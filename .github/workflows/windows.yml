@@ -145,6 +145,7 @@ jobs:
         if: github.event_name != 'pull_request' && hashFiles('builddir/src/nordstjernen.exe') != ''
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
+          NS_ALLOW_ROOT: '1'
         run: |
           set -o pipefail
           ./scripts/pack-windows.sh 2>&1 | tee pack-windows.log
