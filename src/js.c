@@ -25018,13 +25018,19 @@ ns_cookie_remove_named(char **jar, const char *name, gsize name_len)
 typedef struct {
     gboolean expired;
     gboolean secure;
+    gboolean has_domain;
+    gboolean samesite_none;
+    gboolean path_is_root;
 } ns_cookie_attrs;
 
 static void
 ns_cookie_parse_attrs(const char *attrs, ns_cookie_attrs *out)
 {
-    out->expired = FALSE;
-    out->secure  = FALSE;
+    out->expired       = FALSE;
+    out->secure        = FALSE;
+    out->has_domain    = FALSE;
+    out->samesite_none = FALSE;
+    out->path_is_root  = FALSE;
     if (!attrs) return;
     while (*attrs) {
         while (*attrs == ';' || *attrs == ' ' || *attrs == '\t') attrs++;
@@ -25035,18 +25041,45 @@ ns_cookie_parse_attrs(const char *attrs, ns_cookie_attrs *out)
             alen--;
         const char *eq = memchr(attrs, '=', alen);
         gsize klen = eq ? (gsize)(eq - attrs) : alen;
+        const char *vp = eq ? eq + 1 : NULL;
+        gsize vlen = eq ? (gsize)(attrs + alen - vp) : 0;
+        while (vlen && (vp[0] == ' ' || vp[0] == '\t')) { vp++; vlen--; }
         if (klen == 6 && g_ascii_strncasecmp(attrs, "secure", 6) == 0) {
             out->secure = TRUE;
         } else if (klen == 7 && g_ascii_strncasecmp(attrs, "max-age", 7) == 0 && eq) {
-            const char *vp = eq + 1;
-            while (*vp == ' ') vp++;
+            const char *p = vp;
+            while (*p == ' ') p++;
             char *endp = NULL;
-            gint64 ma = g_ascii_strtoll(vp, &endp, 10);
-            if (endp != vp && ma <= 0) out->expired = TRUE;
+            gint64 ma = g_ascii_strtoll(p, &endp, 10);
+            if (endp != p && ma <= 0) out->expired = TRUE;
+        } else if (klen == 6 && g_ascii_strncasecmp(attrs, "domain", 6) == 0 &&
+                   eq && vlen) {
+            out->has_domain = TRUE;
+        } else if (klen == 4 && g_ascii_strncasecmp(attrs, "path", 4) == 0 && eq) {
+            out->path_is_root = (vlen == 1 && vp[0] == '/');
+        } else if (klen == 8 && g_ascii_strncasecmp(attrs, "samesite", 8) == 0 &&
+                   eq && vlen == 4 && g_ascii_strncasecmp(vp, "none", 4) == 0) {
+            out->samesite_none = TRUE;
         }
         if (!end) break;
         attrs = end + 1;
     }
+}
+
+static gboolean
+ns_cookie_prefix_ok(const char *name, gsize name_len,
+                    const ns_cookie_attrs *attrs, gboolean is_https)
+{
+    if (name_len >= 9 && g_ascii_strncasecmp(name, "__Secure-", 9) == 0) {
+        if (!attrs->secure || !is_https) return FALSE;
+    }
+    if (name_len >= 7 && g_ascii_strncasecmp(name, "__Host-", 7) == 0) {
+        if (!attrs->secure || !is_https) return FALSE;
+        if (attrs->has_domain) return FALSE;
+        if (!attrs->path_is_root) return FALSE;
+    }
+    if (attrs->samesite_none && !attrs->secure) return FALSE;
+    return TRUE;
 }
 
 static JSValue
@@ -25063,12 +25096,16 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     const char *semi = strchr(s, ';');
     gsize key_len  = (gsize)(eq - s);
     gsize pair_len = semi ? (gsize)(semi - s) : strlen(s);
-    ns_cookie_attrs attrs = { FALSE, FALSE };
+    ns_cookie_attrs attrs = { FALSE, FALSE, FALSE, FALSE, FALSE };
     if (semi) ns_cookie_parse_attrs(semi, &attrs);
 
     gboolean is_https = js->partition_key &&
                         g_str_has_prefix(js->partition_key, "https://");
     if (attrs.secure && !is_https) { JS_FreeCString(ctx, s); return JS_UNDEFINED; }
+    if (!ns_cookie_prefix_ok(s, key_len, &attrs, is_https)) {
+        JS_FreeCString(ctx, s);
+        return JS_UNDEFINED;
+    }
 
     char *jar = js->cookie_value ? g_strdup(js->cookie_value) : g_strdup("");
     ns_cookie_remove_named(&jar, s, key_len);
@@ -27553,6 +27590,30 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
     g_array_free(tasks, TRUE);
 }
 
+static gboolean
+ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
+                          ns_response *resp)
+{
+    if (!resp) return FALSE;
+    if (resp->xframe_options && *resp->xframe_options) {
+        g_autofree char *v = g_strdup(resp->xframe_options);
+        g_strstrip(v);
+        if (g_ascii_strcasecmp(v, "deny") == 0)
+            return TRUE;
+        if (g_ascii_strcasecmp(v, "sameorigin") == 0 &&
+            !ns_url_same_origin(framed_url, embedder_url))
+            return TRUE;
+    }
+    if (resp->csp_header && *resp->csp_header) {
+        ns_csp *csp = ns_csp_parse(resp->csp_header);
+        gboolean allowed = ns_csp_allows(csp, NS_CSP_FRAME_ANCESTORS,
+                                         embedder_url, framed_url);
+        ns_csp_free(csp);
+        if (!allowed) return TRUE;
+    }
+    return FALSE;
+}
+
 static void
 ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 {
@@ -27580,10 +27641,30 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         abs = g_strdup(origin);
     } else if (src && *src && !g_str_has_prefix(src, "about:")) {
         abs = ns_url_resolve(origin, src);
+        if (abs && js->csp &&
+            !ns_csp_allows(js->csp, NS_CSP_FRAME, abs, origin)) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf(
+                    "Blocked iframe %s by Content-Security-Policy "
+                    "frame-src", abs);
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            g_free(abs);
+            abs = NULL;
+        }
         if (abs) {
             GError *err = NULL;
             resp = ns_js_fetch_resource(js, abs, origin, NULL, &err);
-            if (resp && resp->body && resp->body->len > 0 &&
+            if (resp && ns_iframe_framing_blocked(origin, abs, resp)) {
+                if (js->log_cb) {
+                    char *line = g_strdup_printf(
+                        "Blocked framing of %s (X-Frame-Options / "
+                        "frame-ancestors)", abs);
+                    js->log_cb(line, js->log_user_data);
+                    g_free(line);
+                }
+            } else if (resp && resp->body && resp->body->len > 0 &&
                 (resp->status == 200 || resp->status == 0) && !resp->error)
                 decoded = ns_html_decode_body((const char *)resp->body->data,
                                               resp->body->len);

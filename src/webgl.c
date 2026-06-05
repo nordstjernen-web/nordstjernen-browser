@@ -880,6 +880,69 @@ wgl_getError(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     return JS_NewInt32(ctx, (int)glGetError());
 }
 
+static GLint
+wgl_param_cap(GLenum pname)
+{
+    switch (pname) {
+    case GL_MAX_TEXTURE_SIZE:                 return 16384;
+    case GL_MAX_CUBE_MAP_TEXTURE_SIZE:        return 16384;
+    case GL_MAX_RENDERBUFFER_SIZE:            return 16384;
+    case GL_MAX_VERTEX_ATTRIBS:               return 16;
+    case GL_MAX_VERTEX_UNIFORM_VECTORS:       return 1024;
+    case GL_MAX_VARYING_VECTORS:              return 30;
+    case GL_MAX_FRAGMENT_UNIFORM_VECTORS:     return 1024;
+    case GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS:   return 16;
+    case GL_MAX_TEXTURE_IMAGE_UNITS:          return 16;
+    case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: return 32;
+#ifdef GL_MAX_3D_TEXTURE_SIZE
+    case GL_MAX_3D_TEXTURE_SIZE:              return 2048;
+#endif
+#ifdef GL_MAX_ARRAY_TEXTURE_LAYERS
+    case GL_MAX_ARRAY_TEXTURE_LAYERS:         return 2048;
+#endif
+#ifdef GL_MAX_DRAW_BUFFERS
+    case GL_MAX_DRAW_BUFFERS:                 return 8;
+#endif
+#ifdef GL_MAX_COLOR_ATTACHMENTS
+    case GL_MAX_COLOR_ATTACHMENTS:            return 8;
+#endif
+#ifdef GL_MAX_SAMPLES
+    case GL_MAX_SAMPLES:                      return 4;
+#endif
+#ifdef GL_MAX_VERTEX_UNIFORM_COMPONENTS
+    case GL_MAX_VERTEX_UNIFORM_COMPONENTS:    return 4096;
+#endif
+#ifdef GL_MAX_FRAGMENT_UNIFORM_COMPONENTS
+    case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:  return 4096;
+#endif
+#ifdef GL_MAX_VERTEX_OUTPUT_COMPONENTS
+    case GL_MAX_VERTEX_OUTPUT_COMPONENTS:     return 64;
+#endif
+#ifdef GL_MAX_FRAGMENT_INPUT_COMPONENTS
+    case GL_MAX_FRAGMENT_INPUT_COMPONENTS:    return 120;
+#endif
+#ifdef GL_MAX_VARYING_COMPONENTS
+    case GL_MAX_VARYING_COMPONENTS:           return 120;
+#endif
+#ifdef GL_MAX_VERTEX_UNIFORM_BLOCKS
+    case GL_MAX_VERTEX_UNIFORM_BLOCKS:        return 12;
+#endif
+#ifdef GL_MAX_FRAGMENT_UNIFORM_BLOCKS
+    case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:      return 12;
+#endif
+#ifdef GL_MAX_COMBINED_UNIFORM_BLOCKS
+    case GL_MAX_COMBINED_UNIFORM_BLOCKS:      return 24;
+#endif
+#ifdef GL_MAX_UNIFORM_BUFFER_BINDINGS
+    case GL_MAX_UNIFORM_BUFFER_BINDINGS:      return 24;
+#endif
+#ifdef GL_MAX_UNIFORM_BLOCK_SIZE
+    case GL_MAX_UNIFORM_BLOCK_SIZE:           return 16384;
+#endif
+    default:                                  return 0;
+    }
+}
+
 static JSValue
 wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -901,6 +964,10 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         GLint v[4] = { 0, 0, 0, 0 };
         glGetIntegerv(pname, v);
         int n = (pname == GL_MAX_VIEWPORT_DIMS) ? 2 : 4;
+        if (pname == GL_MAX_VIEWPORT_DIMS) {
+            if (v[0] > 16384) v[0] = 16384;
+            if (v[1] > 16384) v[1] = 16384;
+        }
         JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)v,
                                           (size_t)n * sizeof(GLint));
         JSValue ta = JS_NewTypedArray(ctx, 1, &a, JS_TYPED_ARRAY_INT32);
@@ -919,12 +986,20 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
               : (pname == GL_COLOR_CLEAR_VALUE ||
                  pname == GL_BLEND_COLOR)                       ? 4
                                                                : 2;
+        if (pname == GL_ALIASED_LINE_WIDTH_RANGE) {
+            v[0] = 1.0f; v[1] = 1.0f;
+        } else if (pname == GL_ALIASED_POINT_SIZE_RANGE) {
+            v[0] = 1.0f;
+            if (v[1] > 1024.0f) v[1] = 1024.0f;
+        }
         JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)v,
                                           (size_t)n * sizeof(GLfloat));
         JSValue ta = JS_NewTypedArray(ctx, 1, &a, JS_TYPED_ARRAY_FLOAT32);
         JS_FreeValue(ctx, a);
         return ta;
     }
+    case GL_NUM_COMPRESSED_TEXTURE_FORMATS:
+        return JS_NewInt32(ctx, 0);
     case NS_UNPACK_FLIP_Y_WEBGL:
         return JS_NewBool(ctx, g->unpack_flip_y);
     case NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL:
@@ -937,21 +1012,17 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     case GL_DITHER:
         return JS_NewBool(ctx, glIsEnabled(pname));
     case GL_COMPRESSED_TEXTURE_FORMATS: {
-        GLint count = 0;
-        glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &count);
-        if (count < 0 || count > 256) count = 0;
-        GLint *v = g_new0(GLint, count > 0 ? count : 1);
-        if (count > 0) glGetIntegerv(pname, v);
-        JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)v,
-                                          (size_t)count * sizeof(GLint));
+        GLint none = 0;
+        JSValue a = JS_NewArrayBufferCopy(ctx, (const uint8_t *)&none, 0);
         JSValue ta = JS_NewTypedArray(ctx, 1, &a, JS_TYPED_ARRAY_UINT32);
         JS_FreeValue(ctx, a);
-        g_free(v);
         return ta;
     }
     default: {
         GLint v[32] = { 0 };
         glGetIntegerv(pname, v);
+        GLint cap = wgl_param_cap(pname);
+        if (cap && v[0] > cap) v[0] = cap;
         return JS_NewInt32(ctx, v[0]);
     }
     }

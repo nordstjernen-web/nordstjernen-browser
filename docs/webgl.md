@@ -202,7 +202,16 @@ mitigations focus on the parts a hostile page can actually reach.
 - **Reduced fingerprinting.** `getParameter(VENDOR)` and `RENDERER` return
   generic `"Nordstjernen"` strings, and `VERSION` /
   `SHADING_LANGUAGE_VERSION` return the WebGL-style version, not the raw
-  driver string. There is no `WEBGL_debug_renderer_info` extension.
+  driver string. There is no `WEBGL_debug_renderer_info` extension, and
+  `getSupportedExtensions` returns an empty list. The numeric capability
+  limits that fingerprinting libraries probe — `MAX_TEXTURE_SIZE`,
+  `MAX_VIEWPORT_DIMS`, `MAX_VERTEX_ATTRIBS`, the uniform/varying/texture-unit
+  maxima, the WebGL 2 block and component limits, and the aliased
+  line/point-size ranges — are clamped to fixed common values
+  (`wgl_param_cap` in `src/webgl.c`), so high-end and exotic GPUs report the
+  same numbers as the mainstream. `COMPRESSED_TEXTURE_FORMATS` is reported as
+  empty. Clamping only ever lowers a reported limit, so it never makes the
+  driver promise capacity it does not have.
 - **No JS-controlled stack write in `getParameter`.** An unrecognised
   `pname` falls through to `glGetIntegerv` into a fixed stack buffer; that
   buffer is sized with generous headroom (32 ints) so a caller-supplied

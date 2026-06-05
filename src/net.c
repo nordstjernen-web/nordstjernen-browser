@@ -956,12 +956,24 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
     char *contents = NULL;
     g_file_get_contents(jar_path, &contents, NULL, NULL);
     GString *out = g_string_new(NULL);
+    gboolean blocked_httponly = FALSE;
     if (contents) {
         char **lines = g_strsplit(contents, "\n", -1);
         for (int i = 0; lines[i]; i++) {
             char *line = lines[i];
             if (!*line) continue;
             if (line[0] == '#') {
+                if (g_str_has_prefix(line, "#HttpOnly_")) {
+                    char **hf = g_strsplit(line + 10, "\t", 7);
+                    int hn = 0;
+                    while (hf[hn]) hn++;
+                    if (hn >= 7 &&
+                        g_ascii_strcasecmp(hf[0], file_domain) == 0 &&
+                        strcmp(hf[2], path) == 0 &&
+                        strcmp(hf[5], name_dup) == 0)
+                        blocked_httponly = TRUE;
+                    g_strfreev(hf);
+                }
                 g_string_append(out, line);
                 g_string_append_c(out, '\n');
                 continue;
@@ -984,7 +996,7 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
         g_strfreev(lines);
         g_free(contents);
     }
-    if (!expired) {
+    if (!expired && !blocked_httponly) {
         g_autofree char *vdup = g_strndup(value, value_len);
         g_string_append_printf(out,
             "%s\t%s\t%s\t%s\t%" G_GINT64_FORMAT "\t%s\t%s\n",
