@@ -47,6 +47,7 @@ jobs:
             meson
             ninja-build
             libgtk-4-dev
+            libepoxy-dev
             libcurl4-openssl-dev
             libuchardet-dev
             librsvg2-dev

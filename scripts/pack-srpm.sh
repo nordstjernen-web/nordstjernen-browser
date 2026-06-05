@@ -56,6 +56,7 @@ BuildRequires:  ninja-build
 BuildRequires:  cmake
 BuildRequires:  pkgconf-pkg-config
 BuildRequires:  pkgconfig(gtk4)
+BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(libcurl)
 BuildRequires:  pkgconfig(uchardet)
 BuildRequires:  pkgconfig(librsvg-2.0)

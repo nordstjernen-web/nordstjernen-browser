@@ -90,7 +90,7 @@ The Java API embeds the engine on the JVM (requires JDK 21); see
 
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
-    libgtk-4-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
+    libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev webp-pixbuf-loader
 meson setup builddir && meson compile -C builddir
 ./builddir/src/nordstjernen
@@ -120,6 +120,7 @@ moving parts:
 |---------|-------------|------|
 | GTK 4 | **≥ 4.22.4 on Windows** (MSYS2 stock), ≥ 4.14 elsewhere (≥ 4.22 preferred) | UI toolkit, GSK renderer |
 | GLib / GModule | (ships with GTK) | core types, dynamic module loading |
+| libepoxy | — | OpenGL/ES function dispatch for WebGL (`src/webgl.c`) |
 | Pango | (ships with GTK) | text shaping and layout |
 | libcurl | ≥ 7.85 | HTTP/2 networking, HSTS, cookies |
 | uchardet | — | charset detection for `ns_html_decode_body` |

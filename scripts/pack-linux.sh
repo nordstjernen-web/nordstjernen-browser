@@ -75,6 +75,7 @@ against the other C library — pick the matching download.
 
 ${LIBC_REQ}
 - GTK 4.6+, with gio, gobject, pango, cairo, gdk-pixbuf
+- libepoxy (usually pulled in by GTK 4; WebGL dispatch)
 - libcurl with a TLS backend
 - libuchardet
 - librsvg (SVG rendering)

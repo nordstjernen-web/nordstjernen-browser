@@ -103,7 +103,7 @@ sudo apt install -y openjdk-21-jdk
 
 # Engine build toolchain + libraries (so build-native.sh can cross the JNI bridge)
 sudo apt install -y build-essential clang pkg-config meson ninja-build \
-    libgtk-4-dev libcurl4-openssl-dev libuchardet-dev librsvg2-dev \
+    libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libuchardet-dev librsvg2-dev \
     libpsl-dev libsqlite3-dev libseccomp-dev
 
 # Point JAVA_HOME at the JDK 21 install (and persist it for the cron user)

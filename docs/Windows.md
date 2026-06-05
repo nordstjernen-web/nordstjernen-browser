@@ -33,6 +33,7 @@ pacman -Sy --noconfirm --needed \
     mingw-w64-x86_64-ninja \
     mingw-w64-x86_64-ccache \
     mingw-w64-x86_64-gtk4 \
+    mingw-w64-x86_64-libepoxy \
     mingw-w64-x86_64-curl \
     mingw-w64-x86_64-ca-certificates \
     mingw-w64-x86_64-uchardet \
