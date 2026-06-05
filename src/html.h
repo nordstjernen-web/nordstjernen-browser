@@ -25,6 +25,8 @@ char *ns_html_escape_text(const char *s);
 
 char *ns_html_decode_body(const char *body, gsize len);
 
+char *ns_html_image_document(const char *url);
+
 const char *ns_html_engine_name(void);
 
 const char *ns_html_engine_version(void);

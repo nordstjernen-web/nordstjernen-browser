@@ -67,6 +67,28 @@ ns_html_engine_version(void)
 }
 
 char *
+ns_html_image_document(const char *url)
+{
+    const char *u = url ? url : "";
+    char *esc = ns_html_escape_text(u);
+    char *name = g_path_get_basename(u);
+    char *query = strchr(name, '?');
+    if (query) *query = '\0';
+    char *esc_name = ns_html_escape_text(*name ? name : "image");
+    char *html = g_strdup_printf(
+        "<!DOCTYPE html><html><head><title>%s</title><style>"
+        "html,body{margin:0;min-height:100vh}"
+        "body{background:#1c1d1e;text-align:center}"
+        "img{max-width:100vw;max-height:100vh}"
+        "</style></head><body><img src=\"%s\" alt=\"\"></body></html>",
+        esc_name, esc);
+    g_free(esc);
+    g_free(esc_name);
+    g_free(name);
+    return html;
+}
+
+char *
 ns_html_decode_body(const char *body, gsize len)
 {
     if (!body || len == 0) return g_strdup("");

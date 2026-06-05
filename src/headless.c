@@ -1192,6 +1192,18 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         }
     }
 
+    if (resp->content_type &&
+        g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
+        resp->body && resp->body->len > 0) {
+        char *html = ns_html_image_document(
+            resp->final_url ? resp->final_url : fetch_url);
+        g_byte_array_set_size(resp->body, 0);
+        g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+        g_free(html);
+        g_free(resp->content_type);
+        resp->content_type = g_strdup("text/html; charset=utf-8");
+    }
+
     const char *raw = resp->body ? (const char *)resp->body->data : "";
     gsize raw_len = resp->body ? resp->body->len : 0;
     char *decoded = ns_html_decode_body(raw, raw_len);

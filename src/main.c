@@ -4277,6 +4277,17 @@ ns_on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
         }
     }
 
+    if (resp->content_type &&
+        g_ascii_strncasecmp(resp->content_type, "image/", 6) == 0 &&
+        resp->body && resp->body->len > 0) {
+        char *html = ns_html_image_document(resp->final_url);
+        g_byte_array_set_size(resp->body, 0);
+        g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+        g_free(html);
+        g_free(resp->content_type);
+        resp->content_type = g_strdup("text/html; charset=utf-8");
+    }
+
     ns_window_set_stage(w, NS_STAGE_PARSING);
     gboolean parse_html = is_html_content_type(resp->content_type);
     if (w->worker &&
