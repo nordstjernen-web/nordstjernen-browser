@@ -3480,13 +3480,6 @@ ns_webgl_canvas_surface(const ns_node *canvas)
     g_free(rgba);
     cairo_surface_mark_dirty(g->surf);
     g->dirty = FALSE;
-
-    if (!g->preserve) {
-        glBindFramebuffer(GL_FRAMEBUFFER, ns_webgl_draw_target(g));
-        glClearColor(0, 0, 0, 0);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
-                GL_STENCIL_BUFFER_BIT);
-    }
     return g->surf;
 }
 
