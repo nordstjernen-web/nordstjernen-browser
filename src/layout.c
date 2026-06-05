@@ -94,6 +94,7 @@ box_is_doc_root(const ns_box *b)
 }
 
 static double containing_block_definite_height(const ns_box *box);
+static gboolean style_is_absolute_or_fixed(const ns_style *s);
 
 static double
 resolve_used_height(const ns_box *box, const ns_css_value *hv,
@@ -122,7 +123,16 @@ containing_block_definite_height(const ns_box *box)
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
-    if (!h) return -1;
+    if (!h) {
+        const ns_css_value *top = p->style->values[NS_CSS_TOP];
+        const ns_css_value *bottom = p->style->values[NS_CSS_BOTTOM];
+        if (style_is_absolute_or_fixed(p->style) &&
+            top && !length_is_auto(top) &&
+            bottom && !length_is_auto(bottom) &&
+            p->content_height > 0)
+            return p->content_height;
+        return -1;
+    }
     if (height_is_percent(h)) {
         double base = box_is_doc_root(p) ? ns_css_viewport_h()
                                          : containing_block_definite_height(p);
