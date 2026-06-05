@@ -2403,6 +2403,8 @@ ns_element_get_tagName(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || !n->name) return JS_NULL;
+    if (n->flags & NS_NODE_SVG_NS)
+        return JS_NewString(ctx, n->name);
     for (const char *p = n->name; *p; p++)
         if (*p >= 'A' && *p <= 'Z')
             return JS_NewString(ctx, n->name);
@@ -17045,6 +17047,8 @@ ns_element_get_nodeName(JSContext *ctx, JSValueConst this_val)
             break;
     }
     if (!el->name) return JS_NewString(ctx, "");
+    if (el->flags & NS_NODE_SVG_NS)
+        return JS_NewString(ctx, el->name);
     for (const char *p = el->name; *p; p++)
         if (*p >= 'A' && *p <= 'Z')
             return JS_NewString(ctx, el->name);
@@ -18133,7 +18137,9 @@ ns_element_get_internals(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_namespaceURI(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (n && (n->flags & NS_NODE_SVG_NS))
+        return JS_NewString(ctx, "http://www.w3.org/2000/svg");
     return JS_NewString(ctx, "http://www.w3.org/1999/xhtml");
 }
 
@@ -24739,13 +24745,14 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     }
     const char *local = strchr(name, ':');
     local = local ? local + 1 : name;
-    gboolean preserve_case = ns && (
-        strcmp(ns, "http://www.w3.org/2000/svg") == 0 ||
-        strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0);
+    gboolean is_svg = ns && strcmp(ns, "http://www.w3.org/2000/svg") == 0;
+    gboolean preserve_case = is_svg ||
+        (ns && strcmp(ns, "http://www.w3.org/1998/Math/MathML") == 0);
     char *stored = preserve_case ? g_strdup(local) : g_ascii_strdown(local, -1);
     JS_FreeCString(ctx, name);
     if (ns) JS_FreeCString(ctx, ns);
     ns_node *el = ns_node_new_element(stored);
+    if (is_svg) el->flags |= NS_NODE_SVG_NS;
     g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
     return ns_make_element(ctx, el);
 }
