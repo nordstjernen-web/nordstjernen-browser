@@ -1309,6 +1309,13 @@ ns_window_media_target(ns_window *w, const ns_box *hit,
         abs = page ? g_strdup(page) : NULL;
     }
     if (!abs) return FALSE;
+    if (g_str_has_prefix(abs, "file://")) {
+        const char *page = ns_window_current_url(w);
+        if (!page || !g_str_has_prefix(page, "file://")) {
+            g_free(abs);
+            return FALSE;
+        }
+    }
     *out_url = abs;
     *out_is_video = is_video;
     *out_stream = stream;

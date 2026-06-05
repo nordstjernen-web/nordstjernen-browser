@@ -92,7 +92,10 @@ ns_profile_job_free(ns_profile_job *j)
 {
     if (!j) return;
     g_clear_object(&j->stdout_stream);
-    g_clear_object(&j->child);
+    if (j->child) {
+        g_subprocess_force_exit(j->child);
+        g_clear_object(&j->child);
+    }
     if (j->top_counts)  g_hash_table_destroy(j->top_counts);
     if (j->leaf_counts) g_hash_table_destroy(j->leaf_counts);
     g_free(j->current_top_fn);

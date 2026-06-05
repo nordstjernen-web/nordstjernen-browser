@@ -191,7 +191,6 @@ ns_crypto_generate_keypair(const char *algo, const char *hash, const char *curve
                                           extractable, usages);
     pk->pkey = pkey;
     sk->pkey = EVP_PKEY_dup(pkey);
-    EVP_PKEY_up_ref(pkey);
     *pub = pk;
     *priv = sk;
     return TRUE;
@@ -343,11 +342,15 @@ ns_crypto_import_ec_jwk(const char *curve, const guint8 *x, gsize x_len,
         if (err) *err = g_strdup("DataError: EC JWK");
         return NULL;
     }
+    if (x_len > (gsize)order || y_len > (gsize)order) {
+        if (err) *err = g_strdup("DataError: EC JWK coordinate too large");
+        return NULL;
+    }
     gsize plen = 1 + 2 * (gsize)order;
     guint8 *point = g_malloc0(plen);
     point[0] = 0x04;
-    if (x_len <= (gsize)order) memcpy(point + 1 + order - x_len, x, x_len);
-    if (y_len <= (gsize)order) memcpy(point + 1 + 2 * order - y_len, y, y_len);
+    memcpy(point + 1 + order - x_len, x, x_len);
+    memcpy(point + 1 + 2 * order - y_len, y, y_len);
 
     OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
     BIGNUM *bn_d = NULL;
@@ -510,8 +513,13 @@ ns_crypto_hmac(const ns_crypto_key *k, const guint8 *data, gsize len,
         EVP_MAC_update(ctx, data, len) &&
         EVP_MAC_final(ctx, NULL, &n, 0)) {
         out = g_malloc(n ? n : 1);
-        EVP_MAC_final(ctx, out, &n, n);
-        *out_len = n;
+        if (EVP_MAC_final(ctx, out, &n, n)) {
+            *out_len = n;
+        } else {
+            g_free(out);
+            out = NULL;
+            ns_crypto_err(err, "OperationError: HMAC");
+        }
     } else {
         ns_crypto_err(err, "OperationError: HMAC");
     }
@@ -683,6 +691,15 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
     if (!cipher || !k->raw) { if (err) *err = g_strdup("NotSupportedError: AES"); return NULL; }
     gboolean gcm = !g_strcmp0(k->algo, "AES-GCM");
     int tag_len = gcm ? (p->tag_bits > 0 ? p->tag_bits / 8 : 16) : 0;
+    if (gcm) {
+        switch (tag_len) {
+        case 4: case 8: case 12: case 13: case 14: case 15: case 16:
+            break;
+        default:
+            if (err) *err = g_strdup("OperationError: invalid AES-GCM tag length");
+            return NULL;
+        }
+    }
 
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     int outl = 0, finl = 0;
@@ -749,8 +766,10 @@ ns_crypto_rsa_oaep(const ns_crypto_key *k, const ns_crypto_params *p,
              EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) > 0;
     if (ok && p->label && p->label_len) {
         guint8 *lbl = OPENSSL_memdup(p->label, p->label_len);
-        if (EVP_PKEY_CTX_set0_rsa_oaep_label(ctx, lbl, (int)p->label_len) <= 0)
+        if (EVP_PKEY_CTX_set0_rsa_oaep_label(ctx, lbl, (int)p->label_len) <= 0) {
+            OPENSSL_free(lbl);
             ok = 0;
+        }
     }
     if (ok) {
         int rc = enc ? EVP_PKEY_encrypt(ctx, NULL, &n, data, len)

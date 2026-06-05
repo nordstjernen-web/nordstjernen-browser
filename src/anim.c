@@ -753,8 +753,6 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
     gboolean any = FALSE;
     GHashTableIter it;
     gpointer key, val;
-    ns_anim_state *settled[64];
-    int n_settled = 0;
     g_hash_table_iter_init(&it, a->active);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_anim_state *s = key;
@@ -763,10 +761,8 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
         if (s->color.active && advance_color_chan(a, &s->color, now_us)) any = TRUE;
         if (s->bg.active && advance_color_chan(a, &s->bg, now_us)) any = TRUE;
         if (s->anim_active && advance_animation(a, s, now_us)) any = TRUE;
-        if (!state_is_active(s) && n_settled < 64) settled[n_settled++] = s;
+        if (!state_is_active(s)) g_hash_table_iter_remove(&it);
     }
-    for (int i = 0; i < n_settled; i++)
-        g_hash_table_remove(a->active, settled[i]);
     return any;
 }
 
