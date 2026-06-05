@@ -1,0 +1,18 @@
+<!doctype html><meta charset=utf-8><style>
+li:nth-child(odd){background:#def}
+li:nth-child(even){background:#fed}
+p:first-child{color:red}
+a[href^="https"]{color:green}
+div > span{font-weight:bold}
+input:checked + label{color:blue}
+:not(.skip){font-style:normal}
+article:has(.teaser .flag){background:#e6f3ff}
+article:has(> header + p){border-left:6px solid #2970a8}
+section:has(:scope > .lead + .meta){background:#f1ffe8}
+</style>
+<p>first para</p><p>second</p>
+<ul><li>1<li>2<li>3<li>4</ul>
+<a href="https://x">https link</a> <a href="http://x">http link</a>
+<div><span>child span</span></div>
+<article class="complex-has"><header>Header</header><p class="teaser"><span class="flag">flag</span></p></article>
+<section class="scope-has"><p class="lead">Lead</p><p class="meta">Meta</p></section>
