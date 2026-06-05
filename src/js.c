@@ -2440,6 +2440,7 @@ static const char *const ns_reflected_attr_names[] = {
     "accesskey", "datetime", "srcdoc", "popovertarget",
     "popovertargetaction", "autocapitalize", "enterkeyhint",
     "low", "high", "optimum",
+    "poster", "preload", "wrap", "scope", "cite", "media", "download",
 };
 
 static gboolean ns_reflected_attr_is_global(const char *name);
@@ -2652,6 +2653,9 @@ ns_element_int_attr_getter(JSContext *ctx, JSValueConst this_val, int magic)
                 return JS_NewInt32(ctx, is_w ? 300 : 150);
             }
         }
+        if (strcmp(g_int_attrs[magic].attr, "size") == 0 &&
+            n->name && strcmp(n->name, "input") == 0)
+            return JS_NewInt32(ctx, 20);
         return JS_NewInt32(ctx, g_int_attrs[magic].dflt);
     }
     char *end = NULL;
@@ -22142,6 +22146,14 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("popoverTargetAction", ns_element_attr_getter, ns_element_attr_setter, 77),
     JS_CGETSET_MAGIC_DEF("autocapitalize", ns_element_attr_getter, ns_element_attr_setter, 78),
     JS_CGETSET_MAGIC_DEF("enterKeyHint",   ns_element_attr_getter, ns_element_attr_setter, 79),
+    JS_CGETSET_MAGIC_DEF("charSet",        ns_element_attr_getter, ns_element_attr_setter, 47),
+    JS_CGETSET_MAGIC_DEF("poster",         ns_element_attr_getter, ns_element_attr_setter, 83),
+    JS_CGETSET_MAGIC_DEF("preload",        ns_element_attr_getter, ns_element_attr_setter, 84),
+    JS_CGETSET_MAGIC_DEF("wrap",           ns_element_attr_getter, ns_element_attr_setter, 85),
+    JS_CGETSET_MAGIC_DEF("scope",          ns_element_attr_getter, ns_element_attr_setter, 86),
+    JS_CGETSET_MAGIC_DEF("cite",           ns_element_attr_getter, ns_element_attr_setter, 87),
+    JS_CGETSET_MAGIC_DEF("media",          ns_element_attr_getter, ns_element_attr_setter, 88),
+    JS_CGETSET_MAGIC_DEF("download",       ns_element_attr_getter, ns_element_attr_setter, 89),
     JS_CGETSET_MAGIC_DEF("open",        ns_element_boolattr_getter, ns_element_boolattr_setter,  0),
     JS_CGETSET_MAGIC_DEF("selected",    ns_element_boolattr_getter, ns_element_boolattr_setter,  1),
     JS_CGETSET_MAGIC_DEF("multiple",    ns_element_boolattr_getter, ns_element_boolattr_setter,  2),
