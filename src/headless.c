@@ -671,6 +671,58 @@ headless_drag(headless_flush_ctx *fc,
     ns_js_drag_session_free(session);
 }
 
+static const ns_node *
+headless_mouse_target_at(headless_flush_ctx *fc, double x, double y)
+{
+    ns_box *layout = fc && fc->layout ? *fc->layout : NULL;
+    const ns_box *hit = layout ? ns_box_hit_test(layout, x, y) : NULL;
+    if (hit && hit->dom) return hit->dom;
+    return fc && fc->doc ? ns_node_find_first_element(fc->doc, "body") : NULL;
+}
+
+static gboolean
+headless_emit_pointer_and_mouse(headless_flush_ctx *fc, const ns_node *target,
+                                const char *ptr_type, const char *mouse_type,
+                                double x, double y, int button, int buttons)
+{
+    if (!fc || !fc->js || !target) return FALSE;
+    gboolean prevented = FALSE;
+    ns_js_dispatch_mouse_event(fc->js, target, ptr_type, x, y, x, y,
+                               button, buttons, FALSE, FALSE, FALSE, FALSE,
+                               NULL, &prevented);
+    if (fc->js)
+        ns_js_dispatch_mouse_event(fc->js, target, mouse_type, x, y, x, y,
+                                   button, buttons, FALSE, FALSE, FALSE, FALSE,
+                                   NULL, &prevented);
+    if (fc->js) ns_js_consume_mutated(fc->js);
+    return prevented;
+}
+
+static void
+headless_mouse_drag(headless_flush_ctx *fc,
+                    double x0, double y0, double x1, double y1)
+{
+    if (!fc || !fc->js) return;
+    const ns_node *down = headless_mouse_target_at(fc, x0, y0);
+    if (!down) return;
+    headless_emit_pointer_and_mouse(fc, down, "pointerdown", "mousedown",
+                                    x0, y0, 0, 1);
+    const int steps = 8;
+    for (int i = 1; i <= steps; i++) {
+        double x = x0 + (x1 - x0) * i / steps;
+        double y = y0 + (y1 - y0) * i / steps;
+        const ns_node *over = headless_mouse_target_at(fc, x, y);
+        if (over)
+            headless_emit_pointer_and_mouse(fc, over, "pointermove",
+                                            "mousemove", x, y, 0, 1);
+        settle_main_loop(30, fc);
+    }
+    const ns_node *up = headless_mouse_target_at(fc, x1, y1);
+    if (up)
+        headless_emit_pointer_and_mouse(fc, up, "pointerup", "mouseup",
+                                        x1, y1, 0, 0);
+}
+
 static void
 headless_key(headless_flush_ctx *fc, const char *name)
 {
@@ -790,6 +842,14 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
                 fprintf(stderr, "[headless] click %g,%g\n", x, y);
                 headless_click(fc, nav, x, y);
             }
+        } else if (g_str_has_prefix(a, "mousedrag ")) {
+            double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+            if (sscanf(a + 10, "%lf , %lf %lf , %lf",
+                       &x0, &y0, &x1, &y1) == 4) {
+                fprintf(stderr, "[headless] mousedrag %g,%g -> %g,%g\n",
+                        x0, y0, x1, y1);
+                headless_mouse_drag(fc, x0, y0, x1, y1);
+            }
         } else if (g_str_has_prefix(a, "drag ")) {
             double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
             if (sscanf(a + 5, "%lf , %lf %lf , %lf",
@@ -805,6 +865,13 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
         } else if (g_str_has_prefix(a, "key ")) {
             fprintf(stderr, "[headless] key %s\n", a + 4);
             headless_key(fc, g_strstrip(a + 4));
+        } else if (g_str_has_prefix(a, "eval ")) {
+            char *result = ns_js_eval_source(fc->js, a + 5, "headless-act-eval");
+            if (result) {
+                fprintf(stdout, "act-eval: %s\n", result);
+                g_free(result);
+            }
+            ns_js_consume_mutated(fc->js);
         } else if (g_str_has_prefix(a, "wait ")) {
             gint64 ms = g_ascii_strtoll(a + 5, NULL, 10);
             if (ms < 0) ms = 0;
