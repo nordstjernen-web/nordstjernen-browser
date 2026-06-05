@@ -206,6 +206,151 @@ ns_watchdog_kill(GPid pid, gboolean force)
 
 static gboolean ns_watchdog_spawn(ns_watchdog *wd, gboolean recover);
 
+#ifdef G_OS_WIN32
+typedef struct {
+    wchar_t *data;
+    size_t len;
+    size_t cap;
+} ns_watchdog_wbuf;
+
+static gboolean
+ns_watchdog_wbuf_reserve(ns_watchdog_wbuf *b, size_t extra)
+{
+    if (extra > ((size_t)-1) - b->len - 1) return FALSE;
+    size_t need = b->len + extra + 1;
+    if (need <= b->cap) return TRUE;
+    size_t cap = b->cap ? b->cap : 256;
+    while (cap < need) {
+        if (cap > ((size_t)-1) / 2) return FALSE;
+        cap *= 2;
+    }
+    wchar_t *data = g_renew(wchar_t, b->data, cap);
+    b->data = data;
+    b->cap = cap;
+    return TRUE;
+}
+
+static gboolean
+ns_watchdog_wbuf_append_char(ns_watchdog_wbuf *b, wchar_t ch)
+{
+    if (!ns_watchdog_wbuf_reserve(b, 1)) return FALSE;
+    b->data[b->len++] = ch;
+    b->data[b->len] = L'\0';
+    return TRUE;
+}
+
+static gboolean
+ns_watchdog_wbuf_append_many(ns_watchdog_wbuf *b, wchar_t ch, size_t count)
+{
+    if (!ns_watchdog_wbuf_reserve(b, count)) return FALSE;
+    for (size_t i = 0; i < count; i++) b->data[b->len++] = ch;
+    b->data[b->len] = L'\0';
+    return TRUE;
+}
+
+static gboolean
+ns_watchdog_wbuf_append_quoted(ns_watchdog_wbuf *b, const wchar_t *arg)
+{
+    if (!ns_watchdog_wbuf_append_char(b, L'"')) return FALSE;
+    size_t slashes = 0;
+    for (const wchar_t *p = arg; *p; p++) {
+        if (*p == L'\\') {
+            slashes++;
+            continue;
+        }
+        if (*p == L'"') {
+            if (!ns_watchdog_wbuf_append_many(b, L'\\', slashes * 2 + 1))
+                return FALSE;
+            if (!ns_watchdog_wbuf_append_char(b, *p)) return FALSE;
+            slashes = 0;
+            continue;
+        }
+        if (slashes > 0) {
+            if (!ns_watchdog_wbuf_append_many(b, L'\\', slashes)) return FALSE;
+            slashes = 0;
+        }
+        if (!ns_watchdog_wbuf_append_char(b, *p)) return FALSE;
+    }
+    if (slashes > 0 &&
+        !ns_watchdog_wbuf_append_many(b, L'\\', slashes * 2))
+        return FALSE;
+    return ns_watchdog_wbuf_append_char(b, L'"');
+}
+
+static wchar_t *
+ns_watchdog_build_command_line(char **argv)
+{
+    ns_watchdog_wbuf b = {0};
+    for (int i = 0; argv[i]; i++) {
+        wchar_t *arg = g_utf8_to_utf16(argv[i], -1, NULL, NULL, NULL);
+        if (!arg) {
+            g_free(b.data);
+            return NULL;
+        }
+        gboolean ok = (i == 0 || ns_watchdog_wbuf_append_char(&b, L' ')) &&
+                      ns_watchdog_wbuf_append_quoted(&b, arg);
+        g_free(arg);
+        if (!ok) {
+            g_free(b.data);
+            return NULL;
+        }
+    }
+    return b.data;
+}
+
+static void
+ns_watchdog_restore_recover_env(const wchar_t *old)
+{
+    SetEnvironmentVariableW(L"NS_WATCHDOG_RECOVER", old && *old ? old : NULL);
+}
+
+static gboolean
+ns_watchdog_spawn_win32(ns_watchdog *wd, gboolean recover, GPid *pid,
+                        GError **err)
+{
+    wchar_t *app = g_utf8_to_utf16(wd->child_argv[0], -1, NULL, NULL, NULL);
+    wchar_t *cmd = ns_watchdog_build_command_line(wd->child_argv);
+    const char *old_utf8 = g_getenv(NS_WATCHDOG_RECOVER_ENV);
+    wchar_t *old = old_utf8 ? g_utf8_to_utf16(old_utf8, -1, NULL, NULL, NULL)
+                            : NULL;
+    if (!app || !cmd) {
+        g_set_error(err, G_SPAWN_ERROR, G_SPAWN_ERROR_NOMEM,
+                    "could not build Windows child command line");
+        g_free(app);
+        g_free(cmd);
+        g_free(old);
+        return FALSE;
+    }
+
+    SetEnvironmentVariableW(L"NS_WATCHDOG_RECOVER", recover ? L"1" : NULL);
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof si);
+    memset(&pi, 0, sizeof pi);
+    si.cb = sizeof si;
+    BOOL ok = CreateProcessW(app, cmd, NULL, NULL, TRUE, 0,
+                             NULL, NULL, &si, &pi);
+    DWORD error = ok ? 0 : GetLastError();
+    ns_watchdog_restore_recover_env(old);
+    g_free(app);
+    g_free(cmd);
+    g_free(old);
+
+    if (!ok) {
+        char *msg = g_win32_error_message((gint)error);
+        g_set_error(err, G_SPAWN_ERROR, G_SPAWN_ERROR_FAILED,
+                    "CreateProcessW failed: %s", msg ? msg : "unknown error");
+        g_free(msg);
+        return FALSE;
+    }
+
+    CloseHandle(pi.hThread);
+    *pid = (GPid)pi.hProcess;
+    return TRUE;
+}
+#endif
+
 static gboolean
 ns_watchdog_respawn_cb(gpointer user_data)
 {
@@ -278,6 +423,9 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
 {
     GError *err = NULL;
     GPid pid = 0;
+#ifdef G_OS_WIN32
+    gboolean ok = ns_watchdog_spawn_win32(wd, recover, &pid, &err);
+#else
     char **envp = g_get_environ();
     if (recover)
         envp = g_environ_setenv(envp, NS_WATCHDOG_RECOVER_ENV, "1", TRUE);
@@ -287,6 +435,7 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
                                 G_SPAWN_DO_NOT_REAP_CHILD,
                                 NULL, NULL, &pid, &err);
     g_strfreev(envp);
+#endif
     if (!ok) {
         g_warning("ns_watchdog: failed to launch browser: %s",
                   err ? err->message : "unknown error");

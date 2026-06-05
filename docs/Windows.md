@@ -114,7 +114,8 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 about:start
 `scripts/pack-windows.sh` produces a self-contained `dist/nordstjernen-win64/`
 folder that runs on a Windows machine with no MSYS2 install. It:
 
-1. Copies `nordstjernen.exe` and transitively resolves every imported
+1. Copies a tiny Win32 launcher as `nordstjernen.exe`, copies the
+   real GTK browser as `nordstjernen-browser.exe`, and transitively resolves every imported
    DLL via `objdump -p`, pulling each one from `/mingw64/bin/` into
    the bundle (system DLLs like `KERNEL32.dll` are skipped because
    they aren't found there).
@@ -124,12 +125,14 @@ folder that runs on a Windows machine with no MSYS2 install. It:
    `share/icons/Adwaita/`, `share/icons/hicolor/`.
 3. Copies the CA bundle to `etc/ssl/certs/ca-bundle.crt` so libcurl
    can verify TLS certificates.
-4. Nothing else — `nordstjernen.exe` bootstraps `GTK_DATA_PREFIX`,
+4. Nothing else — `nordstjernen-browser.exe` bootstraps `GTK_DATA_PREFIX`,
    `GDK_PIXBUF_MODULE_FILE`, `CURL_CA_BUNDLE`, and `SSL_CERT_FILE`
    from its own install directory on startup, so no launcher script
    is needed. Earlier bundles shipped a `nordstjernen.cmd` wrapper
    for this; it flashed a brief console window on launch and has
-   been removed.
+   been removed. The current `nordstjernen.exe` launcher exists only
+   to preserve the public executable name and to show a clear error if
+   a user runs it from inside the ZIP before extracting the whole folder.
 
 Run it from the MINGW64 shell:
 
@@ -148,9 +151,13 @@ event handlers / in-flight `fetch()` promises still hold
 JSValues. Production builds need that assertion compiled out;
 debugging the actual leak is a separate task.
 
-Typical output: 73 DLLs, ~71 MB. The bundle is portable — copy
-the folder to another Windows box (or hand it to a user) and
-double-click `nordstjernen.exe` to launch.
+Typical output: 77 DLLs, ~86 MB. The bundle is portable — extract
+the whole `nordstjernen-win64` folder to another Windows box and
+double-click `nordstjernen.exe` to launch. Running the executable
+directly from inside File Explorer's ZIP view is not supported;
+Explorer extracts only the clicked file, and the launcher displays
+an "Extract All" message instead of failing with Windows'
+`0xC0000135` missing-DLL status.
 
 The bundle is intentionally *not* code-signed. Authenticode signing
 is a separate, manual step (see Phase 11 / Distribution).
@@ -231,7 +238,8 @@ the install dir.
 
 ### Shortcuts target `nordstjernen.exe` directly
 
-The exe self-bootstraps the runtime env (`GTK_DATA_PREFIX`,
+The public exe is a launcher that starts `nordstjernen-browser.exe`
+from the same directory. The browser exe self-bootstraps the runtime env (`GTK_DATA_PREFIX`,
 `GTK_EXE_PREFIX`, `XDG_DATA_DIRS`, `GDK_PIXBUF_MODULE_FILE`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`) from its own install directory
 inside `ns_win32_anchor_gtk_data` (`src/main.c`). Earlier bundles
@@ -354,6 +362,10 @@ so we don't ship a bundled copy there.
 - *"The application was unable to start correctly (0xc000007b)"* —
   PATH is picking up a 32-bit DLL from elsewhere. Run from the
   bundle directory so Windows finds the bundled 64-bit DLLs first.
+- *Running from inside the ZIP shows "Extract All"* — extract the
+  whole `nordstjernen-win64` folder first. Windows' ZIP view launches
+  a temporary copy of only the clicked file, without the sibling DLLs
+  and GTK runtime data the browser needs.
 - *Icons missing / buttons blank in the header bar* —
   `share/icons/Adwaita` didn't make it into the bundle. Re-run
   `scripts/pack-windows.sh`.

@@ -92,12 +92,14 @@ nordstjernen_sources = nordstjernen_lib_sources + files(
   'watchdog.c',
 ) + [polyfills_h]
 
+nordstjernen_win_resources = []
 if host_machine.system() == 'windows'
   windows = import('windows')
-  nordstjernen_sources += windows.compile_resources(
+  nordstjernen_win_resources = windows.compile_resources(
     'nordstjernen.rc',
     depend_files: files('../data/icons/nordstjernen.ico'),
   )
+  nordstjernen_sources += nordstjernen_win_resources
 endif
 
 if is_android
@@ -181,6 +183,15 @@ if not is_android
     win_subsystem: nordstjernen_win_subsystem,
     link_args: nordstjernen_link_args,
     install: true,
+  )
+endif
+
+if host_machine.system() == 'windows'
+  executable(
+    'nordstjernen-launcher',
+    files('win_launcher.c') + nordstjernen_win_resources,
+    win_subsystem: 'windows',
+    link_args: ['-luser32', '-lshell32'],
   )
 endif
 

@@ -143,7 +143,6 @@ jobs:
       - name: Build redistributable bundle (pack-windows.sh)
         id: pack
         if: github.event_name != 'pull_request' && hashFiles('builddir/src/nordstjernen.exe') != ''
-        continue-on-error: true
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
         run: |
@@ -152,6 +151,16 @@ jobs:
           VERSION=$(grep -E "^[[:space:]]*version" meson.build | head -1 \
                     | sed -E "s/.*version: '([^']+)'.*/\1/")
           ZIP="dist/nordstjernen-${VERSION}-windows-x86_64.zip"
+          ./dist/nordstjernen-win64/nordstjernen.exe --print-config > bundle-config.txt
+          ./dist/nordstjernen-win64/nordstjernen.exe --headless --dump=text about:start > bundle-about.txt
+          grep -q Nordstjernen bundle-about.txt
+          mkdir -p isolated-launcher
+          cp dist/nordstjernen-win64/nordstjernen.exe isolated-launcher/
+          if ./isolated-launcher/nordstjernen.exe --print-config 2> isolated-launcher.err; then
+            echo "isolated launcher unexpectedly succeeded" >&2
+            exit 1
+          fi
+          grep -q "Extract All" isolated-launcher.err
           ( cd dist && zip -r -q "$(basename "$ZIP")" nordstjernen-win64 )
           echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
 

@@ -11,6 +11,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILDDIR=${BUILDDIR:-$ROOT/builddir-release}
 OUT=${OUT:-$ROOT/dist/nordstjernen-win64}
 BIN_SRC=$BUILDDIR/src/nordstjernen.exe
+LAUNCHER_SRC=$BUILDDIR/src/nordstjernen-launcher.exe
+BROWSER_EXE=nordstjernen-browser.exe
 
 resolve_mingw_prefix() {
     for cand in "${MINGW_PREFIX:-}" /c/msys64/mingw64 "C:/msys64/mingw64" \
@@ -37,10 +39,15 @@ if [ ! -x "$BIN_SRC" ]; then
     echo "pack-windows: build did not produce $BIN_SRC" >&2
     exit 1
 fi
+if [ ! -x "$LAUNCHER_SRC" ]; then
+    echo "pack-windows: build did not produce $LAUNCHER_SRC" >&2
+    exit 1
+fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT/bin"
-cp "$BIN_SRC" "$OUT/nordstjernen.exe"
+cp "$LAUNCHER_SRC" "$OUT/nordstjernen.exe"
+cp "$BIN_SRC" "$OUT/$BROWSER_EXE"
 
 # GLib settings schemas (compiled). Apps that GSettings-look-up a key crash without these.
 mkdir -p "$OUT/share/glib-2.0/schemas"
@@ -62,7 +69,7 @@ fi
 # pixbuf loader DLL. objdump reports import names; we look them up in the
 # mingw bin dir and skip anything that resolves to a Windows system DLL.
 declare -A seen
-queue=("$OUT/nordstjernen.exe")
+queue=("$OUT/$BROWSER_EXE")
 for loader in "$OUT"/lib/gdk-pixbuf-2.0/*/loaders/*.dll; do
     [ -f "$loader" ] && queue+=("$loader")
 done
