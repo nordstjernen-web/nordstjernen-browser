@@ -732,18 +732,26 @@ static void append_display_contents_children(ns_box *block, const ns_node *n,
                                              ns_box **pending_before);
 
 static gboolean
-button_has_replaced_child(const ns_node *n)
+button_has_replaced_child_depth(const ns_node *n, int depth)
 {
+    if (depth >= NS_LAYOUT_MAX_DEPTH) return FALSE;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             (strcmp(c->name, "svg") == 0 || strcmp(c->name, "img") == 0 ||
              strcmp(c->name, "picture") == 0 || strcmp(c->name, "audio") == 0 ||
              strcmp(c->name, "video") == 0))
             return TRUE;
-        if (c->kind == NS_NODE_ELEMENT && button_has_replaced_child(c))
+        if (c->kind == NS_NODE_ELEMENT &&
+            button_has_replaced_child_depth(c, depth + 1))
             return TRUE;
     }
     return FALSE;
+}
+
+static gboolean
+button_has_replaced_child(const ns_node *n)
+{
+    return button_has_replaced_child_depth(n, 0);
 }
 
 static gboolean
@@ -3484,12 +3492,16 @@ build_block(const ns_node *n, GHashTable *styles)
     return out;
 }
 
+static int g_contents_depth;
+
 static void
 append_display_contents_children(ns_box *block, const ns_node *n,
                                  GHashTable *styles,
                                  gboolean blockify_children,
                                  ns_box **pending_before)
 {
+    if (g_contents_depth >= NS_LAYOUT_MAX_DEPTH) return;
+    g_contents_depth++;
     const ns_style *s = g_hash_table_lookup(styles, n);
     ns_box *contents_before = (s && s->before)
         ? build_pseudo_inline_for(s->before, n) : NULL;
@@ -3596,6 +3608,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
         ns_box *contents_after = build_pseudo_inline_for(s->after, n);
         if (contents_after) box_append_child(block, contents_after);
     }
+    g_contents_depth--;
 }
 
 static ns_box *
@@ -6844,6 +6857,7 @@ expand_auto_repeat(const ns_css_tracks *tr, double available_main, double gap)
     if (pattern_with_gap > 0)
         repeats = (int)((available_main + gap) / pattern_with_gap);
     if (repeats < 1) repeats = 1;
+    if (repeats > NS_CSS_TRACKS_MAX) repeats = NS_CSS_TRACKS_MAX;
 
     int prefix = tr->auto_repeat_start;
     int suffix_start = tr->auto_repeat_start + tr->auto_repeat_count;
