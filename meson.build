@@ -146,45 +146,45 @@ sqlite3 = dependency('sqlite3')
 librsvg = dependency('librsvg-2.0', version: '>=2.46', required: not is_android)
 have_librsvg = librsvg.found() and not is_android
 if have_librsvg
-  add_project_arguments('-DND_HAVE_LIBRSVG=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_LIBRSVG=1', language: 'c')
 endif
 
 have_gdk_pixbuf = not is_android
 if have_gdk_pixbuf
-  add_project_arguments('-DND_HAVE_GDK_PIXBUF=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_GDK_PIXBUF=1', language: 'c')
 endif
 
 if not is_android
-  add_project_arguments('-DND_ENABLE_WEBGL=1', language: 'c')
+  add_project_arguments('-DNS_ENABLE_WEBGL=1', language: 'c')
 endif
 
 libpoppler = dependency('poppler-glib', required: false)
 have_poppler = libpoppler.found() and not is_android
 if have_poppler
-  add_project_arguments('-DND_HAVE_POPPLER=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_POPPLER=1', language: 'c')
 endif
 
 libfontconfig = dependency('fontconfig', required: false)
 have_fontconfig = libfontconfig.found()
 if have_fontconfig
-  add_project_arguments('-DND_HAVE_FONTCONFIG=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_FONTCONFIG=1', language: 'c')
 endif
 libpangoft2 = dependency('pangoft2', required: false)
 have_pangoft2 = libpangoft2.found()
 if have_pangoft2
-  add_project_arguments('-DND_HAVE_PANGOFT2=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_PANGOFT2=1', language: 'c')
 endif
 
 libfreetype = dependency('freetype2', required: false)
 have_freetype = libfreetype.found()
 if have_freetype
-  add_project_arguments('-DND_HAVE_FREETYPE=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_FREETYPE=1', language: 'c')
 endif
 
 libavif = dependency('libavif', required: false)
 have_avif = libavif.found() and not is_android
 if have_avif
-  add_project_arguments('-DND_HAVE_AVIF=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
 libseccomp = dependency(
@@ -193,7 +193,7 @@ libseccomp = dependency(
 )
 have_seccomp = libseccomp.found() and not is_android
 if have_seccomp
-  add_project_arguments('-DND_HAVE_SECCOMP=1', language: 'c')
+  add_project_arguments('-DNS_HAVE_SECCOMP=1', language: 'c')
 endif
 
 libwuffs = dependency('wuffs', fallback: ['wuffs', 'wuffs_dep'])
@@ -204,7 +204,7 @@ if fs.is_file('src/lexbor/version')
   lexbor_version_raw = fs.read('src/lexbor/version').strip()
   lexbor_version = lexbor_version_raw.split('=')[1]
 endif
-add_project_arguments('-DND_LEXBOR_VERSION="' + lexbor_version + '"',
+add_project_arguments('-DNS_LEXBOR_VERSION="' + lexbor_version + '"',
                       language: 'c')
 
 build_date = get_option('build_date')
@@ -214,7 +214,7 @@ if build_date == ''
     build_date = date_cmd.stdout().strip()
   endif
 endif
-add_project_arguments('-DND_BUILD_DATE="' + build_date + '"', language: 'c')
+add_project_arguments('-DNS_BUILD_DATE="' + build_date + '"', language: 'c')
 
 subdir('src/lexbor')
 subdir('src/quickjs')

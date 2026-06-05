@@ -55,7 +55,7 @@ for e in entries:
             skip = True; continue
         if a in DROP or a.endswith('.o') or a.endswith('.o.d'):
             continue
-        if a.startswith('-DND_HAVE_GDK_PIXBUF') or a.startswith('-DND_HAVE_LIBRSVG'):
+        if a.startswith('-DNS_HAVE_GDK_PIXBUF') or a.startswith('-DNS_HAVE_LIBRSVG'):
             continue
         out.append(a)
     out += ['-D__ANDROID__', '-fsyntax-only']
