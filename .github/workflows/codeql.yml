@@ -67,11 +67,22 @@ jobs:
         if: matrix.build-mode == 'manual'
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "ndk;${NDK_VERSION}" \
-            "cmake;${CMAKE_VERSION}"
+          for attempt in 1 2 3; do
+            if sdkmanager \
+                "platforms;android-35" \
+                "build-tools;35.0.0" \
+                "ndk;${NDK_VERSION}" \
+                "cmake;${CMAKE_VERSION}"; then
+              echo "sdkmanager succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "sdkmanager failed on attempt ${attempt}; clearing partial downloads and retrying" >&2
+            rm -rf "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/.downloadIntermediates" \
+                   "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/.temp" 2>/dev/null || true
+            sleep $((attempt * 10))
+          done
+          echo "sdkmanager failed after 3 attempts" >&2
+          exit 1
 
       - name: Set up Gradle
         if: matrix.build-mode == 'manual'
