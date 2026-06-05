@@ -633,6 +633,9 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (!s) return n->name && strchr(n->name, '-') != NULL;
     if (style_is_none(s)) return FALSE;
     if (style_is_absolute_or_fixed(s)) return FALSE;
+    if (keyword_is(s->values[NS_CSS_DISPLAY], "inline-flex") ||
+        keyword_is(s->values[NS_CSS_DISPLAY], "inline-grid"))
+        return TRUE;
     if (!style_is_block(s) && contains_block_media(n, styles)) return FALSE;
     if (keyword_is(s->values[NS_CSS_DISPLAY], "inline-block"))
         return TRUE;
@@ -844,8 +847,9 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     if (!s) return FALSE;
     const ns_css_value *d = s->values[NS_CSS_DISPLAY];
-    if (!(keyword_is(d, "inline-block") || keyword_is(d, "inline-flex") ||
-          keyword_is(d, "inline-grid")))
+    if (keyword_is(d, "inline-flex") || keyword_is(d, "inline-grid"))
+        return TRUE;
+    if (!keyword_is(d, "inline-block"))
         return FALSE;
     return style_has_atomic_inline_box(s) || contains_block_media(n, styles);
 }
@@ -5112,7 +5116,24 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
-        if (!box->text || !*box->text) return 0;
+        if (!box->text || !*box->text) {
+            if (!box->inline_atomics || box->inline_atomics->len == 0)
+                return 0;
+            double sum = 0;
+            for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
+                ns_box *ab = g_array_index(box->inline_atomics,
+                                           ns_inline_atomic, ai).box;
+                if (!ab) continue;
+                if (ab->content_width == 0 && ab->content_height == 0)
+                    layout_box(ab, inline_atomic_measure_basis(ab),
+                               parent_style);
+                sum += ab->content_width +
+                       ab->margin.left + ab->margin.right +
+                       ab->padding.left + ab->padding.right +
+                       ab->border.left + ab->border.right;
+            }
+            return sum;
+        }
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, -1);
         gboolean cacheable =
@@ -5953,6 +5974,16 @@ estimate_natural_width(const ns_box *b, double cap)
                 }
             }
         }
+    }
+    const ns_css_value *swv = b->style ? b->style->values[NS_CSS_WIDTH] : NULL;
+    if (swv && swv->kind == NS_CSS_V_LENGTH &&
+        (swv->u.length.unit == NS_CSS_UNIT_PX ||
+         swv->u.length.unit == NS_CSS_UNIT_NUMBER) &&
+        swv->u.length.v > 0) {
+        double sw = swv->u.length.v +
+                    b->padding.left + b->padding.right +
+                    b->border.left  + b->border.right;
+        return sw > cap ? cap : sw;
     }
     double w = 0;
     if (b->kind == NS_BOX_INLINE && b->text) {
