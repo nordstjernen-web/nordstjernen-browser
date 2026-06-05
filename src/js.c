@@ -55,6 +55,8 @@ struct ns_worker_host {
     char         *base_url;
     char         *name;
     char         *origin;
+    char         *inline_script;
+    gsize         inline_script_len;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
 };
@@ -11646,6 +11648,7 @@ ns_worker_host_unref(ns_worker_host *host)
     g_free(host->base_url);
     g_free(host->name);
     g_free(host->origin);
+    g_free(host->inline_script);
     g_free(host);
 }
 
@@ -12379,8 +12382,10 @@ ns_worker_js_new(ns_worker_host *host)
                       JS_NewString(ctx, host->origin ? host->origin : ""));
     JS_SetPropertyStr(ctx, global, "name",
                       JS_NewString(ctx, host->name ? host->name : ""));
+    const char *secure_url = host->url && g_str_has_prefix(host->url, "blob:")
+        ? host->base_url : host->url;
     JS_SetPropertyStr(ctx, global, "isSecureContext",
-                      host->url && g_str_has_prefix(host->url, "https:") ? JS_TRUE : JS_FALSE);
+                      secure_url && g_str_has_prefix(secure_url, "https:") ? JS_TRUE : JS_FALSE);
     ns_worker_install_location(ctx, global, host->url);
 
     JS_FreeValue(ctx, global);
@@ -12395,7 +12400,9 @@ ns_worker_thread(gpointer data)
 
     char *final_url = NULL;
     char *error = NULL;
-    char *body = ns_worker_fetch_script(host, host->url, &final_url, &error);
+    char *body = host->inline_script
+        ? g_strndup(host->inline_script, host->inline_script_len)
+        : ns_worker_fetch_script(host, host->url, &final_url, &error);
     if (!body) {
         ns_worker_post_owner_error(host, error ? error : "Worker load failed", host->url);
         g_free(error);
@@ -12487,30 +12494,48 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowTypeError(ctx, "Worker is unavailable");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
-    char *abs = js->current_url ? ns_url_resolve(js->current_url, raw)
-                                : ns_url_resolve(NULL, raw);
+    char *abs = NULL;
+    char *inline_script = NULL;
+    gsize inline_script_len = 0;
+    if (g_str_has_prefix(raw, "blob:")) {
+        GBytes *blob = ns_js_blob_url_lookup(js, raw, NULL);
+        if (!blob) {
+            JS_FreeCString(ctx, raw);
+            return JS_ThrowTypeError(ctx, "Worker: blob URL not found");
+        }
+        const guint8 *blob_data = g_bytes_get_data(blob, &inline_script_len);
+        inline_script = g_strndup((const char *)blob_data, inline_script_len);
+        abs = g_strdup(raw);
+    } else {
+        abs = js->current_url ? ns_url_resolve(js->current_url, raw)
+                              : ns_url_resolve(NULL, raw);
+    }
     JS_FreeCString(ctx, raw);
     if (!abs) return JS_ThrowTypeError(ctx, "Worker: invalid script URL");
 
     g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
     if (type && *type && g_ascii_strcasecmp(type, "classic") != 0) {
         g_free(abs);
+        g_free(inline_script);
         return JS_ThrowTypeError(ctx, "Worker: module workers are not supported");
     }
     g_autofree char *name = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "name") : NULL;
 
-    char *policy_error = NULL;
-    ns_worker_host tmp = {0};
-    tmp.base_url = js->current_url;
-    if (!ns_worker_script_url_allowed(&tmp, abs, &policy_error)) {
-        JSValue ret = JS_ThrowTypeError(ctx, "Worker: %s",
-                                        policy_error ? policy_error : "blocked");
-        g_free(policy_error);
-        g_free(abs);
-        return ret;
+    if (!inline_script) {
+        char *policy_error = NULL;
+        ns_worker_host tmp = {0};
+        tmp.base_url = js->current_url;
+        if (!ns_worker_script_url_allowed(&tmp, abs, &policy_error)) {
+            JSValue ret = JS_ThrowTypeError(ctx, "Worker: %s",
+                                            policy_error ? policy_error : "blocked");
+            g_free(policy_error);
+            g_free(abs);
+            return ret;
+        }
     }
     if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs, js->current_url)) {
         g_free(abs);
+        g_free(inline_script);
         return JS_ThrowTypeError(ctx, "Worker: blocked by Content-Security-Policy worker-src");
     }
 
@@ -12536,6 +12561,8 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->url = abs;
     host->base_url = g_strdup(js->current_url ? js->current_url : abs);
     host->name = g_strdup(name ? name : "");
+    host->inline_script = inline_script;
+    host->inline_script_len = inline_script_len;
     host->origin = ns_url_origin_from(host->base_url);
     if (!host->origin) host->origin = g_strdup("");
     host->log_cb = js->log_cb;
