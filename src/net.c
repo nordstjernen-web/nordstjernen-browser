@@ -2301,7 +2301,7 @@ static const char k_about_start_template[] =
     "<div class=\"wrap\">"
     "<img class=\"logo\" alt=\"Nordstjernen\" src=\"__ND_LOGO_URI__\">"
     "<div class=\"title\">Nordstjernen " NS_VERSION "</div>"
-    "<div class=\"tagline\">Nordstjernen is a fine web browser</div>"
+    "<div class=\"tagline\">__ND_TAGLINE__</div>"
     "<form class=\"search\" action=\"https://html.duckduckgo.com/html/\""
     " method=\"get\">"
     "<input type=\"text\" name=\"q\" size=\"24\" autofocus"
@@ -2316,6 +2316,19 @@ static const char k_about_start_template[] =
     "</div>"
     "</body></html>";
 
+static const char *
+about_start_tagline(void)
+{
+    static const char *const taglines[] = {
+        "Nordstjernen the legendary web browser",
+        "Northstar the legendary web browser",
+        "Nordstjärnan the legendary web browser",
+        "Étoile du Nord the legendary web browser",
+        "Nordstern the legendary web browser",
+    };
+    return taglines[g_random_int_range(0, G_N_ELEMENTS(taglines))];
+}
+
 static gboolean
 synthesize_about_response(const char *url, ns_response *resp)
 {
@@ -2329,9 +2342,12 @@ synthesize_about_response(const char *url, ns_response *resp)
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
     } else if (g_str_equal(what, "start") || g_str_equal(what, "home") ||
                g_str_equal(what, "newtab")) {
-        char *body = about_substitute(k_about_start_template,
-                                      "__ND_LOGO_URI__",
-                                      about_logo_data_uri());
+        char *with_logo = about_substitute(k_about_start_template,
+                                           "__ND_LOGO_URI__",
+                                           about_logo_data_uri());
+        char *body = about_substitute(with_logo, "__ND_TAGLINE__",
+                                      about_start_tagline());
+        g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
