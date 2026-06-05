@@ -639,6 +639,7 @@ typedef struct ns_style {
     struct ns_style *selection;
     struct ns_style *marker;
     struct ns_style *backdrop;
+    guint share_id;
     struct ns_var_map *vars;
 } ns_style;
 

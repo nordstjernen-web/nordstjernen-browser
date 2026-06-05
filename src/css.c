@@ -11732,6 +11732,7 @@ cascade_walk(ns_node *node,
 
 static GHashTable *g_style_share;
 static GByteArray *g_share_scratch;
+static guint g_style_share_next_id;
 
 typedef struct {
     guint32  hash;
@@ -11788,6 +11789,7 @@ ns_style_clone_shared(const ns_style *s)
 {
     if (!s) return NULL;
     ns_style *c = ns_style_alloc();
+    c->share_id = s->share_id;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         if (i == NS_CSS_FONT_SIZE && s->values[i]) {
             c->values[i] = ns_css_value_dup(s->values[i]);
@@ -11856,8 +11858,8 @@ style_share_key(GByteArray *b,
                 const ns_pe_gather *pe_g, int n_pe)
 {
     g_byte_array_set_size(b, 0);
-    gconstpointer pp = parent_style;
-    g_byte_array_append(b, (const guint8 *)&pp, sizeof pp);
+    guint parent_id = parent_style ? parent_style->share_id : 0;
+    g_byte_array_append(b, (const guint8 *)&parent_id, sizeof parent_id);
     g_byte_array_append(b, (const guint8 *)&root_px, sizeof root_px);
     guint cq_len = g_cq_stack ? g_cq_stack->len : 0;
     g_byte_array_append(b, (const guint8 *)&cq_len, sizeof cq_len);
@@ -12132,6 +12134,8 @@ cascade_walk(ns_node *node,
                 g_ptr_array_free(pe_owned, TRUE);
             }
             if (have_key) {
+                if (s->share_id == 0)
+                    s->share_id = ++g_style_share_next_id;
                 share_key_t *k = g_new(share_key_t, 1);
                 k->len  = probe.len;
                 k->hash = probe.hash;
@@ -12607,6 +12611,7 @@ ns_css_compute(ns_node *doc,
         g_share_scratch = g_byte_array_sized_new(512);
     g_style_share = g_hash_table_new_full(share_key_hash, share_key_equal,
                                           share_key_free, NULL);
+    g_style_share_next_id = 0;
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, &root_px,
                  layer_ranks, out);
     g_hash_table_destroy(g_style_share);
