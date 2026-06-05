@@ -5608,7 +5608,7 @@ ns_browser_close_tab(ns_window *w)
     gboolean found = g_ptr_array_find(tabs, w, &idx);
     g_ptr_array_remove(tabs, w);
     if (strip && w->tab_button) gtk_box_remove(GTK_BOX(strip), w->tab_button);
-    if (stack && w->page_root) gtk_stack_remove(stack, w->page_root);
+    GtkWidget *page_root = w->page_root;
 
     ns_window *next = NULL;
     if (found && tabs->len > 0)
@@ -5617,6 +5617,7 @@ ns_browser_close_tab(ns_window *w)
         next = g_ptr_array_index(tabs, 0);
 
     on_window_destroy(NULL, w);
+    if (stack && page_root) gtk_stack_remove(stack, page_root);
 
     if (next) ns_browser_set_active(toplevel, next);
 }
