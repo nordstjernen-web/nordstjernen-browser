@@ -869,19 +869,24 @@ ns_element_get_attr(const ns_node *el, const char *name)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !name)
         return NULL;
+    if (el->flags & NS_NODE_SVG_NS) {
+        for (const ns_attr *a = el->attrs; a; a = a->next)
+            if (a->name && strcmp(a->name, name) == 0)
+                return a->value;
+        return NULL;
+    }
     if (ns_str_is_ascii_lower(name)) {
         char c0 = name[0];
         for (const ns_attr *a = el->attrs; a; a = a->next) {
             const char *an = a->name;
             if (!an) continue;
             char ac = an[0];
+            char ac_lower = (ac >= 'A' && ac <= 'Z') ? ac + 32 : ac;
+            if (ac_lower != c0) continue;
             if (ac == c0) {
                 if (strcmp(an, name) == 0) return a->value;
-                continue;
             }
-            if (ac >= 'A' && ac <= 'Z' && (ac + 32) == c0) {
-                if (g_ascii_strcasecmp(an, name) == 0) return a->value;
-            }
+            if (g_ascii_strcasecmp(an, name) == 0) return a->value;
         }
         return NULL;
     }
