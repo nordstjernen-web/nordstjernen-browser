@@ -489,6 +489,29 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         nav->pending_url = g_strdup(link->href);
         return;
     }
+    if (nav) {
+        for (const ns_node *cur = dom; cur; cur = cur->parent) {
+            if (!ns_node_is_element_named(cur, "a")) continue;
+            const char *href = ns_element_get_attr(cur, "href");
+            if (!href || !*href) break;
+            char *url;
+            if (hit && hit->dom && ns_node_is_element_named(hit->dom, "img") &&
+                ns_element_get_attr(hit->dom, "ismap")) {
+                double cx0 = hit->x + hit->margin.left +
+                             hit->border.left + hit->padding.left;
+                double cy0 = hit->y + hit->margin.top +
+                             hit->border.top + hit->padding.top;
+                int ix = (int)(x - cx0); if (ix < 0) ix = 0;
+                int iy = (int)(y - cy0); if (iy < 0) iy = 0;
+                url = g_strdup_printf("%s?%d,%d", href, ix, iy);
+            } else {
+                url = g_strdup(href);
+            }
+            g_free(nav->pending_url);
+            nav->pending_url = url;
+            return;
+        }
+    }
     for (const ns_node *cur = dom; cur; cur = cur->parent) {
         if (cur->kind == NS_NODE_ELEMENT && cur->name &&
             strcmp(cur->name, "summary") == 0 && cur->parent &&

@@ -1679,7 +1679,20 @@ ns_on_drawing_pressed(GtkGestureClick *gesture, int n_press,
                             GdkModifierType mods = event ?
                                 gdk_event_get_modifier_state(event) : 0;
                             const char *target = ns_element_get_attr(cur, "target");
-                            ns_window_follow_href(w, href, target, mods);
+                            char *ismap_href = NULL;
+                            if (ns_node_is_element_named(hit->dom, "img") &&
+                                ns_element_get_attr(hit->dom, "ismap")) {
+                                double cx0 = hit->x + hit->margin.left +
+                                             hit->border.left + hit->padding.left;
+                                double cy0 = hit->y + hit->margin.top +
+                                             hit->border.top + hit->padding.top;
+                                int ix = (int)(x - cx0); if (ix < 0) ix = 0;
+                                int iy = (int)(y - cy0); if (iy < 0) iy = 0;
+                                ismap_href = g_strdup_printf("%s?%d,%d", href, ix, iy);
+                            }
+                            ns_window_follow_href(w, ismap_href ? ismap_href : href,
+                                                  target, mods);
+                            g_free(ismap_href);
                             handled = TRUE;
                             break;
                         }

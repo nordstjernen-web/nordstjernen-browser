@@ -141,7 +141,8 @@ elements (`head title meta link style script noscript template`) to
 | `video` | 🟡 | poster + play overlay; click hands the source URL to the system media player (`ns_media_launch_external`) — no in-process codec. Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp |
 | `audio` | 🟡 | click hands the source URL to the system media player; no in-process codec |
 | `track` (captions) | ❌ | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path; not rendered |
-| `map` / `area` (image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
+| `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
+| `img ismap` (server-side image maps) | ✅ | clicking an `<img ismap>` nested in an `<a href>` appends the click position relative to the image's top-left corner as a `?x,y` suffix to the link URL before navigating (GUI path in `src/main.c`, headless click path in `src/headless.c`); coordinates are clamped to non-negative |
 | MathML | ❌ | parsed into DOM; not laid out |
 
 ## §4.9 Tabular data
