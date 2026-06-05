@@ -1766,6 +1766,24 @@ ns_throw_quota_exceeded(JSContext *ctx)
     return JS_Throw(ctx, err);
 }
 
+static JSValue
+ns_throw_selector_syntax_error(JSContext *ctx, const char *sel)
+{
+    JSValue err = JS_NewError(ctx);
+    JS_DefinePropertyValueStr(ctx, err, "name",
+        JS_NewString(ctx, "SyntaxError"),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    char *msg = g_strdup_printf("'%s' is not a valid selector", sel ? sel : "");
+    JS_DefinePropertyValueStr(ctx, err, "message",
+        JS_NewString(ctx, msg),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    g_free(msg);
+    JS_DefinePropertyValueStr(ctx, err, "code",
+        JS_NewInt32(ctx, 12),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    return JS_Throw(ctx, err);
+}
+
 static int
 ns_storage_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
                    JSValueConst obj, JSAtom prop)
@@ -16686,12 +16704,15 @@ ns_query_selector_impl(JSContext *ctx, const ns_node *root,
         JS_FreeCString(ctx, sel);
         return fast;
     }
-    GPtrArray *sels = ns_css_parse_selector_list(sel);
-    JS_FreeCString(ctx, sel);
-    if (sels->len == 0) {
+    gboolean valid = FALSE;
+    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
+    if (!valid) {
         g_ptr_array_free(sels, TRUE);
-        return want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
+        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
+        JS_FreeCString(ctx, sel);
+        return exc;
     }
+    JS_FreeCString(ctx, sel);
     const ns_node *prev_scope = ns_css_set_match_scope(root);
     ns_js *js = js_from_ctx(ctx);
     const ns_node *prev_focus = ns_css_set_focus_node(js ? js->focused_node : NULL);
@@ -16792,7 +16813,14 @@ ns_element_matches(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, sel);
         return JS_TRUE;
     }
-    GPtrArray *sels = ns_css_parse_selector_list(sel);
+    gboolean valid = FALSE;
+    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
+    if (!valid) {
+        g_ptr_array_free(sels, TRUE);
+        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
+        JS_FreeCString(ctx, sel);
+        return exc;
+    }
     JS_FreeCString(ctx, sel);
     const ns_node *prev_scope = ns_css_set_match_scope(el);
     ns_js *js = js_from_ctx(ctx);
@@ -16816,7 +16844,14 @@ ns_element_closest(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, sel);
         return ns_make_element(ctx, el);
     }
-    GPtrArray *sels = ns_css_parse_selector_list(sel);
+    gboolean valid = FALSE;
+    GPtrArray *sels = ns_css_parse_selector_list_checked(sel, &valid);
+    if (!valid) {
+        g_ptr_array_free(sels, TRUE);
+        JSValue exc = ns_throw_selector_syntax_error(ctx, sel);
+        JS_FreeCString(ctx, sel);
+        return exc;
+    }
     JS_FreeCString(ctx, sel);
     const ns_node *prev_scope = ns_css_set_match_scope(el);
     ns_js *js = js_from_ctx(ctx);
@@ -18453,8 +18488,10 @@ static JSValue
 ns_element_getClientRects(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     JSValue arr = JS_NewArray(ctx);
+    if (!ns_box_for_this(ctx, this_val))
+        return arr;
     JSValue rect = ns_element_getBoundingClientRect(ctx, this_val, 0, NULL);
     JS_SetPropertyUint32(ctx, arr, 0, rect);
     return arr;
@@ -22808,13 +22845,17 @@ ns_document_create_tree_walker(JSContext *ctx, JSValueConst this_val,
     return tw;
 }
 
+static JSValue ns_impl_create_html_document(JSContext *ctx,
+                                            JSValueConst this_val,
+                                            int argc, JSValueConst *argv);
+
 static JSValue
 ns_document_implementation(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     JSValue impl = JS_NewObject(ctx);
     ns_bind_fn(ctx, impl, "hasFeature",          ns_event_true, 2);
-    ns_bind_fn(ctx, impl, "createHTMLDocument",  ns_event_noop, 1);
+    ns_bind_fn(ctx, impl, "createHTMLDocument",  ns_impl_create_html_document, 1);
     ns_bind_fn(ctx, impl, "createDocument",      ns_event_noop, 3);
     ns_bind_fn(ctx, impl, "createDocumentType",  ns_event_noop, 3);
     return impl;
@@ -24765,6 +24806,46 @@ ns_document_createDocumentFragment(JSContext *ctx, JSValueConst this_val,
     frag->flags |= NS_NODE_FRAGMENT;
     g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, frag);
     return ns_make_element(ctx, frag);
+}
+
+static JSValue
+ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NULL;
+    char *title = NULL;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
+        const char *t = JS_ToCString(ctx, argv[0]);
+        if (t) { title = g_markup_escape_text(t, -1); JS_FreeCString(ctx, t); }
+    }
+    char *src = g_strdup_printf(
+        "<!DOCTYPE html><html><head><title>%s</title></head><body></body></html>",
+        title ? title : "");
+    g_free(title);
+    ns_node *doc = ns_html_parse(src, -1);
+    g_free(src);
+    if (!doc) return JS_NULL;
+    ns_mark_scripts_already_started(doc);
+    g_hash_table_add(js->orphan_nodes, doc);
+    JSValue wrapper = ns_make_element(ctx, doc);
+    ns_attach_document_view(ctx, wrapper, doc);
+    ns_bind_fn(ctx, wrapper, "createElement",
+               ns_document_createElement, 1);
+    ns_bind_fn(ctx, wrapper, "createElementNS",
+               ns_document_createElementNS, 2);
+    ns_bind_fn(ctx, wrapper, "createTextNode",
+               ns_document_createTextNode, 1);
+    ns_bind_fn(ctx, wrapper, "createComment",
+               ns_document_createComment, 1);
+    ns_bind_fn(ctx, wrapper, "createDocumentFragment",
+               ns_document_createDocumentFragment, 0);
+    ns_bind_fn(ctx, wrapper, "importNode",
+               ns_document_import_node, 2);
+    ns_bind_fn(ctx, wrapper, "adoptNode",
+               ns_document_adopt_node, 1);
+    return wrapper;
 }
 
 static JSValue

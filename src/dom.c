@@ -931,6 +931,8 @@ ns_node_find_first_element(const ns_node *root, const char *tag)
     return ns_node_find_first_element_depth(root, tag, 0);
 }
 
+static gboolean ns_node_contains(const ns_node *ancestor, const ns_node *node);
+
 static ns_node *
 ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
 {
@@ -1293,8 +1295,17 @@ ns_node_find_by_id(const ns_node *root, const char *id)
     if (!root || !id || !*id) return NULL;
     if (root->id_index) {
         ns_node *hit = g_hash_table_lookup(root->id_index, id);
-        if (hit) return hit;
-        return NULL;
+        if (hit) {
+            const char *hid = ns_element_get_attr(hit, "id");
+            if (hid && strcmp(hid, id) == 0 && ns_node_contains(root, hit))
+                return hit;
+        }
+        ns_node *found = ns_node_find_by_id_depth(root, id, 0);
+        if (found)
+            g_hash_table_replace(root->id_index, g_strdup(id), found);
+        else
+            g_hash_table_remove(root->id_index, id);
+        return found;
     }
     return ns_node_find_by_id_depth(root, id, 0);
 }

@@ -513,6 +513,8 @@ typedef struct ns_css_selector {
 } ns_css_selector;
 
 GPtrArray *ns_css_parse_selector_list(const char *text);
+GPtrArray *ns_css_parse_selector_list_checked(const char *text,
+                                              gboolean *out_valid);
 
 const ns_node *ns_css_set_match_scope(const ns_node *scope);
 

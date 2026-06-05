@@ -1504,6 +1504,8 @@ typedef struct ns_css_scope_text {
 
 #define NS_CSS_MAX_SELECTOR_NESTING 48
 
+static gboolean g_sel_parse_error;
+
 static ns_css_selector *parse_one_selector(const char **pp, const char *end,
                                            int depth);
 
@@ -1613,6 +1615,24 @@ parse_anb(const char *arg, gsize alen, int *out_a, int *out_b)
     *out_a = a;
     *out_b = b;
     return TRUE;
+}
+
+static gboolean
+css_pseudo_class_is_standard(const char *name, gsize n)
+{
+    static const char *known[] = {
+        "default", "indeterminate", "in-range", "out-of-range",
+        "fullscreen", "modal", "autofill", "blank",
+        "user-valid", "user-invalid", "target-within", "focus-visible",
+        "local-link", "current", "past", "future",
+        "playing", "paused", "muted", "seeking", "buffering", "stalled",
+        "picture-in-picture", "volume-locked",
+        "host", "host-context", "nth-col", "nth-last-col", "state",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(known); i++)
+        if (strlen(known[i]) == n && g_ascii_strncasecmp(name, known[i], n) == 0)
+            return TRUE;
+    return FALSE;
 }
 
 static gboolean
@@ -1899,7 +1919,9 @@ parse_one_selector(const char **pp, const char *end, int depth)
                            ((name_n == 2 && g_ascii_strncasecmp(name_s, "is",    2) == 0) ||
                             (name_n == 5 && g_ascii_strncasecmp(name_s, "where", 5) == 0))) {
                     gboolean is_where = (name_n == 5);
+                    gboolean saved_err = g_sel_parse_error;
                     GPtrArray *group = parse_selector_group(arg_s, arg_n, depth + 1);
+                    g_sel_parse_error = saved_err;
                     if (group->len == 0) {
                         g_ptr_array_free(group, TRUE);
                         cmp->never_match = TRUE;
@@ -1966,9 +1988,12 @@ parse_one_selector(const char **pp, const char *end, int depth)
                         sel->spec_c += mc;
                     } else {
                         cmp->never_match = TRUE;
+                        if (!css_pseudo_class_is_standard(name_s, name_n))
+                            g_sel_parse_error = TRUE;
                     }
                 } else {
                     cmp->never_match = TRUE;
+                    g_sel_parse_error = TRUE;
                 }
                 g_free(pseudo_name);
                 any = TRUE;
@@ -2031,6 +2056,8 @@ parse_one_selector(const char **pp, const char *end, int depth)
         expect_compound = FALSE;
     }
     *pp = p;
+    if (pending != NS_CSS_COMB_NONE)
+        g_sel_parse_error = TRUE;
     if (sel->compounds->len == 0) {
         ns_css_selector_free(sel);
         return NULL;
@@ -9970,6 +9997,17 @@ ns_css_parse_selector_list(const char *text)
         if (p < end && *p == ',') p++;
         else if (p == iter_start) break;
     }
+    return out;
+}
+
+GPtrArray *
+ns_css_parse_selector_list_checked(const char *text, gboolean *out_valid)
+{
+    g_sel_parse_error = FALSE;
+    GPtrArray *out = ns_css_parse_selector_list(text);
+    if (out_valid)
+        *out_valid = !g_sel_parse_error && out->len > 0;
+    g_sel_parse_error = FALSE;
     return out;
 }
 
