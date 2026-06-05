@@ -5993,10 +5993,13 @@ ns_session_try_restore(GtkApplication *app)
     return TRUE;
 }
 
+static void ns_probe_gl_or_fallback(void);
+
 static void
 on_activate(GtkApplication *app, gpointer user_data)
 {
     (void)user_data;
+    ns_probe_gl_or_fallback();
     ns_install_icon_search_paths();
     ns_apply_user_prefs_to_css();
     GtkSettings *settings = gtk_settings_get_default();
@@ -6836,6 +6839,30 @@ ns_apply_gsk_renderer_auto(void)
         g_setenv("GSK_RENDERER", "cairo", TRUE);
         g_message("no GPU detected; using the software (cairo) renderer");
     }
+#endif
+}
+
+static void
+ns_probe_gl_or_fallback(void)
+{
+#ifdef __linux__
+    static gboolean probed;
+    if (probed) return;
+    probed = TRUE;
+    if (g_getenv("GSK_RENDERER")) return;
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return;
+    GError *err = NULL;
+    GdkGLContext *gl = gdk_display_create_gl_context(display, &err);
+    if (gl && gdk_gl_context_realize(gl, &err)) {
+        g_object_unref(gl);
+        return;
+    }
+    g_clear_object(&gl);
+    g_message("OpenGL init failed (%s); using the software (cairo) renderer",
+              err && err->message ? err->message : "no usable driver");
+    g_clear_error(&err);
+    g_setenv("GSK_RENDERER", "cairo", TRUE);
 #endif
 }
 
