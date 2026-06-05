@@ -1,4 +1,7 @@
-/* Nordstjernen — page export: screenshot (PNG), save (PDF/HTML), and printing. */
+/* Nordstjernen — page export: screenshot (PNG), save (PDF/HTML), and printing.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include <gtk/gtk.h>
 #include <cairo-pdf.h>

@@ -1,4 +1,7 @@
-/* Nordstjernen — civil-date math and HTML date/time string parsing. */
+/* Nordstjernen — civil-date math and HTML date/time string parsing.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include "datetime.h"
 

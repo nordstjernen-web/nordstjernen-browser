@@ -1,4 +1,7 @@
-/* Nordstjernen — right-click context menu over the rendered document. */
+/* Nordstjernen — right-click context menu over the rendered document.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #ifndef NS_CTXMENU_H
 #define NS_CTXMENU_H

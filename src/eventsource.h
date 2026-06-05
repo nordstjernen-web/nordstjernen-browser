@@ -1,4 +1,7 @@
-/* Nordstjernen — minimal EventSource / Server-Sent Events client (libcurl). */
+/* Nordstjernen — minimal EventSource / Server-Sent Events client (libcurl).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #ifndef NS_EVENTSOURCE_H
 #define NS_EVENTSOURCE_H

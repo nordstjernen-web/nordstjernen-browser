@@ -1,4 +1,7 @@
-/* Nordstjernen — HTML form validation, serialization, and submission helpers. */
+/* Nordstjernen — HTML form validation, serialization, and submission helpers.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include <glib.h>
 #include <string.h>

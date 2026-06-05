@@ -1,4 +1,7 @@
-/* Nordstjernen — JavaScript bytecode cache. */
+/* Nordstjernen — JavaScript bytecode cache.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include "bcache.h"
 

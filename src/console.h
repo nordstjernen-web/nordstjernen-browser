@@ -1,4 +1,7 @@
-/* Nordstjernen — developer console window (JS REPL, profiler, debug log). */
+/* Nordstjernen — developer console window (JS REPL, profiler, debug log).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #ifndef NS_CONSOLE_H
 #define NS_CONSOLE_H

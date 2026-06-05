@@ -1,4 +1,7 @@
-/* Nordstjernen — minimalist WebGL: canvas.getContext mapped onto GLES via GTK. */
+/* Nordstjernen — minimalist WebGL: canvas.getContext mapped onto GLES via GTK.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include "webgl.h"
 

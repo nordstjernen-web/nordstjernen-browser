@@ -1,4 +1,7 @@
-/* Nordstjernen - force the mobile variant of select sites. */
+/* Nordstjernen - force the mobile variant of select sites.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include "mobile.h"
 

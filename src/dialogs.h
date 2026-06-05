@@ -1,4 +1,7 @@
-/* Nordstjernen — chrome dialogs: About, Settings, and the bookmarks list. */
+/* Nordstjernen — chrome dialogs: About, Settings, and the bookmarks list.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #ifndef NS_DIALOGS_H
 #define NS_DIALOGS_H

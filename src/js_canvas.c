@@ -1,4 +1,7 @@
-/* Nordstjernen — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS). */
+/* Nordstjernen — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 #include "js_internal.h"
 
 #include <math.h>

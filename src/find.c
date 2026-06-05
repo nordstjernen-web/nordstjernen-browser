@@ -1,4 +1,7 @@
-/* Nordstjernen — find-in-page (the search bar over the rendered document). */
+/* Nordstjernen — find-in-page (the search bar over the rendered document).
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include <gtk/gtk.h>
 
