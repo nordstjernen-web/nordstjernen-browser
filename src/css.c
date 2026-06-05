@@ -2010,6 +2010,7 @@ parse_one_selector(const char **pp, const char *end, int depth)
                 }
                 ns_css_attr_pred ap = {0};
                 ap.name = ascii_lower(attr_name, strlen(attr_name));
+                ap.name_bit = ns_attr_name_bloom_bit(ap.name);
                 g_free(attr_name);
                 ap.op   = NS_CSS_ATTR_PRESENT;
                 p = css_skip_ws_comments(p, end);
@@ -9588,8 +9589,10 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
         }
     }
     if (sel->attrs && sel->attrs->len > 0) {
+        guint64 elbloom = ns_node_attr_bloom(el);
         for (guint i = 0; i < sel->attrs->len; i++) {
             const ns_css_attr_pred *a = &g_array_index(sel->attrs, ns_css_attr_pred, i);
+            if (a->name_bit && (elbloom & a->name_bit) == 0) return FALSE;
             const char *v = ns_element_get_attr(el, a->name);
             if (a->op == NS_CSS_ATTR_PRESENT) {
                 if (!v) return FALSE;

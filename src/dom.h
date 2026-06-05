@@ -18,8 +18,9 @@ typedef enum ns_node_kind {
     NS_NODE_COMMENT,
 } ns_node_kind;
 
-#define NS_ATTR_OWN_NAME  (1u << 0)
-#define NS_ATTR_OWN_VALUE (1u << 1)
+#define NS_ATTR_OWN_NAME   (1u << 0)
+#define NS_ATTR_OWN_VALUE  (1u << 1)
+#define NS_ATTR_NAME_LOWER (1u << 2)
 
 #define NS_SHADOW_ATTR     "data-nd-shadow-root"
 #define NS_HOST_SCOPE_ATTR "data-nd-host"
@@ -72,6 +73,8 @@ struct ns_node {
 
     void *class_set;
 
+    guint64 attr_bloom;
+
     guint8 flags;
 };
 
@@ -97,6 +100,8 @@ void        ns_element_remove_attr(ns_node *el, const char *name);
 
 ns_node    *ns_node_clone(const ns_node *src, gboolean deep);
 const char *ns_element_get_attr(const ns_node *el, const char *name);
+guint64     ns_attr_name_bloom_bit(const char *name);
+guint64     ns_node_attr_bloom(const ns_node *el);
 gboolean    ns_node_has_class(const ns_node *el, const char *name, gsize len);
 gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
 

@@ -584,10 +584,11 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set) ns_class_set_clear(el);
+    el->attr_bloom = 0;
     ns_attr *a = g_new0(ns_attr, 1);
     a->name  = (char *)name;
     a->value = (char *)(value ? value : "");
-    a->flags = 0;
+    a->flags = ns_str_is_ascii_lower(name) ? NS_ATTR_NAME_LOWER : 0;
     ns_attr *tail = NULL;
     for (ns_attr *cur = el->attrs; cur; cur = cur->next) tail = cur;
     if (tail) tail->next = a;
@@ -780,6 +781,7 @@ ns_element_set_attr(ns_node *el, const char *name, const char *value)
 
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
+    el->attr_bloom = 0;
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
@@ -794,7 +796,8 @@ ns_element_set_attr(ns_node *el, const char *name, const char *value)
     ns_attr *a = g_new0(ns_attr, 1);
     a->name = g_strdup(name);
     a->value = g_strdup(value ? value : "");
-    a->flags = NS_ATTR_OWN_NAME | NS_ATTR_OWN_VALUE;
+    a->flags = NS_ATTR_OWN_NAME | NS_ATTR_OWN_VALUE |
+               (ns_str_is_ascii_lower(name) ? NS_ATTR_NAME_LOWER : 0);
     a->next = NULL;
     if (tail) tail->next = a;
     else      el->attrs = a;
@@ -806,6 +809,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
+    el->attr_bloom = 0;
     ns_attr **link = &el->attrs;
     while (*link) {
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
@@ -864,6 +868,28 @@ ns_node_clone(const ns_node *src, gboolean deep)
     return ns_node_clone_depth(src, deep, 0);
 }
 
+guint64
+ns_attr_name_bloom_bit(const char *name)
+{
+    guint32 h = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        h ^= *p;
+        h *= 16777619u;
+    }
+    return (guint64)1 << (h & 63);
+}
+
+guint64
+ns_node_attr_bloom(const ns_node *el)
+{
+    if (el->attr_bloom) return el->attr_bloom;
+    guint64 b = 0;
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        if (a->name) b |= ns_attr_name_bloom_bit(a->name);
+    ((ns_node *)el)->attr_bloom = b;
+    return b;
+}
+
 const char *
 ns_element_get_attr(const ns_node *el, const char *name)
 {
@@ -880,13 +906,11 @@ ns_element_get_attr(const ns_node *el, const char *name)
         for (const ns_attr *a = el->attrs; a; a = a->next) {
             const char *an = a->name;
             if (!an) continue;
-            char ac = an[0];
-            char ac_lower = (ac >= 'A' && ac <= 'Z') ? ac + 32 : ac;
-            if (ac_lower != c0) continue;
-            if (ac == c0) {
-                if (strcmp(an, name) == 0) return a->value;
+            if (a->flags & NS_ATTR_NAME_LOWER) {
+                if (an[0] == c0 && strcmp(an, name) == 0) return a->value;
+            } else if (g_ascii_strcasecmp(an, name) == 0) {
+                return a->value;
             }
-            if (g_ascii_strcasecmp(an, name) == 0) return a->value;
         }
         return NULL;
     }

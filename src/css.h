@@ -422,6 +422,7 @@ typedef struct ns_css_attr_pred {
     ns_css_attr_op op;
     char *value;
     gboolean ci;
+    guint64 name_bit;
 } ns_css_attr_pred;
 
 typedef enum ns_css_pseudo {
