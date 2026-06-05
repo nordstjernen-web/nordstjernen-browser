@@ -67,6 +67,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | DOM tree construction | ✅ | lexbor (`src/html_lexbor.c`); spec-faithful even for malformed input |
 | `Document`, `documentElement`, `body`, `head` | ✅ | exposed in `src/js.c` |
 | `document.title` | ✅ | reflects `<title>` |
+| `HTMLElement.innerText` / `outerText` | ✅ | layout-aware getter (not a `textContent` alias): the rendered-text walk in `src/js.c` skips `display:none` subtrees and non-rendered elements (`script`/`style`/`head`/…), collapses runs of ASCII whitespace under normal `white-space` while preserving them under the `pre` family, turns `<br>` and block-box boundaries into newlines, and keeps `visibility:hidden` text per spec; when the element itself is not rendered the getter falls back to `textContent`. The setter splits on `\n` into text nodes and `<br>` elements |
 | DOM tree accessors (`getElementsBy{Id,TagName,TagNameNS,ClassName,Name}`, `forms`/`images`/`links`/`scripts`) | ✅ | `getElementsByTagNameNS` applies the spec namespace filter — empty string normalised to `null`, `null` matches nothing (our DOM is XHTML-only), `*` matches any, the XHTML URI matches by local name; exposed on both `Document` and `Element` |
 | `document.currentScript` | ✅ | the running classic `<script>` element during execution; `null` for module scripts (`src/js.c`) |
 | `document.compatMode` | ✅ | reflects the parser's quirks state (`BackCompat` in quirks mode, else `CSS1Compat`); plumbed from lexbor's `compat_mode` via the document node flags |

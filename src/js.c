@@ -2926,6 +2926,169 @@ ns_element_get_textContent(JSContext *ctx, JSValueConst this_val)
     return v;
 }
 
+typedef struct {
+    GString *out;
+    gboolean pending_space;
+    gboolean at_line_start;
+} ns_inner_text_ctx;
+
+static gboolean
+ns_inner_text_skip_tag(const char *nm)
+{
+    static const char *const set[] = {
+        "script", "style", "head", "title", "meta", "link", "base",
+        "noscript", "template", "datalist", NULL };
+    if (!nm) return FALSE;
+    for (int i = 0; set[i]; i++)
+        if (g_ascii_strcasecmp(nm, set[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_inner_text_is_block(const ns_style *s, const char *nm)
+{
+    if (s) {
+        const ns_css_value *d = s->values[NS_CSS_DISPLAY];
+        if (d && d->kind == NS_CSS_V_KEYWORD && d->u.keyword) {
+            const char *k = d->u.keyword;
+            if (strstr(k, "inline")) return FALSE;
+            if (strcmp(k, "none") == 0) return FALSE;
+            if (strcmp(k, "table-cell") == 0 ||
+                strcmp(k, "table-column") == 0 ||
+                strcmp(k, "table-column-group") == 0) return FALSE;
+            return TRUE;
+        }
+    }
+    static const char *const block[] = {
+        "address", "article", "aside", "blockquote", "body", "dd",
+        "details", "div", "dl", "dt", "fieldset", "figcaption", "figure",
+        "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
+        "hgroup", "hr", "html", "li", "main", "nav", "ol", "p", "pre",
+        "section", "summary", "table", "tbody", "tfoot", "thead", "tr",
+        "ul", NULL };
+    if (!nm) return FALSE;
+    for (int i = 0; block[i]; i++)
+        if (g_ascii_strcasecmp(nm, block[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_inner_text_preserve_ws(const ns_style *s, const char *nm, gboolean inherited)
+{
+    if (s) {
+        const ns_css_value *w = s->values[NS_CSS_WHITE_SPACE];
+        if (w && w->kind == NS_CSS_V_KEYWORD && w->u.keyword) {
+            const char *k = w->u.keyword;
+            if (strcmp(k, "pre") == 0 || strcmp(k, "pre-wrap") == 0 ||
+                strcmp(k, "pre-line") == 0 || strcmp(k, "break-spaces") == 0)
+                return TRUE;
+            if (strcmp(k, "normal") == 0 || strcmp(k, "nowrap") == 0)
+                return FALSE;
+        }
+    }
+    if (nm && g_ascii_strcasecmp(nm, "pre") == 0) return TRUE;
+    return inherited;
+}
+
+static void
+ns_inner_text_emit_newline(ns_inner_text_ctx *c)
+{
+    c->pending_space = FALSE;
+    g_string_append_c(c->out, '\n');
+    c->at_line_start = TRUE;
+}
+
+static void
+ns_inner_text_require_break(ns_inner_text_ctx *c)
+{
+    if (c->out->len == 0) { c->at_line_start = TRUE; return; }
+    if (!c->at_line_start) ns_inner_text_emit_newline(c);
+}
+
+static void
+ns_inner_text_emit_glyph(ns_inner_text_ctx *c, char ch)
+{
+    if (c->pending_space) {
+        if (!c->at_line_start) g_string_append_c(c->out, ' ');
+        c->pending_space = FALSE;
+    }
+    g_string_append_c(c->out, ch);
+    c->at_line_start = FALSE;
+}
+
+static void
+ns_inner_text_emit_text(ns_inner_text_ctx *c, const char *t, gboolean preserve)
+{
+    for (const char *p = t; *p; p++) {
+        unsigned char ch = (unsigned char)*p;
+        if (preserve) {
+            if (ch == '\r') continue;
+            if (ch == '\n') { ns_inner_text_emit_newline(c); continue; }
+            if (c->pending_space) {
+                if (!c->at_line_start) g_string_append_c(c->out, ' ');
+                c->pending_space = FALSE;
+            }
+            g_string_append_c(c->out, *p);
+            c->at_line_start = FALSE;
+        } else if (ch == ' ' || ch == '\t' || ch == '\n' ||
+                   ch == '\r' || ch == '\f') {
+            c->pending_space = TRUE;
+        } else {
+            ns_inner_text_emit_glyph(c, *p);
+        }
+    }
+}
+
+static void
+ns_inner_text_collect(ns_js *js, const ns_node *n,
+                      ns_inner_text_ctx *c, gboolean preserve)
+{
+    if (!n) return;
+    if (n->kind == NS_NODE_TEXT) {
+        if (n->text) ns_inner_text_emit_text(c, n->text, preserve);
+        return;
+    }
+    if (n->kind != NS_NODE_ELEMENT) return;
+    if (ns_inner_text_skip_tag(n->name)) return;
+    const ns_style *s = js && js->style_table
+                      ? g_hash_table_lookup(js->style_table, n) : NULL;
+    if (s && ns_css_keyword_is(s->values[NS_CSS_DISPLAY], "none")) return;
+    if (n->name && g_ascii_strcasecmp(n->name, "br") == 0) {
+        ns_inner_text_emit_newline(c);
+        return;
+    }
+    gboolean block = ns_inner_text_is_block(s, n->name);
+    gboolean child_preserve = ns_inner_text_preserve_ws(s, n->name, preserve);
+    if (block) ns_inner_text_require_break(c);
+    for (const ns_node *ch = n->first_child; ch; ch = ch->next_sibling)
+        ns_inner_text_collect(js, ch, c, child_preserve);
+    if (block) ns_inner_text_require_break(c);
+}
+
+static JSValue
+ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->style_table)
+        return ns_element_get_textContent(ctx, this_val);
+    if (n->kind == NS_NODE_ELEMENT) {
+        const ns_style *s = g_hash_table_lookup(js->style_table, n);
+        if (s && ns_css_keyword_is(s->values[NS_CSS_DISPLAY], "none"))
+            return ns_element_get_textContent(ctx, this_val);
+    }
+    ns_inner_text_ctx c = { g_string_new(NULL), FALSE, TRUE };
+    ns_inner_text_collect(js, n, &c, FALSE);
+    while (c.out->len &&
+           (c.out->str[c.out->len - 1] == '\n' ||
+            c.out->str[c.out->len - 1] == ' '))
+        g_string_truncate(c.out, c.out->len - 1);
+    JSValue v = JS_NewString(ctx, c.out->str);
+    g_string_free(c.out, TRUE);
+    return v;
+}
+
 static JSValue
 ns_element_get_text(JSContext *ctx, JSValueConst this_val)
 {
@@ -21614,8 +21777,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("tagName",                ns_element_get_tagName,                ns_element_noop_set),
     JS_CGETSET_DEF("localName",              ns_element_get_localName,              ns_element_noop_set),
     JS_CGETSET_DEF("textContent",            ns_element_get_textContent,            ns_element_set_textContent),
-    JS_CGETSET_DEF("innerText",              ns_element_get_textContent,            ns_element_set_innerText),
-    JS_CGETSET_DEF("outerText",              ns_element_get_textContent,            ns_element_set_innerText),
+    JS_CGETSET_DEF("innerText",              ns_element_get_innerText,              ns_element_set_innerText),
+    JS_CGETSET_DEF("outerText",              ns_element_get_innerText,              ns_element_set_innerText),
     JS_CGETSET_DEF("text",                   ns_element_get_text,                   ns_element_set_text),
     JS_CGETSET_DEF("id",                     ns_element_get_id,                     ns_element_set_id),
     JS_CGETSET_DEF("className",              ns_element_get_className,              ns_element_set_className),
