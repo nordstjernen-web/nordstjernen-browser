@@ -1,4 +1,7 @@
-/* Nordstjernen — JNI bridge from the Android host app to the C engine. */
+/* Nordstjernen — JNI bridge from the Android host app to the C engine.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include <jni.h>
 #include <android/bitmap.h>

@@ -1,7 +1,10 @@
 /* Nordstjernen — JNI stub used when the native engine deps are not yet
  * cross-compiled. Builds an APK whose UI runs and reports the engine as
  * unavailable, so the host app and CI are exercised without the full
- * GNOME/cairo dependency stack. */
+ * GNOME/cairo dependency stack.
+ * Copyright 2026 Andreas Røsdal
+ * SPDX-License-Identifier: LicenseRef-NSL-1.0
+ */
 
 #include <jni.h>
 
