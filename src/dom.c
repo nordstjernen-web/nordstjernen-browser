@@ -1047,6 +1047,54 @@ ns_class_array_destroy(gpointer p)
     g_ptr_array_free((GPtrArray *)p, TRUE);
 }
 
+static int
+ns_node_document_order_cmp(const ns_node *a, const ns_node *b)
+{
+    if (a == b) return 0;
+    int da = 0, db = 0;
+    for (const ns_node *p = a; p; p = p->parent) da++;
+    for (const ns_node *p = b; p; p = p->parent) db++;
+    const ns_node *ca = a, *cb = b;
+    int x = da, y = db;
+    while (x > y) { ca = ca->parent; x--; }
+    while (y > x) { cb = cb->parent; y--; }
+    if (ca == cb) return da < db ? -1 : 1;
+    while (ca->parent != cb->parent) {
+        ca = ca->parent;
+        cb = cb->parent;
+    }
+    for (const ns_node *c = ca->parent ? ca->parent->first_child : NULL;
+         c; c = c->next_sibling) {
+        if (c == ca) return -1;
+        if (c == cb) return 1;
+    }
+    return 0;
+}
+
+static void
+ns_doc_index_ordered_insert(GPtrArray *arr, ns_node *node)
+{
+    for (guint k = 0; k < arr->len; k++)
+        if (g_ptr_array_index(arr, k) == node) {
+            g_ptr_array_remove_index(arr, k);
+            break;
+        }
+    if (arr->len == 0 ||
+        ns_node_document_order_cmp(node, g_ptr_array_index(arr, arr->len - 1)) >= 0) {
+        g_ptr_array_add(arr, node);
+        return;
+    }
+    guint lo = 0, hi = arr->len;
+    while (lo < hi) {
+        guint mid = (lo + hi) / 2;
+        if (ns_node_document_order_cmp(node, g_ptr_array_index(arr, mid)) < 0)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    g_ptr_array_insert(arr, (gint)lo, node);
+}
+
 static void
 ns_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
                              ns_node *node)
@@ -1064,9 +1112,7 @@ ns_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
     GPtrArray *arr = g_hash_table_lookup(map, key);
     if (arr) {
         if (key != stack) g_free(key);
-        for (guint k = 0; k < arr->len; k++)
-            if (g_ptr_array_index(arr, k) == node) return;
-        g_ptr_array_add(arr, node);
+        ns_doc_index_ordered_insert(arr, node);
     } else {
         arr = g_ptr_array_new();
         g_ptr_array_add(arr, node);
@@ -1201,9 +1247,7 @@ ns_doc_tag_index_add_single(GHashTable *map, const char *tag, ns_node *node)
         g_free(probe);
     }
     if (arr) {
-        for (guint k = 0; k < arr->len; k++)
-            if (g_ptr_array_index(arr, k) == node) return;
-        g_ptr_array_add(arr, node);
+        ns_doc_index_ordered_insert(arr, node);
         return;
     }
     arr = g_ptr_array_new();

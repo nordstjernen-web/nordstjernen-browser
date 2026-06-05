@@ -2797,6 +2797,11 @@ ns_element_get_type(JSContext *ctx, JSValueConst this_val)
                                G_N_ELEMENTS(kw_button_types), "submit", "submit" };
         return ns_reflect_enum(ctx, n, &d);
     }
+    if (strcmp(n->name, "select") == 0)
+        return JS_NewString(ctx, ns_element_get_attr(n, "multiple")
+                                     ? "select-multiple" : "select-one");
+    if (strcmp(n->name, "textarea") == 0)
+        return JS_NewString(ctx, "textarea");
     const char *v = ns_element_get_attr(n, "type");
     return JS_NewString(ctx, v ? v : "");
 }
@@ -12850,15 +12855,18 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
 {
     ns_qcache_invalidate(js);
     if (js && js->current_doc) {
-        if (added) {
-            ns_doc_id_index_subtree_added   (js->current_doc, added);
-            ns_doc_class_index_subtree_added(js->current_doc, added);
-            ns_doc_tag_index_subtree_added  (js->current_doc, added);
-        }
+        gboolean parent_connected = FALSE;
+        for (const ns_node *p = parent; p; p = p->parent)
+            if (p == js->current_doc) { parent_connected = TRUE; break; }
         if (removed) {
             ns_doc_id_index_subtree_removed   (js->current_doc, removed);
             ns_doc_class_index_subtree_removed(js->current_doc, removed);
             ns_doc_tag_index_subtree_removed  (js->current_doc, removed);
+        }
+        if (parent_connected && added) {
+            ns_doc_id_index_subtree_added   (js->current_doc, added);
+            ns_doc_class_index_subtree_added(js->current_doc, added);
+            ns_doc_tag_index_subtree_added  (js->current_doc, added);
         }
     }
     ns_mut_record_emit(js, "childList", parent, added, removed,
