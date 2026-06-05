@@ -7456,11 +7456,64 @@ ns_computed_initial_value(const char *name)
 }
 
 static char *
+ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name);
+
+static char *
+ns_computed_box_shorthand(JSContext *ctx, const ns_node *n,
+                          const char *t, const char *r,
+                          const char *b, const char *l)
+{
+    char *vt = ns_computed_lookup(ctx, n, t);
+    char *vr = ns_computed_lookup(ctx, n, r);
+    char *vb = ns_computed_lookup(ctx, n, b);
+    char *vl = ns_computed_lookup(ctx, n, l);
+    char *out = NULL;
+    if (vt && vr && vb && vl) {
+        if (strcmp(vt, vr) == 0 && strcmp(vr, vb) == 0 && strcmp(vb, vl) == 0)
+            out = g_strdup(vt);
+        else if (strcmp(vt, vb) == 0 && strcmp(vl, vr) == 0)
+            out = g_strdup_printf("%s %s", vt, vr);
+        else if (strcmp(vl, vr) == 0)
+            out = g_strdup_printf("%s %s %s", vt, vr, vb);
+        else
+            out = g_strdup_printf("%s %s %s %s", vt, vr, vb, vl);
+    }
+    g_free(vt); g_free(vr); g_free(vb); g_free(vl);
+    return out;
+}
+
+static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
     if (!n || !name) return NULL;
     if (strcmp(name, "css-float") == 0 || strcmp(name, "cssFloat") == 0)
         name = "float";
+
+    if (strcmp(name, "margin") == 0)
+        return ns_computed_box_shorthand(ctx, n, "margin-top", "margin-right",
+                                         "margin-bottom", "margin-left");
+    if (strcmp(name, "padding") == 0)
+        return ns_computed_box_shorthand(ctx, n, "padding-top", "padding-right",
+                                         "padding-bottom", "padding-left");
+    if (strcmp(name, "border-width") == 0)
+        return ns_computed_box_shorthand(ctx, n, "border-top-width",
+                                         "border-right-width",
+                                         "border-bottom-width",
+                                         "border-left-width");
+    if (strcmp(name, "border-color") == 0)
+        return ns_computed_box_shorthand(ctx, n, "border-top-color",
+                                         "border-right-color",
+                                         "border-bottom-color",
+                                         "border-left-color");
+    if (strcmp(name, "border-style") == 0)
+        return ns_computed_box_shorthand(ctx, n, "border-top-style",
+                                         "border-right-style",
+                                         "border-bottom-style",
+                                         "border-left-style");
+    if (strcmp(name, "inset") == 0)
+        return ns_computed_box_shorthand(ctx, n, "top", "right",
+                                         "bottom", "left");
+
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
     const char *style = ns_element_get_attr(n, "style");
