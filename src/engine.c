@@ -467,7 +467,7 @@ ns_engine_suffix_before_ext(const char *path, const char *suffix)
     if (!path) return NULL;
     const char *slash = strrchr(path, '/');
     const char *back  = strrchr(path, '\\');
-    if (back > slash) slash = back;
+    if (back && (!slash || back > slash)) slash = back;
     const char *dot = strrchr(path, '.');
     if (dot && (!slash || dot > slash))
         return g_strdup_printf("%.*s%s%s",
