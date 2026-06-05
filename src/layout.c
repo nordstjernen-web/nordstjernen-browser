@@ -8041,7 +8041,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         cursor_y += prev_margin_bottom;
     }
 
-    {
+    if (floats && floats->len > 0) {
         double fb = floats_max_bottom(floats);
         if (fb > cursor_y) cursor_y = fb;
     }
