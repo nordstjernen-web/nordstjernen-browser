@@ -49,6 +49,7 @@ jobs:
             libgtk-4-dev
             libepoxy-dev
             libcurl4-openssl-dev
+            libssl-dev
             libuchardet-dev
             librsvg2-dev
             libpsl-dev
