@@ -115,7 +115,8 @@ ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
     if (JS_IsException(ab)) { JS_FreeValue(ctx, dv); return NULL; }
     size_t ab_len = 0;
     uint8_t *base = JS_GetArrayBuffer(ctx, &ab_len, ab);
-    if (!base || byte_len < (size_t)iw * (size_t)ih * 4u) {
+    if (!base || byte_offset + byte_len > ab_len ||
+        byte_len < (size_t)iw * (size_t)ih * 4u) {
         JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv); return NULL;
     }
     const uint8_t *rgba = base + byte_offset;
@@ -201,6 +202,11 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
         JS_ToInt32(ctx, &rw, argv[3]);
         JS_ToInt32(ctx, &rh, argv[4]);
         crop = 1;
+    }
+    if (crop && (rw <= 0 || rh <= 0 || rw > 32767 || rh > 32767)) {
+        cairo_surface_destroy(surf);
+        ns_js_promise_reject(ctx, resolvers, "createImageBitmap: invalid crop size");
+        return promise;
     }
     if (crop) {
         cairo_surface_t *out = ns_image_bitmap_crop(surf, sw, sh, sx, sy, rw, rh);
@@ -2146,9 +2152,9 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     }
     if (cd)
     for (int y = 0; y < sh; y++) {
-        int srcy = sy + y;
+        int64_t srcy = (int64_t)sy + y;
         for (int x = 0; x < sw; x++) {
-            int srcx = sx + x;
+            int64_t srcx = (int64_t)sx + x;
             uint8_t *dst = out + ((size_t)y * (size_t)sw + (size_t)x) * 4u;
             if (srcx < 0 || srcy < 0 || srcx >= cw || srcy >= ch) continue;
             const uint8_t *p = cd + (size_t)srcy * (size_t)cs + (size_t)srcx * 4u;
