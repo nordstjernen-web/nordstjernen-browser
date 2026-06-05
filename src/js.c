@@ -14056,6 +14056,7 @@ ns_mouse_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
     JS_SetPropertyStr(ctx, ev, "movementY", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, ev, "button",   JS_NewInt32(ctx, btn));
     JS_SetPropertyStr(ctx, ev, "buttons",  JS_NewInt32(ctx, buttons));
+    JS_SetPropertyStr(ctx, ev, "which",    JS_NewInt32(ctx, btn + 1));
     JS_SetPropertyStr(ctx, ev, "detail",   JS_NewInt32(ctx, detail));
     JS_SetPropertyStr(ctx, ev, "relatedTarget", related);
     ns_event_apply_modifier_init(ctx, ev, have_init ? argv[1] : JS_UNDEFINED);
@@ -14810,6 +14811,7 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "movementY", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, event, "button",  JS_NewInt32(ctx, button));
     JS_SetPropertyStr(ctx, event, "buttons", JS_NewInt32(ctx, buttons));
+    JS_SetPropertyStr(ctx, event, "which",   JS_NewInt32(ctx, button + 1));
     JS_SetPropertyStr(ctx, event, "detail",
         JS_NewInt32(ctx, strcmp(type, "dblclick") == 0 ? 2
                        : strcmp(type, "click") == 0    ? 1 : 0));
@@ -14923,6 +14925,7 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     JS_SetPropertyStr(ctx, event, "movementY", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, event, "button",  JS_NewInt32(ctx, button));
     JS_SetPropertyStr(ctx, event, "buttons", JS_NewInt32(ctx, buttons));
+    JS_SetPropertyStr(ctx, event, "which",   JS_NewInt32(ctx, button + 1));
     JS_SetPropertyStr(ctx, event, "detail",  JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, event, "shiftKey", shift ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
