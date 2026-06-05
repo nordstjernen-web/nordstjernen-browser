@@ -15686,10 +15686,15 @@ ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
         JSValue entry = JS_NewObject(ctx);
         JS_SetPropertyStr(ctx, entry, "name",
                           JS_NewString(ctx, a->name ? a->name : ""));
+        JS_SetPropertyStr(ctx, entry, "nodeName",
+                          JS_NewString(ctx, a->name ? a->name : ""));
         JS_SetPropertyStr(ctx, entry, "localName",
                           JS_NewString(ctx, a->name ? a->name : ""));
         JS_SetPropertyStr(ctx, entry, "value",
                           JS_NewString(ctx, a->value ? a->value : ""));
+        JS_SetPropertyStr(ctx, entry, "nodeValue",
+                          JS_NewString(ctx, a->value ? a->value : ""));
+        JS_SetPropertyStr(ctx, entry, "nodeType", JS_NewInt32(ctx, 2));
         JS_SetPropertyStr(ctx, entry, "namespaceURI", JS_NULL);
         JS_SetPropertyStr(ctx, entry, "prefix",       JS_NULL);
         JS_SetPropertyStr(ctx, entry, "specified",    JS_TRUE);
@@ -15733,10 +15738,15 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
             out = JS_NewObject(ctx);
             JS_SetPropertyStr(ctx, out, "name",
                               JS_NewString(ctx, a->name));
+            JS_SetPropertyStr(ctx, out, "nodeName",
+                              JS_NewString(ctx, a->name));
             JS_SetPropertyStr(ctx, out, "localName",
                               JS_NewString(ctx, a->name));
             JS_SetPropertyStr(ctx, out, "value",
                               JS_NewString(ctx, a->value ? a->value : ""));
+            JS_SetPropertyStr(ctx, out, "nodeValue",
+                              JS_NewString(ctx, a->value ? a->value : ""));
+            JS_SetPropertyStr(ctx, out, "nodeType", JS_NewInt32(ctx, 2));
             JS_SetPropertyStr(ctx, out, "namespaceURI", JS_NULL);
             JS_SetPropertyStr(ctx, out, "prefix", JS_NULL);
             JS_SetPropertyStr(ctx, out, "specified", JS_TRUE);

@@ -70,6 +70,7 @@ ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
                               int *out_w, int *out_h,
                               gsize *out_stride, gsize *out_buf_len)
 {
+    ns_wuffs_format kind = ns_wuffs_detect(data, len);
     wuffs_base__image_decoder *dec = ns_wuffs_pick_decoder(data, len);
     if (!dec) return NULL;
 
@@ -137,7 +138,7 @@ ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
     g_free(workbuf);
     free(dec);
 
-    if (!wuffs_base__status__is_ok(&st)) {
+    if (!wuffs_base__status__is_ok(&st) && kind != NS_WUFFS_GIF) {
         g_free(pix);
         return NULL;
     }
