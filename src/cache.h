@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_CACHE_H
-#define ND_CACHE_H
+#ifndef NS_CACHE_H
+#define NS_CACHE_H
 
 #include <glib.h>
 
 G_BEGIN_DECLS
 
-typedef struct nd_cache_entry {
+typedef struct ns_cache_entry {
     char       *final_url;
     long        status;
     char       *content_type;
@@ -20,16 +20,16 @@ typedef struct nd_cache_entry {
     gint64      expires_at;
     gint64      fetched_at;
     GByteArray *body;
-} nd_cache_entry;
+} ns_cache_entry;
 
-void   nd_cache_init(void);
-void   nd_cache_shutdown(void);
+void   ns_cache_init(void);
+void   ns_cache_shutdown(void);
 
-nd_cache_entry *nd_cache_get(const char *url, const char *partition);
-gboolean        nd_cache_is_fresh(const nd_cache_entry *e);
-void   nd_cache_entry_free(nd_cache_entry *e);
+ns_cache_entry *ns_cache_get(const char *url, const char *partition);
+gboolean        ns_cache_is_fresh(const ns_cache_entry *e);
+void   ns_cache_entry_free(ns_cache_entry *e);
 
-void   nd_cache_put(const char *url,
+void   ns_cache_put(const char *url,
                     const char *partition,
                     const char *final_url,
                     long status,
@@ -41,12 +41,12 @@ void   nd_cache_put(const char *url,
                     const char *expires_header,
                     const void *body, gsize body_len);
 
-void   nd_cache_promote_304(const char *url,
+void   ns_cache_promote_304(const char *url,
                             const char *partition,
                             const char *cache_control,
                             const char *expires_header);
 
-void   nd_cache_clear(void);
+void   ns_cache_clear(void);
 
 G_END_DECLS
 

@@ -18,7 +18,7 @@ lxb_doc_destroy_void(void *p)
 }
 
 static void
-lxb_borrow_attributes(lxb_dom_element_t *el, nd_node *out)
+lxb_borrow_attributes(lxb_dom_element_t *el, ns_node *out)
 {
     lxb_dom_attr_t *attr = lxb_dom_element_first_attribute(el);
     while (attr) {
@@ -28,7 +28,7 @@ lxb_borrow_attributes(lxb_dom_element_t *el, nd_node *out)
         if (k && klen > 0) {
             (void)klen;
             (void)vlen;
-            nd_element_append_attr_borrow(out,
+            ns_element_append_attr_borrow(out,
                 (const char *)k,
                 v ? (const char *)v : "");
         }
@@ -36,34 +36,34 @@ lxb_borrow_attributes(lxb_dom_element_t *el, nd_node *out)
     }
 }
 
-static nd_node *
+static ns_node *
 lxb_node_convert(lxb_dom_node_t *src)
 {
     switch (src->type) {
     case LXB_DOM_NODE_TYPE_DOCUMENT:
     case LXB_DOM_NODE_TYPE_DOCUMENT_FRAGMENT:
-        return nd_node_new_document();
+        return ns_node_new_document();
     case LXB_DOM_NODE_TYPE_ELEMENT: {
         lxb_dom_element_t *el = lxb_dom_interface_element(src);
         size_t nlen = 0;
         const lxb_char_t *name = lxb_dom_element_qualified_name(el, &nlen);
         (void)nlen;
-        nd_node *out = nd_node_new_element(NULL);
-        nd_node_set_name_borrow(out, name ? (const char *)name : "unknown");
+        ns_node *out = ns_node_new_element(NULL);
+        ns_node_set_name_borrow(out, name ? (const char *)name : "unknown");
         lxb_borrow_attributes(el, out);
         return out;
     }
     case LXB_DOM_NODE_TYPE_TEXT:
     case LXB_DOM_NODE_TYPE_CDATA_SECTION: {
         lxb_dom_character_data_t *cd = lxb_dom_interface_character_data(src);
-        nd_node *out = nd_node_new_text(NULL);
-        nd_node_set_text_borrow(out, cd->data.data ? (const char *)cd->data.data : "");
+        ns_node *out = ns_node_new_text(NULL);
+        ns_node_set_text_borrow(out, cd->data.data ? (const char *)cd->data.data : "");
         return out;
     }
     case LXB_DOM_NODE_TYPE_COMMENT: {
         lxb_dom_character_data_t *cd = lxb_dom_interface_character_data(src);
-        nd_node *out = nd_node_new_comment(NULL);
-        nd_node_set_text_borrow(out, cd->data.data ? (const char *)cd->data.data : "");
+        ns_node *out = ns_node_new_comment(NULL);
+        ns_node_set_text_borrow(out, cd->data.data ? (const char *)cd->data.data : "");
         return out;
     }
     case LXB_DOM_NODE_TYPE_DOCUMENT_TYPE:
@@ -90,33 +90,33 @@ lxb_template_content_first_child(lxb_dom_node_t *src)
 
 typedef struct lxb_walk_frame {
     lxb_dom_node_t *src_child;
-    nd_node        *nd_parent;
+    ns_node        *ns_parent;
 } lxb_walk_frame;
 
 static void
-lxb_walk_push(GArray *stack, lxb_dom_node_t *child, nd_node *parent)
+lxb_walk_push(GArray *stack, lxb_dom_node_t *child, ns_node *parent)
 {
     if (!child || !parent) return;
-    lxb_walk_frame fr = { .src_child = child, .nd_parent = parent };
+    lxb_walk_frame fr = { .src_child = child, .ns_parent = parent };
     g_array_append_val(stack, fr);
 }
 
 static void
-lxb_walk_into(lxb_dom_node_t *src_root, nd_node *nd_root)
+lxb_walk_into(lxb_dom_node_t *src_root, ns_node *ns_root)
 {
     GArray *stack = g_array_new(FALSE, FALSE, sizeof(lxb_walk_frame));
-    lxb_walk_push(stack, src_root->first_child, nd_root);
-    lxb_walk_push(stack, lxb_template_content_first_child(src_root), nd_root);
+    lxb_walk_push(stack, src_root->first_child, ns_root);
+    lxb_walk_push(stack, lxb_template_content_first_child(src_root), ns_root);
     while (stack->len > 0) {
         lxb_walk_frame fr = g_array_index(stack, lxb_walk_frame, stack->len - 1);
         g_array_set_size(stack, stack->len - 1);
         lxb_dom_node_t *src = fr.src_child;
-        nd_node *parent = fr.nd_parent;
+        ns_node *parent = fr.ns_parent;
         while (src) {
             lxb_dom_node_t *next = src->next;
-            nd_node *converted = lxb_node_convert(src);
+            ns_node *converted = lxb_node_convert(src);
             if (converted) {
-                nd_node_append_child(parent, converted);
+                ns_node_append_child(parent, converted);
                 lxb_dom_node_t *kids = src->first_child;
                 lxb_dom_node_t *tpl_kids = lxb_template_content_first_child(src);
                 if (next) lxb_walk_push(stack, next, parent);
@@ -136,38 +136,38 @@ lxb_walk_into(lxb_dom_node_t *src_root, nd_node *nd_root)
     g_array_free(stack, TRUE);
 }
 
-static nd_node *
+static ns_node *
 lxb_to_nd_root(lxb_dom_node_t *root)
 {
     if (!root) return NULL;
-    nd_node *out = lxb_node_convert(root);
+    ns_node *out = lxb_node_convert(root);
     if (!out) return NULL;
     lxb_walk_into(root, out);
     return out;
 }
 
 static void
-nd_dsd_convert(nd_node *n, int depth)
+ns_dsd_convert(ns_node *n, int depth)
 {
     if (!n || depth >= 512) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind == ND_NODE_ELEMENT && c->name &&
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, "template") == 0) {
-            const char *mode = nd_element_get_attr(c, "shadowrootmode");
-            if (!mode) mode = nd_element_get_attr(c, "shadowroot");
+            const char *mode = ns_element_get_attr(c, "shadowrootmode");
+            if (!mode) mode = ns_element_get_attr(c, "shadowroot");
             if (mode && (g_ascii_strcasecmp(mode, "open") == 0 ||
                          g_ascii_strcasecmp(mode, "closed") == 0)) {
-                nd_node_set_name_borrow(c, "div");
-                nd_element_set_attr(c, ND_SHADOW_ATTR,
+                ns_node_set_name_borrow(c, "div");
+                ns_element_set_attr(c, NS_SHADOW_ATTR,
                     g_ascii_strcasecmp(mode, "closed") == 0 ? "closed" : "open");
             }
         }
-        nd_dsd_convert(c, depth + 1);
+        ns_dsd_convert(c, depth + 1);
     }
 }
 
-nd_node *
-nd_html_parse(const char *input, gssize len)
+ns_node *
+ns_html_parse(const char *input, gssize len)
 {
     if (!input) return NULL;
     size_t n = (len < 0) ? strlen(input) : (size_t)len;
@@ -180,17 +180,17 @@ nd_html_parse(const char *input, gssize len)
         lxb_html_document_destroy(doc);
         return NULL;
     }
-    nd_node *root = lxb_to_nd_root(lxb_dom_interface_node(doc));
+    ns_node *root = lxb_to_nd_root(lxb_dom_interface_node(doc));
     if (!root) {
         lxb_html_document_destroy(doc);
         return NULL;
     }
     if (doc->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_QUIRKS)
-        root->flags |= ND_NODE_QUIRKS;
+        root->flags |= NS_NODE_QUIRKS;
     else if (doc->dom_document.compat_mode == LXB_DOM_DOCUMENT_CMODE_LIMITED_QUIRKS)
-        root->flags |= ND_NODE_LIMITED_QUIRKS;
-    nd_dsd_convert(root, 0);
-    nd_node_attach_backing(root, doc, lxb_doc_destroy_void);
+        root->flags |= NS_NODE_LIMITED_QUIRKS;
+    ns_dsd_convert(root, 0);
+    ns_node_attach_backing(root, doc, lxb_doc_destroy_void);
     return root;
 }
 
@@ -205,8 +205,8 @@ lxb_tag_id_from_name(lxb_html_document_t *doc, const char *name)
     return data->tag_id;
 }
 
-nd_node *
-nd_html_parse_fragment_in(const char *context_tag,
+ns_node *
+ns_html_parse_fragment_in(const char *context_tag,
                           const char *input, gssize len)
 {
     if (!input) return NULL;
@@ -231,8 +231,8 @@ nd_html_parse_fragment_in(const char *context_tag,
         lxb_html_document_destroy(doc);
         return NULL;
     }
-    nd_node *out = nd_node_new_document();
+    ns_node *out = ns_node_new_document();
     lxb_walk_into(frag, out);
-    nd_node_attach_backing(out, doc, lxb_doc_destroy_void);
+    ns_node_attach_backing(out, doc, lxb_doc_destroy_void);
     return out;
 }

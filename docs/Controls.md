@@ -3,9 +3,9 @@
 Every way to drive Nordstjernen from the keyboard, the mouse, and a
 touchscreen. This is a living map of the actual bindings; the browser's
 runtime behaviour is the source of truth. The keyboard accelerators are
-registered in `src/main.c` (`nd_install_actions`), the in-page key
-handling in `src/main.c` (`nd_on_drawing_key_pressed`), and the pointer
-and touch gestures in `src/window.c` (`nd_window_build_content`).
+registered in `src/main.c` (`ns_install_actions`), the in-page key
+handling in `src/main.c` (`ns_on_drawing_key_pressed`), and the pointer
+and touch gestures in `src/window.c` (`ns_window_build_content`).
 
 **Modifier naming.** Shortcuts below are written with **Ctrl**, but the
 accelerators use GTK's `<Primary>` modifier, which maps to **⌘ Command**

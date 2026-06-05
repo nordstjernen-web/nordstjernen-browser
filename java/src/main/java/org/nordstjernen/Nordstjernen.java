@@ -37,7 +37,7 @@ public final class Nordstjernen {
         NativeLoader.load();
         int rc = nativeInit();
         if (rc != 0) {
-            throw new NordstjernenException("nd_browser_init failed (rc=" + rc + ")");
+            throw new NordstjernenException("ns_browser_init failed (rc=" + rc + ")");
         }
         initialized = true;
     }

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_HTML_H
-#define ND_HTML_H
+#ifndef NS_HTML_H
+#define NS_HTML_H
 
 #include <glib.h>
 
@@ -12,22 +12,22 @@
 
 G_BEGIN_DECLS
 
-nd_node *nd_html_parse(const char *input, gssize len);
+ns_node *ns_html_parse(const char *input, gssize len);
 
-nd_node *nd_html_parse_fragment_in(const char *context_tag,
+ns_node *ns_html_parse_fragment_in(const char *context_tag,
                                    const char *input, gssize len);
 
-gboolean nd_html_is_void(const char *tag);
+gboolean ns_html_is_void(const char *tag);
 
-void nd_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
+void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
 
-char *nd_html_escape_text(const char *s);
+char *ns_html_escape_text(const char *s);
 
-char *nd_html_decode_body(const char *body, gsize len);
+char *ns_html_decode_body(const char *body, gsize len);
 
-const char *nd_html_engine_name(void);
+const char *ns_html_engine_name(void);
 
-const char *nd_html_engine_version(void);
+const char *ns_html_engine_version(void);
 
 G_END_DECLS
 

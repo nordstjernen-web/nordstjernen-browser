@@ -24,7 +24,7 @@ polyfills_h = custom_target(
   input: ['../scripts/embed-text.py', '../data/js/polyfills.js'],
   output: 'polyfills.h',
   command: [python, '@INPUT0@', '@INPUT1@', '@OUTPUT@',
-            'nd_js_polyfills_src'],
+            'ns_js_polyfills_src'],
 )
 
 nordstjernen_engine_sources = files(

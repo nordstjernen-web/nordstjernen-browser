@@ -25,7 +25,7 @@
 #include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#ifdef ND_HAVE_SECCOMP
+#ifdef NS_HAVE_SECCOMP
 #include <seccomp.h>
 #endif
 #endif
@@ -41,7 +41,7 @@
 #endif
 
 gboolean
-nd_security_csprng_fill(void *buf, gsize len)
+ns_security_csprng_fill(void *buf, gsize len)
 {
     if (!buf || len == 0) return TRUE;
 #if defined(G_OS_WIN32)
@@ -90,7 +90,7 @@ nd_security_csprng_fill(void *buf, gsize len)
 }
 
 static gboolean
-nd_sri_digest_equal_b64(GChecksumType type,
+ns_sri_digest_equal_b64(GChecksumType type,
                         const char *want_b64, gsize want_len,
                         const void *body, gsize body_len)
 {
@@ -108,7 +108,7 @@ nd_sri_digest_equal_b64(GChecksumType type,
 }
 
 gboolean
-nd_security_sri_check(const char *integrity_attr,
+ns_security_sri_check(const char *integrity_attr,
                       const void *body, gsize body_len)
 {
     if (!integrity_attr || !*integrity_attr) return TRUE;
@@ -137,7 +137,7 @@ nd_security_sri_check(const char *integrity_attr,
         const char *qmark = strchr(b64, '?');
         gsize b64_len = qmark ? (gsize)(qmark - b64) : strlen(b64);
         if (b64_len == 0) continue;
-        if (nd_sri_digest_equal_b64(ctype, b64, b64_len, body, body_len))
+        if (ns_sri_digest_equal_b64(ctype, b64, b64_len, body, body_len))
             return TRUE;
     }
     return FALSE;
@@ -145,7 +145,7 @@ nd_security_sri_check(const char *integrity_attr,
 
 #ifdef G_OS_WIN32
 static gboolean
-nd_win_is_elevated(void)
+ns_win_is_elevated(void)
 {
     SID_IDENTIFIER_AUTHORITY nt_auth = SECURITY_NT_AUTHORITY;
     PSID admins_sid = NULL;
@@ -162,31 +162,31 @@ nd_win_is_elevated(void)
 #endif
 
 gboolean
-nd_security_refuse_root(void)
+ns_security_refuse_root(void)
 {
 #if defined(__linux__) || defined(__APPLE__)
     if (geteuid() != 0 && getuid() != 0) return TRUE;
-    if (g_getenv("ND_ALLOW_ROOT")) {
-        g_warning("nordstjernen: running as root because ND_ALLOW_ROOT is set");
+    if (g_getenv("NS_ALLOW_ROOT")) {
+        g_warning("nordstjernen: running as root because NS_ALLOW_ROOT is set");
         return TRUE;
     }
     fprintf(stderr,
         "nordstjernen: refusing to run as root.\n"
         "  Web browsers process untrusted content; running as root exposes\n"
         "  the whole system if the renderer is compromised.\n"
-        "  Re-run as an unprivileged user, or set ND_ALLOW_ROOT=1 to override.\n");
+        "  Re-run as an unprivileged user, or set NS_ALLOW_ROOT=1 to override.\n");
     return FALSE;
 #elif defined(G_OS_WIN32)
-    if (!nd_win_is_elevated()) return TRUE;
-    if (g_getenv("ND_ALLOW_ROOT")) {
-        g_warning("nordstjernen: running elevated because ND_ALLOW_ROOT is set");
+    if (!ns_win_is_elevated()) return TRUE;
+    if (g_getenv("NS_ALLOW_ROOT")) {
+        g_warning("nordstjernen: running elevated because NS_ALLOW_ROOT is set");
         return TRUE;
     }
     const char *msg =
         "Nordstjernen refuses to run as Administrator.\n\n"
         "Web browsers process untrusted content; running with elevated\n"
         "privileges exposes the whole system if the renderer is compromised.\n\n"
-        "Re-launch as a normal user, or set the ND_ALLOW_ROOT environment\n"
+        "Re-launch as a normal user, or set the NS_ALLOW_ROOT environment\n"
         "variable to 1 to override.";
     fprintf(stderr, "nordstjernen: %s\n", msg);
     MessageBoxA(NULL, msg, "Nordstjernen", MB_OK | MB_ICONERROR);
@@ -196,15 +196,15 @@ nd_security_refuse_root(void)
 #endif
 }
 
-static GPtrArray *nd_extra_writable_dirs = NULL;
+static GPtrArray *ns_extra_writable_dirs = NULL;
 
 void
-nd_security_add_writable_dir(const char *dir)
+ns_security_add_writable_dir(const char *dir)
 {
     if (!dir || !*dir) return;
-    if (!nd_extra_writable_dirs)
-        nd_extra_writable_dirs = g_ptr_array_new_with_free_func(g_free);
-    g_ptr_array_add(nd_extra_writable_dirs, g_strdup(dir));
+    if (!ns_extra_writable_dirs)
+        ns_extra_writable_dirs = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(ns_extra_writable_dirs, g_strdup(dir));
 }
 
 #ifdef __linux__
@@ -251,9 +251,9 @@ add_path_rw(int rfd, guint64 allowed, const char *path)
 }
 
 void
-nd_security_sandbox_init(const char *self_exe)
+ns_security_sandbox_init(const char *self_exe)
 {
-    if (g_getenv("ND_NO_SANDBOX")) return;
+    if (g_getenv("NS_NO_SANDBOX")) return;
 
     guint64 fs_read =
         LANDLOCK_ACCESS_FS_READ_FILE |
@@ -309,29 +309,29 @@ nd_security_sandbox_init(const char *self_exe)
     add_path_rw(rfd, fs_read, g_get_user_cache_dir());
     add_path_rw(rfd, fs_rw,   g_get_user_runtime_dir());
 
-    char *nd_cfg_root =
+    char *ns_cfg_root =
         g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
-    g_mkdir_with_parents(nd_cfg_root, 0700);
-    add_path_rw(rfd, fs_rw, nd_cfg_root);
-    g_free(nd_cfg_root);
+    g_mkdir_with_parents(ns_cfg_root, 0700);
+    add_path_rw(rfd, fs_rw, ns_cfg_root);
+    g_free(ns_cfg_root);
 
-    char *nd_data_root =
+    char *ns_data_root =
         g_build_filename(g_get_user_data_dir(), "nordstjernen", NULL);
-    g_mkdir_with_parents(nd_data_root, 0700);
-    add_path_rw(rfd, fs_rw, nd_data_root);
-    g_free(nd_data_root);
+    g_mkdir_with_parents(ns_data_root, 0700);
+    add_path_rw(rfd, fs_rw, ns_data_root);
+    g_free(ns_data_root);
 
-    char *nd_cache_top =
+    char *ns_cache_top =
         g_build_filename(g_get_user_cache_dir(), "nordstjernen", NULL);
-    g_mkdir_with_parents(nd_cache_top, 0700);
-    add_path_rw(rfd, fs_rw, nd_cache_top);
-    g_free(nd_cache_top);
+    g_mkdir_with_parents(ns_cache_top, 0700);
+    add_path_rw(rfd, fs_rw, ns_cache_top);
+    g_free(ns_cache_top);
 
-    char *nd_cache_root =
+    char *ns_cache_root =
         g_build_filename(g_get_user_cache_dir(), "nordstjernen", "cache", NULL);
-    g_mkdir_with_parents(nd_cache_root, 0700);
-    add_path_rw(rfd, fs_rw, nd_cache_root);
-    g_free(nd_cache_root);
+    g_mkdir_with_parents(ns_cache_root, 0700);
+    add_path_rw(rfd, fs_rw, ns_cache_root);
+    g_free(ns_cache_root);
 
     {
         const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
@@ -396,9 +396,9 @@ nd_security_sandbox_init(const char *self_exe)
         }
     }
 
-    if (nd_extra_writable_dirs) {
-        for (guint i = 0; i < nd_extra_writable_dirs->len; i++) {
-            const char *p = g_ptr_array_index(nd_extra_writable_dirs, i);
+    if (ns_extra_writable_dirs) {
+        for (guint i = 0; i < ns_extra_writable_dirs->len; i++) {
+            const char *p = g_ptr_array_index(ns_extra_writable_dirs, i);
             add_path_rw(rfd, fs_rw, p);
         }
     }
@@ -409,8 +409,8 @@ nd_security_sandbox_init(const char *self_exe)
     close(rfd);
 }
 
-#ifdef ND_HAVE_SECCOMP
-static const char *const nd_seccomp_allowed_names[] = {
+#ifdef NS_HAVE_SECCOMP
+static const char *const ns_seccomp_allowed_names[] = {
     "accept",
     "accept4",
     "access",
@@ -681,12 +681,12 @@ static const char *const nd_seccomp_allowed_names[] = {
 #endif
 
 void
-nd_security_seccomp_init(void)
+ns_security_seccomp_init(void)
 {
-    if (g_getenv("ND_NO_SANDBOX")) return;
-    if (g_getenv("ND_NO_SECCOMP")) return;
+    if (g_getenv("NS_NO_SANDBOX")) return;
+    if (g_getenv("NS_NO_SECCOMP")) return;
 
-#ifdef ND_HAVE_SECCOMP
+#ifdef NS_HAVE_SECCOMP
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) {
         g_info("seccomp: PR_SET_NO_NEW_PRIVS failed: %s", g_strerror(errno));
         return;
@@ -699,8 +699,8 @@ nd_security_seccomp_init(void)
     }
     (void)seccomp_attr_set(ctx, SCMP_FLTATR_CTL_TSYNC, 1);
 
-    for (size_t i = 0; i < G_N_ELEMENTS(nd_seccomp_allowed_names); i++) {
-        int nr = seccomp_syscall_resolve_name(nd_seccomp_allowed_names[i]);
+    for (size_t i = 0; i < G_N_ELEMENTS(ns_seccomp_allowed_names); i++) {
+        int nr = seccomp_syscall_resolve_name(ns_seccomp_allowed_names[i]);
         if (nr == __NR_SCMP_ERROR) continue;
         (void)seccomp_rule_add(ctx, SCMP_ACT_ALLOW, nr, 0);
     }
@@ -717,13 +717,13 @@ nd_security_seccomp_init(void)
 #else
 
 void
-nd_security_sandbox_init(const char *self_exe)
+ns_security_sandbox_init(const char *self_exe)
 {
     (void)self_exe;
 }
 
 void
-nd_security_seccomp_init(void)
+ns_security_seccomp_init(void)
 {
 }
 
@@ -731,10 +731,10 @@ nd_security_seccomp_init(void)
 
 #ifdef G_OS_WIN32
 
-typedef BOOL (WINAPI *nd_smp_fn)(int policy, PVOID buffer, SIZE_T length);
+typedef BOOL (WINAPI *ns_smp_fn)(int policy, PVOID buffer, SIZE_T length);
 
 static void
-nd_win32_apply_mitigation(nd_smp_fn fn, int policy, DWORD flags)
+ns_win32_apply_mitigation(ns_smp_fn fn, int policy, DWORD flags)
 {
     if (!fn) return;
     DWORD m = flags;
@@ -742,27 +742,27 @@ nd_win32_apply_mitigation(nd_smp_fn fn, int policy, DWORD flags)
 }
 
 void
-nd_security_win32_mitigations_init(void)
+ns_security_win32_mitigations_init(void)
 {
-    if (g_getenv("ND_NO_WIN32_MITIGATIONS")) return;
+    if (g_getenv("NS_NO_WIN32_MITIGATIONS")) return;
 
     HMODULE k = GetModuleHandleW(L"kernel32.dll");
     if (!k) return;
-    nd_smp_fn fn = (nd_smp_fn)(void *)GetProcAddress(k, "SetProcessMitigationPolicy");
+    ns_smp_fn fn = (ns_smp_fn)(void *)GetProcAddress(k, "SetProcessMitigationPolicy");
     if (!fn) return;
 
-    nd_win32_apply_mitigation(fn, 0,  0x0Fu);
-    nd_win32_apply_mitigation(fn, 3,  0x03u);
-    nd_win32_apply_mitigation(fn, 6,  0x01u);
-    nd_win32_apply_mitigation(fn, 7,  0x01u);
-    nd_win32_apply_mitigation(fn, 10, 0x07u);
-    nd_win32_apply_mitigation(fn, 13, 0x01u);
+    ns_win32_apply_mitigation(fn, 0,  0x0Fu);
+    ns_win32_apply_mitigation(fn, 3,  0x03u);
+    ns_win32_apply_mitigation(fn, 6,  0x01u);
+    ns_win32_apply_mitigation(fn, 7,  0x01u);
+    ns_win32_apply_mitigation(fn, 10, 0x07u);
+    ns_win32_apply_mitigation(fn, 13, 0x01u);
 }
 
 #else
 
 void
-nd_security_win32_mitigations_init(void)
+ns_security_win32_mitigations_init(void)
 {
 }
 

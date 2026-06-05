@@ -61,7 +61,7 @@ work without writable executable pages.
 ### Privilege drop (`src/security.c`)
 
 - Refuses to start as root (Linux/macOS) or Administrator (Windows).
-  Override with `ND_ALLOW_ROOT=1` if you really mean it.
+  Override with `NS_ALLOW_ROOT=1` if you really mean it.
 - Sets `PR_SET_NO_NEW_PRIVS` before installing the seccomp filter, so
   setuid binaries cannot be used to gain privileges after a compromise.
 
@@ -103,15 +103,15 @@ before any HTML is parsed.
   choose the binary, inject extra arguments, or pivot to an arbitrary
   interpreter. The broker exits as soon as the browser does (socket EOF).
 
-Both layers can be disabled for debugging with `ND_NO_SANDBOX=1` /
-`ND_NO_SECCOMP=1`. Don't use those in normal operation.
+Both layers can be disabled for debugging with `NS_NO_SANDBOX=1` /
+`NS_NO_SECCOMP=1`. Don't use those in normal operation.
 
 ### Windows process mitigations
 
 Windows has no direct Landlock or seccomp-bpf equivalent that a
 user-space GTK process can apply to itself. Instead the browser
 hardens itself at startup via `SetProcessMitigationPolicy`, called
-from `nd_security_win32_mitigations_init` in `src/security.c`
+from `ns_security_win32_mitigations_init` in `src/security.c`
 **before** any DLL we don't statically link is touched. Six
 policies, all best-effort (an unsupported policy on an older
 Windows just returns `FALSE` and is skipped):
@@ -156,13 +156,13 @@ integration we don't have yet. The closest equivalents — Low
 Integrity Level drop and AppContainer — are tracked as future
 work.
 
-Plus the same `nd_security_refuse_root` as Linux: refuses to
+Plus the same `ns_security_refuse_root` as Linux: refuses to
 launch as Administrator (`CheckTokenMembership` against the
 Built-in Administrators SID), with a `MessageBox` and a `stderr`
 diagnostic.
 
 The whole mitigation suite can be disabled for debugging with
-`ND_NO_WIN32_MITIGATIONS=1`. Don't use that in normal operation.
+`NS_NO_WIN32_MITIGATIONS=1`. Don't use that in normal operation.
 
 ### Network
 
@@ -276,9 +276,9 @@ Network cookies live in libcurl's per-site cookie jar on disk. They
 are parsed, scoped, and re-sent by libcurl, honouring `HttpOnly`,
 `Secure`, `SameSite`, `Path`, `Domain`, and expiry. At navigation the
 non-`HttpOnly` cookies for the document's origin are read back out of
-the jar (`nd_net_cookies_for_js`) and seeded into `document.cookie`,
+the jar (`ns_net_cookies_for_js`) and seeded into `document.cookie`,
 and the `document.cookie` setter writes back into that same per-site
-jar (`nd_net_cookie_store_from_js`) — so a cookie set from JS is sent
+jar (`ns_net_cookie_store_from_js`) — so a cookie set from JS is sent
 on the next request, and a cookie set over the network is visible to a
 later `document.cookie` read. `HttpOnly` cookies are written by libcurl
 with a `#HttpOnly_` line prefix that the JS read path skips, so they

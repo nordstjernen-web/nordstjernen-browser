@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_VERSION_H
-#define ND_VERSION_H
+#ifndef NS_VERSION_H
+#define NS_VERSION_H
 
-#define ND_VERSION "1.0.0"
+#define NS_VERSION "1.0.0"
 
-#ifndef ND_BUILD_DATE
-#define ND_BUILD_DATE ""
+#ifndef NS_BUILD_DATE
+#define NS_BUILD_DATE ""
 #endif
 
 #endif

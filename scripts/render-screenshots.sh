@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${ND_BIN:-$ROOT/builddir/src/nordstjernen.exe}
+BIN=${NS_BIN:-$ROOT/builddir/src/nordstjernen.exe}
 OUT=${OUT:-$ROOT/data/screenshots}
 LIST=${LIST:-$OUT/sites.txt}
 

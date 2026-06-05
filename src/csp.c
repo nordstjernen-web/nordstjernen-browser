@@ -10,52 +10,52 @@
 #include "net.h"
 
 typedef struct {
-    GPtrArray *sources[ND_CSP_KIND_COUNT];
-    gboolean   set[ND_CSP_KIND_COUNT];
-} nd_csp_policy;
+    GPtrArray *sources[NS_CSP_KIND_COUNT];
+    gboolean   set[NS_CSP_KIND_COUNT];
+} ns_csp_policy;
 
-struct nd_csp {
+struct ns_csp {
     GPtrArray *policies;
 };
 
 static gboolean
-policy_frame_ancestors_allows(const nd_csp_policy *p,
+policy_frame_ancestors_allows(const ns_csp_policy *p,
                               const char *parent_url,
                               const char *document_url);
 
-static nd_csp_kind
+static ns_csp_kind
 directive_kind(const char *name)
 {
-    static const struct { const char *name; nd_csp_kind kind; } map[] = {
-        { "default-src",     ND_CSP_DEFAULT },
-        { "script-src",      ND_CSP_SCRIPT },
-        { "style-src",       ND_CSP_STYLE },
-        { "img-src",         ND_CSP_IMG },
-        { "media-src",       ND_CSP_MEDIA },
-        { "connect-src",     ND_CSP_CONNECT },
-        { "font-src",        ND_CSP_FONT },
-        { "frame-src",       ND_CSP_FRAME },
-        { "child-src",       ND_CSP_CHILD },
-        { "worker-src",      ND_CSP_WORKER },
-        { "frame-ancestors", ND_CSP_FRAME_ANCESTORS },
+    static const struct { const char *name; ns_csp_kind kind; } map[] = {
+        { "default-src",     NS_CSP_DEFAULT },
+        { "script-src",      NS_CSP_SCRIPT },
+        { "style-src",       NS_CSP_STYLE },
+        { "img-src",         NS_CSP_IMG },
+        { "media-src",       NS_CSP_MEDIA },
+        { "connect-src",     NS_CSP_CONNECT },
+        { "font-src",        NS_CSP_FONT },
+        { "frame-src",       NS_CSP_FRAME },
+        { "child-src",       NS_CSP_CHILD },
+        { "worker-src",      NS_CSP_WORKER },
+        { "frame-ancestors", NS_CSP_FRAME_ANCESTORS },
     };
     for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
         if (g_ascii_strcasecmp(name, map[i].name) == 0) return map[i].kind;
-    return ND_CSP_KIND_COUNT;
+    return NS_CSP_KIND_COUNT;
 }
 
-static nd_csp_policy *
+static ns_csp_policy *
 policy_parse(const char *policy_text)
 {
-    nd_csp_policy *p = g_new0(nd_csp_policy, 1);
+    ns_csp_policy *p = g_new0(ns_csp_policy, 1);
     char **clauses = g_strsplit(policy_text, ";", -1);
     for (int i = 0; clauses[i]; i++) {
         char *clause = g_strstrip(clauses[i]);
         if (!*clause) continue;
         char **toks = g_strsplit_set(clause, " \t", -1);
         if (!toks || !toks[0]) { g_strfreev(toks); continue; }
-        nd_csp_kind k = directive_kind(toks[0]);
-        if (k == ND_CSP_KIND_COUNT) { g_strfreev(toks); continue; }
+        ns_csp_kind k = directive_kind(toks[0]);
+        if (k == NS_CSP_KIND_COUNT) { g_strfreev(toks); continue; }
         p->set[k] = TRUE;
         if (!p->sources[k])
             p->sources[k] = g_ptr_array_new_with_free_func(g_free);
@@ -71,19 +71,19 @@ policy_parse(const char *policy_text)
 }
 
 static void
-policy_free(nd_csp_policy *p)
+policy_free(ns_csp_policy *p)
 {
     if (!p) return;
-    for (int i = 0; i < ND_CSP_KIND_COUNT; i++)
+    for (int i = 0; i < NS_CSP_KIND_COUNT; i++)
         if (p->sources[i]) g_ptr_array_free(p->sources[i], TRUE);
     g_free(p);
 }
 
-nd_csp *
-nd_csp_parse(const char *header_value)
+ns_csp *
+ns_csp_parse(const char *header_value)
 {
     if (!header_value || !*header_value) return NULL;
-    nd_csp *csp = g_new0(nd_csp, 1);
+    ns_csp *csp = g_new0(ns_csp, 1);
     csp->policies = g_ptr_array_new_with_free_func((GDestroyNotify)policy_free);
     char **policies = g_strsplit(header_value, ",", -1);
     for (int i = 0; policies[i]; i++) {
@@ -101,7 +101,7 @@ nd_csp_parse(const char *header_value)
 }
 
 void
-nd_csp_free(nd_csp *csp)
+ns_csp_free(ns_csp *csp)
 {
     if (!csp) return;
     g_ptr_array_free(csp->policies, TRUE);
@@ -179,7 +179,7 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
     if (!src || !*src) return FALSE;
     if (strcmp(src, "'none'") == 0) return FALSE;
     if (strcmp(src, "*") == 0)      return is_network_scheme_url(resource_url);
-    if (strcmp(src, "'self'") == 0) return nd_url_same_origin(resource_url, doc_url);
+    if (strcmp(src, "'self'") == 0) return ns_url_same_origin(resource_url, doc_url);
     if (strcmp(src, "'unsafe-inline'") == 0 ||
         strcmp(src, "'unsafe-eval'") == 0   ||
         strcmp(src, "'strict-dynamic'") == 0)
@@ -202,7 +202,7 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
         src_scheme = g_ascii_strdown(src, scheme_len);
     }
 
-    g_autoptr(nd_url_parts) res = nd_url_parts_new(resource_url);
+    g_autoptr(ns_url_parts) res = ns_url_parts_new(resource_url);
     if (!res || !res->hostname) return FALSE;
     const char *res_scheme = res->protocol ? res->protocol : "";
 
@@ -241,23 +241,23 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
 }
 
 static gboolean
-policy_allows_with_nonce(const nd_csp_policy *p, nd_csp_kind kind,
+policy_allows_with_nonce(const ns_csp_policy *p, ns_csp_kind kind,
                          const char *resource_url, const char *document_url,
                          const char *nonce)
 {
-    if (kind == ND_CSP_FRAME_ANCESTORS)
+    if (kind == NS_CSP_FRAME_ANCESTORS)
         return policy_frame_ancestors_allows(p, resource_url, document_url);
 
-    nd_csp_kind eff = kind;
+    ns_csp_kind eff = kind;
     if (!p->set[eff]) {
-        if (kind == ND_CSP_WORKER && p->set[ND_CSP_CHILD])
-            eff = ND_CSP_CHILD;
-        else if (kind == ND_CSP_WORKER && p->set[ND_CSP_SCRIPT])
-            eff = ND_CSP_SCRIPT;
-        else if (kind == ND_CSP_FRAME && p->set[ND_CSP_CHILD])
-            eff = ND_CSP_CHILD;
-        else if (p->set[ND_CSP_DEFAULT])
-            eff = ND_CSP_DEFAULT;
+        if (kind == NS_CSP_WORKER && p->set[NS_CSP_CHILD])
+            eff = NS_CSP_CHILD;
+        else if (kind == NS_CSP_WORKER && p->set[NS_CSP_SCRIPT])
+            eff = NS_CSP_SCRIPT;
+        else if (kind == NS_CSP_FRAME && p->set[NS_CSP_CHILD])
+            eff = NS_CSP_CHILD;
+        else if (p->set[NS_CSP_DEFAULT])
+            eff = NS_CSP_DEFAULT;
         else
             return TRUE;
     }
@@ -279,40 +279,40 @@ policy_allows_with_nonce(const nd_csp_policy *p, nd_csp_kind kind,
         }
         if (source_matches(s, resource_url, document_url)) return TRUE;
     }
-    if (strict_dynamic && (kind == ND_CSP_SCRIPT ||
-                           (kind == ND_CSP_DEFAULT && eff == ND_CSP_DEFAULT)))
+    if (strict_dynamic && (kind == NS_CSP_SCRIPT ||
+                           (kind == NS_CSP_DEFAULT && eff == NS_CSP_DEFAULT)))
         return TRUE;
     return FALSE;
 }
 
 gboolean
-nd_csp_allows(const nd_csp *csp, nd_csp_kind kind,
+ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,
               const char *resource_url, const char *document_url)
 {
-    return nd_csp_allows_with_nonce(csp, kind, resource_url, document_url, NULL);
+    return ns_csp_allows_with_nonce(csp, kind, resource_url, document_url, NULL);
 }
 
 gboolean
-nd_csp_allows_with_nonce(const nd_csp *csp, nd_csp_kind kind,
+ns_csp_allows_with_nonce(const ns_csp *csp, ns_csp_kind kind,
                          const char *resource_url, const char *document_url,
                          const char *nonce)
 {
     if (!csp || !resource_url) return TRUE;
-    if (kind >= ND_CSP_KIND_COUNT) return TRUE;
+    if (kind >= NS_CSP_KIND_COUNT) return TRUE;
     for (guint i = 0; i < csp->policies->len; i++) {
-        const nd_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
         if (!policy_allows_with_nonce(p, kind, resource_url, document_url, nonce))
             return FALSE;
     }
     return TRUE;
 }
 
-static nd_csp_kind
-inline_script_kind(const nd_csp_policy *p)
+static ns_csp_kind
+inline_script_kind(const ns_csp_policy *p)
 {
-    if (p->set[ND_CSP_SCRIPT])  return ND_CSP_SCRIPT;
-    if (p->set[ND_CSP_DEFAULT]) return ND_CSP_DEFAULT;
-    return ND_CSP_KIND_COUNT;
+    if (p->set[NS_CSP_SCRIPT])  return NS_CSP_SCRIPT;
+    if (p->set[NS_CSP_DEFAULT]) return NS_CSP_DEFAULT;
+    return NS_CSP_KIND_COUNT;
 }
 
 static gboolean
@@ -356,12 +356,12 @@ hash_token_matches(const char *src, const char *body, gsize body_len)
 }
 
 static gboolean
-policy_inline_script_allowed(const nd_csp_policy *p,
+policy_inline_script_allowed(const ns_csp_policy *p,
                              const char *body, gsize body_len,
                              const char *nonce)
 {
-    nd_csp_kind k = inline_script_kind(p);
-    if (k == ND_CSP_KIND_COUNT) return TRUE;
+    ns_csp_kind k = inline_script_kind(p);
+    if (k == NS_CSP_KIND_COUNT) return TRUE;
     const GPtrArray *list = p->sources[k];
     if (!list) return FALSE;
 
@@ -382,13 +382,13 @@ policy_inline_script_allowed(const nd_csp_policy *p,
 }
 
 gboolean
-nd_csp_inline_script_allowed(const nd_csp *csp,
+ns_csp_inline_script_allowed(const ns_csp *csp,
                              const char *body, gsize body_len,
                              const char *nonce)
 {
     if (!csp) return TRUE;
     for (guint i = 0; i < csp->policies->len; i++) {
-        const nd_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
         if (!policy_inline_script_allowed(p, body, body_len, nonce))
             return FALSE;
     }
@@ -396,10 +396,10 @@ nd_csp_inline_script_allowed(const nd_csp *csp,
 }
 
 static gboolean
-policy_inline_event_handler_allowed(const nd_csp_policy *p)
+policy_inline_event_handler_allowed(const ns_csp_policy *p)
 {
-    nd_csp_kind k = inline_script_kind(p);
-    if (k == ND_CSP_KIND_COUNT) return TRUE;
+    ns_csp_kind k = inline_script_kind(p);
+    if (k == NS_CSP_KIND_COUNT) return TRUE;
     const GPtrArray *list = p->sources[k];
     if (!list) return FALSE;
     if (list_has_token(list, "'strict-dynamic'")) return FALSE;
@@ -407,11 +407,11 @@ policy_inline_event_handler_allowed(const nd_csp_policy *p)
 }
 
 gboolean
-nd_csp_inline_event_handler_allowed(const nd_csp *csp)
+ns_csp_inline_event_handler_allowed(const ns_csp *csp)
 {
     if (!csp) return TRUE;
     for (guint i = 0; i < csp->policies->len; i++) {
-        const nd_csp_policy *p = g_ptr_array_index(csp->policies, i);
+        const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
         if (!policy_inline_event_handler_allowed(p))
             return FALSE;
     }
@@ -419,18 +419,18 @@ nd_csp_inline_event_handler_allowed(const nd_csp *csp)
 }
 
 gboolean
-nd_csp_javascript_url_allowed(const nd_csp *csp)
+ns_csp_javascript_url_allowed(const ns_csp *csp)
 {
-    return nd_csp_inline_event_handler_allowed(csp);
+    return ns_csp_inline_event_handler_allowed(csp);
 }
 
 static gboolean
-policy_frame_ancestors_allows(const nd_csp_policy *p,
+policy_frame_ancestors_allows(const ns_csp_policy *p,
                               const char *parent_url,
                               const char *document_url)
 {
-    if (!p || !p->set[ND_CSP_FRAME_ANCESTORS]) return TRUE;
-    GPtrArray *list = p->sources[ND_CSP_FRAME_ANCESTORS];
+    if (!p || !p->set[NS_CSP_FRAME_ANCESTORS]) return TRUE;
+    GPtrArray *list = p->sources[NS_CSP_FRAME_ANCESTORS];
     if (!list || list->len == 0) return FALSE;
     if (!parent_url) return TRUE;
     for (guint i = 0; i < list->len; i++) {

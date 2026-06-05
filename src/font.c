@@ -13,43 +13,43 @@
 #include "net.h"
 #include "paint.h"
 
-#ifdef ND_HAVE_FONTCONFIG
+#ifdef NS_HAVE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
 #endif
-#ifdef ND_HAVE_PANGOFT2
+#ifdef NS_HAVE_PANGOFT2
 #include <pango/pangofc-fontmap.h>
-#define ND_HAVE_PANGOFC 1
+#define NS_HAVE_PANGOFC 1
 #endif
-#ifdef ND_HAVE_FREETYPE
+#ifdef NS_HAVE_FREETYPE
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_TRUETYPE_TABLES_H
 #include FT_TRUETYPE_TAGS_H
 #endif
 
-typedef struct nd_font_entry {
+typedef struct ns_font_entry {
     char *family;
     char *url;
     gboolean loaded;
     gboolean inflight;
     GCancellable *cancel;
-} nd_font_entry;
+} ns_font_entry;
 
-typedef struct nd_font_pending {
+typedef struct ns_font_pending {
     GPtrArray *families;
     GCancellable *cancel;
-} nd_font_pending;
+} ns_font_pending;
 
 static GHashTable        *g_entries;
 static GHashTable        *g_pending_by_url;
 static char              *g_cache_dir;
-static nd_font_loaded_cb  g_loaded_cb;
+static ns_font_loaded_cb  g_loaded_cb;
 static gpointer           g_loaded_ud;
 
 static void
-nd_font_pending_free(gpointer data)
+ns_font_pending_free(gpointer data)
 {
-    nd_font_pending *p = data;
+    ns_font_pending *p = data;
     if (!p) return;
     if (p->cancel) g_object_unref(p->cancel);
     if (p->families) g_ptr_array_free(p->families, TRUE);
@@ -57,12 +57,12 @@ nd_font_pending_free(gpointer data)
 }
 
 void
-nd_font_init(void)
+ns_font_init(void)
 {
     if (g_entries) return;
     g_entries = g_hash_table_new(g_str_hash, g_str_equal);
     g_pending_by_url = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                             g_free, nd_font_pending_free);
+                                             g_free, ns_font_pending_free);
     const char *xdg = g_getenv("XDG_CACHE_HOME");
     char *base = xdg && *xdg
         ? g_strdup(xdg)
@@ -70,18 +70,18 @@ nd_font_init(void)
     g_cache_dir = g_build_filename(base, "nordstjernen", "webfonts", NULL);
     g_free(base);
     g_mkdir_with_parents(g_cache_dir, 0700);
-    nd_paint_register_font_oracle();
+    ns_paint_register_font_oracle();
 }
 
 void
-nd_font_shutdown(void)
+ns_font_shutdown(void)
 {
     if (!g_entries) return;
     GHashTableIter it;
     gpointer k, v;
     g_hash_table_iter_init(&it, g_entries);
     while (g_hash_table_iter_next(&it, &k, &v)) {
-        nd_font_entry *e = v;
+        ns_font_entry *e = v;
         if (e->cancel) {
             g_cancellable_cancel(e->cancel);
             g_object_unref(e->cancel);
@@ -101,9 +101,9 @@ nd_font_shutdown(void)
 }
 
 gboolean
-nd_font_available(void)
+ns_font_available(void)
 {
-#ifdef ND_HAVE_FONTCONFIG
+#ifdef NS_HAVE_FONTCONFIG
     return TRUE;
 #else
     return FALSE;
@@ -111,14 +111,14 @@ nd_font_available(void)
 }
 
 void
-nd_font_set_loaded_cb(nd_font_loaded_cb cb, gpointer user_data)
+ns_font_set_loaded_cb(ns_font_loaded_cb cb, gpointer user_data)
 {
     g_loaded_cb = cb;
     g_loaded_ud = user_data;
 }
 
 static const char *
-nd_font_extension_for(const char *url, char *buf, gsize buflen)
+ns_font_extension_for(const char *url, char *buf, gsize buflen)
 {
     if (!url) return ".bin";
     const char *q = strchr(url, '?');
@@ -137,7 +137,7 @@ nd_font_extension_for(const char *url, char *buf, gsize buflen)
 }
 
 static gboolean
-nd_font_bytes_look_like_font(const guint8 *d, gsize len)
+ns_font_bytes_look_like_font(const guint8 *d, gsize len)
 {
     if (!d || len < 4) return FALSE;
     static const guint8 sigs[][4] = {
@@ -154,9 +154,9 @@ nd_font_bytes_look_like_font(const guint8 *d, gsize len)
     return FALSE;
 }
 
-#ifdef ND_HAVE_FREETYPE
+#ifdef NS_HAVE_FREETYPE
 static gboolean
-nd_font_bytes_are_woff(const guint8 *d, gsize len)
+ns_font_bytes_are_woff(const guint8 *d, gsize len)
 {
     if (!d || len < 4) return FALSE;
     return d[0] == 'w' && d[1] == 'O' && d[2] == 'F' &&
@@ -164,16 +164,16 @@ nd_font_bytes_are_woff(const guint8 *d, gsize len)
 }
 
 static void
-nd_put_be16(guint8 *p, guint16 v) { p[0] = v >> 8; p[1] = (guint8)v; }
+ns_put_be16(guint8 *p, guint16 v) { p[0] = v >> 8; p[1] = (guint8)v; }
 
 static void
-nd_put_be32(guint8 *p, guint32 v)
+ns_put_be32(guint8 *p, guint32 v)
 {
     p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = (guint8)v;
 }
 
 static guint8 *
-nd_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
+ns_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
                      gboolean *out_cff)
 {
     FT_Library lib;
@@ -184,13 +184,13 @@ nd_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
         return NULL;
     }
 
-    typedef struct { FT_ULong tag, len, off; } nd_sfnt_tab;
+    typedef struct { FT_ULong tag, len, off; } ns_sfnt_tab;
     guint8 *buf = NULL;
     FT_ULong num = 0;
     if (FT_Sfnt_Table_Info(face, 0, NULL, &num) || num == 0 || num > 4096)
         goto out;
 
-    nd_sfnt_tab *tabs = g_new0(nd_sfnt_tab, num);
+    ns_sfnt_tab *tabs = g_new0(ns_sfnt_tab, num);
     gboolean cff = FALSE, bad = FALSE;
     for (FT_UInt i = 0; i < num; i++) {
         FT_ULong tag = 0, tlen = 0;
@@ -219,11 +219,11 @@ nd_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
         }
         buf = too_big ? NULL : g_try_malloc0(off);
         if (buf) {
-            nd_put_be32(buf, cff ? FT_MAKE_TAG('O', 'T', 'T', 'O') : 0x00010000u);
-            nd_put_be16(buf + 4, (guint16)num);
-            nd_put_be16(buf + 6, sr);
-            nd_put_be16(buf + 8, es);
-            nd_put_be16(buf + 10, rs);
+            ns_put_be32(buf, cff ? FT_MAKE_TAG('O', 'T', 'T', 'O') : 0x00010000u);
+            ns_put_be16(buf + 4, (guint16)num);
+            ns_put_be16(buf + 6, sr);
+            ns_put_be16(buf + 8, es);
+            ns_put_be16(buf + 10, rs);
             for (FT_UInt i = 0; i < num; i++) {
                 FT_ULong tlen = tabs[i].len;
                 if (FT_Load_Sfnt_Table(face, tabs[i].tag, 0,
@@ -239,10 +239,10 @@ nd_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
                            ((guint32)q[2] << 8) | q[3];
                 }
                 guint8 *dir = buf + 12 + (gsize)i * 16;
-                nd_put_be32(dir, tabs[i].tag);
-                nd_put_be32(dir + 4, sum);
-                nd_put_be32(dir + 8, (guint32)tabs[i].off);
-                nd_put_be32(dir + 12, (guint32)tabs[i].len);
+                ns_put_be32(dir, tabs[i].tag);
+                ns_put_be32(dir + 4, sum);
+                ns_put_be32(dir + 8, (guint32)tabs[i].off);
+                ns_put_be32(dir + 12, (guint32)tabs[i].len);
             }
         }
         if (buf) {
@@ -257,10 +257,10 @@ out:
     FT_Done_FreeType(lib);
     return buf;
 }
-#endif /* ND_HAVE_FREETYPE */
+#endif /* NS_HAVE_FREETYPE */
 
 static char *
-nd_font_cache_path_for(const char *family, const char *url,
+ns_font_cache_path_for(const char *family, const char *url,
                        const char *forced_ext)
 {
     if (!g_cache_dir || !family) return NULL;
@@ -269,7 +269,7 @@ nd_font_cache_path_for(const char *family, const char *url,
         if (!g_ascii_isalnum(*p) && *p != '-' && *p != '_') *p = '_';
     char extbuf[12];
     const char *ext = forced_ext ? forced_ext
-                                 : nd_font_extension_for(url, extbuf, sizeof extbuf);
+                                 : ns_font_extension_for(url, extbuf, sizeof extbuf);
     char *digest = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
                                                  url ? url : "", -1);
     char tag[65];
@@ -282,17 +282,17 @@ nd_font_cache_path_for(const char *family, const char *url,
     return full;
 }
 
-typedef struct nd_font_fetch_ctx {
+typedef struct ns_font_fetch_ctx {
     char *url;
-} nd_font_fetch_ctx;
+} ns_font_fetch_ctx;
 
-#ifdef ND_HAVE_FONTCONFIG
+#ifdef NS_HAVE_FONTCONFIG
 static void
-nd_font_install_file(const char *path)
+ns_font_install_file(const char *path)
 {
     if (!path) return;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
-#ifdef ND_HAVE_PANGOFC
+#ifdef NS_HAVE_PANGOFC
     PangoFontMap *fm = pango_cairo_font_map_get_default();
     if (fm && PANGO_IS_FC_FONT_MAP(fm))
         pango_fc_font_map_config_changed(PANGO_FC_FONT_MAP(fm));
@@ -301,19 +301,19 @@ nd_font_install_file(const char *path)
 #endif
 
 static void
-nd_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
+ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
 {
     (void)src;
-    nd_font_fetch_ctx *ctx = user_data;
+    ns_font_fetch_ctx *ctx = user_data;
     GError *err = NULL;
-    nd_response *resp = nd_net_fetch_finish(res, &err);
-    nd_font_pending *pending = g_pending_by_url
+    ns_response *resp = ns_net_fetch_finish(res, &err);
+    ns_font_pending *pending = g_pending_by_url
         ? g_hash_table_lookup(g_pending_by_url, ctx->url) : NULL;
     GPtrArray *families = pending ? pending->families : NULL;
     if (families) {
         for (guint i = 0; i < families->len; i++) {
             const char *family = g_ptr_array_index(families, i);
-            nd_font_entry *e = g_entries ? g_hash_table_lookup(g_entries, family)
+            ns_font_entry *e = g_entries ? g_hash_table_lookup(g_entries, family)
                                          : NULL;
             if (!e) continue;
             g_clear_object(&e->cancel);
@@ -322,16 +322,16 @@ nd_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
     }
     if (resp && !resp->error && resp->status < 400 &&
         resp->body && resp->body->len > 0 &&
-        nd_font_bytes_look_like_font(resp->body->data, resp->body->len)) {
+        ns_font_bytes_look_like_font(resp->body->data, resp->body->len)) {
         const guint8 *write_data = resp->body->data;
         gsize write_len = resp->body->len;
         const char *forced_ext = NULL;
         guint8 *converted = NULL;
-#ifdef ND_HAVE_FREETYPE
-        if (nd_font_bytes_are_woff(resp->body->data, resp->body->len)) {
+#ifdef NS_HAVE_FREETYPE
+        if (ns_font_bytes_are_woff(resp->body->data, resp->body->len)) {
             gsize clen = 0;
             gboolean cff = FALSE;
-            converted = nd_font_woff_to_sfnt(resp->body->data,
+            converted = ns_font_woff_to_sfnt(resp->body->data,
                                              resp->body->len, &clen, &cff);
             if (converted) {
                 write_data = converted;
@@ -343,9 +343,9 @@ nd_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
         if (families) {
             for (guint i = 0; i < families->len; i++) {
                 const char *family = g_ptr_array_index(families, i);
-                nd_font_entry *e = g_entries
+                ns_font_entry *e = g_entries
                     ? g_hash_table_lookup(g_entries, family) : NULL;
-                char *path = nd_font_cache_path_for(family,
+                char *path = ns_font_cache_path_for(family,
                                                     e ? e->url
                                                       : (resp->final_url ? resp->final_url
                                                                          : ctx->url),
@@ -354,8 +354,8 @@ nd_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
                 GError *werr = NULL;
                 if (g_file_set_contents(path, (const char *)write_data,
                                         (gssize)write_len, &werr)) {
-#ifdef ND_HAVE_FONTCONFIG
-                    nd_font_install_file(path);
+#ifdef NS_HAVE_FONTCONFIG
+                    ns_font_install_file(path);
 #endif
                     if (e) e->loaded = TRUE;
                     if (g_loaded_cb) g_loaded_cb(family, g_loaded_ud);
@@ -367,23 +367,23 @@ nd_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
         g_free(converted);
     }
     if (g_pending_by_url) g_hash_table_remove(g_pending_by_url, ctx->url);
-    nd_response_free(resp);
+    ns_response_free(resp);
     g_clear_error(&err);
     g_free(ctx->url);
     g_free(ctx);
 }
 
 void
-nd_font_request(const char *family, const char *src_url, const char *base_url)
+ns_font_request(const char *family, const char *src_url, const char *base_url)
 {
-    if (!nd_font_available()) return;
-    if (!g_entries) nd_font_init();
+    if (!ns_font_available()) return;
+    if (!g_entries) ns_font_init();
     if (!family || !*family || !src_url || !*src_url) return;
 
-    char *abs = base_url ? nd_url_resolve(base_url, src_url) : g_strdup(src_url);
+    char *abs = base_url ? ns_url_resolve(base_url, src_url) : g_strdup(src_url);
     if (!abs) return;
 
-    nd_font_entry *existing = g_hash_table_lookup(g_entries, family);
+    ns_font_entry *existing = g_hash_table_lookup(g_entries, family);
     if (existing) {
         if (existing->loaded || existing->inflight) { g_free(abs); return; }
         if (existing->url && strcmp(existing->url, abs) == 0) {
@@ -393,13 +393,13 @@ nd_font_request(const char *family, const char *src_url, const char *base_url)
         g_free(existing->url);
         existing->url = abs;
     } else {
-        existing = g_new0(nd_font_entry, 1);
+        existing = g_new0(ns_font_entry, 1);
         existing->family = g_strdup(family);
         existing->url = abs;
         g_hash_table_insert(g_entries, existing->family, existing);
     }
 
-    nd_font_pending *pending = g_pending_by_url
+    ns_font_pending *pending = g_pending_by_url
         ? g_hash_table_lookup(g_pending_by_url, existing->url) : NULL;
     if (pending) {
         gboolean seen = FALSE;
@@ -413,7 +413,7 @@ nd_font_request(const char *family, const char *src_url, const char *base_url)
         return;
     }
 
-    pending = g_new0(nd_font_pending, 1);
+    pending = g_new0(ns_font_pending, 1);
     pending->families = g_ptr_array_new_with_free_func(g_free);
     pending->cancel = g_cancellable_new();
     g_ptr_array_add(pending->families, g_strdup(family));
@@ -423,8 +423,8 @@ nd_font_request(const char *family, const char *src_url, const char *base_url)
     existing->inflight = TRUE;
     g_set_object(&existing->cancel, pending->cancel);
 
-    nd_font_fetch_ctx *ctx = g_new0(nd_font_fetch_ctx, 1);
+    ns_font_fetch_ctx *ctx = g_new0(ns_font_fetch_ctx, 1);
     ctx->url = g_strdup(existing->url);
-    nd_net_fetch_async(existing->url, base_url, existing->cancel,
-                       nd_font_on_fetched, ctx);
+    ns_net_fetch_async(existing->url, base_url, existing->cancel,
+                       ns_font_on_fetched, ctx);
 }

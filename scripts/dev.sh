@@ -3,10 +3,10 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${ND_BIN:-$ROOT/builddir/src/nordstjernen}
-export ND_ALLOW_ROOT=${ND_ALLOW_ROOT:-1}
-LIST=${ND_LIST:-$ROOT/reading-list.txt}
-BASE=${ND_BASE:-$ROOT/data/baseline}
+BIN=${NS_BIN:-$ROOT/builddir/src/nordstjernen}
+export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
+LIST=${NS_LIST:-$ROOT/reading-list.txt}
+BASE=${NS_BASE:-$ROOT/data/baseline}
 
 cd "$ROOT"
 
@@ -29,9 +29,9 @@ layout baselines are <slug>.layout.txt. Use layout targets for
 geometry (text-free, fixed-size fixtures) so the diff is font-stable.
 
 Env:
-  ND_BIN   path to nordstjernen binary (default: $BIN)
-  ND_LIST  reading-list path           (default: $LIST)
-  ND_BASE  baseline dir                (default: $BASE)
+  NS_BIN   path to nordstjernen binary (default: $BIN)
+  NS_LIST  reading-list path           (default: $LIST)
+  NS_BASE  baseline dir                (default: $BASE)
 EOF
 }
 

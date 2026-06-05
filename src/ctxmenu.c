@@ -13,11 +13,11 @@
 #include "window.h"
 
 static char *
-nd_build_search_url(const char *query)
+ns_build_search_url(const char *query)
 {
     if (!query || !*query) return NULL;
     char *escaped = g_uri_escape_string(query, NULL, FALSE);
-    const nd_config *cfg = nd_config_get();
+    const ns_config *cfg = ns_config_get();
     const char *tmpl = cfg && cfg->search_engine && *cfg->search_engine
                        ? cfg->search_engine
                        : "https://www.google.com/search?q=%s";
@@ -35,7 +35,7 @@ nd_build_search_url(const char *query)
 }
 
 static char *
-nd_search_snippet_label(const char *text)
+ns_search_snippet_label(const char *text)
 {
     char *flat = g_strdup(text ? text : "");
     for (char *p = flat; *p; p++) {
@@ -60,11 +60,11 @@ static void
 on_ctx_open_link(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_link) return;
-    char *abs = nd_resolve_url(w, w->context_menu_link);
+    char *abs = ns_resolve_url(w, w->context_menu_link);
     if (!abs) return;
-    nd_window_load_url(w, abs, ND_LOAD_USER);
+    ns_window_load_url(w, abs, NS_LOAD_USER);
     g_free(abs);
 }
 
@@ -72,13 +72,13 @@ static void
 on_ctx_open_link_new_tab(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_link) return;
-    char *abs = nd_resolve_url(w, w->context_menu_link);
+    char *abs = ns_resolve_url(w, w->context_menu_link);
     if (!abs) return;
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(w->window));
-    nd_window *nw = nd_browser_add_tab(w->window, app, abs);
-    if (nw) nd_browser_set_active(w->window, nw);
+    ns_window *nw = ns_browser_add_tab(w->window, app, abs);
+    if (nw) ns_browser_set_active(w->window, nw);
     g_free(abs);
 }
 
@@ -86,12 +86,12 @@ static void
 on_ctx_open_link_new_window(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_link) return;
-    char *abs = nd_resolve_url(w, w->context_menu_link);
+    char *abs = ns_resolve_url(w, w->context_menu_link);
     if (abs) {
         GtkApplication *app = gtk_window_get_application(GTK_WINDOW(w->window));
-        nd_spawn_window(app, abs);
+        ns_spawn_window(app, abs);
         g_free(abs);
     }
 }
@@ -100,12 +100,12 @@ static void
 on_ctx_copy_link(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_link) return;
-    char *abs = nd_resolve_url(w, w->context_menu_link);
+    char *abs = ns_resolve_url(w, w->context_menu_link);
     GdkClipboard *cb = gtk_widget_get_clipboard(w->window);
     gdk_clipboard_set_text(cb, abs ? abs : w->context_menu_link);
-    nd_window_set_status(w, "Copied %s", abs ? abs : w->context_menu_link);
+    ns_window_set_status(w, "Copied %s", abs ? abs : w->context_menu_link);
     g_free(abs);
 }
 
@@ -113,16 +113,16 @@ static void
 on_ctx_bookmark_link(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
-    if (!w->context_menu_link || !nd_app_bookmarks()) return;
-    char *abs = nd_resolve_url(w, w->context_menu_link);
+    ns_window *w = ud;
+    if (!w->context_menu_link || !ns_app_bookmarks()) return;
+    char *abs = ns_resolve_url(w, w->context_menu_link);
     const char *url = abs ? abs : w->context_menu_link;
-    if (nd_bookmarks_contains(nd_app_bookmarks(), url)) {
-        nd_bookmarks_remove(nd_app_bookmarks(), url);
-        nd_window_set_status(w, "Removed bookmark %s", url);
+    if (ns_bookmarks_contains(ns_app_bookmarks(), url)) {
+        ns_bookmarks_remove(ns_app_bookmarks(), url);
+        ns_window_set_status(w, "Removed bookmark %s", url);
     } else {
-        nd_bookmarks_add(nd_app_bookmarks(), url, url);
-        nd_window_set_status(w, "Bookmarked %s", url);
+        ns_bookmarks_add(ns_app_bookmarks(), url, url);
+        ns_window_set_status(w, "Bookmarked %s", url);
     }
     g_free(abs);
 }
@@ -131,11 +131,11 @@ static void
 on_ctx_open_image(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_image) return;
-    char *abs = nd_resolve_url(w, w->context_menu_image);
+    char *abs = ns_resolve_url(w, w->context_menu_image);
     if (!abs) return;
-    nd_window_load_url(w, abs, ND_LOAD_USER);
+    ns_window_load_url(w, abs, NS_LOAD_USER);
     g_free(abs);
 }
 
@@ -143,13 +143,13 @@ static void
 on_ctx_open_image_new_tab(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_image) return;
-    char *abs = nd_resolve_url(w, w->context_menu_image);
+    char *abs = ns_resolve_url(w, w->context_menu_image);
     if (!abs) return;
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(w->window));
-    nd_window *nw = nd_browser_add_tab(w->window, app, abs);
-    if (nw) nd_browser_set_active(w->window, nw);
+    ns_window *nw = ns_browser_add_tab(w->window, app, abs);
+    if (nw) ns_browser_set_active(w->window, nw);
     g_free(abs);
 }
 
@@ -157,12 +157,12 @@ static void
 on_ctx_copy_image_address(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_image) return;
-    char *abs = nd_resolve_url(w, w->context_menu_image);
+    char *abs = ns_resolve_url(w, w->context_menu_image);
     GdkClipboard *cb = gtk_widget_get_clipboard(w->window);
     gdk_clipboard_set_text(cb, abs ? abs : w->context_menu_image);
-    nd_window_set_status(w, "Copied %s", abs ? abs : w->context_menu_image);
+    ns_window_set_status(w, "Copied %s", abs ? abs : w->context_menu_image);
     g_free(abs);
 }
 
@@ -170,12 +170,12 @@ static void
 on_ctx_open_media(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_media) return;
-    if (nd_media_launch_external(GTK_WINDOW(w->window), w->context_menu_media,
+    if (ns_media_launch_external(GTK_WINDOW(w->window), w->context_menu_media,
                                  w->context_menu_media_is_video,
                                  w->context_menu_media_stream))
-        nd_window_set_status(w, "Opening %s in external player…",
+        ns_window_set_status(w, "Opening %s in external player…",
                              w->context_menu_media_is_video ? "video" : "audio");
 }
 
@@ -183,23 +183,23 @@ static void
 on_ctx_copy_media_address(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_media) return;
     GdkClipboard *cb = gtk_widget_get_clipboard(w->window);
     gdk_clipboard_set_text(cb, w->context_menu_media);
-    nd_window_set_status(w, "Copied %s", w->context_menu_media);
+    ns_window_set_status(w, "Copied %s", w->context_menu_media);
 }
 
 static void
 on_ctx_copy_selection(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_selection || !*w->context_menu_selection) return;
     GdkClipboard *cb = gtk_widget_get_clipboard(w->drawing_area
                                                 ? w->drawing_area : w->window);
     gdk_clipboard_set_text(cb, w->context_menu_selection);
-    nd_window_set_status(w, "Copied %d characters",
+    ns_window_set_status(w, "Copied %d characters",
                          (int)g_utf8_strlen(w->context_menu_selection, -1));
 }
 
@@ -207,13 +207,13 @@ static void
 on_ctx_search_selection(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->context_menu_selection || !*w->context_menu_selection) return;
-    char *url = nd_build_search_url(w->context_menu_selection);
+    char *url = ns_build_search_url(w->context_menu_selection);
     if (!url) return;
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(w->window));
-    nd_window *nw = nd_browser_add_tab(w->window, app, url);
-    if (nw) nd_browser_set_active(w->window, nw);
+    ns_window *nw = ns_browser_add_tab(w->window, app, url);
+    if (nw) ns_browser_set_active(w->window, nw);
     g_free(url);
 }
 
@@ -221,26 +221,26 @@ static void
 on_ctx_view_source(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
+    ns_window *w = ud;
     if (!w->last_body) return;
-    w->mode = (w->mode == ND_VIEW_RAW) ? ND_VIEW_RENDER : ND_VIEW_RAW;
-    nd_window_render(w);
+    w->mode = (w->mode == NS_VIEW_RAW) ? NS_VIEW_RENDER : NS_VIEW_RAW;
+    ns_window_render(w);
 }
 
 static void
 on_ctx_bookmark_page(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
-    const char *url = nd_window_current_url(w);
-    if (!url || !nd_app_bookmarks()) return;
-    if (nd_bookmarks_contains(nd_app_bookmarks(), url)) {
-        nd_bookmarks_remove(nd_app_bookmarks(), url);
-        nd_window_set_status(w, "Removed bookmark %s", url);
+    ns_window *w = ud;
+    const char *url = ns_window_current_url(w);
+    if (!url || !ns_app_bookmarks()) return;
+    if (ns_bookmarks_contains(ns_app_bookmarks(), url)) {
+        ns_bookmarks_remove(ns_app_bookmarks(), url);
+        ns_window_set_status(w, "Removed bookmark %s", url);
     } else {
-        char *title = nd_window_current_title(w);
-        nd_bookmarks_add(nd_app_bookmarks(), url, title ? title : url);
-        nd_window_set_status(w, "Bookmarked %s", url);
+        char *title = ns_window_current_title(w);
+        ns_bookmarks_add(ns_app_bookmarks(), url, title ? title : url);
+        ns_window_set_status(w, "Bookmarked %s", url);
         g_free(title);
     }
 }
@@ -249,25 +249,25 @@ static void
 on_ctx_home(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
-    if (nd_app_home_url() && *nd_app_home_url())
-        nd_window_load_url(w, nd_app_home_url(), ND_LOAD_USER);
+    ns_window *w = ud;
+    if (ns_app_home_url() && *ns_app_home_url())
+        ns_window_load_url(w, ns_app_home_url(), NS_LOAD_USER);
 }
 
 static void
 on_ctx_copy_url(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
-    nd_window *w = ud;
-    const char *url = nd_window_current_url(w);
+    ns_window *w = ud;
+    const char *url = ns_window_current_url(w);
     if (!url) return;
     GdkClipboard *cb = gtk_widget_get_clipboard(w->window);
     gdk_clipboard_set_text(cb, url);
-    nd_window_set_status(w, "Copied %s", url);
+    ns_window_set_status(w, "Copied %s", url);
 }
 
 void
-nd_install_ctx_actions(nd_window *w)
+ns_install_ctx_actions(ns_window *w)
 {
     static const struct { const char *name; GCallback cb; } items[] = {
         { "ctx-open-link",            G_CALLBACK(on_ctx_open_link) },
@@ -297,11 +297,11 @@ nd_install_ctx_actions(nd_window *w)
     }
 }
 
-static const nd_box *
-nd_box_find_image_ancestor(const nd_box *hit)
+static const ns_box *
+ns_box_find_image_ancestor(const ns_box *hit)
 {
-    for (const nd_box *b = hit; b; b = b->parent) {
-        if (b->kind == ND_BOX_IMAGE && b->media && b->media->image_src
+    for (const ns_box *b = hit; b; b = b->parent) {
+        if (b->kind == NS_BOX_IMAGE && b->media && b->media->image_src
             && *b->media->image_src)
             return b;
     }
@@ -309,15 +309,15 @@ nd_box_find_image_ancestor(const nd_box *hit)
 }
 
 void
-nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
+ns_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
                             double x, double y, gpointer user_data)
 {
     (void)n_press;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w->layout_tree) return;
 
     if (w->js) {
-        const nd_box *target = nd_box_hit_test(w->layout_tree, x, y);
+        const ns_box *target = ns_box_hit_test(w->layout_tree, x, y);
         if (target && target->dom) {
             double cy = y, cx = x;
             if (w->render_vadj) cy = y - gtk_adjustment_get_value(w->render_vadj);
@@ -333,14 +333,14 @@ nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
                 ? gtk_event_controller_get_current_event_state(
                       GTK_EVENT_CONTROLLER(gesture)) : 0;
             gboolean prevented = FALSE;
-            nd_js_dispatch_mouse_event(w->js, target->dom, "contextmenu",
+            ns_js_dispatch_mouse_event(w->js, target->dom, "contextmenu",
                                        cx, cy, x, y, 2, 2,
                                        (st & GDK_SHIFT_MASK)   != 0,
                                        (st & GDK_CONTROL_MASK) != 0,
                                        (st & GDK_ALT_MASK)     != 0,
                                        (st & GDK_META_MASK)    != 0,
                                        NULL, &prevented);
-            if (w->js && nd_js_consume_mutated(w->js)) nd_window_js_mutated(w);
+            if (w->js && ns_js_consume_mutated(w->js)) ns_window_js_mutated(w);
             if (prevented) {
                 if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
                 return;
@@ -353,38 +353,38 @@ nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
     g_clear_pointer(&w->context_menu_selection, g_free);
     g_clear_pointer(&w->context_menu_media, g_free);
 
-    const char *href = nd_box_hit_link(w->layout_tree, x, y);
-    const nd_box *hit = nd_box_hit_test(w->layout_tree, x, y);
+    const char *href = ns_box_hit_link(w->layout_tree, x, y);
+    const ns_box *hit = ns_box_hit_test(w->layout_tree, x, y);
     if (!href && hit && hit->dom) {
-        for (const nd_node *p = hit->dom; p; p = p->parent) {
-            if (nd_node_is_element_named(p, "a")) {
-                const char *h = nd_element_get_attr(p, "href");
+        for (const ns_node *p = hit->dom; p; p = p->parent) {
+            if (ns_node_is_element_named(p, "a")) {
+                const char *h = ns_element_get_attr(p, "href");
                 if (h && *h) { href = h; break; }
             }
         }
     }
     if (href) w->context_menu_link = g_strdup(href);
 
-    const nd_box *img = nd_box_find_image_ancestor(hit);
+    const ns_box *img = ns_box_find_image_ancestor(hit);
     if (img) w->context_menu_image = g_strdup(img->media->image_src);
 
     {
         char *media_url = NULL;
         gboolean is_video = FALSE, stream = FALSE;
-        if (nd_window_media_target(w, hit, &media_url, &is_video, &stream)) {
+        if (ns_window_media_target(w, hit, &media_url, &is_video, &stream)) {
             w->context_menu_media = media_url;
             w->context_menu_media_is_video = is_video;
             w->context_menu_media_stream = stream;
         }
     }
 
-    if (nd_selection_has_range(&w->selection)) {
-        char *text = nd_selection_collect_text(w->layout_tree, &w->selection);
+    if (ns_selection_has_range(&w->selection)) {
+        char *text = ns_selection_collect_text(w->layout_tree, &w->selection);
         if (text && *text) w->context_menu_selection = text;
         else g_free(text);
     }
 
-    nd_window_update_nav_state(w);
+    ns_window_update_nav_state(w);
 
     GMenu *menu = g_menu_new();
 
@@ -425,7 +425,7 @@ nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
     if (w->context_menu_selection) {
         GMenu *sel_section = g_menu_new();
         g_menu_append(sel_section, "Copy", "win.ctx-copy-selection");
-        char *search_label = nd_search_snippet_label(w->context_menu_selection);
+        char *search_label = ns_search_snippet_label(w->context_menu_selection);
         g_menu_append(sel_section, search_label, "win.ctx-search-selection");
         g_free(search_label);
         g_menu_append_section(menu, NULL, G_MENU_MODEL(sel_section));
@@ -443,7 +443,7 @@ nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
     g_menu_append(page_section, "Copy Page URL", "win.ctx-copy-url");
     if (w->last_body)
         g_menu_append(page_section,
-                      w->mode == ND_VIEW_RAW ? "Exit Source View" : "View Page Source",
+                      w->mode == NS_VIEW_RAW ? "Exit Source View" : "View Page Source",
                       "win.ctx-view-source");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(page_section));
     g_object_unref(page_section);
@@ -459,9 +459,9 @@ nd_on_drawing_right_pressed(GtkGestureClick *gesture, int n_press,
 }
 
 void
-nd_on_drawing_long_pressed(GtkGestureLongPress *gesture, double x, double y,
+ns_on_drawing_long_pressed(GtkGestureLongPress *gesture, double x, double y,
                            gpointer user_data)
 {
     (void)gesture;
-    nd_on_drawing_right_pressed(NULL, 1, x, y, user_data);
+    ns_on_drawing_right_pressed(NULL, 1, x, y, user_data);
 }

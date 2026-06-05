@@ -28,13 +28,13 @@ Three ways, in priority order (highest wins):
 2. **Environment variables** (per-shell):
 
    ```sh
-   export ND_HTTPS_PROXY=socks5h://127.0.0.1:1080
-   export ND_HTTP_PROXY=http://proxy.corp:8080
-   export ND_NO_PROXY=localhost,127.0.0.1,*.corp.internal
+   export NS_HTTPS_PROXY=socks5h://127.0.0.1:1080
+   export NS_HTTP_PROXY=http://proxy.corp:8080
+   export NS_NO_PROXY=localhost,127.0.0.1,*.corp.internal
    ```
 
-   `ND_HTTPS_PROXY` is used for `https://` URLs, `ND_HTTP_PROXY` for
-   plain `http://`. If only `ND_HTTP_PROXY` is set, it is used for
+   `NS_HTTPS_PROXY` is used for `https://` URLs, `NS_HTTP_PROXY` for
+   plain `http://`. If only `NS_HTTP_PROXY` is set, it is used for
    both schemes.
 
 3. **Config file** at `~/.config/nordstjernen/nordstjernen.conf`
@@ -100,9 +100,9 @@ reading text-mode sites behind Tor.
 ### Corporate forward proxy with credentials
 
 ```sh
-export ND_HTTP_PROXY=http://alice:hunter2@proxy.corp:8080
-export ND_HTTPS_PROXY=http://alice:hunter2@proxy.corp:8080
-export ND_NO_PROXY=localhost,127.0.0.1,*.corp.internal
+export NS_HTTP_PROXY=http://alice:hunter2@proxy.corp:8080
+export NS_HTTPS_PROXY=http://alice:hunter2@proxy.corp:8080
+export NS_NO_PROXY=localhost,127.0.0.1,*.corp.internal
 nordstjernen
 ```
 

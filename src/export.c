@@ -10,11 +10,11 @@
 #include "window.h"
 
 gboolean
-nd_window_screenshot_to(nd_window *w, const char *path)
+ns_window_screenshot_to(ns_window *w, const char *path)
 {
     if (!w || !path) return FALSE;
-    double vw = w->last_viewport_w > 0 ? w->last_viewport_w : nd_layout_viewport();
-    nd_window_ensure_layout(w, vw);
+    double vw = w->last_viewport_w > 0 ? w->last_viewport_w : ns_layout_viewport();
+    ns_window_ensure_layout(w, vw);
     if (!w->layout_tree) return FALSE;
     double pw = vw;
     double ph = w->layout_tree->content_height + 1;
@@ -32,9 +32,9 @@ nd_window_screenshot_to(nd_window *w, const char *path)
     cairo_t *cr = cairo_create(surf);
     cairo_set_source_rgb(cr, 1, 1, 1);
     cairo_paint(cr);
-    nd_paint_set_js(w->js);
-    nd_paint_set_anim(w->anim);
-    nd_paint_with_selection(cr, w->layout_tree, NULL, &w->selection);
+    ns_paint_set_js(w->js);
+    ns_paint_set_anim(w->anim);
+    ns_paint_with_selection(cr, w->layout_tree, NULL, &w->selection);
     cairo_destroy(cr);
     cairo_status_t st = cairo_surface_write_to_png(surf, path);
     cairo_surface_destroy(surf);
@@ -42,18 +42,18 @@ nd_window_screenshot_to(nd_window *w, const char *path)
 }
 
 static void
-nd_save_screenshot_done(GObject *src, GAsyncResult *res, gpointer user_data)
+ns_save_screenshot_done(GObject *src, GAsyncResult *res, gpointer user_data)
 {
-    nd_window *w = nd_window_for_id(GPOINTER_TO_UINT(user_data));
+    ns_window *w = ns_window_for_id(GPOINTER_TO_UINT(user_data));
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(src), res, NULL);
     if (!file || !w) { if (file) g_object_unref(file); return; }
     char *path = g_file_get_path(file);
     g_object_unref(file);
     if (!path) return;
-    if (nd_window_screenshot_to(w, path))
-        nd_window_set_status(w, "Saved screenshot: %s", path);
+    if (ns_window_screenshot_to(w, path))
+        ns_window_set_status(w, "Saved screenshot: %s", path);
     else
-        nd_window_set_status(w, "Cannot write %s", path);
+        ns_window_set_status(w, "Cannot write %s", path);
     g_free(path);
 }
 
@@ -61,48 +61,48 @@ void
 on_win_screenshot(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w->layout_tree) return;
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Save screenshot as PNG");
-    char *title_text = nd_window_current_title(w);
+    char *title_text = ns_window_current_title(w);
     char *suggested  = g_strdup_printf("%s.png",
         title_text && *title_text ? title_text : "page");
     g_free(title_text);
     gtk_file_dialog_set_initial_name(dialog, suggested);
     g_free(suggested);
     gtk_file_dialog_save(dialog, GTK_WINDOW(w->window), NULL,
-                         nd_save_screenshot_done, GUINT_TO_POINTER(w->id));
+                         ns_save_screenshot_done, GUINT_TO_POINTER(w->id));
     g_object_unref(dialog);
 }
 
 static void
-nd_save_pdf_done(GObject *src, GAsyncResult *res, gpointer user_data)
+ns_save_pdf_done(GObject *src, GAsyncResult *res, gpointer user_data)
 {
-    nd_window *w = nd_window_for_id(GPOINTER_TO_UINT(user_data));
+    ns_window *w = ns_window_for_id(GPOINTER_TO_UINT(user_data));
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(src), res, NULL);
     if (!file || !w) { if (file) g_object_unref(file); return; }
     char *path = g_file_get_path(file);
     g_object_unref(file);
     if (!path) return;
 
-    nd_window_ensure_layout(w, nd_layout_viewport());
+    ns_window_ensure_layout(w, ns_layout_viewport());
     if (!w->layout_tree) { g_free(path); return; }
-    double pw = nd_layout_viewport();
+    double pw = ns_layout_viewport();
     double ph = w->layout_tree->content_height + 32;
     cairo_surface_t *surf = cairo_pdf_surface_create(path, pw, ph);
     if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surf);
-        nd_window_set_status(w, "Cannot write %s", path);
+        ns_window_set_status(w, "Cannot write %s", path);
         g_free(path);
         return;
     }
     cairo_t *cr = cairo_create(surf);
-    nd_paint(cr, w->layout_tree, NULL);
+    ns_paint(cr, w->layout_tree, NULL);
     cairo_destroy(cr);
     cairo_surface_finish(surf);
     cairo_surface_destroy(surf);
-    nd_window_set_status(w, "Saved PDF: %s", path);
+    ns_window_set_status(w, "Saved PDF: %s", path);
     g_free(path);
 }
 
@@ -110,25 +110,25 @@ void
 on_win_save_pdf(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w->layout_tree) return;
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Save page as PDF");
-    char *title_text = nd_window_current_title(w);
+    char *title_text = ns_window_current_title(w);
     char *suggested  = g_strdup_printf("%s.pdf",
         title_text && *title_text ? title_text : "page");
     g_free(title_text);
     gtk_file_dialog_set_initial_name(dialog, suggested);
     g_free(suggested);
     gtk_file_dialog_save(dialog, GTK_WINDOW(w->window), NULL,
-                         nd_save_pdf_done, GUINT_TO_POINTER(w->id));
+                         ns_save_pdf_done, GUINT_TO_POINTER(w->id));
     g_object_unref(dialog);
 }
 
 static void
-nd_save_html_done(GObject *src, GAsyncResult *res, gpointer user_data)
+ns_save_html_done(GObject *src, GAsyncResult *res, gpointer user_data)
 {
-    nd_window *w = nd_window_for_id(GPOINTER_TO_UINT(user_data));
+    ns_window *w = ns_window_for_id(GPOINTER_TO_UINT(user_data));
     GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(src), res, NULL);
     if (!file || !w) { if (file) g_object_unref(file); return; }
     char *path = g_file_get_path(file);
@@ -141,23 +141,23 @@ nd_save_html_done(GObject *src, GAsyncResult *res, gpointer user_data)
         body = g_memdup2(w->last_body, w->last_body_len);
         body_len = w->last_body_len;
     } else if (w->parsed_doc) {
-        body = nd_node_outer_html(w->parsed_doc);
+        body = ns_node_outer_html(w->parsed_doc);
         body_len = body ? strlen(body) : 0;
     }
     if (!body || body_len == 0) {
         g_free(body);
-        nd_window_set_status(w, "Nothing to save");
+        ns_window_set_status(w, "Nothing to save");
         g_free(path);
         return;
     }
 
     GError *err = NULL;
     if (!g_file_set_contents(path, body, (gssize)body_len, &err)) {
-        nd_window_set_status(w, "Cannot write %s: %s",
+        ns_window_set_status(w, "Cannot write %s: %s",
                              path, err ? err->message : "(unknown)");
         g_clear_error(&err);
     } else {
-        nd_window_set_status(w, "Saved HTML: %s", path);
+        ns_window_set_status(w, "Saved HTML: %s", path);
     }
     g_free(body);
     g_free(path);
@@ -167,22 +167,22 @@ void
 on_win_save_html(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w->parsed_doc && (!w->last_body || w->last_body_len == 0)) return;
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog, "Save page as HTML");
-    char *title_text = nd_window_current_title(w);
+    char *title_text = ns_window_current_title(w);
     char *suggested  = g_strdup_printf("%s.html",
         title_text && *title_text ? title_text : "page");
     g_free(title_text);
     gtk_file_dialog_set_initial_name(dialog, suggested);
     g_free(suggested);
     gtk_file_dialog_save(dialog, GTK_WINDOW(w->window), NULL,
-                         nd_save_html_done, GUINT_TO_POINTER(w->id));
+                         ns_save_html_done, GUINT_TO_POINTER(w->id));
     g_object_unref(dialog);
 }
 
-typedef struct nd_print_ctx {
+typedef struct ns_print_ctx {
     guint      w_id;
     double     scale;
     double     page_content_h;
@@ -190,10 +190,10 @@ typedef struct nd_print_ctx {
     double    *page_offsets;
     char      *header_title;
     char      *header_url;
-} nd_print_ctx;
+} ns_print_ctx;
 
 static void
-nd_print_ctx_free(nd_print_ctx *pc)
+ns_print_ctx_free(ns_print_ctx *pc)
 {
     if (!pc) return;
     g_free(pc->page_offsets);
@@ -203,14 +203,14 @@ nd_print_ctx_free(nd_print_ctx *pc)
 }
 
 static void
-nd_print_collect_breakpoints(const nd_box *root, GArray *ys)
+ns_print_collect_breakpoints(const ns_box *root, GArray *ys)
 {
     if (!root) return;
-    for (const nd_box *c = root->first_child; c; c = c->next_sibling) {
-        if (c->kind != ND_BOX_BLOCK && c->kind != ND_BOX_TABLE &&
-            c->kind != ND_BOX_TABLE_CAPTION &&
-            c->kind != ND_BOX_TABLE_ROW && c->kind != ND_BOX_IMAGE &&
-            c->kind != ND_BOX_VIDEO)
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_TABLE &&
+            c->kind != NS_BOX_TABLE_CAPTION &&
+            c->kind != NS_BOX_TABLE_ROW && c->kind != NS_BOX_IMAGE &&
+            c->kind != NS_BOX_VIDEO)
             continue;
         double top    = c->y + c->margin.top;
         double height = c->content_height + c->padding.top + c->padding.bottom +
@@ -219,12 +219,12 @@ nd_print_collect_breakpoints(const nd_box *root, GArray *ys)
         g_array_append_val(ys, top);
         g_array_append_val(ys, bottom);
         if (height > 0)
-            nd_print_collect_breakpoints(c, ys);
+            ns_print_collect_breakpoints(c, ys);
     }
 }
 
 static int
-nd_print_compare_double(gconstpointer a, gconstpointer b)
+ns_print_compare_double(gconstpointer a, gconstpointer b)
 {
     double da = *(const double *)a;
     double db = *(const double *)b;
@@ -234,12 +234,12 @@ nd_print_compare_double(gconstpointer a, gconstpointer b)
 }
 
 static void
-nd_on_print_begin(GtkPrintOperation *op, GtkPrintContext *ctx, gpointer user_data)
+ns_on_print_begin(GtkPrintOperation *op, GtkPrintContext *ctx, gpointer user_data)
 {
-    nd_print_ctx *pc = user_data;
-    nd_window *w = nd_window_for_id(pc->w_id);
+    ns_print_ctx *pc = user_data;
+    ns_window *w = ns_window_for_id(pc->w_id);
     if (!w) { gtk_print_operation_set_n_pages(op, 1); pc->n_pages = 1; return; }
-    nd_window_ensure_layout(w, nd_layout_viewport());
+    ns_window_ensure_layout(w, ns_layout_viewport());
     if (!w->layout_tree) {
         gtk_print_operation_set_n_pages(op, 1);
         pc->n_pages = 1;
@@ -247,7 +247,7 @@ nd_on_print_begin(GtkPrintOperation *op, GtkPrintContext *ctx, gpointer user_dat
     }
     double page_w = gtk_print_context_get_width(ctx);
     double page_h = gtk_print_context_get_height(ctx);
-    double doc_w  = nd_layout_viewport();
+    double doc_w  = ns_layout_viewport();
     double doc_h  = w->layout_tree->content_height + 16;
     if (doc_w <= 0 || doc_h <= 0) {
         gtk_print_operation_set_n_pages(op, 1);
@@ -261,8 +261,8 @@ nd_on_print_begin(GtkPrintOperation *op, GtkPrintContext *ctx, gpointer user_dat
     if (pc->page_content_h < 100) pc->page_content_h = 100;
 
     GArray *breaks = g_array_new(FALSE, FALSE, sizeof(double));
-    nd_print_collect_breakpoints(w->layout_tree, breaks);
-    g_array_sort(breaks, nd_print_compare_double);
+    ns_print_collect_breakpoints(w->layout_tree, breaks);
+    g_array_sort(breaks, ns_print_compare_double);
 
     GArray *offsets = g_array_new(FALSE, FALSE, sizeof(double));
     double zero = 0.0;
@@ -296,12 +296,12 @@ nd_on_print_begin(GtkPrintOperation *op, GtkPrintContext *ctx, gpointer user_dat
 }
 
 static void
-nd_on_print_draw_page(GtkPrintOperation *op, GtkPrintContext *ctx,
+ns_on_print_draw_page(GtkPrintOperation *op, GtkPrintContext *ctx,
                       int page_nr, gpointer user_data)
 {
     (void)op;
-    nd_print_ctx *pc = user_data;
-    nd_window *w = nd_window_for_id(pc->w_id);
+    ns_print_ctx *pc = user_data;
+    ns_window *w = ns_window_for_id(pc->w_id);
     if (!w) return;
     cairo_t *cr = gtk_print_context_get_cairo_context(ctx);
     double page_w = gtk_print_context_get_width(ctx);
@@ -356,46 +356,46 @@ nd_on_print_draw_page(GtkPrintOperation *op, GtkPrintContext *ctx,
     cairo_clip(cr);
     cairo_scale(cr, pc->scale, pc->scale);
     cairo_translate(cr, 0, -offset);
-    nd_paint(cr, w->layout_tree, NULL);
+    ns_paint(cr, w->layout_tree, NULL);
     cairo_restore(cr);
 }
 
 static void
-nd_on_print_done(GtkPrintOperation *op, GtkPrintOperationResult result,
+ns_on_print_done(GtkPrintOperation *op, GtkPrintOperationResult result,
                  gpointer user_data)
 {
     (void)op;
-    nd_print_ctx *pc = user_data;
-    nd_window *w = nd_window_for_id(pc->w_id);
+    ns_print_ctx *pc = user_data;
+    ns_window *w = ns_window_for_id(pc->w_id);
     if (w) {
         if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
             GError *err = NULL;
             gtk_print_operation_get_error(op, &err);
-            nd_window_set_status(w, "Print error: %s",
+            ns_window_set_status(w, "Print error: %s",
                                  err ? err->message : "unknown");
             g_clear_error(&err);
         } else if (result == GTK_PRINT_OPERATION_RESULT_APPLY) {
-            nd_window_set_status(w, "Sent %d page%s to printer",
+            ns_window_set_status(w, "Sent %d page%s to printer",
                                  pc->n_pages, pc->n_pages == 1 ? "" : "s");
         }
     }
-    nd_print_ctx_free(pc);
+    ns_print_ctx_free(pc);
 }
 
 void
 on_win_print(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    nd_window *w = user_data;
-    nd_window_ensure_layout(w, nd_layout_viewport());
+    ns_window *w = user_data;
+    ns_window_ensure_layout(w, ns_layout_viewport());
     if (!w->layout_tree) {
-        nd_window_set_status(w, "Nothing to print");
+        ns_window_set_status(w, "Nothing to print");
         return;
     }
-    nd_print_ctx *pc = g_new0(nd_print_ctx, 1);
+    ns_print_ctx *pc = g_new0(ns_print_ctx, 1);
     pc->w_id = w->id;
-    pc->header_title = nd_window_current_title(w);
-    pc->header_url   = g_strdup(nd_window_current_url(w));
+    pc->header_title = ns_window_current_title(w);
+    pc->header_url   = g_strdup(ns_window_current_url(w));
 
     GtkPrintOperation *op = gtk_print_operation_new();
     gtk_print_operation_set_unit(op, GTK_UNIT_POINTS);
@@ -407,16 +407,16 @@ on_win_print(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     else
         gtk_print_operation_set_job_name(op, "Nordstjernen page");
 
-    g_signal_connect(op, "begin-print", G_CALLBACK(nd_on_print_begin),     pc);
-    g_signal_connect(op, "draw-page",   G_CALLBACK(nd_on_print_draw_page), pc);
-    g_signal_connect(op, "done",        G_CALLBACK(nd_on_print_done),      pc);
+    g_signal_connect(op, "begin-print", G_CALLBACK(ns_on_print_begin),     pc);
+    g_signal_connect(op, "draw-page",   G_CALLBACK(ns_on_print_draw_page), pc);
+    g_signal_connect(op, "done",        G_CALLBACK(ns_on_print_done),      pc);
 
     GError *err = NULL;
     gtk_print_operation_run(op,
                             GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
                             GTK_WINDOW(w->window), &err);
     if (err) {
-        nd_window_set_status(w, "Print failed: %s", err->message);
+        ns_window_set_status(w, "Print failed: %s", err->message);
         g_clear_error(&err);
     }
     g_object_unref(op);

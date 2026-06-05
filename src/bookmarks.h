@@ -3,29 +3,29 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_BOOKMARKS_H
-#define ND_BOOKMARKS_H
+#ifndef NS_BOOKMARKS_H
+#define NS_BOOKMARKS_H
 
 #include <glib.h>
 
 G_BEGIN_DECLS
 
-typedef struct nd_bookmark {
+typedef struct ns_bookmark {
     char *url;
     char *title;
-} nd_bookmark;
+} ns_bookmark;
 
-typedef struct nd_bookmarks nd_bookmarks;
+typedef struct ns_bookmarks ns_bookmarks;
 
-nd_bookmarks *nd_bookmarks_load(void);
-void          nd_bookmarks_free(nd_bookmarks *bm);
+ns_bookmarks *ns_bookmarks_load(void);
+void          ns_bookmarks_free(ns_bookmarks *bm);
 
-guint    nd_bookmarks_count(const nd_bookmarks *bm);
-const nd_bookmark *nd_bookmarks_get(const nd_bookmarks *bm, guint i);
+guint    ns_bookmarks_count(const ns_bookmarks *bm);
+const ns_bookmark *ns_bookmarks_get(const ns_bookmarks *bm, guint i);
 
-gboolean nd_bookmarks_contains(const nd_bookmarks *bm, const char *url);
-void     nd_bookmarks_add(nd_bookmarks *bm, const char *url, const char *title);
-void     nd_bookmarks_remove(nd_bookmarks *bm, const char *url);
+gboolean ns_bookmarks_contains(const ns_bookmarks *bm, const char *url);
+void     ns_bookmarks_add(ns_bookmarks *bm, const char *url, const char *title);
+void     ns_bookmarks_remove(ns_bookmarks *bm, const char *url);
 
 G_END_DECLS
 

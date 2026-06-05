@@ -13,45 +13,45 @@
 #include "texture.h"
 #include "webgl.h"
 
-static JSClassID nd_path2d_class_id;
+static JSClassID ns_path2d_class_id;
 
 void
-nd_path2d_finalizer(JSRuntime *rt, JSValue val)
+ns_path2d_finalizer(JSRuntime *rt, JSValue val)
 {
     (void)rt;
-    nd_path2d *p = JS_GetOpaque(val, nd_path2d_class_id);
+    ns_path2d *p = JS_GetOpaque(val, ns_path2d_class_id);
     if (!p) return;
     if (p->cr) cairo_destroy(p->cr);
     if (p->rs) cairo_surface_destroy(p->rs);
     g_free(p);
 }
 
-static JSClassDef nd_path2d_class = {
+static JSClassDef ns_path2d_class = {
     "Path2D",
-    .finalizer = nd_path2d_finalizer,
+    .finalizer = ns_path2d_finalizer,
 };
 
-static JSClassID nd_image_bitmap_class_id;
+static JSClassID ns_image_bitmap_class_id;
 
 void
-nd_image_bitmap_finalizer(JSRuntime *rt, JSValue val)
+ns_image_bitmap_finalizer(JSRuntime *rt, JSValue val)
 {
     (void)rt;
-    nd_image_bitmap *b = JS_GetOpaque(val, nd_image_bitmap_class_id);
+    ns_image_bitmap *b = JS_GetOpaque(val, ns_image_bitmap_class_id);
     if (!b) return;
     if (b->surf) cairo_surface_destroy(b->surf);
     g_free(b);
 }
 
-static JSClassDef nd_image_bitmap_class = {
+static JSClassDef ns_image_bitmap_class = {
     "ImageBitmap",
-    .finalizer = nd_image_bitmap_finalizer,
+    .finalizer = ns_image_bitmap_finalizer,
 };
 
 void
-nd_canvas_state_free(gpointer data)
+ns_canvas_state_free(gpointer data)
 {
-    nd_canvas_state *st = data;
+    ns_canvas_state *st = data;
     if (!st) return;
     if (st->fill_pattern)   cairo_pattern_destroy(st->fill_pattern);
     if (st->stroke_pattern) cairo_pattern_destroy(st->stroke_pattern);
@@ -62,11 +62,11 @@ nd_canvas_state_free(gpointer data)
 }
 
 JSValue
-nd_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
+ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)ctx; (void)argc; (void)argv;
-    nd_image_bitmap *b = JS_GetOpaque(this_val, nd_image_bitmap_class_id);
+    ns_image_bitmap *b = JS_GetOpaque(this_val, ns_image_bitmap_class_id);
     if (b && b->surf) {
         cairo_surface_destroy(b->surf);
         b->surf = NULL;
@@ -76,26 +76,26 @@ nd_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h)
+ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h)
 {
     if (!surf || w <= 0 || h <= 0) {
         if (surf) cairo_surface_destroy(surf);
         return JS_NULL;
     }
-    nd_image_bitmap *b = g_new0(nd_image_bitmap, 1);
+    ns_image_bitmap *b = g_new0(ns_image_bitmap, 1);
     b->surf = surf;
     b->w = w;
     b->h = h;
-    JSValue obj = JS_NewObjectClass(ctx, nd_image_bitmap_class_id);
+    JSValue obj = JS_NewObjectClass(ctx, ns_image_bitmap_class_id);
     JS_SetOpaque(obj, b);
     JS_SetPropertyStr(ctx, obj, "width",  JS_NewInt32(ctx, w));
     JS_SetPropertyStr(ctx, obj, "height", JS_NewInt32(ctx, h));
-    nd_bind_fn(ctx, obj, "close", nd_image_bitmap_close, 0);
+    ns_bind_fn(ctx, obj, "close", ns_image_bitmap_close, 0);
     return obj;
 }
 
 cairo_surface_t *
-nd_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
+ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
                                int *out_w, int *out_h)
 {
     JSValue wv = JS_GetPropertyStr(ctx, src, "width");
@@ -148,7 +148,7 @@ nd_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
 }
 
 cairo_surface_t *
-nd_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
+ns_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
                      int sx, int sy, int rw, int rh)
 {
     cairo_surface_t *out = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, rw, rh);
@@ -165,7 +165,7 @@ nd_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
 }
 
 JSValue
-nd_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
+ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -173,7 +173,7 @@ nd_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(promise)) return promise;
     if (argc < 1 || !JS_IsObject(argv[0])) {
-        nd_js_promise_reject(ctx, resolvers, "createImageBitmap: source required");
+        ns_js_promise_reject(ctx, resolvers, "createImageBitmap: source required");
         return promise;
     }
     int sw = 0, sh = 0;
@@ -182,11 +182,11 @@ nd_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     gboolean is_imagedata = JS_IsObject(dv);
     JS_FreeValue(ctx, dv);
     if (is_imagedata)
-        surf = nd_image_bitmap_from_imagedata(ctx, argv[0], &sw, &sh);
+        surf = ns_image_bitmap_from_imagedata(ctx, argv[0], &sw, &sh);
     else
-        surf = nd_ctx_drawimage_source(ctx, argv[0], &sw, &sh);
+        surf = ns_ctx_drawimage_source(ctx, argv[0], &sw, &sh);
     if (!surf) {
-        nd_js_promise_reject(ctx, resolvers,
+        ns_js_promise_reject(ctx, resolvers,
             "createImageBitmap: invalid source");
         return promise;
     }
@@ -200,16 +200,16 @@ nd_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
         crop = 1;
     }
     if (crop) {
-        cairo_surface_t *out = nd_image_bitmap_crop(surf, sw, sh, sx, sy, rw, rh);
+        cairo_surface_t *out = ns_image_bitmap_crop(surf, sw, sh, sx, sy, rw, rh);
         cairo_surface_destroy(surf);
         if (!out) {
-            nd_js_promise_reject(ctx, resolvers, "createImageBitmap: crop failed");
+            ns_js_promise_reject(ctx, resolvers, "createImageBitmap: crop failed");
             return promise;
         }
         surf = out;
         sw = rw; sh = rh;
     }
-    JSValue bm = nd_image_bitmap_make(ctx, surf, sw, sh);
+    JSValue bm = ns_image_bitmap_make(ctx, surf, sw, sh);
     JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &bm);
     JS_FreeValue(ctx, bm);
     JS_FreeValue(ctx, resolvers[0]);
@@ -218,14 +218,14 @@ nd_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
+ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_js *js = js_from_ctx(ctx);
-    const nd_node *el = nd_unwrap_element(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *el = ns_unwrap_element(this_val);
     if (!js || !el) return JS_NULL;
-    cairo_surface_t *src = nd_js_canvas_surface(js, el);
+    cairo_surface_t *src = ns_js_canvas_surface(js, el);
     if (!src) return JS_NULL;
     int w = cairo_image_surface_get_width(src);
     int h = cairo_image_surface_get_height(src);
@@ -240,11 +240,11 @@ nd_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_paint(cr);
     cairo_destroy(cr);
-    return nd_image_bitmap_make(ctx, copy, w, h);
+    return ns_image_bitmap_make(ctx, copy, w, h);
 }
 
 void
-nd_dommatrix_read(JSContext *ctx, JSValueConst v, double *a, double *b,
+ns_dommatrix_read(JSContext *ctx, JSValueConst v, double *a, double *b,
                   double *c, double *d, double *e, double *f)
 {
     *a = 1; *b = 0; *c = 0; *d = 1; *e = 0; *f = 0;
@@ -259,7 +259,7 @@ nd_dommatrix_read(JSContext *ctx, JSValueConst v, double *a, double *b,
 }
 
 void
-nd_dommatrix_write(JSContext *ctx, JSValueConst obj, double a, double b,
+ns_dommatrix_write(JSContext *ctx, JSValueConst obj, double a, double b,
                    double c, double d, double e, double f)
 {
     JS_SetPropertyStr(ctx, obj, "a",   JS_NewFloat64(ctx, a));
@@ -281,33 +281,33 @@ nd_dommatrix_write(JSContext *ctx, JSValueConst obj, double a, double b,
 }
 
 JSValue
-nd_dommatrix_multiply(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_multiply(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     double a1, b1, c1, d1, e1, f1, a2, b2, c2, d2, e2, f2;
-    nd_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
+    ns_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
     if (argc < 1) {
-        return nd_dommatrix_make(ctx, a1, b1, c1, d1, e1, f1, FALSE);
+        return ns_dommatrix_make(ctx, a1, b1, c1, d1, e1, f1, FALSE);
     }
-    nd_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
+    ns_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
     double a = a1 * a2 + c1 * b2;
     double b = b1 * a2 + d1 * b2;
     double c = a1 * c2 + c1 * d2;
     double d = b1 * c2 + d1 * d2;
     double e = a1 * e2 + c1 * f2 + e1;
     double f = b1 * e2 + d1 * f2 + f1;
-    return nd_dommatrix_make(ctx, a, b, c, d, e, f, FALSE);
+    return ns_dommatrix_make(ctx, a, b, c, d, e, f, FALSE);
 }
 
 JSValue
-nd_dommatrix_multiplySelf(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_multiplySelf(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
     double a1, b1, c1, d1, e1, f1, a2, b2, c2, d2, e2, f2;
-    nd_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
+    ns_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
     if (argc < 1) return JS_DupValue(ctx, this_val);
-    nd_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
-    nd_dommatrix_write(ctx, this_val,
+    ns_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
+    ns_dommatrix_write(ctx, this_val,
         a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,
         a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,
         a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1);
@@ -315,77 +315,77 @@ nd_dommatrix_multiplySelf(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_dommatrix_translate(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_translate(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double tx = argc >= 1 ? nd_arg_d(ctx, argv[0]) : 0;
-    double ty = argc >= 2 ? nd_arg_d(ctx, argv[1]) : 0;
-    return nd_dommatrix_make(ctx, a, b, c, d, e + a * tx + c * ty,
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    double tx = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 0;
+    double ty = argc >= 2 ? ns_arg_d(ctx, argv[1]) : 0;
+    return ns_dommatrix_make(ctx, a, b, c, d, e + a * tx + c * ty,
                              f + b * tx + d * ty, FALSE);
 }
 
 JSValue
-nd_dommatrix_scale(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_scale(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double sx = argc >= 1 ? nd_arg_d(ctx, argv[0]) : 1;
-    double sy = argc >= 2 ? nd_arg_d(ctx, argv[1]) : sx;
-    return nd_dommatrix_make(ctx, a * sx, b * sx, c * sy, d * sy, e, f, FALSE);
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    double sx = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 1;
+    double sy = argc >= 2 ? ns_arg_d(ctx, argv[1]) : sx;
+    return ns_dommatrix_make(ctx, a * sx, b * sx, c * sy, d * sy, e, f, FALSE);
 }
 
 JSValue
-nd_dommatrix_rotate(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_rotate(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double deg = argc >= 1 ? nd_arg_d(ctx, argv[0]) : 0;
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    double deg = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 0;
     double r = deg * G_PI / 180.0;
     double cs = cos(r), sn = sin(r);
     double na = a * cs + c * sn;
     double nb = b * cs + d * sn;
     double nc = -a * sn + c * cs;
     double nd = -b * sn + d * cs;
-    return nd_dommatrix_make(ctx, na, nb, nc, nd, e, f, FALSE);
+    return ns_dommatrix_make(ctx, na, nb, nc, nd, e, f, FALSE);
 }
 
 JSValue
-nd_dommatrix_inverse(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_inverse(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
     double det = a * d - b * c;
     if (det == 0) {
         JSValue nan = JS_NewFloat64(ctx, NAN);
-        JSValue m = nd_dommatrix_make(ctx, NAN, NAN, NAN, NAN, NAN, NAN, FALSE);
+        JSValue m = ns_dommatrix_make(ctx, NAN, NAN, NAN, NAN, NAN, NAN, FALSE);
         JS_FreeValue(ctx, nan);
         return m;
     }
     double inv = 1.0 / det;
-    return nd_dommatrix_make(ctx,
+    return ns_dommatrix_make(ctx,
         d * inv, -b * inv, -c * inv, a * inv,
         (c * f - d * e) * inv, (b * e - a * f) * inv, FALSE);
 }
 
 JSValue
-nd_dommatrix_invertSelf(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_invertSelf(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
     double det = a * d - b * c;
     if (det == 0) {
-        nd_dommatrix_write(ctx, this_val, NAN, NAN, NAN, NAN, NAN, NAN);
+        ns_dommatrix_write(ctx, this_val, NAN, NAN, NAN, NAN, NAN, NAN);
     } else {
         double inv = 1.0 / det;
-        nd_dommatrix_write(ctx, this_val,
+        ns_dommatrix_write(ctx, this_val,
             d * inv, -b * inv, -c * inv, a * inv,
             (c * f - d * e) * inv, (b * e - a * f) * inv);
     }
@@ -393,7 +393,7 @@ nd_dommatrix_invertSelf(JSContext *ctx, JSValueConst this_val,
 }
 
 void
-nd_obj_double(JSContext *ctx, JSValueConst obj, const char *key, double *out)
+ns_obj_double(JSContext *ctx, JSValueConst obj, const char *key, double *out)
 {
     JSValue v = JS_GetPropertyStr(ctx, obj, key);
     if (!JS_IsUndefined(v) && !JS_IsNull(v)) JS_ToFloat64(ctx, out, v);
@@ -401,17 +401,17 @@ nd_obj_double(JSContext *ctx, JSValueConst obj, const char *key, double *out)
 }
 
 JSValue
-nd_dommatrix_transformPoint(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_transformPoint(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
     double px = 0, py = 0, pz = 0, pw = 1;
     if (argc >= 1 && JS_IsObject(argv[0])) {
-        nd_obj_double(ctx, argv[0], "x", &px);
-        nd_obj_double(ctx, argv[0], "y", &py);
-        nd_obj_double(ctx, argv[0], "z", &pz);
-        nd_obj_double(ctx, argv[0], "w", &pw);
+        ns_obj_double(ctx, argv[0], "x", &px);
+        ns_obj_double(ctx, argv[0], "y", &py);
+        ns_obj_double(ctx, argv[0], "z", &pz);
+        ns_obj_double(ctx, argv[0], "w", &pw);
     }
     JSValue out = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, out, "x", JS_NewFloat64(ctx, a * px + c * py + e * pw));
@@ -422,12 +422,12 @@ nd_dommatrix_transformPoint(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_dommatrix_toString(JSContext *ctx, JSValueConst this_val,
+ns_dommatrix_toString(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     double a, b, c, d, e, f;
-    nd_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
+    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
     char buf[256];
     g_snprintf(buf, sizeof buf, "matrix(%g, %g, %g, %g, %g, %g)",
                a, b, c, d, e, f);
@@ -435,33 +435,33 @@ nd_dommatrix_toString(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
+ns_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
                   double e, double f, gboolean readonly)
 {
     JSValue obj = JS_NewObject(ctx);
-    nd_dommatrix_write(ctx, obj, a, b, c, d, e, f);
-    nd_bind_fn(ctx, obj, "translatePoint",   nd_dommatrix_transformPoint, 1);
-    nd_bind_fn(ctx, obj, "transformPoint",   nd_dommatrix_transformPoint, 1);
-    nd_bind_fn(ctx, obj, "multiply",         nd_dommatrix_multiply,       1);
-    nd_bind_fn(ctx, obj, "translate",        nd_dommatrix_translate,      3);
-    nd_bind_fn(ctx, obj, "scale",            nd_dommatrix_scale,          6);
-    nd_bind_fn(ctx, obj, "rotate",           nd_dommatrix_rotate,         3);
-    nd_bind_fn(ctx, obj, "inverse",          nd_dommatrix_inverse,        0);
-    nd_bind_fn(ctx, obj, "toString",         nd_dommatrix_toString,       0);
+    ns_dommatrix_write(ctx, obj, a, b, c, d, e, f);
+    ns_bind_fn(ctx, obj, "translatePoint",   ns_dommatrix_transformPoint, 1);
+    ns_bind_fn(ctx, obj, "transformPoint",   ns_dommatrix_transformPoint, 1);
+    ns_bind_fn(ctx, obj, "multiply",         ns_dommatrix_multiply,       1);
+    ns_bind_fn(ctx, obj, "translate",        ns_dommatrix_translate,      3);
+    ns_bind_fn(ctx, obj, "scale",            ns_dommatrix_scale,          6);
+    ns_bind_fn(ctx, obj, "rotate",           ns_dommatrix_rotate,         3);
+    ns_bind_fn(ctx, obj, "inverse",          ns_dommatrix_inverse,        0);
+    ns_bind_fn(ctx, obj, "toString",         ns_dommatrix_toString,       0);
     if (!readonly) {
-        nd_bind_fn(ctx, obj, "multiplySelf",  nd_dommatrix_multiplySelf,  1);
-        nd_bind_fn(ctx, obj, "invertSelf",    nd_dommatrix_invertSelf,    0);
+        ns_bind_fn(ctx, obj, "multiplySelf",  ns_dommatrix_multiplySelf,  1);
+        ns_bind_fn(ctx, obj, "invertSelf",    ns_dommatrix_invertSelf,    0);
     }
     return obj;
 }
 
 JSValue
-nd_dommatrix_ctor_impl(JSContext *ctx, int argc, JSValueConst *argv,
+ns_dommatrix_ctor_impl(JSContext *ctx, int argc, JSValueConst *argv,
                        gboolean readonly)
 {
     double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
     if (argc >= 1 && JS_IsArray(argv[0])) {
-        uint32_t n = nd_js_array_length(ctx, argv[0]);
+        uint32_t n = ns_js_array_length(ctx, argv[0]);
         if (n == 6) {
             double v[6];
             for (uint32_t i = 0; i < 6; i++) {
@@ -472,34 +472,34 @@ nd_dommatrix_ctor_impl(JSContext *ctx, int argc, JSValueConst *argv,
             a = v[0]; b = v[1]; c = v[2]; d = v[3]; e = v[4]; f = v[5];
         }
     } else if (argc >= 1 && JS_IsObject(argv[0])) {
-        nd_dommatrix_read(ctx, argv[0], &a, &b, &c, &d, &e, &f);
+        ns_dommatrix_read(ctx, argv[0], &a, &b, &c, &d, &e, &f);
     }
-    return nd_dommatrix_make(ctx, a, b, c, d, e, f, readonly);
+    return ns_dommatrix_make(ctx, a, b, c, d, e, f, readonly);
 }
 
 JSValue
-nd_window_dommatrix_ctor(JSContext *ctx, JSValueConst this_val,
+ns_window_dommatrix_ctor(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
     (void)this_val;
-    return nd_dommatrix_ctor_impl(ctx, argc, argv, FALSE);
+    return ns_dommatrix_ctor_impl(ctx, argc, argv, FALSE);
 }
 
 JSValue
-nd_window_dommatrix_readonly_ctor(JSContext *ctx, JSValueConst this_val,
+ns_window_dommatrix_readonly_ctor(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv)
 {
     (void)this_val;
-    return nd_dommatrix_ctor_impl(ctx, argc, argv, TRUE);
+    return ns_dommatrix_ctor_impl(ctx, argc, argv, TRUE);
 }
 
 JSValue
-nd_window_offscreen_canvas_ctor(JSContext *ctx, JSValueConst this_val,
+ns_window_offscreen_canvas_ctor(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (!js_from_ctx(ctx)) return JS_NULL;
-    nd_node *el = nd_node_new_element(g_strdup("canvas"));
+    ns_node *el = ns_node_new_element(g_strdup("canvas"));
     int w = 300, h = 150;
     if (argc >= 1) JS_ToInt32(ctx, &w, argv[0]);
     if (argc >= 2) JS_ToInt32(ctx, &h, argv[1]);
@@ -507,33 +507,33 @@ nd_window_offscreen_canvas_ctor(JSContext *ctx, JSValueConst this_val,
     if (h < 0) h = 0;
     char buf[16];
     g_snprintf(buf, sizeof buf, "%d", w);
-    nd_element_set_attr(el, "width", buf);
+    ns_element_set_attr(el, "width", buf);
     g_snprintf(buf, sizeof buf, "%d", h);
-    nd_element_set_attr(el, "height", buf);
+    ns_element_set_attr(el, "height", buf);
     g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, el);
-    JSValue obj = nd_make_element(ctx, el);
-    nd_bind_fn(ctx, obj, "transferToImageBitmap",
-               nd_offscreen_transferToImageBitmap, 0);
-    nd_bind_fn(ctx, obj, "convertToBlob",
-               nd_offscreen_convertToBlob, 1);
+    JSValue obj = ns_make_element(ctx, el);
+    ns_bind_fn(ctx, obj, "transferToImageBitmap",
+               ns_offscreen_transferToImageBitmap, 0);
+    ns_bind_fn(ctx, obj, "convertToBlob",
+               ns_offscreen_convertToBlob, 1);
     return obj;
 }
 
 int
-nd_canvas_dim_from_attr(const nd_node *el, const char *name, int defv)
+ns_canvas_dim_from_attr(const ns_node *el, const char *name, int defv)
 {
-    const char *v = nd_element_get_attr(el, name);
+    const char *v = ns_element_get_attr(el, name);
     if (!v || !*v) return defv;
-    int n = nd_parse_int(v, defv, 0, 8192);
+    int n = ns_parse_int(v, defv, 0, 8192);
     if (n < 1) return defv;
     return n;
 }
 
 gboolean
-nd_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
+ns_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
 {
     guint8 cr, cg, cb, ca;
-    if (!nd_css_parse_color(s, &cr, &cg, &cb, &ca)) return FALSE;
+    if (!ns_css_parse_color(s, &cr, &cg, &cb, &ca)) return FALSE;
     *r = cr / 255.0;
     *g = cg / 255.0;
     *b = cb / 255.0;
@@ -541,22 +541,22 @@ nd_canvas_parse_color(const char *s, double *r, double *g, double *b, double *a)
     return TRUE;
 }
 
-nd_canvas_state *
-nd_canvas_state_for(nd_js *js, const nd_node *el)
+ns_canvas_state *
+ns_canvas_state_for(ns_js *js, const ns_node *el)
 {
     if (!js || !el) return NULL;
     if (!js->canvas_states)
         js->canvas_states = g_hash_table_new_full(g_direct_hash, g_direct_equal,
-                                                  NULL, nd_canvas_state_free);
-    nd_canvas_state *st = g_hash_table_lookup(js->canvas_states, el);
-    int w = nd_canvas_dim_from_attr(el, "width",  300);
-    int h = nd_canvas_dim_from_attr(el, "height", 150);
+                                                  NULL, ns_canvas_state_free);
+    ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, el);
+    int w = ns_canvas_dim_from_attr(el, "width",  300);
+    int h = ns_canvas_dim_from_attr(el, "height", 150);
     if (st && (st->w != w || st->h != h)) {
         g_hash_table_remove(js->canvas_states, el);
         st = NULL;
     }
     if (!st) {
-        st = g_new0(nd_canvas_state, 1);
+        st = g_new0(ns_canvas_state, 1);
         st->w = w;
         st->h = h;
         st->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
@@ -571,28 +571,28 @@ nd_canvas_state_for(nd_js *js, const nd_node *el)
 }
 
 cairo_surface_t *
-nd_js_canvas_surface(nd_js *js, const nd_node *n)
+ns_js_canvas_surface(ns_js *js, const ns_node *n)
 {
     if (!n) return NULL;
-    cairo_surface_t *gl = nd_webgl_canvas_surface(n);
+    cairo_surface_t *gl = ns_webgl_canvas_surface(n);
     if (gl) return gl;
     if (!js || !js->canvas_states) return NULL;
-    nd_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
+    ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
     return st ? st->surf : NULL;
 }
 
-nd_canvas_state *
-nd_ctx_state(JSContext *ctx, JSValueConst this_val)
+ns_canvas_state *
+ns_ctx_state(JSContext *ctx, JSValueConst this_val)
 {
     if (!js_from_ctx(ctx)) return NULL;
     JSValue node_v = JS_GetPropertyStr(ctx, this_val, "_node");
-    const nd_node *n = nd_unwrap_element(node_v);
+    const ns_node *n = ns_unwrap_element(node_v);
     JS_FreeValue(ctx, node_v);
-    return nd_canvas_state_for(js_from_ctx(ctx), n);
+    return ns_canvas_state_for(js_from_ctx(ctx), n);
 }
 
 cairo_pattern_t *
-nd_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
+ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
 {
     if (!JS_IsObject(obj)) return NULL;
     JSValue t = JS_GetPropertyStr(ctx, obj, "_type");
@@ -614,7 +614,7 @@ nd_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
         JSValue node_v = JS_GetPropertyStr(ctx, obj, "_node");
         int iw = 0, ih = 0;
         cairo_surface_t *img =
-            nd_ctx_drawimage_source(ctx, node_v, &iw, &ih);
+            ns_ctx_drawimage_source(ctx, node_v, &iw, &ih);
         JS_FreeValue(ctx, node_v);
         if (!img) return NULL;
         pat = cairo_pattern_create_for_surface(img);
@@ -688,7 +688,7 @@ nd_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
 }
 
 double
-nd_ctx_global_alpha(JSContext *ctx, JSValueConst this_val)
+ns_ctx_global_alpha(JSContext *ctx, JSValueConst this_val)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "globalAlpha");
     double ga = 1.0;
@@ -700,7 +700,7 @@ nd_ctx_global_alpha(JSContext *ctx, JSValueConst this_val)
 }
 
 cairo_operator_t
-nd_ctx_parse_composite(const char *s)
+ns_ctx_parse_composite(const char *s)
 {
     if (!s)                                    return CAIRO_OPERATOR_OVER;
     if (!strcmp(s, "source-over"))             return CAIRO_OPERATOR_OVER;
@@ -733,20 +733,20 @@ nd_ctx_parse_composite(const char *s)
 }
 
 void
-nd_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, cairo_t *cr)
+ns_ctx_apply_composite(JSContext *ctx, JSValueConst this_val, cairo_t *cr)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "globalCompositeOperation");
     cairo_operator_t op = CAIRO_OPERATOR_OVER;
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
-        if (s) { op = nd_ctx_parse_composite(s); JS_FreeCString(ctx, s); }
+        if (s) { op = ns_ctx_parse_composite(s); JS_FreeCString(ctx, s); }
     }
     JS_FreeValue(ctx, v);
     cairo_set_operator(cr, op);
 }
 
 gboolean
-nd_ctx_image_smoothing(JSContext *ctx, JSValueConst this_val)
+ns_ctx_image_smoothing(JSContext *ctx, JSValueConst this_val)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "imageSmoothingEnabled");
     gboolean on = TRUE;
@@ -757,7 +757,7 @@ nd_ctx_image_smoothing(JSContext *ctx, JSValueConst this_val)
 }
 
 void
-nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
+ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
     JSValue v;
     if (st->fill_pattern) { cairo_pattern_destroy(st->fill_pattern); st->fill_pattern = NULL; }
@@ -767,13 +767,13 @@ nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
         const char *s = JS_ToCString(ctx, v);
         if (s) {
             double r, g, b, a;
-            if (nd_canvas_parse_color(s, &r, &g, &b, &a)) {
+            if (ns_canvas_parse_color(s, &r, &g, &b, &a)) {
                 st->fill_r = r; st->fill_g = g; st->fill_b = b; st->fill_a = a;
             }
             JS_FreeCString(ctx, s);
         }
     } else if (JS_IsObject(v)) {
-        st->fill_pattern = nd_ctx_build_pattern(ctx, v);
+        st->fill_pattern = ns_ctx_build_pattern(ctx, v);
     }
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "strokeStyle");
@@ -781,13 +781,13 @@ nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
         const char *s = JS_ToCString(ctx, v);
         if (s) {
             double r, g, b, a;
-            if (nd_canvas_parse_color(s, &r, &g, &b, &a)) {
+            if (ns_canvas_parse_color(s, &r, &g, &b, &a)) {
                 st->stroke_r = r; st->stroke_g = g; st->stroke_b = b; st->stroke_a = a;
             }
             JS_FreeCString(ctx, s);
         }
     } else if (JS_IsObject(v)) {
-        st->stroke_pattern = nd_ctx_build_pattern(ctx, v);
+        st->stroke_pattern = ns_ctx_build_pattern(ctx, v);
     }
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "lineWidth");
@@ -834,7 +834,7 @@ nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
         const char *s = JS_ToCString(ctx, v);
         if (s) {
             double r, g, b, a;
-            if (nd_canvas_parse_color(s, &r, &g, &b, &a)) {
+            if (ns_canvas_parse_color(s, &r, &g, &b, &a)) {
                 st->shadow_r = r; st->shadow_g = g;
                 st->shadow_b = b; st->shadow_a = a;
             }
@@ -860,7 +860,7 @@ nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "_dashes");
     if (JS_IsArray(v)) {
-        uint32_t n = nd_js_array_length(ctx, v);
+        uint32_t n = ns_js_array_length(ctx, v);
         if (n == 0) {
             cairo_set_dash(st->cr, NULL, 0, 0);
         } else {
@@ -881,14 +881,14 @@ nd_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
 }
 
 gboolean
-nd_ctx_has_shadow(const nd_canvas_state *st)
+ns_ctx_has_shadow(const ns_canvas_state *st)
 {
     if (!st || st->shadow_a <= 0) return FALSE;
     return st->shadow_ox != 0 || st->shadow_oy != 0 || st->shadow_blur > 0;
 }
 
 void
-nd_box_blur_argb(uint8_t *data, int w, int h, int stride, int radius)
+ns_box_blur_argb(uint8_t *data, int w, int h, int stride, int radius)
 {
     if (radius <= 0 || w <= 0 || h <= 0) return;
     if (radius > 64) radius = 64;
@@ -933,10 +933,10 @@ nd_box_blur_argb(uint8_t *data, int w, int h, int stride, int radius)
 }
 
 void
-nd_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st,
-                   nd_ctx_drawfn draw, void *ud)
+ns_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st,
+                   ns_ctx_drawfn draw, void *ud)
 {
-    if (!nd_ctx_has_shadow(st)) {
+    if (!ns_ctx_has_shadow(st)) {
         draw(st->cr, ud);
         return;
     }
@@ -973,7 +973,7 @@ nd_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st,
         }
         int radius = (int)(st->shadow_blur * 0.5 + 0.5);
         if (radius > 0)
-            nd_box_blur_argb(data, sw, sh, stride, radius);
+            ns_box_blur_argb(data, sw, sh, stride, radius);
         cairo_surface_mark_dirty(off);
     }
     cairo_save(st->cr);
@@ -987,50 +987,50 @@ nd_ctx_with_shadow(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st,
 }
 
 void
-nd_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
+ns_ctx_set_fill_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
-    double ga = nd_ctx_global_alpha(ctx, this_val);
+    double ga = ns_ctx_global_alpha(ctx, this_val);
     if (st->fill_pattern) cairo_set_source(st->cr, st->fill_pattern);
     else cairo_set_source_rgba(st->cr, st->fill_r, st->fill_g, st->fill_b,
                                st->fill_a * ga);
 }
 
 void
-nd_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, nd_canvas_state *st)
+ns_ctx_set_stroke_source(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
 {
-    double ga = nd_ctx_global_alpha(ctx, this_val);
+    double ga = ns_ctx_global_alpha(ctx, this_val);
     if (st->stroke_pattern) cairo_set_source(st->cr, st->stroke_pattern);
     else cairo_set_source_rgba(st->cr, st->stroke_r, st->stroke_g, st->stroke_b,
                                st->stroke_a * ga);
 }
 
 void
-nd_draw_fillrect(cairo_t *cr, void *vud)
+ns_draw_fillrect(cairo_t *cr, void *vud)
 {
-    nd_draw_rect_ud *u = vud;
-    if (cr == u->st->cr) nd_ctx_set_fill_source(u->ctx, u->this_val, u->st);
+    ns_draw_rect_ud *u = vud;
+    if (cr == u->st->cr) ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
     else {
-        double ga = nd_ctx_global_alpha(u->ctx, u->this_val);
+        double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
         cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
                               u->st->fill_b, u->st->fill_a * ga);
     }
-    nd_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
     cairo_rectangle(cr, u->x, u->y, u->w, u->h);
     cairo_fill(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
 void
-nd_draw_strokerect(cairo_t *cr, void *vud)
+ns_draw_strokerect(cairo_t *cr, void *vud)
 {
-    nd_draw_rect_ud *u = vud;
-    if (cr == u->st->cr) nd_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
+    ns_draw_rect_ud *u = vud;
+    if (cr == u->st->cr) ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
     else {
-        double ga = nd_ctx_global_alpha(u->ctx, u->this_val);
+        double ga = ns_ctx_global_alpha(u->ctx, u->this_val);
         cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
                               u->st->stroke_b, u->st->stroke_a * ga);
     }
-    nd_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
     cairo_set_line_width(cr, u->lw);
     cairo_rectangle(cr, u->x, u->y, u->w, u->h);
     cairo_stroke(cr);
@@ -1038,103 +1038,103 @@ nd_draw_strokerect(cairo_t *cr, void *vud)
 }
 
 JSValue
-nd_ctx_fillRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_fillRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
-    nd_draw_rect_ud u = {
-        .x = nd_arg_d(ctx, argv[0]), .y = nd_arg_d(ctx, argv[1]),
-        .w = nd_arg_d(ctx, argv[2]), .h = nd_arg_d(ctx, argv[3]),
+    ns_ctx_sync_styles(ctx, this_val, st);
+    ns_draw_rect_ud u = {
+        .x = ns_arg_d(ctx, argv[0]), .y = ns_arg_d(ctx, argv[1]),
+        .w = ns_arg_d(ctx, argv[2]), .h = ns_arg_d(ctx, argv[3]),
         .lw = st->line_width, .ctx = ctx, .this_val = this_val, .st = st,
     };
-    nd_ctx_with_shadow(ctx, this_val, st, nd_draw_fillrect, &u);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_fillrect, &u);
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_strokeRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_strokeRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
-    nd_draw_rect_ud u = {
-        .x = nd_arg_d(ctx, argv[0]), .y = nd_arg_d(ctx, argv[1]),
-        .w = nd_arg_d(ctx, argv[2]), .h = nd_arg_d(ctx, argv[3]),
+    ns_ctx_sync_styles(ctx, this_val, st);
+    ns_draw_rect_ud u = {
+        .x = ns_arg_d(ctx, argv[0]), .y = ns_arg_d(ctx, argv[1]),
+        .w = ns_arg_d(ctx, argv[2]), .h = ns_arg_d(ctx, argv[3]),
         .lw = st->line_width, .ctx = ctx, .this_val = this_val, .st = st,
     };
-    nd_ctx_with_shadow(ctx, this_val, st, nd_draw_strokerect, &u);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_strokerect, &u);
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_clearRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_clearRect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     cairo_set_operator(st->cr, CAIRO_OPERATOR_CLEAR);
     cairo_rectangle(st->cr,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
     cairo_fill(st->cr);
     cairo_restore(st->cr);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_beginPath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_beginPath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st) cairo_new_path(st->cr);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_closePath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_closePath(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st) cairo_close_path(st->cr);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_moveTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_moveTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
-    if (st) cairo_move_to(st->cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st) cairo_move_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_lineTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_lineTo(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
-    if (st) cairo_line_to(st->cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st) cairo_line_to(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_arc(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_arc(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 5) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[0]);
-    double y = nd_arg_d(ctx, argv[1]);
-    double r = nd_arg_d(ctx, argv[2]);
-    double a0 = nd_arg_d(ctx, argv[3]);
-    double a1 = nd_arg_d(ctx, argv[4]);
+    double x = ns_arg_d(ctx, argv[0]);
+    double y = ns_arg_d(ctx, argv[1]);
+    double r = ns_arg_d(ctx, argv[2]);
+    double a0 = ns_arg_d(ctx, argv[3]);
+    double a1 = ns_arg_d(ctx, argv[4]);
     gboolean ccw = argc >= 6 && JS_ToBool(ctx, argv[5]);
     if (ccw) cairo_arc_negative(st->cr, x, y, r, a0, a1);
     else     cairo_arc(st->cr, x, y, r, a0, a1);
@@ -1142,28 +1142,28 @@ nd_ctx_arc(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 }
 
 JSValue
-nd_ctx_rect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_rect(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st)
         cairo_rectangle(st->cr,
-            nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-            nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]));
+            ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+            ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
     return JS_UNDEFINED;
 }
 
 gboolean
-nd_value_is_path2d(JSValueConst v)
+ns_value_is_path2d(JSValueConst v)
 {
     if (!JS_IsObject(v)) return FALSE;
-    return JS_GetOpaque(v, nd_path2d_class_id) != NULL;
+    return JS_GetOpaque(v, ns_path2d_class_id) != NULL;
 }
 
 void
-nd_replay_path2d(cairo_t *target, JSValueConst path_v)
+ns_replay_path2d(cairo_t *target, JSValueConst path_v)
 {
-    nd_path2d *p = JS_GetOpaque(path_v, nd_path2d_class_id);
+    ns_path2d *p = JS_GetOpaque(path_v, ns_path2d_class_id);
     if (!p) return;
     cairo_path_t *cp = cairo_copy_path(p->cr);
     cairo_new_path(target);
@@ -1172,19 +1172,19 @@ nd_replay_path2d(cairo_t *target, JSValueConst path_v)
 }
 
 cairo_fill_rule_t
-nd_parse_fill_rule(const char *s)
+ns_parse_fill_rule(const char *s)
 {
     if (s && !strcmp(s, "evenodd")) return CAIRO_FILL_RULE_EVEN_ODD;
     return CAIRO_FILL_RULE_WINDING;
 }
 
 cairo_path_t *
-nd_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
+ns_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
                              int argc, JSValueConst *argv)
 {
     JSValueConst path_v = JS_UNDEFINED;
     const char *rule_s = NULL;
-    if (argc >= 1 && nd_value_is_path2d(argv[0])) {
+    if (argc >= 1 && ns_value_is_path2d(argv[0])) {
         path_v = argv[0];
         if (argc >= 2 && JS_IsString(argv[1]))
             rule_s = JS_ToCString(ctx, argv[1]);
@@ -1194,15 +1194,15 @@ nd_ctx_prepare_path_and_rule(JSContext *ctx, cairo_t *cr,
     cairo_path_t *saved = NULL;
     if (!JS_IsUndefined(path_v)) {
         saved = cairo_copy_path(cr);
-        nd_replay_path2d(cr, path_v);
+        ns_replay_path2d(cr, path_v);
     }
-    cairo_set_fill_rule(cr, nd_parse_fill_rule(rule_s));
+    cairo_set_fill_rule(cr, ns_parse_fill_rule(rule_s));
     if (rule_s) JS_FreeCString(ctx, rule_s);
     return saved;
 }
 
 void
-nd_ctx_restore_path(cairo_t *cr, cairo_path_t *saved)
+ns_ctx_restore_path(cairo_t *cr, cairo_path_t *saved)
 {
     if (!saved) return;
     cairo_new_path(cr);
@@ -1211,88 +1211,88 @@ nd_ctx_restore_path(cairo_t *cr, cairo_path_t *saved)
 }
 
 void
-nd_draw_fillpath(cairo_t *cr, void *vud)
+ns_draw_fillpath(cairo_t *cr, void *vud)
 {
-    nd_draw_path_ud *u = vud;
+    ns_draw_path_ud *u = vud;
     if (cr != u->st->cr) {
         cairo_new_path(cr);
         if (u->snapshot) cairo_append_path(cr, u->snapshot);
         cairo_set_source_rgba(cr, u->st->fill_r, u->st->fill_g,
                               u->st->fill_b, u->st->fill_a *
-                              nd_ctx_global_alpha(u->ctx, u->this_val));
+                              ns_ctx_global_alpha(u->ctx, u->this_val));
     } else {
-        nd_ctx_set_fill_source(u->ctx, u->this_val, u->st);
+        ns_ctx_set_fill_source(u->ctx, u->this_val, u->st);
     }
     cairo_set_fill_rule(cr, u->fill_rule);
-    nd_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
     cairo_fill_preserve(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
 void
-nd_draw_strokepath(cairo_t *cr, void *vud)
+ns_draw_strokepath(cairo_t *cr, void *vud)
 {
-    nd_draw_path_ud *u = vud;
+    ns_draw_path_ud *u = vud;
     if (cr != u->st->cr) {
         cairo_new_path(cr);
         if (u->snapshot) cairo_append_path(cr, u->snapshot);
         cairo_set_source_rgba(cr, u->st->stroke_r, u->st->stroke_g,
                               u->st->stroke_b, u->st->stroke_a *
-                              nd_ctx_global_alpha(u->ctx, u->this_val));
+                              ns_ctx_global_alpha(u->ctx, u->this_val));
     } else {
-        nd_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
+        ns_ctx_set_stroke_source(u->ctx, u->this_val, u->st);
     }
-    nd_ctx_apply_composite(u->ctx, u->this_val, cr);
+    ns_ctx_apply_composite(u->ctx, u->this_val, cr);
     cairo_set_line_width(cr, u->lw);
     cairo_stroke_preserve(cr);
     cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 }
 
 JSValue
-nd_ctx_fill(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_fill(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
-    cairo_path_t *saved = nd_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
-    cairo_path_t *snap = nd_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
-    nd_draw_path_ud u = {
+    ns_ctx_sync_styles(ctx, this_val, st);
+    cairo_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
+    cairo_path_t *snap = ns_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
+    ns_draw_path_ud u = {
         .ctx = ctx, .this_val = this_val, .st = st,
         .lw = st->line_width, .snapshot = snap,
         .fill_rule = cairo_get_fill_rule(st->cr),
     };
-    nd_ctx_with_shadow(ctx, this_val, st, nd_draw_fillpath, &u);
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_fillpath, &u);
     if (snap) cairo_path_destroy(snap);
-    nd_ctx_restore_path(st->cr, saved);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    ns_ctx_restore_path(st->cr, saved);
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_stroke(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_stroke(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
+    ns_ctx_sync_styles(ctx, this_val, st);
     cairo_path_t *saved = NULL;
-    if (argc >= 1 && nd_value_is_path2d(argv[0])) {
+    if (argc >= 1 && ns_value_is_path2d(argv[0])) {
         saved = cairo_copy_path(st->cr);
-        nd_replay_path2d(st->cr, argv[0]);
+        ns_replay_path2d(st->cr, argv[0]);
     }
-    cairo_path_t *snap = nd_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
-    nd_draw_path_ud u = {
+    cairo_path_t *snap = ns_ctx_has_shadow(st) ? cairo_copy_path(st->cr) : NULL;
+    ns_draw_path_ud u = {
         .ctx = ctx, .this_val = this_val, .st = st,
         .lw = st->line_width, .snapshot = snap,
         .fill_rule = cairo_get_fill_rule(st->cr),
     };
-    nd_ctx_with_shadow(ctx, this_val, st, nd_draw_strokepath, &u);
+    ns_ctx_with_shadow(ctx, this_val, st, ns_draw_strokepath, &u);
     if (snap) cairo_path_destroy(snap);
-    nd_ctx_restore_path(st->cr, saved);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    ns_ctx_restore_path(st->cr, saved);
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
-static const char *nd_ctx_savable_props[] = {
+static const char *ns_ctx_savable_props[] = {
     "fillStyle", "strokeStyle", "font", "textAlign", "textBaseline",
     "direction", "globalAlpha", "globalCompositeOperation",
     "shadowColor", "shadowBlur", "shadowOffsetX", "shadowOffsetY",
@@ -1304,10 +1304,10 @@ static const char *nd_ctx_savable_props[] = {
 };
 
 JSValue
-nd_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     JSValue stack = JS_GetPropertyStr(ctx, this_val, "_stateStack");
@@ -1317,30 +1317,30 @@ nd_ctx_save(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         JS_SetPropertyStr(ctx, this_val, "_stateStack", JS_DupValue(ctx, stack));
     }
     JSValue snap = JS_NewObject(ctx);
-    for (gsize i = 0; i < G_N_ELEMENTS(nd_ctx_savable_props); i++) {
-        JSValue v = JS_GetPropertyStr(ctx, this_val, nd_ctx_savable_props[i]);
-        JS_SetPropertyStr(ctx, snap, nd_ctx_savable_props[i], v);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
+        JSValue v = JS_GetPropertyStr(ctx, this_val, ns_ctx_savable_props[i]);
+        JS_SetPropertyStr(ctx, snap, ns_ctx_savable_props[i], v);
     }
-    uint32_t n = nd_js_array_length(ctx, stack);
+    uint32_t n = ns_js_array_length(ctx, stack);
     JS_SetPropertyUint32(ctx, stack, n, snap);
     JS_FreeValue(ctx, stack);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     JSValue stack = JS_GetPropertyStr(ctx, this_val, "_stateStack");
     if (!JS_IsArray(stack)) { JS_FreeValue(ctx, stack); return JS_UNDEFINED; }
-    uint32_t n = nd_js_array_length(ctx, stack);
+    uint32_t n = ns_js_array_length(ctx, stack);
     if (n == 0) { JS_FreeValue(ctx, stack); return JS_UNDEFINED; }
     JSValue snap = JS_GetPropertyUint32(ctx, stack, n - 1);
-    for (gsize i = 0; i < G_N_ELEMENTS(nd_ctx_savable_props); i++) {
-        JSValue v = JS_GetPropertyStr(ctx, snap, nd_ctx_savable_props[i]);
-        JS_SetPropertyStr(ctx, this_val, nd_ctx_savable_props[i], v);
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_ctx_savable_props); i++) {
+        JSValue v = JS_GetPropertyStr(ctx, snap, ns_ctx_savable_props[i]);
+        JS_SetPropertyStr(ctx, this_val, ns_ctx_savable_props[i], v);
     }
     JS_FreeValue(ctx, snap);
     JSAtom len_atom = JS_NewAtom(ctx, "length");
@@ -1352,34 +1352,34 @@ nd_ctx_restore(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 }
 
 JSValue
-nd_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_translate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
-    if (st) cairo_translate(st->cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st) cairo_translate(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_scale(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
-    if (st) cairo_scale(st->cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st) cairo_scale(st->cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_rotate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 1) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
-    if (st) cairo_rotate(st->cr, nd_arg_d(ctx, argv[0]));
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st) cairo_rotate(st->cr, ns_arg_d(ctx, argv[0]));
     return JS_UNDEFINED;
 }
 
 PangoFontDescription *
-nd_canvas_font_desc(const char *css_font)
+ns_canvas_font_desc(const char *css_font)
 {
     const char *src = css_font && *css_font ? css_font : "10px sans-serif";
     double size_px = 10.0;
@@ -1425,7 +1425,7 @@ nd_canvas_font_desc(const char *css_font)
 }
 
 gboolean
-nd_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val)
+ns_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "direction");
     gboolean rtl = FALSE;
@@ -1438,13 +1438,13 @@ nd_ctx_direction_is_rtl(JSContext *ctx, JSValueConst this_val)
 }
 
 void
-nd_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
-                  nd_canvas_state *st, const char *text,
+ns_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
+                  ns_canvas_state *st, const char *text,
                   double x, double y, double max_width,
                   gboolean stroke)
 {
     PangoLayout *layout = pango_cairo_create_layout(st->cr);
-    PangoFontDescription *desc = nd_canvas_font_desc(st->font);
+    PangoFontDescription *desc = ns_canvas_font_desc(st->font);
     pango_layout_set_font_description(layout, desc);
     pango_layout_set_text(layout, text, -1);
     PangoRectangle ink, logical;
@@ -1467,7 +1467,7 @@ nd_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
         dy = -baseline_offset;
     }
     JS_FreeValue(ctx, baseline_v);
-    gboolean rtl = nd_ctx_direction_is_rtl(ctx, this_val);
+    gboolean rtl = ns_ctx_direction_is_rtl(ctx, this_val);
     JSValue align_v = JS_GetPropertyStr(ctx, this_val, "textAlign");
     double dx = 0;
     double tw = (double)logical.width / PANGO_SCALE;
@@ -1491,17 +1491,17 @@ nd_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
     double xscale = 1.0;
     if (max_width > 0 && tw > max_width) xscale = max_width / tw;
     cairo_save(st->cr);
-    nd_ctx_apply_composite(ctx, this_val, st->cr);
+    ns_ctx_apply_composite(ctx, this_val, st->cr);
     cairo_translate(st->cr, x + dx * xscale, y + dy);
     if (xscale < 1.0) cairo_scale(st->cr, xscale, 1.0);
     if (stroke) {
-        nd_ctx_set_stroke_source(ctx, this_val, st);
+        ns_ctx_set_stroke_source(ctx, this_val, st);
         cairo_set_line_width(st->cr, st->line_width);
         cairo_move_to(st->cr, 0, 0);
         pango_cairo_layout_path(st->cr, layout);
         cairo_stroke(st->cr);
     } else {
-        nd_ctx_set_fill_source(ctx, this_val, st);
+        ns_ctx_set_fill_source(ctx, this_val, st);
         cairo_move_to(st->cr, 0, 0);
         pango_cairo_show_layout(st->cr, layout);
     }
@@ -1511,35 +1511,35 @@ nd_ctx_paint_text(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_fillText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     if (argc < 3) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
+    ns_ctx_sync_styles(ctx, this_val, st);
     const char *text = JS_ToCString(ctx, argv[0]);
     if (!text) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[1]);
-    double y = nd_arg_d(ctx, argv[2]);
-    double mw = argc >= 4 ? nd_arg_d(ctx, argv[3]) : 0;
-    nd_ctx_paint_text(ctx, this_val, st, text, x, y, mw, FALSE);
+    double x = ns_arg_d(ctx, argv[1]);
+    double y = ns_arg_d(ctx, argv[2]);
+    double mw = argc >= 4 ? ns_arg_d(ctx, argv[3]) : 0;
+    ns_ctx_paint_text(ctx, this_val, st, text, x, y, mw, FALSE);
     JS_FreeCString(ctx, text);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+ns_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     JSValue obj = JS_NewObject(ctx);
     double width = 0, ascent = 0, descent = 0;
     double font_ascent = 0, font_descent = 0;
-    nd_canvas_state *st = argc >= 1 ? nd_ctx_state(ctx, this_val) : NULL;
+    ns_canvas_state *st = argc >= 1 ? ns_ctx_state(ctx, this_val) : NULL;
     const char *text = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     if (text && st) {
-        nd_ctx_sync_styles(ctx, this_val, st);
+        ns_ctx_sync_styles(ctx, this_val, st);
         PangoLayout *layout = pango_cairo_create_layout(st->cr);
-        PangoFontDescription *desc = nd_canvas_font_desc(st->font);
+        PangoFontDescription *desc = ns_canvas_font_desc(st->font);
         pango_layout_set_font_description(layout, desc);
         pango_layout_set_text(layout, text, -1);
         PangoRectangle ink, logical;
@@ -1577,14 +1577,14 @@ nd_ctx_measureText(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
 }
 
 JSValue
-nd_ctx_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
+ns_ctx_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double cpx = nd_arg_d(ctx, argv[0]), cpy = nd_arg_d(ctx, argv[1]);
-    double x   = nd_arg_d(ctx, argv[2]), y   = nd_arg_d(ctx, argv[3]);
+    double cpx = ns_arg_d(ctx, argv[0]), cpy = ns_arg_d(ctx, argv[1]);
+    double x   = ns_arg_d(ctx, argv[2]), y   = ns_arg_d(ctx, argv[3]);
     double x0, y0;
     cairo_get_current_point(st->cr, &x0, &y0);
     cairo_curve_to(st->cr,
@@ -1595,28 +1595,28 @@ nd_ctx_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
+ns_ctx_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     if (argc < 6) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st) cairo_curve_to(st->cr,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]),
-        nd_arg_d(ctx, argv[4]), nd_arg_d(ctx, argv[5]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
+        ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_arcTo(JSContext *ctx, JSValueConst this_val,
+ns_ctx_arcTo(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
 {
     if (argc < 5) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double x1 = nd_arg_d(ctx, argv[0]), y1 = nd_arg_d(ctx, argv[1]);
-    double x2 = nd_arg_d(ctx, argv[2]), y2 = nd_arg_d(ctx, argv[3]);
-    double r  = nd_arg_d(ctx, argv[4]);
+    double x1 = ns_arg_d(ctx, argv[0]), y1 = ns_arg_d(ctx, argv[1]);
+    double x2 = ns_arg_d(ctx, argv[2]), y2 = ns_arg_d(ctx, argv[3]);
+    double r  = ns_arg_d(ctx, argv[4]);
     double x0, y0;
     cairo_get_current_point(st->cr, &x0, &y0);
     double a1x = x0 - x1, a1y = y0 - y1;
@@ -1650,19 +1650,19 @@ nd_ctx_arcTo(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
+ns_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
 {
     if (argc < 7) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double x  = nd_arg_d(ctx, argv[0]);
-    double y  = nd_arg_d(ctx, argv[1]);
-    double rx = nd_arg_d(ctx, argv[2]);
-    double ry = nd_arg_d(ctx, argv[3]);
-    double rot = nd_arg_d(ctx, argv[4]);
-    double a0 = nd_arg_d(ctx, argv[5]);
-    double a1 = nd_arg_d(ctx, argv[6]);
+    double x  = ns_arg_d(ctx, argv[0]);
+    double y  = ns_arg_d(ctx, argv[1]);
+    double rx = ns_arg_d(ctx, argv[2]);
+    double ry = ns_arg_d(ctx, argv[3]);
+    double rot = ns_arg_d(ctx, argv[4]);
+    double a0 = ns_arg_d(ctx, argv[5]);
+    double a1 = ns_arg_d(ctx, argv[6]);
     gboolean ccw = argc >= 8 && JS_ToBool(ctx, argv[7]);
     cairo_save(st->cr);
     cairo_translate(st->cr, x, y);
@@ -1675,19 +1675,19 @@ nd_ctx_ellipse(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_clip(JSContext *ctx, JSValueConst this_val,
+ns_ctx_clip(JSContext *ctx, JSValueConst this_val,
             int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    cairo_path_t *saved = nd_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
+    cairo_path_t *saved = ns_ctx_prepare_path_and_rule(ctx, st->cr, argc, argv);
     cairo_clip_preserve(st->cr);
-    nd_ctx_restore_path(st->cr, saved);
+    ns_ctx_restore_path(st->cr, saved);
     return JS_UNDEFINED;
 }
 
 gboolean
-nd_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m)
+ns_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m)
 {
     if (!JS_IsObject(v)) return FALSE;
     double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
@@ -1703,10 +1703,10 @@ nd_matrix_from_obj(JSContext *ctx, JSValueConst v, cairo_matrix_t *m)
 }
 
 JSValue
-nd_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
+ns_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_matrix_t m;
     if (argc == 0) {
@@ -1714,54 +1714,54 @@ nd_ctx_setTransform(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     }
     if (argc == 1) {
-        if (!nd_matrix_from_obj(ctx, argv[0], &m)) return JS_UNDEFINED;
+        if (!ns_matrix_from_obj(ctx, argv[0], &m)) return JS_UNDEFINED;
         cairo_set_matrix(st->cr, &m);
         return JS_UNDEFINED;
     }
     if (argc < 6) return JS_UNDEFINED;
     cairo_matrix_init(&m,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]),
-        nd_arg_d(ctx, argv[4]), nd_arg_d(ctx, argv[5]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
+        ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
     cairo_set_matrix(st->cr, &m);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_transform(JSContext *ctx, JSValueConst this_val,
+ns_ctx_transform(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     if (argc < 6) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_matrix_t m;
     cairo_matrix_init(&m,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]),
-        nd_arg_d(ctx, argv[4]), nd_arg_d(ctx, argv[5]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
+        ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
     cairo_transform(st->cr, &m);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_resetTransform(JSContext *ctx, JSValueConst this_val,
+ns_ctx_resetTransform(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (st) cairo_identity_matrix(st->cr);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_setLineDash(JSContext *ctx, JSValueConst this_val,
+ns_ctx_setLineDash(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     JSValue stored = JS_NewArray(ctx);
     if (argc >= 1 && JS_IsArray(argv[0])) {
-        uint32_t n = nd_js_array_length(ctx, argv[0]);
+        uint32_t n = ns_js_array_length(ctx, argv[0]);
         uint32_t out = 0;
         gboolean dup = (n % 2 == 1);
         for (uint32_t pass = 0; pass < (dup ? 2u : 1u); pass++) {
@@ -1780,7 +1780,7 @@ nd_ctx_setLineDash(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_getLineDash(JSContext *ctx, JSValueConst this_val,
+ns_ctx_getLineDash(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
@@ -1789,7 +1789,7 @@ nd_ctx_getLineDash(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, cur);
         return JS_NewArray(ctx);
     }
-    uint32_t n = nd_js_array_length(ctx, cur);
+    uint32_t n = ns_js_array_length(ctx, cur);
     JSValue out = JS_NewArray(ctx);
     for (uint32_t i = 0; i < n; i++) {
         JSValue e = JS_GetPropertyUint32(ctx, cur, i);
@@ -1800,16 +1800,16 @@ nd_ctx_getLineDash(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
+ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
-    double pos = nd_arg_d(ctx, argv[0]);
+    double pos = ns_arg_d(ctx, argv[0]);
     if (!JS_IsString(argv[1])) return JS_UNDEFINED;
     const char *col = JS_ToCString(ctx, argv[1]);
     if (!col) return JS_UNDEFINED;
     double r, g, b, a;
-    gboolean ok = nd_canvas_parse_color(col, &r, &g, &b, &a);
+    gboolean ok = ns_canvas_parse_color(col, &r, &g, &b, &a);
     JS_FreeCString(ctx, col);
     if (!ok) return JS_UNDEFINED;
     JSValue stops = JS_GetPropertyStr(ctx, this_val, "_stops");
@@ -1832,27 +1832,27 @@ nd_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
 }
 
 cairo_surface_t *
-nd_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h)
+ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h)
 {
     if (!JS_IsObject(src)) return NULL;
-    nd_image_bitmap *bm = JS_GetOpaque(src, nd_image_bitmap_class_id);
+    ns_image_bitmap *bm = JS_GetOpaque(src, ns_image_bitmap_class_id);
     if (bm && bm->surf) {
         *out_w = bm->w;
         *out_h = bm->h;
         return cairo_surface_reference(bm->surf);
     }
-    const nd_node *n = nd_unwrap_element(src);
+    const ns_node *n = ns_unwrap_element(src);
     if (!n) {
         JSValue nv = JS_GetPropertyStr(ctx, src, "_node");
-        n = nd_unwrap_element(nv);
+        n = ns_unwrap_element(nv);
         JS_FreeValue(ctx, nv);
     }
     if (!n || !n->name) return NULL;
-    nd_js *js = js_from_ctx(ctx);
+    ns_js *js = js_from_ctx(ctx);
     if (!js) return NULL;
     if (strcmp(n->name, "canvas") == 0) {
         if (js->canvas_states) {
-            nd_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
+            ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
             if (st && st->surf) {
                 *out_w = st->w;
                 *out_h = st->h;
@@ -1861,25 +1861,25 @@ nd_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         }
         return NULL;
     }
-    nd_texture *tex = NULL;
+    ns_texture *tex = NULL;
     if (js->layout_root) {
-        const nd_box *b = nd_box_find_by_dom(js->layout_root, n);
+        const ns_box *b = ns_box_find_by_dom(js->layout_root, n);
         if (b && b->media) {
             if (strcmp(n->name, "img") == 0 && b->media->image) {
-                const nd_image *im = (const nd_image *)b->media->image;
+                const ns_image *im = (const ns_image *)b->media->image;
                 if (im->texture) tex = im->texture;
             } else if (strcmp(n->name, "video") == 0 && b->media->video) {
-                const nd_video *v = (const nd_video *)b->media->video;
+                const ns_video *v = (const ns_video *)b->media->video;
                 tex = v->poster_texture;
             }
         }
     }
-    nd_image *im_cache = NULL;
+    ns_image *im_cache = NULL;
     if (!tex && strcmp(n->name, "img") == 0) {
-        const nd_image *im = nd_js_image_for_node(js, n);
+        const ns_image *im = ns_js_image_for_node(js, n);
         if (im && im->texture) {
             tex = im->texture;
-            if (!im->anim_frames) im_cache = (nd_image *)im;
+            if (!im->anim_frames) im_cache = (ns_image *)im;
         }
     }
     if (!tex) return NULL;
@@ -1889,8 +1889,8 @@ nd_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         *out_h = cairo_image_surface_get_height(cached);
         return cairo_surface_reference(cached);
     }
-    int iw = nd_texture_get_width(tex);
-    int ih = nd_texture_get_height(tex);
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
     if (iw <= 0 || ih <= 0) return NULL;
     cairo_surface_t *surf =
         cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
@@ -1900,7 +1900,7 @@ nd_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
     }
     guchar *dst = cairo_image_surface_get_data(surf);
     int dst_stride = cairo_image_surface_get_stride(surf);
-    nd_texture_download(tex, dst, (gsize)dst_stride);
+    ns_texture_download(tex, dst, (gsize)dst_stride);
     cairo_surface_mark_dirty(surf);
     *out_w = iw;
     *out_h = ih;
@@ -1910,23 +1910,23 @@ nd_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
 }
 
 cairo_surface_t *
-nd_js_drawimage_source_surface(JSContext *ctx, JSValueConst src,
+ns_js_drawimage_source_surface(JSContext *ctx, JSValueConst src,
                                int *out_w, int *out_h)
 {
     *out_w = 0;
     *out_h = 0;
-    return nd_ctx_drawimage_source(ctx, src, out_w, out_h);
+    return ns_ctx_drawimage_source(ctx, src, out_w, out_h);
 }
 
 JSValue
-nd_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
+ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     if (argc < 3) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     int sw_total = 0, sh_total = 0;
-    cairo_surface_t *src = nd_ctx_drawimage_source(ctx, argv[0],
+    cairo_surface_t *src = ns_ctx_drawimage_source(ctx, argv[0],
                                                    &sw_total, &sh_total);
     if (!src || sw_total <= 0 || sh_total <= 0) {
         if (src) cairo_surface_destroy(src);
@@ -1934,34 +1934,34 @@ nd_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     }
     double sx, sy, sw, sh, dx, dy, dw, dh;
     if (argc >= 9) {
-        sx = nd_arg_d(ctx, argv[1]);
-        sy = nd_arg_d(ctx, argv[2]);
-        sw = nd_arg_d(ctx, argv[3]);
-        sh = nd_arg_d(ctx, argv[4]);
-        dx = nd_arg_d(ctx, argv[5]);
-        dy = nd_arg_d(ctx, argv[6]);
-        dw = nd_arg_d(ctx, argv[7]);
-        dh = nd_arg_d(ctx, argv[8]);
+        sx = ns_arg_d(ctx, argv[1]);
+        sy = ns_arg_d(ctx, argv[2]);
+        sw = ns_arg_d(ctx, argv[3]);
+        sh = ns_arg_d(ctx, argv[4]);
+        dx = ns_arg_d(ctx, argv[5]);
+        dy = ns_arg_d(ctx, argv[6]);
+        dw = ns_arg_d(ctx, argv[7]);
+        dh = ns_arg_d(ctx, argv[8]);
     } else if (argc >= 5) {
         sx = 0; sy = 0; sw = sw_total; sh = sh_total;
-        dx = nd_arg_d(ctx, argv[1]);
-        dy = nd_arg_d(ctx, argv[2]);
-        dw = nd_arg_d(ctx, argv[3]);
-        dh = nd_arg_d(ctx, argv[4]);
+        dx = ns_arg_d(ctx, argv[1]);
+        dy = ns_arg_d(ctx, argv[2]);
+        dw = ns_arg_d(ctx, argv[3]);
+        dh = ns_arg_d(ctx, argv[4]);
     } else {
         sx = 0; sy = 0; sw = sw_total; sh = sh_total;
-        dx = nd_arg_d(ctx, argv[1]);
-        dy = nd_arg_d(ctx, argv[2]);
+        dx = ns_arg_d(ctx, argv[1]);
+        dy = ns_arg_d(ctx, argv[2]);
         dw = sw_total; dh = sh_total;
     }
     if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) {
         cairo_surface_destroy(src);
         return JS_UNDEFINED;
     }
-    double ga = nd_ctx_global_alpha(ctx, this_val);
-    gboolean smooth = nd_ctx_image_smoothing(ctx, this_val);
+    double ga = ns_ctx_global_alpha(ctx, this_val);
+    gboolean smooth = ns_ctx_image_smoothing(ctx, this_val);
     cairo_save(st->cr);
-    nd_ctx_apply_composite(ctx, this_val, st->cr);
+    ns_ctx_apply_composite(ctx, this_val, st->cr);
     cairo_translate(st->cr, dx, dy);
     cairo_scale(st->cr, dw / sw, dh / sh);
     cairo_translate(st->cr, -sx, -sy);
@@ -1975,18 +1975,18 @@ nd_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     else                  cairo_paint(st->cr);
     cairo_restore(st->cr);
     cairo_surface_destroy(src);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
+ns_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
     int iw = 0, ih = 0;
-    cairo_surface_t *probe = nd_ctx_drawimage_source(ctx, argv[0], &iw, &ih);
+    cairo_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih);
     if (!probe) return JS_NULL;
     cairo_surface_destroy(probe);
     JSValue obj = JS_NewObject(ctx);
@@ -2009,43 +2009,43 @@ nd_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_createLinearGradient(JSContext *ctx, JSValueConst this_val,
+ns_ctx_createLinearGradient(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 4) return JS_NULL;
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "_type", JS_NewString(ctx, "linear"));
-    JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[0])));
-    JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[1])));
-    JS_SetPropertyStr(ctx, obj, "_x1", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[2])));
-    JS_SetPropertyStr(ctx, obj, "_y1", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[3])));
+    JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[0])));
+    JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[1])));
+    JS_SetPropertyStr(ctx, obj, "_x1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[2])));
+    JS_SetPropertyStr(ctx, obj, "_y1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[3])));
     JS_SetPropertyStr(ctx, obj, "_stops", JS_NewArray(ctx));
-    nd_bind_fn(ctx, obj, "addColorStop", nd_ctx_gradient_addColorStop, 2);
+    ns_bind_fn(ctx, obj, "addColorStop", ns_ctx_gradient_addColorStop, 2);
     return obj;
 }
 
 JSValue
-nd_ctx_createRadialGradient(JSContext *ctx, JSValueConst this_val,
+ns_ctx_createRadialGradient(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 6) return JS_NULL;
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "_type", JS_NewString(ctx, "radial"));
-    JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[0])));
-    JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[1])));
-    JS_SetPropertyStr(ctx, obj, "_r0", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[2])));
-    JS_SetPropertyStr(ctx, obj, "_x1", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[3])));
-    JS_SetPropertyStr(ctx, obj, "_y1", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[4])));
-    JS_SetPropertyStr(ctx, obj, "_r1", JS_NewFloat64(ctx, nd_arg_d(ctx, argv[5])));
+    JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[0])));
+    JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[1])));
+    JS_SetPropertyStr(ctx, obj, "_r0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[2])));
+    JS_SetPropertyStr(ctx, obj, "_x1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[3])));
+    JS_SetPropertyStr(ctx, obj, "_y1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[4])));
+    JS_SetPropertyStr(ctx, obj, "_r1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[5])));
     JS_SetPropertyStr(ctx, obj, "_stops", JS_NewArray(ctx));
-    nd_bind_fn(ctx, obj, "addColorStop", nd_ctx_gradient_addColorStop, 2);
+    ns_bind_fn(ctx, obj, "addColorStop", ns_ctx_gradient_addColorStop, 2);
     return obj;
 }
 
 JSValue
-nd_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
+ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
 {
     if (w <= 0 || h <= 0) return JS_NULL;
     if (w > 32767 || h > 32767) return JS_ThrowRangeError(ctx, "ImageData too large");
@@ -2074,7 +2074,7 @@ nd_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
 }
 
 JSValue
-nd_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
+ns_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -2094,15 +2094,15 @@ nd_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
     if (w < 0) w = -w;
     if (h < 0) h = -h;
     if (w == 0 || h == 0) return JS_NULL;
-    return nd_image_data_make(ctx, w, h, NULL);
+    return ns_image_data_make(ctx, w, h, NULL);
 }
 
 JSValue
-nd_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
+ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_NULL;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     int sx = 0, sy = 0, sw = 0, sh = 0;
     JS_ToInt32(ctx, &sx, argv[0]);
     JS_ToInt32(ctx, &sy, argv[1]);
@@ -2162,17 +2162,17 @@ nd_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
-    JSValue result = nd_image_data_make(ctx, sw, sh, out);
+    JSValue result = ns_image_data_make(ctx, sw, sh, out);
     g_free(out);
     return result;
 }
 
 JSValue
-nd_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
+ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     if (argc < 3 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st || !st->surf) return JS_UNDEFINED;
     JSValue wv = JS_GetPropertyStr(ctx, argv[0], "width");
     JSValue hv = JS_GetPropertyStr(ctx, argv[0], "height");
@@ -2245,32 +2245,32 @@ nd_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
     cairo_surface_mark_dirty(st->surf);
     JS_FreeValue(ctx, ab);
     JS_FreeValue(ctx, dv);
-    nd_js *_j = js_from_ctx(ctx);
+    ns_js *_j = js_from_ctx(ctx);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
+ns_ctx_strokeText(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
     if (argc < 3) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    nd_ctx_sync_styles(ctx, this_val, st);
+    ns_ctx_sync_styles(ctx, this_val, st);
     const char *text = JS_ToCString(ctx, argv[0]);
     if (!text) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[1]);
-    double y = nd_arg_d(ctx, argv[2]);
-    double mw = argc >= 4 ? nd_arg_d(ctx, argv[3]) : 0;
-    nd_ctx_paint_text(ctx, this_val, st, text, x, y, mw, TRUE);
+    double x = ns_arg_d(ctx, argv[1]);
+    double y = ns_arg_d(ctx, argv[2]);
+    double mw = argc >= 4 ? ns_arg_d(ctx, argv[3]) : 0;
+    ns_ctx_paint_text(ctx, this_val, st, text, x, y, mw, TRUE);
     JS_FreeCString(ctx, text);
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 void
-nd_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
+ns_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
                       double rtl, double rtr, double rbr, double rbl)
 {
     double aw = fabs(w), ah = fabs(h);
@@ -2291,12 +2291,12 @@ nd_round_rect_subpath(cairo_t *cr, double x, double y, double w, double h,
 }
 
 void
-nd_extract_radii(JSContext *ctx, JSValueConst v,
+ns_extract_radii(JSContext *ctx, JSValueConst v,
                  double *rtl, double *rtr, double *rbr, double *rbl)
 {
     *rtl = *rtr = *rbr = *rbl = 0;
     if (JS_IsArray(v)) {
-        uint32_t n = nd_js_array_length(ctx, v);
+        uint32_t n = ns_js_array_length(ctx, v);
         double r[4] = { 0, 0, 0, 0 };
         for (uint32_t i = 0; i < n && i < 4; i++) {
             JSValue e = JS_GetPropertyUint32(ctx, v, i);
@@ -2319,28 +2319,28 @@ nd_extract_radii(JSContext *ctx, JSValueConst v,
 }
 
 JSValue
-nd_ctx_roundRect(JSContext *ctx, JSValueConst this_val,
+ns_ctx_roundRect(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_UNDEFINED;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[0]);
-    double y = nd_arg_d(ctx, argv[1]);
-    double w = nd_arg_d(ctx, argv[2]);
-    double h = nd_arg_d(ctx, argv[3]);
+    double x = ns_arg_d(ctx, argv[0]);
+    double y = ns_arg_d(ctx, argv[1]);
+    double w = ns_arg_d(ctx, argv[2]);
+    double h = ns_arg_d(ctx, argv[3]);
     double rtl = 0, rtr = 0, rbr = 0, rbl = 0;
-    if (argc >= 5) nd_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl);
-    nd_round_rect_subpath(st->cr, x, y, w, h, rtl, rtr, rbr, rbl);
+    if (argc >= 5) ns_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl);
+    ns_round_rect_subpath(st->cr, x, y, w, h, rtl, rtr, rbr, rbl);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_reset(JSContext *ctx, JSValueConst this_val,
+ns_ctx_reset(JSContext *ctx, JSValueConst this_val,
              int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
     cairo_save(st->cr);
     cairo_identity_matrix(st->cr);
@@ -2386,144 +2386,144 @@ nd_ctx_reset(JSContext *ctx, JSValueConst this_val,
     st->shadow_r = st->shadow_g = st->shadow_b = 0;
     st->shadow_a = 0; st->shadow_blur = 0;
     st->shadow_ox = st->shadow_oy = 0;
-    { nd_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_ctx_getTransform(JSContext *ctx, JSValueConst this_val,
+ns_ctx_getTransform(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     cairo_matrix_t m = { 1, 0, 0, 1, 0, 0 };
     if (st) cairo_get_matrix(st->cr, &m);
-    return nd_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0, FALSE);
+    return ns_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0, FALSE);
 }
 
 JSValue
-nd_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
+ns_ctx_isPointInPath(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st || argc < 2) return JS_FALSE;
     int i = 0;
     cairo_path_t *saved = NULL;
-    if (nd_value_is_path2d(argv[0])) {
+    if (ns_value_is_path2d(argv[0])) {
         if (argc < 3) return JS_FALSE;
         saved = cairo_copy_path(st->cr);
-        nd_replay_path2d(st->cr, argv[0]);
+        ns_replay_path2d(st->cr, argv[0]);
         i = 1;
     }
-    double x = nd_arg_d(ctx, argv[i]);
-    double y = nd_arg_d(ctx, argv[i + 1]);
+    double x = ns_arg_d(ctx, argv[i]);
+    double y = ns_arg_d(ctx, argv[i + 1]);
     const char *rule_s = NULL;
     if (argc > i + 2 && JS_IsString(argv[i + 2]))
         rule_s = JS_ToCString(ctx, argv[i + 2]);
     cairo_fill_rule_t prev_rule = cairo_get_fill_rule(st->cr);
-    cairo_set_fill_rule(st->cr, nd_parse_fill_rule(rule_s));
+    cairo_set_fill_rule(st->cr, ns_parse_fill_rule(rule_s));
     if (rule_s) JS_FreeCString(ctx, rule_s);
     cairo_bool_t in = cairo_in_fill(st->cr, x, y);
     cairo_set_fill_rule(st->cr, prev_rule);
-    nd_ctx_restore_path(st->cr, saved);
+    ns_ctx_restore_path(st->cr, saved);
     return in ? JS_TRUE : JS_FALSE;
 }
 
 JSValue
-nd_ctx_isPointInStroke(JSContext *ctx, JSValueConst this_val,
+ns_ctx_isPointInStroke(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
-    nd_canvas_state *st = nd_ctx_state(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st || argc < 2) return JS_FALSE;
-    nd_ctx_sync_styles(ctx, this_val, st);
+    ns_ctx_sync_styles(ctx, this_val, st);
     int i = 0;
     cairo_path_t *saved = NULL;
-    if (nd_value_is_path2d(argv[0])) {
+    if (ns_value_is_path2d(argv[0])) {
         if (argc < 3) return JS_FALSE;
         saved = cairo_copy_path(st->cr);
-        nd_replay_path2d(st->cr, argv[0]);
+        ns_replay_path2d(st->cr, argv[0]);
         i = 1;
     }
-    double x = nd_arg_d(ctx, argv[i]);
-    double y = nd_arg_d(ctx, argv[i + 1]);
+    double x = ns_arg_d(ctx, argv[i]);
+    double y = ns_arg_d(ctx, argv[i + 1]);
     cairo_set_line_width(st->cr, st->line_width);
     cairo_bool_t in = cairo_in_stroke(st->cr, x, y);
-    nd_ctx_restore_path(st->cr, saved);
+    ns_ctx_restore_path(st->cr, saved);
     return in ? JS_TRUE : JS_FALSE;
 }
 
 JSValue
-nd_path2d_get_cr(JSContext *ctx, JSValueConst this_val, cairo_t **out)
+ns_path2d_get_cr(JSContext *ctx, JSValueConst this_val, cairo_t **out)
 {
-    nd_path2d *p = JS_GetOpaque(this_val, nd_path2d_class_id);
+    ns_path2d *p = JS_GetOpaque(this_val, ns_path2d_class_id);
     if (!p) return JS_ThrowTypeError(ctx, "Path2D expected");
     *out = p->cr;
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_moveTo(JSContext *ctx, JSValueConst this_val,
+ns_path2d_moveTo(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 2) return JS_UNDEFINED;
-    cairo_move_to(cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+    cairo_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_lineTo(JSContext *ctx, JSValueConst this_val,
+ns_path2d_lineTo(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 2) return JS_UNDEFINED;
     if (!cairo_has_current_point(cr))
-        cairo_move_to(cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
-    cairo_line_to(cr, nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]));
+        cairo_move_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
+    cairo_line_to(cr, ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_closePath(JSContext *ctx, JSValueConst this_val,
+ns_path2d_closePath(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     cairo_close_path(cr);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
+ns_path2d_bezierCurveTo(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 6) return JS_UNDEFINED;
     cairo_curve_to(cr,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]),
-        nd_arg_d(ctx, argv[4]), nd_arg_d(ctx, argv[5]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]),
+        ns_arg_d(ctx, argv[4]), ns_arg_d(ctx, argv[5]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
+ns_path2d_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
-    double cpx = nd_arg_d(ctx, argv[0]), cpy = nd_arg_d(ctx, argv[1]);
-    double x   = nd_arg_d(ctx, argv[2]), y   = nd_arg_d(ctx, argv[3]);
+    double cpx = ns_arg_d(ctx, argv[0]), cpy = ns_arg_d(ctx, argv[1]);
+    double x   = ns_arg_d(ctx, argv[2]), y   = ns_arg_d(ctx, argv[3]);
     double x0, y0;
     if (!cairo_has_current_point(cr)) cairo_move_to(cr, cpx, cpy);
     cairo_get_current_point(cr, &x0, &y0);
@@ -2535,18 +2535,18 @@ nd_path2d_quadraticCurveTo(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_path2d_arc(JSContext *ctx, JSValueConst this_val,
+ns_path2d_arc(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 5) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[0]);
-    double y = nd_arg_d(ctx, argv[1]);
-    double r = nd_arg_d(ctx, argv[2]);
-    double a0 = nd_arg_d(ctx, argv[3]);
-    double a1 = nd_arg_d(ctx, argv[4]);
+    double x = ns_arg_d(ctx, argv[0]);
+    double y = ns_arg_d(ctx, argv[1]);
+    double r = ns_arg_d(ctx, argv[2]);
+    double a0 = ns_arg_d(ctx, argv[3]);
+    double a1 = ns_arg_d(ctx, argv[4]);
     gboolean ccw = argc >= 6 && JS_ToBool(ctx, argv[5]);
     if (ccw) cairo_arc_negative(cr, x, y, r, a0, a1);
     else     cairo_arc(cr, x, y, r, a0, a1);
@@ -2554,16 +2554,16 @@ nd_path2d_arc(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_path2d_arcTo(JSContext *ctx, JSValueConst this_val,
+ns_path2d_arcTo(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 5) return JS_UNDEFINED;
-    double x1 = nd_arg_d(ctx, argv[0]), y1 = nd_arg_d(ctx, argv[1]);
-    double x2 = nd_arg_d(ctx, argv[2]), y2 = nd_arg_d(ctx, argv[3]);
-    double r  = nd_arg_d(ctx, argv[4]);
+    double x1 = ns_arg_d(ctx, argv[0]), y1 = ns_arg_d(ctx, argv[1]);
+    double x2 = ns_arg_d(ctx, argv[2]), y2 = ns_arg_d(ctx, argv[3]);
+    double r  = ns_arg_d(ctx, argv[4]);
     if (!cairo_has_current_point(cr)) cairo_move_to(cr, x1, y1);
     double x0, y0;
     cairo_get_current_point(cr, &x0, &y0);
@@ -2596,20 +2596,20 @@ nd_path2d_arcTo(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_path2d_ellipse(JSContext *ctx, JSValueConst this_val,
+ns_path2d_ellipse(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 7) return JS_UNDEFINED;
-    double x  = nd_arg_d(ctx, argv[0]);
-    double y  = nd_arg_d(ctx, argv[1]);
-    double rx = nd_arg_d(ctx, argv[2]);
-    double ry = nd_arg_d(ctx, argv[3]);
-    double rot = nd_arg_d(ctx, argv[4]);
-    double a0 = nd_arg_d(ctx, argv[5]);
-    double a1 = nd_arg_d(ctx, argv[6]);
+    double x  = ns_arg_d(ctx, argv[0]);
+    double y  = ns_arg_d(ctx, argv[1]);
+    double rx = ns_arg_d(ctx, argv[2]);
+    double ry = ns_arg_d(ctx, argv[3]);
+    double rot = ns_arg_d(ctx, argv[4]);
+    double a0 = ns_arg_d(ctx, argv[5]);
+    double a1 = ns_arg_d(ctx, argv[6]);
     gboolean ccw = argc >= 8 && JS_ToBool(ctx, argv[7]);
     cairo_save(cr);
     cairo_translate(cr, x, y);
@@ -2622,46 +2622,46 @@ nd_path2d_ellipse(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_path2d_rect(JSContext *ctx, JSValueConst this_val,
+ns_path2d_rect(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
     cairo_rectangle(cr,
-        nd_arg_d(ctx, argv[0]), nd_arg_d(ctx, argv[1]),
-        nd_arg_d(ctx, argv[2]), nd_arg_d(ctx, argv[3]));
+        ns_arg_d(ctx, argv[0]), ns_arg_d(ctx, argv[1]),
+        ns_arg_d(ctx, argv[2]), ns_arg_d(ctx, argv[3]));
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
+ns_path2d_roundRect(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
     if (argc < 4) return JS_UNDEFINED;
-    double x = nd_arg_d(ctx, argv[0]);
-    double y = nd_arg_d(ctx, argv[1]);
-    double w = nd_arg_d(ctx, argv[2]);
-    double h = nd_arg_d(ctx, argv[3]);
+    double x = ns_arg_d(ctx, argv[0]);
+    double y = ns_arg_d(ctx, argv[1]);
+    double w = ns_arg_d(ctx, argv[2]);
+    double h = ns_arg_d(ctx, argv[3]);
     double rtl = 0, rtr = 0, rbr = 0, rbl = 0;
-    if (argc >= 5) nd_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl);
-    nd_round_rect_subpath(cr, x, y, w, h, rtl, rtr, rbr, rbl);
+    if (argc >= 5) ns_extract_radii(ctx, argv[4], &rtl, &rtr, &rbr, &rbl);
+    ns_round_rect_subpath(cr, x, y, w, h, rtl, rtr, rbr, rbl);
     return JS_UNDEFINED;
 }
 
 JSValue
-nd_path2d_addPath(JSContext *ctx, JSValueConst this_val,
+ns_path2d_addPath(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
     cairo_t *cr = NULL;
-    JSValue err = nd_path2d_get_cr(ctx, this_val, &cr);
+    JSValue err = ns_path2d_get_cr(ctx, this_val, &cr);
     if (JS_IsException(err)) return err;
-    if (argc < 1 || !nd_value_is_path2d(argv[0])) return JS_UNDEFINED;
-    nd_path2d *src = JS_GetOpaque(argv[0], nd_path2d_class_id);
+    if (argc < 1 || !ns_value_is_path2d(argv[0])) return JS_UNDEFINED;
+    ns_path2d *src = JS_GetOpaque(argv[0], ns_path2d_class_id);
     if (!src) return JS_UNDEFINED;
     cairo_path_t *cp = cairo_copy_path(src->cr);
     cairo_save(cr);
@@ -2685,32 +2685,32 @@ nd_path2d_addPath(JSContext *ctx, JSValueConst this_val,
 }
 
 void
-nd_path2d_attach_methods(JSContext *ctx, JSValueConst obj)
+ns_path2d_attach_methods(JSContext *ctx, JSValueConst obj)
 {
-    nd_bind_fn(ctx, obj, "moveTo",          nd_path2d_moveTo,          2);
-    nd_bind_fn(ctx, obj, "lineTo",          nd_path2d_lineTo,          2);
-    nd_bind_fn(ctx, obj, "closePath",       nd_path2d_closePath,       0);
-    nd_bind_fn(ctx, obj, "bezierCurveTo",   nd_path2d_bezierCurveTo,   6);
-    nd_bind_fn(ctx, obj, "quadraticCurveTo",nd_path2d_quadraticCurveTo,4);
-    nd_bind_fn(ctx, obj, "arc",             nd_path2d_arc,             6);
-    nd_bind_fn(ctx, obj, "arcTo",           nd_path2d_arcTo,           5);
-    nd_bind_fn(ctx, obj, "ellipse",         nd_path2d_ellipse,         8);
-    nd_bind_fn(ctx, obj, "rect",            nd_path2d_rect,            4);
-    nd_bind_fn(ctx, obj, "roundRect",       nd_path2d_roundRect,       5);
-    nd_bind_fn(ctx, obj, "addPath",         nd_path2d_addPath,         2);
+    ns_bind_fn(ctx, obj, "moveTo",          ns_path2d_moveTo,          2);
+    ns_bind_fn(ctx, obj, "lineTo",          ns_path2d_lineTo,          2);
+    ns_bind_fn(ctx, obj, "closePath",       ns_path2d_closePath,       0);
+    ns_bind_fn(ctx, obj, "bezierCurveTo",   ns_path2d_bezierCurveTo,   6);
+    ns_bind_fn(ctx, obj, "quadraticCurveTo",ns_path2d_quadraticCurveTo,4);
+    ns_bind_fn(ctx, obj, "arc",             ns_path2d_arc,             6);
+    ns_bind_fn(ctx, obj, "arcTo",           ns_path2d_arcTo,           5);
+    ns_bind_fn(ctx, obj, "ellipse",         ns_path2d_ellipse,         8);
+    ns_bind_fn(ctx, obj, "rect",            ns_path2d_rect,            4);
+    ns_bind_fn(ctx, obj, "roundRect",       ns_path2d_roundRect,       5);
+    ns_bind_fn(ctx, obj, "addPath",         ns_path2d_addPath,         2);
 }
 
 const char *
-nd_svg_skip_ws(const char *p)
+ns_svg_skip_ws(const char *p)
 {
     while (*p && (g_ascii_isspace(*p) || *p == ',')) p++;
     return p;
 }
 
 gboolean
-nd_svg_read_number(const char **pp, double *out)
+ns_svg_read_number(const char **pp, double *out)
 {
-    const char *p = nd_svg_skip_ws(*pp);
+    const char *p = ns_svg_skip_ws(*pp);
     char *end = NULL;
     double v = g_ascii_strtod(p, &end);
     if (end == p) return FALSE;
@@ -2720,7 +2720,7 @@ nd_svg_read_number(const char **pp, double *out)
 }
 
 void
-nd_path2d_arc_svg(cairo_t *cr, double x1, double y1,
+ns_path2d_arc_svg(cairo_t *cr, double x1, double y1,
                   double rx, double ry, double phi_deg,
                   gboolean large_arc, gboolean sweep,
                   double x2, double y2)
@@ -2765,7 +2765,7 @@ nd_path2d_arc_svg(cairo_t *cr, double x1, double y1,
 }
 
 void
-nd_path2d_parse_svg(cairo_t *cr, const char *d)
+ns_path2d_parse_svg(cairo_t *cr, const char *d)
 {
     if (!d) return;
     const char *p = d;
@@ -2776,7 +2776,7 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
     char prev_cmd = 0;
     char cmd = 0;
     while (*p) {
-        p = nd_svg_skip_ws(p);
+        p = ns_svg_skip_ws(p);
         if (!*p) break;
         if (g_ascii_isalpha(*p)) {
             cmd = *p++;
@@ -2793,25 +2793,25 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
         gboolean rel = g_ascii_islower(cmd);
         switch (cmd) {
         case 'M': case 'm':
-            if (!nd_svg_read_number(&p, &x) || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x) || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
             cairo_move_to(cr, x, y);
             cx = x; cy = y; sx = x; sy = y;
             break;
         case 'L': case 'l':
-            if (!nd_svg_read_number(&p, &x) || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x) || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
             cairo_line_to(cr, x, y);
             cx = x; cy = y;
             break;
         case 'H': case 'h':
-            if (!nd_svg_read_number(&p, &x)) return;
+            if (!ns_svg_read_number(&p, &x)) return;
             if (rel) x += cx;
             cairo_line_to(cr, x, cy);
             cx = x;
             break;
         case 'V': case 'v':
-            if (!nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &y)) return;
             if (rel) y += cy;
             cairo_line_to(cr, cx, y);
             cy = y;
@@ -2821,17 +2821,17 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
             cx = sx; cy = sy;
             break;
         case 'C': case 'c':
-            if (!nd_svg_read_number(&p, &x1) || !nd_svg_read_number(&p, &y1) ||
-                !nd_svg_read_number(&p, &x2) || !nd_svg_read_number(&p, &y2) ||
-                !nd_svg_read_number(&p, &x)  || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x1) || !ns_svg_read_number(&p, &y1) ||
+                !ns_svg_read_number(&p, &x2) || !ns_svg_read_number(&p, &y2) ||
+                !ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x1 += cx; y1 += cy; x2 += cx; y2 += cy; x += cx; y += cy; }
             cairo_curve_to(cr, x1, y1, x2, y2, x, y);
             last_cx = x2; last_cy = y2;
             cx = x; cy = y;
             break;
         case 'S': case 's':
-            if (!nd_svg_read_number(&p, &x2) || !nd_svg_read_number(&p, &y2) ||
-                !nd_svg_read_number(&p, &x)  || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x2) || !ns_svg_read_number(&p, &y2) ||
+                !ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x2 += cx; y2 += cy; x += cx; y += cy; }
             if (prev_cmd == 'C' || prev_cmd == 'c' ||
                 prev_cmd == 'S' || prev_cmd == 's') {
@@ -2842,8 +2842,8 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
             cx = x; cy = y;
             break;
         case 'Q': case 'q':
-            if (!nd_svg_read_number(&p, &x1) || !nd_svg_read_number(&p, &y1) ||
-                !nd_svg_read_number(&p, &x)  || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x1) || !ns_svg_read_number(&p, &y1) ||
+                !ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x1 += cx; y1 += cy; x += cx; y += cy; }
             cairo_curve_to(cr,
                 cx + 2.0 / 3.0 * (x1 - cx), cy + 2.0 / 3.0 * (y1 - cy),
@@ -2853,7 +2853,7 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
             cx = x; cy = y;
             break;
         case 'T': case 't':
-            if (!nd_svg_read_number(&p, &x)  || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &x)  || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
             if (prev_cmd == 'Q' || prev_cmd == 'q' ||
                 prev_cmd == 'T' || prev_cmd == 't') {
@@ -2867,12 +2867,12 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
             cx = x; cy = y;
             break;
         case 'A': case 'a':
-            if (!nd_svg_read_number(&p, &rx)    || !nd_svg_read_number(&p, &ry) ||
-                !nd_svg_read_number(&p, &rot)   ||
-                !nd_svg_read_number(&p, &large) || !nd_svg_read_number(&p, &sweep) ||
-                !nd_svg_read_number(&p, &x)     || !nd_svg_read_number(&p, &y)) return;
+            if (!ns_svg_read_number(&p, &rx)    || !ns_svg_read_number(&p, &ry) ||
+                !ns_svg_read_number(&p, &rot)   ||
+                !ns_svg_read_number(&p, &large) || !ns_svg_read_number(&p, &sweep) ||
+                !ns_svg_read_number(&p, &x)     || !ns_svg_read_number(&p, &y)) return;
             if (rel) { x += cx; y += cy; }
-            nd_path2d_arc_svg(cr, cx, cy, rx, ry, rot,
+            ns_path2d_arc_svg(cr, cx, cy, rx, ry, rot,
                               large != 0, sweep != 0, x, y);
             cx = x; cy = y;
             break;
@@ -2884,18 +2884,18 @@ nd_path2d_parse_svg(cairo_t *cr, const char *d)
 }
 
 JSValue
-nd_path2d_ctor(JSContext *ctx, JSValueConst this_val,
+ns_path2d_ctor(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
 {
     (void)this_val;
-    nd_path2d *p = g_new0(nd_path2d, 1);
+    ns_path2d *p = g_new0(ns_path2d, 1);
     p->rs = cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, NULL);
     p->cr = cairo_create(p->rs);
-    JSValue obj = JS_NewObjectClass(ctx, nd_path2d_class_id);
+    JSValue obj = JS_NewObjectClass(ctx, ns_path2d_class_id);
     JS_SetOpaque(obj, p);
-    nd_path2d_attach_methods(ctx, obj);
-    if (argc >= 1 && nd_value_is_path2d(argv[0])) {
-        nd_path2d *src = JS_GetOpaque(argv[0], nd_path2d_class_id);
+    ns_path2d_attach_methods(ctx, obj);
+    if (argc >= 1 && ns_value_is_path2d(argv[0])) {
+        ns_path2d *src = JS_GetOpaque(argv[0], ns_path2d_class_id);
         if (src) {
             cairo_path_t *cp = cairo_copy_path(src->cr);
             cairo_append_path(p->cr, cp);
@@ -2903,13 +2903,13 @@ nd_path2d_ctor(JSContext *ctx, JSValueConst this_val,
         }
     } else if (argc >= 1 && JS_IsString(argv[0])) {
         const char *d = JS_ToCString(ctx, argv[0]);
-        if (d) { nd_path2d_parse_svg(p->cr, d); JS_FreeCString(ctx, d); }
+        if (d) { ns_path2d_parse_svg(p->cr, d); JS_FreeCString(ctx, d); }
     }
     return obj;
 }
 
 JSValue
-nd_ctx_get_attrs(JSContext *ctx, JSValueConst this_val,
+ns_ctx_get_attrs(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
@@ -2925,7 +2925,7 @@ nd_ctx_get_attrs(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_is_context_lost(JSContext *ctx, JSValueConst this_val,
+ns_ctx_is_context_lost(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
@@ -2933,7 +2933,7 @@ nd_ctx_is_context_lost(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_ctx_draw_focus_if_needed(JSContext *ctx, JSValueConst this_val,
+ns_ctx_draw_focus_if_needed(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
@@ -2941,10 +2941,10 @@ nd_ctx_draw_focus_if_needed(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-nd_element_getContext(JSContext *ctx, JSValueConst this_val,
+ns_element_getContext(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    const nd_node *el = nd_unwrap_element(this_val);
+    const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !js_from_ctx(ctx)) return JS_NULL;
     if (argc >= 1 && JS_IsString(argv[0])) {
         const char *t = JS_ToCString(ctx, argv[0]);
@@ -2956,12 +2956,12 @@ nd_element_getContext(JSContext *ctx, JSValueConst this_val,
         gboolean is_2d = !t || strcmp(t, "2d") == 0;
         if (t) JS_FreeCString(ctx, t);
         if (webgl_version)
-            return nd_webgl_get_context(ctx, js_from_ctx(ctx), this_val, el,
+            return ns_webgl_get_context(ctx, js_from_ctx(ctx), this_val, el,
                                         webgl_version,
                                         argc >= 2 ? argv[1] : JS_UNDEFINED);
         if (!is_2d) return JS_NULL;
     }
-    nd_canvas_state *st = nd_canvas_state_for(js_from_ctx(ctx), el);
+    ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
     if (!st) return JS_NULL;
     JSValue attrs = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, attrs, "alpha", JS_TRUE);
@@ -3018,76 +3018,76 @@ nd_element_getContext(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "direction", JS_NewString(ctx, "ltr"));
     JS_SetPropertyStr(ctx, obj, "filter", JS_NewString(ctx, "none"));
     JS_SetPropertyStr(ctx, obj, "_dashes", JS_NewArray(ctx));
-    nd_bind_fn(ctx, obj, "fillRect",    nd_ctx_fillRect,    4);
-    nd_bind_fn(ctx, obj, "strokeRect",  nd_ctx_strokeRect,  4);
-    nd_bind_fn(ctx, obj, "clearRect",   nd_ctx_clearRect,   4);
-    nd_bind_fn(ctx, obj, "beginPath",   nd_ctx_beginPath,   0);
-    nd_bind_fn(ctx, obj, "closePath",   nd_ctx_closePath,   0);
-    nd_bind_fn(ctx, obj, "moveTo",      nd_ctx_moveTo,      2);
-    nd_bind_fn(ctx, obj, "lineTo",      nd_ctx_lineTo,      2);
-    nd_bind_fn(ctx, obj, "arc",         nd_ctx_arc,         6);
-    nd_bind_fn(ctx, obj, "rect",        nd_ctx_rect,        4);
-    nd_bind_fn(ctx, obj, "roundRect",   nd_ctx_roundRect,   5);
-    nd_bind_fn(ctx, obj, "fill",        nd_ctx_fill,        2);
-    nd_bind_fn(ctx, obj, "stroke",      nd_ctx_stroke,      1);
-    nd_bind_fn(ctx, obj, "save",        nd_ctx_save,        0);
-    nd_bind_fn(ctx, obj, "restore",     nd_ctx_restore,     0);
-    nd_bind_fn(ctx, obj, "reset",       nd_ctx_reset,       0);
-    nd_bind_fn(ctx, obj, "translate",   nd_ctx_translate,   2);
-    nd_bind_fn(ctx, obj, "scale",       nd_ctx_scale,       2);
-    nd_bind_fn(ctx, obj, "rotate",      nd_ctx_rotate,      1);
-    nd_bind_fn(ctx, obj, "fillText",    nd_ctx_fillText,    4);
-    nd_bind_fn(ctx, obj, "strokeText",  nd_ctx_strokeText,  4);
-    nd_bind_fn(ctx, obj, "measureText", nd_ctx_measureText, 1);
-    nd_bind_fn(ctx, obj, "clip",        nd_ctx_clip,        2);
-    nd_bind_fn(ctx, obj, "isPointInPath",   nd_ctx_isPointInPath,   4);
-    nd_bind_fn(ctx, obj, "isPointInStroke", nd_ctx_isPointInStroke, 3);
-    nd_bind_fn(ctx, obj, "drawImage",   nd_ctx_drawImage,   9);
-    nd_bind_fn(ctx, obj, "arcTo",          nd_ctx_arcTo,           5);
-    nd_bind_fn(ctx, obj, "quadraticCurveTo", nd_ctx_quadraticCurveTo, 4);
-    nd_bind_fn(ctx, obj, "bezierCurveTo",  nd_ctx_bezierCurveTo,   6);
-    nd_bind_fn(ctx, obj, "ellipse",        nd_ctx_ellipse,         8);
-    nd_bind_fn(ctx, obj, "setTransform",   nd_ctx_setTransform,    6);
-    nd_bind_fn(ctx, obj, "transform",      nd_ctx_transform,       6);
-    nd_bind_fn(ctx, obj, "resetTransform", nd_ctx_resetTransform,  0);
-    nd_bind_fn(ctx, obj, "getTransform",   nd_ctx_getTransform,    0);
-    nd_bind_fn(ctx, obj, "setLineDash",    nd_ctx_setLineDash,     1);
-    nd_bind_fn(ctx, obj, "getLineDash",    nd_ctx_getLineDash,     0);
-    nd_bind_fn(ctx, obj, "createLinearGradient", nd_ctx_createLinearGradient, 4);
-    nd_bind_fn(ctx, obj, "createRadialGradient", nd_ctx_createRadialGradient, 6);
-    nd_bind_fn(ctx, obj, "createPattern",        nd_ctx_createPattern, 2);
-    nd_bind_fn(ctx, obj, "createImageData",      nd_ctx_createImageData, 2);
-    nd_bind_fn(ctx, obj, "getImageData",         nd_ctx_getImageData,    4);
-    nd_bind_fn(ctx, obj, "putImageData",         nd_ctx_putImageData,    7);
-    nd_bind_fn(ctx, obj, "getContextAttributes", nd_ctx_get_attrs,       0);
-    nd_bind_fn(ctx, obj, "isContextLost",        nd_ctx_is_context_lost, 0);
-    nd_bind_fn(ctx, obj, "drawFocusIfNeeded",    nd_ctx_draw_focus_if_needed, 2);
+    ns_bind_fn(ctx, obj, "fillRect",    ns_ctx_fillRect,    4);
+    ns_bind_fn(ctx, obj, "strokeRect",  ns_ctx_strokeRect,  4);
+    ns_bind_fn(ctx, obj, "clearRect",   ns_ctx_clearRect,   4);
+    ns_bind_fn(ctx, obj, "beginPath",   ns_ctx_beginPath,   0);
+    ns_bind_fn(ctx, obj, "closePath",   ns_ctx_closePath,   0);
+    ns_bind_fn(ctx, obj, "moveTo",      ns_ctx_moveTo,      2);
+    ns_bind_fn(ctx, obj, "lineTo",      ns_ctx_lineTo,      2);
+    ns_bind_fn(ctx, obj, "arc",         ns_ctx_arc,         6);
+    ns_bind_fn(ctx, obj, "rect",        ns_ctx_rect,        4);
+    ns_bind_fn(ctx, obj, "roundRect",   ns_ctx_roundRect,   5);
+    ns_bind_fn(ctx, obj, "fill",        ns_ctx_fill,        2);
+    ns_bind_fn(ctx, obj, "stroke",      ns_ctx_stroke,      1);
+    ns_bind_fn(ctx, obj, "save",        ns_ctx_save,        0);
+    ns_bind_fn(ctx, obj, "restore",     ns_ctx_restore,     0);
+    ns_bind_fn(ctx, obj, "reset",       ns_ctx_reset,       0);
+    ns_bind_fn(ctx, obj, "translate",   ns_ctx_translate,   2);
+    ns_bind_fn(ctx, obj, "scale",       ns_ctx_scale,       2);
+    ns_bind_fn(ctx, obj, "rotate",      ns_ctx_rotate,      1);
+    ns_bind_fn(ctx, obj, "fillText",    ns_ctx_fillText,    4);
+    ns_bind_fn(ctx, obj, "strokeText",  ns_ctx_strokeText,  4);
+    ns_bind_fn(ctx, obj, "measureText", ns_ctx_measureText, 1);
+    ns_bind_fn(ctx, obj, "clip",        ns_ctx_clip,        2);
+    ns_bind_fn(ctx, obj, "isPointInPath",   ns_ctx_isPointInPath,   4);
+    ns_bind_fn(ctx, obj, "isPointInStroke", ns_ctx_isPointInStroke, 3);
+    ns_bind_fn(ctx, obj, "drawImage",   ns_ctx_drawImage,   9);
+    ns_bind_fn(ctx, obj, "arcTo",          ns_ctx_arcTo,           5);
+    ns_bind_fn(ctx, obj, "quadraticCurveTo", ns_ctx_quadraticCurveTo, 4);
+    ns_bind_fn(ctx, obj, "bezierCurveTo",  ns_ctx_bezierCurveTo,   6);
+    ns_bind_fn(ctx, obj, "ellipse",        ns_ctx_ellipse,         8);
+    ns_bind_fn(ctx, obj, "setTransform",   ns_ctx_setTransform,    6);
+    ns_bind_fn(ctx, obj, "transform",      ns_ctx_transform,       6);
+    ns_bind_fn(ctx, obj, "resetTransform", ns_ctx_resetTransform,  0);
+    ns_bind_fn(ctx, obj, "getTransform",   ns_ctx_getTransform,    0);
+    ns_bind_fn(ctx, obj, "setLineDash",    ns_ctx_setLineDash,     1);
+    ns_bind_fn(ctx, obj, "getLineDash",    ns_ctx_getLineDash,     0);
+    ns_bind_fn(ctx, obj, "createLinearGradient", ns_ctx_createLinearGradient, 4);
+    ns_bind_fn(ctx, obj, "createRadialGradient", ns_ctx_createRadialGradient, 6);
+    ns_bind_fn(ctx, obj, "createPattern",        ns_ctx_createPattern, 2);
+    ns_bind_fn(ctx, obj, "createImageData",      ns_ctx_createImageData, 2);
+    ns_bind_fn(ctx, obj, "getImageData",         ns_ctx_getImageData,    4);
+    ns_bind_fn(ctx, obj, "putImageData",         ns_ctx_putImageData,    7);
+    ns_bind_fn(ctx, obj, "getContextAttributes", ns_ctx_get_attrs,       0);
+    ns_bind_fn(ctx, obj, "isContextLost",        ns_ctx_is_context_lost, 0);
+    ns_bind_fn(ctx, obj, "drawFocusIfNeeded",    ns_ctx_draw_focus_if_needed, 2);
     return obj;
 }
 
 cairo_status_t
-nd_canvas_png_write(void *closure, const unsigned char *data, unsigned int length)
+ns_canvas_png_write(void *closure, const unsigned char *data, unsigned int length)
 {
     g_byte_array_append((GByteArray *)closure, data, length);
     return CAIRO_STATUS_SUCCESS;
 }
 
 JSValue
-nd_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
+ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     JSValue resolvers[2];
     JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(promise)) return promise;
-    const nd_node *el = nd_unwrap_element(this_val);
+    const ns_node *el = ns_unwrap_element(this_val);
     JSValue blob = JS_NULL;
     if (el && js_from_ctx(ctx)) {
-        nd_canvas_state *st = nd_canvas_state_for(js_from_ctx(ctx), el);
+        ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
         if (st && st->surf) {
             GByteArray *buf = g_byte_array_new();
             cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
-                nd_canvas_png_write, buf);
+                ns_canvas_png_write, buf);
             if (s == CAIRO_STATUS_SUCCESS) {
                 JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
                 JSValue global = JS_GetGlobalObject(ctx);
@@ -3113,14 +3113,14 @@ nd_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-void nd_canvas_register_image_bitmap_class(JSRuntime *rt)
+void ns_canvas_register_image_bitmap_class(JSRuntime *rt)
 {
-    if (!nd_image_bitmap_class_id) JS_NewClassID(rt, &nd_image_bitmap_class_id);
-    JS_NewClass(rt, nd_image_bitmap_class_id, &nd_image_bitmap_class);
+    if (!ns_image_bitmap_class_id) JS_NewClassID(rt, &ns_image_bitmap_class_id);
+    JS_NewClass(rt, ns_image_bitmap_class_id, &ns_image_bitmap_class);
 }
 
-void nd_canvas_register_path2d_class(JSRuntime *rt)
+void ns_canvas_register_path2d_class(JSRuntime *rt)
 {
-    if (!nd_path2d_class_id) JS_NewClassID(rt, &nd_path2d_class_id);
-    JS_NewClass(rt, nd_path2d_class_id, &nd_path2d_class);
+    if (!ns_path2d_class_id) JS_NewClassID(rt, &ns_path2d_class_id);
+    JS_NewClass(rt, ns_path2d_class_id, &ns_path2d_class);
 }

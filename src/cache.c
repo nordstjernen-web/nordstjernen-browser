@@ -79,7 +79,7 @@ restrict_to_owner(const char *path, gboolean is_dir)
 #endif
 }
 
-#define ND_CACHE_MAX_AGE_SECONDS (30 * 24 * 60 * 60)
+#define NS_CACHE_MAX_AGE_SECONDS (30 * 24 * 60 * 60)
 
 static void delete_key(const char *key);
 static void evict_aged_out(void);
@@ -88,7 +88,7 @@ static void evict_to_cap(void);
 static guint64
 cache_cap_bytes(void)
 {
-    const nd_config *c = nd_config_get();
+    const ns_config *c = ns_config_get();
     int mb = c ? c->cache_cap_mb : 256;
     if (mb <= 0) mb = 256;
     return (guint64)mb * 1024ULL * 1024ULL;
@@ -196,15 +196,15 @@ cache_schema(void)
 }
 
 void
-nd_cache_init(void)
+ns_cache_init(void)
 {
-    const nd_config *c = nd_config_get();
+    const ns_config *c = ns_config_get();
     if (c && !c->cache_enabled) {
         g_cache_disabled = TRUE;
         return;
     }
     const char *base = g_get_user_cache_dir();
-    g_cache_dir = g_build_filename(base, ND_APP_DIR_NAME, "cache", NULL);
+    g_cache_dir = g_build_filename(base, NS_APP_DIR_NAME, "cache", NULL);
     g_mkdir_with_parents(g_cache_dir, 0700);
     restrict_to_owner(g_cache_dir, TRUE);
 
@@ -235,7 +235,7 @@ nd_cache_init(void)
 }
 
 void
-nd_cache_shutdown(void)
+ns_cache_shutdown(void)
 {
     if (g_cache_db) {
         sqlite3_close(g_cache_db);
@@ -245,13 +245,13 @@ nd_cache_shutdown(void)
 }
 
 static gboolean
-nd_cache_enabled(void)
+ns_cache_enabled(void)
 {
     return !g_cache_disabled && g_cache_db != NULL;
 }
 
 void
-nd_cache_entry_free(nd_cache_entry *e)
+ns_cache_entry_free(ns_cache_entry *e)
 {
     if (!e) return;
     g_free(e->final_url);
@@ -390,11 +390,11 @@ touch_key(const char *key)
     sqlite3_finalize(st);
 }
 
-nd_cache_entry *
-nd_cache_get(const char *url, const char *partition)
+ns_cache_entry *
+ns_cache_get(const char *url, const char *partition)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
-    if (!nd_cache_enabled() || !url) return NULL;
+    if (!ns_cache_enabled() || !url) return NULL;
     g_autofree char *key = key_for_url(url, partition);
 
     sqlite3_stmt *st = NULL;
@@ -422,7 +422,7 @@ nd_cache_get(const char *url, const char *partition)
         return NULL;
     }
 
-    nd_cache_entry *e = g_new0(nd_cache_entry, 1);
+    ns_cache_entry *e = g_new0(ns_cache_entry, 1);
     e->final_url        = column_dup(st, 0);
     e->status           = status;
     e->content_type     = column_dup(st, 2);
@@ -438,13 +438,13 @@ nd_cache_get(const char *url, const char *partition)
     char *data = NULL;
     gsize dlen = 0;
     if (!g_file_get_contents(bp, &data, &dlen, NULL)) {
-        nd_cache_entry_free(e);
+        ns_cache_entry_free(e);
         delete_key(key);
         return NULL;
     }
     if (dlen > G_MAXUINT || dlen > cache_cap_bytes()) {
         g_free(data);
-        nd_cache_entry_free(e);
+        ns_cache_entry_free(e);
         return NULL;
     }
     e->body = g_byte_array_new();
@@ -457,7 +457,7 @@ nd_cache_get(const char *url, const char *partition)
 }
 
 gboolean
-nd_cache_is_fresh(const nd_cache_entry *e)
+ns_cache_is_fresh(const ns_cache_entry *e)
 {
     if (!e) return FALSE;
     return e->expires_at > now_seconds();
@@ -467,14 +467,14 @@ static gboolean
 url_should_cache(const char *url)
 {
     if (!url) return FALSE;
-    if (!nd_url_is_http_or_https(url)) return FALSE;
+    if (!ns_url_is_http_or_https(url)) return FALSE;
     for (const unsigned char *p = (const unsigned char *)url; *p; p++)
         if (*p < 0x20 || *p == 0x7F) return FALSE;
     return TRUE;
 }
 
 void
-nd_cache_put(const char *url,
+ns_cache_put(const char *url,
              const char *partition,
              const char *final_url,
              long status,
@@ -487,7 +487,7 @@ nd_cache_put(const char *url,
              const void *body, gsize body_len)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
-    if (!nd_cache_enabled() || !url_should_cache(url)) return;
+    if (!ns_cache_enabled() || !url_should_cache(url)) return;
     if (cache_control && (strstr(cache_control, "no-store") ||
                           strstr(cache_control, "private"))) return;
     if (!is_cacheable_status(status)) return;
@@ -540,13 +540,13 @@ nd_cache_put(const char *url,
 }
 
 void
-nd_cache_promote_304(const char *url,
+ns_cache_promote_304(const char *url,
                      const char *partition,
                      const char *cache_control,
                      const char *expires_header)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
-    if (!nd_cache_enabled() || !url_should_cache(url)) return;
+    if (!ns_cache_enabled() || !url_should_cache(url)) return;
     g_autofree char *key = key_for_url(url, partition);
 
     sqlite3_stmt *st = NULL;
@@ -599,10 +599,10 @@ evict_by_select(const char *sql, gboolean has_bind, gint64 bind_value)
 }
 
 void
-nd_cache_clear(void)
+ns_cache_clear(void)
 {
     G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
-    if (!nd_cache_enabled()) return;
+    if (!ns_cache_enabled()) return;
     evict_by_select("SELECT key FROM entries", FALSE, 0);
 }
 
@@ -610,7 +610,7 @@ static void
 evict_aged_out(void)
 {
     evict_by_select("SELECT key FROM entries WHERE last_used < ?",
-                    TRUE, now_seconds() - ND_CACHE_MAX_AGE_SECONDS);
+                    TRUE, now_seconds() - NS_CACHE_MAX_AGE_SECONDS);
 }
 
 static void

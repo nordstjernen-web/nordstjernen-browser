@@ -14,7 +14,7 @@
 #   num-samples defaults to 120.
 #
 # Prints two tables: the leaf function (where the CPU actually is) and the
-# inclusive frequency of Nordstjernen (nd_*) frames across all stacks.
+# inclusive frequency of Nordstjernen (ns_*) frames across all stacks.
 set -euo pipefail
 
 PID=${1:?usage: sample-profile.sh <pid> [num-samples]}
@@ -56,7 +56,7 @@ END { if (leaf!="") print leaf }
 ' "$SAMPLES" | sort | uniq -c | sort -rn | head -25
 
 echo
-echo "=== Inclusive nd_* frames across all stacks, top 25 ==="
-grep -oE " in nd_[A-Za-z0-9_]+| nd_[A-Za-z0-9_]+ \(" "$SAMPLES" \
-    | sed -E 's/ in //; s/ \(//; s/^ //' | grep -E "^nd_" \
+echo "=== Inclusive ns_* frames across all stacks, top 25 ==="
+grep -oE " in ns_[A-Za-z0-9_]+| ns_[A-Za-z0-9_]+ \(" "$SAMPLES" \
+    | sed -E 's/ in //; s/ \(//; s/^ //' | grep -E "^ns_" \
     | sort | uniq -c | sort -rn | head -25

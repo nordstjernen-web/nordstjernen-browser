@@ -11,7 +11,7 @@
 #include "paint.h"
 
 void
-nd_selection_clear(nd_selection *sel)
+ns_selection_clear(ns_selection *sel)
 {
     if (!sel) return;
     sel->anchor_box = NULL;
@@ -22,7 +22,7 @@ nd_selection_clear(nd_selection *sel)
 }
 
 gboolean
-nd_selection_has_range(const nd_selection *sel)
+ns_selection_has_range(const ns_selection *sel)
 {
     if (!sel || !sel->active) return FALSE;
     if (!sel->anchor_box || !sel->focus_box) return FALSE;
@@ -32,33 +32,33 @@ nd_selection_has_range(const nd_selection *sel)
 }
 
 static gboolean
-box_xy_inside(const nd_box *b, double x, double y)
+box_xy_inside(const ns_box *b, double x, double y)
 {
     if (b->content_width <= 0 || b->content_height <= 0) return FALSE;
     return x >= b->x && x <= b->x + b->content_width &&
            y >= b->y && y <= b->y + b->content_height;
 }
 
-static const nd_box *
-inline_at_xy_walk(const nd_box *root, double x, double y)
+static const ns_box *
+inline_at_xy_walk(const ns_box *root, double x, double y)
 {
     if (!root) return NULL;
-    for (const nd_box *c = root->first_child; c; c = c->next_sibling) {
-        const nd_box *m = inline_at_xy_walk(c, x, y);
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
+        const ns_box *m = inline_at_xy_walk(c, x, y);
         if (m) return m;
     }
-    if (root->kind == ND_BOX_INLINE && root->text && *root->text &&
+    if (root->kind == NS_BOX_INLINE && root->text && *root->text &&
         box_xy_inside(root, x, y))
         return root;
     return NULL;
 }
 
-static const nd_box *
-nearest_inline_walk(const nd_box *root, double x, double y,
-                    double *best_dist, const nd_box *best)
+static const ns_box *
+nearest_inline_walk(const ns_box *root, double x, double y,
+                    double *best_dist, const ns_box *best)
 {
     if (!root) return best;
-    if (root->kind == ND_BOX_INLINE && root->text && *root->text &&
+    if (root->kind == NS_BOX_INLINE && root->text && *root->text &&
         root->content_width > 0 && root->content_height > 0) {
         double cx = root->x + root->content_width / 2.0;
         double cy = root->y + root->content_height / 2.0;
@@ -66,16 +66,16 @@ nearest_inline_walk(const nd_box *root, double x, double y,
         double d2 = dx * dx + dy * dy;
         if (d2 < *best_dist) { *best_dist = d2; best = root; }
     }
-    for (const nd_box *c = root->first_child; c; c = c->next_sibling)
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
         best = nearest_inline_walk(c, x, y, best_dist, best);
     return best;
 }
 
-static const nd_box *
-find_inline_for_point(const nd_box *root, double x, double y,
+static const ns_box *
+find_inline_for_point(const ns_box *root, double x, double y,
                       double *out_local_x, double *out_local_y)
 {
-    const nd_box *hit = inline_at_xy_walk(root, x, y);
+    const ns_box *hit = inline_at_xy_walk(root, x, y);
     if (!hit) {
         double best = 1e18;
         hit = nearest_inline_walk(root, x, y, &best, NULL);
@@ -87,18 +87,18 @@ find_inline_for_point(const nd_box *root, double x, double y,
 }
 
 static gboolean
-resolve_point(const nd_box *root, double x, double y,
-              const nd_box **out_box, gsize *out_byte)
+resolve_point(const ns_box *root, double x, double y,
+              const ns_box **out_box, gsize *out_byte)
 {
     double lx, ly;
-    const nd_box *b = find_inline_for_point(root, x, y, &lx, &ly);
+    const ns_box *b = find_inline_for_point(root, x, y, &lx, &ly);
     if (!b) return FALSE;
     if (lx < 0) lx = 0;
     if (ly < 0) ly = 0;
     if (lx > b->content_width)  lx = b->content_width;
     if (ly > b->content_height) ly = b->content_height;
     gsize byte = 0;
-    nd_paint_inline_xy_to_byte(b, lx, ly, &byte);
+    ns_paint_inline_xy_to_byte(b, lx, ly, &byte);
     if (b->text) {
         gsize tlen = strlen(b->text);
         if (byte > tlen) byte = tlen;
@@ -109,13 +109,13 @@ resolve_point(const nd_box *root, double x, double y,
 }
 
 gboolean
-nd_selection_anchor_at(nd_selection *sel, const nd_box *root, double x, double y)
+ns_selection_anchor_at(ns_selection *sel, const ns_box *root, double x, double y)
 {
     if (!sel) return FALSE;
-    const nd_box *b = NULL;
+    const ns_box *b = NULL;
     gsize byte = 0;
     if (!resolve_point(root, x, y, &b, &byte)) {
-        nd_selection_clear(sel);
+        ns_selection_clear(sel);
         return FALSE;
     }
     sel->anchor_box = b;
@@ -127,10 +127,10 @@ nd_selection_anchor_at(nd_selection *sel, const nd_box *root, double x, double y
 }
 
 gboolean
-nd_selection_extend_to(nd_selection *sel, const nd_box *root, double x, double y)
+ns_selection_extend_to(ns_selection *sel, const ns_box *root, double x, double y)
 {
     if (!sel || !sel->active || !sel->anchor_box) return FALSE;
-    const nd_box *b = NULL;
+    const ns_box *b = NULL;
     gsize byte = 0;
     if (!resolve_point(root, x, y, &b, &byte)) return FALSE;
     sel->focus_box = b;
@@ -139,25 +139,25 @@ nd_selection_extend_to(nd_selection *sel, const nd_box *root, double x, double y
 }
 
 typedef struct find_endpoints_ctx {
-    const nd_box *a;
-    const nd_box *b;
-    const nd_box *first;
-    const nd_box *last;
+    const ns_box *a;
+    const ns_box *b;
+    const ns_box *first;
+    const ns_box *last;
     int           seen;
 } find_endpoints_ctx;
 
 static void
-walk_inline_pre(const nd_box *root, void (*cb)(const nd_box *, gpointer),
+walk_inline_pre(const ns_box *root, void (*cb)(const ns_box *, gpointer),
                 gpointer ud)
 {
     if (!root) return;
-    if (root->kind == ND_BOX_INLINE) cb(root, ud);
-    for (const nd_box *c = root->first_child; c; c = c->next_sibling)
+    if (root->kind == NS_BOX_INLINE) cb(root, ud);
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
         walk_inline_pre(c, cb, ud);
 }
 
 static void
-find_endpoints_cb(const nd_box *b, gpointer ud)
+find_endpoints_cb(const ns_box *b, gpointer ud)
 {
     find_endpoints_ctx *ctx = ud;
     if (ctx->seen == 2) return;
@@ -174,9 +174,9 @@ find_endpoints_cb(const nd_box *b, gpointer ud)
 }
 
 static void
-order_endpoints(const nd_box *root, nd_selection sel,
-                const nd_box **first_box, gsize *first_byte,
-                const nd_box **last_box,  gsize *last_byte)
+order_endpoints(const ns_box *root, ns_selection sel,
+                const ns_box **first_box, gsize *first_byte,
+                const ns_box **last_box,  gsize *last_byte)
 {
     if (sel.anchor_box == sel.focus_box) {
         *first_box = sel.anchor_box;
@@ -207,20 +207,20 @@ order_endpoints(const nd_box *root, nd_selection sel,
 
 typedef struct paint_ctx {
     cairo_t       *cr;
-    const nd_box  *first_box;
-    const nd_box  *last_box;
+    const ns_box  *first_box;
+    const ns_box  *last_box;
     gsize          first_byte;
     gsize          last_byte;
     int            state;
 } paint_ctx;
 
 static gboolean
-selection_color(const nd_style *s, nd_css_prop prop,
+selection_color(const ns_style *s, ns_css_prop prop,
                 double *r, double *g, double *b, double *a)
 {
     if (!s) return FALSE;
-    const nd_css_value *v = s->values[prop];
-    if (!v || v->kind != ND_CSS_V_COLOR) return FALSE;
+    const ns_css_value *v = s->values[prop];
+    if (!v || v->kind != NS_CSS_V_COLOR) return FALSE;
     *r = v->u.color.r / 255.0;
     *g = v->u.color.g / 255.0;
     *b = v->u.color.b / 255.0;
@@ -229,7 +229,7 @@ selection_color(const nd_style *s, nd_css_prop prop,
 }
 
 static void
-paint_box_highlight(cairo_t *cr, const nd_box *b, gsize start_b, gsize end_b)
+paint_box_highlight(cairo_t *cr, const ns_box *b, gsize start_b, gsize end_b)
 {
     if (!b->text) return;
     gsize tlen = strlen(b->text);
@@ -237,20 +237,20 @@ paint_box_highlight(cairo_t *cr, const nd_box *b, gsize start_b, gsize end_b)
     if (end_b   > tlen) end_b   = tlen;
     if (start_b >= end_b) return;
 
-    PangoLayout *layout = nd_paint_build_inline_layout(cr, b);
+    PangoLayout *layout = ns_paint_build_inline_layout(cr, b);
     if (!layout) return;
 
-    double y_offset = nd_paint_inline_y_offset_for_layout(b, layout);
+    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
 
     double bg_r = 0.20, bg_g = 0.40, bg_b = 0.85, bg_a = 0.30;
-    const nd_style *ssel = b->style ? b->style->selection : NULL;
-    selection_color(ssel, ND_CSS_BACKGROUND_COLOR, &bg_r, &bg_g, &bg_b, &bg_a);
+    const ns_style *ssel = b->style ? b->style->selection : NULL;
+    selection_color(ssel, NS_CSS_BACKGROUND_COLOR, &bg_r, &bg_g, &bg_b, &bg_a);
 
     double fg_r, fg_g, fg_b, fg_a;
-    gboolean recolor = selection_color(ssel, ND_CSS_COLOR,
+    gboolean recolor = selection_color(ssel, NS_CSS_COLOR,
                                        &fg_r, &fg_g, &fg_b, &fg_a);
     if (!recolor && ssel && bg_a >= 0.999) {
-        recolor = selection_color(b->style, ND_CSS_COLOR,
+        recolor = selection_color(b->style, NS_CSS_COLOR,
                                   &fg_r, &fg_g, &fg_b, &fg_a);
         if (!recolor) { fg_r = fg_g = fg_b = 0.1; fg_a = 1.0; recolor = TRUE; }
     }
@@ -299,7 +299,7 @@ paint_box_highlight(cairo_t *cr, const nd_box *b, gsize start_b, gsize end_b)
 }
 
 static void
-paint_walk_cb(const nd_box *b, gpointer ud)
+paint_walk_cb(const ns_box *b, gpointer ud)
 {
     paint_ctx *ctx = ud;
     if (ctx->state == 2) return;
@@ -331,10 +331,10 @@ paint_walk_cb(const nd_box *b, gpointer ud)
 }
 
 void
-nd_selection_paint(cairo_t *cr, const nd_box *root, const nd_selection *sel)
+ns_selection_paint(cairo_t *cr, const ns_box *root, const ns_selection *sel)
 {
-    if (!cr || !root || !nd_selection_has_range(sel)) return;
-    const nd_box *fb = NULL, *lb = NULL;
+    if (!cr || !root || !ns_selection_has_range(sel)) return;
+    const ns_box *fb = NULL, *lb = NULL;
     gsize fy = 0, ly = 0;
     order_endpoints(root, *sel, &fb, &fy, &lb, &ly);
     paint_ctx ctx = { cr, fb, lb, fy, ly, 0 };
@@ -343,15 +343,15 @@ nd_selection_paint(cairo_t *cr, const nd_box *root, const nd_selection *sel)
 
 typedef struct collect_ctx {
     GString       *out;
-    const nd_box  *first_box;
-    const nd_box  *last_box;
+    const ns_box  *first_box;
+    const ns_box  *last_box;
     gsize          first_byte;
     gsize          last_byte;
     int            state;
 } collect_ctx;
 
 static void
-collect_walk_cb(const nd_box *b, gpointer ud)
+collect_walk_cb(const ns_box *b, gpointer ud)
 {
     collect_ctx *ctx = ud;
     if (ctx->state == 2) return;
@@ -393,10 +393,10 @@ collect_walk_cb(const nd_box *b, gpointer ud)
 }
 
 char *
-nd_selection_collect_text(const nd_box *root, const nd_selection *sel)
+ns_selection_collect_text(const ns_box *root, const ns_selection *sel)
 {
-    if (!root || !nd_selection_has_range(sel)) return NULL;
-    const nd_box *fb = NULL, *lb = NULL;
+    if (!root || !ns_selection_has_range(sel)) return NULL;
+    const ns_box *fb = NULL, *lb = NULL;
     gsize fy = 0, ly = 0;
     order_endpoints(root, *sel, &fb, &fy, &lb, &ly);
     GString *out = g_string_new(NULL);
@@ -406,22 +406,22 @@ nd_selection_collect_text(const nd_box *root, const nd_selection *sel)
 }
 
 typedef struct edge_ctx {
-    const nd_box *first;
-    const nd_box *last;
+    const ns_box *first;
+    const ns_box *last;
 } edge_ctx;
 
 static void
-edge_walk_cb(const nd_box *b, gpointer ud)
+edge_walk_cb(const ns_box *b, gpointer ud)
 {
     edge_ctx *ctx = ud;
-    if (b->kind != ND_BOX_INLINE) return;
+    if (b->kind != NS_BOX_INLINE) return;
     if (!b->text || !*b->text) return;
     if (!ctx->first) ctx->first = b;
     ctx->last = b;
 }
 
 gboolean
-nd_selection_select_all(nd_selection *sel, const nd_box *root)
+ns_selection_select_all(ns_selection *sel, const ns_box *root)
 {
     if (!sel || !root) return FALSE;
     edge_ctx ec = { NULL, NULL };
@@ -436,19 +436,19 @@ nd_selection_select_all(nd_selection *sel, const nd_box *root)
 }
 
 typedef struct bounds_ctx {
-    const nd_box *first;
-    const nd_box *last;
+    const ns_box *first;
+    const ns_box *last;
     int           state;
     double        x0, y0, x1, y1;
     gboolean      any;
 } bounds_ctx;
 
 static void
-bounds_walk_cb(const nd_box *b, gpointer ud)
+bounds_walk_cb(const ns_box *b, gpointer ud)
 {
     bounds_ctx *ctx = ud;
     if (ctx->state == 2) return;
-    if (b->kind != ND_BOX_INLINE || !b->text || !*b->text) return;
+    if (b->kind != NS_BOX_INLINE || !b->text || !*b->text) return;
     if (ctx->state == 0 && b != ctx->first) return;
     if (ctx->state == 0) ctx->state = 1;
     double bx0 = b->x, by0 = b->y;
@@ -468,12 +468,12 @@ bounds_walk_cb(const nd_box *b, gpointer ud)
 }
 
 gboolean
-nd_selection_bounds(const nd_box *root, const nd_selection *sel,
+ns_selection_bounds(const ns_box *root, const ns_selection *sel,
                     double *out_x, double *out_y,
                     double *out_w, double *out_h)
 {
-    if (!root || !nd_selection_has_range(sel)) return FALSE;
-    const nd_box *fb = NULL, *lb = NULL;
+    if (!root || !ns_selection_has_range(sel)) return FALSE;
+    const ns_box *fb = NULL, *lb = NULL;
     gsize fy = 0, ly = 0;
     order_endpoints(root, *sel, &fb, &fy, &lb, &ly);
     bounds_ctx ctx = { fb, lb, 0, 0, 0, 0, 0, FALSE };

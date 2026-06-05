@@ -3,7 +3,7 @@
 #include "datetime.h"
 
 long
-nd_dt_floormod(long a, long b)
+ns_dt_floormod(long a, long b)
 {
     long r = a % b;
     if (r != 0 && ((r < 0) != (b < 0))) r += b;
@@ -11,7 +11,7 @@ nd_dt_floormod(long a, long b)
 }
 
 long
-nd_dt_days_from_civil(int y, int m, int d)
+ns_dt_days_from_civil(int y, int m, int d)
 {
     int yy = y - (m <= 2);
     long era = (yy >= 0 ? yy : yy - 399) / 400;
@@ -22,7 +22,7 @@ nd_dt_days_from_civil(int y, int m, int d)
 }
 
 void
-nd_dt_civil_from_days(long z, int *y, int *m, int *d)
+ns_dt_civil_from_days(long z, int *y, int *m, int *d)
 {
     z += 719468L;
     long era = (z >= 0 ? z : z - 146096) / 146097;
@@ -39,7 +39,7 @@ nd_dt_civil_from_days(long z, int *y, int *m, int *d)
 }
 
 int
-nd_dt_days_in_month(int y, int m)
+ns_dt_days_in_month(int y, int m)
 {
     static const int dim[] = { 31,28,31,30,31,30,31,31,30,31,30,31 };
     if (m < 1 || m > 12) return 0;
@@ -51,7 +51,7 @@ nd_dt_days_in_month(int y, int m)
 }
 
 int
-nd_dt_iso_weeks_in_year(int y)
+ns_dt_iso_weeks_in_year(int y)
 {
     int p  = (y + y / 4 - y / 100 + y / 400) % 7;
     int py = y - 1;
@@ -60,15 +60,15 @@ nd_dt_iso_weeks_in_year(int y)
 }
 
 long
-nd_dt_iso_week1_monday(int y)
+ns_dt_iso_week1_monday(int y)
 {
-    long jan4 = nd_dt_days_from_civil(y, 1, 4);
-    int m0 = (int)nd_dt_floormod(jan4 + 3, 7);
+    long jan4 = ns_dt_days_from_civil(y, 1, 4);
+    int m0 = (int)ns_dt_floormod(jan4 + 3, 7);
     return jan4 - m0;
 }
 
 const char *
-nd_dt_rd_digits(const char *p, int min, int max, int *out)
+ns_dt_rd_digits(const char *p, int min, int max, int *out)
 {
     int val = 0, cnt = 0;
     while (*p >= '0' && *p <= '9' && cnt < max) {
@@ -82,26 +82,26 @@ nd_dt_rd_digits(const char *p, int min, int max, int *out)
 }
 
 const char *
-nd_dt_rd_date(const char *p, int *y, int *m, int *d)
+ns_dt_rd_date(const char *p, int *y, int *m, int *d)
 {
-    p = nd_dt_rd_digits(p, 4, 9, y); if (!p || *p != '-') return NULL; p++;
-    p = nd_dt_rd_digits(p, 2, 2, m); if (!p || *p != '-') return NULL; p++;
-    p = nd_dt_rd_digits(p, 2, 2, d); if (!p) return NULL;
-    if (*y < 1 || *y > ND_DT_MAX_YEAR ||
-        *m < 1 || *m > 12 || *d < 1 || *d > nd_dt_days_in_month(*y, *m))
+    p = ns_dt_rd_digits(p, 4, 9, y); if (!p || *p != '-') return NULL; p++;
+    p = ns_dt_rd_digits(p, 2, 2, m); if (!p || *p != '-') return NULL; p++;
+    p = ns_dt_rd_digits(p, 2, 2, d); if (!p) return NULL;
+    if (*y < 1 || *y > NS_DT_MAX_YEAR ||
+        *m < 1 || *m > 12 || *d < 1 || *d > ns_dt_days_in_month(*y, *m))
         return NULL;
     return p;
 }
 
 const char *
-nd_dt_rd_time(const char *p, int *ms)
+ns_dt_rd_time(const char *p, int *ms)
 {
     int h, mi, se = 0, frac = 0;
-    p = nd_dt_rd_digits(p, 2, 2, &h);  if (!p || *p != ':') return NULL; p++;
-    p = nd_dt_rd_digits(p, 2, 2, &mi); if (!p) return NULL;
+    p = ns_dt_rd_digits(p, 2, 2, &h);  if (!p || *p != ':') return NULL; p++;
+    p = ns_dt_rd_digits(p, 2, 2, &mi); if (!p) return NULL;
     if (*p == ':') {
         p++;
-        p = nd_dt_rd_digits(p, 2, 2, &se); if (!p) return NULL;
+        p = ns_dt_rd_digits(p, 2, 2, &se); if (!p) return NULL;
         if (*p == '.') {
             p++;
             int v = 0, c = 0;

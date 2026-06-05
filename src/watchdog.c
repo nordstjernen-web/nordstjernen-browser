@@ -25,26 +25,26 @@
 #include <sys/prctl.h>
 #endif
 
-#define ND_WATCHDOG_FLAG           "--watchdog"
-#define ND_WATCHDOG_NO_FLAG        "--no-watchdog"
-#define ND_WATCHDOG_CHILD_FLAG     "--watchdog-child"
-#define ND_WATCHDOG_SESSION_PREFIX "--watchdog-session="
-#define ND_WATCHDOG_RECOVER_ENV    "ND_WATCHDOG_RECOVER"
+#define NS_WATCHDOG_FLAG           "--watchdog"
+#define NS_WATCHDOG_NO_FLAG        "--no-watchdog"
+#define NS_WATCHDOG_CHILD_FLAG     "--watchdog-child"
+#define NS_WATCHDOG_SESSION_PREFIX "--watchdog-session="
+#define NS_WATCHDOG_RECOVER_ENV    "NS_WATCHDOG_RECOVER"
 
-#define ND_WATCHDOG_BEAT_SECS      2
-#define ND_WATCHDOG_CHECK_SECS     1
-#define ND_WATCHDOG_HANG_MIN_SECS  30
-#define ND_WATCHDOG_BACKOFF_MS     1000
-#define ND_WATCHDOG_BURST_MAX      5
-#define ND_WATCHDOG_BURST_SECS     60
-#define ND_WATCHDOG_STOP_GRACE_SECS 3
-#define ND_WATCHDOG_HANG_EXIT      70
+#define NS_WATCHDOG_BEAT_SECS      2
+#define NS_WATCHDOG_CHECK_SECS     1
+#define NS_WATCHDOG_HANG_MIN_SECS  30
+#define NS_WATCHDOG_BACKOFF_MS     1000
+#define NS_WATCHDOG_BURST_MAX      5
+#define NS_WATCHDOG_BURST_SECS     60
+#define NS_WATCHDOG_STOP_GRACE_SECS 3
+#define NS_WATCHDOG_HANG_EXIT      70
 
 static gint g_beat;
 static int  g_hang_secs;
 
 static gboolean
-nd_watchdog_beat(gpointer user_data)
+ns_watchdog_beat(gpointer user_data)
 {
     (void)user_data;
     g_atomic_int_inc(&g_beat);
@@ -52,13 +52,13 @@ nd_watchdog_beat(gpointer user_data)
 }
 
 static gpointer
-nd_watchdog_hang_thread(gpointer user_data)
+ns_watchdog_hang_thread(gpointer user_data)
 {
     (void)user_data;
     gint   last = g_atomic_int_get(&g_beat);
     gint64 last_change = g_get_monotonic_time();
     for (;;) {
-        g_usleep((gulong)ND_WATCHDOG_CHECK_SECS * G_USEC_PER_SEC);
+        g_usleep((gulong)NS_WATCHDOG_CHECK_SECS * G_USEC_PER_SEC);
         gint   cur = g_atomic_int_get(&g_beat);
         gint64 now = g_get_monotonic_time();
         if (cur != last) {
@@ -68,17 +68,17 @@ nd_watchdog_hang_thread(gpointer user_data)
         }
         if (now - last_change > (gint64)g_hang_secs * G_USEC_PER_SEC) {
             fprintf(stderr,
-                    "nd_watchdog: main loop unresponsive for %ds — exiting for restart\n",
+                    "ns_watchdog: main loop unresponsive for %ds — exiting for restart\n",
                     g_hang_secs);
             fflush(stderr);
-            _Exit(ND_WATCHDOG_HANG_EXIT);
+            _Exit(NS_WATCHDOG_HANG_EXIT);
         }
     }
     return NULL;
 }
 
 void
-nd_watchdog_child_guard_parent_death(void)
+ns_watchdog_child_guard_parent_death(void)
 {
 #ifdef __linux__
     prctl(PR_SET_PDEATHSIG, SIGTERM);
@@ -88,19 +88,19 @@ nd_watchdog_child_guard_parent_death(void)
 }
 
 void
-nd_watchdog_child_arm_hang_monitor(int js_budget_ms)
+ns_watchdog_child_arm_hang_monitor(int js_budget_ms)
 {
-    g_hang_secs = js_budget_ms / 1000 + ND_WATCHDOG_HANG_MIN_SECS;
-    if (g_hang_secs < ND_WATCHDOG_HANG_MIN_SECS)
-        g_hang_secs = ND_WATCHDOG_HANG_MIN_SECS;
-    g_message("nd_watchdog: hang monitor armed, exit after %ds unresponsive",
+    g_hang_secs = js_budget_ms / 1000 + NS_WATCHDOG_HANG_MIN_SECS;
+    if (g_hang_secs < NS_WATCHDOG_HANG_MIN_SECS)
+        g_hang_secs = NS_WATCHDOG_HANG_MIN_SECS;
+    g_message("ns_watchdog: hang monitor armed, exit after %ds unresponsive",
               g_hang_secs);
-    g_timeout_add_seconds(ND_WATCHDOG_BEAT_SECS, nd_watchdog_beat, NULL);
-    g_thread_unref(g_thread_new("nd-watchdog", nd_watchdog_hang_thread, NULL));
+    g_timeout_add_seconds(NS_WATCHDOG_BEAT_SECS, ns_watchdog_beat, NULL);
+    g_thread_unref(g_thread_new("nd-watchdog", ns_watchdog_hang_thread, NULL));
 }
 
 static const char *
-nd_watchdog_arg_value(int argc, char **argv, const char *prefix)
+ns_watchdog_arg_value(int argc, char **argv, const char *prefix)
 {
     for (int i = 1; i < argc; i++)
         if (argv[i] && g_str_has_prefix(argv[i], prefix))
@@ -109,29 +109,29 @@ nd_watchdog_arg_value(int argc, char **argv, const char *prefix)
 }
 
 const char *
-nd_watchdog_child_session_arg(int argc, char **argv)
+ns_watchdog_child_session_arg(int argc, char **argv)
 {
-    return nd_watchdog_arg_value(argc, argv, ND_WATCHDOG_SESSION_PREFIX);
+    return ns_watchdog_arg_value(argc, argv, NS_WATCHDOG_SESSION_PREFIX);
 }
 
 gboolean
-nd_watchdog_is_child(int argc, char **argv)
+ns_watchdog_is_child(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++)
-        if (argv[i] && g_strcmp0(argv[i], ND_WATCHDOG_CHILD_FLAG) == 0)
+        if (argv[i] && g_strcmp0(argv[i], NS_WATCHDOG_CHILD_FLAG) == 0)
             return TRUE;
     return FALSE;
 }
 
 gboolean
-nd_watchdog_child_is_recovery(void)
+ns_watchdog_child_is_recovery(void)
 {
-    const char *v = g_getenv(ND_WATCHDOG_RECOVER_ENV);
+    const char *v = g_getenv(NS_WATCHDOG_RECOVER_ENV);
     return v && g_strcmp0(v, "1") == 0;
 }
 
 static gboolean
-nd_watchdog_is_oneshot(const char *arg)
+ns_watchdog_is_oneshot(const char *arg)
 {
     return g_strcmp0(arg, "--headless")     == 0 ||
            g_strcmp0(arg, "--print-config") == 0 ||
@@ -142,15 +142,15 @@ nd_watchdog_is_oneshot(const char *arg)
 }
 
 gboolean
-nd_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
+ns_watchdog_should_supervise(int argc, char **argv, gboolean enabled_by_default)
 {
     gboolean forced = FALSE;
     for (int i = 1; i < argc; i++) {
         if (!argv[i]) continue;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_CHILD_FLAG) == 0) return FALSE;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_NO_FLAG) == 0)    return FALSE;
-        if (nd_watchdog_is_oneshot(argv[i]))                 return FALSE;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_FLAG) == 0)       forced = TRUE;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_CHILD_FLAG) == 0) return FALSE;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_NO_FLAG) == 0)    return FALSE;
+        if (ns_watchdog_is_oneshot(argv[i]))                 return FALSE;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_FLAG) == 0)       forced = TRUE;
     }
     return forced || enabled_by_default;
 }
@@ -166,10 +166,10 @@ typedef struct {
     int         burst_count;
     gint64      burst_start_us;
     int         exit_status;
-} nd_watchdog;
+} ns_watchdog;
 
 static void
-nd_watchdog_kill(GPid pid, gboolean force)
+ns_watchdog_kill(GPid pid, gboolean force)
 {
 #ifdef G_OS_WIN32
     (void)force;
@@ -179,41 +179,41 @@ nd_watchdog_kill(GPid pid, gboolean force)
 #endif
 }
 
-static gboolean nd_watchdog_spawn(nd_watchdog *wd, gboolean recover);
+static gboolean ns_watchdog_spawn(ns_watchdog *wd, gboolean recover);
 
 static gboolean
-nd_watchdog_respawn_cb(gpointer user_data)
+ns_watchdog_respawn_cb(gpointer user_data)
 {
-    nd_watchdog *wd = user_data;
+    ns_watchdog *wd = user_data;
     if (!wd->stopping)
-        nd_watchdog_spawn(wd, TRUE);
+        ns_watchdog_spawn(wd, TRUE);
     return G_SOURCE_REMOVE;
 }
 
 static void
-nd_watchdog_schedule_restart(nd_watchdog *wd)
+ns_watchdog_schedule_restart(ns_watchdog *wd)
 {
     gint64 now = g_get_monotonic_time();
-    if (now - wd->burst_start_us > (gint64)ND_WATCHDOG_BURST_SECS * G_USEC_PER_SEC) {
+    if (now - wd->burst_start_us > (gint64)NS_WATCHDOG_BURST_SECS * G_USEC_PER_SEC) {
         wd->burst_start_us = now;
         wd->burst_count = 0;
     }
     wd->burst_count++;
-    if (wd->burst_count > ND_WATCHDOG_BURST_MAX) {
-        g_warning("nd_watchdog: child failed %d times in under %ds — giving up",
-                  wd->burst_count, ND_WATCHDOG_BURST_SECS);
+    if (wd->burst_count > NS_WATCHDOG_BURST_MAX) {
+        g_warning("ns_watchdog: child failed %d times in under %ds — giving up",
+                  wd->burst_count, NS_WATCHDOG_BURST_SECS);
         wd->exit_status = 1;
         g_main_loop_quit(wd->loop);
         return;
     }
-    g_message("nd_watchdog: restarting browser (attempt %d)", wd->burst_count);
-    g_timeout_add(ND_WATCHDOG_BACKOFF_MS, nd_watchdog_respawn_cb, wd);
+    g_message("ns_watchdog: restarting browser (attempt %d)", wd->burst_count);
+    g_timeout_add(NS_WATCHDOG_BACKOFF_MS, ns_watchdog_respawn_cb, wd);
 }
 
 static void
-nd_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
+ns_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
 {
-    nd_watchdog *wd = user_data;
+    ns_watchdog *wd = user_data;
     g_spawn_close_pid(pid);
     wd->have_pid = FALSE;
     wd->watch_id = 0;
@@ -236,32 +236,32 @@ nd_watchdog_child_exited(GPid pid, gint status, gpointer user_data)
     }
 
 #ifdef G_OS_WIN32
-    g_warning("nd_watchdog: browser exited abnormally (code %d)", status);
+    g_warning("ns_watchdog: browser exited abnormally (code %d)", status);
 #else
     if (WIFSIGNALED(status))
-        g_warning("nd_watchdog: browser stopped by signal %d", WTERMSIG(status));
+        g_warning("ns_watchdog: browser stopped by signal %d", WTERMSIG(status));
     else
-        g_warning("nd_watchdog: browser exited with code %d", WEXITSTATUS(status));
+        g_warning("ns_watchdog: browser exited with code %d", WEXITSTATUS(status));
 #endif
-    nd_watchdog_schedule_restart(wd);
+    ns_watchdog_schedule_restart(wd);
 }
 
 static gboolean
-nd_watchdog_spawn(nd_watchdog *wd, gboolean recover)
+ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
 {
     GError *err = NULL;
     GPid pid = 0;
     char **envp = g_get_environ();
     if (recover)
-        envp = g_environ_setenv(envp, ND_WATCHDOG_RECOVER_ENV, "1", TRUE);
+        envp = g_environ_setenv(envp, NS_WATCHDOG_RECOVER_ENV, "1", TRUE);
     else
-        envp = g_environ_unsetenv(envp, ND_WATCHDOG_RECOVER_ENV);
+        envp = g_environ_unsetenv(envp, NS_WATCHDOG_RECOVER_ENV);
     gboolean ok = g_spawn_async(NULL, wd->child_argv, envp,
                                 G_SPAWN_DO_NOT_REAP_CHILD,
                                 NULL, NULL, &pid, &err);
     g_strfreev(envp);
     if (!ok) {
-        g_warning("nd_watchdog: failed to launch browser: %s",
+        g_warning("ns_watchdog: failed to launch browser: %s",
                   err ? err->message : "unknown error");
         g_clear_error(&err);
         wd->exit_status = 1;
@@ -270,31 +270,31 @@ nd_watchdog_spawn(nd_watchdog *wd, gboolean recover)
     }
     wd->pid = pid;
     wd->have_pid = TRUE;
-    wd->watch_id = g_child_watch_add(pid, nd_watchdog_child_exited, wd);
+    wd->watch_id = g_child_watch_add(pid, ns_watchdog_child_exited, wd);
     return TRUE;
 }
 
 #ifndef G_OS_WIN32
 static gboolean
-nd_watchdog_force_kill_cb(gpointer user_data)
+ns_watchdog_force_kill_cb(gpointer user_data)
 {
-    nd_watchdog *wd = user_data;
+    ns_watchdog *wd = user_data;
     if (wd->have_pid)
-        nd_watchdog_kill(wd->pid, TRUE);
+        ns_watchdog_kill(wd->pid, TRUE);
     return G_SOURCE_REMOVE;
 }
 
 static gboolean
-nd_watchdog_signal_cb(gpointer user_data)
+ns_watchdog_signal_cb(gpointer user_data)
 {
-    nd_watchdog *wd = user_data;
+    ns_watchdog *wd = user_data;
     if (!wd->stopping) {
         wd->stopping = TRUE;
         wd->exit_status = 0;
         if (wd->have_pid) {
-            nd_watchdog_kill(wd->pid, FALSE);
-            g_timeout_add_seconds(ND_WATCHDOG_STOP_GRACE_SECS,
-                                  nd_watchdog_force_kill_cb, wd);
+            ns_watchdog_kill(wd->pid, FALSE);
+            g_timeout_add_seconds(NS_WATCHDOG_STOP_GRACE_SECS,
+                                  ns_watchdog_force_kill_cb, wd);
         } else {
             g_main_loop_quit(wd->loop);
         }
@@ -304,29 +304,29 @@ nd_watchdog_signal_cb(gpointer user_data)
 #endif
 
 static char **
-nd_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
+ns_watchdog_build_child_argv(const char *self_exe, int argc, char **argv,
                              const char *session_path)
 {
     GPtrArray *args = g_ptr_array_new();
     g_ptr_array_add(args, g_strdup(self_exe));
     for (int i = 1; i < argc; i++) {
         if (!argv[i]) continue;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_FLAG) == 0) continue;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_NO_FLAG) == 0) continue;
-        if (g_strcmp0(argv[i], ND_WATCHDOG_CHILD_FLAG) == 0) continue;
-        if (g_str_has_prefix(argv[i], ND_WATCHDOG_SESSION_PREFIX)) continue;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_FLAG) == 0) continue;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_NO_FLAG) == 0) continue;
+        if (g_strcmp0(argv[i], NS_WATCHDOG_CHILD_FLAG) == 0) continue;
+        if (g_str_has_prefix(argv[i], NS_WATCHDOG_SESSION_PREFIX)) continue;
         g_ptr_array_add(args, g_strdup(argv[i]));
     }
-    g_ptr_array_add(args, g_strdup(ND_WATCHDOG_CHILD_FLAG));
-    g_ptr_array_add(args, g_strconcat(ND_WATCHDOG_SESSION_PREFIX, session_path, NULL));
+    g_ptr_array_add(args, g_strdup(NS_WATCHDOG_CHILD_FLAG));
+    g_ptr_array_add(args, g_strconcat(NS_WATCHDOG_SESSION_PREFIX, session_path, NULL));
     g_ptr_array_add(args, NULL);
     return (char **)g_ptr_array_free(args, FALSE);
 }
 
 int
-nd_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
+ns_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
 {
-    nd_watchdog wd = { 0 };
+    ns_watchdog wd = { 0 };
 
     char *uuid = g_uuid_string_random();
     char *name = g_strconcat("nordstjernen-watchdog-", uuid, ".session", NULL);
@@ -334,24 +334,24 @@ nd_watchdog_run_supervisor(const char *self_exe, int argc, char **argv)
     g_free(name);
     g_free(uuid);
 
-    wd.child_argv = nd_watchdog_build_child_argv(self_exe, argc, argv,
+    wd.child_argv = ns_watchdog_build_child_argv(self_exe, argc, argv,
                                                  wd.session_path);
     wd.loop = g_main_loop_new(NULL, FALSE);
     wd.burst_start_us = g_get_monotonic_time();
 
 #ifndef G_OS_WIN32
-    g_unix_signal_add(SIGINT, nd_watchdog_signal_cb, &wd);
-    g_unix_signal_add(SIGTERM, nd_watchdog_signal_cb, &wd);
+    g_unix_signal_add(SIGINT, ns_watchdog_signal_cb, &wd);
+    g_unix_signal_add(SIGTERM, ns_watchdog_signal_cb, &wd);
 #endif
 
-    g_message("nd_watchdog: supervising browser");
+    g_message("ns_watchdog: supervising browser");
 
-    if (nd_watchdog_spawn(&wd, FALSE))
+    if (ns_watchdog_spawn(&wd, FALSE))
         g_main_loop_run(wd.loop);
 
     if (wd.watch_id) g_source_remove(wd.watch_id);
     if (wd.have_pid) {
-        nd_watchdog_kill(wd.pid, TRUE);
+        ns_watchdog_kill(wd.pid, TRUE);
         g_spawn_close_pid(wd.pid);
     }
     g_main_loop_unref(wd.loop);

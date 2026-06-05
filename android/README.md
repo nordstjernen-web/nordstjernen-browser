@@ -20,7 +20,7 @@ than bitmap-stretched.
 ```
  Kotlin UI (MainActivity, PageView)
         │  JNI
- nd_jni.c  ──►  libnordstjernen.so  (engine: net, dom, css, layout, js, paint)
+ ns_jni.c  ──►  libnordstjernen.so  (engine: net, dom, css, layout, js, paint)
                        │
                        └─► glib · cairo · pango · pangocairo · harfbuzz ·
                            freetype · fontconfig · libcurl · sqlite3 ·
@@ -28,13 +28,13 @@ than bitmap-stretched.
 ```
 
 The engine drops **GTK 4, librsvg and gdk-pixbuf** on Android: `GdkTexture`
-is replaced by the `nd_texture` abstraction (`src/texture.c`), and the SVG /
+is replaced by the `ns_texture` abstraction (`src/texture.c`), and the SVG /
 fallback image decoders are gated out. So the Android dependency set is just
 the GLib/cairo/pango graphics stack plus networking/storage — all plain C, no
 Rust toolchain required. PNG/JPEG/GIF/BMP still decode via the in-tree Wuffs;
 SVG and uncommon formats render as a broken-image box for now.
 
-`nd_browser_render_rgba()` (added to the embedding API for Android) paints a
+`ns_browser_render_rgba()` (added to the embedding API for Android) paints a
 viewport region straight into an Android `ARGB_8888` Bitmap via
 `AndroidBitmap_lockPixels`, so there is no PNG round-trip.
 
@@ -51,8 +51,8 @@ android/
     build.gradle                       app module (AGP + Kotlin + CMake)
     src/main/AndroidManifest.xml
     src/main/cpp/CMakeLists.txt         builds the JNI bridge
-    src/main/cpp/nd_jni.c               real bridge → engine
-    src/main/cpp/nd_jni_stub.c          fallback when the engine isn't bundled
+    src/main/cpp/ns_jni.c               real bridge → engine
+    src/main/cpp/ns_jni_stub.c          fallback when the engine isn't bundled
     src/main/java/.../NativeBrowser.kt  JNI facade
     src/main/java/.../PageView.kt       scrolling render surface
     src/main/java/.../MainActivity.kt   URL bar + navigation
@@ -77,9 +77,9 @@ Requires JDK 17, the Android SDK (compileSdk 35), and CMake 3.22+ from the SDK.
 `CMakeLists.txt` checks for a prebuilt engine at
 `app/src/main/jniLibs/<abi>/libnordstjernen.so`:
 
-* **present** — the real JNI bridge (`nd_jni.c`) is compiled and linked against
+* **present** — the real JNI bridge (`ns_jni.c`) is compiled and linked against
   it. The app loads and renders real pages.
-* **absent** — the stub bridge (`nd_jni_stub.c`) is built so the APK still
+* **absent** — the stub bridge (`ns_jni_stub.c`) is built so the APK still
   assembles and runs; `NativeBrowser.available` is `false` and the UI shows a
   banner. This is what CI produces today and what lets UI work proceed before
   the dependency stack is cross-built.
@@ -99,8 +99,8 @@ into `jniLibs/arm64-v8a/`.
 ## Status
 
 * **Done & verified on desktop:** engine `__ANDROID__` guards, the
-  `nd_browser_render_rgba` (density-scaled) / `nd_browser_page_size` /
-  `nd_browser_link_at` / `nd_browser_title` embedding API (compiles clean under
+  `ns_browser_render_rgba` (density-scaled) / `ns_browser_page_size` /
+  `ns_browser_link_at` / `ns_browser_title` embedding API (compiles clean under
   the project's `--werror` flags, and the render/title paths are exercised by a
   link-test against the built library), the JNI bridge, the full Kotlin app
   (history, reload, link following, fling, intent handling, mobile-width
@@ -109,9 +109,9 @@ into `jniLibs/arm64-v8a/`.
   APK on every push via `.github/workflows/android.yml`.
 * **Done & verified on desktop (dependency shrink):** the engine no longer
   needs GTK 4, librsvg or gdk-pixbuf — `GdkTexture` is abstracted behind
-  `nd_texture` (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on
-  Android) and the SVG/fallback decoders are gated behind `ND_HAVE_LIBRSVG` /
-  `ND_HAVE_GDK_PIXBUF`. The desktop build is byte-for-byte behaviourally
+  `ns_texture` (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on
+  Android) and the SVG/fallback decoders are gated behind `NS_HAVE_LIBRSVG` /
+  `NS_HAVE_GDK_PIXBUF`. The desktop build is byte-for-byte behaviourally
   identical (renders images to PNG as before).
 * **Android sources verified-compiling:** `scripts/check-android-sources.sh`
   re-checks every engine translation unit under the Android configuration

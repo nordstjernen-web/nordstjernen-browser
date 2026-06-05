@@ -17,7 +17,7 @@ nothing imported.
 - **No** WebGL, WebGPU, or AI-style web APIs.
 - No embedded audio/video codecs. `<audio>`/`<video>` render a poster
   and play overlay; clicking hands the media URL to an external player
-  (`src/media.c::nd_media_launch_external`).
+  (`src/media.c::ns_media_launch_external`).
 - English UI only (for now).
 - Does not phone home, does not telemeter the user.
 
@@ -110,14 +110,14 @@ PNG, GIF, BMP, and JPEG bytes are decoded through
 [Wuffs](https://github.com/google/wuffs), a memory-safe
 transpiled-to-C image-decoder library. The single-file release is
 vendored at `subprojects/wuffs/wuffs-v0.4.c` and built as a static
-subproject. `src/image_wuffs.c::nd_image_decode_wuffs` is tried
+subproject. `src/image_wuffs.c::ns_image_decode_wuffs` is tried
 first; it returns NULL for any other format, in which case
-`src/image.c::nd_image_decode_bytes` falls back to GDK-Pixbuf
+`src/image.c::ns_image_decode_bytes` falls back to GDK-Pixbuf
 (for TIFF / ICO / WebP / etc.) and, last, to librsvg for SVG.
 
 ### URL parsing: lexbor URL module
 
-The `nd_url_*` helpers in `src/net.c` route URL resolution, origin
+The `ns_url_*` helpers in `src/net.c` route URL resolution, origin
 extraction, and host extraction through `lxb_url_parse` /
 `lxb_url_serialize` from lexbor's WHATWG URL module. No separate URL
 library or build option — it's part of the same `liblexbor_static.a`
@@ -126,7 +126,7 @@ that the HTML parser uses.
 ### Charset detection: uchardet
 
 Required dependency (Debian/Ubuntu `libuchardet-dev`,
-Fedora/RHEL `uchardet-devel`). `nd_html_decode_body` hands the
+Fedora/RHEL `uchardet-devel`). `ns_html_decode_body` hands the
 response body to [uchardet](https://www.freedesktop.org/wiki/Software/uchardet/)
 to identify the charset, then `g_convert`s to UTF-8. No
 hand-rolled BOM / HTTP-charset / meta-charset sniffing — uchardet

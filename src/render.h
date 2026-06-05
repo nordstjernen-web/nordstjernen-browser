@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_RENDER_H
-#define ND_RENDER_H
+#ifndef NS_RENDER_H
+#define NS_RENDER_H
 
 #include <glib.h>
 
@@ -16,28 +16,28 @@
 
 G_BEGIN_DECLS
 
-struct nd_image_cache;
+struct ns_image_cache;
 
-typedef struct nd_render_ctx {
-    nd_node                        *doc;
-    const nd_css_stylesheet *const *sheets;
+typedef struct ns_render_ctx {
+    ns_node                        *doc;
+    const ns_css_stylesheet *const *sheets;
     guint                           n_sheets;
     double                          viewport_width;
     double                          viewport_height;
     double                          zoom;
-    struct nd_image_cache          *images;
+    struct ns_image_cache          *images;
     const char                     *base_url;
-    nd_anim                        *anim;
-    nd_js                          *js;
-    const nd_node                  *focused_input;
+    ns_anim                        *anim;
+    ns_js                          *js;
+    const ns_node                  *focused_input;
     gsize                           caret_byte;
     gsize                           sel_anchor_byte;
     char     *(*resolve_url)(const char *href, gpointer ud);
     gboolean  (*font_allowed)(const char *abs_url, gpointer ud);
     gpointer                        cb_ud;
-} nd_render_ctx;
+} ns_render_ctx;
 
-GHashTable *nd_render_relayout(const nd_render_ctx *c, nd_box **out_layout);
+GHashTable *ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout);
 
 G_END_DECLS
 

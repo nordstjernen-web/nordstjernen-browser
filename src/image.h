@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_IMAGE_H
-#define ND_IMAGE_H
+#ifndef NS_IMAGE_H
+#define NS_IMAGE_H
 
 #include <glib.h>
 
@@ -12,28 +12,28 @@
 
 G_BEGIN_DECLS
 
-typedef struct nd_image_cache nd_image_cache;
-typedef struct nd_image       nd_image;
-typedef struct nd_tab_worker  nd_tab_worker;
+typedef struct ns_image_cache ns_image_cache;
+typedef struct ns_image       ns_image;
+typedef struct ns_tab_worker  ns_tab_worker;
 
-typedef struct nd_image_anim_frame {
-    nd_texture *texture;
+typedef struct ns_image_anim_frame {
+    ns_texture *texture;
     int         delay_ms;
-} nd_image_anim_frame;
+} ns_image_anim_frame;
 
-typedef struct nd_image_pixel_frame {
+typedef struct ns_image_pixel_frame {
     guint8            *pixels;
     gsize              pixels_len;
     gsize              stride;
-    nd_texture_format  format;
+    ns_texture_format  format;
     int                width;
     int                height;
     int                delay_ms;
-} nd_image_pixel_frame;
+} ns_image_pixel_frame;
 
-struct nd_image {
+struct ns_image {
     char        *url;
-    nd_texture  *texture;
+    ns_texture  *texture;
     void        *render_surface;
     int          natural_width;
     int          natural_height;
@@ -49,73 +49,73 @@ struct nd_image {
     int          anim_total_ms;
 };
 
-typedef void (*nd_image_ready_cb)(nd_image *img, gpointer user_data);
+typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
 
-nd_image_cache *nd_image_cache_new(void);
-void            nd_image_cache_free(nd_image_cache *cache);
-void            nd_image_cache_set_worker(nd_image_cache *cache,
-                                          nd_tab_worker  *worker);
+ns_image_cache *ns_image_cache_new(void);
+void            ns_image_cache_free(ns_image_cache *cache);
+void            ns_image_cache_set_worker(ns_image_cache *cache,
+                                          ns_tab_worker  *worker);
 
-nd_image       *nd_image_cache_get(nd_image_cache *cache,
+ns_image       *ns_image_cache_get(ns_image_cache *cache,
                                    const char     *url,
                                    const char     *top_url,
-                                   nd_image_ready_cb cb,
+                                   ns_image_ready_cb cb,
                                    gpointer        user_data);
 
-void            nd_image_cache_cancel_cb(nd_image_cache *cache,
+void            ns_image_cache_cancel_cb(ns_image_cache *cache,
                                          gpointer user_data);
 
-nd_image       *nd_image_cache_peek(nd_image_cache *cache, const char *url);
+ns_image       *ns_image_cache_peek(ns_image_cache *cache, const char *url);
 
-nd_image       *nd_image_cache_insert_loaded(nd_image_cache *cache,
+ns_image       *ns_image_cache_insert_loaded(ns_image_cache *cache,
                                              const char     *url,
-                                             nd_texture     *texture,
+                                             ns_texture     *texture,
                                              int             width,
                                              int             height);
 
-nd_texture *nd_image_decode_bytes(const guchar *data, gsize len,
+ns_texture *ns_image_decode_bytes(const guchar *data, gsize len,
                                   int *out_w, int *out_h);
 
-nd_texture *nd_image_decode_wuffs(const guchar *data, gsize len,
+ns_texture *ns_image_decode_wuffs(const guchar *data, gsize len,
                                   int *out_w, int *out_h);
 
-GArray *nd_image_decode_wuffs_anim(const guchar *data, gsize len,
+GArray *ns_image_decode_wuffs_anim(const guchar *data, gsize len,
                                    int *out_w, int *out_h);
 
-GArray *nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
+GArray *ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
                                              int *out_w, int *out_h);
 
-guint8 *nd_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
+guint8 *ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
                                       int *out_w, int *out_h,
                                       gsize *out_stride, gsize *out_buf_len);
 
-gboolean nd_image_wuffs_supports_bytes(const guchar *data, gsize len);
+gboolean ns_image_wuffs_supports_bytes(const guchar *data, gsize len);
 
-void nd_image_pixel_frame_clear(gpointer data);
+void ns_image_pixel_frame_clear(gpointer data);
 
-guint8 *nd_image_decode_bytes_to_pixels(const guchar *data, gsize len,
+guint8 *ns_image_decode_bytes_to_pixels(const guchar *data, gsize len,
                                         int *out_w, int *out_h,
                                         gsize *out_stride,
                                         gsize *out_buf_len,
-                                        nd_texture_format *out_format);
+                                        ns_texture_format *out_format);
 
-nd_texture *nd_image_decode_ico(const guchar *data, gsize len,
+ns_texture *ns_image_decode_ico(const guchar *data, gsize len,
                                 int *out_w, int *out_h);
 
-gboolean nd_image_cache_tick(nd_image_cache *cache, gint64 now_us);
+gboolean ns_image_cache_tick(ns_image_cache *cache, gint64 now_us);
 
-gboolean nd_image_should_retry(const nd_image *img, gint64 now_us);
+gboolean ns_image_should_retry(const ns_image *img, gint64 now_us);
 
-#ifdef ND_HAVE_AVIF
-nd_texture *nd_image_decode_avif(const guchar *data, gsize len,
+#ifdef NS_HAVE_AVIF
+ns_texture *ns_image_decode_avif(const guchar *data, gsize len,
                                  int *out_w, int *out_h);
 
-gboolean nd_image_avif_supports_bytes(const guchar *data, gsize len);
+gboolean ns_image_avif_supports_bytes(const guchar *data, gsize len);
 #endif
 
-gboolean nd_image_pixbuf_supports_mime(const char *mime);
+gboolean ns_image_pixbuf_supports_mime(const char *mime);
 
-const char *nd_image_accept_header_fragment(void);
+const char *ns_image_accept_header_fragment(void);
 
 G_END_DECLS
 

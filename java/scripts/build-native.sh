@@ -47,7 +47,7 @@ mkdir -p "$OUTDIR"
 CC="${CC:-cc}"
 $CC -shared -fPIC -O2 \
     -I"$JAVA_HOME/include" -I"$JNI_MD_DIR" -I"$REPO_ROOT/src" \
-    "$REPO_ROOT/java/src/main/native/nd_java_jni.c" \
+    "$REPO_ROOT/java/src/main/native/ns_java_jni.c" \
     -L"$(dirname "$ENGINE")" -lnordstjernen \
     $RPATH \
     -o "$OUTDIR/libnordstjernenjni.$SOEXT"

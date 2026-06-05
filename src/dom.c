@@ -11,10 +11,10 @@
 #include <math.h>
 #include <string.h>
 
-static void nd_class_set_clear(nd_node *el);
+static void ns_class_set_clear(ns_node *el);
 
 static gboolean
-nd_str_is_ascii_lower(const char *s)
+ns_str_is_ascii_lower(const char *s)
 {
     for (; *s; s++)
         if (*s >= 'A' && *s <= 'Z') return FALSE;
@@ -22,7 +22,7 @@ nd_str_is_ascii_lower(const char *s)
 }
 
 int
-nd_parse_int(const char *s, int dflt, int min_v, int max_v)
+ns_parse_int(const char *s, int dflt, int min_v, int max_v)
 {
     if (!s || !*s) return dflt;
     while (*s == ' ' || *s == '\t') s++;
@@ -38,38 +38,38 @@ nd_parse_int(const char *s, int dflt, int min_v, int max_v)
 }
 
 typedef enum {
-    ND_FORM_INPUT_OTHER,
-    ND_FORM_INPUT_NUMBER,
-    ND_FORM_INPUT_RANGE,
-    ND_FORM_INPUT_DATE,
-    ND_FORM_INPUT_MONTH,
-    ND_FORM_INPUT_WEEK,
-    ND_FORM_INPUT_TIME,
-    ND_FORM_INPUT_DATETIME,
-} nd_form_input_kind;
+    NS_FORM_INPUT_OTHER,
+    NS_FORM_INPUT_NUMBER,
+    NS_FORM_INPUT_RANGE,
+    NS_FORM_INPUT_DATE,
+    NS_FORM_INPUT_MONTH,
+    NS_FORM_INPUT_WEEK,
+    NS_FORM_INPUT_TIME,
+    NS_FORM_INPUT_DATETIME,
+} ns_form_input_kind;
 
-static nd_form_input_kind
-nd_form_input_kind_of_type(const char *type)
+static ns_form_input_kind
+ns_form_input_kind_of_type(const char *type)
 {
-    if (!type) return ND_FORM_INPUT_OTHER;
-    if (!g_ascii_strcasecmp(type, "number"))         return ND_FORM_INPUT_NUMBER;
-    if (!g_ascii_strcasecmp(type, "range"))          return ND_FORM_INPUT_RANGE;
-    if (!g_ascii_strcasecmp(type, "date"))           return ND_FORM_INPUT_DATE;
-    if (!g_ascii_strcasecmp(type, "month"))          return ND_FORM_INPUT_MONTH;
-    if (!g_ascii_strcasecmp(type, "week"))           return ND_FORM_INPUT_WEEK;
-    if (!g_ascii_strcasecmp(type, "time"))           return ND_FORM_INPUT_TIME;
-    if (!g_ascii_strcasecmp(type, "datetime-local")) return ND_FORM_INPUT_DATETIME;
-    return ND_FORM_INPUT_OTHER;
+    if (!type) return NS_FORM_INPUT_OTHER;
+    if (!g_ascii_strcasecmp(type, "number"))         return NS_FORM_INPUT_NUMBER;
+    if (!g_ascii_strcasecmp(type, "range"))          return NS_FORM_INPUT_RANGE;
+    if (!g_ascii_strcasecmp(type, "date"))           return NS_FORM_INPUT_DATE;
+    if (!g_ascii_strcasecmp(type, "month"))          return NS_FORM_INPUT_MONTH;
+    if (!g_ascii_strcasecmp(type, "week"))           return NS_FORM_INPUT_WEEK;
+    if (!g_ascii_strcasecmp(type, "time"))           return NS_FORM_INPUT_TIME;
+    if (!g_ascii_strcasecmp(type, "datetime-local")) return NS_FORM_INPUT_DATETIME;
+    return NS_FORM_INPUT_OTHER;
 }
 
 gboolean
-nd_input_type_has_number_value(const char *type)
+ns_input_type_has_number_value(const char *type)
 {
-    return nd_form_input_kind_of_type(type) != ND_FORM_INPUT_OTHER;
+    return ns_form_input_kind_of_type(type) != NS_FORM_INPUT_OTHER;
 }
 
 gboolean
-nd_input_type_supports_readonly(const char *type)
+ns_input_type_supports_readonly(const char *type)
 {
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "text") == 0 ||
@@ -87,7 +87,7 @@ nd_input_type_supports_readonly(const char *type)
 }
 
 gboolean
-nd_input_type_supports_text_constraints(const char *type)
+ns_input_type_supports_text_constraints(const char *type)
 {
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "text") == 0 ||
@@ -99,36 +99,36 @@ nd_input_type_supports_text_constraints(const char *type)
 }
 
 gboolean
-nd_form_control_readonly_bars_validation(const nd_node *control)
+ns_form_control_readonly_bars_validation(const ns_node *control)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT || !control->name)
+    if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
-    if (!nd_element_get_attr(control, "readonly")) return FALSE;
+    if (!ns_element_get_attr(control, "readonly")) return FALSE;
     if (strcmp(control->name, "textarea") == 0) return TRUE;
     if (strcmp(control->name, "input") != 0) return FALSE;
-    return nd_input_type_supports_readonly(nd_element_get_attr(control, "type"));
+    return ns_input_type_supports_readonly(ns_element_get_attr(control, "type"));
 }
 
 gboolean
-nd_form_control_length_limits_apply(const nd_node *control)
+ns_form_control_length_limits_apply(const ns_node *control)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT || !control->name)
+    if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
     if (strcmp(control->name, "textarea") == 0) return TRUE;
     if (strcmp(control->name, "input") != 0) return FALSE;
-    return nd_input_type_supports_text_constraints(nd_element_get_attr(control, "type"));
+    return ns_input_type_supports_text_constraints(ns_element_get_attr(control, "type"));
 }
 
 gboolean
-nd_form_control_supports_required(const nd_node *control)
+ns_form_control_supports_required(const ns_node *control)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT || !control->name)
+    if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
     if (strcmp(control->name, "textarea") == 0 ||
         strcmp(control->name, "select") == 0)
         return TRUE;
     if (strcmp(control->name, "input") != 0) return FALSE;
-    const char *type = nd_element_get_attr(control, "type");
+    const char *type = ns_element_get_attr(control, "type");
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "hidden") != 0 &&
            g_ascii_strcasecmp(type, "range") != 0 &&
@@ -140,7 +140,7 @@ nd_form_control_supports_required(const nd_node *control)
 }
 
 static gboolean
-nd_form_parse_finite_double(const char *v, double *out)
+ns_form_parse_finite_double(const char *v, double *out)
 {
     if (!v || !*v) return FALSE;
     char *end = NULL;
@@ -154,57 +154,57 @@ nd_form_parse_finite_double(const char *v, double *out)
 
 
 gboolean
-nd_input_value_to_number(const char *type, const char *value, double *out)
+ns_input_value_to_number(const char *type, const char *value, double *out)
 {
     if (!value || !*value) return FALSE;
-    nd_form_input_kind kind = nd_form_input_kind_of_type(type);
+    ns_form_input_kind kind = ns_form_input_kind_of_type(type);
     int y, m, d, ms;
     switch (kind) {
-    case ND_FORM_INPUT_NUMBER:
-    case ND_FORM_INPUT_RANGE:
-        return nd_form_parse_finite_double(value, out);
-    case ND_FORM_INPUT_DATE: {
-        const char *p = nd_dt_rd_date(value, &y, &m, &d);
+    case NS_FORM_INPUT_NUMBER:
+    case NS_FORM_INPUT_RANGE:
+        return ns_form_parse_finite_double(value, out);
+    case NS_FORM_INPUT_DATE: {
+        const char *p = ns_dt_rd_date(value, &y, &m, &d);
         if (!p || *p != '\0') return FALSE;
-        if (out) *out = (double)nd_dt_days_from_civil(y, m, d) * 86400000.0;
+        if (out) *out = (double)ns_dt_days_from_civil(y, m, d) * 86400000.0;
         return TRUE;
     }
-    case ND_FORM_INPUT_MONTH: {
-        const char *p = nd_dt_rd_digits(value, 4, 9, &y);
+    case NS_FORM_INPUT_MONTH: {
+        const char *p = ns_dt_rd_digits(value, 4, 9, &y);
         if (!p || *p != '-') return FALSE;
         p++;
-        p = nd_dt_rd_digits(p, 2, 2, &m);
-        if (!p || *p != '\0' || y < 1 || y > ND_DT_MAX_YEAR ||
+        p = ns_dt_rd_digits(p, 2, 2, &m);
+        if (!p || *p != '\0' || y < 1 || y > NS_DT_MAX_YEAR ||
             m < 1 || m > 12) return FALSE;
         if (out) *out = (double)((y - 1970) * 12 + (m - 1));
         return TRUE;
     }
-    case ND_FORM_INPUT_WEEK: {
-        const char *p = nd_dt_rd_digits(value, 4, 9, &y);
+    case NS_FORM_INPUT_WEEK: {
+        const char *p = ns_dt_rd_digits(value, 4, 9, &y);
         if (!p || *p != '-' || *(p + 1) != 'W') return FALSE;
         p += 2;
         int w;
-        p = nd_dt_rd_digits(p, 2, 2, &w);
-        if (!p || *p != '\0' || y < 1 || y > ND_DT_MAX_YEAR || w < 1 ||
-            w > nd_dt_iso_weeks_in_year(y))
+        p = ns_dt_rd_digits(p, 2, 2, &w);
+        if (!p || *p != '\0' || y < 1 || y > NS_DT_MAX_YEAR || w < 1 ||
+            w > ns_dt_iso_weeks_in_year(y))
             return FALSE;
-        long monday = nd_dt_iso_week1_monday(y) + (long)(w - 1) * 7;
+        long monday = ns_dt_iso_week1_monday(y) + (long)(w - 1) * 7;
         if (out) *out = (double)monday * 86400000.0;
         return TRUE;
     }
-    case ND_FORM_INPUT_TIME: {
-        const char *p = nd_dt_rd_time(value, &ms);
+    case NS_FORM_INPUT_TIME: {
+        const char *p = ns_dt_rd_time(value, &ms);
         if (!p || *p != '\0') return FALSE;
         if (out) *out = (double)ms;
         return TRUE;
     }
-    case ND_FORM_INPUT_DATETIME: {
-        const char *p = nd_dt_rd_date(value, &y, &m, &d);
+    case NS_FORM_INPUT_DATETIME: {
+        const char *p = ns_dt_rd_date(value, &y, &m, &d);
         if (!p || (*p != 'T' && *p != ' ')) return FALSE;
         p++;
-        p = nd_dt_rd_time(p, &ms);
+        p = ns_dt_rd_time(p, &ms);
         if (!p || *p != '\0') return FALSE;
-        if (out) *out = (double)nd_dt_days_from_civil(y, m, d) * 86400000.0 + ms;
+        if (out) *out = (double)ns_dt_days_from_civil(y, m, d) * 86400000.0 + ms;
         return TRUE;
     }
     default:
@@ -213,45 +213,45 @@ nd_input_value_to_number(const char *type, const char *value, double *out)
 }
 
 gboolean
-nd_input_value_range_state(const nd_node *input, const char *value,
+ns_input_value_range_state(const ns_node *input, const char *value,
                            gboolean *underflow, gboolean *overflow)
 {
     if (underflow) *underflow = FALSE;
     if (overflow) *overflow = FALSE;
-    if (!input || !nd_node_is_element_named(input, "input")) return FALSE;
-    const char *type = nd_element_get_attr(input, "type");
+    if (!input || !ns_node_is_element_named(input, "input")) return FALSE;
+    const char *type = ns_element_get_attr(input, "type");
     double v;
-    if (!nd_input_value_to_number(type, value, &v)) return FALSE;
+    if (!ns_input_value_to_number(type, value, &v)) return FALSE;
     double bound;
-    const char *min = nd_element_get_attr(input, "min");
-    const char *max = nd_element_get_attr(input, "max");
-    if (nd_input_value_to_number(type, min, &bound) && v < bound) {
+    const char *min = ns_element_get_attr(input, "min");
+    const char *max = ns_element_get_attr(input, "max");
+    if (ns_input_value_to_number(type, min, &bound) && v < bound) {
         if (underflow) *underflow = TRUE;
     }
-    if (nd_input_value_to_number(type, max, &bound) && v > bound) {
+    if (ns_input_value_to_number(type, max, &bound) && v > bound) {
         if (overflow) *overflow = TRUE;
     }
     return TRUE;
 }
 
 static double
-nd_form_step_scale(nd_form_input_kind kind)
+ns_form_step_scale(ns_form_input_kind kind)
 {
     switch (kind) {
-    case ND_FORM_INPUT_DATE:     return 86400000.0;
-    case ND_FORM_INPUT_WEEK:     return 604800000.0;
-    case ND_FORM_INPUT_TIME:
-    case ND_FORM_INPUT_DATETIME: return 1000.0;
+    case NS_FORM_INPUT_DATE:     return 86400000.0;
+    case NS_FORM_INPUT_WEEK:     return 604800000.0;
+    case NS_FORM_INPUT_TIME:
+    case NS_FORM_INPUT_DATETIME: return 1000.0;
     default:                     return 1.0;
     }
 }
 
 static double
-nd_form_default_step(nd_form_input_kind kind)
+ns_form_default_step(ns_form_input_kind kind)
 {
     switch (kind) {
-    case ND_FORM_INPUT_TIME:
-    case ND_FORM_INPUT_DATETIME:
+    case NS_FORM_INPUT_TIME:
+    case NS_FORM_INPUT_DATETIME:
         return 60.0;
     default:
         return 1.0;
@@ -259,25 +259,25 @@ nd_form_default_step(nd_form_input_kind kind)
 }
 
 gboolean
-nd_input_value_step_mismatch(const nd_node *input, const char *value)
+ns_input_value_step_mismatch(const ns_node *input, const char *value)
 {
-    if (!input || !nd_node_is_element_named(input, "input")) return FALSE;
-    const char *type = nd_element_get_attr(input, "type");
-    nd_form_input_kind kind = nd_form_input_kind_of_type(type);
-    if (kind == ND_FORM_INPUT_OTHER) return FALSE;
-    const char *step_attr = nd_element_get_attr(input, "step");
+    if (!input || !ns_node_is_element_named(input, "input")) return FALSE;
+    const char *type = ns_element_get_attr(input, "type");
+    ns_form_input_kind kind = ns_form_input_kind_of_type(type);
+    if (kind == NS_FORM_INPUT_OTHER) return FALSE;
+    const char *step_attr = ns_element_get_attr(input, "step");
     if (step_attr && g_ascii_strcasecmp(step_attr, "any") == 0)
         return FALSE;
     double v;
-    if (!nd_input_value_to_number(type, value, &v)) return FALSE;
-    double step_value = nd_form_default_step(kind);
+    if (!ns_input_value_to_number(type, value, &v)) return FALSE;
+    double step_value = ns_form_default_step(kind);
     double parsed;
-    if (nd_form_parse_finite_double(step_attr, &parsed) && parsed > 0)
+    if (ns_form_parse_finite_double(step_attr, &parsed) && parsed > 0)
         step_value = parsed;
-    double step = step_value * nd_form_step_scale(kind);
+    double step = step_value * ns_form_step_scale(kind);
     if (step <= 0 || !isfinite(step)) return FALSE;
-    double base = kind == ND_FORM_INPUT_WEEK ? -259200000.0 : 0.0;
-    if (nd_input_value_to_number(type, nd_element_get_attr(input, "min"), &parsed))
+    double base = kind == NS_FORM_INPUT_WEEK ? -259200000.0 : 0.0;
+    if (ns_input_value_to_number(type, ns_element_get_attr(input, "min"), &parsed))
         base = parsed;
     double q = (v - base) / step;
     double nearest = round(q);
@@ -286,54 +286,54 @@ nd_input_value_step_mismatch(const nd_node *input, const char *value)
 }
 
 static gboolean
-nd_input_type_is(const nd_node *node, const char *want)
+ns_input_type_is(const ns_node *node, const char *want)
 {
-    if (!nd_node_is_element_named(node, "input")) return FALSE;
-    const char *type = nd_element_get_attr(node, "type");
+    if (!ns_node_is_element_named(node, "input")) return FALSE;
+    const char *type = ns_element_get_attr(node, "type");
     return type && g_ascii_strcasecmp(type, want) == 0;
 }
 
 static gboolean
-nd_radio_group_has_checked(const nd_node *scan, const nd_node *doc,
-                           const nd_node *owner,
+ns_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
+                           const ns_node *owner,
                            const char *name, int depth)
 {
     if (!scan || depth >= 512) return FALSE;
-    if (nd_input_type_is(scan, "radio")) {
-        const char *scan_name = nd_element_get_attr(scan, "name");
+    if (ns_input_type_is(scan, "radio")) {
+        const char *scan_name = ns_element_get_attr(scan, "name");
         if (!scan_name) scan_name = "";
         if (strcmp(scan_name, name) == 0 &&
-            nd_form_owner(scan, doc) == owner &&
-            nd_element_get_attr(scan, "checked"))
+            ns_form_owner(scan, doc) == owner &&
+            ns_element_get_attr(scan, "checked"))
             return TRUE;
     }
-    for (const nd_node *c = scan->first_child; c; c = c->next_sibling)
-        if (nd_radio_group_has_checked(c, doc, owner, name, depth + 1))
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        if (ns_radio_group_has_checked(c, doc, owner, name, depth + 1))
             return TRUE;
     return FALSE;
 }
 
 gboolean
-nd_form_control_value_missing(const nd_node *control, const char *value,
-                              const nd_node *doc)
+ns_form_control_value_missing(const ns_node *control, const char *value,
+                              const ns_node *doc)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT || !control->name)
+    if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
-    if (nd_input_type_is(control, "checkbox"))
-        return nd_element_get_attr(control, "checked") == NULL;
-    if (nd_input_type_is(control, "radio")) {
-        const char *name = nd_element_get_attr(control, "name");
+    if (ns_input_type_is(control, "checkbox"))
+        return ns_element_get_attr(control, "checked") == NULL;
+    if (ns_input_type_is(control, "radio")) {
+        const char *name = ns_element_get_attr(control, "name");
         if (!name) name = "";
-        const nd_node *root = doc ? doc : nd_node_root(control);
-        const nd_node *owner = nd_form_owner(control, root);
-        return !nd_radio_group_has_checked(root ? root : control,
+        const ns_node *root = doc ? doc : ns_node_root(control);
+        const ns_node *owner = ns_form_owner(control, root);
+        return !ns_radio_group_has_checked(root ? root : control,
                                            root, owner, name, 0);
     }
     return !value || !*value;
 }
 
 static gboolean
-nd_email_token_valid(const char *start, gsize len)
+ns_email_token_valid(const char *start, gsize len)
 {
     char *token = g_strndup(start, len);
     char *trimmed = g_strstrip(token);
@@ -356,23 +356,23 @@ nd_email_token_valid(const char *start, gsize len)
 }
 
 gboolean
-nd_input_email_value_valid(const nd_node *input, const char *value)
+ns_input_email_value_valid(const ns_node *input, const char *value)
 {
     if (!value || !*value) return TRUE;
-    if (!input || !nd_element_get_attr(input, "multiple"))
-        return nd_email_token_valid(value, strlen(value));
+    if (!input || !ns_element_get_attr(input, "multiple"))
+        return ns_email_token_valid(value, strlen(value));
     const char *p = value;
     while (TRUE) {
         const char *comma = strchr(p, ',');
         gsize len = comma ? (gsize)(comma - p) : strlen(p);
-        if (!nd_email_token_valid(p, len)) return FALSE;
+        if (!ns_email_token_valid(p, len)) return FALSE;
         if (!comma) return TRUE;
         p = comma + 1;
     }
 }
 
 gboolean
-nd_ce_attr_enables(const char *ce)
+ns_ce_attr_enables(const char *ce)
 {
     return ce && (!*ce ||
                   g_ascii_strcasecmp(ce, "true") == 0 ||
@@ -380,12 +380,12 @@ nd_ce_attr_enables(const char *ce)
 }
 
 gboolean
-nd_node_is_text_input(const nd_node *n)
+ns_node_is_text_input(const ns_node *n)
 {
-    if (!n || n->kind != ND_NODE_ELEMENT || !n->name) return FALSE;
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     if (strcmp(n->name, "textarea") == 0) return TRUE;
     if (strcmp(n->name, "input") != 0) return FALSE;
-    const char *type = nd_element_get_attr(n, "type");
+    const char *type = ns_element_get_attr(n, "type");
     if (!type || !*type) return TRUE;
     return g_ascii_strcasecmp(type, "text")     == 0 ||
            g_ascii_strcasecmp(type, "search")   == 0 ||
@@ -397,74 +397,74 @@ nd_node_is_text_input(const nd_node *n)
 }
 
 gboolean
-nd_node_is_contenteditable_host(const nd_node *n)
+ns_node_is_contenteditable_host(const ns_node *n)
 {
-    if (!n || n->kind != ND_NODE_ELEMENT || !n->name) return FALSE;
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     if (strcmp(n->name, "input") == 0 || strcmp(n->name, "textarea") == 0)
         return FALSE;
-    return nd_ce_attr_enables(nd_element_get_attr(n, "contenteditable"));
+    return ns_ce_attr_enables(ns_element_get_attr(n, "contenteditable"));
 }
 
 gboolean
-nd_node_is_editable(const nd_node *n)
+ns_node_is_editable(const ns_node *n)
 {
-    return nd_node_is_text_input(n) || nd_node_is_contenteditable_host(n);
+    return ns_node_is_text_input(n) || ns_node_is_contenteditable_host(n);
 }
 
 const char *
-nd_node_editable_value(const nd_node *n)
+ns_node_editable_value(const ns_node *n)
 {
     if (!n) return "";
     if ((n->name && strcmp(n->name, "textarea") == 0) ||
-        nd_node_is_contenteditable_host(n)) {
-        for (const nd_node *c = n->first_child; c; c = c->next_sibling)
-            if (c->kind == ND_NODE_TEXT && c->text)
+        ns_node_is_contenteditable_host(n)) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+            if (c->kind == NS_NODE_TEXT && c->text)
                 return c->text;
         return "";
     }
-    const char *v = nd_element_get_attr(n, "value");
+    const char *v = ns_element_get_attr(n, "value");
     return v ? v : "";
 }
 
 void
-nd_node_set_editable_value(nd_node *n, const char *value)
+ns_node_set_editable_value(ns_node *n, const char *value)
 {
     if (!n) return;
     if ((n->name && strcmp(n->name, "textarea") == 0) ||
-        nd_node_is_contenteditable_host(n)) {
-        for (nd_node *c = n->first_child; c; ) {
-            nd_node *next = c->next_sibling;
-            nd_node_remove(c);
-            nd_node_free(c);
+        ns_node_is_contenteditable_host(n)) {
+        for (ns_node *c = n->first_child; c; ) {
+            ns_node *next = c->next_sibling;
+            ns_node_remove(c);
+            ns_node_free(c);
             c = next;
         }
-        nd_node_append_child(n, nd_node_new_text(g_strdup(value ? value : "")));
+        ns_node_append_child(n, ns_node_new_text(g_strdup(value ? value : "")));
     } else {
-        nd_element_set_attr(n, "value", value ? value : "");
+        ns_element_set_attr(n, "value", value ? value : "");
     }
 }
 
 void
-nd_node_flatten_editable(nd_node *n)
+ns_node_flatten_editable(ns_node *n)
 {
-    if (!nd_node_is_contenteditable_host(n)) return;
-    char *txt = nd_node_collect_text(n);
-    nd_node_set_editable_value(n, txt ? txt : "");
+    if (!ns_node_is_contenteditable_host(n)) return;
+    char *txt = ns_node_collect_text(n);
+    ns_node_set_editable_value(n, txt ? txt : "");
     g_free(txt);
 }
 
 gboolean
-nd_node_is_numeric_input(const nd_node *control)
+ns_node_is_numeric_input(const ns_node *control)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT || !control->name)
+    if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
     if (strcmp(control->name, "input") != 0) return FALSE;
-    const char *type = nd_element_get_attr(control, "type");
+    const char *type = ns_element_get_attr(control, "type");
     return type && g_ascii_strcasecmp(type, "number") == 0;
 }
 
 char *
-nd_numeric_filter_insert(const char *insert, gsize len, gsize *out_len)
+ns_numeric_filter_insert(const char *insert, gsize len, gsize *out_len)
 {
     GString *s = g_string_sized_new(len);
     for (gsize i = 0; insert && i < len; i++) {
@@ -478,124 +478,124 @@ nd_numeric_filter_insert(const char *insert, gsize len, gsize *out_len)
 }
 
 
-static nd_node *
-nd_node_new(nd_node_kind kind)
+static ns_node *
+ns_node_new(ns_node_kind kind)
 {
-    nd_node *n = g_new0(nd_node, 1);
+    ns_node *n = g_new0(ns_node, 1);
     n->kind = kind;
     return n;
 }
 
-nd_node *
-nd_node_new_document(void)
+ns_node *
+ns_node_new_document(void)
 {
-    return nd_node_new(ND_NODE_DOCUMENT);
+    return ns_node_new(NS_NODE_DOCUMENT);
 }
 
-nd_node *
-nd_node_new_element(char *name)
+ns_node *
+ns_node_new_element(char *name)
 {
-    nd_node *n = nd_node_new(ND_NODE_ELEMENT);
+    ns_node *n = ns_node_new(NS_NODE_ELEMENT);
     n->name = name;
-    n->flags |= ND_NODE_OWN_NAME;
+    n->flags |= NS_NODE_OWN_NAME;
     return n;
 }
 
-nd_node *
-nd_node_new_text(char *text)
+ns_node *
+ns_node_new_text(char *text)
 {
-    nd_node *n = nd_node_new(ND_NODE_TEXT);
+    ns_node *n = ns_node_new(NS_NODE_TEXT);
     n->text = text;
-    n->flags |= ND_NODE_OWN_TEXT;
+    n->flags |= NS_NODE_OWN_TEXT;
     return n;
 }
 
-nd_node *
-nd_node_new_comment(char *text)
+ns_node *
+ns_node_new_comment(char *text)
 {
-    nd_node *n = nd_node_new(ND_NODE_COMMENT);
+    ns_node *n = ns_node_new(NS_NODE_COMMENT);
     n->text = text;
-    n->flags |= ND_NODE_OWN_TEXT;
+    n->flags |= NS_NODE_OWN_TEXT;
     return n;
 }
 
 void
-nd_node_set_name_borrow(nd_node *n, const char *name)
+ns_node_set_name_borrow(ns_node *n, const char *name)
 {
     if (!n) return;
-    if (n->flags & ND_NODE_OWN_NAME)
+    if (n->flags & NS_NODE_OWN_NAME)
         g_free(n->name);
     n->name = (char *)name;
-    n->flags &= ~ND_NODE_OWN_NAME;
+    n->flags &= ~NS_NODE_OWN_NAME;
 }
 
 void
-nd_node_set_text_borrow(nd_node *n, const char *text)
+ns_node_set_text_borrow(ns_node *n, const char *text)
 {
     if (!n) return;
-    if (n->flags & ND_NODE_OWN_TEXT)
+    if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = (char *)text;
-    n->flags &= ~ND_NODE_OWN_TEXT;
+    n->flags &= ~NS_NODE_OWN_TEXT;
 }
 
 void
-nd_node_replace_text_owned(nd_node *n, char *text)
+ns_node_replace_text_owned(ns_node *n, char *text)
 {
     if (!n) {
         g_free(text);
         return;
     }
-    if (n->flags & ND_NODE_OWN_TEXT)
+    if (n->flags & NS_NODE_OWN_TEXT)
         g_free(n->text);
     n->text = text;
-    n->flags |= ND_NODE_OWN_TEXT;
+    n->flags |= NS_NODE_OWN_TEXT;
 }
 
 void
-nd_node_own_strings_deep(nd_node *n)
+ns_node_own_strings_deep(ns_node *n)
 {
     if (!n) return;
-    nd_class_set_clear(n);
-    if (n->name && !(n->flags & ND_NODE_OWN_NAME)) {
+    ns_class_set_clear(n);
+    if (n->name && !(n->flags & NS_NODE_OWN_NAME)) {
         n->name = g_strdup(n->name);
-        n->flags |= ND_NODE_OWN_NAME;
+        n->flags |= NS_NODE_OWN_NAME;
     }
-    if (n->text && !(n->flags & ND_NODE_OWN_TEXT)) {
+    if (n->text && !(n->flags & NS_NODE_OWN_TEXT)) {
         n->text = g_strdup(n->text);
-        n->flags |= ND_NODE_OWN_TEXT;
+        n->flags |= NS_NODE_OWN_TEXT;
     }
-    for (nd_attr *a = n->attrs; a; a = a->next) {
-        if (a->name && !(a->flags & ND_ATTR_OWN_NAME)) {
+    for (ns_attr *a = n->attrs; a; a = a->next) {
+        if (a->name && !(a->flags & NS_ATTR_OWN_NAME)) {
             a->name = g_strdup(a->name);
-            a->flags |= ND_ATTR_OWN_NAME;
+            a->flags |= NS_ATTR_OWN_NAME;
         }
-        if (a->value && !(a->flags & ND_ATTR_OWN_VALUE)) {
+        if (a->value && !(a->flags & NS_ATTR_OWN_VALUE)) {
             a->value = g_strdup(a->value);
-            a->flags |= ND_ATTR_OWN_VALUE;
+            a->flags |= NS_ATTR_OWN_VALUE;
         }
     }
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_node_own_strings_deep(c);
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_node_own_strings_deep(c);
 }
 
 void
-nd_element_append_attr_borrow(nd_node *el, const char *name, const char *value)
+ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT || !name) return;
-    if (el->class_set) nd_class_set_clear(el);
-    nd_attr *a = g_new0(nd_attr, 1);
+    if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
+    if (el->class_set) ns_class_set_clear(el);
+    ns_attr *a = g_new0(ns_attr, 1);
     a->name  = (char *)name;
     a->value = (char *)(value ? value : "");
     a->flags = 0;
-    nd_attr *tail = NULL;
-    for (nd_attr *cur = el->attrs; cur; cur = cur->next) tail = cur;
+    ns_attr *tail = NULL;
+    for (ns_attr *cur = el->attrs; cur; cur = cur->next) tail = cur;
     if (tail) tail->next = a;
     else      el->attrs = a;
 }
 
 void
-nd_node_attach_backing(nd_node *root, void *backing, void (*destroy)(void *))
+ns_node_attach_backing(ns_node *root, void *backing, void (*destroy)(void *))
 {
     if (!root) {
         if (backing && destroy) destroy(backing);
@@ -608,48 +608,48 @@ nd_node_attach_backing(nd_node *root, void *backing, void (*destroy)(void *))
 }
 
 static void
-nd_attr_free(nd_attr *a)
+ns_attr_free(ns_attr *a)
 {
     while (a) {
-        nd_attr *next = a->next;
-        if (a->flags & ND_ATTR_OWN_NAME)  g_free(a->name);
-        if (a->flags & ND_ATTR_OWN_VALUE) g_free(a->value);
+        ns_attr *next = a->next;
+        if (a->flags & NS_ATTR_OWN_NAME)  g_free(a->name);
+        if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
         g_free(a);
         a = next;
     }
 }
 
-typedef struct nd_class_set {
+typedef struct ns_class_set {
     guint n;
     struct { const char *p; guint len; } tok[];
-} nd_class_set;
+} ns_class_set;
 
-static nd_class_set g_nd_empty_class_set;
+static ns_class_set g_nd_empty_class_set;
 
 static inline gboolean
-nd_clsset_ws(char c)
+ns_clsset_ws(char c)
 {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
 
-static nd_class_set *
-nd_class_set_build(const char *cls)
+static ns_class_set *
+ns_class_set_build(const char *cls)
 {
     guint n = 0;
     for (const char *s = cls; *s; ) {
-        while (*s && nd_clsset_ws(*s)) s++;
+        while (*s && ns_clsset_ws(*s)) s++;
         if (!*s) break;
-        while (*s && !nd_clsset_ws(*s)) s++;
+        while (*s && !ns_clsset_ws(*s)) s++;
         n++;
     }
     if (n == 0) return &g_nd_empty_class_set;
-    nd_class_set *cs = g_malloc(sizeof *cs + (gsize)n * sizeof cs->tok[0]);
+    ns_class_set *cs = g_malloc(sizeof *cs + (gsize)n * sizeof cs->tok[0]);
     cs->n = 0;
     for (const char *s = cls; *s; ) {
-        while (*s && nd_clsset_ws(*s)) s++;
+        while (*s && ns_clsset_ws(*s)) s++;
         if (!*s) break;
         const char *t = s;
-        while (*s && !nd_clsset_ws(*s)) s++;
+        while (*s && !ns_clsset_ws(*s)) s++;
         cs->tok[cs->n].p = t;
         cs->tok[cs->n].len = (guint)(s - t);
         cs->n++;
@@ -658,7 +658,7 @@ nd_class_set_build(const char *cls)
 }
 
 static void
-nd_class_set_clear(nd_node *el)
+ns_class_set_clear(ns_node *el)
 {
     if (el->class_set && el->class_set != &g_nd_empty_class_set)
         g_free(el->class_set);
@@ -666,14 +666,14 @@ nd_class_set_clear(nd_node *el)
 }
 
 gboolean
-nd_node_has_class(const nd_node *el, const char *name, gsize len)
+ns_node_has_class(const ns_node *el, const char *name, gsize len)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT) return FALSE;
-    nd_class_set *cs = el->class_set;
+    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    ns_class_set *cs = el->class_set;
     if (!cs) {
-        const char *cls = nd_element_get_attr(el, "class");
-        cs = (cls && *cls) ? nd_class_set_build(cls) : &g_nd_empty_class_set;
-        ((nd_node *)el)->class_set = cs;
+        const char *cls = ns_element_get_attr(el, "class");
+        cs = (cls && *cls) ? ns_class_set_build(cls) : &g_nd_empty_class_set;
+        ((ns_node *)el)->class_set = cs;
     }
     for (guint i = 0; i < cs->n; i++)
         if (cs->tok[i].len == len && memcmp(cs->tok[i].p, name, len) == 0)
@@ -682,7 +682,7 @@ nd_node_has_class(const nd_node *el, const char *name, gsize len)
 }
 
 void
-nd_node_free(nd_node *node)
+ns_node_free(ns_node *node)
 {
     if (!node)
         return;
@@ -691,12 +691,12 @@ nd_node_free(nd_node *node)
     g_ptr_array_add(stack, node);
 
     while (stack->len > 0) {
-        nd_node *cur = g_ptr_array_index(stack, stack->len - 1);
+        ns_node *cur = g_ptr_array_index(stack, stack->len - 1);
         if (cur->first_child) {
-            nd_node *c = cur->first_child;
+            ns_node *c = cur->first_child;
             cur->first_child = NULL;
             while (c) {
-                nd_node *next = c->next_sibling;
+                ns_node *next = c->next_sibling;
                 c->next_sibling = NULL;
                 c->parent = NULL;
                 g_ptr_array_add(stack, c);
@@ -707,10 +707,10 @@ nd_node_free(nd_node *node)
         g_ptr_array_set_size(stack, stack->len - 1);
         if (cur->js_invalidate)
             cur->js_invalidate(cur);
-        if (cur->flags & ND_NODE_OWN_NAME) g_free(cur->name);
-        if (cur->flags & ND_NODE_OWN_TEXT) g_free(cur->text);
-        nd_class_set_clear(cur);
-        nd_attr_free(cur->attrs);
+        if (cur->flags & NS_NODE_OWN_NAME) g_free(cur->name);
+        if (cur->flags & NS_NODE_OWN_TEXT) g_free(cur->text);
+        ns_class_set_clear(cur);
+        ns_attr_free(cur->attrs);
         if (cur->backing && cur->backing_free)
             cur->backing_free(cur->backing);
         if (cur->id_index) {
@@ -731,9 +731,9 @@ nd_node_free(nd_node *node)
 }
 
 static void
-nd_node_detach(nd_node *child)
+ns_node_detach(ns_node *child)
 {
-    nd_node *p = child->parent;
+    ns_node *p = child->parent;
     if (!p)
         return;
     if (child->prev_sibling)
@@ -750,12 +750,12 @@ nd_node_detach(nd_node *child)
 }
 
 void
-nd_node_append_child(nd_node *parent, nd_node *child)
+ns_node_append_child(ns_node *parent, ns_node *child)
 {
     g_return_if_fail(parent != NULL);
     g_return_if_fail(child != NULL);
 
-    nd_node_detach(child);
+    ns_node_detach(child);
     child->parent = parent;
     child->prev_sibling = parent->last_child;
     if (parent->last_child)
@@ -766,53 +766,53 @@ nd_node_append_child(nd_node *parent, nd_node *child)
 }
 
 void
-nd_node_remove(nd_node *child)
+ns_node_remove(ns_node *child)
 {
-    nd_node_detach(child);
+    ns_node_detach(child);
 }
 
 void
-nd_element_set_attr(nd_node *el, const char *name, const char *value)
+ns_element_set_attr(ns_node *el, const char *name, const char *value)
 {
     g_return_if_fail(el != NULL);
-    g_return_if_fail(el->kind == ND_NODE_ELEMENT);
+    g_return_if_fail(el->kind == NS_NODE_ELEMENT);
     g_return_if_fail(name != NULL);
 
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
-        nd_class_set_clear(el);
+        ns_class_set_clear(el);
 
-    nd_attr *tail = NULL;
-    for (nd_attr *a = el->attrs; a; a = a->next) {
+    ns_attr *tail = NULL;
+    for (ns_attr *a = el->attrs; a; a = a->next) {
         if (g_ascii_strcasecmp(a->name, name) == 0) {
-            if (a->flags & ND_ATTR_OWN_VALUE) g_free(a->value);
+            if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
             a->value = g_strdup(value ? value : "");
-            a->flags |= ND_ATTR_OWN_VALUE;
+            a->flags |= NS_ATTR_OWN_VALUE;
             return;
         }
         tail = a;
     }
-    nd_attr *a = g_new0(nd_attr, 1);
+    ns_attr *a = g_new0(ns_attr, 1);
     a->name = g_strdup(name);
     a->value = g_strdup(value ? value : "");
-    a->flags = ND_ATTR_OWN_NAME | ND_ATTR_OWN_VALUE;
+    a->flags = NS_ATTR_OWN_NAME | NS_ATTR_OWN_VALUE;
     a->next = NULL;
     if (tail) tail->next = a;
     else      el->attrs = a;
 }
 
 void
-nd_element_remove_attr(nd_node *el, const char *name)
+ns_element_remove_attr(ns_node *el, const char *name)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT || !name) return;
+    if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
-        nd_class_set_clear(el);
-    nd_attr **link = &el->attrs;
+        ns_class_set_clear(el);
+    ns_attr **link = &el->attrs;
     while (*link) {
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
-            nd_attr *dead = *link;
+            ns_attr *dead = *link;
             *link = dead->next;
-            if (dead->flags & ND_ATTR_OWN_NAME)  g_free(dead->name);
-            if (dead->flags & ND_ATTR_OWN_VALUE) g_free(dead->value);
+            if (dead->flags & NS_ATTR_OWN_NAME)  g_free(dead->name);
+            if (dead->flags & NS_ATTR_OWN_VALUE) g_free(dead->value);
             g_free(dead);
             return;
         }
@@ -820,58 +820,58 @@ nd_element_remove_attr(nd_node *el, const char *name)
     }
 }
 
-#define ND_DOM_MAX_DEPTH 512
+#define NS_DOM_MAX_DEPTH 512
 
-static nd_node *
-nd_node_clone_depth(const nd_node *src, gboolean deep, int depth)
+static ns_node *
+ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
 {
-    if (!src || depth >= ND_DOM_MAX_DEPTH) return NULL;
-    nd_node *out = NULL;
+    if (!src || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    ns_node *out = NULL;
     switch (src->kind) {
-    case ND_NODE_ELEMENT:
-        out = nd_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
-        for (const nd_attr *a = src->attrs; a; a = a->next)
-            nd_element_set_attr(out, a->name ? a->name : "",
+    case NS_NODE_ELEMENT:
+        out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
+        for (const ns_attr *a = src->attrs; a; a = a->next)
+            ns_element_set_attr(out, a->name ? a->name : "",
                                 a->value ? a->value : "");
         break;
-    case ND_NODE_TEXT:
-        out = nd_node_new_text(g_strdup(src->text ? src->text : ""));
+    case NS_NODE_TEXT:
+        out = ns_node_new_text(g_strdup(src->text ? src->text : ""));
         break;
-    case ND_NODE_DOCUMENT:
-    case ND_NODE_DOCTYPE:
-    case ND_NODE_COMMENT:
-        out = nd_node_new(src->kind);
+    case NS_NODE_DOCUMENT:
+    case NS_NODE_DOCTYPE:
+    case NS_NODE_COMMENT:
+        out = ns_node_new(src->kind);
         if (src->text) {
             out->text = g_strdup(src->text);
-            out->flags |= ND_NODE_OWN_TEXT;
+            out->flags |= NS_NODE_OWN_TEXT;
         }
         if (src->name) {
             out->name = g_strdup(src->name);
-            out->flags |= ND_NODE_OWN_NAME;
+            out->flags |= NS_NODE_OWN_NAME;
         }
         break;
     }
-    if (out) out->flags |= src->flags & ND_NODE_FRAGMENT;
+    if (out) out->flags |= src->flags & NS_NODE_FRAGMENT;
     if (deep && out)
-        for (const nd_node *c = src->first_child; c; c = c->next_sibling)
-            nd_node_append_child(out, nd_node_clone_depth(c, TRUE, depth + 1));
+        for (const ns_node *c = src->first_child; c; c = c->next_sibling)
+            ns_node_append_child(out, ns_node_clone_depth(c, TRUE, depth + 1));
     return out;
 }
 
-nd_node *
-nd_node_clone(const nd_node *src, gboolean deep)
+ns_node *
+ns_node_clone(const ns_node *src, gboolean deep)
 {
-    return nd_node_clone_depth(src, deep, 0);
+    return ns_node_clone_depth(src, deep, 0);
 }
 
 const char *
-nd_element_get_attr(const nd_node *el, const char *name)
+ns_element_get_attr(const ns_node *el, const char *name)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT || !name)
+    if (!el || el->kind != NS_NODE_ELEMENT || !name)
         return NULL;
-    if (nd_str_is_ascii_lower(name)) {
+    if (ns_str_is_ascii_lower(name)) {
         char c0 = name[0];
-        for (const nd_attr *a = el->attrs; a; a = a->next) {
+        for (const ns_attr *a = el->attrs; a; a = a->next) {
             const char *an = a->name;
             if (!an) continue;
             char ac = an[0];
@@ -885,7 +885,7 @@ nd_element_get_attr(const nd_node *el, const char *name)
         }
         return NULL;
     }
-    for (const nd_attr *a = el->attrs; a; a = a->next) {
+    for (const ns_attr *a = el->attrs; a; a = a->next) {
         if (g_ascii_strcasecmp(a->name, name) == 0)
             return a->value;
     }
@@ -893,76 +893,76 @@ nd_element_get_attr(const nd_node *el, const char *name)
 }
 
 gboolean
-nd_node_is_element_named(const nd_node *n, const char *tag)
+ns_node_is_element_named(const ns_node *n, const char *tag)
 {
-    return n && n->kind == ND_NODE_ELEMENT && n->name && tag &&
+    return n && n->kind == NS_NODE_ELEMENT && n->name && tag &&
            strcmp(n->name, tag) == 0;
 }
 
-const nd_node *
-nd_node_root(const nd_node *n)
+const ns_node *
+ns_node_root(const ns_node *n)
 {
     if (!n) return NULL;
     while (n->parent) n = n->parent;
     return n;
 }
 
-static nd_node *
-nd_node_find_first_element_depth(const nd_node *root, const char *tag, int depth)
+static ns_node *
+ns_node_find_first_element_depth(const ns_node *root, const char *tag, int depth)
 {
-    if (!root || !tag || depth >= ND_DOM_MAX_DEPTH) return NULL;
-    if (nd_node_is_element_named(root, tag))
-        return (nd_node *)root;
-    for (const nd_node *c = root->first_child; c; c = c->next_sibling) {
-        nd_node *m = nd_node_find_first_element_depth(c, tag, depth + 1);
+    if (!root || !tag || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    if (ns_node_is_element_named(root, tag))
+        return (ns_node *)root;
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        ns_node *m = ns_node_find_first_element_depth(c, tag, depth + 1);
         if (m) return m;
     }
     return NULL;
 }
 
-nd_node *
-nd_node_find_first_element(const nd_node *root, const char *tag)
+ns_node *
+ns_node_find_first_element(const ns_node *root, const char *tag)
 {
     if (root && tag && *tag && root->tag_index) {
-        GPtrArray *list = nd_doc_tag_index_lookup(root, tag);
+        GPtrArray *list = ns_doc_tag_index_lookup(root, tag);
         if (list && list->len > 0) return g_ptr_array_index(list, 0);
         return NULL;
     }
-    return nd_node_find_first_element_depth(root, tag, 0);
+    return ns_node_find_first_element_depth(root, tag, 0);
 }
 
-static nd_node *
-nd_node_find_by_id_depth(const nd_node *root, const char *id, int depth)
+static ns_node *
+ns_node_find_by_id_depth(const ns_node *root, const char *id, int depth)
 {
-    if (!root || !id || depth >= ND_DOM_MAX_DEPTH) return NULL;
-    if (root->kind == ND_NODE_ELEMENT) {
-        const char *eid = nd_element_get_attr(root, "id");
-        if (eid && strcmp(eid, id) == 0) return (nd_node *)root;
+    if (!root || !id || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    if (root->kind == NS_NODE_ELEMENT) {
+        const char *eid = ns_element_get_attr(root, "id");
+        if (eid && strcmp(eid, id) == 0) return (ns_node *)root;
     }
-    if (nd_node_is_element_named(root, "template")) return NULL;
-    for (const nd_node *c = root->first_child; c; c = c->next_sibling) {
-        nd_node *m = nd_node_find_by_id_depth(c, id, depth + 1);
+    if (ns_node_is_element_named(root, "template")) return NULL;
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        ns_node *m = ns_node_find_by_id_depth(c, id, depth + 1);
         if (m) return m;
     }
     return NULL;
 }
 
 static void
-nd_doc_id_index_register_subtree(GHashTable *map, nd_node *n, int depth)
+ns_doc_id_index_register_subtree(GHashTable *map, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT) {
-        const char *eid = nd_element_get_attr(n, "id");
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT) {
+        const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid && !g_hash_table_contains(map, eid))
             g_hash_table_insert(map, g_strdup(eid), n);
     }
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_id_index_register_subtree(map, c, depth + 1);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_id_index_register_subtree(map, c, depth + 1);
 }
 
 void
-nd_doc_id_index_build(nd_node *doc)
+ns_doc_id_index_build(ns_node *doc)
 {
     if (!doc) return;
     if (doc->id_index) {
@@ -971,11 +971,11 @@ nd_doc_id_index_build(nd_node *doc)
         doc->id_index = g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
     }
-    nd_doc_id_index_register_subtree(doc->id_index, doc, 0);
+    ns_doc_id_index_register_subtree(doc->id_index, doc, 0);
 }
 
 void
-nd_doc_id_index_register(nd_node *doc, const char *id, nd_node *node)
+ns_doc_id_index_register(ns_node *doc, const char *id, ns_node *node)
 {
     if (!doc || !doc->id_index || !id || !*id || !node) return;
     if (g_hash_table_contains(doc->id_index, id)) return;
@@ -983,7 +983,7 @@ nd_doc_id_index_register(nd_node *doc, const char *id, nd_node *node)
 }
 
 void
-nd_doc_id_index_unregister(nd_node *doc, const char *id, const nd_node *node)
+ns_doc_id_index_unregister(ns_node *doc, const char *id, const ns_node *node)
 {
     if (!doc || !doc->id_index || !id || !*id) return;
     gpointer cur = g_hash_table_lookup(doc->id_index, id);
@@ -991,58 +991,58 @@ nd_doc_id_index_unregister(nd_node *doc, const char *id, const nd_node *node)
 }
 
 static void
-nd_doc_id_index_add_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_id_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT) {
-        const char *eid = nd_element_get_attr(n, "id");
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT) {
+        const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid && !g_hash_table_contains(doc->id_index, eid))
             g_hash_table_insert(doc->id_index, g_strdup(eid), n);
     }
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_id_index_add_subtree(doc, c, depth + 1);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_id_index_add_subtree(doc, c, depth + 1);
 }
 
 static void
-nd_doc_id_index_remove_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_id_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT) {
-        const char *eid = nd_element_get_attr(n, "id");
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT) {
+        const char *eid = ns_element_get_attr(n, "id");
         if (eid && *eid) {
             gpointer cur = g_hash_table_lookup(doc->id_index, eid);
             if (cur == n) g_hash_table_remove(doc->id_index, eid);
         }
     }
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_id_index_remove_subtree(doc, c, depth + 1);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_id_index_remove_subtree(doc, c, depth + 1);
 }
 
 void
-nd_doc_id_index_subtree_added(nd_node *doc, nd_node *root)
+ns_doc_id_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
-    nd_doc_id_index_add_subtree(doc, root, 0);
+    ns_doc_id_index_add_subtree(doc, root, 0);
 }
 
 void
-nd_doc_id_index_subtree_removed(nd_node *doc, nd_node *root)
+ns_doc_id_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->id_index || !root) return;
-    nd_doc_id_index_remove_subtree(doc, root, 0);
+    ns_doc_id_index_remove_subtree(doc, root, 0);
 }
 
 static void
-nd_class_array_destroy(gpointer p)
+ns_class_array_destroy(gpointer p)
 {
     g_ptr_array_free((GPtrArray *)p, TRUE);
 }
 
 static void
-nd_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
-                             nd_node *node)
+ns_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
+                             ns_node *node)
 {
     if (tok_len == 0) return;
     char stack[96];
@@ -1069,8 +1069,8 @@ nd_doc_class_index_add_token(GHashTable *map, const char *tok, gsize tok_len,
 }
 
 static void
-nd_doc_class_index_remove_token(GHashTable *map, const char *tok, gsize tok_len,
-                                nd_node *node)
+ns_doc_class_index_remove_token(GHashTable *map, const char *tok, gsize tok_len,
+                                ns_node *node)
 {
     if (tok_len == 0) return;
     char stack[96];
@@ -1094,97 +1094,97 @@ nd_doc_class_index_remove_token(GHashTable *map, const char *tok, gsize tok_len,
 }
 
 static gboolean
-nd_class_is_ws(char c)
+ns_class_is_ws(char c)
 {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
 }
 
 void
-nd_doc_class_index_register(nd_node *doc, const char *class_attr, nd_node *node)
+ns_doc_class_index_register(ns_node *doc, const char *class_attr, ns_node *node)
 {
     if (!doc || !doc->class_index || !class_attr || !node) return;
     const char *p = class_attr;
     while (*p) {
-        while (*p && nd_class_is_ws(*p)) p++;
+        while (*p && ns_class_is_ws(*p)) p++;
         if (!*p) break;
         const char *tok = p;
-        while (*p && !nd_class_is_ws(*p)) p++;
-        nd_doc_class_index_add_token(doc->class_index, tok, (gsize)(p - tok), node);
+        while (*p && !ns_class_is_ws(*p)) p++;
+        ns_doc_class_index_add_token(doc->class_index, tok, (gsize)(p - tok), node);
     }
 }
 
 void
-nd_doc_class_index_unregister(nd_node *doc, const char *class_attr, nd_node *node)
+ns_doc_class_index_unregister(ns_node *doc, const char *class_attr, ns_node *node)
 {
     if (!doc || !doc->class_index || !class_attr || !node) return;
     const char *p = class_attr;
     while (*p) {
-        while (*p && nd_class_is_ws(*p)) p++;
+        while (*p && ns_class_is_ws(*p)) p++;
         if (!*p) break;
         const char *tok = p;
-        while (*p && !nd_class_is_ws(*p)) p++;
-        nd_doc_class_index_remove_token(doc->class_index, tok, (gsize)(p - tok), node);
+        while (*p && !ns_class_is_ws(*p)) p++;
+        ns_doc_class_index_remove_token(doc->class_index, tok, (gsize)(p - tok), node);
     }
 }
 
 static void
-nd_doc_class_index_add_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_class_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT) {
-        const char *cls = nd_element_get_attr(n, "class");
-        if (cls && *cls) nd_doc_class_index_register(doc, cls, n);
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT) {
+        const char *cls = ns_element_get_attr(n, "class");
+        if (cls && *cls) ns_doc_class_index_register(doc, cls, n);
     }
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_class_index_add_subtree(doc, c, depth + 1);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_class_index_add_subtree(doc, c, depth + 1);
 }
 
 static void
-nd_doc_class_index_remove_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_class_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT) {
-        const char *cls = nd_element_get_attr(n, "class");
-        if (cls && *cls) nd_doc_class_index_unregister(doc, cls, n);
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT) {
+        const char *cls = ns_element_get_attr(n, "class");
+        if (cls && *cls) ns_doc_class_index_unregister(doc, cls, n);
     }
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_class_index_remove_subtree(doc, c, depth + 1);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_class_index_remove_subtree(doc, c, depth + 1);
 }
 
 void
-nd_doc_class_index_build(nd_node *doc)
+ns_doc_class_index_build(ns_node *doc)
 {
     if (!doc) return;
     if (doc->class_index) {
         g_hash_table_remove_all(doc->class_index);
     } else {
         doc->class_index = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                 g_free, nd_class_array_destroy);
+                                                 g_free, ns_class_array_destroy);
     }
-    nd_doc_class_index_add_subtree(doc, doc, 0);
+    ns_doc_class_index_add_subtree(doc, doc, 0);
 }
 
 void
-nd_doc_class_index_subtree_added(nd_node *doc, nd_node *root)
+ns_doc_class_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->class_index || !root) return;
-    nd_doc_class_index_add_subtree(doc, root, 0);
+    ns_doc_class_index_add_subtree(doc, root, 0);
 }
 
 void
-nd_doc_class_index_subtree_removed(nd_node *doc, nd_node *root)
+ns_doc_class_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->class_index || !root) return;
-    nd_doc_class_index_remove_subtree(doc, root, 0);
+    ns_doc_class_index_remove_subtree(doc, root, 0);
 }
 
 static void
-nd_doc_tag_index_add_single(GHashTable *map, const char *tag, nd_node *node)
+ns_doc_tag_index_add_single(GHashTable *map, const char *tag, ns_node *node)
 {
     if (!tag || !*tag) return;
-    gboolean is_lower = nd_str_is_ascii_lower(tag);
+    gboolean is_lower = ns_str_is_ascii_lower(tag);
     GPtrArray *arr = is_lower
         ? g_hash_table_lookup(map, tag)
         : NULL;
@@ -1206,11 +1206,11 @@ nd_doc_tag_index_add_single(GHashTable *map, const char *tag, nd_node *node)
 }
 
 static void
-nd_doc_tag_index_remove_single(GHashTable *map, const char *tag, nd_node *node)
+ns_doc_tag_index_remove_single(GHashTable *map, const char *tag, ns_node *node)
 {
     if (!tag || !*tag) return;
     GPtrArray *arr;
-    if (nd_str_is_ascii_lower(tag)) {
+    if (ns_str_is_ascii_lower(tag)) {
         arr = g_hash_table_lookup(map, tag);
     } else {
         gchar *key = g_ascii_strdown(tag, -1);
@@ -1227,59 +1227,59 @@ nd_doc_tag_index_remove_single(GHashTable *map, const char *tag, nd_node *node)
 }
 
 static void
-nd_doc_tag_index_add_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_tag_index_add_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT && n->name)
-        nd_doc_tag_index_add_single(doc->tag_index, n->name, n);
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_tag_index_add_subtree(doc, c, depth + 1);
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT && n->name)
+        ns_doc_tag_index_add_single(doc->tag_index, n->name, n);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_tag_index_add_subtree(doc, c, depth + 1);
 }
 
 static void
-nd_doc_tag_index_remove_subtree(nd_node *doc, nd_node *n, int depth)
+ns_doc_tag_index_remove_subtree(ns_node *doc, ns_node *n, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_ELEMENT && n->name)
-        nd_doc_tag_index_remove_single(doc->tag_index, n->name, n);
-    if (nd_node_is_element_named(n, "template")) return;
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_doc_tag_index_remove_subtree(doc, c, depth + 1);
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_ELEMENT && n->name)
+        ns_doc_tag_index_remove_single(doc->tag_index, n->name, n);
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_doc_tag_index_remove_subtree(doc, c, depth + 1);
 }
 
 void
-nd_doc_tag_index_build(nd_node *doc)
+ns_doc_tag_index_build(ns_node *doc)
 {
     if (!doc) return;
     if (doc->tag_index) {
         g_hash_table_remove_all(doc->tag_index);
     } else {
         doc->tag_index = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                               g_free, nd_class_array_destroy);
+                                               g_free, ns_class_array_destroy);
     }
-    nd_doc_tag_index_add_subtree(doc, doc, 0);
+    ns_doc_tag_index_add_subtree(doc, doc, 0);
 }
 
 void
-nd_doc_tag_index_subtree_added(nd_node *doc, nd_node *root)
+ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->tag_index || !root) return;
-    nd_doc_tag_index_add_subtree(doc, root, 0);
+    ns_doc_tag_index_add_subtree(doc, root, 0);
 }
 
 void
-nd_doc_tag_index_subtree_removed(nd_node *doc, nd_node *root)
+ns_doc_tag_index_subtree_removed(ns_node *doc, ns_node *root)
 {
     if (!doc || !doc->tag_index || !root) return;
-    nd_doc_tag_index_remove_subtree(doc, root, 0);
+    ns_doc_tag_index_remove_subtree(doc, root, 0);
 }
 
 GPtrArray *
-nd_doc_tag_index_lookup(const nd_node *doc, const char *tag)
+ns_doc_tag_index_lookup(const ns_node *doc, const char *tag)
 {
     if (!doc || !doc->tag_index || !tag || !*tag) return NULL;
-    if (nd_str_is_ascii_lower(tag))
+    if (ns_str_is_ascii_lower(tag))
         return g_hash_table_lookup(doc->tag_index, tag);
     gchar *key = g_ascii_strdown(tag, -1);
     GPtrArray *arr = g_hash_table_lookup(doc->tag_index, key);
@@ -1287,26 +1287,26 @@ nd_doc_tag_index_lookup(const nd_node *doc, const char *tag)
     return arr;
 }
 
-nd_node *
-nd_node_find_by_id(const nd_node *root, const char *id)
+ns_node *
+ns_node_find_by_id(const ns_node *root, const char *id)
 {
     if (!root || !id || !*id) return NULL;
     if (root->id_index) {
-        nd_node *hit = g_hash_table_lookup(root->id_index, id);
+        ns_node *hit = g_hash_table_lookup(root->id_index, id);
         if (hit) return hit;
         return NULL;
     }
-    return nd_node_find_by_id_depth(root, id, 0);
+    return ns_node_find_by_id_depth(root, id, 0);
 }
 
 static void
-collect_descendant_text_skip_script(const nd_node *n, GString *out, int depth)
+collect_descendant_text_skip_script(const ns_node *n, GString *out, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind == ND_NODE_TEXT) {
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_TEXT) {
             if (c->text) g_string_append(out, c->text);
-        } else if (c->kind == ND_NODE_ELEMENT && c->name &&
+        } else if (c->kind == NS_NODE_ELEMENT && c->name &&
                    g_ascii_strcasecmp(c->name, "script") == 0) {
             continue;
         } else {
@@ -1316,7 +1316,7 @@ collect_descendant_text_skip_script(const nd_node *n, GString *out, int depth)
 }
 
 static char *
-nd_node_collect_descendant_text_skip_script(const nd_node *root)
+ns_node_collect_descendant_text_skip_script(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
     collect_descendant_text_skip_script(root, out, 0);
@@ -1324,7 +1324,7 @@ nd_node_collect_descendant_text_skip_script(const nd_node *root)
 }
 
 static char *
-nd_strip_and_collapse_ascii_ws(const char *s)
+ns_strip_and_collapse_ascii_ws(const char *s)
 {
     if (!s) return g_strdup("");
     GString *out = g_string_new(NULL);
@@ -1348,148 +1348,148 @@ nd_strip_and_collapse_ascii_ws(const char *s)
 }
 
 char *
-nd_option_text_dup(const nd_node *option)
+ns_option_text_dup(const ns_node *option)
 {
     if (!option) return g_strdup("");
-    g_autofree char *raw = nd_node_collect_descendant_text_skip_script(option);
-    return nd_strip_and_collapse_ascii_ws(raw);
+    g_autofree char *raw = ns_node_collect_descendant_text_skip_script(option);
+    return ns_strip_and_collapse_ascii_ws(raw);
 }
 
 char *
-nd_option_label_dup(const nd_node *option)
+ns_option_label_dup(const ns_node *option)
 {
     if (!option) return g_strdup("");
-    const char *lbl = nd_element_get_attr(option, "label");
+    const char *lbl = ns_element_get_attr(option, "label");
     if (lbl) return g_strdup(lbl);
-    return nd_option_text_dup(option);
+    return ns_option_text_dup(option);
 }
 
 char *
-nd_option_value_dup(const nd_node *option)
+ns_option_value_dup(const ns_node *option)
 {
     if (!option) return g_strdup("");
-    const char *v = nd_element_get_attr(option, "value");
+    const char *v = ns_element_get_attr(option, "value");
     if (v) return g_strdup(v);
-    return nd_option_text_dup(option);
+    return ns_option_text_dup(option);
 }
 
-const nd_node *
-nd_select_first_selected_option(const nd_node *select)
+const ns_node *
+ns_select_first_selected_option(const ns_node *select)
 {
     if (!select) return NULL;
-    for (const nd_node *c = select->first_child; c; c = c->next_sibling) {
-        if (nd_node_is_element_named(c, "optgroup")) {
-            for (const nd_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (nd_node_is_element_named(cc, "option"))
-                    if (nd_element_get_attr(cc, "selected")) return cc;
+    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "optgroup")) {
+            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
+                if (ns_node_is_element_named(cc, "option"))
+                    if (ns_element_get_attr(cc, "selected")) return cc;
             }
-        } else if (nd_node_is_element_named(c, "option")) {
-            if (nd_element_get_attr(c, "selected")) return c;
+        } else if (ns_node_is_element_named(c, "option")) {
+            if (ns_element_get_attr(c, "selected")) return c;
         }
     }
     return NULL;
 }
 
-const nd_node *
-nd_select_chosen_option(const nd_node *select)
+const ns_node *
+ns_select_chosen_option(const ns_node *select)
 {
     if (!select) return NULL;
-    const nd_node *selected = nd_select_first_selected_option(select);
+    const ns_node *selected = ns_select_first_selected_option(select);
     if (selected) return selected;
-    const nd_node *first = NULL;
-    for (const nd_node *c = select->first_child; c && !first; c = c->next_sibling) {
-        if (nd_node_is_element_named(c, "optgroup")) {
-            for (const nd_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (nd_node_is_element_named(cc, "option")) {
+    const ns_node *first = NULL;
+    for (const ns_node *c = select->first_child; c && !first; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "optgroup")) {
+            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
+                if (ns_node_is_element_named(cc, "option")) {
                     first = cc;
                     break;
                 }
             }
-        } else if (nd_node_is_element_named(c, "option")) {
+        } else if (ns_node_is_element_named(c, "option")) {
             first = c;
         }
     }
     return first;
 }
 
-const nd_node *
-nd_form_owner(const nd_node *control, const nd_node *doc)
+const ns_node *
+ns_form_owner(const ns_node *control, const ns_node *doc)
 {
-    if (!control || control->kind != ND_NODE_ELEMENT) return NULL;
-    if (!doc) doc = nd_node_root(control);
-    const char *form_id = nd_element_get_attr(control, "form");
+    if (!control || control->kind != NS_NODE_ELEMENT) return NULL;
+    if (!doc) doc = ns_node_root(control);
+    const char *form_id = ns_element_get_attr(control, "form");
     if (form_id) {
         if (*form_id && doc) {
-            nd_node *owner = nd_node_find_by_id(doc, form_id);
-            if (nd_node_is_element_named(owner, "form")) return owner;
+            ns_node *owner = ns_node_find_by_id(doc, form_id);
+            if (ns_node_is_element_named(owner, "form")) return owner;
         }
         return NULL;
     }
-    for (const nd_node *p = control->parent; p; p = p->parent)
-        if (nd_node_is_element_named(p, "form")) return p;
+    for (const ns_node *p = control->parent; p; p = p->parent)
+        if (ns_node_is_element_named(p, "form")) return p;
     return NULL;
 }
 
 static void
-nd_form_reset_control(nd_node *n)
+ns_form_reset_control(ns_node *n)
 {
-    if (!n || n->kind != ND_NODE_ELEMENT || !n->name) return;
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return;
     if (strcmp(n->name, "input") == 0 ||
         strcmp(n->name, "textarea") == 0) {
-        const char *type = nd_element_get_attr(n, "type");
+        const char *type = ns_element_get_attr(n, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0)) {
-            if (nd_element_get_attr(n, "defaultChecked"))
-                nd_element_set_attr(n, "checked", "");
+            if (ns_element_get_attr(n, "defaultChecked"))
+                ns_element_set_attr(n, "checked", "");
             else
-                nd_element_remove_attr(n, "checked");
+                ns_element_remove_attr(n, "checked");
         }
     } else if (strcmp(n->name, "select") == 0) {
-        for (nd_node *o = n->first_child; o; o = o->next_sibling) {
-            if (nd_node_is_element_named(o, "option"))
-                nd_element_remove_attr(o, "selected");
+        for (ns_node *o = n->first_child; o; o = o->next_sibling) {
+            if (ns_node_is_element_named(o, "option"))
+                ns_element_remove_attr(o, "selected");
         }
     }
 }
 
 static void
-nd_form_reset_walk(nd_node *form, nd_node *scan, const nd_node *doc, int depth)
+ns_form_reset_walk(ns_node *form, ns_node *scan, const ns_node *doc, int depth)
 {
     if (!form || !scan || depth >= 512) return;
-    if (scan->kind == ND_NODE_ELEMENT && scan->name &&
-        nd_form_owner(scan, doc) == form)
-        nd_form_reset_control(scan);
-    for (nd_node *c = scan->first_child; c; c = c->next_sibling)
-        nd_form_reset_walk(form, c, doc, depth + 1);
+    if (scan->kind == NS_NODE_ELEMENT && scan->name &&
+        ns_form_owner(scan, doc) == form)
+        ns_form_reset_control(scan);
+    for (ns_node *c = scan->first_child; c; c = c->next_sibling)
+        ns_form_reset_walk(form, c, doc, depth + 1);
 }
 
 void
-nd_form_reset_owned_controls(nd_node *form, nd_node *root, const nd_node *doc)
+ns_form_reset_owned_controls(ns_node *form, ns_node *root, const ns_node *doc)
 {
-    nd_form_reset_walk(form, root ? root : form, doc ? doc : form, 0);
+    ns_form_reset_walk(form, root ? root : form, doc ? doc : form, 0);
 }
 
 static gboolean
-nd_node_contains(const nd_node *ancestor, const nd_node *node)
+ns_node_contains(const ns_node *ancestor, const ns_node *node)
 {
-    for (const nd_node *p = node; p; p = p->parent)
+    for (const ns_node *p = node; p; p = p->parent)
         if (p == ancestor) return TRUE;
     return FALSE;
 }
 
-static const nd_node *
-nd_fieldset_first_legend(const nd_node *fieldset)
+static const ns_node *
+ns_fieldset_first_legend(const ns_node *fieldset)
 {
     if (!fieldset) return NULL;
-    for (const nd_node *c = fieldset->first_child; c; c = c->next_sibling)
-        if (nd_node_is_element_named(c, "legend")) return c;
+    for (const ns_node *c = fieldset->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "legend")) return c;
     return NULL;
 }
 
 gboolean
-nd_element_supports_disabled(const nd_node *el)
+ns_element_supports_disabled(const ns_node *el)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT || !el->name) return FALSE;
+    if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
     return strcmp(el->name, "button") == 0 ||
            strcmp(el->name, "fieldset") == 0 ||
            strcmp(el->name, "input") == 0 ||
@@ -1500,72 +1500,72 @@ nd_element_supports_disabled(const nd_node *el)
 }
 
 gboolean
-nd_element_effectively_disabled(const nd_node *el)
+ns_element_effectively_disabled(const ns_node *el)
 {
-    if (!nd_element_supports_disabled(el)) return FALSE;
-    if (nd_element_get_attr(el, "disabled")) return TRUE;
-    for (const nd_node *p = el->parent; p; p = p->parent) {
-        if (nd_node_is_element_named(el, "option") &&
-            nd_node_is_element_named(p, "optgroup") &&
-            nd_element_get_attr(p, "disabled"))
+    if (!ns_element_supports_disabled(el)) return FALSE;
+    if (ns_element_get_attr(el, "disabled")) return TRUE;
+    for (const ns_node *p = el->parent; p; p = p->parent) {
+        if (ns_node_is_element_named(el, "option") &&
+            ns_node_is_element_named(p, "optgroup") &&
+            ns_element_get_attr(p, "disabled"))
             return TRUE;
-        if (!nd_node_is_element_named(p, "fieldset") ||
-            !nd_element_get_attr(p, "disabled"))
+        if (!ns_node_is_element_named(p, "fieldset") ||
+            !ns_element_get_attr(p, "disabled"))
             continue;
-        const nd_node *legend = nd_fieldset_first_legend(p);
-        if (legend && nd_node_contains(legend, el)) continue;
+        const ns_node *legend = ns_fieldset_first_legend(p);
+        if (legend && ns_node_contains(legend, el)) continue;
         return TRUE;
     }
     return FALSE;
 }
 
-static const nd_node *g_active_modal;
+static const ns_node *g_active_modal;
 
 void
-nd_dom_set_active_modal(const nd_node *modal)
+ns_dom_set_active_modal(const ns_node *modal)
 {
     g_active_modal = modal;
 }
 
-const nd_node *
-nd_dom_active_modal(void)
+const ns_node *
+ns_dom_active_modal(void)
 {
     return g_active_modal;
 }
 
 gboolean
-nd_element_effectively_inert(const nd_node *el)
+ns_element_effectively_inert(const ns_node *el)
 {
-    if (!el || el->kind != ND_NODE_ELEMENT) return FALSE;
-    for (const nd_node *p = el; p; p = p->parent)
-        if (p->kind == ND_NODE_ELEMENT && nd_element_get_attr(p, "inert"))
+    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    for (const ns_node *p = el; p; p = p->parent)
+        if (p->kind == NS_NODE_ELEMENT && ns_element_get_attr(p, "inert"))
             return TRUE;
     if (g_active_modal && el != g_active_modal &&
-        !nd_node_contains(g_active_modal, el))
+        !ns_node_contains(g_active_modal, el))
         return TRUE;
     return FALSE;
 }
 
 static void
-collect_text(const nd_node *n, GString *out, int depth)
+collect_text(const ns_node *n, GString *out, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_TEXT) {
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_TEXT) {
         if (n->text) g_string_append(out, n->text);
         return;
     }
-    if (n->kind == ND_NODE_ELEMENT && n->name &&
+    if (n->kind == NS_NODE_ELEMENT && n->name &&
         (strcmp(n->name, "style")    == 0 ||
          strcmp(n->name, "script")   == 0 ||
          strcmp(n->name, "noscript") == 0 ||
          strcmp(n->name, "template") == 0))
         return;
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling)
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_text(c, out, depth + 1);
 }
 
 char *
-nd_node_collect_text(const nd_node *root)
+ns_node_collect_text(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
     collect_text(root, out, 0);
@@ -1573,19 +1573,19 @@ nd_node_collect_text(const nd_node *root)
 }
 
 static void
-collect_all_text(const nd_node *n, GString *out, int depth)
+collect_all_text(const ns_node *n, GString *out, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_TEXT) {
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_TEXT) {
         if (n->text) g_string_append(out, n->text);
         return;
     }
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling)
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_all_text(c, out, depth + 1);
 }
 
 char *
-nd_node_collect_all_text(const nd_node *root)
+ns_node_collect_all_text(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
     collect_all_text(root, out, 0);
@@ -1593,49 +1593,49 @@ nd_node_collect_all_text(const nd_node *root)
 }
 
 #include "html.h"
-#define is_void_tag nd_html_is_void
+#define is_void_tag ns_html_is_void
 
 static void
-serialize_node(const nd_node *n, GString *out, gboolean include_self, int depth)
+serialize_node(const ns_node *n, GString *out, gboolean include_self, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return;
-    if (n->kind == ND_NODE_TEXT) {
-        nd_html_escape_append(out, n->text, FALSE);
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return;
+    if (n->kind == NS_NODE_TEXT) {
+        ns_html_escape_append(out, n->text, FALSE);
         return;
     }
-    if (n->kind == ND_NODE_COMMENT) {
+    if (n->kind == NS_NODE_COMMENT) {
         g_string_append(out, "<!--");
         g_string_append(out, n->text ? n->text : "");
         g_string_append(out, "-->");
         return;
     }
-    if (n->kind == ND_NODE_DOCTYPE) {
+    if (n->kind == NS_NODE_DOCTYPE) {
         g_string_append_printf(out, "<!DOCTYPE %s>", n->name ? n->name : "");
         return;
     }
-    gboolean raw_text = n->kind == ND_NODE_ELEMENT && n->name &&
+    gboolean raw_text = n->kind == NS_NODE_ELEMENT && n->name &&
                         (g_ascii_strcasecmp(n->name, "script") == 0 ||
                          g_ascii_strcasecmp(n->name, "style") == 0);
-    if (n->kind == ND_NODE_ELEMENT && include_self) {
+    if (n->kind == NS_NODE_ELEMENT && include_self) {
         g_string_append_c(out, '<');
         g_string_append(out, n->name ? n->name : "");
-        for (const nd_attr *a = n->attrs; a; a = a->next) {
+        for (const ns_attr *a = n->attrs; a; a = a->next) {
             g_string_append_c(out, ' ');
             g_string_append(out, a->name);
             g_string_append(out, "=\"");
-            nd_html_escape_append(out, a->value, TRUE);
+            ns_html_escape_append(out, a->value, TRUE);
             g_string_append_c(out, '"');
         }
         g_string_append_c(out, '>');
         if (is_void_tag(n->name)) return;
     }
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling) {
-        if (raw_text && c->kind == ND_NODE_TEXT)
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (raw_text && c->kind == NS_NODE_TEXT)
             g_string_append(out, c->text ? c->text : "");
         else
             serialize_node(c, out, TRUE, depth + 1);
     }
-    if (n->kind == ND_NODE_ELEMENT && include_self) {
+    if (n->kind == NS_NODE_ELEMENT && include_self) {
         g_string_append(out, "</");
         g_string_append(out, n->name ? n->name : "");
         g_string_append_c(out, '>');
@@ -1643,15 +1643,15 @@ serialize_node(const nd_node *n, GString *out, gboolean include_self, int depth)
 }
 
 char *
-nd_node_inner_html(const nd_node *root)
+ns_node_inner_html(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
-    gboolean raw_text = root && root->kind == ND_NODE_ELEMENT && root->name &&
+    gboolean raw_text = root && root->kind == NS_NODE_ELEMENT && root->name &&
                         (g_ascii_strcasecmp(root->name, "script") == 0 ||
                          g_ascii_strcasecmp(root->name, "style") == 0);
     if (root)
-        for (const nd_node *c = root->first_child; c; c = c->next_sibling) {
-            if (raw_text && c->kind == ND_NODE_TEXT)
+        for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+            if (raw_text && c->kind == NS_NODE_TEXT)
                 g_string_append(out, c->text ? c->text : "");
             else
                 serialize_node(c, out, TRUE, 0);
@@ -1660,7 +1660,7 @@ nd_node_inner_html(const nd_node *root)
 }
 
 char *
-nd_node_outer_html(const nd_node *node)
+ns_node_outer_html(const ns_node *node)
 {
     GString *out = g_string_new(NULL);
     if (node) serialize_node(node, out, TRUE, 0);
@@ -1668,7 +1668,7 @@ nd_node_outer_html(const nd_node *node)
 }
 
 static void
-nd_dump_text(GString *out, const char *s, gsize max)
+ns_dump_text(GString *out, const char *s, gsize max)
 {
     if (!s) return;
     gsize len = strlen(s);
@@ -1688,55 +1688,55 @@ nd_dump_text(GString *out, const char *s, gsize max)
 }
 
 static void
-nd_dump_node(GString *out, const nd_node *n, int depth)
+ns_dump_node(GString *out, const ns_node *n, int depth)
 {
-    if (depth >= ND_DOM_MAX_DEPTH) return;
+    if (depth >= NS_DOM_MAX_DEPTH) return;
     for (int i = 0; i < depth; i++)
         g_string_append(out, "  ");
 
     switch (n->kind) {
-    case ND_NODE_DOCUMENT:
+    case NS_NODE_DOCUMENT:
         g_string_append(out, "#document\n");
         break;
-    case ND_NODE_DOCTYPE:
+    case NS_NODE_DOCTYPE:
         g_string_append_printf(out, "<!DOCTYPE %s>\n", n->name ? n->name : "");
         break;
-    case ND_NODE_ELEMENT:
+    case NS_NODE_ELEMENT:
         g_string_append_printf(out, "<%s", n->name ? n->name : "?");
-        for (const nd_attr *a = n->attrs; a; a = a->next) {
+        for (const ns_attr *a = n->attrs; a; a = a->next) {
             g_string_append_printf(out, " %s=\"", a->name);
-            nd_dump_text(out, a->value, 0);
+            ns_dump_text(out, a->value, 0);
             g_string_append_c(out, '"');
         }
         g_string_append(out, ">\n");
         break;
-    case ND_NODE_TEXT:
+    case NS_NODE_TEXT:
         g_string_append(out, "\"");
-        nd_dump_text(out, n->text, 120);
+        ns_dump_text(out, n->text, 120);
         g_string_append(out, "\"\n");
         break;
-    case ND_NODE_COMMENT:
+    case NS_NODE_COMMENT:
         g_string_append(out, "<!--");
-        nd_dump_text(out, n->text, 120);
+        ns_dump_text(out, n->text, 120);
         g_string_append(out, "-->\n");
         break;
     }
 
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling)
-        nd_dump_node(out, c, depth + 1);
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_dump_node(out, c, depth + 1);
 }
 
 GString *
-nd_node_dump(const nd_node *node)
+ns_node_dump(const ns_node *node)
 {
     GString *out = g_string_new(NULL);
     if (node)
-        nd_dump_node(out, node, 0);
+        ns_dump_node(out, node, 0);
     return out;
 }
 
 static int
-nd_map_parse_coords(const char *s, double *out, int max)
+ns_map_parse_coords(const char *s, double *out, int max)
 {
     int n = 0;
     const char *p = s;
@@ -1754,7 +1754,7 @@ nd_map_parse_coords(const char *s, double *out, int max)
 }
 
 static gboolean
-nd_map_point_in_poly(const double *pts, int npairs, double x, double y)
+ns_map_point_in_poly(const double *pts, int npairs, double x, double y)
 {
     gboolean in = FALSE;
     for (int i = 0, j = npairs - 1; i < npairs; j = i++) {
@@ -1768,7 +1768,7 @@ nd_map_point_in_poly(const double *pts, int npairs, double x, double y)
 }
 
 static gboolean
-nd_area_hit(const char *shape, const char *coords, double lx, double ly,
+ns_area_hit(const char *shape, const char *coords, double lx, double ly,
             double iw, double ih)
 {
     gboolean is_circle = shape && g_ascii_strncasecmp(shape, "circ", 4) == 0;
@@ -1777,7 +1777,7 @@ nd_area_hit(const char *shape, const char *coords, double lx, double ly,
     if (is_default)
         return lx >= 0 && ly >= 0 && lx <= iw && ly <= ih;
     double c[64];
-    int n = coords ? nd_map_parse_coords(coords, c, 64) : 0;
+    int n = coords ? ns_map_parse_coords(coords, c, 64) : 0;
     if (is_circle) {
         if (n < 3) return FALSE;
         double dx = lx - c[0], dy = ly - c[1];
@@ -1785,7 +1785,7 @@ nd_area_hit(const char *shape, const char *coords, double lx, double ly,
     }
     if (is_poly) {
         if (n < 6) return FALSE;
-        return nd_map_point_in_poly(c, n / 2, lx, ly);
+        return ns_map_point_in_poly(c, n / 2, lx, ly);
     }
     if (n < 4) return FALSE;
     double x1 = MIN(c[0], c[2]), x2 = MAX(c[0], c[2]);
@@ -1793,41 +1793,41 @@ nd_area_hit(const char *shape, const char *coords, double lx, double ly,
     return lx >= x1 && lx <= x2 && ly >= y1 && ly <= y2;
 }
 
-static const nd_node *
-nd_find_map(const nd_node *n, const char *name, int depth)
+static const ns_node *
+ns_find_map(const ns_node *n, const char *name, int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return NULL;
-    if (nd_node_is_element_named(n, "map")) {
-        const char *mn = nd_element_get_attr(n, "name");
-        const char *mid = nd_element_get_attr(n, "id");
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    if (ns_node_is_element_named(n, "map")) {
+        const char *mn = ns_element_get_attr(n, "name");
+        const char *mid = ns_element_get_attr(n, "id");
         if ((mn && strcmp(mn, name) == 0) || (mid && strcmp(mid, name) == 0))
             return n;
     }
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling) {
-        const nd_node *r = nd_find_map(c, name, depth + 1);
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        const ns_node *r = ns_find_map(c, name, depth + 1);
         if (r) return r;
     }
     return NULL;
 }
 
-static const nd_node *
-nd_map_first_area(const nd_node *n, double lx, double ly, double iw, double ih,
+static const ns_node *
+ns_map_first_area(const ns_node *n, double lx, double ly, double iw, double ih,
                   int depth)
 {
-    if (!n || depth >= ND_DOM_MAX_DEPTH) return NULL;
-    for (const nd_node *c = n->first_child; c; c = c->next_sibling) {
-        if (nd_node_is_element_named(c, "area") &&
-            nd_area_hit(nd_element_get_attr(c, "shape"),
-                        nd_element_get_attr(c, "coords"), lx, ly, iw, ih))
+    if (!n || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "area") &&
+            ns_area_hit(ns_element_get_attr(c, "shape"),
+                        ns_element_get_attr(c, "coords"), lx, ly, iw, ih))
             return c;
-        const nd_node *r = nd_map_first_area(c, lx, ly, iw, ih, depth + 1);
+        const ns_node *r = ns_map_first_area(c, lx, ly, iw, ih, depth + 1);
         if (r) return r;
     }
     return NULL;
 }
 
 char *
-nd_image_map_resolve(const nd_node *doc, const char *usemap,
+ns_image_map_resolve(const ns_node *doc, const char *usemap,
                      double lx, double ly, double iw, double ih,
                      const char **out_target)
 {
@@ -1835,12 +1835,12 @@ nd_image_map_resolve(const nd_node *doc, const char *usemap,
     if (!doc || !usemap || lx < 0 || ly < 0) return NULL;
     const char *name = usemap[0] == '#' ? usemap + 1 : usemap;
     if (!*name) return NULL;
-    const nd_node *map = nd_find_map(doc, name, 0);
+    const ns_node *map = ns_find_map(doc, name, 0);
     if (!map) return NULL;
-    const nd_node *area = nd_map_first_area(map, lx, ly, iw, ih, 0);
+    const ns_node *area = ns_map_first_area(map, lx, ly, iw, ih, 0);
     if (!area) return NULL;
-    const char *href = nd_element_get_attr(area, "href");
+    const char *href = ns_element_get_attr(area, "href");
     if (!href || !*href) return NULL;
-    if (out_target) *out_target = nd_element_get_attr(area, "target");
+    if (out_target) *out_target = ns_element_get_attr(area, "target");
     return g_strdup(href);
 }

@@ -14,21 +14,21 @@
 #include "config.h"
 #include "js.h"
 
-typedef struct nd_idb_db {
+typedef struct ns_idb_db {
     sqlite3 *db;
     char    *path;
     guint64  last_used;
-} nd_idb_db;
+} ns_idb_db;
 
-static JSValue nd_idb_throw(JSContext *ctx, const char *name, const char *message);
+static JSValue ns_idb_throw(JSContext *ctx, const char *name, const char *message);
 
-#define ND_IDB_MAX_OPEN 16
+#define NS_IDB_MAX_OPEN 16
 
 static GHashTable *g_idb_handles;
 static guint64     g_idb_clock;
 
 static void
-nd_idb_db_free(nd_idb_db *h)
+ns_idb_db_free(ns_idb_db *h)
 {
     if (!h) return;
     if (h->db) sqlite3_close(h->db);
@@ -37,23 +37,23 @@ nd_idb_db_free(nd_idb_db *h)
 }
 
 static void
-nd_idb_db_close(nd_idb_db *h)
+ns_idb_db_close(ns_idb_db *h)
 {
     (void)h;
 }
 
 static void
-nd_idb_cache_evict(const char *key)
+ns_idb_cache_evict(const char *key)
 {
     if (g_idb_handles && key)
         g_hash_table_remove(g_idb_handles, key);
 }
 
 static void
-nd_idb_cache_trim(void)
+ns_idb_cache_trim(void)
 {
     if (!g_idb_handles ||
-        g_hash_table_size(g_idb_handles) <= ND_IDB_MAX_OPEN)
+        g_hash_table_size(g_idb_handles) <= NS_IDB_MAX_OPEN)
         return;
     GHashTableIter it;
     gpointer k, v;
@@ -61,7 +61,7 @@ nd_idb_cache_trim(void)
     guint64 lru_stamp = G_MAXUINT64;
     g_hash_table_iter_init(&it, g_idb_handles);
     while (g_hash_table_iter_next(&it, &k, &v)) {
-        nd_idb_db *h = v;
+        ns_idb_db *h = v;
         if (h->last_used < lru_stamp) {
             lru_stamp = h->last_used;
             lru_path = k;
@@ -72,20 +72,20 @@ nd_idb_cache_trim(void)
 }
 
 static JSValue
-nd_idb_throw(JSContext *ctx, const char *name, const char *message)
+ns_idb_throw(JSContext *ctx, const char *name, const char *message)
 {
     return JS_ThrowDOMException(ctx, name ? name : "UnknownError",
                                 "%s", message ? message : "");
 }
 
 static JSValue
-nd_idb_throw_sql(JSContext *ctx, sqlite3 *db)
+ns_idb_throw_sql(JSContext *ctx, sqlite3 *db)
 {
-    return nd_idb_throw(ctx, "UnknownError", db ? sqlite3_errmsg(db) : "SQLite error");
+    return ns_idb_throw(ctx, "UnknownError", db ? sqlite3_errmsg(db) : "SQLite error");
 }
 
 static void
-nd_idb_free_cstrings(JSContext *ctx, int n, ...)
+ns_idb_free_cstrings(JSContext *ctx, int n, ...)
 {
     va_list ap;
     va_start(ap, n);
@@ -97,19 +97,19 @@ nd_idb_free_cstrings(JSContext *ctx, int n, ...)
 }
 
 static char *
-nd_idb_hash_string(const char *input)
+ns_idb_hash_string(const char *input)
 {
     return g_compute_checksum_for_string(G_CHECKSUM_SHA256, input, -1);
 }
 
 static char *
-nd_idb_partition_dir(JSContext *ctx)
+ns_idb_partition_dir(JSContext *ctx)
 {
-    nd_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = nd_js_storage_partition(js);
+    ns_js *js = JS_GetContextOpaque(ctx);
+    const char *partition = ns_js_storage_partition(js);
     if (!partition || !*partition) return NULL;
-    g_autofree char *hash = nd_idb_hash_string(partition);
-    char *dir = g_build_filename(g_get_user_data_dir(), ND_APP_DIR_NAME,
+    g_autofree char *hash = ns_idb_hash_string(partition);
+    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
                                  "indexeddb", hash, NULL);
     g_mkdir_with_parents(dir, 0700);
     g_chmod(dir, 0700);
@@ -117,18 +117,18 @@ nd_idb_partition_dir(JSContext *ctx)
 }
 
 static char *
-nd_idb_path_for_name(JSContext *ctx, const char *name)
+ns_idb_path_for_name(JSContext *ctx, const char *name)
 {
     if (!name || !*name) return NULL;
-    g_autofree char *dir = nd_idb_partition_dir(ctx);
+    g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return NULL;
-    g_autofree char *hash = nd_idb_hash_string(name);
+    g_autofree char *hash = ns_idb_hash_string(name);
     g_autofree char *file = g_strdup_printf("%s.sqlite", hash);
     return g_build_filename(dir, file, NULL);
 }
 
 static gboolean
-nd_idb_exec(sqlite3 *db, const char *sql)
+ns_idb_exec(sqlite3 *db, const char *sql)
 {
     char *err = NULL;
     int rc = sqlite3_exec(db, sql, NULL, NULL, &err);
@@ -138,10 +138,10 @@ nd_idb_exec(sqlite3 *db, const char *sql)
     return rc == SQLITE_OK;
 }
 
-#define ND_IDB_MAX_PAGES 65536
+#define NS_IDB_MAX_PAGES 65536
 
 static void
-nd_idb_configure(sqlite3 *db)
+ns_idb_configure(sqlite3 *db)
 {
 #ifdef SQLITE_DBCONFIG_DEFENSIVE
     sqlite3_db_config(db, SQLITE_DBCONFIG_DEFENSIVE, 1, NULL);
@@ -159,28 +159,28 @@ nd_idb_configure(sqlite3 *db)
 }
 
 static gboolean
-nd_idb_schema(sqlite3 *db)
+ns_idb_schema(sqlite3 *db)
 {
-    return nd_idb_exec(db, "PRAGMA foreign_keys=ON") &&
-           nd_idb_exec(db, "PRAGMA journal_mode=WAL") &&
-           nd_idb_exec(db, "PRAGMA synchronous=NORMAL") &&
-           nd_idb_exec(db, "PRAGMA cache_size=-512") &&
-           nd_idb_exec(db, "PRAGMA max_page_count=" G_STRINGIFY(ND_IDB_MAX_PAGES)) &&
-           nd_idb_exec(db, "CREATE TABLE IF NOT EXISTS meta("
+    return ns_idb_exec(db, "PRAGMA foreign_keys=ON") &&
+           ns_idb_exec(db, "PRAGMA journal_mode=WAL") &&
+           ns_idb_exec(db, "PRAGMA synchronous=NORMAL") &&
+           ns_idb_exec(db, "PRAGMA cache_size=-512") &&
+           ns_idb_exec(db, "PRAGMA max_page_count=" G_STRINGIFY(NS_IDB_MAX_PAGES)) &&
+           ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS meta("
                            "key TEXT PRIMARY KEY,value TEXT NOT NULL)") &&
-           nd_idb_exec(db, "CREATE TABLE IF NOT EXISTS stores("
+           ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS stores("
                            "name TEXT PRIMARY KEY,"
                            "key_path TEXT NOT NULL,"
                            "auto_increment INTEGER NOT NULL,"
                            "key_gen INTEGER NOT NULL DEFAULT 1)") &&
-           nd_idb_exec(db, "CREATE TABLE IF NOT EXISTS records("
+           ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS records("
                            "store TEXT NOT NULL,"
                            "key TEXT NOT NULL,"
                            "value BLOB NOT NULL,"
                            "PRIMARY KEY(store,key),"
                            "FOREIGN KEY(store) REFERENCES stores(name) "
                            "ON DELETE CASCADE ON UPDATE CASCADE)") &&
-           nd_idb_exec(db, "CREATE TABLE IF NOT EXISTS indexes("
+           ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS indexes("
                            "store TEXT NOT NULL,"
                            "name TEXT NOT NULL,"
                            "key_path TEXT NOT NULL,"
@@ -189,7 +189,7 @@ nd_idb_schema(sqlite3 *db)
                            "PRIMARY KEY(store,name),"
                            "FOREIGN KEY(store) REFERENCES stores(name) "
                            "ON DELETE CASCADE ON UPDATE CASCADE)") &&
-           nd_idb_exec(db, "CREATE TABLE IF NOT EXISTS index_records("
+           ns_idb_exec(db, "CREATE TABLE IF NOT EXISTS index_records("
                            "store TEXT NOT NULL,"
                            "name TEXT NOT NULL,"
                            "index_key TEXT NOT NULL,"
@@ -199,70 +199,70 @@ nd_idb_schema(sqlite3 *db)
                            "ON DELETE CASCADE ON UPDATE CASCADE,"
                            "FOREIGN KEY(store,primary_key) REFERENCES records(store,key) "
                            "ON DELETE CASCADE ON UPDATE CASCADE)") &&
-           nd_idb_exec(db, "CREATE INDEX IF NOT EXISTS idx_records_store "
+           ns_idb_exec(db, "CREATE INDEX IF NOT EXISTS idx_records_store "
                            "ON records(store)") &&
-           nd_idb_exec(db, "CREATE INDEX IF NOT EXISTS idx_index_records_lookup "
+           ns_idb_exec(db, "CREATE INDEX IF NOT EXISTS idx_index_records_lookup "
                            "ON index_records(store,name,index_key)");
 }
 
 #ifdef SQLITE_OPEN_NOFOLLOW
-#define ND_IDB_OPEN_FLAGS \
+#define NS_IDB_OPEN_FLAGS \
     (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOFOLLOW)
 #else
-#define ND_IDB_OPEN_FLAGS (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
+#define NS_IDB_OPEN_FLAGS (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
 #endif
 
 static char *
-nd_idb_cache_key(JSContext *ctx, const char *name)
+ns_idb_cache_key(JSContext *ctx, const char *name)
 {
-    nd_js *js = JS_GetContextOpaque(ctx);
-    const char *partition = nd_js_storage_partition(js);
+    ns_js *js = JS_GetContextOpaque(ctx);
+    const char *partition = ns_js_storage_partition(js);
     if (!partition || !*partition || !name || !*name) return NULL;
     return g_strdup_printf("%s\x1f%s", partition, name);
 }
 
-static nd_idb_db *
-nd_idb_open_db(JSContext *ctx, const char *name)
+static ns_idb_db *
+ns_idb_open_db(JSContext *ctx, const char *name)
 {
-    g_autofree char *key = nd_idb_cache_key(ctx, name);
+    g_autofree char *key = ns_idb_cache_key(ctx, name);
     if (!key) return NULL;
     if (g_idb_handles) {
-        nd_idb_db *cached = g_hash_table_lookup(g_idb_handles, key);
+        ns_idb_db *cached = g_hash_table_lookup(g_idb_handles, key);
         if (cached) {
             cached->last_used = ++g_idb_clock;
             return cached;
         }
     }
-    g_autofree char *path = nd_idb_path_for_name(ctx, name);
+    g_autofree char *path = ns_idb_path_for_name(ctx, name);
     if (!path) return NULL;
     sqlite3 *db = NULL;
-    int rc = sqlite3_open_v2(path, &db, ND_IDB_OPEN_FLAGS, NULL);
+    int rc = sqlite3_open_v2(path, &db, NS_IDB_OPEN_FLAGS, NULL);
     if (rc != SQLITE_OK) {
         g_warning("idb: could not open %s: %s", path,
                   db ? sqlite3_errmsg(db) : sqlite3_errstr(rc));
         if (db) sqlite3_close(db);
         return NULL;
     }
-    nd_idb_configure(db);
+    ns_idb_configure(db);
     sqlite3_busy_timeout(db, 2500);
-    if (!nd_idb_schema(db)) {
+    if (!ns_idb_schema(db)) {
         sqlite3_close(db);
         return NULL;
     }
-    nd_idb_db *h = g_new0(nd_idb_db, 1);
+    ns_idb_db *h = g_new0(ns_idb_db, 1);
     h->db = db;
     h->path = g_strdup(path);
     h->last_used = ++g_idb_clock;
     if (!g_idb_handles)
         g_idb_handles = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                              g_free, (GDestroyNotify)nd_idb_db_free);
+                                              g_free, (GDestroyNotify)ns_idb_db_free);
     g_hash_table_insert(g_idb_handles, g_steal_pointer(&key), h);
-    nd_idb_cache_trim();
+    ns_idb_cache_trim();
     return h;
 }
 
 static gboolean
-nd_idb_set_meta(sqlite3 *db, const char *key, const char *value)
+ns_idb_set_meta(sqlite3 *db, const char *key, const char *value)
 {
     sqlite3_stmt *st = NULL;
     if (sqlite3_prepare_v2(db,
@@ -278,7 +278,7 @@ nd_idb_set_meta(sqlite3 *db, const char *key, const char *value)
 }
 
 static char *
-nd_idb_get_meta(sqlite3 *db, const char *key)
+ns_idb_get_meta(sqlite3 *db, const char *key)
 {
     sqlite3_stmt *st = NULL;
     char *out = NULL;
@@ -295,15 +295,15 @@ nd_idb_get_meta(sqlite3 *db, const char *key)
 }
 
 static int64_t
-nd_idb_get_version(sqlite3 *db)
+ns_idb_get_version(sqlite3 *db)
 {
-    g_autofree char *v = nd_idb_get_meta(db, "version");
+    g_autofree char *v = ns_idb_get_meta(db, "version");
     if (!v || !*v) return 0;
     return g_ascii_strtoll(v, NULL, 10);
 }
 
 static JSValue
-nd_idb_read_value(JSContext *ctx, const void *blob, int len)
+ns_idb_read_value(JSContext *ctx, const void *blob, int len)
 {
     if (!blob || len <= 0) return JS_UNDEFINED;
     JSValue v = JS_ReadObject(ctx, blob, (size_t)len, JS_READ_OBJ_REFERENCE);
@@ -315,7 +315,7 @@ nd_idb_read_value(JSContext *ctx, const void *blob, int len)
 }
 
 static gboolean
-nd_idb_bind_value(JSContext *ctx, sqlite3_stmt *st, int index, JSValueConst value)
+ns_idb_bind_value(JSContext *ctx, sqlite3_stmt *st, int index, JSValueConst value)
 {
     size_t len = 0;
     uint8_t *buf = JS_WriteObject(ctx, &len, value, JS_WRITE_OBJ_REFERENCE);
@@ -327,7 +327,7 @@ nd_idb_bind_value(JSContext *ctx, sqlite3_stmt *st, int index, JSValueConst valu
 }
 
 static JSValue
-nd_idb_store_array(sqlite3 *db, JSContext *ctx)
+ns_idb_store_array(sqlite3 *db, JSContext *ctx)
 {
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
@@ -376,44 +376,44 @@ nd_idb_store_array(sqlite3 *db, JSContext *ctx)
 }
 
 static JSValue
-nd_idb_info_for(JSContext *ctx, nd_idb_db *h, const char *name)
+ns_idb_info_for(JSContext *ctx, ns_idb_db *h, const char *name)
 {
-    g_autofree char *stored_name = nd_idb_get_meta(h->db, "name");
-    if (!stored_name) nd_idb_set_meta(h->db, "name", name);
+    g_autofree char *stored_name = ns_idb_get_meta(h->db, "name");
+    if (!stored_name) ns_idb_set_meta(h->db, "name", name);
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "name", JS_NewString(ctx, name));
-    JS_SetPropertyStr(ctx, obj, "version", JS_NewInt64(ctx, nd_idb_get_version(h->db)));
-    JS_SetPropertyStr(ctx, obj, "stores", nd_idb_store_array(h->db, ctx));
+    JS_SetPropertyStr(ctx, obj, "version", JS_NewInt64(ctx, ns_idb_get_version(h->db)));
+    JS_SetPropertyStr(ctx, obj, "stores", ns_idb_store_array(h->db, ctx));
     return obj;
 }
 
 static const char *
-nd_idb_arg_string(JSContext *ctx, JSValueConst v)
+ns_idb_arg_string(JSContext *ctx, JSValueConst v)
 {
     return JS_ToCString(ctx, v);
 }
 
 static JSValue
-nd_idb_backend_open(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_open(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1) return nd_idb_throw(ctx, "TypeError", "Database name is required");
-    const char *name = nd_idb_arg_string(ctx, argv[0]);
+    if (argc < 1) return ns_idb_throw(ctx, "TypeError", "Database name is required");
+    const char *name = ns_idb_arg_string(ctx, argv[0]);
     if (!name) return JS_EXCEPTION;
-    nd_idb_db *h = nd_idb_open_db(ctx, name);
+    ns_idb_db *h = ns_idb_open_db(ctx, name);
     if (!h) {
         JS_FreeCString(ctx, name);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
-    JSValue out = nd_idb_info_for(ctx, h, name);
+    JSValue out = ns_idb_info_for(ctx, h, name);
     JS_FreeCString(ctx, name);
-    nd_idb_db_close(h);
+    ns_idb_db_close(h);
     return out;
 }
 
 static JSValue
-nd_idb_backend_set_version(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_set_version(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -424,18 +424,18 @@ nd_idb_backend_set_version(JSContext *ctx, JSValueConst this_val,
         if (name) JS_FreeCString(ctx, name);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, name);
+    ns_idb_db *h = ns_idb_open_db(ctx, name);
     JS_FreeCString(ctx, name);
-    if (!h) return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+    if (!h) return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     char buf[64];
     g_snprintf(buf, sizeof(buf), "%" G_GINT64_FORMAT, version);
-    gboolean ok = nd_idb_set_meta(h->db, "version", buf);
-    nd_idb_db_close(h);
+    gboolean ok = ns_idb_set_meta(h->db, "version", buf);
+    ns_idb_db_close(h);
     return JS_NewBool(ctx, ok);
 }
 
 static JSValue
-nd_idb_backend_create_store(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_create_store(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -445,14 +445,14 @@ nd_idb_backend_create_store(JSContext *ctx, JSValueConst this_val,
     const char *key_path = JS_ToCString(ctx, argv[2]);
     gboolean auto_inc = JS_ToBool(ctx, argv[3]) > 0;
     if (!dbn || !store || !key_path) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, key_path);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, key_path);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, key_path);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, key_path);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -465,20 +465,20 @@ nd_idb_backend_create_store(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
         if (!ok && sqlite3_errcode(h->db) == SQLITE_CONSTRAINT) {
             sqlite3_finalize(st);
-            nd_idb_db_close(h);
-            nd_idb_free_cstrings(ctx, 2, store, key_path);
-            return nd_idb_throw(ctx, "ConstraintError", "Object store already exists");
+            ns_idb_db_close(h);
+            ns_idb_free_cstrings(ctx, 2, store, key_path);
+            return ns_idb_throw(ctx, "ConstraintError", "Object store already exists");
         }
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, key_path);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, key_path);
     return out;
 }
 
 static JSValue
-nd_idb_backend_delete_store(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_delete_store(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -486,14 +486,14 @@ nd_idb_backend_delete_store(JSContext *ctx, JSValueConst this_val,
     const char *dbn = JS_ToCString(ctx, argv[0]);
     const char *store = JS_ToCString(ctx, argv[1]);
     if (!dbn || !store) {
-        nd_idb_free_cstrings(ctx, 2, dbn, store);
+        ns_idb_free_cstrings(ctx, 2, dbn, store);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
         JS_FreeCString(ctx, store);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db, "DELETE FROM stores WHERE name=?",
@@ -503,14 +503,14 @@ nd_idb_backend_delete_store(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
     JS_FreeCString(ctx, store);
     return out;
 }
 
 static JSValue
-nd_idb_backend_create_index(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_create_index(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -522,14 +522,14 @@ nd_idb_backend_create_index(JSContext *ctx, JSValueConst this_val,
     gboolean unique = JS_ToBool(ctx, argv[4]) > 0;
     gboolean multi = JS_ToBool(ctx, argv[5]) > 0;
     if (!dbn || !store || !name || !key_path) {
-        nd_idb_free_cstrings(ctx, 4, dbn, store, name, key_path);
+        ns_idb_free_cstrings(ctx, 4, dbn, store, name, key_path);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 3, store, name, key_path);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 3, store, name, key_path);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -545,20 +545,20 @@ nd_idb_backend_create_index(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
         if (!ok && sqlite3_errcode(h->db) == SQLITE_CONSTRAINT) {
             sqlite3_finalize(st);
-            nd_idb_db_close(h);
-            nd_idb_free_cstrings(ctx, 3, store, name, key_path);
-            return nd_idb_throw(ctx, "ConstraintError", "Index already exists");
+            ns_idb_db_close(h);
+            ns_idb_free_cstrings(ctx, 3, store, name, key_path);
+            return ns_idb_throw(ctx, "ConstraintError", "Index already exists");
         }
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 3, store, name, key_path);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 3, store, name, key_path);
     return out;
 }
 
 static JSValue
-nd_idb_backend_delete_index(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_delete_index(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -567,14 +567,14 @@ nd_idb_backend_delete_index(JSContext *ctx, JSValueConst this_val,
     const char *store = JS_ToCString(ctx, argv[1]);
     const char *name = JS_ToCString(ctx, argv[2]);
     if (!dbn || !store || !name) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, name);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, name);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, name);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, name);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -586,14 +586,14 @@ nd_idb_backend_delete_index(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, name);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, name);
     return out;
 }
 
 static JSValue
-nd_idb_backend_next_key(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_next_key(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -601,14 +601,14 @@ nd_idb_backend_next_key(JSContext *ctx, JSValueConst this_val,
     const char *dbn = JS_ToCString(ctx, argv[0]);
     const char *store = JS_ToCString(ctx, argv[1]);
     if (!dbn || !store) {
-        nd_idb_free_cstrings(ctx, 2, dbn, store);
+        ns_idb_free_cstrings(ctx, 2, dbn, store);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
         JS_FreeCString(ctx, store);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
     sqlite3_stmt *st = NULL;
@@ -635,14 +635,14 @@ nd_idb_backend_next_key(JSContext *ctx, JSValueConst this_val,
     }
     if (st) sqlite3_finalize(st);
     sqlite3_exec(h->db, ok ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
-    JSValue out = ok ? JS_NewInt64(ctx, key) : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
+    JSValue out = ok ? JS_NewInt64(ctx, key) : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
     JS_FreeCString(ctx, store);
     return out;
 }
 
 static gboolean
-nd_idb_insert_index_entries(JSContext *ctx, sqlite3 *db,
+ns_idb_insert_index_entries(JSContext *ctx, sqlite3 *db,
                             const char *store, const char *primary_key,
                             JSValueConst entries)
 {
@@ -684,7 +684,7 @@ nd_idb_insert_index_entries(JSContext *ctx, sqlite3 *db,
 }
 
 static JSValue
-nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_put(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -702,14 +702,14 @@ nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, JS_GetException(ctx));
     }
     if (!dbn || !store || !key) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, key);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, key);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, key);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, key);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     gboolean ok = TRUE;
     sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
@@ -724,9 +724,9 @@ nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
             if (sqlite3_step(exists) == SQLITE_ROW) {
                 sqlite3_finalize(exists);
                 sqlite3_exec(h->db, "ROLLBACK", NULL, NULL, NULL);
-                nd_idb_db_close(h);
-                nd_idb_free_cstrings(ctx, 2, store, key);
-                return nd_idb_throw(ctx, "ConstraintError", "Key already exists");
+                ns_idb_db_close(h);
+                ns_idb_free_cstrings(ctx, 2, store, key);
+                return ns_idb_throw(ctx, "ConstraintError", "Key already exists");
             }
         }
         if (exists) sqlite3_finalize(exists);
@@ -741,7 +741,7 @@ nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
     if (ok) {
         sqlite3_bind_text(st, 1, store, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, key, -1, SQLITE_TRANSIENT);
-        ok = nd_idb_bind_value(ctx, st, 3, argv[3]);
+        ok = ns_idb_bind_value(ctx, st, 3, argv[3]);
         if (ok) ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) { sqlite3_finalize(st); st = NULL; }
@@ -758,7 +758,7 @@ nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
         sqlite3_finalize(st);
         st = NULL;
     }
-    if (ok) ok = nd_idb_insert_index_entries(ctx, h->db, store, key, argv[5]);
+    if (ok) ok = ns_idb_insert_index_entries(ctx, h->db, store, key, argv[5]);
     if (ok && has_numeric && numeric_key >= 1.0 &&
         sqlite3_prepare_v2(h->db,
             "UPDATE stores SET key_gen=max(key_gen, ?) WHERE name=?",
@@ -775,14 +775,14 @@ nd_idb_backend_put(JSContext *ctx, JSValueConst this_val,
     sqlite3_exec(h->db, ok ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
     JSValue out = ok ? JS_TRUE
                      : (JS_HasException(ctx) ? JS_EXCEPTION
-                                             : nd_idb_throw_sql(ctx, h->db));
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, key);
+                                             : ns_idb_throw_sql(ctx, h->db));
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, key);
     return out;
 }
 
 static JSValue
-nd_idb_backend_get(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_get(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -791,14 +791,14 @@ nd_idb_backend_get(JSContext *ctx, JSValueConst this_val,
     const char *store = JS_ToCString(ctx, argv[1]);
     const char *key = JS_ToCString(ctx, argv[2]);
     if (!dbn || !store || !key) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, key);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, key);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, key);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, key);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     JSValue out = JS_UNDEFINED;
@@ -808,17 +808,17 @@ nd_idb_backend_get(JSContext *ctx, JSValueConst this_val,
         sqlite3_bind_text(st, 1, store, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, key, -1, SQLITE_TRANSIENT);
         if (sqlite3_step(st) == SQLITE_ROW)
-            out = nd_idb_read_value(ctx, sqlite3_column_blob(st, 0),
+            out = ns_idb_read_value(ctx, sqlite3_column_blob(st, 0),
                                     sqlite3_column_bytes(st, 0));
     }
     if (st) sqlite3_finalize(st);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, key);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, key);
     return out;
 }
 
 static JSValue
-nd_idb_backend_records(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_records(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -826,14 +826,14 @@ nd_idb_backend_records(JSContext *ctx, JSValueConst this_val,
     const char *dbn = JS_ToCString(ctx, argv[0]);
     const char *store = JS_ToCString(ctx, argv[1]);
     if (!dbn || !store) {
-        nd_idb_free_cstrings(ctx, 2, dbn, store);
+        ns_idb_free_cstrings(ctx, 2, dbn, store);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
         JS_FreeCString(ctx, store);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
@@ -847,19 +847,19 @@ nd_idb_backend_records(JSContext *ctx, JSValueConst this_val,
             JSValue rec = JS_NewObject(ctx);
             JS_SetPropertyStr(ctx, rec, "key", JS_NewString(ctx, key ? key : ""));
             JS_SetPropertyStr(ctx, rec, "value",
-                nd_idb_read_value(ctx, sqlite3_column_blob(st, 1),
+                ns_idb_read_value(ctx, sqlite3_column_blob(st, 1),
                                   sqlite3_column_bytes(st, 1)));
             JS_SetPropertyUint32(ctx, arr, i++, rec);
         }
     }
     if (st) sqlite3_finalize(st);
-    nd_idb_db_close(h);
+    ns_idb_db_close(h);
     JS_FreeCString(ctx, store);
     return arr;
 }
 
 static JSValue
-nd_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -868,14 +868,14 @@ nd_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
     const char *store = JS_ToCString(ctx, argv[1]);
     const char *index = JS_ToCString(ctx, argv[2]);
     if (!dbn || !store || !index) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, index);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, index);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, index);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, index);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     JSValue arr = JS_NewArray(ctx);
     sqlite3_stmt *st = NULL;
@@ -897,19 +897,19 @@ nd_idb_backend_index_records(JSContext *ctx, JSValueConst this_val,
             JS_SetPropertyStr(ctx, rec, "primaryKey",
                 JS_NewString(ctx, pk ? pk : ""));
             JS_SetPropertyStr(ctx, rec, "value",
-                nd_idb_read_value(ctx, sqlite3_column_blob(st, 2),
+                ns_idb_read_value(ctx, sqlite3_column_blob(st, 2),
                                   sqlite3_column_bytes(st, 2)));
             JS_SetPropertyUint32(ctx, arr, i++, rec);
         }
     }
     if (st) sqlite3_finalize(st);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, index);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, index);
     return arr;
 }
 
 static JSValue
-nd_idb_backend_delete_record(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_delete_record(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -918,14 +918,14 @@ nd_idb_backend_delete_record(JSContext *ctx, JSValueConst this_val,
     const char *store = JS_ToCString(ctx, argv[1]);
     const char *key = JS_ToCString(ctx, argv[2]);
     if (!dbn || !store || !key) {
-        nd_idb_free_cstrings(ctx, 3, dbn, store, key);
+        ns_idb_free_cstrings(ctx, 3, dbn, store, key);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
-        nd_idb_free_cstrings(ctx, 2, store, key);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        ns_idb_free_cstrings(ctx, 2, store, key);
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -937,14 +937,14 @@ nd_idb_backend_delete_record(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
-    nd_idb_free_cstrings(ctx, 2, store, key);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
+    ns_idb_free_cstrings(ctx, 2, store, key);
     return out;
 }
 
 static JSValue
-nd_idb_backend_clear(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_clear(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
     (void)this_val;
@@ -952,14 +952,14 @@ nd_idb_backend_clear(JSContext *ctx, JSValueConst this_val,
     const char *dbn = JS_ToCString(ctx, argv[0]);
     const char *store = JS_ToCString(ctx, argv[1]);
     if (!dbn || !store) {
-        nd_idb_free_cstrings(ctx, 2, dbn, store);
+        ns_idb_free_cstrings(ctx, 2, dbn, store);
         return JS_EXCEPTION;
     }
-    nd_idb_db *h = nd_idb_open_db(ctx, dbn);
+    ns_idb_db *h = ns_idb_open_db(ctx, dbn);
     JS_FreeCString(ctx, dbn);
     if (!h) {
         JS_FreeCString(ctx, store);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     sqlite3_stmt *st = NULL;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -970,44 +970,44 @@ nd_idb_backend_clear(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) sqlite3_finalize(st);
-    JSValue out = ok ? JS_TRUE : nd_idb_throw_sql(ctx, h->db);
-    nd_idb_db_close(h);
+    JSValue out = ok ? JS_TRUE : ns_idb_throw_sql(ctx, h->db);
+    ns_idb_db_close(h);
     JS_FreeCString(ctx, store);
     return out;
 }
 
 static JSValue
-nd_idb_backend_info(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_info(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 1) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_EXCEPTION;
-    nd_idb_db *h = nd_idb_open_db(ctx, name);
+    ns_idb_db *h = ns_idb_open_db(ctx, name);
     if (!h) {
         JS_FreeCString(ctx, name);
-        return nd_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
+        return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
-    JSValue out = nd_idb_info_for(ctx, h, name);
-    nd_idb_db_close(h);
+    JSValue out = ns_idb_info_for(ctx, h, name);
+    ns_idb_db_close(h);
     JS_FreeCString(ctx, name);
     return out;
 }
 
 static JSValue
-nd_idb_backend_delete_database(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_delete_database(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
     (void)this_val;
     if (argc < 1) return JS_FALSE;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_EXCEPTION;
-    g_autofree char *path = nd_idb_path_for_name(ctx, name);
-    g_autofree char *key = nd_idb_cache_key(ctx, name);
+    g_autofree char *path = ns_idb_path_for_name(ctx, name);
+    g_autofree char *key = ns_idb_cache_key(ctx, name);
     JS_FreeCString(ctx, name);
-    if (!path) return nd_idb_throw(ctx, "SecurityError", "Storage is unavailable");
-    nd_idb_cache_evict(key);
+    if (!path) return ns_idb_throw(ctx, "SecurityError", "Storage is unavailable");
+    ns_idb_cache_evict(key);
     g_unlink(path);
     g_autofree char *wal = g_strconcat(path, "-wal", NULL);
     g_autofree char *shm = g_strconcat(path, "-shm", NULL);
@@ -1017,14 +1017,14 @@ nd_idb_backend_delete_database(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-nd_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
+ns_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
     (void)this_val;
     (void)argc;
     (void)argv;
     JSValue arr = JS_NewArray(ctx);
-    g_autofree char *dir = nd_idb_partition_dir(ctx);
+    g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return arr;
     GDir *gd = g_dir_open(dir, 0, NULL);
     if (!gd) return arr;
@@ -1038,8 +1038,8 @@ nd_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
             if (db) sqlite3_close(db);
             continue;
         }
-        g_autofree char *name = nd_idb_get_meta(db, "name");
-        int64_t version = nd_idb_get_version(db);
+        g_autofree char *name = ns_idb_get_meta(db, "name");
+        int64_t version = ns_idb_get_version(db);
         sqlite3_close(db);
         if (!name) continue;
         JSValue info = JS_NewObject(ctx);
@@ -1052,32 +1052,32 @@ nd_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
-nd_idb_bind(JSContext *ctx, JSValueConst obj, const char *name,
+ns_idb_bind(JSContext *ctx, JSValueConst obj, const char *name,
             JSCFunction *fn, int argc)
 {
     JS_SetPropertyStr(ctx, obj, name, JS_NewCFunction(ctx, fn, name, argc));
 }
 
 void
-nd_idb_install(JSContext *ctx, JSValueConst global)
+ns_idb_install(JSContext *ctx, JSValueConst global)
 {
     JSValue backend = JS_NewObject(ctx);
-    nd_idb_bind(ctx, backend, "open", nd_idb_backend_open, 1);
-    nd_idb_bind(ctx, backend, "info", nd_idb_backend_info, 1);
-    nd_idb_bind(ctx, backend, "setVersion", nd_idb_backend_set_version, 2);
-    nd_idb_bind(ctx, backend, "createStore", nd_idb_backend_create_store, 4);
-    nd_idb_bind(ctx, backend, "deleteStore", nd_idb_backend_delete_store, 2);
-    nd_idb_bind(ctx, backend, "createIndex", nd_idb_backend_create_index, 6);
-    nd_idb_bind(ctx, backend, "deleteIndex", nd_idb_backend_delete_index, 3);
-    nd_idb_bind(ctx, backend, "nextKey", nd_idb_backend_next_key, 2);
-    nd_idb_bind(ctx, backend, "put", nd_idb_backend_put, 7);
-    nd_idb_bind(ctx, backend, "get", nd_idb_backend_get, 3);
-    nd_idb_bind(ctx, backend, "records", nd_idb_backend_records, 2);
-    nd_idb_bind(ctx, backend, "indexRecords", nd_idb_backend_index_records, 3);
-    nd_idb_bind(ctx, backend, "deleteRecord", nd_idb_backend_delete_record, 3);
-    nd_idb_bind(ctx, backend, "clear", nd_idb_backend_clear, 2);
-    nd_idb_bind(ctx, backend, "deleteDatabase", nd_idb_backend_delete_database, 1);
-    nd_idb_bind(ctx, backend, "databases", nd_idb_backend_databases, 0);
+    ns_idb_bind(ctx, backend, "open", ns_idb_backend_open, 1);
+    ns_idb_bind(ctx, backend, "info", ns_idb_backend_info, 1);
+    ns_idb_bind(ctx, backend, "setVersion", ns_idb_backend_set_version, 2);
+    ns_idb_bind(ctx, backend, "createStore", ns_idb_backend_create_store, 4);
+    ns_idb_bind(ctx, backend, "deleteStore", ns_idb_backend_delete_store, 2);
+    ns_idb_bind(ctx, backend, "createIndex", ns_idb_backend_create_index, 6);
+    ns_idb_bind(ctx, backend, "deleteIndex", ns_idb_backend_delete_index, 3);
+    ns_idb_bind(ctx, backend, "nextKey", ns_idb_backend_next_key, 2);
+    ns_idb_bind(ctx, backend, "put", ns_idb_backend_put, 7);
+    ns_idb_bind(ctx, backend, "get", ns_idb_backend_get, 3);
+    ns_idb_bind(ctx, backend, "records", ns_idb_backend_records, 2);
+    ns_idb_bind(ctx, backend, "indexRecords", ns_idb_backend_index_records, 3);
+    ns_idb_bind(ctx, backend, "deleteRecord", ns_idb_backend_delete_record, 3);
+    ns_idb_bind(ctx, backend, "clear", ns_idb_backend_clear, 2);
+    ns_idb_bind(ctx, backend, "deleteDatabase", ns_idb_backend_delete_database, 1);
+    ns_idb_bind(ctx, backend, "databases", ns_idb_backend_databases, 0);
     JS_DefinePropertyValueStr(ctx, global, "__nd_idb", backend,
                               JS_PROP_CONFIGURABLE);
 }

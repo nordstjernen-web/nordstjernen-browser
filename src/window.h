@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_WINDOW_H
-#define ND_WINDOW_H
+#ifndef NS_WINDOW_H
+#define NS_WINDOW_H
 
 #include <gtk/gtk.h>
 
@@ -20,27 +20,27 @@
 
 G_BEGIN_DECLS
 
-typedef struct nd_tab_worker nd_tab_worker;
+typedef struct ns_tab_worker ns_tab_worker;
 
-typedef enum nd_view_mode {
-    ND_VIEW_RENDER,
-    ND_VIEW_RAW,
-    ND_VIEW_DOM,
-    ND_VIEW_LAYOUT,
-} nd_view_mode;
+typedef enum ns_view_mode {
+    NS_VIEW_RENDER,
+    NS_VIEW_RAW,
+    NS_VIEW_DOM,
+    NS_VIEW_LAYOUT,
+} ns_view_mode;
 
-typedef enum nd_load_stage {
-    ND_STAGE_IDLE,
-    ND_STAGE_CONNECTING,
-    ND_STAGE_FETCHING,
-    ND_STAGE_PARSING,
-    ND_STAGE_STYLING,
-    ND_STAGE_SCRIPTING,
-    ND_STAGE_RENDERING,
-    ND_STAGE_DONE,
-} nd_load_stage;
+typedef enum ns_load_stage {
+    NS_STAGE_IDLE,
+    NS_STAGE_CONNECTING,
+    NS_STAGE_FETCHING,
+    NS_STAGE_PARSING,
+    NS_STAGE_STYLING,
+    NS_STAGE_SCRIPTING,
+    NS_STAGE_RENDERING,
+    NS_STAGE_DONE,
+} ns_load_stage;
 
-typedef struct nd_window {
+typedef struct ns_window {
     guint         id;
     GtkWidget    *window;
     GtkWidget    *page_root;
@@ -67,7 +67,7 @@ typedef struct nd_window {
     GtkWidget    *spinner;
     GtkWidget    *spinner_anim;
     GtkWidget    *stage_stack;
-    nd_load_stage stage;
+    ns_load_stage stage;
     guint         stage_done_source;
     GtkWidget    *logo_image;
     guint         logo_anim_source;
@@ -76,10 +76,10 @@ typedef struct nd_window {
     GtkWidget    *text_view;
     GtkWidget    *drawing_area;
     GtkAdjustment *render_vadj;
-    nd_box       *layout_tree;
+    ns_box       *layout_tree;
     GHashTable   *style_table;
-    nd_node      *parsed_doc;
-    nd_node      *focused_input;
+    ns_node      *parsed_doc;
+    ns_node      *focused_input;
     char         *focused_input_initial;
     gsize         caret_byte;
     gsize         sel_anchor_byte;
@@ -90,7 +90,7 @@ typedef struct nd_window {
     gboolean      caret_blink_on;
     GCancellable *current_fetch;
     guint         fetch_gen;
-    nd_view_mode  mode;
+    ns_view_mode  mode;
 
     GPtrArray    *history;
     int           cursor;
@@ -101,7 +101,7 @@ typedef struct nd_window {
     gboolean      dom_mutated;
     char         *pending_fragment;
     char         *lazy_url;
-    nd_csp       *csp;
+    ns_csp       *csp;
 
     double        zoom;
     double        pinch_base_zoom;
@@ -111,18 +111,18 @@ typedef struct nd_window {
     GtkWidget    *search_count_label;
     GtkWidget    *search_case_toggle;
     gboolean      search_case_sensitive;
-    const nd_box *search_active_box;
+    const ns_box *search_active_box;
     char         *search_query;
 
-    nd_image_cache *images;
-    nd_video_cache *videos;
-    nd_tab_worker  *worker;
-    nd_js          *js;
-    struct nd_anim *anim;
+    ns_image_cache *images;
+    ns_video_cache *videos;
+    ns_tab_worker  *worker;
+    ns_js          *js;
+    struct ns_anim *anim;
 
-    nd_pdf       *pdf;
+    ns_pdf       *pdf;
 
-    nd_selection  selection;
+    ns_selection  selection;
     char         *context_menu_link;
     char         *context_menu_image;
     char         *context_menu_selection;
@@ -133,10 +133,10 @@ typedef struct nd_window {
     double        drag_start_y;
     double        cursor_x;
     double        cursor_y;
-    const nd_node *hover_node;
-    const nd_node *html_drag_source;
-    const nd_node *html_drag_over;
-    nd_js_drag_session *html_drag_session;
+    const ns_node *hover_node;
+    const ns_node *html_drag_source;
+    const ns_node *html_drag_over;
+    ns_js_drag_session *html_drag_session;
     gboolean      html_drag_active;
     gboolean      html_drag_can_drop;
 
@@ -166,45 +166,45 @@ typedef struct nd_window {
         GtkTextBuffer *dlog_buffer;
         guint          dlog_sub_id;
     } console;
-} nd_window;
+} ns_window;
 
-void nd_window_build_toolbar     (nd_window *w, GtkWidget *header,
+void ns_window_build_toolbar     (ns_window *w, GtkWidget *header,
                                   const char *home_url);
-void nd_window_update_logo_loading(nd_window *w, gboolean loading);
-void nd_window_set_stage(nd_window *w, nd_load_stage stage);
-GArray *nd_logo_anim_frames(void);
-void nd_window_build_search_bar  (nd_window *w, GtkWidget *vbox);
-void nd_window_build_content     (nd_window *w, GtkWidget *vbox);
+void ns_window_update_logo_loading(ns_window *w, gboolean loading);
+void ns_window_set_stage(ns_window *w, ns_load_stage stage);
+GArray *ns_logo_anim_frames(void);
+void ns_window_build_search_bar  (ns_window *w, GtkWidget *vbox);
+void ns_window_build_content     (ns_window *w, GtkWidget *vbox);
 
-typedef enum nd_load_source {
-    ND_LOAD_USER,
-    ND_LOAD_HISTORY,
-} nd_load_source;
+typedef enum ns_load_source {
+    NS_LOAD_USER,
+    NS_LOAD_HISTORY,
+} ns_load_source;
 
-nd_window *nd_window_for_id       (guint id);
-void       nd_window_ensure_js    (nd_window *w);
-void       nd_window_js_mutated   (gpointer user_data);
-void       nd_window_ensure_layout(nd_window *w, double viewport_width);
-const char *nd_window_current_url (nd_window *w);
-char       *nd_window_current_title(nd_window *w);
-void        nd_window_set_status  (nd_window *w, const char *fmt, ...)
+ns_window *ns_window_for_id       (guint id);
+void       ns_window_ensure_js    (ns_window *w);
+void       ns_window_js_mutated   (gpointer user_data);
+void       ns_window_ensure_layout(ns_window *w, double viewport_width);
+const char *ns_window_current_url (ns_window *w);
+char       *ns_window_current_title(ns_window *w);
+void        ns_window_set_status  (ns_window *w, const char *fmt, ...)
                                    G_GNUC_PRINTF(2, 3);
-double      nd_layout_viewport    (void);
-void        nd_window_load_url    (nd_window *w, const char *raw_url,
-                                   nd_load_source src);
-char       *nd_resolve_url        (const nd_window *w, const char *href);
-gboolean    nd_window_media_target(nd_window *w, const struct nd_box *hit,
+double      ns_layout_viewport    (void);
+void        ns_window_load_url    (ns_window *w, const char *raw_url,
+                                   ns_load_source src);
+char       *ns_resolve_url        (const ns_window *w, const char *href);
+gboolean    ns_window_media_target(ns_window *w, const struct ns_box *hit,
                                    char **out_url, gboolean *out_is_video,
                                    gboolean *out_stream);
-void        nd_window_render      (nd_window *w);
-void        nd_window_update_nav_state(nd_window *w);
-void        nd_spawn_window       (GtkApplication *app, const char *url);
-nd_window  *nd_browser_add_tab    (GtkWidget *toplevel, GtkApplication *app,
+void        ns_window_render      (ns_window *w);
+void        ns_window_update_nav_state(ns_window *w);
+void        ns_spawn_window       (GtkApplication *app, const char *url);
+ns_window  *ns_browser_add_tab    (GtkWidget *toplevel, GtkApplication *app,
                                    const char *url);
-void        nd_browser_set_active (GtkWidget *toplevel, nd_window *w);
-nd_bookmarks *nd_app_bookmarks    (void);
-const char   *nd_app_home_url     (void);
-void          nd_app_set_home_url (const char *url);
+void        ns_browser_set_active (GtkWidget *toplevel, ns_window *w);
+ns_bookmarks *ns_app_bookmarks    (void);
+const char   *ns_app_home_url     (void);
+void          ns_app_set_home_url (const char *url);
 
 void on_back_clicked        (GtkButton *b, gpointer ud);
 void on_forward_clicked     (GtkButton *b, gpointer ud);
@@ -216,23 +216,23 @@ void on_stop_clicked        (GtkButton *b, gpointer ud);
 gboolean on_url_entry_key_pressed(GtkEventControllerKey *ctrl, guint keyval,
                                   guint keycode, GdkModifierType state,
                                   gpointer ud);
-void nd_window_setup_url_suggestions(nd_window *w);
+void ns_window_setup_url_suggestions(ns_window *w);
 void on_drawing_motion      (GtkEventControllerMotion *c, double x, double y, gpointer ud);
-gboolean nd_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer ud);
-void nd_draw_render         (GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer ud);
-void nd_on_drawing_pressed  (GtkGestureClick *g, int n, double x, double y, gpointer ud);
-void nd_on_drawing_released (GtkGestureClick *g, int n, double x, double y, gpointer ud);
-void nd_on_drawing_pressed_middle(GtkGestureClick *g, int n, double x, double y, gpointer ud);
-void nd_on_drawing_side_pressed(GtkGestureClick *g, int n, double x, double y, gpointer ud);
-void nd_on_drawing_zoom_begin(GtkGesture *g, GdkEventSequence *seq, gpointer ud);
-void nd_on_drawing_zoom_end(GtkGesture *g, GdkEventSequence *seq, gpointer ud);
-void nd_on_drawing_drag_begin (GtkGestureDrag *g, double x, double y, gpointer ud);
-void nd_on_drawing_drag_update(GtkGestureDrag *g, double dx, double dy, gpointer ud);
-void nd_on_drawing_drag_end   (GtkGestureDrag *g, double dx, double dy, gpointer ud);
-gboolean nd_on_drawing_key_pressed (GtkEventControllerKey *c, guint kv, guint kc, GdkModifierType st, gpointer ud);
-void     nd_on_drawing_key_released(GtkEventControllerKey *c, guint kv, guint kc, GdkModifierType st, gpointer ud);
-gboolean nd_window_raf_tick        (GtkWidget *widget, GdkFrameClock *clock, gpointer ud);
-void     nd_window_render_vadjustment_changed(GtkAdjustment *adj, gpointer ud);
+gboolean ns_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer ud);
+void ns_draw_render         (GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer ud);
+void ns_on_drawing_pressed  (GtkGestureClick *g, int n, double x, double y, gpointer ud);
+void ns_on_drawing_released (GtkGestureClick *g, int n, double x, double y, gpointer ud);
+void ns_on_drawing_pressed_middle(GtkGestureClick *g, int n, double x, double y, gpointer ud);
+void ns_on_drawing_side_pressed(GtkGestureClick *g, int n, double x, double y, gpointer ud);
+void ns_on_drawing_zoom_begin(GtkGesture *g, GdkEventSequence *seq, gpointer ud);
+void ns_on_drawing_zoom_end(GtkGesture *g, GdkEventSequence *seq, gpointer ud);
+void ns_on_drawing_drag_begin (GtkGestureDrag *g, double x, double y, gpointer ud);
+void ns_on_drawing_drag_update(GtkGestureDrag *g, double dx, double dy, gpointer ud);
+void ns_on_drawing_drag_end   (GtkGestureDrag *g, double dx, double dy, gpointer ud);
+gboolean ns_on_drawing_key_pressed (GtkEventControllerKey *c, guint kv, guint kc, GdkModifierType st, gpointer ud);
+void     ns_on_drawing_key_released(GtkEventControllerKey *c, guint kv, guint kc, GdkModifierType st, gpointer ud);
+gboolean ns_window_raf_tick        (GtkWidget *widget, GdkFrameClock *clock, gpointer ud);
+void     ns_window_render_vadjustment_changed(GtkAdjustment *adj, gpointer ud);
 
 G_END_DECLS
 

@@ -12,31 +12,31 @@
 
 #include "net.h"
 
-#define ND_WS_RECV_BUF       8192
-#define ND_WS_MAX_MESSAGE    (8 * 1024 * 1024)
-#define ND_WS_POLL_MSEC      10
+#define NS_WS_RECV_BUF       8192
+#define NS_WS_MAX_MESSAGE    (8 * 1024 * 1024)
+#define NS_WS_POLL_MSEC      10
 
 typedef enum {
-    ND_WS_OUT_TEXT,
-    ND_WS_OUT_BINARY,
-    ND_WS_OUT_CLOSE,
-} nd_ws_out_kind;
+    NS_WS_OUT_TEXT,
+    NS_WS_OUT_BINARY,
+    NS_WS_OUT_CLOSE,
+} ns_ws_out_kind;
 
 typedef struct {
-    nd_ws_out_kind kind;
+    ns_ws_out_kind kind;
     guint8        *data;
     gsize          len;
     int            close_code;
-} nd_ws_out_msg;
+} ns_ws_out_msg;
 
-struct nd_ws {
+struct ns_ws {
     volatile gint     refcount;
 
     char             *url;
     char             *origin;
     GPtrArray        *protocols;
 
-    nd_ws_callbacks   cbs;
+    ns_ws_callbacks   cbs;
     gpointer          user_data;
 
     GMutex            lock;
@@ -53,22 +53,22 @@ struct nd_ws {
     gboolean          recv_in_message;
 };
 
-static nd_ws *
-nd_ws_ref(nd_ws *ws)
+static ns_ws *
+ns_ws_ref(ns_ws *ws)
 {
     if (ws) g_atomic_int_inc(&ws->refcount);
     return ws;
 }
 
 static void
-nd_ws_destroy(nd_ws *ws)
+ns_ws_destroy(ns_ws *ws)
 {
     if (!ws) return;
     g_free(ws->url);
     g_free(ws->origin);
     if (ws->protocols) g_ptr_array_free(ws->protocols, TRUE);
     while (!g_queue_is_empty(&ws->out_queue)) {
-        nd_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
+        ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
         g_free(m->data);
         g_free(m);
     }
@@ -79,41 +79,41 @@ nd_ws_destroy(nd_ws *ws)
 }
 
 static void
-nd_ws_unref(nd_ws *ws)
+ns_ws_unref(ns_ws *ws)
 {
     if (!ws) return;
     if (g_atomic_int_dec_and_test(&ws->refcount))
-        nd_ws_destroy(ws);
+        ns_ws_destroy(ws);
 }
 
 typedef struct {
-    nd_ws  *ws;
-    void  (*invoke)(struct nd_ws *ws, gpointer payload);
+    ns_ws  *ws;
+    void  (*invoke)(struct ns_ws *ws, gpointer payload);
     gpointer payload;
     void   (*payload_free)(gpointer);
-} nd_ws_dispatch;
+} ns_ws_dispatch;
 
 static gboolean
-nd_ws_dispatch_run(gpointer data)
+ns_ws_dispatch_run(gpointer data)
 {
-    nd_ws_dispatch *d = data;
-    nd_ws *ws = d->ws;
+    ns_ws_dispatch *d = data;
+    ns_ws *ws = d->ws;
     if (!g_atomic_int_get(&ws->detached) && ws->cbs.busy &&
         ws->cbs.busy(ws->user_data)) {
-        g_timeout_add(4, nd_ws_dispatch_run, d);
+        g_timeout_add(4, ns_ws_dispatch_run, d);
         return G_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&ws->detached) && d->invoke)
         d->invoke(ws, d->payload);
     if (d->payload && d->payload_free) d->payload_free(d->payload);
-    nd_ws_unref(ws);
+    ns_ws_unref(ws);
     g_free(d);
     return G_SOURCE_REMOVE;
 }
 
 static void
-nd_ws_post(nd_ws *ws,
-           void (*invoke)(nd_ws *, gpointer),
+ns_ws_post(ns_ws *ws,
+           void (*invoke)(ns_ws *, gpointer),
            gpointer payload,
            void   (*payload_free)(gpointer))
 {
@@ -121,52 +121,52 @@ nd_ws_post(nd_ws *ws,
         if (payload && payload_free) payload_free(payload);
         return;
     }
-    nd_ws_dispatch *d = g_new0(nd_ws_dispatch, 1);
-    d->ws = nd_ws_ref(ws);
+    ns_ws_dispatch *d = g_new0(ns_ws_dispatch, 1);
+    d->ws = ns_ws_ref(ws);
     d->invoke = invoke;
     d->payload = payload;
     d->payload_free = payload_free;
-    g_idle_add(nd_ws_dispatch_run, d);
+    g_idle_add(ns_ws_dispatch_run, d);
 }
 
 typedef struct {
     GByteArray *data;
     gboolean    is_text;
-} nd_ws_msg_payload;
+} ns_ws_msg_payload;
 
 typedef struct {
     int   code;
     char *reason;
     gboolean clean;
-} nd_ws_close_payload;
+} ns_ws_close_payload;
 
 static void
-nd_ws_msg_payload_free(gpointer p)
+ns_ws_msg_payload_free(gpointer p)
 {
-    nd_ws_msg_payload *m = p;
+    ns_ws_msg_payload *m = p;
     if (m->data) g_byte_array_free(m->data, TRUE);
     g_free(m);
 }
 
 static void
-nd_ws_close_payload_free(gpointer p)
+ns_ws_close_payload_free(gpointer p)
 {
-    nd_ws_close_payload *c = p;
+    ns_ws_close_payload *c = p;
     g_free(c->reason);
     g_free(c);
 }
 
 static void
-nd_ws_invoke_open(nd_ws *ws, gpointer payload)
+ns_ws_invoke_open(ns_ws *ws, gpointer payload)
 {
     (void)payload;
     if (ws->cbs.on_open) ws->cbs.on_open(ws->user_data);
 }
 
 static void
-nd_ws_invoke_msg(nd_ws *ws, gpointer payload)
+ns_ws_invoke_msg(ns_ws *ws, gpointer payload)
 {
-    nd_ws_msg_payload *m = payload;
+    ns_ws_msg_payload *m = payload;
     if (m->is_text) {
         if (ws->cbs.on_text) {
             const char *text = m->data->len ? (const char *)m->data->data : "";
@@ -179,57 +179,57 @@ nd_ws_invoke_msg(nd_ws *ws, gpointer payload)
 }
 
 static void
-nd_ws_invoke_close(nd_ws *ws, gpointer payload)
+ns_ws_invoke_close(ns_ws *ws, gpointer payload)
 {
-    nd_ws_close_payload *c = payload;
+    ns_ws_close_payload *c = payload;
     if (ws->cbs.on_close)
         ws->cbs.on_close(c->code, c->reason ? c->reason : "", c->clean, ws->user_data);
 }
 
 static void
-nd_ws_invoke_error(nd_ws *ws, gpointer payload)
+ns_ws_invoke_error(ns_ws *ws, gpointer payload)
 {
     const char *msg = payload;
     if (ws->cbs.on_error) ws->cbs.on_error(msg, ws->user_data);
 }
 
 static void
-nd_ws_dispatch_open(nd_ws *ws)
+ns_ws_dispatch_open(ns_ws *ws)
 {
-    g_atomic_int_set(&ws->state, ND_WS_STATE_OPEN);
-    nd_ws_post(ws, nd_ws_invoke_open, NULL, NULL);
+    g_atomic_int_set(&ws->state, NS_WS_STATE_OPEN);
+    ns_ws_post(ws, ns_ws_invoke_open, NULL, NULL);
 }
 
 static void
-nd_ws_dispatch_message(nd_ws *ws, gboolean is_text,
+ns_ws_dispatch_message(ns_ws *ws, gboolean is_text,
                        const guint8 *data, gsize len)
 {
-    nd_ws_msg_payload *m = g_new0(nd_ws_msg_payload, 1);
+    ns_ws_msg_payload *m = g_new0(ns_ws_msg_payload, 1);
     m->is_text = is_text;
     m->data = g_byte_array_sized_new(len);
     if (len) g_byte_array_append(m->data, data, len);
-    nd_ws_post(ws, nd_ws_invoke_msg, m, nd_ws_msg_payload_free);
+    ns_ws_post(ws, ns_ws_invoke_msg, m, ns_ws_msg_payload_free);
 }
 
 static void
-nd_ws_dispatch_close(nd_ws *ws, int code, const char *reason, gboolean clean)
+ns_ws_dispatch_close(ns_ws *ws, int code, const char *reason, gboolean clean)
 {
-    g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSED);
-    nd_ws_close_payload *c = g_new0(nd_ws_close_payload, 1);
+    g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSED);
+    ns_ws_close_payload *c = g_new0(ns_ws_close_payload, 1);
     c->code = code;
     c->reason = reason ? g_strdup(reason) : NULL;
     c->clean = clean;
-    nd_ws_post(ws, nd_ws_invoke_close, c, nd_ws_close_payload_free);
+    ns_ws_post(ws, ns_ws_invoke_close, c, ns_ws_close_payload_free);
 }
 
 static void
-nd_ws_dispatch_error(nd_ws *ws, const char *msg)
+ns_ws_dispatch_error(ns_ws *ws, const char *msg)
 {
-    nd_ws_post(ws, nd_ws_invoke_error, g_strdup(msg ? msg : ""), g_free);
+    ns_ws_post(ws, ns_ws_invoke_error, g_strdup(msg ? msg : ""), g_free);
 }
 
 static gboolean
-nd_ws_send_curl(nd_ws *ws, CURL *curl, const guint8 *data, gsize len,
+ns_ws_send_curl(ns_ws *ws, CURL *curl, const guint8 *data, gsize len,
                 unsigned int flags)
 {
     gsize off = 0;
@@ -259,7 +259,7 @@ nd_ws_send_curl(nd_ws *ws, CURL *curl, const guint8 *data, gsize len,
 }
 
 static int
-nd_ws_echo_close_code(int code)
+ns_ws_echo_close_code(int code)
 {
     if (code == 1000 || code == 1001 || code == 1002 || code == 1003 ||
         (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999))
@@ -268,7 +268,7 @@ nd_ws_echo_close_code(int code)
 }
 
 static gboolean
-nd_ws_send_close_frame(CURL *curl, int code, const char *reason)
+ns_ws_send_close_frame(CURL *curl, int code, const char *reason)
 {
     guint8 buf[125];
     gsize  len = 0;
@@ -290,22 +290,22 @@ nd_ws_send_close_frame(CURL *curl, int code, const char *reason)
 }
 
 static void
-nd_ws_drain_outgoing(nd_ws *ws, CURL *curl, gboolean *want_close,
+ns_ws_drain_outgoing(ns_ws *ws, CURL *curl, gboolean *want_close,
                      int *close_code, char **close_reason)
 {
     for (;;) {
         g_mutex_lock(&ws->lock);
-        nd_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
+        ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
         g_mutex_unlock(&ws->lock);
         if (!m) return;
         switch (m->kind) {
-        case ND_WS_OUT_TEXT:
-            nd_ws_send_curl(ws, curl, m->data, m->len, CURLWS_TEXT);
+        case NS_WS_OUT_TEXT:
+            ns_ws_send_curl(ws, curl, m->data, m->len, CURLWS_TEXT);
             break;
-        case ND_WS_OUT_BINARY:
-            nd_ws_send_curl(ws, curl, m->data, m->len, CURLWS_BINARY);
+        case NS_WS_OUT_BINARY:
+            ns_ws_send_curl(ws, curl, m->data, m->len, CURLWS_BINARY);
             break;
-        case ND_WS_OUT_CLOSE:
+        case NS_WS_OUT_CLOSE:
             *want_close = TRUE;
             *close_code = m->close_code;
             g_free(*close_reason);
@@ -319,7 +319,7 @@ nd_ws_drain_outgoing(nd_ws *ws, CURL *curl, gboolean *want_close,
 }
 
 static void
-nd_ws_handle_frame(nd_ws *ws, const guint8 *data, gsize len,
+ns_ws_handle_frame(ns_ws *ws, const guint8 *data, gsize len,
                    const struct curl_ws_frame *meta,
                    CURL *curl,
                    gboolean *peer_closed,
@@ -365,7 +365,7 @@ nd_ws_handle_frame(nd_ws *ws, const guint8 *data, gsize len,
         return;
     }
     if (len) {
-        if (ws->recv_assembly->len + len > ND_WS_MAX_MESSAGE) {
+        if (ws->recv_assembly->len + len > NS_WS_MAX_MESSAGE) {
             *too_big = TRUE;
             g_byte_array_set_size(ws->recv_assembly, 0);
             ws->recv_in_message = FALSE;
@@ -381,7 +381,7 @@ nd_ws_handle_frame(nd_ws *ws, const guint8 *data, gsize len,
                              ws->recv_assembly->len, NULL)) {
             *bad_utf8 = TRUE;
         } else {
-            nd_ws_dispatch_message(ws, is_text,
+            ns_ws_dispatch_message(ws, is_text,
                                    ws->recv_assembly->data,
                                    ws->recv_assembly->len);
         }
@@ -391,36 +391,36 @@ nd_ws_handle_frame(nd_ws *ws, const guint8 *data, gsize len,
 }
 
 static void
-nd_ws_worker_wait(nd_ws *ws)
+ns_ws_worker_wait(ns_ws *ws)
 {
     g_mutex_lock(&ws->lock);
     if (g_queue_is_empty(&ws->out_queue) &&
         !g_atomic_int_get(&ws->exit_requested)) {
         gint64 deadline = g_get_monotonic_time() +
-                          (gint64)ND_WS_POLL_MSEC * G_TIME_SPAN_MILLISECOND;
+                          (gint64)NS_WS_POLL_MSEC * G_TIME_SPAN_MILLISECOND;
         g_cond_wait_until(&ws->cond, &ws->lock, deadline);
     }
     g_mutex_unlock(&ws->lock);
 }
 
 static int
-nd_ws_handshake_progress(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
+ns_ws_handshake_progress(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
                          curl_off_t ultotal, curl_off_t ulnow)
 {
     (void)dltotal; (void)dlnow; (void)ultotal; (void)ulnow;
-    const nd_ws *ws = clientp;
+    const ns_ws *ws = clientp;
     return g_atomic_int_get(&ws->exit_requested) ? 1 : 0;
 }
 
 static gpointer
-nd_ws_worker(gpointer data)
+ns_ws_worker(gpointer data)
 {
-    nd_ws *ws = data;
+    ns_ws *ws = data;
     CURL *curl = curl_easy_init();
     if (!curl) {
-        nd_ws_dispatch_error(ws, "curl init failed");
-        nd_ws_dispatch_close(ws, 1006, "init failed", FALSE);
-        nd_ws_unref(ws);
+        ns_ws_dispatch_error(ws, "curl init failed");
+        ns_ws_dispatch_close(ws, 1006, "init failed", FALSE);
+        ns_ws_unref(ws);
         return NULL;
     }
 
@@ -428,7 +428,7 @@ nd_ws_worker(gpointer data)
     curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 2L);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION,
                      (long)CURL_HTTP_VERSION_1_1);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, ND_USER_AGENT);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -436,7 +436,7 @@ nd_ws_worker(gpointer data)
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, nd_ws_handshake_progress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_ws_handshake_progress);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, ws);
 
     struct curl_slist *headers = NULL;
@@ -466,11 +466,11 @@ nd_ws_worker(gpointer data)
         const char *msg = rc != CURLE_OK
             ? (errbuf[0] ? errbuf : curl_easy_strerror(rc))
             : "aborted";
-        if (rc != CURLE_OK) nd_ws_dispatch_error(ws, msg);
-        nd_ws_dispatch_close(ws, 1006, msg, FALSE);
+        if (rc != CURLE_OK) ns_ws_dispatch_error(ws, msg);
+        ns_ws_dispatch_close(ws, 1006, msg, FALSE);
         if (headers) curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
-        nd_ws_unref(ws);
+        ns_ws_unref(ws);
         return NULL;
     }
 
@@ -480,16 +480,16 @@ nd_ws_worker(gpointer data)
         if (code != 0 && code != 101) {
             char *msg = g_strdup_printf(
                 "WebSocket handshake failed (HTTP %ld)", code);
-            nd_ws_dispatch_error(ws, msg);
-            nd_ws_dispatch_close(ws, 1006, msg, FALSE);
+            ns_ws_dispatch_error(ws, msg);
+            ns_ws_dispatch_close(ws, 1006, msg, FALSE);
             g_free(msg);
             if (headers) curl_slist_free_all(headers);
             curl_easy_cleanup(curl);
-            nd_ws_unref(ws);
+            ns_ws_unref(ws);
             return NULL;
         }
     }
-    nd_ws_dispatch_open(ws);
+    ns_ws_dispatch_open(ws);
 
     gboolean clean_close = FALSE;
     int close_code = 1006;
@@ -501,13 +501,13 @@ nd_ws_worker(gpointer data)
     gboolean bad_utf8 = FALSE;
     gboolean too_big = FALSE;
 
-    guint8 buf[ND_WS_RECV_BUF];
+    guint8 buf[NS_WS_RECV_BUF];
 
     while (!g_atomic_int_get(&ws->exit_requested)) {
-        nd_ws_drain_outgoing(ws, curl, &want_close, &close_code, &close_reason);
+        ns_ws_drain_outgoing(ws, curl, &want_close, &close_code, &close_reason);
         if (want_close) {
-            g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSING);
-            nd_ws_send_close_frame(curl, close_code, close_reason);
+            g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+            ns_ws_send_close_frame(curl, close_code, close_reason);
             clean_close = TRUE;
             break;
         }
@@ -516,24 +516,24 @@ nd_ws_worker(gpointer data)
         const struct curl_ws_frame *meta = NULL;
         rc = curl_ws_recv(curl, buf, sizeof buf, &got, &meta);
         if (rc == CURLE_AGAIN) {
-            nd_ws_worker_wait(ws);
+            ns_ws_worker_wait(ws);
             continue;
         }
         if (rc != CURLE_OK) {
             const char *msg = errbuf[0] ? errbuf : curl_easy_strerror(rc);
-            nd_ws_dispatch_error(ws, msg);
+            ns_ws_dispatch_error(ws, msg);
             close_code = 1006;
             g_free(close_reason);
             close_reason = g_strdup(msg);
             break;
         }
         if (meta) {
-            nd_ws_handle_frame(ws, buf, got, meta, curl,
+            ns_ws_handle_frame(ws, buf, got, meta, curl,
                                &peer_closed, &peer_code, &peer_reason,
                                &bad_utf8, &too_big);
             if (too_big) {
-                g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSING);
-                nd_ws_send_close_frame(curl, 1009, "message too big");
+                g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                ns_ws_send_close_frame(curl, 1009, "message too big");
                 clean_close = FALSE;
                 close_code = 1009;
                 g_free(close_reason);
@@ -541,8 +541,8 @@ nd_ws_worker(gpointer data)
                 break;
             }
             if (bad_utf8) {
-                g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSING);
-                nd_ws_send_close_frame(curl, 1007, "invalid utf-8");
+                g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                ns_ws_send_close_frame(curl, 1007, "invalid utf-8");
                 clean_close = FALSE;
                 close_code = 1007;
                 g_free(close_reason);
@@ -550,8 +550,8 @@ nd_ws_worker(gpointer data)
                 break;
             }
             if (peer_closed) {
-                g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSING);
-                nd_ws_send_close_frame(curl, nd_ws_echo_close_code(peer_code),
+                g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                ns_ws_send_close_frame(curl, ns_ws_echo_close_code(peer_code),
                                        NULL);
                 clean_close = TRUE;
                 close_code = peer_code;
@@ -562,7 +562,7 @@ nd_ws_worker(gpointer data)
         }
     }
 
-    nd_ws_dispatch_close(ws, close_code,
+    ns_ws_dispatch_close(ws, close_code,
                          close_reason ? close_reason
                                       : (peer_reason ? peer_reason : ""),
                          clean_close);
@@ -571,12 +571,12 @@ nd_ws_worker(gpointer data)
     g_free(peer_reason);
     if (headers) curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    nd_ws_unref(ws);
+    ns_ws_unref(ws);
     return NULL;
 }
 
 gboolean
-nd_ws_available(void)
+ns_ws_available(void)
 {
     const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
     if (!v || !v->protocols) return FALSE;
@@ -587,17 +587,17 @@ nd_ws_available(void)
     return FALSE;
 }
 
-nd_ws *
-nd_ws_new(const char        *url,
+ns_ws *
+ns_ws_new(const char        *url,
           const char        *origin,
           const char *const *protocols,
-          const nd_ws_callbacks *cbs,
+          const ns_ws_callbacks *cbs,
           gpointer           user_data)
 {
     g_return_val_if_fail(url != NULL, NULL);
-    if (!nd_ws_available()) return NULL;
+    if (!ns_ws_available()) return NULL;
 
-    nd_ws *ws = g_new0(nd_ws, 1);
+    ns_ws *ws = g_new0(ns_ws, 1);
     ws->refcount = 1;
     ws->url    = g_strdup(url);
     ws->origin = origin ? g_strdup(origin) : NULL;
@@ -611,24 +611,24 @@ nd_ws_new(const char        *url,
     g_mutex_init(&ws->lock);
     g_cond_init(&ws->cond);
     g_queue_init(&ws->out_queue);
-    g_atomic_int_set(&ws->state, ND_WS_STATE_CONNECTING);
+    g_atomic_int_set(&ws->state, NS_WS_STATE_CONNECTING);
 
-    nd_ws_ref(ws);
-    ws->thread = g_thread_new("nd-ws", nd_ws_worker, ws);
+    ns_ws_ref(ws);
+    ws->thread = g_thread_new("nd-ws", ns_ws_worker, ws);
     return ws;
 }
 
 static gboolean
-nd_ws_enqueue(nd_ws *ws, nd_ws_out_kind kind,
+ns_ws_enqueue(ns_ws *ws, ns_ws_out_kind kind,
               const guint8 *data, gsize len, int close_code)
 {
     if (!ws) return FALSE;
     int s = g_atomic_int_get(&ws->state);
-    if (s == ND_WS_STATE_CLOSED) return FALSE;
-    if (kind != ND_WS_OUT_CLOSE && s == ND_WS_STATE_CLOSING) return FALSE;
-    if (kind != ND_WS_OUT_CLOSE && len > ND_WS_MAX_MESSAGE) return FALSE;
+    if (s == NS_WS_STATE_CLOSED) return FALSE;
+    if (kind != NS_WS_OUT_CLOSE && s == NS_WS_STATE_CLOSING) return FALSE;
+    if (kind != NS_WS_OUT_CLOSE && len > NS_WS_MAX_MESSAGE) return FALSE;
 
-    nd_ws_out_msg *m = g_new0(nd_ws_out_msg, 1);
+    ns_ws_out_msg *m = g_new0(ns_ws_out_msg, 1);
     m->kind = kind;
     m->close_code = close_code;
     if (data && len > 0) {
@@ -643,39 +643,39 @@ nd_ws_enqueue(nd_ws *ws, nd_ws_out_kind kind,
 }
 
 gboolean
-nd_ws_send_text(nd_ws *ws, const char *text, gsize len)
+ns_ws_send_text(ns_ws *ws, const char *text, gsize len)
 {
-    return nd_ws_enqueue(ws, ND_WS_OUT_TEXT,
+    return ns_ws_enqueue(ws, NS_WS_OUT_TEXT,
                          (const guint8 *)text, len, 0);
 }
 
 gboolean
-nd_ws_send_binary(nd_ws *ws, const guint8 *data, gsize len)
+ns_ws_send_binary(ns_ws *ws, const guint8 *data, gsize len)
 {
-    return nd_ws_enqueue(ws, ND_WS_OUT_BINARY, data, len, 0);
+    return ns_ws_enqueue(ws, NS_WS_OUT_BINARY, data, len, 0);
 }
 
 void
-nd_ws_close(nd_ws *ws, int code, const char *reason)
+ns_ws_close(ns_ws *ws, int code, const char *reason)
 {
     if (!ws) return;
     int s = g_atomic_int_get(&ws->state);
-    if (s == ND_WS_STATE_CLOSING || s == ND_WS_STATE_CLOSED) return;
+    if (s == NS_WS_STATE_CLOSING || s == NS_WS_STATE_CLOSED) return;
     if (code <= 0) code = 1000;
     gsize rlen = reason ? strlen(reason) : 0;
-    nd_ws_enqueue(ws, ND_WS_OUT_CLOSE, (const guint8 *)reason, rlen, code);
-    g_atomic_int_set(&ws->state, ND_WS_STATE_CLOSING);
+    ns_ws_enqueue(ws, NS_WS_OUT_CLOSE, (const guint8 *)reason, rlen, code);
+    g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
 }
 
 int
-nd_ws_state_get(nd_ws *ws)
+ns_ws_state_get(ns_ws *ws)
 {
-    if (!ws) return ND_WS_STATE_CLOSED;
+    if (!ws) return NS_WS_STATE_CLOSED;
     return g_atomic_int_get(&ws->state);
 }
 
 void
-nd_ws_free(nd_ws *ws)
+ns_ws_free(ns_ws *ws)
 {
     if (!ws) return;
     g_atomic_int_set(&ws->detached, 1);
@@ -687,5 +687,5 @@ nd_ws_free(nd_ws *ws)
         g_thread_join(ws->thread);
         ws->thread = NULL;
     }
-    nd_ws_unref(ws);
+    ns_ws_unref(ws);
 }

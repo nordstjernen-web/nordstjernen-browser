@@ -6,7 +6,7 @@
 #include <curl/curl.h>
 #include <string.h>
 
-struct nd_es {
+struct ns_es {
     char     *url;
     char     *origin;
     char     *last_event_id;
@@ -16,19 +16,19 @@ struct nd_es {
     volatile gint exit_requested;
     volatile gint detached;
     int       refcount;
-    nd_es_callbacks cbs;
+    ns_es_callbacks cbs;
     gpointer  user_data;
 };
 
-static nd_es *
-nd_es_ref(nd_es *es)
+static ns_es *
+ns_es_ref(ns_es *es)
 {
     g_atomic_int_inc(&es->refcount);
     return es;
 }
 
 static void
-nd_es_destroy(nd_es *es)
+ns_es_destroy(ns_es *es)
 {
     g_free(es->url);
     g_free(es->origin);
@@ -38,63 +38,63 @@ nd_es_destroy(nd_es *es)
 }
 
 static void
-nd_es_unref(nd_es *es)
+ns_es_unref(ns_es *es)
 {
     if (g_atomic_int_dec_and_test(&es->refcount))
-        nd_es_destroy(es);
+        ns_es_destroy(es);
 }
 
 typedef struct {
-    nd_es   *es;
-    void   (*invoke)(nd_es *, gpointer);
+    ns_es   *es;
+    void   (*invoke)(ns_es *, gpointer);
     gpointer payload;
     void   (*payload_free)(gpointer);
-} nd_es_dispatch;
+} ns_es_dispatch;
 
 static gboolean
-nd_es_dispatch_run(gpointer data)
+ns_es_dispatch_run(gpointer data)
 {
-    nd_es_dispatch *d = data;
-    nd_es *es = d->es;
+    ns_es_dispatch *d = data;
+    ns_es *es = d->es;
     if (!g_atomic_int_get(&es->detached) && es->cbs.busy &&
         es->cbs.busy(es->user_data)) {
-        g_timeout_add(4, nd_es_dispatch_run, d);
+        g_timeout_add(4, ns_es_dispatch_run, d);
         return G_SOURCE_REMOVE;
     }
     if (!g_atomic_int_get(&es->detached) && d->invoke)
         d->invoke(es, d->payload);
     if (d->payload && d->payload_free) d->payload_free(d->payload);
-    nd_es_unref(es);
+    ns_es_unref(es);
     g_free(d);
     return G_SOURCE_REMOVE;
 }
 
 static void
-nd_es_post(nd_es *es, void (*invoke)(nd_es *, gpointer), gpointer payload,
+ns_es_post(ns_es *es, void (*invoke)(ns_es *, gpointer), gpointer payload,
            void (*payload_free)(gpointer))
 {
     if (g_atomic_int_get(&es->detached)) {
         if (payload && payload_free) payload_free(payload);
         return;
     }
-    nd_es_dispatch *d = g_new0(nd_es_dispatch, 1);
-    d->es = nd_es_ref(es);
+    ns_es_dispatch *d = g_new0(ns_es_dispatch, 1);
+    d->es = ns_es_ref(es);
     d->invoke = invoke;
     d->payload = payload;
     d->payload_free = payload_free;
-    g_idle_add(nd_es_dispatch_run, d);
+    g_idle_add(ns_es_dispatch_run, d);
 }
 
 typedef struct {
     char *event;
     char *data;
     char *last_id;
-} nd_es_msg;
+} ns_es_msg;
 
 static void
-nd_es_msg_free(gpointer p)
+ns_es_msg_free(gpointer p)
 {
-    nd_es_msg *m = p;
+    ns_es_msg *m = p;
     g_free(m->event);
     g_free(m->data);
     g_free(m->last_id);
@@ -102,34 +102,34 @@ nd_es_msg_free(gpointer p)
 }
 
 static void
-nd_es_invoke_open(nd_es *es, gpointer payload)
+ns_es_invoke_open(ns_es *es, gpointer payload)
 {
     (void)payload;
     if (es->cbs.on_open) es->cbs.on_open(es->user_data);
 }
 
 static void
-nd_es_invoke_message(nd_es *es, gpointer payload)
+ns_es_invoke_message(ns_es *es, gpointer payload)
 {
-    nd_es_msg *m = payload;
+    ns_es_msg *m = payload;
     if (es->cbs.on_message)
         es->cbs.on_message(m->event, m->data, m->last_id, es->user_data);
 }
 
 static void
-nd_es_invoke_error(nd_es *es, gpointer payload)
+ns_es_invoke_error(ns_es *es, gpointer payload)
 {
     if (es->cbs.on_error) es->cbs.on_error(GPOINTER_TO_INT(payload), es->user_data);
 }
 
 static void
-nd_es_emit_error(nd_es *es, gboolean fatal)
+ns_es_emit_error(ns_es *es, gboolean fatal)
 {
-    nd_es_post(es, nd_es_invoke_error, GINT_TO_POINTER(fatal ? 1 : 0), NULL);
+    ns_es_post(es, ns_es_invoke_error, GINT_TO_POINTER(fatal ? 1 : 0), NULL);
 }
 
 typedef struct {
-    nd_es      *es;
+    ns_es      *es;
     GByteArray *line;
     gboolean    last_was_cr;
     GString    *data;
@@ -138,10 +138,10 @@ typedef struct {
     gboolean    opened;
     gboolean    fatal;
     gboolean    is_event_stream;
-} nd_es_parse;
+} ns_es_parse;
 
 static void
-nd_es_dispatch_event(nd_es_parse *p)
+ns_es_dispatch_event(ns_es_parse *p)
 {
     if (!p->data->len && !p->event_type) return;
     if (!p->data->len) {
@@ -152,7 +152,7 @@ nd_es_dispatch_event(nd_es_parse *p)
     gsize n = p->data->len;
     if (n && p->data->str[n - 1] == '\n')
         g_string_truncate(p->data, n - 1);
-    nd_es_msg *m = g_new0(nd_es_msg, 1);
+    ns_es_msg *m = g_new0(ns_es_msg, 1);
     m->event = p->event_type ? p->event_type : g_strdup("message");
     m->data = g_strdup(p->data->str);
     g_mutex_lock(&p->es->lock);
@@ -160,13 +160,13 @@ nd_es_dispatch_event(nd_es_parse *p)
     g_mutex_unlock(&p->es->lock);
     p->event_type = NULL;
     g_string_truncate(p->data, 0);
-    nd_es_post(p->es, nd_es_invoke_message, m, nd_es_msg_free);
+    ns_es_post(p->es, ns_es_invoke_message, m, ns_es_msg_free);
 }
 
 static void
-nd_es_process_line(nd_es_parse *p, const char *line)
+ns_es_process_line(ns_es_parse *p, const char *line)
 {
-    if (!*line) { nd_es_dispatch_event(p); return; }
+    if (!*line) { ns_es_dispatch_event(p); return; }
     if (line[0] == ':') return;
     const char *colon = strchr(line, ':');
     char *field, *value;
@@ -204,7 +204,7 @@ nd_es_process_line(nd_es_parse *p, const char *line)
 }
 
 static void
-nd_es_feed(nd_es_parse *p, const char *buf, gsize len)
+ns_es_feed(ns_es_parse *p, const char *buf, gsize len)
 {
     for (gsize i = 0; i < len; i++) {
         char c = buf[i];
@@ -214,7 +214,7 @@ nd_es_feed(nd_es_parse *p, const char *buf, gsize len)
             if (c == '\r') p->last_was_cr = TRUE;
             g_byte_array_append(p->line, (const guint8 *)"", 1);
             p->line->data[p->line->len - 1] = '\0';
-            nd_es_process_line(p, (const char *)p->line->data);
+            ns_es_process_line(p, (const char *)p->line->data);
             g_byte_array_set_size(p->line, 0);
         } else {
             g_byte_array_append(p->line, (const guint8 *)&c, 1);
@@ -223,9 +223,9 @@ nd_es_feed(nd_es_parse *p, const char *buf, gsize len)
 }
 
 static size_t
-nd_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
+ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
-    nd_es_parse *p = userdata;
+    ns_es_parse *p = userdata;
     size_t total = size * nitems;
     if (total >= 5 && !g_ascii_strncasecmp(buffer, "HTTP/", 5)) {
         long code = 0;
@@ -241,7 +241,7 @@ nd_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
         if (!p->opened) {
             if (p->status == 200 && p->is_event_stream) {
                 p->opened = TRUE;
-                nd_es_post(p->es, nd_es_invoke_open, NULL, NULL);
+                ns_es_post(p->es, ns_es_invoke_open, NULL, NULL);
             } else if (p->status >= 200) {
                 p->fatal = TRUE;
             }
@@ -251,37 +251,37 @@ nd_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 }
 
 static size_t
-nd_es_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
+ns_es_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-    nd_es_parse *p = userdata;
+    ns_es_parse *p = userdata;
     if (g_atomic_int_get(&p->es->exit_requested) || p->fatal) return 0;
-    nd_es_feed(p, ptr, size * nmemb);
+    ns_es_feed(p, ptr, size * nmemb);
     return size * nmemb;
 }
 
 static int
-nd_es_progress(void *clientp, curl_off_t dt, curl_off_t dn, curl_off_t ut,
+ns_es_progress(void *clientp, curl_off_t dt, curl_off_t dn, curl_off_t ut,
                curl_off_t un)
 {
     (void)dt; (void)dn; (void)ut; (void)un;
-    const nd_es *es = clientp;
+    const ns_es *es = clientp;
     return g_atomic_int_get(&es->exit_requested) ? 1 : 0;
 }
 
 static gboolean
-nd_es_connect_once(nd_es *es, gboolean *opened_out)
+ns_es_connect_once(ns_es *es, gboolean *opened_out)
 {
     CURL *curl = curl_easy_init();
     if (!curl) return FALSE;
 
-    nd_es_parse p = {0};
+    ns_es_parse p = {0};
     p.es = es;
     p.line = g_byte_array_new();
     p.data = g_string_new(NULL);
     p.status = 0;
 
     curl_easy_setopt(curl, CURLOPT_URL, es->url);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, ND_USER_AGENT);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -290,12 +290,12 @@ nd_es_connect_once(nd_es *es, gboolean *opened_out)
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nd_es_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, ns_es_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &p);
-    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, nd_es_header_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, ns_es_header_cb);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &p);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, nd_es_progress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_es_progress);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, es);
 
     struct curl_slist *hdrs = NULL;
@@ -328,18 +328,18 @@ nd_es_connect_once(nd_es *es, gboolean *opened_out)
 }
 
 static gpointer
-nd_es_worker(gpointer data)
+ns_es_worker(gpointer data)
 {
-    nd_es *es = data;
+    ns_es *es = data;
     while (!g_atomic_int_get(&es->exit_requested)) {
         gboolean opened = FALSE;
-        gboolean retriable = nd_es_connect_once(es, &opened);
+        gboolean retriable = ns_es_connect_once(es, &opened);
         if (g_atomic_int_get(&es->exit_requested)) break;
         if (!retriable) {
-            nd_es_emit_error(es, TRUE);
+            ns_es_emit_error(es, TRUE);
             break;
         }
-        nd_es_emit_error(es, FALSE);
+        ns_es_emit_error(es, FALSE);
         gint64 wait_ms = es->reconnect_ms;
         if (wait_ms <= 0) wait_ms = 3000;
         gint64 waited = 0;
@@ -348,15 +348,15 @@ nd_es_worker(gpointer data)
             waited += 50;
         }
     }
-    nd_es_unref(es);
+    ns_es_unref(es);
     return NULL;
 }
 
-nd_es *
-nd_es_new(const char *url, const char *origin, const char *last_event_id,
-          const nd_es_callbacks *cbs, gpointer user_data)
+ns_es *
+ns_es_new(const char *url, const char *origin, const char *last_event_id,
+          const ns_es_callbacks *cbs, gpointer user_data)
 {
-    nd_es *es = g_new0(nd_es, 1);
+    ns_es *es = g_new0(ns_es, 1);
     es->url = g_strdup(url);
     es->origin = g_strdup(origin);
     es->last_event_id = g_strdup(last_event_id ? last_event_id : "");
@@ -365,20 +365,20 @@ nd_es_new(const char *url, const char *origin, const char *last_event_id,
     es->cbs = *cbs;
     es->user_data = user_data;
     g_mutex_init(&es->lock);
-    nd_es_ref(es);
-    es->thread = g_thread_new("nd-eventsource", nd_es_worker, es);
+    ns_es_ref(es);
+    es->thread = g_thread_new("nd-eventsource", ns_es_worker, es);
     return es;
 }
 
 void
-nd_es_close(nd_es *es)
+ns_es_close(ns_es *es)
 {
     if (!es) return;
     g_atomic_int_set(&es->exit_requested, 1);
 }
 
 void
-nd_es_free(nd_es *es)
+ns_es_free(ns_es *es)
 {
     if (!es) return;
     g_atomic_int_set(&es->detached, 1);
@@ -387,5 +387,5 @@ nd_es_free(nd_es *es)
         g_thread_join(es->thread);
         es->thread = NULL;
     }
-    nd_es_unref(es);
+    ns_es_unref(es);
 }

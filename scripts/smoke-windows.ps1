@@ -22,13 +22,13 @@ if (-not (Test-Path -LiteralPath $MingwBin)) {
 
 Add-Type -TypeDefinition @"
 using System.Runtime.InteropServices;
-public static class NdWin32ErrorMode {
+public static class NsWin32ErrorMode {
     [DllImport("kernel32.dll")]
     public static extern uint SetErrorMode(uint uMode);
 }
 "@
 
-[NdWin32ErrorMode]::SetErrorMode(0x8003) | Out-Null
+[NsWin32ErrorMode]::SetErrorMode(0x8003) | Out-Null
 $env:PATH = "$MingwBin;$env:PATH"
 
 $process = Start-Process -FilePath $Exe -ArgumentList @($Url) -PassThru -WindowStyle Hidden

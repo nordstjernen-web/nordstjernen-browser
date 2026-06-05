@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_IDB_H
-#define ND_IDB_H
+#ifndef NS_IDB_H
+#define NS_IDB_H
 
 #include <quickjs.h>
 
-void nd_idb_install(JSContext *ctx, JSValueConst global);
+void ns_idb_install(JSContext *ctx, JSValueConst global);
 
 #endif

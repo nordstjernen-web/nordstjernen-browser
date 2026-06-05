@@ -3,49 +3,49 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_CSP_H
-#define ND_CSP_H
+#ifndef NS_CSP_H
+#define NS_CSP_H
 
 #include <glib.h>
 
 G_BEGIN_DECLS
 
-typedef enum nd_csp_kind {
-    ND_CSP_DEFAULT,
-    ND_CSP_SCRIPT,
-    ND_CSP_STYLE,
-    ND_CSP_IMG,
-    ND_CSP_MEDIA,
-    ND_CSP_CONNECT,
-    ND_CSP_FONT,
-    ND_CSP_FRAME,
-    ND_CSP_CHILD,
-    ND_CSP_WORKER,
-    ND_CSP_FRAME_ANCESTORS,
-    ND_CSP_KIND_COUNT,
-} nd_csp_kind;
+typedef enum ns_csp_kind {
+    NS_CSP_DEFAULT,
+    NS_CSP_SCRIPT,
+    NS_CSP_STYLE,
+    NS_CSP_IMG,
+    NS_CSP_MEDIA,
+    NS_CSP_CONNECT,
+    NS_CSP_FONT,
+    NS_CSP_FRAME,
+    NS_CSP_CHILD,
+    NS_CSP_WORKER,
+    NS_CSP_FRAME_ANCESTORS,
+    NS_CSP_KIND_COUNT,
+} ns_csp_kind;
 
-typedef struct nd_csp nd_csp;
+typedef struct ns_csp ns_csp;
 
-nd_csp *nd_csp_parse(const char *header_value);
-void    nd_csp_free(nd_csp *csp);
+ns_csp *ns_csp_parse(const char *header_value);
+void    ns_csp_free(ns_csp *csp);
 
-gboolean nd_csp_allows(const nd_csp *csp, nd_csp_kind kind,
+gboolean ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,
                        const char *resource_url,
                        const char *document_url);
 
-gboolean nd_csp_allows_with_nonce(const nd_csp *csp, nd_csp_kind kind,
+gboolean ns_csp_allows_with_nonce(const ns_csp *csp, ns_csp_kind kind,
                                   const char *resource_url,
                                   const char *document_url,
                                   const char *nonce);
 
-gboolean nd_csp_inline_script_allowed(const nd_csp *csp,
+gboolean ns_csp_inline_script_allowed(const ns_csp *csp,
                                       const char *body, gsize body_len,
                                       const char *nonce);
 
-gboolean nd_csp_inline_event_handler_allowed(const nd_csp *csp);
+gboolean ns_csp_inline_event_handler_allowed(const ns_csp *csp);
 
-gboolean nd_csp_javascript_url_allowed(const nd_csp *csp);
+gboolean ns_csp_javascript_url_allowed(const ns_csp *csp);
 
 G_END_DECLS
 

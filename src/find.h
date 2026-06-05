@@ -1,7 +1,7 @@
 /* Nordstjernen — find-in-page (the search bar over the rendered document). */
 
-#ifndef ND_FIND_H
-#define ND_FIND_H
+#ifndef NS_FIND_H
+#define NS_FIND_H
 
 #include <gtk/gtk.h>
 

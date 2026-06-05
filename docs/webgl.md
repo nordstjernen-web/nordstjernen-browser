@@ -47,14 +47,14 @@ runs with no GPU), `getContext` simply returns `null`.
 ## Config
 
 `webgl_enabled` (boolean, default `false`) lives in the normal flat config
-file alongside the other preferences (see `nd_config`). It records that the
+file alongside the other preferences (see `ns_config`). It records that the
 user has enabled WebGL at least once. The per-site trust prompt still
 governs which origins may actually create a context.
 
 ## How it works
 
 `src/webgl.c` is the whole implementation; it is compiled into the engine
-only when `ND_ENABLE_WEBGL` is defined (every desktop build — Linux, macOS,
+only when `NS_ENABLE_WEBGL` is defined (every desktop build — Linux, macOS,
 Windows). The Android engine build, which has no GTK, gets a stub that
 returns `null`.
 
@@ -188,7 +188,7 @@ mitigations focus on the parts a hostile page can actually reach.
 - **Memory-safe texture decoding.** Texture uploads from a DOM source
   (`<img>` / `<canvas>` / `ImageBitmap`) decode through the same
   Wuffs-first image path as the rest of the engine
-  (`nd_image_decode_bytes`): Google's memory-safe Wuffs decoder handles
+  (`ns_image_decode_bytes`): Google's memory-safe Wuffs decoder handles
   PNG/GIF/BMP/JPEG, with GDK-Pixbuf and librsvg only as fallbacks. The
   untrusted image bytes never touch a hand-rolled decoder before becoming
   texels. Raw typed-array uploads stay bounds-checked as above.

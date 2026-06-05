@@ -18,7 +18,7 @@
 
 typedef struct fetch_state {
     GMainLoop  *loop;
-    nd_response *resp;
+    ns_response *resp;
     GError      *error;
 } fetch_state;
 
@@ -27,16 +27,16 @@ on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
     fetch_state *st = user_data;
-    st->resp = nd_net_fetch_finish(result, &st->error);
+    st->resp = ns_net_fetch_finish(result, &st->error);
     g_main_loop_quit(st->loop);
 }
 
-nd_response *
-nd_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
+ns_response *
+ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
 {
     fetch_state st = {0};
     st.loop = g_main_loop_new(NULL, FALSE);
-    nd_net_fetch_async(url, top_url, NULL, on_fetch_done, &st);
+    ns_net_fetch_async(url, top_url, NULL, on_fetch_done, &st);
     g_main_loop_run(st.loop);
     g_main_loop_unref(st.loop);
     if (error) *error = st.error;
@@ -52,7 +52,7 @@ fetch_css_bytes(const char *url, GHashTable *cache)
         GBytes *hit = g_hash_table_lookup(cache, url);
         if (hit) return g_bytes_get_size(hit) ? g_bytes_ref(hit) : NULL;
     }
-    nd_response *resp = nd_engine_fetch_blocking(url, NULL, NULL);
+    ns_response *resp = ns_engine_fetch_blocking(url, NULL, NULL);
     GBytes *bytes = NULL;
     if (resp && !resp->error && resp->status < 400 &&
         resp->body && resp->body->len > 0) {
@@ -62,7 +62,7 @@ fetch_css_bytes(const char *url, GHashTable *cache)
     } else if (cache) {
         g_hash_table_insert(cache, g_strdup(url), g_bytes_new(NULL, 0));
     }
-    if (resp) nd_response_free(resp);
+    if (resp) ns_response_free(resp);
     return bytes;
 }
 
@@ -90,19 +90,19 @@ rel_is_stylesheet(const char *rel)
 }
 
 static void
-append_stylesheet_expanded(GPtrArray *out, nd_css_stylesheet *sh,
+append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                            const char *base_url, GHashTable *seen,
                            GHashTable *cache, int depth)
 {
     if (!out || !sh) return;
-    if (depth < ND_CSS_IMPORT_MAX_DEPTH && sh->imports) {
+    if (depth < NS_CSS_IMPORT_MAX_DEPTH && sh->imports) {
         for (guint i = 0; i < sh->imports->len; i++) {
-            nd_css_import *im = &g_array_index(sh->imports, nd_css_import, i);
+            ns_css_import *im = &g_array_index(sh->imports, ns_css_import, i);
             if (!im->url || !*im->url) continue;
             if (im->media && *im->media &&
-                !nd_css_media_query_matches(im->media))
+                !ns_css_media_query_matches(im->media))
                 continue;
-            char *abs = nd_url_resolve(base_url, im->url);
+            char *abs = ns_url_resolve(base_url, im->url);
             if (!abs) continue;
             if (seen && g_hash_table_contains(seen, abs)) {
                 g_free(abs);
@@ -113,11 +113,11 @@ append_stylesheet_expanded(GPtrArray *out, nd_css_stylesheet *sh,
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
-                nd_css_stylesheet *child =
-                    nd_css_stylesheet_parse(data, (gssize)len);
+                ns_css_stylesheet *child =
+                    ns_css_stylesheet_parse(data, (gssize)len);
                 if (child) {
                     if (im->layer_name)
-                        nd_css_stylesheet_force_layer(child, im->layer_name);
+                        ns_css_stylesheet_force_layer(child, im->layer_name);
                     append_stylesheet_expanded(out, child, abs, seen, cache,
                                                depth + 1);
                 }
@@ -126,7 +126,7 @@ append_stylesheet_expanded(GPtrArray *out, nd_css_stylesheet *sh,
             g_free(abs);
         }
     }
-    nd_css_stylesheet_resolve_urls(sh, base_url);
+    ns_css_stylesheet_resolve_urls(sh, base_url);
     g_ptr_array_add(out, sh);
 }
 
@@ -141,8 +141,8 @@ static void
 sheet_run_flush(sheet_collect_ctx *cc)
 {
     if (!cc->run || cc->run->len == 0) return;
-    nd_css_stylesheet *sh =
-        nd_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len);
+    ns_css_stylesheet *sh =
+        ns_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len);
     if (sh) {
         GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, NULL);
@@ -155,26 +155,26 @@ sheet_run_flush(sheet_collect_ctx *cc)
 }
 
 static void
-collect_stylesheets_walk(nd_node *n, const char *base_url,
+collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc)
 {
-    if (!n || nd_node_is_element_named(n, "noscript")) return;
-    if (nd_node_is_element_named(n, "iframe")) {
+    if (!n || ns_node_is_element_named(n, "noscript")) return;
+    if (ns_node_is_element_named(n, "iframe")) {
         sheet_run_flush(cc);
-        const char *furl = nd_element_get_attr(n, "data-nd-frame-url");
+        const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
         if (furl && *furl) base_url = furl;
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (nd_node_is_element_named(n, "style")) {
-        char *css = nd_css_style_element_text(n);
+    if (ns_node_is_element_named(n, "style")) {
+        char *css = ns_css_style_element_text(n);
         if (css) {
             if (cc->run_base && cc->run_base != base_url)
                 sheet_run_flush(cc);
             if (strstr(css, "@import")) {
                 sheet_run_flush(cc);
-                nd_css_stylesheet *sh =
-                    nd_css_stylesheet_from_style_element_cached(n);
+                ns_css_stylesheet *sh =
+                    ns_css_stylesheet_from_style_element_cached(n);
                 if (sh) {
                     GHashTable *seen =
                         g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -190,20 +190,20 @@ collect_stylesheets_walk(nd_node *n, const char *base_url,
             }
             g_free(css);
         }
-    } else if (nd_node_is_element_named(n, "link") && base_url) {
+    } else if (ns_node_is_element_named(n, "link") && base_url) {
         sheet_run_flush(cc);
-        const char *rel = nd_element_get_attr(n, "rel");
-        const char *href = nd_element_get_attr(n, "href");
-        const char *media = nd_element_get_attr(n, "media");
+        const char *rel = ns_element_get_attr(n, "rel");
+        const char *href = ns_element_get_attr(n, "href");
+        const char *media = ns_element_get_attr(n, "media");
         if (href && *href && rel_is_stylesheet(rel) &&
-            (!media || !*media || nd_css_media_query_matches(media))) {
-            char *abs = nd_url_resolve(base_url, href);
+            (!media || !*media || ns_css_media_query_matches(media))) {
+            char *abs = ns_url_resolve(base_url, href);
             GBytes *bytes = fetch_css_bytes(abs, cache);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
-                nd_css_stylesheet *sh =
-                    nd_css_stylesheet_parse_url_cached(abs, data, (gssize)len);
+                ns_css_stylesheet *sh =
+                    ns_css_stylesheet_parse_url_cached(abs, data, (gssize)len);
                 if (sh) {
                     GHashTable *seen =
                         g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -217,12 +217,12 @@ collect_stylesheets_walk(nd_node *n, const char *base_url,
             g_free(abs);
         }
     }
-    for (nd_node *c = n->first_child; c; c = c->next_sibling)
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_stylesheets_walk(c, base_url, cc);
 }
 
 void
-nd_engine_collect_stylesheets(nd_node *doc, const char *base_url,
+ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                               GPtrArray *out, GHashTable *css_cache)
 {
     sheet_collect_ctx cc = {
@@ -235,36 +235,36 @@ nd_engine_collect_stylesheets(nd_node *doc, const char *base_url,
 }
 
 GHashTable *
-nd_engine_compute_cascade(nd_node *doc, const char *base_url,
+ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                           GHashTable *css_cache)
 {
-    nd_css_style_element_cache_begin();
+    ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
-    nd_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
-    GHashTable *styles = nd_css_compute(doc,
-        (const nd_css_stylesheet *const *)page_sheets->pdata,
+    ns_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
+    GHashTable *styles = ns_css_compute(doc,
+        (const ns_css_stylesheet *const *)page_sheets->pdata,
         page_sheets->len);
     for (guint i = 0; i < page_sheets->len; i++)
-        nd_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
+        ns_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
     g_ptr_array_free(page_sheets, TRUE);
     return styles;
 }
 
 GHashTable *
-nd_engine_relayout(nd_node *doc, const char *base_url,
+ns_engine_relayout(ns_node *doc, const char *base_url,
                    int viewport_width, double viewport_height,
-                   nd_image_cache *images, nd_anim *anim,
-                   nd_js *js, GHashTable *css_cache,
-                   const nd_node *focused, gsize caret_byte,
-                   gsize sel_anchor_byte, nd_box **out_layout)
+                   ns_image_cache *images, ns_anim *anim,
+                   ns_js *js, GHashTable *css_cache,
+                   const ns_node *focused, gsize caret_byte,
+                   gsize sel_anchor_byte, ns_box **out_layout)
 {
-    nd_css_style_element_cache_begin();
+    ns_css_style_element_cache_begin();
     GPtrArray *sheets = g_ptr_array_new();
-    nd_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
+    ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
 
-    nd_render_ctx rc = {
+    ns_render_ctx rc = {
         .doc             = doc,
-        .sheets          = (const nd_css_stylesheet *const *)sheets->pdata,
+        .sheets          = (const ns_css_stylesheet *const *)sheets->pdata,
         .n_sheets        = sheets->len,
         .viewport_width  = (double)viewport_width,
         .viewport_height = viewport_height > 0 ? viewport_height
@@ -278,88 +278,88 @@ nd_engine_relayout(nd_node *doc, const char *base_url,
         .caret_byte      = caret_byte,
         .sel_anchor_byte = sel_anchor_byte,
     };
-    GHashTable *styles = nd_render_relayout(&rc, out_layout);
-    nd_debug_log_emit(ND_DLOG_RENDER, "relayout", "styles=%u vw=%d",
+    GHashTable *styles = ns_render_relayout(&rc, out_layout);
+    ns_debug_log_emit(NS_DLOG_RENDER, "relayout", "styles=%u vw=%d",
                       styles ? g_hash_table_size(styles) : 0u, viewport_width);
 
     for (guint i = 0; i < sheets->len; i++)
-        nd_css_stylesheet_free(g_ptr_array_index(sheets, i));
+        ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
     g_ptr_array_free(sheets, TRUE);
     return styles;
 }
 
 void
-nd_engine_load_keyframes(nd_anim *anim, nd_node *doc, const char *base_url,
+ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
                          GHashTable *css_cache)
 {
     if (!anim) return;
     GPtrArray *sheets = g_ptr_array_new();
-    nd_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
+    ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);
     for (guint i = 0; i < sheets->len; i++) {
-        const nd_css_stylesheet *sh = g_ptr_array_index(sheets, i);
-        if (sh) nd_anim_load_from_stylesheet(anim, sh);
+        const ns_css_stylesheet *sh = g_ptr_array_index(sheets, i);
+        if (sh) ns_anim_load_from_stylesheet(anim, sh);
     }
     for (guint i = 0; i < sheets->len; i++)
-        nd_css_stylesheet_free(g_ptr_array_index(sheets, i));
+        ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
     g_ptr_array_free(sheets, TRUE);
 }
 
 void
-nd_engine_anim_observe(nd_anim *anim, GHashTable *styles, gint64 now_us)
+ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us)
 {
     if (!anim || !styles) return;
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, styles);
     while (g_hash_table_iter_next(&it, &key, &val))
-        nd_anim_observe(anim, (const nd_node *)key, (const nd_style *)val, now_us);
-    nd_anim_prune(anim, styles);
+        ns_anim_observe(anim, (const ns_node *)key, (const ns_style *)val, now_us);
+    ns_anim_prune(anim, styles);
 }
 
 void
-nd_engine_fetch_images(nd_box *root, const char *base_url,
-                       nd_image_cache *cache)
+ns_engine_fetch_images(ns_box *root, const char *base_url,
+                       ns_image_cache *cache)
 {
     if (!root || !base_url || !cache) return;
     GPtrArray *imgs = g_ptr_array_new();
-    nd_layout_collect_images(root, imgs);
+    ns_layout_collect_images(root, imgs);
     for (guint i = 0; i < imgs->len; i++) {
-        nd_box *box = g_ptr_array_index(imgs, i);
+        ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
         const char *src = box->media->image_src
                           ? box->media->image_src
                           : box->media->bg_image_src;
         if (!src) continue;
         if (g_str_has_prefix(src, "nd-inline-svg:")) continue;
-        char *abs = nd_url_resolve(base_url, src);
+        char *abs = ns_url_resolve(base_url, src);
         if (!abs) continue;
-        if (nd_image_cache_peek(cache, abs)) { g_free(abs); continue; }
-        nd_response *resp = nd_engine_fetch_blocking(abs, base_url, NULL);
+        if (ns_image_cache_peek(cache, abs)) { g_free(abs); continue; }
+        ns_response *resp = ns_engine_fetch_blocking(abs, base_url, NULL);
         if (resp && !resp->error && resp->body && resp->body->len > 0) {
             int w = 0, h = 0;
-            nd_texture *tex = nd_image_decode_bytes(
+            ns_texture *tex = ns_image_decode_bytes(
                 resp->body->data, resp->body->len, &w, &h);
             if (tex)
-                nd_image_cache_insert_loaded(cache, abs, tex, w, h);
+                ns_image_cache_insert_loaded(cache, abs, tex, w, h);
         }
-        if (resp) nd_response_free(resp);
+        if (resp) ns_response_free(resp);
         g_free(abs);
     }
     g_ptr_array_free(imgs, TRUE);
 }
 
 static void
-walk_max_bottom(const nd_box *b, double *out)
+walk_max_bottom(const ns_box *b, double *out)
 {
     if (!b) return;
     double bottom = b->y + b->content_height;
     if (bottom > *out) *out = bottom;
-    for (const nd_box *c = b->first_child; c; c = c->next_sibling)
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         walk_max_bottom(c, out);
 }
 
 int
-nd_engine_write_png(const nd_box *root, const char *path)
+ns_engine_write_png(const ns_box *root, const char *path)
 {
     if (!root || !path) return 2;
     const int kCairoMax = 30000;
@@ -387,7 +387,7 @@ nd_engine_write_png(const nd_box *root, const char *path)
         return 2;
     }
     cairo_t *cr = cairo_create(surf);
-    nd_paint(cr, root, NULL);
+    ns_paint(cr, root, NULL);
     cairo_destroy(cr);
     cairo_status_t st = cairo_surface_write_to_png(surf, path);
     cairo_surface_destroy(surf);
@@ -400,7 +400,7 @@ nd_engine_write_png(const nd_box *root, const char *path)
 }
 
 int
-nd_engine_write_pdf(const nd_box *root, const char *path)
+ns_engine_write_pdf(const ns_box *root, const char *path)
 {
     if (!root || !path) return 2;
     double w = root->content_width > 0 ? root->content_width : 595.0;
@@ -412,7 +412,7 @@ nd_engine_write_pdf(const nd_box *root, const char *path)
         return 2;
     }
     cairo_t *cr = cairo_create(surf);
-    nd_paint(cr, root, NULL);
+    ns_paint(cr, root, NULL);
     cairo_show_page(cr);
     cairo_destroy(cr);
     cairo_surface_destroy(surf);
@@ -420,30 +420,30 @@ nd_engine_write_pdf(const nd_box *root, const char *path)
 }
 
 void
-nd_engine_dump_text(const nd_box *b, GString *out)
+ns_engine_dump_text(const ns_box *b, GString *out)
 {
     if (!b) return;
-    if (b->kind == ND_BOX_INLINE && b->text && *b->text) {
+    if (b->kind == NS_BOX_INLINE && b->text && *b->text) {
         g_string_append(out, b->text);
         g_string_append_c(out, '\n');
-    } else if (b->kind == ND_BOX_IMAGE && b->dom) {
-        const char *alt = nd_element_get_attr(b->dom, "alt");
+    } else if (b->kind == NS_BOX_IMAGE && b->dom) {
+        const char *alt = ns_element_get_attr(b->dom, "alt");
         const char *src = b->media ? b->media->image_src : NULL;
         if (alt && *alt) g_string_append_printf(out, "[image: %s]\n", alt);
         else if (src)    g_string_append_printf(out, "[image: %s]\n", src);
         else             g_string_append(out, "[image]\n");
     }
-    for (const nd_box *c = b->first_child; c; c = c->next_sibling)
-        nd_engine_dump_text(c, out);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        ns_engine_dump_text(c, out);
 }
 
 void
-nd_engine_dump_layout(const nd_box *b, int indent, GString *out)
+ns_engine_dump_layout(const ns_box *b, int indent, GString *out)
 {
     if (!b) return;
     for (int i = 0; i < indent; i++) g_string_append_c(out, ' ');
     g_string_append_printf(out, "%s @(%.0f,%.0f) %.0fx%.0f",
-        nd_box_kind_name(b->kind), b->x, b->y,
+        ns_box_kind_name(b->kind), b->x, b->y,
         b->content_width, b->content_height);
     if (b->dom && b->dom->name) g_string_append_printf(out, " <%s>", b->dom->name);
     if (b->media && b->media->image_src)
@@ -457,12 +457,12 @@ nd_engine_dump_layout(const nd_box *b, int indent, GString *out)
         }
     }
     g_string_append_c(out, '\n');
-    for (const nd_box *c = b->first_child; c; c = c->next_sibling)
-        nd_engine_dump_layout(c, indent + 2, out);
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        ns_engine_dump_layout(c, indent + 2, out);
 }
 
 char *
-nd_engine_suffix_before_ext(const char *path, const char *suffix)
+ns_engine_suffix_before_ext(const char *path, const char *suffix)
 {
     if (!path) return NULL;
     const char *slash = strrchr(path, '/');

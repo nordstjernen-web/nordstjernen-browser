@@ -11,7 +11,7 @@
 #include <lexbor/core/base.h>
 
 gboolean
-nd_html_is_void(const char *tag)
+ns_html_is_void(const char *tag)
 {
     if (!tag) return FALSE;
     static const char *const voids[] = {
@@ -26,7 +26,7 @@ nd_html_is_void(const char *tag)
 }
 
 void
-nd_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
+ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
 {
     for (const char *p = s ? s : ""; *p; p++) {
         switch (*p) {
@@ -43,31 +43,31 @@ nd_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
 }
 
 char *
-nd_html_escape_text(const char *s)
+ns_html_escape_text(const char *s)
 {
     GString *g = g_string_new(NULL);
-    nd_html_escape_append(g, s, TRUE);
+    ns_html_escape_append(g, s, TRUE);
     return g_string_free(g, FALSE);
 }
 
 const char *
-nd_html_engine_name(void)
+ns_html_engine_name(void)
 {
     return "lexbor";
 }
 
 const char *
-nd_html_engine_version(void)
+ns_html_engine_version(void)
 {
-#ifdef ND_LEXBOR_VERSION
-    return ND_LEXBOR_VERSION;
+#ifdef NS_LEXBOR_VERSION
+    return NS_LEXBOR_VERSION;
 #else
     return LEXBOR_VERSION_STRING;
 #endif
 }
 
 char *
-nd_html_decode_body(const char *body, gsize len)
+ns_html_decode_body(const char *body, gsize len)
 {
     if (!body || len == 0) return g_strdup("");
 

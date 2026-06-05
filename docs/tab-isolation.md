@@ -12,19 +12,19 @@ next useful implementation steps. The current direction is:
 ## Current state
 
 Nordstjernen is one browser process with N tabs. Each tab is an
-`nd_window` (`src/window.h`) owned by the GTK application. Most renderer
+`ns_window` (`src/window.h`) owned by the GTK application. Most renderer
 state is already per tab:
 
 - parsed DOM (`parsed_doc`), layout tree, computed-style table, scroll,
   focus, history cursor, CSP, image/video cache, and animation state;
-- one QuickJS runtime and context per tab, created by `nd_js_new()` in
+- one QuickJS runtime and context per tab, created by `ns_js_new()` in
   `src/js.c`;
 - classic Dedicated Workers created by that tab get their own QuickJS
   runtime, GLib main context, and OS thread, with message handoff back
   to the owning tab;
-- one serial `nd_tab_worker` per tab, created by
-  `nd_browser_construct_tab()` in `src/main.c`;
-- one `GtkDrawingArea` per tab, painted by `nd_draw_render()`.
+- one serial `ns_tab_worker` per tab, created by
+  `ns_browser_construct_tab()` in `src/main.c`;
+- one `GtkDrawingArea` per tab, painted by `ns_draw_render()`.
 
 The old process-global active JavaScript pointer has been replaced by a
 thread-local `GPrivate` slot. JavaScript still runs on the main thread,
@@ -32,7 +32,7 @@ but the runtime ownership model is now compatible with future tab-owned
 thread work as long as each QuickJS runtime is only entered from one
 thread at a time.
 
-Networking is already asynchronous. `nd_net_fetch_async()` runs blocking
+Networking is already asynchronous. `ns_net_fetch_async()` runs blocking
 curl work on a GTask worker pool, with global and per-origin throttles,
 then returns results to the main loop. Shared browser state is guarded
 where it is currently shared:
@@ -64,7 +64,7 @@ Current worker-owned jobs:
 | Main page body decode | done | generation-checked completion |
 | Main page HTML parse | done | parsed tree is accepted only for the live tab and fetch generation |
 | Top-level external CSS parse | done | stylesheet publication, cascade invalidation, and layout invalidation remain on the main loop |
-| Still-image decode | mostly done | worker returns owned pixels; main loop creates `nd_texture` / `GdkTexture` |
+| Still-image decode | mostly done | worker returns owned pixels; main loop creates `ns_texture` / `GdkTexture` |
 | Video poster decode | mostly done | same pixel-buffer handoff for still images |
 | Animated GIF decode | mostly done | worker returns owned frame pixels; main loop creates animation textures |
 | GDK-Pixbuf / librsvg image fallback | mostly done | worker decodes to pixels, with temporary texture download only as a compatibility fallback |

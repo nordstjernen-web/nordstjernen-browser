@@ -62,7 +62,7 @@ Windows (MSYS2) and macOS; CI builds all three plus musl on every push.
 - **14 · YouTube watch-page playback** — baseline shipped: clicking a
   streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL to
   the external player, which resolves it with yt-dlp
-  (`nd_media_launch_external`, `stream=TRUE`). Next: detect more sites and
+  (`ns_media_launch_external`, `stream=TRUE`). Next: detect more sites and
   surface a clearer in-page affordance; optionally run the `base.js`
   signature-cipher transform in QuickJS to get a direct URL without
   yt-dlp.

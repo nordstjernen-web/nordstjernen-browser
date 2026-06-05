@@ -11,7 +11,7 @@
 
 #include "net.h"
 
-static nd_config g_cfg;
+static ns_config g_cfg;
 static char     *g_cfg_path;
 
 static void
@@ -21,10 +21,10 @@ set_string(char **slot, const char *value)
     *slot = g_strdup(value ? value : "");
 }
 
-typedef struct { const char *name; int val; } nd_enum_choice;
+typedef struct { const char *name; int val; } ns_enum_choice;
 
 static int
-parse_enum(const char *v, const nd_enum_choice *choices, gsize n, int dflt)
+parse_enum(const char *v, const ns_enum_choice *choices, gsize n, int dflt)
 {
     if (!v || !*v) return dflt;
     for (gsize i = 0; i < n; i++)
@@ -35,7 +35,7 @@ parse_enum(const char *v, const nd_enum_choice *choices, gsize n, int dflt)
 static gboolean
 parse_bool(const char *v, gboolean dflt)
 {
-    static const nd_enum_choice map[] = {
+    static const ns_enum_choice map[] = {
         { "true", TRUE }, { "yes", TRUE }, { "on",  TRUE }, { "1", TRUE },
         { "false", FALSE }, { "no", FALSE }, { "off", FALSE }, { "0", FALSE },
     };
@@ -54,58 +54,58 @@ parse_int(const char *v, int dflt)
     return (int)n;
 }
 
-static nd_referer_policy
-parse_referer_policy(const char *v, nd_referer_policy dflt)
+static ns_referer_policy
+parse_referer_policy(const char *v, ns_referer_policy dflt)
 {
-    static const nd_enum_choice map[] = {
-        { "none",                            ND_REFERER_NO_REFERRER },
-        { "no-referrer",                     ND_REFERER_NO_REFERRER },
-        { "same-origin",                     ND_REFERER_SAME_ORIGIN },
-        { "strict-origin-when-cross-origin", ND_REFERER_STRICT_ORIGIN_WHEN_CROSS },
-        { "default",                         ND_REFERER_STRICT_ORIGIN_WHEN_CROSS },
-        { "unsafe-url",                      ND_REFERER_UNSAFE_URL },
-        { "full",                            ND_REFERER_UNSAFE_URL },
+    static const ns_enum_choice map[] = {
+        { "none",                            NS_REFERER_NO_REFERRER },
+        { "no-referrer",                     NS_REFERER_NO_REFERRER },
+        { "same-origin",                     NS_REFERER_SAME_ORIGIN },
+        { "strict-origin-when-cross-origin", NS_REFERER_STRICT_ORIGIN_WHEN_CROSS },
+        { "default",                         NS_REFERER_STRICT_ORIGIN_WHEN_CROSS },
+        { "unsafe-url",                      NS_REFERER_UNSAFE_URL },
+        { "full",                            NS_REFERER_UNSAFE_URL },
     };
-    return (nd_referer_policy)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
+    return (ns_referer_policy)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
 }
 
-static nd_cookie_policy
-parse_cookie_policy(const char *v, nd_cookie_policy dflt)
+static ns_cookie_policy
+parse_cookie_policy(const char *v, ns_cookie_policy dflt)
 {
-    static const nd_enum_choice map[] = {
-        { "always",           ND_COOKIE_ALWAYS },
-        { "first-party",      ND_COOKIE_FIRST_PARTY },
-        { "first-party-only", ND_COOKIE_FIRST_PARTY },
-        { "never",            ND_COOKIE_NEVER },
-        { "off",              ND_COOKIE_NEVER },
+    static const ns_enum_choice map[] = {
+        { "always",           NS_COOKIE_ALWAYS },
+        { "first-party",      NS_COOKIE_FIRST_PARTY },
+        { "first-party-only", NS_COOKIE_FIRST_PARTY },
+        { "never",            NS_COOKIE_NEVER },
+        { "off",              NS_COOKIE_NEVER },
     };
-    return (nd_cookie_policy)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
+    return (ns_cookie_policy)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
 }
 
-static nd_color_scheme_pref
-parse_color_scheme(const char *v, nd_color_scheme_pref dflt)
+static ns_color_scheme_pref
+parse_color_scheme(const char *v, ns_color_scheme_pref dflt)
 {
-    static const nd_enum_choice map[] = {
-        { "auto",   ND_COLOR_SCHEME_PREF_AUTO },
-        { "system", ND_COLOR_SCHEME_PREF_AUTO },
-        { "light",  ND_COLOR_SCHEME_PREF_LIGHT },
-        { "dark",   ND_COLOR_SCHEME_PREF_DARK },
+    static const ns_enum_choice map[] = {
+        { "auto",   NS_COLOR_SCHEME_PREF_AUTO },
+        { "system", NS_COLOR_SCHEME_PREF_AUTO },
+        { "light",  NS_COLOR_SCHEME_PREF_LIGHT },
+        { "dark",   NS_COLOR_SCHEME_PREF_DARK },
     };
-    return (nd_color_scheme_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
+    return (ns_color_scheme_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
 }
 
-static nd_reduced_motion_pref
-parse_reduced_motion(const char *v, nd_reduced_motion_pref dflt)
+static ns_reduced_motion_pref
+parse_reduced_motion(const char *v, ns_reduced_motion_pref dflt)
 {
-    static const nd_enum_choice map[] = {
-        { "auto",          ND_REDUCED_MOTION_PREF_AUTO },
-        { "system",        ND_REDUCED_MOTION_PREF_AUTO },
-        { "no-preference", ND_REDUCED_MOTION_PREF_NO_PREFERENCE },
-        { "off",           ND_REDUCED_MOTION_PREF_NO_PREFERENCE },
-        { "reduce",        ND_REDUCED_MOTION_PREF_REDUCE },
-        { "on",            ND_REDUCED_MOTION_PREF_REDUCE },
+    static const ns_enum_choice map[] = {
+        { "auto",          NS_REDUCED_MOTION_PREF_AUTO },
+        { "system",        NS_REDUCED_MOTION_PREF_AUTO },
+        { "no-preference", NS_REDUCED_MOTION_PREF_NO_PREFERENCE },
+        { "off",           NS_REDUCED_MOTION_PREF_NO_PREFERENCE },
+        { "reduce",        NS_REDUCED_MOTION_PREF_REDUCE },
+        { "on",            NS_REDUCED_MOTION_PREF_REDUCE },
     };
-    return (nd_reduced_motion_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
+    return (ns_reduced_motion_pref)parse_enum(v, map, G_N_ELEMENTS(map), dflt);
 }
 
 typedef enum cfg_kind {
@@ -126,24 +126,24 @@ typedef struct cfg_field {
     int         def_int;
 } cfg_field;
 
-#define FS(name, val)       { #name, CFG_STRING,       G_STRUCT_OFFSET(nd_config, name), val,   0 }
-#define FB(name, val)       { #name, CFG_BOOL,         G_STRUCT_OFFSET(nd_config, name), NULL,  val }
-#define FI(name, val)       { #name, CFG_INT,          G_STRUCT_OFFSET(nd_config, name), NULL,  val }
-#define FE(name, kind, val) { #name, kind,             G_STRUCT_OFFSET(nd_config, name), NULL,  val }
+#define FS(name, val)       { #name, CFG_STRING,       G_STRUCT_OFFSET(ns_config, name), val,   0 }
+#define FB(name, val)       { #name, CFG_BOOL,         G_STRUCT_OFFSET(ns_config, name), NULL,  val }
+#define FI(name, val)       { #name, CFG_INT,          G_STRUCT_OFFSET(ns_config, name), NULL,  val }
+#define FE(name, kind, val) { #name, kind,             G_STRUCT_OFFSET(ns_config, name), NULL,  val }
 
 static const cfg_field cfg_fields[] = {
     FS(home_url,              "about:start"),
-    FS(user_agent,            ND_USER_AGENT),
+    FS(user_agent,            NS_USER_AGENT),
     FS(accept_language,       ""),
     FS(search_engine,         "https://lite.duckduckgo.com/lite/?q=%s"),
     FS(http_proxy,            ""),
     FS(https_proxy,           ""),
     FS(no_proxy,              ""),
     FS(gsk_renderer,          "auto"),
-    FE(referer_policy,        CFG_REFERER,      ND_REFERER_STRICT_ORIGIN_WHEN_CROSS),
-    FE(cookie_policy,         CFG_COOKIE,       ND_COOKIE_FIRST_PARTY),
-    FE(color_scheme,          CFG_COLOR_SCHEME,    ND_COLOR_SCHEME_PREF_AUTO),
-    FE(reduced_motion,        CFG_REDUCED_MOTION,  ND_REDUCED_MOTION_PREF_AUTO),
+    FE(referer_policy,        CFG_REFERER,      NS_REFERER_STRICT_ORIGIN_WHEN_CROSS),
+    FE(cookie_policy,         CFG_COOKIE,       NS_COOKIE_FIRST_PARTY),
+    FE(color_scheme,          CFG_COLOR_SCHEME,    NS_COLOR_SCHEME_PREF_AUTO),
+    FE(reduced_motion,        CFG_REDUCED_MOTION,  NS_REDUCED_MOTION_PREF_AUTO),
     FB(do_not_track,          TRUE),
     FB(images_enabled,        TRUE),
     FB(webgl_enabled,         FALSE),
@@ -155,7 +155,7 @@ static const cfg_field cfg_fields[] = {
     FI(default_font_size_px,  16),
     FI(js_eval_budget_ms,     60000),
     FI(js_memory_cap_mb,      2048),
-    FI(max_redirects,         ND_MAX_REDIRECTS),
+    FI(max_redirects,         NS_MAX_REDIRECTS),
     FI(window_width_px,       1280),
     FI(window_height_px,      800),
     FI(layout_viewport_px,    1000),
@@ -167,7 +167,7 @@ static const cfg_field cfg_fields[] = {
 #undef FE
 
 static void
-apply_default(nd_config *c)
+apply_default(ns_config *c)
 {
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
         const cfg_field *f = &cfg_fields[i];
@@ -176,16 +176,16 @@ apply_default(nd_config *c)
         case CFG_STRING:      set_string((char **)slot, f->def_str); break;
         case CFG_BOOL:        *(gboolean *)slot = (gboolean)f->def_int; break;
         case CFG_INT:         *(int *)slot      = f->def_int; break;
-        case CFG_REFERER:     *(nd_referer_policy *)slot     = (nd_referer_policy)f->def_int; break;
-        case CFG_COOKIE:      *(nd_cookie_policy *)slot      = (nd_cookie_policy)f->def_int; break;
-        case CFG_COLOR_SCHEME:    *(nd_color_scheme_pref *)slot   = (nd_color_scheme_pref)f->def_int; break;
-        case CFG_REDUCED_MOTION:  *(nd_reduced_motion_pref *)slot = (nd_reduced_motion_pref)f->def_int; break;
+        case CFG_REFERER:     *(ns_referer_policy *)slot     = (ns_referer_policy)f->def_int; break;
+        case CFG_COOKIE:      *(ns_cookie_policy *)slot      = (ns_cookie_policy)f->def_int; break;
+        case CFG_COLOR_SCHEME:    *(ns_color_scheme_pref *)slot   = (ns_color_scheme_pref)f->def_int; break;
+        case CFG_REDUCED_MOTION:  *(ns_reduced_motion_pref *)slot = (ns_reduced_motion_pref)f->def_int; break;
         }
     }
 }
 
 static void
-apply_pair(nd_config *c, const char *key, const char *value)
+apply_pair(ns_config *c, const char *key, const char *value)
 {
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
         const cfg_field *f = &cfg_fields[i];
@@ -195,17 +195,17 @@ apply_pair(nd_config *c, const char *key, const char *value)
         case CFG_STRING:       set_string((char **)slot, value); break;
         case CFG_BOOL:         *(gboolean *)slot = parse_bool(value, *(gboolean *)slot); break;
         case CFG_INT:          *(int *)slot      = parse_int(value, *(int *)slot); break;
-        case CFG_REFERER:      *(nd_referer_policy *)slot     = parse_referer_policy(value, *(nd_referer_policy *)slot); break;
-        case CFG_COOKIE:       *(nd_cookie_policy *)slot      = parse_cookie_policy(value, *(nd_cookie_policy *)slot); break;
-        case CFG_COLOR_SCHEME:   *(nd_color_scheme_pref *)slot   = parse_color_scheme(value, *(nd_color_scheme_pref *)slot); break;
-        case CFG_REDUCED_MOTION: *(nd_reduced_motion_pref *)slot = parse_reduced_motion(value, *(nd_reduced_motion_pref *)slot); break;
+        case CFG_REFERER:      *(ns_referer_policy *)slot     = parse_referer_policy(value, *(ns_referer_policy *)slot); break;
+        case CFG_COOKIE:       *(ns_cookie_policy *)slot      = parse_cookie_policy(value, *(ns_cookie_policy *)slot); break;
+        case CFG_COLOR_SCHEME:   *(ns_color_scheme_pref *)slot   = parse_color_scheme(value, *(ns_color_scheme_pref *)slot); break;
+        case CFG_REDUCED_MOTION: *(ns_reduced_motion_pref *)slot = parse_reduced_motion(value, *(ns_reduced_motion_pref *)slot); break;
         }
         return;
     }
 }
 
 static void
-load_file(nd_config *c, const char *path)
+load_file(ns_config *c, const char *path)
 {
     char *contents = NULL;
     gsize len = 0;
@@ -232,23 +232,23 @@ load_file(nd_config *c, const char *path)
 }
 
 static const struct { const char *env; const char *key; } env_disable[] = {
-    { "ND_NO_CACHE",         "cache_enabled"         },
-    { "ND_NO_LOCAL_STORAGE", "local_storage_enabled" },
-    { "ND_NO_IMAGES",        "images_enabled"        },
-    { "ND_NO_WATCHDOG",      "watchdog_enabled"      },
+    { "NS_NO_CACHE",         "cache_enabled"         },
+    { "NS_NO_LOCAL_STORAGE", "local_storage_enabled" },
+    { "NS_NO_IMAGES",        "images_enabled"        },
+    { "NS_NO_WATCHDOG",      "watchdog_enabled"      },
 };
 
 static const struct { const char *env; const char *key; } env_value[] = {
-    { "ND_HOME_URL",    "home_url"    },
-    { "ND_USER_AGENT",  "user_agent"  },
-    { "ND_HTTP_PROXY",  "http_proxy"  },
-    { "ND_HTTPS_PROXY", "https_proxy" },
-    { "ND_NO_PROXY",    "no_proxy"    },
-    { "ND_GSK_RENDERER","gsk_renderer"},
+    { "NS_HOME_URL",    "home_url"    },
+    { "NS_USER_AGENT",  "user_agent"  },
+    { "NS_HTTP_PROXY",  "http_proxy"  },
+    { "NS_HTTPS_PROXY", "https_proxy" },
+    { "NS_NO_PROXY",    "no_proxy"    },
+    { "NS_GSK_RENDERER","gsk_renderer"},
 };
 
 static void
-apply_env(nd_config *c)
+apply_env(ns_config *c)
 {
     for (gsize i = 0; i < G_N_ELEMENTS(env_disable); i++)
         if (g_getenv(env_disable[i].env)) apply_pair(c, env_disable[i].key, "false");
@@ -259,18 +259,18 @@ apply_env(nd_config *c)
 }
 
 void
-nd_config_init(void)
+ns_config_init(void)
 {
     apply_default(&g_cfg);
     g_cfg_path = g_build_filename(g_get_user_config_dir(),
-                                  ND_APP_DIR_NAME, "nordstjernen.conf",
+                                  NS_APP_DIR_NAME, "nordstjernen.conf",
                                   NULL);
     load_file(&g_cfg, g_cfg_path);
     apply_env(&g_cfg);
 }
 
 void
-nd_config_shutdown(void)
+ns_config_shutdown(void)
 {
     g_free(g_cfg.home_url);
     g_free(g_cfg.user_agent);
@@ -284,51 +284,51 @@ nd_config_shutdown(void)
     g_clear_pointer(&g_cfg_path, g_free);
 }
 
-const nd_config *
-nd_config_get(void)
+const ns_config *
+ns_config_get(void)
 {
     return &g_cfg;
 }
 
-nd_config *
-nd_config_mut(void)
+ns_config *
+ns_config_mut(void)
 {
     return &g_cfg;
 }
 
 const char *
-nd_config_path(void)
+ns_config_path(void)
 {
     return g_cfg_path;
 }
 
 static const char *const referer_policy_names[] = {
-    [ND_REFERER_NO_REFERRER]              = "none",
-    [ND_REFERER_SAME_ORIGIN]              = "same-origin",
-    [ND_REFERER_STRICT_ORIGIN_WHEN_CROSS] = "strict-origin-when-cross-origin",
-    [ND_REFERER_UNSAFE_URL]               = "unsafe-url",
+    [NS_REFERER_NO_REFERRER]              = "none",
+    [NS_REFERER_SAME_ORIGIN]              = "same-origin",
+    [NS_REFERER_STRICT_ORIGIN_WHEN_CROSS] = "strict-origin-when-cross-origin",
+    [NS_REFERER_UNSAFE_URL]               = "unsafe-url",
 };
 
 static const char *const cookie_policy_names[] = {
-    [ND_COOKIE_ALWAYS]      = "always",
-    [ND_COOKIE_FIRST_PARTY] = "first-party",
-    [ND_COOKIE_NEVER]       = "never",
+    [NS_COOKIE_ALWAYS]      = "always",
+    [NS_COOKIE_FIRST_PARTY] = "first-party",
+    [NS_COOKIE_NEVER]       = "never",
 };
 
 static const char *const color_scheme_names[] = {
-    [ND_COLOR_SCHEME_PREF_AUTO]  = "auto",
-    [ND_COLOR_SCHEME_PREF_LIGHT] = "light",
-    [ND_COLOR_SCHEME_PREF_DARK]  = "dark",
+    [NS_COLOR_SCHEME_PREF_AUTO]  = "auto",
+    [NS_COLOR_SCHEME_PREF_LIGHT] = "light",
+    [NS_COLOR_SCHEME_PREF_DARK]  = "dark",
 };
 
 static const char *const reduced_motion_names[] = {
-    [ND_REDUCED_MOTION_PREF_AUTO]          = "auto",
-    [ND_REDUCED_MOTION_PREF_NO_PREFERENCE] = "no-preference",
-    [ND_REDUCED_MOTION_PREF_REDUCE]        = "reduce",
+    [NS_REDUCED_MOTION_PREF_AUTO]          = "auto",
+    [NS_REDUCED_MOTION_PREF_NO_PREFERENCE] = "no-preference",
+    [NS_REDUCED_MOTION_PREF_REDUCE]        = "reduce",
 };
 
 static const char *
-referer_policy_name(nd_referer_policy p)
+referer_policy_name(ns_referer_policy p)
 {
     if ((unsigned)p >= G_N_ELEMENTS(referer_policy_names) || !referer_policy_names[p])
         return "strict-origin-when-cross-origin";
@@ -336,7 +336,7 @@ referer_policy_name(nd_referer_policy p)
 }
 
 static const char *
-cookie_policy_name(nd_cookie_policy p)
+cookie_policy_name(ns_cookie_policy p)
 {
     if ((unsigned)p >= G_N_ELEMENTS(cookie_policy_names) || !cookie_policy_names[p])
         return "first-party";
@@ -344,7 +344,7 @@ cookie_policy_name(nd_cookie_policy p)
 }
 
 static const char *
-color_scheme_name(nd_color_scheme_pref p)
+color_scheme_name(ns_color_scheme_pref p)
 {
     if ((unsigned)p >= G_N_ELEMENTS(color_scheme_names) || !color_scheme_names[p])
         return "auto";
@@ -352,7 +352,7 @@ color_scheme_name(nd_color_scheme_pref p)
 }
 
 static const char *
-reduced_motion_name(nd_reduced_motion_pref p)
+reduced_motion_name(ns_reduced_motion_pref p)
 {
     if ((unsigned)p >= G_N_ELEMENTS(reduced_motion_names) || !reduced_motion_names[p])
         return "auto";
@@ -360,7 +360,7 @@ reduced_motion_name(nd_reduced_motion_pref p)
 }
 
 gboolean
-nd_config_save(GError **error)
+ns_config_save(GError **error)
 {
     if (!g_cfg_path) {
         g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_NOENT,
@@ -377,7 +377,7 @@ nd_config_save(GError **error)
     }
     g_free(dir);
 
-    const nd_config *c = &g_cfg;
+    const ns_config *c = &g_cfg;
     GString *s = g_string_new(NULL);
     g_string_append(s, "# nordstjernen configuration\n");
     for (gsize i = 0; i < G_N_ELEMENTS(cfg_fields); i++) {
@@ -399,19 +399,19 @@ nd_config_save(GError **error)
             break;
         case CFG_REFERER:
             g_string_append_printf(s, "%s = %s\n", f->key,
-                referer_policy_name(*(const nd_referer_policy *)slot));
+                referer_policy_name(*(const ns_referer_policy *)slot));
             break;
         case CFG_COOKIE:
             g_string_append_printf(s, "%s = %s\n", f->key,
-                cookie_policy_name(*(const nd_cookie_policy *)slot));
+                cookie_policy_name(*(const ns_cookie_policy *)slot));
             break;
         case CFG_COLOR_SCHEME:
             g_string_append_printf(s, "%s = %s\n", f->key,
-                color_scheme_name(*(const nd_color_scheme_pref *)slot));
+                color_scheme_name(*(const ns_color_scheme_pref *)slot));
             break;
         case CFG_REDUCED_MOTION:
             g_string_append_printf(s, "%s = %s\n", f->key,
-                reduced_motion_name(*(const nd_reduced_motion_pref *)slot));
+                reduced_motion_name(*(const ns_reduced_motion_pref *)slot));
             break;
         }
     }
@@ -421,9 +421,9 @@ nd_config_save(GError **error)
 }
 
 char *
-nd_config_dump(void)
+ns_config_dump(void)
 {
-    const nd_config *c = &g_cfg;
+    const ns_config *c = &g_cfg;
     GString *s = g_string_new(NULL);
     g_string_append_printf(s, "# nordstjernen effective config\n");
     g_string_append_printf(s, "# file: %s\n", g_cfg_path ? g_cfg_path : "(none)");
@@ -434,14 +434,14 @@ nd_config_dump(void)
                                c->accept_language);
     else
         g_string_append_printf(s, "accept_language       = (auto: %s)\n",
-                               nd_net_default_accept_language());
+                               ns_net_default_accept_language());
     g_string_append_printf(s, "search_engine         = %s\n", c->search_engine);
     g_string_append_printf(s, "gsk_renderer          = %s\n",
                            c->gsk_renderer && *c->gsk_renderer
                                ? c->gsk_renderer : "auto");
     {
-        char *hp  = nd_net_proxy_mask(c->http_proxy);
-        char *hsp = nd_net_proxy_mask(c->https_proxy);
+        char *hp  = ns_net_proxy_mask(c->http_proxy);
+        char *hsp = ns_net_proxy_mask(c->https_proxy);
         g_string_append_printf(s, "http_proxy            = %s\n",
                                hp  && *hp  ? hp  : "(none)");
         g_string_append_printf(s, "https_proxy           = %s\n",

@@ -8,7 +8,7 @@ set -euo pipefail
 log() { printf '[pack-apk] %s\n' "$*" >&2; }
 trap 'rc=$?; printf "[pack-apk] FAILED (exit %s) at line %s: %s\n" \
     "$rc" "$LINENO" "$BASH_COMMAND" >&2; exit $rc' ERR
-[ -n "${ND_DEBUG:-}" ] && set -x
+[ -n "${NS_DEBUG:-}" ] && set -x
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 VERSION=${VERSION:-$(awk -F"'" \

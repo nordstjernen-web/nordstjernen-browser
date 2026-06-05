@@ -10,8 +10,8 @@
 #include <sqlite3.h>
 #include <string.h>
 
-#define ND_HISTORY_MAX_ROWS  10000
-#define ND_HISTORY_PAGE_ROWS 200
+#define NS_HISTORY_MAX_ROWS  10000
+#define NS_HISTORY_PAGE_ROWS 200
 
 static sqlite3 *g_history_db;
 static gboolean g_history_disabled;
@@ -83,20 +83,20 @@ history_prune(void)
             "SELECT url FROM visits ORDER BY last_visit DESC LIMIT ?)",
             -1, &st, NULL) != SQLITE_OK)
         return;
-    sqlite3_bind_int(st, 1, ND_HISTORY_MAX_ROWS);
+    sqlite3_bind_int(st, 1, NS_HISTORY_MAX_ROWS);
     sqlite3_step(st);
     sqlite3_finalize(st);
 }
 
 void
-nd_history_init(void)
+ns_history_init(void)
 {
     g_mutex_lock(&g_history_mutex);
     if (g_history_db || g_history_disabled) {
         g_mutex_unlock(&g_history_mutex);
         return;
     }
-    char *dir = g_build_filename(g_get_user_data_dir(), ND_APP_DIR_NAME, NULL);
+    char *dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(dir, 0700);
     g_chmod(dir, 0700);
     char *path = g_build_filename(dir, "history.sqlite", NULL);
@@ -131,7 +131,7 @@ nd_history_init(void)
 }
 
 void
-nd_history_shutdown(void)
+ns_history_shutdown(void)
 {
     g_mutex_lock(&g_history_mutex);
     if (g_history_db) {
@@ -142,7 +142,7 @@ nd_history_shutdown(void)
 }
 
 void
-nd_history_record(const char *url, const char *title)
+ns_history_record(const char *url, const char *title)
 {
     if (!history_is_recordable(url)) return;
     g_mutex_lock(&g_history_mutex);
@@ -171,7 +171,7 @@ nd_history_record(const char *url, const char *title)
 }
 
 void
-nd_history_clear(void)
+ns_history_clear(void)
 {
     g_mutex_lock(&g_history_mutex);
     history_exec("DELETE FROM visits");
@@ -191,9 +191,9 @@ history_like_escape(const char *s)
 }
 
 void
-nd_history_suggestion_free(gpointer s)
+ns_history_suggestion_free(gpointer s)
 {
-    nd_history_suggestion *item = s;
+    ns_history_suggestion *item = s;
     if (!item) return;
     g_free(item->url);
     g_free(item->title);
@@ -201,7 +201,7 @@ nd_history_suggestion_free(gpointer s)
 }
 
 GPtrArray *
-nd_history_suggest(const char *prefix, int limit)
+ns_history_suggest(const char *prefix, int limit)
 {
     if (!prefix || !*prefix) return NULL;
     if (limit <= 0) limit = 8;
@@ -224,12 +224,12 @@ nd_history_suggest(const char *prefix, int limit)
     sqlite3_bind_text(st, 1, pat, -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (st, 2, limit);
 
-    GPtrArray *out = g_ptr_array_new_with_free_func(nd_history_suggestion_free);
+    GPtrArray *out = g_ptr_array_new_with_free_func(ns_history_suggestion_free);
     while (sqlite3_step(st) == SQLITE_ROW) {
         const unsigned char *u = sqlite3_column_text(st, 0);
         const unsigned char *t = sqlite3_column_text(st, 1);
         if (!u) continue;
-        nd_history_suggestion *item = g_new0(nd_history_suggestion, 1);
+        ns_history_suggestion *item = g_new0(ns_history_suggestion, 1);
         item->url   = g_strdup((const char *)u);
         item->title = t ? g_strdup((const char *)t) : NULL;
         g_ptr_array_add(out, item);
@@ -260,7 +260,7 @@ static const char k_history_style[] =
     "</style>";
 
 char *
-nd_history_html_page(void)
+ns_history_html_page(void)
 {
     GString *s = g_string_new(
         "<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -277,7 +277,7 @@ nd_history_html_page(void)
             "SELECT url,title,last_visit FROM visits "
             "ORDER BY last_visit DESC LIMIT ?",
             -1, &st, NULL) == SQLITE_OK) {
-        sqlite3_bind_int(st, 1, ND_HISTORY_PAGE_ROWS);
+        sqlite3_bind_int(st, 1, NS_HISTORY_PAGE_ROWS);
         while (sqlite3_step(st) == SQLITE_ROW) {
             const char *url   = (const char *)sqlite3_column_text(st, 0);
             const char *title = (const char *)sqlite3_column_text(st, 1);

@@ -21,22 +21,22 @@
 #   only suites whose path contains the substring run (e.g. "react", "complex").
 #
 # Environment overrides:
-#   ND_BIN              browser binary (default builddir/src/nordstjernen)
-#   ND_SPEEDOMETER_DIR  scratch checkout (default $TMPDIR/nd-speedometer31)
-#   ND_ITERS            iterations per suite, median reported (default 3)
-#   ND_SETTLE           headless settle budget in ms (default 8000)
-#   ND_PORT             local HTTP port (default 8123)
+#   NS_BIN              browser binary (default builddir/src/nordstjernen)
+#   NS_SPEEDOMETER_DIR  scratch checkout (default $TMPDIR/nd-speedometer31)
+#   NS_ITERS            iterations per suite, median reported (default 3)
+#   NS_SETTLE           headless settle budget in ms (default 8000)
+#   NS_PORT             local HTTP port (default 8123)
 set -euo pipefail
 export LC_NUMERIC=C
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-BIN=${ND_BIN:-$ROOT/builddir/src/nordstjernen}
-export ND_ALLOW_ROOT=${ND_ALLOW_ROOT:-1}
-WORK=${ND_SPEEDOMETER_DIR:-${TMPDIR:-/tmp}/nd-speedometer31}
-PORT=${ND_PORT:-8123}
-ITERS=${ND_ITERS:-3}
-SETTLE=${ND_SETTLE:-8000}
-REPO=${ND_SPEEDOMETER_REPO:-https://github.com/WebKit/Speedometer.git}
+BIN=${NS_BIN:-$ROOT/builddir/src/nordstjernen}
+export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
+WORK=${NS_SPEEDOMETER_DIR:-${TMPDIR:-/tmp}/nd-speedometer31}
+PORT=${NS_PORT:-8123}
+ITERS=${NS_ITERS:-3}
+SETTLE=${NS_SETTLE:-8000}
+REPO=${NS_SPEEDOMETER_REPO:-https://github.com/WebKit/Speedometer.git}
 FILTER=${1:-}
 
 if [ ! -x "$BIN" ]; then
@@ -137,19 +137,19 @@ async function ndMain(){
     const here = location.pathname;
     const norm = (u) => u.split('#')[0].split('?')[0];
     const suite = Suites.find((s) => here.endsWith(norm(s.url)));
-    if (!suite){ NDLOG("ND_BENCH ERROR no-suite-match " + here); return; }
-    NDLOG("ND_BENCH SUITE " + suite.name);
+    if (!suite){ NDLOG("NS_BENCH ERROR no-suite-match " + here); return; }
+    NDLOG("NS_BENCH SUITE " + suite.name);
     try { await suite.prepare(page); }
-    catch (e){ NDLOG("ND_BENCH ERROR prepare " + (e && e.message ? e.message : e)); return; }
+    catch (e){ NDLOG("NS_BENCH ERROR prepare " + (e && e.message ? e.message : e)); return; }
     let suiteTotal = 0; const parts = [];
     for (const test of suite.tests){
         let r;
         try { r = await runStep(test); }
-        catch (e){ NDLOG("ND_BENCH ERROR step " + test.name + " " + (e && e.message ? e.message : e)); return; }
+        catch (e){ NDLOG("NS_BENCH ERROR step " + test.name + " " + (e && e.message ? e.message : e)); return; }
         suiteTotal += r.total;
         parts.push(test.name + "=" + r.total.toFixed(2) + "(s" + r.sync.toFixed(2) + "/a" + r.async.toFixed(2) + ")");
     }
-    NDLOG("ND_BENCH DONE " + suite.name + " | total=" + suiteTotal.toFixed(2) + " | " + parts.join(" ") + " | domNodes=" + document.getElementsByTagName('*').length);
+    NDLOG("NS_BENCH DONE " + suite.name + " | total=" + suiteTotal.toFixed(2) + " | " + parts.join(" ") + " | domNodes=" + document.getElementsByTagName('*').length);
 }
 if (document.readyState === "complete" || document.readyState === "interactive") requestAnimationFrame(() => ndMain());
 else window.addEventListener("DOMContentLoaded", () => requestAnimationFrame(() => ndMain()));
@@ -185,10 +185,10 @@ for p in "${PATHS[@]}"; do
     case "$p" in *react*|*preact*) url="$url#/home" ;; esac
     tots=(); add=""; comp=""; del=""; dom=""; name=""
     for _ in $(seq 1 "$ITERS"); do
-        line=$(ND_ALLOW_ROOT=1 "$BIN" --headless --dump=none --settle-ms="$SETTLE" "$url" 2>&1 \
-               | grep -oE "ND_BENCH DONE.*" | head -1 || true)
+        line=$(NS_ALLOW_ROOT=1 "$BIN" --headless --dump=none --settle-ms="$SETTLE" "$url" 2>&1 \
+               | grep -oE "NS_BENCH DONE.*" | head -1 || true)
         [ -z "$line" ] && continue
-        name=$(echo "$line" | sed -E 's/ND_BENCH DONE ([^ ]+) .*/\1/')
+        name=$(echo "$line" | sed -E 's/NS_BENCH DONE ([^ ]+) .*/\1/')
         tots+=("$(echo "$line" | grep -oE 'total=[0-9.]+' | head -1 | cut -d= -f2)")
         add=$(echo "$line"  | grep -oE 'Adding[0-9]+Items=[0-9.]+' | grep -oE '[0-9.]+$')
         comp=$(echo "$line" | grep -oE 'CompletingAllItems=[0-9.]+' | grep -oE '[0-9.]+$')

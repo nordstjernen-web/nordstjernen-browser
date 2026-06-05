@@ -1,7 +1,7 @@
 /* Nordstjernen — page export: screenshot (PNG), save (PDF/HTML), and printing. */
 
-#ifndef ND_EXPORT_H
-#define ND_EXPORT_H
+#ifndef NS_EXPORT_H
+#define NS_EXPORT_H
 
 #include <gtk/gtk.h>
 
@@ -9,7 +9,7 @@
 
 G_BEGIN_DECLS
 
-gboolean nd_window_screenshot_to(nd_window *w, const char *path);
+gboolean ns_window_screenshot_to(ns_window *w, const char *path);
 
 void on_win_screenshot(GSimpleAction *action, GVariant *parameter, gpointer ud);
 void on_win_save_pdf  (GSimpleAction *action, GVariant *parameter, gpointer ud);

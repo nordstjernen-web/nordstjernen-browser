@@ -72,16 +72,16 @@ esac
 
 git config --global --add safe.directory "$(pwd)" || true
 
-if [ -z "${ND_BUILD_JOBS:-}" ]; then
+if [ -z "${NS_BUILD_JOBS:-}" ]; then
     mem_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo)
     cores=$(nproc)
     jobs=$(( mem_gb / 2 ))
     [ "$jobs" -lt 2 ] && jobs=2
     [ "$jobs" -gt "$cores" ] && jobs=$cores
-    export ND_BUILD_JOBS=$jobs
+    export NS_BUILD_JOBS=$jobs
 fi
-export ND_BUILD_LTO=${ND_BUILD_LTO:-false}
-echo "nightly-distro-build($DISTRO): building with -j${ND_BUILD_JOBS} lto=${ND_BUILD_LTO} (mem-bounded)"
+export NS_BUILD_LTO=${NS_BUILD_LTO:-false}
+echo "nightly-distro-build($DISTRO): building with -j${NS_BUILD_JOBS} lto=${NS_BUILD_LTO} (mem-bounded)"
 
 ./scripts/pack-linux.sh
 

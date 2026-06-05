@@ -12,7 +12,7 @@ static const char k_mobile_ua[] =
     "Mobile/15E148 Safari/604.1";
 
 const char *
-nd_mobile_user_agent(void)
+ns_mobile_user_agent(void)
 {
     return k_mobile_ua;
 }
@@ -65,7 +65,7 @@ reddit_site_host(const char *host)
 }
 
 gboolean
-nd_mobile_force_host(const char *host)
+ns_mobile_force_host(const char *host)
 {
     return facebook_host(host)     ||
            youtube_site_host(host) ||
@@ -86,10 +86,10 @@ mobile_host_for(const char *host)
 }
 
 char *
-nd_mobile_rewrite_url(const char *url)
+ns_mobile_rewrite_url(const char *url)
 {
     if (!url) return NULL;
-    g_autoptr(nd_url_parts) p = nd_url_parts_new(url);
+    g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
     if (!p || !p->hostname) return NULL;
     const char *newhost = mobile_host_for(p->hostname);
     if (!newhost) return NULL;

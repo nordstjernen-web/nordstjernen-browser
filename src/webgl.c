@@ -2,7 +2,7 @@
 
 #include "webgl.h"
 
-#if defined(ND_ENABLE_WEBGL)
+#if defined(NS_ENABLE_WEBGL)
 
 #include <stdint.h>
 #include <string.h>
@@ -14,17 +14,17 @@
 #include "js.h"
 #include "net.h"
 
-#define ND_UNPACK_FLIP_Y_WEBGL              0x9240
-#define ND_UNPACK_PREMULTIPLY_ALPHA_WEBGL   0x9241
-#define ND_CONTEXT_LOST_WEBGL               0x9242
-#define ND_UNPACK_COLORSPACE_CONVERSION_WEBGL 0x9243
-#define ND_BROWSER_DEFAULT_WEBGL            0x9244
+#define NS_UNPACK_FLIP_Y_WEBGL              0x9240
+#define NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL   0x9241
+#define NS_CONTEXT_LOST_WEBGL               0x9242
+#define NS_UNPACK_COLORSPACE_CONVERSION_WEBGL 0x9243
+#define NS_BROWSER_DEFAULT_WEBGL            0x9244
 
-typedef struct nd_webgl {
-    nd_js         *js;
+typedef struct ns_webgl {
+    ns_js         *js;
     JSContext     *ctx;
     JSValue        js_obj;
-    const nd_node *canvas;
+    const ns_node *canvas;
     int            version;
     GdkGLContext  *gl;
     GLuint         fbo, color_tex, depth_rb;
@@ -39,22 +39,22 @@ typedef struct nd_webgl {
     gboolean       depth, stencil, alpha, antialias, preserve;
     GHashTable    *syncs;
     int            next_sync;
-} nd_webgl;
+} ns_webgl;
 
-static JSClassID nd_webgl_class_id;
+static JSClassID ns_webgl_class_id;
 static GHashTable *g_webgl_by_node;
 
 static GHashTable *g_webgl_decisions;
 
-typedef struct nd_webgl_prompt_data {
+typedef struct ns_webgl_prompt_data {
     GMainLoop *loop;
     int        choice;
-} nd_webgl_prompt_data;
+} ns_webgl_prompt_data;
 
 static void
-nd_webgl_prompt_done(GObject *src, GAsyncResult *res, gpointer ud)
+ns_webgl_prompt_done(GObject *src, GAsyncResult *res, gpointer ud)
 {
-    nd_webgl_prompt_data *d = ud;
+    ns_webgl_prompt_data *d = ud;
     GError *err = NULL;
     int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, &err);
     if (err) { idx = 0; g_error_free(err); }
@@ -63,7 +63,7 @@ nd_webgl_prompt_done(GObject *src, GAsyncResult *res, gpointer ud)
 }
 
 static int
-nd_webgl_ask(GtkWindow *parent, const char *primary, const char *detail,
+ns_webgl_ask(GtkWindow *parent, const char *primary, const char *detail,
              const char *const *buttons)
 {
     GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
@@ -73,8 +73,8 @@ nd_webgl_ask(GtkWindow *parent, const char *primary, const char *detail,
     gtk_alert_dialog_set_default_button(dlg, 0);
     gtk_alert_dialog_set_modal(dlg, TRUE);
 
-    nd_webgl_prompt_data data = { g_main_loop_new(NULL, FALSE), 0 };
-    gtk_alert_dialog_choose(dlg, parent, NULL, nd_webgl_prompt_done, &data);
+    ns_webgl_prompt_data data = { g_main_loop_new(NULL, FALSE), 0 };
+    gtk_alert_dialog_choose(dlg, parent, NULL, ns_webgl_prompt_done, &data);
     g_main_loop_run(data.loop);
     g_main_loop_unref(data.loop);
     g_object_unref(dlg);
@@ -82,7 +82,7 @@ nd_webgl_ask(GtkWindow *parent, const char *primary, const char *detail,
 }
 
 static gboolean
-nd_webgl_prompt(const char *origin, gboolean already_enabled)
+ns_webgl_prompt(const char *origin, gboolean already_enabled)
 {
     GApplication *app = g_application_get_default();
     GtkWindow *parent = (app && GTK_IS_APPLICATION(app))
@@ -96,7 +96,7 @@ nd_webgl_prompt(const char *origin, gboolean already_enabled)
         "on %s.\n\nWebGL hands the page near-direct access to your GPU "
         "driver. Only allow it on sites you trust.", origin);
     const char *buttons[] = { "Block", "Allow and trust this site", NULL };
-    int first = nd_webgl_ask(parent, primary, detail, buttons);
+    int first = ns_webgl_ask(parent, primary, detail, buttons);
     g_free(primary);
     g_free(detail);
     if (first != 1)
@@ -106,16 +106,16 @@ nd_webgl_prompt(const char *origin, gboolean already_enabled)
         "Give %s near-direct access to your GPU driver?\n\nThis stays "
         "enabled for this origin for the rest of the session.", origin);
     const char *confirm_buttons[] = { "Cancel", "Enable WebGL", NULL };
-    int second = nd_webgl_ask(parent, "Are you sure?", confirm, confirm_buttons);
+    int second = ns_webgl_ask(parent, "Are you sure?", confirm, confirm_buttons);
     g_free(confirm);
     return second == 1;
 }
 
 static gboolean
-nd_webgl_permission(nd_js *js)
+ns_webgl_permission(ns_js *js)
 {
-    const char *url = nd_js_current_url(js);
-    char *origin = nd_url_origin_from(url);
+    const char *url = ns_js_current_url(js);
+    char *origin = ns_url_origin_from(url);
     if (!origin || !*origin) {
         g_free(origin);
         origin = g_strdup(url && *url ? url : "this page");
@@ -137,11 +137,11 @@ nd_webgl_permission(nd_js *js)
         return TRUE;
     }
 
-    nd_config *cfg = nd_config_mut();
-    gboolean allow = nd_webgl_prompt(origin, cfg && cfg->webgl_enabled);
+    ns_config *cfg = ns_config_mut();
+    gboolean allow = ns_webgl_prompt(origin, cfg && cfg->webgl_enabled);
     if (allow && cfg && !cfg->webgl_enabled) {
         cfg->webgl_enabled = TRUE;
-        nd_config_save(NULL);
+        ns_config_save(NULL);
     }
     g_hash_table_insert(g_webgl_decisions, g_strdup(origin),
                         GINT_TO_POINTER(allow ? 1 : 2));
@@ -150,9 +150,9 @@ nd_webgl_permission(nd_js *js)
 }
 
 static int
-nd_webgl_dim(const nd_node *el, const char *name, int defv)
+ns_webgl_dim(const ns_node *el, const char *name, int defv)
 {
-    const char *s = nd_element_get_attr(el, name);
+    const char *s = ns_element_get_attr(el, name);
     if (!s || !*s) return defv;
     long v = strtol(s, NULL, 10);
     if (v <= 0) return defv;
@@ -161,13 +161,13 @@ nd_webgl_dim(const nd_node *el, const char *name, int defv)
 }
 
 static GLuint
-nd_webgl_draw_target(nd_webgl *g)
+ns_webgl_draw_target(ns_webgl *g)
 {
     return g->samples > 1 ? g->draw_fbo : g->fbo;
 }
 
 static gboolean
-nd_webgl_alloc_storage(nd_webgl *g, int w, int h)
+ns_webgl_alloc_storage(ns_webgl *g, int w, int h)
 {
     GLenum ds_format = (g->depth && g->stencil) ? GL_DEPTH24_STENCIL8
                      : g->stencil               ? GL_STENCIL_INDEX8
@@ -214,19 +214,19 @@ nd_webgl_alloc_storage(nd_webgl *g, int w, int h)
                                   GL_RENDERBUFFER, g->depth_rb);
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, nd_webgl_draw_target(g));
+    glBindFramebuffer(GL_FRAMEBUFFER, ns_webgl_draw_target(g));
     return glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
 }
 
 static void
-nd_webgl_sync_size(nd_webgl *g)
+ns_webgl_sync_size(ns_webgl *g)
 {
-    int w = nd_webgl_dim(g->canvas, "width", 300);
-    int h = nd_webgl_dim(g->canvas, "height", 150);
+    int w = ns_webgl_dim(g->canvas, "width", 300);
+    int h = ns_webgl_dim(g->canvas, "height", 150);
     if (w == g->w && h == g->h) return;
     g->w = w;
     g->h = h;
-    nd_webgl_alloc_storage(g, w, h);
+    ns_webgl_alloc_storage(g, w, h);
     glViewport(0, 0, w, h);
     g->dirty = TRUE;
     if (g->surf) { cairo_surface_destroy(g->surf); g->surf = NULL; }
@@ -239,7 +239,7 @@ nd_webgl_sync_size(nd_webgl *g)
 }
 
 static gboolean
-nd_webgl_attr(JSContext *ctx, JSValueConst attrs, const char *name, gboolean defv)
+ns_webgl_attr(JSContext *ctx, JSValueConst attrs, const char *name, gboolean defv)
 {
     if (!JS_IsObject(attrs)) return defv;
     JSValue v = JS_GetPropertyStr(ctx, attrs, name);
@@ -250,10 +250,10 @@ nd_webgl_attr(JSContext *ctx, JSValueConst attrs, const char *name, gboolean def
     return r;
 }
 
-static void nd_webgl_free(nd_webgl *g);
+static void ns_webgl_free(ns_webgl *g);
 
-static nd_webgl *
-nd_webgl_make(JSContext *ctx, nd_js *js, const nd_node *canvas, int version,
+static ns_webgl *
+ns_webgl_make(JSContext *ctx, ns_js *js, const ns_node *canvas, int version,
               JSValueConst attrs)
 {
     GdkDisplay *display = gdk_display_get_default();
@@ -269,20 +269,20 @@ nd_webgl_make(JSContext *ctx, nd_js *js, const nd_node *canvas, int version,
     }
     gdk_gl_context_make_current(gl);
 
-    nd_webgl *g = g_new0(nd_webgl, 1);
+    ns_webgl *g = g_new0(ns_webgl, 1);
     g->js = js;
     g->canvas = canvas;
     g->version = version;
     g->gl = gl;
     g->js_obj = JS_UNDEFINED;
-    g->alpha     = nd_webgl_attr(ctx, attrs, "alpha", TRUE);
-    g->depth     = nd_webgl_attr(ctx, attrs, "depth", TRUE);
-    g->stencil   = nd_webgl_attr(ctx, attrs, "stencil", FALSE);
-    g->antialias = nd_webgl_attr(ctx, attrs, "antialias", TRUE);
-    g->preserve  = nd_webgl_attr(ctx, attrs, "preserveDrawingBuffer", FALSE);
-    g->premultiplied_alpha = nd_webgl_attr(ctx, attrs, "premultipliedAlpha", TRUE);
-    g->w = nd_webgl_dim(canvas, "width", 300);
-    g->h = nd_webgl_dim(canvas, "height", 150);
+    g->alpha     = ns_webgl_attr(ctx, attrs, "alpha", TRUE);
+    g->depth     = ns_webgl_attr(ctx, attrs, "depth", TRUE);
+    g->stencil   = ns_webgl_attr(ctx, attrs, "stencil", FALSE);
+    g->antialias = ns_webgl_attr(ctx, attrs, "antialias", TRUE);
+    g->preserve  = ns_webgl_attr(ctx, attrs, "preserveDrawingBuffer", FALSE);
+    g->premultiplied_alpha = ns_webgl_attr(ctx, attrs, "premultipliedAlpha", TRUE);
+    g->w = ns_webgl_dim(canvas, "width", 300);
+    g->h = ns_webgl_dim(canvas, "height", 150);
     g->dirty = TRUE;
 
     g->samples = 1;
@@ -301,8 +301,8 @@ nd_webgl_make(JSContext *ctx, nd_js *js, const nd_node *canvas, int version,
         glGenRenderbuffers(1, &g->msaa_color_rb);
         glGenRenderbuffers(1, &g->msaa_depth_rb);
     }
-    if (!nd_webgl_alloc_storage(g, g->w, g->h)) {
-        nd_webgl_free(g);
+    if (!ns_webgl_alloc_storage(g, g->w, g->h)) {
+        ns_webgl_free(g);
         return NULL;
     }
     glViewport(0, 0, g->w, g->h);
@@ -312,7 +312,7 @@ nd_webgl_make(JSContext *ctx, nd_js *js, const nd_node *canvas, int version,
 }
 
 static void
-nd_webgl_free(nd_webgl *g)
+ns_webgl_free(ns_webgl *g)
 {
     if (!g) return;
     if (g->gl) {
@@ -339,30 +339,30 @@ nd_webgl_free(nd_webgl *g)
 }
 
 static void
-nd_webgl_finalizer(JSRuntime *rt, JSValue val)
+ns_webgl_finalizer(JSRuntime *rt, JSValue val)
 {
     (void)rt;
-    nd_webgl *g = JS_GetOpaque(val, nd_webgl_class_id);
+    ns_webgl *g = JS_GetOpaque(val, ns_webgl_class_id);
     if (!g) return;
     if (g_webgl_by_node)
         g_hash_table_remove(g_webgl_by_node, g->canvas);
-    nd_webgl_free(g);
+    ns_webgl_free(g);
 }
 
-static JSClassDef nd_webgl_class = {
+static JSClassDef ns_webgl_class = {
     "WebGLRenderingContext",
-    .finalizer = nd_webgl_finalizer,
+    .finalizer = ns_webgl_finalizer,
 };
 
-static nd_webgl *
+static ns_webgl *
 wgl_cur(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
-    nd_webgl *g = JS_GetOpaque(this_val, nd_webgl_class_id);
+    ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
     if (!g || !g->gl) return NULL;
     gdk_gl_context_make_current(g->gl);
-    nd_webgl_sync_size(g);
-    glBindFramebuffer(GL_FRAMEBUFFER, nd_webgl_draw_target(g));
+    ns_webgl_sync_size(g);
+    glBindFramebuffer(GL_FRAMEBUFFER, ns_webgl_draw_target(g));
     return g;
 }
 
@@ -507,9 +507,9 @@ wgl_ints(JSContext *ctx, JSValueConst v, GLint *out, int max)
     return cnt;
 }
 
-#define ND_WEBGL_MAX_ALLOC    (1024u * 1024u * 1024u)
-#define ND_WEBGL_MAX_CONTEXTS 32
-#define ND_WEBGL_MAX_SHADER   (4u * 1024u * 1024u)
+#define NS_WEBGL_MAX_ALLOC    (1024u * 1024u * 1024u)
+#define NS_WEBGL_MAX_CONTEXTS 32
+#define NS_WEBGL_MAX_SHADER   (4u * 1024u * 1024u)
 
 static int
 wgl_components(int format)
@@ -555,7 +555,7 @@ wgl_pixel_bytes(int format, int type)
 }
 
 static size_t
-wgl_transfer_bytes(nd_webgl *g, int w, int h, int depth,
+wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
                    int format, int type, gboolean pack)
 {
     if (w <= 0 || h <= 0 || depth <= 0) return 0;
@@ -611,7 +611,7 @@ wgl_flip_rows(const uint8_t *src, int w, int h, int bpp)
 }
 
 #define WGL_GET(name) \
-    nd_webgl *g = wgl_cur(ctx, this_val); \
+    ns_webgl *g = wgl_cur(ctx, this_val); \
     if (!g) return JS_UNDEFINED; \
     (void)g; (void)name; (void)argc; (void)argv
 
@@ -646,7 +646,7 @@ wgl_clear(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     WGL_GET(0);
     glClear((GLbitfield)argi(ctx, argc, argv, 0));
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -857,11 +857,11 @@ wgl_pixelStorei(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
     WGL_GET(0);
     int pname = argi(ctx, argc, argv, 0);
     int param = argi(ctx, argc, argv, 1);
-    if (pname == ND_UNPACK_FLIP_Y_WEBGL) {
+    if (pname == NS_UNPACK_FLIP_Y_WEBGL) {
         g->unpack_flip_y = param ? TRUE : FALSE;
-    } else if (pname == ND_UNPACK_PREMULTIPLY_ALPHA_WEBGL) {
+    } else if (pname == NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL) {
         g->premultiply = param ? TRUE : FALSE;
-    } else if (pname == ND_UNPACK_COLORSPACE_CONVERSION_WEBGL) {
+    } else if (pname == NS_UNPACK_COLORSPACE_CONVERSION_WEBGL) {
         /* no-op */
     } else {
         glPixelStorei((GLenum)pname, param);
@@ -922,9 +922,9 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
         JS_FreeValue(ctx, a);
         return ta;
     }
-    case ND_UNPACK_FLIP_Y_WEBGL:
+    case NS_UNPACK_FLIP_Y_WEBGL:
         return JS_NewBool(ctx, g->unpack_flip_y);
-    case ND_UNPACK_PREMULTIPLY_ALPHA_WEBGL:
+    case NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL:
         return JS_NewBool(ctx, g->premultiply);
     case GL_DEPTH_TEST:
     case GL_BLEND:
@@ -958,7 +958,7 @@ static JSValue
 wgl_getContextAttributes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
-    nd_webgl *g = JS_GetOpaque(this_val, nd_webgl_class_id);
+    ns_webgl *g = JS_GetOpaque(this_val, ns_webgl_class_id);
     JSValue o = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, o, "alpha", JS_NewBool(ctx, g ? g->alpha : TRUE));
     JS_SetPropertyStr(ctx, o, "depth", JS_NewBool(ctx, g ? g->depth : TRUE));
@@ -1026,7 +1026,7 @@ wgl_shaderSource(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     size_t slen = 0;
     const char *src = JS_ToCStringLen(ctx, &slen, argv[1]);
     if (src) {
-        if (slen <= ND_WEBGL_MAX_SHADER) {
+        if (slen <= NS_WEBGL_MAX_SHADER) {
             const GLchar *p = src;
             GLint plen = (GLint)slen;
             glShaderSource((GLuint)wgl_name(ctx, argv[0]), 1, &p, &plen);
@@ -1284,7 +1284,7 @@ wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (argc >= 2 && JS_IsNumber(argv[1])) {
         int64_t size = 0;
         JS_ToInt64(ctx, &size, argv[1]);
-        if (size < 0 || (uint64_t)size > ND_WEBGL_MAX_ALLOC) return JS_UNDEFINED;
+        if (size < 0 || (uint64_t)size > NS_WEBGL_MAX_ALLOC) return JS_UNDEFINED;
         void *zero = size ? g_try_malloc0((size_t)size) : NULL;
         glBufferData(target, (GLsizeiptr)size, zero, usage);
         g_free(zero);
@@ -1293,7 +1293,7 @@ wgl_bufferData(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JSValue hold;
     size_t len = 0;
     const uint8_t *p = (argc >= 2) ? view_bytes(ctx, argv[1], &len, &hold) : NULL;
-    if (len > ND_WEBGL_MAX_ALLOC) {
+    if (len > NS_WEBGL_MAX_ALLOC) {
         if (p && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return JS_UNDEFINED;
     }
@@ -1540,7 +1540,7 @@ wgl_drawArrays(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (first < 0 || count < 0) return JS_UNDEFINED;
     glDrawArrays((GLenum)argi(ctx, argc, argv, 0), first, count);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -1555,7 +1555,7 @@ wgl_drawElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     glDrawElements((GLenum)argi(ctx, argc, argv, 0), count, type,
                    (const void *)offset);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -1630,7 +1630,7 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
                 gboolean flip_y, gboolean premultiply, int *out_w, int *out_h)
 {
     int w = 0, h = 0;
-    cairo_surface_t *s = nd_js_drawimage_source_surface(ctx, src, &w, &h);
+    cairo_surface_t *s = ns_js_drawimage_source_surface(ctx, src, &w, &h);
     if (!s) return NULL;
     const unsigned char *data = cairo_image_surface_get_data(s);
     int stride = cairo_image_surface_get_stride(s);
@@ -1695,7 +1695,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (!JS_IsNull(argv[8]) && !JS_IsUndefined(argv[8]))
             px = view_bytes(ctx, argv[8], &len, &hold);
         size_t need = wgl_transfer_bytes(g, w, h, 1, format, type, FALSE);
-        if (need > ND_WEBGL_MAX_ALLOC || (px && len < need)) {
+        if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
             if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
             return JS_UNDEFINED;
         }
@@ -1724,7 +1724,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[5], &w, &h, &len, &hold);
         size_t need = (px && w > 0 && h > 0)
             ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
-        if (px && w > 0 && h > 0 && need > 0 && need <= ND_WEBGL_MAX_ALLOC &&
+        if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
             if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
@@ -1768,7 +1768,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         if (!JS_IsNull(argv[8]) && !JS_IsUndefined(argv[8]))
             px = view_bytes(ctx, argv[8], &len, &hold);
         size_t need = wgl_transfer_bytes(g, w, h, 1, format, type, FALSE);
-        if (need > ND_WEBGL_MAX_ALLOC || (px && len < need)) {
+        if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
             return JS_UNDEFINED;
         }
@@ -1793,7 +1793,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         const uint8_t *px = wgl_imagedata_bytes(ctx, argv[6], &w, &h, &len, &hold);
         size_t need = (px && w > 0 && h > 0)
             ? wgl_transfer_bytes(g, w, h, 1, format, type, FALSE) : 0;
-        if (px && w > 0 && h > 0 && need > 0 && need <= ND_WEBGL_MAX_ALLOC &&
+        if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
             if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
@@ -1828,7 +1828,7 @@ wgl_bindFramebuffer(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
     WGL_GET(0);
     GLenum target = (GLenum)argi(ctx, argc, argv, 0);
     GLuint f = (argc >= 2) ? (GLuint)wgl_name(ctx, argv[1]) : 0;
-    glBindFramebuffer(target, f ? f : nd_webgl_draw_target(g));
+    glBindFramebuffer(target, f ? f : ns_webgl_draw_target(g));
     return JS_UNDEFINED;
 }
 
@@ -2069,7 +2069,7 @@ wgl_drawArraysInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     if (first < 0 || count < 0 || instances < 0) return JS_UNDEFINED;
     glDrawArraysInstanced((GLenum)argi(ctx, argc, argv, 0), first, count, instances);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2086,7 +2086,7 @@ wgl_drawElementsInstanced(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     glDrawElementsInstanced((GLenum)argi(ctx, argc, argv, 0), count, type,
                             (const void *)offset, instances);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2305,7 +2305,7 @@ wgl_clearBuffer_fv(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     if (argc >= 3) wgl_floats(ctx, argv[2], v, 4);
     glClearBufferfv((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1), v);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2317,7 +2317,7 @@ wgl_clearBuffer_iv(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     if (argc >= 3) wgl_ints(ctx, argv[2], v, 4);
     glClearBufferiv((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1), v);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2329,7 +2329,7 @@ wgl_clearBuffer_uiv(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
     if (argc >= 3) wgl_uints(ctx, argv[2], v, 4);
     glClearBufferuiv((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1), v);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2340,7 +2340,7 @@ wgl_clearBufferfi(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     glClearBufferfi((GLenum)argi(ctx, argc, argv, 0), argi(ctx, argc, argv, 1),
                     (float)argd(ctx, argc, argv, 2), argi(ctx, argc, argv, 3));
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2467,7 +2467,7 @@ wgl_drawRangeElements(JSContext *ctx, JSValueConst this_val, int argc, JSValueCo
                         (GLuint)argi(ctx, argc, argv, 2), count, type,
                         (const void *)offset);
     g->dirty = TRUE;
-    nd_js_request_repaint(g->js);
+    ns_js_request_repaint(g->js);
     return JS_UNDEFINED;
 }
 
@@ -2568,7 +2568,7 @@ wgl_texImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (argc >= 10 && JS_IsObject(argv[9]))
         px = view_bytes(ctx, argv[9], &len, &hold);
     size_t need = wgl_transfer_bytes(g, w, h, d, format, type, FALSE);
-    if (need > ND_WEBGL_MAX_ALLOC || (px && len < need)) {
+    if (need > NS_WEBGL_MAX_ALLOC || (px && len < need)) {
         if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         return JS_UNDEFINED;
     }
@@ -2824,7 +2824,7 @@ wgl_fenceSync(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 }
 
 static GLsync
-wgl_sync_lookup(JSContext *ctx, nd_webgl *g, JSValueConst v)
+wgl_sync_lookup(JSContext *ctx, ns_webgl *g, JSValueConst v)
 {
     if (!g->syncs || !JS_IsObject(v)) return NULL;
     JSValue p = JS_GetPropertyStr(ctx, v, "_sync");
@@ -2984,11 +2984,11 @@ wgl_set_constants(JSContext *ctx, JSValueConst obj)
     K(UNPACK_ALIGNMENT); K(PACK_ALIGNMENT);
 
     set_const(ctx, obj, "DEPTH_STENCIL_ATTACHMENT", 0x821A);
-    set_const(ctx, obj, "UNPACK_FLIP_Y_WEBGL", ND_UNPACK_FLIP_Y_WEBGL);
-    set_const(ctx, obj, "UNPACK_PREMULTIPLY_ALPHA_WEBGL", ND_UNPACK_PREMULTIPLY_ALPHA_WEBGL);
-    set_const(ctx, obj, "CONTEXT_LOST_WEBGL", ND_CONTEXT_LOST_WEBGL);
-    set_const(ctx, obj, "UNPACK_COLORSPACE_CONVERSION_WEBGL", ND_UNPACK_COLORSPACE_CONVERSION_WEBGL);
-    set_const(ctx, obj, "BROWSER_DEFAULT_WEBGL", ND_BROWSER_DEFAULT_WEBGL);
+    set_const(ctx, obj, "UNPACK_FLIP_Y_WEBGL", NS_UNPACK_FLIP_Y_WEBGL);
+    set_const(ctx, obj, "UNPACK_PREMULTIPLY_ALPHA_WEBGL", NS_UNPACK_PREMULTIPLY_ALPHA_WEBGL);
+    set_const(ctx, obj, "CONTEXT_LOST_WEBGL", NS_CONTEXT_LOST_WEBGL);
+    set_const(ctx, obj, "UNPACK_COLORSPACE_CONVERSION_WEBGL", NS_UNPACK_COLORSPACE_CONVERSION_WEBGL);
+    set_const(ctx, obj, "BROWSER_DEFAULT_WEBGL", NS_BROWSER_DEFAULT_WEBGL);
 }
 
 #undef K
@@ -3300,33 +3300,33 @@ wgl_bind_methods2(JSContext *ctx, JSValueConst obj)
 }
 
 JSValue
-nd_webgl_get_context(JSContext *ctx, nd_js *js, JSValueConst canvas_obj,
-                     const nd_node *canvas, int version, JSValueConst attrs)
+ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
+                     const ns_node *canvas, int version, JSValueConst attrs)
 {
     if (!g_webgl_by_node)
         g_webgl_by_node = g_hash_table_new(g_direct_hash, g_direct_equal);
 
-    nd_webgl *existing = g_hash_table_lookup(g_webgl_by_node, canvas);
+    ns_webgl *existing = g_hash_table_lookup(g_webgl_by_node, canvas);
     if (existing)
         return JS_DupValue(ctx, existing->js_obj);
 
-    if (g_hash_table_size(g_webgl_by_node) >= ND_WEBGL_MAX_CONTEXTS)
+    if (g_hash_table_size(g_webgl_by_node) >= NS_WEBGL_MAX_CONTEXTS)
         return JS_NULL;
 
-    if (!nd_webgl_permission(js))
+    if (!ns_webgl_permission(js))
         return JS_NULL;
 
-    if (!nd_webgl_class_id) {
-        JS_NewClassID(JS_GetRuntime(ctx), &nd_webgl_class_id);
-        JS_NewClass(JS_GetRuntime(ctx), nd_webgl_class_id, &nd_webgl_class);
+    if (!ns_webgl_class_id) {
+        JS_NewClassID(JS_GetRuntime(ctx), &ns_webgl_class_id);
+        JS_NewClass(JS_GetRuntime(ctx), ns_webgl_class_id, &ns_webgl_class);
     }
 
-    nd_webgl *g = nd_webgl_make(ctx, js, canvas, version, attrs);
+    ns_webgl *g = ns_webgl_make(ctx, js, canvas, version, attrs);
     if (!g) return JS_NULL;
 
-    JSValue obj = JS_NewObjectClass(ctx, nd_webgl_class_id);
+    JSValue obj = JS_NewObjectClass(ctx, ns_webgl_class_id);
     if (JS_IsException(obj)) {
-        nd_webgl_free(g);
+        ns_webgl_free(g);
         return JS_NULL;
     }
     JS_SetOpaque(obj, g);
@@ -3348,14 +3348,14 @@ nd_webgl_get_context(JSContext *ctx, nd_js *js, JSValueConst canvas_obj,
 }
 
 cairo_surface_t *
-nd_webgl_canvas_surface(const nd_node *canvas)
+ns_webgl_canvas_surface(const ns_node *canvas)
 {
     if (!g_webgl_by_node) return NULL;
-    nd_webgl *g = g_hash_table_lookup(g_webgl_by_node, canvas);
+    ns_webgl *g = g_hash_table_lookup(g_webgl_by_node, canvas);
     if (!g || !g->gl) return NULL;
 
     gdk_gl_context_make_current(g->gl);
-    nd_webgl_sync_size(g);
+    ns_webgl_sync_size(g);
 
     int w = g->w, h = g->h;
     if (w <= 0 || h <= 0) return NULL;
@@ -3408,7 +3408,7 @@ nd_webgl_canvas_surface(const nd_node *canvas)
     g->dirty = FALSE;
 
     if (!g->preserve) {
-        glBindFramebuffer(GL_FRAMEBUFFER, nd_webgl_draw_target(g));
+        glBindFramebuffer(GL_FRAMEBUFFER, ns_webgl_draw_target(g));
         glClearColor(0, 0, 0, 0);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
                 GL_STENCIL_BUFFER_BIT);
@@ -3416,18 +3416,18 @@ nd_webgl_canvas_surface(const nd_node *canvas)
     return g->surf;
 }
 
-#else /* !ND_ENABLE_WEBGL */
+#else /* !NS_ENABLE_WEBGL */
 
 JSValue
-nd_webgl_get_context(JSContext *ctx, nd_js *js, JSValueConst canvas_obj,
-                     const nd_node *canvas, int version, JSValueConst attrs)
+ns_webgl_get_context(JSContext *ctx, ns_js *js, JSValueConst canvas_obj,
+                     const ns_node *canvas, int version, JSValueConst attrs)
 {
     (void)js; (void)canvas_obj; (void)canvas; (void)version; (void)attrs;
     return JS_NULL;
 }
 
 cairo_surface_t *
-nd_webgl_canvas_surface(const nd_node *canvas)
+ns_webgl_canvas_surface(const ns_node *canvas)
 {
     (void)canvas;
     return NULL;

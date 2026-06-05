@@ -12,65 +12,65 @@
 #include "wuffs-v0.4.c"
 
 enum {
-    ND_WUFFS_MAX_DIM    = 16384,
-    ND_WUFFS_MAX_PIXELS = 64 * 1024 * 1024,
+    NS_WUFFS_MAX_DIM    = 16384,
+    NS_WUFFS_MAX_PIXELS = 64 * 1024 * 1024,
 };
 
 typedef enum {
-    ND_WUFFS_NONE = 0,
-    ND_WUFFS_PNG,
-    ND_WUFFS_GIF,
-    ND_WUFFS_BMP,
-    ND_WUFFS_JPEG,
-    ND_WUFFS_WEBP,
-} nd_wuffs_format;
+    NS_WUFFS_NONE = 0,
+    NS_WUFFS_PNG,
+    NS_WUFFS_GIF,
+    NS_WUFFS_BMP,
+    NS_WUFFS_JPEG,
+    NS_WUFFS_WEBP,
+} ns_wuffs_format;
 
-static nd_wuffs_format
-nd_wuffs_detect(const guchar *data, gsize len)
+static ns_wuffs_format
+ns_wuffs_detect(const guchar *data, gsize len)
 {
-    if (!data || len < 4) return ND_WUFFS_NONE;
+    if (!data || len < 4) return NS_WUFFS_NONE;
     if (data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47)
-        return ND_WUFFS_PNG;
+        return NS_WUFFS_PNG;
     if (len >= 6 &&
         data[0] == 'G' && data[1] == 'I' && data[2] == 'F' && data[3] == '8' &&
         (data[4] == '7' || data[4] == '9') && data[5] == 'a')
-        return ND_WUFFS_GIF;
+        return NS_WUFFS_GIF;
     if (data[0] == 'B' && data[1] == 'M')
-        return ND_WUFFS_BMP;
+        return NS_WUFFS_BMP;
     if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF)
-        return ND_WUFFS_JPEG;
+        return NS_WUFFS_JPEG;
     if (len >= 12 &&
         data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
         data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P')
-        return ND_WUFFS_WEBP;
-    return ND_WUFFS_NONE;
+        return NS_WUFFS_WEBP;
+    return NS_WUFFS_NONE;
 }
 
 static wuffs_base__image_decoder *
-nd_wuffs_pick_decoder(const guchar *data, gsize len)
+ns_wuffs_pick_decoder(const guchar *data, gsize len)
 {
-    switch (nd_wuffs_detect(data, len)) {
-    case ND_WUFFS_PNG:  return wuffs_png__decoder__alloc_as__wuffs_base__image_decoder();
-    case ND_WUFFS_GIF:  return wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder();
-    case ND_WUFFS_BMP:  return wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder();
-    case ND_WUFFS_JPEG: return wuffs_jpeg__decoder__alloc_as__wuffs_base__image_decoder();
-    case ND_WUFFS_WEBP: return wuffs_webp__decoder__alloc_as__wuffs_base__image_decoder();
+    switch (ns_wuffs_detect(data, len)) {
+    case NS_WUFFS_PNG:  return wuffs_png__decoder__alloc_as__wuffs_base__image_decoder();
+    case NS_WUFFS_GIF:  return wuffs_gif__decoder__alloc_as__wuffs_base__image_decoder();
+    case NS_WUFFS_BMP:  return wuffs_bmp__decoder__alloc_as__wuffs_base__image_decoder();
+    case NS_WUFFS_JPEG: return wuffs_jpeg__decoder__alloc_as__wuffs_base__image_decoder();
+    case NS_WUFFS_WEBP: return wuffs_webp__decoder__alloc_as__wuffs_base__image_decoder();
     default:            return NULL;
     }
 }
 
 gboolean
-nd_image_wuffs_supports_bytes(const guchar *data, gsize len)
+ns_image_wuffs_supports_bytes(const guchar *data, gsize len)
 {
-    return nd_wuffs_detect(data, len) != ND_WUFFS_NONE;
+    return ns_wuffs_detect(data, len) != NS_WUFFS_NONE;
 }
 
 guint8 *
-nd_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
+ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
                               int *out_w, int *out_h,
                               gsize *out_stride, gsize *out_buf_len)
 {
-    wuffs_base__image_decoder *dec = nd_wuffs_pick_decoder(data, len);
+    wuffs_base__image_decoder *dec = ns_wuffs_pick_decoder(data, len);
     if (!dec) return NULL;
 
     wuffs_base__io_buffer src = wuffs_base__make_io_buffer(
@@ -89,8 +89,8 @@ nd_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
     uint32_t w = wuffs_base__pixel_config__width(&ic.pixcfg);
     uint32_t h = wuffs_base__pixel_config__height(&ic.pixcfg);
     if (w == 0 || h == 0 ||
-        w > ND_WUFFS_MAX_DIM || h > ND_WUFFS_MAX_DIM ||
-        (uint64_t)w * (uint64_t)h > (uint64_t)ND_WUFFS_MAX_PIXELS) {
+        w > NS_WUFFS_MAX_DIM || h > NS_WUFFS_MAX_DIM ||
+        (uint64_t)w * (uint64_t)h > (uint64_t)NS_WUFFS_MAX_PIXELS) {
         free(dec);
         return NULL;
     }
@@ -100,7 +100,7 @@ nd_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
         WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, w, h);
 
     uint64_t pix_len64 = wuffs_base__pixel_config__pixbuf_len(&ic.pixcfg);
-    if (pix_len64 == 0 || pix_len64 > (uint64_t)ND_WUFFS_MAX_PIXELS * 4u) {
+    if (pix_len64 == 0 || pix_len64 > (uint64_t)NS_WUFFS_MAX_PIXELS * 4u) {
         free(dec);
         return NULL;
     }
@@ -157,18 +157,18 @@ nd_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
     return pix;
 }
 
-nd_texture *
-nd_image_decode_wuffs(const guchar *data, gsize len, int *out_w, int *out_h)
+ns_texture *
+ns_image_decode_wuffs(const guchar *data, gsize len, int *out_w, int *out_h)
 {
     int w = 0, h = 0;
     gsize stride = 0, buf_len = 0;
-    guint8 *pix = nd_image_wuffs_decode_to_bgra(data, len, &w, &h,
+    guint8 *pix = ns_image_wuffs_decode_to_bgra(data, len, &w, &h,
                                                 &stride, &buf_len);
     if (!pix) return NULL;
 
     GBytes *bytes = g_bytes_new_take(pix, buf_len);
-    nd_texture *tex = nd_texture_new(
-        w, h, ND_TEXTURE_BGRA_PREMULTIPLIED, bytes, stride);
+    ns_texture *tex = ns_texture_new(
+        w, h, NS_TEXTURE_BGRA_PREMULTIPLIED, bytes, stride);
     g_bytes_unref(bytes);
 
     if (tex) {
@@ -179,7 +179,7 @@ nd_image_decode_wuffs(const guchar *data, gsize len, int *out_w, int *out_h)
 }
 
 GArray *
-nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
+ns_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
                                      int *out_w, int *out_h)
 {
     if (!data || len < 6) return NULL;
@@ -207,8 +207,8 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
     uint32_t w = wuffs_base__pixel_config__width(&ic.pixcfg);
     uint32_t h = wuffs_base__pixel_config__height(&ic.pixcfg);
     if (w == 0 || h == 0 ||
-        w > ND_WUFFS_MAX_DIM || h > ND_WUFFS_MAX_DIM ||
-        (uint64_t)w * (uint64_t)h > (uint64_t)ND_WUFFS_MAX_PIXELS) {
+        w > NS_WUFFS_MAX_DIM || h > NS_WUFFS_MAX_DIM ||
+        (uint64_t)w * (uint64_t)h > (uint64_t)NS_WUFFS_MAX_PIXELS) {
         free(dec);
         return NULL;
     }
@@ -218,7 +218,7 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         WUFFS_BASE__PIXEL_SUBSAMPLING__NONE, w, h);
 
     uint64_t pix_len64 = wuffs_base__pixel_config__pixbuf_len(&ic.pixcfg);
-    if (pix_len64 == 0 || pix_len64 > (uint64_t)ND_WUFFS_MAX_PIXELS * 4u) {
+    if (pix_len64 == 0 || pix_len64 > (uint64_t)NS_WUFFS_MAX_PIXELS * 4u) {
         free(dec);
         return NULL;
     }
@@ -245,10 +245,10 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         if (!workbuf) { g_free(pix); free(dec); return NULL; }
     }
 
-    GArray *frames = g_array_new(FALSE, FALSE, sizeof(nd_image_pixel_frame));
-    g_array_set_clear_func(frames, nd_image_pixel_frame_clear);
-    enum { ND_GIF_MAX_FRAMES = 1024 };
-    const gsize ND_GIF_MAX_TOTAL_BYTES = (gsize)512 * 1024 * 1024;
+    GArray *frames = g_array_new(FALSE, FALSE, sizeof(ns_image_pixel_frame));
+    g_array_set_clear_func(frames, ns_image_pixel_frame_clear);
+    enum { NS_GIF_MAX_FRAMES = 1024 };
+    const gsize NS_GIF_MAX_TOTAL_BYTES = (gsize)512 * 1024 * 1024;
     gsize anim_bytes_total = 0;
 
     uint8_t prev_disposal = WUFFS_BASE__ANIMATION_DISPOSAL__NONE;
@@ -256,7 +256,7 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
     uint8_t *backup = NULL;
     gsize    pix_bytes_total = (gsize)pix_len64;
 
-    while (frames->len < ND_GIF_MAX_FRAMES) {
+    while (frames->len < NS_GIF_MAX_FRAMES) {
         wuffs_base__frame_config fc = {0};
         st = wuffs_base__image_decoder__decode_frame_config(dec, &fc, &src);
         if (!wuffs_base__status__is_ok(&st)) break;
@@ -297,7 +297,7 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         gsize frame_bytes = (gsize)tab.stride * (gsize)h;
         if (frame_bytes > pix_bytes_total) break;
         anim_bytes_total += frame_bytes;
-        if (anim_bytes_total > ND_GIF_MAX_TOTAL_BYTES) break;
+        if (anim_bytes_total > NS_GIF_MAX_TOTAL_BYTES) break;
         uint8_t *copy = g_try_malloc(frame_bytes);
         if (!copy) break;
         memcpy(copy, pix, frame_bytes);
@@ -306,11 +306,11 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
         int delay_ms = (int)(flicks / 705600);
         if (delay_ms <= 0) delay_ms = 100;
 
-        nd_image_pixel_frame f = {
+        ns_image_pixel_frame f = {
             .pixels = copy,
             .pixels_len = frame_bytes,
             .stride = (gsize)tab.stride,
-            .format = ND_TEXTURE_BGRA_PREMULTIPLIED,
+            .format = NS_TEXTURE_BGRA_PREMULTIPLIED,
             .width = (int)w,
             .height = (int)h,
             .delay_ms = delay_ms,
@@ -330,36 +330,36 @@ nd_image_decode_wuffs_anim_to_pixels(const guchar *data, gsize len,
 }
 
 GArray *
-nd_image_decode_wuffs_anim(const guchar *data, gsize len, int *out_w, int *out_h)
+ns_image_decode_wuffs_anim(const guchar *data, gsize len, int *out_w, int *out_h)
 {
     int w = 0, h = 0;
-    GArray *pixel_frames = nd_image_decode_wuffs_anim_to_pixels(
+    GArray *pixel_frames = ns_image_decode_wuffs_anim_to_pixels(
         data, len, &w, &h);
     if (!pixel_frames) return NULL;
 
-    GArray *frames = g_array_new(FALSE, FALSE, sizeof(nd_image_anim_frame));
+    GArray *frames = g_array_new(FALSE, FALSE, sizeof(ns_image_anim_frame));
     gboolean ok = TRUE;
     for (guint i = 0; i < pixel_frames->len; i++) {
-        nd_image_pixel_frame *pf =
-            &g_array_index(pixel_frames, nd_image_pixel_frame, i);
+        ns_image_pixel_frame *pf =
+            &g_array_index(pixel_frames, ns_image_pixel_frame, i);
         GBytes *bytes = g_bytes_new_take(pf->pixels, pf->pixels_len);
         pf->pixels = NULL;
-        nd_texture *tex = nd_texture_new(pf->width, pf->height, pf->format,
+        ns_texture *tex = ns_texture_new(pf->width, pf->height, pf->format,
                                          bytes, pf->stride);
         g_bytes_unref(bytes);
         if (!tex) {
             ok = FALSE;
             break;
         }
-        nd_image_anim_frame f = { tex, pf->delay_ms };
+        ns_image_anim_frame f = { tex, pf->delay_ms };
         g_array_append_val(frames, f);
     }
     g_array_free(pixel_frames, TRUE);
     if (!ok || frames->len == 0) {
         for (guint i = 0; i < frames->len; i++) {
-            nd_image_anim_frame *f =
-                &g_array_index(frames, nd_image_anim_frame, i);
-            nd_texture_unref(f->texture);
+            ns_image_anim_frame *f =
+                &g_array_index(frames, ns_image_anim_frame, i);
+            ns_texture_unref(f->texture);
         }
         g_array_free(frames, TRUE);
         return NULL;

@@ -13,7 +13,7 @@ bin="$root/builddir/src/nordstjernen"
 src="$root/data/render-tests"
 out="${1:-$root/render-tests-out}"
 port=8137
-vw="${ND_TEST_VIEWPORT:-800}"
+vw="${NS_TEST_VIEWPORT:-800}"
 
 [ -x "$bin" ] || { echo "build first: scripts/dev.sh build" >&2; exit 1; }
 mkdir -p "$out"

@@ -16,7 +16,7 @@ NIGHTLY_GHA_TIMEOUT=${NIGHTLY_GHA_TIMEOUT:-4200}
 NIGHTLY_GHA_DISPATCH=${NIGHTLY_GHA_DISPATCH:-1}
 NIGHTLY_PULL=${NIGHTLY_PULL:-1}
 NIGHTLY_PULL_BRANCH=${NIGHTLY_PULL_BRANCH:-main}
-DOCKER=${ND_DOCKER:-docker}
+DOCKER=${NS_DOCKER:-docker}
 
 NIGHTLY_DEBIAN_IMAGE=${NIGHTLY_DEBIAN_IMAGE:-debian:trixie}
 NIGHTLY_UBUNTU_IMAGE=${NIGHTLY_UBUNTU_IMAGE:-ubuntu:24.04}
@@ -53,7 +53,7 @@ moved nightly.sh, so a plain cron invocation always builds the latest
 orchestrator. A dirty or diverged working tree is left untouched.
 
 Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
-NIGHTLY_PULL_BRANCH, NIGHTLY_GHA_TIMEOUT, NIGHTLY_GHA_BRANCH, ND_DOCKER,
+NIGHTLY_PULL_BRANCH, NIGHTLY_GHA_TIMEOUT, NIGHTLY_GHA_BRANCH, NS_DOCKER,
 and the NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE}_IMAGE image tags.
 EOF
 }
@@ -173,7 +173,7 @@ stage_distro() {
     if $DOCKER run --rm \
         -v "$tree:/build:z" -w /build \
         -e "VERSION=$version" \
-        -e "ND_BUILD_DATE=$DATE" \
+        -e "NS_BUILD_DATE=$DATE" \
         "$image" \
         sh -c 'command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true; exec bash scripts/nightly-distro-build.sh "$1"' sh "$distro" 2>&1 | tee "$dst/build.log"; then
         local n=0

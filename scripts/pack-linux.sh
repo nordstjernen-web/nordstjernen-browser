@@ -7,7 +7,7 @@ set -euo pipefail
 log() { printf '[pack-linux] %s\n' "$*" >&2; }
 trap 'rc=$?; printf "[pack-linux] FAILED (exit %s) at line %s: %s\n" \
     "$rc" "$LINENO" "$BASH_COMMAND" >&2; exit $rc' ERR
-[ -n "${ND_DEBUG:-}" ] && set -x
+[ -n "${NS_DEBUG:-}" ] && set -x
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILDDIR=${BUILDDIR:-$ROOT/release-build}
@@ -21,11 +21,11 @@ STAGE="$ROOT/dist/${SLUG}"
 ZIP="$ROOT/dist/${SLUG}.zip"
 
 if [ ! -d "$BUILDDIR" ]; then
-    meson setup "$BUILDDIR" --buildtype=release -Db_lto="${ND_BUILD_LTO:-true}" \
+    meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
         -Db_ndebug=true --strip \
-        ${ND_BUILD_DATE:+-Dbuild_date="$ND_BUILD_DATE"}
+        ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"}
 fi
-meson compile -C "$BUILDDIR" ${ND_BUILD_JOBS:+-j "$ND_BUILD_JOBS"}
+meson compile -C "$BUILDDIR" ${NS_BUILD_JOBS:+-j "$NS_BUILD_JOBS"}
 strip --strip-all "$BUILDDIR/src/nordstjernen"
 
 LOADER=$(ldd "$BUILDDIR/src/nordstjernen" 2>/dev/null \

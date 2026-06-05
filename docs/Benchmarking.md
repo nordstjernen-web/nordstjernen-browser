@@ -56,7 +56,7 @@ scripts/speedometer-bench.sh            # every loadable TodoMVC suite
 scripts/speedometer-bench.sh complex    # only paths containing "complex"
 ```
 
-Each suite is run `ND_ITERS` times (default 3) and the median total is
+Each suite is run `NS_ITERS` times (default 3) and the median total is
 reported. Per phase the driver records `sync` time (the interaction loop) plus
 `async` time (a forced layout flush on the next frame), matching the real
 runner's `measurementMethod = "raf"` measurement. `domNodes` is the live
@@ -164,7 +164,7 @@ full table for each element that declared even one local `--var`
 tens of millions of string copies. A per-element profile attributed ~80% of
 the whole cascade to this one step. The inherited table is immutable once
 built, so it is now shared by reference: each element holds a small
-copy-on-write layer (`nd_var_map`) of just its own overrides chained to the
+copy-on-write layer (`ns_var_map`) of just its own overrides chained to the
 parent's map, and `var()` lookups walk the chain. The `@property`-registered
 path (where non-inheriting/initial semantics force a flat table) is unchanged.
 This cut the var-heavy complex suites 2–4x with no change to the light suites,
@@ -206,16 +206,16 @@ Together these drop the complex-DOM suites ~20-29% (see the table).
 A fresh 60-sample profile after these changes shows the remaining cost is the
 **inherent full-document re-cascade**: leaf time is dominated by the glibc
 allocator (`_int_malloc`/`free`/`malloc_consolidate`, ~45%) and `g_str_hash` /
-`g_hash_table_lookup` from selector-index matching, with `nd_style_free` high
+`g_hash_table_lookup` from selector-index matching, with `ns_style_free` high
 in the inclusive frames — i.e. allocating and freeing ~7000 computed styles
-(and their `nd_css_value`s) on each of the 100 reflows. The two levers that
+(and their `ns_css_value`s) on each of the 100 reflows. The two levers that
 remain, both larger and correctness-sensitive, are:
 
 1. **Incremental restyle** — re-cascade only the mutated subtree (plus the
    siblings/ancestors that structural selectors depend on) instead of the whole
    document, turning the add phase from O(items x nodes) toward O(items).
-2. **Refcount `nd_css_value`** — `cascade_for` deep-copies every matched and
-   inherited value into each element's style and `nd_style_free` frees them
+2. **Refcount `ns_css_value`** — `cascade_for` deep-copies every matched and
+   inherited value into each element's style and `ns_style_free` frees them
    all; sharing immutable values by refcount would remove most of the per-node
    alloc/free churn. This needs an audit that no site mutates a value in place.
 
@@ -233,17 +233,17 @@ scripts/sample-profile.sh <pid> 150
 A sampling profile of the `TodoMVC-*-Complex-DOM` add phases (now that the
 cascade allocator churn is tamed by value refcounting and shared inherited
 custom-property tables) showed the dominant remaining engine cost shifting
-from the cascade to `nd_walk_first_match` — the `querySelector` /
+from the cascade to `ns_walk_first_match` — the `querySelector` /
 `querySelectorAll` slow path, which walked the whole ~6600-node document and
 tested every element. The framework suites issue per-item selector queries
 over the top-level document on each of the 100 inserts.
 
-`nd_query_selector_simple` already short-circuits bare `#id`, `.class`, and
+`ns_query_selector_simple` already short-circuits bare `#id`, `.class`, and
 `tag` queries through the document id/class/tag indices. The slow path now
 applies the same idea to compound and descendant selectors via a **rightmost
 key bucket**: for a single-selector query whose subject (rightmost) compound
 carries a positive id/class/tag, candidates are gathered from that document
-index and verified with the full `nd_css_selector_matches` (which already does
+index and verified with the full `ns_css_selector_matches` (which already does
 right-to-left combinator matching), instead of walking the subtree. The
 candidate set is provably identical to the walk's — the document indices skip
 `<template>` content with the same guard the walk uses — so only ordering

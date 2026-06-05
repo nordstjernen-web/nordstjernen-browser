@@ -91,7 +91,7 @@ Headless rendering works the same as on Linux:
 - **Sandbox.** The Linux Landlock sandbox is Linux-only. On macOS,
   the only startup-side restriction is the same refuse-root check
   used on Linux — `nordstjernen` exits with status 77 if launched
-  via `sudo` unless `ND_ALLOW_ROOT=1` is set.
+  via `sudo` unless `NS_ALLOW_ROOT=1` is set.
 - **Keyboard shortcuts.** Every accelerator uses GTK's `<Primary>`
   modifier, which maps to ⌘ on macOS. So `⌘L` focuses the URL bar,
   `⌘T` / `⌘N` open a new window, `⌘R` reloads, `⌘W` closes the
@@ -138,7 +138,7 @@ There is no iOS build today. The blockers are real, not speed-of-light:
    stands and the entitlements / notarisation paperwork for an
    alt-engine browser is non-trivial.
 3. **No `fork`/`exec` for new-window.** iOS apps run a single
-   process. The `nd_spawn_window` path that re-execs the binary
+   process. The `ns_spawn_window` path that re-execs the binary
    for OS-level isolation simply cannot exist; isolation would
    need to be inside one process, or shelved.
 4. **Cairo and Pango are not first-class on iOS.** They build,

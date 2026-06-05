@@ -29,7 +29,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | HTML tokenizer + tree construction | in-tree lexbor, `src/html_lexbor.c` |
 | Parse dispatch, charset decode | `src/html.c` |
 | DOM tree + node APIs | `src/dom.c`, exposed in `src/js.c` |
-| WHATWG URL | lexbor URL module via `src/net.c` (`nd_url_*`) |
+| WHATWG URL | lexbor URL module via `src/net.c` (`ns_url_*`) |
 | CSS cascade / selectors | `src/css.c`, `src/css.h` |
 | Layout (block/inline/flex/grid/table) | `src/layout.c`, `src/layout.h` |
 | Paint (Cairo) / text (Pango) | `src/paint.c`, `src/render.c`, `src/font.c` |
@@ -50,10 +50,10 @@ standards mode (see [§13](#13-the-html-syntax)).
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| WHATWG URL parsing & serialisation | ✅ | lexbor URL module via `nd_url_resolve`, `nd_url_parts_new`, `nd_url_host_from`, `nd_url_origin_from` in `src/net.c` |
+| WHATWG URL parsing & serialisation | ✅ | lexbor URL module via `ns_url_resolve`, `ns_url_parts_new`, `ns_url_host_from`, `ns_url_origin_from` in `src/net.c` |
 | IDN / Punycode | ✅ | handled inside the lexbor URL module |
-| Origin & same-origin/same-site | ✅ | `nd_url_same_origin`, `nd_url_is_same_site` (`src/net.c`) |
-| Character encodings → UTF-8 | ✅ | uchardet detection in `nd_html_decode_body` (`src/html.c`), `g_convert` to UTF-8, Latin-1 last-resort |
+| Origin & same-origin/same-site | ✅ | `ns_url_same_origin`, `ns_url_is_same_site` (`src/net.c`) |
+| Character encodings → UTF-8 | ✅ | uchardet detection in `ns_html_decode_body` (`src/html.c`), `g_convert` to UTF-8, Latin-1 last-resort |
 | Content-type sniffing | 🟡 | charset sniffing delegated to uchardet; no full MIME sniffing standard |
 | Reflected content attributes / IDL | ✅ | typed reflection in `src/js.c`: string, URL (resolved to absolute), boolean (presence), `long`/`unsigned long` with defaults and spec clamping (e.g. `colSpan` → [1,1000], `rowSpan` → [0,65534]), numeric `progress`/`meter` range getters (`value`/`max`/`position`, `min`/`low`/`high`/`optimum`), and **enumerated** attributes canonicalised to known keywords with missing-/invalid-value defaults (`type`, `loading`, `decoding`, `method`, `crossOrigin`, `referrerPolicy`, `draggable` true/false/auto) |
 | Microsyntaxes (numbers, dates/times, colours, tokens) | 🟡 | integer/non-negative-integer parsing drives reflection; date/month/week/time/local-date-time parsing & serialisation back the form `valueAsNumber`/`valueAsDate` APIs (`src/js.c`); the legacy-colour-value algorithm drives presentational hints (`bgcolor`/`text`/`<font color>`, `parse_legacy_color` in `src/css.c`); space/comma-separated tokens handled |
@@ -80,13 +80,13 @@ standards mode (see [§13](#13-the-html-syntax)).
 | Element | Status | Notes |
 |---------|:--:|------|
 | `title` | ✅ | window/tab title; `title.text` IDL attribute returns/sets the child text content per spec |
-| `base` (`href`, `target`) | ✅ | `href` feeds URL resolution via `nd_url_resolve` |
+| `base` (`href`, `target`) | ✅ | `href` feeds URL resolution via `ns_url_resolve` |
 | `link rel="stylesheet"` | ✅ | fetched and cascaded (`src/css.c`) |
 | `link rel="icon"` | ✅ | favicon fetched as image |
 | `link rel="preload"`/`prefetch`/`dns-prefetch` | 🟡 | parsed as a generic link; no dedicated preload queue |
 | `meta charset` | ✅ | feeds charset decode |
-| `meta name="viewport"` | 🟡 | parsed; viewport width/height come from `nd_css_set_viewport` (`src/css.c`); not all directives enforced |
-| `meta http-equiv` (CSP, refresh, etc.) | 🟡 | CSP/Referrer-Policy honoured where reflected; `refresh` follows the WHATWG shared-declarative-refresh parsing (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL) and is also honoured from the HTTP `Refresh` response header (`src/net.c` → `nd_window_apply_meta_refresh` in `src/main.c`) |
+| `meta name="viewport"` | 🟡 | parsed; viewport width/height come from `ns_css_set_viewport` (`src/css.c`); not all directives enforced |
+| `meta http-equiv` (CSP, refresh, etc.) | 🟡 | CSP/Referrer-Policy honoured where reflected; `refresh` follows the WHATWG shared-declarative-refresh parsing (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL) and is also honoured from the HTTP `Refresh` response header (`src/net.c` → `ns_window_apply_meta_refresh` in `src/main.c`) |
 | `meta name="referrer"` | ✅ | Referrer-Policy applied in `src/net.c` |
 | `style` (inline sheet) | ✅ | parsed and cascaded by `src/css.c` |
 
@@ -122,8 +122,8 @@ elements (`head title meta link style script noscript template`) to
 | `target` | ✅ | stored on the link range |
 | `rel` (`noopener`/`noreferrer`/`nofollow`) | 🟡 | parsed; `noreferrer` interacts with Referrer-Policy; `noopener` semantics limited (single browsing context) |
 | `download` | 🟡 | recognised; save flow limited |
-| `HTMLHyperlinkElementUtils` (`href`/`protocol`/`host`/`hostname`/`port`/`pathname`/`search`/`hash`/`origin`) | ✅ | typed URL decomposition via `nd_element_anchor_part_get` / `nd_element_anchor_href_set` (`src/js.c`); `href` resolves to absolute on read, parses on write |
-| `a.text` (descendant text content) | ✅ | per-spec dispatch in `nd_element_get_text` |
+| `HTMLHyperlinkElementUtils` (`href`/`protocol`/`host`/`hostname`/`port`/`pathname`/`search`/`hash`/`origin`) | ✅ | typed URL decomposition via `ns_element_anchor_part_get` / `ns_element_anchor_href_set` (`src/js.c`); `href` resolves to absolute on read, parses on write |
+| `a.text` (descendant text content) | ✅ | per-spec dispatch in `ns_element_get_text` |
 | `ins` / `del` | 🟡 | styled by UA CSS (ins green, del dark red); no edit semantics |
 
 ## §4.8 Embedded content
@@ -131,17 +131,17 @@ elements (`head title meta link style script noscript template`) to
 | Element | Status | Notes |
 |---------|:--:|------|
 | `img` | ✅ | layout + decode pipeline |
-| `img srcset` / `sizes` | 🟡→✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`nd_css_sizes_resolve`); width & density descriptors selected by viewport/density (recent layout work) |
-| `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `nd_css_media_query_matches` |
+| `img srcset` / `sizes` | 🟡→✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density (recent layout work) |
+| `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
 | `img loading="lazy"` | ✅ | fetch deferred |
 | Decode pipeline | ✅/🟡 | Wuffs (PNG/APNG, GIF, BMP, JPEG) → GDK-Pixbuf (WebP/TIFF/ICO) → librsvg (static SVG); AVIF if built with libavif |
-| `iframe` | 🟡 | `src`/`srcdoc` load; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`nd_iframe_effective_sandbox` in `src/js.c`) |
+| `iframe` | 🟡 | `src`/`srcdoc` load; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
-| `video` | 🟡 | poster + play overlay; click hands the source URL to the system media player (`nd_media_launch_external`) — no in-process codec. Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp |
+| `video` | 🟡 | poster + play overlay; click hands the source URL to the system media player (`ns_media_launch_external`) — no in-process codec. Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp |
 | `audio` | 🟡 | click hands the source URL to the system media player; no in-process codec |
 | `track` (captions) | ❌ | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path; not rendered |
-| `map` / `area` (image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`nd_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
+| `map` / `area` (image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
 | MathML | ❌ | parsed into DOM; not laid out |
 
 ## §4.9 Tabular data
@@ -189,14 +189,14 @@ validation.
 | `FormData` (`append`/`set`/`entries`/…) | ✅ | `append(name, blob, filename)` honours the third-argument filename per spec |
 | Form ownership / successful controls | ✅ (`form="id"` owners, disabled fieldsets, default checkbox/radio `"on"` values, multi-select values, form.elements named lookup/RadioNodeList, associated submit/reset activation with cancelable reset events) |
 | Submission, `application/x-www-form-urlencoded` | ✅ (HTML `+` space encoding; `requestSubmit()` validates/fires `SubmitEvent` with `submitter`, while `submit()` bypasses both) |
-| Submission, `multipart/form-data` | ✅ (full UTF-8 serialiser: native form submit (`src/main.c`), and `fetch`/`XMLHttpRequest` bodies of `FormData` and `URLSearchParams` (`src/js.c` `nd_js_form_data_serialize` / `nd_js_usp_serialize`) — CSPRNG boundary, per-entry `Content-Disposition`, Blob/File parts get a `Content-Type` from `blob.type` (default `application/octet-stream`) and the entry's filename (or `blob` if unspecified), name/filename quoted per WHATWG (only LF/CR/`"` escaped), and `URLSearchParams` bodies auto-pick `application/x-www-form-urlencoded;charset=UTF-8` — caller-set `Content-Type` always wins) |
+| Submission, `multipart/form-data` | ✅ (full UTF-8 serialiser: native form submit (`src/main.c`), and `fetch`/`XMLHttpRequest` bodies of `FormData` and `URLSearchParams` (`src/js.c` `ns_js_form_data_serialize` / `ns_js_usp_serialize`) — CSPRNG boundary, per-entry `Content-Disposition`, Blob/File parts get a `Content-Type` from `blob.type` (default `application/octet-stream`) and the entry's filename (or `blob` if unspecified), name/filename quoted per WHATWG (only LF/CR/`"` escaped), and `URLSearchParams` bodies auto-pick `application/x-www-form-urlencoded;charset=UTF-8` — caller-set `Content-Type` always wins) |
 | `formaction`/`formmethod`/`formenctype` overrides | ✅ |
 
 ## §4.11 Interactive elements
 
 | Element | Status | Notes |
 |---------|:--:|------|
-| `details` / `summary` | 🟡 | open/close transitions dispatch the spec's `ToggleEvent` pair — a (non-cancelable) `beforetoggle` then a `toggle`, each carrying `oldState` and `newState` ∈ `"open"`/`"closed"`; opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule (`nd_js_details_toggle_open` in `src/js.c`, hooked from the click path, the `open` IDL setter, and `setAttribute`/`removeAttribute`); UA-styled disclosure; no animation |
+| `details` / `summary` | 🟡 | open/close transitions dispatch the spec's `ToggleEvent` pair — a (non-cancelable) `beforetoggle` then a `toggle`, each carrying `oldState` and `newState` ∈ `"open"`/`"closed"`; opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule (`ns_js_details_toggle_open` in `src/js.c`, hooked from the click path, the `open` IDL setter, and `setAttribute`/`removeAttribute`); UA-styled disclosure; no animation |
 | `dialog` | ✅ | `open`/`show()`/`showModal()`/`close(result)` and `returnValue` implemented (`src/js.c`); `method="dialog"` forms close the dialog with the submitter's value; `requestClose(returnValue?)` (and an Escape press on the topmost open modal) fires a cancelable `cancel` event and, if not prevented, closes the dialog and fires `close` — matching the spec's close-watcher semantics. `showModal()` now puts the dialog in the top layer (painted on top of an author `::backdrop` fill, `src/paint.c`), moves focus to its `autofocus`/first focusable descendant, traps focus by making the rest of the document inert, and restores focus to the opener on close |
 | `popover` attribute | 🟡 | open/closed state, `showPopover`/`hidePopover`/`togglePopover`, `popovertarget` activation, and target/action reflection; open/close transitions dispatch the spec `ToggleEvent` pair — a `beforetoggle` (cancelable on open, so `preventDefault()` keeps the popover closed) then a `toggle`, each with `oldState`/`newState`; limited top-layer behaviour |
 
@@ -204,7 +204,7 @@ validation.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `script` inline / external | ✅ | `nd_js_run_scripts_in_doc` (`src/js.c`); `script.text` returns/sets the child text content per spec |
+| `script` inline / external | ✅ | `ns_js_run_scripts_in_doc` (`src/js.c`); `script.text` returns/sets the child text content per spec |
 | `async` / `defer` | ✅ | `defer` delays to end of parse |
 | `type="module"` / `nomodule` | 🟡 | modules detected and run; full module graph/`import` resolution limited |
 | Engine | ✅ | QuickJS-ng (in-tree, **interpreter only, no JIT** — W^X holds); ≈ES2020+; per-call eval budget plus a 60 s absolute execution monitor that halts a runaway page (armed on the outermost JS entry, enforced in the interrupt callback — `src/js.c`) |
@@ -258,10 +258,10 @@ surface).
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `hidden` attribute | ✅ | mapped to `display:none` |
-| `inert` attribute | ✅ | excludes the subtree from focus (`focus()`, sequential navigation) and click activation, and an open modal dialog makes the rest of the document inert (`nd_dom_set_active_modal` → `nd_element_effectively_inert`) |
+| `inert` attribute | ✅ | excludes the subtree from focus (`focus()`, sequential navigation) and click activation, and an open modal dialog makes the rest of the document inert (`ns_dom_set_active_modal` → `ns_element_effectively_inert`) |
 | Event dispatch / cancellation | 🟡 | DOM listeners, bubbling, `preventDefault()`, and inline `return false`; cancellation now honours `event.cancelable` |
-| `contenteditable` | ✅ | in-page plaintext editing: a `contenteditable` host (`true`, the empty string, or `plaintext-only`) is focusable by click or Tab and edits as a single plaintext run — on focus its content is flattened to text, then the shared text-entry machinery (`nd_node_editable_value`/`nd_node_set_editable_value` in `src/dom.c`) drives a rendered caret, text selection, keyboard caret navigation (arrows, Home/End), insertion, Backspace/Delete, Enter→newline, and copy/cut/paste. Newlines in the host render as forced line breaks (`collect_walk` in `src/layout.c`); `beforeinput`/`input` fire and `document.activeElement`/`:focus` stay in sync. Rich inline structure is not preserved across an edit (the plaintext model); there is no per-range rich-text formatting |
-| `tabindex` / focus order | ✅ | sequential focus navigation (`nd_js_sequential_focus_target` in `src/js.c`) honours `tabindex` ordering — positive values first in ascending order, then `0`/auto in tree order, negative excluded — skipping disabled/inert/hidden controls; Tab / Shift+Tab walk it (`src/main.c`), and `focus()`/`blur()` route through the canonical `nd_js_set_focus`, keeping `document.activeElement` and `:focus` in sync |
+| `contenteditable` | ✅ | in-page plaintext editing: a `contenteditable` host (`true`, the empty string, or `plaintext-only`) is focusable by click or Tab and edits as a single plaintext run — on focus its content is flattened to text, then the shared text-entry machinery (`ns_node_editable_value`/`ns_node_set_editable_value` in `src/dom.c`) drives a rendered caret, text selection, keyboard caret navigation (arrows, Home/End), insertion, Backspace/Delete, Enter→newline, and copy/cut/paste. Newlines in the host render as forced line breaks (`collect_walk` in `src/layout.c`); `beforeinput`/`input` fire and `document.activeElement`/`:focus` stay in sync. Rich inline structure is not preserved across an edit (the plaintext model); there is no per-range rich-text formatting |
+| `tabindex` / focus order | ✅ | sequential focus navigation (`ns_js_sequential_focus_target` in `src/js.c`) honours `tabindex` ordering — positive values first in ascending order, then `0`/auto in tree order, negative excluded — skipping disabled/inert/hidden controls; Tab / Shift+Tab walk it (`src/main.c`), and `focus()`/`blur()` route through the canonical `ns_js_set_focus`, keeping `document.activeElement` and `:focus` in sync |
 | `accesskey` | 🟡 | parsed; no key binding |
 | `spellcheck` | 🟡 | parsed; no spell-check UI |
 | `autocapitalize` / `enterkeyhint` | 🟡 | reflected in IDL; advisory only |
@@ -296,11 +296,11 @@ surface).
 | `crypto.getRandomValues` / `crypto.randomUUID` | ✅ | CSPRNG-backed |
 | `crypto.subtle` (Web Cryptography) | ✅ | full SubtleCrypto over OpenSSL libcrypto (`src/webcrypto.c`): `digest`, `generateKey`, `importKey`, `exportKey`, `sign`, `verify`, `encrypt`, `decrypt`, `deriveBits`, `deriveKey`. Algorithms: HMAC; AES-GCM/CBC/CTR; RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP; ECDSA and ECDH on P-256/384/521; PBKDF2; HKDF. Key formats `raw`/`jwk`/`spki`/`pkcs8`; ECDSA uses the raw r‖s signature encoding. Verified against NIST AES-GCM, RFC 6070 PBKDF2 and RFC 5869 HKDF vectors |
 | `structuredClone` (§2.7) | ✅ | true serialize/deserialize in `src/js.c`: cycles & shared references, `Map`/`Set`/`Date`/`RegExp`, `ArrayBuffer`/typed arrays/`DataView`, `Blob`/`File`, `Error` subtypes (name/message/stack), `undefined`; `DataCloneError` for functions/symbols. Transfer lists remain unsupported; `Worker.postMessage` rejects non-empty transfer lists. |
-| `DOMParser` / `XMLSerializer` | ✅ | The returned `Document` carries the live spec accessors — `documentElement`, `body`, `head`, `title`, `nodeType` (`= 9`) — populated by `nd_attach_document_view` (`src/js.c`); `text/html` parses through the full HTML document parser (auto-wraps `<html><head><body>`); MIME types with `xml` or `svg` parse through the fragment parser so the supplied root (e.g. `<svg>`) becomes `documentElement` rather than being wrapped |
+| `DOMParser` / `XMLSerializer` | ✅ | The returned `Document` carries the live spec accessors — `documentElement`, `body`, `head`, `title`, `nodeType` (`= 9`) — populated by `ns_attach_document_view` (`src/js.c`); `text/html` parses through the full HTML document parser (auto-wraps `<html><head><body>`); MIME types with `xml` or `svg` parse through the fragment parser so the supplied root (e.g. `<svg>`) becomes `documentElement` rather than being wrapped |
 | `fetch` / `Response` body | ✅ | binary-safe: response bytes are attached as an `ArrayBuffer` on `_bodyBuffer` and the body consumers (`text` / `json` / `blob` / `arrayBuffer` / `bytes` / `formData`) read from it through `TextDecoder` / `Uint8Array`, so non-UTF-8 bytes survive round-tripping (PNG, MP4, etc.) instead of being mangled by JS-string conversion |
 | `XMLHttpRequest.responseType` | ✅ | `""`/`"text"`, `"json"`, `"arraybuffer"` (`ArrayBuffer`), `"blob"` (`Blob`, `type` from `Content-Type`), `"document"` (delegates to `DOMParser`, XML mode picked when the response is `*xml*` or SVG); `responseText` stays populated regardless for compatibility |
 | `AbortSignal` + `fetch(url, {signal})` | ✅ | `AbortSignal.abort(reason)` and `AbortController().abort(reason)` cancel an in-flight `fetch` — the in-progress curl transfer is interrupted via `GCancellable` (xferinfo callback), the promise is rejected with the signal's `reason` (or a synthetic `AbortError`), and the abort listener is cleaned up when the state is freed. A pre-aborted signal rejects synchronously without touching the network. `AbortSignal.timeout(ms)` schedules a real `g_timeout_add` that flips the signal and fires `abort` with a `TimeoutError`. `AbortSignal.any([s1, s2, …])` returns a composite signal that aborts as soon as any input does, copying the firing signal's `reason` (and is immediately aborted if any input is already aborted) |
-| `navigator.sendBeacon(url, body?)` | ✅ | fire-and-forget HTTP POST through the regular fetch pipeline (`nd_navigator_sendBeacon` in `src/js.c`); body type is inferred and the Content-Type chosen accordingly — string → `text/plain;charset=UTF-8`, `Blob`/`File` → `blob.type`, `URLSearchParams` → urlencoded, `FormData` → multipart with CSPRNG boundary, `ArrayBuffer`/typed array → raw bytes. Same-origin policy and the rest of the fetch security pipeline apply. Returns `false` on non-string URL or non-`http(s)` scheme; otherwise `true` |
+| `navigator.sendBeacon(url, body?)` | ✅ | fire-and-forget HTTP POST through the regular fetch pipeline (`ns_navigator_sendBeacon` in `src/js.c`); body type is inferred and the Content-Type chosen accordingly — string → `text/plain;charset=UTF-8`, `Blob`/`File` → `blob.type`, `URLSearchParams` → urlencoded, `FormData` → multipart with CSPRNG boundary, `ArrayBuffer`/typed array → raw bytes. Same-origin policy and the rest of the fetch security pipeline apply. Returns `false` on non-string URL or non-`http(s)` scheme; otherwise `true` |
 | `navigator.clipboard.writeText(text)` | 🟡 | in a windowed context, writes through the GTK clipboard (`gdk_clipboard_set_text`) and resolves; in headless / no-clipboard contexts rejects with `NotAllowedError`. Other clipboard methods (`readText`/`read`/`write`) still reject — read access is intentionally not exposed |
 | `navigator.*` device APIs (geolocation, sensors, …) | 🚫 | by design |
 
@@ -416,7 +416,7 @@ CSS support (abridged):
 - ✅ `text-indent` — indents the first formatted line of a block's
   inline content (length or percentage of the content width), including
   large negative sprite-hiding indents used with clipped inline-block
-  logos (`nd_text_indent_px` in `src/layout.c`).
+  logos (`ns_text_indent_px` in `src/layout.c`).
 - ✅ `white-space`: `normal`/`nowrap` collapse, `pre`/`pre-wrap`/
   `break-spaces` preserve, and `pre-line` collapses runs of spaces/tabs
   while preserving newlines as forced breaks (`white_space_mode` in
@@ -499,7 +499,7 @@ path in `src/layout.h`.
 | `applet` | 🚫 | no Java; `display:none` |
 | `marquee` | 🟡 | renders as static block; no scrolling |
 | `basefont` `noembed` `plaintext` `xmp` `isindex` | 🚫 | `display:none` / inert |
-| Presentational attributes (`align`, `bgcolor`, `<font>`) | 🟡 | a subset mapped to CSS where common (`presentational_hints_css` in `src/css.c`): `bgcolor`/`text`/`<font color/face/size>`, `width`/`height`, `hspace`/`vspace`, `<hr align/color/size>`, and the table family — `cellspacing`→`border-spacing`, `cellpadding`→cell `padding`, `<td/th align/valign/nowrap>`, `<table align=left/right>`→`float` and `align=center`→auto side margins (centred by `layout_table`), and **`<table border=N>`** maps the legacy grid: an outer table border plus a `1px solid` border on every `td`/`th` (the classic `border="1"` grid), while `border="0"` stays gridless. The legacy **list attributes** are honoured in `src/paint.c`: `<ol start>`/`<ol reversed>`/`<li value>` drive ordinal numbering (`list_item_ordinal` — start seeds the first number, reversed counts down, a `value` resets the running count), and `<ol type>`/`<ul type>`/`<li type>` map to `list-style-type` as a presentational hint (`presentational_hints_css` in `src/css.c`, applied at `ND_CSS_ORIGIN_PRESENTATIONAL` so it overrides the UA default but loses to author CSS): ol/li `1`/`a`/`A`/`i`/`I` → decimal / lower- and upper-alpha / lower- and upper-roman (case-sensitive), ul/li `disc`/`circle`/`square` (case-insensitive) |
+| Presentational attributes (`align`, `bgcolor`, `<font>`) | 🟡 | a subset mapped to CSS where common (`presentational_hints_css` in `src/css.c`): `bgcolor`/`text`/`<font color/face/size>`, `width`/`height`, `hspace`/`vspace`, `<hr align/color/size>`, and the table family — `cellspacing`→`border-spacing`, `cellpadding`→cell `padding`, `<td/th align/valign/nowrap>`, `<table align=left/right>`→`float` and `align=center`→auto side margins (centred by `layout_table`), and **`<table border=N>`** maps the legacy grid: an outer table border plus a `1px solid` border on every `td`/`th` (the classic `border="1"` grid), while `border="0"` stays gridless. The legacy **list attributes** are honoured in `src/paint.c`: `<ol start>`/`<ol reversed>`/`<li value>` drive ordinal numbering (`list_item_ordinal` — start seeds the first number, reversed counts down, a `value` resets the running count), and `<ol type>`/`<ul type>`/`<li type>` map to `list-style-type` as a presentational hint (`presentational_hints_css` in `src/css.c`, applied at `NS_CSS_ORIGIN_PRESENTATIONAL` so it overrides the UA default but loses to author CSS): ol/li `1`/`a`/`A`/`i`/`I` → decimal / lower- and upper-alpha / lower- and upper-roman (case-sensitive), ul/li `disc`/`circle`/`square` (case-insensitive) |
 
 ---
 
@@ -548,7 +548,7 @@ closer to plain HTML.
 
 `src/mobile.c` performs two things, both keyed on the request host:
 
-- `nd_mobile_rewrite_url` swaps the host before fetch:
+- `ns_mobile_rewrite_url` swaps the host before fetch:
   `*.facebook.com` → `m.facebook.com`,
   `www.youtube.com` / `youtube.com` / `music.youtube.com` →
   `m.youtube.com`,
@@ -556,7 +556,7 @@ closer to plain HTML.
   `new.reddit.com` → `old.reddit.com` (the legacy server-side
   rendered variant Reddit still maintains; the post-2023 Shreddit
   front-end is unrenderable without a full custom-element runtime).
-- `nd_mobile_force_host` makes the network layer (`src/net.c`) send a
+- `ns_mobile_force_host` makes the network layer (`src/net.c`) send a
   current iOS Safari `User-Agent` for the Facebook/YouTube hosts plus
   YouTube's CDN hosts (`*.googlevideo.com`, `*.ytimg.com`,
   `*.ggpht.com`), and exposes the same UA through

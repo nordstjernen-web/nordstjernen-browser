@@ -47,8 +47,8 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz
     if (ca && *ca) setenv("CURL_CA_BUNDLE", ca, 1);
     free(dir);
     free(ca);
-    int rc = nd_browser_init();
-    LOGI("nd_browser_init rc=%d", rc);
+    int rc = ns_browser_init();
+    LOGI("ns_browser_init rc=%d", rc);
     return rc;
 }
 
@@ -59,7 +59,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
 {
     (void)clazz;
     char *u = jstr_dup(env, url);
-    nd_browser *b = u ? nd_browser_open(u, viewport_width, settle_ms) : NULL;
+    ns_browser *b = u ? ns_browser_open(u, viewport_width, settle_ms) : NULL;
     free(u);
     return (jlong)(intptr_t)b;
 }
@@ -69,9 +69,9 @@ Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env, jclass c
                                                            jlong handle)
 {
     (void)clazz;
-    nd_browser *b = (nd_browser *)(intptr_t)handle;
+    ns_browser *b = (ns_browser *)(intptr_t)handle;
     int w = 0, h = 0;
-    if (nd_browser_page_size(b, &w, &h) != 0) return NULL;
+    if (ns_browser_page_size(b, &w, &h) != 0) return NULL;
     jintArray arr = (*env)->NewIntArray(env, 2);
     if (!arr) return NULL;
     jint vals[2] = { w, h };
@@ -86,7 +86,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env, jclass cla
                                                          jobject bitmap)
 {
     (void)clazz;
-    nd_browser *b = (nd_browser *)(intptr_t)handle;
+    ns_browser *b = (ns_browser *)(intptr_t)handle;
     if (!b || !bitmap) return JNI_FALSE;
 
     AndroidBitmapInfo info;
@@ -100,7 +100,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env, jclass cla
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS)
         return JNI_FALSE;
 
-    int rc = nd_browser_render_rgba(b, scroll_x, scroll_y,
+    int rc = ns_browser_render_rgba(b, scroll_x, scroll_y,
                                     (int)info.width, (int)info.height, scale,
                                     (unsigned char *)pixels, (int)info.stride);
     AndroidBitmap_unlockPixels(env, bitmap);
@@ -112,7 +112,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeTitle(JNIEnv *env, jclass claz
                                                         jlong handle)
 {
     (void)clazz;
-    char *title = nd_browser_title((nd_browser *)(intptr_t)handle);
+    char *title = ns_browser_title((ns_browser *)(intptr_t)handle);
     if (!title) return NULL;
     jstring s = (*env)->NewStringUTF(env, title);
     free(title);
@@ -124,8 +124,8 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRenderText(JNIEnv *env, jclass
                                                              jlong handle)
 {
     (void)clazz;
-    nd_browser *b = (nd_browser *)(intptr_t)handle;
-    char *text = nd_browser_render_text(b);
+    ns_browser *b = (ns_browser *)(intptr_t)handle;
+    char *text = ns_browser_render_text(b);
     if (!text) return NULL;
     jstring s = (*env)->NewStringUTF(env, text);
     free(text);
@@ -137,8 +137,8 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeLinkAt(JNIEnv *env, jclass cla
                                                          jlong handle, jint x, jint y)
 {
     (void)clazz;
-    nd_browser *b = (nd_browser *)(intptr_t)handle;
-    char *url = nd_browser_link_at(b, x, y);
+    ns_browser *b = (ns_browser *)(intptr_t)handle;
+    char *url = ns_browser_link_at(b, x, y);
     if (!url) return NULL;
     jstring s = (*env)->NewStringUTF(env, url);
     free(url);
@@ -150,12 +150,12 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeClose(JNIEnv *env, jclass claz
                                                         jlong handle)
 {
     (void)env; (void)clazz;
-    nd_browser_close((nd_browser *)(intptr_t)handle);
+    ns_browser_close((ns_browser *)(intptr_t)handle);
 }
 
 JNIEXPORT void JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeShutdown(JNIEnv *env, jclass clazz)
 {
     (void)env; (void)clazz;
-    nd_browser_shutdown();
+    ns_browser_shutdown();
 }

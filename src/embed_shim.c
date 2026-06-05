@@ -5,10 +5,10 @@
 
 #include <glib.h>
 
-const char *nd_app_self_exe(void);
+const char *ns_app_self_exe(void);
 
 const char *
-nd_app_self_exe(void)
+ns_app_self_exe(void)
 {
     return NULL;
 }

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_VIDEO_H
-#define ND_VIDEO_H
+#ifndef NS_VIDEO_H
+#define NS_VIDEO_H
 
 #include <glib.h>
 
@@ -12,29 +12,29 @@
 
 G_BEGIN_DECLS
 
-typedef struct nd_video {
+typedef struct ns_video {
     char        *url;
     int          natural_width;
     int          natural_height;
-    nd_texture  *poster_texture;
+    ns_texture  *poster_texture;
     gboolean     loaded;
     gboolean     failed;
-} nd_video;
+} ns_video;
 
-typedef struct nd_video_cache nd_video_cache;
-typedef struct nd_tab_worker  nd_tab_worker;
-typedef void (*nd_video_ready_cb)(nd_video *v, gpointer user_data);
+typedef struct ns_video_cache ns_video_cache;
+typedef struct ns_tab_worker  ns_tab_worker;
+typedef void (*ns_video_ready_cb)(ns_video *v, gpointer user_data);
 
-nd_video_cache *nd_video_cache_new(void);
-void            nd_video_cache_free(nd_video_cache *cache);
-void            nd_video_cache_set_worker(nd_video_cache *cache,
-                                          nd_tab_worker *worker);
+ns_video_cache *ns_video_cache_new(void);
+void            ns_video_cache_free(ns_video_cache *cache);
+void            ns_video_cache_set_worker(ns_video_cache *cache,
+                                          ns_tab_worker *worker);
 
-nd_video *nd_video_cache_get(nd_video_cache *cache,
+ns_video *ns_video_cache_get(ns_video_cache *cache,
                              const char *url,
                              const char *poster_url,
                              const char *top_url,
-                             nd_video_ready_cb cb,
+                             ns_video_ready_cb cb,
                              gpointer user_data);
 
 G_END_DECLS

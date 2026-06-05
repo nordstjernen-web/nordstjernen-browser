@@ -50,12 +50,12 @@ fresh box gets them in one command:
 
 - `mingw-w64-x86_64-ca-certificates` is a hard dependency of
   `mingw-w64-x86_64-curl`, so it always arrives with curl. It's
-  what makes HTTPS work — `src/net.c::nd_net_resolve_ca_bundle`
+  what makes HTTPS work — `src/net.c::ns_net_resolve_ca_bundle`
   hardcodes `C:/msys64/mingw64/etc/ssl/certs/ca-bundle.crt` in
   the Windows fallback list. With the package installed, dev
   builds reach `https://` without any env-var fiddling.
 - `mingw-w64-x86_64-uchardet` is the charset detector used by
-  `nd_html_decode_body`. Per `CLAUDE.md` it's a hard dependency;
+  `ns_html_decode_body`. Per `CLAUDE.md` it's a hard dependency;
   without it `meson setup` fails the `uchardet` pkg-config check.
 - `mingw-w64-x86_64-webp-pixbuf-loader` is a hard runtime
   dependency for WebP. The in-tree Wuffs decoder handles
@@ -180,7 +180,7 @@ Build the installer from the MINGW64 shell:
 The installer is intentionally **per-user**:
 
 - `RequestExecutionLevel user` — no UAC prompt, no Administrator
-  rights. This matches `src/security.c::nd_security_refuse_root`:
+  rights. This matches `src/security.c::ns_security_refuse_root`:
   the browser exits 77 if launched with elevated tokens, so a
   Program-Files install would only put the binary somewhere the
   process refuses to run from anyway.
@@ -233,7 +233,7 @@ the install dir.
 The exe self-bootstraps the runtime env (`GTK_DATA_PREFIX`,
 `GTK_EXE_PREFIX`, `XDG_DATA_DIRS`, `GDK_PIXBUF_MODULE_FILE`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`) from its own install directory
-inside `nd_win32_anchor_gtk_data` (`src/main.c`). Earlier bundles
+inside `ns_win32_anchor_gtk_data` (`src/main.c`). Earlier bundles
 shipped a `nordstjernen.cmd` wrapper that did this in a batch
 script, but launching a `.cmd` from Explorer flashes a console
 window for the lifetime of the script. Removing the wrapper and
@@ -283,8 +283,8 @@ source Firefox uses. We bundle it because:
   only exists on a machine with MSYS2 installed; on a fresh
   user box it is missing.
 
-`src/net.c::nd_net_resolve_ca_bundle` resolves the file at
-`nd_net_init()` time, in this order:
+`src/net.c::ns_net_resolve_ca_bundle` resolves the file at
+`ns_net_init()` time, in this order:
 
 1. `$CURL_CA_BUNDLE` env var, if set and the path exists.
 2. `$SSL_CERT_FILE` env var, same condition.
@@ -312,10 +312,10 @@ so we don't ship a bundled copy there.
   is a no-op. The intentional analogue (AppContainer / Job Object)
   is not yet implemented.
 - **Refuses to run as Administrator.** Mirrors the Linux refuse-root
-  check (`src/security.c::nd_security_refuse_root`). Elevation is
+  check (`src/security.c::ns_security_refuse_root`). Elevation is
   detected via `CheckTokenMembership` against the builtin
   Administrators SID; if the token is a member, the process prints a
-  warning to stderr and exits 77. `ND_ALLOW_ROOT=1` bypasses, same
+  warning to stderr and exits 77. `NS_ALLOW_ROOT=1` bypasses, same
   as Linux.
 - **Self-exe path** is resolved via `GetModuleFileNameW`, so
   Ctrl+N / target=_blank / middle-click correctly re-spawn the same

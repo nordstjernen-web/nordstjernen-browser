@@ -56,7 +56,7 @@ jobs:
 
       - name: Headless smoke test (musl, no X server needed)
         env:
-          ND_ALLOW_ROOT: '1'
+          NS_ALLOW_ROOT: '1'
         run: |
           ldd builddir/src/nordstjernen | grep -i musl || true
           ./builddir/src/nordstjernen \

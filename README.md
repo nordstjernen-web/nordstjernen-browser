@@ -110,7 +110,7 @@ moving parts:
 
 | Component | Role |
 |-----------|------|
-| [lexbor](https://github.com/lexbor/lexbor) | HTML5 → DOM parser, CSS, and the WHATWG URL module (`nd_url_*`) |
+| [lexbor](https://github.com/lexbor/lexbor) | HTML5 → DOM parser, CSS, and the WHATWG URL module (`ns_url_*`) |
 | [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng fork) | JavaScript engine — no JIT, browser-side hooks added in-tree |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG, GIF, BMP, JPEG, WebP (lossless) |
 
@@ -122,7 +122,7 @@ moving parts:
 | GLib / GModule | (ships with GTK) | core types, dynamic module loading |
 | Pango | (ships with GTK) | text shaping and layout |
 | libcurl | ≥ 7.85 | HTTP/2 networking, HSTS, cookies |
-| uchardet | — | charset detection for `nd_html_decode_body` |
+| uchardet | — | charset detection for `ns_html_decode_body` |
 | libpsl | — | public-suffix list for cookie scoping |
 | SQLite | — | IndexedDB persistent storage |
 | librsvg | ≥ 2.46 | SVG rendering / icons |

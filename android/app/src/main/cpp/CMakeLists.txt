@@ -6,7 +6,7 @@
 # only builds the thin JNI bridge.
 #
 # If that prebuilt engine .so is present for the ABI being built, the real
-# bridge (nd_jni.c) is compiled and linked against it. Otherwise a stub bridge
+# bridge (ns_jni.c) is compiled and linked against it. Otherwise a stub bridge
 # is built so the APK still assembles and runs with the engine reported
 # unavailable — useful for UI work and CI before the dep stack is cross-built.
 
@@ -24,11 +24,11 @@ if(EXISTS "${PREBUILT_ENGINE}")
     add_library(nordstjernen SHARED IMPORTED)
     set_target_properties(nordstjernen PROPERTIES IMPORTED_LOCATION "${PREBUILT_ENGINE}")
 
-    add_library(nordstjernen_jni SHARED nd_jni.c)
+    add_library(nordstjernen_jni SHARED ns_jni.c)
     target_include_directories(nordstjernen_jni PRIVATE "${ENGINE_HEADER_DIR}")
     target_link_libraries(nordstjernen_jni nordstjernen jnigraphics android log)
 else()
     message(WARNING "nordstjernen: prebuilt engine not found for ${ANDROID_ABI}; building stub bridge")
-    add_library(nordstjernen_jni SHARED nd_jni_stub.c)
+    add_library(nordstjernen_jni SHARED ns_jni_stub.c)
     target_link_libraries(nordstjernen_jni log)
 endif()

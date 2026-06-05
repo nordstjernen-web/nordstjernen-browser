@@ -10,60 +10,60 @@
 #ifndef __ANDROID__
 
 static GdkMemoryFormat
-to_gdk_format(nd_texture_format format)
+to_gdk_format(ns_texture_format format)
 {
-    return format == ND_TEXTURE_DEFAULT
+    return format == NS_TEXTURE_DEFAULT
                ? GDK_MEMORY_DEFAULT
                : GDK_MEMORY_B8G8R8A8_PREMULTIPLIED;
 }
 
-nd_texture *
-nd_texture_new(int width, int height, nd_texture_format format,
+ns_texture *
+ns_texture_new(int width, int height, ns_texture_format format,
                GBytes *bytes, gsize stride)
 {
     return gdk_memory_texture_new(width, height, to_gdk_format(format),
                                   bytes, stride);
 }
 
-nd_texture *
-nd_texture_ref(nd_texture *texture)
+ns_texture *
+ns_texture_ref(ns_texture *texture)
 {
     return texture ? g_object_ref(texture) : NULL;
 }
 
 void
-nd_texture_unref(nd_texture *texture)
+ns_texture_unref(ns_texture *texture)
 {
     if (texture) g_object_unref(texture);
 }
 
 void
-nd_texture_clear(nd_texture **texture)
+ns_texture_clear(ns_texture **texture)
 {
     g_clear_object(texture);
 }
 
 int
-nd_texture_get_width(nd_texture *texture)
+ns_texture_get_width(ns_texture *texture)
 {
     return gdk_texture_get_width(texture);
 }
 
 int
-nd_texture_get_height(nd_texture *texture)
+ns_texture_get_height(ns_texture *texture)
 {
     return gdk_texture_get_height(texture);
 }
 
 void
-nd_texture_download(nd_texture *texture, guchar *dst, gsize dst_stride)
+ns_texture_download(ns_texture *texture, guchar *dst, gsize dst_stride)
 {
     gdk_texture_download(texture, dst, dst_stride);
 }
 
 #else /* __ANDROID__ */
 
-struct nd_texture {
+struct ns_texture {
     gint    ref_count;
     int     width;
     int     height;
@@ -71,8 +71,8 @@ struct nd_texture {
     guchar *bgra;
 };
 
-nd_texture *
-nd_texture_new(int width, int height, nd_texture_format format,
+ns_texture *
+ns_texture_new(int width, int height, ns_texture_format format,
                GBytes *bytes, gsize stride)
 {
     (void)format;
@@ -84,7 +84,7 @@ nd_texture_new(int width, int height, nd_texture_format format,
     gsize needed = stride * (gsize)height;
     if (!src || src_len < needed) return NULL;
 
-    nd_texture *t = g_new0(nd_texture, 1);
+    ns_texture *t = g_new0(ns_texture, 1);
     t->ref_count = 1;
     t->width = width;
     t->height = height;
@@ -94,15 +94,15 @@ nd_texture_new(int width, int height, nd_texture_format format,
     return t;
 }
 
-nd_texture *
-nd_texture_ref(nd_texture *texture)
+ns_texture *
+ns_texture_ref(ns_texture *texture)
 {
     if (texture) g_atomic_int_inc(&texture->ref_count);
     return texture;
 }
 
 void
-nd_texture_unref(nd_texture *texture)
+ns_texture_unref(ns_texture *texture)
 {
     if (texture && g_atomic_int_dec_and_test(&texture->ref_count)) {
         g_free(texture->bgra);
@@ -111,28 +111,28 @@ nd_texture_unref(nd_texture *texture)
 }
 
 void
-nd_texture_clear(nd_texture **texture)
+ns_texture_clear(ns_texture **texture)
 {
     if (texture && *texture) {
-        nd_texture_unref(*texture);
+        ns_texture_unref(*texture);
         *texture = NULL;
     }
 }
 
 int
-nd_texture_get_width(nd_texture *texture)
+ns_texture_get_width(ns_texture *texture)
 {
     return texture ? texture->width : 0;
 }
 
 int
-nd_texture_get_height(nd_texture *texture)
+ns_texture_get_height(ns_texture *texture)
 {
     return texture ? texture->height : 0;
 }
 
 void
-nd_texture_download(nd_texture *texture, guchar *dst, gsize dst_stride)
+ns_texture_download(ns_texture *texture, guchar *dst, gsize dst_stride)
 {
     if (!texture || !dst) return;
     gsize row = (gsize)texture->width * 4;

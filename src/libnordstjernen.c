@@ -27,13 +27,13 @@
 #include "net.h"
 #include "paint.h"
 
-struct nd_browser {
-    nd_node        *doc;
-    nd_box         *layout;
+struct ns_browser {
+    ns_node        *doc;
+    ns_box         *layout;
     GHashTable     *styles;
-    nd_js          *js;
-    nd_anim        *anim;
-    nd_image_cache *images;
+    ns_js          *js;
+    ns_anim        *anim;
+    ns_image_cache *images;
     GHashTable     *css_cache;
     char           *base_url;
     int             vw;
@@ -42,32 +42,32 @@ struct nd_browser {
 };
 
 static void
-browser_relayout(nd_browser *b)
+browser_relayout(ns_browser *b)
 {
-    if (b->js && b->layout) nd_js_set_layout_root(b->js, NULL);
-    if (b->layout) { nd_box_free(b->layout); b->layout = NULL; }
-    if (b->js && b->styles) nd_js_set_style_table(b->js, NULL);
+    if (b->js && b->layout) ns_js_set_layout_root(b->js, NULL);
+    if (b->layout) { ns_box_free(b->layout); b->layout = NULL; }
+    if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
-    b->styles = nd_engine_relayout(b->doc, b->base_url, b->vw, b->vh,
+    b->styles = ns_engine_relayout(b->doc, b->base_url, b->vw, b->vh,
                                    b->images, b->anim, b->js,
                                    b->css_cache, NULL, 0, 0, &b->layout);
 }
 
 static void
-walk_max_bottom(const nd_box *b, double *out)
+walk_max_bottom(const ns_box *b, double *out)
 {
     if (!b) return;
     double bottom = b->y + b->content_height;
     if (bottom > *out) *out = bottom;
-    for (const nd_box *c = b->first_child; c; c = c->next_sibling)
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         walk_max_bottom(c, out);
 }
 
 static void
-browser_ensure_images(nd_browser *browser)
+browser_ensure_images(ns_browser *browser)
 {
     if (browser->images_fetched) return;
-    nd_engine_fetch_images(browser->layout, browser->base_url,
+    ns_engine_fetch_images(browser->layout, browser->base_url,
                            browser->images);
     browser_relayout(browser);
     browser->images_fetched = TRUE;
@@ -76,9 +76,9 @@ browser_ensure_images(nd_browser *browser)
 static void
 browser_flush(gpointer user_data)
 {
-    nd_browser *b = user_data;
+    ns_browser *b = user_data;
     if (!b || !b->js) return;
-    if (!b->layout || nd_js_consume_mutated(b->js))
+    if (!b->layout || ns_js_consume_mutated(b->js))
         browser_relayout(b);
 }
 
@@ -92,18 +92,18 @@ settle_quit_cb(gpointer user_data)
 static gboolean
 settle_tick_cb(gpointer user_data)
 {
-    nd_browser *b = user_data;
+    ns_browser *b = user_data;
     gint64 now = g_get_monotonic_time();
-    if (b->images) nd_image_cache_tick(b->images, now);
-    if (b->anim) nd_anim_tick(b->anim, now);
-    if (b->js && nd_js_run_animation_frame(b->js) &&
-        nd_js_consume_mutated(b->js))
+    if (b->images) ns_image_cache_tick(b->images, now);
+    if (b->anim) ns_anim_tick(b->anim, now);
+    if (b->js && ns_js_run_animation_frame(b->js) &&
+        ns_js_consume_mutated(b->js))
         browser_relayout(b);
     return G_SOURCE_CONTINUE;
 }
 
 static void
-browser_settle(nd_browser *b, int settle_ms)
+browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
@@ -120,26 +120,26 @@ static void browser_js_navigate(const char *url, gboolean reload, gpointer ud)
 { (void)url; (void)reload; (void)ud; }
 
 int
-nd_browser_init(void)
+ns_browser_init(void)
 {
-    nd_net_init();
-    nd_net_set_allow_file_urls(TRUE);
-    nd_cache_init();
-    nd_bcache_init();
-    nd_history_init();
-    nd_font_init();
+    ns_net_init();
+    ns_net_set_allow_file_urls(TRUE);
+    ns_cache_init();
+    ns_bcache_init();
+    ns_history_init();
+    ns_font_init();
     return 0;
 }
 
 void
-nd_browser_shutdown(void)
+ns_browser_shutdown(void)
 {
-    nd_font_shutdown();
-    nd_bcache_shutdown();
-    nd_history_shutdown();
-    nd_cache_shutdown();
-    nd_net_shutdown();
-    nd_config_shutdown();
+    ns_font_shutdown();
+    ns_bcache_shutdown();
+    ns_history_shutdown();
+    ns_cache_shutdown();
+    ns_net_shutdown();
+    ns_config_shutdown();
 }
 
 static char *
@@ -155,8 +155,8 @@ resolve_local_path(const char *url)
     return file_url;
 }
 
-nd_browser *
-nd_browser_open(const char *url, int viewport_width, int settle_ms)
+ns_browser *
+ns_browser_open(const char *url, int viewport_width, int settle_ms)
 {
     if (!url || !*url) return NULL;
 
@@ -164,9 +164,9 @@ nd_browser_open(const char *url, int viewport_width, int settle_ms)
     const char *fetch_url = file_url ? file_url : url;
 
     GError *err = NULL;
-    nd_response *resp = nd_engine_fetch_blocking(fetch_url, NULL, &err);
+    ns_response *resp = ns_engine_fetch_blocking(fetch_url, NULL, &err);
     if (!resp || resp->error || !resp->body) {
-        if (resp) nd_response_free(resp);
+        if (resp) ns_response_free(resp);
         g_clear_error(&err);
         g_free(file_url);
         return NULL;
@@ -176,41 +176,41 @@ nd_browser_open(const char *url, int viewport_width, int settle_ms)
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
     g_free(file_url);
 
-    char *decoded = nd_html_decode_body((const char *)resp->body->data,
+    char *decoded = ns_html_decode_body((const char *)resp->body->data,
                                         resp->body->len);
-    nd_node *doc = nd_html_parse(decoded ? decoded : "",
+    ns_node *doc = ns_html_parse(decoded ? decoded : "",
                                  decoded ? (gssize)strlen(decoded) : 0);
     g_free(decoded);
-    nd_response_free(resp);
+    ns_response_free(resp);
 
     int vw = viewport_width > 0 ? viewport_width : 1000;
     double vh = (double)vw * 0.75;
-    nd_css_set_viewport((double)vw, vh);
+    ns_css_set_viewport((double)vw, vh);
     const char *frag = strchr(url, '#');
-    nd_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
+    ns_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
 
-    nd_browser *b = g_new0(nd_browser, 1);
+    ns_browser *b = g_new0(ns_browser, 1);
     b->doc = doc;
     b->base_url = base;
     b->vw = vw;
     b->vh = vh;
     b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                          (GDestroyNotify)g_bytes_unref);
-    b->images = nd_image_cache_new();
-    b->styles = nd_engine_compute_cascade(doc, base, b->css_cache);
+    b->images = ns_image_cache_new();
+    b->styles = ns_engine_compute_cascade(doc, base, b->css_cache);
 
-    b->anim = nd_anim_new();
-    nd_engine_load_keyframes(b->anim, doc, base, b->css_cache);
-    nd_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
+    b->anim = ns_anim_new();
+    ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
+    ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
 
-    b->js = nd_js_new(browser_js_log, NULL,
+    b->js = ns_js_new(browser_js_log, NULL,
                       browser_js_mutated, NULL,
                       browser_js_navigate, NULL);
     if (b->js) {
-        nd_js_set_style_table(b->js, b->styles);
-        nd_js_set_image_cache(b->js, b->images);
-        nd_js_set_layout_flush_cb(b->js, browser_flush, b);
-        nd_js_run_scripts_in_doc(b->js, doc, base);
+        ns_js_set_style_table(b->js, b->styles);
+        ns_js_set_image_cache(b->js, b->images);
+        ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_run_scripts_in_doc(b->js, doc, base);
     }
 
     browser_settle(b, settle_ms);
@@ -219,11 +219,11 @@ nd_browser_open(const char *url, int viewport_width, int settle_ms)
 }
 
 char *
-nd_browser_render_text(nd_browser *browser)
+ns_browser_render_text(ns_browser *browser)
 {
     if (!browser || !browser->layout) return NULL;
     GString *out = g_string_new(NULL);
-    nd_engine_dump_text(browser->layout, out);
+    ns_engine_dump_text(browser->layout, out);
     char *text = malloc(out->len + 1);
     if (text) {
         memcpy(text, out->str, out->len);
@@ -234,29 +234,29 @@ nd_browser_render_text(nd_browser *browser)
 }
 
 int
-nd_browser_render_image(nd_browser *browser, const char *path)
+ns_browser_render_image(ns_browser *browser, const char *path)
 {
     if (!browser || !browser->layout || !path) return -1;
 
     browser_ensure_images(browser);
 
-    nd_paint_set_js(browser->js);
-    nd_paint_set_anim(browser->anim);
+    ns_paint_set_js(browser->js);
+    ns_paint_set_anim(browser->anim);
 
     int rc;
     gsize len = strlen(path);
     if (len >= 4 && g_ascii_strcasecmp(path + len - 4, ".pdf") == 0)
-        rc = nd_engine_write_pdf(browser->layout, path);
+        rc = ns_engine_write_pdf(browser->layout, path);
     else
-        rc = nd_engine_write_png(browser->layout, path);
+        rc = ns_engine_write_png(browser->layout, path);
 
-    nd_paint_set_anim(NULL);
-    nd_paint_set_js(NULL);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
     return rc;
 }
 
 int
-nd_browser_page_size(nd_browser *browser, int *out_width, int *out_height)
+ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
 {
     if (!browser || !browser->layout) return -1;
     double w = browser->layout->content_width;
@@ -270,7 +270,7 @@ nd_browser_page_size(nd_browser *browser, int *out_width, int *out_height)
 }
 
 int
-nd_browser_render_rgba(nd_browser *browser, int scroll_x, int scroll_y,
+ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
                        int width, int height, double scale,
                        unsigned char *out, int stride)
 {
@@ -294,11 +294,11 @@ nd_browser_render_rgba(nd_browser *browser, int scroll_x, int scroll_y,
     cairo_scale(cr, scale, scale);
     cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
 
-    nd_paint_set_js(browser->js);
-    nd_paint_set_anim(browser->anim);
-    nd_paint(cr, browser->layout, NULL);
-    nd_paint_set_anim(NULL);
-    nd_paint_set_js(NULL);
+    ns_paint_set_js(browser->js);
+    ns_paint_set_anim(browser->anim);
+    ns_paint(cr, browser->layout, NULL);
+    ns_paint_set_anim(NULL);
+    ns_paint_set_js(NULL);
 
     cairo_destroy(cr);
     cairo_surface_flush(surf);
@@ -322,7 +322,7 @@ nd_browser_render_rgba(nd_browser *browser, int scroll_x, int scroll_y,
 }
 
 char *
-nd_browser_link_at(nd_browser *browser, int x, int y)
+ns_browser_link_at(ns_browser *browser, int x, int y)
 {
     if (!browser || !browser->layout) return NULL;
 
@@ -335,21 +335,21 @@ nd_browser_link_at(nd_browser *browser, int x, int y)
         { -kR, -kR }, { kR, -kR }, { -kR, kR }, { kR, kR },
     };
     for (int i = 0; i < (int)(sizeof probe / sizeof probe[0]); i++) {
-        const char *href = nd_box_hit_link(browser->layout,
+        const char *href = ns_box_hit_link(browser->layout,
                                            (double)(x + probe[i][0]),
                                            (double)(y + probe[i][1]));
-        if (href && *href) return nd_url_resolve(browser->base_url, href);
+        if (href && *href) return ns_url_resolve(browser->base_url, href);
     }
     return NULL;
 }
 
 char *
-nd_browser_title(nd_browser *browser)
+ns_browser_title(ns_browser *browser)
 {
     if (!browser || !browser->doc) return NULL;
-    nd_node *title = nd_node_find_first_element(browser->doc, "title");
+    ns_node *title = ns_node_find_first_element(browser->doc, "title");
     if (!title) return NULL;
-    char *raw = nd_node_collect_text(title);
+    char *raw = ns_node_collect_text(title);
     if (!raw) return NULL;
 
     GString *out = g_string_new(NULL);
@@ -376,22 +376,22 @@ nd_browser_title(nd_browser *browser)
 }
 
 char *
-nd_browser_url(nd_browser *browser)
+ns_browser_url(ns_browser *browser)
 {
     if (!browser || !browser->base_url) return NULL;
     return strdup(browser->base_url);
 }
 
 static void
-collect_links(const nd_node *node, const char *base, GString *out,
+collect_links(const ns_node *node, const char *base, GString *out,
               GHashTable *seen)
 {
-    for (const nd_node *c = node->first_child; c; c = c->next_sibling) {
-        if (nd_node_is_element_named(c, "a")) {
-            const char *href = nd_element_get_attr(c, "href");
+    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "a")) {
+            const char *href = ns_element_get_attr(c, "href");
             if (href && *href && href[0] != '#' &&
                 !g_str_has_prefix(href, "javascript:")) {
-                char *abs = nd_url_resolve(base, href);
+                char *abs = ns_url_resolve(base, href);
                 if (abs && *abs && !g_hash_table_contains(seen, abs)) {
                     g_hash_table_add(seen, g_strdup(abs));
                     if (out->len) g_string_append_c(out, '\n');
@@ -405,7 +405,7 @@ collect_links(const nd_node *node, const char *base, GString *out,
 }
 
 char *
-nd_browser_links(nd_browser *browser)
+ns_browser_links(ns_browser *browser)
 {
     if (!browser || !browser->doc) return NULL;
     GString *out = g_string_new(NULL);
@@ -420,21 +420,21 @@ nd_browser_links(nd_browser *browser)
 }
 
 void
-nd_browser_close(nd_browser *browser)
+ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
-    nd_paint_set_anim(NULL);
+    ns_paint_set_anim(NULL);
     if (browser->js) {
-        nd_js_set_layout_root(browser->js, NULL);
-        nd_js_set_style_table(browser->js, NULL);
+        ns_js_set_layout_root(browser->js, NULL);
+        ns_js_set_style_table(browser->js, NULL);
     }
-    if (browser->anim) nd_anim_free(browser->anim);
-    if (browser->layout) nd_box_free(browser->layout);
+    if (browser->anim) ns_anim_free(browser->anim);
+    if (browser->layout) ns_box_free(browser->layout);
     if (browser->styles) g_hash_table_destroy(browser->styles);
     if (browser->css_cache) g_hash_table_destroy(browser->css_cache);
-    if (browser->js) nd_js_free(browser->js);
-    if (browser->doc) nd_node_free(browser->doc);
-    if (browser->images) nd_image_cache_free(browser->images);
+    if (browser->js) ns_js_free(browser->js);
+    if (browser->doc) ns_node_free(browser->doc);
+    if (browser->images) ns_image_cache_free(browser->images);
     g_free(browser->base_url);
     g_free(browser);
 }

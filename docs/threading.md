@@ -9,7 +9,7 @@ back to the main thread through a GLib main-context invocation before
 it touches any shared browser state.
 
 The guiding rule: **nothing outside the main thread ever touches a
-`GtkWidget`, a `nd_node` DOM tree, a layout box, or a live
+`GtkWidget`, a `ns_node` DOM tree, a layout box, or a live
 `JSContext` that belongs to the page.** Background threads operate on
 self-contained inputs (response bytes, a URL, a script source) and
 produce self-contained outputs (decoded pixels, a parsed stylesheet, a
@@ -40,7 +40,7 @@ Two mechanisms keep the UI from freezing:
 2. **Long synchronous page JS cooperatively pumps the GUI.** Page
    JavaScript necessarily runs on the main thread (it manipulates the
    DOM). To stop a tight script from freezing the window,
-   `nd_js_interrupt_cb` (`src/js.c`) is installed as the QuickJS
+   `ns_js_interrupt_cb` (`src/js.c`) is installed as the QuickJS
    interrupt handler. While *main-thread* JS runs, every ~100 ms it
    does up to 8 non-blocking iterations of the default `GMainContext`,
    so paints and input are serviced mid-script. This pump is gated to
@@ -62,7 +62,7 @@ still on the C stack. Two layers keep that safe:
   event dispatch, image-load callbacks — early-returns when `in_pump`
   is set, so reentrant *JavaScript* never runs nested inside the pump.
 - **`js->dispatch_depth`** is raised around event dispatch;
-  `nd_js_free_or_defer_node` then parks freed DOM nodes in
+  `ns_js_free_or_defer_node` then parks freed DOM nodes in
   `orphan_nodes` and sweeps them after dispatch unwinds, so a handler
   can never free a node the outer frame still references.
 
@@ -75,25 +75,25 @@ reentrant *JS*; they do not guard *GTK-level teardown*. If the pump
 dispatches an input event whose handler frees `w->js` while a `JS_Eval`
 frame is still on the stack, that is a use-after-free. The codebase
 routes the well-understood cases around it: the explicit **Stop** path
-calls `nd_js_halt` (set a flag) instead of freeing and the interrupt
+calls `ns_js_halt` (set a flag) instead of freeing and the interrupt
 handler unwinds on the next `halted` check; cross-origin navigation
 frees the old context in the *load-completion* callback, not mid-eval;
-and the post-navigation in-place pump (`nd_on_load_prepared`) re-checks
-`nd_window_for_id` after iterating so it bails if the window vanished.
+and the post-navigation in-place pump (`ns_on_load_prepared`) re-checks
+`ns_window_for_id` after iterating so it bails if the window vanished.
 
 Every GTK path that can free or replace `w->js` is now deferred while
-`nd_js_in_pump(w->js)` holds, so the running context cannot be pulled
+`ns_js_in_pump(w->js)` holds, so the running context cannot be pulled
 out from under a live `JS_Eval` frame:
 
-- **Close a tab** (`nd_browser_close_tab`, tab close button / Ctrl+W)
-  and **zoom** (`nd_window_after_zoom`, which rebuilds the page) re-post
+- **Close a tab** (`ns_browser_close_tab`, tab close button / Ctrl+W)
+  and **zoom** (`ns_window_after_zoom`, which rebuilds the page) re-post
   themselves with `g_idle_add` keyed on the window id.
 - **Window-manager close** (titlebar ✕, Alt+F4) is caught by a
   `close-request` handler (`on_toplevel_close_request`) that vetoes the
   close (returns `TRUE`) and re-posts `gtk_window_close` on idle while
   any tab in the window is mid-pump.
-- **Navigation** (`nd_window_load_url` — omnibox, link, reload) defers
-  via `nd_window_load_url_deferred` so a new load cannot complete and
+- **Navigation** (`ns_window_load_url` — omnibox, link, reload) defers
+  via `ns_window_load_url_deferred` so a new load cannot complete and
   free the old context during the pump.
 
 Each guard re-checks `in_pump` when its idle fires, so it simply
@@ -112,14 +112,14 @@ Every blocking or unbounded operation has a bound:
 | HTTP redirects | 10 | `CURLOPT_MAXREDIRS`, `net.c` |
 | WebSocket connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `ws.c` |
 | WebSocket transfer | none (long-lived); 10 ms poll cadence | `ws.c` |
-| Page JS eval slice | `js_eval_budget_ms` (default 5 s, max 60 s) | `nd_js_budget_push`, `js.c` |
-| Page JS hard monitor | 60 s of wall-clock per top-level entry | `ND_JS_MONITOR_LIMIT_US`, `js.c` |
+| Page JS eval slice | `js_eval_budget_ms` (default 5 s, max 60 s) | `ns_js_budget_push`, `js.c` |
+| Page JS hard monitor | 60 s of wall-clock per top-level entry | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
 | JS heap | `js_memory_cap_mb` (default 256, max 512) | `JS_SetMemoryLimit`, `js.c` |
-| Per-origin in-flight requests | 6 | `ND_NET_MAX_PER_ORIGIN`, `net.c` |
-| Total in-flight requests | 6 | `ND_MAX_CONCURRENT_FETCHES`, `net.c` |
+| Per-origin in-flight requests | 6 | `NS_NET_MAX_PER_ORIGIN`, `net.c` |
+| Total in-flight requests | 6 | `NS_MAX_CONCURRENT_FETCHES`, `net.c` |
 | Hung GUI loop | `js_eval_budget_ms/1000 + 30` s | `watchdog.c` |
 
-The origin-slot wait (`nd_net_acquire_origin_slot`) uses
+The origin-slot wait (`ns_net_acquire_origin_slot`) uses
 `g_cond_wait_until` with a 250 ms re-check so a cancelled request never
 blocks a pool thread indefinitely.
 
@@ -127,13 +127,13 @@ blocks a pool thread indefinitely.
 
 ### Network (`src/net.c`)
 
-`nd_net_fetch_async` / `nd_net_request_async` build a `GTask`,
-duplicate every input into a heap `nd_fetch_ctx`, and enqueue it. A
+`ns_net_fetch_async` / `ns_net_request_async` build a `GTask`,
+duplicate every input into a heap `ns_fetch_ctx`, and enqueue it. A
 mutex-guarded throttle (`g_fetch_throttle_mutex`, `g_fetch_queue`,
-`g_fetch_active`) caps concurrency at `ND_MAX_CONCURRENT_FETCHES` and
-dispatches via `g_task_run_in_thread`. `nd_fetch_thread` runs the
+`g_fetch_active`) caps concurrency at `NS_MAX_CONCURRENT_FETCHES` and
+dispatches via `g_task_run_in_thread`. `ns_fetch_thread` runs the
 blocking `curl_easy_perform`, then `g_task_return_pointer` delivers the
-`nd_response` to the `GTask` callback **on the main thread** (the task
+`ns_response` to the `GTask` callback **on the main thread** (the task
 was created there). On completion the active count is decremented under
 the mutex and the queue is re-pumped.
 
@@ -156,19 +156,19 @@ Shared state and its protection:
 ### Per-tab worker (`src/tab_worker.c`)
 
 Each tab owns one serial worker thread (`GMutex` + `GCond` + `GQueue`).
-It runs the GTK-free, CPU-heavy steps of a page load — `nd_html_decode_body`,
-`nd_html_parse`, image decode, CSS parse/scope — off the GUI thread.
-Jobs are submitted with an owned `nd_response` and a callback; the
-thread produces an owned result (`nd_tab_load_result` etc.) and
+It runs the GTK-free, CPU-heavy steps of a page load — `ns_html_decode_body`,
+`ns_html_parse`, image decode, CSS parse/scope — off the GUI thread.
+Jobs are submitted with an owned `ns_response` and a callback; the
+thread produces an owned result (`ns_tab_load_result` etc.) and
 delivers it with `g_main_context_invoke_full(NULL, …)` so the callback
 runs on the main thread. Serial-per-tab means a tab's own work never
 races itself; transferred ownership means it never shares a buffer with
 the GUI thread. Shutdown drains the queue, signals, and joins.
 
-### Web Workers (`src/js.c`, `nd_worker_*`)
+### Web Workers (`src/js.c`, `ns_worker_*`)
 
 A `Worker` spawns a dedicated thread with its **own `JSRuntime`,
-`JSContext`, and `GMainContext`** (`nd_worker_host`). The worker thread
+`JSContext`, and `GMainContext`** (`ns_worker_host`). The worker thread
 pushes its context as thread-default and runs its own `GMainLoop`;
 timers and messages are sources on that context. The host is
 reference-counted (`ref_count`) and uses atomics for cross-thread
@@ -179,13 +179,13 @@ Message passing is structured-clone over `JS_WriteObject` /
 `JS_ReadObject` (no shared JS heap, transfer lists rejected):
 
 - owner → worker: `g_main_context_invoke_full(host->context, …)` runs
-  `nd_worker_deliver_worker` **on the worker thread**.
+  `ns_worker_deliver_worker` **on the worker thread**.
 - worker → owner: `g_main_context_invoke_full(NULL, …)` runs
-  `nd_worker_deliver_owner` **on the main thread**, guarded by
+  `ns_worker_deliver_owner` **on the main thread**, guarded by
   `owner_alive`.
 
-Teardown (`nd_js_free`) clears `owner_alive`, detaches owner pointers,
-then `nd_worker_host_stop(host, TRUE)` sets `closing`, asks the loop to
+Teardown (`ns_js_free`) clears `owner_alive`, detaches owner pointers,
+then `ns_worker_host_stop(host, TRUE)` sets `closing`, asks the loop to
 quit, and joins. The interrupt handler observes `closing` and halts the
 worker promptly.
 
@@ -195,26 +195,26 @@ One thread per socket using curl `CONNECT_ONLY` plus `curl_ws_recv` /
 `curl_ws_send`. The out-queue is a `GMutex`/`GCond` pair; `state`,
 `exit_requested`, and `detached` are atomics. Inbound frames are
 reassembled on the worker thread, then marshalled to the main thread
-via `nd_ws_post` → `g_idle_add` → `nd_ws_dispatch_run`, which invokes
+via `ns_ws_post` → `g_idle_add` → `ns_ws_dispatch_run`, which invokes
 the JS callbacks. The `detached` flag (set when the owning JS object
 goes away) makes any in-flight dispatch a no-op and is checked both at
-post time and dispatch time; the dispatch holds a ref on `nd_ws` so the
+post time and dispatch time; the dispatch holds a ref on `ns_ws` so the
 struct outlives queued events.
 
-`nd_ws_free` runs on the GUI thread and joins the worker, so the worker
+`ns_ws_free` runs on the GUI thread and joins the worker, so the worker
 must exit promptly. The recv/send poll loop checks `exit_requested`
 every 10 ms, and the connecting handshake (`curl_easy_perform` with
 `CONNECT_ONLY`) installs a transfer-info callback
-(`nd_ws_handshake_progress`) that aborts the moment `exit_requested` is
+(`ns_ws_handshake_progress`) that aborts the moment `exit_requested` is
 set. Without it, closing a socket mid-handshake would block the GUI on
 join for up to the 15 s connect timeout.
 
 ### Watchdog (`src/watchdog.c`)
 
-Two parts. A **supervisor process** (`nd_watchdog_run_supervisor`)
+Two parts. A **supervisor process** (`ns_watchdog_run_supervisor`)
 `g_spawn`s the browser child, watches it with `g_child_watch_add`, and
 restarts it on crash/hang with capped exponential burst control. Inside
-the child, a **hang-monitor thread** (`nd_watchdog_hang_thread`) sleeps
+the child, a **hang-monitor thread** (`ns_watchdog_hang_thread`) sleeps
 1 s at a time and compares an atomic heartbeat (`g_beat`, bumped by a
 2 s GUI-thread timeout) against a deadline; if the GUI loop stops
 beating for longer than the budget it `_Exit`s with code 70 so the
@@ -225,15 +225,15 @@ one atomic and never GTK.
 
 The in-process event log is mutex-guarded (`g_dlog_mutex`) and is
 emitted into from **any thread** — notably the fetch pool, which logs
-every request from `nd_fetch_thread`. `nd_dlog_dispatch` snapshots the
+every request from `ns_fetch_thread`. `ns_dlog_dispatch` snapshots the
 subscriber list under the lock, then calls each listener **on the
 emitting thread**. Listeners therefore must be thread-safe: they must
 not touch GTK/DOM directly and must not dereference an object that
 another thread can free. The console listener copies the entry and
 hands it to the GUI thread via `g_idle_add`, keying on the window **id
-by value** (not the `nd_window` pointer, which is freed when a tab
+by value** (not the `ns_window` pointer, which is freed when a tab
 closes) so a late dispatch from a worker thread can never touch freed
-memory; the idle callback resolves the id with `nd_window_for_id` and
+memory; the idle callback resolves the id with `ns_window_for_id` and
 no-ops if the window is gone.
 
 ### SQLite storage (`cache.c`, `history.c`, `idb.c`)
@@ -242,7 +242,7 @@ Three SQLite databases back the browser, each opened `WAL` +
 `synchronous=NORMAL` with a 2.5 s `busy_timeout`:
 
 - **HTTP cache** (`cache.c`) — read and written from the **fetch pool
-  threads** (`nd_fetch_thread`); all access is serialised by
+  threads** (`ns_fetch_thread`); all access is serialised by
   `g_cache_mutex`.
 - **History** (`history.c`) — a single persistent handle guarded by
   `g_history_mutex`, touched from the GUI thread.
@@ -263,7 +263,7 @@ costs only a hash-table lookup — the expensive on-disk path (two SHA-256
 hashes plus a `mkdir`/`chmod` of the partition directory) is computed
 only on a miss, when the file is actually opened. Committed data persists
 without an explicit close because WAL recovers it on the next open. The
-cache is bounded to `ND_IDB_MAX_OPEN` (16) connections, LRU-evicted (each
+cache is bounded to `NS_IDB_MAX_OPEN` (16) connections, LRU-evicted (each
 handle carries a `last_used` stamp), and each connection caps its page
 cache at 512 KiB (`PRAGMA cache_size=-512`), so a long session that
 touches many origins cannot accumulate unbounded file descriptors or
@@ -306,10 +306,10 @@ of view* — the script that triggers them must see the result inline:
 classic external `<script src>`, classic module imports (the QuickJS
 module loader resolves synchronously), and `<iframe>` `src` plus its
 inline scripts. (`XMLHttpRequest` is **not** here — it always uses the
-async fetch pool, `nd_net_request_async`.)
+async fetch pool, `ns_net_request_async`.)
 
 Rather than block the GUI thread inside `curl_easy_perform`, these route
-through `nd_js_fetch_resource`, which dispatches the request to the
+through `ns_js_fetch_resource`, which dispatches the request to the
 async fetch pool and spins a **nested `GMainLoop`** on the GUI thread
 until completion, with `js->in_pump` set for the duration. The window
 keeps painting; reentrant JS (timers/rAF/events) is suppressed by the
@@ -320,7 +320,7 @@ a plain C callback, so it fires and quits the nested loop even while
 `in_pump` defers everything else. The wait is bounded by the curl
 transfer timeout, and concurrency still flows through the 6-slot
 throttle. On a worker thread (`js->worker_host`) there is no GUI to keep
-alive, so `nd_js_fetch_resource` falls back to a direct blocking fetch.
+alive, so `ns_js_fetch_resource` falls back to a direct blocking fetch.
 
 **Deferring without busy-spin.** Because the nested loop holds `in_pump`
 for the whole sub-resource fetch (not just the ~8 iterations of the
@@ -332,16 +332,16 @@ page JS: each, when `in_pump` holds, re-arms with a 4 ms `g_timeout`
 (matching the existing image-load path) so the loop can sleep in
 `poll()` between checks. The covered set:
 
-- `fetch()` completion (`nd_on_js_fetch_deliver_idle`),
-- `XMLHttpRequest` completion (`nd_on_xhr_deliver_idle`) and the
-  blocked/CORS-error path (`nd_xhr_emit_blocked_idle`),
+- `fetch()` completion (`ns_on_js_fetch_deliver_idle`),
+- `XMLHttpRequest` completion (`ns_on_xhr_deliver_idle`) and the
+  blocked/CORS-error path (`ns_xhr_emit_blocked_idle`),
 - WebSocket open/message/close/error delivery, deferred in
-  `nd_ws_dispatch_run` via an optional `busy` predicate on
-  `nd_ws_callbacks` (so `ws.c` stays GTK-free and the queued payload is
+  `ns_ws_dispatch_run` via an optional `busy` predicate on
+  `ns_ws_callbacks` (so `ws.c` stays GTK-free and the queued payload is
   held, not copied, until the consumer is ready),
-- `AbortSignal.timeout()` firing (`nd_abort_signal_timeout_fire`),
-- `FileReader` completion (`nd_filereader_complete`),
-- DOM timers (`nd_timer_fire`) and `requestAnimationFrame`/event entry
+- `AbortSignal.timeout()` firing (`ns_abort_signal_timeout_fire`),
+- `FileReader` completion (`ns_filereader_complete`),
+- DOM timers (`ns_timer_fire`) and `requestAnimationFrame`/event entry
   points, which already early-out under `in_pump`.
 
 This also closed a latent reentrancy gap: XHR, WebSocket, AbortSignal,

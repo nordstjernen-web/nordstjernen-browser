@@ -12,16 +12,16 @@
 #include "dialogs.h"
 #include "find.h"
 
-extern const char *nd_app_self_exe(void);
+extern const char *ns_app_self_exe(void);
 
 static void
-nd_window_log_renderer(GtkWidget *widget, gpointer user_data)
+ns_window_log_renderer(GtkWidget *widget, gpointer user_data)
 {
     (void)user_data;
     GtkNative *native = gtk_widget_get_native(widget);
     GskRenderer *renderer = native ? gtk_native_get_renderer(native) : NULL;
     const char *requested = g_getenv("GSK_RENDERER");
-    nd_debug_log_emit(ND_DLOG_RENDER, "gsk",
+    ns_debug_log_emit(NS_DLOG_RENDER, "gsk",
         "active renderer %s (GSK_RENDERER=%s)",
         renderer ? G_OBJECT_TYPE_NAME(renderer) : "(none)",
         requested && *requested ? requested : "auto");
@@ -29,7 +29,7 @@ nd_window_log_renderer(GtkWidget *widget, gpointer user_data)
 
 static GtkWidget *
 make_toolbar_button(const char *icon, const char *tooltip,
-                    GCallback handler, nd_window *w)
+                    GCallback handler, ns_window *w)
 {
     GtkWidget *b = gtk_button_new_from_icon_name(icon);
     gtk_widget_set_tooltip_text(b, tooltip);
@@ -38,9 +38,9 @@ make_toolbar_button(const char *icon, const char *tooltip,
 }
 
 static char *
-nd_logo_read_first(const char *const *rel_paths, gsize *out_len)
+ns_logo_read_first(const char *const *rel_paths, gsize *out_len)
 {
-    const char *exe = nd_app_self_exe();
+    const char *exe = ns_app_self_exe();
     char *exe_dir = exe ? g_path_get_dirname(exe) : g_strdup(".");
     char *contents = NULL;
     gsize len = 0;
@@ -56,7 +56,7 @@ nd_logo_read_first(const char *const *rel_paths, gsize *out_len)
 }
 
 GArray *
-nd_logo_anim_frames(void)
+ns_logo_anim_frames(void)
 {
     static GArray *cached = NULL;
     static gboolean tried = FALSE;
@@ -71,17 +71,17 @@ nd_logo_anim_frames(void)
         NULL,
     };
     gsize gif_len = 0;
-    char *gif = nd_logo_read_first(gif_paths, &gif_len);
+    char *gif = ns_logo_read_first(gif_paths, &gif_len);
     if (!gif) return NULL;
 
-    GArray *frames = nd_image_decode_wuffs_anim(
+    GArray *frames = ns_image_decode_wuffs_anim(
         (const guchar *)gif, gif_len, NULL, NULL);
     g_free(gif);
     if (!frames) return NULL;
     if (frames->len < 2) {
         for (guint i = 0; i < frames->len; i++) {
-            nd_image_anim_frame *f =
-                &g_array_index(frames, nd_image_anim_frame, i);
+            ns_image_anim_frame *f =
+                &g_array_index(frames, ns_image_anim_frame, i);
             if (f->texture) g_object_unref(f->texture);
         }
         g_array_free(frames, TRUE);
@@ -91,56 +91,56 @@ nd_logo_anim_frames(void)
     return cached;
 }
 
-static gboolean nd_logo_anim_tick(gpointer user_data);
+static gboolean ns_logo_anim_tick(gpointer user_data);
 
 static void
-nd_logo_anim_schedule_next(nd_window *w, int frame_index)
+ns_logo_anim_schedule_next(ns_window *w, int frame_index)
 {
-    GArray *frames = nd_logo_anim_frames();
+    GArray *frames = ns_logo_anim_frames();
     if (!frames || frames->len == 0) return;
-    nd_image_anim_frame *f =
-        &g_array_index(frames, nd_image_anim_frame, frame_index);
+    ns_image_anim_frame *f =
+        &g_array_index(frames, ns_image_anim_frame, frame_index);
     int delay = f->delay_ms > 0 ? f->delay_ms : 100;
     if (delay < 20) delay = 20;
-    w->logo_anim_source = g_timeout_add(delay, nd_logo_anim_tick, w);
+    w->logo_anim_source = g_timeout_add(delay, ns_logo_anim_tick, w);
 }
 
 static gboolean
-nd_logo_anim_tick(gpointer user_data)
+ns_logo_anim_tick(gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     w->logo_anim_source = 0;
-    GArray *frames = nd_logo_anim_frames();
+    GArray *frames = ns_logo_anim_frames();
     if (!frames || frames->len == 0 || !w->logo_image)
         return G_SOURCE_REMOVE;
     w->logo_anim_index = (w->logo_anim_index + 1) % (int)frames->len;
-    nd_image_anim_frame *f =
-        &g_array_index(frames, nd_image_anim_frame, w->logo_anim_index);
+    ns_image_anim_frame *f =
+        &g_array_index(frames, ns_image_anim_frame, w->logo_anim_index);
     if (f->texture) {
         gtk_image_set_from_paintable(GTK_IMAGE(w->logo_image),
                                      GDK_PAINTABLE(f->texture));
         gtk_image_set_pixel_size(GTK_IMAGE(w->logo_image), 26);
     }
-    nd_logo_anim_schedule_next(w, w->logo_anim_index);
+    ns_logo_anim_schedule_next(w, w->logo_anim_index);
     return G_SOURCE_REMOVE;
 }
 
 void
-nd_window_update_logo_loading(nd_window *w, gboolean loading)
+ns_window_update_logo_loading(ns_window *w, gboolean loading)
 {
     if (!w || !w->logo_image) return;
-    GArray *frames = loading ? nd_logo_anim_frames() : NULL;
+    GArray *frames = loading ? ns_logo_anim_frames() : NULL;
     if (loading && frames && frames->len > 0) {
         if (w->logo_anim_source) return;
         w->logo_anim_index = 0;
-        nd_image_anim_frame *f0 =
-            &g_array_index(frames, nd_image_anim_frame, 0);
+        ns_image_anim_frame *f0 =
+            &g_array_index(frames, ns_image_anim_frame, 0);
         if (f0->texture) {
             gtk_image_set_from_paintable(GTK_IMAGE(w->logo_image),
                                          GDK_PAINTABLE(f0->texture));
             gtk_image_set_pixel_size(GTK_IMAGE(w->logo_image), 26);
         }
-        nd_logo_anim_schedule_next(w, 0);
+        ns_logo_anim_schedule_next(w, 0);
     } else {
         if (w->logo_anim_source) {
             g_source_remove(w->logo_anim_source);
@@ -153,37 +153,37 @@ nd_window_update_logo_loading(nd_window *w, gboolean loading)
 }
 
 static const char *
-nd_stage_page_name(nd_load_stage s)
+ns_stage_page_name(ns_load_stage s)
 {
     switch (s) {
-    case ND_STAGE_CONNECTING: return "connecting";
-    case ND_STAGE_FETCHING:   return "fetching";
-    case ND_STAGE_PARSING:    return "parsing";
-    case ND_STAGE_STYLING:    return "rendering";
-    case ND_STAGE_SCRIPTING:  return "scripting";
-    case ND_STAGE_RENDERING:  return "rendering";
-    case ND_STAGE_DONE:       return "done";
+    case NS_STAGE_CONNECTING: return "connecting";
+    case NS_STAGE_FETCHING:   return "fetching";
+    case NS_STAGE_PARSING:    return "parsing";
+    case NS_STAGE_STYLING:    return "rendering";
+    case NS_STAGE_SCRIPTING:  return "scripting";
+    case NS_STAGE_RENDERING:  return "rendering";
+    case NS_STAGE_DONE:       return "done";
     default:                  return "fetching";
     }
 }
 
 static const char *
-nd_stage_tooltip(nd_load_stage s)
+ns_stage_tooltip(ns_load_stage s)
 {
     switch (s) {
-    case ND_STAGE_CONNECTING:
+    case NS_STAGE_CONNECTING:
         return "Connecting — resolving the host and opening the connection…";
-    case ND_STAGE_FETCHING:
+    case NS_STAGE_FETCHING:
         return "Fetching — downloading the page from the server…";
-    case ND_STAGE_PARSING:
+    case NS_STAGE_PARSING:
         return "Parsing — building the document tree (HTML → DOM)…";
-    case ND_STAGE_STYLING:
+    case NS_STAGE_STYLING:
         return "Styling — matching CSS rules and resolving the cascade…";
-    case ND_STAGE_SCRIPTING:
+    case NS_STAGE_SCRIPTING:
         return "Running scripts — executing the page's JavaScript…";
-    case ND_STAGE_RENDERING:
+    case NS_STAGE_RENDERING:
         return "Rendering — laying out and painting the page…";
-    case ND_STAGE_DONE:
+    case NS_STAGE_DONE:
         return "Done — the page finished loading and rendering.";
     default:
         return "Idle";
@@ -191,16 +191,16 @@ nd_stage_tooltip(nd_load_stage s)
 }
 
 static gboolean
-nd_stage_done_revert(gpointer user_data)
+ns_stage_done_revert(gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     w->stage_done_source = 0;
-    nd_window_set_stage(w, ND_STAGE_IDLE);
+    ns_window_set_stage(w, NS_STAGE_IDLE);
     return G_SOURCE_REMOVE;
 }
 
 void
-nd_window_set_stage(nd_window *w, nd_load_stage stage)
+ns_window_set_stage(ns_window *w, ns_load_stage stage)
 {
     if (!w || !w->spinner || !GTK_IS_STACK(w->spinner)) return;
     if (w->stage_done_source) {
@@ -209,7 +209,7 @@ nd_window_set_stage(nd_window *w, nd_load_stage stage)
     }
     w->stage = stage;
 
-    if (stage == ND_STAGE_IDLE) {
+    if (stage == NS_STAGE_IDLE) {
         if (w->spinner_anim && GTK_IS_SPINNER(w->spinner_anim))
             gtk_spinner_set_spinning(GTK_SPINNER(w->spinner_anim), FALSE);
         gtk_stack_set_visible_child_name(GTK_STACK(w->spinner), "idle");
@@ -219,19 +219,19 @@ nd_window_set_stage(nd_window *w, nd_load_stage stage)
 
     if (w->stage_stack && GTK_IS_STACK(w->stage_stack))
         gtk_stack_set_visible_child_name(GTK_STACK(w->stage_stack),
-                                         nd_stage_page_name(stage));
+                                         ns_stage_page_name(stage));
     if (w->spinner_anim && GTK_IS_SPINNER(w->spinner_anim))
         gtk_spinner_set_spinning(GTK_SPINNER(w->spinner_anim),
-                                 stage != ND_STAGE_DONE);
+                                 stage != NS_STAGE_DONE);
     gtk_stack_set_visible_child_name(GTK_STACK(w->spinner), "busy");
-    gtk_widget_set_tooltip_text(w->spinner, nd_stage_tooltip(stage));
+    gtk_widget_set_tooltip_text(w->spinner, ns_stage_tooltip(stage));
 
-    if (stage == ND_STAGE_DONE)
-        w->stage_done_source = g_timeout_add(1100, nd_stage_done_revert, w);
+    if (stage == NS_STAGE_DONE)
+        w->stage_done_source = g_timeout_add(1100, ns_stage_done_revert, w);
 }
 
 void
-nd_window_build_toolbar(nd_window *w, GtkWidget *toolbar, const char *home_url)
+ns_window_build_toolbar(ns_window *w, GtkWidget *toolbar, const char *home_url)
 {
     w->back_button = make_toolbar_button("nordstjernen-back", "Back",
                                          G_CALLBACK(on_back_clicked), w);
@@ -289,7 +289,7 @@ nd_window_build_toolbar(nd_window *w, GtkWidget *toolbar, const char *home_url)
     g_signal_connect(url_keys, "key-pressed",
                      G_CALLBACK(on_url_entry_key_pressed), w);
     gtk_widget_add_controller(w->url_entry, url_keys);
-    nd_window_setup_url_suggestions(w);
+    ns_window_setup_url_suggestions(w);
 
     w->go_button = make_toolbar_button("nordstjernen-go",
         "Load the URL in the address bar",
@@ -335,7 +335,7 @@ nd_window_build_toolbar(nd_window *w, GtkWidget *toolbar, const char *home_url)
     w->spinner = busy_indicator;
     w->spinner_anim = busy_spinner;
     w->stage_stack = stage_stack;
-    w->stage = ND_STAGE_IDLE;
+    w->stage = NS_STAGE_IDLE;
 
     gtk_box_append(GTK_BOX(toolbar), w->back_button);
     gtk_box_append(GTK_BOX(toolbar), w->forward_button);
@@ -365,7 +365,7 @@ nd_window_build_toolbar(nd_window *w, GtkWidget *toolbar, const char *home_url)
 }
 
 void
-nd_window_build_search_bar(nd_window *w, GtkWidget *vbox)
+ns_window_build_search_bar(ns_window *w, GtkWidget *vbox)
 {
     w->search_revealer = gtk_revealer_new();
     gtk_revealer_set_transition_type(GTK_REVEALER(w->search_revealer),
@@ -408,7 +408,7 @@ nd_window_build_search_bar(nd_window *w, GtkWidget *vbox)
 }
 
 void
-nd_window_build_content(nd_window *w, GtkWidget *vbox)
+ns_window_build_content(ns_window *w, GtkWidget *vbox)
 {
     w->content_stack = gtk_stack_new();
     gtk_widget_set_hexpand(w->content_stack, TRUE);
@@ -440,7 +440,7 @@ nd_window_build_content(nd_window *w, GtkWidget *vbox)
     w->render_vadj = gtk_scrolled_window_get_vadjustment(
         GTK_SCROLLED_WINDOW(scrolled_render));
     g_signal_connect(w->render_vadj, "value-changed",
-                     G_CALLBACK(nd_window_render_vadjustment_changed), w);
+                     G_CALLBACK(ns_window_render_vadjustment_changed), w);
     w->drawing_area = gtk_drawing_area_new();
     gtk_widget_set_hexpand(w->drawing_area, TRUE);
     gtk_widget_set_vexpand(w->drawing_area, TRUE);
@@ -451,44 +451,44 @@ nd_window_build_content(nd_window *w, GtkWidget *vbox)
             "Ctrl+L to focus the address bar.",
         -1);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(w->drawing_area),
-                                   nd_draw_render, w, NULL);
+                                   ns_draw_render, w, NULL);
     g_signal_connect(w->drawing_area, "realize",
-                     G_CALLBACK(nd_window_log_renderer), NULL);
-    gtk_widget_add_tick_callback(w->drawing_area, nd_window_raf_tick, w, NULL);
+                     G_CALLBACK(ns_window_log_renderer), NULL);
+    gtk_widget_add_tick_callback(w->drawing_area, ns_window_raf_tick, w, NULL);
     GtkGesture *click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
-    g_signal_connect(click, "pressed", G_CALLBACK(nd_on_drawing_pressed), w);
-    g_signal_connect(click, "released", G_CALLBACK(nd_on_drawing_released), w);
+    g_signal_connect(click, "pressed", G_CALLBACK(ns_on_drawing_pressed), w);
+    g_signal_connect(click, "released", G_CALLBACK(ns_on_drawing_released), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(click));
 
     GtkGesture *middle = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle), GDK_BUTTON_MIDDLE);
-    g_signal_connect(middle, "pressed", G_CALLBACK(nd_on_drawing_pressed_middle), w);
+    g_signal_connect(middle, "pressed", G_CALLBACK(ns_on_drawing_pressed_middle), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(middle));
 
     GtkGesture *secondary = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(secondary), GDK_BUTTON_SECONDARY);
-    g_signal_connect(secondary, "pressed", G_CALLBACK(nd_on_drawing_right_pressed), w);
+    g_signal_connect(secondary, "pressed", G_CALLBACK(ns_on_drawing_right_pressed), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(secondary));
 
     GtkGesture *back_btn = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(back_btn), 8);
-    g_signal_connect(back_btn, "pressed", G_CALLBACK(nd_on_drawing_side_pressed), w);
+    g_signal_connect(back_btn, "pressed", G_CALLBACK(ns_on_drawing_side_pressed), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(back_btn));
 
     GtkGesture *forward_btn = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(forward_btn), 9);
-    g_signal_connect(forward_btn, "pressed", G_CALLBACK(nd_on_drawing_side_pressed), w);
+    g_signal_connect(forward_btn, "pressed", G_CALLBACK(ns_on_drawing_side_pressed), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(forward_btn));
 
     GtkGesture *long_press = gtk_gesture_long_press_new();
     gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(long_press), TRUE);
-    g_signal_connect(long_press, "pressed", G_CALLBACK(nd_on_drawing_long_pressed), w);
+    g_signal_connect(long_press, "pressed", G_CALLBACK(ns_on_drawing_long_pressed), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(long_press));
 
     GtkGesture *pinch = gtk_gesture_zoom_new();
-    g_signal_connect(pinch, "begin", G_CALLBACK(nd_on_drawing_zoom_begin), w);
-    g_signal_connect(pinch, "end",   G_CALLBACK(nd_on_drawing_zoom_end), w);
+    g_signal_connect(pinch, "begin", G_CALLBACK(ns_on_drawing_zoom_begin), w);
+    g_signal_connect(pinch, "end",   G_CALLBACK(ns_on_drawing_zoom_end), w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(pinch));
 
     GtkEventController *motion = gtk_event_controller_motion_new();
@@ -498,20 +498,20 @@ nd_window_build_content(nd_window *w, GtkWidget *vbox)
     GtkEventController *scroll = gtk_event_controller_scroll_new(
         GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
     gtk_event_controller_set_propagation_phase(scroll, GTK_PHASE_CAPTURE);
-    g_signal_connect(scroll, "scroll", G_CALLBACK(nd_on_drawing_scroll), w);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(ns_on_drawing_scroll), w);
     gtk_widget_add_controller(w->drawing_area, scroll);
 
     GtkGesture *drag = gtk_gesture_drag_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
-    g_signal_connect(drag, "drag-begin",  G_CALLBACK(nd_on_drawing_drag_begin),  w);
-    g_signal_connect(drag, "drag-update", G_CALLBACK(nd_on_drawing_drag_update), w);
-    g_signal_connect(drag, "drag-end",    G_CALLBACK(nd_on_drawing_drag_end),    w);
+    g_signal_connect(drag, "drag-begin",  G_CALLBACK(ns_on_drawing_drag_begin),  w);
+    g_signal_connect(drag, "drag-update", G_CALLBACK(ns_on_drawing_drag_update), w);
+    g_signal_connect(drag, "drag-end",    G_CALLBACK(ns_on_drawing_drag_end),    w);
     gtk_widget_add_controller(w->drawing_area, GTK_EVENT_CONTROLLER(drag));
 
     gtk_widget_set_focusable(w->drawing_area, TRUE);
     GtkEventController *key = gtk_event_controller_key_new();
-    g_signal_connect(key, "key-pressed", G_CALLBACK(nd_on_drawing_key_pressed), w);
-    g_signal_connect(key, "key-released", G_CALLBACK(nd_on_drawing_key_released), w);
+    g_signal_connect(key, "key-pressed", G_CALLBACK(ns_on_drawing_key_pressed), w);
+    g_signal_connect(key, "key-released", G_CALLBACK(ns_on_drawing_key_released), w);
     gtk_widget_add_controller(w->drawing_area, key);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_render),
                                   w->drawing_area);

@@ -19,7 +19,7 @@
 #endif
 
 static const char *
-nd_os_name(void)
+ns_os_name(void)
 {
 #ifdef G_OS_WIN32
     return "Windows";
@@ -42,17 +42,17 @@ nd_os_name(void)
 }
 
 void
-nd_env_each(nd_env_emit_fn emit, gpointer user_data)
+ns_env_each(ns_env_emit_fn emit, gpointer user_data)
 {
     char buf[160];
 
-    const char *hv = nd_html_engine_version();
+    const char *hv = ns_html_engine_version();
     if (hv && *hv) {
         g_snprintf(buf, sizeof(buf), "%s %s",
-                   nd_html_engine_name(), hv);
+                   ns_html_engine_name(), hv);
         emit("HTML parser", buf, user_data);
     } else {
-        emit("HTML parser", nd_html_engine_name(), user_data);
+        emit("HTML parser", ns_html_engine_name(), user_data);
     }
 
     emit("CSS engine", "Nordstjernen", user_data);
@@ -62,7 +62,7 @@ nd_env_each(nd_env_emit_fn emit, gpointer user_data)
                QJS_VERSION_SUFFIX);
     emit("JS engine", buf, user_data);
 
-    emit("JS active",  nd_js_engine_name(), user_data);
+    emit("JS active",  ns_js_engine_name(), user_data);
 
 #ifndef __ANDROID__
     g_snprintf(buf, sizeof(buf), "%u.%u.%u",
@@ -72,15 +72,15 @@ nd_env_each(nd_env_emit_fn emit, gpointer user_data)
     emit("GTK", buf, user_data);
 #endif
 
-    emit("OS", nd_os_name(), user_data);
+    emit("OS", ns_os_name(), user_data);
 
     {
-        char *proxy = nd_net_effective_proxy_for("https://example.com/");
+        char *proxy = ns_net_effective_proxy_for("https://example.com/");
         emit("Proxy (https)", proxy && *proxy ? proxy : "(direct)", user_data);
         g_free(proxy);
     }
     {
-        char *proxy = nd_net_effective_proxy_for("http://example.com/");
+        char *proxy = ns_net_effective_proxy_for("http://example.com/");
         emit("Proxy (http)",  proxy && *proxy ? proxy : "(direct)", user_data);
         g_free(proxy);
     }

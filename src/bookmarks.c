@@ -9,7 +9,7 @@
 #include <glib/gstdio.h>
 #include <string.h>
 
-struct nd_bookmarks {
+struct ns_bookmarks {
     GArray *items;
     char   *path;
 };
@@ -18,7 +18,7 @@ static char *
 bookmarks_path(void)
 {
     const char *config = g_get_user_config_dir();
-    g_autofree char *dir = g_build_filename(config, ND_APP_DIR_NAME, NULL);
+    g_autofree char *dir = g_build_filename(config, NS_APP_DIR_NAME, NULL);
     g_mkdir_with_parents(dir, 0700);
     return g_build_filename(dir, "bookmarks.txt", NULL);
 }
@@ -26,16 +26,16 @@ bookmarks_path(void)
 static void
 bookmark_clear(gpointer data)
 {
-    nd_bookmark *b = data;
+    ns_bookmark *b = data;
     g_free(b->url);
     g_free(b->title);
 }
 
-nd_bookmarks *
-nd_bookmarks_load(void)
+ns_bookmarks *
+ns_bookmarks_load(void)
 {
-    nd_bookmarks *bm = g_new0(nd_bookmarks, 1);
-    bm->items = g_array_new(FALSE, FALSE, sizeof(nd_bookmark));
+    ns_bookmarks *bm = g_new0(ns_bookmarks, 1);
+    bm->items = g_array_new(FALSE, FALSE, sizeof(ns_bookmark));
     g_array_set_clear_func(bm->items, bookmark_clear);
     bm->path = bookmarks_path();
 
@@ -47,7 +47,7 @@ nd_bookmarks_load(void)
             char *line = g_strstrip(lines[i]);
             if (*line == '\0' || *line == '#') continue;
             char *tab = strchr(line, '\t');
-            nd_bookmark b;
+            ns_bookmark b;
             if (tab) {
                 *tab = '\0';
                 b.url   = g_strdup(line);
@@ -65,7 +65,7 @@ nd_bookmarks_load(void)
 }
 
 void
-nd_bookmarks_free(nd_bookmarks *bm)
+ns_bookmarks_free(ns_bookmarks *bm)
 {
     if (!bm) return;
     g_array_free(bm->items, TRUE);
@@ -84,12 +84,12 @@ bookmark_append_sanitized(GString *out, const char *s)
 }
 
 static void
-nd_bookmarks_save(nd_bookmarks *bm)
+ns_bookmarks_save(ns_bookmarks *bm)
 {
     if (!bm) return;
     GString *out = g_string_new(NULL);
     for (guint i = 0; i < bm->items->len; i++) {
-        nd_bookmark *b = &g_array_index(bm->items, nd_bookmark, i);
+        ns_bookmark *b = &g_array_index(bm->items, ns_bookmark, i);
         bookmark_append_sanitized(out, b->url);
         g_string_append_c(out, '\t');
         bookmark_append_sanitized(out, b->title);
@@ -106,47 +106,47 @@ nd_bookmarks_save(nd_bookmarks *bm)
 }
 
 guint
-nd_bookmarks_count(const nd_bookmarks *bm)
+ns_bookmarks_count(const ns_bookmarks *bm)
 {
     return bm ? bm->items->len : 0;
 }
 
-const nd_bookmark *
-nd_bookmarks_get(const nd_bookmarks *bm, guint i)
+const ns_bookmark *
+ns_bookmarks_get(const ns_bookmarks *bm, guint i)
 {
     if (!bm || i >= bm->items->len) return NULL;
-    return &g_array_index(bm->items, nd_bookmark, i);
+    return &g_array_index(bm->items, ns_bookmark, i);
 }
 
 gboolean
-nd_bookmarks_contains(const nd_bookmarks *bm, const char *url)
+ns_bookmarks_contains(const ns_bookmarks *bm, const char *url)
 {
     if (!bm || !url) return FALSE;
     for (guint i = 0; i < bm->items->len; i++) {
-        nd_bookmark *b = &g_array_index(bm->items, nd_bookmark, i);
+        ns_bookmark *b = &g_array_index(bm->items, ns_bookmark, i);
         if (b->url && strcmp(b->url, url) == 0) return TRUE;
     }
     return FALSE;
 }
 
 void
-nd_bookmarks_add(nd_bookmarks *bm, const char *url, const char *title)
+ns_bookmarks_add(ns_bookmarks *bm, const char *url, const char *title)
 {
-    if (!bm || !url || nd_bookmarks_contains(bm, url)) return;
-    nd_bookmark b = { .url = g_strdup(url), .title = g_strdup(title ? title : url) };
+    if (!bm || !url || ns_bookmarks_contains(bm, url)) return;
+    ns_bookmark b = { .url = g_strdup(url), .title = g_strdup(title ? title : url) };
     g_array_append_val(bm->items, b);
-    nd_bookmarks_save(bm);
+    ns_bookmarks_save(bm);
 }
 
 void
-nd_bookmarks_remove(nd_bookmarks *bm, const char *url)
+ns_bookmarks_remove(ns_bookmarks *bm, const char *url)
 {
     if (!bm || !url) return;
     for (guint i = 0; i < bm->items->len; i++) {
-        nd_bookmark *b = &g_array_index(bm->items, nd_bookmark, i);
+        ns_bookmark *b = &g_array_index(bm->items, ns_bookmark, i);
         if (b->url && strcmp(b->url, url) == 0) {
             g_array_remove_index(bm->items, i);
-            nd_bookmarks_save(bm);
+            ns_bookmarks_save(bm);
             return;
         }
     }

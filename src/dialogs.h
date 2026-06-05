@@ -1,7 +1,7 @@
 /* Nordstjernen — chrome dialogs: About, Settings, and the bookmarks list. */
 
-#ifndef ND_DIALOGS_H
-#define ND_DIALOGS_H
+#ifndef NS_DIALOGS_H
+#define NS_DIALOGS_H
 
 #include <gtk/gtk.h>
 

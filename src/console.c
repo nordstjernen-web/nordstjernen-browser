@@ -13,7 +13,7 @@
 #include "window.h"
 
 void
-nd_window_console_append(nd_window *w, const char *line)
+ns_window_console_append(ns_window *w, const char *line)
 {
     if (!w || !w->console.buffer || !line) return;
     GDateTime *now = g_date_time_new_now_local();
@@ -60,47 +60,47 @@ nd_window_console_append(nd_window *w, const char *line)
 }
 
 static void
-nd_console_entry_activate(GtkEntry *entry, gpointer user_data)
+ns_console_entry_activate(GtkEntry *entry, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     const char *src = gtk_editable_get_text(GTK_EDITABLE(entry));
     if (!src || !*src) return;
     char *echo = g_strdup_printf("> %s", src);
-    nd_window_console_append(w, echo);
+    ns_window_console_append(w, echo);
     g_free(echo);
-    nd_window_ensure_js(w);
+    ns_window_ensure_js(w);
     if (w->js) {
-        char *result = nd_js_eval_source(w->js, src, "console");
-        if (nd_js_consume_mutated(w->js))
-            nd_window_js_mutated(w);
+        char *result = ns_js_eval_source(w->js, src, "console");
+        if (ns_js_consume_mutated(w->js))
+            ns_window_js_mutated(w);
         if (result) {
-            nd_window_console_append(w, result);
+            ns_window_console_append(w, result);
             g_free(result);
         }
     } else {
-        nd_window_console_append(w, "(no JS context)");
+        ns_window_console_append(w, "(no JS context)");
     }
     gtk_editable_set_text(GTK_EDITABLE(entry), "");
 }
 
 static void
-nd_console_emit_env_line(const char *label, const char *value, gpointer user_data)
+ns_console_emit_env_line(const char *label, const char *value, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     char *line = g_strdup_printf("%-11s : %s", label, value);
-    nd_window_console_append(w, line);
+    ns_window_console_append(w, line);
     g_free(line);
 }
 
 static void
-nd_window_console_emit_banner(nd_window *w)
+ns_window_console_emit_banner(ns_window *w)
 {
     char *line;
 
-    line = g_strdup_printf("Nordstjernen %s — JavaScript console", ND_VERSION);
-    nd_window_console_append(w, line); g_free(line);
+    line = g_strdup_printf("Nordstjernen %s — JavaScript console", NS_VERSION);
+    ns_window_console_append(w, line); g_free(line);
 
-    nd_env_each(nd_console_emit_env_line, w);
+    ns_env_each(ns_console_emit_env_line, w);
 
     if (w->last_render_us > 0) {
         double ms = (double)w->last_render_us / 1000.0;
@@ -108,22 +108,22 @@ nd_window_console_emit_banner(nd_window *w)
     } else {
         line = g_strdup_printf("%-11s : (not measured yet)", "Last render");
     }
-    nd_window_console_append(w, line); g_free(line);
+    ns_window_console_append(w, line); g_free(line);
 
-    const char *enc = nd_net_supported_encodings();
+    const char *enc = ns_net_supported_encodings();
     line = g_strdup_printf("%-11s : %s", "Encodings",
                            (enc && *enc) ? enc : "(identity only)");
-    nd_window_console_append(w, line); g_free(line);
+    ns_window_console_append(w, line); g_free(line);
 
-    nd_window_console_append(w, "");
+    ns_window_console_append(w, "");
 }
 
-static void nd_window_console_build_profile_tab(nd_window *w, GtkWidget *notebook);
-static void nd_window_console_build_dlog_tab(nd_window *w, GtkWidget *notebook);
-static void nd_console_on_window_destroy(GtkWidget *widget, gpointer user_data);
+static void ns_window_console_build_profile_tab(ns_window *w, GtkWidget *notebook);
+static void ns_window_console_build_dlog_tab(ns_window *w, GtkWidget *notebook);
+static void ns_console_on_window_destroy(GtkWidget *widget, gpointer user_data);
 
 void
-nd_window_open_console(nd_window *w)
+ns_window_open_console(ns_window *w)
 {
     if (w->console.window) {
         gtk_window_present(GTK_WINDOW(w->console.window));
@@ -137,7 +137,7 @@ nd_window_open_console(nd_window *w)
     gtk_window_set_transient_for(GTK_WINDOW(w->console.window), GTK_WINDOW(w->window));
     g_object_add_weak_pointer(G_OBJECT(w->console.window), (gpointer *)&w->console.window);
     g_signal_connect(w->console.window, "destroy",
-                     G_CALLBACK(nd_console_on_window_destroy), w);
+                     G_CALLBACK(ns_console_on_window_destroy), w);
 
     GtkWidget *notebook = gtk_notebook_new();
     gtk_notebook_set_scrollable(GTK_NOTEBOOK(notebook), TRUE);
@@ -185,22 +185,22 @@ nd_window_open_console(nd_window *w)
     gtk_box_append(GTK_BOX(vbox), input_row);
 
     g_signal_connect(w->console.entry, "activate",
-                     G_CALLBACK(nd_console_entry_activate), w);
+                     G_CALLBACK(ns_console_entry_activate), w);
 
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), vbox,
                              gtk_label_new("Console"));
 
-    nd_window_console_build_profile_tab(w, notebook);
-    nd_window_console_build_dlog_tab(w, notebook);
+    ns_window_console_build_profile_tab(w, notebook);
+    ns_window_console_build_dlog_tab(w, notebook);
 
-    nd_window_console_emit_banner(w);
+    ns_window_console_emit_banner(w);
 
     gtk_window_present(GTK_WINDOW(w->console.window));
     gtk_widget_grab_focus(w->console.entry);
 }
 
 static void
-nd_console_profile_append(nd_window *w, const char *line)
+ns_console_profile_append(ns_window *w, const char *line)
 {
     if (!w || !w->console.profile_buffer || !line) return;
     GtkTextIter end;
@@ -212,13 +212,13 @@ nd_console_profile_append(nd_window *w, const char *line)
 
 typedef struct {
     guint w_id;
-} nd_console_profile_ctx;
+} ns_console_profile_ctx;
 
 static void
-nd_console_profile_progress(guint done, guint total, gpointer user_data)
+ns_console_profile_progress(guint done, guint total, gpointer user_data)
 {
-    nd_console_profile_ctx *ctx = user_data;
-    nd_window *w = ctx ? nd_window_for_id(ctx->w_id) : NULL;
+    ns_console_profile_ctx *ctx = user_data;
+    ns_window *w = ctx ? ns_window_for_id(ctx->w_id) : NULL;
     if (!w || !w->console.profile_progress_label) return;
     char *msg = g_strdup_printf("Sampling %u / %u…", done, total);
     gtk_label_set_text(GTK_LABEL(w->console.profile_progress_label), msg);
@@ -226,10 +226,10 @@ nd_console_profile_progress(guint done, guint total, gpointer user_data)
 }
 
 static void
-nd_console_profile_done(const nd_profile_result *r, gpointer user_data)
+ns_console_profile_done(const ns_profile_result *r, gpointer user_data)
 {
-    nd_console_profile_ctx *ctx = user_data;
-    nd_window *w = ctx ? nd_window_for_id(ctx->w_id) : NULL;
+    ns_console_profile_ctx *ctx = user_data;
+    ns_window *w = ctx ? ns_window_for_id(ctx->w_id) : NULL;
     g_free(ctx);
     if (!w) return;
     w->console.profile_running = FALSE;
@@ -257,49 +257,49 @@ nd_console_profile_done(const nd_profile_result *r, gpointer user_data)
         r->samples_taken, r->samples_requested,
         r->thread_snapshots,
         r->interval_ms, r->wall_us / 1.0e6);
-    nd_console_profile_append(w, hdr);
+    ns_console_profile_append(w, hdr);
     g_free(hdr);
     if (!r->ok && r->error_message) {
         char *line = g_strdup_printf("error: %s", r->error_message);
-        nd_console_profile_append(w, line);
+        ns_console_profile_append(w, line);
         g_free(line);
     }
     if (denom == 0) return;
 
-    nd_console_profile_append(w,
+    ns_console_profile_append(w,
         "Hot C functions (leaf, ignoring poll/main-loop):");
-    nd_console_profile_append(w,
+    ns_console_profile_append(w,
         "  hits   pct  function");
     guint shown = 0;
     for (guint i = 0; i < r->leaf_rows->len && shown < 20; i++) {
-        nd_profile_row row = g_array_index(r->leaf_rows, nd_profile_row, i);
+        ns_profile_row row = g_array_index(r->leaf_rows, ns_profile_row, i);
         double pct = 100.0 * (double)row.hits / (double)denom;
         char *line = g_strdup_printf("  %4u  %5.1f%%  %s",
                                      row.hits, pct, row.function);
-        nd_console_profile_append(w, line);
+        ns_console_profile_append(w, line);
         g_free(line);
         shown++;
     }
-    nd_console_profile_append(w, "");
-    nd_console_profile_append(w, "Top-of-stack frames (raw frame #0):");
-    nd_console_profile_append(w,
+    ns_console_profile_append(w, "");
+    ns_console_profile_append(w, "Top-of-stack frames (raw frame #0):");
+    ns_console_profile_append(w,
         "  hits   pct  function");
     shown = 0;
     for (guint i = 0; i < r->top_rows->len && shown < 10; i++) {
-        nd_profile_row row = g_array_index(r->top_rows, nd_profile_row, i);
+        ns_profile_row row = g_array_index(r->top_rows, ns_profile_row, i);
         double pct = 100.0 * (double)row.hits / (double)denom;
         char *line = g_strdup_printf("  %4u  %5.1f%%  %s",
                                      row.hits, pct, row.function);
-        nd_console_profile_append(w, line);
+        ns_console_profile_append(w, line);
         g_free(line);
         shown++;
     }
 }
 
 static void
-nd_console_profile_start_clicked(GtkButton *btn, gpointer user_data)
+ns_console_profile_start_clicked(GtkButton *btn, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w || w->console.profile_running) return;
     int samples = 30, interval = 50;
     if (w->console.profile_samples_spin)
@@ -313,21 +313,21 @@ nd_console_profile_start_clicked(GtkButton *btn, gpointer user_data)
     if (w->console.profile_progress_label)
         gtk_label_set_text(GTK_LABEL(w->console.profile_progress_label),
                            "Starting gdb…");
-    nd_console_profile_ctx *ctx = g_new0(nd_console_profile_ctx, 1);
+    ns_console_profile_ctx *ctx = g_new0(ns_console_profile_ctx, 1);
     ctx->w_id = w->id;
-    if (!nd_profiler_run_async((guint)samples, (guint)interval,
-                               nd_console_profile_progress,
-                               nd_console_profile_done, ctx)) {
+    if (!ns_profiler_run_async((guint)samples, (guint)interval,
+                               ns_console_profile_progress,
+                               ns_console_profile_done, ctx)) {
         w->console.profile_running = FALSE;
         gtk_button_set_label(btn, "Start sampling");
     }
 }
 
 static void
-nd_console_profile_clear_clicked(GtkButton *btn, gpointer user_data)
+ns_console_profile_clear_clicked(GtkButton *btn, gpointer user_data)
 {
     (void)btn;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w || !w->console.profile_buffer) return;
     GtkTextIter a, b;
     gtk_text_buffer_get_start_iter(w->console.profile_buffer, &a);
@@ -336,7 +336,7 @@ nd_console_profile_clear_clicked(GtkButton *btn, gpointer user_data)
 }
 
 static void
-nd_window_console_build_profile_tab(nd_window *w, GtkWidget *notebook)
+ns_window_console_build_profile_tab(ns_window *w, GtkWidget *notebook)
 {
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_start(vbox, 6);
@@ -367,19 +367,19 @@ nd_window_console_build_profile_tab(nd_window *w, GtkWidget *notebook)
 
     GtkWidget *start = gtk_button_new_with_label("Start sampling");
     g_signal_connect(start, "clicked",
-                     G_CALLBACK(nd_console_profile_start_clicked), w);
+                     G_CALLBACK(ns_console_profile_start_clicked), w);
     w->console.profile_start_btn = start;
     gtk_box_append(GTK_BOX(row), start);
 
     GtkWidget *clear = gtk_button_new_with_label("Clear");
     g_signal_connect(clear, "clicked",
-                     G_CALLBACK(nd_console_profile_clear_clicked), w);
+                     G_CALLBACK(ns_console_profile_clear_clicked), w);
     gtk_box_append(GTK_BOX(row), clear);
 
     gtk_box_append(GTK_BOX(vbox), row);
 
     GtkWidget *progress = gtk_label_new(
-        nd_profiler_supported()
+        ns_profiler_supported()
             ? "Ready. Click \"Start sampling\" to capture a profile."
             : "gdb not found in $PATH — profiler unavailable.");
     gtk_label_set_xalign(GTK_LABEL(progress), 0.0);
@@ -405,7 +405,7 @@ nd_window_console_build_profile_tab(nd_window *w, GtkWidget *notebook)
 }
 
 static void
-nd_console_dlog_format(const nd_dlog_entry *e, char **out_line)
+ns_console_dlog_format(const ns_dlog_entry *e, char **out_line)
 {
     gint64 wall_us = g_get_real_time() -
         (g_get_monotonic_time() - e->monotonic_us);
@@ -419,18 +419,18 @@ nd_console_dlog_format(const nd_dlog_entry *e, char **out_line)
     if (t) g_date_time_unref(t);
     *out_line = g_strdup_printf("%s  [%-6s] %s: %s",
                                 ts,
-                                nd_dlog_level_name(e->level),
+                                ns_dlog_level_name(e->level),
                                 e->category ? e->category : "",
                                 e->message  ? e->message  : "");
     g_free(ts);
 }
 
 static void
-nd_console_dlog_append_entry(nd_window *w, const nd_dlog_entry *e)
+ns_console_dlog_append_entry(ns_window *w, const ns_dlog_entry *e)
 {
     if (!w || !w->console.dlog_buffer || !e) return;
     char *line = NULL;
-    nd_console_dlog_format(e, &line);
+    ns_console_dlog_format(e, &line);
     GtkTextIter end;
     gtk_text_buffer_get_end_iter(w->console.dlog_buffer, &end);
     GtkTextMark *mk = gtk_text_buffer_create_mark(w->console.dlog_buffer,
@@ -440,11 +440,11 @@ nd_console_dlog_append_entry(nd_window *w, const nd_dlog_entry *e)
     gtk_text_buffer_insert(w->console.dlog_buffer, &end, "\n", 1);
     const char *tag = NULL;
     switch (e->level) {
-    case ND_DLOG_ERROR:  tag = "dlog-error";  break;
-    case ND_DLOG_WARN:   tag = "dlog-warn";   break;
-    case ND_DLOG_RENDER: tag = "dlog-render"; break;
-    case ND_DLOG_NET:    tag = "dlog-net";    break;
-    case ND_DLOG_JS:     tag = "dlog-js";     break;
+    case NS_DLOG_ERROR:  tag = "dlog-error";  break;
+    case NS_DLOG_WARN:   tag = "dlog-warn";   break;
+    case NS_DLOG_RENDER: tag = "dlog-render"; break;
+    case NS_DLOG_NET:    tag = "dlog-net";    break;
+    case NS_DLOG_JS:     tag = "dlog-js";     break;
     default: break;
     }
     if (tag) {
@@ -459,16 +459,16 @@ nd_console_dlog_append_entry(nd_window *w, const nd_dlog_entry *e)
 
 typedef struct {
     guint w_id;
-    nd_dlog_entry e;
-} nd_dlog_idle_payload;
+    ns_dlog_entry e;
+} ns_dlog_idle_payload;
 
 static gboolean
-nd_console_dlog_idle_cb(gpointer user_data)
+ns_console_dlog_idle_cb(gpointer user_data)
 {
-    nd_dlog_idle_payload *p = user_data;
-    nd_window *w = nd_window_for_id(p->w_id);
+    ns_dlog_idle_payload *p = user_data;
+    ns_window *w = ns_window_for_id(p->w_id);
     if (w && w->console.dlog_buffer)
-        nd_console_dlog_append_entry(w, &p->e);
+        ns_console_dlog_append_entry(w, &p->e);
     g_free(p->e.category);
     g_free(p->e.message);
     g_free(p);
@@ -476,32 +476,32 @@ nd_console_dlog_idle_cb(gpointer user_data)
 }
 
 static void
-nd_console_dlog_listener(const nd_dlog_entry *e, gpointer user_data)
+ns_console_dlog_listener(const ns_dlog_entry *e, gpointer user_data)
 {
     guint w_id = GPOINTER_TO_UINT(user_data);
     if (!w_id || !e) return;
-    nd_dlog_idle_payload *p = g_new0(nd_dlog_idle_payload, 1);
+    ns_dlog_idle_payload *p = g_new0(ns_dlog_idle_payload, 1);
     p->w_id = w_id;
     p->e.monotonic_us = e->monotonic_us;
     p->e.level        = e->level;
     p->e.category     = g_strdup(e->category ? e->category : "");
     p->e.message      = g_strdup(e->message  ? e->message  : "");
-    g_idle_add(nd_console_dlog_idle_cb, p);
+    g_idle_add(ns_console_dlog_idle_cb, p);
 }
 
 static void
-nd_console_dlog_visit_initial(gpointer item, gpointer user_data)
+ns_console_dlog_visit_initial(gpointer item, gpointer user_data)
 {
-    nd_window *w = user_data;
-    nd_dlog_entry *e = item;
-    nd_console_dlog_append_entry(w, e);
+    ns_window *w = user_data;
+    ns_dlog_entry *e = item;
+    ns_console_dlog_append_entry(w, e);
 }
 
 static void
-nd_console_dlog_clear_clicked(GtkButton *btn, gpointer user_data)
+ns_console_dlog_clear_clicked(GtkButton *btn, gpointer user_data)
 {
     (void)btn;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w || !w->console.dlog_buffer) return;
     GtkTextIter a, b;
     gtk_text_buffer_get_start_iter(w->console.dlog_buffer, &a);
@@ -510,7 +510,7 @@ nd_console_dlog_clear_clicked(GtkButton *btn, gpointer user_data)
 }
 
 static void
-nd_window_console_build_dlog_tab(nd_window *w, GtkWidget *notebook)
+ns_window_console_build_dlog_tab(ns_window *w, GtkWidget *notebook)
 {
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_margin_start(vbox, 6);
@@ -527,7 +527,7 @@ nd_window_console_build_dlog_tab(nd_window *w, GtkWidget *notebook)
 
     GtkWidget *clear = gtk_button_new_with_label("Clear");
     g_signal_connect(clear, "clicked",
-                     G_CALLBACK(nd_console_dlog_clear_clicked), w);
+                     G_CALLBACK(ns_console_dlog_clear_clicked), w);
     gtk_box_append(GTK_BOX(row), clear);
     gtk_box_append(GTK_BOX(vbox), row);
 
@@ -560,19 +560,19 @@ nd_window_console_build_dlog_tab(nd_window *w, GtkWidget *notebook)
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), vbox,
                              gtk_label_new("Debug Log"));
 
-    nd_debug_log_snapshot(nd_console_dlog_visit_initial, w);
-    w->console.dlog_sub_id = nd_debug_log_subscribe(nd_console_dlog_listener,
+    ns_debug_log_snapshot(ns_console_dlog_visit_initial, w);
+    w->console.dlog_sub_id = ns_debug_log_subscribe(ns_console_dlog_listener,
                                                     GUINT_TO_POINTER(w->id));
 }
 
 static void
-nd_console_on_window_destroy(GtkWidget *widget, gpointer user_data)
+ns_console_on_window_destroy(GtkWidget *widget, gpointer user_data)
 {
     (void)widget;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     if (!w) return;
     if (w->console.dlog_sub_id) {
-        nd_debug_log_unsubscribe(w->console.dlog_sub_id);
+        ns_debug_log_unsubscribe(w->console.dlog_sub_id);
         w->console.dlog_sub_id = 0;
     }
     w->console.notebook              = NULL;
@@ -591,21 +591,21 @@ void
 on_win_open_console(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
-    nd_window *w = user_data;
-    nd_window_open_console(w);
+    ns_window *w = user_data;
+    ns_window_open_console(w);
 }
 
 void
-nd_window_console_close(nd_window *w)
+ns_window_console_close(ns_window *w)
 {
     if (!w) return;
     if (w->console.dlog_sub_id) {
-        nd_debug_log_unsubscribe(w->console.dlog_sub_id);
+        ns_debug_log_unsubscribe(w->console.dlog_sub_id);
         w->console.dlog_sub_id = 0;
     }
     if (w->console.window) {
         g_signal_handlers_disconnect_by_func(
-            w->console.window, G_CALLBACK(nd_console_on_window_destroy), w);
+            w->console.window, G_CALLBACK(ns_console_on_window_destroy), w);
         gtk_window_destroy(GTK_WINDOW(w->console.window));
     }
 }

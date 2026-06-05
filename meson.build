@@ -71,8 +71,8 @@ add_project_link_arguments(
   language: 'c',
 )
 
-nd_buildtype = get_option('buildtype')
-nd_is_release = (nd_buildtype == 'release' or nd_buildtype == 'minsize')
+ns_buildtype = get_option('buildtype')
+ns_is_release = (ns_buildtype == 'release' or ns_buildtype == 'minsize')
 # Every build profile gets -O3 (via default_options optimization=3) plus
 # dead-section pruning. Nordstjernen leans on the optimizer to inline the
 # lexbor parser walks, QuickJS interpreter dispatch, and our box-layout
@@ -88,7 +88,7 @@ add_project_link_arguments(
   cc.get_supported_link_arguments(['-Wl,--gc-sections']),
   language: 'c',
 )
-if nd_is_release
+if ns_is_release
   add_project_link_arguments(
     cc.get_supported_link_arguments(['-Wl,-s']),
     language: 'c',
@@ -100,7 +100,7 @@ else
   )
 endif
 message('nordstjernen build profile: ' +
-        (nd_is_release ? 'release (LTO + stripped + hardened)'
+        (ns_is_release ? 'release (LTO + stripped + hardened)'
                        : 'development (debug symbols + frame pointer + hardened)'))
 
 is_android = host_machine.system() == 'android'
@@ -108,7 +108,7 @@ is_android = host_machine.system() == 'android'
 # Android builds only the embeddable engine library, driven by the JNI host app
 # in android/. It links the GLib/cairo/pango graphics stack directly instead of
 # GTK 4: the engine uses no GTK widgets, and GdkTexture is replaced by the
-# nd_texture abstraction (src/texture.c). gtk4 is therefore desktop-only.
+# ns_texture abstraction (src/texture.c). gtk4 is therefore desktop-only.
 if is_android
   glib       = dependency('glib-2.0')
   gobject    = dependency('gobject-2.0')

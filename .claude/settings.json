@@ -11,7 +11,7 @@
       "Bash(./scripts/dev.sh:*)",
       "Bash(./builddir/src/nordstjernen:*)",
       "Bash(./builddir-asan/src/nordstjernen:*)",
-      "Bash(ND_NO_SANDBOX=1:*)",
+      "Bash(NS_NO_SANDBOX=1:*)",
       "Bash(ASAN_OPTIONS=*)",
       "Bash(DISPLAY=:0:*)",
       "Bash(git:*)",

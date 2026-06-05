@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
-#ifndef ND_TAB_WORKER_H
-#define ND_TAB_WORKER_H
+#ifndef NS_TAB_WORKER_H
+#define NS_TAB_WORKER_H
 
 #include <gio/gio.h>
 #include <glib.h>
@@ -13,69 +13,69 @@
 #include "net.h"
 #include "texture.h"
 
-typedef struct nd_css_stylesheet nd_css_stylesheet;
+typedef struct ns_css_stylesheet ns_css_stylesheet;
 
 G_BEGIN_DECLS
 
-typedef struct nd_tab_worker nd_tab_worker;
+typedef struct ns_tab_worker ns_tab_worker;
 
-typedef struct nd_tab_load_result {
-    nd_response *resp;
+typedef struct ns_tab_load_result {
+    ns_response *resp;
     char        *body;
     gsize        body_len;
-    nd_node     *doc;
+    ns_node     *doc;
     gboolean     parsed;
-} nd_tab_load_result;
+} ns_tab_load_result;
 
-typedef struct nd_tab_image_result {
-    nd_response *resp;
+typedef struct ns_tab_image_result {
+    ns_response *resp;
     guint8      *pixels;
     GArray      *anim_frames;
     gsize        pixels_len;
     gsize        stride;
-    nd_texture_format format;
+    ns_texture_format format;
     int          width;
     int          height;
-} nd_tab_image_result;
+} ns_tab_image_result;
 
-typedef struct nd_tab_css_result {
-    nd_response       *resp;
-    nd_css_stylesheet *sheet;
-} nd_tab_css_result;
+typedef struct ns_tab_css_result {
+    ns_response       *resp;
+    ns_css_stylesheet *sheet;
+} ns_tab_css_result;
 
-typedef void (*nd_tab_load_ready_cb)(nd_tab_load_result *result,
+typedef void (*ns_tab_load_ready_cb)(ns_tab_load_result *result,
                                      gpointer user_data);
-typedef void (*nd_tab_image_ready_cb)(nd_tab_image_result *result,
+typedef void (*ns_tab_image_ready_cb)(ns_tab_image_result *result,
                                       gpointer user_data);
-typedef void (*nd_tab_css_ready_cb)(nd_tab_css_result *result,
+typedef void (*ns_tab_css_ready_cb)(ns_tab_css_result *result,
                                     gpointer user_data);
 
-nd_tab_worker *nd_tab_worker_new(const char *name);
-void           nd_tab_worker_free(nd_tab_worker *worker);
+ns_tab_worker *ns_tab_worker_new(const char *name);
+void           ns_tab_worker_free(ns_tab_worker *worker);
 
-gboolean nd_tab_worker_load_response(nd_tab_worker *worker,
-                                     nd_response *resp,
+gboolean ns_tab_worker_load_response(ns_tab_worker *worker,
+                                     ns_response *resp,
                                      gboolean parse_html,
-                                     nd_tab_load_ready_cb cb,
+                                     ns_tab_load_ready_cb cb,
                                      gpointer user_data,
                                      GDestroyNotify user_data_destroy);
 
-gboolean nd_tab_worker_decode_image_response(nd_tab_worker *worker,
-                                             nd_response *resp,
-                                             nd_tab_image_ready_cb cb,
+gboolean ns_tab_worker_decode_image_response(ns_tab_worker *worker,
+                                             ns_response *resp,
+                                             ns_tab_image_ready_cb cb,
                                              gpointer user_data,
                                              GDestroyNotify user_data_destroy);
 
-gboolean nd_tab_worker_parse_css_response(nd_tab_worker *worker,
-                                          nd_response *resp,
+gboolean ns_tab_worker_parse_css_response(ns_tab_worker *worker,
+                                          ns_response *resp,
                                           const char *scope_id,
-                                          nd_tab_css_ready_cb cb,
+                                          ns_tab_css_ready_cb cb,
                                           gpointer user_data,
                                           GDestroyNotify user_data_destroy);
 
-void nd_tab_load_result_free(nd_tab_load_result *result);
-void nd_tab_image_result_free(nd_tab_image_result *result);
-void nd_tab_css_result_free(nd_tab_css_result *result);
+void ns_tab_load_result_free(ns_tab_load_result *result);
+void ns_tab_image_result_free(ns_tab_image_result *result);
+void ns_tab_css_result_free(ns_tab_css_result *result);
 
 G_END_DECLS
 

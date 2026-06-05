@@ -24,7 +24,7 @@ Three ways, highest priority first:
    nordstjernen --no-watchdog
    ```
 
-2. **Environment** (one shell): `ND_NO_WATCHDOG=1` does the same.
+2. **Environment** (one shell): `NS_NO_WATCHDOG=1` does the same.
 
 3. **Config file** (persistent): set `watchdog_enabled = false` in
    `nordstjernen.conf`.
@@ -88,7 +88,7 @@ an "Aw, Snap!" / `about:tabcrashed`.
 
 While the browser runs it records the URLs of its open `http(s)`/`file`
 tabs to a small session file every few seconds. When a crash or hang
-triggers a restart, the supervisor sets `ND_WATCHDOG_RECOVER=1` on the
+triggers a restart, the supervisor sets `NS_WATCHDOG_RECOVER=1` on the
 respawned child; that child reopens the saved pages and shows a dialog
 telling you it recovered after an unexpected exit. A clean shutdown
 deletes the session file, so a normal launch never offers to recover.
@@ -110,5 +110,5 @@ child to quit gracefully and then exits cleanly without restarting it.
   filter, or any UI — those belong to the child.
 - The child is launched with the internal `--watchdog-child` and
   `--watchdog-session=<path>` flags, and recovery is signalled with the
-  `ND_WATCHDOG_RECOVER` environment variable; you never set these
+  `NS_WATCHDOG_RECOVER` environment variable; you never set these
   yourself.

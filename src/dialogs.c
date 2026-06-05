@@ -11,46 +11,46 @@
 #include "window.h"
 
 
-typedef struct nd_about_logo {
+typedef struct ns_about_logo {
     GtkWidget *image;
     GArray    *frames;
     int        index;
     guint      source_id;
-} nd_about_logo;
+} ns_about_logo;
 
-static gboolean nd_about_logo_advance(gpointer user_data);
+static gboolean ns_about_logo_advance(gpointer user_data);
 
 static void
-nd_about_logo_show_frame(nd_about_logo *al)
+ns_about_logo_show_frame(ns_about_logo *al)
 {
     if (!al || !al->frames || al->frames->len == 0) return;
-    nd_image_anim_frame *f =
-        &g_array_index(al->frames, nd_image_anim_frame, al->index);
+    ns_image_anim_frame *f =
+        &g_array_index(al->frames, ns_image_anim_frame, al->index);
     if (f->texture && al->image) {
         gtk_image_set_from_paintable(GTK_IMAGE(al->image),
                                      GDK_PAINTABLE(f->texture));
     }
     int delay = f->delay_ms > 0 ? f->delay_ms : 100;
     if (delay < 20) delay = 20;
-    al->source_id = g_timeout_add(delay, nd_about_logo_advance, al);
+    al->source_id = g_timeout_add(delay, ns_about_logo_advance, al);
 }
 
 static gboolean
-nd_about_logo_advance(gpointer user_data)
+ns_about_logo_advance(gpointer user_data)
 {
-    nd_about_logo *al = user_data;
+    ns_about_logo *al = user_data;
     al->source_id = 0;
     if (!al->frames || al->frames->len == 0 || !al->image)
         return G_SOURCE_REMOVE;
     al->index = (al->index + 1) % (int)al->frames->len;
-    nd_about_logo_show_frame(al);
+    ns_about_logo_show_frame(al);
     return G_SOURCE_REMOVE;
 }
 
 static void
-nd_about_logo_free(gpointer data)
+ns_about_logo_free(gpointer data)
 {
-    nd_about_logo *al = data;
+    ns_about_logo *al = data;
     if (!al) return;
     if (al->source_id) {
         g_source_remove(al->source_id);
@@ -64,7 +64,7 @@ void
 on_about_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_window *w = user_data;
+    ns_window *w = user_data;
 
     GtkWidget *dlg = gtk_window_new();
     gtk_window_set_transient_for(GTK_WINDOW(dlg), GTK_WINDOW(w->window));
@@ -77,8 +77,8 @@ on_about_clicked(GtkButton *button, gpointer user_data)
     gtk_widget_add_css_class(vbox, "nd-about-content");
     gtk_widget_set_halign(vbox, GTK_ALIGN_CENTER);
 
-    nd_about_logo *al = g_new0(nd_about_logo, 1);
-    al->frames = nd_logo_anim_frames();
+    ns_about_logo *al = g_new0(ns_about_logo, 1);
+    al->frames = ns_logo_anim_frames();
     al->index = 0;
 
     GtkWidget *logo = gtk_image_new();
@@ -86,24 +86,24 @@ on_about_clicked(GtkButton *button, gpointer user_data)
     gtk_image_set_pixel_size(GTK_IMAGE(logo), 128);
     al->image = logo;
     if (al->frames && al->frames->len > 0) {
-        nd_about_logo_show_frame(al);
+        ns_about_logo_show_frame(al);
     } else {
         gtk_image_set_from_icon_name(GTK_IMAGE(logo), "nordstjernen");
     }
     g_object_set_data_full(G_OBJECT(logo), "nd-about-logo",
-                           al, nd_about_logo_free);
+                           al, ns_about_logo_free);
     gtk_box_append(GTK_BOX(vbox), logo);
 
     GtkWidget *name = gtk_label_new("Nordstjernen");
     gtk_widget_add_css_class(name, "nd-about-name");
     gtk_box_append(GTK_BOX(vbox), name);
 
-    GtkWidget *version = gtk_label_new("Version " ND_VERSION);
+    GtkWidget *version = gtk_label_new("Version " NS_VERSION);
     gtk_widget_add_css_class(version, "nd-about-version");
     gtk_box_append(GTK_BOX(vbox), version);
 
-    if (ND_BUILD_DATE[0]) {
-        GtkWidget *built = gtk_label_new("Built " ND_BUILD_DATE);
+    if (NS_BUILD_DATE[0]) {
+        GtkWidget *built = gtk_label_new("Built " NS_BUILD_DATE);
         gtk_widget_add_css_class(built, "nd-about-version");
         gtk_box_append(GTK_BOX(vbox), built);
     }
@@ -134,24 +134,24 @@ void
 on_logo_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_window *w = user_data;
-    nd_window_load_url(w, "https://www.nordstjernen.org/", ND_LOAD_USER);
+    ns_window *w = user_data;
+    ns_window_load_url(w, "https://www.nordstjernen.org/", NS_LOAD_USER);
 }
 
-typedef struct nd_settings_dialog {
-    nd_window *w;
+typedef struct ns_settings_dialog {
+    ns_window *w;
     GtkWidget *dialog;
     GtkWidget *http_proxy_entry;
     GtkWidget *home_url_entry;
     GtkWidget *search_engine_entry;
-} nd_settings_dialog;
+} ns_settings_dialog;
 
 static void
 on_settings_dialog_save(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_settings_dialog *sd = user_data;
-    nd_config *c = nd_config_mut();
+    ns_settings_dialog *sd = user_data;
+    ns_config *c = ns_config_mut();
 
     const char *http_proxy   = gtk_editable_get_text(GTK_EDITABLE(sd->http_proxy_entry));
     const char *home_url     = gtk_editable_get_text(GTK_EDITABLE(sd->home_url_entry));
@@ -164,16 +164,16 @@ on_settings_dialog_save(GtkButton *button, gpointer user_data)
     g_free(c->search_engine);
     c->search_engine = g_strdup(search ? search : "");
 
-    nd_app_set_home_url(c->home_url);
+    ns_app_set_home_url(c->home_url);
 
     GError *err = NULL;
-    if (!nd_config_save(&err)) {
-        nd_window_set_status(sd->w, "Failed to save settings: %s",
+    if (!ns_config_save(&err)) {
+        ns_window_set_status(sd->w, "Failed to save settings: %s",
                              err ? err->message : "unknown error");
         g_clear_error(&err);
     } else {
-        nd_window_set_status(sd->w, "Settings saved to %s",
-                             nd_config_path());
+        ns_window_set_status(sd->w, "Settings saved to %s",
+                             ns_config_path());
     }
     gtk_window_destroy(GTK_WINDOW(sd->dialog));
 }
@@ -182,7 +182,7 @@ static void
 on_settings_dialog_cancel(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_settings_dialog *sd = user_data;
+    ns_settings_dialog *sd = user_data;
     gtk_window_destroy(GTK_WINDOW(sd->dialog));
 }
 
@@ -190,11 +190,11 @@ static void
 on_settings_clear_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_settings_dialog *sd = user_data;
-    nd_window *w = sd->w;
+    ns_settings_dialog *sd = user_data;
+    ns_window *w = sd->w;
 
-    nd_cache_clear();
-    nd_history_clear();
+    ns_cache_clear();
+    ns_history_clear();
 
     char *keep = NULL;
     if (w->history && w->cursor >= 0 && w->cursor < (int)w->history->len)
@@ -210,8 +210,8 @@ on_settings_clear_clicked(GtkButton *button, gpointer user_data)
     } else {
         w->cursor = -1;
     }
-    nd_window_update_nav_state(w);
-    nd_window_set_status(w, "Cleared cache and history");
+    ns_window_update_nav_state(w);
+    ns_window_set_status(w, "Cleared cache and history");
 }
 
 static void
@@ -222,7 +222,7 @@ on_settings_dialog_destroy(GtkWidget *widget, gpointer user_data)
 }
 
 static GtkWidget *
-nd_settings_add_row(GtkWidget *grid, int row, const char *label_text,
+ns_settings_add_row(GtkWidget *grid, int row, const char *label_text,
                     GtkWidget *control)
 {
     GtkWidget *label = gtk_label_new(label_text);
@@ -239,10 +239,10 @@ void
 on_settings_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
-    nd_window *w = user_data;
-    const nd_config *c = nd_config_get();
+    ns_window *w = user_data;
+    const ns_config *c = ns_config_get();
 
-    nd_settings_dialog *sd = g_new0(nd_settings_dialog, 1);
+    ns_settings_dialog *sd = g_new0(ns_settings_dialog, 1);
     sd->w = w;
     sd->dialog = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(sd->dialog), "Settings — Nordstjernen");
@@ -272,26 +272,26 @@ on_settings_clicked(GtkButton *button, gpointer user_data)
                           c->home_url ? c->home_url : "");
     gtk_entry_set_placeholder_text(GTK_ENTRY(sd->home_url_entry),
                                    "about:start");
-    nd_settings_add_row(grid, 0, "Home URL:", sd->home_url_entry);
+    ns_settings_add_row(grid, 0, "Home URL:", sd->home_url_entry);
 
     sd->search_engine_entry = gtk_entry_new();
     gtk_editable_set_text(GTK_EDITABLE(sd->search_engine_entry),
                           c->search_engine ? c->search_engine : "");
     gtk_entry_set_placeholder_text(GTK_ENTRY(sd->search_engine_entry),
                                    "https://example.com/search?q=%s");
-    nd_settings_add_row(grid, 1, "Search engine:", sd->search_engine_entry);
+    ns_settings_add_row(grid, 1, "Search engine:", sd->search_engine_entry);
 
     sd->http_proxy_entry = gtk_entry_new();
     gtk_editable_set_text(GTK_EDITABLE(sd->http_proxy_entry),
                           c->http_proxy ? c->http_proxy : "");
     gtk_entry_set_placeholder_text(GTK_ENTRY(sd->http_proxy_entry),
                                    "http://host:port  (leave blank for direct)");
-    nd_settings_add_row(grid, 2, "HTTP proxy:", sd->http_proxy_entry);
+    ns_settings_add_row(grid, 2, "HTTP proxy:", sd->http_proxy_entry);
 
     GtkWidget *hint = gtk_label_new(NULL);
     char *hint_text = g_strdup_printf(
         "Saved to %s. New requests pick up changes immediately.",
-        nd_config_path() ? nd_config_path() : "(no config path)");
+        ns_config_path() ? ns_config_path() : "(no config path)");
     gtk_label_set_text(GTK_LABEL(hint), hint_text);
     g_free(hint_text);
     gtk_label_set_wrap(GTK_LABEL(hint), TRUE);
@@ -326,10 +326,10 @@ on_settings_clicked(GtkButton *button, gpointer user_data)
 static void
 on_bookmark_open(GtkButton *button, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     const char *url = g_object_get_data(G_OBJECT(button), "nd-url");
     if (!url) return;
-    nd_window_load_url(w, url, ND_LOAD_USER);
+    ns_window_load_url(w, url, NS_LOAD_USER);
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER);
     if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
 }
@@ -337,11 +337,11 @@ on_bookmark_open(GtkButton *button, gpointer user_data)
 static void
 on_bookmark_open_new_window(GtkButton *button, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     const char *url = g_object_get_data(G_OBJECT(button), "nd-url");
     if (!url) return;
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(w->window));
-    nd_spawn_window(app, url);
+    ns_spawn_window(app, url);
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(button), GTK_TYPE_POPOVER);
     if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
 }
@@ -349,12 +349,12 @@ on_bookmark_open_new_window(GtkButton *button, gpointer user_data)
 static void
 on_bookmark_delete(GtkButton *button, gpointer user_data)
 {
-    nd_window *w = user_data;
+    ns_window *w = user_data;
     const char *url = g_object_get_data(G_OBJECT(button), "nd-url");
-    if (!url || !nd_app_bookmarks()) return;
+    if (!url || !ns_app_bookmarks()) return;
     char *url_copy = g_strdup(url);
-    nd_bookmarks_remove(nd_app_bookmarks(), url_copy);
-    nd_window_set_status(w, "Removed bookmark %s", url_copy);
+    ns_bookmarks_remove(ns_app_bookmarks(), url_copy);
+    ns_window_set_status(w, "Removed bookmark %s", url_copy);
     g_free(url_copy);
     GtkWidget *row = gtk_widget_get_parent(GTK_WIDGET(button));
     GtkWidget *list = row ? gtk_widget_get_parent(row) : NULL;
@@ -364,8 +364,8 @@ on_bookmark_delete(GtkButton *button, gpointer user_data)
 void
 on_bookmarks_clicked(GtkButton *button, gpointer user_data)
 {
-    nd_window *w = user_data;
-    if (!nd_app_bookmarks()) return;
+    ns_window *w = user_data;
+    if (!ns_app_bookmarks()) return;
     GtkWidget *popover = gtk_popover_new();
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_size_request(outer, 420, -1);
@@ -383,7 +383,7 @@ on_bookmarks_clicked(GtkButton *button, gpointer user_data)
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scrolled), 420);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scrolled), TRUE);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    guint count = nd_bookmarks_count(nd_app_bookmarks());
+    guint count = ns_bookmarks_count(ns_app_bookmarks());
     if (count == 0) {
         GtkWidget *empty = gtk_label_new("No bookmarks yet — star a page to add one.");
         gtk_widget_set_margin_top(empty, 12);
@@ -393,7 +393,7 @@ on_bookmarks_clicked(GtkButton *button, gpointer user_data)
         gtk_box_append(GTK_BOX(box), empty);
     }
     for (guint i = 0; i < count; i++) {
-        const nd_bookmark *b = nd_bookmarks_get(nd_app_bookmarks(), i);
+        const ns_bookmark *b = ns_bookmarks_get(ns_app_bookmarks(), i);
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
         GtkWidget *open = gtk_button_new();
         gtk_button_set_has_frame(GTK_BUTTON(open), FALSE);

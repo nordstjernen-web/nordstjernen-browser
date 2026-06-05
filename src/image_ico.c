@@ -8,9 +8,9 @@
 #include <string.h>
 
 enum {
-    ND_ICO_MAX_ENTRIES = 256,
-    ND_ICO_MAX_DIM     = 1024,
-    ND_ICO_MAX_BMP     = 64 * 1024 * 1024,
+    NS_ICO_MAX_ENTRIES = 256,
+    NS_ICO_MAX_DIM     = 1024,
+    NS_ICO_MAX_BMP     = 64 * 1024 * 1024,
 };
 
 static guint16
@@ -40,7 +40,7 @@ is_png(const guchar *d, gsize len)
     return len >= 8 && memcmp(d, sig, 8) == 0;
 }
 
-static nd_texture *
+static ns_texture *
 decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
 {
     if (len < 40) return NULL;
@@ -51,7 +51,7 @@ decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
     guint16 bitcount = rd_u16(p + 14);
     guint32 compression = rd_u32(p + 16);
     if (bw <= 0 || bh <= 0 || (bh & 1)) return NULL;
-    if (bw > ND_ICO_MAX_DIM || bh > 2 * ND_ICO_MAX_DIM) return NULL;
+    if (bw > NS_ICO_MAX_DIM || bh > 2 * NS_ICO_MAX_DIM) return NULL;
     if (compression != 0) return NULL;
     if (bitcount != 1 && bitcount != 4 && bitcount != 8 &&
         bitcount != 24 && bitcount != 32) return NULL;
@@ -72,7 +72,7 @@ decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
 
     guint64 data_off64 = (guint64)14 + hdr + pal_bytes;
     guint64 bmp_len = data_off64 + xor_size;
-    if (data_off64 > G_MAXUINT32 || bmp_len > ND_ICO_MAX_BMP) return NULL;
+    if (data_off64 > G_MAXUINT32 || bmp_len > NS_ICO_MAX_BMP) return NULL;
     guint32 data_off = (guint32)data_off64;
 
     guint8 *bmp = g_try_malloc((gsize)bmp_len);
@@ -88,7 +88,7 @@ decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
 
     int dw = 0, dh = 0;
     gsize stride = 0, buf_len = 0;
-    guint8 *pix = nd_image_wuffs_decode_to_bgra(bmp, (gsize)bmp_len,
+    guint8 *pix = ns_image_wuffs_decode_to_bgra(bmp, (gsize)bmp_len,
                                                 &dw, &dh, &stride, &buf_len);
     g_free(bmp);
     if (!pix) return NULL;
@@ -111,8 +111,8 @@ decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
     }
 
     GBytes *bytes = g_bytes_new_take(pix, buf_len);
-    nd_texture *tex = nd_texture_new(
-        dw, dh, ND_TEXTURE_BGRA_PREMULTIPLIED, bytes, stride);
+    ns_texture *tex = ns_texture_new(
+        dw, dh, NS_TEXTURE_BGRA_PREMULTIPLIED, bytes, stride);
     g_bytes_unref(bytes);
     if (tex) {
         if (out_w) *out_w = dw;
@@ -121,15 +121,15 @@ decode_dib_entry(const guchar *p, gsize len, int *out_w, int *out_h)
     return tex;
 }
 
-nd_texture *
-nd_image_decode_ico(const guchar *data, gsize len, int *out_w, int *out_h)
+ns_texture *
+ns_image_decode_ico(const guchar *data, gsize len, int *out_w, int *out_h)
 {
     if (!data || len < 6) return NULL;
     if (rd_u16(data) != 0) return NULL;
     guint16 type = rd_u16(data + 2);
     if (type != 1 && type != 2) return NULL;
     guint16 count = rd_u16(data + 4);
-    if (count == 0 || count > ND_ICO_MAX_ENTRIES) return NULL;
+    if (count == 0 || count > NS_ICO_MAX_ENTRIES) return NULL;
     if (6 + (gsize)count * 16 > len) return NULL;
 
     int best = -1;
@@ -158,6 +158,6 @@ nd_image_decode_ico(const guchar *data, gsize len, int *out_w, int *out_h)
     const guchar *payload = data + off;
 
     if (is_png(payload, size))
-        return nd_image_decode_wuffs(payload, size, out_w, out_h);
+        return ns_image_decode_wuffs(payload, size, out_w, out_h);
     return decode_dib_entry(payload, size, out_w, out_h);
 }

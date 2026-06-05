@@ -133,7 +133,7 @@ sudo usermod -aG docker "$USER"      # log out / back in for this to apply
 docker run --rm hello-world          # verify
 ```
 
-Podman works too — set `ND_DOCKER=podman`. The orchestrator mounts the
+Podman works too — set `NS_DOCKER=podman`. The orchestrator mounts the
 build tree with the `:z` SELinux relabel, which Docker on Ubuntu
 (AppArmor, no SELinux) ignores harmlessly.
 
@@ -230,7 +230,7 @@ to the command (keep the cron file `chmod 600`):
 | `--no-pull` / `NIGHTLY_PULL` | `1` | Fast-forward the checkout to `origin/main` and re-exec before building; `0`/`--no-pull` to disable. |
 | `NIGHTLY_PULL_BRANCH` | `main` | Branch the working tree is fast-forwarded to. |
 | `JAVA_HOME` | autodetected from `javac` | JDK 21 used by the Java stage. |
-| `ND_DOCKER` | `docker` | Container engine (`docker` or `podman`). |
+| `NS_DOCKER` | `docker` | Container engine (`docker` or `podman`). |
 | `NIGHTLY_GHA_TIMEOUT` | `4200` | Seconds to wait for each GitHub run. |
 | `NIGHTLY_GHA_DISPATCH` | `1` | Dispatch a fresh run if none exists for the commit; set `0` to only reuse. |
 | `NIGHTLY_DEBIAN_IMAGE` | `debian:trixie` | Override the Debian base image. |
@@ -271,10 +271,10 @@ prefer a dedicated vhost, point its `root` at `/var/www/html/nightly`
   (quickjs, wuffs) at `-O3`, and especially the whole-program LTO link
   under newer GCC, is memory-hungry. The helper mitigates this two
   ways: it caps `ninja` parallelism to roughly `MemGB / 2` jobs
-  (`ND_BUILD_JOBS`) and disables LTO for the nightly packages
-  (`ND_BUILD_LTO=false`) — nightly binaries are functionally identical,
+  (`NS_BUILD_JOBS`) and disables LTO for the nightly packages
+  (`NS_BUILD_LTO=false`) — nightly binaries are functionally identical,
   just slightly larger. Override either env if your box has plenty of
-  RAM (`ND_BUILD_LTO=true ND_BUILD_JOBS=16`). Builds also run
+  RAM (`NS_BUILD_LTO=true NS_BUILD_JOBS=16`). Builds also run
   sequentially, one distro at a time, so don't launch a second heavy
   build alongside a nightly.
 - **Debian build fails with `implicit declaration of
