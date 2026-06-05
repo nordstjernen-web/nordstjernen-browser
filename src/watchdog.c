@@ -4,6 +4,7 @@
  */
 
 #include "watchdog.h"
+#include "debuglog.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -169,6 +170,30 @@ typedef struct {
 } ns_watchdog;
 
 static void
+ns_watchdog_report_failure(const char *detail)
+{
+#ifdef G_OS_WIN32
+    const char *log = ns_debug_log_file_path();
+    char *body = g_strdup_printf(
+        "Nordstjernen could not start.\n\n%s\n\n"
+        "A diagnostic log was written to:\n%s\n\n"
+        "If this persists, try launching with the cairo renderer by setting "
+        "the environment variable NS_GSK_RENDERER=cairo before starting.",
+        detail ? detail : "The browser process exited before opening a window.",
+        log ? log : "(log file unavailable)");
+    wchar_t *wbody = (wchar_t *)g_utf8_to_utf16(body, -1, NULL, NULL, NULL);
+    if (wbody) {
+        MessageBoxW(NULL, wbody, L"Nordstjernen",
+                    MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+        g_free(wbody);
+    }
+    g_free(body);
+#else
+    (void)detail;
+#endif
+}
+
+static void
 ns_watchdog_kill(GPid pid, gboolean force)
 {
 #ifdef G_OS_WIN32
@@ -202,6 +227,8 @@ ns_watchdog_schedule_restart(ns_watchdog *wd)
     if (wd->burst_count > NS_WATCHDOG_BURST_MAX) {
         g_warning("ns_watchdog: child failed %d times in under %ds — giving up",
                   wd->burst_count, NS_WATCHDOG_BURST_SECS);
+        ns_watchdog_report_failure(
+            "The browser repeatedly exited during startup.");
         wd->exit_status = 1;
         g_main_loop_quit(wd->loop);
         return;
@@ -263,6 +290,10 @@ ns_watchdog_spawn(ns_watchdog *wd, gboolean recover)
     if (!ok) {
         g_warning("ns_watchdog: failed to launch browser: %s",
                   err ? err->message : "unknown error");
+        char *detail = g_strdup_printf("Failed to launch the browser process: %s",
+                                       err ? err->message : "unknown error");
+        ns_watchdog_report_failure(detail);
+        g_free(detail);
         g_clear_error(&err);
         wd->exit_status = 1;
         g_main_loop_quit(wd->loop);

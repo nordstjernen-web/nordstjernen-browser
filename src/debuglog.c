@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <glib/gstdio.h>
+
 #define NS_DLOG_CAPACITY 1024
 
 typedef struct ns_dlog_sub {
@@ -21,6 +23,56 @@ static GQueue  *g_dlog_entries;
 static GArray  *g_dlog_subs;
 static guint    g_dlog_next_id = 1;
 static gboolean g_dlog_inited;
+
+static char    *g_dlog_file_path;
+static FILE    *g_dlog_file;
+static gboolean g_dlog_file_tried;
+
+static gboolean
+ns_dlog_file_enabled(void)
+{
+#ifdef G_OS_WIN32
+    return !g_getenv("NS_NO_LOG_FILE");
+#else
+    return g_getenv("NS_LOG_FILE") != NULL;
+#endif
+}
+
+const char *
+ns_debug_log_file_path(void)
+{
+    if (!g_dlog_file_path && ns_dlog_file_enabled()) {
+        const char *override = g_getenv("NS_LOG_FILE");
+        if (override && *override)
+            g_dlog_file_path = g_strdup(override);
+        else
+            g_dlog_file_path = g_build_filename(g_get_user_data_dir(),
+                                                "Nordstjernen",
+                                                "nordstjernen-debug.log", NULL);
+    }
+    return g_dlog_file_path;
+}
+
+static void
+ns_dlog_file_write(const ns_dlog_entry *e)
+{
+    if (!ns_dlog_file_enabled()) return;
+    if (!g_dlog_file && !g_dlog_file_tried) {
+        g_dlog_file_tried = TRUE;
+        const char *path = ns_debug_log_file_path();
+        if (path) {
+            char *dir = g_path_get_dirname(path);
+            if (dir) { g_mkdir_with_parents(dir, 0700); g_free(dir); }
+            g_dlog_file = g_fopen(path, "a");
+        }
+    }
+    if (!g_dlog_file) return;
+    gint64 t = g_get_real_time() / 1000;
+    fprintf(g_dlog_file, "%" G_GINT64_FORMAT " %-5s %s: %s\n",
+            t, ns_dlog_level_name(e->level),
+            e->category ? e->category : "", e->message ? e->message : "");
+    fflush(g_dlog_file);
+}
 
 static void
 ns_dlog_entry_free(gpointer p)
@@ -89,6 +141,7 @@ ns_debug_log_emit_v(ns_dlog_level level, const char *category,
     e->category = g_strdup(category ? category : "");
     e->message = fmt ? g_strdup_vprintf(fmt, ap) : g_strdup("");
 
+    ns_dlog_file_write(e);
     ns_dlog_dispatch(e);
 
     g_mutex_lock(&g_dlog_mutex);

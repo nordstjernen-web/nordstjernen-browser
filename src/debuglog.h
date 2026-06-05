@@ -40,6 +40,8 @@ void  ns_debug_log_snapshot(GFunc visit, gpointer user_data);
 
 const char *ns_dlog_level_name(ns_dlog_level lvl);
 
+const char *ns_debug_log_file_path(void);
+
 G_END_DECLS
 
 #endif

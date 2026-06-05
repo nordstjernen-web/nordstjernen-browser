@@ -334,6 +334,23 @@ so we don't ship a bundled copy there.
 
 ## Troubleshooting
 
+- *Double-clicking `nordstjernen.exe` does nothing — no window, no
+  error.* The bundled binary is a GUI-subsystem executable with the
+  crash-restart watchdog enabled by default, so a child that dies during
+  startup leaves no console output to read. Two things now make this
+  diagnosable:
+  - A diagnostic log is written to
+    `%LOCALAPPDATA%\Nordstjernen\nordstjernen-debug.log` (override with
+    `NS_LOG_FILE=<path>`, disable with `NS_NO_LOG_FILE=1`). GTK/GLib
+    startup warnings and errors land there even with no console.
+  - When the watchdog gives up after repeated child crashes — or can't
+    spawn the browser at all — it pops a message box pointing at that
+    log instead of exiting silently.
+
+  The most common cause on a fresh Windows 11 box (especially a VM, an
+  RDP session, or a machine with no GPU vendor driver) is GSK renderer
+  initialisation. Set `NS_GSK_RENDERER=cairo` (or `gsk_renderer = cairo`
+  in the config) to force the software renderer, which works without GL.
 - *"The application was unable to start correctly (0xc000007b)"* —
   PATH is picking up a 32-bit DLL from elsewhere. Run from the
   bundle directory so Windows finds the bundled 64-bit DLLs first.
