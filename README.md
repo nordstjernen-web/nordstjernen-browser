@@ -8,8 +8,8 @@ Nordstjernen is built in Norway.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough.
 
-**Minimalism.** The whole engine is about **88,000 lines of hand-written
-C** (93 files in `src/`, excluding the vendored lexbor, QuickJS and Wuffs
+**Minimalism.** The whole engine is about **88,000 lines of C written by
+Claude and Codex** (93 files in `src/`, excluding the vendored lexbor, QuickJS and Wuffs
 libraries) — small enough for one person to read and audit end-to-end.
 
 **Correctness.** Behaviour is measured against the **spec text**,
