@@ -1504,8 +1504,45 @@
                     if (sm[0]) parts.push({ segment: sm[0], index: sm.index });
                 }
             } else {
-                for (var i = 0; i < s.length; i++)
-                    parts.push({ segment: s.charAt(i), index: i, isWordLike: /\w/.test(s.charAt(i)) });
+                var gi = 0, gn = s.length;
+                var cpLen = function (c) { return c > 0xFFFF ? 2 : 1; };
+                var isRegional = function (c) { return c >= 0x1F1E6 && c <= 0x1F1FF; };
+                var isExtend = function (c) {
+                    return (c >= 0x0300 && c <= 0x036F) ||
+                           (c >= 0x0483 && c <= 0x0489) ||
+                           (c >= 0x0591 && c <= 0x05BD) ||
+                           (c >= 0x0610 && c <= 0x061A) ||
+                           (c >= 0x064B && c <= 0x065F) ||
+                           (c >= 0x06D6 && c <= 0x06DC) ||
+                           (c >= 0x0E31 && c <= 0x0E3A) ||
+                           (c >= 0x1AB0 && c <= 0x1AFF) ||
+                           (c >= 0x1DC0 && c <= 0x1DFF) ||
+                           (c >= 0x20D0 && c <= 0x20FF) ||
+                           (c >= 0xFE00 && c <= 0xFE0F) ||
+                           (c >= 0xFE20 && c <= 0xFE2F) ||
+                           (c >= 0x1F3FB && c <= 0x1F3FF) ||
+                           c === 0x200D;
+                };
+                while (gi < gn) {
+                    var start = gi;
+                    var c0 = s.codePointAt(gi);
+                    gi += cpLen(c0);
+                    if (isRegional(c0)) {
+                        if (gi < gn && isRegional(s.codePointAt(gi)))
+                            gi += cpLen(s.codePointAt(gi));
+                    } else {
+                        while (gi < gn) {
+                            var nc = s.codePointAt(gi);
+                            if (nc === 0x200D) {
+                                gi += 1;
+                                if (gi < gn) gi += cpLen(s.codePointAt(gi));
+                            } else if (isExtend(nc)) {
+                                gi += cpLen(nc);
+                            } else break;
+                        }
+                    }
+                    parts.push({ segment: s.slice(start, gi), index: start });
+                }
             }
             parts[Symbol.iterator] = function () {
                 var idx = 0;

@@ -18574,6 +18574,23 @@ ns_element_get_zero_int(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_element_get_isContentEditable(JSContext *ctx, JSValueConst this_val)
+{
+    (void)ctx;
+    const ns_node *n = ns_unwrap_element(this_val);
+    for (const ns_node *p = n; p; p = p->parent) {
+        const char *v = ns_element_get_attr(p, "contenteditable");
+        if (!v) continue;
+        if (g_ascii_strcasecmp(v, "false") == 0)
+            return JS_FALSE;
+        if (*v == '\0' || g_ascii_strcasecmp(v, "true") == 0 ||
+            g_ascii_strcasecmp(v, "plaintext-only") == 0)
+            return JS_TRUE;
+    }
+    return JS_FALSE;
+}
+
+static JSValue
 ns_element_get_one_int(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
@@ -23290,7 +23307,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("valueAsDate",       ns_element_get_value_as_date,     ns_element_set_value_as_date),
     JS_CGETSET_DEF("position",          ns_element_get_progress_position, ns_element_noop_set),
     JS_CGETSET_DEF("encoding",          ns_element_get_form_enctype,      ns_element_noop_set),
-    JS_CGETSET_DEF("isContentEditable", ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("isContentEditable", ns_element_get_isContentEditable,  ns_element_noop_set),
     JS_CGETSET_DEF("translate",         ns_element_get_translate,         ns_element_set_translate),
     JS_CGETSET_DEF("offsetParent",      ns_element_get_offsetParent,      ns_element_noop_set),
     JS_CGETSET_DEF("videoWidth",        ns_element_get_zero_int,          ns_element_noop_set),
