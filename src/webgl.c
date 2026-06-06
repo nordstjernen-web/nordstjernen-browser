@@ -601,6 +601,17 @@ wgl_transfer_bytes(ns_webgl *g, int w, int h, int depth,
     return total;
 }
 
+static gboolean
+wgl_flip_fits(int w, int h, int bpp, size_t len)
+{
+    size_t row, total;
+    if (w <= 0 || h <= 0 || bpp <= 0) return FALSE;
+    if (__builtin_mul_overflow((size_t)w, (size_t)bpp, &row) ||
+        __builtin_mul_overflow(row, (size_t)h, &total))
+        return FALSE;
+    return total <= len;
+}
+
 static uint8_t *
 wgl_flip_rows(const uint8_t *src, int w, int h, int bpp)
 {
@@ -1778,7 +1789,8 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (!px) {
             zero = need ? g_try_malloc0(need) : NULL;
             px = zero;
-        } else if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
+        } else if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
+                   wgl_flip_fits(w, h, wgl_components(format), len)) {
             flipped = wgl_flip_rows(px, w, h, wgl_components(format));
             if (flipped) px = flipped;
         }
@@ -1801,7 +1813,8 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
-            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
+            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
+                wgl_flip_fits(w, h, wgl_components(format), len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
@@ -1847,7 +1860,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             return JS_UNDEFINED;
         }
         uint8_t *flipped = NULL;
-        if (px && g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
+        if (px && g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
+            wgl_flip_fits(w, h, wgl_components(format), len)) {
             flipped = wgl_flip_rows(px, w, h, wgl_components(format));
             if (flipped) px = flipped;
         }
@@ -1870,7 +1884,8 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
-            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE) {
+            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
+                wgl_flip_fits(w, h, wgl_components(format), len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
