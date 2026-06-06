@@ -89,3 +89,8 @@ selection.
 meson + ninja, with `ccache` for fast rebuilds. Build and smoke-launch
 locally before pushing — the local machine is the build and run oracle.
 Commit small; push logical units to `origin/main` as they land.
+
+
+
+If you're not paying for the product, you are the product."
+
