@@ -25336,6 +25336,191 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
     return JS_TRUE;
 }
 
+static JSValue
+ns_illegal_constructor(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return JS_ThrowTypeError(ctx, "Illegal constructor");
+}
+
+static gboolean
+ns_global_has(JSContext *ctx, JSValueConst global, const char *name)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    int has = JS_HasProperty(ctx, global, atom);
+    JS_FreeAtom(ctx, atom);
+    return has > 0;
+}
+
+static void
+ns_set_if_missing(JSContext *ctx, JSValueConst global,
+                  const char *name, JSValue value)
+{
+    if (ns_global_has(ctx, global, name))
+        JS_FreeValue(ctx, value);
+    else
+        JS_SetPropertyStr(ctx, global, name, value);
+}
+
+static void
+ns_install_window_compat(JSContext *ctx, JSValueConst global)
+{
+    static const char *const interfaces[] = {
+        "AbstractRange", "AnalyserNode", "AnimationEffect",
+        "AnimationPlaybackEvent", "AnimationTimeline", "AudioBuffer",
+        "AudioBufferSourceNode", "AudioDestinationNode", "AudioListener",
+        "AudioNode", "AudioParam", "AudioScheduledSourceNode", "BarProp",
+        "BaseAudioContext", "BiquadFilterNode", "CSSAnimation",
+        "CSSConditionRule", "CSSContainerRule", "CSSCounterStyleRule",
+        "CSSFontFaceRule", "CSSFontFeatureValuesRule", "CSSGroupingRule",
+        "CSSImportRule", "CSSKeyframeRule", "CSSKeyframesRule",
+        "CSSLayerBlockRule", "CSSLayerStatementRule", "CSSMediaRule",
+        "CSSNamespaceRule", "CSSNestedDeclarations", "CSSPageRule",
+        "CSSPropertyRule", "CSSRuleList", "CSSSupportsRule", "CSSTransition",
+        "Cache", "CacheStorage", "CanvasGradient", "CanvasPattern",
+        "CaretPosition", "ChannelMergerNode", "ChannelSplitterNode",
+        "Clipboard", "ClipboardItem", "ConstantSourceNode",
+        "CookieChangeEvent", "CookieStore", "CredentialsContainer",
+        "CustomElementRegistry", "CustomStateSet", "DOMImplementation",
+        "DOMRectList", "DelayNode", "DocumentTimeline",
+        "DynamicsCompressorNode", "ElementInternals", "FormDataEvent",
+        "GainNode", "Gamepad", "GamepadButton", "GamepadHapticActuator",
+        "GeolocationCoordinates", "GeolocationPosition",
+        "GeolocationPositionError", "HTMLFormControlsCollection", "History",
+        "IdleDeadline", "ImageBitmap", "KeyframeEffect", "Location",
+        "MathMLElement", "MediaCapabilities", "MediaDeviceInfo",
+        "MediaDevices", "MediaElementAudioSourceNode", "MediaError",
+        "MediaKeySystemAccess", "MediaSource", "MediaStream",
+        "MediaStreamTrack", "MediaStreamTrackEvent", "MessagePort",
+        "MimeType", "MimeTypeArray", "Navigator",
+        "OfflineAudioCompletionEvent", "OffscreenCanvasRenderingContext2D",
+        "OscillatorNode", "PannerNode", "Performance",
+        "PerformanceEventTiming", "PerformanceNavigation",
+        "PerformanceObserverEntryList", "PerformanceTiming", "PeriodicWave",
+        "PermissionStatus", "Plugin", "PluginArray",
+        "ReadableByteStreamController", "ReadableStreamBYOBReader",
+        "ReadableStreamBYOBRequest", "ReadableStreamDefaultController",
+        "ReadableStreamDefaultReader", "ResizeObserverSize", "SVGAElement",
+        "SVGAnimatedEnumeration", "SVGAnimatedInteger", "SVGAnimatedLength",
+        "SVGAnimatedLengthList", "SVGAnimatedNumber", "SVGAnimatedNumberList",
+        "SVGAnimatedRect", "SVGAnimatedString", "SVGAnimatedTransformList",
+        "SVGAnimationElement", "SVGCircleElement", "SVGClipPathElement",
+        "SVGComponentTransferFunctionElement", "SVGDefsElement",
+        "SVGDescElement", "SVGEllipseElement", "SVGFEBlendElement",
+        "SVGFEColorMatrixElement", "SVGFEComponentTransferElement",
+        "SVGFECompositeElement", "SVGFEDisplacementMapElement",
+        "SVGFEDropShadowElement", "SVGFEFloodElement", "SVGFEFuncAElement",
+        "SVGFEFuncBElement", "SVGFEFuncGElement", "SVGFEFuncRElement",
+        "SVGFEGaussianBlurElement", "SVGFEImageElement", "SVGFEMergeElement",
+        "SVGFEMergeNodeElement", "SVGFEMorphologyElement", "SVGFEOffsetElement",
+        "SVGFETurbulenceElement", "SVGFilterElement", "SVGForeignObjectElement",
+        "SVGGElement", "SVGGeometryElement", "SVGGradientElement",
+        "SVGGraphicsElement", "SVGImageElement", "SVGLength", "SVGLengthList",
+        "SVGLineElement", "SVGLinearGradientElement", "SVGMaskElement",
+        "SVGMatrix", "SVGMetadataElement", "SVGNumber", "SVGNumberList",
+        "SVGPathElement", "SVGPatternElement", "SVGPoint", "SVGPolygonElement",
+        "SVGPolylineElement", "SVGRadialGradientElement", "SVGRect",
+        "SVGRectElement", "SVGScriptElement", "SVGStopElement",
+        "SVGStyleElement", "SVGSymbolElement", "SVGTSpanElement",
+        "SVGTextContentElement", "SVGTextElement", "SVGTextPathElement",
+        "SVGTextPositioningElement", "SVGTitleElement", "SVGTransform",
+        "SVGTransformList", "SVGUnitTypes", "SVGUseElement", "SVGViewElement",
+        "Screen", "ScreenOrientation", "ScriptProcessorNode", "ServiceWorker",
+        "ServiceWorkerContainer", "ServiceWorkerRegistration", "SourceBuffer",
+        "SourceBufferList", "SpeechSynthesis", "SpeechSynthesisUtterance",
+        "SpeechSynthesisVoice", "StaticRange", "StereoPannerNode",
+        "StorageManager", "StyleSheet", "StyleSheetList", "TextEvent",
+        "TextTrack", "TextTrackCue", "TextTrackCueList", "TextTrackList",
+        "TimeRanges", "ToggleEvent", "TrackEvent",
+        "TransformStreamDefaultController", "UserActivation", "VTTCue",
+        "VisualViewport", "WebGL2RenderingContext", "WebGLActiveInfo",
+        "WebGLBuffer", "WebGLContextEvent", "WebGLFramebuffer", "WebGLProgram",
+        "WebGLQuery", "WebGLRenderbuffer", "WebGLRenderingContext",
+        "WebGLSampler", "WebGLShader", "WebGLShaderPrecisionFormat",
+        "WebGLSync", "WebGLTexture", "WebGLTransformFeedback",
+        "WebGLUniformLocation", "WebGLVertexArrayObject", "WebKitCSSMatrix",
+        "WritableStreamDefaultController", "WritableStreamDefaultWriter",
+        "XMLHttpRequestEventTarget", "XMLHttpRequestUpload", "XPathEvaluator",
+        "XPathExpression", "XPathResult",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(interfaces); i++)
+        if (!ns_global_has(ctx, global, interfaces[i]))
+            ns_bind_ctor(ctx, global, interfaces[i],
+                         ns_illegal_constructor, 0);
+
+    static const char *const event_handlers[] = {
+        "onabort", "onanimationcancel", "onanimationend",
+        "onanimationiteration", "onanimationstart", "onauxclick",
+        "onbeforeinput", "onbeforematch", "onbeforetoggle", "onblur",
+        "oncancel", "oncanplay", "oncanplaythrough", "onchange", "onclick",
+        "onclose", "oncontextlost", "oncontextmenu", "oncontextrestored",
+        "oncuechange", "ondblclick", "ondrag", "ondragend", "ondragenter",
+        "ondragleave", "ondragover", "ondragstart", "ondrop",
+        "ondurationchange", "onemptied", "onended", "onfocus", "onformdata",
+        "ongamepadconnected", "ongamepaddisconnected", "ongotpointercapture",
+        "oninput", "oninvalid", "onkeydown", "onkeypress", "onkeyup",
+        "onloadeddata", "onloadedmetadata", "onloadstart",
+        "onlostpointercapture", "onmousedown", "onmouseenter", "onmouseleave",
+        "onmousemove", "onmouseout", "onmouseover", "onmouseup", "onpause",
+        "onplay", "onplaying", "onpointercancel", "onpointerdown",
+        "onpointerenter", "onpointerleave", "onpointermove", "onpointerout",
+        "onpointerover", "onpointerrawupdate", "onpointerup", "onprogress",
+        "onratechange", "onreset", "onscrollend", "onsecuritypolicyviolation",
+        "onseeked", "onseeking", "onselect", "onselectionchange",
+        "onslotchange", "onstalled", "onsubmit", "onsuspend", "ontimeupdate",
+        "ontoggle", "onvolumechange", "onwaiting", "onwebkitanimationend",
+        "onwebkitanimationiteration", "onwebkitanimationstart",
+        "onwebkittransitionend", "onwheel",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(event_handlers); i++)
+        ns_set_if_missing(ctx, global, event_handlers[i], JS_NULL);
+
+    static const char *const bars[] = {
+        "locationbar", "menubar", "personalbar",
+        "scrollbars", "statusbar", "toolbar",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(bars); i++) {
+        JSValue bar = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, bar, "visible", JS_TRUE);
+        ns_set_if_missing(ctx, global, bars[i], bar);
+    }
+
+    ns_set_if_missing(ctx, global, "crossOriginIsolated", JS_FALSE);
+    ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
+    ns_set_if_missing(ctx, global, "WebAssembly", JS_NewObject(ctx));
+    ns_set_if_missing(ctx, global, "Temporal", JS_NewObject(ctx));
+
+    ns_bind_fn_if_missing(ctx, global, "captureEvents", ns_event_noop, 0);
+    ns_bind_fn_if_missing(ctx, global, "releaseEvents", ns_event_noop, 0);
+
+    JSValue external = JS_NewObject(ctx);
+    ns_bind_fn(ctx, external, "AddSearchProvider", ns_event_noop, 1);
+    ns_bind_fn(ctx, external, "IsSearchProviderInstalled", ns_event_noop, 1);
+    ns_set_if_missing(ctx, global, "external", external);
+
+    JSValue navigator = JS_GetPropertyStr(ctx, global, "navigator");
+    ns_set_if_missing(ctx, global, "clientInformation",
+                      JS_DupValue(ctx, navigator));
+    JS_FreeValue(ctx, navigator);
+
+    JSValue url_ctor = JS_GetPropertyStr(ctx, global, "URL");
+    ns_set_if_missing(ctx, global, "webkitURL", JS_DupValue(ctx, url_ctor));
+    JS_FreeValue(ctx, url_ctor);
+
+    JSValue speech = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, speech, "pending",  JS_FALSE);
+    JS_SetPropertyStr(ctx, speech, "speaking", JS_FALSE);
+    JS_SetPropertyStr(ctx, speech, "paused",   JS_FALSE);
+    JS_SetPropertyStr(ctx, speech, "onvoiceschanged", JS_NULL);
+    ns_bind_fn(ctx, speech, "getVoices", ns_event_empty_array, 0);
+    ns_bind_fn(ctx, speech, "speak",  ns_event_noop, 1);
+    ns_bind_fn(ctx, speech, "cancel", ns_event_noop, 0);
+    ns_bind_fn(ctx, speech, "pause",  ns_event_noop, 0);
+    ns_bind_fn(ctx, speech, "resume", ns_event_noop, 0);
+    ns_set_if_missing(ctx, global, "speechSynthesis", speech);
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -26221,6 +26406,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JSValue session_obj = JS_NewObjectClass(ctx, ns_storage_class_id);
     JS_SetOpaque(session_obj, js->session_storage);
     JS_SetPropertyStr(ctx, global, "sessionStorage", session_obj);
+
+    ns_install_window_compat(ctx, global);
 
     js->pristine_promise = JS_GetPropertyStr(ctx, global, "Promise");
     JS_FreeValue(ctx, global);
