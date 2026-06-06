@@ -174,6 +174,7 @@ ns_html_parse(const char *input, gssize len)
     lxb_html_document_t *doc = lxb_html_document_create();
     if (!doc) return NULL;
     lxb_html_document_dom_opt_set(doc, LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
+    lxb_html_document_scripting_set(doc, true);
     lxb_status_t status = lxb_html_document_parse(doc,
                                                   (const lxb_char_t *)input, n);
     if (status != LXB_STATUS_OK) {
@@ -217,11 +218,13 @@ ns_html_parse_fragment_in(const char *context_tag,
         return NULL;
     }
     lxb_html_parser_dom_opt_set(parser, LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
+    lxb_html_parser_scripting_set(parser, true);
     lxb_html_document_t *doc = lxb_html_document_create();
     if (!doc) {
         lxb_html_parser_destroy(parser);
         return NULL;
     }
+    lxb_html_document_scripting_set(doc, true);
     lxb_tag_id_t tag_id = lxb_tag_id_from_name(doc, context_tag);
     lxb_dom_node_t *frag = lxb_html_parse_fragment_by_tag_id(
         parser, doc, tag_id, LXB_NS_HTML,

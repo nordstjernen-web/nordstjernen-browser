@@ -1681,6 +1681,15 @@ ns_node_collect_all_text(const ns_node *root)
 #include "html.h"
 #define is_void_tag ns_html_is_void
 
+static gboolean
+serialize_pre_like(const char *name)
+{
+    return name &&
+           (g_ascii_strcasecmp(name, "pre") == 0 ||
+            g_ascii_strcasecmp(name, "textarea") == 0 ||
+            g_ascii_strcasecmp(name, "listing") == 0);
+}
+
 static void
 serialize_node(const ns_node *n, GString *out, gboolean include_self, int depth)
 {
@@ -1700,8 +1709,7 @@ serialize_node(const ns_node *n, GString *out, gboolean include_self, int depth)
         return;
     }
     gboolean raw_text = n->kind == NS_NODE_ELEMENT && n->name &&
-                        (g_ascii_strcasecmp(n->name, "script") == 0 ||
-                         g_ascii_strcasecmp(n->name, "style") == 0);
+                        ns_html_is_raw_text(n->name);
     if (n->kind == NS_NODE_ELEMENT && include_self) {
         g_string_append_c(out, '<');
         g_string_append(out, n->name ? n->name : "");
@@ -1714,6 +1722,10 @@ serialize_node(const ns_node *n, GString *out, gboolean include_self, int depth)
         }
         g_string_append_c(out, '>');
         if (is_void_tag(n->name)) return;
+        if (serialize_pre_like(n->name) && n->first_child &&
+            n->first_child->kind == NS_NODE_TEXT && n->first_child->text &&
+            n->first_child->text[0] == '\n')
+            g_string_append_c(out, '\n');
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (raw_text && c->kind == NS_NODE_TEXT)
@@ -1733,8 +1745,7 @@ ns_node_inner_html(const ns_node *root)
 {
     GString *out = g_string_new(NULL);
     gboolean raw_text = root && root->kind == NS_NODE_ELEMENT && root->name &&
-                        (g_ascii_strcasecmp(root->name, "script") == 0 ||
-                         g_ascii_strcasecmp(root->name, "style") == 0);
+                        ns_html_is_raw_text(root->name);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
             if (raw_text && c->kind == NS_NODE_TEXT)

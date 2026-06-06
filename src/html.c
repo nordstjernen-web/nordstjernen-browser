@@ -25,6 +25,21 @@ ns_html_is_void(const char *tag)
     return FALSE;
 }
 
+gboolean
+ns_html_is_raw_text(const char *tag)
+{
+    if (!tag) return FALSE;
+    static const char *const raws[] = {
+        "script", "style", "xmp", "iframe", "noembed", "noframes",
+        "noscript", "plaintext",
+        NULL,
+    };
+    for (int i = 0; raws[i]; i++)
+        if (g_ascii_strcasecmp(tag, raws[i]) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 void
 ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
 {
@@ -36,6 +51,14 @@ ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
         case '"':
             if (escape_quotes) g_string_append(out, "&quot;");
             else               g_string_append_c(out, '"');
+            break;
+        case '\xc2':
+            if ((unsigned char)p[1] == 0xa0) {
+                g_string_append(out, "&nbsp;");
+                p++;
+            } else {
+                g_string_append_c(out, *p);
+            }
             break;
         default:  g_string_append_c(out, *p);    break;
         }
