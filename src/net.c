@@ -36,6 +36,7 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #include <stdlib.h>
+#include <sys/sysctl.h>
 #endif
 
 static char *g_cookie_dir;
@@ -1429,6 +1430,11 @@ ns_net_available_memory_bytes(void)
         }
         fclose(f);
     }
+#elif defined(__APPLE__)
+    uint64_t mem = 0;
+    size_t len = sizeof mem;
+    if (sysctlbyname("hw.memsize", &mem, &len, NULL, 0) == 0 && mem > 0)
+        return (guint64)mem;
 #elif defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
     long pages = sysconf(_SC_AVPHYS_PAGES);
     long psize = sysconf(_SC_PAGESIZE);
