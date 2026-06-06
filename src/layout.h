@@ -93,6 +93,8 @@ typedef struct ns_box_media {
     void  *image;
     char  *bg_image_src;
     void  *bg_image;
+    GPtrArray *bg_layer_srcs;
+    GPtrArray *bg_layer_images;
     char  *video_src;
     char  *video_poster;
     char  *video_audio_src;

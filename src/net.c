@@ -2689,11 +2689,23 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
         }
-        char *ct_hdr = g_strdup_printf("Content-Type: %s",
-            content_type && *content_type ? content_type
-                                          : "application/x-www-form-urlencoded");
-        headers = curl_slist_append(headers, ct_hdr);
-        g_free(ct_hdr);
+        gboolean extra_has_ct = FALSE;
+        if (extra_headers) {
+            for (guint i = 0; i < extra_headers->len; i++) {
+                const char *h = g_ptr_array_index(extra_headers, i);
+                if (h && g_ascii_strncasecmp(h, "Content-Type:", 13) == 0) {
+                    extra_has_ct = TRUE;
+                    break;
+                }
+            }
+        }
+        if (!extra_has_ct) {
+            char *ct_hdr = g_strdup_printf("Content-Type: %s",
+                content_type && *content_type ? content_type
+                                              : "application/x-www-form-urlencoded");
+            headers = curl_slist_append(headers, ct_hdr);
+            g_free(ct_hdr);
+        }
     } else if (method && *method) {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     }

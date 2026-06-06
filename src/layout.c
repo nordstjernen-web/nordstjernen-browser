@@ -520,6 +520,10 @@ ns_box_free(ns_box *box)
         if (cur->media) {
             g_free(cur->media->image_src);
             g_free(cur->media->bg_image_src);
+            if (cur->media->bg_layer_srcs)
+                g_ptr_array_free(cur->media->bg_layer_srcs, TRUE);
+            if (cur->media->bg_layer_images)
+                g_ptr_array_free(cur->media->bg_layer_images, TRUE);
             g_free(cur->media->video_src);
             g_free(cur->media->video_poster);
             g_free(cur->media->video_audio_src);
@@ -912,29 +916,54 @@ static GHashTable  *g_abs_ph_set;
 static GHashTable  *g_abs_static;
 static GHashTable  *g_abs_seen;
 
+static void *
+collect_peek_image(const char *src)
+{
+    if (!src || !g_image_cache_for_layout) return NULL;
+    char *abs = g_base_url_for_layout
+        ? ns_url_resolve(g_base_url_for_layout, src)
+        : NULL;
+    void *img = ns_image_cache_peek(g_image_cache_for_layout,
+                                    abs ? abs : src);
+    g_free(abs);
+    return img;
+}
+
 static void
 collect_box_bg_image(ns_box *box, const ns_style *s)
 {
-    const ns_css_value *bg_or_mask =
-        (s && s->values[NS_CSS_BACKGROUND_IMAGE] &&
-         s->values[NS_CSS_BACKGROUND_IMAGE]->kind == NS_CSS_V_URL &&
-         s->values[NS_CSS_BACKGROUND_IMAGE]->u.url)
-            ? s->values[NS_CSS_BACKGROUND_IMAGE]
-        : (s && s->values[NS_CSS_MASK_IMAGE] &&
-           s->values[NS_CSS_MASK_IMAGE]->kind == NS_CSS_V_URL &&
-           s->values[NS_CSS_MASK_IMAGE]->u.url)
+    const ns_css_value *bg = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    gboolean any_url = FALSE;
+    for (const ns_css_value *l = bg; l; l = l->next_layer)
+        if (l->kind == NS_CSS_V_URL && l->u.url) { any_url = TRUE; break; }
+    const ns_css_value *mask =
+        (s && s->values[NS_CSS_MASK_IMAGE] &&
+         s->values[NS_CSS_MASK_IMAGE]->kind == NS_CSS_V_URL &&
+         s->values[NS_CSS_MASK_IMAGE]->u.url)
             ? s->values[NS_CSS_MASK_IMAGE]
             : NULL;
-    if (!bg_or_mask) return;
+    if (!any_url && !mask) return;
     ns_box_media *m = ns_box_media_ensure(box);
-    m->bg_image_src = g_strdup(bg_or_mask->u.url);
-    if (g_image_cache_for_layout) {
-        char *abs = g_base_url_for_layout
-            ? ns_url_resolve(g_base_url_for_layout, m->bg_image_src)
-            : NULL;
-        m->bg_image = ns_image_cache_peek(g_image_cache_for_layout,
-                                          abs ? abs : m->bg_image_src);
-        g_free(abs);
+    if (!any_url) {
+        m->bg_image_src = g_strdup(mask->u.url);
+        m->bg_image = collect_peek_image(m->bg_image_src);
+        return;
+    }
+    if (bg->next_layer) {
+        m->bg_layer_srcs = g_ptr_array_new_with_free_func(g_free);
+        m->bg_layer_images = g_ptr_array_new();
+        for (const ns_css_value *l = bg; l; l = l->next_layer) {
+            char *src = (l->kind == NS_CSS_V_URL && l->u.url)
+                        ? g_strdup(l->u.url) : NULL;
+            g_ptr_array_add(m->bg_layer_srcs, src);
+            g_ptr_array_add(m->bg_layer_images, collect_peek_image(src));
+        }
+    }
+    for (const ns_css_value *l = bg; l; l = l->next_layer) {
+        if (l->kind != NS_CSS_V_URL || !l->u.url) continue;
+        m->bg_image_src = g_strdup(l->u.url);
+        m->bg_image = collect_peek_image(m->bg_image_src);
+        break;
     }
 }
 
@@ -3739,7 +3768,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
 
     if (n->name && strcmp(n->name, "video") == 0) {
         ns_box *vb = build_video_box(n);
-        if (vb) vb->style = s;
+        if (vb) {
+            vb->style = s;
+            collect_box_bg_image(vb, s);
+        }
         return vb;
     }
 
@@ -4272,13 +4304,15 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
     if (!bd)
         bd = pango_context_get_base_dir(pango_layout_get_context(layout)) ==
              PANGO_DIRECTION_RTL ? 4 : 3;
-    char *key = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%d|%s|%s|%s",
+    char *key = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s",
                                 pango_layout_get_width(layout),
                                 (int)pango_layout_get_wrap(layout),
                                 (int)pango_layout_get_ellipsize(layout),
                                 pango_layout_get_height(layout),
                                 pango_layout_get_indent(layout),
-                                ls_px, ws_px, bd, fd,
+                                ls_px, ws_px,
+                                (double)pango_layout_get_line_spacing(layout),
+                                bd, fd,
                                 lang ? lang : "",
                                 box->text);
     g_free(fd);
@@ -4313,6 +4347,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     else
         pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
@@ -4435,6 +4470,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     PangoLayout *layout = make_pango_layout(parent_style);
     pango_layout_set_width(layout, (int)(box->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, box->content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
@@ -4672,6 +4708,7 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
     PangoLayout *layout = make_pango_layout(parent_style);
     pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
+    ns_paint_apply_css_line_spacing(layout, parent_style);
     pango_layout_set_text(layout, box->text, -1);
 
     PangoAttrList *i18n = pango_attr_list_new();
@@ -8167,17 +8204,15 @@ flex_done: ;
     gboolean overflow_scrolls  = overflow_kw_scrolls(ovy);
     gboolean overflow_scrolls_x = overflow_kw_scrolls(ovx);
     double measured = cursor_y - inner_y;
-    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC)) {
-        double explicit_h = resolve_used_height(box, hv, parent_content_width, -1);
-        if (explicit_h < 0) {
-            box->content_height = measured;
-        } else {
-            if (border_box) {
-                explicit_h -= vert_extras;
-                if (explicit_h < 0) explicit_h = 0;
-            }
-            box->content_height = explicit_h;
+    double explicit_h = -1;
+    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        explicit_h = resolve_used_height(box, hv, parent_content_width, -1);
+    if (explicit_h >= 0) {
+        if (border_box) {
+            explicit_h -= vert_extras;
+            if (explicit_h < 0) explicit_h = 0;
         }
+        box->content_height = explicit_h;
     } else {
         const ns_css_value *ar = box->style
             ? box->style->values[NS_CSS_ASPECT_RATIO] : NULL;
@@ -8482,15 +8517,40 @@ position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
                        + abox->border.top  + abox->border.bottom
                        + abox->margin.top  + abox->margin.bottom;
 
+    gboolean ml_auto = length_is_auto(s ? s->values[NS_CSS_MARGIN_LEFT]   : NULL);
+    gboolean mr_auto = length_is_auto(s ? s->values[NS_CSS_MARGIN_RIGHT]  : NULL);
+    gboolean mt_auto = length_is_auto(s ? s->values[NS_CSS_MARGIN_TOP]    : NULL);
+    gboolean mb_auto = length_is_auto(s ? s->values[NS_CSS_MARGIN_BOTTOM] : NULL);
+
     double final_x, final_y;
-    if (!l_auto) {
+    if (!l_auto && !r_auto && (ml_auto || mr_auto)) {
+        double remaining = cb_w - left - right - box_outer_w;
+        double ml;
+        if (ml_auto && mr_auto)
+            ml = remaining > 0 ? remaining / 2 : 0;
+        else if (ml_auto)
+            ml = remaining;
+        else
+            ml = 0;
+        final_x = cb_inner_x + left + ml;
+    } else if (!l_auto) {
         final_x = cb_inner_x + left;
     } else if (!r_auto) {
         final_x = cb_inner_x + cb_w - right - box_outer_w;
     } else {
         final_x = abox->x;
     }
-    if (!t_auto) {
+    if (!t_auto && !b_auto && (mt_auto || mb_auto)) {
+        double remaining = cb_h - top - bottom - box_outer_h;
+        double mt;
+        if (mt_auto && mb_auto)
+            mt = remaining / 2;
+        else if (mt_auto)
+            mt = remaining;
+        else
+            mt = 0;
+        final_y = cb_inner_y + top + mt;
+    } else if (!t_auto) {
         final_y = cb_inner_y + top;
     } else if (!b_auto) {
         final_y = cb_inner_y + cb_h - bottom - box_outer_h;

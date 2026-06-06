@@ -424,24 +424,26 @@ paint_inline_box_shadow(cairo_t *cr, const ns_style *s, double x, double y,
 }
 
 static void
-paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
-                              const ns_style *s, double x, double y,
-                              double w, double h, corner_radii radii)
+paint_bg_image_core(cairo_t *cr, ns_image *img,
+                    const ns_css_value *rep_v, const ns_css_value *sz,
+                    const ns_css_value *px, const ns_css_value *py,
+                    double x, double y, double w, double h,
+                    double clip_x, double clip_y, double clip_w, double clip_h,
+                    corner_radii radii)
 {
-    ns_image *img = r && r->bg_image ? r->bg_image : NULL;
     if (!img || !img->loaded || !img->texture) return;
     int iw = ns_texture_get_width(img->texture);
     int ih = ns_texture_get_height(img->texture);
     if (iw <= 0 || ih <= 0) return;
     gboolean tile_x = TRUE, tile_y = TRUE;
-    const char *repeat = s ? ns_style_keyword(s, NS_CSS_BACKGROUND_REPEAT) : NULL;
+    const char *repeat = (rep_v && rep_v->kind == NS_CSS_V_KEYWORD)
+                         ? rep_v->u.keyword : NULL;
     if (repeat) {
         if (strcmp(repeat, "no-repeat") == 0) { tile_x = tile_y = FALSE; }
         else if (strcmp(repeat, "repeat-x") == 0) { tile_y = FALSE; }
         else if (strcmp(repeat, "repeat-y") == 0) { tile_x = FALSE; }
     }
     double draw_w = iw, draw_h = ih;
-    const ns_css_value *sz = s ? s->values[NS_CSS_BACKGROUND_SIZE] : NULL;
     if (sz && sz->kind == NS_CSS_V_KEYWORD && sz->u.keyword) {
         if (strcmp(sz->u.keyword, "cover") == 0) {
             double sx = w / (double)iw;
@@ -471,8 +473,6 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
     if (draw_w < 1) draw_w = 1;
     if (draw_h < 1) draw_h = 1;
     double off_x = 0, off_y = 0;
-    const ns_css_value *px = s ? s->values[NS_CSS_BACKGROUND_POSITION_X] : NULL;
-    const ns_css_value *py = s ? s->values[NS_CSS_BACKGROUND_POSITION_Y] : NULL;
     if (px && px->kind == NS_CSS_V_LENGTH) {
         if (px->u.length.unit == NS_CSS_UNIT_PERCENT)
             off_x = (w - draw_w) * (px->u.length.v / 100.0);
@@ -496,7 +496,7 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
     ns_texture_download(img->texture, dst, (gsize)dst_stride);
     cairo_surface_mark_dirty(surf);
     cairo_save(cr);
-    rounded_rect_path(cr, x, y, w, h, radii);
+    rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
     cairo_clip(cr);
     cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
     cairo_pattern_set_extend(pat,
@@ -522,6 +522,131 @@ paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
     cairo_pattern_destroy(pat);
     cairo_restore(cr);
     cairo_surface_destroy(surf);
+}
+
+static void
+paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
+                       double border_x, double border_y,
+                       double border_w, double border_h,
+                       double clip_x, double clip_y,
+                       double clip_w, double clip_h,
+                       corner_radii radii)
+{
+    double cx = border_x + gr->center_x * border_w;
+    double cy = border_y + gr->center_y * border_h;
+    if (gr->conic && gr->n_stops > 0) {
+        double r_outer = sqrt(border_w * border_w + border_h * border_h);
+        int slices = 360;
+        cairo_save(cr);
+        rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
+        cairo_clip(cr);
+        for (int i = 0; i < slices; i++) {
+            double frac = (i + 0.5) / slices;
+            double pos = frac + gr->from_deg / 360.0;
+            while (pos < 0) pos += 1.0;
+            while (pos >= 1.0) pos -= 1.0;
+            if (gr->repeating) {
+                double cper = gr->stops[gr->n_stops - 1].pos;
+                if (cper > 0) pos = fmod(pos, cper);
+            }
+            int lo = 0;
+            while (lo + 1 < gr->n_stops &&
+                   gr->stops[lo + 1].pos < pos) lo++;
+            int hi = lo + 1;
+            if (hi >= gr->n_stops) hi = gr->n_stops - 1;
+            double t = 0.0;
+            if (gr->stops[hi].pos > gr->stops[lo].pos)
+                t = (pos - gr->stops[lo].pos) /
+                    (gr->stops[hi].pos - gr->stops[lo].pos);
+            if (t < 0) t = 0;
+            if (t > 1) t = 1;
+            double sr = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
+            double sg = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
+            double sb = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
+            double sa = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
+            double a1 = (i / (double)slices) * 2 * G_PI - G_PI / 2;
+            double a2 = ((i + 1) / (double)slices) * 2 * G_PI - G_PI / 2;
+            cairo_set_source_rgba(cr, sr, sg, sb, sa);
+            cairo_move_to(cr, cx, cy);
+            cairo_arc(cr, cx, cy, r_outer, a1, a2);
+            cairo_close_path(cr);
+            cairo_fill(cr);
+        }
+        cairo_restore(cr);
+    } else {
+        cairo_pattern_t *pat;
+        double dxh = 0, dyh = 0, r_outer = 1, line_len;
+        if (gr->radial) {
+            double corners[4][2] = {
+                { border_x, border_y },
+                { border_x + border_w, border_y },
+                { border_x, border_y + border_h },
+                { border_x + border_w, border_y + border_h },
+            };
+            r_outer = 1;
+            for (int k = 0; k < 4; k++) {
+                double ddx = corners[k][0] - cx, ddy = corners[k][1] - cy;
+                double dd = sqrt(ddx * ddx + ddy * ddy);
+                if (dd > r_outer) r_outer = dd;
+            }
+            line_len = r_outer;
+        } else {
+            double rad = gr->angle_deg * G_PI / 180.0;
+            double dx = sin(rad), dy = -cos(rad);
+            double half = (fabs(dx) * border_w + fabs(dy) * border_h) / 2.0;
+            dxh = dx * half;
+            dyh = dy * half;
+            line_len = 2.0 * half;
+        }
+        if (line_len <= 0) line_len = 1;
+        double frac[NS_CSS_GRADIENT_STOPS_MAX];
+        for (int i = 0; i < gr->n_stops; i++)
+            frac[i] = gr->stops[i].pos_is_px
+                ? gr->stops[i].pos / line_len : gr->stops[i].pos;
+        double period = (gr->repeating && gr->n_stops > 0)
+            ? frac[gr->n_stops - 1] : 1.0;
+        if (period <= 0) period = 1.0;
+        if (gr->radial) {
+            double r_tile = r_outer * period;
+            if (r_tile <= 0) r_tile = 1;
+            pat = cairo_pattern_create_radial(cx, cy, 0, cx, cy, r_tile);
+        } else {
+            double x0 = cx - dxh, y0 = cy - dyh;
+            double x1 = cx + dxh, y1 = cy + dyh;
+            pat = cairo_pattern_create_linear(
+                x0, y0,
+                x0 + (x1 - x0) * period, y0 + (y1 - y0) * period);
+        }
+        for (int i = 0; i < gr->n_stops; i++) {
+            const ns_css_gradient_stop *st = &gr->stops[i];
+            cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
+                st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
+        }
+        if (gr->repeating)
+            cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
+        cairo_save(cr);
+        rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
+        cairo_clip(cr);
+        cairo_set_source(cr, pat);
+        cairo_paint(cr);
+        cairo_pattern_destroy(pat);
+        cairo_restore(cr);
+    }
+}
+
+static void
+paint_inline_background_image(cairo_t *cr, const ns_inline_attr *r,
+                              const ns_style *s, double x, double y,
+                              double w, double h, corner_radii radii)
+{
+    ns_image *img = r && r->bg_image ? r->bg_image : NULL;
+    if (!img) return;
+    paint_bg_image_core(cr, img,
+        s ? s->values[NS_CSS_BACKGROUND_REPEAT] : NULL,
+        s ? s->values[NS_CSS_BACKGROUND_SIZE] : NULL,
+        s ? s->values[NS_CSS_BACKGROUND_POSITION_X] : NULL,
+        s ? s->values[NS_CSS_BACKGROUND_POSITION_Y] : NULL,
+        x, y, w, h, x, y, w, h, radii);
 }
 
 static void
@@ -663,209 +788,45 @@ paint_block(cairo_t *cr, const ns_box *b)
         cairo_fill(cr);
     }
 
-    if (b->media && b->media->bg_image) {
-        ns_image *img = b->media->bg_image;
-        if (img->loaded && img->texture) {
-            int iw = ns_texture_get_width(img->texture);
-            int ih = ns_texture_get_height(img->texture);
-            if (iw > 0 && ih > 0) {
-                const char *repeat = s ? ns_style_keyword(s, NS_CSS_BACKGROUND_REPEAT) : NULL;
-                gboolean tile_x = TRUE, tile_y = TRUE;
-                if (repeat) {
-                    if (strcmp(repeat, "no-repeat") == 0) { tile_x = tile_y = FALSE; }
-                    else if (strcmp(repeat, "repeat-x") == 0) { tile_y = FALSE; }
-                    else if (strcmp(repeat, "repeat-y") == 0) { tile_x = FALSE; }
-                }
-                double draw_w = iw, draw_h = ih;
-                const ns_css_value *sz = s ? s->values[NS_CSS_BACKGROUND_SIZE] : NULL;
-                if (sz && sz->kind == NS_CSS_V_KEYWORD && sz->u.keyword) {
-                    if (strcmp(sz->u.keyword, "cover") == 0) {
-                        double sx = border_w / (double)iw;
-                        double sy = border_h / (double)ih;
-                        double sc = sx > sy ? sx : sy;
-                        draw_w = iw * sc; draw_h = ih * sc;
-                    } else if (strcmp(sz->u.keyword, "contain") == 0) {
-                        double sx = border_w / (double)iw;
-                        double sy = border_h / (double)ih;
-                        double sc = sx < sy ? sx : sy;
-                        draw_w = iw * sc; draw_h = ih * sc;
-                    }
-                } else if (sz && sz->kind == NS_CSS_V_LENGTH) {
-                    draw_w = bg_size_px(sz->u.length.v, sz->u.length.unit, border_w);
-                    draw_h = draw_w * ((double)ih / (double)iw);
-                } else if (sz && sz->kind == NS_CSS_V_SIZE) {
-                    gboolean wa = sz->u.size.w_auto;
-                    gboolean ha = sz->u.size.h_auto;
-                    if (!wa) draw_w = bg_size_px(sz->u.size.w, sz->u.size.w_unit, border_w);
-                    if (!ha) draw_h = bg_size_px(sz->u.size.h, sz->u.size.h_unit, border_h);
-                    if (wa && !ha) draw_w = draw_h * ((double)iw / (double)ih);
-                    else if (!wa && ha) draw_h = draw_w * ((double)ih / (double)iw);
-                    else if (wa && ha) { draw_w = iw; draw_h = ih; }
-                }
-                if (draw_w < 1) draw_w = 1;
-                if (draw_h < 1) draw_h = 1;
-                double off_x = 0, off_y = 0;
-                const ns_css_value *px = s ? s->values[NS_CSS_BACKGROUND_POSITION_X] : NULL;
-                const ns_css_value *py = s ? s->values[NS_CSS_BACKGROUND_POSITION_Y] : NULL;
-                if (px && px->kind == NS_CSS_V_LENGTH) {
-                    if (px->u.length.unit == NS_CSS_UNIT_PERCENT)
-                        off_x = (border_w - draw_w) * (px->u.length.v / 100.0);
-                    else
-                        off_x = px->u.length.v;
-                }
-                if (py && py->kind == NS_CSS_V_LENGTH) {
-                    if (py->u.length.unit == NS_CSS_UNIT_PERCENT)
-                        off_y = (border_h - draw_h) * (py->u.length.v / 100.0);
-                    else
-                        off_y = py->u.length.v;
-                }
-                cairo_surface_t *surf = cairo_image_surface_create(
-                    CAIRO_FORMAT_ARGB32, iw, ih);
-                if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
-                    guchar *dst = cairo_image_surface_get_data(surf);
-                    int dst_stride = cairo_image_surface_get_stride(surf);
-                    ns_texture_download(img->texture, dst, (gsize)dst_stride);
-                    cairo_surface_mark_dirty(surf);
-                    cairo_save(cr);
-                    rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-                    cairo_clip(cr);
-                    cairo_pattern_t *pat = cairo_pattern_create_for_surface(surf);
-                    cairo_pattern_set_extend(pat,
-                        (tile_x || tile_y) ? CAIRO_EXTEND_REPEAT : CAIRO_EXTEND_NONE);
-                    double sx = draw_w / (double)iw;
-                    double sy = draw_h / (double)ih;
-                    cairo_matrix_t m;
-                    cairo_matrix_init_identity(&m);
-                    cairo_matrix_scale(&m, 1.0 / sx, 1.0 / sy);
-                    cairo_matrix_translate(&m, -(border_x + off_x), -(border_y + off_y));
-                    cairo_pattern_set_matrix(pat, &m);
-                    cairo_set_source(cr, pat);
-                    if (tile_x && tile_y) {
-                        cairo_paint(cr);
-                    } else if (!tile_x && !tile_y) {
-                        cairo_rectangle(cr, border_x + off_x, border_y + off_y,
-                                        draw_w, draw_h);
-                        cairo_fill(cr);
-                    } else if (tile_x) {
-                        cairo_rectangle(cr, border_x, border_y + off_y,
-                                        border_w, draw_h);
-                        cairo_fill(cr);
-                    } else {
-                        cairo_rectangle(cr, border_x + off_x, border_y,
-                                        draw_w, border_h);
-                        cairo_fill(cr);
-                    }
-                    cairo_pattern_destroy(pat);
-                    cairo_restore(cr);
-                }
-                cairo_surface_destroy(surf);
-            }
-        }
+    const ns_css_value *bg_head = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    gboolean bg_has_url = FALSE;
+    for (const ns_css_value *l = bg_head; l; l = l->next_layer)
+        if (l->kind == NS_CSS_V_URL) { bg_has_url = TRUE; break; }
+
+    if (b->media && b->media->bg_image && !bg_has_url) {
+        paint_bg_image_core(cr, b->media->bg_image,
+            s ? s->values[NS_CSS_BACKGROUND_REPEAT] : NULL,
+            s ? s->values[NS_CSS_BACKGROUND_SIZE] : NULL,
+            s ? s->values[NS_CSS_BACKGROUND_POSITION_X] : NULL,
+            s ? s->values[NS_CSS_BACKGROUND_POSITION_Y] : NULL,
+            border_x, border_y, border_w, border_h,
+            clip_x, clip_y, clip_w, clip_h, radii);
     }
 
-    if (s && s->values[NS_CSS_BACKGROUND_IMAGE] &&
-        s->values[NS_CSS_BACKGROUND_IMAGE]->kind == NS_CSS_V_GRADIENT) {
-        const ns_css_gradient *gr = &s->values[NS_CSS_BACKGROUND_IMAGE]->u.gradient;
-        double cx = border_x + gr->center_x * border_w;
-        double cy = border_y + gr->center_y * border_h;
-        if (gr->conic && gr->n_stops > 0) {
-            double r_outer = sqrt(border_w * border_w + border_h * border_h);
-            int slices = 360;
-            cairo_save(cr);
-            rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-            cairo_clip(cr);
-            for (int i = 0; i < slices; i++) {
-                double frac = (i + 0.5) / slices;
-                double pos = frac + gr->from_deg / 360.0;
-                while (pos < 0) pos += 1.0;
-                while (pos >= 1.0) pos -= 1.0;
-                if (gr->repeating) {
-                    double cper = gr->stops[gr->n_stops - 1].pos;
-                    if (cper > 0) pos = fmod(pos, cper);
-                }
-                int lo = 0;
-                while (lo + 1 < gr->n_stops &&
-                       gr->stops[lo + 1].pos < pos) lo++;
-                int hi = lo + 1;
-                if (hi >= gr->n_stops) hi = gr->n_stops - 1;
-                double t = 0.0;
-                if (gr->stops[hi].pos > gr->stops[lo].pos)
-                    t = (pos - gr->stops[lo].pos) /
-                        (gr->stops[hi].pos - gr->stops[lo].pos);
-                if (t < 0) t = 0;
-                if (t > 1) t = 1;
-                double sr = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
-                double sg = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
-                double sb = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
-                double sa = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
-                double a1 = (i / (double)slices) * 2 * G_PI - G_PI / 2;
-                double a2 = ((i + 1) / (double)slices) * 2 * G_PI - G_PI / 2;
-                cairo_set_source_rgba(cr, sr, sg, sb, sa);
-                cairo_move_to(cr, cx, cy);
-                cairo_arc(cr, cx, cy, r_outer, a1, a2);
-                cairo_close_path(cr);
-                cairo_fill(cr);
-            }
-            cairo_restore(cr);
-        } else {
-            cairo_pattern_t *pat;
-            double dxh = 0, dyh = 0, r_outer = 1, line_len;
-            if (gr->radial) {
-                double corners[4][2] = {
-                    { border_x, border_y },
-                    { border_x + border_w, border_y },
-                    { border_x, border_y + border_h },
-                    { border_x + border_w, border_y + border_h },
-                };
-                r_outer = 1;
-                for (int k = 0; k < 4; k++) {
-                    double ddx = corners[k][0] - cx, ddy = corners[k][1] - cy;
-                    double dd = sqrt(ddx * ddx + ddy * ddy);
-                    if (dd > r_outer) r_outer = dd;
-                }
-                line_len = r_outer;
-            } else {
-                double rad = gr->angle_deg * G_PI / 180.0;
-                double dx = sin(rad), dy = -cos(rad);
-                double half = (fabs(dx) * border_w + fabs(dy) * border_h) / 2.0;
-                dxh = dx * half;
-                dyh = dy * half;
-                line_len = 2.0 * half;
-            }
-            if (line_len <= 0) line_len = 1;
-            double frac[NS_CSS_GRADIENT_STOPS_MAX];
-            for (int i = 0; i < gr->n_stops; i++)
-                frac[i] = gr->stops[i].pos_is_px
-                    ? gr->stops[i].pos / line_len : gr->stops[i].pos;
-            double period = (gr->repeating && gr->n_stops > 0)
-                ? frac[gr->n_stops - 1] : 1.0;
-            if (period <= 0) period = 1.0;
-            if (gr->radial) {
-                double r_tile = r_outer * period;
-                if (r_tile <= 0) r_tile = 1;
-                pat = cairo_pattern_create_radial(cx, cy, 0, cx, cy, r_tile);
-            } else {
-                double x0 = cx - dxh, y0 = cy - dyh;
-                double x1 = cx + dxh, y1 = cy + dyh;
-                pat = cairo_pattern_create_linear(
-                    x0, y0,
-                    x0 + (x1 - x0) * period, y0 + (y1 - y0) * period);
-            }
-            for (int i = 0; i < gr->n_stops; i++) {
-                const ns_css_gradient_stop *st = &gr->stops[i];
-                cairo_pattern_add_color_stop_rgba(pat, frac[i] / period,
-                    st->r / 255.0, st->g / 255.0, st->b / 255.0, st->a / 255.0);
-            }
-            if (gr->repeating)
-                cairo_pattern_set_extend(pat, CAIRO_EXTEND_REPEAT);
-            cairo_save(cr);
-            rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
-            cairo_clip(cr);
-            cairo_set_source(cr, pat);
-            cairo_paint(cr);
-            cairo_pattern_destroy(pat);
-            cairo_restore(cr);
+    int n_bg_layers = ns_css_value_layer_count(bg_head);
+    for (int li = n_bg_layers - 1; li >= 0; li--) {
+        const ns_css_value *lv = ns_css_value_layer(bg_head, li);
+        if (lv->kind == NS_CSS_V_GRADIENT) {
+            paint_bg_gradient_core(cr, &lv->u.gradient,
+                border_x, border_y, border_w, border_h,
+                clip_x, clip_y, clip_w, clip_h, radii);
+            continue;
         }
+        if (lv->kind != NS_CSS_V_URL) continue;
+        ns_image *img = NULL;
+        if (b->media && b->media->bg_layer_images &&
+            li < (int)b->media->bg_layer_images->len)
+            img = g_ptr_array_index(b->media->bg_layer_images, li);
+        else if (b->media)
+            img = b->media->bg_image;
+        if (!img) continue;
+        paint_bg_image_core(cr, img,
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_REPEAT], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_SIZE], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
+            ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_Y], li),
+            border_x, border_y, border_w, border_h,
+            clip_x, clip_y, clip_w, clip_h, radii);
     }
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
@@ -1069,6 +1030,38 @@ ns_style_is_nowrap(const ns_style *style)
             strcmp(ws->u.keyword, "pre") == 0);
 }
 
+double
+ns_paint_css_line_height_px(const ns_style *s)
+{
+    if (!s) return -1;
+    const ns_css_value *lh = s->values[NS_CSS_LINE_HEIGHT];
+    if (!lh || lh->kind != NS_CSS_V_LENGTH) return -1;
+    double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
+    switch (lh->u.length.unit) {
+    case NS_CSS_UNIT_PX:      return lh->u.length.v;
+    case NS_CSS_UNIT_NUMBER:
+    case NS_CSS_UNIT_EM:      return lh->u.length.v * font_size;
+    case NS_CSS_UNIT_PERCENT: return lh->u.length.v / 100.0 * font_size;
+    default:                  return -1;
+    }
+}
+
+void
+ns_paint_apply_css_line_spacing(PangoLayout *layout, const ns_style *s)
+{
+    double lh_px = ns_paint_css_line_height_px(s);
+    if (!layout || lh_px <= 0) return;
+    PangoContext *ctx = pango_layout_get_context(layout);
+    const PangoFontDescription *fd = pango_layout_get_font_description(layout);
+    PangoFontMetrics *fm = pango_context_get_metrics(ctx, fd, NULL);
+    if (!fm) return;
+    double natural = (pango_font_metrics_get_ascent(fm) +
+                      pango_font_metrics_get_descent(fm)) / (double)PANGO_SCALE;
+    pango_font_metrics_unref(fm);
+    if (natural <= 0) return;
+    pango_layout_set_line_spacing(layout, (float)(lh_px / natural));
+}
+
 void
 ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
                     const ns_box *b)
@@ -1240,7 +1233,9 @@ ns_paint_inline_y_offset_for_layout(const ns_box *b, PangoLayout *layout)
     pango_layout_get_pixel_size(layout, NULL, &ph);
     double y_offset = (b->content_height - (double)ph) * 0.5;
     if (inline_has_form_controls(b)) y_offset = 0;
-    if (y_offset < 0) y_offset = 0;
+    if (y_offset < 0 &&
+        ns_paint_css_line_height_px(inherited_style(b)) <= 0)
+        y_offset = 0;
     return y_offset;
 }
 
@@ -1315,6 +1310,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     else
         pango_layout_set_width(layout, (int)(b->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
+    ns_paint_apply_css_line_spacing(layout, s);
     double text_x = b->x;
     {
         double ti = ns_text_indent_px(s, b->content_width);
@@ -1885,6 +1881,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
     else
         pango_layout_set_width(layout, (int)(b->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
+    ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
@@ -2476,10 +2473,21 @@ paint_video(cairo_t *cr, const ns_box *b)
     }
     ns_video *v = b->media ? b->media->video : NULL;
     ns_texture *tex = v ? v->poster_texture : NULL;
+    ns_image *bgimg = b->media ? b->media->bg_image : NULL;
+    gboolean bg_painted = bgimg && bgimg->loaded && bgimg->texture;
+    if (!bg_painted && b->media && b->media->bg_layer_images) {
+        for (guint li = 0; li < b->media->bg_layer_images->len; li++) {
+            ns_image *limg = g_ptr_array_index(b->media->bg_layer_images, li);
+            if (limg && limg->loaded && limg->texture) {
+                bg_painted = TRUE;
+                break;
+            }
+        }
+    }
     cairo_save(cr);
     if (tex) {
         paint_texture(cr, b, tex);
-    } else {
+    } else if (!bg_painted) {
         cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
         cairo_rectangle(cr, b->x, b->y, b->content_width, b->content_height);
         cairo_fill(cr);

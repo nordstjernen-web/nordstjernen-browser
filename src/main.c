@@ -3056,6 +3056,12 @@ ns_window_image_ready_needs_relayout(ns_window *w, ns_image *img)
         }
         if (box->media->bg_image == (void *)img)
             any_ref = TRUE;
+        if (box->media->bg_layer_images) {
+            for (guint li = 0; li < box->media->bg_layer_images->len; li++)
+                if (g_ptr_array_index(box->media->bg_layer_images, li) ==
+                    (void *)img)
+                    any_ref = TRUE;
+        }
     }
     g_ptr_array_free(imgs, TRUE);
     return needs || !any_ref;
@@ -3613,6 +3619,29 @@ ns_window_kick_image_loads(ns_window *w)
                     if (ns_image_inflight(box->media->bg_image)) inflight++;
                     g_free(abs);
                 }
+            }
+        }
+        if (box->media->bg_layer_srcs) {
+            for (guint li = 0; li < box->media->bg_layer_srcs->len; li++) {
+                const char *src =
+                    g_ptr_array_index(box->media->bg_layer_srcs, li);
+                if (!src) continue;
+                ns_image *cur =
+                    g_ptr_array_index(box->media->bg_layer_images, li);
+                if (ns_image_should_retry(cur, now_us)) cur = NULL;
+                if (cur) continue;
+                if (inflight >= 12) break;
+                char *abs = ns_resolve_url(w, src);
+                if (!abs) continue;
+                if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
+                    g_free(abs);
+                    continue;
+                }
+                ns_image *img = ns_image_cache_get(w->images, abs,
+                    ns_window_current_url(w), on_image_ready, w);
+                box->media->bg_layer_images->pdata[li] = img;
+                if (ns_image_inflight(img)) inflight++;
+                g_free(abs);
             }
         }
     }

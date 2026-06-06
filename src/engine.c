@@ -326,24 +326,34 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
-        const char *src = box->media->image_src
-                          ? box->media->image_src
-                          : box->media->bg_image_src;
-        if (!src) continue;
-        if (g_str_has_prefix(src, "nd-inline-svg:")) continue;
-        char *abs = ns_url_resolve(base_url, src);
-        if (!abs) continue;
-        if (ns_image_cache_peek(cache, abs)) { g_free(abs); continue; }
-        ns_response *resp = ns_engine_fetch_blocking(abs, base_url, NULL);
-        if (resp && !resp->error && resp->body && resp->body->len > 0) {
-            int w = 0, h = 0;
-            ns_texture *tex = ns_image_decode_bytes(
-                resp->body->data, resp->body->len, &w, &h);
-            if (tex)
-                ns_image_cache_insert_loaded(cache, abs, tex, w, h);
+        GPtrArray *srcs = g_ptr_array_new();
+        if (box->media->image_src)
+            g_ptr_array_add(srcs, box->media->image_src);
+        else if (box->media->bg_layer_srcs) {
+            for (guint li = 0; li < box->media->bg_layer_srcs->len; li++) {
+                char *lsrc = g_ptr_array_index(box->media->bg_layer_srcs, li);
+                if (lsrc) g_ptr_array_add(srcs, lsrc);
+            }
+        } else if (box->media->bg_image_src)
+            g_ptr_array_add(srcs, box->media->bg_image_src);
+        for (guint si = 0; si < srcs->len; si++) {
+            const char *src = g_ptr_array_index(srcs, si);
+            if (g_str_has_prefix(src, "nd-inline-svg:")) continue;
+            char *abs = ns_url_resolve(base_url, src);
+            if (!abs) continue;
+            if (ns_image_cache_peek(cache, abs)) { g_free(abs); continue; }
+            ns_response *resp = ns_engine_fetch_blocking(abs, base_url, NULL);
+            if (resp && !resp->error && resp->body && resp->body->len > 0) {
+                int w = 0, h = 0;
+                ns_texture *tex = ns_image_decode_bytes(
+                    resp->body->data, resp->body->len, &w, &h);
+                if (tex)
+                    ns_image_cache_insert_loaded(cache, abs, tex, w, h);
+            }
+            if (resp) ns_response_free(resp);
+            g_free(abs);
         }
-        if (resp) ns_response_free(resp);
-        g_free(abs);
+        g_ptr_array_free(srcs, TRUE);
     }
     g_ptr_array_free(imgs, TRUE);
 }

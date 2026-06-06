@@ -399,7 +399,11 @@ typedef struct ns_css_value {
         ns_css_areas     areas;
         ns_css_anim_list anim;
     } u;
+    struct ns_css_value *next_layer;
 } ns_css_value;
+
+const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
+int                 ns_css_value_layer_count(const ns_css_value *head);
 
 double   ns_css_length_or(const ns_css_value *v, double fallback);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);

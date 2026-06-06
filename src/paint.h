@@ -45,6 +45,10 @@ void ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
 
 PangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 
+double ns_paint_css_line_height_px(const ns_style *style);
+void ns_paint_apply_css_line_spacing(PangoLayout *layout,
+                                     const ns_style *style);
+
 gboolean ns_paint_li_is_inside(const ns_style *li_style);
 gboolean ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
                                  char *out, gsize out_sz);
