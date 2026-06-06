@@ -21073,6 +21073,77 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static int
+ns_pointer_capture_index(JSContext *ctx, JSValueConst set, int32_t id)
+{
+    if (!JS_IsArray(set)) return -1;
+    uint32_t len = ns_js_array_length(ctx, set);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue v = JS_GetPropertyUint32(ctx, set, i);
+        int32_t e = 0;
+        JS_ToInt32(ctx, &e, v);
+        JS_FreeValue(ctx, v);
+        if (e == id) return (int)i;
+    }
+    return -1;
+}
+
+static JSValue
+ns_element_setPointerCapture(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    int32_t id = 0;
+    JS_ToInt32(ctx, &id, argv[0]);
+    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
+    if (!JS_IsArray(set)) {
+        JS_FreeValue(ctx, set);
+        set = JS_NewArray(ctx);
+        JS_SetPropertyStr(ctx, this_val, "_pointerCaptures",
+                          JS_DupValue(ctx, set));
+    }
+    if (ns_pointer_capture_index(ctx, set, id) < 0)
+        JS_SetPropertyUint32(ctx, set, ns_js_array_length(ctx, set),
+                             JS_NewInt32(ctx, id));
+    JS_FreeValue(ctx, set);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_hasPointerCapture(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_FALSE;
+    int32_t id = 0;
+    JS_ToInt32(ctx, &id, argv[0]);
+    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
+    gboolean found = ns_pointer_capture_index(ctx, set, id) >= 0;
+    JS_FreeValue(ctx, set);
+    return found ? JS_TRUE : JS_FALSE;
+}
+
+static JSValue
+ns_element_releasePointerCapture(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    int32_t id = 0;
+    JS_ToInt32(ctx, &id, argv[0]);
+    JSValue set = JS_GetPropertyStr(ctx, this_val, "_pointerCaptures");
+    int idx = ns_pointer_capture_index(ctx, set, id);
+    if (idx >= 0) {
+        JSValue splice = JS_GetPropertyStr(ctx, set, "splice");
+        JSValueConst sargs[2] = { JS_NewInt32(ctx, idx), JS_NewInt32(ctx, 1) };
+        JSValue r = JS_Call(ctx, splice, set, 2, sargs);
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, sargs[0]);
+        JS_FreeValue(ctx, sargs[1]);
+        JS_FreeValue(ctx, splice);
+    }
+    JS_FreeValue(ctx, set);
+    return JS_UNDEFINED;
+}
+
 #define NS_DIALOG_RV_KEY    "__nd_dialogReturnValue"
 #define NS_DIALOG_MODAL_KEY "__nd_dialogModal"
 
@@ -23275,6 +23346,9 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("cancelAsync",             1, ns_element_cancelAsync),
     JS_CFUNC_DEF("announce",                1, ns_event_noop),
     JS_CFUNC_DEF("scrollIntoView",          0, ns_element_scrollIntoView),
+    JS_CFUNC_DEF("setPointerCapture",       1, ns_element_setPointerCapture),
+    JS_CFUNC_DEF("releasePointerCapture",   1, ns_element_releasePointerCapture),
+    JS_CFUNC_DEF("hasPointerCapture",       1, ns_element_hasPointerCapture),
     JS_CFUNC_DEF("show",                    0, ns_element_show),
     JS_CFUNC_DEF("showModal",               0, ns_element_showModal),
     JS_CFUNC_DEF("close",                   0, ns_element_close),
