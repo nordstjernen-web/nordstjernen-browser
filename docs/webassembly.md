@@ -30,7 +30,7 @@ The `WebAssembly` namespace (`src/wasm.c`):
 
 Marshalling at the JS ↔ wasm boundary:
 
-- `i32`/`f32`/`f64` ↔ numbers, `i64` ↔ `BigInt` (numbers accepted too).
+- `i32`/`f32`/`f64` ↔ numbers, `i64` ↔ `BigInt`.
 - `externref` ↔ any JS value. Values are boxed and registered with
   WAMR's externref table; WAMR's reclaim pass frees boxes that wasm no
   longer holds, with a cleanup callback dropping the JS reference.

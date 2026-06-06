@@ -6503,7 +6503,24 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         }
     }
 
-    if (!module->possible_memory_grow) {
+    bool has_exported_memory = false;
+    for (i = 0; i < module->export_count; i++) {
+        if (module->exports[i].kind == EXPORT_KIND_MEMORY) {
+            has_exported_memory = true;
+        }
+        else if (module->exports[i].kind == EXPORT_KIND_TABLE) {
+            uint32 table_idx = module->exports[i].index;
+            if (table_idx < module->import_table_count)
+                module->import_tables[table_idx]
+                    .u.table.table_type.possible_grow = true;
+            else if (table_idx - module->import_table_count
+                     < module->table_count)
+                module->tables[table_idx - module->import_table_count]
+                    .table_type.possible_grow = true;
+        }
+    }
+
+    if (!module->possible_memory_grow && !has_exported_memory) {
 #if WASM_ENABLE_SHRUNK_MEMORY != 0
         if (aux_data_end_global && aux_heap_base_global
             && aux_stack_top_global) {

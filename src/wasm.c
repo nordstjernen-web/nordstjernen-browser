@@ -167,6 +167,14 @@ ns_wasm_runtime_ready(void)
     return TRUE;
 }
 
+static guint8 *
+ns_wasm_memdup_bytes(const guint8 *bytes, size_t len)
+{
+    if (len == 0)
+        return g_malloc0(1);
+    return g_memdup2(bytes, len);
+}
+
 static JSValue
 ns_wasm_throw_named(JSContext *ctx, const char *class_name, const char *msg)
 {
@@ -207,7 +215,7 @@ ns_wasm_copy_buffer_source(JSContext *ctx, JSValueConst v, size_t *out_len)
                 JS_FreeValue(ctx, buf);
                 return NULL;
             }
-            out = g_memdup2(base + off, blen ? blen : 1);
+            out = ns_wasm_memdup_bytes(base + off, blen);
             *out_len = blen;
         }
         JS_FreeValue(ctx, buf);
@@ -222,7 +230,7 @@ ns_wasm_copy_buffer_source(JSContext *ctx, JSValueConst v, size_t *out_len)
             return NULL;
         }
         *out_len = total;
-        return g_memdup2(base, total ? total : 1);
+        return ns_wasm_memdup_bytes(base, total);
     }
     if (JS_HasException(ctx))
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -235,6 +243,21 @@ ns_wasm_buffer_source_error(JSContext *ctx, const char *msg)
     if (JS_HasException(ctx))
         return JS_EXCEPTION;
     return JS_ThrowTypeError(ctx, "%s", msg);
+}
+
+static int
+ns_wasm_to_u32_index(JSContext *ctx, JSValueConst v, uint32_t *out,
+                     const char *what)
+{
+    uint64_t idx = 0;
+    if (JS_ToIndex(ctx, &idx, v))
+        return -1;
+    if (idx > G_MAXUINT32) {
+        JS_ThrowRangeError(ctx, "%s is too large", what);
+        return -1;
+    }
+    *out = (uint32_t)idx;
+    return 0;
 }
 
 static ns_wasm_ref *
@@ -299,11 +322,8 @@ ns_wasm_js_to_val(JSContext *ctx, ns_wasm_instance *wi, JSValueConst v,
     }
     case WASM_I64: {
         int64_t i = 0;
-        if (JS_ToBigInt64(ctx, &i, v)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            if (JS_ToInt64(ctx, &i, v))
-                return -1;
-        }
+        if (JS_ToBigInt64(ctx, &i, v))
+            return -1;
         out->of.i64 = i;
         return 0;
     }
@@ -425,8 +445,15 @@ ns_wasm_call_function(JSContext *ctx, ns_wasm_instance *wi,
     if (n_results == 1)
         return ns_wasm_val_to_js(ctx, &results[0]);
     JSValue arr = JS_NewArray(ctx);
-    for (guint i = 0; i < n_results; i++)
-        JS_SetPropertyUint32(ctx, arr, i, ns_wasm_val_to_js(ctx, &results[i]));
+    if (JS_IsException(arr))
+        return arr;
+    for (guint i = 0; i < n_results; i++) {
+        JSValue v = ns_wasm_val_to_js(ctx, &results[i]);
+        if (JS_IsException(v) || JS_SetPropertyUint32(ctx, arr, i, v) < 0) {
+            JS_FreeValue(ctx, arr);
+            return JS_EXCEPTION;
+        }
+    }
     return arr;
 }
 
@@ -484,13 +511,25 @@ ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
 }
 
 static void
+ns_wasm_memory_detach_buffer(ns_wasm_memory *m)
+{
+    if (!m || JS_IsUndefined(m->buffer))
+        return;
+    JS_DetachArrayBuffer(m->ctx, m->buffer);
+    JS_FreeValue(m->ctx, m->buffer);
+    m->buffer = JS_UNDEFINED;
+    m->base = NULL;
+    m->size = 0;
+}
+
+static void
 ns_wasm_memory_finalizer(JSRuntime *rt, JSValue val)
 {
     ns_wasm_memory *m = JS_GetOpaque(val, ns_wasm_memory_class_id);
     if (!m)
         return;
+    ns_wasm_memory_detach_buffer(m);
     JS_FreeValueRT(rt, m->instance);
-    JS_FreeValueRT(rt, m->buffer);
     g_free(m);
 }
 
@@ -527,10 +566,7 @@ ns_wasm_memory_buffer_get(JSContext *ctx, JSValueConst this_val)
                   wasm_memory_get_bytes_per_page(mem);
     if (!JS_IsUndefined(m->buffer) && m->base == base && m->size == size)
         return JS_DupValue(ctx, m->buffer);
-    if (!JS_IsUndefined(m->buffer)) {
-        JS_DetachArrayBuffer(ctx, m->buffer);
-        JS_FreeValue(ctx, m->buffer);
-    }
+    ns_wasm_memory_detach_buffer(m);
     JSValue buffer = JS_NewArrayBuffer(ctx, base, size, NULL, NULL, FALSE);
     if (JS_IsException(buffer)) {
         m->buffer = JS_UNDEFINED;
@@ -555,14 +591,18 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
     if (!wi || !wi->inst)
         return JS_ThrowTypeError(ctx, "wasm instance is gone");
     uint32_t delta = 0;
-    if (argc > 0 && JS_ToUint32(ctx, &delta, argv[0]))
+    if (ns_wasm_to_u32_index(ctx, argc > 0 ? argv[0] : JS_UNDEFINED,
+                             &delta, "wasm memory.grow delta"))
         return JS_EXCEPTION;
     wasm_memory_inst_t mem = wasm_runtime_get_memory(wi->inst, 0);
     if (!mem)
         return JS_ThrowTypeError(ctx, "wasm memory is gone");
     uint32_t old_pages = (uint32_t)wasm_memory_get_cur_page_count(mem);
-    if (delta && !wasm_runtime_enlarge_memory(wi->inst, delta))
-        return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
+    if (delta) {
+        if (!wasm_memory_enlarge(mem, delta))
+            return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
+        ns_wasm_memory_detach_buffer(m);
+    }
     return JS_NewUint32(ctx, old_pages);
 }
 
@@ -581,13 +621,7 @@ ns_wasm_on_memory_grown(wasm_module_inst_t inst, void *user_data)
     if (!wi || JS_IsUndefined(wi->memory_obj))
         return;
     ns_wasm_memory *m = JS_GetOpaque(wi->memory_obj, ns_wasm_memory_class_id);
-    if (!m || JS_IsUndefined(m->buffer))
-        return;
-    JS_DetachArrayBuffer(m->ctx, m->buffer);
-    JS_FreeValue(m->ctx, m->buffer);
-    m->buffer = JS_UNDEFINED;
-    m->base = NULL;
-    m->size = 0;
+    ns_wasm_memory_detach_buffer(m);
 }
 
 static void
@@ -614,6 +648,16 @@ static const JSClassDef ns_wasm_table_class = {
     .finalizer = ns_wasm_table_finalizer,
     .gc_mark = ns_wasm_table_gc_mark,
 };
+
+static void
+ns_wasm_instance_detach_memory(ns_wasm_instance *wi)
+{
+    if (!wi || JS_IsUndefined(wi->memory_obj))
+        return;
+    ns_wasm_memory *m = JS_GetOpaque(wi->memory_obj,
+                                     ns_wasm_memory_class_id);
+    ns_wasm_memory_detach_buffer(m);
+}
 
 static ns_wasm_table *
 ns_wasm_table_opaque(JSContext *ctx, JSValueConst this_val,
@@ -653,7 +697,8 @@ ns_wasm_table_get(JSContext *ctx, JSValueConst this_val, int argc,
     if (!t)
         return JS_EXCEPTION;
     uint32_t idx = 0;
-    if (argc > 0 && JS_ToUint32(ctx, &idx, argv[0]))
+    if (ns_wasm_to_u32_index(ctx, argc > 0 ? argv[0] : JS_UNDEFINED,
+                             &idx, "wasm table index"))
         return JS_EXCEPTION;
     if (t->elem_kind == WASM_FUNCREF) {
         wasm_table_inst_t tbl;
@@ -687,7 +732,8 @@ ns_wasm_table_set(JSContext *ctx, JSValueConst this_val, int argc,
     if (!t)
         return JS_EXCEPTION;
     uint32_t idx = 0;
-    if (argc > 0 && JS_ToUint32(ctx, &idx, argv[0]))
+    if (ns_wasm_to_u32_index(ctx, argc > 0 ? argv[0] : JS_UNDEFINED,
+                             &idx, "wasm table index"))
         return JS_EXCEPTION;
     JSValueConst v = argc > 1 ? argv[1] : JS_UNDEFINED;
     if (t->elem_kind == WASM_FUNCREF) {
@@ -701,6 +747,11 @@ ns_wasm_table_set(JSContext *ctx, JSValueConst this_val, int argc,
     }
     uint32_t ref = NS_WAMR_NULL_REF;
     if (!JS_IsNull(v)) {
+        uint32_t size = 0;
+        if (!ns_wamr_table_size(wi->inst, t->name, &size, NULL))
+            return JS_ThrowTypeError(ctx, "wasm table is gone");
+        if (idx >= size)
+            return JS_ThrowRangeError(ctx, "table index out of bounds");
         ns_wasm_ref *r = ns_wasm_ref_box(ctx, v);
         if (!ns_wasm_ref_register(wi->inst, r, &ref))
             return JS_ThrowInternalError(ctx,
@@ -720,23 +771,31 @@ ns_wasm_table_grow(JSContext *ctx, JSValueConst this_val, int argc,
     if (!t)
         return JS_EXCEPTION;
     uint32_t delta = 0;
-    if (argc > 0 && JS_ToUint32(ctx, &delta, argv[0]))
+    if (ns_wasm_to_u32_index(ctx, argc > 0 ? argv[0] : JS_UNDEFINED,
+                             &delta, "wasm table.grow delta"))
         return JS_EXCEPTION;
-    if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]) &&
-        t->elem_kind == WASM_FUNCREF)
-        return JS_ThrowTypeError(ctx,
-                                 "growing funcref table entries from JS "
-                                 "is not supported");
+    uint32_t ref = NS_WAMR_NULL_REF;
+    gboolean fill_externref = FALSE;
+    if (argc > 1) {
+        if (t->elem_kind == WASM_FUNCREF && !JS_IsNull(argv[1]))
+            return JS_ThrowTypeError(ctx,
+                                     "growing funcref table entries from JS "
+                                     "is not supported");
+        if (t->elem_kind == WASM_EXTERNREF && !JS_IsNull(argv[1])) {
+            ns_wasm_ref *r = ns_wasm_ref_box(ctx, argv[1]);
+            if (!ns_wasm_ref_register(wi->inst, r, &ref))
+                return JS_ThrowInternalError(
+                    ctx, "wasm externref registration failed");
+            fill_externref = TRUE;
+        }
+    }
     uint32_t old_size = 0;
-    if (!ns_wamr_table_grow(wi->inst, t->name, delta, &old_size))
+    if (!ns_wamr_table_grow(wi->inst, t->name, delta, &old_size)) {
+        if (fill_externref)
+            ns_wamr_externref_reclaim(wi->inst);
         return JS_ThrowRangeError(ctx, "wasm table.grow failed");
-    if (argc > 1 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]) &&
-        t->elem_kind == WASM_EXTERNREF) {
-        uint32_t ref = NS_WAMR_NULL_REF;
-        ns_wasm_ref *r = ns_wasm_ref_box(ctx, argv[1]);
-        if (!ns_wasm_ref_register(wi->inst, r, &ref))
-            return JS_ThrowInternalError(ctx,
-                                         "wasm externref registration failed");
+    }
+    if (fill_externref) {
         for (uint32_t i = 0; i < delta; i++) {
             if (!ns_wamr_table_set_ref(wi->inst, t->name, old_size + i, ref))
                 return JS_ThrowRangeError(ctx, "table index out of bounds");
@@ -788,6 +847,7 @@ ns_wasm_instance_finalizer(JSRuntime *rt, JSValue val)
     ns_wasm_instance *wi = JS_GetOpaque(val, ns_wasm_instance_class_id);
     if (!wi)
         return;
+    ns_wasm_instance_detach_memory(wi);
     if (wi->exec_env)
         wasm_runtime_destroy_exec_env(wi->exec_env);
     if (wi->inst) {
@@ -921,13 +981,10 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
         case WASM_I64: {
             int64_t i = 0;
             if (JS_ToBigInt64(ctx, &i, ret)) {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-                if (JS_ToInt64(ctx, &i, ret)) {
-                    ns_wasm_native_fail(ctx, wi, inst,
-                                        "wasm import result conversion failed");
-                    JS_FreeValue(ctx, ret);
-                    return;
-                }
+                ns_wasm_native_fail(ctx, wi, inst,
+                                    "wasm import result conversion failed");
+                JS_FreeValue(ctx, ret);
+                return;
             }
             *(int64_t *)args = i;
             break;
@@ -1264,8 +1321,8 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
 
     ns_wasm_module *mod = g_new0(ns_wasm_module, 1);
     ns_wasm_linkage_init(&mod->linkage);
-    mod->bytes = g_memdup2(bytes, len ? len : 1);
-    mod->load_bytes = g_memdup2(bytes, len ? len : 1);
+    mod->bytes = ns_wasm_memdup_bytes(bytes, len);
+    mod->load_bytes = ns_wasm_memdup_bytes(bytes, len);
     mod->len = len;
 
     char error_buf[192] = "";
@@ -1491,8 +1548,20 @@ ns_wasm_instantiate(JSContext *ctx, JSValueConst this_val, int argc,
         return ns_wasm_resolved_promise(ctx, instance);
     }
     JSValue pair = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, pair, "module", module);
-    JS_SetPropertyStr(ctx, pair, "instance", instance);
+    if (JS_IsException(pair)) {
+        JS_FreeValue(ctx, module);
+        JS_FreeValue(ctx, instance);
+        return ns_wasm_resolved_promise(ctx, pair);
+    }
+    if (JS_SetPropertyStr(ctx, pair, "module", module) < 0) {
+        JS_FreeValue(ctx, pair);
+        JS_FreeValue(ctx, instance);
+        return ns_wasm_resolved_promise(ctx, JS_EXCEPTION);
+    }
+    if (JS_SetPropertyStr(ctx, pair, "instance", instance) < 0) {
+        JS_FreeValue(ctx, pair);
+        return ns_wasm_resolved_promise(ctx, JS_EXCEPTION);
+    }
     return ns_wasm_resolved_promise(ctx, pair);
 }
 
