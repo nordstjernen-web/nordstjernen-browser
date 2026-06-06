@@ -30696,6 +30696,83 @@ ns_subtree_has_pending_script(const ns_node *n)
     return FALSE;
 }
 
+static gboolean
+ns_link_is_loadable_stylesheet(const ns_node *n)
+{
+    if (!ns_node_is_element_named(n, "link")) return FALSE;
+    if (n->flags & NS_NODE_LINK_LOAD_FIRED) return FALSE;
+    const char *rel = ns_element_get_attr(n, "rel");
+    const char *href = ns_element_get_attr(n, "href");
+    if (!href || !*href || !rel) return FALSE;
+    gchar **parts = g_strsplit_set(rel, " \t\r\n\f", -1);
+    gboolean is_sheet = FALSE, is_alt = FALSE;
+    for (gchar **p = parts; *p; p++) {
+        if (g_ascii_strcasecmp(*p, "stylesheet") == 0) is_sheet = TRUE;
+        else if (g_ascii_strcasecmp(*p, "alternate") == 0) is_alt = TRUE;
+    }
+    g_strfreev(parts);
+    return is_sheet && !is_alt;
+}
+
+static void
+ns_js_collect_pending_stylesheets(ns_node *n, GPtrArray *out)
+{
+    if (!n) return;
+    if (ns_link_is_loadable_stylesheet(n)) {
+        g_ptr_array_add(out, n);
+        return;
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_js_collect_pending_stylesheets(c, out);
+}
+
+static void
+ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
+{
+    if (!js || !n || (n->flags & NS_NODE_LINK_LOAD_FIRED)) return;
+    n->flags |= NS_NODE_LINK_LOAD_FIRED;
+    const char *href = ns_element_get_attr(n, "href");
+    if (!href || !*href) {
+        ns_js_dispatch_resource_event(js, n, "error");
+        return;
+    }
+    if (g_str_has_prefix(href, "data:")) {
+        ns_js_dispatch_resource_event(js, n, "load");
+        return;
+    }
+    char *abs = ns_url_resolve(origin, href);
+    if (!abs) {
+        ns_js_dispatch_resource_event(js, n, "error");
+        return;
+    }
+    gboolean loaded = FALSE;
+    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_STYLE, abs, origin)) {
+        if (js->log_cb) {
+            char *line = g_strdup_printf("CSP blocked: stylesheet %s", abs);
+            js->log_cb(line, js->log_user_data);
+            g_free(line);
+        }
+    } else {
+        GError *err = NULL;
+        ns_response *resp = ns_js_fetch_resource(js, abs, origin, NULL, &err);
+        if (resp && resp->status == 200)
+            loaded = TRUE;
+        else if (js->log_cb) {
+            const char *why = err ? err->message :
+                (resp && resp->error ? resp->error :
+                 (resp ? "non-200 status" : "fetch failed"));
+            char *line = g_strdup_printf("stylesheet %s: %s", abs, why);
+            js->log_cb(line, js->log_user_data);
+            g_free(line);
+        }
+        ns_response_free(resp);
+        g_clear_error(&err);
+    }
+    g_free(abs);
+    ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
+}
+
 static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
@@ -30705,11 +30782,17 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     for (const ns_node *p = root; p; p = p->parent)
         if (p == js->current_doc) { connected = TRUE; break; }
     if (!connected) return;
-    if (!ns_subtree_has_pending_script(root)) return;
+    GPtrArray *sheets = g_ptr_array_new();
+    ns_js_collect_pending_stylesheets(root, sheets);
+    if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
+        g_ptr_array_free(sheets, TRUE);
+        return;
+    }
     if (js->eval_depth > 0) {
         if (!js->deferred_script_roots)
             js->deferred_script_roots = g_ptr_array_new();
         g_ptr_array_add(js->deferred_script_roots, root);
+        g_ptr_array_free(sheets, TRUE);
         return;
     }
     const char *origin = (js->current_url && *js->current_url)
@@ -30720,6 +30803,9 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
     g_array_free(tasks, TRUE);
+    for (guint i = 0; i < sheets->len; i++)
+        ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i), origin);
+    g_ptr_array_free(sheets, TRUE);
 }
 
 static void
@@ -30735,7 +30821,12 @@ ns_js_drain_deferred_scripts(ns_js *js)
         for (const ns_node *p = root; p; p = p->parent)
             if (p == js->current_doc) { connected = TRUE; break; }
         if (!connected) continue;
-        if (!ns_subtree_has_pending_script(root)) continue;
+        GPtrArray *sheets = g_ptr_array_new();
+        ns_js_collect_pending_stylesheets(root, sheets);
+        if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
+            g_ptr_array_free(sheets, TRUE);
+            continue;
+        }
         const char *origin = (js->current_url && *js->current_url)
                            ? js->current_url : "inline";
         GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
@@ -30744,6 +30835,10 @@ ns_js_drain_deferred_scripts(ns_js *js)
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
         g_array_free(tasks, TRUE);
+        for (guint i = 0; i < sheets->len; i++)
+            ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i),
+                                          origin);
+        g_ptr_array_free(sheets, TRUE);
     }
 }
 

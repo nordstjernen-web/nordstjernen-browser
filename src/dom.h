@@ -45,6 +45,7 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_QUIRKS         (1u << 5)
 #define NS_NODE_LIMITED_QUIRKS (1u << 6)
 #define NS_NODE_SVG_NS         (1u << 7)
+#define NS_NODE_LINK_LOAD_FIRED (1u << 8)
 
 struct ns_node {
     ns_node_kind kind;
