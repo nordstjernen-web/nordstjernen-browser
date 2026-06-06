@@ -1008,8 +1008,34 @@ static JSClassID ns_style_class_id;
 static JSClassID ns_token_list_class_id;
 static JSClassID ns_storage_class_id;
 
+static ns_node *ns_unwrap_element_mut(JSValueConst val);
+
+typedef struct {
+    JSValue element;
+} ns_style_back;
+
 static void
-ns_style_finalizer(JSRuntime *rt, JSValue val) { (void)rt; (void)val; }
+ns_style_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_style_back *b = JS_GetOpaque(val, ns_style_class_id);
+    if (!b) return;
+    JS_FreeValueRT(rt, b->element);
+    g_free(b);
+}
+
+static void
+ns_style_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_style_back *b = JS_GetOpaque(val, ns_style_class_id);
+    if (b) JS_MarkValue(rt, b->element, mark_func);
+}
+
+static ns_node *
+ns_style_node(JSValueConst this_val)
+{
+    ns_style_back *b = JS_GetOpaque(this_val, ns_style_class_id);
+    return b ? ns_unwrap_element_mut(b->element) : NULL;
+}
 
 static char *
 camel_to_kebab(const char *s)
@@ -1043,7 +1069,7 @@ static int
 ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
                           JSValueConst obj, JSAtom prop)
 {
-    ns_node *n = JS_GetOpaque(obj, ns_style_class_id);
+    ns_node *n = ns_style_node(obj);
     if (!n) return 0;
     const char *name = JS_AtomToCString(ctx, prop);
     if (!name) return 0;
@@ -1106,7 +1132,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
 static JSValue
 ns_style_get_length(JSContext *ctx, JSValueConst this_val)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewInt32(ctx, 0);
     const char *style = ns_element_get_attr(n, "style");
     if (!style) return JS_NewInt32(ctx, 0);
@@ -1130,7 +1156,7 @@ ns_style_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
                       JSValueConst val, JSValueConst receiver, int flags)
 {
     (void)receiver; (void)flags;
-    ns_node *n = JS_GetOpaque(obj, ns_style_class_id);
+    ns_node *n = ns_style_node(obj);
     if (!n) return FALSE;
     ns_js *js = js_from_ctx(ctx);
     if (js && js->pinned_wrappers_set &&
@@ -1167,6 +1193,7 @@ static JSClassExoticMethods ns_style_exotic = {
 static JSClassDef ns_style_class = {
     .class_name = "CSSStyleDeclaration",
     .finalizer  = ns_style_finalizer,
+    .gc_mark    = ns_style_gc_mark,
     .exotic     = &ns_style_exotic,
 };
 
@@ -1174,8 +1201,6 @@ typedef struct {
     JSValue     element;
     const char *attr;
 } ns_token_list_back;
-
-static ns_node *ns_unwrap_element_mut(JSValueConst val);
 
 static void
 ns_token_list_finalizer(JSRuntime *rt, JSValue val)
@@ -2021,7 +2046,7 @@ static const JSCFunctionListEntry ns_tlist_proto_funcs[] = {
 static JSValue
 ns_style_get_cssText(JSContext *ctx, JSValueConst this_val)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n) return JS_NewString(ctx, "");
     const char *s = ns_element_get_attr(n, "style");
     return JS_NewString(ctx, s ? s : "");
@@ -2030,7 +2055,7 @@ ns_style_get_cssText(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_style_set_cssText(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (s) {
@@ -2044,7 +2069,7 @@ static JSValue
 ns_style_getPropertyValue(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
@@ -2060,7 +2085,7 @@ static JSValue
 ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n || argc < 2) return JS_UNDEFINED;
     const char *name = JS_ToCString(ctx, argv[0]);
     const char *value = JS_ToCString(ctx, argv[1]);
@@ -2079,7 +2104,7 @@ static JSValue
 ns_style_removeProperty(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
-    ns_node *n = JS_GetOpaque(this_val, ns_style_class_id);
+    ns_node *n = ns_style_node(this_val);
     if (!n || argc < 1) return JS_NewString(ctx, "");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NewString(ctx, "");
@@ -3499,7 +3524,9 @@ ns_element_get_style(JSContext *ctx, JSValueConst this_val)
     if (!n) return JS_NULL;
     JSValue obj = JS_NewObjectClass(ctx, ns_style_class_id);
     if (JS_IsException(obj)) return obj;
-    JS_SetOpaque(obj, n);
+    ns_style_back *b = g_new0(ns_style_back, 1);
+    b->element = JS_DupValue(ctx, this_val);
+    JS_SetOpaque(obj, b);
     return obj;
 }
 
