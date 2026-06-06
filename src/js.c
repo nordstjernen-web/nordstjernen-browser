@@ -23200,6 +23200,47 @@ ns_window_scroll_by(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_scroll_by_vertical(JSContext *ctx, JSValueConst this_val, double dy)
+{
+    JSValue dyv = JS_NewFloat64(ctx, dy);
+    JSValueConst args[2] = { JS_NewInt32(ctx, 0), dyv };
+    JSValue r = ns_window_scroll_by(ctx, this_val, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, dyv);
+    return r;
+}
+
+static JSValue
+ns_window_scroll_by_lines(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    int lines = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &lines, argv[0]);
+    return ns_window_scroll_by_vertical(ctx, this_val, lines * 16.0);
+}
+
+static JSValue
+ns_window_scroll_by_pages(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    int pages = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &pages, argv[0]);
+    double vh = 800;
+    JSValue ih = JS_GetPropertyStr(ctx, this_val, "innerHeight");
+    JS_ToFloat64(ctx, &vh, ih);
+    JS_FreeValue(ctx, ih);
+    return ns_window_scroll_by_vertical(ctx, this_val, pages * vh);
+}
+
+static JSValue
+ns_window_focus(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_window_invoke_action(ctx, "focus");
+}
+
+static JSValue
 ns_element_scroll_common(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv, gboolean relative)
 {
@@ -26193,19 +26234,20 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "__ND_FP_DEBUG",
                       JS_NewBool(ctx, g_getenv("NS_FP_DEBUG") != NULL));
     static const ns_fn_def window_noops[] = {
-        { "close", 0 }, { "focus", 0 }, { "blur", 0 },
+        { "close", 0 }, { "blur", 0 },
         { "moveTo", 2 }, { "moveBy", 2 },
         { "resizeTo", 2 }, { "resizeBy", 2 },
     };
     ns_bind_fns(ctx, global, ns_event_noop, window_noops, G_N_ELEMENTS(window_noops));
     ns_bind_fn(ctx, global, "print", ns_window_print, 0);
     ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
+    ns_bind_fn(ctx, global, "focus", ns_window_focus, 0);
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
-    ns_bind_fn(ctx, global, "scrollByLines", ns_event_noop, 1);
-    ns_bind_fn(ctx, global, "scrollByPages", ns_event_noop, 1);
+    ns_bind_fn(ctx, global, "scrollByLines", ns_window_scroll_by_lines, 1);
+    ns_bind_fn(ctx, global, "scrollByPages", ns_window_scroll_by_pages, 1);
     ns_bind_fn(ctx, global, "open",                  ns_window_open_method,            3);
     ns_bind_fn(ctx, global, "confirm",               ns_window_confirm,                1);
     ns_bind_fn(ctx, global, "prompt",                ns_window_prompt,                 2);
