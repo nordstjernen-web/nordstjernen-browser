@@ -91,7 +91,9 @@ ns_wasm_runtime_init_once(gpointer data)
     args.mem_alloc_type = Alloc_With_System_Allocator;
     if (!wasm_runtime_full_init(&args))
         return NULL;
-    wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
+    wasm_runtime_set_log_level(g_getenv("ND_WASM_LOG")
+                                   ? WASM_LOG_LEVEL_VERBOSE
+                                   : WASM_LOG_LEVEL_ERROR);
     wasm_runtime_set_enlarge_mem_success_callback(ns_wasm_on_memory_grown,
                                                   NULL);
     (void)data;
@@ -954,7 +956,16 @@ ns_wasm_link_imports(JSContext *ctx, ns_wasm_module *mod,
     g_hash_table_destroy(groups);
 
     if (!ok) {
-        ns_wasm_throw_named(ctx, "LinkError", "wasm import resolution failed");
+        GString *msg = g_string_new("unresolved wasm imports:");
+        for (int32_t i = 0; i < n; i++) {
+            wasm_import_t imp;
+            wasm_runtime_get_import_type(mod->module, i, &imp);
+            if (imp.kind == WASM_IMPORT_EXPORT_KIND_FUNC && !imp.linked)
+                g_string_append_printf(msg, " %s.%s", imp.module_name,
+                                       imp.name);
+        }
+        ns_wasm_throw_named(ctx, "LinkError", msg->str);
+        g_string_free(msg, TRUE);
         return FALSE;
     }
     mod->linked = TRUE;

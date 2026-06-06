@@ -4624,6 +4624,7 @@ wasm_func_type_get_result_valkind(WASMFuncType *const func_type,
 #endif
 #if WASM_ENABLE_REF_TYPES != 0
         case VALUE_TYPE_EXTERNREF:
+            return WASM_EXTERNREF;
 #endif
         case VALUE_TYPE_VOID:
         default:
