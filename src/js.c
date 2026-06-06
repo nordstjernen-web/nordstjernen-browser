@@ -142,6 +142,8 @@ static void ns_js_record_character_data(ns_js *js, ns_node *target, const char *
 static gboolean ns_mut_target_covers(const ns_mut_target *t, ns_node *node);
 static void ns_nodelist_decorate(JSContext *ctx, JSValueConst arr);
 static JSValue ns_nodelist_from_array(JSContext *ctx, JSValue arr);
+static void ns_collect_by_name(const ns_node *root, const char *name,
+                               JSContext *ctx, JSValue arr, uint32_t *idx);
 static JSValue ns_nodelist_new(JSContext *ctx);
 static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
@@ -1008,6 +1010,22 @@ static JSClassID ns_element_class_id;
 static JSClassID ns_style_class_id;
 static JSClassID ns_token_list_class_id;
 static JSClassID ns_storage_class_id;
+static JSClassID ns_live_class_id;
+
+typedef enum {
+    NS_LIVE_CHILDREN,
+    NS_LIVE_CHILDNODES,
+    NS_LIVE_BY_TAG,
+    NS_LIVE_DOC_TAG,
+    NS_LIVE_BY_CLASS,
+    NS_LIVE_DOC_CLASS,
+    NS_LIVE_BY_NAME,
+    NS_LIVE_FORM_ELEMENTS,
+    NS_LIVE_LINKS,
+} ns_live_kind;
+
+static JSValue ns_make_live(JSContext *ctx, JSValueConst owner,
+                            ns_live_kind kind, const char *param);
 
 static ns_node *ns_unwrap_element_mut(JSValueConst val);
 
@@ -3256,8 +3274,6 @@ static JSValue ns_array_namedItem(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_form_elements_named_lookup(JSContext *ctx,
                                              JSValueConst this_val,
                                              const char *name);
-static JSValue ns_form_elements_namedItem(JSContext *ctx, JSValueConst this_val,
-                                          int argc, JSValueConst *argv);
 
 static JSValue
 ns_element_get_text_length(JSContext *ctx, JSValueConst this_val)
@@ -17291,15 +17307,8 @@ ns_element_get_previousElementSibling(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_children(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_node *n = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!n || ns_node_is_element_named(n, "template")) return arr;
-    uint32_t i = 0;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c->kind != NS_NODE_ELEMENT) continue;
-        JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-    }
-    return arr;
+    if (!ns_unwrap_element(this_val)) return JS_NewArray(ctx);
+    return ns_make_live(ctx, this_val, NS_LIVE_CHILDREN, NULL);
 }
 
 static JSValue
@@ -17346,13 +17355,8 @@ ns_element_get_previousSibling(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_childNodes(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_node *n = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!n || ns_node_is_element_named(n, "template")) return arr;
-    uint32_t i = 0;
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
-    return arr;
+    if (!ns_unwrap_element(this_val)) return JS_NewArray(ctx);
+    return ns_make_live(ctx, this_val, NS_LIVE_CHILDNODES, NULL);
 }
 
 static JSValue
@@ -17439,29 +17443,7 @@ ns_element_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
     const char *tag = JS_ToCString(ctx, argv[0]);
     if (!tag)
         return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
-    ns_js *jsx = js_from_ctx(ctx);
-    JSValue cached = ns_qcache_get(jsx, root, 'T', tag);
-    if (!JS_IsUndefined(cached)) { JS_FreeCString(ctx, tag); return cached; }
-
-    JSValue nl = ns_nodelist_new(ctx);
-    uint32_t i = 0;
-    const ns_node *doc = jsx ? jsx->current_doc : NULL;
-    gboolean wildcard = strcmp(tag, "*") == 0;
-    GPtrArray *list = (!wildcard && ns_root_uses_doc_index(root, doc) && doc->tag_index)
-        ? ns_doc_tag_index_lookup(doc, tag) : NULL;
-    if (list) {
-        for (guint k = 0; k < list->len; k++) {
-            const ns_node *n = g_ptr_array_index(list, k);
-            if (root != doc && !ns_node_ancestor_or_self(n, root)) continue;
-            if (n == root) continue;
-            JS_SetPropertyUint32(ctx, nl, i++, ns_make_element(ctx, n));
-        }
-    } else {
-        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-            ns_collect_by_tag(c, tag, ctx, nl, &i);
-    }
-    JSValue result = ns_nodelist_finalize(ctx, nl, i);
-    ns_qcache_put(jsx, root, 'T', tag, result);
+    JSValue result = ns_make_live(ctx, this_val, NS_LIVE_BY_TAG, tag);
     JS_FreeCString(ctx, tag);
     return result;
 }
@@ -18019,29 +18001,12 @@ ns_element_getElementsByClassName(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv)
 {
     const ns_node *root = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!root || argc < 1) return arr;
+    if (!root || argc < 1) return JS_NewArray(ctx);
     const char *cls = JS_ToCString(ctx, argv[0]);
-    if (!cls) return arr;
-    uint32_t i = 0;
-    ns_js *js = js_from_ctx(ctx);
-    ns_node *doc = js ? js->current_doc : NULL;
-    if (doc && doc->class_index && ns_root_uses_doc_index(root, doc)) {
-        GPtrArray *list = g_hash_table_lookup(doc->class_index, cls);
-        if (list) {
-            for (guint k = 0; k < list->len; k++) {
-                const ns_node *n = g_ptr_array_index(list, k);
-                if (n == root) continue;
-                if (!ns_node_ancestor_or_self(n, root)) continue;
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, n));
-            }
-        }
-    } else {
-        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-            ns_collect_by_class(c, cls, ctx, arr, &i);
-    }
+    if (!cls) return JS_NewArray(ctx);
+    JSValue result = ns_make_live(ctx, this_val, NS_LIVE_BY_CLASS, cls);
     JS_FreeCString(ctx, cls);
-    return ns_nodelist_from_array(ctx, arr);
+    return result;
 }
 
 static gboolean
@@ -20321,6 +20286,275 @@ ns_form_collect_controls(const ns_node *form, const ns_node *scan,
     }
 }
 
+typedef struct {
+    JSValue      owner;
+    ns_live_kind kind;
+    char        *param;
+    gboolean     html_collection;
+    JSValue      cache;
+    guint64      cache_gen;
+    gboolean     has_cache;
+} ns_live_back;
+
+static void
+ns_collect_links(const ns_node *n, JSContext *ctx, JSValue arr, uint32_t *idx)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if ((ns_node_is_element_named(c, "a") || ns_node_is_element_named(c, "area")) &&
+            ns_element_get_attr(c, "href"))
+            JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
+        ns_collect_links(c, ctx, arr, idx);
+    }
+}
+
+static JSValue
+ns_live_build(JSContext *ctx, ns_live_back *b)
+{
+    JSValue arr = JS_NewArray(ctx);
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *root;
+    switch (b->kind) {
+    case NS_LIVE_BY_NAME:
+    case NS_LIVE_LINKS:
+    case NS_LIVE_DOC_TAG:
+    case NS_LIVE_DOC_CLASS:
+        root = js ? js->current_doc : NULL;
+        break;
+    default:
+        root = ns_unwrap_element(b->owner);
+        break;
+    }
+    if (!root) return arr;
+    uint32_t i = 0;
+    switch (b->kind) {
+    case NS_LIVE_CHILDREN:
+        if (!ns_node_is_element_named(root, "template"))
+            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+                if (c->kind == NS_NODE_ELEMENT)
+                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
+        break;
+    case NS_LIVE_CHILDNODES:
+        if (!ns_node_is_element_named(root, "template"))
+            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
+        break;
+    case NS_LIVE_BY_TAG:
+    case NS_LIVE_DOC_TAG:
+        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+            ns_collect_by_tag(c, b->param ? b->param : "*", ctx, arr, &i);
+        break;
+    case NS_LIVE_BY_CLASS:
+    case NS_LIVE_DOC_CLASS:
+        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+            ns_collect_by_class(c, b->param ? b->param : "", ctx, arr, &i);
+        break;
+    case NS_LIVE_BY_NAME:
+        ns_collect_by_name(root, b->param ? b->param : "", ctx, arr, &i);
+        break;
+    case NS_LIVE_FORM_ELEMENTS:
+        if (root->name && strcmp(root->name, "form") == 0) {
+            const ns_node *doc = ns_node_root(root);
+            ns_form_collect_controls(root, doc ? doc : root, doc ? doc : root,
+                                     ctx, arr, &i, 0);
+        }
+        break;
+    case NS_LIVE_LINKS:
+        ns_collect_links(root, ctx, arr, &i);
+        break;
+    }
+    return arr;
+}
+
+static JSValue
+ns_live_snapshot(JSContext *ctx, ns_live_back *b)
+{
+    ns_js *js = js_from_ctx(ctx);
+    guint64 gen = js ? js->dom_gen : 0;
+    if (!b->has_cache || b->cache_gen != gen) {
+        if (b->has_cache) JS_FreeValue(ctx, b->cache);
+        b->cache = ns_live_build(ctx, b);
+        b->cache_gen = gen;
+        b->has_cache = TRUE;
+    }
+    return b->cache;
+}
+
+static JSValue
+ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
+              const char *name)
+{
+    if (b->kind == NS_LIVE_FORM_ELEMENTS) {
+        JSValue r = ns_form_elements_named_lookup(ctx, snap, name);
+        return JS_IsNull(r) ? JS_UNDEFINED : r;
+    }
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue el = JS_GetPropertyUint32(ctx, snap, i);
+        const ns_node *n = ns_unwrap_element(el);
+        if (n) {
+            const char *id = ns_element_get_attr(n, "id");
+            const char *nm = ns_element_get_attr(n, "name");
+            if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
+                return el;
+        }
+        JS_FreeValue(ctx, el);
+    }
+    return JS_UNDEFINED;
+}
+
+static int
+ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
+                JSValueConst obj, JSAtom prop)
+{
+    ns_live_back *b = JS_GetOpaque(obj, ns_live_class_id);
+    if (!b) return 0;
+    const char *name = JS_AtomToCString(ctx, prop);
+    if (!name) return 0;
+    JSValue snap = ns_live_snapshot(ctx, b);
+    uint32_t len = ns_js_array_length(ctx, snap);
+    int ret = 0;
+    if (strcmp(name, "length") == 0) {
+        if (desc) {
+            desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+            desc->value  = JS_NewInt64(ctx, len);
+            desc->getter = JS_UNDEFINED;
+            desc->setter = JS_UNDEFINED;
+        }
+        ret = 1;
+    } else if (name[0] >= '0' && name[0] <= '9') {
+        char *end = NULL;
+        long idx = strtol(name, &end, 10);
+        if (end && *end == '\0' && idx >= 0 && (uint32_t)idx < len) {
+            if (desc) {
+                desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE |
+                               JS_PROP_WRITABLE;
+                desc->value  = JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+                desc->getter = JS_UNDEFINED;
+                desc->setter = JS_UNDEFINED;
+            }
+            ret = 1;
+        }
+    } else if (b->html_collection) {
+        JSValue found = ns_live_named(ctx, b, snap, len, name);
+        if (!JS_IsUndefined(found)) {
+            if (desc) {
+                desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+                desc->value  = found;
+                desc->getter = JS_UNDEFINED;
+                desc->setter = JS_UNDEFINED;
+            } else {
+                JS_FreeValue(ctx, found);
+            }
+            ret = 1;
+        }
+    }
+    JS_FreeCString(ctx, name);
+    return ret;
+}
+
+static int
+ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
+                      JSValueConst obj)
+{
+    ns_live_back *b = JS_GetOpaque(obj, ns_live_class_id);
+    if (!b) { *ptab = NULL; *plen = 0; return 0; }
+    JSValue snap = ns_live_snapshot(ctx, b);
+    uint32_t len = ns_js_array_length(ctx, snap);
+    uint32_t total = len + 1;
+    JSPropertyEnum *tab = js_malloc(ctx, sizeof(JSPropertyEnum) * total);
+    if (!tab) return -1;
+    for (uint32_t i = 0; i < len; i++) {
+        tab[i].atom = JS_NewAtomUInt32(ctx, i);
+        tab[i].is_enumerable = 1;
+    }
+    tab[len].atom = JS_NewAtom(ctx, "length");
+    tab[len].is_enumerable = 0;
+    *ptab = tab;
+    *plen = total;
+    return 0;
+}
+
+static JSValue
+ns_live_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
+    if (!b || argc < 1) return JS_NULL;
+    int32_t idx;
+    if (JS_ToInt32(ctx, &idx, argv[0])) return JS_NULL;
+    JSValue snap = ns_live_snapshot(ctx, b);
+    uint32_t len = ns_js_array_length(ctx, snap);
+    if (idx < 0 || (uint32_t)idx >= len) return JS_NULL;
+    return JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
+}
+
+static JSValue
+ns_live_namedItem(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv)
+{
+    ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
+    if (!b || argc < 1) return JS_NULL;
+    const char *name = JS_ToCString(ctx, argv[0]);
+    if (!name) return JS_NULL;
+    JSValue snap = ns_live_snapshot(ctx, b);
+    uint32_t len = ns_js_array_length(ctx, snap);
+    JSValue r = ns_live_named(ctx, b, snap, len, name);
+    JS_FreeCString(ctx, name);
+    return JS_IsUndefined(r) ? JS_NULL : r;
+}
+
+static void
+ns_live_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_live_back *b = JS_GetOpaque(val, ns_live_class_id);
+    if (!b) return;
+    JS_FreeValueRT(rt, b->owner);
+    if (b->has_cache) JS_FreeValueRT(rt, b->cache);
+    g_free(b->param);
+    g_free(b);
+}
+
+static void
+ns_live_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_live_back *b = JS_GetOpaque(val, ns_live_class_id);
+    if (!b) return;
+    JS_MarkValue(rt, b->owner, mark_func);
+    if (b->has_cache) JS_MarkValue(rt, b->cache, mark_func);
+}
+
+static JSClassExoticMethods ns_live_exotic = {
+    .get_own_property       = ns_live_get_own,
+    .get_own_property_names = ns_live_get_own_names,
+};
+
+static JSClassDef ns_live_class = {
+    .class_name = "HTMLCollection",
+    .finalizer  = ns_live_finalizer,
+    .gc_mark    = ns_live_gc_mark,
+    .exotic     = &ns_live_exotic,
+};
+
+static const JSCFunctionListEntry ns_live_proto_funcs[] = {
+    JS_CFUNC_DEF("item",      1, ns_live_item),
+    JS_CFUNC_DEF("namedItem", 1, ns_live_namedItem),
+};
+
+static JSValue
+ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
+             const char *param)
+{
+    JSValue obj = JS_NewObjectClass(ctx, ns_live_class_id);
+    if (JS_IsException(obj)) return obj;
+    ns_live_back *b = g_new0(ns_live_back, 1);
+    b->owner           = JS_DupValue(ctx, owner);
+    b->kind            = kind;
+    b->param           = param ? g_strdup(param) : NULL;
+    b->html_collection = kind != NS_LIVE_CHILDNODES && kind != NS_LIVE_BY_NAME;
+    b->cache           = JS_UNDEFINED;
+    b->has_cache       = FALSE;
+    JS_SetOpaque(obj, b);
+    return obj;
+}
+
 static JSValue
 ns_element_get_option_index(JSContext *ctx, JSValueConst this_val)
 {
@@ -20603,45 +20837,7 @@ ns_element_tr_cells(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_form_elements(JSContext *ctx, JSValueConst this_val)
 {
-    const ns_node *el = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    JS_DefinePropertyValueStr(ctx, arr, "namedItem",
-        JS_NewCFunction(ctx, ns_form_elements_namedItem, "namedItem", 1), 0);
-    JS_DefinePropertyValueStr(ctx, arr, "item",
-        JS_NewCFunction(ctx, ns_array_item, "item", 1), 0);
-    if (!el || !el->name || strcmp(el->name, "form") != 0) return arr;
-    uint32_t i = 0;
-    const ns_node *doc = ns_node_root(el);
-    ns_form_collect_controls(el, doc ? doc : el, doc ? doc : el,
-                             ctx, arr, &i, 0);
-    for (uint32_t k = 0; k < i; k++) {
-        JSValue item = JS_GetPropertyUint32(ctx, arr, k);
-        const ns_node *n = ns_unwrap_element(item);
-        if (n && n->kind == NS_NODE_ELEMENT) {
-            const char *nm  = ns_element_get_attr(n, "name");
-            const char *idv = ns_element_get_attr(n, "id");
-            if (nm && *nm) {
-                JSAtom a = JS_NewAtom(ctx, nm);
-                if (JS_HasProperty(ctx, arr, a) <= 0) {
-                    JSValue named = ns_form_elements_named_lookup(ctx, arr, nm);
-                    JS_DefinePropertyValue(ctx, arr, a, named,
-                        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-                }
-                JS_FreeAtom(ctx, a);
-            }
-            if (idv && *idv && (!nm || strcmp(nm, idv) != 0)) {
-                JSAtom a = JS_NewAtom(ctx, idv);
-                if (JS_HasProperty(ctx, arr, a) <= 0) {
-                    JSValue named = ns_form_elements_named_lookup(ctx, arr, idv);
-                    JS_DefinePropertyValue(ctx, arr, a, named,
-                        JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
-                }
-                JS_FreeAtom(ctx, a);
-            }
-        }
-        JS_FreeValue(ctx, item);
-    }
-    return arr;
+    return ns_make_live(ctx, this_val, NS_LIVE_FORM_ELEMENTS, NULL);
 }
 
 static JSValue
@@ -20811,17 +21007,6 @@ ns_form_elements_named_lookup(JSContext *ctx, JSValueConst this_val,
         return list;
     }
     return first;
-}
-
-static JSValue
-ns_form_elements_namedItem(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
-{
-    if (argc < 1 || !JS_IsString(argv[0])) return JS_NULL;
-    const char *name = JS_ToCString(ctx, argv[0]);
-    JSValue result = ns_form_elements_named_lookup(ctx, this_val, name);
-    JS_FreeCString(ctx, name);
-    return result;
 }
 
 static JSValue
@@ -23677,15 +23862,13 @@ ns_document_collect_by_tag(JSContext *ctx, const char *tag)
 static JSValue
 ns_document_get_forms(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    return ns_document_collect_by_tag(ctx, "form");
+    return ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, "form");
 }
 
 static JSValue
 ns_document_get_images(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    return ns_document_collect_by_tag(ctx, "img");
+    return ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, "img");
 }
 
 static JSValue
@@ -24358,24 +24541,7 @@ ns_document_import_node(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_document_get_links(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    JSValue arr = JS_NewArray(ctx);
-    if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc) return arr;
-    uint32_t idx = 0;
-    GQueue q = G_QUEUE_INIT;
-    g_queue_push_tail(&q, js_from_ctx(ctx)->current_doc);
-    while (!g_queue_is_empty(&q)) {
-        ns_node *n = g_queue_pop_head(&q);
-        for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-            if ((ns_node_is_element_named(c, "a") ||
-                 ns_node_is_element_named(c, "area")) &&
-                ns_element_get_attr(c, "href"))
-                JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
-            g_queue_push_tail(&q, c);
-        }
-    }
-    g_queue_clear(&q);
-    return arr;
+    return ns_make_live(ctx, this_val, NS_LIVE_LINKS, NULL);
 }
 
 static void
@@ -25281,6 +25447,23 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     }
     JS_SetClassProto(ctx, ns_token_list_class_id, tlist_proto);
 
+    if (!ns_live_class_id)
+        JS_NewClassID(js->rt, &ns_live_class_id);
+    JS_NewClass(js->rt, ns_live_class_id, &ns_live_class);
+    JSValue live_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, live_proto, ns_live_proto_funcs,
+                               G_N_ELEMENTS(ns_live_proto_funcs));
+    {
+        JSValue garr  = JS_GetGlobalObject(ctx);
+        JSValue actor = JS_GetPropertyStr(ctx, garr, "Array");
+        JSValue aproto = JS_GetPropertyStr(ctx, actor, "prototype");
+        if (JS_IsObject(aproto)) JS_SetPrototype(ctx, live_proto, aproto);
+        JS_FreeValue(ctx, aproto);
+        JS_FreeValue(ctx, actor);
+        JS_FreeValue(ctx, garr);
+    }
+    JS_SetClassProto(ctx, ns_live_class_id, live_proto);
+
     if (!ns_storage_class_id)
         JS_NewClassID(js->rt, &ns_storage_class_id);
     JS_NewClass(js->rt, ns_storage_class_id, &ns_storage_class);
@@ -26045,30 +26228,12 @@ static JSValue
 ns_document_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *jsx = js_from_ctx(ctx);
     if (!jsx || !jsx->current_doc || argc < 1)
         return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
     const char *tag = JS_ToCString(ctx, argv[0]);
     if (!tag) return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
-    ns_node *doc = jsx->current_doc;
-    JSValue cached = ns_qcache_get(jsx, doc, 'T', tag);
-    if (!JS_IsUndefined(cached)) { JS_FreeCString(ctx, tag); return cached; }
-
-    JSValue nl = ns_nodelist_new(ctx);
-    uint32_t i = 0;
-    gboolean wildcard = strcmp(tag, "*") == 0;
-    if (!wildcard && doc->tag_index) {
-        GPtrArray *list = ns_doc_tag_index_lookup(doc, tag);
-        if (list)
-            for (guint k = 0; k < list->len; k++)
-                JS_SetPropertyUint32(ctx, nl, i++,
-                                     ns_make_element(ctx, g_ptr_array_index(list, k)));
-    } else {
-        ns_collect_by_tag(doc, tag, ctx, nl, &i);
-    }
-    JSValue result = ns_nodelist_finalize(ctx, nl, i);
-    ns_qcache_put(jsx, doc, 'T', tag, result);
+    JSValue result = ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, tag);
     JS_FreeCString(ctx, tag);
     return result;
 }
@@ -26139,28 +26304,12 @@ static JSValue
 ns_document_getElementsByClassName(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *jsx = js_from_ctx(ctx);
     if (!jsx || !jsx->current_doc || argc < 1)
         return ns_nodelist_from_array(ctx, JS_NewArray(ctx));
     const char *cls = JS_ToCString(ctx, argv[0]);
     if (!cls) return ns_nodelist_from_array(ctx, JS_NewArray(ctx));
-    ns_node *doc = jsx->current_doc;
-    JSValue cached = ns_qcache_get(jsx, doc, 'C', cls);
-    if (!JS_IsUndefined(cached)) { JS_FreeCString(ctx, cls); return cached; }
-    JSValue arr = JS_NewArray(ctx);
-    uint32_t i = 0;
-    if (doc->class_index) {
-        GPtrArray *list = g_hash_table_lookup(doc->class_index, cls);
-        if (list)
-            for (guint k = 0; k < list->len; k++)
-                JS_SetPropertyUint32(ctx, arr, i++,
-                                     ns_make_element(ctx, g_ptr_array_index(list, k)));
-    } else {
-        ns_collect_by_class(doc, cls, ctx, arr, &i);
-    }
-    JSValue result = ns_nodelist_from_array(ctx, arr);
-    ns_qcache_put(jsx, doc, 'C', cls, result);
+    JSValue result = ns_make_live(ctx, this_val, NS_LIVE_DOC_CLASS, cls);
     JS_FreeCString(ctx, cls);
     return result;
 }
@@ -26495,16 +26644,15 @@ static JSValue
 ns_document_getElementsByName(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    (void)this_val;
     JSValue arr = JS_NewArray(ctx);
     if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc || argc < 1)
         return ns_nodelist_from_array(ctx, arr);
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return ns_nodelist_from_array(ctx, arr);
-    uint32_t i = 0;
-    ns_collect_by_name(js_from_ctx(ctx)->current_doc, name, ctx, arr, &i);
+    JS_FreeValue(ctx, arr);
+    JSValue result = ns_make_live(ctx, this_val, NS_LIVE_BY_NAME, name);
     JS_FreeCString(ctx, name);
-    return ns_nodelist_from_array(ctx, arr);
+    return result;
 }
 
 static JSValue
