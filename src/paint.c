@@ -1191,8 +1191,83 @@ append_font_ligature_features(GString *out, const char *ligatures)
     g_strfreev(tokens);
 }
 
+static const char *
+paint_font_feature_skip_ws(const char *p)
+{
+    while (*p && g_ascii_isspace((unsigned char)*p)) p++;
+    return p;
+}
+
+static gboolean
+paint_font_feature_read_tag(const char **pp, char tag[5])
+{
+    const char *p = paint_font_feature_skip_ws(*pp);
+    if (*p != '"' && *p != '\'') return FALSE;
+    char quote = *p++;
+    const char *s = p;
+    while (*p && *p != quote) p++;
+    if (*p != quote || p - s != 4) return FALSE;
+    memcpy(tag, s, 4);
+    tag[4] = '\0';
+    *pp = p + 1;
+    return TRUE;
+}
+
+static gboolean
+paint_font_feature_read_value(const char **pp, int *out)
+{
+    const char *p = paint_font_feature_skip_ws(*pp);
+    *out = 1;
+    if (!*p || *p == ',') {
+        *pp = p;
+        return TRUE;
+    }
+    if (g_ascii_isalpha((unsigned char)*p)) {
+        const char *s = p;
+        while (g_ascii_isalpha((unsigned char)*p) || *p == '-') p++;
+        char *kw = g_ascii_strdown(s, (gssize)(p - s));
+        if (strcmp(kw, "on") == 0) *out = 1;
+        else if (strcmp(kw, "off") == 0) *out = 0;
+        else {
+            g_free(kw);
+            return FALSE;
+        }
+        g_free(kw);
+        *pp = paint_font_feature_skip_ws(p);
+        return TRUE;
+    }
+    if (!g_ascii_isdigit((unsigned char)*p)) return FALSE;
+    char *endp = NULL;
+    gint64 v = g_ascii_strtoll(p, &endp, 10);
+    if (!endp || endp == p) return FALSE;
+    if (v < 0) v = 0;
+    if (v > G_MAXINT) v = G_MAXINT;
+    *out = (int)v;
+    *pp = paint_font_feature_skip_ws(endp);
+    return TRUE;
+}
+
+static void
+append_font_feature_settings_features(GString *out, const char *settings)
+{
+    if (!settings || !*settings || strcmp(settings, "normal") == 0) return;
+    const char *p = paint_font_feature_skip_ws(settings);
+    while (*p) {
+        char tag[5];
+        int value = 1;
+        if (!paint_font_feature_read_tag(&p, tag)) return;
+        if (!paint_font_feature_read_value(&p, &value)) return;
+        char feature[32];
+        g_snprintf(feature, sizeof(feature), "%s=%d", tag, value);
+        append_font_feature(out, feature);
+        if (*p != ',') break;
+        p = paint_font_feature_skip_ws(p + 1);
+    }
+}
+
 PangoAttribute *
-ns_paint_font_features_attr_from_values(int kerning, const char *ligatures)
+ns_paint_font_features_attr_from_values(int kerning, const char *ligatures,
+                                        const char *settings)
 {
     GString *s = g_string_new(NULL);
     if (kerning == 0)
@@ -1200,6 +1275,7 @@ ns_paint_font_features_attr_from_values(int kerning, const char *ligatures)
     else if (kerning > 0)
         append_font_feature(s, "kern=1");
     append_font_ligature_features(s, ligatures);
+    append_font_feature_settings_features(s, settings);
     if (s->len == 0) {
         g_string_free(s, TRUE);
         return NULL;
@@ -1220,6 +1296,9 @@ ns_paint_apply_font_features(PangoAttrList *attrs, const ns_style *s,
     const ns_css_value *lig = s->values[NS_CSS_FONT_VARIANT_LIGATURES];
     if (lig && lig->kind == NS_CSS_V_KEYWORD)
         append_font_ligature_features(features, lig->u.keyword);
+    const ns_css_value *settings = s->values[NS_CSS_FONT_FEATURE_SETTINGS];
+    if (settings && settings->kind == NS_CSS_V_KEYWORD)
+        append_font_feature_settings_features(features, settings->u.keyword);
     if (features->len == 0) {
         g_string_free(features, TRUE);
         return;
@@ -1514,7 +1593,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     pango_stretch_from_css(r->font_stretch)); break;
             case NS_INLINE_FONT_FEATURES:
                 a = ns_paint_font_features_attr_from_values(
-                    r->font_kerning, r->font_ligatures); break;
+                    r->font_kerning, r->font_ligatures, r->font_features); break;
             case NS_INLINE_ITALIC:
                 a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE:
@@ -2059,7 +2138,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
                     pango_stretch_from_css(r->font_stretch)); break;
             case NS_INLINE_FONT_FEATURES:
                 a = ns_paint_font_features_attr_from_values(
-                    r->font_kerning, r->font_ligatures); break;
+                    r->font_kerning, r->font_ligatures, r->font_features); break;
             case NS_INLINE_ITALIC:    a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE: a = pango_attr_family_new("monospace"); break;
             case NS_INLINE_FONT_SIZE:

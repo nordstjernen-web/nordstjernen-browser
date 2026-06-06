@@ -118,6 +118,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_STRETCH]         = "font-stretch",
     [NS_CSS_FONT_KERNING]         = "font-kerning",
     [NS_CSS_FONT_VARIANT_LIGATURES] = "font-variant-ligatures",
+    [NS_CSS_FONT_FEATURE_SETTINGS] = "font-feature-settings",
     [NS_CSS_FONT_FAMILY]          = "font-family",
     [NS_CSS_TEXT_ALIGN]           = "text-align",
     [NS_CSS_MARGIN_TOP]           = "margin-top",
@@ -271,6 +272,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_STRETCH:
     case NS_CSS_FONT_KERNING:
     case NS_CSS_FONT_VARIANT_LIGATURES:
+    case NS_CSS_FONT_FEATURE_SETTINGS:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -4207,6 +4209,7 @@ normalize_display_value(const char *text)
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
 static gboolean is_font_stretch_keyword(const char *s);
 static gboolean is_font_ligatures_value(const char *s);
+static gboolean is_font_feature_settings_value(const char *s);
 
 static gboolean
 value_has_top_level_comma(const char *t)
@@ -4738,6 +4741,18 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_FONT_FEATURE_SETTINGS: {
+        char *kw = ascii_lower(t, strlen(t));
+        if (strcmp(kw, "normal") == 0 || is_font_feature_settings_value(t)) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = strcmp(kw, "normal") == 0 ? kw : g_strdup(t);
+            if (v->u.keyword != kw) g_free(kw);
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
     case NS_CSS_TAB_SIZE: {
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && len >= 0) {
@@ -5180,6 +5195,78 @@ is_font_ligatures_value(const char *s)
     }
     g_strfreev(tokens);
     return any && ok;
+}
+
+static const char *
+font_feature_skip_ws(const char *p)
+{
+    while (*p && g_ascii_isspace((unsigned char)*p)) p++;
+    return p;
+}
+
+static gboolean
+font_feature_read_tag(const char **pp, char tag[5])
+{
+    const char *p = font_feature_skip_ws(*pp);
+    if (*p != '"' && *p != '\'') return FALSE;
+    char quote = *p++;
+    const char *s = p;
+    while (*p && *p != quote) p++;
+    if (*p != quote || p - s != 4) return FALSE;
+    for (int i = 0; i < 4; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x20 || c > 0x7e) return FALSE;
+        tag[i] = (char)c;
+    }
+    tag[4] = '\0';
+    *pp = p + 1;
+    return TRUE;
+}
+
+static gboolean
+font_feature_read_optional_value(const char **pp)
+{
+    const char *p = font_feature_skip_ws(*pp);
+    if (!*p || *p == ',') {
+        *pp = p;
+        return TRUE;
+    }
+    if (g_ascii_isalpha((unsigned char)*p)) {
+        const char *s = p;
+        while (g_ascii_isalpha((unsigned char)*p) || *p == '-') p++;
+        char *kw = ascii_lower(s, (gsize)(p - s));
+        gboolean ok = strcmp(kw, "on") == 0 || strcmp(kw, "off") == 0;
+        g_free(kw);
+        if (!ok) return FALSE;
+        *pp = font_feature_skip_ws(p);
+        return TRUE;
+    }
+    if (!g_ascii_isdigit((unsigned char)*p)) return FALSE;
+    char *endp = NULL;
+    (void)g_ascii_strtoll(p, &endp, 10);
+    if (!endp || endp == p) return FALSE;
+    *pp = font_feature_skip_ws(endp);
+    return TRUE;
+}
+
+static gboolean
+is_font_feature_settings_value(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    const char *p = font_feature_skip_ws(s);
+    if (!*p) return FALSE;
+    while (*p) {
+        char tag[5];
+        if (!font_feature_read_tag(&p, tag)) return FALSE;
+        if (!font_feature_read_optional_value(&p)) return FALSE;
+        if (*p == ',') {
+            p = font_feature_skip_ws(p + 1);
+            if (!*p) return FALSE;
+            continue;
+        }
+        return *p == '\0';
+    }
+    return FALSE;
 }
 
 static void
@@ -6195,6 +6282,7 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_STRETCH,
                     NS_CSS_FONT_KERNING,
                     NS_CSS_FONT_VARIANT_LIGATURES,
+                    NS_CSS_FONT_FEATURE_SETTINGS,
                     NS_CSS_FONT_SIZE,
                     NS_CSS_LINE_HEIGHT,
                     NS_CSS_FONT_FAMILY,
