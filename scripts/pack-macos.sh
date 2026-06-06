@@ -25,6 +25,23 @@ if ! command -v dylibbundler >/dev/null 2>&1; then
     exit 1
 fi
 
+run_dylibbundler() {
+    local secs=$1; shift
+    ( "$@" </dev/null ) &
+    local pid=$! i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        i=$((i + 1))
+        if [ "$i" -ge "$secs" ]; then
+            echo "pack-macos.sh: dylibbundler exceeded ${secs}s, killing" >&2
+            kill -9 "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            return 124
+        fi
+    done
+    wait "$pid"
+}
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" \
         --prefix=/usr/local \
@@ -117,7 +134,7 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
 </plist>
 PLIST_EOF
 
-if ! dylibbundler -of -cd -b \
+if ! run_dylibbundler 300 dylibbundler -of -cd -b \
     -x "$STAGE/Contents/MacOS/nordstjernen-bin" \
     -d "$STAGE/Contents/Frameworks/" \
     -p "@executable_path/../Frameworks/"; then
@@ -154,7 +171,7 @@ if [ -n "$PIXBUF_MODDIR" ] && [ -d "$PIXBUF_MODDIR" ]; then
     cp "$PIXBUF_MODDIR"/*.so "$LOADERS/" 2>/dev/null || true
     for so in "$LOADERS"/*.so; do
         [ -e "$so" ] || continue
-        dylibbundler -of -cd -b -x "$so" -d "$FW/" \
+        run_dylibbundler 180 dylibbundler -of -cd -b -x "$so" -d "$FW/" \
             -p "@executable_path/../Frameworks/" >/dev/null 2>&1 || true
     done
     if command -v gdk-pixbuf-query-loaders >/dev/null 2>&1; then
