@@ -3978,9 +3978,11 @@ extract_timing_function(char *item, ns_css_timing *out)
             out->step_pos = parts[0] && parts[1]
                 ? parse_step_pos(g_strstrip(parts[1])) : NS_CSS_STEP_JUMP_END;
         } else {
+            guint np = g_strv_length(parts);
             out->kind = NS_CSS_TIMING_CUBIC;
             for (int i = 0; i < 4; i++)
-                out->cb[i] = parts[i] ? g_ascii_strtod(g_strstrip(parts[i]), NULL) : 0.0;
+                out->cb[i] = (guint)i < np
+                    ? g_ascii_strtod(g_strstrip(parts[i]), NULL) : 0.0;
         }
         g_strfreev(parts);
         g_free(body);
