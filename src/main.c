@@ -6569,6 +6569,7 @@ ns_install_icon_search_paths(void)
     const char *try_rel[] = {
         "share/icons",
         "../share/icons",
+        "../Resources/share/icons",
         "data/icons",
         "../data/icons",
         "../../data/icons",
@@ -6872,6 +6873,42 @@ ns_win32_attach_parent_console(void)
 }
 #endif
 
+#ifdef __APPLE__
+static void
+ns_macos_anchor_gtk_data(void)
+{
+    if (!g_self_exe) return;
+    char *macos_dir = g_path_get_dirname(g_self_exe);
+    if (!macos_dir) return;
+    char *contents = g_path_get_dirname(macos_dir);
+    g_free(macos_dir);
+    if (!contents) return;
+    char *res = g_build_filename(contents, "Resources", NULL);
+    g_free(contents);
+
+    char *schemas = g_build_filename(res, "share", "glib-2.0", "schemas", NULL);
+    if (g_file_test(schemas, G_FILE_TEST_IS_DIR) &&
+        !g_getenv("GSETTINGS_SCHEMA_DIR"))
+        g_setenv("GSETTINGS_SCHEMA_DIR", schemas, TRUE);
+    g_free(schemas);
+
+    char *loaders = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
+                                     "2.10.0", "loaders", NULL);
+    char *cache = g_build_filename(res, "lib", "gdk-pixbuf-2.0",
+                                   "2.10.0", "loaders.cache", NULL);
+    if (g_file_test(cache, G_FILE_TEST_EXISTS)) {
+        if (!g_getenv("GDK_PIXBUF_MODULE_FILE"))
+            g_setenv("GDK_PIXBUF_MODULE_FILE", cache, TRUE);
+        if (!g_getenv("GDK_PIXBUF_MODULEDIR"))
+            g_setenv("GDK_PIXBUF_MODULEDIR", loaders, TRUE);
+    }
+    g_free(cache);
+    g_free(loaders);
+
+    g_free(res);
+}
+#endif
+
 void ns_main_on_font_loaded(const char *family, gpointer user_data);
 
 void
@@ -7018,6 +7055,9 @@ main(int argc, char **argv)
 #ifdef G_OS_WIN32
     ns_win32_set_app_id();
     ns_win32_anchor_gtk_data();
+#endif
+#ifdef __APPLE__
+    ns_macos_anchor_gtk_data();
 #endif
 
     gboolean headless = FALSE;

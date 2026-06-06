@@ -105,7 +105,16 @@ Headless rendering works the same as on Linux:
   `builddir/src/nordstjernen` that launches from Terminal or Finder
   and shows up in the Dock while it runs. For distribution,
   `scripts/pack-macos.sh` stages a `.app` bundle (with a generated
-  `Info.plist`) and produces a `.dmg`.
+  `Info.plist`) and produces a `.dmg`. Beyond vendoring the Homebrew
+  dylibs with `dylibbundler`, the bundle also carries the data GTK 4
+  reads at runtime so the `.dmg` works on a Mac with no Homebrew: the
+  app's own SVG toolbar icons under `Contents/Resources/share/icons`,
+  the GdkPixbuf loader modules plus a `loaders.cache` (the SVG loader
+  is what renders those icons), and the compiled GSettings schemas.
+  At startup `ns_macos_anchor_gtk_data()` (in `src/main.c`) points
+  `GSETTINGS_SCHEMA_DIR`, `GDK_PIXBUF_MODULE_FILE`, and
+  `GDK_PIXBUF_MODULEDIR` at those bundled copies when it detects it is
+  running from inside an `.app`.
 
 ## Definition of done on macOS
 

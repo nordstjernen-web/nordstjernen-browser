@@ -126,6 +126,44 @@ if ! dylibbundler -of -cd -b \
     exit 1
 fi
 
+RES="$STAGE/Contents/Resources"
+FW="$STAGE/Contents/Frameworks"
+
+mkdir -p "$RES/share/icons"
+cp -R "$ROOT/data/icons/hicolor" "$RES/share/icons/"
+GTK_PREFIX=$(pkg-config --variable=prefix gtk4 2>/dev/null || true)
+if [ -n "$GTK_PREFIX" ] && [ -f "$GTK_PREFIX/share/icons/hicolor/index.theme" ]; then
+    cp "$GTK_PREFIX/share/icons/hicolor/index.theme" \
+        "$RES/share/icons/hicolor/" 2>/dev/null || true
+fi
+
+SCHEMADIR=$(pkg-config --variable=schemasdir gio-2.0 2>/dev/null || true)
+if [ -n "$SCHEMADIR" ] && [ -d "$SCHEMADIR" ]; then
+    mkdir -p "$RES/share/glib-2.0/schemas"
+    cp "$SCHEMADIR"/*.xml "$RES/share/glib-2.0/schemas/" 2>/dev/null || true
+    cp "$SCHEMADIR"/gschema.dtd "$RES/share/glib-2.0/schemas/" 2>/dev/null || true
+    if command -v glib-compile-schemas >/dev/null 2>&1; then
+        glib-compile-schemas "$RES/share/glib-2.0/schemas" || true
+    fi
+fi
+
+PIXBUF_MODDIR=$(pkg-config --variable=gdk_pixbuf_moduledir gdk-pixbuf-2.0 2>/dev/null || true)
+if [ -n "$PIXBUF_MODDIR" ] && [ -d "$PIXBUF_MODDIR" ]; then
+    LOADERS="$RES/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+    mkdir -p "$LOADERS"
+    cp "$PIXBUF_MODDIR"/*.so "$LOADERS/" 2>/dev/null || true
+    for so in "$LOADERS"/*.so; do
+        [ -e "$so" ] || continue
+        dylibbundler -of -cd -b -x "$so" -d "$FW/" \
+            -p "@executable_path/../Frameworks/" >/dev/null 2>&1 || true
+    done
+    if command -v gdk-pixbuf-query-loaders >/dev/null 2>&1; then
+        ( cd "$LOADERS" && \
+          GDK_PIXBUF_MODULEDIR="$LOADERS" gdk-pixbuf-query-loaders *.so ) \
+            > "$RES/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache" 2>/dev/null || true
+    fi
+fi
+
 rm -f "$DMG"
 if ! hdiutil create -volname "Nordstjernen ${VERSION}" \
     -srcfolder "$STAGE" \
