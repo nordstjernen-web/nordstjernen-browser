@@ -2332,7 +2332,11 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
 static void
 paint_image(cairo_t *cr, const ns_box *b)
 {
-    ns_image *img = b->media ? b->media->image : NULL;
+    const ns_image *img = NULL;
+    if (b->dom && g_paint_js)
+        img = ns_js_image_for_node(g_paint_js, b->dom);
+    if (!img && b->media)
+        img = b->media->image;
     cairo_save(cr);
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);

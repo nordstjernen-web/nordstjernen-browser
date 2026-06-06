@@ -20628,11 +20628,6 @@ const ns_image *
 ns_js_image_for_node(ns_js *js, const ns_node *el)
 {
     if (!js || !el) return NULL;
-    if (js->layout_root) {
-        const ns_box *b = ns_box_find_by_dom(js->layout_root, el);
-        if (b && b->media && b->media->image)
-            return (const ns_image *)b->media->image;
-    }
     if (js->js_image_loads) {
         ns_js_image_load *r = g_hash_table_lookup(js->js_image_loads, el);
         if (r && r->img) return r->img;
@@ -20648,6 +20643,11 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
                 if (im) return im;
             }
         }
+    }
+    if (js->layout_root) {
+        const ns_box *b = ns_box_find_by_dom(js->layout_root, el);
+        if (b && b->media && b->media->image)
+            return (const ns_image *)b->media->image;
     }
     return NULL;
 }
@@ -25497,7 +25497,9 @@ ns_js_flush_document_write(ns_js *js)
     if (inserted->len > 0) {
         JSValue global = JS_GetGlobalObject(js->ctx);
         JSValue document = JS_GetPropertyStr(js->ctx, global, "document");
-        ns_document_expose_legacy_named(js, parent, document);
+        for (guint i = 0; i < inserted->len; i++)
+            ns_document_expose_legacy_named(js, g_ptr_array_index(inserted, i),
+                                            document);
         JS_FreeValue(js->ctx, document);
         JS_FreeValue(js->ctx, global);
         js->mutated = TRUE;
