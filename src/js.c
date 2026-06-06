@@ -6911,6 +6911,108 @@ ns_window_message_channel(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_broadcast_registry(JSContext *ctx)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue reg = JS_GetPropertyStr(ctx, global, "__ns_broadcast_channels");
+    if (!JS_IsArray(reg)) {
+        JS_FreeValue(ctx, reg);
+        reg = JS_NewArray(ctx);
+        JS_SetPropertyStr(ctx, global, "__ns_broadcast_channels",
+                          JS_DupValue(ctx, reg));
+    }
+    JS_FreeValue(ctx, global);
+    return reg;
+}
+
+static JSValue
+ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    JSValue closed = JS_GetPropertyStr(ctx, this_val, "_closed");
+    gboolean is_closed = JS_ToBool(ctx, closed);
+    JS_FreeValue(ctx, closed);
+    if (is_closed)
+        return JS_ThrowTypeError(ctx,
+            "BroadcastChannel.postMessage: channel is closed");
+
+    JSValueConst msg = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JSValue data;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue clone = JS_GetPropertyStr(ctx, global, "structuredClone");
+    JS_FreeValue(ctx, global);
+    if (JS_IsFunction(ctx, clone)) {
+        JSValueConst cargs[1] = { msg };
+        data = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
+        if (JS_IsException(data)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            data = JS_DupValue(ctx, msg);
+        }
+    } else {
+        data = JS_DupValue(ctx, msg);
+    }
+    JS_FreeValue(ctx, clone);
+
+    JSValue name = JS_GetPropertyStr(ctx, this_val, "name");
+    const char *ns = JS_ToCString(ctx, name);
+
+    JSValue reg = ns_broadcast_registry(ctx);
+    uint32_t len = ns_js_array_length(ctx, reg);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue ch = JS_GetPropertyUint32(ctx, reg, i);
+        if (JS_VALUE_GET_PTR(ch) == JS_VALUE_GET_PTR(this_val)) {
+            JS_FreeValue(ctx, ch);
+            continue;
+        }
+        JSValue cclosed = JS_GetPropertyStr(ctx, ch, "_closed");
+        gboolean cc = JS_ToBool(ctx, cclosed);
+        JS_FreeValue(ctx, cclosed);
+        JSValue cname = JS_GetPropertyStr(ctx, ch, "name");
+        const char *cns = JS_ToCString(ctx, cname);
+        gboolean same = ns && cns && strcmp(ns, cns) == 0;
+        if (cns) JS_FreeCString(ctx, cns);
+        JS_FreeValue(ctx, cname);
+        if (!cc && same) {
+            JSValueConst job_args[2] = { ch, data };
+            JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+        }
+        JS_FreeValue(ctx, ch);
+    }
+    JS_FreeValue(ctx, reg);
+    if (ns) JS_FreeCString(ctx, ns);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, data);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_broadcast_close(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JS_SetPropertyStr(ctx, this_val, "_closed", JS_TRUE);
+    JSValue reg = ns_broadcast_registry(ctx);
+    uint32_t len = ns_js_array_length(ctx, reg);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue ch = JS_GetPropertyUint32(ctx, reg, i);
+        gboolean match = JS_VALUE_GET_PTR(ch) == JS_VALUE_GET_PTR(this_val);
+        JS_FreeValue(ctx, ch);
+        if (match) {
+            JSValue splice = JS_GetPropertyStr(ctx, reg, "splice");
+            JSValueConst sargs[2] = { JS_NewUint32(ctx, i), JS_NewInt32(ctx, 1) };
+            JSValue r = JS_Call(ctx, splice, reg, 2, sargs);
+            JS_FreeValue(ctx, r);
+            JS_FreeValue(ctx, sargs[0]);
+            JS_FreeValue(ctx, sargs[1]);
+            JS_FreeValue(ctx, splice);
+            break;
+        }
+    }
+    JS_FreeValue(ctx, reg);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_window_broadcast_channel(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -6924,10 +7026,18 @@ ns_window_broadcast_channel(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, bc, "name", JS_NewString(ctx, ""));
     }
     JS_SetPropertyStr(ctx, bc, "_listeners", JS_NewArray(ctx));
-    ns_bind_fn(ctx, bc, "postMessage",        ns_event_noop, 1);
-    ns_bind_fn(ctx, bc, "close",              ns_event_noop, 0);
-    ns_bind_event_target_listeners(ctx, bc);
-    JS_SetPropertyStr(ctx, bc, "onmessage", JS_NULL);
+    JS_SetPropertyStr(ctx, bc, "_closed",    JS_FALSE);
+    ns_bind_fn(ctx, bc, "postMessage",        ns_broadcast_post_message,     1);
+    ns_bind_fn(ctx, bc, "close",              ns_broadcast_close,            0);
+    ns_bind_fn(ctx, bc, "addEventListener",   ns_port_add_event_listener,    2);
+    ns_bind_fn(ctx, bc, "removeEventListener", ns_port_remove_event_listener, 2);
+    JS_SetPropertyStr(ctx, bc, "onmessage",      JS_NULL);
+    JS_SetPropertyStr(ctx, bc, "onmessageerror", JS_NULL);
+
+    JSValue reg = ns_broadcast_registry(ctx);
+    uint32_t len = ns_js_array_length(ctx, reg);
+    JS_SetPropertyUint32(ctx, reg, len, JS_DupValue(ctx, bc));
+    JS_FreeValue(ctx, reg);
     return bc;
 }
 
@@ -11404,10 +11514,28 @@ ns_js_ws_on_binary(const guint8 *data, gsize len, gpointer user_data)
     JSValue bt = JS_GetPropertyStr(ctx, s->wrapper, "binaryType");
     const char *bts = JS_ToCString(ctx, bt);
     JSValue data_v;
-    if (bts && strcmp(bts, "arraybuffer") == 0)
+    if (bts && strcmp(bts, "arraybuffer") == 0) {
         data_v = JS_NewArrayBufferCopy(ctx, data, len);
-    else
-        data_v = JS_NewStringLen(ctx, (const char *)data, len);
+    } else {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue blob_ctor = JS_GetPropertyStr(ctx, global, "Blob");
+        JS_FreeValue(ctx, global);
+        if (JS_IsConstructor(ctx, blob_ctor)) {
+            JSValue ab = JS_NewArrayBufferCopy(ctx, data, len);
+            JSValue parts = JS_NewArray(ctx);
+            JS_SetPropertyUint32(ctx, parts, 0, ab);
+            JSValueConst args[1] = { parts };
+            data_v = JS_CallConstructor(ctx, blob_ctor, 1, args);
+            JS_FreeValue(ctx, parts);
+            if (JS_IsException(data_v)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                data_v = JS_NewArrayBufferCopy(ctx, data, len);
+            }
+        } else {
+            data_v = JS_NewArrayBufferCopy(ctx, data, len);
+        }
+        JS_FreeValue(ctx, blob_ctor);
+    }
     if (bts) JS_FreeCString(ctx, bts);
     JS_FreeValue(ctx, bt);
     JS_SetPropertyStr(ctx, ev, "data", data_v);
