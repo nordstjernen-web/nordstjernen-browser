@@ -5268,6 +5268,10 @@ on_window_destroy(GtkWidget *widget, gpointer user_data)
     (void)widget;
     ns_window *w = user_data;
     ns_window_mark_dead(w);
+    if (w->raf_tick_id && w->drawing_area) {
+        gtk_widget_remove_tick_callback(w->drawing_area, w->raf_tick_id);
+        w->raf_tick_id = 0;
+    }
     g_clear_handle_id(&w->caret_blink_source, g_source_remove);
     g_clear_handle_id(&w->refresh_source, g_source_remove);
     g_clear_handle_id(&w->logo_anim_source, g_source_remove);

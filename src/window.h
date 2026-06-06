@@ -75,6 +75,7 @@ typedef struct ns_window {
     GtkWidget    *content_stack;
     GtkWidget    *text_view;
     GtkWidget    *drawing_area;
+    guint         raf_tick_id;
     GtkAdjustment *render_vadj;
     ns_box       *layout_tree;
     GHashTable   *style_table;

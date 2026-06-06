@@ -454,7 +454,8 @@ ns_window_build_content(ns_window *w, GtkWidget *vbox)
                                    ns_draw_render, w, NULL);
     g_signal_connect(w->drawing_area, "realize",
                      G_CALLBACK(ns_window_log_renderer), NULL);
-    gtk_widget_add_tick_callback(w->drawing_area, ns_window_raf_tick, w, NULL);
+    w->raf_tick_id = gtk_widget_add_tick_callback(w->drawing_area,
+                                                  ns_window_raf_tick, w, NULL);
     GtkGesture *click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
     g_signal_connect(click, "pressed", G_CALLBACK(ns_on_drawing_pressed), w);
