@@ -52,6 +52,14 @@ ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes)
             if (escape_quotes) g_string_append(out, "&quot;");
             else               g_string_append_c(out, '"');
             break;
+        case '\xc2':
+            if ((unsigned char)p[1] == 0xa0) {
+                g_string_append(out, "&nbsp;");
+                p++;
+            } else {
+                g_string_append_c(out, *p);
+            }
+            break;
         default:  g_string_append_c(out, *p);    break;
         }
     }
