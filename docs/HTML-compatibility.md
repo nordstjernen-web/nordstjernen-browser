@@ -425,7 +425,9 @@ CSS support (abridged):
   `break-spaces` preserve, and `pre-line` collapses runs of spaces/tabs
   while preserving newlines as forced breaks (`white_space_mode` in
   `src/layout.c`); `text-wrap`/`text-wrap-mode` map `nowrap` to the same
-  no-wrap path and wrapping keywords to normal wrapping.
+  no-wrap path and wrapping keywords to normal wrapping. CSS `hyphens`
+  is inherited; `auto` enables Pango inserted hyphens using the element
+  language, while `manual`/`none` keep automatic insertion disabled.
 - ✅ Multi-column layout: `column-count`/`column-width`/`columns`, gaps,
   rules, balanced block-child distribution, and plain inline text runs
   fragmented by wrapped line while preserving links and text-style ranges.

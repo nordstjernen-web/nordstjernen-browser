@@ -8126,6 +8126,7 @@ ns_computed_initial_value(const char *name)
         return "none";
     if (strcmp(name, "visibility") == 0) return "visible";
     if (strcmp(name, "white-space") == 0) return "normal";
+    if (strcmp(name, "hyphens") == 0) return "manual";
     if (strcmp(name, "overflow") == 0 ||
         strcmp(name, "overflow-x") == 0 ||
         strcmp(name, "overflow-y") == 0)

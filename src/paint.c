@@ -1066,12 +1066,6 @@ void
 ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
                     const ns_box *b)
 {
-    if (attrs) {
-        PangoAttribute *ih = pango_attr_insert_hyphens_new(FALSE);
-        ih->start_index = 0;
-        ih->end_index   = G_MAXUINT;
-        pango_attr_list_insert(attrs, ih);
-    }
     if (!b) return;
     const ns_node  *dn = b->dom;
     const ns_style *st = b->style;
@@ -1080,6 +1074,14 @@ ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
         if (!st && p->style) st = p->style;
     }
     if (!dn && !st) return;
+    if (attrs) {
+        gboolean auto_hyphens =
+            st && keyword_is(st->values[NS_CSS_HYPHENS], "auto");
+        PangoAttribute *ih = pango_attr_insert_hyphens_new(auto_hyphens);
+        ih->start_index = 0;
+        ih->end_index   = G_MAXUINT;
+        pango_attr_list_insert(attrs, ih);
+    }
     const char *lang = dn ? nearest_node_attr(dn, "lang") : NULL;
     if (lang && attrs) {
         PangoAttribute *a = pango_attr_language_new(

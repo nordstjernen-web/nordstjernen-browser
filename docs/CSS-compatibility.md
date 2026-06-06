@@ -145,7 +145,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | `text-indent` (incl. negative sprite-hiding) | ✅ | |
 | `letter-spacing` / `word-spacing` / `tab-size` | ✅ | |
 | `white-space` (`normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line`/`break-spaces`) | ✅ | |
-| `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) | ✅ | wrapping keywords mapped |
+| `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
 | `font-variant: small-caps` | ✅ | |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | ❌ | text always lays out horizontally |

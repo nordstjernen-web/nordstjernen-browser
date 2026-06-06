@@ -220,6 +220,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_TEXT_SHADOW]          = "text-shadow",
     [NS_CSS_OVERFLOW_WRAP]        = "overflow-wrap",
     [NS_CSS_WORD_BREAK]           = "word-break",
+    [NS_CSS_HYPHENS]              = "hyphens",
     [NS_CSS_TEXT_OVERFLOW]        = "text-overflow",
     [NS_CSS_TEXT_DECORATION_COLOR]= "text-decoration-color",
     [NS_CSS_TEXT_DECORATION_STYLE]= "text-decoration-style",
@@ -270,6 +271,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_LETTER_SPACING:
     case NS_CSS_WORD_SPACING:
     case NS_CSS_WHITE_SPACE:
+    case NS_CSS_HYPHENS:
     case NS_CSS_DIRECTION:
     case NS_CSS_CAPTION_SIDE:
     case NS_CSS_BORDER_COLLAPSE:
