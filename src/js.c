@@ -9083,6 +9083,8 @@ ns_window_performance_memory_get(JSContext *ctx, JSValueConst this_val,
 
 static JSValue ns_event_prevent_default(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
+static JSValue ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val,
+                                           int argc, JSValueConst *argv);
 static JSValue ns_event_stop_propagation(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
 
@@ -14738,6 +14740,7 @@ ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
     ns_bind_fn(ctx, event, "stopPropagation",          ns_event_stop_propagation, 0);
     ns_bind_fn(ctx, event, "stopImmediatePropagation", ns_event_stop_immediate, 0);
     ns_bind_fn(ctx, event, "composedPath",             ns_event_empty_array,    0);
+    ns_bind_fn(ctx, event, "getModifierState",         ns_event_get_modifier_state, 1);
     return event;
 }
 
@@ -14814,6 +14817,27 @@ ns_submit_event_ctor(JSContext *ctx, JSValueConst this_val,
     return ev;
 }
 
+static JSValue
+ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_FALSE;
+    const char *k = JS_ToCString(ctx, argv[0]);
+    if (!k) return JS_FALSE;
+    const char *prop = NULL;
+    if (strcmp(k, "Control") == 0)      prop = "ctrlKey";
+    else if (strcmp(k, "Shift") == 0)   prop = "shiftKey";
+    else if (strcmp(k, "Alt") == 0)     prop = "altKey";
+    else if (strcmp(k, "Meta") == 0 ||
+             strcmp(k, "OS") == 0)      prop = "metaKey";
+    JS_FreeCString(ctx, k);
+    if (!prop) return JS_FALSE;
+    JSValue v = JS_GetPropertyStr(ctx, this_val, prop);
+    gboolean state = JS_ToBool(ctx, v);
+    JS_FreeValue(ctx, v);
+    return state ? JS_TRUE : JS_FALSE;
+}
+
 static void
 ns_event_apply_modifier_init(JSContext *ctx, JSValueConst ev, JSValueConst init)
 {
@@ -14828,6 +14852,7 @@ ns_event_apply_modifier_init(JSContext *ctx, JSValueConst ev, JSValueConst init)
     JS_SetPropertyStr(ctx, ev, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "altKey",   alt   ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "metaKey",  meta  ? JS_TRUE : JS_FALSE);
+    ns_bind_fn(ctx, ev, "getModifierState", ns_event_get_modifier_state, 1);
 }
 
 static JSValue
