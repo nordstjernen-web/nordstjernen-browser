@@ -138,7 +138,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets |
+| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning:none` maps to OpenType `kern=0` |
 | `text-align` (`left`/`right`/`center`/`justify`/`start`/`end`) | ✅ | |
 | `text-decoration` (line/style/color), `text-shadow` | ✅ | |
 | `text-transform` (uppercase/lowercase/capitalize) | ✅ | |

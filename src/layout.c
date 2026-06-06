@@ -1625,6 +1625,25 @@ emit_font_stretch_attr(GArray *attrs, gsize start, gsize end, int font_stretch)
     g_array_append_val(attrs, a);
 }
 
+static int
+font_kerning_int_from_style(const ns_style *s)
+{
+    const char *kw = s ? ns_style_keyword(s, NS_CSS_FONT_KERNING) : NULL;
+    if (!kw) return -1;
+    if (strcmp(kw, "none") == 0) return 0;
+    if (strcmp(kw, "normal") == 0 || strcmp(kw, "auto") == 0) return 1;
+    return -1;
+}
+
+static void
+emit_font_kerning_attr(GArray *attrs, gsize start, gsize end, int font_kerning)
+{
+    if (end <= start || font_kerning < 0) return;
+    ns_inline_attr a = { .kind = NS_INLINE_FONT_KERNING, .start = start,
+                         .len = end - start, .font_kerning = font_kerning };
+    g_array_append_val(attrs, a);
+}
+
 static void
 emit_color_attr(GArray *attrs, gsize start, gsize end,
                 guint8 r, guint8 g, guint8 b, guint8 a8)
@@ -2661,6 +2680,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     int font_stretch_self = ns_css_font_stretch_rank(fst);
     gboolean font_stretch_active = fst != NULL;
     gsize stretch_start = ctx->out->len;
+    int font_kerning_self = font_kerning_int_from_style(s);
+    gboolean font_kerning_active = font_kerning_self >= 0;
+    gsize kerning_start = ctx->out->len;
 
     gboolean is_q = strcmp(n->name, "q") == 0;
     if (is_q) {
@@ -2774,6 +2796,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (font_stretch_active && ctx->out->len > stretch_start)
         emit_font_stretch_attr(ctx->attrs, stretch_start, ctx->out->len,
                                font_stretch_self);
+    if (font_kerning_active && ctx->out->len > kerning_start)
+        emit_font_kerning_attr(ctx->attrs, kerning_start, ctx->out->len,
+                               font_kerning_self);
 
     if (bold && --ctx->bold_depth == 0)
         emit_attr(ctx->attrs, NS_INLINE_BOLD, ctx->bold_start, ctx->out->len);
@@ -3066,6 +3091,15 @@ build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *sty
                         .kind = NS_INLINE_FONT_FAMILY,
                         .start = fl_start, .len = fl_len,
                         .family = fl->values[NS_CSS_FONT_FAMILY]->u.keyword,
+                    };
+                    g_array_append_val(box->attrs, a);
+                }
+                int fk = font_kerning_int_from_style(fl);
+                if (fk >= 0) {
+                    ns_inline_attr a = {
+                        .kind = NS_INLINE_FONT_KERNING,
+                        .start = fl_start, .len = fl_len,
+                        .font_kerning = fk,
                     };
                     g_array_append_val(box->attrs, a);
                 }
@@ -3532,6 +3566,15 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
             .start = 0, .len = tlen,
             .font_stretch =
                 ns_css_font_stretch_rank(ps->values[NS_CSS_FONT_STRETCH]),
+        };
+        g_array_append_val(box->attrs, a);
+    }
+    int fk = font_kerning_int_from_style(ps);
+    if (fk >= 0) {
+        ns_inline_attr a = {
+            .kind = NS_INLINE_FONT_KERNING,
+            .start = 0, .len = tlen,
+            .font_kerning = fk,
         };
         g_array_append_val(box->attrs, a);
     }
@@ -4120,6 +4163,9 @@ apply_inline_layout_attrs(PangoAttrList *attrs, const ns_box *box)
             a = pango_attr_stretch_new(
                 layout_pango_stretch_from_css(r->font_stretch));
             break;
+        case NS_INLINE_FONT_KERNING:
+            a = pango_attr_font_features_new(r->font_kerning ? "kern=1" : "kern=0");
+            break;
         case NS_INLINE_ITALIC:
             a = pango_attr_style_new(PANGO_STYLE_ITALIC);
             break;
@@ -4352,7 +4398,8 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
     if (!bd)
         bd = pango_context_get_base_dir(pango_layout_get_context(layout)) ==
              PANGO_DIRECTION_RTL ? 4 : 3;
-    char *key = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s",
+    const char *fk = style ? ns_style_keyword(style, NS_CSS_FONT_KERNING) : NULL;
+    char *key = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s|%s",
                                 pango_layout_get_width(layout),
                                 (int)pango_layout_get_wrap(layout),
                                 (int)pango_layout_get_ellipsize(layout),
@@ -4362,6 +4409,7 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
                                 (double)pango_layout_get_line_spacing(layout),
                                 bd, fd,
                                 lang ? lang : "",
+                                fk ? fk : "",
                                 box->text);
     g_free(fd);
     return key;
@@ -4411,6 +4459,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
     PangoAttrList *i18n = pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
+    ns_paint_apply_font_kerning(i18n, parent_style, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(i18n, box);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
@@ -4529,6 +4578,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     pango_layout_set_text(layout, box->text, -1);
     PangoAttrList *i18n = pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
+    ns_paint_apply_font_kerning(i18n, parent_style, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(i18n, box);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
@@ -4761,6 +4811,7 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
 
     PangoAttrList *i18n = pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
+    ns_paint_apply_font_kerning(i18n, parent_style, 0, G_MAXUINT);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
     pango_layout_set_attributes(layout, i18n);
@@ -5277,6 +5328,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         pango_layout_set_text(layout, box->text, -1);
         PangoAttrList *i18n = pango_attr_list_new();
         ns_paint_apply_i18n(layout, i18n, box);
+        ns_paint_apply_font_kerning(i18n, parent_style, 0, G_MAXUINT);
         ns_inline_apply_atomic_shapes(i18n, box);
         apply_inline_spacing(i18n, parent_style, box->text);
         apply_inline_layout_attrs(i18n, box);
@@ -5382,6 +5434,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         pango_layout_set_text(layout, box->text, -1);
         PangoAttrList *i18n = pango_attr_list_new();
         ns_paint_apply_i18n(layout, i18n, box);
+        ns_paint_apply_font_kerning(i18n, parent_style, 0, G_MAXUINT);
         ns_inline_apply_atomic_shapes(i18n, box);
         apply_inline_spacing(i18n, parent_style, box->text);
         apply_inline_layout_attrs(i18n, box);

@@ -116,6 +116,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_WEIGHT]          = "font-weight",
     [NS_CSS_FONT_STYLE]           = "font-style",
     [NS_CSS_FONT_STRETCH]         = "font-stretch",
+    [NS_CSS_FONT_KERNING]         = "font-kerning",
     [NS_CSS_FONT_FAMILY]          = "font-family",
     [NS_CSS_TEXT_ALIGN]           = "text-align",
     [NS_CSS_MARGIN_TOP]           = "margin-top",
@@ -267,6 +268,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_WEIGHT:
     case NS_CSS_FONT_STYLE:
     case NS_CSS_FONT_STRETCH:
+    case NS_CSS_FONT_KERNING:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -4709,6 +4711,19 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_FONT_KERNING: {
+        char *kw = ascii_lower(t, strlen(t));
+        if (strcmp(kw, "auto") == 0 ||
+            strcmp(kw, "normal") == 0 ||
+            strcmp(kw, "none") == 0) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
     case NS_CSS_TAB_SIZE: {
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && len >= 0) {
@@ -6130,6 +6145,7 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_VARIANT,
                     NS_CSS_FONT_WEIGHT,
                     NS_CSS_FONT_STRETCH,
+                    NS_CSS_FONT_KERNING,
                     NS_CSS_FONT_SIZE,
                     NS_CSS_LINE_HEIGHT,
                     NS_CSS_FONT_FAMILY,

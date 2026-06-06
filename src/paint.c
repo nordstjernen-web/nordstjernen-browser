@@ -1124,6 +1124,36 @@ ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
     }
 }
 
+static const char *
+font_kerning_features(const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
+    if (strcmp(v->u.keyword, "none") == 0) return "kern=0";
+    if (strcmp(v->u.keyword, "normal") == 0 ||
+        strcmp(v->u.keyword, "auto") == 0) return "kern=1";
+    return NULL;
+}
+
+void
+ns_paint_apply_font_kerning(PangoAttrList *attrs, const ns_style *s,
+                            guint start, guint end)
+{
+    if (!attrs || !s) return;
+    const char *features = font_kerning_features(s->values[NS_CSS_FONT_KERNING]);
+    if (!features) return;
+    PangoAttribute *a = pango_attr_font_features_new(features);
+    a->start_index = start;
+    a->end_index = end;
+    pango_attr_list_insert(attrs, a);
+}
+
+static PangoAttribute *
+font_kerning_attr_from_int(int v)
+{
+    if (v < 0) return NULL;
+    return pango_attr_font_features_new(v ? "kern=1" : "kern=0");
+}
+
 static gboolean
 ns_paint_font_available(const char *family)
 {
@@ -1316,6 +1346,7 @@ apply_first_line_attrs(PangoAttrList *attrs, const ns_style *fl,
     if (keyword_is(fl->values[NS_CSS_FONT_VARIANT], "small-caps"))
         attr_insert_range(attrs, pango_attr_variant_new(PANGO_VARIANT_SMALL_CAPS),
                           start, len);
+    ns_paint_apply_font_kerning(attrs, fl, start, end);
     if (keyword_is(fl->values[NS_CSS_TEXT_DECORATION], "underline"))
         attr_insert_range(attrs, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE),
                           start, len);
@@ -1361,6 +1392,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     PangoAttrList *attrs = pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
+    ns_paint_apply_font_kerning(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);
     double ls_px = 0, ws_px = 0;
     if (s && s->values[NS_CSS_LETTER_SPACING] &&
@@ -1402,6 +1434,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
                     pango_stretch_from_css(r->font_stretch)); break;
+            case NS_INLINE_FONT_KERNING:
+                a = font_kerning_attr_from_int(r->font_kerning); break;
             case NS_INLINE_ITALIC:
                 a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE:
@@ -1931,6 +1965,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 
     PangoAttrList *attrs = pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
+    ns_paint_apply_font_kerning(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);
     if (b->attrs) {
         for (gint ii = (gint)b->attrs->len - 1; ii >= 0; ii--) {
@@ -1943,6 +1978,8 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
                     pango_stretch_from_css(r->font_stretch)); break;
+            case NS_INLINE_FONT_KERNING:
+                a = font_kerning_attr_from_int(r->font_kerning); break;
             case NS_INLINE_ITALIC:    a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE: a = pango_attr_family_new("monospace"); break;
             case NS_INLINE_FONT_SIZE:

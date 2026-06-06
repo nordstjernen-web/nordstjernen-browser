@@ -8138,6 +8138,7 @@ ns_computed_initial_value(const char *name)
     if (strcmp(name, "flex-direction") == 0) return "row";
     if (strcmp(name, "font-weight") == 0) return "400";
     if (strcmp(name, "font-stretch") == 0) return "normal";
+    if (strcmp(name, "font-kerning") == 0) return "auto";
     return NULL;
 }
 
