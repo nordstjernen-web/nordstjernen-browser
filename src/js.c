@@ -10941,30 +10941,71 @@ static JSValue
 ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
-    (void)this_val;
-    if (argc < 1) return JS_NewString(ctx, "");
-    const uint8_t *data = NULL;
-    size_t data_len = 0;
-    JSValue holder = JS_UNDEFINED;
-    if (ns_js_bytes_view(ctx, argv[0], &data, &data_len, &holder)) {
-        JSValue r = JS_NewStringLen(ctx, (const char *)data, data_len);
-        JS_FreeValue(ctx, holder);
-        return r;
+    gboolean stream = FALSE;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        JSValue s = JS_GetPropertyStr(ctx, argv[1], "stream");
+        stream = JS_ToBool(ctx, s);
+        JS_FreeValue(ctx, s);
     }
-    uint32_t len = ns_js_array_length(ctx, argv[0]);
-    if (len == 0) return JS_NewString(ctx, "");
-    if (len > (1u << 24)) len = (1u << 24);
-    GByteArray *out = g_byte_array_sized_new(len);
-    for (uint32_t i = 0; i < len; i++) {
-        JSValue v = JS_GetPropertyUint32(ctx, argv[0], i);
-        int32_t b = 0;
-        JS_ToInt32(ctx, &b, v);
-        JS_FreeValue(ctx, v);
-        guint8 byte = (guint8)(b & 0xff);
-        g_byte_array_append(out, &byte, 1);
+
+    GByteArray *buf = g_byte_array_new();
+
+    JSValue tail = JS_GetPropertyStr(ctx, this_val, "_tail");
+    if (JS_IsObject(tail)) {
+        size_t tlen = 0;
+        uint8_t *tp = JS_GetArrayBuffer(ctx, &tlen, tail);
+        if (tp && tlen) g_byte_array_append(buf, tp, tlen);
     }
-    JSValue r = JS_NewStringLen(ctx, (const char *)out->data, out->len);
-    g_byte_array_free(out, TRUE);
+    JS_FreeValue(ctx, tail);
+
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
+        const uint8_t *data = NULL;
+        size_t data_len = 0;
+        JSValue holder = JS_UNDEFINED;
+        if (ns_js_bytes_view(ctx, argv[0], &data, &data_len, &holder)) {
+            if (data && data_len) g_byte_array_append(buf, data, data_len);
+            JS_FreeValue(ctx, holder);
+        } else {
+            uint32_t len = ns_js_array_length(ctx, argv[0]);
+            if (len > (1u << 24)) len = (1u << 24);
+            for (uint32_t i = 0; i < len; i++) {
+                JSValue v = JS_GetPropertyUint32(ctx, argv[0], i);
+                int32_t b = 0;
+                JS_ToInt32(ctx, &b, v);
+                JS_FreeValue(ctx, v);
+                guint8 byte = (guint8)(b & 0xff);
+                g_byte_array_append(buf, &byte, 1);
+            }
+        }
+    }
+
+    guint n = buf->len;
+    guint hold = 0;
+    if (stream && n > 0) {
+        for (guint k = 1; k <= 3 && k <= n; k++) {
+            guint8 b = buf->data[n - k];
+            if ((b & 0xC0) == 0x80) continue;
+            int seqlen;
+            if ((b & 0x80) == 0)         seqlen = 1;
+            else if ((b & 0xE0) == 0xC0) seqlen = 2;
+            else if ((b & 0xF0) == 0xE0) seqlen = 3;
+            else if ((b & 0xF8) == 0xF0) seqlen = 4;
+            else                         seqlen = 1;
+            if ((guint)seqlen > k) hold = k;
+            break;
+        }
+    }
+
+    guint emit = n - hold;
+    JSValue r = JS_NewStringLen(ctx, (const char *)buf->data, emit);
+
+    if (stream && hold > 0)
+        JS_SetPropertyStr(ctx, this_val, "_tail",
+                          JS_NewArrayBufferCopy(ctx, buf->data + emit, hold));
+    else
+        JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
+
+    g_byte_array_free(buf, TRUE);
     return r;
 }
 
