@@ -65,6 +65,8 @@ struct ns_js {
     gboolean      in_layout_flush;
     ns_js_clipboard_write_cb clipboard_write_cb;
     gpointer      clipboard_write_user_data;
+    ns_js_window_action_cb window_action_cb;
+    gpointer      window_action_user_data;
     JSValue       history_state;
     int           history_length;
     GPtrArray    *history_entries;

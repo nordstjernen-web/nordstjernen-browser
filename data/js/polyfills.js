@@ -2911,7 +2911,14 @@
         try {
             Object.defineProperty(navigator, 'vibrate', {
                 configurable: true, enumerable: true,
-                value: function () { return false; }
+                value: function (pattern) {
+                    var list = Array.isArray(pattern) ? pattern : [pattern];
+                    for (var i = 0; i < list.length; i++) {
+                        var v = Number(list[i]);
+                        if (!isFinite(v) || v < 0) return false;
+                    }
+                    return true;
+                }
             });
         } catch (e) {}
         try {

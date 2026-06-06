@@ -30,6 +30,7 @@ typedef void (*ns_js_soft_nav_cb)(const char *url, gboolean replace, gpointer us
 typedef void (*ns_js_repaint_cb)(gpointer user_data);
 typedef void (*ns_js_layout_flush_cb)(gpointer user_data);
 typedef gboolean (*ns_js_clipboard_write_cb)(const char *text, gpointer user_data);
+typedef void (*ns_js_window_action_cb)(const char *action, gpointer user_data);
 
 ns_js *ns_js_new(ns_js_log_cb      log_cb,  gpointer log_user_data,
                  ns_js_mutated_cb  mut_cb,  gpointer mut_user_data,
@@ -46,6 +47,8 @@ void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
                                     gpointer user_data);
+void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
+                                  gpointer user_data);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
 void   ns_js_dispatch_hashchange(ns_js *js,

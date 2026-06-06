@@ -415,6 +415,17 @@ ns_window_js_clipboard_write(const char *text, gpointer user_data)
 }
 
 static void
+ns_window_js_window_action(const char *action, gpointer user_data)
+{
+    ns_window *w = user_data;
+    if (!w || !w->window || !action) return;
+    if (g_strcmp0(action, "print") != 0 && g_strcmp0(action, "stop") != 0)
+        return;
+    if (g_action_group_has_action(G_ACTION_GROUP(w->window), action))
+        g_action_group_activate_action(G_ACTION_GROUP(w->window), action, NULL);
+}
+
+static void
 ns_window_js_form_submit(const ns_node *form, const ns_node *submitter,
                          gpointer user_data)
 {
@@ -1158,6 +1169,7 @@ ns_window_ensure_js(ns_window *w)
     ns_js_set_repaint_cb(w->js, ns_window_js_repaint, w);
     ns_js_set_layout_flush_cb(w->js, ns_window_js_flush_layout, w);
     ns_js_set_clipboard_write_cb(w->js, ns_window_js_clipboard_write, w);
+    ns_js_set_window_action_cb(w->js, ns_window_js_window_action, w);
     ns_js_set_image_cache(w->js, w->images);
 }
 

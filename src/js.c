@@ -5445,6 +5445,34 @@ ns_storage_estimate(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_returns_false(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_FALSE;
+}
+
+static JSValue
+ns_navigator_get_battery(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue battery = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, battery, "charging", JS_TRUE);
+    JS_SetPropertyStr(ctx, battery, "chargingTime", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, battery, "dischargingTime",
+                      JS_NewFloat64(ctx, INFINITY));
+    JS_SetPropertyStr(ctx, battery, "level", JS_NewFloat64(ctx, 1.0));
+    JS_SetPropertyStr(ctx, battery, "onchargingchange", JS_NULL);
+    JS_SetPropertyStr(ctx, battery, "onchargingtimechange", JS_NULL);
+    JS_SetPropertyStr(ctx, battery, "ondischargingtimechange", JS_NULL);
+    JS_SetPropertyStr(ctx, battery, "onlevelchange", JS_NULL);
+    JS_SetPropertyStr(ctx, battery, "_listeners", JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, battery);
+    return ns_promise_resolve_take(ctx, battery);
+}
+
+static JSValue
 ns_cache_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
@@ -22957,6 +22985,31 @@ ns_media_request_video_frame_callback(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_invoke_action(JSContext *ctx, const char *action)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->window_action_cb)
+        js->window_action_cb(action, js->window_action_user_data);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_window_print(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_window_invoke_action(ctx, "print");
+}
+
+static JSValue
+ns_window_stop(JSContext *ctx, JSValueConst this_val,
+               int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_window_invoke_action(ctx, "stop");
+}
+
+static JSValue
 ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
@@ -25857,10 +25910,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, mime_types, "namedItem", ns_event_noop, 1);
     JS_SetPropertyStr(ctx, navigator, "mimeTypes", mime_types);
 
-    ns_bind_fn(ctx, navigator, "javaEnabled",       ns_event_noop, 0);
-    ns_bind_fn(ctx, navigator, "taintEnabled",      ns_event_noop, 0);
+    ns_bind_fn(ctx, navigator, "javaEnabled",       ns_returns_false, 0);
+    ns_bind_fn(ctx, navigator, "taintEnabled",      ns_returns_false, 0);
     ns_bind_fn(ctx, navigator, "getAutoplayPolicy", ns_event_noop, 1);
-    ns_bind_fn(ctx, navigator, "getBattery",  ns_returns_rejected,  0);
+    ns_bind_fn(ctx, navigator, "getBattery",  ns_navigator_get_battery, 0);
     ns_bind_fn(ctx, navigator, "getGamepads", ns_event_empty_array, 0);
     ns_bind_fn(ctx, navigator, "requestMIDIAccess",            ns_returns_rejected, 1);
     ns_bind_fn(ctx, navigator, "requestMediaKeySystemAccess",  ns_eme_request_access, 2);
@@ -26002,12 +26055,14 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "__ND_FP_DEBUG",
                       JS_NewBool(ctx, g_getenv("NS_FP_DEBUG") != NULL));
     static const ns_fn_def window_noops[] = {
-        { "print", 0 }, { "close", 0 }, { "focus", 0 }, { "blur", 0 },
-        { "stop", 0 }, { "find", 7 },
+        { "close", 0 }, { "focus", 0 }, { "blur", 0 },
+        { "find", 7 },
         { "moveTo", 2 }, { "moveBy", 2 },
         { "resizeTo", 2 }, { "resizeBy", 2 },
     };
     ns_bind_fns(ctx, global, ns_event_noop, window_noops, G_N_ELEMENTS(window_noops));
+    ns_bind_fn(ctx, global, "print", ns_window_print, 0);
+    ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
@@ -30142,6 +30197,15 @@ ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
     if (!js) return;
     js->clipboard_write_cb = cb;
     js->clipboard_write_user_data = user_data;
+}
+
+void
+ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
+                           gpointer user_data)
+{
+    if (!js) return;
+    js->window_action_cb = cb;
+    js->window_action_user_data = user_data;
 }
 
 void
