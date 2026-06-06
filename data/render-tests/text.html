@@ -8,6 +8,7 @@ pre{background:#eee;padding:8px}
 .hy{width:72px;hyphens:auto;border:1px solid #9c9}
 .fs{font-stretch:condensed}.fs b{font-stretch:150%}
 .kern{font:42px serif}.kern .off{font-kerning:none}.kern .on{font-kerning:normal}
+.liga{font:34px serif}.liga .off{font-variant-ligatures:none}.liga .on{font-variant-ligatures:common-ligatures contextual}
 .of{width:130px;height:34px;overflow:hidden auto;border:1px solid #c99}
 </style>
 <div class=e>This is a very long line that should be ellipsized</div>
@@ -19,4 +20,5 @@ pre{background:#eee;padding:8px}
 <div class=hy lang=en>characteristically compatible</div>
 <div class=fs>condensed <b>expanded</b> text</div>
 <div class=kern><span class=off>AVAV</span> <span class=on>AVAV</span></div>
+<div class=liga><span class=off>office ffi</span> <span class=on>office ffi</span></div>
 <div class=of id=overflow-pair>long horizontal run should be clipped while vertical overflow can scroll</div>

@@ -462,7 +462,8 @@ CSS support (abridged):
   `src/css.c`).
 - ✅ `::first-line` — the first formatted line of a block adopts the
   pseudo's `color`, `background-color`, `font-size`/`weight`/`style`/
-  `family`, `font-kerning`, `font-variant: small-caps`, and `text-decoration:
+  `family`, `font-kerning`, `font-variant: small-caps`,
+  `font-variant-ligatures`, and `text-decoration:
   underline`. The first line's extent is taken from the wrapped Pango
   layout at paint time (`apply_first_line_attrs` in `src/paint.c`), so
   it tracks the actual wrap width; cascades correctly with other

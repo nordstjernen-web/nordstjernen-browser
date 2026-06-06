@@ -42,8 +42,10 @@ void ns_paint_apply_inline_font(PangoLayout *layout, const ns_style *style);
 
 void ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
                          const ns_box *box);
-void ns_paint_apply_font_kerning(PangoAttrList *attrs, const ns_style *style,
-                                 guint start, guint end);
+void ns_paint_apply_font_features(PangoAttrList *attrs, const ns_style *style,
+                                  guint start, guint end);
+PangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
+                                                        const char *ligatures);
 
 PangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 

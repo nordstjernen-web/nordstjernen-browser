@@ -138,7 +138,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning:none` maps to OpenType `kern=0` |
+| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning` and ligature controls map to OpenType features |
 | `text-align` (`left`/`right`/`center`/`justify`/`start`/`end`) | ✅ | |
 | `text-decoration` (line/style/color), `text-shadow` | ✅ | |
 | `text-transform` (uppercase/lowercase/capitalize) | ✅ | |
@@ -146,7 +146,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | `letter-spacing` / `word-spacing` / `tab-size` | ✅ | |
 | `white-space` (`normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line`/`break-spaces`) | ✅ | |
 | `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
-| `font-variant: small-caps` | ✅ | |
+| `font-variant: small-caps`, `font-variant-ligatures` | ✅ | common/discretionary/historical/contextual ligature keywords map to Pango OpenType feature tags |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | ❌ | text always lays out horizontally |
 | Ruby (`display:ruby`) | 🟡 | parsed; no ruby positioning |

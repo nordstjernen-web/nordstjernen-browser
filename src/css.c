@@ -117,6 +117,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_STYLE]           = "font-style",
     [NS_CSS_FONT_STRETCH]         = "font-stretch",
     [NS_CSS_FONT_KERNING]         = "font-kerning",
+    [NS_CSS_FONT_VARIANT_LIGATURES] = "font-variant-ligatures",
     [NS_CSS_FONT_FAMILY]          = "font-family",
     [NS_CSS_TEXT_ALIGN]           = "text-align",
     [NS_CSS_MARGIN_TOP]           = "margin-top",
@@ -269,6 +270,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_STYLE:
     case NS_CSS_FONT_STRETCH:
     case NS_CSS_FONT_KERNING:
+    case NS_CSS_FONT_VARIANT_LIGATURES:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -4204,6 +4206,7 @@ normalize_display_value(const char *text)
 
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
 static gboolean is_font_stretch_keyword(const char *s);
+static gboolean is_font_ligatures_value(const char *s);
 
 static gboolean
 value_has_top_level_comma(const char *t)
@@ -4724,6 +4727,17 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_FONT_VARIANT_LIGATURES: {
+        char *kw = ascii_lower(t, strlen(t));
+        if (is_font_ligatures_value(kw)) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
     case NS_CSS_TAB_SIZE: {
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && len >= 0) {
@@ -5132,6 +5146,40 @@ is_font_stretch_keyword(const char *s)
          g_ascii_strcasecmp(s, "expanded") == 0 ||
          g_ascii_strcasecmp(s, "extra-expanded") == 0 ||
          g_ascii_strcasecmp(s, "ultra-expanded") == 0);
+}
+
+static gboolean
+is_font_ligature_token(const char *s)
+{
+    return s &&
+        (strcmp(s, "common-ligatures") == 0 ||
+         strcmp(s, "no-common-ligatures") == 0 ||
+         strcmp(s, "discretionary-ligatures") == 0 ||
+         strcmp(s, "no-discretionary-ligatures") == 0 ||
+         strcmp(s, "historical-ligatures") == 0 ||
+         strcmp(s, "no-historical-ligatures") == 0 ||
+         strcmp(s, "contextual") == 0 ||
+         strcmp(s, "no-contextual") == 0);
+}
+
+static gboolean
+is_font_ligatures_value(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    if (strcmp(s, "normal") == 0 || strcmp(s, "none") == 0) return TRUE;
+    char **tokens = g_strsplit_set(s, " \t\r\n\f", -1);
+    gboolean any = FALSE;
+    gboolean ok = TRUE;
+    for (int i = 0; tokens[i]; i++) {
+        if (!*tokens[i]) continue;
+        any = TRUE;
+        if (!is_font_ligature_token(tokens[i])) {
+            ok = FALSE;
+            break;
+        }
+    }
+    g_strfreev(tokens);
+    return any && ok;
 }
 
 static void
@@ -6146,6 +6194,7 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_WEIGHT,
                     NS_CSS_FONT_STRETCH,
                     NS_CSS_FONT_KERNING,
+                    NS_CSS_FONT_VARIANT_LIGATURES,
                     NS_CSS_FONT_SIZE,
                     NS_CSS_LINE_HEIGHT,
                     NS_CSS_FONT_FAMILY,

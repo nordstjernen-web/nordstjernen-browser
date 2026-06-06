@@ -1124,34 +1124,112 @@ ns_paint_apply_i18n(PangoLayout *layout, PangoAttrList *attrs,
     }
 }
 
-static const char *
-font_kerning_features(const ns_css_value *v)
+static void
+append_font_feature(GString *out, const char *feature)
 {
-    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
-    if (strcmp(v->u.keyword, "none") == 0) return "kern=0";
-    if (strcmp(v->u.keyword, "normal") == 0 ||
-        strcmp(v->u.keyword, "auto") == 0) return "kern=1";
-    return NULL;
+    if (!feature || !*feature) return;
+    if (out->len > 0) g_string_append(out, ", ");
+    g_string_append(out, feature);
+}
+
+static void
+append_font_kerning_features(GString *out, const ns_css_value *v)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return;
+    if (strcmp(v->u.keyword, "none") == 0)
+        append_font_feature(out, "kern=0");
+    else if (strcmp(v->u.keyword, "normal") == 0 ||
+             strcmp(v->u.keyword, "auto") == 0)
+        append_font_feature(out, "kern=1");
+}
+
+static void
+append_font_ligature_token(GString *out, const char *token)
+{
+    if (strcmp(token, "none") == 0) {
+        append_font_feature(out, "liga=0");
+        append_font_feature(out, "clig=0");
+        append_font_feature(out, "dlig=0");
+        append_font_feature(out, "hlig=0");
+        append_font_feature(out, "calt=0");
+    } else if (strcmp(token, "normal") == 0) {
+        append_font_feature(out, "liga=1");
+        append_font_feature(out, "clig=1");
+        append_font_feature(out, "dlig=0");
+        append_font_feature(out, "hlig=0");
+        append_font_feature(out, "calt=1");
+    } else if (strcmp(token, "common-ligatures") == 0) {
+        append_font_feature(out, "liga=1");
+        append_font_feature(out, "clig=1");
+    } else if (strcmp(token, "no-common-ligatures") == 0) {
+        append_font_feature(out, "liga=0");
+        append_font_feature(out, "clig=0");
+    } else if (strcmp(token, "discretionary-ligatures") == 0) {
+        append_font_feature(out, "dlig=1");
+    } else if (strcmp(token, "no-discretionary-ligatures") == 0) {
+        append_font_feature(out, "dlig=0");
+    } else if (strcmp(token, "historical-ligatures") == 0) {
+        append_font_feature(out, "hlig=1");
+    } else if (strcmp(token, "no-historical-ligatures") == 0) {
+        append_font_feature(out, "hlig=0");
+    } else if (strcmp(token, "contextual") == 0) {
+        append_font_feature(out, "calt=1");
+    } else if (strcmp(token, "no-contextual") == 0) {
+        append_font_feature(out, "calt=0");
+    }
+}
+
+static void
+append_font_ligature_features(GString *out, const char *ligatures)
+{
+    if (!ligatures || !*ligatures) return;
+    char **tokens = g_strsplit_set(ligatures, " \t\r\n\f", -1);
+    for (int i = 0; tokens[i]; i++) {
+        if (*tokens[i])
+            append_font_ligature_token(out, tokens[i]);
+    }
+    g_strfreev(tokens);
+}
+
+PangoAttribute *
+ns_paint_font_features_attr_from_values(int kerning, const char *ligatures)
+{
+    GString *s = g_string_new(NULL);
+    if (kerning == 0)
+        append_font_feature(s, "kern=0");
+    else if (kerning > 0)
+        append_font_feature(s, "kern=1");
+    append_font_ligature_features(s, ligatures);
+    if (s->len == 0) {
+        g_string_free(s, TRUE);
+        return NULL;
+    }
+    char *features = g_string_free(s, FALSE);
+    PangoAttribute *a = pango_attr_font_features_new(features);
+    g_free(features);
+    return a;
 }
 
 void
-ns_paint_apply_font_kerning(PangoAttrList *attrs, const ns_style *s,
-                            guint start, guint end)
+ns_paint_apply_font_features(PangoAttrList *attrs, const ns_style *s,
+                             guint start, guint end)
 {
     if (!attrs || !s) return;
-    const char *features = font_kerning_features(s->values[NS_CSS_FONT_KERNING]);
-    if (!features) return;
-    PangoAttribute *a = pango_attr_font_features_new(features);
+    GString *features = g_string_new(NULL);
+    append_font_kerning_features(features, s->values[NS_CSS_FONT_KERNING]);
+    const ns_css_value *lig = s->values[NS_CSS_FONT_VARIANT_LIGATURES];
+    if (lig && lig->kind == NS_CSS_V_KEYWORD)
+        append_font_ligature_features(features, lig->u.keyword);
+    if (features->len == 0) {
+        g_string_free(features, TRUE);
+        return;
+    }
+    char *str = g_string_free(features, FALSE);
+    PangoAttribute *a = pango_attr_font_features_new(str);
+    g_free(str);
     a->start_index = start;
     a->end_index = end;
     pango_attr_list_insert(attrs, a);
-}
-
-static PangoAttribute *
-font_kerning_attr_from_int(int v)
-{
-    if (v < 0) return NULL;
-    return pango_attr_font_features_new(v ? "kern=1" : "kern=0");
 }
 
 static gboolean
@@ -1346,7 +1424,7 @@ apply_first_line_attrs(PangoAttrList *attrs, const ns_style *fl,
     if (keyword_is(fl->values[NS_CSS_FONT_VARIANT], "small-caps"))
         attr_insert_range(attrs, pango_attr_variant_new(PANGO_VARIANT_SMALL_CAPS),
                           start, len);
-    ns_paint_apply_font_kerning(attrs, fl, start, end);
+    ns_paint_apply_font_features(attrs, fl, start, end);
     if (keyword_is(fl->values[NS_CSS_TEXT_DECORATION], "underline"))
         attr_insert_range(attrs, pango_attr_underline_new(PANGO_UNDERLINE_SINGLE),
                           start, len);
@@ -1392,7 +1470,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 
     PangoAttrList *attrs = pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
-    ns_paint_apply_font_kerning(attrs, s, 0, G_MAXUINT);
+    ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);
     double ls_px = 0, ws_px = 0;
     if (s && s->values[NS_CSS_LETTER_SPACING] &&
@@ -1434,8 +1512,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
                     pango_stretch_from_css(r->font_stretch)); break;
-            case NS_INLINE_FONT_KERNING:
-                a = font_kerning_attr_from_int(r->font_kerning); break;
+            case NS_INLINE_FONT_FEATURES:
+                a = ns_paint_font_features_attr_from_values(
+                    r->font_kerning, r->font_ligatures); break;
             case NS_INLINE_ITALIC:
                 a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE:
@@ -1965,7 +2044,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 
     PangoAttrList *attrs = pango_attr_list_new();
     ns_paint_apply_i18n(layout, attrs, b);
-    ns_paint_apply_font_kerning(attrs, s, 0, G_MAXUINT);
+    ns_paint_apply_font_features(attrs, s, 0, G_MAXUINT);
     ns_inline_apply_atomic_shapes(attrs, b);
     if (b->attrs) {
         for (gint ii = (gint)b->attrs->len - 1; ii >= 0; ii--) {
@@ -1978,8 +2057,9 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             case NS_INLINE_FONT_STRETCH:
                 a = pango_attr_stretch_new(
                     pango_stretch_from_css(r->font_stretch)); break;
-            case NS_INLINE_FONT_KERNING:
-                a = font_kerning_attr_from_int(r->font_kerning); break;
+            case NS_INLINE_FONT_FEATURES:
+                a = ns_paint_font_features_attr_from_values(
+                    r->font_kerning, r->font_ligatures); break;
             case NS_INLINE_ITALIC:    a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE: a = pango_attr_family_new("monospace"); break;
             case NS_INLINE_FONT_SIZE:
