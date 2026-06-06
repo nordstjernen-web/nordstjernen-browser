@@ -60,6 +60,10 @@ The full section-by-section walk-through lives in
 - **WebGL** — opt-in, per-site WebGL 1 / 2 mapped onto OpenGL ES via GTK;
   off by default and gated behind a trust prompt. See
   [`docs/webgl.md`](docs/webgl.md).
+- **WebAssembly** — the full JS API (`compile`, `instantiate`,
+  `Memory`, `Table`, externref) over a vendored WAMR interpreter;
+  runs wasm-bindgen bundles. See
+  [`docs/webassembly.md`](docs/webassembly.md).
 - **UI** — tabs, bookmarks, find-in-page, print, JS console, headless
   mode, and a C embedding API.
 
@@ -112,6 +116,7 @@ moving parts:
 |-----------|------|
 | [lexbor](https://github.com/lexbor/lexbor) | HTML5 → DOM parser, CSS, and the WHATWG URL module (`ns_url_*`) |
 | [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng fork) | JavaScript engine — no JIT, browser-side hooks added in-tree |
+| [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (subset) | WebAssembly interpreter behind the `WebAssembly` JS API (`src/wasm.c`) |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG, GIF, BMP, JPEG, WebP (lossless) |
 
 **Required system libraries:**
