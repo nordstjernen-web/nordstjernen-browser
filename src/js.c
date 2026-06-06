@@ -167,6 +167,7 @@ static JSValue ns_event_stop_immediate(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
                                     const char *type);
+static void    ns_observer_schedule_tick(ns_js *js);
 static JSValue ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 static JSValue ns_target_removeEventListener(JSContext *ctx, JSValueConst this_val,
@@ -14884,6 +14885,7 @@ typedef struct ns_io_observer {
     JSValue   cb;
     JSValue   wrapper;
     JSValue   root_wrapper;
+    JSValue   pin;
     GArray    *targets;
     double    margin_top, margin_right, margin_bottom, margin_left;
     GArray    *thresholds;
@@ -14891,6 +14893,19 @@ typedef struct ns_io_observer {
 } ns_io_observer;
 
 static JSClassID ns_io_observer_class_id;
+
+static void
+ns_io_observer_set_pin(JSContext *ctx, ns_io_observer *o, gboolean want)
+{
+    if (!o || !ctx) return;
+    if (want && JS_IsUndefined(o->pin)) {
+        o->pin = JS_DupValue(ctx, o->wrapper);
+    } else if (!want && !JS_IsUndefined(o->pin)) {
+        JSValue p = o->pin;
+        o->pin = JS_UNDEFINED;
+        JS_FreeValue(ctx, p);
+    }
+}
 
 static void
 ns_io_observer_targets_clear(JSContext *ctx, ns_io_observer *o)
@@ -15213,8 +15228,9 @@ ns_intersection_observer_observe(JSContext *ctx, JSValueConst this_val,
         .has_fired = FALSE,
     };
     g_array_append_val(o->targets, nt);
+    ns_io_observer_set_pin(ctx, o, TRUE);
     ns_js *js = js_from_ctx(ctx);
-    if (js) js->mutated = TRUE;
+    if (js) { js->mutated = TRUE; ns_observer_schedule_tick(js); }
     return JS_UNDEFINED;
 }
 
@@ -15235,6 +15251,8 @@ ns_intersection_observer_unobserve(JSContext *ctx, JSValueConst this_val,
             break;
         }
     }
+    if (o->targets->len == 0)
+        ns_io_observer_set_pin(ctx, o, FALSE);
     return JS_UNDEFINED;
 }
 
@@ -15246,6 +15264,7 @@ ns_intersection_observer_disconnect(JSContext *ctx, JSValueConst this_val,
     ns_io_observer *o = ns_unwrap_io_observer(this_val);
     if (!o) return JS_UNDEFINED;
     ns_io_observer_targets_clear(ctx, o);
+    ns_io_observer_set_pin(ctx, o, FALSE);
     return JS_UNDEFINED;
 }
 
@@ -15288,6 +15307,7 @@ ns_intersection_observer_ctor(JSContext *ctx, JSValueConst this_val,
         ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
     o->wrapper = obj;
     o->root_wrapper = JS_NULL;
+    o->pin = JS_UNDEFINED;
     o->targets = g_array_new(FALSE, FALSE, sizeof(ns_io_target));
     o->thresholds = g_array_new(FALSE, FALSE, sizeof(double));
     double viewport_w = js && js->layout_root ? js->layout_root->content_width : 1000;
@@ -15380,6 +15400,7 @@ ns_resize_observer_observe(JSContext *ctx, JSValueConst this_val,
     if (_j) {
         ns_resize_observer_register(_j, ctx, this_val, argv[0]);
         _j->mutated = TRUE;
+        ns_observer_schedule_tick(_j);
     }
     return JS_UNDEFINED;
 }
@@ -15434,6 +15455,26 @@ ns_resize_observers_tick(ns_js *js)
         JS_FreeValue(ctx, cb);
         JS_FreeValue(ctx, targets);
     }
+}
+
+static gboolean
+ns_observer_tick_timer(gpointer data)
+{
+    ns_js *js = data;
+    if (!js) return G_SOURCE_REMOVE;
+    js->observer_tick_source = 0;
+    if (!js->ctx) return G_SOURCE_REMOVE;
+    ns_intersection_observers_tick(js);
+    ns_resize_observers_tick(js);
+    ns_drain_microtasks(js);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_observer_schedule_tick(ns_js *js)
+{
+    if (!js || !js->ctx || js->worker_host || js->observer_tick_source) return;
+    js->observer_tick_source = g_timeout_add(4, ns_observer_tick_timer, js);
 }
 
 static JSValue
@@ -29689,6 +29730,10 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->pending_ws, TRUE);
         js->pending_ws = NULL;
+    }
+    if (js->observer_tick_source) {
+        g_source_remove(js->observer_tick_source);
+        js->observer_tick_source = 0;
     }
     if (js->filereader_idles) {
         for (guint i = 0; i < js->filereader_idles->len; i++) {

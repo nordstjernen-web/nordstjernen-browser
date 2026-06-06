@@ -139,6 +139,7 @@ struct ns_js {
     gboolean      mutation_drain_scheduled;
     GPtrArray    *intersection_observers;
     GPtrArray    *resize_observers;
+    guint         observer_tick_source;
     GArray       *doc_stack;
     JSValue       iframe_doc;
     int           iframe_doc_set;

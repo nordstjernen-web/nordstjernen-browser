@@ -295,6 +295,7 @@ surface).
 | `queueMicrotask` | ✅ | |
 | `requestAnimationFrame` / `cancelAnimationFrame` | ✅ | tied to repaint |
 | `requestIdleCallback` | ✅ | |
+| `MutationObserver` / `IntersectionObserver` / `ResizeObserver` | ✅ | callbacks fire for real: mutations via the microtask checkpoint; intersection/resize on layout changes **and** as an initial observation scheduled when `observe()` is first called (so virtualized lists, lazy-load and read-receipt patterns get their first callback without waiting for a reflow). An actively-observing `IntersectionObserver` is kept alive while it has targets, so dropping the JS reference (common with React refs) does not GC it out from under the observation; `disconnect()` / removing all targets releases it |
 | `atob` / `btoa` | ✅ | |
 | `crypto.getRandomValues` / `crypto.randomUUID` | ✅ | CSPRNG-backed |
 | `crypto.subtle` (Web Cryptography) | ✅ | full SubtleCrypto over OpenSSL libcrypto (`src/webcrypto.c`): `digest`, `generateKey`, `importKey`, `exportKey`, `sign`, `verify`, `encrypt`, `decrypt`, `deriveBits`, `deriveKey`. Algorithms: HMAC; AES-GCM/CBC/CTR; RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP; ECDSA and ECDH on P-256/384/521; PBKDF2; HKDF. Key formats `raw`/`jwk`/`spki`/`pkcs8`; ECDSA uses the raw r‖s signature encoding. Verified against NIST AES-GCM, RFC 6070 PBKDF2 and RFC 5869 HKDF vectors |
