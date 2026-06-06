@@ -14860,6 +14860,7 @@ ns_invoke_listeners_at(ns_js *js, const ns_node *cur, const ns_node *target,
             fn = JS_UNDEFINED;
             this_for_call = cur_target_obj;
         }
+        if (l->once) ns_listener_tombstone(js->ctx, l);
         JSValue ret = JS_IsFunction(js->ctx, fn)
             ? JS_Call(js->ctx, fn, this_for_call, 1, &event)
             : JS_UNDEFINED;
@@ -14885,8 +14886,6 @@ ns_invoke_listeners_at(ns_js *js, const ns_node *cur, const ns_node *target,
         }
         JS_FreeValue(js->ctx, ret);
         *fired = TRUE;
-        if (!ns_listener_is_tombstoned(l) && l->once)
-            ns_listener_tombstone(js->ctx, l);
         JSValue imm = js->listener_atoms_set
             ? JS_GetProperty(js->ctx, event, js->atom_immediate_stopped)
             : JS_GetPropertyStr(js->ctx, event, "_immediate_stopped");
