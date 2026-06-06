@@ -6490,6 +6490,8 @@ ns_install_icon_search_paths(void)
     const char *try_rel[] = {
         "share/icons",
         "../share/icons",
+        "data/icons",
+        "../data/icons",
         "../../data/icons",
         NULL,
     };
