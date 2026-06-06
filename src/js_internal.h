@@ -67,6 +67,8 @@ struct ns_js {
     gpointer      clipboard_write_user_data;
     JSValue       history_state;
     int           history_length;
+    GPtrArray    *history_entries;
+    int           history_pos;
     char         *current_url;
     ns_node       *current_doc;
     ns_node       *current_script;

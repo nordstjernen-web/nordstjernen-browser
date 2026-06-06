@@ -7827,13 +7827,48 @@ ns_history_get_state(JSContext *ctx, JSValueConst this_val,
     return JS_DupValue(ctx, js->history_state);
 }
 
+typedef struct {
+    char    *url;
+    JSValue  state;
+} ns_history_entry;
+
+static JSValue ns_make_event(JSContext *ctx, const char *type,
+                             const ns_node *target);
+static gboolean ns_js_dispatch_built_event(ns_js *js, const ns_node *target,
+                                           const char *type, JSValue event,
+                                           gboolean *default_prevented);
+
+static void
+ns_history_ensure_stack(ns_js *js)
+{
+    if (!js || js->history_entries) return;
+    js->history_entries = g_ptr_array_new();
+    ns_history_entry *e = g_new0(ns_history_entry, 1);
+    e->url = g_strdup(js->current_url ? js->current_url : "");
+    e->state = JS_NULL;
+    g_ptr_array_add(js->history_entries, e);
+    js->history_pos = 0;
+}
+
+static void
+ns_history_entry_pop_free(ns_js *js, ns_history_entry *e)
+{
+    if (!e) return;
+    g_free(e->url);
+    if (js->ctx) JS_FreeValue(js->ctx, e->state);
+    g_free(e);
+}
+
 static JSValue
 ns_history_get_length(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
-    return JS_NewInt32(ctx, js ? js->history_length : 1);
+    if (!js) return JS_NewInt32(ctx, 1);
+    if (js->history_entries && js->history_entries->len > 0)
+        return JS_NewInt32(ctx, (int)js->history_entries->len);
+    return JS_NewInt32(ctx, js->history_length);
 }
 
 static JSValue
@@ -7842,6 +7877,8 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
+
+    ns_history_ensure_stack(js);
 
     char *new_url = NULL;
     if (argc >= 3 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
@@ -7880,6 +7917,27 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
 
     if (!replace) js->history_length++;
 
+    if (replace) {
+        ns_history_entry *e =
+            g_ptr_array_index(js->history_entries, js->history_pos);
+        g_free(e->url);
+        e->url = g_strdup(js->current_url ? js->current_url : "");
+        JS_FreeValue(ctx, e->state);
+        e->state = JS_DupValue(ctx, js->history_state);
+    } else {
+        while ((int)js->history_entries->len > js->history_pos + 1) {
+            guint last = js->history_entries->len - 1;
+            ns_history_entry_pop_free(js,
+                g_ptr_array_index(js->history_entries, last));
+            g_ptr_array_remove_index(js->history_entries, last);
+        }
+        ns_history_entry *e = g_new0(ns_history_entry, 1);
+        e->url = g_strdup(js->current_url ? js->current_url : "");
+        e->state = JS_DupValue(ctx, js->history_state);
+        g_ptr_array_add(js->history_entries, e);
+        js->history_pos = js->history_entries->len - 1;
+    }
+
     if (js->soft_nav_cb)
         js->soft_nav_cb(js->current_url, replace, js->soft_nav_user_data);
 
@@ -7900,6 +7958,78 @@ ns_history_replaceState(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     return ns_history_set_state_impl(ctx, argc, argv, TRUE);
+}
+
+static JSValue
+ns_history_popstate_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->current_doc || js->halted || js->in_pump)
+        return JS_UNDEFINED;
+    JSValue state = argc >= 1 ? argv[0] : JS_NULL;
+    JSValue event = ns_make_event(ctx, "popstate", js->current_doc);
+    JS_SetPropertyStr(ctx, event, "state", JS_DupValue(ctx, state));
+    ns_js_dispatch_built_event(js, js->current_doc, "popstate", event, NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_history_navigate(JSContext *ctx, int delta)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_UNDEFINED;
+    ns_history_ensure_stack(js);
+    int n = (int)js->history_entries->len;
+    int target = js->history_pos + delta;
+    if (target < 0) target = 0;
+    if (target > n - 1) target = n - 1;
+    if (target == js->history_pos) return JS_UNDEFINED;
+
+    js->history_pos = target;
+    ns_history_entry *e = g_ptr_array_index(js->history_entries, target);
+    if (e->url) {
+        g_free(js->current_url);
+        js->current_url = g_strdup(e->url);
+    }
+    JS_FreeValue(ctx, js->history_state);
+    js->history_state = JS_DupValue(ctx, e->state);
+
+    if (js->soft_nav_cb)
+        js->soft_nav_cb(js->current_url, TRUE, js->soft_nav_user_data);
+
+    JSValueConst arg = js->history_state;
+    JS_EnqueueJob(ctx, ns_history_popstate_job, 1, &arg);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_history_back(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_history_navigate(ctx, -1);
+}
+
+static JSValue
+ns_history_forward(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_history_navigate(ctx, 1);
+}
+
+static JSValue
+ns_history_go(JSContext *ctx, JSValueConst this_val,
+              int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    int delta = 0;
+    if (argc >= 1) {
+        double d = 0;
+        JS_ToFloat64(ctx, &d, argv[0]);
+        delta = (int)d;
+    }
+    return ns_history_navigate(ctx, delta);
 }
 
 static void ns_js_flush_layout(ns_js *js);
@@ -25041,11 +25171,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, history, "scrollRestoration", JS_NewString(ctx, "auto"));
     ns_bind_fn(ctx, history, "pushState",    ns_history_pushState,    3);
     ns_bind_fn(ctx, history, "replaceState", ns_history_replaceState, 3);
-    static const ns_fn_def history_back_noops[] = {
-        { "back", 0 }, { "forward", 0 }, { "go", 1 },
-    };
-    ns_bind_fns(ctx, history, ns_event_noop, history_back_noops,
-                G_N_ELEMENTS(history_back_noops));
+    ns_bind_fn(ctx, history, "back",         ns_history_back,         0);
+    ns_bind_fn(ctx, history, "forward",      ns_history_forward,      0);
+    ns_bind_fn(ctx, history, "go",           ns_history_go,           1);
     JSAtom hatom_state  = JS_NewAtom(ctx, "state");
     JSAtom hatom_length = JS_NewAtom(ctx, "length");
     JS_DefinePropertyGetSet(ctx, history, hatom_state,
@@ -27091,6 +27219,13 @@ ns_js_free(ns_js *js)
         js->workers = NULL;
     }
     if (js->ctx) JS_FreeValue(js->ctx, js->history_state);
+    if (js->history_entries) {
+        for (guint i = 0; i < js->history_entries->len; i++)
+            ns_history_entry_pop_free(js,
+                g_ptr_array_index(js->history_entries, i));
+        g_ptr_array_free(js->history_entries, TRUE);
+        js->history_entries = NULL;
+    }
     if (js->perf_entries) g_ptr_array_free(js->perf_entries, TRUE);
     if (js->perf_observers) {
         for (guint i = 0; i < js->perf_observers->len; i++) {
