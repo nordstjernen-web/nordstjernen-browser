@@ -809,7 +809,7 @@ ns_net_cookies_for_js(const char *url)
     GString *out = g_string_new(NULL);
     char **lines = g_strsplit(contents, "\n", -1);
     for (int i = 0; lines[i]; i++) {
-        char *line = lines[i];
+        char *line = g_strchomp(lines[i]);
         if (!*line) continue;
         if (line[0] == '#') continue;
         char **f = g_strsplit(line, "\t", 7);

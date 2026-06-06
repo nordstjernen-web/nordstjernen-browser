@@ -126,6 +126,7 @@ static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
 static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
+static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
@@ -25369,6 +25370,183 @@ ns_document_get_compatMode(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, "CSS1Compat");
 }
 
+static ns_node *
+ns_document_write_parent(ns_js *js, ns_node **out_ref)
+{
+    if (out_ref) *out_ref = NULL;
+    if (!js || !js->current_doc) return NULL;
+    ns_node *script = js->document_write_script;
+    if (script && script->parent) {
+        if (out_ref) *out_ref = script;
+        return script->parent;
+    }
+    ns_node *body = ns_node_find_first_element(js->current_doc, "body");
+    if (body && out_ref) *out_ref = body->last_child;
+    return body;
+}
+
+static void
+ns_define_missing_named_value(JSContext *ctx, JSValueConst obj,
+                              const char *name, JSValueConst value)
+{
+    if (!name || !*name) return;
+    JSAtom atom = JS_NewAtom(ctx, name);
+    if (JS_HasProperty(ctx, obj, atom) <= 0)
+        JS_DefinePropertyValue(ctx, obj, atom, JS_DupValue(ctx, value),
+                               JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static void
+ns_form_expose_legacy_members(JSContext *ctx, JSValueConst form)
+{
+    JSValue elements = ns_element_get_form_elements(ctx, form);
+    uint32_t len = ns_js_array_length(ctx, elements);
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, elements, i);
+        JS_DefinePropertyValueUint32(ctx, form, i, JS_DupValue(ctx, item),
+                                     JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        const ns_node *n = ns_unwrap_element(item);
+        if (n && n->kind == NS_NODE_ELEMENT) {
+            const char *nm = ns_element_get_attr(n, "name");
+            const char *idv = ns_element_get_attr(n, "id");
+            if (nm && *nm) {
+                JSValue named = ns_form_elements_named_lookup(ctx, elements, nm);
+                ns_define_missing_named_value(ctx, form, nm, named);
+                JS_FreeValue(ctx, named);
+            }
+            if (idv && *idv && (!nm || strcmp(nm, idv) != 0)) {
+                JSValue named = ns_form_elements_named_lookup(ctx, elements, idv);
+                ns_define_missing_named_value(ctx, form, idv, named);
+                JS_FreeValue(ctx, named);
+            }
+        }
+        JS_FreeValue(ctx, item);
+    }
+    JS_FreeValue(ctx, elements);
+}
+
+static void
+ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
+                                   const ns_node *n)
+{
+    if (!n) return;
+    if (ns_node_is_element_named(n, "form") ||
+        ns_node_is_element_named(n, "img")) {
+        JSValue element = ns_make_element(ctx, n);
+        if (ns_node_is_element_named(n, "form"))
+            ns_form_expose_legacy_members(ctx, element);
+        ns_define_missing_named_value(ctx, document,
+                                      ns_element_get_attr(n, "name"), element);
+        ns_define_missing_named_value(ctx, document,
+                                      ns_element_get_attr(n, "id"), element);
+        JS_FreeValue(ctx, element);
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_document_expose_legacy_named_in(ctx, document, c);
+}
+
+static void
+ns_document_expose_legacy_named(ns_js *js, const ns_node *root,
+                                JSValueConst document)
+{
+    if (!js || !root || !JS_IsObject(document)) return;
+    ns_document_expose_legacy_named_in(js->ctx, document, root);
+}
+
+static void
+ns_js_flush_document_write(ns_js *js)
+{
+    if (!js || !js->document_write_buffer) return;
+    if (js->document_write_buffer->len == 0) {
+        js->document_write_script = NULL;
+        return;
+    }
+    ns_node *ref = NULL;
+    ns_node *parent = ns_document_write_parent(js, &ref);
+    char *html = g_strdup(js->document_write_buffer->str);
+    g_string_truncate(js->document_write_buffer, 0);
+    js->document_write_script = NULL;
+    if (!parent) {
+        g_free(html);
+        return;
+    }
+    const char *ctx_tag = parent->kind == NS_NODE_ELEMENT ? parent->name : NULL;
+    ns_node *fragment = ns_html_parse_fragment_in(ctx_tag, html, -1);
+    g_free(html);
+    if (!fragment) return;
+    ns_mark_scripts_already_started(fragment);
+    GPtrArray *inserted = g_ptr_array_new();
+    ns_node *c = fragment->first_child;
+    while (c) {
+        ns_node *next = c->next_sibling;
+        ns_node_own_strings_deep(c);
+        ns_node_remove(c);
+        if (ref && ref->parent == parent) {
+            ns_insert_sibling_after(ref, c);
+        } else {
+            ns_node_append_child(parent, c);
+        }
+        ns_js_record_child_change(js, parent, c, NULL,
+                                  c->prev_sibling, c->next_sibling);
+        ref = c;
+        g_ptr_array_add(inserted, c);
+        c = next;
+    }
+    ns_node_free(fragment);
+    if (inserted->len > 0) {
+        JSValue global = JS_GetGlobalObject(js->ctx);
+        JSValue document = JS_GetPropertyStr(js->ctx, global, "document");
+        ns_document_expose_legacy_named(js, parent, document);
+        JS_FreeValue(js->ctx, document);
+        JS_FreeValue(js->ctx, global);
+        js->mutated = TRUE;
+        ns_ce_upgrade_subtree_all(js, parent);
+        ns_js_run_inserted_scripts(js, parent);
+    }
+    g_ptr_array_free(inserted, TRUE);
+}
+
+static JSValue
+ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
+                         gboolean newline)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->current_doc) return JS_UNDEFINED;
+    if (js->document_write_buffer &&
+        js->document_write_script != js->current_script)
+        ns_js_flush_document_write(js);
+    if (!js->document_write_buffer)
+        js->document_write_buffer = g_string_new(NULL);
+    js->document_write_script = js->current_script;
+    for (int i = 0; i < argc; i++) {
+        const char *s = JS_ToCString(ctx, argv[i]);
+        if (!s) continue;
+        g_string_append(js->document_write_buffer, s);
+        JS_FreeCString(ctx, s);
+    }
+    if (newline) g_string_append_c(js->document_write_buffer, '\n');
+    if (!js->current_script)
+        ns_js_flush_document_write(js);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_document_write(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_document_write_common(ctx, argc, argv, FALSE);
+}
+
+static JSValue
+ns_document_writeln(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    return ns_document_write_common(ctx, argc, argv, TRUE);
+}
+
 static JSValue
 ns_document_get_currentScript(JSContext *ctx, JSValueConst this_val)
 {
@@ -25436,8 +25614,8 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CGETSET_DEF("applets",         ns_document_get_applets,         ns_element_noop_set),
     JS_CGETSET_DEF("fonts",           ns_document_get_fonts,           ns_element_noop_set),
     JS_CGETSET_DEF("implementation",  ns_document_implementation,      NULL),
-    JS_CFUNC_DEF("write",      1, ns_event_noop),
-    JS_CFUNC_DEF("writeln",    1, ns_event_noop),
+    JS_CFUNC_DEF("write",      1, ns_document_write),
+    JS_CFUNC_DEF("writeln",    1, ns_document_writeln),
     JS_CFUNC_DEF("open",       0, ns_event_noop),
     JS_CFUNC_DEF("close",      0, ns_event_noop),
     JS_CFUNC_DEF("execCommand", 3, ns_event_false),
@@ -25939,6 +26117,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         }
         JS_FreeValue(ctx, doc_ctor);
     }
+    ns_document_expose_legacy_named(js, js->current_doc, document);
     JS_SetPropertyStr(ctx, global, "document", document);
 
     JSValue location = JS_NewObject(ctx);
@@ -26053,6 +26232,10 @@ ns_js_free(ns_js *js)
     g_free(js->referrer);
     g_free(js->current_url);
     g_free(js->selection_text);
+    if (js->document_write_buffer) {
+        g_string_free(js->document_write_buffer, TRUE);
+        js->document_write_buffer = NULL;
+    }
     if (js->workers) {
         for (guint i = 0; i < js->workers->len; i++) {
             ns_worker_host *host = g_ptr_array_index(js->workers, i);
@@ -26442,7 +26625,10 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
             JSValue v = JS_Call(js->ctx, fn, global, 1, args);
             js->eval_depth--;
             js->eval_deadline_us = 0;
-            if (js->eval_depth == 0) ns_js_drain_deferred_scripts(js);
+            if (js->eval_depth == 0) {
+                ns_js_flush_document_write(js);
+                ns_js_drain_deferred_scripts(js);
+            }
             if (JS_IsException(v)) {
                 JSValue ex = JS_GetException(js->ctx);
                 const char *msg = JS_ToCString(js->ctx, ex);
@@ -26492,7 +26678,10 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     g_free(copy);
     js->eval_deadline_us = 0;
     js->eval_depth--;
-    if (js->eval_depth == 0) ns_js_drain_deferred_scripts(js);
+    if (js->eval_depth == 0) {
+        ns_js_flush_document_write(js);
+        ns_js_drain_deferred_scripts(js);
+    }
     if (profile)
         g_printerr("[profile] js eval     %6.1fms  %zub  %s%s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
@@ -26642,7 +26831,10 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     g_free(copy);
     js->eval_deadline_us = 0;
     js->eval_depth--;
-    if (js->eval_depth == 0) ns_js_drain_deferred_scripts(js);
+    if (js->eval_depth == 0) {
+        ns_js_flush_document_write(js);
+        ns_js_drain_deferred_scripts(js);
+    }
     if (profile)
         g_printerr("[profile] js module   %6.1fms  %zub  %s\n",
                    (g_get_monotonic_time() - t0) / 1000.0, (size_t)len,
@@ -27746,7 +27938,10 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             JSValue v = JS_Call(js->ctx, fn, swin, 8, args);
             js->eval_depth--;
             js->eval_deadline_us = 0;
-            if (js->eval_depth == 0) ns_js_drain_deferred_scripts(js);
+            if (js->eval_depth == 0) {
+                ns_js_flush_document_write(js);
+                ns_js_drain_deferred_scripts(js);
+            }
             if (JS_IsException(v)) {
                 JSValue ex = JS_GetException(js->ctx);
                 const char *m = JS_ToCString(js->ctx, ex);

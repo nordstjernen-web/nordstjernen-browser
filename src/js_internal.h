@@ -122,6 +122,8 @@ struct ns_js {
     gboolean      halted;
     gboolean      in_pump;
     int           eval_depth;
+    GString      *document_write_buffer;
+    ns_node      *document_write_script;
     GPtrArray    *deferred_script_roots;
     GPtrArray    *pending_iframe_loads;
     GHashTable   *iframe_globals;
