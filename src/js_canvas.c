@@ -2105,10 +2105,11 @@ ns_ctx_createImageData(JSContext *ctx, JSValueConst this_val,
     } else {
         return JS_NULL;
     }
-    if (w < 0) w = -w;
-    if (h < 0) h = -h;
-    if (w == 0 || h == 0) return JS_NULL;
-    return ns_image_data_make(ctx, w, h, NULL);
+    int64_t aw = w < 0 ? -(int64_t)w : (int64_t)w;
+    int64_t ah = h < 0 ? -(int64_t)h : (int64_t)h;
+    if (aw == 0 || ah == 0) return JS_NULL;
+    if (aw > 32767 || ah > 32767) return JS_ThrowRangeError(ctx, "ImageData too large");
+    return ns_image_data_make(ctx, (int)aw, (int)ah, NULL);
 }
 
 JSValue
@@ -2122,9 +2123,10 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     JS_ToInt32(ctx, &sy, argv[1]);
     JS_ToInt32(ctx, &sw, argv[2]);
     JS_ToInt32(ctx, &sh, argv[3]);
-    if (sw < 0) { sx += sw; sw = -sw; }
-    if (sh < 0) { sy += sh; sh = -sh; }
-    if (sw == 0 || sh == 0) {
+    int64_t ox = sx, oy = sy, rw = sw, rh = sh;
+    if (rw < 0) { ox += rw; rw = -rw; }
+    if (rh < 0) { oy += rh; rh = -rh; }
+    if (rw == 0 || rh == 0) {
         /* A zero-area region yields an ImageData with an empty pixel
            buffer rather than null, so callers that immediately read
            .data (e.g. gif.js) don't fault. */
@@ -2140,9 +2142,10 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, obj, "data",   data);
         return obj;
     }
-    if (sw > 32767 || sh > 32767)
+    if (rw > 32767 || rh > 32767)
         return JS_ThrowRangeError(ctx, "getImageData region too large");
-    uint8_t *out = g_malloc0((size_t)sw * (size_t)sh * 4u);
+    int dw = (int)rw, dh = (int)rh;
+    uint8_t *out = g_malloc0((size_t)dw * (size_t)dh * 4u);
     /* A canvas with no backing surface (never drawn to) reads as
        transparent black, not null. */
     cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
@@ -2156,11 +2159,11 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
         cd = cairo_image_surface_get_data(surf);
     }
     if (cd)
-    for (int y = 0; y < sh; y++) {
-        int64_t srcy = (int64_t)sy + y;
-        for (int x = 0; x < sw; x++) {
-            int64_t srcx = (int64_t)sx + x;
-            uint8_t *dst = out + ((size_t)y * (size_t)sw + (size_t)x) * 4u;
+    for (int y = 0; y < dh; y++) {
+        int64_t srcy = oy + y;
+        for (int x = 0; x < dw; x++) {
+            int64_t srcx = ox + x;
+            uint8_t *dst = out + ((size_t)y * (size_t)dw + (size_t)x) * 4u;
             if (srcx < 0 || srcy < 0 || srcx >= cw || srcy >= ch) continue;
             const uint8_t *p = cd + (size_t)srcy * (size_t)cs + (size_t)srcx * 4u;
             uint8_t b = p[0], g = p[1], r = p[2], a = p[3];
@@ -2176,7 +2179,7 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
-    JSValue result = ns_image_data_make(ctx, sw, sh, out);
+    JSValue result = ns_image_data_make(ctx, dw, dh, out);
     g_free(out);
     return result;
 }
@@ -2199,12 +2202,14 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
     int dx = 0, dy = 0;
     JS_ToInt32(ctx, &dx, argv[1]);
     JS_ToInt32(ctx, &dy, argv[2]);
-    int rx = 0, ry = 0, rw = iw, rh = ih;
+    int64_t rx = 0, ry = 0, rw = iw, rh = ih;
     if (argc >= 7) {
-        JS_ToInt32(ctx, &rx, argv[3]);
-        JS_ToInt32(ctx, &ry, argv[4]);
-        JS_ToInt32(ctx, &rw, argv[5]);
-        JS_ToInt32(ctx, &rh, argv[6]);
+        int arx = 0, ary = 0, arw = 0, arh = 0;
+        JS_ToInt32(ctx, &arx, argv[3]);
+        JS_ToInt32(ctx, &ary, argv[4]);
+        JS_ToInt32(ctx, &arw, argv[5]);
+        JS_ToInt32(ctx, &arh, argv[6]);
+        rx = arx; ry = ary; rw = arw; rh = arh;
     }
     size_t byte_offset = 0, byte_len = 0, bpe = 0;
     JSValue ab = JS_GetTypedArrayBuffer(ctx, dv, &byte_offset, &byte_len, &bpe);
