@@ -14444,9 +14444,9 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     }
     if (!stopped && path->len > 0) {
         const ns_node *cur = path->pdata[0];
-        stopped = ns_invoke_listeners_at(js, cur, target, type, event, FALSE, &fired);
+        stopped = ns_invoke_listeners_at(js, cur, target, type, event, TRUE, &fired);
         if (!stopped)
-            stopped = ns_invoke_listeners_at(js, cur, target, type, event, TRUE, &fired);
+            stopped = ns_invoke_listeners_at(js, cur, target, type, event, FALSE, &fired);
     }
     JSValue bub = JS_GetPropertyStr(js->ctx, event, "bubbles");
     gboolean bubbles = JS_ToBool(js->ctx, bub) ? TRUE : FALSE;
