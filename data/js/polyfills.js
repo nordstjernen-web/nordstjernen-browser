@@ -481,6 +481,33 @@
         new Uint8Array(buf).set(b);
         return Promise.resolve(buf);
     };
+    Blob.prototype.stream = function () {
+        var bytes = this._b;
+        if (typeof ReadableStream === 'function') {
+            return new ReadableStream({
+                start: function (controller) {
+                    if (bytes && bytes.length)
+                        controller.enqueue(new Uint8Array(bytes));
+                    controller.close();
+                }
+            });
+        }
+        var done = false;
+        return {
+            getReader: function () {
+                return {
+                    read: function () {
+                        if (done)
+                            return Promise.resolve({ done: true, value: undefined });
+                        done = true;
+                        return Promise.resolve({ done: false, value: new Uint8Array(bytes) });
+                    },
+                    releaseLock: function () {},
+                    cancel: function () { done = true; return Promise.resolve(); }
+                };
+            }
+        };
+    };
     defineCtor('Blob', Blob);
 
     function File(parts, name, options) {
