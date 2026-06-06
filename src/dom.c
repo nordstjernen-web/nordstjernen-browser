@@ -857,8 +857,10 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
     }
     if (out) out->flags |= src->flags & NS_NODE_FRAGMENT;
     if (deep && out)
-        for (const ns_node *c = src->first_child; c; c = c->next_sibling)
-            ns_node_append_child(out, ns_node_clone_depth(c, TRUE, depth + 1));
+        for (const ns_node *c = src->first_child; c; c = c->next_sibling) {
+            ns_node *cc = ns_node_clone_depth(c, TRUE, depth + 1);
+            if (cc) ns_node_append_child(out, cc);
+        }
     return out;
 }
 

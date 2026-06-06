@@ -245,7 +245,8 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
             if (p->status == 200 && p->is_event_stream) {
                 p->opened = TRUE;
                 ns_es_post(p->es, ns_es_invoke_open, NULL, NULL);
-            } else if (p->status >= 200) {
+            } else if (p->status >= 200 &&
+                       (p->status < 300 || p->status >= 400)) {
                 p->fatal = TRUE;
             }
         }

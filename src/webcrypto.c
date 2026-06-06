@@ -171,7 +171,11 @@ ns_crypto_generate_keypair(const char *algo, const char *hash, const char *curve
         }
         EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
         BIGNUM *e = BN_new();
-        BN_set_word(e, pubexp ? pubexp : 65537);
+        if (!e || !BN_set_word(e, pubexp ? pubexp : 65537)) {
+            BN_free(e);
+            EVP_PKEY_CTX_free(ctx);
+            return ns_crypto_err(err, "OperationError: RSA keygen"), FALSE;
+        }
         if (!ctx || EVP_PKEY_keygen_init(ctx) <= 0 ||
             EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, modulus_bits) <= 0 ||
             EVP_PKEY_CTX_set1_rsa_keygen_pubexp(ctx, e) <= 0 ||
@@ -191,6 +195,11 @@ ns_crypto_generate_keypair(const char *algo, const char *hash, const char *curve
                                           extractable, usages);
     pk->pkey = pkey;
     sk->pkey = EVP_PKEY_dup(pkey);
+    if (!sk->pkey) {
+        ns_crypto_key_unref(pk);
+        ns_crypto_key_unref(sk);
+        return ns_crypto_err(err, "OperationError: key duplication"), FALSE;
+    }
     *pub = pk;
     *priv = sk;
     return TRUE;
