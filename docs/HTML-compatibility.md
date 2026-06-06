@@ -313,7 +313,7 @@ surface).
 | API | Status | Notes |
 |-----|:--:|------|
 | `MessageEvent` | ✅ | |
-| `WebSocket` (`ws://`/`wss://`) | ✅ | libcurl WebSocket; subprotocol negotiation |
+| `WebSocket` (`ws://`/`wss://`) | ✅ | uses libcurl's native WebSocket when the linked libcurl provides it, otherwise a built-in RFC 6455 client (handshake + masked framing, text/binary, fragmentation, ping/pong, close) over a `CONNECT_ONLY` (TLS) socket — so it works regardless of how libcurl was compiled; subprotocol negotiation |
 | Cross-document `postMessage` | 🟡 | delivers asynchronously as a `MessageEvent` (with `data`/`origin`/`source`) to `onmessage` and `addEventListener('message')`; the payload is `structuredClone`d so post-call mutation does not leak. Window targeting is approximate — all frames share one runtime and one listener list, so a message is not isolated to a single target frame |
 | `MessageChannel` / `MessagePort` | 🟡 | constructs two ports; same-context delivery |
 | Server-sent events (`EventSource`) | ✅ | libcurl-backed streaming client (`src/eventsource.c`): `onopen`/`onmessage`/`onerror`, named events via `addEventListener`, multi-line `data`, `id` → `lastEventId`, `retry`, automatic reconnection with `Last-Event-ID`, and `close()`; HTTPS pages refuse `http:` streams and `connect-src` CSP is enforced |

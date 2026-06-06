@@ -1,4 +1,4 @@
-/* Nordstjernen — minimal WebSocket client (libcurl-backed).
+/* Nordstjernen — WebSocket client: libcurl-native when available, else a built-in RFC 6455 framer over a CONNECT_ONLY socket.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "net.h"
+#include "security.h"
 
 #define NS_WS_RECV_BUF       8192
 #define NS_WS_MAX_MESSAGE    (8 * 1024 * 1024)
@@ -413,7 +414,7 @@ ns_ws_handshake_progress(void *clientp, curl_off_t dltotal, curl_off_t dlnow,
 }
 
 static gpointer
-ns_ws_worker(gpointer data)
+ns_ws_worker_curl(gpointer data)
 {
     ns_ws *ws = data;
     CURL *curl = curl_easy_init();
@@ -575,8 +576,505 @@ ns_ws_worker(gpointer data)
     return NULL;
 }
 
-gboolean
-ns_ws_available(void)
+typedef struct {
+    char    *connect_url;
+    char    *host_hdr;
+    char    *path;
+    gboolean tls;
+} ns_ws_target;
+
+static void
+ns_ws_target_clear(ns_ws_target *t)
+{
+    g_free(t->connect_url);
+    g_free(t->host_hdr);
+    g_free(t->path);
+}
+
+static gboolean
+ns_ws_parse_url(const char *url, ns_ws_target *out)
+{
+    gboolean tls;
+    const char *p = url;
+    if (g_ascii_strncasecmp(p, "wss://", 6) == 0)      { tls = TRUE;  p += 6; }
+    else if (g_ascii_strncasecmp(p, "ws://", 5) == 0)  { tls = FALSE; p += 5; }
+    else return FALSE;
+
+    const char *host_start = p;
+    while (*p && *p != '/' && *p != '?' && *p != '#') p++;
+    if (p == host_start) return FALSE;
+    char *hostport = g_strndup(host_start, (gsize)(p - host_start));
+
+    const char *path = *p ? p : "/";
+    const char *frag = strchr(path, '#');
+    char *path_dup = frag ? g_strndup(path, (gsize)(frag - path)) : g_strdup(path);
+    if (!*path_dup) { g_free(path_dup); path_dup = g_strdup("/"); }
+
+    char *host_hdr = g_strdup(hostport);
+    if (strchr(hostport, ']') == NULL) {
+        char *colon = strrchr(host_hdr, ':');
+        if (colon && ((tls && strcmp(colon, ":443") == 0) ||
+                      (!tls && strcmp(colon, ":80") == 0)))
+            *colon = '\0';
+    }
+
+    out->tls = tls;
+    out->connect_url = g_strdup_printf("%s://%s", tls ? "https" : "http", hostport);
+    out->host_hdr = host_hdr;
+    out->path = path_dup;
+    g_free(hostport);
+    return TRUE;
+}
+
+static void
+ns_ws_random_bytes(guint8 *buf, gsize len)
+{
+    if (ns_security_csprng_fill(buf, len)) return;
+    for (gsize i = 0; i < len; i++)
+        buf[i] = (guint8)g_random_int_range(0, 256);
+}
+
+static char *
+ns_ws_accept_for_key(const char *key)
+{
+    GChecksum *c = g_checksum_new(G_CHECKSUM_SHA1);
+    g_checksum_update(c, (const guchar *)key, (gssize)strlen(key));
+    g_checksum_update(c, (const guchar *)"258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
+    guint8 digest[20];
+    gsize dl = sizeof digest;
+    g_checksum_get_digest(c, digest, &dl);
+    g_checksum_free(c);
+    return g_base64_encode(digest, sizeof digest);
+}
+
+static gboolean
+ns_ws_raw_send_all(ns_ws *ws, CURL *curl, const guint8 *data, gsize len)
+{
+    gsize off = 0;
+    int stalls = 0;
+    while (off < len) {
+        if (g_atomic_int_get(&ws->exit_requested)) return FALSE;
+        size_t sent = 0;
+        CURLcode rc = curl_easy_send(curl, data + off, len - off, &sent);
+        if (rc == CURLE_AGAIN) {
+            if (++stalls > 5000) return FALSE;
+            g_usleep(2000);
+            continue;
+        }
+        if (rc != CURLE_OK) return FALSE;
+        off += sent;
+        if (sent == 0) { if (++stalls > 5000) return FALSE; g_usleep(2000); }
+        else stalls = 0;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_ws_raw_send_frame(ns_ws *ws, CURL *curl, int opcode,
+                     const guint8 *data, gsize len)
+{
+    guint8 hdr[14];
+    gsize hl = 0;
+    hdr[0] = (guint8)(0x80 | (opcode & 0x0f));
+    if (len < 126) {
+        hdr[1] = (guint8)(0x80 | len);
+        hl = 2;
+    } else if (len <= 0xffff) {
+        hdr[1] = 0x80 | 126;
+        hdr[2] = (guint8)((len >> 8) & 0xff);
+        hdr[3] = (guint8)(len & 0xff);
+        hl = 4;
+    } else {
+        hdr[1] = 0x80 | 127;
+        for (int i = 0; i < 8; i++)
+            hdr[2 + i] = (guint8)((((guint64)len) >> (56 - 8 * i)) & 0xff);
+        hl = 10;
+    }
+    guint8 mask[4];
+    ns_ws_random_bytes(mask, 4);
+    memcpy(hdr + hl, mask, 4);
+    hl += 4;
+    if (!ns_ws_raw_send_all(ws, curl, hdr, hl)) return FALSE;
+    if (len) {
+        guint8 *masked = g_malloc(len);
+        for (gsize i = 0; i < len; i++) masked[i] = data[i] ^ mask[i & 3];
+        gboolean ok = ns_ws_raw_send_all(ws, curl, masked, len);
+        g_free(masked);
+        return ok;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_ws_raw_send_close(ns_ws *ws, CURL *curl, int code, const char *reason)
+{
+    guint8 buf[125];
+    gsize len = 0;
+    if (code > 0) {
+        buf[0] = (guint8)((code >> 8) & 0xff);
+        buf[1] = (guint8)(code & 0xff);
+        len = 2;
+        if (reason && *reason) {
+            gsize rlen = strlen(reason);
+            if (rlen > sizeof buf - 2) rlen = sizeof buf - 2;
+            memcpy(buf + 2, reason, rlen);
+            len += rlen;
+        }
+    }
+    return ns_ws_raw_send_frame(ws, curl, 0x8, len ? buf : NULL, len);
+}
+
+static void
+ns_ws_drain_outgoing_manual(ns_ws *ws, CURL *curl, gboolean *want_close,
+                            int *close_code, char **close_reason)
+{
+    for (;;) {
+        g_mutex_lock(&ws->lock);
+        ns_ws_out_msg *m = g_queue_pop_head(&ws->out_queue);
+        g_mutex_unlock(&ws->lock);
+        if (!m) return;
+        switch (m->kind) {
+        case NS_WS_OUT_TEXT:
+            ns_ws_raw_send_frame(ws, curl, 0x1, m->data, m->len);
+            break;
+        case NS_WS_OUT_BINARY:
+            ns_ws_raw_send_frame(ws, curl, 0x2, m->data, m->len);
+            break;
+        case NS_WS_OUT_CLOSE:
+            *want_close = TRUE;
+            *close_code = m->close_code;
+            g_free(*close_reason);
+            *close_reason = m->data ? g_strndup((const char *)m->data, m->len) : NULL;
+            break;
+        }
+        g_free(m->data);
+        g_free(m);
+        if (*want_close) return;
+    }
+}
+
+static int
+ns_ws_raw_take_frame(GByteArray *in, gboolean *fin, int *opcode,
+                     guint8 **payload, gsize *plen)
+{
+    if (in->len < 2) return 0;
+    const guint8 *d = in->data;
+    gboolean masked = (d[1] & 0x80) != 0;
+    guint64 len = d[1] & 0x7f;
+    gsize pos = 2;
+    if (len == 126) {
+        if (in->len < 4) return 0;
+        len = ((guint64)d[2] << 8) | d[3];
+        pos = 4;
+    } else if (len == 127) {
+        if (in->len < 10) return 0;
+        len = 0;
+        for (int i = 0; i < 8; i++) len = (len << 8) | d[2 + i];
+        pos = 10;
+    }
+    if (len > NS_WS_MAX_MESSAGE) return -1;
+    gsize maskpos = pos;
+    if (masked) {
+        if (in->len < pos + 4) return 0;
+        pos += 4;
+    }
+    if (in->len < pos + len) return 0;
+
+    guint8 *pl = len ? g_malloc(len) : NULL;
+    if (masked) {
+        const guint8 *mk = d + maskpos;
+        for (guint64 i = 0; i < len; i++) pl[i] = d[pos + i] ^ mk[i & 3];
+    } else if (len) {
+        memcpy(pl, d + pos, len);
+    }
+    *fin = (d[0] & 0x80) != 0;
+    *opcode = d[0] & 0x0f;
+    *payload = pl;
+    *plen = len;
+    g_byte_array_remove_range(in, 0, pos + len);
+    return 1;
+}
+
+static gboolean
+ns_ws_manual_handshake(ns_ws *ws, CURL *curl, const ns_ws_target *t,
+                       GByteArray *leftover, char **err)
+{
+    guint8 rnd[16];
+    ns_ws_random_bytes(rnd, sizeof rnd);
+    char *key = g_base64_encode(rnd, sizeof rnd);
+
+    GString *req = g_string_new(NULL);
+    g_string_append_printf(req, "GET %s HTTP/1.1\r\n", t->path);
+    g_string_append_printf(req, "Host: %s\r\n", t->host_hdr);
+    g_string_append(req, "Upgrade: websocket\r\n");
+    g_string_append(req, "Connection: Upgrade\r\n");
+    g_string_append_printf(req, "Sec-WebSocket-Key: %s\r\n", key);
+    g_string_append(req, "Sec-WebSocket-Version: 13\r\n");
+    if (ws->origin && *ws->origin)
+        g_string_append_printf(req, "Origin: %s\r\n", ws->origin);
+    if (ws->protocols && ws->protocols->len > 0) {
+        g_string_append(req, "Sec-WebSocket-Protocol: ");
+        for (guint i = 0; i < ws->protocols->len; i++) {
+            if (i > 0) g_string_append(req, ", ");
+            g_string_append(req, g_ptr_array_index(ws->protocols, i));
+        }
+        g_string_append(req, "\r\n");
+    }
+    g_string_append_printf(req, "User-Agent: %s\r\n", NS_USER_AGENT);
+    g_string_append(req, "\r\n");
+
+    gboolean sent = ns_ws_raw_send_all(ws, curl, (const guint8 *)req->str, req->len);
+    g_string_free(req, TRUE);
+    if (!sent) {
+        g_free(key);
+        *err = g_strdup("WebSocket handshake send failed");
+        return FALSE;
+    }
+
+    GByteArray *resp = g_byte_array_new();
+    gint64 deadline = g_get_monotonic_time() + 15 * G_TIME_SPAN_SECOND;
+    gssize hdr_end = -1;
+    while (hdr_end < 0) {
+        if (g_atomic_int_get(&ws->exit_requested) ||
+            g_get_monotonic_time() > deadline) {
+            g_byte_array_free(resp, TRUE);
+            g_free(key);
+            *err = g_strdup("WebSocket handshake timed out");
+            return FALSE;
+        }
+        char tmp[2048];
+        size_t got = 0;
+        CURLcode rc = curl_easy_recv(curl, tmp, sizeof tmp, &got);
+        if (rc == CURLE_AGAIN) { g_usleep(5000); continue; }
+        if (rc != CURLE_OK || got == 0) {
+            g_byte_array_free(resp, TRUE);
+            g_free(key);
+            *err = g_strdup("WebSocket handshake connection closed");
+            return FALSE;
+        }
+        g_byte_array_append(resp, (guint8 *)tmp, got);
+        for (gsize i = 0; i + 3 < resp->len; i++) {
+            if (resp->data[i] == '\r' && resp->data[i + 1] == '\n' &&
+                resp->data[i + 2] == '\r' && resp->data[i + 3] == '\n') {
+                hdr_end = (gssize)i;
+                break;
+            }
+        }
+        if (resp->len > 65536) {
+            g_byte_array_free(resp, TRUE);
+            g_free(key);
+            *err = g_strdup("WebSocket handshake response too large");
+            return FALSE;
+        }
+    }
+
+    char *headers = g_strndup((const char *)resp->data, (gsize)hdr_end);
+    gsize body_off = (gsize)hdr_end + 4;
+    if (resp->len > body_off)
+        g_byte_array_append(leftover, resp->data + body_off, resp->len - body_off);
+    g_byte_array_free(resp, TRUE);
+
+    char *expected = ns_ws_accept_for_key(key);
+    g_free(key);
+
+    gboolean ok = FALSE;
+    char *status = strstr(headers, " 101");
+    char *eol = strchr(headers, '\n');
+    if (status && eol && status < eol) {
+        char *low = g_ascii_strdown(headers, -1);
+        char *acc = strstr(low, "sec-websocket-accept:");
+        if (acc) {
+            acc += strlen("sec-websocket-accept:");
+            while (*acc == ' ' || *acc == '\t') acc++;
+            char *end = acc;
+            while (*end && *end != '\r' && *end != '\n' && *end != ' ') end++;
+            char *got_accept = g_strndup(acc, (gsize)(end - acc));
+            char *exp_low = g_ascii_strdown(expected, -1);
+            ok = strcmp(got_accept, exp_low) == 0;
+            g_free(got_accept);
+            g_free(exp_low);
+        }
+        g_free(low);
+    }
+    g_free(expected);
+    g_free(headers);
+    if (!ok) *err = g_strdup("WebSocket handshake rejected by server");
+    return ok;
+}
+
+static gpointer
+ns_ws_worker_manual(gpointer data)
+{
+    ns_ws *ws = data;
+    ns_ws_target target = {0};
+    if (!ns_ws_parse_url(ws->url, &target)) {
+        ns_ws_dispatch_error(ws, "invalid WebSocket URL");
+        ns_ws_dispatch_close(ws, 1006, "invalid URL", FALSE);
+        ns_ws_unref(ws);
+        return NULL;
+    }
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        ns_ws_target_clear(&target);
+        ns_ws_dispatch_error(ws, "curl init failed");
+        ns_ws_dispatch_close(ws, 1006, "init failed", FALSE);
+        ns_ws_unref(ws);
+        return NULL;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, target.connect_url);
+    curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, target.tls ? 2L : 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_ws_handshake_progress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, ws);
+    char errbuf[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+
+    CURLcode rc = curl_easy_perform(curl);
+    if (rc != CURLE_OK || g_atomic_int_get(&ws->exit_requested)) {
+        const char *msg = rc != CURLE_OK
+            ? (errbuf[0] ? errbuf : curl_easy_strerror(rc)) : "aborted";
+        if (rc != CURLE_OK) ns_ws_dispatch_error(ws, msg);
+        ns_ws_dispatch_close(ws, 1006, msg, FALSE);
+        curl_easy_cleanup(curl);
+        ns_ws_target_clear(&target);
+        ns_ws_unref(ws);
+        return NULL;
+    }
+
+    GByteArray *inbuf = g_byte_array_new();
+    char *herr = NULL;
+    if (!ns_ws_manual_handshake(ws, curl, &target, inbuf, &herr)) {
+        ns_ws_dispatch_error(ws, herr ? herr : "handshake failed");
+        ns_ws_dispatch_close(ws, 1006, herr ? herr : "handshake failed", FALSE);
+        g_free(herr);
+        g_byte_array_free(inbuf, TRUE);
+        curl_easy_cleanup(curl);
+        ns_ws_target_clear(&target);
+        ns_ws_unref(ws);
+        return NULL;
+    }
+    ns_ws_target_clear(&target);
+    ns_ws_dispatch_open(ws);
+
+    GByteArray *msg = g_byte_array_new();
+    gboolean in_msg = FALSE, msg_is_text = FALSE;
+    gboolean clean_close = FALSE;
+    int close_code = 1006;
+    char *close_reason = NULL;
+    gboolean want_close = FALSE;
+
+    while (!g_atomic_int_get(&ws->exit_requested)) {
+        ns_ws_drain_outgoing_manual(ws, curl, &want_close, &close_code, &close_reason);
+        if (want_close) {
+            g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+            ns_ws_raw_send_close(ws, curl, close_code, close_reason);
+            clean_close = TRUE;
+            break;
+        }
+
+        char tmp[NS_WS_RECV_BUF];
+        size_t got = 0;
+        rc = curl_easy_recv(curl, tmp, sizeof tmp, &got);
+        if (rc == CURLE_AGAIN) {
+            ns_ws_worker_wait(ws);
+            continue;
+        }
+        if (rc != CURLE_OK || got == 0) {
+            const char *m = (rc != CURLE_OK && errbuf[0]) ? errbuf
+                : (rc != CURLE_OK ? curl_easy_strerror(rc) : "connection closed");
+            ns_ws_dispatch_error(ws, m);
+            close_code = 1006;
+            g_free(close_reason);
+            close_reason = g_strdup(m);
+            break;
+        }
+        g_byte_array_append(inbuf, (guint8 *)tmp, got);
+
+        gboolean fatal = FALSE;
+        for (;;) {
+            gboolean fin = FALSE;
+            int opcode = 0;
+            guint8 *pl = NULL;
+            gsize plen = 0;
+            int take = ns_ws_raw_take_frame(inbuf, &fin, &opcode, &pl, &plen);
+            if (take == 0) break;
+            if (take < 0) {
+                g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                ns_ws_raw_send_close(ws, curl, 1009, "message too big");
+                close_code = 1009;
+                g_free(close_reason);
+                close_reason = g_strdup("message too big");
+                fatal = TRUE;
+                break;
+            }
+            if (opcode == 0x8) {
+                int code = 1005;
+                if (plen >= 2) code = (pl[0] << 8) | pl[1];
+                char *reason = (plen > 2) ? g_strndup((char *)pl + 2, plen - 2) : NULL;
+                g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                ns_ws_raw_send_close(ws, curl, ns_ws_echo_close_code(code), NULL);
+                clean_close = TRUE;
+                close_code = code;
+                g_free(close_reason);
+                close_reason = reason;
+                g_free(pl);
+                fatal = TRUE;
+                break;
+            } else if (opcode == 0x9) {
+                ns_ws_raw_send_frame(ws, curl, 0xA, pl, plen > 125 ? 125 : plen);
+            } else if (opcode == 0xA) {
+                /* pong: ignore */
+            } else if (opcode == 0x1 || opcode == 0x2) {
+                if (in_msg) { fatal = TRUE; close_code = 1002; g_free(pl); break; }
+                in_msg = TRUE;
+                msg_is_text = (opcode == 0x1);
+                g_byte_array_set_size(msg, 0);
+                if (plen) g_byte_array_append(msg, pl, plen);
+            } else if (opcode == 0x0) {
+                if (!in_msg) { fatal = TRUE; close_code = 1002; g_free(pl); break; }
+                if (plen) g_byte_array_append(msg, pl, plen);
+            }
+            if ((opcode == 0x0 || opcode == 0x1 || opcode == 0x2) && fin && in_msg) {
+                if (msg_is_text && msg->len > 0 &&
+                    !g_utf8_validate((const char *)msg->data, msg->len, NULL)) {
+                    g_atomic_int_set(&ws->state, NS_WS_STATE_CLOSING);
+                    ns_ws_raw_send_close(ws, curl, 1007, "invalid utf-8");
+                    close_code = 1007;
+                    g_free(close_reason);
+                    close_reason = g_strdup("invalid utf-8");
+                    fatal = TRUE;
+                } else {
+                    ns_ws_dispatch_message(ws, msg_is_text, msg->data, msg->len);
+                }
+                in_msg = FALSE;
+                g_byte_array_set_size(msg, 0);
+            }
+            g_free(pl);
+            if (fatal) break;
+        }
+        if (fatal) break;
+    }
+
+    ns_ws_dispatch_close(ws, close_code, close_reason ? close_reason : "",
+                         clean_close);
+    g_free(close_reason);
+    g_byte_array_free(inbuf, TRUE);
+    g_byte_array_free(msg, TRUE);
+    curl_easy_cleanup(curl);
+    ns_ws_unref(ws);
+    return NULL;
+}
+
+static gboolean
+ns_ws_curl_native(void)
 {
     const curl_version_info_data *v = curl_version_info(CURLVERSION_NOW);
     if (!v || !v->protocols) return FALSE;
@@ -585,6 +1083,20 @@ ns_ws_available(void)
         if (g_ascii_strcasecmp(*p, "wss") == 0) return TRUE;
     }
     return FALSE;
+}
+
+static gpointer
+ns_ws_worker(gpointer data)
+{
+    if (ns_ws_curl_native())
+        return ns_ws_worker_curl(data);
+    return ns_ws_worker_manual(data);
+}
+
+gboolean
+ns_ws_available(void)
+{
+    return TRUE;
 }
 
 ns_ws *
