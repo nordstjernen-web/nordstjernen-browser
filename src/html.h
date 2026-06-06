@@ -19,6 +19,8 @@ ns_node *ns_html_parse_fragment_in(const char *context_tag,
 
 gboolean ns_html_is_void(const char *tag);
 
+gboolean ns_html_is_raw_text(const char *tag);
+
 void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
 
 char *ns_html_escape_text(const char *s);
