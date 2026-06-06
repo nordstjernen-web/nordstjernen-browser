@@ -7449,13 +7449,135 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     return out;
 }
 
+static gboolean
+ns_css_supports_decl(const char *prop, const char *value)
+{
+    if (!prop || !value) return FALSE;
+    while (g_ascii_isspace((guchar)*prop)) prop++;
+    while (g_ascii_isspace((guchar)*value)) value++;
+    if (!*prop || !*value) return FALSE;
+    char *css = g_strdup_printf("x{%s:%s}", prop, value);
+    ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, -1);
+    g_free(css);
+    gboolean ok = FALSE;
+    if (sh && sh->rules && sh->rules->len > 0) {
+        ns_css_rule *r = g_ptr_array_index(sh->rules, 0);
+        if (r) {
+            if (r->decls && r->decls->len > 0) ok = TRUE;
+            else if (r->vars && g_hash_table_size(r->vars) > 0) ok = TRUE;
+            else if (r->pending && r->pending->len > 0) ok = TRUE;
+        }
+    }
+    if (sh) ns_css_stylesheet_free(sh);
+    return ok;
+}
+
+static const char *
+ns_css_supports_top_colon(const char *s)
+{
+    int depth = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p == '(') depth++;
+        else if (*p == ')') { if (depth) depth--; }
+        else if (*p == ':' && depth == 0) return p;
+    }
+    return NULL;
+}
+
+static int
+ns_css_eval_supports_condition(const char *s)
+{
+    if (!s) return -1;
+    while (g_ascii_isspace((guchar)*s)) s++;
+    const char *end = s + strlen(s);
+    while (end > s && g_ascii_isspace((guchar)end[-1])) end--;
+    if (end == s) return -1;
+    gsize len = (gsize)(end - s);
+
+    if (len > 3 && g_ascii_strncasecmp(s, "not", 3) == 0 &&
+        (g_ascii_isspace((guchar)s[3]) || s[3] == '(')) {
+        int r = ns_css_eval_supports_condition(s + 3);
+        return r < 0 ? -1 : !r;
+    }
+
+    int depth = 0;
+    for (gsize i = 0; i < len; i++) {
+        char c = s[i];
+        if (c == '(') depth++;
+        else if (c == ')') { if (depth) depth--; }
+        else if (depth == 0 && i > 0 && g_ascii_isspace((guchar)s[i - 1])) {
+            if (g_ascii_strncasecmp(s + i, "and", 3) == 0 &&
+                i + 3 < len && g_ascii_isspace((guchar)s[i + 3])) {
+                char *left = g_strndup(s, i);
+                int lr = ns_css_eval_supports_condition(left);
+                g_free(left);
+                int rr = ns_css_eval_supports_condition(s + i + 3);
+                if (lr < 0 || rr < 0) return -1;
+                return lr && rr;
+            }
+            if (g_ascii_strncasecmp(s + i, "or", 2) == 0 &&
+                i + 2 < len && g_ascii_isspace((guchar)s[i + 2])) {
+                char *left = g_strndup(s, i);
+                int lr = ns_css_eval_supports_condition(left);
+                g_free(left);
+                int rr = ns_css_eval_supports_condition(s + i + 2);
+                if (lr < 0 || rr < 0) return -1;
+                return lr || rr;
+            }
+        }
+    }
+
+    if (s[0] == '(' && s[len - 1] == ')') {
+        char *inner = g_strndup(s + 1, len - 2);
+        int r;
+        const char *colon = ns_css_supports_top_colon(inner);
+        if (colon) {
+            char *pn = g_strndup(inner, (gsize)(colon - inner));
+            char *pv = g_strdup(colon + 1);
+            r = ns_css_supports_decl(g_strstrip(pn), g_strstrip(pv)) ? 1 : 0;
+            g_free(pn);
+            g_free(pv);
+        } else if (strchr(inner, '(')) {
+            r = ns_css_eval_supports_condition(inner);
+        } else {
+            r = -1;
+        }
+        g_free(inner);
+        return r;
+    }
+
+    const char *colon = ns_css_supports_top_colon(s);
+    if (colon) {
+        char *pn = g_strndup(s, (gsize)(colon - s));
+        char *pv = g_strndup(colon + 1, (gsize)(end - (colon + 1)));
+        int r = ns_css_supports_decl(g_strstrip(pn), g_strstrip(pv)) ? 1 : 0;
+        g_free(pn);
+        g_free(pv);
+        return r;
+    }
+    return -1;
+}
+
 static JSValue
 ns_css_supports(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argv;
+    (void)this_val;
     if (argc < 1) return JS_FALSE;
-    return JS_TRUE;
+    gboolean result;
+    if (argc >= 2) {
+        const char *prop = JS_ToCString(ctx, argv[0]);
+        const char *val  = JS_ToCString(ctx, argv[1]);
+        result = ns_css_supports_decl(prop, val);
+        if (prop) JS_FreeCString(ctx, prop);
+        if (val) JS_FreeCString(ctx, val);
+    } else {
+        const char *cond = JS_ToCString(ctx, argv[0]);
+        int r = cond ? ns_css_eval_supports_condition(cond) : -1;
+        if (cond) JS_FreeCString(ctx, cond);
+        result = (r != 0);
+    }
+    return result ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
