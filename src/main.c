@@ -359,8 +359,6 @@ ns_window_js_relayout_now(gpointer user_data)
     ns_window *w = user_data;
     if (!w) return G_SOURCE_REMOVE;
     w->js_relayout_idle_id = 0;
-    if (w->js && w->layout_tree)
-        ns_js_fire_media_load_events(w->js, w->layout_tree);
     ns_window_drop_layout(w);
     w->layout_dirty = TRUE;
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);

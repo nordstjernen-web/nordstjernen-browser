@@ -409,6 +409,7 @@ typedef struct ns_listener {
 typedef struct ns_timer {
     ns_js   *js;
     JSValue  cb;
+    char    *code;
     int      id;
     guint    glib_source;
     gboolean is_interval;
@@ -776,6 +777,7 @@ ns_timer_free(gpointer data)
     if (!t) return;
     if (t->glib_source) g_source_remove(t->glib_source);
     JS_FreeValue(t->js->ctx, t->cb);
+    g_free(t->code);
     for (int i = 0; i < t->extra_args_count; i++)
         JS_FreeValue(t->js->ctx, t->extra_args[i]);
     g_free(t->extra_args);
@@ -883,7 +885,10 @@ ns_timer_fire(gpointer data)
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     JSValue ret;
-    if (t->is_idle) {
+    if (t->code) {
+        ret = JS_Eval(js->ctx, t->code, strlen(t->code), "<timer>",
+                      JS_EVAL_TYPE_GLOBAL);
+    } else if (t->is_idle) {
         JSValue deadline = JS_NewObject(js->ctx);
         JS_SetPropertyStr(js->ctx, deadline, "didTimeout", JS_FALSE);
         JS_SetPropertyStr(js->ctx, deadline, "timeRemaining",
@@ -934,7 +939,14 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
 {
     (void)this_val;
     if (!js_from_ctx(ctx) || argc < 1) return JS_NewInt32(ctx, 0);
-    if (!JS_IsFunction(ctx, argv[0])) return JS_NewInt32(ctx, 0);
+    gboolean is_function = JS_IsFunction(ctx, argv[0]);
+    char *code = NULL;
+    if (!is_function) {
+        const char *s = JS_ToCString(ctx, argv[0]);
+        if (!s) return JS_NewInt32(ctx, 0);
+        code = g_strdup(s);
+        JS_FreeCString(ctx, s);
+    }
     int32_t ms = 0;
     if (argc >= 2) JS_ToInt32(ctx, &ms, argv[1]);
     if (ms < 0) ms = 0;
@@ -942,13 +954,15 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     ns_js *js = js_from_ctx(ctx);
     int nesting = js->timer_nesting_level + 1;
     if (nesting > 5 && ms < 4) ms = 4;
+    if (is_interval && ms < 4) ms = 4;
 
     ns_timer *t = g_new0(ns_timer, 1);
     t->js = js;
-    t->cb = JS_DupValue(ctx, argv[0]);
+    t->cb = is_function ? JS_DupValue(ctx, argv[0]) : JS_UNDEFINED;
+    t->code = code;
     t->is_interval = is_interval;
     t->nesting_level = nesting;
-    if (argc > 2) {
+    if (is_function && argc > 2) {
         int n_extra = argc - 2;
         if (n_extra > 64) n_extra = 64;
         t->extra_args_count = n_extra;
@@ -2523,6 +2537,33 @@ ns_element_reflect_str_set(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_js_img_src_layout_neutral(const ns_node *n)
+{
+    if (!n || !n->name || strcmp(n->name, "img") != 0) return FALSE;
+    const char *w = ns_element_get_attr(n, "width");
+    const char *h = ns_element_get_attr(n, "height");
+    return w && *w && h && *h;
+}
+
+static void
+ns_js_set_attr_recorded_paint_only(ns_js *js, ns_node *n,
+                                   const char *name, const char *value)
+{
+    if (!n || !name) return;
+    const char *new_value = value ? value : "";
+    const char *old = ns_element_get_attr(n, name);
+    if (old && strcmp(old, new_value) == 0) return;
+    char *old_copy = old ? g_strdup(old) : NULL;
+    ns_element_set_attr(n, name, new_value);
+    if (js) {
+        ns_js_record_attr_change(js, n, name, old_copy);
+        ns_ce_attr_changed(js, n, name, old_copy, new_value);
+        if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+    }
+    g_free(old_copy);
+}
+
 static JSValue
 ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, int magic)
 {
@@ -2538,13 +2579,21 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
     }
     const char *s = JS_ToCString(ctx, val);
     if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, names[magic], s);
-        if (magic == 3 && n->name && strcmp(n->name, "img") == 0) {
+        ns_js *js = js_from_ctx(ctx);
+        const char *old = ns_element_get_attr(n, names[magic]);
+        gboolean changed = !old || strcmp(old, s) != 0;
+        gboolean img_src_paint_only =
+            changed && magic == 3 && ns_js_img_src_layout_neutral(n);
+        if (img_src_paint_only)
+            ns_js_set_attr_recorded_paint_only(js, n, names[magic], s);
+        else
+            ns_js_set_attr_recorded(js, n, names[magic], s);
+        if (changed && magic == 3 && n->name && strcmp(n->name, "img") == 0) {
             n->flags &= ~NS_NODE_IMG_LOAD_FIRED;
-            ns_js_start_image_load(js_from_ctx(ctx), n, s);
+            ns_js_start_image_load(js, n, s);
         }
-        if (magic == 3 && n->name && strcmp(n->name, "iframe") == 0)
-            ns_js_schedule_iframe_load(js_from_ctx(ctx), n);
+        if (changed && magic == 3 && n->name && strcmp(n->name, "iframe") == 0)
+            ns_js_schedule_iframe_load(js, n);
         JS_FreeCString(ctx, s);
     }
     return JS_UNDEFINED;
@@ -4028,6 +4077,50 @@ ns_mark_scripts_already_started(ns_node *root)
         ns_mark_scripts_already_started(c);
 }
 
+static gboolean
+ns_js_attrs_empty(const ns_node *n)
+{
+    return !n || !n->attrs;
+}
+
+static gboolean
+ns_js_try_update_same_shape_text_html(ns_js *js, ns_node *target,
+                                      const ns_node *fragment)
+{
+    if (!target || !fragment) return FALSE;
+    gboolean changed = FALSE;
+    ns_node *oldc = target->first_child;
+    const ns_node *newc = fragment->first_child;
+    while (oldc && newc) {
+        if (oldc->kind != newc->kind) return FALSE;
+        if (oldc->kind == NS_NODE_TEXT) {
+            const char *old_text = oldc->text ? oldc->text : "";
+            const char *new_text = newc->text ? newc->text : "";
+            if (strlen(old_text) != strlen(new_text)) return FALSE;
+            if (strcmp(old_text, new_text) != 0) {
+                char *old_copy = g_strdup(old_text);
+                ns_node_replace_text_owned(oldc, g_strdup(new_text));
+                if (js) ns_js_record_character_data(js, oldc, old_copy);
+                g_free(old_copy);
+                changed = TRUE;
+            }
+        } else if (oldc->kind == NS_NODE_ELEMENT) {
+            if (!oldc->name || !newc->name) return FALSE;
+            if (strcmp(oldc->name, newc->name) != 0) return FALSE;
+            if (!ns_js_attrs_empty(oldc) || !ns_js_attrs_empty(newc)) return FALSE;
+            if (oldc->first_child || newc->first_child) return FALSE;
+        } else {
+            return FALSE;
+        }
+        oldc = oldc->next_sibling;
+        newc = newc->next_sibling;
+    }
+    if (oldc || newc) return FALSE;
+    if (changed && js && js->repaint_cb)
+        js->repaint_cb(js->repaint_user_data);
+    return TRUE;
+}
+
 static JSValue
 ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -4036,10 +4129,14 @@ ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    ns_element_clear_children_recorded(_j, n);
     ns_node *fragment = ns_html_parse_fragment_in(n->name, s, -1);
     JS_FreeCString(ctx, s);
     if (fragment) {
+        if (ns_js_try_update_same_shape_text_html(_j, n, fragment)) {
+            ns_node_free(fragment);
+            return JS_UNDEFINED;
+        }
+        ns_element_clear_children_recorded(_j, n);
         ns_mark_scripts_already_started(fragment);
         ns_node *c = fragment->first_child;
         while (c) {
@@ -13083,13 +13180,15 @@ static void
 ns_js_set_attr_recorded(ns_js *js, ns_node *n, const char *name, const char *value)
 {
     if (!n || !name) return;
+    const char *new_value = value ? value : "";
     const char *old = ns_element_get_attr(n, name);
+    if (old && strcmp(old, new_value) == 0) return;
     char *old_copy = old ? g_strdup(old) : NULL;
-    ns_element_set_attr(n, name, value ? value : "");
+    ns_element_set_attr(n, name, new_value);
     if (js) {
         js->mutated = TRUE;
         ns_js_record_attr_change(js, n, name, old_copy);
-        ns_ce_attr_changed(js, n, name, old_copy, value ? value : "");
+        ns_ce_attr_changed(js, n, name, old_copy, new_value);
     }
     g_free(old_copy);
 }
@@ -15995,21 +16094,29 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     const char *val  = JS_ToCString(ctx, argv[1]);
     if (name && val) {
         const char *old = ns_element_get_attr(n, name);
+        gboolean changed = !old || strcmp(old, val) != 0;
         char *old_copy = old ? g_strdup(old) : NULL;
-        ns_element_set_attr(n, name, val);
         ns_js *_j = js_from_ctx(ctx);
-        if (_j) {
-            _j->mutated = TRUE;
+        gboolean img_src_paint_only =
+            changed && g_ascii_strcasecmp(name, "src") == 0 &&
+            ns_js_img_src_layout_neutral(n);
+        if (changed) {
+            ns_element_set_attr(n, name, val);
+        }
+        if (changed && _j) {
+            if (!img_src_paint_only) _j->mutated = TRUE;
             ns_js_record_attr_change(_j, n, name, old_copy);
+            if (img_src_paint_only && _j->repaint_cb)
+                _j->repaint_cb(_j->repaint_user_data);
         }
         if (g_ascii_strcasecmp(name, "open") == 0 && !old_copy &&
             ns_node_is_element_named(n, "details"))
             ns_js_details_toggle_open(_j, n, TRUE);
         g_free(old_copy);
-        if (g_ascii_strcasecmp(name, "src") == 0 &&
+        if (changed && g_ascii_strcasecmp(name, "src") == 0 &&
             n->name && strcmp(n->name, "img") == 0)
             ns_js_start_image_load(js_from_ctx(ctx), n, val);
-        if ((g_ascii_strcasecmp(name, "src") == 0 ||
+        if (changed && (g_ascii_strcasecmp(name, "src") == 0 ||
              g_ascii_strcasecmp(name, "srcdoc") == 0) &&
             n->name && strcmp(n->name, "iframe") == 0)
             ns_js_schedule_iframe_load(js_from_ctx(ctx), n);
@@ -27354,10 +27461,47 @@ ns_js_drain_deferred_scripts(ns_js *js)
 }
 
 static void
+ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs)
+{
+    const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
+    if (srcdoc && *srcdoc) {
+        ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
+        ns_element_set_attr(iframe, "data-nd-frame-url", origin);
+        return;
+    }
+    ns_element_set_attr(iframe, "data-nd-frame-srcdoc", "");
+    ns_element_set_attr(iframe, "data-nd-frame-url",
+                        abs && *abs ? abs : origin);
+}
+
+static gboolean
+ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
+{
+    if (!js || !iframe) return FALSE;
+    if (!ns_element_get_attr(iframe, "data-nd-frame-loaded")) return FALSE;
+    const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
+    const char *loaded_srcdoc = ns_element_get_attr(iframe, "data-nd-frame-srcdoc");
+    if (srcdoc && *srcdoc)
+        return loaded_srcdoc && strcmp(loaded_srcdoc, srcdoc) == 0;
+
+    const char *src = ns_element_get_attr(iframe, "src");
+    if (!src || !*src || g_str_has_prefix(src, "about:")) return FALSE;
+    const char *origin = (js->current_url && *js->current_url)
+                       ? js->current_url : "inline";
+    char *abs = ns_url_resolve(origin, src);
+    if (!abs) return FALSE;
+    const char *loaded_url = ns_element_get_attr(iframe, "data-nd-frame-url");
+    gboolean same = loaded_url && strcmp(loaded_url, abs) == 0;
+    g_free(abs);
+    return same;
+}
+
+static void
 ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe)
 {
     if (!js || !iframe || js->halted) return;
     if (!ns_node_is_element_named(iframe, "iframe")) return;
+    if (ns_js_iframe_source_loaded(js, iframe)) return;
     if (!js->pending_iframe_loads)
         js->pending_iframe_loads = g_ptr_array_new();
     for (guint i = 0; i < js->pending_iframe_loads->len; i++)
@@ -27543,14 +27687,15 @@ ns_js_skip_block_comment(const char *p, const char *end)
     return end;
 }
 
-static void
+static const char *
 ns_js_iframe_collect_var_names(GPtrArray *names, GHashTable *seen,
                                const char *p, const char *end)
 {
     int depth = 0;
     while (p < end) {
         p = ns_js_skip_space(p, end);
-        if (p >= end || *p == ';') return;
+        if (p >= end) return p;
+        if (*p == ';') return p + 1;
         if (*p == '\'' || *p == '"' || *p == '`') {
             p = ns_js_skip_quoted(p, end, *p);
             continue;
@@ -27596,6 +27741,7 @@ ns_js_iframe_collect_var_names(GPtrArray *names, GHashTable *seen,
         else if (depth == 0 && *p == ',') p++;
         else p++;
     }
+    return p;
 }
 
 static void
@@ -27630,8 +27776,7 @@ ns_js_iframe_collect_exposed_names(GPtrArray *names, GHashTable *seen,
             continue;
         }
         if (ns_js_word_at(start, p, end, "var")) {
-            ns_js_iframe_collect_var_names(names, seen, p + 3, end);
-            p += 3;
+            p = ns_js_iframe_collect_var_names(names, seen, p + 3, end);
             continue;
         }
         p++;
@@ -28190,7 +28335,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_js_record_child_change(js, iframe, content_root, NULL, NULL, NULL);
 
         const char *iorigin = abs && *abs ? abs : origin;
-        ns_element_set_attr(iframe, "data-nd-frame-url", iorigin);
+        ns_js_mark_iframe_source(iframe, origin, abs);
         JSValue realm_doc = ns_iframe_make_realm_doc(js->ctx, content_root,
                                                      sandbox);
         JSValue realm_scope = JS_NULL;
