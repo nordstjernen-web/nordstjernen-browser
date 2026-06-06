@@ -445,7 +445,7 @@ ns_crypto_bn_export(const EVP_PKEY *pkey, const char *param, gsize *out_len)
     guint8 *out = g_malloc(n ? n : 1);
     BN_bn2bin(bn, out);
     *out_len = n;
-    BN_free(bn);
+    BN_clear_free(bn);
     return out;
 }
 
@@ -712,12 +712,14 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
 
     EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
     int outl = 0, finl = 0;
-    gsize cap = len + 32 + (gsize)tag_len;
-    guint8 *out = g_malloc(cap ? cap : 1);
+    guint8 *out = NULL;
     gsize produced = 0;
     const guint8 *ct = data;
     gsize ct_len = len;
     guint8 tagbuf[16];
+
+    if (!ctx || len > G_MAXSIZE - 64) goto fail;
+    out = g_malloc(len + 32 + (gsize)tag_len);
 
     if (!EVP_CipherInit_ex(ctx, cipher, NULL, NULL, NULL, enc)) goto fail;
     if (gcm) {

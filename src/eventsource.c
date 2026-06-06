@@ -9,6 +9,9 @@
 #include <curl/curl.h>
 #include <string.h>
 
+#define NS_ES_MAX_LINE  (1 << 20)
+#define NS_ES_MAX_EVENT (8 << 20)
+
 struct ns_es {
     char     *url;
     char     *origin;
@@ -183,8 +186,12 @@ ns_es_process_line(ns_es_parse *p, const char *line)
         value = g_strdup("");
     }
     if (!strcmp(field, "data")) {
-        g_string_append(p->data, value);
-        g_string_append_c(p->data, '\n');
+        if (p->data->len >= NS_ES_MAX_EVENT)
+            p->fatal = TRUE;
+        else {
+            g_string_append(p->data, value);
+            g_string_append_c(p->data, '\n');
+        }
     } else if (!strcmp(field, "event")) {
         g_free(p->event_type);
         p->event_type = *value ? g_strdup(value) : NULL;
@@ -220,6 +227,7 @@ ns_es_feed(ns_es_parse *p, const char *buf, gsize len)
             ns_es_process_line(p, (const char *)p->line->data);
             g_byte_array_set_size(p->line, 0);
         } else {
+            if (p->line->len >= NS_ES_MAX_LINE) { p->fatal = TRUE; return; }
             g_byte_array_append(p->line, (const guint8 *)&c, 1);
         }
     }

@@ -1038,6 +1038,7 @@ ns_idb_backend_databases(JSContext *ctx, JSValueConst this_val,
             if (db) sqlite3_close(db);
             continue;
         }
+        ns_idb_configure(db);
         g_autofree char *name = ns_idb_get_meta(db, "name");
         int64_t version = ns_idb_get_version(db);
         sqlite3_close(db);
