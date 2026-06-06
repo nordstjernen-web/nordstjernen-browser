@@ -33,6 +33,7 @@
 #include "eventsource.h"
 #include "security.h"
 #include "video.h"
+#include "wasm.h"
 #include "webcrypto.h"
 #include "webgl.h"
 #include "ws.h"
@@ -27033,7 +27034,6 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
 
     ns_set_if_missing(ctx, global, "crossOriginIsolated", JS_FALSE);
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
-    ns_set_if_missing(ctx, global, "WebAssembly", JS_NewObject(ctx));
     ns_set_if_missing(ctx, global, "Temporal", JS_NewObject(ctx));
 
     ns_bind_fn_if_missing(ctx, global, "captureEvents", ns_event_noop, 0);
@@ -28165,6 +28165,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     else
         JS_FreeValue(ctx, subtle);
     JS_FreeValue(ctx, crypto_obj);
+
+    ns_wasm_install(ctx, global);
 
     JSValue local_obj = JS_NewObjectClass(ctx, ns_storage_class_id);
     JS_SetOpaque(local_obj, js->local_storage);

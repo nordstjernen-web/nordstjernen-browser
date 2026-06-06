@@ -63,6 +63,7 @@ nordstjernen_engine_sources = files(
   'tab_worker.c',
   'texture.c',
   'video.c',
+  'wasm.c',
   'webcrypto.c',
   'webgl.c',
   'ws.c',
@@ -118,6 +119,7 @@ if is_android
     libwuffs,
     libuchardet,
     liblexbor,
+    libwamr,
     sqlite3,
     zlib,
   ]
@@ -133,6 +135,7 @@ else
     libwuffs,
     libuchardet,
     liblexbor,
+    libwamr,
     librsvg,
     sqlite3,
     zlib,

@@ -219,6 +219,7 @@ add_project_arguments('-DNS_BUILD_DATE="' + build_date + '"', language: 'c')
 
 subdir('src/lexbor')
 subdir('src/quickjs')
+subdir('src/wamr')
 
 install_data(
   'data/icons/hicolor/scalable/apps/nordstjernen.svg',
