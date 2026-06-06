@@ -82,6 +82,9 @@ void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);
 
 gboolean ns_js_run_animation_frame(ns_js *js);
 
+typedef struct ns_anim ns_anim;
+void ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim);
+
 void     ns_js_set_style_table(ns_js *js, GHashTable *styles);
 
 struct ns_box;

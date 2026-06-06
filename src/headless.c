@@ -319,6 +319,7 @@ settle_raf_tick(gpointer user_data)
     gint64 now = g_get_monotonic_time();
     if (fc->image_cache) ns_image_cache_tick(fc->image_cache, now);
     if (fc->anim) ns_anim_tick(fc->anim, now);
+    if (fc->anim && fc->js) ns_js_dispatch_anim_events(fc->js, fc->anim);
     if (fc->js && ns_js_run_animation_frame(fc->js)) {
         if (ns_js_consume_mutated(fc->js) &&
             now - s->last_flush_us >= 2000000) {

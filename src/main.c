@@ -724,6 +724,8 @@ ns_window_raf_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer ud)
         redraw = TRUE;
     if (w->anim && ns_anim_tick(w->anim, now_us))
         redraw = TRUE;
+    if (w->anim && w->js)
+        ns_js_dispatch_anim_events(w->js, w->anim);
     if (w->js && ns_js_run_animation_frame(w->js)) {
         if (ns_js_consume_mutated(w->js)) {
             ns_window_js_mutated(w);

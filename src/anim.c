@@ -22,6 +22,7 @@ typedef struct ns_anim_color_chan {
 } ns_anim_color_chan;
 
 typedef struct ns_anim_state {
+    const ns_node *node;
     gboolean has_last_opacity;
     double   last_opacity;
     gboolean has_last_transform;
@@ -64,12 +65,45 @@ typedef struct ns_anim_state {
     guint8   anim_bg_value[4];
 } ns_anim_state;
 
+typedef struct {
+    const ns_node *node;
+    const char    *type;
+    char          *name;
+    double         elapsed_ms;
+} ns_anim_event;
+
 struct ns_anim {
     GHashTable *states;
     GHashTable *active;
     GHashTable *keyframes;
     int         active_count;
+    GArray     *events;
 };
+
+static void
+anim_emit(ns_anim *a, const ns_node *node, const char *type,
+          const char *name, double elapsed_ms)
+{
+    if (!a || !node) return;
+    if (!a->events)
+        a->events = g_array_new(FALSE, FALSE, sizeof(ns_anim_event));
+    ns_anim_event e = { node, type, g_strdup(name ? name : ""), elapsed_ms };
+    g_array_append_val(a->events, e);
+}
+
+void
+ns_anim_drain_events(ns_anim *a, ns_anim_event_cb cb, gpointer user)
+{
+    if (!a || !a->events || a->events->len == 0) return;
+    GArray *evs = a->events;
+    a->events = NULL;
+    for (guint i = 0; i < evs->len; i++) {
+        ns_anim_event *e = &g_array_index(evs, ns_anim_event, i);
+        if (cb) cb(e->node, e->type, e->name, e->elapsed_ms, user);
+        g_free(e->name);
+    }
+    g_array_free(evs, TRUE);
+}
 
 static void
 ns_anim_state_free(gpointer data)
@@ -123,6 +157,11 @@ ns_anim_free(ns_anim *a)
     g_hash_table_destroy(a->active);
     g_hash_table_destroy(a->states);
     g_hash_table_destroy(a->keyframes);
+    if (a->events) {
+        for (guint i = 0; i < a->events->len; i++)
+            g_free(g_array_index(a->events, ns_anim_event, i).name);
+        g_array_free(a->events, TRUE);
+    }
     g_free(a);
 }
 
@@ -318,6 +357,7 @@ state_for(ns_anim *a, const ns_node *dom)
     ns_anim_state *s = g_hash_table_lookup(a->states, dom);
     if (s) return s;
     s = g_new0(ns_anim_state, 1);
+    s->node = dom;
     g_hash_table_insert(a->states, (gpointer)dom, s);
     return s;
 }
@@ -756,11 +796,28 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
     g_hash_table_iter_init(&it, a->active);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_anim_state *s = key;
+        gboolean op0 = s->opacity_active, tr0 = s->transform_active;
+        gboolean co0 = s->color.active, bg0 = s->bg.active, an0 = s->anim_active;
         if (s->opacity_active && advance_opacity(a, s, now_us)) any = TRUE;
         if (s->transform_active && advance_transform(a, s, now_us)) any = TRUE;
         if (s->color.active && advance_color_chan(a, &s->color, now_us)) any = TRUE;
         if (s->bg.active && advance_color_chan(a, &s->bg, now_us)) any = TRUE;
         if (s->anim_active && advance_animation(a, s, now_us)) any = TRUE;
+        if (op0 && !s->opacity_active)
+            anim_emit(a, s->node, "transitionend", "opacity",
+                      s->opacity_duration_ms);
+        if (tr0 && !s->transform_active)
+            anim_emit(a, s->node, "transitionend", "transform",
+                      s->transform_duration_ms);
+        if (co0 && !s->color.active)
+            anim_emit(a, s->node, "transitionend", "color",
+                      s->color.duration_ms);
+        if (bg0 && !s->bg.active)
+            anim_emit(a, s->node, "transitionend", "background-color",
+                      s->bg.duration_ms);
+        if (an0 && !s->anim_active)
+            anim_emit(a, s->node, "animationend", s->anim_name,
+                      s->anim_duration_ms);
         if (!state_is_active(s)) g_hash_table_iter_remove(&it);
     }
     return any;

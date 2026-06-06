@@ -16,6 +16,7 @@
 #include <pango/pangocairo.h>
 #include <quickjs.h>
 
+#include "anim.h"
 #include "bcache.h"
 #include "config.h"
 #include "css.h"
@@ -15694,6 +15695,35 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
     if (g_ascii_strcasecmp(type, "invalid") == 0)
         JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
+}
+
+static void
+ns_js_anim_event_cb(const ns_node *node, const char *type,
+                    const char *name, double elapsed_ms, gpointer user)
+{
+    ns_js *js = user;
+    if (!js || !js->ctx || !node || js->halted) return;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, node);
+    JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "elapsedTime",
+                      JS_NewFloat64(ctx, elapsed_ms / 1000.0));
+    JS_SetPropertyStr(ctx, event, "pseudoElement", JS_NewString(ctx, ""));
+    if (type[0] == 'a')
+        JS_SetPropertyStr(ctx, event, "animationName",
+                          JS_NewString(ctx, name ? name : ""));
+    else
+        JS_SetPropertyStr(ctx, event, "propertyName",
+                          JS_NewString(ctx, name ? name : ""));
+    ns_js_dispatch_built_event(js, node, type, event, NULL);
+}
+
+void
+ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim)
+{
+    if (!js || !anim || js->halted || js->in_pump) return;
+    ns_anim_drain_events(anim, ns_js_anim_event_cb, js);
 }
 
 gboolean

@@ -96,6 +96,7 @@ settle_tick_cb(gpointer user_data)
     gint64 now = g_get_monotonic_time();
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->anim) ns_anim_tick(b->anim, now);
+    if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js && ns_js_run_animation_frame(b->js) &&
         ns_js_consume_mutated(b->js))
         browser_relayout(b);
