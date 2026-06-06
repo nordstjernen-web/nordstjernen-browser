@@ -9207,6 +9207,10 @@ ns_target_make_event(JSContext *ctx, JSValueConst target, const char *type)
     JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, target));
     JS_SetPropertyStr(ctx, ev, "bubbles", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable", JS_FALSE);
+    JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
+    ns_bind_fn(ctx, ev, "preventDefault",           ns_event_prevent_default, 0);
+    ns_bind_fn(ctx, ev, "stopPropagation",          ns_event_stop_propagation, 0);
+    ns_bind_fn(ctx, ev, "stopImmediatePropagation", ns_event_stop_immediate, 0);
     return ev;
 }
 
@@ -9228,6 +9232,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
     if (JS_IsArray(listeners)) {
         JSValue lenv = JS_GetPropertyStr(ctx, listeners, "length");
         uint32_t n = 0; JS_ToUint32(ctx, &n, lenv); JS_FreeValue(ctx, lenv);
+        gboolean any_dead = FALSE;
         for (uint32_t i = 0; i < n; i++) {
             JSValue entry = JS_GetPropertyUint32(ctx, listeners, i);
             if (JS_IsObject(entry)) {
@@ -9237,18 +9242,58 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                 gboolean match = ts && strcmp(ts, type) == 0;
                 if (ts) JS_FreeCString(ctx, ts);
                 if (match) {
-                    JSValue fn = JS_GetPropertyStr(ctx, entry, "fn");
-                    if (JS_IsFunction(ctx, fn)) {
-                        JSValueConst args[1] = { ev };
-                        JSValue r = JS_Call(ctx, fn, obj, 1, args);
-                        if (JS_IsException(r))
-                            JS_FreeValue(ctx, JS_GetException(ctx));
-                        JS_FreeValue(ctx, r);
+                    gboolean skip = FALSE;
+                    JSValue sigv = JS_GetPropertyStr(ctx, entry, "signal");
+                    if (JS_IsObject(sigv)) {
+                        JSValue ab = JS_GetPropertyStr(ctx, sigv, "aborted");
+                        if (JS_ToBool(ctx, ab)) skip = TRUE;
+                        JS_FreeValue(ctx, ab);
                     }
-                    JS_FreeValue(ctx, fn);
+                    JS_FreeValue(ctx, sigv);
+                    JSValue oncev = JS_GetPropertyStr(ctx, entry, "once");
+                    gboolean once = JS_ToBool(ctx, oncev);
+                    JS_FreeValue(ctx, oncev);
+                    if (once || skip) {
+                        JS_SetPropertyStr(ctx, entry, "_dead", JS_TRUE);
+                        any_dead = TRUE;
+                    }
+                    if (!skip) {
+                        JSValue fn = JS_GetPropertyStr(ctx, entry, "fn");
+                        if (JS_IsFunction(ctx, fn)) {
+                            JSValueConst args[1] = { ev };
+                            JSValue r = JS_Call(ctx, fn, obj, 1, args);
+                            if (JS_IsException(r))
+                                JS_FreeValue(ctx, JS_GetException(ctx));
+                            JS_FreeValue(ctx, r);
+                        }
+                        JS_FreeValue(ctx, fn);
+                    }
                 }
             }
             JS_FreeValue(ctx, entry);
+            JSValue immv = JS_GetPropertyStr(ctx, ev, "_immediate_stopped");
+            gboolean immediate = JS_ToBool(ctx, immv);
+            JS_FreeValue(ctx, immv);
+            if (immediate) break;
+        }
+        if (any_dead) {
+            JSValue live = JS_GetPropertyStr(ctx, obj, "_listeners");
+            if (JS_IsArray(live)) {
+                JSValue lv = JS_GetPropertyStr(ctx, live, "length");
+                uint32_t m = 0; JS_ToUint32(ctx, &m, lv); JS_FreeValue(ctx, lv);
+                JSValue kept = JS_NewArray(ctx);
+                uint32_t k = 0;
+                for (uint32_t i = 0; i < m; i++) {
+                    JSValue e = JS_GetPropertyUint32(ctx, live, i);
+                    JSValue dv = JS_GetPropertyStr(ctx, e, "_dead");
+                    gboolean dead = JS_ToBool(ctx, dv);
+                    JS_FreeValue(ctx, dv);
+                    if (dead) JS_FreeValue(ctx, e);
+                    else      JS_SetPropertyUint32(ctx, kept, k++, e);
+                }
+                JS_SetPropertyStr(ctx, obj, "_listeners", kept);
+            }
+            JS_FreeValue(ctx, live);
         }
     }
     JS_FreeValue(ctx, listeners);
@@ -9269,6 +9314,19 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
     if (argc < 2 || !JS_IsFunction(ctx, argv[1])) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
+    gboolean capture = FALSE, once = FALSE;
+    JSValue signal = JS_NULL;
+    if (argc >= 3) ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal);
+    if (JS_IsObject(signal)) {
+        JSValue ab = JS_GetPropertyStr(ctx, signal, "aborted");
+        gboolean already = JS_ToBool(ctx, ab);
+        JS_FreeValue(ctx, ab);
+        if (already) {
+            JS_FreeValue(ctx, signal);
+            JS_FreeCString(ctx, type);
+            return JS_UNDEFINED;
+        }
+    }
     JSValue listeners = JS_GetPropertyStr(ctx, this_val, "_listeners");
     if (!JS_IsArray(listeners)) {
         JS_FreeValue(ctx, listeners);
@@ -9278,11 +9336,37 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
     }
     JSValue lenv = JS_GetPropertyStr(ctx, listeners, "length");
     uint32_t n = 0; JS_ToUint32(ctx, &n, lenv); JS_FreeValue(ctx, lenv);
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue e = JS_GetPropertyUint32(ctx, listeners, i);
+        gboolean dup = FALSE;
+        if (JS_IsObject(e)) {
+            JSValue tv = JS_GetPropertyStr(ctx, e, "type");
+            const char *ts = JS_ToCString(ctx, tv);
+            JS_FreeValue(ctx, tv);
+            JSValue fnv = JS_GetPropertyStr(ctx, e, "fn");
+            if (ts && strcmp(ts, type) == 0 &&
+                JS_VALUE_GET_PTR(fnv) == JS_VALUE_GET_PTR(argv[1]))
+                dup = TRUE;
+            if (ts) JS_FreeCString(ctx, ts);
+            JS_FreeValue(ctx, fnv);
+        }
+        JS_FreeValue(ctx, e);
+        if (dup) {
+            JS_FreeValue(ctx, listeners);
+            JS_FreeValue(ctx, signal);
+            JS_FreeCString(ctx, type);
+            return JS_UNDEFINED;
+        }
+    }
     JSValue entry = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, entry, "type", JS_NewString(ctx, type));
     JS_SetPropertyStr(ctx, entry, "fn",   JS_DupValue(ctx, argv[1]));
+    if (once) JS_SetPropertyStr(ctx, entry, "once", JS_TRUE);
+    if (JS_IsObject(signal))
+        JS_SetPropertyStr(ctx, entry, "signal", JS_DupValue(ctx, signal));
     JS_SetPropertyUint32(ctx, listeners, n, entry);
     JS_FreeValue(ctx, listeners);
+    JS_FreeValue(ctx, signal);
     JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
 }
