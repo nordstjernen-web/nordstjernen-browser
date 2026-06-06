@@ -1140,6 +1140,28 @@ oklab_to_srgb(double l, double a, double b, guint8 *r, guint8 *g,
 }
 
 static double
+srgb_decode_gamma(double c)
+{
+    if (c <= 0.04045) return c / 12.92;
+    return pow((c + 0.055) / 1.055, 2.4);
+}
+
+static void
+srgb_to_oklab(guint8 r, guint8 g, guint8 b, double *ol, double *oa, double *ob)
+{
+    double rl = srgb_decode_gamma(r / 255.0);
+    double gl = srgb_decode_gamma(g / 255.0);
+    double bl = srgb_decode_gamma(b / 255.0);
+    double l = 0.4122214708 * rl + 0.5363325363 * gl + 0.0514459929 * bl;
+    double m = 0.2119034982 * rl + 0.6806995451 * gl + 0.1073969566 * bl;
+    double s = 0.0883024619 * rl + 0.2817188376 * gl + 0.6299787005 * bl;
+    double lp = cbrt(l), mp = cbrt(m), sp = cbrt(s);
+    *ol = 0.2104542553 * lp + 0.7936177850 * mp - 0.0040720468 * sp;
+    *oa = 1.9779984951 * lp - 2.4285922050 * mp + 0.4505937099 * sp;
+    *ob = 0.0259040371 * lp + 0.7827717662 * mp - 0.8086757660 * sp;
+}
+
+static double
 lab_inv_f(double t)
 {
     double t3 = t * t * t;
@@ -1359,11 +1381,23 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
     while (*space && is_ws(*space)) space++;
     gboolean ok = g_ascii_strncasecmp(space, "in", 2) == 0 &&
                   is_ws(space[2]);
+    gboolean in_oklab = FALSE;
     if (ok) {
         space += 2;
         while (*space && is_ws(*space)) space++;
-        ok = g_ascii_strncasecmp(space, "srgb", 4) == 0 &&
-             (!space[4] || is_ws(space[4]));
+        gsize sl = 0;
+        while (space[sl] && !is_ws(space[sl])) sl++;
+        in_oklab = (sl == 5 &&
+                    (g_ascii_strncasecmp(space, "oklab", 5) == 0 ||
+                     g_ascii_strncasecmp(space, "oklch", 5) == 0));
+        ok = in_oklab ||
+             (sl == 4 && g_ascii_strncasecmp(space, "srgb", 4) == 0) ||
+             (sl == 11 && g_ascii_strncasecmp(space, "srgb-linear", 11) == 0) ||
+             (sl == 3 && (g_ascii_strncasecmp(space, "hsl", 3) == 0 ||
+                          g_ascii_strncasecmp(space, "hwb", 3) == 0 ||
+                          g_ascii_strncasecmp(space, "lab", 3) == 0 ||
+                          g_ascii_strncasecmp(space, "lch", 3) == 0 ||
+                          g_ascii_strncasecmp(space, "xyz", 3) == 0));
     }
     guint8 c1[4] = {0}, c2[4] = {0};
     double p1 = 50, p2 = 50;
@@ -1383,15 +1417,28 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
             double a1 = c1[3] / 255.0;
             double a2 = c2[3] / 255.0;
             double ao = a1 * w1 + a2 * w2;
-            double rr = 0, gg = 0, bb = 0;
-            if (ao > 0) {
-                rr = (c1[0] * a1 * w1 + c2[0] * a2 * w2) / ao;
-                gg = (c1[1] * a1 * w1 + c2[1] * a2 * w2) / ao;
-                bb = (c1[2] * a1 * w1 + c2[2] * a2 * w2) / ao;
+            if (in_oklab) {
+                double l1, aa1, bb1, l2, aa2, bb2;
+                srgb_to_oklab(c1[0], c1[1], c1[2], &l1, &aa1, &bb1);
+                srgb_to_oklab(c2[0], c2[1], c2[2], &l2, &aa2, &bb2);
+                double lo = 0, ao2 = 0, bo = 0;
+                if (ao > 0) {
+                    lo  = (l1 * a1 * w1 + l2 * a2 * w2) / ao;
+                    ao2 = (aa1 * a1 * w1 + aa2 * a2 * w2) / ao;
+                    bo  = (bb1 * a1 * w1 + bb2 * a2 * w2) / ao;
+                }
+                oklab_to_srgb(lo, ao2, bo, r, g, b);
+            } else {
+                double rr = 0, gg = 0, bb = 0;
+                if (ao > 0) {
+                    rr = (c1[0] * a1 * w1 + c2[0] * a2 * w2) / ao;
+                    gg = (c1[1] * a1 * w1 + c2[1] * a2 * w2) / ao;
+                    bb = (c1[2] * a1 * w1 + c2[2] * a2 * w2) / ao;
+                }
+                *r = (guint8)CLAMP((int)(rr + 0.5), 0, 255);
+                *g = (guint8)CLAMP((int)(gg + 0.5), 0, 255);
+                *b = (guint8)CLAMP((int)(bb + 0.5), 0, 255);
             }
-            *r = (guint8)CLAMP((int)(rr + 0.5), 0, 255);
-            *g = (guint8)CLAMP((int)(gg + 0.5), 0, 255);
-            *b = (guint8)CLAMP((int)(bb + 0.5), 0, 255);
             *a = (guint8)CLAMP((int)(ao * 255 + 0.5), 0, 255);
         }
     }
@@ -1399,11 +1446,134 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
     return ok;
 }
 
+typedef struct {
+    double v;
+    char unit[8];
+} ns_color_calc_term;
+
+static gboolean color_calc_expr(const char **pp, const char *end,
+                                ns_color_calc_term *out);
+
+static gboolean
+color_calc_factor(const char **pp, const char *end, ns_color_calc_term *out)
+{
+    const char *p = *pp;
+    while (p < end && is_ws(*p)) p++;
+    if (p < end && *p == '(') {
+        p++;
+        if (!color_calc_expr(&p, end, out)) return FALSE;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || *p != ')') return FALSE;
+        *pp = p + 1;
+        return TRUE;
+    }
+    if (p + 5 <= end && g_ascii_strncasecmp(p, "calc(", 5) == 0) {
+        p += 5;
+        if (!color_calc_expr(&p, end, out)) return FALSE;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || *p != ')') return FALSE;
+        *pp = p + 1;
+        return TRUE;
+    }
+    char *num_end = NULL;
+    double v = g_ascii_strtod(p, &num_end);
+    if (!num_end || num_end == p || num_end > end) return FALSE;
+    out->v = v;
+    int ui = 0;
+    p = num_end;
+    while (p < end && (is_ident(*p) || *p == '%') &&
+           ui < (int)sizeof out->unit - 1)
+        out->unit[ui++] = *p++;
+    out->unit[ui] = '\0';
+    *pp = p;
+    return TRUE;
+}
+
+static gboolean
+color_calc_term_mul(const char **pp, const char *end, ns_color_calc_term *out)
+{
+    if (!color_calc_factor(pp, end, out)) return FALSE;
+    for (;;) {
+        const char *p = *pp;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || (*p != '*' && *p != '/')) return TRUE;
+        char op = *p++;
+        ns_color_calc_term rhs;
+        if (!color_calc_factor(&p, end, &rhs)) return FALSE;
+        if (op == '*') {
+            if (out->unit[0] && rhs.unit[0]) return FALSE;
+            out->v *= rhs.v;
+            if (rhs.unit[0]) g_strlcpy(out->unit, rhs.unit, sizeof out->unit);
+        } else {
+            if (rhs.unit[0] || rhs.v == 0) return FALSE;
+            out->v /= rhs.v;
+        }
+        *pp = p;
+    }
+}
+
+static gboolean
+color_calc_expr(const char **pp, const char *end, ns_color_calc_term *out)
+{
+    if (!color_calc_term_mul(pp, end, out)) return FALSE;
+    for (;;) {
+        const char *p = *pp;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || (*p != '+' && *p != '-')) return TRUE;
+        char op = *p++;
+        ns_color_calc_term rhs;
+        if (!color_calc_term_mul(&p, end, &rhs)) return FALSE;
+        if (g_ascii_strcasecmp(out->unit, rhs.unit) != 0) {
+            if (!out->unit[0] && out->v == 0)
+                g_strlcpy(out->unit, rhs.unit, sizeof out->unit);
+            else if (!(rhs.unit[0] == '\0' && rhs.v == 0))
+                return FALSE;
+        }
+        out->v = op == '+' ? out->v + rhs.v : out->v - rhs.v;
+        *pp = p;
+    }
+}
+
+static char *
+color_resolve_calcs(const char *s)
+{
+    const char *send = s + strlen(s);
+    GString *out = g_string_new(NULL);
+    const char *p = s;
+    while (*p) {
+        if (g_ascii_strncasecmp(p, "calc(", 5) == 0) {
+            const char *body = p + 5;
+            const char *close = match_close_paren(body, send);
+            if (!close) { g_string_free(out, TRUE); return NULL; }
+            const char *q = body;
+            ns_color_calc_term t = { 0, "" };
+            if (!color_calc_expr(&q, close, &t)) {
+                g_string_free(out, TRUE);
+                return NULL;
+            }
+            g_string_append_printf(out, "%.6g%s", t.v, t.unit);
+            p = close + 1;
+        } else {
+            g_string_append_c(out, *p++);
+        }
+    }
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
 {
     *a = 255;
     if (!s || !*s) return FALSE;
+    if (strstr(s, "calc(")) {
+        char *flat = color_resolve_calcs(s);
+        if (flat) {
+            gboolean ok = parse_color(flat, r, g, b, a);
+            g_free(flat);
+            return ok;
+        }
+        return FALSE;
+    }
     if (g_ascii_strcasecmp(s, "transparent") == 0) {
         *r = 0; *g = 0; *b = 0; *a = 0;
         return TRUE;
