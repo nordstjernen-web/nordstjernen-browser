@@ -6761,6 +6761,21 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_target_entry_signal_aborted(JSContext *ctx, JSValueConst entry)
+{
+    if (!JS_IsObject(entry)) return FALSE;
+    JSValue sigv = JS_GetPropertyStr(ctx, entry, "signal");
+    gboolean aborted = FALSE;
+    if (JS_IsObject(sigv)) {
+        JSValue ab = JS_GetPropertyStr(ctx, sigv, "aborted");
+        aborted = JS_ToBool(ctx, ab);
+        JS_FreeValue(ctx, ab);
+    }
+    JS_FreeValue(ctx, sigv);
+    return aborted;
+}
+
 static JSValue
 ns_port_add_event_listener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
@@ -6794,7 +6809,8 @@ ns_port_add_event_listener(JSContext *ctx, JSValueConst this_val,
         JSValue cbv = JS_GetPropertyStr(ctx, e, "cb");
         const char *ts = JS_ToCString(ctx, tv);
         gboolean dup = ts && strcmp(ts, type) == 0 &&
-                       JS_VALUE_GET_PTR(cbv) == JS_VALUE_GET_PTR(argv[1]);
+                       JS_VALUE_GET_PTR(cbv) == JS_VALUE_GET_PTR(argv[1]) &&
+                       !ns_target_entry_signal_aborted(ctx, e);
         if (ts) JS_FreeCString(ctx, ts);
         JS_FreeValue(ctx, tv);
         JS_FreeValue(ctx, cbv);
@@ -9527,7 +9543,8 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, tv);
             JSValue fnv = JS_GetPropertyStr(ctx, e, "fn");
             if (ts && strcmp(ts, type) == 0 &&
-                JS_VALUE_GET_PTR(fnv) == JS_VALUE_GET_PTR(argv[1]))
+                JS_VALUE_GET_PTR(fnv) == JS_VALUE_GET_PTR(argv[1]) &&
+                !ns_target_entry_signal_aborted(ctx, e))
                 dup = TRUE;
             if (ts) JS_FreeCString(ctx, ts);
             JS_FreeValue(ctx, fnv);
@@ -25297,6 +25314,10 @@ ns_document_addEventListener(JSContext *ctx, JSValueConst this_val,
     for (guint i = 0; i < _js->listeners->len; i++) {
         ns_listener *ex = g_ptr_array_index(_js->listeners, i);
         if (ns_listener_is_tombstoned(ex)) continue;
+        if (ns_listener_signal_aborted(_js, ex)) {
+            ns_listener_tombstone(ctx, ex);
+            continue;
+        }
         if (ex->target == _js->current_doc && strcmp(ex->type, type) == 0 &&
             !!ex->capture == !!capture &&
             JS_VALUE_GET_TAG(ex->cb) == JS_VALUE_GET_TAG(argv[1]) &&
