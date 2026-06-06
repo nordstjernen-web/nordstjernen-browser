@@ -2564,7 +2564,7 @@ calc_px_value(double px)
 static ns_css_value *
 parse_calc(const char *text)
 {
-    static int depth;
+    static __thread int depth;
     if (depth > NS_CALC_MAX_DEPTH) return NULL;
     depth++;
     ns_css_value *v = parse_calc_inner(text);
@@ -11071,8 +11071,7 @@ static const char *kUa =
     "big { font-size: 1.17em; }\n"
     "code, pre, kbd, samp, tt { font-family: monospace; }\n"
     "code, kbd, samp { white-space: pre-wrap; }\n"
-    "pre { margin: 0.9em 0; padding: 6px; background-color: #f4f4f4; "
-    "line-height: 1.4; white-space: pre; }\n"
+    "pre { margin: 0.9em 0; line-height: 1.4; white-space: pre; }\n"
     "textarea { white-space: pre-wrap; }\n"
     "code { background-color: #f4f4f4; padding: 1px 4px; font-size: 0.93em; }\n"
     "samp { background-color: #f4f4f4; padding: 1px 4px; }\n"

@@ -376,7 +376,7 @@ ns_window_js_mutated(gpointer user_data)
     w->dom_mutated = TRUE;
     if (w->js_relayout_idle_id) return;
     w->js_relayout_idle_id =
-        g_timeout_add(2000, ns_window_js_relayout_now, w);
+        g_timeout_add(16, ns_window_js_relayout_now, w);
 }
 
 static void

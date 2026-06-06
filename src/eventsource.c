@@ -241,7 +241,18 @@ ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     if (total >= 5 && !g_ascii_strncasecmp(buffer, "HTTP/", 5)) {
         long code = 0;
         const char *sp = memchr(buffer, ' ', total);
-        if (sp) code = strtol(sp + 1, NULL, 10);
+        if (sp) {
+            char digits[8];
+            size_t avail = total - (size_t)(sp + 1 - buffer);
+            size_t n = 0;
+            while (n < avail && n < sizeof digits - 1 &&
+                   g_ascii_isdigit(sp[1 + n])) {
+                digits[n] = sp[1 + n];
+                n++;
+            }
+            digits[n] = '\0';
+            code = strtol(digits, NULL, 10);
+        }
         p->status = code;
         p->is_event_stream = FALSE;
     } else if (total >= 13 &&

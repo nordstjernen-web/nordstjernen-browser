@@ -619,6 +619,10 @@ ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *
 
     if (!g_strcmp0(k->algo, "ECDSA")) {
         int order = ns_crypto_curve_order_bytes(k->curve);
+        if (order <= 0) {
+            g_free(der);
+            return ns_crypto_err(err, "OperationError: unsupported ECDSA curve");
+        }
         out = ns_crypto_ecdsa_der_to_raw(der, n, order, out_len);
         g_free(der);
         if (!out) return ns_crypto_err(err, "OperationError: ECDSA encode");
@@ -649,6 +653,7 @@ ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8
     gsize der_len = 0;
     if (!g_strcmp0(k->algo, "ECDSA")) {
         int order = ns_crypto_curve_order_bytes(k->curve);
+        if (order <= 0) { if (err) *err = g_strdup("OperationError: unsupported ECDSA curve"); return -1; }
         der = ns_crypto_ecdsa_raw_to_der(sig, sig_len, order, &der_len);
         if (!der) { if (err) *err = g_strdup("OperationError: ECDSA decode"); return -1; }
         sig = der;

@@ -849,9 +849,7 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     const ns_css_value *d = s->values[NS_CSS_DISPLAY];
     if (keyword_is(d, "inline-flex") || keyword_is(d, "inline-grid"))
         return TRUE;
-    if (!keyword_is(d, "inline-block"))
-        return FALSE;
-    return style_has_atomic_inline_box(s) || contains_block_media(n, styles);
+    return keyword_is(d, "inline-block");
 }
 static const ns_node *g_focused_input_for_layout;
 static gboolean       g_focused_is_contenteditable_for_layout;
@@ -902,8 +900,16 @@ typedef struct ns_abs_entry {
     gboolean       fixed;
 } ns_abs_entry;
 
-static GArray  *g_abs_pending;
-static gboolean g_abs_force_build;
+typedef struct ns_abs_static {
+    ns_box *run;
+    double  rel_x;
+    double  rel_y;
+} ns_abs_static;
+
+static GArray      *g_abs_pending;
+static gboolean     g_abs_force_build;
+static GHashTable  *g_abs_ph_set;
+static GHashTable  *g_abs_static;
 
 static void
 collect_box_bg_image(ns_box *box, const ns_style *s)
@@ -2062,7 +2068,24 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (node_has_hidden_utility(n)) return;
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
-    if (s && style_is_absolute_or_fixed(s)) return;
+    if (s && style_is_absolute_or_fixed(s)) {
+        if (g_abs_pending) {
+            ns_abs_entry e;
+            e.dom = n;
+            const ns_css_value *pv = s->values[NS_CSS_POSITION];
+            e.fixed = pv && pv->kind == NS_CSS_V_KEYWORD && pv->u.keyword &&
+                      strcmp(pv->u.keyword, "fixed") == 0;
+            g_array_append_val(g_abs_pending, e);
+            if (ctx->atomics && !e.fixed && g_abs_ph_set) {
+                ns_box *ph = box_new(NS_BOX_BLOCK);
+                ns_atomic_raw rec = { .start = ctx->out->len, .box = ph };
+                g_string_append(ctx->out, "\xef\xbf\xbc");
+                g_array_append_val(ctx->atomics, rec);
+                g_hash_table_insert(g_abs_ph_set, ph, (gpointer)n);
+            }
+        }
+        return;
+    }
 
     if (ctx->atomics && is_atomic_inline(n, ctx->styles)) {
         ns_box *sub = build_block(n, ctx->styles);
@@ -4336,6 +4359,23 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         pango_layout_get_pixel_size(layout, &pw, &ph);
         line_count = pango_layout_get_line_count(layout);
         measured = ph;
+        if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
+            double indent = ns_text_indent_px(parent_style, content_width);
+            for (guint i = 0; i < box->inline_atomics->len; i++) {
+                const ns_inline_atomic *a =
+                    &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+                if (!a->box) continue;
+                const ns_node *dom = g_hash_table_lookup(g_abs_ph_set, a->box);
+                if (!dom) continue;
+                PangoRectangle pos;
+                pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+                ns_abs_static *st = g_new0(ns_abs_static, 1);
+                st->run   = box;
+                st->rel_x = indent + (double)pos.x / PANGO_SCALE;
+                st->rel_y = (double)pos.y / PANGO_SCALE;
+                g_hash_table_insert(g_abs_static, (gpointer)dom, st);
+            }
+        }
         if (mkey) {
             ns_inline_measure *e = g_new(ns_inline_measure, 1);
             e->height = measured;
@@ -8511,10 +8551,17 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         double cb_h = cb_is_icb ? ns_css_viewport_h() : cb->content_height;
         if (cb_is_icb) avail = viewport_width;
         const ns_style *cs = cb->style;
-        double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
-        static_abs_y_walk(cb, e.dom, &static_y);
-        abox->x = cb->x + cb->margin.left + cb->border.left + cb->padding.left;
-        abox->y = static_y;
+        ns_abs_static *st = g_abs_static
+            ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
+        if (st && st->run) {
+            abox->x = st->run->x + st->rel_x;
+            abox->y = st->run->y + st->rel_y;
+        } else {
+            double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
+            static_abs_y_walk(cb, e.dom, &static_y);
+            abox->x = cb->x + cb->margin.left + cb->border.left + cb->padding.left;
+            abox->y = static_y;
+        }
         const ns_css_value *awv = abox->style
             ? abox->style->values[NS_CSS_WIDTH] : NULL;
         gboolean has_explicit_width = awv &&
@@ -8649,6 +8696,9 @@ static ns_box *
 ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 {
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
+    g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_abs_static = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                         NULL, g_free);
     g_contains_block_media_cache = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_cq_seen_container = FALSE;
     ns_css_set_container_dims(0, 0);
@@ -8656,6 +8706,8 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     if (!root) {
         g_array_free(g_abs_pending, TRUE);
         g_abs_pending = NULL;
+        g_clear_pointer(&g_abs_ph_set, g_hash_table_destroy);
+        g_clear_pointer(&g_abs_static, g_hash_table_destroy);
         g_hash_table_destroy(g_contains_block_media_cache);
         g_contains_block_media_cache = NULL;
         return NULL;
@@ -8670,6 +8722,8 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 
     g_array_free(g_abs_pending, TRUE);
     g_abs_pending = NULL;
+    g_clear_pointer(&g_abs_ph_set, g_hash_table_destroy);
+    g_clear_pointer(&g_abs_static, g_hash_table_destroy);
     g_hash_table_destroy(g_contains_block_media_cache);
     g_contains_block_media_cache = NULL;
     return root;
