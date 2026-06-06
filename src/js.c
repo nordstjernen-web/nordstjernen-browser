@@ -23200,6 +23200,47 @@ ns_window_scroll_by(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_window_scroll_by_vertical(JSContext *ctx, JSValueConst this_val, double dy)
+{
+    JSValue dyv = JS_NewFloat64(ctx, dy);
+    JSValueConst args[2] = { JS_NewInt32(ctx, 0), dyv };
+    JSValue r = ns_window_scroll_by(ctx, this_val, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, dyv);
+    return r;
+}
+
+static JSValue
+ns_window_scroll_by_lines(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    int lines = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &lines, argv[0]);
+    return ns_window_scroll_by_vertical(ctx, this_val, lines * 16.0);
+}
+
+static JSValue
+ns_window_scroll_by_pages(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    int pages = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &pages, argv[0]);
+    double vh = 800;
+    JSValue ih = JS_GetPropertyStr(ctx, this_val, "innerHeight");
+    JS_ToFloat64(ctx, &vh, ih);
+    JS_FreeValue(ctx, ih);
+    return ns_window_scroll_by_vertical(ctx, this_val, pages * vh);
+}
+
+static JSValue
+ns_window_focus(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_window_invoke_action(ctx, "focus");
+}
+
+static JSValue
 ns_element_scroll_common(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv, gboolean relative)
 {
@@ -25587,6 +25628,156 @@ ns_illegal_constructor(JSContext *ctx, JSValueConst this_val,
     return JS_ThrowTypeError(ctx, "Illegal constructor");
 }
 
+static JSValue
+ns_speech_utterance_ctor(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    JSValue u = JS_NewObject(ctx);
+    const char *text = (argc >= 1) ? JS_ToCString(ctx, argv[0]) : NULL;
+    JS_SetPropertyStr(ctx, u, "text", JS_NewString(ctx, text ? text : ""));
+    if (text) JS_FreeCString(ctx, text);
+    JS_SetPropertyStr(ctx, u, "lang",   JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, u, "voice",  JS_NULL);
+    JS_SetPropertyStr(ctx, u, "volume", JS_NewFloat64(ctx, 1.0));
+    JS_SetPropertyStr(ctx, u, "rate",   JS_NewFloat64(ctx, 1.0));
+    JS_SetPropertyStr(ctx, u, "pitch",  JS_NewFloat64(ctx, 1.0));
+    static const char *const handlers[] = {
+        "onstart", "onend", "onerror", "onpause",
+        "onresume", "onmark", "onboundary",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(handlers); i++)
+        JS_SetPropertyStr(ctx, u, handlers[i], JS_NULL);
+    JS_SetPropertyStr(ctx, u, "_listeners", JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, u);
+    return u;
+}
+
+static JSValue
+ns_static_range_ctor(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "Failed to construct 'StaticRange': 1 argument required");
+    JSValue sc = JS_GetPropertyStr(ctx, argv[0], "startContainer");
+    JSValue ec = JS_GetPropertyStr(ctx, argv[0], "endContainer");
+    int32_t so = 0, eo = 0;
+    JSValue v;
+    v = JS_GetPropertyStr(ctx, argv[0], "startOffset"); JS_ToInt32(ctx, &so, v); JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, argv[0], "endOffset");   JS_ToInt32(ctx, &eo, v); JS_FreeValue(ctx, v);
+    gboolean collapsed = (so == eo) &&
+        JS_VALUE_GET_PTR(sc) == JS_VALUE_GET_PTR(ec) && JS_IsObject(sc);
+    JSValue r = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, r, "startContainer", sc);
+    JS_SetPropertyStr(ctx, r, "startOffset",    JS_NewInt32(ctx, so));
+    JS_SetPropertyStr(ctx, r, "endContainer",   ec);
+    JS_SetPropertyStr(ctx, r, "endOffset",      JS_NewInt32(ctx, eo));
+    JS_SetPropertyStr(ctx, r, "collapsed",      JS_NewBool(ctx, collapsed));
+    return r;
+}
+
+static JSValue
+ns_vtt_cue_ctor(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    double start = 0, end = 0;
+    if (argc >= 1) JS_ToFloat64(ctx, &start, argv[0]);
+    if (argc >= 2) JS_ToFloat64(ctx, &end, argv[1]);
+    const char *text = (argc >= 3) ? JS_ToCString(ctx, argv[2]) : NULL;
+    JSValue c = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, c, "startTime",   JS_NewFloat64(ctx, start));
+    JS_SetPropertyStr(ctx, c, "endTime",     JS_NewFloat64(ctx, end));
+    JS_SetPropertyStr(ctx, c, "text",        JS_NewString(ctx, text ? text : ""));
+    if (text) JS_FreeCString(ctx, text);
+    JS_SetPropertyStr(ctx, c, "id",          JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, c, "pauseOnExit", JS_FALSE);
+    JS_SetPropertyStr(ctx, c, "track",       JS_NULL);
+    JS_SetPropertyStr(ctx, c, "vertical",    JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, c, "snapToLines", JS_TRUE);
+    JS_SetPropertyStr(ctx, c, "line",        JS_NewString(ctx, "auto"));
+    JS_SetPropertyStr(ctx, c, "lineAlign",   JS_NewString(ctx, "start"));
+    JS_SetPropertyStr(ctx, c, "position",    JS_NewString(ctx, "auto"));
+    JS_SetPropertyStr(ctx, c, "positionAlign", JS_NewString(ctx, "auto"));
+    JS_SetPropertyStr(ctx, c, "size",        JS_NewInt32(ctx, 100));
+    JS_SetPropertyStr(ctx, c, "align",       JS_NewString(ctx, "center"));
+    JS_SetPropertyStr(ctx, c, "region",      JS_NULL);
+    JS_SetPropertyStr(ctx, c, "onenter",     JS_NULL);
+    JS_SetPropertyStr(ctx, c, "onexit",      JS_NULL);
+    JS_SetPropertyStr(ctx, c, "_listeners",  JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, c);
+    return c;
+}
+
+static JSValue
+ns_clipboard_item_get_type(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    if (argc < 1) return ns_returns_rejected(ctx, this_val, 0, NULL);
+    JSValue store = JS_GetPropertyStr(ctx, this_val, "__data");
+    JSValue value = JS_UNDEFINED;
+    if (JS_IsObject(store)) {
+        const char *type = JS_ToCString(ctx, argv[0]);
+        if (type) {
+            value = JS_GetPropertyStr(ctx, store, type);
+            JS_FreeCString(ctx, type);
+        }
+    }
+    JS_FreeValue(ctx, store);
+    if (JS_IsUndefined(value) || JS_IsException(value)) {
+        JS_FreeValue(ctx, value);
+        return ns_promise_reject_dom(ctx, "NotFoundError",
+            "The type was not found");
+    }
+    return ns_promise_resolve_take(ctx, value);
+}
+
+static JSValue
+ns_clipboard_item_ctor(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    JSValue item = JS_NewObject(ctx);
+    JSValue types = JS_NewArray(ctx);
+    JSValue data = JS_NewObject(ctx);
+    uint32_t out = 0;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSPropertyEnum *tab = NULL;
+        uint32_t n = 0;
+        if (JS_GetOwnPropertyNames(ctx, &tab, &n, argv[0],
+                                   JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+            for (uint32_t i = 0; i < n; i++) {
+                JSValue key = JS_AtomToString(ctx, tab[i].atom);
+                JSValue val = JS_GetProperty(ctx, argv[0], tab[i].atom);
+                JS_SetProperty(ctx, data, tab[i].atom, val);
+                JS_SetPropertyUint32(ctx, types, out++, key);
+            }
+            JS_FreePropertyEnum(ctx, tab, n);
+        }
+    }
+    JS_SetPropertyStr(ctx, item, "types", types);
+    JS_SetPropertyStr(ctx, item, "presentationStyle",
+                      JS_NewString(ctx, "unspecified"));
+    JS_DefinePropertyValueStr(ctx, item, "__data", data, 0);
+    ns_bind_fn(ctx, item, "getType", ns_clipboard_item_get_type, 1);
+    return item;
+}
+
+static JSValue
+ns_custom_state_set_ctor(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue set_ctor = JS_GetPropertyStr(ctx, global, "Set");
+    JS_FreeValue(ctx, global);
+    JSValue set = JS_CallConstructor(ctx, set_ctor, 0, NULL);
+    JS_FreeValue(ctx, set_ctor);
+    return set;
+}
+
 static gboolean
 ns_global_has(JSContext *ctx, JSValueConst global, const char *name)
 {
@@ -26193,19 +26384,20 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "__ND_FP_DEBUG",
                       JS_NewBool(ctx, g_getenv("NS_FP_DEBUG") != NULL));
     static const ns_fn_def window_noops[] = {
-        { "close", 0 }, { "focus", 0 }, { "blur", 0 },
+        { "close", 0 }, { "blur", 0 },
         { "moveTo", 2 }, { "moveBy", 2 },
         { "resizeTo", 2 }, { "resizeBy", 2 },
     };
     ns_bind_fns(ctx, global, ns_event_noop, window_noops, G_N_ELEMENTS(window_noops));
     ns_bind_fn(ctx, global, "print", ns_window_print, 0);
     ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
+    ns_bind_fn(ctx, global, "focus", ns_window_focus, 0);
     ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
-    ns_bind_fn(ctx, global, "scrollByLines", ns_event_noop, 1);
-    ns_bind_fn(ctx, global, "scrollByPages", ns_event_noop, 1);
+    ns_bind_fn(ctx, global, "scrollByLines", ns_window_scroll_by_lines, 1);
+    ns_bind_fn(ctx, global, "scrollByPages", ns_window_scroll_by_pages, 1);
     ns_bind_fn(ctx, global, "open",                  ns_window_open_method,            3);
     ns_bind_fn(ctx, global, "confirm",               ns_window_confirm,                1);
     ns_bind_fn(ctx, global, "prompt",                ns_window_prompt,                 2);
@@ -26270,6 +26462,16 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "OffscreenCanvas", ns_window_offscreen_canvas_ctor, 2);
     ns_bind_ctor(ctx, global, "DOMMatrix",          ns_window_dommatrix_ctor,          1);
     ns_bind_ctor(ctx, global, "DOMMatrixReadOnly",  ns_window_dommatrix_readonly_ctor, 1);
+    {
+        JSValue dm = JS_GetPropertyStr(ctx, global, "DOMMatrix");
+        JS_SetPropertyStr(ctx, global, "WebKitCSSMatrix", dm);
+    }
+    ns_bind_ctor(ctx, global, "SpeechSynthesisUtterance",
+                 ns_speech_utterance_ctor, 1);
+    ns_bind_ctor(ctx, global, "StaticRange",  ns_static_range_ctor,   1);
+    ns_bind_ctor(ctx, global, "VTTCue",       ns_vtt_cue_ctor,        3);
+    ns_bind_ctor(ctx, global, "ClipboardItem", ns_clipboard_item_ctor, 1);
+    ns_bind_ctor(ctx, global, "CustomStateSet", ns_custom_state_set_ctor, 0);
     ns_bind_ctor(ctx, global, "Audio",           ns_window_audio_ctor,           1);
     ns_bind_ctor(ctx, global, "AudioContext",    ns_audio_context_ctor,          1);
     {
@@ -26333,6 +26535,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         "GamepadEvent","DeviceMotionEvent","DeviceOrientationEvent",
         "PromiseRejectionEvent","SecurityPolicyViolationEvent",
         "TrustedTypePolicyFactory",
+        "TextEvent","ToggleEvent","FormDataEvent","TrackEvent",
+        "MediaStreamTrackEvent","CookieChangeEvent",
+        "AnimationPlaybackEvent","OfflineAudioCompletionEvent",
     };
     for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
