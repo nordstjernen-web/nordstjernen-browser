@@ -2415,6 +2415,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
 
     char *url_host = ns_url_host_from(url);
     gboolean mobile_ua = ns_mobile_force_host(url_host);
+    g_free(url_host);
     const ns_config *cfg = ns_config_get();
     const char *configured_ua =
         (cfg && cfg->user_agent && *cfg->user_agent) ? cfg->user_agent
@@ -2539,7 +2540,6 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, fetch_timeout);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, effective_ua);
-    g_free(url_host);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING,
                      g_accept_encoding ? g_accept_encoding : "");
     switch (cfg ? cfg->referer_policy : NS_REFERER_STRICT_ORIGIN_WHEN_CROSS) {
