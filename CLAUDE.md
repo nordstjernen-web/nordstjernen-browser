@@ -14,10 +14,13 @@ nothing imported.
   maintainable by a single human.
 - HTML5 + modern CSS + modern JavaScript, supported pragmatically as
   far as is feasible without bloat.
-- **No** WebGPU or AI-style web APIs. WebGL is the lone GPU-API
-  exception: a minimalist, opt-in WebGL 1 / 2 over OpenGL ES, off by
-  default and gated by a per-site trust prompt (`src/webgl.c`, see
-  `docs/webgl.md`).
+- **No** WebGPU or AI-style web APIs. WebGL **is** supported — the lone
+  GPU-API exception: a working, minimalist WebGL 1 / 2 over OpenGL ES
+  (`src/webgl.c`, see `docs/webgl.md`). It is opt-in — off by default
+  and gated by a per-site trust prompt — but fully functional once a
+  site is trusted. The `WebGLRenderingContext` / `WebGL2RenderingContext`
+  interface objects also carry the GL enum constants so feature code
+  resolves them without a live context.
 - No embedded audio/video codecs. `<audio>`/`<video>` render a poster
   and play overlay; clicking hands the media URL to an external player
   (`src/media.c::ns_media_launch_external`).
