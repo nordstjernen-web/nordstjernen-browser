@@ -4940,6 +4940,21 @@ static void
 ns_js_fetch_read_body(JSContext *ctx, JSValueConst obj,
                       char **body, gsize *body_len, char **content_type)
 {
+    JSValue bbuf = JS_GetPropertyStr(ctx, obj, "_bodyBuffer");
+    if (!JS_IsException(bbuf) && JS_IsObject(bbuf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, bbuf);
+        if (base) {
+            g_free(*body);
+            *body = ns_js_copy_bytes(base, (gsize)total);
+            *body_len = *body ? (gsize)total : 0;
+            JS_FreeValue(ctx, bbuf);
+            return;
+        }
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, bbuf);
+
     JSValue v = JS_GetPropertyStr(ctx, obj, "body");
     if (JS_IsException(v)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -11952,9 +11967,29 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
     }
     if (JS_IsString(body)) {
         JS_SetPropertyStr(ctx, obj, "body", JS_DupValue(ctx, body));
+        JS_SetPropertyStr(ctx, obj, "_bodyCT",
+                          JS_NewString(ctx, "text/plain;charset=UTF-8"));
         return;
     }
     if (JS_IsObject(body)) {
+        gsize blen = 0;
+        char *ct = NULL;
+        char *serialized = NULL;
+        if (ns_js_value_is_form_data(ctx, body))
+            serialized = ns_js_form_data_serialize(ctx, body, &blen, &ct);
+        else if (ns_js_value_is_url_search_params(ctx, body))
+            serialized = ns_js_usp_serialize(ctx, body, &blen, &ct);
+        if (serialized) {
+            JS_SetPropertyStr(ctx, obj, "_bodyBuffer",
+                JS_NewArrayBufferCopy(ctx, (const uint8_t *)serialized, blen));
+            if (ct) JS_SetPropertyStr(ctx, obj, "_bodyCT", JS_NewString(ctx, ct));
+            JS_SetPropertyStr(ctx, obj, "body", JS_NewString(ctx, ""));
+            g_free(serialized);
+            g_free(ct);
+            return;
+        }
+        g_free(ct);
+
         JSValue buf = ns_body_extract_buffer(ctx, body);
         if (!JS_IsUndefined(buf)) {
             JS_SetPropertyStr(ctx, obj, "_bodyBuffer", buf);
@@ -11962,6 +11997,28 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
                 null_when_empty ? JS_DupValue(ctx, body) : JS_NewString(ctx, ""));
             return;
         }
+
+        JSValue b_priv = JS_GetPropertyStr(ctx, body, "_b");
+        gboolean is_blob = !JS_IsUndefined(b_priv) && !JS_IsNull(b_priv);
+        JS_FreeValue(ctx, b_priv);
+        if (is_blob) {
+            gsize bl = 0;
+            char *bb = ns_blob_bytes_as_string(ctx, body, &bl);
+            if (bb) {
+                JS_SetPropertyStr(ctx, obj, "_bodyBuffer",
+                    JS_NewArrayBufferCopy(ctx, (const uint8_t *)bb, bl));
+                g_free(bb);
+                JSValue tv = JS_GetPropertyStr(ctx, body, "type");
+                const char *ts = JS_IsString(tv) ? JS_ToCString(ctx, tv) : NULL;
+                if (ts && *ts)
+                    JS_SetPropertyStr(ctx, obj, "_bodyCT", JS_NewString(ctx, ts));
+                if (ts) JS_FreeCString(ctx, ts);
+                JS_FreeValue(ctx, tv);
+                JS_SetPropertyStr(ctx, obj, "body", JS_NewString(ctx, ""));
+                return;
+            }
+        }
+
         JSValue get_reader = JS_GetPropertyStr(ctx, body, "getReader");
         gboolean is_stream = JS_IsFunction(ctx, get_reader);
         JS_FreeValue(ctx, get_reader);
@@ -11976,6 +12033,43 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
         s = JS_NewString(ctx, "");
     }
     JS_SetPropertyStr(ctx, obj, "body", s);
+}
+
+static void
+ns_body_apply_inferred_ct(JSContext *ctx, JSValueConst obj)
+{
+    JSValue ctv = JS_GetPropertyStr(ctx, obj, "_bodyCT");
+    if (!JS_IsString(ctv)) { JS_FreeValue(ctx, ctv); return; }
+    JS_SetPropertyStr(ctx, obj, "_bodyCT", JS_UNDEFINED);
+    JSValue headers = JS_GetPropertyStr(ctx, obj, "headers");
+    if (JS_IsObject(headers)) {
+        gboolean already = FALSE;
+        JSValue has_fn = JS_GetPropertyStr(ctx, headers, "has");
+        if (JS_IsFunction(ctx, has_fn)) {
+            JSValue key = JS_NewString(ctx, "content-type");
+            JSValueConst a[1] = { key };
+            JSValue r = JS_Call(ctx, has_fn, headers, 1, a);
+            already = JS_ToBool(ctx, r) > 0;
+            JS_FreeValue(ctx, r);
+            JS_FreeValue(ctx, key);
+        }
+        JS_FreeValue(ctx, has_fn);
+        if (!already) {
+            JSValue set_fn = JS_GetPropertyStr(ctx, headers, "set");
+            if (JS_IsFunction(ctx, set_fn)) {
+                JSValueConst a[2] = { JS_NewString(ctx, "content-type"),
+                                      JS_DupValue(ctx, ctv) };
+                JSValue r = JS_Call(ctx, set_fn, headers, 2, a);
+                if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+                JS_FreeValue(ctx, r);
+                JS_FreeValue(ctx, a[0]);
+                JS_FreeValue(ctx, a[1]);
+            }
+            JS_FreeValue(ctx, set_fn);
+        }
+    }
+    JS_FreeValue(ctx, headers);
+    JS_FreeValue(ctx, ctv);
 }
 
 static JSValue
@@ -12031,6 +12125,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "redirected", JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "headers",
         ns_make_headers_from_init(ctx, headers_init));
+    ns_body_apply_inferred_ct(ctx, obj);
     ns_attach_body_consumers(ctx, obj);
     if (status_text) JS_FreeCString(ctx, status_text);
     JS_FreeValue(ctx, status_text_v);
@@ -12100,6 +12195,7 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, obj, "headers",
         ns_make_headers_from_init(ctx, headers_init));
     ns_body_install(ctx, obj, body_v, TRUE);
+    ns_body_apply_inferred_ct(ctx, obj);
     JS_SetPropertyStr(ctx, obj, "bodyUsed",       JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
     JS_SetPropertyStr(ctx, obj, "credentials",    JS_NewString(ctx, "same-origin"));
