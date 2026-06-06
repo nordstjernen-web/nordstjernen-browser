@@ -1647,6 +1647,148 @@
     DecompressionStream.prototype.constructor = DecompressionStream;
     defineCtor('DecompressionStream', DecompressionStream);
 
+    if (typeof Request === 'function' && typeof Response === 'function') {
+        var cacheStores = new Map();
+
+        function cacheKey(request, ignoreSearch) {
+            var url;
+            if (request && typeof request === 'object' && request.url)
+                url = request.url;
+            else { try { url = new Request(request).url; } catch (e) { url = String(request); } }
+            if (ignoreSearch) {
+                var q = url.indexOf('?');
+                if (q >= 0) url = url.slice(0, q);
+            }
+            return url;
+        }
+
+        function headerPairs(h) {
+            var out = [];
+            if (!h) return out;
+            try {
+                if (typeof h.forEach === 'function') {
+                    h.forEach(function (v, k) { out.push([k, v]); });
+                } else if (typeof h.entries === 'function') {
+                    var it = h.entries(), e;
+                    while (!(e = it.next()).done) out.push([e.value[0], e.value[1]]);
+                }
+            } catch (err) { /* tolerate */ }
+            return out;
+        }
+
+        function NSCache() { this._entries = new Map(); }
+
+        NSCache.prototype.put = function (request, response) {
+            if (response && response.bodyUsed)
+                return Promise.reject(new TypeError('Response body is already used'));
+            if (response && (response.status === 206))
+                return Promise.reject(new TypeError('Partial response (206) cannot be cached'));
+            var self = this, key = cacheKey(request);
+            var src = (response && typeof response.clone === 'function')
+                ? response.clone() : response;
+            return Promise.resolve(src.arrayBuffer()).then(function (ab) {
+                self._entries.set(key, {
+                    body: ab,
+                    status: response.status === undefined ? 200 : response.status,
+                    statusText: response.statusText || '',
+                    headers: headerPairs(response.headers),
+                    url: response.url || key
+                });
+            });
+        };
+
+        function entryToResponse(entry) {
+            var resp = new Response(new Uint8Array(entry.body), {
+                status: entry.status,
+                statusText: entry.statusText,
+                headers: entry.headers
+            });
+            try { resp.url = entry.url; } catch (e) { /* read-only? tolerate */ }
+            return resp;
+        }
+
+        NSCache.prototype.match = function (request, options) {
+            options = options || {};
+            var entry = this._entries.get(cacheKey(request, options.ignoreSearch));
+            if (!entry && options.ignoreSearch) {
+                var want = cacheKey(request, true), it = this._entries.entries(), e;
+                while (!(e = it.next()).done) {
+                    var k = e.value[0], q = k.indexOf('?');
+                    if ((q >= 0 ? k.slice(0, q) : k) === want) { entry = e.value[1]; break; }
+                }
+            }
+            return Promise.resolve(entry ? entryToResponse(entry) : undefined);
+        };
+
+        NSCache.prototype.matchAll = function (request, options) {
+            if (request === undefined) {
+                var all = [];
+                this._entries.forEach(function (entry) { all.push(entryToResponse(entry)); });
+                return Promise.resolve(all);
+            }
+            return this.match(request, options).then(function (m) {
+                return m ? [m] : [];
+            });
+        };
+
+        NSCache.prototype.add = function (request) {
+            var self = this;
+            return fetch(request).then(function (resp) {
+                if (!resp.ok)
+                    throw new TypeError('Request failed with status ' + resp.status);
+                return self.put(request, resp);
+            });
+        };
+
+        NSCache.prototype.addAll = function (requests) {
+            var self = this;
+            return Promise.all(Array.prototype.map.call(requests, function (r) {
+                return self.add(r);
+            })).then(function () { return undefined; });
+        };
+
+        NSCache.prototype.delete = function (request, options) {
+            var key = cacheKey(request, options && options.ignoreSearch);
+            return Promise.resolve(this._entries.delete(key));
+        };
+
+        NSCache.prototype.keys = function () {
+            var reqs = [];
+            this._entries.forEach(function (entry, key) { reqs.push(new Request(key)); });
+            return Promise.resolve(reqs);
+        };
+
+        var cacheStorage = {
+            open: function (name) {
+                name = String(name);
+                var c = cacheStores.get(name);
+                if (!c) { c = new NSCache(); cacheStores.set(name, c); }
+                return Promise.resolve(c);
+            },
+            has: function (name) {
+                return Promise.resolve(cacheStores.has(String(name)));
+            },
+            delete: function (name) {
+                return Promise.resolve(cacheStores.delete(String(name)));
+            },
+            keys: function () {
+                return Promise.resolve(Array.from(cacheStores.keys()));
+            },
+            match: function (request, options) {
+                var stores = Array.from(cacheStores.values());
+                return (function next(i) {
+                    if (i >= stores.length) return Promise.resolve(undefined);
+                    return stores[i].match(request, options).then(function (m) {
+                        return m || next(i + 1);
+                    });
+                })(0);
+            }
+        };
+
+        try { global.caches = cacheStorage; } catch (e) { /* tolerate */ }
+        try { global.Cache = NSCache; } catch (e) { /* tolerate */ }
+    }
+
     if (typeof Object.hasOwn !== 'function') {
         Object.hasOwn = function (obj, prop) {
             if (obj == null) throw new TypeError('Object.hasOwn: null/undefined');

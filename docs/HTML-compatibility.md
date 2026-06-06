@@ -351,9 +351,19 @@ activating → activated` (each firing `statechange`), and on activation
 `self.skipWaiting()`, `caches`, and the `FetchEvent` /
 `ExtendableMessageEvent` interfaces, and `postMessage` works in both
 directions (SW↔page). **Network interception is not wired** — `fetch`
-events are never dispatched, so a worker cannot serve requests from the
-(currently no-op) Cache API, and registrations live for the session
-rather than persisting across loads.
+events are never dispatched, so a worker cannot serve requests by
+intercepting navigations/subresources, and registrations live for the
+session rather than persisting across loads.
+
+The **Cache API** (`caches` / `CacheStorage` / `Cache`) is implemented as
+a real in-memory store on the page: `caches.open` / `has` / `delete` /
+`keys` / `match`, and per-cache `put`, `match`, `matchAll`, `add`,
+`addAll`, `delete`, and `keys`, with `ignoreSearch`. Entries hold the
+response bytes, status, and headers, so a `match` returns a fresh
+readable `Response`. `add` / `addAll` fetch and store. The store is
+per-session (not persisted to disk) and is not shared into the Service
+Worker thread (which keeps the inert stub, since it cannot intercept
+anyway).
 
 🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
 transferable `ArrayBuffer`s, worker `fetch`, and nested workers are not

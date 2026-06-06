@@ -11893,6 +11893,58 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
 }
 
 static JSValue
+ns_body_extract_buffer(JSContext *ctx, JSValueConst body)
+{
+    size_t off = 0, len = 0, bpe = 0;
+    JSValue view_buf = JS_GetTypedArrayBuffer(ctx, body, &off, &len, &bpe);
+    if (!JS_IsException(view_buf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, view_buf);
+        JSValue out = (base && off + len <= total)
+            ? JS_NewArrayBufferCopy(ctx, base + off, len) : JS_UNDEFINED;
+        JS_FreeValue(ctx, view_buf);
+        return out;
+    }
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, body);
+    if (base)
+        return JS_NewArrayBufferCopy(ctx, base, total);
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    return JS_UNDEFINED;
+}
+
+static void
+ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
+                gboolean null_when_empty)
+{
+    if (JS_IsUndefined(body) || JS_IsNull(body)) {
+        JS_SetPropertyStr(ctx, obj, "body",
+                          null_when_empty ? JS_NULL : JS_NewString(ctx, ""));
+        return;
+    }
+    if (JS_IsString(body)) {
+        JS_SetPropertyStr(ctx, obj, "body", JS_DupValue(ctx, body));
+        return;
+    }
+    if (JS_IsObject(body)) {
+        JSValue buf = ns_body_extract_buffer(ctx, body);
+        if (!JS_IsUndefined(buf)) {
+            JS_SetPropertyStr(ctx, obj, "_bodyBuffer", buf);
+            JS_SetPropertyStr(ctx, obj, "body",
+                null_when_empty ? JS_DupValue(ctx, body) : JS_NewString(ctx, ""));
+            return;
+        }
+    }
+    JSValue s = JS_ToString(ctx, body);
+    if (JS_IsException(s)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        s = JS_NewString(ctx, "");
+    }
+    JS_SetPropertyStr(ctx, obj, "body", s);
+}
+
+static JSValue
 ns_make_headers_from_init(JSContext *ctx, JSValueConst init)
 {
     JSValue global = JS_GetGlobalObject(ctx);
@@ -11933,19 +11985,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
             status_text = JS_ToCString(ctx, status_text_v);
         headers_init = JS_GetPropertyStr(ctx, argv[1], "headers");
     }
-    JSValue body_str;
-    if (JS_IsString(body_v)) {
-        body_str = JS_DupValue(ctx, body_v);
-    } else if (JS_IsNull(body_v) || JS_IsUndefined(body_v)) {
-        body_str = JS_NewString(ctx, "");
-    } else {
-        body_str = JS_ToString(ctx, body_v);
-        if (JS_IsException(body_str)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            body_str = JS_NewString(ctx, "");
-        }
-    }
-    JS_SetPropertyStr(ctx, obj, "body",       body_str);
+    ns_body_install(ctx, obj, body_v, FALSE);
     JS_SetPropertyStr(ctx, obj, "bodyUsed",   JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "status",     JS_NewInt32(ctx, status));
     JS_SetPropertyStr(ctx, obj, "statusText",
@@ -12025,11 +12065,7 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
         JS_NewString(ctx, upper_method ? upper_method : "GET"));
     JS_SetPropertyStr(ctx, obj, "headers",
         ns_make_headers_from_init(ctx, headers_init));
-    if (JS_IsUndefined(body_v) || JS_IsNull(body_v)) {
-        JS_SetPropertyStr(ctx, obj, "body", JS_NULL);
-    } else {
-        JS_SetPropertyStr(ctx, obj, "body", JS_DupValue(ctx, body_v));
-    }
+    ns_body_install(ctx, obj, body_v, TRUE);
     JS_SetPropertyStr(ctx, obj, "bodyUsed",       JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
     JS_SetPropertyStr(ctx, obj, "credentials",    JS_NewString(ctx, "same-origin"));
