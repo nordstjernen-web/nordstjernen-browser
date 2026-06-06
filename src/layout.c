@@ -910,6 +910,7 @@ static GArray      *g_abs_pending;
 static gboolean     g_abs_force_build;
 static GHashTable  *g_abs_ph_set;
 static GHashTable  *g_abs_static;
+static GHashTable  *g_abs_seen;
 
 static void
 collect_box_bg_image(ns_box *box, const ns_style *s)
@@ -2069,7 +2070,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
     if (s && style_is_absolute_or_fixed(s)) {
-        if (g_abs_pending) {
+        if (g_abs_pending &&
+            (!g_abs_seen || g_hash_table_add(g_abs_seen, (gpointer)n))) {
             ns_abs_entry e;
             e.dom = n;
             const ns_css_value *pv = s->values[NS_CSS_POSITION];
@@ -3674,7 +3676,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     if (s && style_is_none(s)) return NULL;
     if (s && style_is_absolute_or_fixed(s)) {
         if (!g_abs_force_build) {
-            if (g_abs_pending) {
+            if (g_abs_pending &&
+                (!g_abs_seen || g_hash_table_add(g_abs_seen, (gpointer)n))) {
                 ns_abs_entry e;
                 e.dom = n;
                 const ns_css_value *pv = s->values[NS_CSS_POSITION];
@@ -8335,24 +8338,21 @@ apply_position_offsets(ns_box *box, double parent_w, double parent_h)
         apply_position_offsets(c, child_w, child_h);
 }
 
-static ns_box *
-find_box_by_dom(ns_box *root, const ns_node *dom)
+static void
+abs_box_map_build(GHashTable *map, ns_box *root)
 {
-    if (!root || !dom) return NULL;
-    if (root->dom == dom) return root;
-    for (ns_box *c = root->first_child; c; c = c->next_sibling) {
-        ns_box *m = find_box_by_dom(c, dom);
-        if (m) return m;
-    }
+    if (!root) return;
+    if (root->dom && !g_hash_table_contains(map, root->dom))
+        g_hash_table_insert(map, (gpointer)root->dom, root);
+    for (ns_box *c = root->first_child; c; c = c->next_sibling)
+        abs_box_map_build(map, c);
     if (root->inline_atomics) {
         for (guint i = 0; i < root->inline_atomics->len; i++) {
             ns_box *ab = g_array_index(root->inline_atomics,
                                        ns_inline_atomic, i).box;
-            ns_box *m = find_box_by_dom(ab, dom);
-            if (m) return m;
+            abs_box_map_build(map, ab);
         }
     }
-    return NULL;
 }
 
 static gboolean
@@ -8532,12 +8532,14 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         while (order_root->parent) order_root = order_root->parent;
         node_order_build(order_root);
     }
+    GHashTable *box_map = g_hash_table_new(g_direct_hash, g_direct_equal);
+    abs_box_map_build(box_map, root);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
         const ns_node *cb_dom = e.fixed
             ? NULL
             : find_abs_containing_block_dom(e.dom, styles);
-        ns_box *cb = cb_dom ? find_box_by_dom(root, cb_dom) : root;
+        ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
         if (!cb) cb = root;
 
         g_abs_force_build = TRUE;
@@ -8546,6 +8548,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         if (!abox) continue;
 
         box_append_child(cb, abox);
+        abs_box_map_build(box_map, abox);
         gboolean cb_is_icb = (cb_dom == NULL);
         double avail = cb->content_width > 0 ? cb->content_width : viewport_width;
         double cb_h = cb_is_icb ? ns_css_viewport_h() : cb->content_height;
@@ -8640,6 +8643,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         apply_position_offsets(abox, avail, cb_h);
         position_absolute_box(abox, cb, cb_is_icb);
     }
+    g_hash_table_destroy(box_map);
     g_array_set_size(g_abs_pending, 0);
     g_clear_pointer(&g_node_order, g_hash_table_destroy);
 }
@@ -8696,6 +8700,7 @@ static ns_box *
 ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 {
     g_abs_pending = g_array_new(FALSE, FALSE, sizeof(ns_abs_entry));
+    g_abs_seen = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_abs_ph_set = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_abs_static = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                          NULL, g_free);
@@ -8706,6 +8711,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
     if (!root) {
         g_array_free(g_abs_pending, TRUE);
         g_abs_pending = NULL;
+        g_clear_pointer(&g_abs_seen, g_hash_table_destroy);
         g_clear_pointer(&g_abs_ph_set, g_hash_table_destroy);
         g_clear_pointer(&g_abs_static, g_hash_table_destroy);
         g_hash_table_destroy(g_contains_block_media_cache);
@@ -8722,6 +8728,7 @@ ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width)
 
     g_array_free(g_abs_pending, TRUE);
     g_abs_pending = NULL;
+    g_clear_pointer(&g_abs_seen, g_hash_table_destroy);
     g_clear_pointer(&g_abs_ph_set, g_hash_table_destroy);
     g_clear_pointer(&g_abs_static, g_hash_table_destroy);
     g_hash_table_destroy(g_contains_block_media_cache);
