@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CSS image filters</title>
+<style>
+body {
+  margin: 26px;
+  font: 15px sans-serif;
+  background: #f7f8fb;
+  color: #1f2937;
+}
+.row {
+  display: flex;
+  gap: 30px;
+  align-items: center;
+}
+.sample {
+  width: 116px;
+  height: 86px;
+  object-fit: cover;
+  background: white;
+}
+.shadow {
+  filter: drop-shadow(10px 9px 5px rgb(31 41 55 / 55%));
+}
+.combo {
+  filter: grayscale(45%) saturate(140%) drop-shadow(currentColor -8px 8px 4px);
+  color: #0f766e;
+}
+</style>
+<div class="row">
+  <img class="sample shadow" src="img.png" alt="">
+  <img class="sample combo" src="wide.png" alt="">
+</div>

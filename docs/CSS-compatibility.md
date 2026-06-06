@@ -186,7 +186,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `opacity` | ✅ | |
-| `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur) | ✅ | on images; `blur()` is a separable box blur; drop-shadow still limited |
+| `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur/drop-shadow) | ✅ | on images; `blur()` is a separable box blur; `drop-shadow()` uses the image alpha mask, CSS lengths, and parsed colors/currentColor |
 | `mix-blend-mode` | ✅ | |
 | `clip-path` (basic shapes) | ✅ | |
 | `mask-image` (`url()` + linear/radial gradient) | ✅ | gradient masks composite the whole element through the gradient's alpha (fade effects); `mask`/`-webkit-mask` aliased; conic masks skipped |

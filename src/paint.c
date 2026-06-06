@@ -2058,6 +2058,311 @@ box_blur_argb(guchar *data, int stride, int w, int h, int radius)
     g_free(tmp);
 }
 
+typedef struct image_drop_shadow {
+    double x, y, blur;
+    rgba color;
+} image_drop_shadow;
+
+static gboolean
+filter_name_is(const char *name, gsize nlen, const char *want)
+{
+    gsize want_len = strlen(want);
+    return nlen == want_len &&
+           g_ascii_strncasecmp(name, want, want_len) == 0;
+}
+
+static const char *
+filter_function_next(const char *p, const char **name_out, gsize *name_len_out,
+                     const char **body_out, const char **body_end_out)
+{
+    while (*p && g_ascii_isspace((unsigned char)*p)) p++;
+    if (!*p) return NULL;
+    const char *name = p;
+    while (*p && (g_ascii_isalpha((unsigned char)*p) || *p == '-')) p++;
+    gsize name_len = (gsize)(p - name);
+    while (*p && g_ascii_isspace((unsigned char)*p)) p++;
+    if (!name_len || *p != '(') return NULL;
+    p++;
+    const char *body = p;
+    int depth = 1;
+    while (*p) {
+        if (*p == '(') {
+            depth++;
+        } else if (*p == ')') {
+            depth--;
+            if (depth == 0) {
+                if (name_out) *name_out = name;
+                if (name_len_out) *name_len_out = name_len;
+                if (body_out) *body_out = body;
+                if (body_end_out) *body_end_out = p;
+                return p + 1;
+            }
+        }
+        p++;
+    }
+    return NULL;
+}
+
+static gboolean
+filter_has_bitmap_effect(const char *filter)
+{
+    if (!filter) return FALSE;
+    const char *p = filter;
+    while (*p) {
+        const char *name = NULL;
+        gsize nlen = 0;
+        const char *next = filter_function_next(p, &name, &nlen, NULL, NULL);
+        if (!next) break;
+        if (filter_name_is(name, nlen, "grayscale") ||
+            filter_name_is(name, nlen, "sepia") ||
+            filter_name_is(name, nlen, "invert") ||
+            filter_name_is(name, nlen, "brightness") ||
+            filter_name_is(name, nlen, "contrast") ||
+            filter_name_is(name, nlen, "saturate") ||
+            filter_name_is(name, nlen, "blur"))
+            return TRUE;
+        p = next;
+    }
+    return FALSE;
+}
+
+static gboolean
+parse_filter_length_px(const char *s, double *out)
+{
+    while (*s && g_ascii_isspace((unsigned char)*s)) s++;
+    char *endp = NULL;
+    double v = g_ascii_strtod(s, &endp);
+    if (!endp || endp == s) return FALSE;
+    while (*endp && g_ascii_isspace((unsigned char)*endp)) endp++;
+    if (*endp == '\0' || g_ascii_strcasecmp(endp, "px") == 0) {
+        *out = v;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "em") == 0 ||
+        g_ascii_strcasecmp(endp, "rem") == 0 ||
+        g_ascii_strcasecmp(endp, "lh") == 0 ||
+        g_ascii_strcasecmp(endp, "rlh") == 0) {
+        *out = v * 16.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "pt") == 0) {
+        *out = v * (96.0 / 72.0);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "pc") == 0) {
+        *out = v * 16.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "cm") == 0) {
+        *out = v * (96.0 / 2.54);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "mm") == 0) {
+        *out = v * (96.0 / 25.4);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "q") == 0) {
+        *out = v * (96.0 / 101.6);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "in") == 0) {
+        *out = v * 96.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "vw") == 0 ||
+        g_ascii_strcasecmp(endp, "dvw") == 0 ||
+        g_ascii_strcasecmp(endp, "svw") == 0 ||
+        g_ascii_strcasecmp(endp, "lvw") == 0) {
+        *out = v * ns_css_viewport_w() / 100.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "vh") == 0 ||
+        g_ascii_strcasecmp(endp, "dvh") == 0 ||
+        g_ascii_strcasecmp(endp, "svh") == 0 ||
+        g_ascii_strcasecmp(endp, "lvh") == 0) {
+        *out = v * ns_css_viewport_h() / 100.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "vmin") == 0 ||
+        g_ascii_strcasecmp(endp, "dvmin") == 0 ||
+        g_ascii_strcasecmp(endp, "svmin") == 0 ||
+        g_ascii_strcasecmp(endp, "lvmin") == 0) {
+        *out = v * MIN(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(endp, "vmax") == 0 ||
+        g_ascii_strcasecmp(endp, "dvmax") == 0 ||
+        g_ascii_strcasecmp(endp, "svmax") == 0 ||
+        g_ascii_strcasecmp(endp, "lvmax") == 0) {
+        *out = v * MAX(ns_css_viewport_w(), ns_css_viewport_h()) / 100.0;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+filter_split_ws(const char *start, const char *end, char *tokens[], int max)
+{
+    int n = 0;
+    int depth = 0;
+    const char *tok = NULL;
+    for (const char *p = start; p <= end; p++) {
+        gboolean done = p == end;
+        char c = done ? '\0' : *p;
+        if (!done && !tok && !g_ascii_isspace((unsigned char)c))
+            tok = p;
+        if (!done && c == '(') depth++;
+        else if (!done && c == ')' && depth > 0) depth--;
+        if ((done || (g_ascii_isspace((unsigned char)c) && depth == 0)) && tok) {
+            if (n < max)
+                tokens[n++] = g_strndup(tok, (gsize)(p - tok));
+            tok = NULL;
+        }
+    }
+    return n;
+}
+
+static gboolean
+parse_filter_shadow_body(const char *body, const char *body_end,
+                         rgba current_color, image_drop_shadow *out)
+{
+    char *tokens[8] = {0};
+    double lengths[3] = {0};
+    int n_lengths = 0;
+    rgba color = current_color;
+    int n = filter_split_ws(body, body_end, tokens, G_N_ELEMENTS(tokens));
+    gboolean ok = TRUE;
+    for (int i = 0; i < n; i++) {
+        double len = 0;
+        guint8 r, g, b, a;
+        char *token = g_strstrip(tokens[i]);
+        if (parse_filter_length_px(token, &len)) {
+            if (n_lengths < 3) lengths[n_lengths++] = len;
+            else ok = FALSE;
+        } else if (g_ascii_strcasecmp(token, "currentcolor") == 0) {
+            color = current_color;
+        } else if (ns_css_parse_color(token, &r, &g, &b, &a)) {
+            color.r = r / 255.0;
+            color.g = g / 255.0;
+            color.b = b / 255.0;
+            color.a = a / 255.0;
+        } else {
+            ok = FALSE;
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    if (!ok || n_lengths < 2) return FALSE;
+    out->x = lengths[0];
+    out->y = lengths[1];
+    out->blur = n_lengths >= 3 && lengths[2] > 0 ? lengths[2] : 0;
+    out->color = color;
+    return TRUE;
+}
+
+static int
+parse_filter_drop_shadows(const char *filter, rgba current_color,
+                          image_drop_shadow shadows[], int max)
+{
+    if (!filter || max <= 0) return 0;
+    int n = 0;
+    const char *p = filter;
+    while (*p && n < max) {
+        const char *name = NULL;
+        const char *body = NULL;
+        const char *body_end = NULL;
+        gsize nlen = 0;
+        const char *next =
+            filter_function_next(p, &name, &nlen, &body, &body_end);
+        if (!next) break;
+        if (filter_name_is(name, nlen, "drop-shadow") &&
+            parse_filter_shadow_body(body, body_end, current_color, &shadows[n]))
+            n++;
+        p = next;
+    }
+    return n;
+}
+
+static cairo_surface_t *
+drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
+                    double ox, double oy, double sx, double sy,
+                    image_drop_shadow shadow, int *pad_out)
+{
+    if (cw <= 0 || ch <= 0 || sx <= 0 || sy <= 0) return NULL;
+    int radius = shadow.blur > 0 ? (int)(shadow.blur + 0.5) : 0;
+    int pad = radius * 2 + 2;
+    int sw = cw + pad * 2;
+    int sh = ch + pad * 2;
+    cairo_surface_t *shadow_surf =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
+    if (cairo_surface_status(shadow_surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(shadow_surf);
+        return NULL;
+    }
+
+    cairo_t *s_cr = cairo_create(shadow_surf);
+    cairo_set_operator(s_cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(s_cr);
+    cairo_set_operator(s_cr, CAIRO_OPERATOR_OVER);
+    cairo_rectangle(s_cr, pad, pad, cw, ch);
+    cairo_clip(s_cr);
+    cairo_translate(s_cr, pad + ox, pad + oy);
+    cairo_scale(s_cr, sx, sy);
+    cairo_set_source_surface(s_cr, src, 0, 0);
+    cairo_paint(s_cr);
+    cairo_destroy(s_cr);
+
+    cairo_surface_flush(shadow_surf);
+    guchar *data = cairo_image_surface_get_data(shadow_surf);
+    int stride = cairo_image_surface_get_stride(shadow_surf);
+    for (int y = 0; y < sh; y++) {
+        guchar *row = data + y * stride;
+        for (int x = 0; x < sw; x++) {
+            guchar *px = row + x * 4;
+            double a = px[3] / 255.0 * shadow.color.a;
+            px[0] = (guchar)(shadow.color.b * a * 255.0 + 0.5);
+            px[1] = (guchar)(shadow.color.g * a * 255.0 + 0.5);
+            px[2] = (guchar)(shadow.color.r * a * 255.0 + 0.5);
+            px[3] = (guchar)(a * 255.0 + 0.5);
+        }
+    }
+    if (radius > 0)
+        box_blur_argb(data, stride, sw, sh, radius);
+    cairo_surface_mark_dirty(shadow_surf);
+    if (pad_out) *pad_out = pad;
+    (void)iw;
+    (void)ih;
+    return shadow_surf;
+}
+
+static void
+paint_texture_drop_shadows(cairo_t *cr, cairo_surface_t *surf, const ns_box *b,
+                           int iw, int ih, double sx, double sy,
+                           double ox, double oy, const char *filter_kw)
+{
+    const ns_style *st = b ? b->style : NULL;
+    rgba current = rgba_of(st ? st->values[NS_CSS_COLOR] : NULL, 0, 0, 0, 1);
+    image_drop_shadow shadows[4];
+    int n = parse_filter_drop_shadows(filter_kw, current, shadows,
+                                      G_N_ELEMENTS(shadows));
+    if (n <= 0) return;
+    int cw = MAX(1, (int)ceil(b->content_width));
+    int ch = MAX(1, (int)ceil(b->content_height));
+    for (int i = 0; i < n; i++) {
+        int pad = 0;
+        cairo_surface_t *shadow =
+            drop_shadow_surface(surf, iw, ih, cw, ch, ox, oy, sx, sy,
+                                shadows[i], &pad);
+        if (!shadow) continue;
+        cairo_save(cr);
+        cairo_set_source_surface(cr, shadow,
+                                 b->x + shadows[i].x - pad,
+                                 b->y + shadows[i].y - pad);
+        cairo_paint(cr);
+        cairo_restore(cr);
+        cairo_surface_destroy(shadow);
+    }
+}
+
 static void
 apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
 {
@@ -2068,24 +2373,21 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
     double blur_radius = 0;
     const char *q = filter;
     while (*q && n_ops < 16) {
-        while (*q == ' ' || *q == '\t') q++;
-        if (!*q) break;
         int op = 0;
-        const char *name = q;
-        while (*q && *q != '(') q++;
-        gsize nlen = (gsize)(q - name);
-        if (*q != '(') break;
-        q++;
-        double amt = parse_filter_amount(q, &q);
-        while (*q && *q != ')') q++;
-        if (*q == ')') q++;
-        if (nlen == 9 && g_ascii_strncasecmp(name, "grayscale", 9) == 0) op = 1;
-        else if (nlen == 5 && g_ascii_strncasecmp(name, "sepia",     5) == 0) op = 2;
-        else if (nlen == 6 && g_ascii_strncasecmp(name, "invert",    6) == 0) op = 3;
-        else if (nlen == 10 && g_ascii_strncasecmp(name, "brightness", 10) == 0) op = 4;
-        else if (nlen == 8  && g_ascii_strncasecmp(name, "contrast",    8) == 0) op = 5;
-        else if (nlen == 8  && g_ascii_strncasecmp(name, "saturate",    8) == 0) op = 6;
-        else if (nlen == 4  && g_ascii_strncasecmp(name, "blur",        4) == 0) {
+        const char *name = NULL;
+        const char *body = NULL;
+        gsize nlen = 0;
+        const char *next = filter_function_next(q, &name, &nlen, &body, NULL);
+        if (!next) break;
+        double amt = parse_filter_amount(body, NULL);
+        q = next;
+        if (filter_name_is(name, nlen, "grayscale")) op = 1;
+        else if (filter_name_is(name, nlen, "sepia")) op = 2;
+        else if (filter_name_is(name, nlen, "invert")) op = 3;
+        else if (filter_name_is(name, nlen, "brightness")) op = 4;
+        else if (filter_name_is(name, nlen, "contrast")) op = 5;
+        else if (filter_name_is(name, nlen, "saturate")) op = 6;
+        else if (filter_name_is(name, nlen, "blur")) {
             if (amt >= 0 && amt > blur_radius) blur_radius = amt;
         }
         if (op && amt >= 0) {
@@ -2322,13 +2624,12 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
         st->values[NS_CSS_FILTER]->u.keyword) {
         filter_kw = st->values[NS_CSS_FILTER]->u.keyword;
     }
-    cairo_surface_t *surf = texture_surface_cached(tex, filter_kw);
+    const char *surface_filter =
+        filter_has_bitmap_effect(filter_kw) ? filter_kw : NULL;
+    cairo_surface_t *surf = texture_surface_cached(tex, surface_filter);
     if (!surf) return FALSE;
-    apply_box_content_clip(cr, b);
     double cw = b->content_width, ch = b->content_height;
     double sx = cw / iw, sy = ch / ih;
-    cairo_rectangle(cr, b->x, b->y, cw, ch);
-    cairo_clip(cr);
     const char *fit = (st && st->values[NS_CSS_OBJECT_FIT] &&
                        st->values[NS_CSS_OBJECT_FIT]->kind == NS_CSS_V_KEYWORD)
                       ? st->values[NS_CSS_OBJECT_FIT]->u.keyword : NULL;
@@ -2348,6 +2649,10 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
                                         ch, ih * s);
         }
     }
+    paint_texture_drop_shadows(cr, surf, b, iw, ih, sx, sy, ox, oy, filter_kw);
+    apply_box_content_clip(cr, b);
+    cairo_rectangle(cr, b->x, b->y, cw, ch);
+    cairo_clip(cr);
     cairo_translate(cr, b->x + ox, b->y + oy);
     cairo_scale(cr, sx, sy);
     cairo_set_source_surface(cr, surf, 0, 0);
@@ -2357,7 +2662,7 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
          strcmp(ir->u.keyword, "crisp-edges") == 0))
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
     cairo_paint(cr);
-    if (filter_kw) cairo_surface_destroy(surf);
+    if (surface_filter) cairo_surface_destroy(surf);
     return TRUE;
 }
 

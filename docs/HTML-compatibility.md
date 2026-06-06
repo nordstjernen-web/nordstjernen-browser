@@ -453,7 +453,7 @@ CSS support (abridged):
   resolution, color-gamut, scripting, display-mode, update,
   dynamic-range, overflow-block/inline, grid/monochrome/color, and user
   preference features including reduced data and inverted colors.
-- ✅ `filter` (grayscale/sepia/invert/brightness/contrast/saturate),
+- ✅ `filter` (grayscale/sepia/invert/brightness/contrast/saturate/blur/drop-shadow),
   `clip-path` (basic shapes), `mix-blend-mode`, `-webkit-line-clamp`.
 - ✅ `:focus`, `:focus-within`, `:focus-visible`, `:placeholder-shown`,
   `:checked`, `:valid`, `:invalid`.
