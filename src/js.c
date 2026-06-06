@@ -18583,6 +18583,502 @@ ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
     return ns_make_dom_rect(ctx, x, y, w, h);
 }
 
+typedef struct { double x, y; gboolean moveto; } ns_svg_pt;
+
+static double
+ns_svg_num(const ns_node *n, const char *attr, double dflt)
+{
+    if (!n) return dflt;
+    const char *v = ns_element_get_attr(n, attr);
+    if (!v || !*v) return dflt;
+    char *end = NULL;
+    double d = g_ascii_strtod(v, &end);
+    return (end == v) ? dflt : d;
+}
+
+static const char *
+ns_svg_read_num(const char *p, double *out)
+{
+    while (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+    char *end = NULL;
+    double v = g_ascii_strtod(p, &end);
+    if (end == p) return NULL;
+    *out = v;
+    return end;
+}
+
+static void
+ns_svg_flatten_cubic(GArray *out, double x0, double y0, double x1, double y1,
+                     double x2, double y2, double x3, double y3)
+{
+    const int steps = 24;
+    for (int i = 1; i <= steps; i++) {
+        double t = (double)i / steps, u = 1 - t;
+        double bx = u*u*u*x0 + 3*u*u*t*x1 + 3*u*t*t*x2 + t*t*t*x3;
+        double by = u*u*u*y0 + 3*u*u*t*y1 + 3*u*t*t*y2 + t*t*t*y3;
+        ns_svg_pt pt = { bx, by, FALSE };
+        g_array_append_val(out, pt);
+    }
+}
+
+static void
+ns_svg_flatten_quad(GArray *out, double x0, double y0, double x1, double y1,
+                    double x2, double y2)
+{
+    const int steps = 18;
+    for (int i = 1; i <= steps; i++) {
+        double t = (double)i / steps, u = 1 - t;
+        double bx = u*u*x0 + 2*u*t*x1 + t*t*x2;
+        double by = u*u*y0 + 2*u*t*y1 + t*t*y2;
+        ns_svg_pt pt = { bx, by, FALSE };
+        g_array_append_val(out, pt);
+    }
+}
+
+static void
+ns_svg_flatten_arc(GArray *out, double x0, double y0, double rx, double ry,
+                   double phi, gboolean large, gboolean sweep,
+                   double x1, double y1)
+{
+    if (rx == 0 || ry == 0 || (x0 == x1 && y0 == y1)) {
+        ns_svg_pt pt = { x1, y1, FALSE };
+        g_array_append_val(out, pt);
+        return;
+    }
+    rx = fabs(rx); ry = fabs(ry);
+    double cosp = cos(phi), sinp = sin(phi);
+    double dx = (x0 - x1) / 2, dy = (y0 - y1) / 2;
+    double x1p =  cosp*dx + sinp*dy;
+    double y1p = -sinp*dx + cosp*dy;
+    double lambda = (x1p*x1p)/(rx*rx) + (y1p*y1p)/(ry*ry);
+    if (lambda > 1) { double s = sqrt(lambda); rx *= s; ry *= s; }
+    double sign = (large != sweep) ? 1 : -1;
+    double num = rx*rx*ry*ry - rx*rx*y1p*y1p - ry*ry*x1p*x1p;
+    double den = rx*rx*y1p*y1p + ry*ry*x1p*x1p;
+    double co = sign * sqrt(num > 0 ? num/den : 0);
+    double cxp =  co * rx * y1p / ry;
+    double cyp = -co * ry * x1p / rx;
+    double cx = cosp*cxp - sinp*cyp + (x0 + x1)/2;
+    double cy = sinp*cxp + cosp*cyp + (y0 + y1)/2;
+    double t0 = atan2((y1p - cyp)/ry, (x1p - cxp)/rx);
+    double t1 = atan2((-y1p - cyp)/ry, (-x1p - cxp)/rx);
+    double dtheta = t1 - t0;
+    if (!sweep && dtheta > 0) dtheta -= 2*M_PI;
+    else if (sweep && dtheta < 0) dtheta += 2*M_PI;
+    const int steps = 32;
+    for (int i = 1; i <= steps; i++) {
+        double t = t0 + dtheta * i / steps;
+        double ex = cx + rx*cos(t)*cosp - ry*sin(t)*sinp;
+        double ey = cy + rx*cos(t)*sinp + ry*sin(t)*cosp;
+        ns_svg_pt pt = { ex, ey, FALSE };
+        g_array_append_val(out, pt);
+    }
+}
+
+static GArray *
+ns_svg_flatten_path(const char *d)
+{
+    GArray *pts = g_array_new(FALSE, FALSE, sizeof(ns_svg_pt));
+    if (!d) return pts;
+    const char *p = d;
+    double cx = 0, cy = 0, sx = 0, sy = 0;
+    double lcx = 0, lcy = 0;
+    char cmd = 0, prev = 0;
+    while (*p) {
+        while (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r')
+            p++;
+        if (!*p) break;
+        if (g_ascii_isalpha(*p)) { cmd = *p; p++; }
+        else if (cmd == 'M') cmd = 'L';
+        else if (cmd == 'm') cmd = 'l';
+        gboolean rel = g_ascii_islower(cmd);
+        char c = g_ascii_toupper(cmd);
+        double a, b, e, f, g, h;
+        if (c == 'M' || c == 'L' || c == 'T') {
+            const char *q = ns_svg_read_num(p, &a); if (!q) break; p = q;
+            q = ns_svg_read_num(p, &b); if (!q) break; p = q;
+            if (rel) { a += cx; b += cy; }
+            if (c == 'T') {
+                double qx = (prev=='Q'||prev=='T') ? 2*cx - lcx : cx;
+                double qy = (prev=='Q'||prev=='T') ? 2*cy - lcy : cy;
+                ns_svg_flatten_quad(pts, cx, cy, qx, qy, a, b);
+                lcx = qx; lcy = qy;
+            } else {
+                ns_svg_pt pt = { a, b, c == 'M' };
+                g_array_append_val(pts, pt);
+                if (c == 'M') { sx = a; sy = b; }
+            }
+            cx = a; cy = b;
+        } else if (c == 'H' || c == 'V') {
+            const char *q = ns_svg_read_num(p, &a); if (!q) break; p = q;
+            if (c == 'H') { if (rel) a += cx; cx = a; }
+            else          { if (rel) a += cy; cy = a; }
+            ns_svg_pt pt = { cx, cy, FALSE };
+            g_array_append_val(pts, pt);
+        } else if (c == 'C' || c == 'S') {
+            double c1x, c1y;
+            if (c == 'C') {
+                const char *q = ns_svg_read_num(p,&a); if(!q)break; p=q;
+                q = ns_svg_read_num(p,&b); if(!q)break; p=q;
+                if (rel){a+=cx;b+=cy;} c1x=a; c1y=b;
+            } else {
+                c1x = (prev=='C'||prev=='S') ? 2*cx - lcx : cx;
+                c1y = (prev=='C'||prev=='S') ? 2*cy - lcy : cy;
+            }
+            const char *q = ns_svg_read_num(p,&e); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&f); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&g); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&h); if(!q)break; p=q;
+            if (rel){e+=cx;f+=cy;g+=cx;h+=cy;}
+            ns_svg_flatten_cubic(pts, cx, cy, c1x, c1y, e, f, g, h);
+            lcx = e; lcy = f; cx = g; cy = h;
+        } else if (c == 'Q') {
+            const char *q = ns_svg_read_num(p,&a); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&b); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&e); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&f); if(!q)break; p=q;
+            if (rel){a+=cx;b+=cy;e+=cx;f+=cy;}
+            ns_svg_flatten_quad(pts, cx, cy, a, b, e, f);
+            lcx = a; lcy = b; cx = e; cy = f;
+        } else if (c == 'A') {
+            double rx, ry, rot, lg, sw;
+            const char *q = ns_svg_read_num(p,&rx); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&ry); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&rot); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&lg); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&sw); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&e); if(!q)break; p=q;
+            q = ns_svg_read_num(p,&f); if(!q)break; p=q;
+            if (rel){e+=cx;f+=cy;}
+            ns_svg_flatten_arc(pts, cx, cy, rx, ry, rot*M_PI/180.0,
+                               lg != 0, sw != 0, e, f);
+            cx = e; cy = f;
+        } else if (c == 'Z') {
+            ns_svg_pt pt = { sx, sy, FALSE };
+            g_array_append_val(pts, pt);
+            cx = sx; cy = sy;
+        } else break;
+        prev = c;
+    }
+    return pts;
+}
+
+static gboolean
+ns_node_local_bbox(const ns_node *n, double *bx, double *by,
+                   double *bw, double *bh)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    const char *tag = n->name;
+    if (g_ascii_strcasecmp(tag, "rect") == 0) {
+        *bx = ns_svg_num(n,"x",0); *by = ns_svg_num(n,"y",0);
+        *bw = ns_svg_num(n,"width",0); *bh = ns_svg_num(n,"height",0);
+        return TRUE;
+    }
+    if (g_ascii_strcasecmp(tag, "circle") == 0) {
+        double r = ns_svg_num(n,"r",0);
+        *bx = ns_svg_num(n,"cx",0)-r; *by = ns_svg_num(n,"cy",0)-r;
+        *bw = 2*r; *bh = 2*r; return TRUE;
+    }
+    if (g_ascii_strcasecmp(tag, "ellipse") == 0) {
+        double rx = ns_svg_num(n,"rx",0), ry = ns_svg_num(n,"ry",0);
+        *bx = ns_svg_num(n,"cx",0)-rx; *by = ns_svg_num(n,"cy",0)-ry;
+        *bw = 2*rx; *bh = 2*ry; return TRUE;
+    }
+    if (g_ascii_strcasecmp(tag, "line") == 0) {
+        double x1 = ns_svg_num(n,"x1",0), y1 = ns_svg_num(n,"y1",0);
+        double x2 = ns_svg_num(n,"x2",0), y2 = ns_svg_num(n,"y2",0);
+        *bx = MIN(x1,x2); *by = MIN(y1,y2);
+        *bw = fabs(x2-x1); *bh = fabs(y2-y1); return TRUE;
+    }
+    gboolean is_poly = g_ascii_strcasecmp(tag,"polygon") == 0 ||
+                       g_ascii_strcasecmp(tag,"polyline") == 0;
+    gboolean is_path = g_ascii_strcasecmp(tag,"path") == 0;
+    if (is_poly || is_path) {
+        GArray *pts = NULL;
+        if (is_path) pts = ns_svg_flatten_path(ns_element_get_attr(n,"d"));
+        else {
+            pts = g_array_new(FALSE, FALSE, sizeof(ns_svg_pt));
+            const char *p = ns_element_get_attr(n,"points");
+            double vx; gboolean have_x = FALSE; double px = 0;
+            while (p && (p = ns_svg_read_num(p, &vx))) {
+                if (!have_x) { px = vx; have_x = TRUE; }
+                else { ns_svg_pt pt = { px, vx, FALSE };
+                       g_array_append_val(pts, pt); have_x = FALSE; }
+            }
+        }
+        gboolean any = FALSE;
+        for (guint i = 0; i < pts->len; i++) {
+            ns_svg_pt pt = g_array_index(pts, ns_svg_pt, i);
+            if (!any) { *bx = *bw = pt.x; *by = *bh = pt.y; any = TRUE; }
+            else {
+                if (pt.x < *bx) *bx = pt.x;
+                if (pt.x > *bw) *bw = pt.x;
+                if (pt.y < *by) *by = pt.y;
+                if (pt.y > *bh) *bh = pt.y;
+            }
+        }
+        g_array_free(pts, TRUE);
+        if (any) { *bw -= *bx; *bh -= *by; return TRUE; }
+        return FALSE;
+    }
+    gboolean any = FALSE;
+    double ux0=0, uy0=0, ux1=0, uy1=0;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        double cx, cy, cw, ch;
+        if (ns_node_local_bbox(c, &cx, &cy, &cw, &ch)) {
+            if (!any) { ux0=cx; uy0=cy; ux1=cx+cw; uy1=cy+ch; any=TRUE; }
+            else {
+                if (cx < ux0) ux0 = cx;
+                if (cy < uy0) uy0 = cy;
+                if (cx+cw > ux1) ux1 = cx+cw;
+                if (cy+ch > uy1) uy1 = cy+ch;
+            }
+        }
+    }
+    if (any) { *bx=ux0; *by=uy0; *bw=ux1-ux0; *bh=uy1-uy0; return TRUE; }
+    return FALSE;
+}
+
+static JSValue
+ns_element_getBBox(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    double x = 0, y = 0, w = 0, h = 0;
+    if (!ns_node_local_bbox(n, &x, &y, &w, &h)) {
+        const ns_box *b = ns_box_for_this(ctx, this_val);
+        if (b) ns_box_border_box(b, &x, &y, &w, &h);
+    }
+    return ns_make_dom_rect(ctx, x, y, w, h);
+}
+
+static double
+ns_svg_path_length(GArray *pts, double at, double *out_x, double *out_y)
+{
+    double total = 0;
+    gboolean found = FALSE;
+    for (guint i = 1; i < pts->len; i++) {
+        ns_svg_pt a = g_array_index(pts, ns_svg_pt, i-1);
+        ns_svg_pt b = g_array_index(pts, ns_svg_pt, i);
+        if (b.moveto) continue;
+        double seg = hypot(b.x - a.x, b.y - a.y);
+        if (out_x && !found && at <= total + seg && seg > 0) {
+            double t = (at - total) / seg;
+            *out_x = a.x + (b.x - a.x) * t;
+            *out_y = a.y + (b.y - a.y) * t;
+            found = TRUE;
+        }
+        total += seg;
+    }
+    if (out_x && !found && pts->len > 0) {
+        ns_svg_pt last = g_array_index(pts, ns_svg_pt, pts->len - 1);
+        *out_x = last.x; *out_y = last.y;
+    }
+    return total;
+}
+
+static JSValue
+ns_element_getTotalLength(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    GArray *pts = ns_svg_flatten_path(n ? ns_element_get_attr(n, "d") : NULL);
+    double len = ns_svg_path_length(pts, 0, NULL, NULL);
+    g_array_free(pts, TRUE);
+    return JS_NewFloat64(ctx, len);
+}
+
+static JSValue
+ns_element_getPointAtLength(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    double at = 0;
+    if (argc >= 1) JS_ToFloat64(ctx, &at, argv[0]);
+    GArray *pts = ns_svg_flatten_path(n ? ns_element_get_attr(n, "d") : NULL);
+    double px = 0, py = 0;
+    ns_svg_path_length(pts, at, &px, &py);
+    g_array_free(pts, TRUE);
+    JSValue pt = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, pt, "x", JS_NewFloat64(ctx, px));
+    JS_SetPropertyStr(ctx, pt, "y", JS_NewFloat64(ctx, py));
+    return pt;
+}
+
+static JSValue
+ns_make_dom_matrix(JSContext *ctx, double a, double b, double c,
+                   double d, double e, double f)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMMatrix");
+    JS_FreeValue(ctx, global);
+    JSValue m = JS_UNDEFINED;
+    if (JS_IsFunction(ctx, ctor))
+        m = JS_CallConstructor(ctx, ctor, 0, NULL);
+    JS_FreeValue(ctx, ctor);
+    if (!JS_IsObject(m)) { JS_FreeValue(ctx, m); m = JS_NewObject(ctx); }
+    const char *keys[6] = { "a","b","c","d","e","f" };
+    double vals[6] = { a,b,c,d,e,f };
+    for (int i = 0; i < 6; i++)
+        JS_SetPropertyStr(ctx, m, keys[i], JS_NewFloat64(ctx, vals[i]));
+    return m;
+}
+
+static JSValue
+ns_svg_point_matrix_transform(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    double x = 0, y = 0;
+    JSValue xv = JS_GetPropertyStr(ctx, this_val, "x");
+    JSValue yv = JS_GetPropertyStr(ctx, this_val, "y");
+    JS_ToFloat64(ctx, &x, xv); JS_ToFloat64(ctx, &y, yv);
+    JS_FreeValue(ctx, xv); JS_FreeValue(ctx, yv);
+    double a=1,b=0,c=0,d=1,e=0,f=0;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSValue v;
+        v = JS_GetPropertyStr(ctx, argv[0], "a"); JS_ToFloat64(ctx,&a,v); JS_FreeValue(ctx,v);
+        v = JS_GetPropertyStr(ctx, argv[0], "b"); JS_ToFloat64(ctx,&b,v); JS_FreeValue(ctx,v);
+        v = JS_GetPropertyStr(ctx, argv[0], "c"); JS_ToFloat64(ctx,&c,v); JS_FreeValue(ctx,v);
+        v = JS_GetPropertyStr(ctx, argv[0], "d"); JS_ToFloat64(ctx,&d,v); JS_FreeValue(ctx,v);
+        v = JS_GetPropertyStr(ctx, argv[0], "e"); JS_ToFloat64(ctx,&e,v); JS_FreeValue(ctx,v);
+        v = JS_GetPropertyStr(ctx, argv[0], "f"); JS_ToFloat64(ctx,&f,v); JS_FreeValue(ctx,v);
+    }
+    JSValue out = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, out, "x", JS_NewFloat64(ctx, a*x + c*y + e));
+    JS_SetPropertyStr(ctx, out, "y", JS_NewFloat64(ctx, b*x + d*y + f));
+    ns_bind_fn(ctx, out, "matrixTransform", ns_svg_point_matrix_transform, 1);
+    return out;
+}
+
+static JSValue
+ns_element_createSVGPoint(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue p = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, p, "x", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, p, "y", JS_NewFloat64(ctx, 0));
+    ns_bind_fn(ctx, p, "matrixTransform", ns_svg_point_matrix_transform, 1);
+    return p;
+}
+
+static JSValue
+ns_element_createSVGRect(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue r = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, r, "x", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, r, "y", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, r, "width", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, r, "height", JS_NewFloat64(ctx, 0));
+    return r;
+}
+
+static JSValue
+ns_element_createSVGMatrix(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_make_dom_matrix(ctx, 1, 0, 0, 1, 0, 0);
+}
+
+static JSValue
+ns_element_createSVGTransform(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue t = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, t, "type", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, t, "angle", JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, t, "matrix", ns_make_dom_matrix(ctx,1,0,0,1,0,0));
+    ns_bind_fn(ctx, t, "setMatrix",    ns_event_noop, 1);
+    ns_bind_fn(ctx, t, "setTranslate", ns_event_noop, 2);
+    ns_bind_fn(ctx, t, "setScale",     ns_event_noop, 2);
+    ns_bind_fn(ctx, t, "setRotate",    ns_event_noop, 3);
+    ns_bind_fn(ctx, t, "setSkewX",     ns_event_noop, 1);
+    ns_bind_fn(ctx, t, "setSkewY",     ns_event_noop, 1);
+    return t;
+}
+
+static const ns_node *
+ns_svg_owner_root(const ns_node *n)
+{
+    const ns_node *svg = NULL;
+    for (const ns_node *p = n; p; p = p->parent)
+        if (p->name && g_ascii_strcasecmp(p->name, "svg") == 0) svg = p;
+    return svg;
+}
+
+static JSValue
+ns_element_getScreenCTM(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    const ns_node *svg = ns_svg_owner_root(n);
+    double sx = 0, sy = 0, sw = 0, sh = 0;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) {
+        ns_js_flush_layout(js);
+        if (js->layout_root && svg) {
+            const ns_box *b = ns_box_find_by_dom(js->layout_root, svg);
+            if (b) ns_box_border_box(b, &sx, &sy, &sw, &sh);
+        }
+    }
+    double scaleX = 1, scaleY = 1, minx = 0, miny = 0;
+    const char *vb = svg ? ns_element_get_attr(svg, "viewBox") : NULL;
+    if (vb) {
+        double v[4]; int got = 0; const char *p = vb;
+        while (got < 4 && (p = ns_svg_read_num(p, &v[got]))) got++;
+        if (got == 4 && v[2] > 0 && v[3] > 0) {
+            minx = v[0]; miny = v[1];
+            if (sw > 0) scaleX = sw / v[2];
+            if (sh > 0) scaleY = sh / v[3];
+        }
+    }
+    return ns_make_dom_matrix(ctx, scaleX, 0, 0, scaleY,
+                              sx - minx*scaleX, sy - miny*scaleY);
+}
+
+static JSValue
+ns_element_getCTM(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    const ns_node *svg = ns_svg_owner_root(n);
+    double scaleX = 1, scaleY = 1, minx = 0, miny = 0;
+    const char *vb = svg ? ns_element_get_attr(svg, "viewBox") : NULL;
+    if (vb) {
+        double v[4]; int got = 0; const char *p = vb;
+        while (got < 4 && (p = ns_svg_read_num(p, &v[got]))) got++;
+        if (got == 4 && v[2] > 0 && v[3] > 0) {
+            minx = v[0]; miny = v[1];
+            double vw = ns_svg_num(svg, "width", v[2]);
+            double vh = ns_svg_num(svg, "height", v[3]);
+            if (v[2] > 0) scaleX = vw / v[2];
+            if (v[3] > 0) scaleY = vh / v[3];
+        }
+    }
+    return ns_make_dom_matrix(ctx, scaleX, 0, 0, scaleY,
+                              -minx*scaleX, -miny*scaleY);
+}
+
+static JSValue
+ns_element_get_ownerSVGElement(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NULL;
+    const ns_node *svg = NULL;
+    for (const ns_node *p = n->parent; p; p = p->parent)
+        if (p->name && g_ascii_strcasecmp(p->name, "svg") == 0) { svg = p; break; }
+    return svg ? ns_make_element(ctx, svg) : JS_NULL;
+}
+
 static JSValue
 ns_element_get_offsetWidth(JSContext *ctx, JSValueConst this_val)
 {
@@ -23855,6 +24351,16 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("contains",                1, ns_element_contains),
     JS_CFUNC_DEF("hasChildNodes",           0, ns_element_hasChildNodes),
     JS_CFUNC_DEF("getBoundingClientRect",   0, ns_element_getBoundingClientRect),
+    JS_CFUNC_DEF("getBBox",                 0, ns_element_getBBox),
+    JS_CFUNC_DEF("getCTM",                  0, ns_element_getCTM),
+    JS_CFUNC_DEF("getScreenCTM",            0, ns_element_getScreenCTM),
+    JS_CFUNC_DEF("getTotalLength",          0, ns_element_getTotalLength),
+    JS_CFUNC_DEF("getPointAtLength",        1, ns_element_getPointAtLength),
+    JS_CFUNC_DEF("createSVGPoint",          0, ns_element_createSVGPoint),
+    JS_CFUNC_DEF("createSVGRect",           0, ns_element_createSVGRect),
+    JS_CFUNC_DEF("createSVGMatrix",         0, ns_element_createSVGMatrix),
+    JS_CFUNC_DEF("createSVGTransform",      0, ns_element_createSVGTransform),
+    JS_CGETSET_DEF("ownerSVGElement",       ns_element_get_ownerSVGElement, ns_element_noop_set),
     JS_CFUNC_DEF("focus",                   0, ns_element_focus),
     JS_CFUNC_DEF("blur",                    0, ns_element_blur),
     JS_CFUNC_DEF("click",                   0, ns_element_click),
@@ -26472,6 +26978,22 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "VTTCue",       ns_vtt_cue_ctor,        3);
     ns_bind_ctor(ctx, global, "ClipboardItem", ns_clipboard_item_ctor, 1);
     ns_bind_ctor(ctx, global, "CustomStateSet", ns_custom_state_set_ctor, 0);
+    {
+        ns_bind_ctor(ctx, global, "WebGLRenderingContext",
+                     ns_illegal_constructor, 0);
+        ns_bind_ctor(ctx, global, "WebGL2RenderingContext",
+                     ns_illegal_constructor, 0);
+        JSValue gl1 = JS_GetPropertyStr(ctx, global, "WebGLRenderingContext");
+        JSValue gl2 = JS_GetPropertyStr(ctx, global, "WebGL2RenderingContext");
+        JSValue gl1p = JS_GetPropertyStr(ctx, gl1, "prototype");
+        JSValue gl2p = JS_GetPropertyStr(ctx, gl2, "prototype");
+        ns_webgl_install_constants(ctx, gl1,  1);
+        ns_webgl_install_constants(ctx, gl1p, 1);
+        ns_webgl_install_constants(ctx, gl2,  2);
+        ns_webgl_install_constants(ctx, gl2p, 2);
+        JS_FreeValue(ctx, gl1p); JS_FreeValue(ctx, gl2p);
+        JS_FreeValue(ctx, gl1);  JS_FreeValue(ctx, gl2);
+    }
     ns_bind_ctor(ctx, global, "Audio",           ns_window_audio_ctor,           1);
     ns_bind_ctor(ctx, global, "AudioContext",    ns_audio_context_ctor,          1);
     {

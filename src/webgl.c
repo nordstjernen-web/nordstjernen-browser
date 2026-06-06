@@ -3003,6 +3003,16 @@ set_const(JSContext *ctx, JSValueConst obj, const char *name, int value)
 
 #define K(n) set_const(ctx, obj, #n, GL_##n)
 
+static void wgl_set_constants(JSContext *ctx, JSValueConst obj);
+static void wgl_set_constants2(JSContext *ctx, JSValueConst obj);
+
+void
+ns_webgl_install_constants(JSContext *ctx, JSValueConst obj, int version)
+{
+    wgl_set_constants(ctx, obj);
+    if (version >= 2) wgl_set_constants2(ctx, obj);
+}
+
 static void
 wgl_set_constants(JSContext *ctx, JSValueConst obj)
 {
