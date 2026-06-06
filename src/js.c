@@ -16736,16 +16736,74 @@ static JSValue ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, in
 static JSValue ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 
 static JSValue
+ns_anim_finish_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    JSValueConst anim = argv[0];
+    JSValue ev = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, ev, "type",          JS_NewString(ctx, "finish"));
+    JS_SetPropertyStr(ctx, ev, "target",        JS_DupValue(ctx, anim));
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, anim));
+
+    JSValue onf = JS_GetPropertyStr(ctx, anim, "onfinish");
+    if (JS_IsFunction(ctx, onf)) {
+        JSValueConst a[1] = { ev };
+        JSValue r = JS_Call(ctx, onf, anim, 1, a);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
+    JS_FreeValue(ctx, onf);
+
+    JSValue listeners = JS_GetPropertyStr(ctx, anim, "_listeners");
+    if (JS_IsArray(listeners)) {
+        uint32_t len = ns_js_array_length(ctx, listeners);
+        for (uint32_t i = 0; i < len; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, listeners, i);
+            JSValue tv = JS_GetPropertyStr(ctx, e, "type");
+            const char *ts = JS_ToCString(ctx, tv);
+            if (ts && strcmp(ts, "finish") == 0) {
+                JSValue cb = JS_GetPropertyStr(ctx, e, "cb");
+                if (JS_IsFunction(ctx, cb)) {
+                    JSValueConst a[1] = { ev };
+                    JSValue r = JS_Call(ctx, cb, anim, 1, a);
+                    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+                    JS_FreeValue(ctx, r);
+                }
+                JS_FreeValue(ctx, cb);
+            }
+            if (ts) JS_FreeCString(ctx, ts);
+            JS_FreeValue(ctx, tv);
+            JS_FreeValue(ctx, e);
+        }
+    }
+    JS_FreeValue(ctx, listeners);
+    JS_FreeValue(ctx, ev);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_element_animate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
     static const ns_fn_def anim_methods[] = {
         { "play", 0 }, { "pause", 0 }, { "cancel", 0 },
         { "finish", 0 }, { "reverse", 0 },
+        { "commitStyles", 0 }, { "persist", 0 },
+        { "updatePlaybackRate", 1 },
     };
     JSValue anim = JS_NewObject(ctx);
     ns_bind_fns(ctx, anim, ns_event_noop, anim_methods, G_N_ELEMENTS(anim_methods));
-    JS_SetPropertyStr(ctx, anim, "playState", JS_NewString(ctx, "finished"));
+    ns_bind_fn(ctx, anim, "addEventListener",    ns_port_add_event_listener,    2);
+    ns_bind_fn(ctx, anim, "removeEventListener", ns_port_remove_event_listener, 2);
+    JS_SetPropertyStr(ctx, anim, "_listeners",   JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, anim, "onfinish",     JS_NULL);
+    JS_SetPropertyStr(ctx, anim, "oncancel",     JS_NULL);
+    JS_SetPropertyStr(ctx, anim, "playState",    JS_NewString(ctx, "finished"));
+    JS_SetPropertyStr(ctx, anim, "playbackRate", JS_NewInt32(ctx, 1));
+    JS_SetPropertyStr(ctx, anim, "currentTime",  JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, anim, "startTime",    JS_NULL);
+    JS_SetPropertyStr(ctx, anim, "pending",      JS_FALSE);
+    JS_SetPropertyStr(ctx, anim, "id",           JS_NewString(ctx, ""));
     JSValue resolvers[2];
     JSValue finished = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(finished)) { JS_FreeValue(ctx, anim); return finished; }
@@ -16757,6 +16815,9 @@ ns_element_animate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     JS_FreeValue(ctx, resolvers[1]);
     JS_SetPropertyStr(ctx, anim, "finished", finished);
     JS_SetPropertyStr(ctx, anim, "ready",    JS_DupValue(ctx, finished));
+
+    JSValueConst job_arg[1] = { anim };
+    JS_EnqueueJob(ctx, ns_anim_finish_job, 1, job_arg);
     return anim;
 }
 
