@@ -40,7 +40,7 @@ ns_build_search_url(const char *query)
 static char *
 ns_search_snippet_label(const char *text)
 {
-    char *flat = g_strdup(text ? text : "");
+    char *flat = g_utf8_make_valid(text ? text : "", -1);
     for (char *p = flat; *p; p++) {
         if (*p == '\n' || *p == '\r' || *p == '\t') *p = ' ';
     }
