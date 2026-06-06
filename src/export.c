@@ -382,7 +382,6 @@ ns_on_print_done(GtkPrintOperation *op, GtkPrintOperationResult result,
                                  pc->n_pages, pc->n_pages == 1 ? "" : "s");
         }
     }
-    ns_print_ctx_free(pc);
 }
 
 void
@@ -423,4 +422,5 @@ on_win_print(GSimpleAction *action, GVariant *parameter, gpointer user_data)
         g_clear_error(&err);
     }
     g_object_unref(op);
+    ns_print_ctx_free(pc);
 }

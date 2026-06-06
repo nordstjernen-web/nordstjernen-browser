@@ -2564,7 +2564,7 @@ calc_px_value(double px)
 static ns_css_value *
 parse_calc(const char *text)
 {
-    static int depth;
+    static __thread int depth;
     if (depth > NS_CALC_MAX_DEPTH) return NULL;
     depth++;
     ns_css_value *v = parse_calc_inner(text);
