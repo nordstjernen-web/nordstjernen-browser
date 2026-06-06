@@ -73,6 +73,7 @@ typedef struct ns_window {
     guint         logo_anim_source;
     int           logo_anim_index;
     GtkWidget    *content_stack;
+    GtkWidget    *status_bar;
     GtkWidget    *text_view;
     GtkWidget    *drawing_area;
     guint         raf_tick_id;
@@ -219,6 +220,7 @@ gboolean on_url_entry_key_pressed(GtkEventControllerKey *ctrl, guint keyval,
                                   gpointer ud);
 void ns_window_setup_url_suggestions(ns_window *w);
 void on_drawing_motion      (GtkEventControllerMotion *c, double x, double y, gpointer ud);
+void on_drawing_leave       (GtkEventControllerMotion *c, gpointer ud);
 gboolean ns_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer ud);
 void ns_draw_render         (GtkDrawingArea *area, cairo_t *cr, int w, int h, gpointer ud);
 void ns_on_drawing_pressed  (GtkGestureClick *g, int n, double x, double y, gpointer ud);

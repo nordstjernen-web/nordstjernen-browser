@@ -4,6 +4,7 @@
  */
 
 #include <gtk/gtk.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -157,7 +158,19 @@ static void     ns_window_mark_dead(ns_window *w);
 void
 ns_window_set_status(ns_window *w, const char *fmt, ...)
 {
-    (void)w; (void)fmt;
+    if (!w || !w->status_bar) return;
+    if (!fmt || !*fmt) {
+        gtk_label_set_text(GTK_LABEL(w->status_bar), "");
+        gtk_widget_set_visible(w->status_bar, FALSE);
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    char *text = g_strdup_vprintf(fmt, ap);
+    va_end(ap);
+    gtk_label_set_text(GTK_LABEL(w->status_bar), text);
+    gtk_widget_set_visible(w->status_bar, TRUE);
+    g_free(text);
 }
 
 static void
@@ -5235,6 +5248,8 @@ on_drawing_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer u
         ns_window_set_status(w, "%s", href);
     else if (media_hover)
         ns_window_set_status(w, "Click to play in external player");
+    else
+        ns_window_set_status(w, NULL);
 
     if (w->js && w->layout_tree) {
         GdkModifierType st = gtk_event_controller_get_current_event_state(
@@ -5260,6 +5275,14 @@ on_drawing_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer u
             ns_window_emit_pointer_and_mouse(w, now, "pointermove", "mousemove",
                                              x, y, 0, 0, st, NULL);
     }
+}
+
+void
+on_drawing_leave(GtkEventControllerMotion *ctrl, gpointer user_data)
+{
+    (void)ctrl;
+    ns_window *w = user_data;
+    ns_window_set_status(w, NULL);
 }
 
 static void

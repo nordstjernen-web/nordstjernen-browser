@@ -15,6 +15,30 @@
 extern const char *ns_app_self_exe(void);
 
 static void
+ns_install_status_css(void)
+{
+    static gboolean done = FALSE;
+    if (done) return;
+    done = TRUE;
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return;
+    static const char css[] =
+        ".nd-statusbar {"
+        " padding: 2px 8px; margin: 0;"
+        " font-size: 0.85em;"
+        " color: @theme_fg_color;"
+        " background-color: @theme_base_color;"
+        " border-top: 1px solid alpha(@theme_fg_color, 0.20);"
+        " border-right: 1px solid alpha(@theme_fg_color, 0.20);"
+        " border-top-right-radius: 4px; }";
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(provider, css);
+    gtk_style_context_add_provider_for_display(display,
+        GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(provider);
+}
+
+static void
 ns_window_log_renderer(GtkWidget *widget, gpointer user_data)
 {
     (void)user_data;
@@ -494,6 +518,7 @@ ns_window_build_content(ns_window *w, GtkWidget *vbox)
 
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "motion", G_CALLBACK(on_drawing_motion), w);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_drawing_leave), w);
     gtk_widget_add_controller(w->drawing_area, motion);
 
     GtkEventController *scroll = gtk_event_controller_scroll_new(
@@ -519,5 +544,23 @@ ns_window_build_content(ns_window *w, GtkWidget *vbox)
     gtk_stack_add_named(GTK_STACK(w->content_stack), scrolled_render, "render");
 
     gtk_stack_set_visible_child_name(GTK_STACK(w->content_stack), "text");
-    gtk_box_append(GTK_BOX(vbox), w->content_stack);
+
+    ns_install_status_css();
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay, TRUE);
+    gtk_widget_set_vexpand(overlay, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), w->content_stack);
+
+    w->status_bar = gtk_label_new(NULL);
+    gtk_widget_add_css_class(w->status_bar, "nd-statusbar");
+    gtk_widget_set_halign(w->status_bar, GTK_ALIGN_START);
+    gtk_widget_set_valign(w->status_bar, GTK_ALIGN_END);
+    gtk_widget_set_can_target(w->status_bar, FALSE);
+    gtk_widget_set_can_focus(w->status_bar, FALSE);
+    gtk_label_set_ellipsize(GTK_LABEL(w->status_bar), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_xalign(GTK_LABEL(w->status_bar), 0.0);
+    gtk_widget_set_visible(w->status_bar, FALSE);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), w->status_bar);
+
+    gtk_box_append(GTK_BOX(vbox), overlay);
 }
