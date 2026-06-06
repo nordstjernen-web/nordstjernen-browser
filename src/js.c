@@ -4658,6 +4658,32 @@ typedef struct ns_js_fetch_delivery {
 } ns_js_fetch_delivery;
 
 static void
+ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
+{
+    if (!raw) return;
+    const char *p = raw;
+    while (*p) {
+        const char *eol = p;
+        while (*eol && *eol != '\n') eol++;
+        const char *lineend = eol;
+        if (lineend > p && lineend[-1] == '\r') lineend--;
+        const char *colon = memchr(p, ':', (size_t)(lineend - p));
+        if (colon && colon > p) {
+            gsize nlen = (gsize)(colon - p);
+            char *name = g_ascii_strdown(p, nlen);
+            const char *v = colon + 1;
+            gsize vlen = (gsize)(lineend - v);
+            while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
+            while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
+            JS_SetPropertyStr(ctx, init, name, JS_NewStringLen(ctx, v, vlen));
+            g_free(name);
+        }
+        if (!*eol) break;
+        p = eol + 1;
+    }
+}
+
+static void
 ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
 {
     if (!st->ctx) {
@@ -4736,6 +4762,10 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                     JS_SetPropertyStr(st->ctx, header_init, known[i].name,
                                       JS_NewString(st->ctx, known[i].value));
             }
+            gboolean same_origin = ns_url_same_origin(
+                st->js ? st->js->current_url : NULL, resp->final_url);
+            if (same_origin && resp->raw_headers)
+                ns_headers_init_add_raw(st->ctx, header_init, resp->raw_headers);
         }
         JSValue global = JS_GetGlobalObject(st->ctx);
         JSValue hdr_ctor = JS_GetPropertyStr(st->ctx, global, "Headers");
@@ -9772,22 +9802,24 @@ ns_xhr_getResponseHeader(JSContext *ctx, JSValueConst this_val,
         gsize nlen = strlen(name);
         const char *p = hdrs;
         while (*p) {
-            const char *eol = strstr(p, "\r\n");
-            gsize line_len = eol ? (gsize)(eol - p) : strlen(p);
-            const char *colon = memchr(p, ':', line_len);
+            const char *eol = p;
+            while (*eol && *eol != '\n') eol++;
+            const char *lineend = eol;
+            if (lineend > p && lineend[-1] == '\r') lineend--;
+            const char *colon = memchr(p, ':', (gsize)(lineend - p));
             if (colon) {
                 gsize hn = (gsize)(colon - p);
                 if (hn == nlen && g_ascii_strncasecmp(p, name, nlen) == 0) {
                     const char *v = colon + 1;
-                    gsize vlen = line_len - hn - 1;
+                    gsize vlen = (gsize)(lineend - v);
                     while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
                     while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
                     ret = JS_NewStringLen(ctx, v, vlen);
                     break;
                 }
             }
-            if (!eol) break;
-            p = eol + 2;
+            if (!*eol) break;
+            p = eol + 1;
         }
         JS_FreeCString(ctx, hdrs);
     }
@@ -10093,12 +10125,15 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
             js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
             resp->final_url);
         char *hdrs;
-        if (!allow)
+        if (!allow) {
             hdrs = g_strdup("");
-        else if (same_origin && resp->raw_headers)
-            hdrs = g_strdup(resp->raw_headers);
-        else
+        } else if (same_origin && resp->raw_headers) {
+            char *known = ns_xhr_serialize_headers(resp);
+            hdrs = g_strconcat(known, resp->raw_headers, NULL);
+            g_free(known);
+        } else {
             hdrs = ns_xhr_serialize_headers(resp);
+        }
         JS_SetPropertyStr(ctx, st->obj, "_responseHeaders",
                           JS_NewString(ctx, hdrs));
         g_free(hdrs);
