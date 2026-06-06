@@ -119,6 +119,7 @@ if is_android
     libuchardet,
     liblexbor,
     sqlite3,
+    zlib,
   ]
 else
   nordstjernen_deps = [
@@ -134,6 +135,7 @@ else
     liblexbor,
     librsvg,
     sqlite3,
+    zlib,
   ]
 
   if have_seccomp

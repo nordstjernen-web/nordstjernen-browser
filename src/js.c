@@ -10,6 +10,8 @@
 #include <math.h>
 #include <string.h>
 
+#include <zlib.h>
+
 #include <cairo.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
@@ -26461,6 +26463,165 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     ns_set_if_missing(ctx, global, "speechSynthesis", speech);
 }
 
+typedef struct {
+    z_stream  zs;
+    gboolean  decompress;
+    gboolean  inited;
+    gboolean  ended;
+} ns_zlib_codec;
+
+static JSClassID ns_zlib_class_id;
+
+static void
+ns_zlib_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_zlib_codec *c = JS_GetOpaque(val, ns_zlib_class_id);
+    if (!c) return;
+    if (c->inited) {
+        if (c->decompress) inflateEnd(&c->zs);
+        else               deflateEnd(&c->zs);
+    }
+    g_free(c);
+}
+
+static JSClassDef ns_zlib_class = {
+    "NSZlibCodec",
+    .finalizer = ns_zlib_finalizer,
+};
+
+static int
+ns_zlib_window_bits(const char *format)
+{
+    if (!format) return 0;
+    if (strcmp(format, "gzip") == 0)        return 15 + 16;
+    if (strcmp(format, "deflate") == 0)     return 15;
+    if (strcmp(format, "deflate-raw") == 0) return -15;
+    return 0;
+}
+
+static JSValue
+ns_zlib_create(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "zlib codec: format and mode required");
+    const char *format = JS_ToCString(ctx, argv[0]);
+    if (!format) return JS_EXCEPTION;
+    int window_bits = ns_zlib_window_bits(format);
+    JS_FreeCString(ctx, format);
+    if (window_bits == 0)
+        return JS_ThrowTypeError(ctx, "Unsupported compression format");
+
+    gboolean decompress = JS_ToBool(ctx, argv[1]) > 0;
+    ns_zlib_codec *c = g_new0(ns_zlib_codec, 1);
+    c->decompress = decompress;
+    int rc = decompress
+        ? inflateInit2(&c->zs, window_bits)
+        : deflateInit2(&c->zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                       window_bits, 8, Z_DEFAULT_STRATEGY);
+    if (rc != Z_OK) {
+        g_free(c);
+        return JS_ThrowInternalError(ctx, "zlib initialization failed");
+    }
+    c->inited = TRUE;
+
+    if (ns_zlib_class_id == 0) {
+        JS_NewClassID(JS_GetRuntime(ctx), &ns_zlib_class_id);
+        JS_NewClass(JS_GetRuntime(ctx), ns_zlib_class_id, &ns_zlib_class);
+    }
+    JSValue obj = JS_NewObjectClass(ctx, ns_zlib_class_id);
+    if (JS_IsException(obj)) {
+        if (decompress) inflateEnd(&c->zs);
+        else            deflateEnd(&c->zs);
+        g_free(c);
+        return obj;
+    }
+    JS_SetOpaque(obj, c);
+    return obj;
+}
+
+static JSValue
+ns_zlib_run(JSContext *ctx, ns_zlib_codec *c, const uint8_t *in,
+            size_t in_len, gboolean finish)
+{
+    if (!c || !c->inited)
+        return JS_ThrowTypeError(ctx, "zlib codec: invalid state");
+    if (c->ended)
+        return JS_NewArrayBufferCopy(ctx, (const uint8_t *)"", 0);
+
+    GByteArray *out = g_byte_array_new();
+    uint8_t buf[16384];
+    c->zs.next_in  = (Bytef *)in;
+    c->zs.avail_in = (uInt)in_len;
+    int flush = finish ? Z_FINISH : Z_NO_FLUSH;
+    int rc;
+    do {
+        c->zs.next_out  = buf;
+        c->zs.avail_out = sizeof(buf);
+        rc = c->decompress ? inflate(&c->zs, flush) : deflate(&c->zs, flush);
+        if (rc == Z_STREAM_ERROR || rc == Z_DATA_ERROR ||
+            rc == Z_NEED_DICT || rc == Z_MEM_ERROR) {
+            g_byte_array_free(out, TRUE);
+            return JS_ThrowTypeError(ctx, "zlib %s error",
+                                     c->decompress ? "decompression"
+                                                   : "compression");
+        }
+        size_t produced = sizeof(buf) - c->zs.avail_out;
+        if (produced) g_byte_array_append(out, buf, (guint)produced);
+        if (rc == Z_STREAM_END) { c->ended = TRUE; break; }
+        if (rc == Z_BUF_ERROR) break;
+    } while (c->zs.avail_out == 0);
+
+    JSValue ab = JS_NewArrayBufferCopy(ctx, out->data, out->len);
+    g_byte_array_free(out, TRUE);
+    return ab;
+}
+
+static ns_zlib_codec *
+ns_zlib_unwrap(JSContext *ctx, JSValueConst v)
+{
+    (void)ctx;
+    return ns_zlib_class_id ? JS_GetOpaque(v, ns_zlib_class_id) : NULL;
+}
+
+static JSValue
+ns_zlib_push(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "zlib push: codec and data required");
+    ns_zlib_codec *c = ns_zlib_unwrap(ctx, argv[0]);
+    if (!c) return JS_ThrowTypeError(ctx, "zlib push: invalid codec");
+
+    size_t off = 0, len = 0, bpe = 0;
+    JSValue buf = JS_GetTypedArrayBuffer(ctx, argv[1], &off, &len, &bpe);
+    if (JS_IsException(buf)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, argv[1]);
+        if (!base) return JS_ThrowTypeError(ctx, "zlib push: ArrayBufferView expected");
+        return ns_zlib_run(ctx, c, base, total, FALSE);
+    }
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
+    JS_FreeValue(ctx, buf);
+    if (!base || off + len > total)
+        return JS_ThrowInternalError(ctx, "zlib push: backing buffer unavailable");
+    return ns_zlib_run(ctx, c, base + off, len, FALSE);
+}
+
+static JSValue
+ns_zlib_finish(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "zlib finish: codec required");
+    ns_zlib_codec *c = ns_zlib_unwrap(ctx, argv[0]);
+    if (!c) return JS_ThrowTypeError(ctx, "zlib finish: invalid codec");
+    return ns_zlib_run(ctx, c, (const uint8_t *)"", 0, TRUE);
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -28914,6 +29075,10 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         JS_FreeValue(ctx, ctor);
     }
     ns_bind_ctor(ctx, global, "XMLSerializer", ns_xml_serializer_ctor, 0);
+
+    ns_bind_fn(ctx, global, "__ns_zlib_create", ns_zlib_create, 2);
+    ns_bind_fn(ctx, global, "__ns_zlib_push",   ns_zlib_push,   2);
+    ns_bind_fn(ctx, global, "__ns_zlib_finish", ns_zlib_finish, 1);
 
     ns_install_hasinstance(ctx, global);
     ns_idb_install(ctx, global);

@@ -197,6 +197,7 @@ if have_seccomp
 endif
 
 libwuffs = dependency('wuffs', fallback: ['wuffs', 'wuffs_dep'])
+zlib = dependency('zlib')
 
 fs = import('fs')
 lexbor_version = '0.0.0'

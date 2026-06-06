@@ -1073,24 +1073,45 @@
     function WritableStream(underlying, strategy) {
         if (!(this instanceof WritableStream))
             return new WritableStream(underlying, strategy);
-        this._underlying = underlying || {};
-        this.locked = false;
+        var self = this;
+        var u = underlying || {};
+        self._underlying = u;
+        self.locked = false;
+        var controller = { error: function () {}, signal: undefined };
+        if (typeof u.start === 'function') {
+            try { u.start(controller); } catch (e) { /* ignore */ }
+        }
+        if (typeof u.write === 'function' && !self._writeChunk)
+            self._writeChunk = function (chunk) { return u.write(chunk, controller); };
+        if (typeof u.close === 'function' && !self._closeStream)
+            self._closeStream = function () { return u.close(); };
+        if (typeof u.abort === 'function' && !self._abortStream)
+            self._abortStream = function (reason) { return u.abort(reason); };
+    }
+    function wsInvoke(fn, arg) {
+        if (typeof fn !== 'function') return Promise.resolve();
+        try { return Promise.resolve(fn(arg)); }
+        catch (e) { return Promise.reject(e); }
     }
     WritableStream.prototype.getWriter = function () {
         var self = this;
         self.locked = true;
         return {
-            write: function () { return Promise.resolve(); },
-            close: function () { return Promise.resolve(); },
-            abort: function () { return Promise.resolve(); },
+            write: function (chunk) { return wsInvoke(self._writeChunk, chunk); },
+            close: function () { return wsInvoke(self._closeStream); },
+            abort: function (reason) { return wsInvoke(self._abortStream, reason); },
             releaseLock: function () { self.locked = false; },
             ready: Promise.resolve(),
             closed: Promise.resolve(),
             desiredSize: 1
         };
     };
-    WritableStream.prototype.abort = function () { return Promise.resolve(); };
-    WritableStream.prototype.close = function () { return Promise.resolve(); };
+    WritableStream.prototype.abort = function (reason) {
+        return wsInvoke(this._abortStream, reason);
+    };
+    WritableStream.prototype.close = function () {
+        return wsInvoke(this._closeStream);
+    };
     if (typeof global.WritableStream !== 'function' ||
         typeof global.WritableStream.prototype.getWriter !== 'function')
         replaceCtor('WritableStream', WritableStream);
@@ -1575,17 +1596,52 @@
         defineCtor('Intl', Intl);
     }
 
-    function CompressionStream() {
-        if (!(this instanceof CompressionStream)) return new CompressionStream();
-        TransformStream.call(this);
+    var zlibCreate = global.__ns_zlib_create;
+    var zlibPush   = global.__ns_zlib_push;
+    var zlibFinish = global.__ns_zlib_finish;
+    try {
+        delete global.__ns_zlib_create;
+        delete global.__ns_zlib_push;
+        delete global.__ns_zlib_finish;
+    } catch (e) { /* ignore */ }
+
+    var ZLIB_FORMATS = { 'gzip': 1, 'deflate': 1, 'deflate-raw': 1 };
+
+    function zlibTransformer(format, decompress) {
+        var fmt = String(format);
+        if (!ZLIB_FORMATS[fmt])
+            throw new TypeError("Unsupported compression format: '" + fmt + "'");
+        if (typeof zlibCreate !== 'function') {
+            return { transform: function (chunk, ctl) { ctl.enqueue(chunk); } };
+        }
+        var codec = zlibCreate(fmt, decompress);
+        return {
+            transform: function (chunk, ctl) {
+                var u8 = chunk instanceof Uint8Array ? chunk
+                       : ArrayBuffer.isView(chunk)
+                         ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+                         : new Uint8Array(chunk);
+                var out = zlibPush(codec, u8);
+                if (out && out.byteLength) ctl.enqueue(new Uint8Array(out));
+            },
+            flush: function (ctl) {
+                var out = zlibFinish(codec);
+                if (out && out.byteLength) ctl.enqueue(new Uint8Array(out));
+            }
+        };
+    }
+
+    function CompressionStream(format) {
+        if (!(this instanceof CompressionStream)) return new CompressionStream(format);
+        TransformStream.call(this, zlibTransformer(format, false));
     }
     CompressionStream.prototype = Object.create(TransformStream.prototype);
     CompressionStream.prototype.constructor = CompressionStream;
     defineCtor('CompressionStream', CompressionStream);
 
-    function DecompressionStream() {
-        if (!(this instanceof DecompressionStream)) return new DecompressionStream();
-        TransformStream.call(this);
+    function DecompressionStream(format) {
+        if (!(this instanceof DecompressionStream)) return new DecompressionStream(format);
+        TransformStream.call(this, zlibTransformer(format, true));
     }
     DecompressionStream.prototype = Object.create(TransformStream.prototype);
     DecompressionStream.prototype.constructor = DecompressionStream;
