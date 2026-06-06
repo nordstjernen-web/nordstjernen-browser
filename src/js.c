@@ -4580,6 +4580,16 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
     g_free(st);
 }
 
+static JSValue
+ns_make_abort_error(JSContext *ctx)
+{
+    JSValue err = JS_NewError(ctx);
+    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "AbortError"));
+    JS_SetPropertyStr(ctx, err, "message",
+                      JS_NewString(ctx, "The operation was aborted."));
+    return err;
+}
+
 static void
 ns_fetch_reject_with_abort(JSContext *ctx, JSValue *reject,
                             JSValueConst signal)
@@ -4589,10 +4599,7 @@ ns_fetch_reject_with_abort(JSContext *ctx, JSValue *reject,
         reason = JS_GetPropertyStr(ctx, signal, "reason");
     if (JS_IsUndefined(reason) || JS_IsNull(reason)) {
         JS_FreeValue(ctx, reason);
-        reason = JS_NewError(ctx);
-        JS_SetPropertyStr(ctx, reason, "name", JS_NewString(ctx, "AbortError"));
-        JS_SetPropertyStr(ctx, reason, "message",
-                          JS_NewString(ctx, "The operation was aborted."));
+        reason = ns_make_abort_error(ctx);
     }
     JSValue ret = JS_Call(ctx, *reject, JS_UNDEFINED, 1, (JSValueConst[]){ reason });
     if (JS_IsException(ret)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -10553,7 +10560,7 @@ ns_abort_controller_abort(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, sig, "aborted", JS_TRUE);
         JSValue reason = argc >= 1
             ? JS_DupValue(ctx, argv[0])
-            : JS_NewString(ctx, "AbortError");
+            : ns_make_abort_error(ctx);
         JS_SetPropertyStr(ctx, sig, "reason", reason);
         ns_target_fire_event(ctx, sig, "abort");
     }
@@ -10568,7 +10575,7 @@ ns_make_abort_signal(JSContext *ctx, gboolean aborted, JSValueConst reason)
     JS_SetPropertyStr(ctx, sig, "aborted", aborted ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, sig, "reason",
                       aborted ? (JS_IsUndefined(reason)
-                                   ? JS_NewString(ctx, "AbortError")
+                                   ? ns_make_abort_error(ctx)
                                    : JS_DupValue(ctx, reason))
                               : JS_UNDEFINED);
     JS_SetPropertyStr(ctx, sig, "_listeners", JS_NewArray(ctx));
