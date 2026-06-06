@@ -7563,6 +7563,9 @@ ns_selection_get_range_at(JSContext *ctx, JSValueConst this_val,
     return ns_selection_make_range(ctx);
 }
 
+static JSValue ns_event_false(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv);
+
 static JSValue
 ns_window_get_selection(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -7571,9 +7574,11 @@ ns_window_get_selection(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     gboolean has = js && js->selection_has_range;
     static const ns_fn_def sel_methods[] = {
-        { "removeAllRanges", 0 }, { "addRange", 1 },
+        { "removeAllRanges", 0 }, { "addRange", 1 }, { "removeRange", 1 },
         { "collapse", 2 }, { "collapseToStart", 0 }, { "collapseToEnd", 0 },
-        { "empty", 0 },
+        { "empty", 0 }, { "setBaseAndExtent", 4 }, { "extend", 2 },
+        { "selectAllChildren", 1 }, { "modify", 3 }, { "setPosition", 2 },
+        { "deleteFromDocument", 0 },
     };
     JSValue sel = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, sel, "anchorNode",   JS_NULL);
@@ -7589,6 +7594,7 @@ ns_window_get_selection(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, sel, "getRangeAt",
         JS_NewCFunction(ctx, ns_selection_get_range_at, "getRangeAt", 1));
     ns_bind_fns(ctx, sel, ns_event_noop, sel_methods, G_N_ELEMENTS(sel_methods));
+    ns_bind_fn(ctx, sel, "containsNode", ns_event_false, 2);
     return sel;
 }
 
@@ -23197,18 +23203,101 @@ ns_range_cloneRange(JSContext *ctx, JSValueConst this_val,
     return out;
 }
 
+typedef struct {
+    ns_node *start, *end;
+    int      soff, eoff;
+    GString *buf;
+    int      state;
+} ns_range_text_ctx;
+
+static void
+ns_range_text_walk(ns_node *n, ns_range_text_ctx *c)
+{
+    if (!n || c->state == 2) return;
+
+    if (n->kind == NS_NODE_TEXT) {
+        if (n->text) {
+            glong total = g_utf8_strlen(n->text, -1);
+            if (n == c->start && n == c->end) {
+                int a = CLAMP(c->soff, 0, (int)total);
+                int b = CLAMP(c->eoff, 0, (int)total);
+                if (b > a) {
+                    const char *p = g_utf8_offset_to_pointer(n->text, a);
+                    const char *q = g_utf8_offset_to_pointer(n->text, b);
+                    g_string_append_len(c->buf, p, (gssize)(q - p));
+                }
+                c->state = 2;
+                return;
+            }
+            if (n == c->start) {
+                int a = CLAMP(c->soff, 0, (int)total);
+                g_string_append(c->buf, g_utf8_offset_to_pointer(n->text, a));
+                c->state = 1;
+            } else if (n == c->end) {
+                int b = CLAMP(c->eoff, 0, (int)total);
+                const char *q = g_utf8_offset_to_pointer(n->text, b);
+                g_string_append_len(c->buf, n->text, (gssize)(q - n->text));
+                c->state = 2;
+                return;
+            } else if (c->state == 1) {
+                g_string_append(c->buf, n->text);
+            }
+        }
+        return;
+    }
+
+    gboolean is_start_el = (n == c->start);
+    gboolean is_end_el   = (n == c->end);
+    int idx = 0;
+    for (ns_node *ch = n->first_child; ch; ch = ch->next_sibling, idx++) {
+        if (is_start_el && c->state == 0 && idx == c->soff) c->state = 1;
+        if (is_end_el && idx == c->eoff) { c->state = 2; return; }
+        ns_range_text_walk(ch, c);
+        if (c->state == 2) return;
+    }
+    if (is_start_el && c->state == 0 && c->soff >= idx) c->state = 1;
+    if (is_end_el && c->eoff >= idx) c->state = 2;
+}
+
 static JSValue
 ns_range_toString_impl(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
     JSValue sc = JS_GetPropertyStr(ctx, this_val, "startContainer");
-    const ns_node *n = ns_unwrap_element(sc);
+    JSValue ec = JS_GetPropertyStr(ctx, this_val, "endContainer");
+    ns_node *start = (ns_node *)ns_unwrap_element(sc);
+    ns_node *end   = (ns_node *)ns_unwrap_element(ec);
     JS_FreeValue(ctx, sc);
-    if (!n) return JS_NewString(ctx, "");
-    char *text = ns_node_collect_text((ns_node *)n);
-    JSValue v = JS_NewString(ctx, text ? text : "");
-    g_free(text);
+    JS_FreeValue(ctx, ec);
+    if (!start) return JS_NewString(ctx, "");
+    if (!end) end = start;
+
+    JSValue so = JS_GetPropertyStr(ctx, this_val, "startOffset");
+    JSValue eo = JS_GetPropertyStr(ctx, this_val, "endOffset");
+    int32_t soff = 0, eoff = 0;
+    JS_ToInt32(ctx, &soff, so);
+    JS_ToInt32(ctx, &eoff, eo);
+    JS_FreeValue(ctx, so);
+    JS_FreeValue(ctx, eo);
+
+    if (start == end && start->kind == NS_NODE_TEXT) {
+        glong total = start->text ? g_utf8_strlen(start->text, -1) : 0;
+        int a = CLAMP((int)soff, 0, (int)total);
+        int b = CLAMP((int)eoff, 0, (int)total);
+        if (b <= a || !start->text) return JS_NewString(ctx, "");
+        const char *p = g_utf8_offset_to_pointer(start->text, a);
+        const char *q = g_utf8_offset_to_pointer(start->text, b);
+        return JS_NewStringLen(ctx, p, (size_t)(q - p));
+    }
+
+    ns_node *root = start;
+    while (root->parent) root = root->parent;
+
+    ns_range_text_ctx c = { start, end, (int)soff, (int)eoff, g_string_new(NULL), 0 };
+    ns_range_text_walk(root, &c);
+    JSValue v = JS_NewString(ctx, c.buf->str);
+    g_string_free(c.buf, TRUE);
     return v;
 }
 
