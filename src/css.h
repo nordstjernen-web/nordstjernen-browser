@@ -19,6 +19,7 @@ typedef enum ns_css_prop {
     NS_CSS_FONT_SIZE,
     NS_CSS_FONT_WEIGHT,
     NS_CSS_FONT_STYLE,
+    NS_CSS_FONT_STRETCH,
     NS_CSS_FONT_FAMILY,
     NS_CSS_TEXT_ALIGN,
     NS_CSS_MARGIN_TOP,
@@ -403,6 +404,7 @@ typedef struct ns_css_value {
     struct ns_css_value *next_layer;
 } ns_css_value;
 
+int                 ns_css_font_stretch_rank(const ns_css_value *v);
 const ns_css_value *ns_css_value_layer(const ns_css_value *head, int index);
 int                 ns_css_value_layer_count(const ns_css_value *head);
 

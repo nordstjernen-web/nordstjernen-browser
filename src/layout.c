@@ -1617,6 +1617,15 @@ emit_font_weight_attr(GArray *attrs, gsize start, gsize end, int font_weight)
 }
 
 static void
+emit_font_stretch_attr(GArray *attrs, gsize start, gsize end, int font_stretch)
+{
+    if (end <= start) return;
+    ns_inline_attr a = { .kind = NS_INLINE_FONT_STRETCH, .start = start,
+                         .len = end - start, .font_stretch = font_stretch };
+    g_array_append_val(attrs, a);
+}
+
+static void
 emit_color_attr(GArray *attrs, gsize start, gsize end,
                 guint8 r, guint8 g, guint8 b, guint8 a8)
 {
@@ -2648,6 +2657,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (strike && ctx->strike_depth++ == 0) ctx->strike_start = ctx->out->len;
 
     gsize weight_start = ctx->out->len;
+    const ns_css_value *fst = s ? s->values[NS_CSS_FONT_STRETCH] : NULL;
+    int font_stretch_self = ns_css_font_stretch_rank(fst);
+    gboolean font_stretch_active = fst != NULL;
+    gsize stretch_start = ctx->out->len;
 
     gboolean is_q = strcmp(n->name, "q") == 0;
     if (is_q) {
@@ -2758,6 +2771,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         emit_font_family_attr(ctx->attrs, family_start, ctx->out->len, family_str);
     if (font_weight_active && ctx->out->len > weight_start)
         emit_font_weight_attr(ctx->attrs, weight_start, ctx->out->len, font_weight_self);
+    if (font_stretch_active && ctx->out->len > stretch_start)
+        emit_font_stretch_attr(ctx->attrs, stretch_start, ctx->out->len,
+                               font_stretch_self);
 
     if (bold && --ctx->bold_depth == 0)
         emit_attr(ctx->attrs, NS_INLINE_BOLD, ctx->bold_start, ctx->out->len);
@@ -3510,6 +3526,15 @@ build_pseudo_inline_for(const ns_style *ps, const ns_node *host)
         };
         g_array_append_val(box->attrs, a);
     }
+    if (ps->values[NS_CSS_FONT_STRETCH]) {
+        ns_inline_attr a = {
+            .kind = NS_INLINE_FONT_STRETCH,
+            .start = 0, .len = tlen,
+            .font_stretch =
+                ns_css_font_stretch_rank(ps->values[NS_CSS_FONT_STRETCH]),
+        };
+        g_array_append_val(box->attrs, a);
+    }
     if (keyword_is(ps->values[NS_CSS_FONT_STYLE], "italic") ||
         keyword_is(ps->values[NS_CSS_FONT_STYLE], "oblique")) {
         ns_inline_attr a = { .kind = NS_INLINE_ITALIC, .start = 0, .len = tlen };
@@ -4047,6 +4072,25 @@ layout_pango_weight_from_css(int weight)
     return (PangoWeight)weight;
 }
 
+static PangoStretch
+layout_pango_stretch_from_css(int rank)
+{
+    static const PangoStretch map[] = {
+        PANGO_STRETCH_ULTRA_CONDENSED,
+        PANGO_STRETCH_EXTRA_CONDENSED,
+        PANGO_STRETCH_CONDENSED,
+        PANGO_STRETCH_SEMI_CONDENSED,
+        PANGO_STRETCH_NORMAL,
+        PANGO_STRETCH_SEMI_EXPANDED,
+        PANGO_STRETCH_EXPANDED,
+        PANGO_STRETCH_EXTRA_EXPANDED,
+        PANGO_STRETCH_ULTRA_EXPANDED,
+    };
+    if (rank < 0) rank = 0;
+    if (rank > 8) rank = 8;
+    return map[rank];
+}
+
 static void
 layout_attr_insert_range(PangoAttrList *attrs, PangoAttribute *a,
                          gsize start, gsize len)
@@ -4071,6 +4115,10 @@ apply_inline_layout_attrs(PangoAttrList *attrs, const ns_box *box)
             break;
         case NS_INLINE_FONT_WEIGHT:
             a = pango_attr_weight_new(layout_pango_weight_from_css(r->font_weight));
+            break;
+        case NS_INLINE_FONT_STRETCH:
+            a = pango_attr_stretch_new(
+                layout_pango_stretch_from_css(r->font_stretch));
             break;
         case NS_INLINE_ITALIC:
             a = pango_attr_style_new(PANGO_STYLE_ITALIC);

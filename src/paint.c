@@ -42,6 +42,25 @@ pango_weight_from_css(int weight)
     return (PangoWeight)weight;
 }
 
+static PangoStretch
+pango_stretch_from_css(int rank)
+{
+    static const PangoStretch map[] = {
+        PANGO_STRETCH_ULTRA_CONDENSED,
+        PANGO_STRETCH_EXTRA_CONDENSED,
+        PANGO_STRETCH_CONDENSED,
+        PANGO_STRETCH_SEMI_CONDENSED,
+        PANGO_STRETCH_NORMAL,
+        PANGO_STRETCH_SEMI_EXPANDED,
+        PANGO_STRETCH_EXPANDED,
+        PANGO_STRETCH_EXTRA_EXPANDED,
+        PANGO_STRETCH_ULTRA_EXPANDED,
+    };
+    if (rank < 0) rank = 0;
+    if (rank > 8) rank = 8;
+    return map[rank];
+}
+
 void
 ns_paint_set_search(gboolean case_sensitive, const ns_box *active)
 {
@@ -1156,6 +1175,9 @@ ns_paint_apply_inline_font(PangoLayout *layout, const ns_style *s)
     int font_weight = ns_css_font_weight_number(fw, -1);
     if (font_weight > 0)
         pango_font_description_set_weight(desc, pango_weight_from_css(font_weight));
+    pango_font_description_set_stretch(desc,
+        pango_stretch_from_css(ns_css_font_stretch_rank(
+            s ? s->values[NS_CSS_FONT_STRETCH] : NULL)));
     if (keyword_is(s ? s->values[NS_CSS_FONT_STYLE] : NULL, "italic"))
         pango_font_description_set_style(desc, PANGO_STYLE_ITALIC);
     else if (keyword_is(s ? s->values[NS_CSS_FONT_STYLE] : NULL, "oblique"))
@@ -1276,6 +1298,11 @@ apply_first_line_attrs(PangoAttrList *attrs, const ns_style *fl,
     if (fw > 0)
         attr_insert_range(attrs, pango_attr_weight_new(pango_weight_from_css(fw)),
                           start, len);
+    if (fl->values[NS_CSS_FONT_STRETCH])
+        attr_insert_range(attrs,
+            pango_attr_stretch_new(pango_stretch_from_css(
+                ns_css_font_stretch_rank(fl->values[NS_CSS_FONT_STRETCH]))),
+            start, len);
     if (keyword_is(fl->values[NS_CSS_FONT_STYLE], "italic") ||
         keyword_is(fl->values[NS_CSS_FONT_STYLE], "oblique"))
         attr_insert_range(attrs, pango_attr_style_new(PANGO_STYLE_ITALIC),
@@ -1372,6 +1399,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 a = pango_attr_weight_new(PANGO_WEIGHT_BOLD); break;
             case NS_INLINE_FONT_WEIGHT:
                 a = pango_attr_weight_new(pango_weight_from_css(r->font_weight)); break;
+            case NS_INLINE_FONT_STRETCH:
+                a = pango_attr_stretch_new(
+                    pango_stretch_from_css(r->font_stretch)); break;
             case NS_INLINE_ITALIC:
                 a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE:
@@ -1910,6 +1940,9 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             case NS_INLINE_BOLD:      a = pango_attr_weight_new(PANGO_WEIGHT_BOLD); break;
             case NS_INLINE_FONT_WEIGHT:
                 a = pango_attr_weight_new(pango_weight_from_css(r->font_weight)); break;
+            case NS_INLINE_FONT_STRETCH:
+                a = pango_attr_stretch_new(
+                    pango_stretch_from_css(r->font_stretch)); break;
             case NS_INLINE_ITALIC:    a = pango_attr_style_new(PANGO_STYLE_ITALIC); break;
             case NS_INLINE_MONOSPACE: a = pango_attr_family_new("monospace"); break;
             case NS_INLINE_FONT_SIZE:

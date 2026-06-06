@@ -115,6 +115,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_SIZE]            = "font-size",
     [NS_CSS_FONT_WEIGHT]          = "font-weight",
     [NS_CSS_FONT_STYLE]           = "font-style",
+    [NS_CSS_FONT_STRETCH]         = "font-stretch",
     [NS_CSS_FONT_FAMILY]          = "font-family",
     [NS_CSS_TEXT_ALIGN]           = "text-align",
     [NS_CSS_MARGIN_TOP]           = "margin-top",
@@ -265,6 +266,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_SIZE:
     case NS_CSS_FONT_WEIGHT:
     case NS_CSS_FONT_STYLE:
+    case NS_CSS_FONT_STRETCH:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -4199,6 +4201,7 @@ normalize_display_value(const char *text)
 }
 
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
+static gboolean is_font_stretch_keyword(const char *s);
 
 static gboolean
 value_has_top_level_comma(const char *t)
@@ -4686,6 +4689,26 @@ parse_value_for(ns_css_prop prop, const char *text)
         v->u.keyword = g_strdup(t);
         break;
     }
+    case NS_CSS_FONT_STRETCH: {
+        char *kw = ascii_lower(t, strlen(t));
+        if (is_font_stretch_keyword(kw)) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+        } else {
+            g_free(kw);
+            double num;
+            ns_css_unit u;
+            if (parse_length(t, &num, &u) &&
+                u == NS_CSS_UNIT_PERCENT && num > 0) {
+                v = g_new0(ns_css_value, 1);
+                v->kind = NS_CSS_V_LENGTH;
+                v->u.length.v = num;
+                v->u.length.unit = u;
+            }
+        }
+        break;
+    }
     case NS_CSS_TAB_SIZE: {
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && len >= 0) {
@@ -4814,6 +4837,38 @@ int
 ns_css_prop_id(const char *name)
 {
     return name ? prop_id(name) : -1;
+}
+
+int
+ns_css_font_stretch_rank(const ns_css_value *v)
+{
+    if (!v) return 4;
+    if (v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
+        const char *kw = v->u.keyword;
+        if (strcmp(kw, "ultra-condensed") == 0) return 0;
+        if (strcmp(kw, "extra-condensed") == 0) return 1;
+        if (strcmp(kw, "condensed") == 0) return 2;
+        if (strcmp(kw, "semi-condensed") == 0) return 3;
+        if (strcmp(kw, "normal") == 0) return 4;
+        if (strcmp(kw, "semi-expanded") == 0) return 5;
+        if (strcmp(kw, "expanded") == 0) return 6;
+        if (strcmp(kw, "extra-expanded") == 0) return 7;
+        if (strcmp(kw, "ultra-expanded") == 0) return 8;
+    }
+    if (v->kind == NS_CSS_V_LENGTH &&
+        v->u.length.unit == NS_CSS_UNIT_PERCENT) {
+        double p = v->u.length.v;
+        if (p <= 56.25) return 0;
+        if (p <= 68.75) return 1;
+        if (p <= 81.25) return 2;
+        if (p <= 93.75) return 3;
+        if (p <= 106.25) return 4;
+        if (p <= 118.75) return 5;
+        if (p <= 137.5) return 6;
+        if (p <= 175.0) return 7;
+        return 8;
+    }
+    return 4;
 }
 
 static void
@@ -5047,6 +5102,21 @@ is_color_keyword(const char *s)
 {
     return s && (g_ascii_strcasecmp(s, "currentcolor") == 0 ||
                  g_ascii_strcasecmp(s, "transparent") == 0);
+}
+
+static gboolean
+is_font_stretch_keyword(const char *s)
+{
+    return s &&
+        (g_ascii_strcasecmp(s, "ultra-condensed") == 0 ||
+         g_ascii_strcasecmp(s, "extra-condensed") == 0 ||
+         g_ascii_strcasecmp(s, "condensed") == 0 ||
+         g_ascii_strcasecmp(s, "semi-condensed") == 0 ||
+         g_ascii_strcasecmp(s, "normal") == 0 ||
+         g_ascii_strcasecmp(s, "semi-expanded") == 0 ||
+         g_ascii_strcasecmp(s, "expanded") == 0 ||
+         g_ascii_strcasecmp(s, "extra-expanded") == 0 ||
+         g_ascii_strcasecmp(s, "ultra-expanded") == 0);
 }
 
 static void
@@ -6059,6 +6129,7 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_STYLE,
                     NS_CSS_FONT_VARIANT,
                     NS_CSS_FONT_WEIGHT,
+                    NS_CSS_FONT_STRETCH,
                     NS_CSS_FONT_SIZE,
                     NS_CSS_LINE_HEIGHT,
                     NS_CSS_FONT_FAMILY,
@@ -6112,6 +6183,8 @@ parse_declaration_block(const char **pp, const char *end,
                     }
                 } else if (g_ascii_strcasecmp(t, "small-caps") == 0) {
                     prop = NS_CSS_FONT_VARIANT; kw = "small-caps";
+                } else if (is_font_stretch_keyword(t)) {
+                    prop = NS_CSS_FONT_STRETCH; kw = t;
                 }
                 if (prop != NS_CSS_PROP_COUNT) {
                     ns_css_value *v = g_new0(ns_css_value, 1);

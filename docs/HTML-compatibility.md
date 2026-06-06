@@ -413,8 +413,8 @@ CSS support (abridged):
   backgrounds (incl. linear/radial/conic gradients and external
   stylesheet-relative `url(...)` resources),
   transforms (2D/3D), transitions/animations (`opacity`/`transform`/
-  `color`/`background-color`), inline font/style ranges measured for
-  wrapping and line height, `object-fit`, `mask-image`,
+  `color`/`background-color`), inline font/style/stretch ranges measured
+  for wrapping and line height, `object-fit`, `mask-image`,
   `accent-color`, `caret-color`, `tab-size`, `pointer-events`, custom properties + `calc()` and
   the Values 4 length math subset (`round()`/`mod()`/`rem()`/`abs()`).
 - ✅ `text-indent` — indents the first formatted line of a block's
