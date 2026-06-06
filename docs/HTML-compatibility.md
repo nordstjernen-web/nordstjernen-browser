@@ -337,9 +337,27 @@ QuickJS object serialization without bytecode or SharedArrayBuffer
 flags; functions, SharedArrayBuffer, and non-empty transfer lists are
 rejected.
 
-🚫 `SharedWorker`, module workers, service workers, worklets,
-transferable `MessagePort`s, transferable `ArrayBuffer`s, worker
-`fetch`, and nested workers are not implemented yet.
+**Service Workers** are supported at a minimalist level.
+`navigator.serviceWorker` exposes `register()` / `getRegistration()` /
+`getRegistrations()` / `ready` / `controller` plus the `controllerchange`
+and `message` events. `register()` fetches and runs the worker script in a
+real `ServiceWorkerGlobalScope` (its own thread) — same-origin,
+mixed-content, and CSP `worker-src` rules apply — then drives the
+lifecycle: the `install` and `activate` `ExtendableEvent`s fire (with
+`waitUntil`), the worker's `state` transitions `installing → installed →
+activating → activated` (each firing `statechange`), and on activation
+`controller` is set and `ready` resolves. The scope provides
+`self.registration`, `self.clients` (`claim` / `matchAll` / `get`),
+`self.skipWaiting()`, `caches`, and the `FetchEvent` /
+`ExtendableMessageEvent` interfaces, and `postMessage` works in both
+directions (SW↔page). **Network interception is not wired** — `fetch`
+events are never dispatched, so a worker cannot serve requests from the
+(currently no-op) Cache API, and registrations live for the session
+rather than persisting across loads.
+
+🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
+transferable `ArrayBuffer`s, worker `fetch`, and nested workers are not
+implemented yet.
 
 ## §12 Web storage
 
@@ -518,7 +536,9 @@ defects, and will not be added:
 
 - **WebGPU** and AI-style web APIs. (WebGL is the exception — supported
   opt-in per site; see §4.12 and [`docs/webgl.md`](webgl.md).)
-- **Service Workers**, Shared Workers, Worklets, server-sent events.
+- Shared Workers, Worklets, and Service Worker **network interception**
+  (the fetch-event request-serving path — see §11 for the supported
+  registration/lifecycle subset).
 - **WebRTC**, **MSE/EME** (DRM media).
 - Plugin content (`embed`/`object` via NPAPI/PPAPI).
 - **In-process audio/video codecs** — playback is handed off to an

@@ -20,7 +20,9 @@ See `README.md` for the product vision and `CLAUDE.md` for working rules.
 ## Non-goals (won't change)
 
 WebGPU / WebRTC / WebUSB / WebBluetooth / WebMIDI / WebHID;
-service workers, push, background sync; DRM / EME; **JIT** (QuickJS
+service-worker network interception, push, background sync (the
+registration + lifecycle subset of Service Workers *is* supported);
+DRM / EME; **JIT** (QuickJS
 interpreter only — W^X holds process-wide); plugins (NPAPI / PPAPI /
 WebExtensions); persistent on-disk history; sync / accounts / telemetry /
 "studies"; localization beyond English (for now).
