@@ -63,6 +63,7 @@ if wamr_system == 'windows'
   wamr_platform_inc = 'core/shared/platform/windows'
 else
   wamr_srcs += files(
+    'core/shared/platform/common/libc-util/libc_errno.c',
     'core/shared/platform/common/memory/mremap.c',
     'core/shared/platform/common/posix/posix_blocking_op.c',
     'core/shared/platform/common/posix/posix_clock.c',
@@ -97,6 +98,7 @@ wamr_incs = include_directories(
   'core/iwasm/common',
   'core/iwasm/interpreter',
   'core/shared/platform/include',
+  'core/shared/platform/common/libc-util',
   wamr_platform_inc,
   'core/shared/utils',
   'core/shared/mem-alloc',
