@@ -21073,6 +21073,35 @@ ns_element_scrollIntoView(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static JSValue
+ns_element_checkVisibility(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    const ns_node *el = ns_unwrap_element(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js) return JS_FALSE;
+    ns_js_flush_layout(js);
+    gboolean visible = js->layout_root &&
+                       ns_box_find_by_dom(js->layout_root, el) != NULL;
+    if (visible && argc >= 1 && JS_IsObject(argv[0])) {
+        if (ns_js_get_bool_prop(ctx, argv[0], "checkVisibilityCSS", NULL) ||
+            ns_js_get_bool_prop(ctx, argv[0], "visibilityProperty", NULL)) {
+            char *v = ns_computed_lookup(ctx, el, "visibility");
+            if (v && (strcmp(v, "hidden") == 0 || strcmp(v, "collapse") == 0))
+                visible = FALSE;
+            g_free(v);
+        }
+        if (visible &&
+            (ns_js_get_bool_prop(ctx, argv[0], "checkOpacity", NULL) ||
+             ns_js_get_bool_prop(ctx, argv[0], "opacityProperty", NULL))) {
+            char *o = ns_computed_lookup(ctx, el, "opacity");
+            if (o && g_ascii_strtod(o, NULL) == 0.0) visible = FALSE;
+            g_free(o);
+        }
+    }
+    return visible ? JS_TRUE : JS_FALSE;
+}
+
 static int
 ns_pointer_capture_index(JSContext *ctx, JSValueConst set, int32_t id)
 {
@@ -23346,6 +23375,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("cancelAsync",             1, ns_element_cancelAsync),
     JS_CFUNC_DEF("announce",                1, ns_event_noop),
     JS_CFUNC_DEF("scrollIntoView",          0, ns_element_scrollIntoView),
+    JS_CFUNC_DEF("checkVisibility",         0, ns_element_checkVisibility),
     JS_CFUNC_DEF("setPointerCapture",       1, ns_element_setPointerCapture),
     JS_CFUNC_DEF("releasePointerCapture",   1, ns_element_releasePointerCapture),
     JS_CFUNC_DEF("hasPointerCapture",       1, ns_element_hasPointerCapture),
