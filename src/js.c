@@ -5473,6 +5473,143 @@ ns_navigator_get_battery(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_throw_dom_exception(JSContext *ctx, const char *name, int code,
+                       const char *message)
+{
+    JSValue err = JS_NewError(ctx);
+    JS_DefinePropertyValueStr(ctx, err, "name", JS_NewString(ctx, name),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, err, "message", JS_NewString(ctx, message),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, err, "code", JS_NewInt32(ctx, code),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    return JS_Throw(ctx, err);
+}
+
+static JSValue
+ns_promise_reject_dom(JSContext *ctx, const char *name, const char *message)
+{
+    JSValue resolvers[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolvers);
+    if (JS_IsException(promise)) return promise;
+    JSValue err = JS_NewError(ctx);
+    JS_DefinePropertyValueStr(ctx, err, "name", JS_NewString(ctx, name),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_DefinePropertyValueStr(ctx, err, "message", JS_NewString(ctx, message),
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &err);
+    JS_FreeValue(ctx, err);
+    JS_FreeValue(ctx, resolvers[0]);
+    JS_FreeValue(ctx, resolvers[1]);
+    return promise;
+}
+
+static JSValue
+ns_media_reject_not_found(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_promise_reject_dom(ctx, "NotFoundError",
+        "Requested device not found");
+}
+
+static JSValue
+ns_clipboard_reject_not_allowed(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return ns_promise_reject_dom(ctx, "NotAllowedError",
+        "Read permission denied");
+}
+
+static gboolean
+ns_protocol_scheme_valid(const char *scheme)
+{
+    static const char *const safelist[] = {
+        "bitcoin", "cabal", "dat", "did", "doi", "dweb", "ed2k", "eth",
+        "ftp", "ftps", "geo", "gopher", "hcp", "im", "ipfs", "ipns", "irc",
+        "ircs", "magnet", "mailto", "matrix", "mms", "news", "nntp",
+        "openpgp4fpr", "sip", "sms", "smsto", "ssb", "ssh", "tel", "urn",
+        "webcal", "wtai", "xmpp", NULL
+    };
+    if (!scheme || !*scheme) return FALSE;
+    if (g_str_has_prefix(scheme, "web+")) {
+        const char *p = scheme + 4;
+        if (!*p) return FALSE;
+        for (; *p; p++)
+            if (*p < 'a' || *p > 'z') return FALSE;
+        return TRUE;
+    }
+    for (int i = 0; safelist[i]; i++)
+        if (g_ascii_strcasecmp(scheme, safelist[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static JSValue
+ns_navigator_register_protocol_handler(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx,
+            "Failed to execute 'registerProtocolHandler' on 'Navigator': "
+            "2 arguments required");
+    const char *scheme = JS_ToCString(ctx, argv[0]);
+    const char *url    = JS_ToCString(ctx, argv[1]);
+    JSValue ret = JS_UNDEFINED;
+    if (!ns_protocol_scheme_valid(scheme)) {
+        char *msg = g_strdup_printf(
+            "Failed to execute 'registerProtocolHandler' on 'Navigator': "
+            "The scheme '%s' doesn't belong to the scheme allowlist.",
+            scheme ? scheme : "");
+        ret = ns_throw_dom_exception(ctx, "SecurityError", 18, msg);
+        g_free(msg);
+    } else if (!url || !strstr(url, "%s")) {
+        char *msg = g_strdup_printf(
+            "Failed to execute 'registerProtocolHandler' on 'Navigator': "
+            "The url provided ('%s') does not contain '%%s'.",
+            url ? url : "");
+        ret = ns_throw_dom_exception(ctx, "SyntaxError", 12, msg);
+        g_free(msg);
+    }
+    if (scheme) JS_FreeCString(ctx, scheme);
+    if (url)    JS_FreeCString(ctx, url);
+    return ret;
+}
+
+static JSValue
+ns_window_find(JSContext *ctx, JSValueConst this_val,
+               int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1) return JS_FALSE;
+    const char *needle = JS_ToCString(ctx, argv[0]);
+    if (!needle) return JS_FALSE;
+    if (!*needle) { JS_FreeCString(ctx, needle); return JS_FALSE; }
+    gboolean case_sensitive = argc >= 2 && JS_ToBool(ctx, argv[1]) > 0;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = js ? js->current_doc : NULL;
+    gboolean found = FALSE;
+    if (doc) {
+        char *hay = ns_node_collect_text(doc);
+        if (hay) {
+            if (case_sensitive) {
+                found = strstr(hay, needle) != NULL;
+            } else {
+                char *h = g_utf8_casefold(hay, -1);
+                char *n = g_utf8_casefold(needle, -1);
+                found = h && n && strstr(h, n) != NULL;
+                g_free(h);
+                g_free(n);
+            }
+            g_free(hay);
+        }
+    }
+    JS_FreeCString(ctx, needle);
+    return JS_NewBool(ctx, found);
+}
+
+static JSValue
 ns_cache_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
@@ -25865,9 +26002,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     JSValue clipboard = JS_NewObject(ctx);
     ns_bind_fn(ctx, clipboard, "writeText", ns_clipboard_writeText, 1);
-    ns_bind_fn(ctx, clipboard, "readText",  ns_returns_rejected, 0);
-    ns_bind_fn(ctx, clipboard, "write",     ns_returns_rejected, 1);
-    ns_bind_fn(ctx, clipboard, "read",      ns_returns_rejected, 0);
+    ns_bind_fn(ctx, clipboard, "readText",  ns_clipboard_reject_not_allowed, 0);
+    ns_bind_fn(ctx, clipboard, "write",     ns_clipboard_reject_not_allowed, 1);
+    ns_bind_fn(ctx, clipboard, "read",      ns_clipboard_reject_not_allowed, 0);
     JS_SetPropertyStr(ctx, navigator, "clipboard", clipboard);
 
     JSValue permissions = JS_NewObject(ctx);
@@ -25876,9 +26013,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, navigator, "permissions", permissions);
 
     JSValue media_devices = JS_NewObject(ctx);
-    ns_bind_fn(ctx, media_devices, "getUserMedia",            ns_returns_rejected, 1);
-    ns_bind_fn(ctx, media_devices, "getDisplayMedia",         ns_returns_rejected, 1);
-    ns_bind_fn(ctx, media_devices, "enumerateDevices",        ns_returns_rejected, 0);
+    ns_bind_fn(ctx, media_devices, "getUserMedia",            ns_media_reject_not_found, 1);
+    ns_bind_fn(ctx, media_devices, "getDisplayMedia",         ns_media_reject_not_found, 1);
+    ns_bind_fn(ctx, media_devices, "enumerateDevices",        ns_returns_resolved_empty_array, 0);
     ns_bind_fn(ctx, media_devices, "getSupportedConstraints", ns_event_noop,       0);
     JS_SetPropertyStr(ctx, navigator, "mediaDevices", media_devices);
 
@@ -25886,7 +26023,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, navigator, "canShare",                  ns_event_noop,       1);
     ns_bind_fn(ctx, navigator, "vibrate",                   ns_event_noop,       1);
     ns_bind_fn(ctx, navigator, "sendBeacon",                ns_navigator_sendBeacon, 2);
-    ns_bind_fn(ctx, navigator, "registerProtocolHandler",   ns_event_noop,       2);
+    ns_bind_fn(ctx, navigator, "registerProtocolHandler",
+               ns_navigator_register_protocol_handler, 2);
     ns_bind_fn(ctx, navigator, "unregisterProtocolHandler", ns_event_noop,       2);
 
     JSValue userAgentData = JS_NewObject(ctx);
@@ -26056,13 +26194,13 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                       JS_NewBool(ctx, g_getenv("NS_FP_DEBUG") != NULL));
     static const ns_fn_def window_noops[] = {
         { "close", 0 }, { "focus", 0 }, { "blur", 0 },
-        { "find", 7 },
         { "moveTo", 2 }, { "moveBy", 2 },
         { "resizeTo", 2 }, { "resizeBy", 2 },
     };
     ns_bind_fns(ctx, global, ns_event_noop, window_noops, G_N_ELEMENTS(window_noops));
     ns_bind_fn(ctx, global, "print", ns_window_print, 0);
     ns_bind_fn(ctx, global, "stop",  ns_window_stop,  0);
+    ns_bind_fn(ctx, global, "find",  ns_window_find,  7);
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
