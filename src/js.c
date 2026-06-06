@@ -5296,6 +5296,52 @@ ns_promise_resolve_take(JSContext *ctx, JSValue value)
 }
 
 static JSValue
+ns_fontface_load(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JS_SetPropertyStr(ctx, this_val, "status", JS_NewString(ctx, "loaded"));
+    JSValue loaded = JS_GetPropertyStr(ctx, this_val, "loaded");
+    if (JS_IsObject(loaded)) return loaded;
+    JS_FreeValue(ctx, loaded);
+    return ns_promise_resolve_take(ctx, JS_DupValue(ctx, this_val));
+}
+
+static JSValue
+ns_window_fontface_ctor(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    JSValue f = JS_NewObject(ctx);
+    const char *family = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
+    JS_SetPropertyStr(ctx, f, "family", JS_NewString(ctx, family ? family : ""));
+    if (family) JS_FreeCString(ctx, family);
+
+    static const struct { const char *k; const char *def; } descs[] = {
+        { "style", "normal" }, { "weight", "normal" }, { "stretch", "normal" },
+        { "unicodeRange", "U+0-10FFFF" }, { "variant", "normal" },
+        { "featureSettings", "normal" }, { "variationSettings", "normal" },
+        { "display", "auto" }, { "ascentOverride", "normal" },
+        { "descentOverride", "normal" }, { "lineGapOverride", "normal" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(descs); i++) {
+        JSValue v = JS_UNDEFINED;
+        if (argc >= 3 && JS_IsObject(argv[2]))
+            v = JS_GetPropertyStr(ctx, argv[2], descs[i].k);
+        if (JS_IsUndefined(v) || JS_IsException(v)) {
+            JS_FreeValue(ctx, v);
+            v = JS_NewString(ctx, descs[i].def);
+        }
+        JS_SetPropertyStr(ctx, f, descs[i].k, v);
+    }
+    JS_SetPropertyStr(ctx, f, "status", JS_NewString(ctx, "unloaded"));
+    JS_SetPropertyStr(ctx, f, "loaded",
+                      ns_promise_resolve_take(ctx, JS_DupValue(ctx, f)));
+    ns_bind_fn(ctx, f, "load", ns_fontface_load, 0);
+    return f;
+}
+
+static JSValue
 ns_returns_resolved_false(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
@@ -26802,7 +26848,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "PerformanceEntry", 0 }, { "PerformanceMark", 0 },
         { "PerformanceMeasure", 0 }, { "PerformanceResourceTiming", 0 },
         { "PerformanceNavigationTiming", 0 },
-        { "FontFace", 3 }, { "FontFaceSet", 0 },
+        { "FontFaceSet", 0 },
         { "ReadableStream", 1 }, { "WritableStream", 1 },
         { "TransformStream", 1 },
         { "ByteLengthQueuingStrategy", 1 }, { "CountQueuingStrategy", 1 },
@@ -26810,6 +26856,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "Crypto", 0 }, { "SubtleCrypto", 0 }, { "CryptoKey", 0 },
     };
     ns_bind_ctors(ctx, global, ns_window_event_ctor, shim_ctors, G_N_ELEMENTS(shim_ctors));
+    ns_bind_ctor(ctx, global, "FontFace", ns_window_fontface_ctor, 3);
     {
         JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleDeclaration");
         JSValue proto = JS_GetClassProto(ctx, ns_style_class_id);
