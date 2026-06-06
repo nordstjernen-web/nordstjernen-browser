@@ -16,7 +16,9 @@ G_BEGIN_DECLS
 #define NS_MAX_REDIRECTS 10
 #define NS_DEFAULT_TIMEOUT_S 30
 #define NS_MAX_TIMEOUT_S 60
-#define NS_USER_AGENT "Nordstjernen/" NS_VERSION " (+https://nordstjernen.org)"
+#define NS_USER_AGENT \
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 " \
+    "Nordstjernen/" NS_VERSION
 
 typedef struct ns_response {
     long  status;

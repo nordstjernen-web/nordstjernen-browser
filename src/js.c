@@ -12615,9 +12615,11 @@ ns_worker_js_new(ns_worker_host *host)
 
     JSValue navigator = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, navigator, "userAgent",
-                      JS_NewString(ctx, "Nordstjernen/" NS_VERSION));
-    JS_SetPropertyStr(ctx, navigator, "appName", JS_NewString(ctx, "Nordstjernen"));
-    JS_SetPropertyStr(ctx, navigator, "appVersion", JS_NewString(ctx, NS_VERSION));
+                      JS_NewString(ctx, NS_USER_AGENT));
+    JS_SetPropertyStr(ctx, navigator, "appName", JS_NewString(ctx, "Netscape"));
+    JS_SetPropertyStr(ctx, navigator, "appCodeName", JS_NewString(ctx, "Mozilla"));
+    JS_SetPropertyStr(ctx, navigator, "appVersion",
+                      JS_NewString(ctx, "5.0 (X11; Linux x86_64)"));
     JS_SetPropertyStr(ctx, navigator, "language", JS_NewString(ctx, "en-US"));
     JS_SetPropertyStr(ctx, navigator, "onLine", JS_TRUE);
     JS_SetPropertyStr(ctx, navigator, "hardwareConcurrency", JS_NewInt32(ctx, 4));
@@ -14570,6 +14572,70 @@ ns_fire_property_on_handler(ns_js *js, const ns_node *target, const char *type,
 }
 
 static gboolean
+ns_event_type_is_window_reflected(const char *type)
+{
+    static const char *const reflected[] = {
+        "load", "unload", "beforeunload", "pageshow", "pagehide",
+        "hashchange", "popstate", "resize", "storage", "offline",
+        "online", "message", "afterprint", "beforeprint",
+        "languagechange", "error",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(reflected); i++)
+        if (strcmp(type, reflected[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_fire_window_level_handlers(ns_js *js, const ns_node *doc_node,
+                              const char *type, JSValue event,
+                              gboolean at_target)
+{
+    gboolean reflected = ns_event_type_is_window_reflected(type);
+    if (reflected && !at_target) return FALSE;
+
+    gboolean fired = FALSE;
+    JSContext *ctx = js->ctx;
+    char prop_name[48];
+    g_snprintf(prop_name, sizeof prop_name, "on%s", type);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc_obj = JS_GetPropertyStr(ctx, global, "document");
+    JSValue holders[2] = { doc_obj, global };
+    for (int i = 0; i < 2; i++) {
+        JSValue handler = JS_GetPropertyStr(ctx, holders[i], prop_name);
+        if (JS_IsFunction(ctx, handler)) {
+            JSValue ret = JS_Call(ctx, handler, holders[i], 1, &event);
+            if (JS_IsException(ret)) {
+                JSValue ex = JS_GetException(ctx);
+                const char *m = JS_ToCString(ctx, ex);
+                if (m && js->log_cb) {
+                    char *line = g_strdup_printf("JS error in on%s: %s",
+                                                 type, m);
+                    js->log_cb(line, js->log_user_data);
+                    g_free(line);
+                }
+                if (m) JS_FreeCString(ctx, m);
+                JS_FreeValue(ctx, ex);
+            } else if (JS_IsBool(ret) && !JS_ToBool(ctx, ret)) {
+                ns_event_mark_default_prevented(ctx, event);
+            }
+            JS_FreeValue(ctx, ret);
+            fired = TRUE;
+        }
+        JS_FreeValue(ctx, handler);
+    }
+    JS_FreeValue(ctx, doc_obj);
+    JS_FreeValue(ctx, global);
+
+    if (reflected) {
+        ns_node *body = ns_node_find_first_element((ns_node *)doc_node,
+                                                    "body");
+        if (body && ns_fire_inline_on_handler(js, body, type, event))
+            fired = TRUE;
+    }
+    return fired;
+}
+
+static gboolean
 ns_invoke_listeners_at(ns_js *js, const ns_node *cur, const ns_node *target,
                        const char *type, JSValue event, gboolean capture_phase,
                        gboolean at_target, gboolean *fired)
@@ -14578,6 +14644,9 @@ ns_invoke_listeners_at(ns_js *js, const ns_node *cur, const ns_node *target,
         if (ns_fire_inline_on_handler(js, cur, type, event))
             *fired = TRUE;
         if (ns_fire_property_on_handler(js, cur, type, event))
+            *fired = TRUE;
+        if (cur->kind == NS_NODE_DOCUMENT &&
+            ns_fire_window_level_handlers(js, cur, type, event, at_target))
             *fired = TRUE;
     }
 
@@ -14979,29 +15048,32 @@ ns_js_fire_img_load_once(ns_js *js, ns_node *node, gboolean failed)
 }
 
 static void
-ns_js_walk_fire_image_events(ns_js *js, const ns_box *b)
+ns_js_walk_collect_media_events(const ns_box *b, GPtrArray *imgs,
+                                GArray *img_failed, GPtrArray *videos)
 {
     if (!b) return;
     if (b->dom && b->dom->name && b->media) {
         if (strcmp(b->dom->name, "img") == 0 && b->media->image) {
             const ns_image *im = (const ns_image *)b->media->image;
-            if (im->loaded || im->failed)
-                ns_js_fire_img_load_once(js, (ns_node *)b->dom, im->failed);
+            if ((im->loaded || im->failed) &&
+                !(b->dom->flags & NS_NODE_IMG_LOAD_FIRED)) {
+                gboolean failed = im->failed ? TRUE : FALSE;
+                g_ptr_array_add(imgs, (gpointer)b->dom);
+                g_array_append_val(img_failed, failed);
+            }
         } else if (strcmp(b->dom->name, "video") == 0 && b->media->video) {
             const ns_video *v = (const ns_video *)b->media->video;
-            if (v->loaded) {
-                ns_js_dispatch_event(js, b->dom, "loadedmetadata", NULL);
-                ns_js_dispatch_event(js, b->dom, "loadeddata", NULL);
-                ns_js_dispatch_event(js, b->dom, "canplay", NULL);
-            }
+            if (v->loaded)
+                g_ptr_array_add(videos, (gpointer)b->dom);
         }
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        ns_js_walk_fire_image_events(js, c);
+        ns_js_walk_collect_media_events(c, imgs, img_failed, videos);
     if (b->inline_atomics)
         for (guint i = 0; i < b->inline_atomics->len; i++)
-            ns_js_walk_fire_image_events(js,
-                g_array_index(b->inline_atomics, ns_inline_atomic, i).box);
+            ns_js_walk_collect_media_events(
+                g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                imgs, img_failed, videos);
 }
 
 void
@@ -15009,7 +15081,22 @@ ns_js_fire_media_load_events(ns_js *js, const struct ns_box *layout)
 {
     if (!js || !layout) return;
     if (js->halted || js->in_pump) return;
-    ns_js_walk_fire_image_events(js, layout);
+    GPtrArray *imgs = g_ptr_array_new();
+    GArray *img_failed = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    GPtrArray *videos = g_ptr_array_new();
+    ns_js_walk_collect_media_events(layout, imgs, img_failed, videos);
+    for (guint i = 0; i < imgs->len; i++)
+        ns_js_fire_img_load_once(js, g_ptr_array_index(imgs, i),
+                                 g_array_index(img_failed, gboolean, i));
+    for (guint i = 0; i < videos->len; i++) {
+        ns_node *v = g_ptr_array_index(videos, i);
+        ns_js_dispatch_event(js, v, "loadedmetadata", NULL);
+        ns_js_dispatch_event(js, v, "loadeddata", NULL);
+        ns_js_dispatch_event(js, v, "canplay", NULL);
+    }
+    g_ptr_array_free(imgs, TRUE);
+    g_array_free(img_failed, TRUE);
+    g_ptr_array_free(videos, TRUE);
 }
 
 gboolean
@@ -24237,11 +24324,13 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     JSValue navigator = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, navigator, "userAgent",
-                      JS_NewString(ctx, "Nordstjernen/" NS_VERSION));
+                      JS_NewString(ctx, NS_USER_AGENT));
     JS_SetPropertyStr(ctx, navigator, "appName",
-                      JS_NewString(ctx, "Nordstjernen"));
+                      JS_NewString(ctx, "Netscape"));
+    JS_SetPropertyStr(ctx, navigator, "appCodeName",
+                      JS_NewString(ctx, "Mozilla"));
     JS_SetPropertyStr(ctx, navigator, "appVersion",
-                      JS_NewString(ctx, NS_VERSION));
+                      JS_NewString(ctx, "5.0 (X11; Linux x86_64)"));
     JS_SetPropertyStr(ctx, navigator, "platform",
                       JS_NewString(ctx, "Linux x86_64"));
     JS_SetPropertyStr(ctx, navigator, "language",
