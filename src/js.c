@@ -5432,6 +5432,19 @@ ns_returns_resolved_empty_array(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_storage_estimate(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue est = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, est, "usage", JS_NewInt64(ctx, 0));
+    JS_SetPropertyStr(ctx, est, "quota",
+                      JS_NewInt64(ctx, (int64_t)2 * 1024 * 1024 * 1024));
+    JS_SetPropertyStr(ctx, est, "usageDetails", JS_NewObject(ctx));
+    return ns_promise_resolve_take(ctx, est);
+}
+
+static JSValue
 ns_cache_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
@@ -5495,6 +5508,46 @@ ns_microtask_job(JSContext *ctx, int argc, JSValueConst *argv)
     (void)argc;
     return JS_Call(ctx, argv[0], JS_UNDEFINED, 0, NULL);
 }
+
+static JSValue
+ns_geolocation_error_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    (void)argc;
+    if (!JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
+    JSValue err = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, err, "code", JS_NewInt32(ctx, 1));
+    JS_SetPropertyStr(ctx, err, "message",
+                      JS_NewString(ctx, "User denied Geolocation"));
+    JS_SetPropertyStr(ctx, err, "PERMISSION_DENIED",    JS_NewInt32(ctx, 1));
+    JS_SetPropertyStr(ctx, err, "POSITION_UNAVAILABLE", JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, err, "TIMEOUT",              JS_NewInt32(ctx, 3));
+    JSValueConst args[1] = { err };
+    JSValue r = JS_Call(ctx, argv[0], JS_UNDEFINED, 1, args);
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, err);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_geolocation_get_current_position(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc >= 2 && JS_IsFunction(ctx, argv[1])) {
+        JSValueConst job_args[1] = { argv[1] };
+        JS_EnqueueJob(ctx, ns_geolocation_error_job, 1, job_args);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_geolocation_watch_position(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    ns_geolocation_get_current_position(ctx, this_val, argc, argv);
+    return JS_NewInt32(ctx, 1);
+}
+
 
 static JSValue
 ns_window_queue_microtask(JSContext *ctx, JSValueConst this_val,
@@ -25750,9 +25803,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, navigator, "connection", connection);
 
     JSValue geolocation = JS_NewObject(ctx);
-    ns_bind_fn(ctx, geolocation, "getCurrentPosition", ns_event_noop, 3);
-    ns_bind_fn(ctx, geolocation, "watchPosition",      ns_event_noop, 3);
-    ns_bind_fn(ctx, geolocation, "clearWatch",         ns_event_noop, 1);
+    ns_bind_fn(ctx, geolocation, "getCurrentPosition",
+               ns_geolocation_get_current_position, 3);
+    ns_bind_fn(ctx, geolocation, "watchPosition",
+               ns_geolocation_watch_position, 3);
+    ns_bind_fn(ctx, geolocation, "clearWatch", ns_event_noop, 1);
     JS_SetPropertyStr(ctx, navigator, "geolocation", geolocation);
 
     JSValue clipboard = JS_NewObject(ctx);
@@ -25816,6 +25871,30 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, media_caps, "encodingInfo",
                ns_media_capabilities_info, 1);
     JS_SetPropertyStr(ctx, navigator, "mediaCapabilities", media_caps);
+
+    JS_SetPropertyStr(ctx, navigator, "vendorSub", JS_NewString(ctx, ""));
+
+    JSValue user_activation = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, user_activation, "hasBeenActive", JS_TRUE);
+    JS_SetPropertyStr(ctx, user_activation, "isActive", JS_FALSE);
+    JS_SetPropertyStr(ctx, navigator, "userActivation", user_activation);
+
+    JSValue storage = JS_NewObject(ctx);
+    ns_bind_fn(ctx, storage, "estimate",  ns_storage_estimate,       0);
+    ns_bind_fn(ctx, storage, "persist",   ns_returns_resolved_false, 0);
+    ns_bind_fn(ctx, storage, "persisted", ns_returns_resolved_false, 0);
+    JS_SetPropertyStr(ctx, navigator, "storage", storage);
+
+    JSValue wake_lock = JS_NewObject(ctx);
+    ns_bind_fn(ctx, wake_lock, "request", ns_returns_rejected, 1);
+    JS_SetPropertyStr(ctx, navigator, "wakeLock", wake_lock);
+
+    ns_bind_fn(ctx, navigator, "getInstalledRelatedApps",
+               ns_returns_resolved_empty_array, 0);
+    ns_bind_fn(ctx, navigator, "setAppBadge",
+               ns_returns_resolved_undefined, 1);
+    ns_bind_fn(ctx, navigator, "clearAppBadge",
+               ns_returns_resolved_undefined, 0);
 
     JS_SetPropertyStr(ctx, global, "navigator", navigator);
 
@@ -25932,6 +26011,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "scrollTo", ns_window_scroll_to, 2);
     ns_bind_fn(ctx, global, "scrollBy", ns_window_scroll_by, 2);
     ns_bind_fn(ctx, global, "scroll",   ns_window_scroll_to, 2);
+    ns_bind_fn(ctx, global, "scrollByLines", ns_event_noop, 1);
+    ns_bind_fn(ctx, global, "scrollByPages", ns_event_noop, 1);
     ns_bind_fn(ctx, global, "open",                  ns_window_open_method,            3);
     ns_bind_fn(ctx, global, "confirm",               ns_window_confirm,                1);
     ns_bind_fn(ctx, global, "prompt",                ns_window_prompt,                 2);

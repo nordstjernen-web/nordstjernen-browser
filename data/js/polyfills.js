@@ -2952,7 +2952,9 @@
                     configurable: true, enumerable: true,
                     value: function (desc) {
                         var name = desc && desc.name ? String(desc.name) : '';
-                        var state = name === 'notifications' ? 'denied' : 'prompt';
+                        var denied = { notifications: 1, geolocation: 1,
+                            camera: 1, microphone: 1 };
+                        var state = denied[name] ? 'denied' : 'prompt';
                         return Promise.resolve(makePermissionStatus(name, state));
                     }
                 });
