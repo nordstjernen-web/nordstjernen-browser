@@ -373,8 +373,14 @@ ns_window_js_mutated(gpointer user_data)
     if (!w) return;
     w->dom_mutated = TRUE;
     if (w->js_relayout_idle_id) return;
+    guint delay = 16;
+    double render_ms = w->last_render_us / 1000.0;
+    if (render_ms > 5) {
+        delay = (guint)(render_ms * 3);
+        if (delay > 500) delay = 500;
+    }
     w->js_relayout_idle_id =
-        g_timeout_add(16, ns_window_js_relayout_now, w);
+        g_timeout_add(delay, ns_window_js_relayout_now, w);
 }
 
 static void
@@ -3127,6 +3133,11 @@ static void
 ns_window_css_fetch_done(ns_window *w)
 {
     if (!w) return;
+    if (g_getenv("NS_CSS_DEBUG"))
+        g_printerr("[cssdbg] done inflight=%u->%u gen=%u first=%d\n",
+                   w->css_inflight,
+                   w->css_inflight > 0 ? w->css_inflight - 1 : 0,
+                   w->fetch_gen, w->first_paint_done);
     if (w->css_inflight > 0) w->css_inflight--;
     if (w->css_inflight == 0 && !w->first_paint_done)
         w->first_paint_done = TRUE;
@@ -3171,6 +3182,10 @@ on_external_css_loaded(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_response *resp = ns_net_fetch_finish(result, &err);
     ns_window *w = ns_window_for_id(fetch->w_id);
     if (!w || fetch->gen != w->fetch_gen) {
+        if (g_getenv("NS_CSS_DEBUG"))
+            g_printerr("[cssdbg] orphan css cb gen=%u cur=%u inflight=%u %s\n",
+                       fetch->gen, w ? w->fetch_gen : 0,
+                       w ? w->css_inflight : 0, fetch->url);
         g_clear_error(&err);
         ns_response_free(resp);
         ns_css_fetch_free(fetch);
