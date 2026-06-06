@@ -2003,6 +2003,21 @@ meter_state_for(const ns_node *n)
 }
 
 static void
+append_pseudo_content(GString *out, const ns_css_value *cv, const ns_node *host)
+{
+    if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return;
+    char *resolved = resolve_pseudo_content(cv->u.keyword, host);
+    if (!resolved) return;
+    const char *txt = resolved;
+    if (strcmp(resolved, "open-quote") == 0)        txt = "\xe2\x80\x9c";
+    else if (strcmp(resolved, "close-quote") == 0)  txt = "\xe2\x80\x9d";
+    else if (strcmp(resolved, "no-open-quote") == 0 ||
+             strcmp(resolved, "no-close-quote") == 0) { g_free(resolved); return; }
+    g_string_append(out, txt);
+    g_free(resolved);
+}
+
+static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
@@ -2384,22 +2399,10 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             const ns_style *bs = ctx->styles
                 ? g_hash_table_lookup(ctx->styles, n) : NULL;
             GString *pseudo = g_string_new(NULL);
-            if (bs && bs->before && bs->before->values[NS_CSS_CONTENT]) {
-                const ns_css_value *cv = bs->before->values[NS_CSS_CONTENT];
-                if (cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword) {
-                    char *gen = resolve_pseudo_content(cv->u.keyword, n);
-                    if (gen) g_string_append(pseudo, gen);
-                    g_free(gen);
-                }
-            }
-            if (bs && bs->after && bs->after->values[NS_CSS_CONTENT]) {
-                const ns_css_value *cv = bs->after->values[NS_CSS_CONTENT];
-                if (cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword) {
-                    char *gen = resolve_pseudo_content(cv->u.keyword, n);
-                    if (gen) g_string_append(pseudo, gen);
-                    g_free(gen);
-                }
-            }
+            if (bs && bs->before)
+                append_pseudo_content(pseudo, bs->before->values[NS_CSS_CONTENT], n);
+            if (bs && bs->after)
+                append_pseudo_content(pseudo, bs->after->values[NS_CSS_CONTENT], n);
             if (pseudo->len > 0) {
                 label = g_string_free(pseudo, FALSE);
             } else {
@@ -2705,26 +2708,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             ctx->text_transform = kw;
     }
 
-    if (s && s->before && s->before->values[NS_CSS_CONTENT]) {
-        const ns_css_value *cv = s->before->values[NS_CSS_CONTENT];
-        if (cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword) {
-            char *gen = resolve_pseudo_content(cv->u.keyword, n);
-            if (gen) g_string_append(ctx->out, gen);
-            g_free(gen);
-        }
-    }
+    if (s && s->before && s->before->values[NS_CSS_CONTENT])
+        append_pseudo_content(ctx->out, s->before->values[NS_CSS_CONTENT], n);
 
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         collect_walk(c, ctx, depth + 1);
 
-    if (s && s->after && s->after->values[NS_CSS_CONTENT]) {
-        const ns_css_value *cv = s->after->values[NS_CSS_CONTENT];
-        if (cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword) {
-            char *gen = resolve_pseudo_content(cv->u.keyword, n);
-            if (gen) g_string_append(ctx->out, gen);
-            g_free(gen);
-        }
-    }
+    if (s && s->after && s->after->values[NS_CSS_CONTENT])
+        append_pseudo_content(ctx->out, s->after->values[NS_CSS_CONTENT], n);
 
     ctx->text_transform = prev_text_transform;
 
