@@ -119,6 +119,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_FONT_KERNING]         = "font-kerning",
     [NS_CSS_FONT_VARIANT_LIGATURES] = "font-variant-ligatures",
     [NS_CSS_FONT_FEATURE_SETTINGS] = "font-feature-settings",
+    [NS_CSS_FONT_VARIATION_SETTINGS] = "font-variation-settings",
     [NS_CSS_FONT_FAMILY]          = "font-family",
     [NS_CSS_TEXT_ALIGN]           = "text-align",
     [NS_CSS_MARGIN_TOP]           = "margin-top",
@@ -273,6 +274,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_FONT_KERNING:
     case NS_CSS_FONT_VARIANT_LIGATURES:
     case NS_CSS_FONT_FEATURE_SETTINGS:
+    case NS_CSS_FONT_VARIATION_SETTINGS:
     case NS_CSS_FONT_FAMILY:
     case NS_CSS_FONT_VARIANT:
     case NS_CSS_LINE_HEIGHT:
@@ -4210,6 +4212,7 @@ static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
 static gboolean is_font_stretch_keyword(const char *s);
 static gboolean is_font_ligatures_value(const char *s);
 static gboolean is_font_feature_settings_value(const char *s);
+static gboolean is_font_variation_settings_value(const char *s);
 
 static gboolean
 value_has_top_level_comma(const char *t)
@@ -4753,6 +4756,18 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_FONT_VARIATION_SETTINGS: {
+        char *kw = ascii_lower(t, strlen(t));
+        if (strcmp(kw, "normal") == 0 || is_font_variation_settings_value(t)) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = strcmp(kw, "normal") == 0 ? kw : g_strdup(t);
+            if (v->u.keyword != kw) g_free(kw);
+        } else {
+            g_free(kw);
+        }
+        break;
+    }
     case NS_CSS_TAB_SIZE: {
         double len; ns_css_unit u;
         if (parse_length(t, &len, &u) && len >= 0) {
@@ -5259,6 +5274,38 @@ is_font_feature_settings_value(const char *s)
         char tag[5];
         if (!font_feature_read_tag(&p, tag)) return FALSE;
         if (!font_feature_read_optional_value(&p)) return FALSE;
+        if (*p == ',') {
+            p = font_feature_skip_ws(p + 1);
+            if (!*p) return FALSE;
+            continue;
+        }
+        return *p == '\0';
+    }
+    return FALSE;
+}
+
+static gboolean
+font_variation_read_value(const char **pp)
+{
+    const char *p = font_feature_skip_ws(*pp);
+    if (!*p || *p == ',') return FALSE;
+    char *endp = NULL;
+    double v = g_ascii_strtod(p, &endp);
+    if (!endp || endp == p || !isfinite(v)) return FALSE;
+    *pp = font_feature_skip_ws(endp);
+    return TRUE;
+}
+
+static gboolean
+is_font_variation_settings_value(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    const char *p = font_feature_skip_ws(s);
+    if (!*p) return FALSE;
+    while (*p) {
+        char tag[5];
+        if (!font_feature_read_tag(&p, tag)) return FALSE;
+        if (!font_variation_read_value(&p)) return FALSE;
         if (*p == ',') {
             p = font_feature_skip_ws(p + 1);
             if (!*p) return FALSE;
@@ -6283,6 +6330,7 @@ parse_declaration_block(const char **pp, const char *end,
                     NS_CSS_FONT_KERNING,
                     NS_CSS_FONT_VARIANT_LIGATURES,
                     NS_CSS_FONT_FEATURE_SETTINGS,
+                    NS_CSS_FONT_VARIATION_SETTINGS,
                     NS_CSS_FONT_SIZE,
                     NS_CSS_LINE_HEIGHT,
                     NS_CSS_FONT_FAMILY,
@@ -6407,6 +6455,26 @@ parse_declaration_block(const char **pp, const char *end,
                 }
             }
             if (family_buf) {
+                static const struct {
+                    ns_css_prop prop;
+                    const char *value;
+                } reset_props[] = {
+                    { NS_CSS_FONT_KERNING, "auto" },
+                    { NS_CSS_FONT_VARIANT_LIGATURES, "normal" },
+                    { NS_CSS_FONT_FEATURE_SETTINGS, "normal" },
+                    { NS_CSS_FONT_VARIATION_SETTINGS, "normal" },
+                };
+                for (gsize j = 0; j < G_N_ELEMENTS(reset_props); j++) {
+                    ns_css_value *rv = g_new0(ns_css_value, 1);
+                    rv->kind = NS_CSS_V_KEYWORD;
+                    rv->u.keyword = g_strdup(reset_props[j].value);
+                    ns_css_decl rd = {
+                        .prop = reset_props[j].prop,
+                        .value = rv,
+                        .important = important
+                    };
+                    g_array_append_val(decls_out, rd);
+                }
                 ns_css_value *fv = g_new0(ns_css_value, 1);
                 fv->kind = NS_CSS_V_KEYWORD;
                 fv->u.keyword = family_buf;

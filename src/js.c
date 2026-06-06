@@ -8157,6 +8157,7 @@ ns_computed_initial_value(const char *name)
     if (strcmp(name, "font-kerning") == 0) return "auto";
     if (strcmp(name, "font-variant-ligatures") == 0) return "normal";
     if (strcmp(name, "font-feature-settings") == 0) return "normal";
+    if (strcmp(name, "font-variation-settings") == 0) return "normal";
     return NULL;
 }
 

@@ -138,7 +138,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning`, ligature controls, and raw `font-feature-settings` map to OpenType features |
+| `color`, `font-family`/`size`/`weight`/`style`/`stretch`/`kerning`/`variant`, `line-height` | ✅ | Pango-backed; inline font/style ranges participate in width and line-height measurement; `font-stretch` keywords and percentages map to Pango's stretch buckets; `font-kerning`, ligature controls, raw `font-feature-settings`, and `font-variation-settings` map to OpenType features |
 | `text-align` (`left`/`right`/`center`/`justify`/`start`/`end`) | ✅ | |
 | `text-decoration` (line/style/color), `text-shadow` | ✅ | |
 | `text-transform` (uppercase/lowercase/capitalize) | ✅ | |
@@ -146,7 +146,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | `letter-spacing` / `word-spacing` / `tab-size` | ✅ | |
 | `white-space` (`normal`/`nowrap`/`pre`/`pre-wrap`/`pre-line`/`break-spaces`) | ✅ | |
 | `word-break` / `overflow-wrap` / `text-wrap`(`-mode`) / `hyphens` | ✅ | wrapping keywords mapped; `hyphens:auto` enables Pango inserted hyphens using the element language, while `manual`/`none` keep automatic insertion disabled |
-| `font-variant: small-caps`, `font-variant-ligatures`, `font-feature-settings` | ✅ | common/discretionary/historical/contextual ligature keywords and quoted four-character feature tags map to Pango OpenType feature tags |
+| `font-variant: small-caps`, `font-variant-ligatures`, `font-feature-settings`, `font-variation-settings` | ✅ | common/discretionary/historical/contextual ligature keywords, quoted four-character feature tags, and variable-font axes map to Pango OpenType settings |
 | `direction` / `unicode-bidi`, `:dir()` | 🟡 | base direction drives Pango + `text-align:start/end`; full bidi override partial |
 | `writing-mode` (vertical-rl/lr, sideways) | ❌ | text always lays out horizontally |
 | Ruby (`display:ruby`) | 🟡 | parsed; no ruby positioning |

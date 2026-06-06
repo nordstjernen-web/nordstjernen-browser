@@ -47,6 +47,7 @@ void ns_paint_apply_font_features(PangoAttrList *attrs, const ns_style *style,
 PangoAttribute *ns_paint_font_features_attr_from_values(int kerning,
                                                         const char *ligatures,
                                                         const char *settings);
+PangoAttribute *ns_paint_font_variations_attr_from_values(const char *settings);
 
 PangoWrapMode ns_paint_wrap_mode_for(const ns_style *style);
 

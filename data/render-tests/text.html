@@ -10,6 +10,7 @@ pre{background:#eee;padding:8px}
 .kern{font:42px serif}.kern .off{font-kerning:none}.kern .on{font-kerning:normal}
 .liga{font:34px serif}.liga .off{font-variant-ligatures:none}.liga .on{font-variant-ligatures:common-ligatures contextual}
 .feat{font:30px serif}.feat .off{font-feature-settings:"liga" 0,"kern" 0}.feat .on{font-feature-settings:"liga" 1,"kern" 1}
+.var{font:30px serif}.var .light{font-variation-settings:"wght" 300}.var .heavy{font-variation-settings:"wght" 900}
 .of{width:130px;height:34px;overflow:hidden auto;border:1px solid #c99}
 </style>
 <div class=e>This is a very long line that should be ellipsized</div>
@@ -23,4 +24,5 @@ pre{background:#eee;padding:8px}
 <div class=kern><span class=off>AVAV</span> <span class=on>AVAV</span></div>
 <div class=liga><span class=off>office ffi</span> <span class=on>office ffi</span></div>
 <div class=feat><span class=off>office AVAV</span> <span class=on>office AVAV</span></div>
+<div class=var><span class=light>Variable text</span> <span class=heavy>Variable text</span></div>
 <div class=of id=overflow-pair>long horizontal run should be clipped while vertical overflow can scroll</div>

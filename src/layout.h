@@ -59,6 +59,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_FONT_WEIGHT,
     NS_INLINE_FONT_STRETCH,
     NS_INLINE_FONT_FEATURES,
+    NS_INLINE_FONT_VARIATIONS,
     NS_INLINE_COLOR,
     NS_INLINE_FONT_FAMILY,
     NS_INLINE_BG_COLOR,
@@ -79,6 +80,7 @@ typedef struct ns_inline_attr {
     int font_kerning;
     const char *font_ligatures;
     const char *font_features;
+    const char *font_variations;
     double box_w, box_h;
     gboolean native_chrome;
     guint8 r, g, b, a;
