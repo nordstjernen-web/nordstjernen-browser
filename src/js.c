@@ -29252,6 +29252,16 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url)
     js->ready_state = 0;
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     ns_js_install_document(js, doc, base_url);
+    {
+        const char *early = g_getenv("NS_EARLY_JS_FILE");
+        char *early_src = NULL;
+        if (early && *early &&
+            g_file_get_contents(early, &early_src, NULL, NULL)) {
+            char *r = ns_js_eval_source(js, early_src, "early-inject");
+            g_free(r);
+            g_free(early_src);
+        }
+    }
     ns_js_schedule_static_iframes(js, doc);
     gint64 t_install = profile ? g_get_monotonic_time() : 0;
     ns_js_prefetch_external_scripts(js, doc,
