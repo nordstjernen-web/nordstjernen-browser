@@ -875,13 +875,18 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
         } else {
             if (n > 64) n = 64;
             double dashes[64];
+            double dash_sum = 0;
             for (uint32_t i = 0; i < n; i++) {
                 JSValue e = JS_GetPropertyUint32(ctx, v, i);
                 double d = 0; JS_ToFloat64(ctx, &d, e); JS_FreeValue(ctx, e);
                 if (d < 0) d = 0;
                 dashes[i] = d;
+                dash_sum += d;
             }
-            cairo_set_dash(st->cr, dashes, (int)n, dash_offset);
+            if (dash_sum > 0)
+                cairo_set_dash(st->cr, dashes, (int)n, dash_offset);
+            else
+                cairo_set_dash(st->cr, NULL, 0, 0);
         }
     } else {
         cairo_set_dash(st->cr, NULL, 0, 0);

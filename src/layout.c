@@ -7205,7 +7205,7 @@ layout_grid_areas(ns_box *box, double cw,
         }
     }
 
-    double col_sizes[NS_CSS_TRACKS_MAX];
+    double col_sizes[NS_CSS_TRACKS_MAX] = {0};
     resolve_track_sizes(&cols_buf, avail, any_auto_content ? col_content : NULL,
                         col_sizes);
 
@@ -7334,7 +7334,7 @@ layout_grid(ns_box *box, double cw,
     const ns_css_tracks *cols = &cols_buf;
     int n_cols = cols->n > 0 ? cols->n : 1;
 
-    double col_sizes[NS_CSS_TRACKS_MAX];
+    double col_sizes[NS_CSS_TRACKS_MAX] = {0};
     double avail = cw - (n_cols > 1 ? col_gap * (n_cols - 1) : 0);
     if (avail < 0) avail = 0;
 

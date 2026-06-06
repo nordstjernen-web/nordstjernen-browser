@@ -39,18 +39,21 @@ typedef struct ns_tab_load_delivery {
     ns_tab_load_ready_cb cb;
     ns_tab_load_result *result;
     gpointer user_data;
+    GDestroyNotify user_data_destroy;
 } ns_tab_load_delivery;
 
 typedef struct ns_tab_image_delivery {
     ns_tab_image_ready_cb cb;
     ns_tab_image_result *result;
     gpointer user_data;
+    GDestroyNotify user_data_destroy;
 } ns_tab_image_delivery;
 
 typedef struct ns_tab_css_delivery {
     ns_tab_css_ready_cb cb;
     ns_tab_css_result *result;
     gpointer user_data;
+    GDestroyNotify user_data_destroy;
 } ns_tab_css_delivery;
 
 static void
@@ -99,8 +102,11 @@ ns_tab_deliver_load(gpointer data)
     ns_tab_load_delivery *d = data;
     if (d->cb)
         d->cb(d->result, d->user_data);
-    else
+    else {
         ns_tab_load_result_free(d->result);
+        if (d->user_data_destroy && d->user_data)
+            d->user_data_destroy(d->user_data);
+    }
     g_free(d);
     return G_SOURCE_REMOVE;
 }
@@ -111,8 +117,11 @@ ns_tab_deliver_image(gpointer data)
     ns_tab_image_delivery *d = data;
     if (d->cb)
         d->cb(d->result, d->user_data);
-    else
+    else {
         ns_tab_image_result_free(d->result);
+        if (d->user_data_destroy && d->user_data)
+            d->user_data_destroy(d->user_data);
+    }
     g_free(d);
     return G_SOURCE_REMOVE;
 }
@@ -123,8 +132,11 @@ ns_tab_deliver_css(gpointer data)
     ns_tab_css_delivery *d = data;
     if (d->cb)
         d->cb(d->result, d->user_data);
-    else
+    else {
         ns_tab_css_result_free(d->result);
+        if (d->user_data_destroy && d->user_data)
+            d->user_data_destroy(d->user_data);
+    }
     g_free(d);
     return G_SOURCE_REMOVE;
 }
@@ -151,7 +163,9 @@ ns_tab_worker_process_load(ns_tab_job *job)
     delivery->cb = (ns_tab_load_ready_cb)job->cb;
     delivery->result = result;
     delivery->user_data = job->user_data;
+    delivery->user_data_destroy = job->user_data_destroy;
     job->user_data = NULL;
+    job->user_data_destroy = NULL;
     g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
                                ns_tab_deliver_load, delivery, NULL);
 }
@@ -197,7 +211,9 @@ ns_tab_worker_process_image(ns_tab_job *job)
     delivery->cb = (ns_tab_image_ready_cb)job->cb;
     delivery->result = result;
     delivery->user_data = job->user_data;
+    delivery->user_data_destroy = job->user_data_destroy;
     job->user_data = NULL;
+    job->user_data_destroy = NULL;
     g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
                                ns_tab_deliver_image, delivery, NULL);
 }
@@ -225,7 +241,9 @@ ns_tab_worker_process_css(ns_tab_job *job)
     delivery->cb = (ns_tab_css_ready_cb)job->cb;
     delivery->result = result;
     delivery->user_data = job->user_data;
+    delivery->user_data_destroy = job->user_data_destroy;
     job->user_data = NULL;
+    job->user_data_destroy = NULL;
     g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
                                ns_tab_deliver_css, delivery, NULL);
 }

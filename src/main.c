@@ -5722,7 +5722,7 @@ on_toplevel_close_request(GtkWindow *toplevel, gpointer user_data)
     for (guint i = 0; i < tabs->len; i++) {
         ns_window *w = g_ptr_array_index(tabs, i);
         if (w && w->js && ns_js_in_pump(w->js)) {
-            g_idle_add(ns_toplevel_close_retry, g_object_ref(toplevel));
+            g_timeout_add(50, ns_toplevel_close_retry, g_object_ref(toplevel));
             return TRUE;
         }
     }
