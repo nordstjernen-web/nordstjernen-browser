@@ -419,6 +419,11 @@ ns_window_js_window_action(const char *action, gpointer user_data)
 {
     ns_window *w = user_data;
     if (!w || !w->window || !action) return;
+    if (g_strcmp0(action, "focus") == 0) {
+        if (GTK_IS_WINDOW(w->window))
+            gtk_window_present(GTK_WINDOW(w->window));
+        return;
+    }
     if (g_strcmp0(action, "print") != 0 && g_strcmp0(action, "stop") != 0)
         return;
     if (g_action_group_has_action(G_ACTION_GROUP(w->window), action))
