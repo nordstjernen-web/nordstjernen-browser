@@ -149,8 +149,11 @@ ns_profile_line_is_frame(const char *line, guint *out_index)
     const char *p = line + 1;
     guint idx = 0;
     if (!g_ascii_isdigit(*p)) return FALSE;
+    int digits = 0;
     while (g_ascii_isdigit(*p)) {
-        idx = idx * 10 + (guint)(*p - '0');
+        if (digits < 9)
+            idx = idx * 10 + (guint)(*p - '0');
+        digits++;
         p++;
     }
     if (*p != ' ') return FALSE;

@@ -797,8 +797,10 @@ ns_wasm_table_grow(JSContext *ctx, JSValueConst this_val, int argc,
     }
     if (fill_externref) {
         for (uint32_t i = 0; i < delta; i++) {
-            if (!ns_wamr_table_set_ref(wi->inst, t->name, old_size + i, ref))
+            if (!ns_wamr_table_set_ref(wi->inst, t->name, old_size + i, ref)) {
+                ns_wamr_externref_reclaim(wi->inst);
                 return JS_ThrowRangeError(ctx, "table index out of bounds");
+            }
         }
     }
     return JS_NewUint32(ctx, old_size);

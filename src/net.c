@@ -532,10 +532,10 @@ ns_net_referer_for(const char *url, const char *top_url,
     if (policy == NS_REFERER_SAME_ORIGIN && !same_origin)
         return NULL;
     if (policy == NS_REFERER_UNSAFE_URL || same_origin) {
-        char *out = g_strdup(top_url);
-        char *hash = strchr(out, '#');
-        if (hash) *hash = '\0';
-        return out;
+        g_autoptr(ns_url_parts) p = ns_url_parts_new(top_url);
+        if (!p || !p->origin || !*p->origin) return NULL;
+        return g_strconcat(p->origin, p->pathname ? p->pathname : "",
+                           p->search ? p->search : "", NULL);
     }
     char *origin = ns_url_origin_from(top_url);
     if (!origin) return NULL;

@@ -246,14 +246,26 @@ ns_media_broker_start(void)
 }
 
 static gboolean
+write_all(int fd, const void *buf, size_t n)
+{
+    const guint8 *p = buf;
+    while (n) {
+        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
+        if (w > 0) { p += w; n -= (size_t)w; continue; }
+        if (w < 0 && errno == EINTR) continue;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
 ns_media_broker_send(const char *url)
 {
     if (ns_media_broker_fd < 0) return FALSE;
     guint32 len = (guint32)strlen(url);
     if (len == 0) return FALSE;
-    return send(ns_media_broker_fd, &len, sizeof len, MSG_NOSIGNAL)
-               == (gssize)sizeof len &&
-           send(ns_media_broker_fd, url, len, MSG_NOSIGNAL) == (gssize)len;
+    return write_all(ns_media_broker_fd, &len, sizeof len) &&
+           write_all(ns_media_broker_fd, url, len);
 }
 #else
 void
