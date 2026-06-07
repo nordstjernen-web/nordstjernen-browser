@@ -174,6 +174,7 @@ style_is_block(const ns_style *s)
     return keyword_is(v, "block")        || keyword_is(v, "flex") ||
            keyword_is(v, "grid")         || keyword_is(v, "list-item") ||
            keyword_is(v, "flow-root")    || keyword_is(v, "inline-block") ||
+           keyword_is(v, "inline-flex")  || keyword_is(v, "inline-grid") ||
            keyword_is(v, "table")        || keyword_is(v, "inline-table") ||
            keyword_is(v, "table-caption") || keyword_is(v, "contents") ||
            keyword_is(v, "-webkit-box");
