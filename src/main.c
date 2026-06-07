@@ -7388,6 +7388,8 @@ ns_install_css(void)
     static const char css[] =
         "headerbar.nd-titlebar { min-height: 24px; padding: 0 2px; }\n"
         "headerbar.nd-titlebar button { min-height: 20px; min-width: 20px; padding: 0 4px; }\n"
+        "headerbar.nd-titlebar button.flat { color: inherit; }\n"
+        "headerbar.nd-titlebar button.flat image { color: inherit; }\n"
         "headerbar.nd-titlebar windowcontrols button { min-height: 20px; min-width: 20px; }\n"
         "button.nd-tab { min-height: 18px; padding: 0 6px; }\n"
         "button.nd-tab-close { min-height: 16px; min-width: 16px; padding: 0; }\n"
