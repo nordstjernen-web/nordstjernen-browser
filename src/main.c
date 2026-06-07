@@ -4549,64 +4549,112 @@ ns_window_load_url(ns_window *w, const char *raw_url, ns_load_source src)
 }
 
 static void
+ns_rounded_rect(cairo_t *cr, double x, double y, double w, double h, double r)
+{
+    cairo_new_sub_path(cr);
+    cairo_arc(cr, x + w - r, y + r, r, -G_PI / 2, 0);
+    cairo_arc(cr, x + w - r, y + h - r, r, 0, G_PI / 2);
+    cairo_arc(cr, x + r, y + h - r, r, G_PI / 2, G_PI);
+    cairo_arc(cr, x + r, y + r, r, G_PI, 3 * G_PI / 2);
+    cairo_close_path(cr);
+}
+
+static void
+ns_hourglass_glass_path(cairo_t *cr, double s)
+{
+    double l = s * 0.22, r = s * 0.78, t = s * 0.19, b = s * 0.81;
+    double cx = s * 0.5, mid = s * 0.5, neck = s * 0.045;
+    cairo_new_sub_path(cr);
+    cairo_move_to(cr, l, t);
+    cairo_curve_to(cr, l, mid - s * 0.11, cx - neck, mid - s * 0.07,
+                   cx - neck, mid);
+    cairo_curve_to(cr, cx - neck, mid + s * 0.07, l, mid + s * 0.11, l, b);
+    cairo_line_to(cr, r, b);
+    cairo_curve_to(cr, r, mid + s * 0.11, cx + neck, mid + s * 0.07,
+                   cx + neck, mid);
+    cairo_curve_to(cr, cx + neck, mid - s * 0.07, r, mid - s * 0.11, r, t);
+    cairo_close_path(cr);
+}
+
+static void
+ns_hourglass_cap(cairo_t *cr, double s, double y)
+{
+    cairo_pattern_t *wood = cairo_pattern_create_linear(0, y, 0, y + s * 0.10);
+    cairo_pattern_add_color_stop_rgb(wood, 0.0, 0.58, 0.37, 0.20);
+    cairo_pattern_add_color_stop_rgb(wood, 0.5, 0.45, 0.27, 0.13);
+    cairo_pattern_add_color_stop_rgb(wood, 1.0, 0.32, 0.18, 0.08);
+    ns_rounded_rect(cr, s * 0.14, y, s * 0.72, s * 0.10, s * 0.045);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9);
+    cairo_set_line_width(cr, s * 0.06);
+    cairo_stroke_preserve(cr);
+    cairo_set_source(cr, wood);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgba(cr, 0.10, 0.06, 0.03, 0.55);
+    cairo_set_line_width(cr, s * 0.02);
+    cairo_stroke(cr);
+    cairo_pattern_destroy(wood);
+}
+
+static void
 ns_draw_hourglass(cairo_t *cr, double s)
 {
-    double left = s * 0.18, right = s * 0.82, cx = s * 0.5;
-    double top = s * 0.18, bot = s * 0.82, mid = s * 0.5;
-    double cap = s * 0.07;
+    double cx = s * 0.5, mid = s * 0.5, t = s * 0.19, b = s * 0.81;
 
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-
-    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.92);
-    cairo_move_to(cr, left, top);
-    cairo_line_to(cr, right, top);
-    cairo_line_to(cr, cx, mid);
-    cairo_close_path(cr);
-    cairo_move_to(cr, left, bot);
-    cairo_line_to(cr, right, bot);
-    cairo_line_to(cr, cx, mid);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-
-    cairo_set_source_rgb(cr, 0.86, 0.62, 0.18);
-    double tw = (right - left) * 0.78, tl = cx - tw * 0.5;
-    cairo_move_to(cr, tl, top + (bot - top) * 0.10);
-    cairo_line_to(cr, tl + tw, top + (bot - top) * 0.10);
-    cairo_line_to(cr, cx, mid - s * 0.01);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-
-    double bw = (right - left) * 0.40, bl = cx - bw * 0.5;
-    cairo_move_to(cr, bl, bot - (bot - top) * 0.06);
-    cairo_line_to(cr, bl + bw, bot - (bot - top) * 0.06);
-    cairo_line_to(cr, cx, mid + (bot - mid) * 0.55);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-
-    cairo_set_line_width(cr, s * 0.025);
-    cairo_move_to(cr, cx, mid);
-    cairo_line_to(cr, cx, bot - (bot - top) * 0.06);
-    cairo_stroke(cr);
-
-    cairo_set_source_rgb(cr, 0.13, 0.13, 0.16);
-    cairo_set_line_width(cr, s * 0.07);
-    cairo_move_to(cr, left, top);
-    cairo_line_to(cr, right, top);
-    cairo_line_to(cr, cx, mid);
-    cairo_close_path(cr);
-    cairo_move_to(cr, left, bot);
-    cairo_line_to(cr, right, bot);
-    cairo_line_to(cr, cx, mid);
-    cairo_close_path(cr);
-    cairo_stroke(cr);
-
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-    cairo_set_line_width(cr, cap * 2.0);
-    cairo_move_to(cr, left - cap, top);
-    cairo_line_to(cr, right + cap, top);
-    cairo_move_to(cr, left - cap, bot);
-    cairo_line_to(cr, right + cap, bot);
+
+    ns_hourglass_glass_path(cr, s);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9);
+    cairo_set_line_width(cr, s * 0.13);
+    cairo_stroke_preserve(cr);
+    cairo_set_source_rgba(cr, 0.88, 0.94, 1.0, 0.42);
+    cairo_fill(cr);
+
+    cairo_save(cr);
+    ns_hourglass_glass_path(cr, s);
+    cairo_clip(cr);
+
+    cairo_pattern_t *sand = cairo_pattern_create_linear(0, t, 0, b);
+    cairo_pattern_add_color_stop_rgb(sand, 0.0, 0.98, 0.80, 0.38);
+    cairo_pattern_add_color_stop_rgb(sand, 1.0, 0.85, 0.56, 0.14);
+    cairo_set_source(cr, sand);
+
+    cairo_move_to(cr, 0, s * 0.31);
+    cairo_curve_to(cr, s * 0.35, s * 0.37, s * 0.65, s * 0.37, s, s * 0.31);
+    cairo_line_to(cr, s, mid);
+    cairo_line_to(cr, 0, mid);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    cairo_move_to(cr, 0, b);
+    cairo_line_to(cr, 0, s * 0.75);
+    cairo_curve_to(cr, s * 0.30, s * 0.73, s * 0.42, s * 0.63, cx, s * 0.61);
+    cairo_curve_to(cr, s * 0.58, s * 0.63, s * 0.70, s * 0.73, s, s * 0.75);
+    cairo_line_to(cr, s, b);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+
+    cairo_set_line_width(cr, s * 0.035);
+    cairo_move_to(cr, cx, mid);
+    cairo_line_to(cr, cx, s * 0.78);
     cairo_stroke(cr);
+    cairo_pattern_destroy(sand);
+    cairo_restore(cr);
+
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.55);
+    cairo_set_line_width(cr, s * 0.035);
+    cairo_move_to(cr, s * 0.28, s * 0.25);
+    cairo_curve_to(cr, s * 0.28, s * 0.34, s * 0.38, s * 0.40, s * 0.44,
+                   s * 0.45);
+    cairo_stroke(cr);
+
+    ns_hourglass_glass_path(cr, s);
+    cairo_set_source_rgb(cr, 0.16, 0.18, 0.22);
+    cairo_set_line_width(cr, s * 0.04);
+    cairo_stroke(cr);
+
+    ns_hourglass_cap(cr, s, s * 0.09);
+    ns_hourglass_cap(cr, s, s * 0.81);
 }
 
 static GdkCursor *
@@ -4615,7 +4663,7 @@ ns_busy_cursor(void)
     static GdkCursor *cursor = NULL;
     if (cursor) return cursor;
 
-    const int size = 28;
+    const int size = 32;
     cairo_surface_t *surf =
         cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
     cairo_t *cr = cairo_create(surf);
