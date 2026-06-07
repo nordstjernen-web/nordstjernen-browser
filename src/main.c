@@ -4876,8 +4876,28 @@ ns_install_suggest_css(void)
 static void
 ns_window_hide_suggestions(ns_window *w)
 {
+    if (!w) return;
+    g_clear_handle_id(&w->suggest_hide_source, g_source_remove);
     if (w->suggest_popover)
         gtk_popover_popdown(GTK_POPOVER(w->suggest_popover));
+}
+
+static gboolean
+ns_window_hide_suggestions_cb(gpointer data)
+{
+    ns_window *w = data;
+    if (!w) return G_SOURCE_REMOVE;
+    w->suggest_hide_source = 0;
+    ns_window_hide_suggestions(w);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_window_hide_suggestions_later(ns_window *w)
+{
+    if (!w || w->suggest_hide_source) return;
+    w->suggest_hide_source =
+        g_timeout_add(250, ns_window_hide_suggestions_cb, w);
 }
 
 static void
@@ -4885,6 +4905,7 @@ on_url_focus_enter(GtkEventControllerFocus *ctrl, gpointer user_data)
 {
     (void)ctrl;
     ns_window *w = user_data;
+    g_clear_handle_id(&w->suggest_hide_source, g_source_remove);
     w->url_focused = TRUE;
 }
 
@@ -4894,7 +4915,7 @@ on_url_focus_leave(GtkEventControllerFocus *ctrl, gpointer user_data)
     (void)ctrl;
     ns_window *w = user_data;
     w->url_focused = FALSE;
-    ns_window_hide_suggestions(w);
+    ns_window_hide_suggestions_later(w);
 }
 
 static void
@@ -4924,6 +4945,23 @@ on_suggest_row_activated(GtkListView *list, guint position, gpointer user_data)
         ns_suggest_navigate(w, u);
         g_free(u);
     }
+}
+
+static void
+on_suggest_item_pressed(GtkGestureClick *gesture, int n_press,
+                        double x, double y, gpointer user_data)
+{
+    (void)n_press; (void)x; (void)y;
+    ns_window *w = user_data;
+    GtkWidget *box =
+        gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    GtkListItem *item = box ? g_object_get_data(G_OBJECT(box), "nd-item") : NULL;
+    GObject *obj = item ? gtk_list_item_get_item(item) : NULL;
+    if (!NS_IS_SUGGEST(obj)) return;
+    NsSuggest *s = NS_SUGGEST(obj);
+    char *u = g_strdup(s->url);
+    ns_suggest_navigate(w, u);
+    g_free(u);
 }
 
 static void
@@ -4991,10 +5029,16 @@ on_url_entry_changed(GtkEditable *editable, gpointer user_data)
 static void
 suggest_item_setup(GtkSignalListItemFactory *factory, GObject *obj, gpointer u)
 {
-    (void)factory; (void)u;
+    (void)factory;
+    ns_window *w = u;
     GtkListItem *item = GTK_LIST_ITEM(obj);
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
     gtk_widget_add_css_class(box, "nd-suggest-row");
+    g_object_set_data(G_OBJECT(box), "nd-item", item);
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
+    g_signal_connect(click, "pressed", G_CALLBACK(on_suggest_item_pressed), w);
+    gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(click));
     GtkWidget *title = gtk_label_new(NULL);
     gtk_widget_add_css_class(title, "nd-suggest-title");
     gtk_label_set_xalign(GTK_LABEL(title), 0.0);
@@ -5044,7 +5088,7 @@ ns_window_setup_url_suggestions(ns_window *w)
     gtk_single_selection_set_can_unselect(sel, TRUE);
 
     GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
-    g_signal_connect(factory, "setup", G_CALLBACK(suggest_item_setup), NULL);
+    g_signal_connect(factory, "setup", G_CALLBACK(suggest_item_setup), w);
     g_signal_connect(factory, "bind",  G_CALLBACK(suggest_item_bind),  NULL);
 
     w->suggest_list = gtk_list_view_new(GTK_SELECTION_MODEL(sel), factory);
@@ -5535,6 +5579,7 @@ on_window_destroy(GtkWidget *widget, gpointer user_data)
     g_clear_handle_id(&w->caret_blink_source, g_source_remove);
     g_clear_handle_id(&w->refresh_source, g_source_remove);
     g_clear_handle_id(&w->scroll_image_source, g_source_remove);
+    g_clear_handle_id(&w->suggest_hide_source, g_source_remove);
     g_clear_handle_id(&w->logo_anim_source, g_source_remove);
     g_clear_handle_id(&w->stage_done_source, g_source_remove);
     w->logo_image = NULL;

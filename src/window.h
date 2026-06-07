@@ -54,6 +54,7 @@ typedef struct ns_window {
     GListStore   *suggest_model;
     gboolean      suggest_suppress;
     gboolean      url_focused;
+    guint         suggest_hide_source;
     GtkWidget    *back_button;
     GtkWidget    *forward_button;
     GtkWidget    *home_button;
