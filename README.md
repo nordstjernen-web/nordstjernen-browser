@@ -173,6 +173,9 @@ Nordstjernen Source License v1.0 — use, modify and redistribute freely,
 except as a competing browser; each release becomes MIT after ten years.
 See [License.md](License.md). Commercial licenses by agreement.
 
+Nordstjernen Source License is inspired by https://fsl.software/  
+The Functional Source License (FSL) is a Fair Source license that converts to Apache 2.0 or MIT.
+
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
 
 <img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
