@@ -4489,6 +4489,95 @@ inline_measure_nearest_attr(const ns_node *n, const char *name)
     return NULL;
 }
 
+static gboolean
+inline_attr_cacheable_kind(ns_inline_attr_kind k)
+{
+    switch (k) {
+    case NS_INLINE_INPUT_FIELD:
+    case NS_INLINE_INPUT_FIELD_FOCUSED:
+    case NS_INLINE_BUTTON:
+    case NS_INLINE_CHECKBOX:
+    case NS_INLINE_CHECKBOX_CHECKED:
+    case NS_INLINE_RADIO:
+    case NS_INLINE_RADIO_CHECKED:
+    case NS_INLINE_PROGRESS:
+    case NS_INLINE_METER:
+    case NS_INLINE_CARET:
+    case NS_INLINE_SELECTION:
+        return FALSE;
+    default:
+        return TRUE;
+    }
+}
+
+static gboolean
+inline_attr_affects_measure(ns_inline_attr_kind k)
+{
+    switch (k) {
+    case NS_INLINE_BOLD:
+    case NS_INLINE_ITALIC:
+    case NS_INLINE_MONOSPACE:
+    case NS_INLINE_FONT_SIZE:
+    case NS_INLINE_FONT_WEIGHT:
+    case NS_INLINE_FONT_STRETCH:
+    case NS_INLINE_FONT_FEATURES:
+    case NS_INLINE_FONT_VARIATIONS:
+    case NS_INLINE_FONT_FAMILY:
+    case NS_INLINE_SUPERSCRIPT:
+    case NS_INLINE_SUBSCRIPT:
+    case NS_INLINE_SMALL_CAPS:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+inline_box_measure_cacheable(const ns_box *box)
+{
+    if (!box || (box->inline_atomics && box->inline_atomics->len > 0))
+        return FALSE;
+    if (!box->attrs) return TRUE;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (!inline_attr_cacheable_kind(a->kind)) return FALSE;
+    }
+    return TRUE;
+}
+
+static void
+inline_measure_key_append_attrs(GString *out, const ns_box *box)
+{
+    if (!out) return;
+    if (!box || !box->attrs || box->attrs->len == 0) {
+        g_string_append(out, "|A0");
+        return;
+    }
+    guint n_measure = 0;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (inline_attr_affects_measure(a->kind)) n_measure++;
+    }
+    g_string_append_printf(out, "|A%u", n_measure);
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (!inline_attr_affects_measure(a->kind)) continue;
+        g_string_append_printf(out,
+            "|%d:%" G_GSIZE_FORMAT ":%" G_GSIZE_FORMAT
+            ":%.3f:%d:%d:%d:%s:%s:%s:%s",
+            (int)a->kind, a->start, a->len,
+            a->font_size_px, a->font_weight, a->font_stretch,
+            a->font_kerning,
+            a->family ? a->family : "",
+            a->font_ligatures ? a->font_ligatures : "",
+            a->font_features ? a->font_features : "",
+            a->font_variations ? a->font_variations : "");
+    }
+}
+
 static char *
 inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout)
 {
@@ -4523,7 +4612,7 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
         style ? ns_style_keyword(style, NS_CSS_FONT_FEATURE_SETTINGS) : NULL;
     const char *fvar =
         style ? ns_style_keyword(style, NS_CSS_FONT_VARIATION_SETTINGS) : NULL;
-    char *key = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s|%s|%s|%s|%s",
+    char *prefix = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s|%s|%s|%s",
                                 pango_layout_get_width(layout),
                                 (int)pango_layout_get_wrap(layout),
                                 (int)pango_layout_get_ellipsize(layout),
@@ -4536,10 +4625,14 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
                                 fk ? fk : "",
                                 flig ? flig : "",
                                 ffeat ? ffeat : "",
-                                fvar ? fvar : "",
-                                box->text);
+                                fvar ? fvar : "");
+    GString *key = g_string_new(prefix);
+    inline_measure_key_append_attrs(key, box);
+    g_string_append_c(key, '|');
+    g_string_append(key, box->text ? box->text : "");
+    g_free(prefix);
     g_free(fd);
-    return key;
+    return g_string_free(key, FALSE);
 }
 
 static void
@@ -4593,9 +4686,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     pango_layout_set_attributes(layout, i18n);
     pango_attr_list_unref(i18n);
 
-    gboolean cacheable =
-        (!box->inline_atomics || box->inline_atomics->len == 0) &&
-        (!box->attrs || box->attrs->len == 0);
+    gboolean cacheable = inline_box_measure_cacheable(box);
     char *mkey = cacheable
         ? inline_measure_key(box, parent_style, layout) : NULL;
     const ns_inline_measure *cached =
@@ -5435,9 +5526,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         }
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, -1);
-        gboolean cacheable =
-            (!box->inline_atomics || box->inline_atomics->len == 0) &&
-            (!box->attrs || box->attrs->len == 0);
+        gboolean cacheable = inline_box_measure_cacheable(box);
         char *mkey = cacheable
             ? inline_measure_key(box, parent_style, layout) : NULL;
         const double *hit =
@@ -5541,9 +5630,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, 1);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
-        gboolean cacheable =
-            (!box->inline_atomics || box->inline_atomics->len == 0) &&
-            (!box->attrs || box->attrs->len == 0);
+        gboolean cacheable = inline_box_measure_cacheable(box);
         char *mkey = cacheable
             ? inline_measure_key(box, parent_style, layout) : NULL;
         const double *hit =

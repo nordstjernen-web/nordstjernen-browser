@@ -3319,8 +3319,20 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
             }
         }
     }
+    double overscan_y = clip_h * 1.25;
+    if (overscan_y < 900) overscan_y = 900;
+    if (overscan_y > 2400) overscan_y = 2400;
+    double overscan_x = 96;
+    clip_x -= overscan_x;
+    clip_w += overscan_x * 2.0;
+    clip_y -= overscan_y;
+    clip_h += overscan_y * 2.0;
+    double ix0 = floor(clip_x);
+    double iy0 = floor(clip_y);
+    double ix1 = ceil(clip_x + clip_w);
+    double iy1 = ceil(clip_y + clip_h);
     cairo_save(cr);
-    cairo_rectangle(cr, clip_x, clip_y, clip_w, clip_h);
+    cairo_rectangle(cr, ix0, iy0, ix1 - ix0, iy1 - iy0);
     cairo_clip(cr);
     ns_paint_with_selection(cr, w->layout_tree, w->search_query, &w->selection);
     cairo_restore(cr);
@@ -3892,6 +3904,55 @@ ns_window_image_box_near_view(const ns_window *w, const ns_box *box)
            box->y <= bottom + margin;
 }
 
+typedef struct ns_image_priority_ctx {
+    double top;
+    double bottom;
+} ns_image_priority_ctx;
+
+static double
+ns_window_image_box_distance(const ns_image_priority_ctx *ctx,
+                             const ns_box *box)
+{
+    if (!ctx || !box) return G_MAXDOUBLE;
+    if (ns_box_in_fixed_layer(box)) return -1.0;
+    double box_h = box->content_height + box->padding.top + box->padding.bottom +
+                   box->border.top + box->border.bottom;
+    if (box_h < 1) box_h = 1;
+    double by0 = box->y;
+    double by1 = box->y + box_h;
+    if (by1 >= ctx->top && by0 <= ctx->bottom) return 0.0;
+    if (by1 < ctx->top) return ctx->top - by1;
+    return by0 - ctx->bottom;
+}
+
+static gint
+ns_window_image_priority_cmp(gconstpointer a, gconstpointer b,
+                             gpointer user_data)
+{
+    const ns_box *ba = *(const ns_box * const *)a;
+    const ns_box *bb = *(const ns_box * const *)b;
+    const ns_image_priority_ctx *ctx = user_data;
+    double da = ns_window_image_box_distance(ctx, ba);
+    double db = ns_window_image_box_distance(ctx, bb);
+    if (da < db) return -1;
+    if (da > db) return 1;
+    double ya = ba ? ba->y : G_MAXDOUBLE;
+    double yb = bb ? bb->y : G_MAXDOUBLE;
+    if (ya < yb) return -1;
+    if (ya > yb) return 1;
+    return 0;
+}
+
+static void
+ns_window_sort_images_by_view(ns_window *w, GPtrArray *imgs)
+{
+    if (!w || !imgs || imgs->len < 2 || !w->render_vadj) return;
+    double top = gtk_adjustment_get_value(w->render_vadj);
+    double page = ns_window_visible_page_height(w);
+    ns_image_priority_ctx ctx = { top, top + page };
+    g_ptr_array_sort_with_data(imgs, ns_window_image_priority_cmp, &ctx);
+}
+
 static gboolean
 ns_image_inflight(const ns_image *img)
 {
@@ -3919,6 +3980,7 @@ ns_window_kick_image_loads(ns_window *w)
     gint64 now_us = g_get_monotonic_time();
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(w->layout_tree, imgs);
+    ns_window_sort_images_by_view(w, imgs);
     guint inflight = ns_window_near_image_inflight_count(w, imgs);
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
