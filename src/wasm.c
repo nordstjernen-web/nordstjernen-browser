@@ -21,6 +21,7 @@ static JSClassID ns_wasm_module_class_id;
 static JSClassID ns_wasm_instance_class_id;
 static JSClassID ns_wasm_memory_class_id;
 static JSClassID ns_wasm_table_class_id;
+static JSClassID ns_wasm_global_class_id;
 static JSClassID ns_wasm_func_class_id;
 
 typedef struct {
@@ -80,6 +81,12 @@ typedef struct {
 typedef struct {
     JSContext *ctx;
     JSValue instance;
+    char *name;
+} ns_wasm_global;
+
+typedef struct {
+    JSContext *ctx;
+    JSValue instance;
     wasm_function_inst_t func;
 } ns_wasm_func;
 
@@ -89,6 +96,7 @@ typedef struct {
 } ns_wasm_ref;
 
 static GPrivate ns_wasm_thread_env_done = G_PRIVATE_INIT(NULL);
+static GPrivate ns_wasm_instantiating = G_PRIVATE_INIT(NULL);
 
 static void ns_wasm_on_memory_grown(wasm_module_inst_t inst, void *user_data);
 
@@ -816,6 +824,135 @@ static const JSCFunctionListEntry ns_wasm_table_proto_funcs[] = {
 };
 
 static void
+ns_wasm_global_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_wasm_global *g = JS_GetOpaque(val, ns_wasm_global_class_id);
+    if (!g)
+        return;
+    JS_FreeValueRT(rt, g->instance);
+    g_free(g->name);
+    g_free(g);
+}
+
+static void
+ns_wasm_global_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_wasm_global *g = JS_GetOpaque(val, ns_wasm_global_class_id);
+    if (!g)
+        return;
+    JS_MarkValue(rt, g->instance, mark_func);
+}
+
+static const JSClassDef ns_wasm_global_class = {
+    "Global",
+    .finalizer = ns_wasm_global_finalizer,
+    .gc_mark = ns_wasm_global_gc_mark,
+};
+
+static gboolean
+ns_wasm_global_resolve(JSContext *ctx, JSValueConst this_val,
+                       wasm_global_inst_t *out)
+{
+    ns_wasm_global *g = JS_GetOpaque2(ctx, this_val, ns_wasm_global_class_id);
+    if (!g) {
+        JS_ThrowTypeError(ctx, "not a WebAssembly.Global");
+        return FALSE;
+    }
+    ns_wasm_instance *wi = ns_wasm_instance_opaque(g->instance);
+    if (!wi || !wi->inst) {
+        JS_ThrowTypeError(ctx, "wasm instance is gone");
+        return FALSE;
+    }
+    if (!wasm_runtime_get_export_global_inst(wi->inst, g->name, out) ||
+        !out->global_data) {
+        JS_ThrowTypeError(ctx, "wasm global is gone");
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static JSValue
+ns_wasm_global_value_get(JSContext *ctx, JSValueConst this_val)
+{
+    wasm_global_inst_t gi;
+    if (!ns_wasm_global_resolve(ctx, this_val, &gi))
+        return JS_EXCEPTION;
+    switch (gi.kind) {
+    case WASM_I32:
+        return JS_NewInt32(ctx, *(int32_t *)gi.global_data);
+    case WASM_I64:
+        return JS_NewBigInt64(ctx, *(int64_t *)gi.global_data);
+    case WASM_F32:
+        return JS_NewFloat64(ctx, *(float *)gi.global_data);
+    case WASM_F64:
+        return JS_NewFloat64(ctx, *(double *)gi.global_data);
+    default:
+        return JS_ThrowTypeError(ctx, "unsupported wasm global type");
+    }
+}
+
+static JSValue
+ns_wasm_global_value_set(JSContext *ctx, JSValueConst this_val,
+                         JSValueConst val)
+{
+    wasm_global_inst_t gi;
+    if (!ns_wasm_global_resolve(ctx, this_val, &gi))
+        return JS_EXCEPTION;
+    if (!gi.is_mutable)
+        return JS_ThrowTypeError(ctx, "WebAssembly.Global is immutable");
+    switch (gi.kind) {
+    case WASM_I32: {
+        int32_t i = 0;
+        if (JS_ToInt32(ctx, &i, val))
+            return JS_EXCEPTION;
+        *(int32_t *)gi.global_data = i;
+        break;
+    }
+    case WASM_I64: {
+        int64_t i = 0;
+        if (JS_ToBigInt64(ctx, &i, val))
+            return JS_EXCEPTION;
+        *(int64_t *)gi.global_data = i;
+        break;
+    }
+    case WASM_F32: {
+        double d = 0;
+        if (JS_ToFloat64(ctx, &d, val))
+            return JS_EXCEPTION;
+        *(float *)gi.global_data = (float)d;
+        break;
+    }
+    case WASM_F64: {
+        double d = 0;
+        if (JS_ToFloat64(ctx, &d, val))
+            return JS_EXCEPTION;
+        *(double *)gi.global_data = d;
+        break;
+    }
+    default:
+        return JS_ThrowTypeError(ctx, "unsupported wasm global type");
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_wasm_global_value_of(JSContext *ctx, JSValueConst this_val, int argc,
+                        JSValueConst *argv)
+{
+    (void)argc;
+    (void)argv;
+    return ns_wasm_global_value_get(ctx, this_val);
+}
+
+static const JSCFunctionListEntry ns_wasm_global_proto_funcs[] = {
+    JS_CGETSET_DEF("value", ns_wasm_global_value_get,
+                   ns_wasm_global_value_set),
+    JS_CFUNC_DEF("valueOf", 0, ns_wasm_global_value_of),
+    JS_PROP_STRING_DEF("[Symbol.toStringTag]", "WebAssembly.Global",
+                       JS_PROP_CONFIGURABLE),
+};
+
+static void
 ns_wasm_module_finalizer(JSRuntime *rt, JSValue val)
 {
     ns_wasm_module *m = JS_GetOpaque(val, ns_wasm_module_class_id);
@@ -907,6 +1044,8 @@ ns_wasm_native_dispatch(wasm_exec_env_t exec_env, uint64_t *args)
     ns_wasm_binding *desc = wasm_runtime_get_function_attachment(exec_env);
     wasm_module_inst_t inst = wasm_runtime_get_module_inst(exec_env);
     ns_wasm_instance *wi = inst ? wasm_runtime_get_custom_data(inst) : NULL;
+    if (!wi)
+        wi = g_private_get(&ns_wasm_instantiating);
     ns_wasm_binding *b = NULL;
     if (wi && desc && wi->linkage.bindings &&
         desc->index < wi->linkage.bindings->len)
@@ -1305,6 +1444,26 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
             }
             break;
         }
+        case WASM_IMPORT_EXPORT_KIND_GLOBAL: {
+            wasm_global_inst_t gi;
+            if (!wasm_runtime_get_export_global_inst(wi->inst, exp.name, &gi))
+                break;
+            JSValue g_obj = JS_NewObjectClass(ctx, ns_wasm_global_class_id);
+            if (JS_IsException(g_obj)) {
+                JS_FreeValue(ctx, exports);
+                return g_obj;
+            }
+            ns_wasm_global *g = g_new0(ns_wasm_global, 1);
+            g->ctx = ctx;
+            g->instance = JS_DupValue(ctx, instance_obj);
+            g->name = g_strdup(exp.name);
+            JS_SetOpaque(g_obj, g);
+            if (JS_SetPropertyStr(ctx, exports, exp.name, g_obj) < 0) {
+                JS_FreeValue(ctx, exports);
+                return JS_EXCEPTION;
+            }
+            break;
+        }
         default:
             break;
         }
@@ -1387,11 +1546,31 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         return JS_EXCEPTION;
     }
 
+    ns_wasm_instance *wi = g_new0(ns_wasm_instance, 1);
+    wi->ctx = ctx;
+    wi->module_obj = JS_UNDEFINED;
+    wi->exports = JS_UNDEFINED;
+    wi->memory_obj = JS_UNDEFINED;
+    wi->pending_exc = JS_UNDEFINED;
+    wi->linkage = linkage;
+
+    g_private_set(&ns_wasm_instantiating, wi);
     wasm_module_inst_t inst =
         wasm_runtime_instantiate(inst_module, NS_WASM_STACK_SIZE, 0, error_buf,
                                  sizeof(error_buf));
+    g_private_set(&ns_wasm_instantiating, NULL);
     if (!inst) {
-        ns_wasm_linkage_clear(rt, &linkage);
+        JSValue exc = JS_UNDEFINED;
+        if (wi->has_pending) {
+            exc = wi->pending_exc;
+            wi->pending_exc = JS_UNDEFINED;
+            wi->has_pending = FALSE;
+        }
+        ns_wasm_linkage_clear(rt, &wi->linkage);
+        JS_FreeValueRT(rt, wi->pending_exc);
+        g_free(wi);
+        if (!JS_IsUndefined(exc))
+            return JS_Throw(ctx, exc);
         return ns_wasm_throw_named(ctx, "LinkError", error_buf);
     }
 
@@ -1399,7 +1578,9 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
         wasm_runtime_create_exec_env(inst, NS_WASM_STACK_SIZE);
     if (!exec_env) {
         wasm_runtime_deinstantiate(inst);
-        ns_wasm_linkage_clear(rt, &linkage);
+        ns_wasm_linkage_clear(rt, &wi->linkage);
+        JS_FreeValueRT(rt, wi->pending_exc);
+        g_free(wi);
         return JS_ThrowInternalError(ctx, "wasm exec env creation failed");
     }
 
@@ -1407,19 +1588,15 @@ ns_wasm_instance_create(JSContext *ctx, JSValueConst module_obj,
     if (JS_IsException(obj)) {
         wasm_runtime_destroy_exec_env(exec_env);
         wasm_runtime_deinstantiate(inst);
-        ns_wasm_linkage_clear(rt, &linkage);
+        ns_wasm_linkage_clear(rt, &wi->linkage);
+        JS_FreeValueRT(rt, wi->pending_exc);
+        g_free(wi);
         return obj;
     }
 
-    ns_wasm_instance *wi = g_new0(ns_wasm_instance, 1);
-    wi->ctx = ctx;
     wi->inst = inst;
     wi->exec_env = exec_env;
     wi->module_obj = JS_DupValue(ctx, module_obj);
-    wi->exports = JS_UNDEFINED;
-    wi->memory_obj = JS_UNDEFINED;
-    wi->pending_exc = JS_UNDEFINED;
-    wi->linkage = linkage;
     JS_SetOpaque(obj, wi);
     wasm_runtime_set_custom_data(inst, wi);
 
@@ -1596,6 +1773,77 @@ ns_wasm_validate(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_NewBool(ctx, ok);
 }
 
+static const char *
+ns_wasm_kind_name(uint8_t kind)
+{
+    switch (kind) {
+    case WASM_IMPORT_EXPORT_KIND_FUNC:
+        return "function";
+    case WASM_IMPORT_EXPORT_KIND_TABLE:
+        return "table";
+    case WASM_IMPORT_EXPORT_KIND_MEMORY:
+        return "memory";
+    case WASM_IMPORT_EXPORT_KIND_GLOBAL:
+        return "global";
+    default:
+        return "";
+    }
+}
+
+static JSValue
+ns_wasm_module_exports_static(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv)
+{
+    (void)this_val;
+    ns_wasm_module *mod =
+        argc > 0 ? JS_GetOpaque2(ctx, argv[0], ns_wasm_module_class_id) : NULL;
+    if (!mod || !mod->module)
+        return JS_ThrowTypeError(ctx,
+                                 "WebAssembly.Module.exports requires a Module");
+    JSValue arr = JS_NewArray(ctx);
+    if (JS_IsException(arr))
+        return arr;
+    int32_t n = wasm_runtime_get_export_count(mod->module);
+    for (int32_t i = 0; i < n; i++) {
+        wasm_export_t exp;
+        wasm_runtime_get_export_type(mod->module, i, &exp);
+        JSValue o = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, exp.name));
+        JS_SetPropertyStr(ctx, o, "kind",
+                          JS_NewString(ctx, ns_wasm_kind_name(exp.kind)));
+        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, o);
+    }
+    return arr;
+}
+
+static JSValue
+ns_wasm_module_imports_static(JSContext *ctx, JSValueConst this_val, int argc,
+                             JSValueConst *argv)
+{
+    (void)this_val;
+    ns_wasm_module *mod =
+        argc > 0 ? JS_GetOpaque2(ctx, argv[0], ns_wasm_module_class_id) : NULL;
+    if (!mod || !mod->module)
+        return JS_ThrowTypeError(ctx,
+                                 "WebAssembly.Module.imports requires a Module");
+    JSValue arr = JS_NewArray(ctx);
+    if (JS_IsException(arr))
+        return arr;
+    int32_t n = wasm_runtime_get_import_count(mod->module);
+    for (int32_t i = 0; i < n; i++) {
+        wasm_import_t imp;
+        wasm_runtime_get_import_type(mod->module, i, &imp);
+        JSValue o = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, o, "module",
+                          JS_NewString(ctx, imp.module_name));
+        JS_SetPropertyStr(ctx, o, "name", JS_NewString(ctx, imp.name));
+        JS_SetPropertyStr(ctx, o, "kind",
+                          JS_NewString(ctx, ns_wasm_kind_name(imp.kind)));
+        JS_SetPropertyUint32(ctx, arr, (uint32_t)i, o);
+    }
+    return arr;
+}
+
 static const char ns_wasm_bootstrap_js[] =
     "(() => {"
     "  const W = WebAssembly;"
@@ -1630,6 +1878,7 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
                            &ns_wasm_instance_class);
     ns_wasm_register_class(rt, &ns_wasm_memory_class_id, &ns_wasm_memory_class);
     ns_wasm_register_class(rt, &ns_wasm_table_class_id, &ns_wasm_table_class);
+    ns_wasm_register_class(rt, &ns_wasm_global_class_id, &ns_wasm_global_class);
     ns_wasm_register_class(rt, &ns_wasm_func_class_id, &ns_wasm_func_class);
 
     JSValue memory_proto = JS_NewObject(ctx);
@@ -1641,6 +1890,11 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
     JS_SetPropertyFunctionList(ctx, table_proto, ns_wasm_table_proto_funcs,
                                G_N_ELEMENTS(ns_wasm_table_proto_funcs));
     JS_SetClassProto(ctx, ns_wasm_table_class_id, table_proto);
+
+    JSValue global_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, global_proto, ns_wasm_global_proto_funcs,
+                               G_N_ELEMENTS(ns_wasm_global_proto_funcs));
+    JS_SetClassProto(ctx, ns_wasm_global_class_id, global_proto);
 
     JSValue module_proto = JS_NewObject(ctx);
     JS_SetClassProto(ctx, ns_wasm_module_class_id,
@@ -1673,6 +1927,14 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
                       JS_DupValue(ctx, memory_proto));
     JS_SetPropertyStr(ctx, table_ctor, "prototype",
                       JS_DupValue(ctx, table_proto));
+    JS_SetPropertyStr(ctx, global_ctor, "prototype",
+                      JS_DupValue(ctx, global_proto));
+    JS_SetPropertyStr(ctx, module_ctor, "exports",
+                      JS_NewCFunction(ctx, ns_wasm_module_exports_static,
+                                      "exports", 1));
+    JS_SetPropertyStr(ctx, module_ctor, "imports",
+                      JS_NewCFunction(ctx, ns_wasm_module_imports_static,
+                                      "imports", 1));
     JS_SetPropertyStr(ctx, module_ctor, "prototype", module_proto);
     JS_SetPropertyStr(ctx, instance_ctor, "prototype", instance_proto);
     JS_SetPropertyStr(ctx, ns, "Module", module_ctor);
