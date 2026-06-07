@@ -107,6 +107,7 @@ typedef struct ns_box_media {
     char  *video_poster;
     char  *video_audio_src;
     void  *video;
+    gboolean declared_image_size;
     gboolean size_independent_of_image;
 } ns_box_media;
 

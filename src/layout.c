@@ -3519,6 +3519,8 @@ build_image_box(const ns_node *n)
     const char *hs = ns_element_get_attr(img, "height");
     box->content_width  = ws ? g_ascii_strtod(ws, NULL) : 0;
     box->content_height = hs ? g_ascii_strtod(hs, NULL) : 0;
+    m->declared_image_size =
+        box->content_width > 0 && box->content_height > 0;
     if (g_image_cache_for_layout) {
         char *abs = g_base_url_for_layout
             ? ns_url_resolve(g_base_url_for_layout, url)
@@ -3897,6 +3899,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         const char *hs = ns_element_get_attr(n, "height");
         box->content_width  = ws ? g_ascii_strtod(ws, NULL) : 0;
         box->content_height = hs ? g_ascii_strtod(hs, NULL) : 0;
+        m->declared_image_size =
+            box->content_width > 0 && box->content_height > 0;
         if (g_image_cache_for_layout) {
             char *xml = ns_svg_outer_with_defs(n);
             if (xml && *xml) {
@@ -5323,6 +5327,7 @@ layout_image(ns_box *box, double parent_content_width)
     const ns_css_value *mnw = box->style ? box->style->values[NS_CSS_MIN_WIDTH]  : NULL;
     const ns_css_value *mnh = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
 
+    gboolean declared_size = box->media && box->media->declared_image_size;
     double w = -1, h = -1;
     if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
         w = length_resolve(wv, parent_content_width, -1);
@@ -5345,7 +5350,8 @@ layout_image(ns_box *box, double parent_content_width)
     double nat_h = (img && img->loaded && img->natural_height > 0)
                    ? (double)img->natural_height : -1;
     if (box->media)
-        box->media->size_independent_of_image = (w >= 0 && h >= 0);
+        box->media->size_independent_of_image =
+            (w >= 0 && h >= 0) || declared_size;
 
     if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
@@ -9239,6 +9245,9 @@ ns_box *
 ns_box_hit_scrollable(ns_box *root, double x, double y)
 {
     if (!root) return NULL;
+    if (root->paint_bottom > root->paint_top &&
+        (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
+        return NULL;
     gboolean clipped = box_clips_children(root);
     if (clipped && !box_padding_contains(root, x, y))
         return NULL;
@@ -9258,6 +9267,9 @@ const ns_box *
 ns_box_hit_test(const ns_box *root, double x, double y)
 {
     if (!root) return NULL;
+    if (root->paint_bottom > root->paint_top &&
+        (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
+        return NULL;
     gboolean clipped = box_clips_children(root);
     if (clipped && !box_padding_contains(root, x, y))
         goto self_test;

@@ -89,6 +89,7 @@ typedef struct ns_window {
     guint         caret_blink_source;
     guint         refresh_source;
     guint         image_retry_source;
+    guint         scroll_image_source;
     gboolean      caret_blink_on;
     GCancellable *current_fetch;
     guint         fetch_gen;
@@ -151,6 +152,8 @@ typedef struct ns_window {
     gboolean     first_paint_done;
     gint64       last_render_us;
     guint        js_relayout_idle_id;
+    gint64       js_relayout_deadline_us;
+    gint64       last_wheel_us;
     gboolean     layout_dirty;
     double       last_viewport_w;
 

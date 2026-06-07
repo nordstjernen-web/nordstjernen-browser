@@ -275,6 +275,7 @@ ns_window_clear_cache(ns_window *w)
 {
     g_clear_handle_id(&w->refresh_source, g_source_remove);
     g_clear_handle_id(&w->image_retry_source, g_source_remove);
+    g_clear_handle_id(&w->scroll_image_source, g_source_remove);
     g_clear_pointer(&w->last_body, g_free);
     w->last_body_len = 0;
     g_clear_pointer(&w->last_content_type, g_free);
@@ -305,6 +306,8 @@ ns_window_clear_cache(ns_window *w)
     w->layout_dirty = TRUE;
     w->favicon_loaded = FALSE;
     g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
+    w->js_relayout_deadline_us = 0;
+    w->last_wheel_us = 0;
 }
 
 static void
@@ -426,11 +429,65 @@ ns_window_js_relayout_now(gpointer user_data)
     ns_window *w = user_data;
     if (!w) return G_SOURCE_REMOVE;
     w->js_relayout_idle_id = 0;
+    w->js_relayout_deadline_us = 0;
     ns_window_drop_layout(w);
     w->layout_dirty = TRUE;
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
     ns_window_apply_page_title(w);
     return G_SOURCE_REMOVE;
+}
+
+static guint
+ns_window_adaptive_relayout_delay(ns_window *w, guint min_delay,
+                                  guint max_delay)
+{
+    guint delay = min_delay;
+    double render_ms = w ? w->last_render_us / 1000.0 : 0;
+    if (render_ms > 5) {
+        guint adaptive = (guint)(render_ms * 3);
+        if (adaptive > delay) delay = adaptive;
+    }
+    if (delay > max_delay) delay = max_delay;
+    return delay;
+}
+
+static void
+ns_window_schedule_relayout(ns_window *w, guint delay)
+{
+    if (!w) return;
+    gint64 now = g_get_monotonic_time();
+    if (w->last_wheel_us > 0) {
+        gint64 quiet_until = w->last_wheel_us + 350000;
+        if (quiet_until > now) {
+            guint quiet_delay = (guint)((quiet_until - now + 999) / 1000);
+            if (delay < quiet_delay) delay = quiet_delay;
+        }
+    }
+    gint64 deadline = now + (gint64)delay * 1000;
+    if (w->js_relayout_idle_id) {
+        if (w->js_relayout_deadline_us &&
+            w->js_relayout_deadline_us <= deadline)
+            return;
+        g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
+    }
+    w->js_relayout_deadline_us = deadline;
+    w->js_relayout_idle_id =
+        g_timeout_add(delay, ns_window_js_relayout_now, w);
+}
+
+static void
+ns_window_postpone_relayout_after_wheel(ns_window *w)
+{
+    if (!w || !w->js_relayout_idle_id) return;
+    guint delay = ns_window_adaptive_relayout_delay(w, 350, 1500);
+    gint64 deadline = g_get_monotonic_time() + (gint64)delay * 1000;
+    if (w->js_relayout_deadline_us &&
+        w->js_relayout_deadline_us >= deadline)
+        return;
+    g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
+    w->js_relayout_deadline_us = deadline;
+    w->js_relayout_idle_id =
+        g_timeout_add(delay, ns_window_js_relayout_now, w);
 }
 
 void
@@ -439,15 +496,8 @@ ns_window_js_mutated(gpointer user_data)
     ns_window *w = user_data;
     if (!w) return;
     w->dom_mutated = TRUE;
-    if (w->js_relayout_idle_id) return;
-    guint delay = 16;
-    double render_ms = w->last_render_us / 1000.0;
-    if (render_ms > 5) {
-        delay = (guint)(render_ms * 3);
-        if (delay > 500) delay = 500;
-    }
-    w->js_relayout_idle_id =
-        g_timeout_add(delay, ns_window_js_relayout_now, w);
+    ns_window_schedule_relayout(w,
+        ns_window_adaptive_relayout_delay(w, 16, 1500));
 }
 
 static void
@@ -2883,13 +2933,15 @@ ns_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy,
 {
     ns_window *w = user_data;
     if (!w->layout_tree || !w->drawing_area) return FALSE;
+    w->last_wheel_us = g_get_monotonic_time();
+    ns_window_postpone_relayout_after_wheel(w);
 
     GdkModifierType state =
         gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c));
 
     if (w->js) {
         const ns_node *wt = ns_window_event_target_at(w, w->cursor_x, w->cursor_y);
-        if (wt) {
+        if (wt && ns_js_has_event_handler(w->js, wt, "wheel")) {
             double cx, cy;
             ns_window_client_xy(w, w->cursor_x, w->cursor_y, &cx, &cy);
             gboolean prevented = FALSE;
@@ -3136,35 +3188,28 @@ ns_resolve_url(const ns_window *w, const char *href)
 static gboolean
 ns_window_image_ready_needs_relayout(ns_window *w, ns_image *img)
 {
-    if (!w->layout_tree || !img) return TRUE;
+    if (!img) return TRUE;
+    if (!w->layout_tree) return FALSE;
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(w->layout_tree, imgs);
-    gboolean any_ref = FALSE;
     gboolean needs = FALSE;
     for (guint i = 0; i < imgs->len && !needs; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
-        if (box->media->image == (void *)img) {
-            any_ref = TRUE;
-            if (!box->media->size_independent_of_image) needs = TRUE;
-        }
-        if (box->media->bg_image == (void *)img)
-            any_ref = TRUE;
-        if (box->media->bg_layer_images) {
-            for (guint li = 0; li < box->media->bg_layer_images->len; li++)
-                if (g_ptr_array_index(box->media->bg_layer_images, li) ==
-                    (void *)img)
-                    any_ref = TRUE;
-        }
+        gboolean fixed = box->media->size_independent_of_image ||
+                         box->media->declared_image_size;
+        if (box->media->image == (void *)img && !fixed)
+            needs = TRUE;
     }
     g_ptr_array_free(imgs, TRUE);
-    return needs || !any_ref;
+    return needs;
 }
 
 static void
 on_image_ready(ns_image *img, gpointer user_data)
 {
     ns_window *w = user_data;
+    if (!w) return;
     if (img && img->failed && img->url) {
         char *line = g_strdup_printf("[error] image: %s — %s",
                                      img->url,
@@ -3182,9 +3227,8 @@ on_image_ready(ns_image *img, gpointer user_data)
         ns_window_schedule_image_retry(w, img);
     if (w->mode != NS_VIEW_RENDER || !w->drawing_area) return;
     if (ns_window_image_ready_needs_relayout(w, img)) {
-        if (!w->js_relayout_idle_id)
-            w->js_relayout_idle_id =
-                g_timeout_add(50, ns_window_js_relayout_now, w);
+        ns_window_schedule_relayout(w,
+            ns_window_adaptive_relayout_delay(w, 250, 1500));
     } else {
         gtk_widget_queue_draw(w->drawing_area);
     }
@@ -3751,13 +3795,26 @@ ns_window_kick_image_loads(ns_window *w)
     g_ptr_array_free(imgs, TRUE);
 }
 
+static gboolean
+ns_window_scroll_image_load_cb(gpointer data)
+{
+    ns_window *w = data;
+    if (!w) return G_SOURCE_REMOVE;
+    w->scroll_image_source = 0;
+    if (w->mode == NS_VIEW_RENDER)
+        ns_window_kick_image_loads(w);
+    return G_SOURCE_REMOVE;
+}
+
 void
 ns_window_render_vadjustment_changed(GtkAdjustment *adj, gpointer ud)
 {
     (void)adj;
     ns_window *w = ud;
     if (!w || w->mode != NS_VIEW_RENDER) return;
-    ns_window_kick_image_loads(w);
+    if (w->scroll_image_source) return;
+    w->scroll_image_source =
+        g_timeout_add(120, ns_window_scroll_image_load_cb, w);
 }
 
 static void
@@ -5477,6 +5534,7 @@ on_window_destroy(GtkWidget *widget, gpointer user_data)
     }
     g_clear_handle_id(&w->caret_blink_source, g_source_remove);
     g_clear_handle_id(&w->refresh_source, g_source_remove);
+    g_clear_handle_id(&w->scroll_image_source, g_source_remove);
     g_clear_handle_id(&w->logo_anim_source, g_source_remove);
     g_clear_handle_id(&w->stage_done_source, g_source_remove);
     w->logo_image = NULL;

@@ -16302,6 +16302,93 @@ ns_fire_window_level_handlers(ns_js *js, const ns_node *doc_node,
 }
 
 static gboolean
+ns_node_has_inline_handler(const ns_node *target, const char *type)
+{
+    if (!target || target->kind != NS_NODE_ELEMENT || !type) return FALSE;
+    char attr_name[48];
+    g_snprintf(attr_name, sizeof attr_name, "on%s", type);
+    const char *body = ns_element_get_attr(target, attr_name);
+    return body && *body;
+}
+
+static gboolean
+ns_js_node_has_property_handler(ns_js *js, const ns_node *target,
+                                const char *type)
+{
+    if (!js || !target || target->kind != NS_NODE_ELEMENT ||
+        !target->js_wrapper || !type)
+        return FALSE;
+    char prop_name[48];
+    g_snprintf(prop_name, sizeof prop_name, "on%s", type);
+    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, target->js_wrapper);
+    JSValue handler = JS_GetPropertyStr(js->ctx, wrapper, prop_name);
+    gboolean has = JS_IsFunction(js->ctx, handler);
+    JS_FreeValue(js->ctx, handler);
+    return has;
+}
+
+static gboolean
+ns_js_window_has_property_handler(ns_js *js, const char *type)
+{
+    if (!js || !type) return FALSE;
+    JSContext *ctx = js->ctx;
+    char prop_name[48];
+    g_snprintf(prop_name, sizeof prop_name, "on%s", type);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc_obj = JS_GetPropertyStr(ctx, global, "document");
+    JSValue holders[2] = { doc_obj, global };
+    gboolean has = FALSE;
+    for (int i = 0; i < 2 && !has; i++) {
+        if (!JS_IsObject(holders[i])) continue;
+        JSValue handler = JS_GetPropertyStr(ctx, holders[i], prop_name);
+        has = JS_IsFunction(ctx, handler);
+        JS_FreeValue(ctx, handler);
+    }
+    JS_FreeValue(ctx, doc_obj);
+    JS_FreeValue(ctx, global);
+    return has;
+}
+
+static gboolean
+ns_node_is_on_path(const ns_node *target, const ns_node *candidate)
+{
+    for (const ns_node *cur = target; cur; cur = cur->parent)
+        if (cur == candidate) return TRUE;
+    return FALSE;
+}
+
+gboolean
+ns_js_has_event_handler(ns_js *js, const ns_node *target, const char *type)
+{
+    if (!js || !target || !type || !*type || js->halted || js->in_pump)
+        return FALSE;
+    for (const ns_node *cur = target; cur; cur = cur->parent) {
+        if (ns_node_has_inline_handler(cur, type))
+            return TRUE;
+        if (ns_js_node_has_property_handler(js, cur, type))
+            return TRUE;
+        if (cur->kind == NS_NODE_DOCUMENT &&
+            ns_js_window_has_property_handler(js, type))
+            return TRUE;
+        if (cur->kind == NS_NODE_DOCUMENT &&
+            ns_event_type_is_window_reflected(type)) {
+            ns_node *body = ns_node_find_first_element((ns_node *)cur, "body");
+            if (body && ns_node_has_inline_handler(body, type))
+                return TRUE;
+        }
+    }
+    for (guint i = 0; i < js->listeners->len; i++) {
+        ns_listener *l = g_ptr_array_index(js->listeners, i);
+        if (ns_listener_is_tombstoned(l)) continue;
+        if (strcmp(l->type, type) != 0) continue;
+        if (ns_listener_signal_aborted(js, l)) continue;
+        if (ns_node_is_on_path(target, l->target))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
 ns_invoke_listeners_at(ns_js *js, const ns_node *cur, const ns_node *target,
                        const char *type, JSValue event, gboolean capture_phase,
                        gboolean at_target, gboolean *fired)

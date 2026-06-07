@@ -146,6 +146,8 @@ gboolean ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
                                     gboolean shift, gboolean ctrl,
                                     gboolean alt,   gboolean meta,
                                     gboolean *default_prevented);
+gboolean ns_js_has_event_handler(ns_js *js, const ns_node *target,
+                                 const char *type);
 
 G_END_DECLS
 
