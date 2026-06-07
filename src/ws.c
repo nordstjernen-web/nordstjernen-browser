@@ -174,8 +174,11 @@ ns_ws_invoke_msg(ns_ws *ws, gpointer payload)
             ws->cbs.on_text(text, m->data->len, ws->user_data);
         }
     } else {
-        if (ws->cbs.on_binary)
-            ws->cbs.on_binary(m->data->data, m->data->len, ws->user_data);
+        if (ws->cbs.on_binary) {
+            const guint8 *bytes = m->data->len
+                ? m->data->data : (const guint8 *)"";
+            ws->cbs.on_binary(bytes, m->data->len, ws->user_data);
+        }
     }
 }
 

@@ -9236,6 +9236,21 @@ ns_box_content_extent(const ns_box *root, double *out_w, double *out_h)
     if (out_h) *out_h = h;
 }
 
+gboolean
+ns_box_tree_has_sticky(const ns_box *root)
+{
+    if (!root) return FALSE;
+    if (root->style) {
+        const ns_css_value *v = root->style->values[NS_CSS_POSITION];
+        if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+            strcmp(v->u.keyword, "sticky") == 0)
+            return TRUE;
+    }
+    for (const ns_box *c = root->first_child; c; c = c->next_sibling)
+        if (ns_box_tree_has_sticky(c)) return TRUE;
+    return FALSE;
+}
+
 GString *
 ns_box_dump(const ns_box *root)
 {

@@ -276,17 +276,23 @@ ns_window_clear_html_drag(ns_window *w)
 }
 
 static void
+ns_window_free_layout_tree(ns_window *w)
+{
+    w->layout_has_sticky = FALSE;
+    if (!w->layout_tree) return;
+    if (w->js) ns_js_set_layout_root(w->js, NULL);
+    ns_box_free(w->layout_tree);
+    w->layout_tree = NULL;
+    ns_selection_clear(&w->selection);
+    w->search_active_box = NULL;
+    w->hover_node = NULL;
+}
+
+static void
 ns_window_drop_layout(ns_window *w)
 {
     ns_window_clear_tile_cache(w);
-    if (w->layout_tree) {
-        if (w->js) ns_js_set_layout_root(w->js, NULL);
-        ns_box_free(w->layout_tree);
-        w->layout_tree = NULL;
-        ns_selection_clear(&w->selection);
-        w->search_active_box = NULL;
-        w->hover_node = NULL;
-    }
+    ns_window_free_layout_tree(w);
     if (w->style_table) {
         if (w->js) ns_js_set_style_table(w->js, NULL);
         g_hash_table_destroy(w->style_table);
@@ -1051,14 +1057,7 @@ ns_window_mark_layout_dirty(ns_window *w)
 {
     if (!w) return;
     ns_window_clear_tile_cache(w);
-    if (w->layout_tree) {
-        if (w->js) ns_js_set_layout_root(w->js, NULL);
-        ns_box_free(w->layout_tree);
-        w->layout_tree = NULL;
-        ns_selection_clear(&w->selection);
-        w->search_active_box = NULL;
-        w->hover_node = NULL;
-    }
+    ns_window_free_layout_tree(w);
     if (w->style_table) {
         if (w->js) ns_js_set_style_table(w->js, NULL);
         g_hash_table_destroy(w->style_table);
@@ -1297,7 +1296,7 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
     gint64 t_start = g_get_monotonic_time();
     ns_css_style_element_cache_begin();
     ns_window_clear_tile_cache(w);
-    if (w->layout_tree) { if (w->js) ns_js_set_layout_root(w->js, NULL); ns_box_free(w->layout_tree); w->layout_tree = NULL; ns_selection_clear(&w->selection); w->search_active_box = NULL; }
+    ns_window_free_layout_tree(w);
     if (w->style_table) { if (w->js) ns_js_set_style_table(w->js, NULL); g_hash_table_destroy(w->style_table); w->style_table = NULL; }
     gint64 t_after_free = g_get_monotonic_time();
 
@@ -1357,6 +1356,7 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
     w->style_table = ns_render_relayout_profile(
         &rc, &w->layout_tree, profile ? &rp : NULL);
     ns_window_clear_tile_cache(w);
+    w->layout_has_sticky = ns_box_tree_has_sticky(w->layout_tree);
     gint64 t_after_layout = g_get_monotonic_time();
 
     for (guint i = 0; i < owned_sheets->len; i++)
@@ -2490,7 +2490,7 @@ ns_window_set_focused_input(ns_window *w, ns_node *target)
                    ns_element_effectively_inert(target)))
         target = NULL;
     ns_window_clear_tile_cache(w);
-    if (w->layout_tree) { if (w->js) ns_js_set_layout_root(w->js, NULL); ns_box_free(w->layout_tree); w->layout_tree = NULL; ns_selection_clear(&w->selection); w->search_active_box = NULL; }
+    ns_window_free_layout_tree(w);
     w->layout_dirty = TRUE;
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
     if (w->focused_input) {
@@ -3451,6 +3451,7 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     double iy1 = ceil(clip_y + clip_h);
     ns_paint_set_cull_margin(800.0);
     gboolean cacheable = w->tile_cache && !w->focused_input &&
+        !w->layout_has_sticky &&
         !w->selection.active && !ns_selection_has_range(&w->selection);
     if (cacheable) {
         guint state_flags = w->search_case_sensitive ? 1u : 0u;
@@ -7081,7 +7082,7 @@ ns_window_after_zoom(ns_window *w)
         return;
     }
     ns_window_clear_tile_cache(w);
-    if (w->layout_tree) { if (w->js) ns_js_set_layout_root(w->js, NULL); ns_box_free(w->layout_tree); w->layout_tree = NULL; ns_selection_clear(&w->selection); w->search_active_box = NULL; }
+    ns_window_free_layout_tree(w);
     if (w->style_table) { if (w->js) ns_js_set_style_table(w->js, NULL); g_hash_table_destroy(w->style_table); w->style_table = NULL; }
     if (w->parsed_doc)  { ns_node_free(w->parsed_doc);  w->parsed_doc  = NULL; }
     w->layout_dirty = TRUE;
@@ -7778,13 +7779,7 @@ ns_main_on_font_loaded(const char *family, gpointer user_data)
         if (!w) continue;
         ns_window_clear_tile_cache(w);
         w->layout_dirty = TRUE;
-        if (w->layout_tree) {
-            if (w->js) ns_js_set_layout_root(w->js, NULL);
-            ns_box_free(w->layout_tree);
-            w->layout_tree = NULL;
-            ns_selection_clear(&w->selection);
-            w->search_active_box = NULL;
-        }
+        ns_window_free_layout_tree(w);
         if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
     }
 }

@@ -19,6 +19,12 @@ tree rebuild changes the root pointer and clears the cache. Active text
 selection and focused editable controls bypass the cache because their visual
 state changes too often to retain safely.
 
+Pages containing `position: sticky` boxes also bypass the cache. Sticky offsets
+are derived from the live paint clip, so baking them into fixed document-space
+tiles would stick the element to each tile boundary instead of the viewport.
+Such pages fall back to the direct paint path, which clips to the real
+overscanned viewport.
+
 The tile cache is intentionally retained on the main thread. Cairo surfaces are
 created and consumed from the same thread as GTK drawing, avoiding cross-thread
 ownership of live layout, DOM nodes, Pango objects, or GTK state.

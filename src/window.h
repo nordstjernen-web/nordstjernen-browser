@@ -122,6 +122,7 @@ typedef struct ns_window {
     ns_image_cache *images;
     ns_tile_cache  *tile_cache;
     guint           tile_prewarm_source;
+    gboolean        layout_has_sticky;
     double          tile_prewarm_y;
     double          tile_prewarm_h;
     int             tile_prewarm_width;
