@@ -3758,6 +3758,10 @@ blend_mode_operator(const ns_style *s)
 }
 
 static const ns_box *g_paint_skip_box;
+static ns_paint_stats g_paint_stats;
+static gboolean g_paint_collect_stats;
+static gboolean g_paint_have_clip;
+static double g_paint_clip_y0, g_paint_clip_y1;
 
 static cairo_pattern_t *
 mask_gradient_pattern(const ns_css_gradient *gr,
@@ -3813,18 +3817,48 @@ mask_gradient_pattern(const ns_css_gradient *gr,
 
 static int g_paint_no_cull;
 
+void
+ns_paint_stats_reset(void)
+{
+    memset(&g_paint_stats, 0, sizeof g_paint_stats);
+    g_paint_collect_stats = TRUE;
+}
+
+void
+ns_paint_stats_get(ns_paint_stats *out)
+{
+    if (out) *out = g_paint_stats;
+    g_paint_collect_stats = FALSE;
+}
+
+static void
+paint_cache_clip(cairo_t *cr)
+{
+    double x0, x1;
+    cairo_clip_extents(cr, &x0, &g_paint_clip_y0, &x1, &g_paint_clip_y1);
+    g_paint_have_clip = TRUE;
+}
+
 static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b) return;
-    if (box_is_hidden(b)) return;
-    if (b == g_paint_skip_box) return;
-    if (!g_paint_no_cull && b->paint_bottom > b->paint_top) {
-        double cull_x0, cull_y0, cull_x1, cull_y1;
-        cairo_clip_extents(cr, &cull_x0, &cull_y0, &cull_x1, &cull_y1);
-        if (b->paint_bottom < cull_y0 - 400.0 ||
-            b->paint_top > cull_y1 + 400.0)
+    if (g_paint_collect_stats) g_paint_stats.boxes_seen++;
+    if (box_is_hidden(b)) {
+        if (g_paint_collect_stats) g_paint_stats.hidden++;
+        return;
+    }
+    if (b == g_paint_skip_box) {
+        if (g_paint_collect_stats) g_paint_stats.skipped_top++;
+        return;
+    }
+    if (!g_paint_no_cull && g_paint_have_clip &&
+        b->paint_bottom > b->paint_top) {
+        if (b->paint_bottom < g_paint_clip_y0 - 400.0 ||
+            b->paint_top > g_paint_clip_y1 + 400.0) {
+            if (g_paint_collect_stats) g_paint_stats.culled_bounds++;
             return;
+        }
     }
     const ns_style *style = b->style;
     double op = box_opacity(b);
@@ -3852,17 +3886,21 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         gboolean is_fixed = posv && posv->kind == NS_CSS_V_KEYWORD &&
                             posv->u.keyword && strcmp(posv->u.keyword, "fixed") == 0;
         if (!is_fixed) {
-            double cx0, cy0, cx1, cy1;
-            cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
             double by = b->y + b->margin.top;
             double bh = b->content_height + b->padding.top + b->padding.bottom +
                         b->border.top + b->border.bottom;
-            if (by + bh < cy0 - 400.0 || by > cy1 + 400.0)
+            if (g_paint_have_clip &&
+                (by + bh < g_paint_clip_y0 - 400.0 ||
+                 by > g_paint_clip_y1 + 400.0))
                 box_offscreen = TRUE;
         }
     }
+    if (box_offscreen && g_paint_collect_stats) g_paint_stats.offscreen++;
 
-    if (grouped) cairo_push_group(cr);
+    if (grouped) {
+        if (g_paint_collect_stats) g_paint_stats.grouped++;
+        cairo_push_group(cr);
+    }
     if (has_transform) {
         cairo_save(cr);
         double bx = b->x + b->margin.left;
@@ -3935,6 +3973,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_TABLE_CAPTION ||
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
             b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO) {
+            if (g_paint_collect_stats) g_paint_stats.blocks++;
             paint_block(cr, b);
         }
         if (b->kind == NS_BOX_BLOCK) {
@@ -3942,11 +3981,21 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_hr(cr, b);
             paint_tmh_audio_player(cr, b);
         }
-        if (b->kind == NS_BOX_INLINE) paint_inline(cr, b, highlight);
-        if (b->kind == NS_BOX_IMAGE)  paint_image(cr, b);
-        if (b->kind == NS_BOX_VIDEO)  paint_video(cr, b);
+        if (b->kind == NS_BOX_INLINE) {
+            if (g_paint_collect_stats) g_paint_stats.inlines++;
+            paint_inline(cr, b, highlight);
+        }
+        if (b->kind == NS_BOX_IMAGE) {
+            if (g_paint_collect_stats) g_paint_stats.images++;
+            paint_image(cr, b);
+        }
+        if (b->kind == NS_BOX_VIDEO) {
+            if (g_paint_collect_stats) g_paint_stats.videos++;
+            paint_video(cr, b);
+        }
     }
     if (ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
+        if (g_paint_collect_stats) g_paint_stats.canvases++;
         cairo_surface_t *surf = ns_js_canvas_surface(g_paint_js, b->dom);
         if (surf) {
             int sw = cairo_image_surface_get_width(surf);
@@ -3986,7 +4035,13 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
         entries[e.order] = e;
     }
-    if (any_z) qsort(entries, n_children, sizeof(paint_entry), paint_entry_cmp);
+    if (any_z) {
+        if (g_paint_collect_stats) {
+            g_paint_stats.sorted_parents++;
+            g_paint_stats.sorted_children += n_children;
+        }
+        qsort(entries, n_children, sizeof(paint_entry), paint_entry_cmp);
+    }
     const char *ovx = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_X) : NULL;
     const char *ovy = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW_Y) : NULL;
     const char *ovs = b->style ? ns_style_keyword(b->style, NS_CSS_OVERFLOW) : NULL;
@@ -4032,6 +4087,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_clip(cr);
             if (b->scroll_x != 0 || b->scroll_y != 0)
                 cairo_translate(cr, -b->scroll_x, -b->scroll_y);
+            if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
         } else {
             clip_overflow = FALSE;
         }
@@ -4277,10 +4333,12 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
     set_source_rgba(cr, bg);
     cairo_paint(cr);
     cairo_restore(cr);
+    paint_cache_clip(cr);
     g_paint_skip_box = top_layer_box(root);
     paint_walk(cr, root, highlight_query);
     g_paint_skip_box = NULL;
     paint_top_layer(cr, root, highlight_query);
+    g_paint_have_clip = FALSE;
 }
 
 void
@@ -4294,9 +4352,11 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
     set_source_rgba(cr, bg);
     cairo_paint(cr);
     cairo_restore(cr);
+    paint_cache_clip(cr);
     g_paint_skip_box = top_layer_box(root);
     paint_walk(cr, root, highlight_query);
     g_paint_skip_box = NULL;
     paint_top_layer(cr, root, highlight_query);
     if (sel) ns_selection_paint(cr, root, sel);
+    g_paint_have_clip = FALSE;
 }

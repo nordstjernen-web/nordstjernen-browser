@@ -304,6 +304,7 @@ ns_window_clear_cache(ns_window *w)
     w->css_inflight = 0;
     w->first_paint_done = FALSE;
     w->layout_dirty = TRUE;
+    w->layout_dirty_reason = NULL;
     w->favicon_loaded = FALSE;
     g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
     w->js_relayout_deadline_us = 0;
@@ -423,6 +424,16 @@ ns_window_js_log(const char *line, gpointer user_data)
     ns_window_console_append(w, line);
 }
 
+static guint ns_window_relayout_max_delay(ns_window *w, guint max_delay);
+static guint ns_window_scroll_quiet_ms(ns_window *w);
+static guint ns_window_adaptive_relayout_delay(ns_window *w, guint min_delay,
+                                               guint max_delay);
+static void ns_window_schedule_relayout(ns_window *w, guint delay,
+                                        const char *reason);
+static void ns_window_profile_relayout_timer(ns_window *w, const char *action,
+                                             const char *reason, guint delay,
+                                             gint64 now);
+
 static gboolean
 ns_window_js_relayout_now(gpointer user_data)
 {
@@ -430,8 +441,29 @@ ns_window_js_relayout_now(gpointer user_data)
     if (!w) return G_SOURCE_REMOVE;
     w->js_relayout_idle_id = 0;
     w->js_relayout_deadline_us = 0;
+    gint64 now = g_get_monotonic_time();
+    if (w->last_wheel_us > 0) {
+        guint quiet_ms = ns_window_scroll_quiet_ms(w);
+        gint64 quiet_until = w->last_wheel_us + (gint64)quiet_ms * 1000;
+        if (quiet_until > now) {
+            guint delay = (guint)((quiet_until - now + 999) / 1000);
+            guint min_delay = w->last_render_us > 250000 ? 250 : delay;
+            guint max_delay = ns_window_relayout_max_delay(w, 1500);
+            guint adaptive = ns_window_adaptive_relayout_delay(
+                w, min_delay, max_delay);
+            if (delay < adaptive) delay = adaptive;
+            ns_window_profile_relayout_timer(w, "defer-scroll",
+                                             w->layout_dirty_reason,
+                                             delay, now);
+            ns_window_schedule_relayout(w, delay,
+                w->layout_dirty_reason ? w->layout_dirty_reason : "scroll");
+            return G_SOURCE_REMOVE;
+        }
+    }
     ns_window_drop_layout(w);
     w->layout_dirty = TRUE;
+    if (!w->layout_dirty_reason) w->layout_dirty_reason = "scheduled";
+    ns_window_profile_relayout_timer(w, "run", w->layout_dirty_reason, 0, now);
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
     ns_window_apply_page_title(w);
     return G_SOURCE_REMOVE;
@@ -451,13 +483,53 @@ ns_window_adaptive_relayout_delay(ns_window *w, guint min_delay,
     return delay;
 }
 
+static guint
+ns_window_relayout_max_delay(ns_window *w, guint max_delay)
+{
+    if (!w) return max_delay;
+    if (w->last_render_us > 1000000 && max_delay < 3500) return 3500;
+    if (w->last_render_us > 250000 && max_delay < 2500) return 2500;
+    return max_delay;
+}
+
+static guint
+ns_window_scroll_quiet_ms(ns_window *w)
+{
+    if (!w) return 350;
+    if (w->last_render_us > 1000000) return 1200;
+    if (w->last_render_us > 250000) return 700;
+    return 350;
+}
+
 static void
-ns_window_schedule_relayout(ns_window *w, guint delay)
+ns_window_profile_relayout_timer(ns_window *w, const char *action,
+                                 const char *reason, guint delay,
+                                 gint64 now)
+{
+    if (!ns_profile_enabled()) return;
+    double render_ms = w ? w->last_render_us / 1000.0 : 0;
+    double wheel_ms = -1.0;
+    guint pending = w ? w->js_relayout_idle_id : 0;
+    gboolean dirty = w ? w->layout_dirty : FALSE;
+    if (w && w->last_wheel_us > 0)
+        wheel_ms = (now - w->last_wheel_us) / 1000.0;
+    g_printerr("[profile] relayout %s reason=%s delay=%ums "
+               "render=%.1fms since-wheel=%.1fms pending=%u dirty=%d\n",
+               action ? action : "?",
+               reason ? reason : (w && w->layout_dirty_reason
+                   ? w->layout_dirty_reason : "?"),
+               delay, render_ms, wheel_ms, pending, dirty);
+}
+
+static void
+ns_window_schedule_relayout(ns_window *w, guint delay, const char *reason)
 {
     if (!w) return;
+    if (reason) w->layout_dirty_reason = reason;
     gint64 now = g_get_monotonic_time();
     if (w->last_wheel_us > 0) {
-        gint64 quiet_until = w->last_wheel_us + 350000;
+        gint64 quiet_until =
+            w->last_wheel_us + (gint64)ns_window_scroll_quiet_ms(w) * 1000;
         if (quiet_until > now) {
             guint quiet_delay = (guint)((quiet_until - now + 999) / 1000);
             if (delay < quiet_delay) delay = quiet_delay;
@@ -466,24 +538,44 @@ ns_window_schedule_relayout(ns_window *w, guint delay)
     gint64 deadline = now + (gint64)delay * 1000;
     if (w->js_relayout_idle_id) {
         if (w->js_relayout_deadline_us &&
-            w->js_relayout_deadline_us <= deadline)
+            w->js_relayout_deadline_us <= deadline) {
+            guint keep_delay = 0;
+            if (w->js_relayout_deadline_us > now)
+                keep_delay =
+                    (guint)((w->js_relayout_deadline_us - now + 999) / 1000);
+            ns_window_profile_relayout_timer(w, "keep",
+                                             w->layout_dirty_reason,
+                                             keep_delay, now);
             return;
+        }
+        ns_window_profile_relayout_timer(w, "replace",
+                                         w->layout_dirty_reason, delay, now);
         g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
     }
     w->js_relayout_deadline_us = deadline;
     w->js_relayout_idle_id =
         g_timeout_add(delay, ns_window_js_relayout_now, w);
+    ns_window_profile_relayout_timer(w, "schedule",
+                                     w->layout_dirty_reason, delay, now);
 }
 
 static void
 ns_window_postpone_relayout_after_wheel(ns_window *w)
 {
     if (!w || !w->js_relayout_idle_id) return;
-    guint delay = ns_window_adaptive_relayout_delay(w, 350, 1500);
-    gint64 deadline = g_get_monotonic_time() + (gint64)delay * 1000;
+    guint delay = ns_window_adaptive_relayout_delay(
+        w, 350, ns_window_relayout_max_delay(w, 1500));
+    gint64 now = g_get_monotonic_time();
+    gint64 deadline = now + (gint64)delay * 1000;
     if (w->js_relayout_deadline_us &&
-        w->js_relayout_deadline_us >= deadline)
+        w->js_relayout_deadline_us >= deadline) {
+        ns_window_profile_relayout_timer(w, "wheel-keep",
+                                         w->layout_dirty_reason,
+                                         delay, now);
         return;
+    }
+    ns_window_profile_relayout_timer(w, "wheel-postpone",
+                                     w->layout_dirty_reason, delay, now);
     g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
     w->js_relayout_deadline_us = deadline;
     w->js_relayout_idle_id =
@@ -497,7 +589,8 @@ ns_window_js_mutated(gpointer user_data)
     if (!w) return;
     w->dom_mutated = TRUE;
     ns_window_schedule_relayout(w,
-        ns_window_adaptive_relayout_delay(w, 16, 1500));
+        ns_window_adaptive_relayout_delay(
+            w, 16, ns_window_relayout_max_delay(w, 1500)), "js");
 }
 
 static void
@@ -926,6 +1019,7 @@ ns_window_mark_layout_dirty(ns_window *w)
         w->style_table = NULL;
     }
     w->layout_dirty = TRUE;
+    w->layout_dirty_reason = "style";
 }
 
 static void
@@ -1152,6 +1246,8 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
         return;
 
     gboolean profile = ns_profile_enabled();
+    const char *reason = w->layout_dirty_reason;
+    if (!reason) reason = w->layout_tree ? "viewport" : "initial";
     gint64 t_start = g_get_monotonic_time();
     ns_css_style_element_cache_begin();
     if (w->layout_tree) { if (w->js) ns_js_set_layout_root(w->js, NULL); ns_box_free(w->layout_tree); w->layout_tree = NULL; ns_selection_clear(&w->selection); w->search_active_box = NULL; }
@@ -1210,7 +1306,9 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
         .font_allowed    = ns_window_render_font_allowed,
         .cb_ud           = w,
     };
-    w->style_table = ns_render_relayout(&rc, &w->layout_tree);
+    ns_render_profile rp;
+    w->style_table = ns_render_relayout_profile(
+        &rc, &w->layout_tree, profile ? &rp : NULL);
     gint64 t_after_layout = g_get_monotonic_time();
 
     for (guint i = 0; i < owned_sheets->len; i++)
@@ -1221,6 +1319,7 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
     ns_window_kick_image_loads(w);
     ns_window_kick_video_loads(w);
     ns_window_kick_stylesheet_loads(w);
+    gint64 t_after_kicks = g_get_monotonic_time();
     if (w->drawing_area && w->layout_tree) {
         double ext_w = 0, ext_h = 0;
         ns_box_content_extent(w->layout_tree, &ext_w, &ext_h);
@@ -1237,25 +1336,41 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
     gint64 t_end = g_get_monotonic_time();
     w->last_render_us = t_end - t_start;
     w->layout_dirty = FALSE;
+    w->layout_dirty_reason = NULL;
     w->last_viewport_w = viewport_width;
     {
         guint style_count = w->style_table ? g_hash_table_size(w->style_table) : 0;
         ns_debug_log_emit(NS_DLOG_RENDER, "layout",
-            "vp=%.0f styles=%u sheets=%u parse=%.1fms%s render=%.1fms "
-            "total=%.1fms",
-            viewport_width, style_count, (guint)sheet_count,
+            "reason=%s vp=%.0f styles=%u sheets=%u parse=%.1fms%s "
+            "render=%.1fms total=%.1fms",
+            reason, viewport_width, style_count, (guint)sheet_count,
             (t_after_parse  - t_after_free)   / 1000.0,
             parsed_fresh ? "" : "(cached)",
             (t_after_layout- t_before_layout) / 1000.0,
             (t_end         - t_start)         / 1000.0);
         if (profile) {
-            g_printerr("[profile] render vp=%.0f styles=%u sheets=%u "
-                       "free=%.1fms parse=%.1fms%s render=%.1fms total=%.1fms\n",
-                       viewport_width, style_count, (guint)sheet_count,
+            g_printerr("[profile] render reason=%s vp=%.0f styles=%u sheets=%u "
+                       "free=%.1fms parse=%.1fms%s sheetscan=%.1fms "
+                       "css1=%.1fms style1=%.1fms layout1=%.1fms "
+                       "containers=%u container=%.1fms css2=%.1fms "
+                       "style2=%.1fms layout2=%.1fms render=%.1fms "
+                       "subres=%.1fms size=%.1fms total=%.1fms\n",
+                       reason, viewport_width, style_count, (guint)sheet_count,
                        (t_after_free   - t_start)        / 1000.0,
                        (t_after_parse  - t_after_free)   / 1000.0,
                        parsed_fresh ? "" : "(cached)",
+                       (t_before_layout - t_after_parse)  / 1000.0,
+                       rp.css1_us / 1000.0,
+                       rp.style1_us / 1000.0,
+                       rp.layout1_us / 1000.0,
+                       rp.containers,
+                       rp.container_us / 1000.0,
+                       rp.css2_us / 1000.0,
+                       rp.style2_us / 1000.0,
+                       rp.layout2_us / 1000.0,
                        (t_after_layout- t_before_layout) / 1000.0,
+                       (t_after_kicks - t_after_layout)   / 1000.0,
+                       (t_end - t_after_kicks)            / 1000.0,
                        (t_end         - t_start)         / 1000.0);
         }
     }
@@ -1269,7 +1384,17 @@ ns_window_js_flush_layout(gpointer user_data)
     gboolean mutated = ns_js_consume_mutated(w->js);
     gboolean dirty = !w->layout_tree || mutated;
     if (!dirty) return;
-    if (mutated && w->layout_tree) w->layout_dirty = TRUE;
+    if (mutated && w->layout_tree) {
+        w->layout_dirty = TRUE;
+        if (w->last_render_us > 250000) {
+            ns_window_schedule_relayout(w,
+                ns_window_adaptive_relayout_delay(
+                    w, 250, ns_window_relayout_max_delay(w, 2500)),
+                "js-flush");
+            return;
+        }
+        w->layout_dirty_reason = "js-flush";
+    }
     double vw = w->last_viewport_w > 0 ? w->last_viewport_w : ns_layout_viewport();
     ns_window_ensure_layout(w, vw);
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
@@ -2927,6 +3052,23 @@ static void ns_window_after_zoom(ns_window *w);
 static void on_win_zoom_in(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_win_zoom_out(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
+static gboolean
+ns_window_should_defer_draw_layout(ns_window *w, double viewport_width)
+{
+    if (!w || !w->layout_tree || !w->layout_dirty ||
+        !w->js_relayout_idle_id)
+        return FALSE;
+    if (fabs(viewport_width - w->last_viewport_w) >= 16.0)
+        return FALSE;
+    gint64 now = g_get_monotonic_time();
+    guint delay = 0;
+    if (w->js_relayout_deadline_us > now)
+        delay = (guint)((w->js_relayout_deadline_us - now + 999) / 1000);
+    ns_window_profile_relayout_timer(w, "defer-draw",
+                                     w->layout_dirty_reason, delay, now);
+    return TRUE;
+}
+
 gboolean
 ns_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy,
                      gpointer user_data)
@@ -3145,21 +3287,68 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
         if (page > 0) vw = page;
         else { int sww = gtk_widget_get_width(sw); if (sww > 0) vw = (double)sww; }
     }
-    ns_window_ensure_layout(w, vw);
+    if (!ns_window_should_defer_draw_layout(w, vw))
+        ns_window_ensure_layout(w, vw);
     if (!w->layout_tree) return;
     ns_paint_set_js(w->js);
     ns_paint_set_anim(w->anim);
     gboolean profile = ns_profile_enabled();
+    if (profile) ns_paint_stats_reset();
     gint64 t_paint = profile ? g_get_monotonic_time() : 0;
+    double clip_x = 0;
+    double clip_y = 0;
+    double clip_w = width;
+    double clip_h = height;
+    if (sw) {
+        GtkAdjustment *ha =
+            gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(sw));
+        GtkAdjustment *va =
+            gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sw));
+        if (ha) {
+            double page = gtk_adjustment_get_page_size(ha);
+            if (page > 0) {
+                clip_x = gtk_adjustment_get_value(ha);
+                clip_w = page;
+            }
+        }
+        if (va) {
+            double page = gtk_adjustment_get_page_size(va);
+            if (page > 0) {
+                clip_y = gtk_adjustment_get_value(va);
+                clip_h = page;
+            }
+        }
+    }
+    cairo_save(cr);
+    cairo_rectangle(cr, clip_x, clip_y, clip_w, clip_h);
+    cairo_clip(cr);
     ns_paint_with_selection(cr, w->layout_tree, w->search_query, &w->selection);
+    cairo_restore(cr);
     gint64 paint_us = g_get_monotonic_time() - t_paint;
-    ns_debug_log_emit(NS_DLOG_RENDER, "paint",
-                      "vp=%d total=%.1fms%s",
-                      width, paint_us / 1000.0,
-                      w->first_paint_done ? "" : " (first)");
+    ns_paint_stats ps = {0};
+    if (profile) ns_paint_stats_get(&ps);
+    if (profile) {
+        ns_debug_log_emit(NS_DLOG_RENDER, "paint",
+                          "vp=%d total=%.1fms boxes=%u culled=%u%s",
+                          width, paint_us / 1000.0,
+                          ps.boxes_seen, ps.culled_bounds + ps.offscreen,
+                          w->first_paint_done ? "" : " (first)");
+    } else {
+        ns_debug_log_emit(NS_DLOG_RENDER, "paint",
+                          "vp=%d total=%.1fms%s",
+                          width, paint_us / 1000.0,
+                          w->first_paint_done ? "" : " (first)");
+    }
     if (profile)
-        g_printerr("[profile] paint vp=%d total=%.1fms\n",
-                   width, paint_us / 1000.0);
+        g_printerr("[profile] paint vp=%d total=%.1fms boxes=%u "
+                   "hidden=%u skipped=%u culled=%u offscreen=%u "
+                   "blocks=%u inlines=%u images=%u videos=%u canvases=%u "
+                   "groups=%u clips=%u sorted=%u/%u\n",
+                   width, paint_us / 1000.0, ps.boxes_seen,
+                   ps.hidden, ps.skipped_top, ps.culled_bounds, ps.offscreen,
+                   ps.blocks, ps.inlines, ps.images, ps.videos, ps.canvases,
+                   ps.grouped, ps.overflow_clips,
+                   ps.sorted_parents, ps.sorted_children);
     w->first_paint_done = TRUE;
 }
 
@@ -3228,7 +3417,8 @@ on_image_ready(ns_image *img, gpointer user_data)
     if (w->mode != NS_VIEW_RENDER || !w->drawing_area) return;
     if (ns_window_image_ready_needs_relayout(w, img)) {
         ns_window_schedule_relayout(w,
-            ns_window_adaptive_relayout_delay(w, 250, 1500));
+            ns_window_adaptive_relayout_delay(
+                w, 250, ns_window_relayout_max_delay(w, 1500)), "image");
     } else {
         gtk_widget_queue_draw(w->drawing_area);
     }

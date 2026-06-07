@@ -156,6 +156,7 @@ typedef struct ns_window {
     gint64       js_relayout_deadline_us;
     gint64       last_wheel_us;
     gboolean     layout_dirty;
+    const char  *layout_dirty_reason;
     double       last_viewport_w;
 
     struct {

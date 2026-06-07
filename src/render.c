@@ -6,6 +6,7 @@
 #include "render.h"
 
 #include <math.h>
+#include <string.h>
 
 #include "font.h"
 #include "net.h"
@@ -148,38 +149,66 @@ render_effective_viewport_width(const ns_render_ctx *c)
 }
 
 GHashTable *
-ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout)
+ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
+                           ns_render_profile *profile)
 {
     if (out_layout) *out_layout = NULL;
     if (!c || !out_layout) return NULL;
+    if (profile) memset(profile, 0, sizeof *profile);
 
     double viewport_width = render_effective_viewport_width(c);
     ns_css_set_viewport(viewport_width, c->viewport_height);
     ns_css_set_focus_node(c->focused_input);
+    gint64 t0 = profile ? g_get_monotonic_time() : 0;
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+    gint64 t1 = profile ? g_get_monotonic_time() : 0;
 
     render_style_pass(c, styles);
+    gint64 t2 = profile ? g_get_monotonic_time() : 0;
 
     ns_box *layout = ns_layout_build(c->doc, styles, viewport_width,
                                      c->focused_input, c->caret_byte,
                                      c->sel_anchor_byte,
                                      c->images, c->base_url);
+    gint64 t3 = profile ? g_get_monotonic_time() : 0;
+    if (profile) {
+        profile->css1_us = t1 - t0;
+        profile->style1_us = t2 - t1;
+        profile->layout1_us = t3 - t2;
+    }
 
     gboolean want_cq = FALSE;
     for (guint i = 0; i < c->n_sheets && !want_cq; i++)
         want_cq = ns_css_stylesheet_has_container_rules(c->sheets[i]);
 
     GHashTable *containers = ns_css_container_map_new();
+    gint64 tc0 = profile ? g_get_monotonic_time() : 0;
     if (want_cq) render_collect_containers(layout, containers);
-    if (g_hash_table_size(containers) > 0) {
+    gint64 tc1 = profile ? g_get_monotonic_time() : 0;
+    guint n_containers = g_hash_table_size(containers);
+    if (profile) {
+        profile->container_us = tc1 - tc0;
+        profile->containers = n_containers;
+    }
+    if (n_containers > 0) {
+        if (profile) profile->container_pass = TRUE;
         ns_css_set_container_map(containers);
+        gint64 t4 = profile ? g_get_monotonic_time() : 0;
         GHashTable *styles2 = ns_css_compute(c->doc, c->sheets, c->n_sheets);
+        gint64 t5 = profile ? g_get_monotonic_time() : 0;
         ns_css_set_container_map(NULL);
         render_style_pass(c, styles2);
+        gint64 t6 = profile ? g_get_monotonic_time() : 0;
         ns_box *layout2 = ns_layout_build(c->doc, styles2, viewport_width,
                                           c->focused_input, c->caret_byte,
                                           c->sel_anchor_byte,
                                           c->images, c->base_url);
+        gint64 t7 = profile ? g_get_monotonic_time() : 0;
+        if (profile) {
+            profile->css2_us = t5 - t4;
+            profile->style2_us = t6 - t5;
+            profile->layout2_us = t7 - t6;
+        }
         ns_box_free(layout);
         g_hash_table_destroy(styles);
         layout = layout2;
@@ -194,4 +223,10 @@ ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout)
     }
     *out_layout = layout;
     return styles;
+}
+
+GHashTable *
+ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout)
+{
+    return ns_render_relayout_profile(c, out_layout, NULL);
 }

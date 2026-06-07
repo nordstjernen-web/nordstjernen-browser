@@ -37,7 +37,22 @@ typedef struct ns_render_ctx {
     gpointer                        cb_ud;
 } ns_render_ctx;
 
+typedef struct ns_render_profile {
+    gint64 css1_us;
+    gint64 style1_us;
+    gint64 layout1_us;
+    gint64 container_us;
+    gint64 css2_us;
+    gint64 style2_us;
+    gint64 layout2_us;
+    guint  containers;
+    gboolean container_pass;
+} ns_render_profile;
+
 GHashTable *ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout);
+GHashTable *ns_render_relayout_profile(const ns_render_ctx *c,
+                                       ns_box **out_layout,
+                                       ns_render_profile *profile);
 
 G_END_DECLS
 

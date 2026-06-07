@@ -23,6 +23,7 @@ typedef struct ns_profile_result {
     gint64          wall_us;
     gboolean        ok;
     char           *error_message;
+    GArray         *stack_rows;
     GArray         *top_rows;
     GArray         *leaf_rows;
 } ns_profile_result;

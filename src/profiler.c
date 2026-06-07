@@ -24,8 +24,10 @@ typedef struct ns_profile_job {
     guint                  thread_snapshots;
     guint                  interval_ms;
     gint64                 t_start_us;
+    GHashTable            *stack_counts;
     GHashTable            *top_counts;
     GHashTable            *leaf_counts;
+    GHashTable            *current_stack_seen;
     char                  *current_top_fn;
     char                  *current_leaf_fn;
     gboolean               saw_any_frame;
@@ -50,6 +52,11 @@ ns_profile_result_free(ns_profile_result *r)
 {
     if (!r) return;
     g_free(r->error_message);
+    if (r->stack_rows) {
+        for (guint i = 0; i < r->stack_rows->len; i++)
+            g_free(g_array_index(r->stack_rows, ns_profile_row, i).function);
+        g_array_free(r->stack_rows, TRUE);
+    }
     if (r->top_rows) {
         for (guint i = 0; i < r->top_rows->len; i++)
             g_free(g_array_index(r->top_rows, ns_profile_row, i).function);
@@ -96,8 +103,10 @@ ns_profile_job_free(ns_profile_job *j)
         g_subprocess_force_exit(j->child);
         g_clear_object(&j->child);
     }
+    if (j->stack_counts) g_hash_table_destroy(j->stack_counts);
     if (j->top_counts)  g_hash_table_destroy(j->top_counts);
     if (j->leaf_counts) g_hash_table_destroy(j->leaf_counts);
+    if (j->current_stack_seen) g_hash_table_destroy(j->current_stack_seen);
     g_free(j->current_top_fn);
     g_free(j->current_leaf_fn);
     g_free(j->error_message);
@@ -119,6 +128,7 @@ ns_profile_emit_done(ns_profile_job *j)
     r->ok                = (j->error_message == NULL) && (j->samples_taken > 0);
     r->error_message     = j->error_message;
     j->error_message     = NULL;
+    r->stack_rows = ns_profile_rows_from_counts(j->stack_counts);
     r->top_rows  = ns_profile_rows_from_counts(j->top_counts);
     r->leaf_rows = ns_profile_rows_from_counts(j->leaf_counts);
 
@@ -162,21 +172,28 @@ ns_profile_line_is_frame(const char *line, guint *out_index)
 }
 
 static void
+ns_profile_count(GHashTable *counts, const char *fn)
+{
+    if (!counts || !fn) return;
+    gpointer cur = g_hash_table_lookup(counts, fn);
+    guint nv = GPOINTER_TO_UINT(cur) + 1;
+    g_hash_table_replace(counts, g_strdup(fn), GUINT_TO_POINTER(nv));
+}
+
+static void
 ns_profile_finalise_thread(ns_profile_job *j)
 {
     if (!j->saw_any_frame) return;
-    if (j->current_top_fn) {
-        gpointer cur = g_hash_table_lookup(j->top_counts, j->current_top_fn);
-        guint nv = GPOINTER_TO_UINT(cur) + 1;
-        g_hash_table_replace(j->top_counts, g_strdup(j->current_top_fn),
-                             GUINT_TO_POINTER(nv));
-    }
-    if (j->current_leaf_fn) {
-        gpointer cur = g_hash_table_lookup(j->leaf_counts, j->current_leaf_fn);
-        guint nv = GPOINTER_TO_UINT(cur) + 1;
-        g_hash_table_replace(j->leaf_counts, g_strdup(j->current_leaf_fn),
-                             GUINT_TO_POINTER(nv));
-    }
+    if (j->current_top_fn)
+        ns_profile_count(j->top_counts, j->current_top_fn);
+    if (j->current_leaf_fn)
+        ns_profile_count(j->leaf_counts, j->current_leaf_fn);
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, j->current_stack_seen);
+    while (g_hash_table_iter_next(&it, &key, &val))
+        ns_profile_count(j->stack_counts, key);
+    g_hash_table_remove_all(j->current_stack_seen);
     j->thread_snapshots++;
     g_clear_pointer(&j->current_top_fn,  g_free);
     g_clear_pointer(&j->current_leaf_fn, g_free);
@@ -252,6 +269,8 @@ ns_profile_ingest_line(ns_profile_job *j, const char *line)
     if (!ns_profile_is_uninteresting_frame(fn)) {
         g_free(j->current_leaf_fn);
         j->current_leaf_fn = g_strdup(fn);
+        if (!g_hash_table_contains(j->current_stack_seen, fn))
+            g_hash_table_add(j->current_stack_seen, g_strdup(fn));
     }
     j->saw_any_frame = TRUE;
     g_free(fn);
@@ -317,10 +336,12 @@ ns_profiler_run_async(guint samples, guint interval_ms,
             r.samples_requested = samples;
             r.interval_ms       = interval_ms;
             r.error_message     = g_strdup("gdb not found in PATH");
-            r.top_rows  = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
-            r.leaf_rows = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.stack_rows = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.top_rows   = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.leaf_rows  = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
             done(&r, user_data);
             g_free(r.error_message);
+            g_array_free(r.stack_rows, TRUE);
             g_array_free(r.top_rows, TRUE);
             g_array_free(r.leaf_rows, TRUE);
         }
@@ -344,7 +365,7 @@ ns_profiler_run_async(guint samples, guint interval_ms,
         "  if ! gdb -batch -p $PID \\\n"
         "      -ex 'set pagination off' \\\n"
         "      -ex 'set print frame-arguments none' \\\n"
-        "      -ex 'thread apply all -- bt 16' 2>/dev/null; then\n"
+        "      -ex 'thread apply all -- bt 64' 2>/dev/null; then\n"
         "    echo '===PROFILER-ERROR=== gdb attach failed (ptrace blocked?)'\n"
         "    exit 1\n"
         "  fi\n"
@@ -367,10 +388,12 @@ ns_profiler_run_async(guint samples, guint interval_ms,
             r.interval_ms       = interval_ms;
             r.error_message = g_strdup_printf("spawn failed: %s",
                                               err ? err->message : "?");
-            r.top_rows  = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
-            r.leaf_rows = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.stack_rows = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.top_rows   = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
+            r.leaf_rows  = g_array_new(FALSE, FALSE, sizeof(ns_profile_row));
             done(&r, user_data);
             g_free(r.error_message);
+            g_array_free(r.stack_rows, TRUE);
             g_array_free(r.top_rows, TRUE);
             g_array_free(r.leaf_rows, TRUE);
         }
@@ -385,8 +408,11 @@ ns_profiler_run_async(guint samples, guint interval_ms,
     j->samples_requested = samples;
     j->interval_ms       = interval_ms;
     j->t_start_us        = g_get_monotonic_time();
-    j->top_counts  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    j->leaf_counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    j->stack_counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    j->top_counts   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    j->leaf_counts  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    j->current_stack_seen =
+        g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     j->progress  = progress;
     j->done      = done;
     j->user_data = user_data;

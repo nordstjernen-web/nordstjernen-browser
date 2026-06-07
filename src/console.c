@@ -270,10 +270,25 @@ ns_console_profile_done(const ns_profile_result *r, gpointer user_data)
     if (denom == 0) return;
 
     ns_console_profile_append(w,
-        "Hot C functions (leaf, ignoring poll/main-loop):");
+        "Hot C functions (any stack frame, ignoring poll/main-loop):");
     ns_console_profile_append(w,
         "  hits   pct  function");
     guint shown = 0;
+    for (guint i = 0; i < r->stack_rows->len && shown < 30; i++) {
+        ns_profile_row row = g_array_index(r->stack_rows, ns_profile_row, i);
+        double pct = 100.0 * (double)row.hits / (double)denom;
+        char *line = g_strdup_printf("  %4u  %5.1f%%  %s",
+                                     row.hits, pct, row.function);
+        ns_console_profile_append(w, line);
+        g_free(line);
+        shown++;
+    }
+    ns_console_profile_append(w, "");
+    ns_console_profile_append(w,
+        "Hot C functions (leaf, ignoring poll/main-loop):");
+    ns_console_profile_append(w,
+        "  hits   pct  function");
+    shown = 0;
     for (guint i = 0; i < r->leaf_rows->len && shown < 20; i++) {
         ns_profile_row row = g_array_index(r->leaf_rows, ns_profile_row, i);
         double pct = 100.0 * (double)row.hits / (double)denom;
