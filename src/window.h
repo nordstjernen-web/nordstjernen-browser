@@ -159,6 +159,7 @@ typedef struct ns_window {
     gint64       last_image_request_us;
     gint64       image_backoff_until_us;
     double       last_visible_image_top;
+    gboolean     initial_image_burst_done;
     gboolean     layout_dirty;
     const char  *layout_dirty_reason;
     double       last_viewport_w;

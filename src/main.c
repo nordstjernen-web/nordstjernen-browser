@@ -65,6 +65,7 @@
 #define NS_APP_ID     "com.nordstjernen.Browser"
 #define NS_TITLE      "Nordstjernen"
 #define NS_IMAGE_START_GAP_US (300 * G_TIME_SPAN_MILLISECOND)
+#define NS_INITIAL_IMAGE_BURST 4
 
 static char         *g_startup_url_override;
 static char         *g_screenshot_path;
@@ -110,6 +111,7 @@ static void ns_browser_close_tab(ns_window *w);
 static void ns_window_update_tab_label(ns_window *w);
 static void ns_setup_bookmarks_watch(GtkApplication *app);
 static void ns_window_kick_image_loads(ns_window *w);
+static void ns_window_kick_initial_visible_image_loads(ns_window *w);
 static void ns_window_maybe_kick_visible_image_loads(ns_window *w,
                                                      gboolean force);
 static void ns_window_kick_video_loads(ns_window *w);
@@ -323,6 +325,11 @@ ns_window_clear_cache(ns_window *w)
     g_clear_handle_id(&w->js_relayout_idle_id, g_source_remove);
     w->js_relayout_deadline_us = 0;
     w->last_wheel_us = 0;
+    w->last_visible_image_kick_us = 0;
+    w->last_image_request_us = 0;
+    w->image_backoff_until_us = 0;
+    w->last_visible_image_top = 0;
+    w->initial_image_burst_done = FALSE;
 }
 
 static void
@@ -1330,6 +1337,7 @@ ns_window_ensure_layout(ns_window *w, double viewport_width)
     g_ptr_array_free(owned_sheets, TRUE);
     g_ptr_array_free(page_sheets, TRUE);
     ns_window_apply_page_title(w);
+    ns_window_kick_initial_visible_image_loads(w);
     ns_window_kick_image_loads(w);
     ns_window_kick_video_loads(w);
     ns_window_kick_stylesheet_loads(w);
@@ -4049,27 +4057,35 @@ ns_window_image_next_delay_ms(ns_window *w, gint64 now_us)
 }
 
 static gboolean
-ns_window_image_slot_available(guint inflight, guint limit, guint started)
+ns_window_image_slot_available(guint inflight, guint limit,
+                               guint started, guint burst_limit)
 {
-    return inflight < limit && started == 0;
+    return inflight < limit && started < burst_limit;
 }
 
 static ns_image *
 ns_window_request_image(ns_window *w, const char *src, const char *kind,
                         guint *inflight, guint limit,
-                        guint *started, gboolean *deferred)
+                        guint *started, guint burst_limit,
+                        gboolean bypass_gap, gboolean *deferred)
 {
     if (!src || g_str_has_prefix(src, "nd-inline-svg:")) return NULL;
     char *abs = ns_resolve_url(w, src);
     if (!abs) return NULL;
     gint64 now_us = g_get_monotonic_time();
+    gboolean local_data = g_str_has_prefix(abs, "data:");
     ns_image *cached = ns_image_cache_peek(w->images, abs);
     if (cached && !ns_image_should_retry(cached, now_us)) {
         g_free(abs);
         return cached;
     }
-    if (!ns_window_image_slot_available(*inflight, limit, *started) ||
-        ns_window_image_next_delay_ms(w, now_us) > 0) {
+    guint delay = ns_window_image_next_delay_ms(w, now_us);
+    gboolean blocked_by_gap = delay > 0 &&
+        (!bypass_gap || w->image_backoff_until_us > now_us);
+    if (!local_data &&
+        (!ns_window_image_slot_available(*inflight, limit,
+                                         *started, burst_limit) ||
+         blocked_by_gap)) {
         if (deferred) *deferred = TRUE;
         g_free(abs);
         return NULL;
@@ -4085,15 +4101,19 @@ ns_window_request_image(ns_window *w, const char *src, const char *kind,
     if (ns_image_inflight(img) && !was_inflight &&
         (!cached || img->attempts > attempts_before)) {
         (*inflight)++;
-        (*started)++;
-        w->last_image_request_us = now_us;
+        if (!local_data) {
+            (*started)++;
+            w->last_image_request_us = now_us;
+        }
     }
     g_free(abs);
     return img;
 }
 
 static void
-ns_window_kick_image_loads_with_margin(ns_window *w, double margin)
+ns_window_kick_image_loads_with_margin(ns_window *w, double margin,
+                                       guint burst_limit,
+                                       gboolean bypass_gap)
 {
     if (!w->layout_tree || !w->images) return;
     gint64 now_us = g_get_monotonic_time();
@@ -4103,6 +4123,7 @@ ns_window_kick_image_loads_with_margin(ns_window *w, double margin)
     guint inflight = ns_window_image_inflight_count(imgs);
     guint limit = ns_window_image_inflight_limit(w);
     guint started = 0;
+    if (burst_limit == 0) burst_limit = 1;
     gboolean deferred = FALSE;
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
@@ -4115,13 +4136,15 @@ ns_window_kick_image_loads_with_margin(ns_window *w, double margin)
         if (box->media->image_src && !box->media->image) {
             box->media->image = ns_window_request_image(w,
                 box->media->image_src, "image",
-                &inflight, limit, &started, &deferred);
+                &inflight, limit, &started, burst_limit,
+                bypass_gap, &deferred);
             if (deferred) break;
         }
         if (box->media->bg_image_src && !box->media->bg_image) {
             box->media->bg_image = ns_window_request_image(w,
                 box->media->bg_image_src, "image",
-                &inflight, limit, &started, &deferred);
+                &inflight, limit, &started, burst_limit,
+                bypass_gap, &deferred);
             if (deferred) break;
         }
         if (box->media->bg_layer_srcs) {
@@ -4134,7 +4157,8 @@ ns_window_kick_image_loads_with_margin(ns_window *w, double margin)
                 if (ns_image_should_retry(cur, now_us)) cur = NULL;
                 if (cur) continue;
                 ns_image *img = ns_window_request_image(w, src, "image",
-                    &inflight, limit, &started, &deferred);
+                    &inflight, limit, &started, burst_limit,
+                    bypass_gap, &deferred);
                 if (deferred) break;
                 if (!img) continue;
                 box->media->bg_layer_images->pdata[li] = img;
@@ -4154,14 +4178,30 @@ static void
 ns_window_kick_image_loads(ns_window *w)
 {
     ns_window_kick_image_loads_with_margin(w,
-        ns_window_image_prefetch_margin(w));
+        ns_window_image_prefetch_margin(w), 1, FALSE);
 }
 
 static void
 ns_window_kick_visible_image_loads(ns_window *w)
 {
     ns_window_kick_image_loads_with_margin(w,
-        ns_window_image_visible_margin(w));
+        ns_window_image_visible_margin(w), 1, FALSE);
+}
+
+static void
+ns_window_kick_initial_visible_image_loads(ns_window *w)
+{
+    if (!w || w->initial_image_burst_done) return;
+    if (w->css_inflight > 0) return;
+    w->initial_image_burst_done = TRUE;
+    w->last_visible_image_kick_us = g_get_monotonic_time();
+    w->last_visible_image_top = w->render_vadj
+        ? gtk_adjustment_get_value(w->render_vadj) : 0;
+    double margin = ns_window_visible_page_height(w) * 0.25;
+    if (margin < 300) margin = 300;
+    if (margin > 900) margin = 900;
+    ns_window_kick_image_loads_with_margin(w, margin,
+        NS_INITIAL_IMAGE_BURST, TRUE);
 }
 
 static void
