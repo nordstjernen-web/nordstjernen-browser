@@ -1152,6 +1152,27 @@ build_table(const ns_node *n, GHashTable *styles)
     return table;
 }
 
+static ns_box *
+build_anonymous_cell_table(const ns_node *start, const ns_node *end,
+                           GHashTable *styles)
+{
+    ns_box *row = box_new(NS_BOX_TABLE_ROW);
+    for (const ns_node *c = start; c != end; c = c->next_sibling) {
+        if (!is_cell_element(c, styles)) continue;
+        const ns_style *cs = g_hash_table_lookup(styles, c);
+        if (cs && (style_is_none(cs) || style_is_absolute_or_fixed(cs)))
+            continue;
+        box_append_child(row, build_cell(c, styles));
+    }
+    if (!row->first_child) {
+        ns_box_free(row);
+        return NULL;
+    }
+    ns_box *table = box_new(NS_BOX_TABLE);
+    box_append_child(table, row);
+    return table;
+}
+
 typedef struct collector_ctx {
     GHashTable *styles;
     const char *active_href;
@@ -4056,6 +4077,19 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 c = c->next_sibling;
                 continue;
             }
+        }
+        if (is_cell_element(c, styles)) {
+            const ns_node *start = c;
+            while (c && (is_cell_element(c, styles) ||
+                         (c->kind == NS_NODE_TEXT && text_is_ws_only(c->text))))
+                c = c->next_sibling;
+            if (pending_before) {
+                box_append_child(block, pending_before);
+                pending_before = NULL;
+            }
+            ns_box *anon = build_anonymous_cell_table(start, c, styles);
+            if (anon) box_append_child(block, anon);
+            continue;
         }
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
