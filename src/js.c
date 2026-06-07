@@ -4016,6 +4016,12 @@ ns_element_get_innerHTML(JSContext *ctx, JSValueConst this_val)
 }
 
 static void
+ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
+                                 GPtrArray *added, GPtrArray *removed,
+                                 ns_node *previous_sibling,
+                                 ns_node *next_sibling);
+
+static void
 ns_element_clear_children(ns_node *n)
 {
     ns_node *c = n->first_child;
@@ -4078,6 +4084,28 @@ ns_element_clear_children_recorded(ns_js *js, ns_node *n)
     }
     n->first_child = NULL;
     n->last_child  = NULL;
+}
+
+static GPtrArray *
+ns_element_clear_children_collect(ns_js *js, ns_node *n)
+{
+    if (!js) {
+        ns_element_clear_children(n);
+        return g_ptr_array_new();
+    }
+    GPtrArray *removed = g_ptr_array_new();
+    ns_node *c = n->first_child;
+    while (c) {
+        ns_node *next = c->next_sibling;
+        if (js) ns_ce_disconnect_subtree(js, c);
+        ns_node_remove(c);
+        if (js) g_hash_table_add(js->orphan_nodes, c);
+        g_ptr_array_add(removed, c);
+        c = next;
+    }
+    n->first_child = NULL;
+    n->last_child  = NULL;
+    return removed;
 }
 
 static JSValue
@@ -4198,7 +4226,8 @@ ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_node_free(fragment);
             return JS_UNDEFINED;
         }
-        ns_element_clear_children_recorded(_j, n);
+        GPtrArray *removed = ns_element_clear_children_collect(_j, n);
+        GPtrArray *added = g_ptr_array_new();
         ns_mark_scripts_already_started(fragment);
         ns_node *c = fragment->first_child;
         while (c) {
@@ -4206,10 +4235,12 @@ ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
             ns_node_own_strings_deep(c);
             ns_node_remove(c);
             ns_node_append_child(n, c);
-            if (_j) ns_js_record_child_change(_j, n, c, NULL,
-                                              c->prev_sibling, c->next_sibling);
+            g_ptr_array_add(added, c);
             c = next;
         }
+        if (_j) ns_js_record_child_change_arrays(_j, n, added, removed, NULL, NULL);
+        g_ptr_array_free(added, TRUE);
+        g_ptr_array_free(removed, TRUE);
         ns_node_free(fragment);
     }
     if (_j) {
@@ -14614,6 +14645,54 @@ ns_mut_record_emit(ns_js *js, const char *type, ns_node *target,
 }
 
 static void
+ns_mut_record_emit_child_list_arrays(ns_js *js, ns_node *target,
+                                     GPtrArray *added_nodes,
+                                     GPtrArray *removed_nodes,
+                                     ns_node *previous_sibling,
+                                     ns_node *next_sibling)
+{
+    if (!js || !js->mutation_observers || !target) return;
+    gboolean has_added = added_nodes && added_nodes->len > 0;
+    gboolean has_removed = removed_nodes && removed_nodes->len > 0;
+    if (!has_added && !has_removed) return;
+    ns_node_arm_js_invalidate(target);
+    if (has_added)
+        for (guint i = 0; i < added_nodes->len; i++)
+            ns_node_arm_js_invalidate(g_ptr_array_index(added_nodes, i));
+    if (has_removed)
+        for (guint i = 0; i < removed_nodes->len; i++)
+            ns_node_arm_js_invalidate(g_ptr_array_index(removed_nodes, i));
+    ns_node_arm_js_invalidate(previous_sibling);
+    ns_node_arm_js_invalidate(next_sibling);
+    for (guint oi = 0; oi < js->mutation_observers->len; oi++) {
+        ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, oi);
+        if (!o || o->disconnected || !o->targets) continue;
+        for (guint ti = 0; ti < o->targets->len; ti++) {
+            const ns_mut_target *t = &g_array_index(o->targets, ns_mut_target, ti);
+            if (!t->child_list || !ns_mut_target_covers(t, target)) continue;
+            ns_mut_record_data *rd = g_new0(ns_mut_record_data, 1);
+            rd->type = g_strdup("childList");
+            rd->target = target;
+            if (has_added) {
+                rd->added = g_ptr_array_new();
+                for (guint i = 0; i < added_nodes->len; i++)
+                    g_ptr_array_add(rd->added, g_ptr_array_index(added_nodes, i));
+            }
+            if (has_removed) {
+                rd->removed = g_ptr_array_new();
+                for (guint i = 0; i < removed_nodes->len; i++)
+                    g_ptr_array_add(rd->removed, g_ptr_array_index(removed_nodes, i));
+            }
+            rd->previous_sibling = previous_sibling;
+            rd->next_sibling = next_sibling;
+            g_ptr_array_add(o->records, rd);
+            break;
+        }
+    }
+    if (js->mutation_observers->len > 0) ns_mut_schedule_drain(js);
+}
+
+static void
 ns_qcache_invalidate(ns_js *js)
 {
     if (!js) return;
@@ -14702,6 +14781,36 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
     }
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL);
+}
+
+static void
+ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
+                                 GPtrArray *added, GPtrArray *removed,
+                                 ns_node *previous_sibling,
+                                 ns_node *next_sibling)
+{
+    ns_qcache_invalidate(js);
+    if (js && js->current_doc) {
+        gboolean parent_connected = FALSE;
+        for (const ns_node *p = parent; p; p = p->parent)
+            if (p == js->current_doc) { parent_connected = TRUE; break; }
+        if (removed)
+            for (guint i = 0; i < removed->len; i++) {
+                ns_node *n = g_ptr_array_index(removed, i);
+                ns_doc_id_index_subtree_removed   (js->current_doc, n);
+                ns_doc_class_index_subtree_removed(js->current_doc, n);
+                ns_doc_tag_index_subtree_removed  (js->current_doc, n);
+            }
+        if (parent_connected && added)
+            for (guint i = 0; i < added->len; i++) {
+                ns_node *n = g_ptr_array_index(added, i);
+                ns_doc_id_index_subtree_added   (js->current_doc, n);
+                ns_doc_class_index_subtree_added(js->current_doc, n);
+                ns_doc_tag_index_subtree_added  (js->current_doc, n);
+            }
+    }
+    ns_mut_record_emit_child_list_arrays(js, parent, added, removed,
+                                         previous_sibling, next_sibling);
 }
 
 static void

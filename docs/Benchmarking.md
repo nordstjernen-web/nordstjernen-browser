@@ -269,3 +269,33 @@ the Speedometer `main` (4.0-alpha, "speedometer next") workloads, which share
 the TodoMVC suites; `scripts/speedometer4-bench.sh` drives those directly
 (it fetches the `main` branch and generates a page driver from
 `default-tests.mjs` the same way the 3.1 harness does from `tests.mjs`).
+
+## Batched `innerHTML` replacement records (2026-06-07)
+
+The jQuery, Backbone, Preact, Vue, and Lit TodoMVC paths repeatedly replace a
+list container's full `innerHTML` during add/complete/delete phases. The DOM
+setter previously cleared children and appended parsed children one at a time,
+calling the child-change recorder for every top-level removed and added node.
+Each call invalidated the selector-query cache and walked id/class/tag
+subtrees for document indices, so a full-list replacement paid repeated hash
+and tree-walk overhead before the page immediately forced layout.
+
+`ns_element_set_innerHTML` now batches that full replacement: removed children
+are collected, parsed children are appended, then the query cache and document
+indices are updated once. MutationObserver delivery still receives childList
+records with `addedNodes` / `removedNodes` arrays, matching the operation's
+aggregate shape.
+
+One-iteration Windows snapshot on the 22 TodoMVC suites that produced a
+duration, using the repo drivers (`NS_ITERS=1`, `NS_SETTLE=10000`):
+
+| Driver | Before score | After score | Geomean before | Geomean after | Delta |
+|--------|-------------:|------------:|---------------:|--------------:|------:|
+| Speedometer 3.1 (`release/3.1`) | 0.8283 | 0.9896 | 1207.2 ms | 1010.5 ms | +19.5% |
+| Speedometer main / 4.0-alpha | 0.9591 | 0.9992 | 1042.7 ms | 1000.8 ms | +4.2% |
+
+The largest 3.1 movers were Angular-Complex, Backbone, jQuery, Preact, Svelte,
+and ES6-Webpack. In 4.0-alpha the same change improved the aggregate score,
+with jQuery, Backbone, Vue, ES5, and ES6-Webpack moving most; jQuery-Complex
+remains noisy and should be rechecked with multi-iteration medians before
+treating one run as a regression.
