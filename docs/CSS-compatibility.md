@@ -199,7 +199,7 @@ Snapshot: **1.0.1**, 2026-06-07.
 |-------|:--:|
 | Type / `*` / `.class` / `#id` / `[attr]` (all matchers, `i` flag) | ✅ |
 | Combinators (descendant, `>`, `+`, `~`) | ✅ |
-| Structural (`:first/last/only-child`, `:first/last/only-of-type`, `:nth-child`/`:nth-of-type`/`-last-*`, `:nth-child(… of S)`, `:empty`, `:root`) | ✅ |
+| Structural (`:first/last/only-child`, `:first/last/only-of-type`, `:nth-child`/`:nth-of-type`/`-last-*`, `:nth-child(… of S)`, `:empty`, `:root`) | ✅ | `:empty` follows Selectors 4: comments and document whitespace do not block a match; element children and non-whitespace text do |
 | Logical `:is()` / `:where()` / `:not()` / `:has()` | ✅ (bounded) |
 | Links/state `:link`/`:visited`/`:any-link`/`:hover`/`:active`/`:focus`/`:focus-within`/`:focus-visible`/`:target`/`:target-within` | ✅ |
 | Forms `:checked`/`:default`/`:indeterminate`/`:disabled`/`:enabled`/`:required`/`:optional`/`:valid`/`:invalid`/`:in-range`/`:out-of-range`/`:read-only`/`:read-write`/`:placeholder-shown`/`:blank` | ✅ |

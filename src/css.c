@@ -9945,6 +9945,26 @@ ns_el_is_blank(const ns_node *el)
 }
 
 static gboolean
+ns_text_is_document_ws(const char *text)
+{
+    if (!text) return TRUE;
+    for (const char *p = text; *p; p++)
+        if (!is_ws(*p)) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+ns_el_is_empty(const ns_node *el)
+{
+    for (const ns_node *c = el ? el->first_child : NULL; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT) return FALSE;
+        if (c->kind == NS_NODE_TEXT && !ns_text_is_document_ws(c->text))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
 ns_el_is_link(const ns_node *el)
 {
     if (!ns_element_get_attr(el, "href")) return FALSE;
@@ -10422,7 +10442,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 break;
             }
             case NS_CSS_PC_EMPTY:
-                if (el->first_child) return FALSE;
+                if (!ns_el_is_empty(el)) return FALSE;
                 break;
             case NS_CSS_PC_ROOT:
                 if (el->parent && el->parent->kind == NS_NODE_ELEMENT) return FALSE;
