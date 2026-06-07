@@ -6,6 +6,8 @@ Focused on supporting the HTML and CSS standards.
 Runs on Windows, Mac and Linux, with an Android port in progress (see `android/`).
 Nordstjernen is built in Norway. 
 
+<img src="docs/best-viewed-in-nordstjernen.png" alt="Best viewed in Nordstjernen" width="140">
+
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough.
 
 **Minimalism.** The whole engine is about **102,000 lines of C written by
@@ -174,7 +176,6 @@ See [License.md](License.md). Commercial licenses by agreement.
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
 
 <img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
-<img src="docs/best-viewed-in-nordstjernen.png" alt="Best viewed in Nordstjernen" width="140">
 
 
 ## Builds
