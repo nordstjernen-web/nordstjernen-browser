@@ -3682,6 +3682,25 @@ sticky_length(const ns_css_value *v, double *out)
     return TRUE;
 }
 
+static gboolean g_paint_have_viewport;
+static double g_paint_vp_x0, g_paint_vp_y0, g_paint_vp_x1, g_paint_vp_y1;
+
+void
+ns_paint_set_viewport(double x0, double y0, double x1, double y1)
+{
+    g_paint_have_viewport = (x1 > x0 && y1 > y0);
+    g_paint_vp_x0 = x0;
+    g_paint_vp_y0 = y0;
+    g_paint_vp_x1 = x1;
+    g_paint_vp_y1 = y1;
+}
+
+void
+ns_paint_clear_viewport(void)
+{
+    g_paint_have_viewport = FALSE;
+}
+
 static void
 compute_sticky_offset(const ns_box *b, cairo_t *cr,
                       double *out_dx, double *out_dy)
@@ -3693,6 +3712,12 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
 
     double clip_x1, clip_y1, clip_x2, clip_y2;
     cairo_clip_extents(cr, &clip_x1, &clip_y1, &clip_x2, &clip_y2);
+    if (g_paint_have_viewport) {
+        clip_x1 = g_paint_vp_x0;
+        clip_y1 = g_paint_vp_y0;
+        clip_x2 = g_paint_vp_x1;
+        clip_y2 = g_paint_vp_y1;
+    }
 
     double box_top = b->y;
     double box_h = b->margin.top + b->border.top + b->padding.top +

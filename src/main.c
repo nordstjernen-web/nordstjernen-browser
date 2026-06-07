@@ -3437,6 +3437,10 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
             }
         }
     }
+    double vp_x0 = clip_x;
+    double vp_y0 = clip_y;
+    double vp_x1 = clip_x + clip_w;
+    double vp_y1 = clip_y + clip_h;
     double overscan_y = clip_h * 2.5;
     if (overscan_y < 2000) overscan_y = 2000;
     if (overscan_y > 5000) overscan_y = 5000;
@@ -3450,6 +3454,7 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     double ix1 = ceil(clip_x + clip_w);
     double iy1 = ceil(clip_y + clip_h);
     ns_paint_set_cull_margin(800.0);
+    ns_paint_set_viewport(vp_x0, vp_y0, vp_x1, vp_y1);
     gboolean cacheable = w->tile_cache && !w->focused_input &&
         !w->layout_has_sticky &&
         !w->selection.active && !ns_selection_has_range(&w->selection);
@@ -3470,6 +3475,7 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
         cairo_restore(cr);
     }
     ns_paint_set_cull_margin(400.0);
+    ns_paint_clear_viewport();
     if (profile) {
         gint64 paint_us = g_get_monotonic_time() - t_paint;
         ns_paint_stats ps = {0};
