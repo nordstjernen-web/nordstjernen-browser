@@ -20,6 +20,7 @@
 #include "debuglog.h"
 #include "dom.h"
 #include "engine.h"
+#include "forms.h"
 #include "html.h"
 #include "image.h"
 #include "js.h"
@@ -117,7 +118,20 @@ headless_js_mutated(gpointer user_data) { (void)user_data; }
 
 typedef struct headless_nav_capture {
     char *pending_url;
+    char *pending_post_body;
+    gsize pending_post_len;
+    char *pending_post_ct;
 } headless_nav_capture;
+
+static void
+headless_nav_capture_clear_post(headless_nav_capture *cap)
+{
+    g_free(cap->pending_post_body);
+    cap->pending_post_body = NULL;
+    cap->pending_post_len = 0;
+    g_free(cap->pending_post_ct);
+    cap->pending_post_ct = NULL;
+}
 
 static void
 headless_js_navigate(const char *url, gboolean reload, gpointer user_data)
@@ -176,101 +190,30 @@ headless_reveal_fragment(ns_node *doc, const char *frag)
 }
 
 static void
-headless_form_collect_select(const ns_node *select, GString *q,
-                             gboolean *first, const char *name)
-{
-    if (!ns_element_get_attr(select, "multiple")) {
-        const ns_node *opt = ns_select_chosen_option(select);
-        char *text = ns_option_value_dup(opt);
-        ns_form_urlencoded_append_pair(q, first, name, text ? text : "");
-        g_free(text);
-        return;
-    }
-    for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
-        if (ns_node_is_element_named(c, "optgroup")) {
-            if (ns_element_effectively_disabled(c) ||
-                ns_element_get_attr(c, "disabled"))
-                continue;
-            for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option") &&
-                    ns_element_get_attr(cc, "selected") &&
-                    !ns_element_effectively_disabled(cc)) {
-                    char *text = ns_option_value_dup(cc);
-                    ns_form_urlencoded_append_pair(q, first, name, text ? text : "");
-                    g_free(text);
-                }
-            }
-        } else if (ns_node_is_element_named(c, "option") &&
-                   ns_element_get_attr(c, "selected") &&
-                   !ns_element_effectively_disabled(c)) {
-            char *text = ns_option_value_dup(c);
-            ns_form_urlencoded_append_pair(q, first, name, text ? text : "");
-            g_free(text);
-        }
-    }
-}
-
-static void
-headless_form_collect(const ns_node *form, const ns_node *n, const ns_node *doc,
-                      GString *q, gboolean *first)
-{
-    if (!n) return;
-    if (n->kind == NS_NODE_ELEMENT && n->name) {
-        if (strcmp(n->name, "input") == 0) {
-            const char *name = ns_element_get_attr(n, "name");
-            const char *type = ns_element_get_attr(n, "type");
-            const char *value = ns_element_get_attr(n, "value");
-            if (name && *name && ns_form_owner(n, doc) == form &&
-                !ns_element_effectively_disabled(n)) {
-                gboolean skip = FALSE;
-                if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
-                             g_ascii_strcasecmp(type, "image")  == 0 ||
-                             g_ascii_strcasecmp(type, "button") == 0 ||
-                             g_ascii_strcasecmp(type, "reset")  == 0 ||
-                             g_ascii_strcasecmp(type, "file")   == 0))
-                    skip = TRUE;
-                if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
-                             g_ascii_strcasecmp(type, "radio")    == 0)) {
-                    if (!ns_element_get_attr(n, "checked")) skip = TRUE;
-                    else if (!value) value = "on";
-                }
-                if (!skip)
-                    ns_form_urlencoded_append_pair(q, first, name, value ? value : "");
-            }
-        } else if (strcmp(n->name, "textarea") == 0) {
-            const char *name = ns_element_get_attr(n, "name");
-            if (name && *name && ns_form_owner(n, doc) == form &&
-                !ns_element_effectively_disabled(n)) {
-                char *text = ns_node_collect_text(n);
-                ns_form_urlencoded_append_pair(q, first, name, text ? text : "");
-                g_free(text);
-            }
-        } else if (strcmp(n->name, "select") == 0) {
-            const char *name = ns_element_get_attr(n, "name");
-            if (name && *name && ns_form_owner(n, doc) == form &&
-                !ns_element_effectively_disabled(n))
-                headless_form_collect_select(n, q, first, name);
-        }
-    }
-    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        headless_form_collect(form, c, doc, q, first);
-}
-
-static void
 headless_js_form_submit(const ns_node *form, const ns_node *submitter,
                         gpointer user_data)
 {
-    (void)submitter;
     headless_nav_capture *cap = user_data;
     if (!cap || !form) return;
     const char *method = ns_element_get_attr(form, "method");
-    if (method && g_ascii_strcasecmp(method, "post") == 0) return;
+    gboolean is_post = method && g_ascii_strcasecmp(method, "post") == 0;
     const char *action = ns_element_get_attr(form, "action");
     if (!action) action = "";
     GString *q = g_string_new(NULL);
     gboolean first = TRUE;
     const ns_node *doc = ns_node_root(form);
-    headless_form_collect(form, doc ? doc : form, doc ? doc : form, q, &first);
+    const ns_node *root = doc ? doc : form;
+    ns_form_collect_inputs(form, root, root, q, &first,
+                           submitter != form ? submitter : NULL);
+    headless_nav_capture_clear_post(cap);
+    g_free(cap->pending_url);
+    if (is_post) {
+        cap->pending_url = g_strdup(action);
+        cap->pending_post_len = q->len;
+        cap->pending_post_body = g_string_free(q, FALSE);
+        cap->pending_post_ct = g_strdup("application/x-www-form-urlencoded");
+        return;
+    }
     char *url;
     if (q->len > 0) {
         const char *sep = strchr(action, '?') ? "&" : "?";
@@ -279,12 +222,13 @@ headless_js_form_submit(const ns_node *form, const ns_node *submitter,
         url = g_strdup(action);
     }
     g_string_free(q, TRUE);
-    g_free(cap->pending_url);
     cap->pending_url = url;
 }
 
 static int ns_headless_run_one(const ns_headless_opts *opts,
-                               const char *fetch_url, int hop);
+                               const char *fetch_url, int hop,
+                               const char *post_body, gsize post_len,
+                               const char *post_ct);
 
 int
 ns_headless_run(const ns_headless_opts *opts)
@@ -303,7 +247,7 @@ ns_headless_run(const ns_headless_opts *opts)
     if (opts->debug_levels)
         dlog_sub = ns_debug_log_subscribe(headless_dlog_listener,
                                           GUINT_TO_POINTER(opts->debug_levels));
-    int rc = ns_headless_run_one(opts, opts->url, 0);
+    int rc = ns_headless_run_one(opts, opts->url, 0, NULL, 0, NULL);
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
@@ -446,6 +390,35 @@ headless_edit_replace(headless_flush_ctx *fc, gsize lo, gsize hi, const char *in
 }
 
 static void
+headless_submit_form_from(headless_flush_ctx *fc, headless_nav_capture *nav,
+                          const ns_node *trigger)
+{
+    if (!nav || !trigger) return;
+    if (ns_element_effectively_disabled(trigger)) return;
+    const ns_node *doc = fc->doc ? fc->doc : ns_node_root(trigger);
+    const ns_node *form = ns_form_owner(trigger, doc);
+    if (!form) return;
+    const ns_node *root = doc ? doc : form;
+    if (!ns_element_get_attr(form, "novalidate") &&
+        !ns_element_get_attr(trigger, "formnovalidate")) {
+        const ns_node *bad = ns_form_first_invalid(form, root, root);
+        if (bad) {
+            const char *name = ns_element_get_attr(bad, "name");
+            fprintf(stderr, "[headless] form blocked by invalid field %s\n",
+                    name && *name ? name : "(unnamed)");
+            return;
+        }
+    }
+    if (fc->js) {
+        gboolean prevented = FALSE;
+        ns_js_dispatch_submit_event(fc->js, form, trigger, &prevented);
+        ns_js_consume_mutated(fc->js);
+        if (prevented) return;
+    }
+    headless_js_form_submit(form, trigger, nav);
+}
+
+static void
 headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
                double x, double y)
 {
@@ -513,6 +486,11 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
         return;
     }
     if (prevented) return;
+    for (const ns_node *cur = dom; cur; cur = cur->parent) {
+        if (!ns_form_is_submit_trigger(cur)) continue;
+        headless_submit_form_from(fc, nav, cur);
+        return;
+    }
     if (hit && hit->dom && ns_node_is_element_named(hit->dom, "img") && nav) {
         const char *usemap = ns_element_get_attr(hit->dom, "usemap");
         if (usemap && *usemap && fc->doc) {
@@ -770,7 +748,8 @@ headless_mouse_drag(headless_flush_ctx *fc,
 }
 
 static void
-headless_key(headless_flush_ctx *fc, const char *name)
+headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
+             const char *name)
 {
     if (!fc->focused || !name || !*name) return;
     ns_node *t = (ns_node *)fc->focused;
@@ -783,6 +762,7 @@ headless_key(headless_flush_ctx *fc, const char *name)
     gboolean has_sel = lo != hi;
     gboolean multiline = (t->name && strcmp(t->name, "textarea") == 0) ||
                          ns_node_is_contenteditable_host(t);
+    gboolean key_prevented = FALSE;
     if (fc->js) {
         int key_code = 0;
         const char *jskey = name;
@@ -800,7 +780,8 @@ headless_key(headless_flush_ctx *fc, const char *name)
             }
         if (key_code) {
             ns_js_dispatch_key_event(fc->js, t, "keydown", jskey, jskey,
-                                     key_code, FALSE, FALSE, FALSE, FALSE, NULL);
+                                     key_code, FALSE, FALSE, FALSE, FALSE,
+                                     &key_prevented);
             ns_js_dispatch_key_event(fc->js, t, "keyup", jskey, jskey,
                                      key_code, FALSE, FALSE, FALSE, FALSE, NULL);
             ns_js_consume_mutated(fc->js);
@@ -808,7 +789,10 @@ headless_key(headless_flush_ctx *fc, const char *name)
     }
     if (g_ascii_strcasecmp(name, "Enter") == 0 ||
         g_ascii_strcasecmp(name, "Return") == 0) {
-        if (multiline) headless_edit_replace(fc, lo, hi, "\n");
+        if (multiline)
+            headless_edit_replace(fc, lo, hi, "\n");
+        else if (!key_prevented && t->name && strcmp(t->name, "input") == 0)
+            headless_submit_form_from(fc, nav, t);
         return;
     }
     if (g_ascii_strcasecmp(name, "Backspace") == 0) {
@@ -910,7 +894,7 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
                                   MAX(fc->caret, fc->anchor), a + 5);
         } else if (g_str_has_prefix(a, "key ")) {
             fprintf(stderr, "[headless] key %s\n", a + 4);
-            headless_key(fc, g_strstrip(a + 4));
+            headless_key(fc, nav, g_strstrip(a + 4));
         } else if (g_str_has_prefix(a, "eval ")) {
             char *result = ns_js_eval_source(fc->js, a + 5, "headless-act-eval");
             if (result) {
@@ -1182,10 +1166,14 @@ headless_inspect_at(const ns_box *layout, double x, double y, GString *out)
 }
 
 static int
-ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop)
+ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop,
+                    const char *post_body, gsize post_len, const char *post_ct)
 {
     GError *err = NULL;
-    ns_response *resp = ns_engine_fetch_blocking(fetch_url, NULL, &err);
+    ns_response *resp = post_body
+        ? ns_engine_post_blocking(fetch_url, NULL, post_body, post_len,
+                                  post_ct, &err)
+        : ns_engine_fetch_blocking(fetch_url, NULL, &err);
     if (!resp) {
         const char *emsg = err ? err->message : "unknown error";
         fprintf(stderr, "headless: fetch failed: %s\n", emsg);
@@ -1310,7 +1298,14 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
             next = ns_url_resolve(base, nav_cap.pending_url);
             if (!next) next = g_strdup(nav_cap.pending_url);
         }
-        fprintf(stderr, "[headless follow %s]\n", next);
+        char *next_post_body = nav_cap.pending_post_body;
+        gsize next_post_len = nav_cap.pending_post_len;
+        char *next_post_ct = nav_cap.pending_post_ct;
+        nav_cap.pending_post_body = NULL;
+        nav_cap.pending_post_ct = NULL;
+        nav_cap.pending_post_len = 0;
+        fprintf(stderr, "[headless follow%s %s]\n",
+                next_post_body ? " POST" : "", next);
         g_free(nav_cap.pending_url);
         nav_cap.pending_url = NULL;
         if (js)            ns_js_set_layout_flush_cb(js, NULL, NULL);
@@ -1325,8 +1320,12 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         if (image_cache)   ns_image_cache_free(image_cache);
         g_free(decoded);
         ns_response_free(resp);
-        int rc2 = ns_headless_run_one(opts, next, hop + 1);
+        int rc2 = ns_headless_run_one(opts, next, hop + 1,
+                                      next_post_body, next_post_len,
+                                      next_post_ct);
         g_free(next);
+        g_free(next_post_body);
+        g_free(next_post_ct);
         return rc2;
     }
 
@@ -1422,6 +1421,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
 
     g_free(decoded);
     g_free(nav_cap.pending_url);
+    headless_nav_capture_clear_post(&nav_cap);
     ns_paint_set_anim(NULL);
     if (anim)          ns_anim_free(anim);
     if (js)            ns_js_set_layout_root(js, NULL);

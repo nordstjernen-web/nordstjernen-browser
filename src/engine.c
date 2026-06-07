@@ -44,6 +44,22 @@ ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
     return st.resp;
 }
 
+ns_response *
+ns_engine_post_blocking(const char *url, const char *top_url,
+                        const void *body, gsize body_len,
+                        const char *content_type, GError **error)
+{
+    fetch_state st = {0};
+    st.loop = g_main_loop_new(NULL, FALSE);
+    ns_net_post_async(url, top_url, body, body_len, content_type,
+                      NULL, on_fetch_done, &st);
+    g_main_loop_run(st.loop);
+    g_main_loop_unref(st.loop);
+    if (error) *error = st.error;
+    else g_clear_error(&st.error);
+    return st.resp;
+}
+
 static GBytes *
 fetch_css_bytes(const char *url, GHashTable *cache)
 {
