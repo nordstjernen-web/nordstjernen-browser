@@ -515,6 +515,13 @@ ns_wasm_make_func(JSContext *ctx, JSValueConst instance,
     f->instance = JS_DupValue(ctx, instance);
     f->func = func;
     JS_SetOpaque(obj, f);
+    ns_wasm_instance *wi = ns_wasm_instance_opaque(instance);
+    if (wi && wi->inst) {
+        guint n_params = wasm_func_get_param_count(func, wi->inst);
+        JS_DefinePropertyValueStr(ctx, obj, "length",
+                                  JS_NewInt32(ctx, (int)n_params),
+                                  JS_PROP_CONFIGURABLE);
+    }
     return obj;
 }
 
@@ -1399,6 +1406,9 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
                     JS_FreeValue(ctx, exports);
                     return fn;
                 }
+                JS_DefinePropertyValueStr(ctx, fn, "name",
+                                          JS_NewString(ctx, exp.name),
+                                          JS_PROP_CONFIGURABLE);
                 if (JS_SetPropertyStr(ctx, exports, exp.name, fn) < 0) {
                     JS_FreeValue(ctx, exports);
                     return JS_EXCEPTION;
