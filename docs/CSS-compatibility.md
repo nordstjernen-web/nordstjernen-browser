@@ -12,7 +12,7 @@ guarantee; the browser's runtime behaviour is the source of truth.
 Re-check any row by running the browser against a page that exercises
 the feature (see [How to re-check](#how-to-re-check-this-document)).
 
-Snapshot: **1.0.0**, 2026-06-05.
+Snapshot: **1.0.1**, 2026-06-07.
 
 **Legend:** ✅ implemented · 🟡 partial / approximated · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -201,9 +201,9 @@ Snapshot: **1.0.0**, 2026-06-05.
 | Combinators (descendant, `>`, `+`, `~`) | ✅ |
 | Structural (`:first/last/only-child`, `:first/last/only-of-type`, `:nth-child`/`:nth-of-type`/`-last-*`, `:nth-child(… of S)`, `:empty`, `:root`) | ✅ |
 | Logical `:is()` / `:where()` / `:not()` / `:has()` | ✅ (bounded) |
-| Links/state `:link`/`:visited`/`:any-link`/`:hover`/`:active`/`:focus`/`:focus-within`/`:focus-visible`/`:target` | ✅ |
-| Forms `:checked`/`:disabled`/`:enabled`/`:required`/`:optional`/`:valid`/`:invalid`/`:read-only`/`:read-write`/`:placeholder-shown` | ✅ |
-| `:lang()` / `:dir()` / `:defined` / `:open` / `:popover-open` / `:scope` | ✅ |
+| Links/state `:link`/`:visited`/`:any-link`/`:hover`/`:active`/`:focus`/`:focus-within`/`:focus-visible`/`:target`/`:target-within` | ✅ |
+| Forms `:checked`/`:default`/`:indeterminate`/`:disabled`/`:enabled`/`:required`/`:optional`/`:valid`/`:invalid`/`:in-range`/`:out-of-range`/`:read-only`/`:read-write`/`:placeholder-shown`/`:blank` | ✅ |
+| `:lang()` / `:dir()` / `:defined` / `:open` / `:popover-open` / `:modal` / `:scope` | ✅ |
 | Pseudo-elements `::before`/`::after`/`::first-letter`/`::first-line`/`::marker`/`::placeholder`/`::selection`/`::backdrop` | ✅ (`::backdrop` partial) |
 
 ## At-rules & queries (Conditional 3/4, MQ 4/5, Containment 3, `@scope`)

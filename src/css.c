@@ -1858,6 +1858,10 @@ parse_pseudo_keyword(const char *name, gsize n,
         { "optional",      NS_CSS_PC_OPTIONAL },
         { "valid",         NS_CSS_PC_VALID },
         { "invalid",       NS_CSS_PC_INVALID },
+        { "in-range",      NS_CSS_PC_IN_RANGE },
+        { "out-of-range",  NS_CSS_PC_OUT_OF_RANGE },
+        { "default",       NS_CSS_PC_DEFAULT },
+        { "indeterminate", NS_CSS_PC_INDETERMINATE },
         { "link",          NS_CSS_PC_LINK },
         { "visited",       NS_CSS_PC_VISITED },
         { "any-link",      NS_CSS_PC_ANY_LINK },
@@ -1867,13 +1871,16 @@ parse_pseudo_keyword(const char *name, gsize n,
         { "focus-visible", NS_CSS_PC_FOCUS },
         { "focus-within",  NS_CSS_PC_FOCUS_WITHIN },
         { "target",        NS_CSS_PC_TARGET },
+        { "target-within", NS_CSS_PC_TARGET_WITHIN },
         { "defined",       NS_CSS_PC_DEFINED },
         { "scope",         NS_CSS_PC_SCOPE },
         { "placeholder-shown", NS_CSS_PC_PLACEHOLDER_SHOWN },
         { "read-only",     NS_CSS_PC_READ_ONLY },
         { "read-write",    NS_CSS_PC_READ_WRITE },
+        { "blank",         NS_CSS_PC_BLANK },
         { "open",          NS_CSS_PC_OPEN },
         { "popover-open",  NS_CSS_PC_POPOVER_OPEN },
+        { "modal",         NS_CSS_PC_MODAL },
     };
     for (gsize i = 0; i < G_N_ELEMENTS(table); i++) {
         gsize klen = strlen(table[i].k);
@@ -9811,6 +9818,133 @@ ns_el_is_checked(const ns_node *el)
 }
 
 static gboolean
+ns_el_is_submit_button(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "input")) {
+        const char *type = ns_element_get_attr(el, "type");
+        return type && (g_ascii_strcasecmp(type, "submit") == 0 ||
+                        g_ascii_strcasecmp(type, "image") == 0);
+    }
+    if (!ns_node_is_element_named(el, "button")) return FALSE;
+    const char *type = ns_element_get_attr(el, "type");
+    return !type || !*type ||
+           g_ascii_strcasecmp(type, "submit") == 0 ||
+           g_ascii_strcasecmp(type, "auto") == 0;
+}
+
+static const ns_node *
+ns_css_first_submit_button_for(const ns_node *scan, const ns_node *doc,
+                               const ns_node *owner, int depth)
+{
+    if (!scan || depth >= 512) return NULL;
+    if (scan->kind == NS_NODE_ELEMENT &&
+        ns_el_is_submit_button(scan) &&
+        !ns_element_effectively_disabled(scan) &&
+        ns_form_owner(scan, doc) == owner)
+        return scan;
+    if (ns_node_is_element_named(scan, "template")) return NULL;
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
+        const ns_node *hit =
+            ns_css_first_submit_button_for(c, doc, owner, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
+static gboolean
+ns_el_is_default(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "option"))
+        return ns_element_get_attr(el, "selected") != NULL;
+    if (ns_node_is_element_named(el, "input")) {
+        const char *type = ns_element_get_attr(el, "type");
+        if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
+                     g_ascii_strcasecmp(type, "radio") == 0))
+            return ns_element_get_attr(el, "checked") != NULL;
+    }
+    if (!ns_el_is_submit_button(el)) return FALSE;
+    const ns_node *doc = ns_node_root(el);
+    const ns_node *owner = ns_form_owner(el, doc);
+    if (!owner) return FALSE;
+    return ns_css_first_submit_button_for(doc ? doc : owner, doc, owner, 0) == el;
+}
+
+static gboolean
+ns_css_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
+                               const ns_node *owner, const char *name,
+                               int depth)
+{
+    if (!scan || depth >= 512) return FALSE;
+    if (ns_node_is_element_named(scan, "input")) {
+        const char *type = ns_element_get_attr(scan, "type");
+        if (type && g_ascii_strcasecmp(type, "radio") == 0) {
+            const char *scan_name = ns_element_get_attr(scan, "name");
+            if (!scan_name) scan_name = "";
+            if (strcmp(scan_name, name) == 0 &&
+                ns_form_owner(scan, doc) == owner &&
+                ns_element_get_attr(scan, "checked"))
+                return TRUE;
+        }
+    }
+    if (ns_node_is_element_named(scan, "template")) return FALSE;
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        if (ns_css_radio_group_has_checked(c, doc, owner, name, depth + 1))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_el_is_indeterminate(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "progress"))
+        return ns_element_get_attr(el, "value") == NULL;
+    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    const char *type = ns_element_get_attr(el, "type");
+    if (!type || g_ascii_strcasecmp(type, "radio") != 0) return FALSE;
+    const char *name = ns_element_get_attr(el, "name");
+    if (!name) name = "";
+    const ns_node *doc = ns_node_root(el);
+    const ns_node *owner = ns_form_owner(el, doc);
+    return !ns_css_radio_group_has_checked(doc ? doc : el, doc, owner, name, 0);
+}
+
+static gboolean
+ns_el_range_state(const ns_node *el, gboolean *under, gboolean *over)
+{
+    if (under) *under = FALSE;
+    if (over) *over = FALSE;
+    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    const char *type = ns_element_get_attr(el, "type");
+    if (!ns_input_type_has_number_value(type)) return FALSE;
+    if (!ns_element_get_attr(el, "min") && !ns_element_get_attr(el, "max"))
+        return FALSE;
+    const char *value = ns_element_get_attr(el, "value");
+    if (!value || !*value) return FALSE;
+    return ns_input_value_range_state(el, value, under, over);
+}
+
+static gboolean
+ns_el_is_blank(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "input")) {
+        if (!ns_input_is_text_entry(el)) return FALSE;
+        const char *value = ns_element_get_attr(el, "value");
+        return !value || !*value;
+    }
+    if (!ns_node_is_element_named(el, "textarea")) return FALSE;
+    char *txt = ns_node_collect_text(el);
+    gboolean blank = TRUE;
+    for (const char *p = txt ? txt : ""; *p; p++) {
+        if (!is_ws(*p)) {
+            blank = FALSE;
+            break;
+        }
+    }
+    g_free(txt);
+    return blank;
+}
+
+static gboolean
 ns_el_is_link(const ns_node *el)
 {
     if (!ns_element_get_attr(el, "href")) return FALSE;
@@ -9921,6 +10055,32 @@ ns_css_node_dir(const ns_node *el)
         if (g_ascii_strcasecmp(dir, "rtl") == 0) return "rtl";
     }
     return "ltr";
+}
+
+static gboolean
+ns_css_node_is_target(const ns_node *el)
+{
+    if (!g_target_fragment || !el) return FALSE;
+    const char *eid = ns_element_get_attr(el, "id");
+    if (eid && strcmp(eid, g_target_fragment) == 0) return TRUE;
+    if (el->name && g_ascii_strcasecmp(el->name, "a") == 0) {
+        const char *nm = ns_element_get_attr(el, "name");
+        if (nm && strcmp(nm, g_target_fragment) == 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_css_node_has_target_within(const ns_node *el, int depth)
+{
+    if (!el || depth >= 512) return FALSE;
+    if (el->kind == NS_NODE_ELEMENT && ns_css_node_is_target(el))
+        return TRUE;
+    if (ns_node_is_element_named(el, "template")) return FALSE;
+    for (const ns_node *c = el->first_child; c; c = c->next_sibling)
+        if (ns_css_node_has_target_within(c, depth + 1))
+            return TRUE;
+    return FALSE;
 }
 
 static gboolean
@@ -10308,6 +10468,24 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     ns_css_control_is_valid(el))
                     return FALSE;
                 break;
+            case NS_CSS_PC_IN_RANGE: {
+                gboolean under = FALSE, over = FALSE;
+                if (!ns_el_range_state(el, &under, &over) || under || over)
+                    return FALSE;
+                break;
+            }
+            case NS_CSS_PC_OUT_OF_RANGE: {
+                gboolean under = FALSE, over = FALSE;
+                if (!ns_el_range_state(el, &under, &over) || (!under && !over))
+                    return FALSE;
+                break;
+            }
+            case NS_CSS_PC_DEFAULT:
+                if (!ns_el_is_default(el)) return FALSE;
+                break;
+            case NS_CSS_PC_INDETERMINATE:
+                if (!ns_el_is_indeterminate(el)) return FALSE;
+                break;
             case NS_CSS_PC_NTH_CHILD:
             case NS_CSS_PC_NTH_LAST_CHILD:
             case NS_CSS_PC_NTH_LAST_OF_TYPE:
@@ -10346,15 +10524,14 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 break;
             }
             case NS_CSS_PC_TARGET: {
-                if (!g_target_fragment) return FALSE;
-                const char *eid = ns_element_get_attr(el, "id");
-                if (eid && strcmp(eid, g_target_fragment) == 0) break;
-                if (el->name && g_ascii_strcasecmp(el->name, "a") == 0) {
-                    const char *nm = ns_element_get_attr(el, "name");
-                    if (nm && strcmp(nm, g_target_fragment) == 0) break;
-                }
-                return FALSE;
+                if (!ns_css_node_is_target(el)) return FALSE;
+                break;
             }
+            case NS_CSS_PC_TARGET_WITHIN:
+                if (!g_target_fragment ||
+                    !ns_css_node_has_target_within(el, 0))
+                    return FALSE;
+                break;
             case NS_CSS_PC_DEFINED:
                 if (!el->name) return FALSE;
                 if (!strchr(el->name, '-')) break;
@@ -10368,6 +10545,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 break;
             case NS_CSS_PC_READ_ONLY:
                 if (ns_el_is_read_write(el)) return FALSE;
+                break;
+            case NS_CSS_PC_BLANK:
+                if (!ns_el_is_blank(el)) return FALSE;
                 break;
             case NS_CSS_PC_LANG:
                 if (!ns_css_lang_matches(el, pc->arg)) return FALSE;
@@ -10386,6 +10566,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 if (!ns_element_get_attr(el, "popover") ||
                     !ns_element_get_attr(el, "data-nd-popover-open"))
                     return FALSE;
+                break;
+            case NS_CSS_PC_MODAL:
+                if (ns_dom_active_modal() != el) return FALSE;
                 break;
             }
         }

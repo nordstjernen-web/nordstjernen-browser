@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.0**, 2026-06-05.
+Snapshot: **1.0.1**, 2026-06-07.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -236,7 +236,7 @@ validation.
 |-------|:--:|------|
 | Common idioms (`rel` keywords, etc.) | 🟡 | as above |
 | `disabled` / inert disabling | 🟡 | HTML disabled-capable controls, disabled `fieldset`, and disabled `optgroup` inheritance feed selectors/form submission; `inert` blocks basic focus/click activation |
-| Matching elements via Selectors/CSS | ✅ | rich selector engine (`src/css.c`) with broad structural, state, and functional selector coverage. The Selectors API (`querySelector`/`querySelectorAll`/`matches`/`closest`) throws a `SyntaxError` for an unparseable or non-standard selector — a dangling combinator (`div >`), an unknown pseudo-class (jQuery's `:radio`/`:first`/`:eq`/`:contains`, etc.), or an empty list — via `ns_css_parse_selector_list_checked` (`src/css.c`). Standard-but-unimplemented pseudo-classes (`:default`, `:indeterminate`, …) and the forgiving `:is()`/`:where()` interiors do **not** throw. This is the contract jQuery/Sizzle rely on to fall back to their own engine, so their non-CSS pseudos now resolve correctly |
+| Matching elements via Selectors/CSS | ✅ | rich selector engine (`src/css.c`) with broad structural, state, and functional selector coverage, including the HTML-connected state pseudo-classes `:default`, `:indeterminate`, `:in-range`, `:out-of-range`, `:blank`, `:target-within`, and `:modal`. The Selectors API (`querySelector`/`querySelectorAll`/`matches`/`closest`) throws a `SyntaxError` for an unparseable or non-standard selector — a dangling combinator (`div >`), an unknown pseudo-class (jQuery's `:radio`/`:first`/`:eq`/`:contains`, etc.), or an empty list — via `ns_css_parse_selector_list_checked` (`src/css.c`). Standard-but-still-unimplemented pseudo-classes (`:fullscreen`, `:autofill`, …) and the forgiving `:is()`/`:where()` interiors do **not** throw. This is the contract jQuery/Sizzle rely on to fall back to their own engine, so their non-CSS pseudos now resolve correctly |
 
 ## §5 Microdata
 
@@ -465,7 +465,9 @@ CSS support (abridged):
   fragmented by wrapped line while preserving links and text-style ranges.
 - ✅ Selectors: type/class/id, combinators, attribute, structural &
   state pseudo-classes including `:any-link`, `:lang()`, `:dir()`,
-  `:open`, `:popover-open`, `:nth-last-*`, `:only-of-type`, and
+  `:open`, `:popover-open`, `:modal`, `:default`, `:indeterminate`,
+  `:in-range`, `:out-of-range`, `:blank`, `:target-within`,
+  `:nth-last-*`, `:only-of-type`, and
   `:nth-child(... of selector)`,
   `:is()/:where()/:has()` (bounded),
   `::before/::after`, `::first-letter`, `::first-line`, `::placeholder`.
