@@ -3274,36 +3274,45 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
                int width, int height, gpointer user_data)
 {
     (void)area;
-    (void)height;
     ns_window *w = user_data;
-    cairo_set_source_rgb(cr, 0.94, 0.94, 0.95);
-    cairo_paint(cr);
     if (w->pdf) {
+        cairo_set_source_rgb(cr, 0.94, 0.94, 0.95);
+        cairo_paint(cr);
         double total_h = 0;
         ns_pdf_paint(w->pdf, cr, (double)width, &total_h);
         int h_req = (int)(total_h + 0.5);
         if (h_req > height) gtk_widget_set_size_request(w->drawing_area, -1, h_req);
         return;
     }
-    cairo_set_source_rgb(cr, 1, 1, 1);
-    cairo_paint(cr);
-    if (!w->last_body || !is_html_content_type(w->last_content_type))
+    if (!w->last_body || !is_html_content_type(w->last_content_type)) {
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
         return;
-    if (!w->first_paint_done && w->css_inflight > 0)
+    }
+    if (!w->first_paint_done && w->css_inflight > 0) {
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
         return;
+    }
     double vw = (double)width;
     GtkWidget *sw = gtk_widget_get_ancestor(w->drawing_area,
                                             GTK_TYPE_SCROLLED_WINDOW);
+    GtkAdjustment *ha = NULL;
+    GtkAdjustment *va = NULL;
     if (sw) {
-        GtkAdjustment *ha =
-            gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(sw));
+        ha = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(sw));
+        va = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sw));
         double page = ha ? gtk_adjustment_get_page_size(ha) : 0;
         if (page > 0) vw = page;
         else { int sww = gtk_widget_get_width(sw); if (sww > 0) vw = (double)sww; }
     }
     if (!ns_window_should_defer_draw_layout(w, vw))
         ns_window_ensure_layout(w, vw);
-    if (!w->layout_tree) return;
+    if (!w->layout_tree) {
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        cairo_paint(cr);
+        return;
+    }
     if (w->last_visible_image_kick_us == 0)
         ns_window_maybe_kick_visible_image_loads(w, TRUE);
     ns_paint_set_js(w->js);
@@ -3316,10 +3325,6 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     double clip_w = width;
     double clip_h = height;
     if (sw) {
-        GtkAdjustment *ha =
-            gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(sw));
-        GtkAdjustment *va =
-            gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sw));
         if (ha) {
             double page = gtk_adjustment_get_page_size(ha);
             if (page > 0) {
