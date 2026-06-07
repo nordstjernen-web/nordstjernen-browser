@@ -3163,6 +3163,7 @@ ns_on_drawing_scroll(GtkEventControllerScroll *c, double dx, double dy,
     if (!changed_x && !changed_y) return FALSE;
     target->scroll_x = new_x;
     target->scroll_y = new_y;
+    ns_tile_cache_clear(w->tile_cache);
     gtk_widget_queue_draw(w->drawing_area);
     return TRUE;
 }
