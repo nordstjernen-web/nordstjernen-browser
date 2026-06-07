@@ -1497,6 +1497,7 @@ typedef struct ns_header_ctx {
     char  *last_modified;
     char  *cache_control;
     char  *expires;
+    char  *location;
     GString *raw;
     gboolean set_cookie_seen;
 } ns_header_ctx;
@@ -1587,6 +1588,7 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     else if (header_capture(buffer, bytes, "Content-Disposition:",
                             hc->content_disposition_out))                                     {}
     else if (header_capture(buffer, bytes, "Refresh:", hc->refresh_out))                       {}
+    else if (header_capture(buffer, bytes, "Location:", &hc->location))                        {}
     else if (header_capture(buffer, bytes, "Set-Cookie:", NULL))
         hc->set_cookie_seen = TRUE;
 
@@ -2392,11 +2394,13 @@ response_from_cache_entry(ns_cache_entry *e)
 }
 
 static ns_response *
-ns_fetch_sync(const char *url, const char *top_url, const char *method,
-              const void *body, gsize body_len, const char *content_type,
-              GPtrArray *extra_headers,
-              GCancellable *cancellable, GError **error)
+ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
+                  const void *body, gsize body_len, const char *content_type,
+                  GPtrArray *extra_headers,
+                  GCancellable *cancellable, GError **error,
+                  gboolean follow_redirects, char **location_out)
 {
+    if (location_out) *location_out = NULL;
     ns_response *resp = g_new0(ns_response, 1);
     resp->body = g_byte_array_new();
 
@@ -2523,7 +2527,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
         if (no_proxy && *no_proxy)
             curl_easy_setopt(curl, CURLOPT_NOPROXY, no_proxy);
     }
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, follow_redirects ? 1L : 0L);
     long max_redirs = cfg ? (long)cfg->max_redirects : (long)NS_MAX_REDIRECTS;
     if (max_redirs < 0)                       max_redirs = 0;
     if (max_redirs > (long)NS_MAX_REDIRECTS)  max_redirs = (long)NS_MAX_REDIRECTS;
@@ -2836,6 +2840,7 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(header_ctx.last_modified);
             g_free(header_ctx.cache_control);
             g_free(header_ctx.expires);
+            g_free(header_ctx.location);
             if (header_ctx.raw) g_string_free(header_ctx.raw, TRUE);
             ns_cache_entry_free(cached);
             ns_response_free(resp);
@@ -2870,7 +2875,8 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             resp->content_type = g_strdup(cached->content_type);
             g_free(resp->cors_allow_origin);
             resp->cors_allow_origin = g_strdup(cached->cors_allow_origin);
-        } else if (resp->status > 0 && resp->body && resp->body->len > 0) {
+        } else if (resp->status > 0 && resp->status < 300 &&
+                   resp->body && resp->body->len > 0) {
             ns_cache_put(url, cache_partition,
                          resp->final_url, resp->status,
                          resp->content_type,
@@ -2890,6 +2896,10 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     g_free(header_ctx.last_modified);
     g_free(header_ctx.cache_control);
     g_free(header_ctx.expires);
+    if (location_out)
+        *location_out = header_ctx.location;
+    else
+        g_free(header_ctx.location);
     if (header_ctx.raw) {
         g_free(resp->raw_headers);
         resp->raw_headers = g_string_free(header_ctx.raw, FALSE);
@@ -2901,6 +2911,107 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
     if (origin_held) ns_net_release_origin_slot(origin_slot);
     g_free(origin_slot);
     g_free(hsts_upgraded);
+    return resp;
+}
+
+static gboolean
+ns_fetch_is_navigation(const char *top_url, GPtrArray *extra_headers)
+{
+    if (!top_url) return TRUE;
+    if (!extra_headers) return FALSE;
+    for (guint i = 0; i < extra_headers->len; i++) {
+        const char *h = g_ptr_array_index(extra_headers, i);
+        if (h && g_ascii_strncasecmp(h, "X-ND-Navigate:", 14) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static ns_response *
+ns_fetch_sync(const char *url, const char *top_url, const char *method,
+              const void *body, gsize body_len, const char *content_type,
+              GPtrArray *extra_headers,
+              GCancellable *cancellable, GError **error)
+{
+    if (!ns_fetch_is_navigation(top_url, extra_headers))
+        return ns_fetch_sync_hop(url, top_url, method, body, body_len,
+                                 content_type, extra_headers,
+                                 cancellable, error, TRUE, NULL);
+
+    const ns_config *cfg = ns_config_get();
+    long max_redirs = cfg ? (long)cfg->max_redirects : (long)NS_MAX_REDIRECTS;
+    if (max_redirs < 0)                       max_redirs = 0;
+    if (max_redirs > (long)NS_MAX_REDIRECTS)  max_redirs = (long)NS_MAX_REDIRECTS;
+
+    char *cur_url = g_strdup(url);
+    char *cur_top = g_strdup(top_url);
+    char *cur_method = g_strdup(method && *method ? method : "GET");
+    const void *cur_body = body;
+    gsize cur_len = body_len;
+    const char *cur_ct = content_type;
+    gboolean started_https = g_str_has_prefix(url, "https://");
+    int hops = 0;
+    ns_response *resp = NULL;
+    for (;;) {
+        char *location = NULL;
+        resp = ns_fetch_sync_hop(cur_url, cur_top, cur_method,
+                                 cur_body, cur_len, cur_ct,
+                                 extra_headers, cancellable, error,
+                                 FALSE, &location);
+        if (!resp) {
+            g_free(location);
+            break;
+        }
+        gboolean is_redirect = resp->status == 301 || resp->status == 302 ||
+                               resp->status == 303 || resp->status == 307 ||
+                               resp->status == 308;
+        if (!is_redirect || resp->error || !location || !*location) {
+            g_free(location);
+            break;
+        }
+        if (hops >= max_redirs) {
+            g_free(resp->error);
+            resp->error = g_strdup("too many redirects");
+            g_free(location);
+            break;
+        }
+        const char *base = resp->final_url ? resp->final_url : cur_url;
+        char *next = ns_url_resolve(base, location);
+        g_free(location);
+        if (!next) break;
+        if (!ns_url_is_http_or_https(next) ||
+            (started_https && !g_str_has_prefix(next, "https://"))) {
+            g_free(resp->error);
+            resp->error = g_strdup("redirect to a disallowed URL blocked");
+            g_free(next);
+            break;
+        }
+        if (resp->status == 303 ||
+            ((resp->status == 301 || resp->status == 302) &&
+             g_ascii_strcasecmp(cur_method, "GET") != 0)) {
+            g_free(cur_method);
+            cur_method = g_strdup("GET");
+            cur_body = NULL;
+            cur_len = 0;
+            cur_ct = NULL;
+        }
+        g_free(cur_top);
+        cur_top = NULL;
+        g_free(cur_url);
+        cur_url = next;
+        hops++;
+        ns_response_free(resp);
+        resp = NULL;
+        if (cancellable && g_cancellable_is_cancelled(cancellable)) {
+            g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                                "fetch cancelled");
+            break;
+        }
+    }
+    if (resp) resp->redirect_count = hops;
+    g_free(cur_url);
+    g_free(cur_top);
+    g_free(cur_method);
     return resp;
 }
 

@@ -707,11 +707,12 @@ ns_window_maybe_submit_form(ns_window *w, const ns_node *clicked)
         ns_window_set_busy(w, TRUE);
         ns_window_update_nav_state(w);
         ns_window_set_status(w, "POST %s …", abs_action);
-        ns_net_post_async(abs_action, ns_window_current_url(w),
-                          body->str, body->len,
-                          content_type,
-                          w->current_fetch, ns_on_fetch_done,
-                          ns_fetch_ctx_new(w));
+        const char *nav_headers[] = { "X-ND-Navigate: 1", NULL };
+        ns_net_request_async(abs_action, ns_window_current_url(w),
+                             "POST", body->str, body->len,
+                             content_type, nav_headers,
+                             w->current_fetch, ns_on_fetch_done,
+                             ns_fetch_ctx_new(w));
         g_free(abs_action);
         g_string_free(body, TRUE);
         g_free(content_type);
