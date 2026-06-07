@@ -67,6 +67,7 @@ char  *ns_js_eval_source(ns_js *js, const char *src, const char *origin);
 
 gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
                               gboolean *default_prevented);
+gboolean ns_js_dispatch_beforematch(ns_js *js, const ns_node *target);
 gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,
                                      gboolean *default_prevented);

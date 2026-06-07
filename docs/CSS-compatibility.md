@@ -72,6 +72,7 @@ Snapshot: **1.0.1**, 2026-06-07.
 | `text-overflow: ellipsis` | ✅ | verified on `white-space:nowrap` clipped boxes |
 | `object-fit` / `object-position` | ✅ | replaced-element sizing |
 | `visibility` (`visible`/`hidden`/`collapse`) | ✅ | |
+| `content-visibility` | ❌ | not parsed or laid out yet; HTML `hidden="until-found"` fragment reveal is handled in navigation code rather than through skipped-content layout |
 
 ## Positioned layout (Position 3)
 

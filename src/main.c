@@ -337,6 +337,44 @@ ns_window_scroll_to_fragment(ns_window *w)
     w->pending_fragment = NULL;
 }
 
+static gboolean
+ns_window_reveal_pending_fragment(ns_window *w, gboolean fire_event)
+{
+    if (!w || !w->parsed_doc || !w->pending_fragment ||
+        !*w->pending_fragment ||
+        g_ascii_strcasecmp(w->pending_fragment, "top") == 0)
+        return FALSE;
+    ns_node *target =
+        ns_node_find_fragment_target(w->parsed_doc, w->pending_fragment);
+    if (!target) return FALSE;
+    GPtrArray *hidden = g_ptr_array_new();
+    for (ns_node *cur = target; cur; cur = cur->parent) {
+        if (ns_element_hidden_until_found(cur))
+            g_ptr_array_add(hidden, cur);
+        if (cur == w->parsed_doc) break;
+    }
+    gboolean changed = FALSE;
+    for (gint i = (gint)hidden->len - 1; i >= 0; i--) {
+        ns_node *el = g_ptr_array_index(hidden, i);
+        if (ns_node_root(el) != w->parsed_doc) break;
+        if (!ns_element_hidden_until_found(el)) continue;
+        if (fire_event && w->js) {
+            ns_js_dispatch_beforematch(w->js, el);
+            if (ns_js_consume_mutated(w->js)) changed = TRUE;
+        }
+        if (ns_node_root(el) != w->parsed_doc) break;
+        if (!ns_element_hidden_until_found(el)) continue;
+        ns_element_remove_attr(el, "hidden");
+        changed = TRUE;
+    }
+    g_ptr_array_free(hidden, TRUE);
+    if (changed) {
+        ns_window_drop_layout(w);
+        w->layout_dirty = TRUE;
+    }
+    return changed;
+}
+
 static void
 ns_window_js_log(const char *line, gpointer user_data)
 {
@@ -1271,6 +1309,7 @@ ns_window_follow_href(ns_window *w, const char *href, const char *target,
         w->pending_fragment = g_strdup(frag);
         ns_css_set_target_fragment(*frag ? frag : NULL);
         ns_window_js_soft_nav(new_url, FALSE, w);
+        ns_window_reveal_pending_fragment(w, TRUE);
         w->layout_dirty = TRUE;
         ns_window_ensure_layout(w, ns_layout_viewport());
         ns_window_scroll_to_fragment(w);
@@ -4095,6 +4134,7 @@ ns_on_load_prepared(ns_tab_load_result *prepared, gpointer user_data)
     ns_css_set_target_fragment(
         w->pending_fragment && *w->pending_fragment
             ? w->pending_fragment : NULL);
+    ns_window_reveal_pending_fragment(w, FALSE);
     ns_window_set_stage(w, NS_STAGE_RENDERING);
     ns_window_render(w);
     if (is_html) {
@@ -4430,6 +4470,7 @@ ns_window_load_url(ns_window *w, const char *raw_url, ns_load_source src)
                     ? w->pending_fragment : NULL);
             if (src != NS_LOAD_HISTORY)
                 ns_window_js_soft_nav(new_url, FALSE, w);
+            ns_window_reveal_pending_fragment(w, src != NS_LOAD_HISTORY);
             w->layout_dirty = TRUE;
             ns_window_ensure_layout(w, ns_layout_viewport());
             ns_window_scroll_to_fragment(w);

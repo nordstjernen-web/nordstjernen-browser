@@ -131,6 +131,26 @@ headless_js_navigate(const char *url, gboolean reload, gpointer user_data)
 }
 
 static void
+headless_reveal_fragment(ns_node *doc, const char *frag)
+{
+    ns_node *target = ns_node_find_fragment_target(doc, frag);
+    if (!target) return;
+    GPtrArray *hidden = g_ptr_array_new();
+    for (ns_node *cur = target; cur; cur = cur->parent) {
+        if (ns_element_hidden_until_found(cur))
+            g_ptr_array_add(hidden, cur);
+        if (cur == doc) break;
+    }
+    for (gint i = (gint)hidden->len - 1; i >= 0; i--) {
+        ns_node *el = g_ptr_array_index(hidden, i);
+        if (ns_node_root(el) != doc) break;
+        if (ns_element_hidden_until_found(el))
+            ns_element_remove_attr(el, "hidden");
+    }
+    g_ptr_array_free(hidden, TRUE);
+}
+
+static void
 headless_form_collect_select(const ns_node *select, GString *q,
                              gboolean *first, const char *name)
 {
@@ -1217,7 +1237,9 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
                                           : (double)vw * 0.75;
     ns_css_set_viewport((double)vw, vh);
     const char *frag = opts->url ? strchr(opts->url, '#') : NULL;
-    ns_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
+    const char *target_frag = frag && *(frag + 1) ? frag + 1 : NULL;
+    ns_css_set_target_fragment(target_frag);
+    if (target_frag) headless_reveal_fragment(doc, target_frag);
     GHashTable *css_cache =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                               (GDestroyNotify)g_bytes_unref);

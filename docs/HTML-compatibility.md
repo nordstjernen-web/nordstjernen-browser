@@ -261,7 +261,7 @@ surface).
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `hidden` attribute | ✅ | mapped to `display:none` |
+| `hidden` attribute | 🟡 | `hidden` maps to `display:none`; `HTMLElement.hidden` follows the spec's enumerated getter/setter for `"until-found"`; fragment/hash navigation reveals `hidden="until-found"` ancestors before scrolling, with `beforematch` fired for same-document navigations. The remaining approximation is that hidden-until-found is not rendered with `content-visibility:hidden` before reveal |
 | `inert` attribute | ✅ | excludes the subtree from focus (`focus()`, sequential navigation) and click activation, and an open modal dialog makes the rest of the document inert (`ns_dom_set_active_modal` → `ns_element_effectively_inert`) |
 | Event dispatch / cancellation | 🟡 | DOM listeners, bubbling, `preventDefault()`, and inline `return false`; cancellation now honours `event.cancelable` |
 | `contenteditable` | ✅ | in-page plaintext editing: a `contenteditable` host (`true`, the empty string, or `plaintext-only`) is focusable by click or Tab and edits as a single plaintext run — on focus its content is flattened to text, then the shared text-entry machinery (`ns_node_editable_value`/`ns_node_set_editable_value` in `src/dom.c`) drives a rendered caret, text selection, keyboard caret navigation (arrows, Home/End), insertion, Backspace/Delete, Enter→newline, and copy/cut/paste. Newlines in the host render as forced line breaks (`collect_walk` in `src/layout.c`); `beforeinput`/`input` fire and `document.activeElement`/`:focus` stay in sync. Rich inline structure is not preserved across an edit (the plaintext model); there is no per-range rich-text formatting |

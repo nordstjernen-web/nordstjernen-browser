@@ -16543,6 +16543,17 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
+gboolean
+ns_js_dispatch_beforematch(ns_js *js, const ns_node *target)
+{
+    if (!js || !target) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    JSValue event = ns_make_event(js->ctx, "beforematch", target);
+    JS_SetPropertyStr(js->ctx, event, "bubbles", JS_TRUE);
+    JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
+    return ns_js_dispatch_built_event(js, target, "beforematch", event, NULL);
+}
+
 static void
 ns_js_anim_event_cb(const ns_node *node, const char *type,
                     const char *name, double elapsed_ms, gpointer user)
@@ -21155,10 +21166,13 @@ ns_element_set_scrollLeft(JSContext *ctx, JSValueConst this_val, JSValueConst va
 static JSValue
 ns_element_get_hidden(JSContext *ctx, JSValueConst this_val)
 {
-    (void)ctx;
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_FALSE;
-    return ns_element_get_attr(el, "hidden") ? JS_TRUE : JS_FALSE;
+    const char *hidden = ns_element_get_attr(el, "hidden");
+    if (!hidden) return JS_FALSE;
+    if (g_ascii_strcasecmp(hidden, "until-found") == 0)
+        return JS_NewString(ctx, "until-found");
+    return JS_TRUE;
 }
 
 static JSValue
@@ -21167,8 +21181,22 @@ ns_element_set_hidden(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    if (JS_ToBool(ctx, val)) ns_js_set_attr_recorded(_j, el, "hidden", "");
-    else                     ns_js_remove_attr_recorded(_j, el, "hidden");
+    if (JS_IsString(val)) {
+        const char *s = JS_ToCString(ctx, val);
+        if (s && g_ascii_strcasecmp(s, "until-found") == 0)
+            ns_js_set_attr_recorded(_j, el, "hidden", "until-found");
+        else if (!s || !*s)
+            ns_js_remove_attr_recorded(_j, el, "hidden");
+        else if (JS_ToBool(ctx, val))
+            ns_js_set_attr_recorded(_j, el, "hidden", "");
+        else
+            ns_js_remove_attr_recorded(_j, el, "hidden");
+        if (s) JS_FreeCString(ctx, s);
+    } else if (JS_ToBool(ctx, val)) {
+        ns_js_set_attr_recorded(_j, el, "hidden", "");
+    } else {
+        ns_js_remove_attr_recorded(_j, el, "hidden");
+    }
     return JS_UNDEFINED;
 }
 

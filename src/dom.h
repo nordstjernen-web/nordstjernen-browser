@@ -109,6 +109,8 @@ gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
 const ns_node *ns_node_root(const ns_node *n);
 ns_node    *ns_node_find_first_element(const ns_node *root, const char *tag);
 ns_node    *ns_node_find_by_id(const ns_node *root, const char *id);
+ns_node    *ns_node_find_fragment_target(const ns_node *root, const char *frag);
+gboolean    ns_element_hidden_until_found(const ns_node *el);
 
 void        ns_doc_id_index_build(ns_node *doc);
 void        ns_doc_id_index_register(ns_node *doc, const char *id, ns_node *node);

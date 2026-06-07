@@ -1385,6 +1385,39 @@ ns_node_find_by_id(const ns_node *root, const char *id)
     return ns_node_find_by_id_depth(root, id, 0);
 }
 
+static ns_node *
+ns_node_find_anchor_name_depth(const ns_node *root, const char *name, int depth)
+{
+    if (!root || !name || depth >= NS_DOM_MAX_DEPTH) return NULL;
+    if (ns_node_is_element_named(root, "a")) {
+        const char *n = ns_element_get_attr(root, "name");
+        if (n && strcmp(n, name) == 0) return (ns_node *)root;
+    }
+    if (ns_node_is_element_named(root, "template")) return NULL;
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        ns_node *m = ns_node_find_anchor_name_depth(c, name, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+ns_node *
+ns_node_find_fragment_target(const ns_node *root, const char *frag)
+{
+    if (!root || !frag || !*frag) return NULL;
+    ns_node *by_id = ns_node_find_by_id(root, frag);
+    if (by_id) return by_id;
+    return ns_node_find_anchor_name_depth(root, frag, 0);
+}
+
+gboolean
+ns_element_hidden_until_found(const ns_node *el)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    const char *hidden = ns_element_get_attr(el, "hidden");
+    return hidden && g_ascii_strcasecmp(hidden, "until-found") == 0;
+}
+
 static void
 collect_descendant_text_skip_script(const ns_node *n, GString *out, int depth)
 {
