@@ -21,6 +21,7 @@
 G_BEGIN_DECLS
 
 typedef struct ns_tab_worker ns_tab_worker;
+typedef struct ns_tile_cache ns_tile_cache;
 
 typedef enum ns_view_mode {
     NS_VIEW_RENDER,
@@ -119,6 +120,7 @@ typedef struct ns_window {
     char         *search_query;
 
     ns_image_cache *images;
+    ns_tile_cache  *tile_cache;
     ns_video_cache *videos;
     ns_tab_worker  *worker;
     ns_js          *js;

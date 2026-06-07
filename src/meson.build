@@ -62,6 +62,7 @@ nordstjernen_engine_sources = files(
   'selection.c',
   'tab_worker.c',
   'texture.c',
+  'tile_cache.c',
   'video.c',
   'wasm.c',
   'webcrypto.c',
