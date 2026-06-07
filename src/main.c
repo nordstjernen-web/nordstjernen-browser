@@ -3304,7 +3304,8 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     if (!ns_window_should_defer_draw_layout(w, vw))
         ns_window_ensure_layout(w, vw);
     if (!w->layout_tree) return;
-    ns_window_maybe_kick_visible_image_loads(w, FALSE);
+    if (w->last_visible_image_kick_us == 0)
+        ns_window_maybe_kick_visible_image_loads(w, TRUE);
     ns_paint_set_js(w->js);
     ns_paint_set_anim(w->anim);
     gboolean profile = ns_profile_enabled();
@@ -3353,22 +3354,15 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     ns_paint_with_selection(cr, w->layout_tree, w->search_query, &w->selection);
     cairo_restore(cr);
     ns_paint_set_cull_margin(400.0);
-    gint64 paint_us = g_get_monotonic_time() - t_paint;
-    ns_paint_stats ps = {0};
-    if (profile) ns_paint_stats_get(&ps);
     if (profile) {
+        gint64 paint_us = g_get_monotonic_time() - t_paint;
+        ns_paint_stats ps = {0};
+        ns_paint_stats_get(&ps);
         ns_debug_log_emit(NS_DLOG_RENDER, "paint",
                           "vp=%d total=%.1fms boxes=%u culled=%u%s",
                           width, paint_us / 1000.0,
                           ps.boxes_seen, ps.culled_bounds + ps.offscreen,
                           w->first_paint_done ? "" : " (first)");
-    } else {
-        ns_debug_log_emit(NS_DLOG_RENDER, "paint",
-                          "vp=%d total=%.1fms%s",
-                          width, paint_us / 1000.0,
-                          w->first_paint_done ? "" : " (first)");
-    }
-    if (profile)
         g_printerr("[profile] paint vp=%d total=%.1fms boxes=%u "
                    "hidden=%u skipped=%u culled=%u offscreen=%u "
                    "blocks=%u inlines=%u images=%u videos=%u canvases=%u "
@@ -3378,6 +3372,7 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
                    ps.blocks, ps.inlines, ps.images, ps.videos, ps.canvases,
                    ps.grouped, ps.overflow_clips,
                    ps.sorted_parents, ps.sorted_children);
+    }
     w->first_paint_done = TRUE;
 }
 
@@ -3437,7 +3432,7 @@ on_image_ready(ns_image *img, gpointer user_data)
         ns_debug_log_emit(NS_DLOG_ERROR, "image", "%s: %s",
                           img->url, img->error ? img->error : "failed");
         g_free(line);
-    } else if (img && img->url) {
+    } else if (img && img->url && ns_profile_enabled()) {
         ns_debug_log_emit(NS_DLOG_RENDER, "image",
                           "ready %dx%d %s",
                           img->natural_width, img->natural_height, img->url);
