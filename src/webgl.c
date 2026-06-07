@@ -877,6 +877,9 @@ wgl_pixelStorei(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *a
         g->premultiply = param ? TRUE : FALSE;
     } else if (pname == NS_UNPACK_COLORSPACE_CONVERSION_WEBGL) {
         /* no-op */
+    } else if (g->version < 2 &&
+               pname != GL_PACK_ALIGNMENT && pname != GL_UNPACK_ALIGNMENT) {
+        glPixelStorei(0, 0);
     } else {
         glPixelStorei((GLenum)pname, param);
     }
@@ -1724,7 +1727,12 @@ wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
         return NULL;
     }
     int comps = wgl_components(format);
-    uint8_t *out = g_try_malloc((size_t)w * (size_t)h * (size_t)comps);
+    guint64 total = (guint64)w * (guint64)h * (guint64)comps;
+    if (total == 0 || total > NS_WEBGL_MAX_ALLOC) {
+        cairo_surface_destroy(s);
+        return NULL;
+    }
+    uint8_t *out = g_try_malloc((size_t)total);
     if (!out) {
         cairo_surface_destroy(s);
         return NULL;
