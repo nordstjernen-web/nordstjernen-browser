@@ -121,6 +121,10 @@ typedef struct ns_window {
 
     ns_image_cache *images;
     ns_tile_cache  *tile_cache;
+    guint           tile_prewarm_source;
+    double          tile_prewarm_y;
+    double          tile_prewarm_h;
+    int             tile_prewarm_width;
     ns_video_cache *videos;
     ns_tab_worker  *worker;
     ns_js          *js;

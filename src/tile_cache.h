@@ -39,6 +39,15 @@ void           ns_tile_cache_paint(ns_tile_cache *cache,
                                    double clip_y,
                                    double clip_w,
                                    double clip_h);
+guint          ns_tile_cache_prewarm(ns_tile_cache *cache,
+                                     const ns_box *root,
+                                     const char *highlight_query,
+                                     const void *state_token,
+                                     guint state_flags,
+                                     int target_width,
+                                     double clip_y,
+                                     double clip_h,
+                                     guint max_tiles);
 void           ns_tile_cache_stats_get(const ns_tile_cache *cache,
                                        ns_tile_cache_stats *out);
 

@@ -26,6 +26,7 @@ struct ns_tile_cache {
     const void *state_token;
     guint state_flags;
     int width;
+    double root_bottom;
     gsize bytes;
     guint last_hits;
     guint last_misses;
@@ -65,6 +66,7 @@ ns_tile_cache_clear(ns_tile_cache *cache)
     cache->state_token = NULL;
     cache->state_flags = 0;
     cache->width = 0;
+    cache->root_bottom = 0;
     cache->bytes = 0;
     cache->last_hits = 0;
     cache->last_misses = 0;
@@ -128,8 +130,29 @@ ns_tile_cache_set_key(ns_tile_cache *cache,
     cache->width = width;
     cache->state_token = state_token;
     cache->state_flags = state_flags;
+    cache->root_bottom = 0;
     g_free(cache->highlight_query);
     cache->highlight_query = g_strdup(highlight_query);
+}
+
+static gboolean
+ns_tile_cache_prepare(ns_tile_cache *cache,
+                      const ns_box *root,
+                      const char *highlight_query,
+                      const void *state_token,
+                      guint state_flags,
+                      int target_width)
+{
+    if (!cache || !root) return FALSE;
+    if (target_width <= 0 || target_width > NS_TILE_CACHE_MAX_WIDTH)
+        return FALSE;
+    if (ns_tile_cache_key_changed(cache, root, highlight_query,
+                                  state_token, state_flags, target_width)) {
+        ns_tile_cache_clear(cache);
+        ns_tile_cache_set_key(cache, root, highlight_query,
+                              state_token, state_flags, target_width);
+    }
+    return TRUE;
 }
 
 static void
@@ -209,6 +232,39 @@ ns_tile_cache_evict(ns_tile_cache *cache)
     }
 }
 
+static gboolean
+ns_tile_cache_try_prewarm(ns_tile_cache *cache,
+                          const ns_box *root,
+                          const char *highlight_query,
+                          int target_width,
+                          int tile_index,
+                          gint64 *now_us)
+{
+    if (tile_index < 0) return FALSE;
+    gpointer key = ns_tile_cache_key(tile_index);
+    if (g_hash_table_lookup(cache->tiles, key)) return FALSE;
+    ns_tile_cache_tile *tile = ns_tile_cache_render_tile(
+        root, highlight_query, NULL, target_width, tile_index);
+    if (!tile) return FALSE;
+    tile->last_used_us = (*now_us)++;
+    cache->bytes += tile->bytes;
+    g_hash_table_insert(cache->tiles, key, tile);
+    ns_tile_cache_evict(cache);
+    return TRUE;
+}
+
+static double
+ns_tile_cache_root_bottom(ns_tile_cache *cache,
+                          const ns_box *root,
+                          double minimum)
+{
+    if (cache->root_bottom <= 0)
+        ns_box_content_extent(root, NULL, &cache->root_bottom);
+    if (cache->root_bottom < minimum)
+        cache->root_bottom = minimum;
+    return cache->root_bottom;
+}
+
 void
 ns_tile_cache_paint(ns_tile_cache *cache,
                     cairo_t *cr,
@@ -234,12 +290,9 @@ ns_tile_cache_paint(ns_tile_cache *cache,
                                    x0, y0, x1 - x0, y1 - y0);
         return;
     }
-    if (ns_tile_cache_key_changed(cache, root, highlight_query,
-                                  state_token, state_flags, target_width)) {
-        ns_tile_cache_clear(cache);
-        ns_tile_cache_set_key(cache, root, highlight_query,
-                              state_token, state_flags, target_width);
-    }
+    if (!ns_tile_cache_prepare(cache, root, highlight_query,
+                               state_token, state_flags, target_width))
+        return;
 
     cache->last_hits = 0;
     cache->last_misses = 0;
@@ -280,6 +333,52 @@ ns_tile_cache_paint(ns_tile_cache *cache,
     }
     cairo_restore(cr);
     ns_tile_cache_evict(cache);
+}
+
+guint
+ns_tile_cache_prewarm(ns_tile_cache *cache,
+                      const ns_box *root,
+                      const char *highlight_query,
+                      const void *state_token,
+                      guint state_flags,
+                      int target_width,
+                      double clip_y,
+                      double clip_h,
+                      guint max_tiles)
+{
+    if (clip_h <= 0 || max_tiles == 0) return 0;
+    if (!ns_tile_cache_prepare(cache, root, highlight_query,
+                               state_token, state_flags, target_width))
+        return 0;
+
+    double y0 = floor(clip_y);
+    double y1 = ceil(clip_y + clip_h);
+    if (y1 <= y0) return 0;
+    int first = (int)floor(y0 / NS_TILE_CACHE_HEIGHT);
+    int last = (int)floor((y1 - 1) / NS_TILE_CACHE_HEIGHT);
+    if (first < 0) first = 0;
+    if (last < first) last = first;
+
+    double root_bottom = ns_tile_cache_root_bottom(cache, root, y1);
+    int max_index = (int)floor((root_bottom - 1) / NS_TILE_CACHE_HEIGHT);
+
+    guint warmed = 0;
+    gint64 now_us = g_get_monotonic_time();
+    for (int distance = 1; warmed < max_tiles &&
+         distance <= NS_TILE_CACHE_MAX_TILES; distance++) {
+        int below = last + distance;
+        if (below <= max_index &&
+            ns_tile_cache_try_prewarm(cache, root, highlight_query,
+                                      target_width, below, &now_us))
+            warmed++;
+        if (warmed >= max_tiles) break;
+        int above = first - distance;
+        if (above >= 0 &&
+            ns_tile_cache_try_prewarm(cache, root, highlight_query,
+                                      target_width, above, &now_us))
+            warmed++;
+    }
+    return warmed;
 }
 
 void

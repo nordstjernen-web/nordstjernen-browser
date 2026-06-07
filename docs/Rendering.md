@@ -23,6 +23,13 @@ The tile cache is intentionally retained on the main thread. Cairo surfaces are
 created and consumed from the same thread as GTK drawing, avoiding cross-thread
 ownership of live layout, DOM nodes, Pango objects, or GTK state.
 
+After a cacheable draw, Nordstjernen schedules one low-priority idle prewarm for
+the next uncached tile adjacent to the overscanned viewport. That keeps nearby
+article content ready for the next wheel scroll while limiting idle work to a
+single tile per draw cycle. It may run while a deferred relayout is pending
+because that retained layout is still the one being drawn; the subsequent layout
+rebuild cancels pending prewarm work and clears the cache.
+
 ## Invalidation
 
 The cache is cleared when the underlying static paint can change:
