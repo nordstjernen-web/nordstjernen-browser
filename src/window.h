@@ -155,6 +155,8 @@ typedef struct ns_window {
     guint        js_relayout_idle_id;
     gint64       js_relayout_deadline_us;
     gint64       last_wheel_us;
+    gint64       last_visible_image_kick_us;
+    double       last_visible_image_top;
     gboolean     layout_dirty;
     const char  *layout_dirty_reason;
     double       last_viewport_w;

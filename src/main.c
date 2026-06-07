@@ -109,6 +109,8 @@ static void ns_browser_close_tab(ns_window *w);
 static void ns_window_update_tab_label(ns_window *w);
 static void ns_setup_bookmarks_watch(GtkApplication *app);
 static void ns_window_kick_image_loads(ns_window *w);
+static void ns_window_maybe_kick_visible_image_loads(ns_window *w,
+                                                     gboolean force);
 static void ns_window_kick_video_loads(ns_window *w);
 static void ns_window_kick_favicon(ns_window *w);
 static gboolean ns_window_scroll_image_load_cb(gpointer data);
@@ -3299,6 +3301,7 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     if (!ns_window_should_defer_draw_layout(w, vw))
         ns_window_ensure_layout(w, vw);
     if (!w->layout_tree) return;
+    ns_window_maybe_kick_visible_image_loads(w, FALSE);
     ns_paint_set_js(w->js);
     ns_paint_set_anim(w->anim);
     gboolean profile = ns_profile_enabled();
@@ -3409,7 +3412,8 @@ ns_window_image_ready_needs_relayout(ns_window *w, ns_image *img)
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
         gboolean fixed = box->media->size_independent_of_image ||
-                         box->media->declared_image_size;
+                         box->media->declared_image_size ||
+                         box->media->placeholder_image_size;
         if (box->media->image == (void *)img && !fixed)
             needs = TRUE;
     }
@@ -3899,16 +3903,34 @@ ns_box_in_fixed_layer(const ns_box *box)
     return FALSE;
 }
 
+static double
+ns_window_image_prefetch_margin(ns_window *w)
+{
+    double page = ns_window_visible_page_height(w);
+    double margin = page * 3.0;
+    if (margin < 2400) margin = 2400;
+    if (margin > 6000) margin = 6000;
+    return margin;
+}
+
+static double
+ns_window_image_visible_margin(ns_window *w)
+{
+    double page = ns_window_visible_page_height(w);
+    double margin = page * 1.5;
+    if (margin < 1200) margin = 1200;
+    if (margin > 2600) margin = 2600;
+    return margin;
+}
+
 static gboolean
-ns_window_image_box_near_view(const ns_window *w, const ns_box *box)
+ns_window_image_box_in_margin(const ns_window *w, const ns_box *box,
+                              double margin)
 {
     if (!w || !box || !w->render_vadj) return TRUE;
     if (ns_box_in_fixed_layer(box)) return TRUE;
     double top = gtk_adjustment_get_value(w->render_vadj);
     double page = ns_window_visible_page_height((ns_window *)w);
-    double margin = page * 3.0;
-    if (margin < 2400) margin = 2400;
-    if (margin > 6000) margin = 6000;
     double box_h = box->content_height + box->padding.top + box->padding.bottom +
                    box->border.top + box->border.bottom;
     if (box_h < 1) box_h = 1;
@@ -3981,6 +4003,12 @@ ns_window_image_inflight_count(GPtrArray *imgs)
         if (!box || !box->media) continue;
         if (ns_image_inflight(box->media->image)) n++;
         if (ns_image_inflight(box->media->bg_image)) n++;
+        if (box->media->bg_layer_images) {
+            for (guint li = 0; li < box->media->bg_layer_images->len; li++)
+                if (ns_image_inflight(g_ptr_array_index(
+                        box->media->bg_layer_images, li)))
+                    n++;
+        }
     }
     return n;
 }
@@ -3992,8 +4020,40 @@ ns_window_image_inflight_limit(ns_window *w)
     return 6;
 }
 
+static gboolean
+ns_window_image_slot_available(guint inflight, guint limit,
+                               guint started, guint burst)
+{
+    return inflight < limit || started < burst;
+}
+
+static ns_image *
+ns_window_request_image(ns_window *w, const char *src, const char *kind,
+                        guint *inflight, guint limit,
+                        guint *started, guint burst)
+{
+    if (!src || g_str_has_prefix(src, "nd-inline-svg:")) return NULL;
+    if (!ns_window_image_slot_available(*inflight, limit, *started, burst))
+        return NULL;
+    char *abs = ns_resolve_url(w, src);
+    if (!abs) return NULL;
+    if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, kind)) {
+        g_free(abs);
+        return NULL;
+    }
+    ns_image *img = ns_image_cache_get(w->images, abs,
+        ns_window_current_url(w), on_image_ready, w);
+    if (ns_image_inflight(img)) {
+        (*inflight)++;
+        (*started)++;
+    }
+    g_free(abs);
+    return img;
+}
+
 static void
-ns_window_kick_image_loads(ns_window *w)
+ns_window_kick_image_loads_with_margin(ns_window *w, double margin,
+                                       guint burst)
 {
     if (!w->layout_tree || !w->images) return;
     gint64 now_us = g_get_monotonic_time();
@@ -4002,43 +4062,24 @@ ns_window_kick_image_loads(ns_window *w)
     ns_window_sort_images_by_view(w, imgs);
     guint inflight = ns_window_image_inflight_count(imgs);
     guint limit = ns_window_image_inflight_limit(w);
+    guint started = 0;
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
-        if (!ns_window_image_box_near_view(w, box)) continue;
+        if (!ns_window_image_box_in_margin(w, box, margin)) continue;
         if (ns_image_should_retry(box->media->image, now_us))
             box->media->image = NULL;
         if (ns_image_should_retry(box->media->bg_image, now_us))
             box->media->bg_image = NULL;
-        if (box->media->image_src &&
-            !box->media->image &&
-            !g_str_has_prefix(box->media->image_src, "nd-inline-svg:")) {
-            if (inflight >= limit) continue;
-            char *abs = ns_resolve_url(w, box->media->image_src);
-            if (abs) {
-                if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
-                    g_free(abs);
-                } else {
-                    box->media->image = ns_image_cache_get(w->images, abs,
-                        ns_window_current_url(w), on_image_ready, w);
-                    if (ns_image_inflight(box->media->image)) inflight++;
-                    g_free(abs);
-                }
-            }
+        if (box->media->image_src && !box->media->image) {
+            box->media->image = ns_window_request_image(w,
+                box->media->image_src, "image",
+                &inflight, limit, &started, burst);
         }
         if (box->media->bg_image_src && !box->media->bg_image) {
-            if (inflight >= limit) continue;
-            char *abs = ns_resolve_url(w, box->media->bg_image_src);
-            if (abs) {
-                if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
-                    g_free(abs);
-                } else {
-                    box->media->bg_image = ns_image_cache_get(w->images, abs,
-                        ns_window_current_url(w), on_image_ready, w);
-                    if (ns_image_inflight(box->media->bg_image)) inflight++;
-                    g_free(abs);
-                }
-            }
+            box->media->bg_image = ns_window_request_image(w,
+                box->media->bg_image_src, "image",
+                &inflight, limit, &started, burst);
         }
         if (box->media->bg_layer_srcs) {
             for (guint li = 0; li < box->media->bg_layer_srcs->len; li++) {
@@ -4049,22 +4090,45 @@ ns_window_kick_image_loads(ns_window *w)
                     g_ptr_array_index(box->media->bg_layer_images, li);
                 if (ns_image_should_retry(cur, now_us)) cur = NULL;
                 if (cur) continue;
-                if (inflight >= limit) break;
-                char *abs = ns_resolve_url(w, src);
-                if (!abs) continue;
-                if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
-                    g_free(abs);
-                    continue;
-                }
-                ns_image *img = ns_image_cache_get(w->images, abs,
-                    ns_window_current_url(w), on_image_ready, w);
+                ns_image *img = ns_window_request_image(w, src, "image",
+                    &inflight, limit, &started, burst);
+                if (!img) continue;
                 box->media->bg_layer_images->pdata[li] = img;
-                if (ns_image_inflight(img)) inflight++;
-                g_free(abs);
             }
         }
     }
     g_ptr_array_free(imgs, TRUE);
+}
+
+static void
+ns_window_kick_image_loads(ns_window *w)
+{
+    ns_window_kick_image_loads_with_margin(w,
+        ns_window_image_prefetch_margin(w), 0);
+}
+
+static void
+ns_window_kick_visible_image_loads(ns_window *w)
+{
+    ns_window_kick_image_loads_with_margin(w,
+        ns_window_image_visible_margin(w), 4);
+}
+
+static void
+ns_window_maybe_kick_visible_image_loads(ns_window *w, gboolean force)
+{
+    if (!w || !w->layout_tree || !w->images) return;
+    gint64 now_us = g_get_monotonic_time();
+    double top = w->render_vadj ? gtk_adjustment_get_value(w->render_vadj) : 0;
+    double page = ns_window_visible_page_height(w);
+    double moved = fabs(top - w->last_visible_image_top);
+    if (!force && w->last_visible_image_kick_us > 0 &&
+        now_us - w->last_visible_image_kick_us < 80 * G_TIME_SPAN_MILLISECOND &&
+        moved < page * 0.2)
+        return;
+    w->last_visible_image_kick_us = now_us;
+    w->last_visible_image_top = top;
+    ns_window_kick_visible_image_loads(w);
 }
 
 static gboolean
@@ -4073,8 +4137,10 @@ ns_window_scroll_image_load_cb(gpointer data)
     ns_window *w = data;
     if (!w) return G_SOURCE_REMOVE;
     w->scroll_image_source = 0;
-    if (w->mode == NS_VIEW_RENDER)
+    if (w->mode == NS_VIEW_RENDER) {
+        ns_window_maybe_kick_visible_image_loads(w, TRUE);
         ns_window_kick_image_loads(w);
+    }
     return G_SOURCE_REMOVE;
 }
 
@@ -4085,6 +4151,7 @@ ns_window_render_vadjustment_changed(GtkAdjustment *adj, gpointer ud)
     ns_window *w = ud;
     if (!w || w->mode != NS_VIEW_RENDER) return;
     if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
+    ns_window_maybe_kick_visible_image_loads(w, FALSE);
     ns_window_schedule_image_kick(w, 40);
 }
 

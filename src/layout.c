@@ -3485,6 +3485,17 @@ ns_svg_outer_with_defs(const ns_node *n)
     return g_string_free(aug, FALSE);
 }
 
+static double
+image_dimension_attr(const ns_node *n, const char *name)
+{
+    const char *s = ns_element_get_attr(n, name);
+    if (!s || !*s) return 0;
+    char *end = NULL;
+    double v = g_ascii_strtod(s, &end);
+    if (end == s || !(v > 0)) return 0;
+    return v;
+}
+
 static ns_box *
 build_image_box(const ns_node *n)
 {
@@ -3515,16 +3526,23 @@ build_image_box(const ns_node *n)
     box->dom = img;
     ns_box_media *m = ns_box_media_ensure(box);
     m->image_src = url;
-    const char *ws = ns_element_get_attr(img, "width");
-    const char *hs = ns_element_get_attr(img, "height");
-    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : 0;
-    box->content_height = hs ? g_ascii_strtod(hs, NULL) : 0;
+    box->content_width = image_dimension_attr(img, "width");
+    box->content_height = image_dimension_attr(img, "height");
+    double file_w = image_dimension_attr(img, "data-file-width");
+    double file_h = image_dimension_attr(img, "data-file-height");
+    if (box->content_width <= 0 && box->content_height > 0 &&
+        file_w > 0 && file_h > 0)
+        box->content_width = box->content_height * file_w / file_h;
+    if (box->content_height <= 0 && box->content_width > 0 &&
+        file_w > 0 && file_h > 0)
+        box->content_height = box->content_width * file_h / file_w;
     m->declared_image_size =
         box->content_width > 0 && box->content_height > 0;
     if (!m->declared_image_size && url &&
         box->content_width <= 0 && box->content_height <= 0) {
         box->content_width = 200;
         box->content_height = 150;
+        m->placeholder_image_size = TRUE;
     }
     if (g_image_cache_for_layout) {
         char *abs = g_base_url_for_layout
@@ -5424,6 +5442,7 @@ layout_image(ns_box *box, double parent_content_width)
     const ns_css_value *mnh = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
 
     gboolean declared_size = box->media && box->media->declared_image_size;
+    gboolean placeholder_size = box->media && box->media->placeholder_image_size;
     double w = -1, h = -1;
     if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
         w = length_resolve(wv, parent_content_width, -1);
@@ -5447,7 +5466,7 @@ layout_image(ns_box *box, double parent_content_width)
                    ? (double)img->natural_height : -1;
     if (box->media)
         box->media->size_independent_of_image =
-            (w >= 0 && h >= 0) || declared_size;
+            (w >= 0 && h >= 0) || declared_size || placeholder_size;
 
     if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
