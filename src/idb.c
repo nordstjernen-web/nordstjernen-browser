@@ -610,7 +610,12 @@ ns_idb_backend_next_key(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, store);
         return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
-    sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+    if (sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK) {
+        JSValue e = ns_idb_throw_sql(ctx, h->db);
+        ns_idb_db_close(h);
+        JS_FreeCString(ctx, store);
+        return e;
+    }
     sqlite3_stmt *st = NULL;
     int64_t key = 1;
     gboolean ok = sqlite3_prepare_v2(h->db,
@@ -712,7 +717,12 @@ ns_idb_backend_put(JSContext *ctx, JSValueConst this_val,
         return ns_idb_throw(ctx, "UnknownError", "Could not open IndexedDB database");
     }
     gboolean ok = TRUE;
-    sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL);
+    if (sqlite3_exec(h->db, "BEGIN IMMEDIATE", NULL, NULL, NULL) != SQLITE_OK) {
+        JSValue e = ns_idb_throw_sql(ctx, h->db);
+        ns_idb_db_close(h);
+        ns_idb_free_cstrings(ctx, 2, store, key);
+        return e;
+    }
     if (add_only) {
         sqlite3_stmt *exists = NULL;
         ok = sqlite3_prepare_v2(h->db,

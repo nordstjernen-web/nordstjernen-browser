@@ -186,7 +186,7 @@ ns_es_process_line(ns_es_parse *p, const char *line)
         value = g_strdup("");
     }
     if (!strcmp(field, "data")) {
-        if (p->data->len >= NS_ES_MAX_EVENT)
+        if (p->data->len + strlen(value) + 1 > NS_ES_MAX_EVENT)
             p->fatal = TRUE;
         else {
             g_string_append(p->data, value);
@@ -385,7 +385,7 @@ ns_es_new(const char *url, const char *origin, const char *last_event_id,
     es->last_event_id = g_strdup(last_event_id ? last_event_id : "");
     es->reconnect_ms = 3000;
     es->refcount = 1;
-    es->cbs = *cbs;
+    if (cbs) es->cbs = *cbs;
     es->user_data = user_data;
     g_mutex_init(&es->lock);
     ns_es_ref(es);

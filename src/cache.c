@@ -445,6 +445,7 @@ ns_cache_get(const char *url, const char *partition)
     if (dlen > G_MAXUINT || dlen > cache_cap_bytes()) {
         g_free(data);
         ns_cache_entry_free(e);
+        delete_key(key);
         return NULL;
     }
     e->body = g_byte_array_new();

@@ -206,6 +206,20 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
     if (!res || !res->hostname) return FALSE;
     const char *res_scheme = res->protocol ? res->protocol : "";
 
+    if (!scheme_sep) {
+        g_autoptr(ns_url_parts) docp = doc_url ? ns_url_parts_new(doc_url) : NULL;
+        const char *doc_scheme = (docp && docp->protocol) ? docp->protocol : NULL;
+        if (doc_scheme && *doc_scheme) {
+            gboolean scheme_ok =
+                g_ascii_strcasecmp(res_scheme, doc_scheme) == 0 ||
+                (g_ascii_strcasecmp(doc_scheme, "http:") == 0 &&
+                 g_ascii_strcasecmp(res_scheme, "https:") == 0) ||
+                (g_ascii_strcasecmp(doc_scheme, "ws:") == 0 &&
+                 g_ascii_strcasecmp(res_scheme, "wss:") == 0);
+            if (!scheme_ok) return FALSE;
+        }
+    }
+
     const char *port_p = strchr(src_host_start, ':');
     const char *path_p = strchr(src_host_start, '/');
     const char *host_end = src_host_start + strlen(src_host_start);

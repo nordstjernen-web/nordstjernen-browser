@@ -233,6 +233,11 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
                          !g_ascii_strcasecmp(algo, "HKDF");
 
     if (!g_strcmp0(format, "raw") && symmetric) {
+        if (!g_ascii_strncasecmp(algo, "AES", 3) &&
+            len != 16 && len != 24 && len != 32) {
+            if (err) *err = g_strdup("DataError: invalid AES key length");
+            return NULL;
+        }
         ns_crypto_key *k = ns_crypto_key_new(NS_CK_SECRET, algo, hash, NULL,
                                              (int)len * 8, extractable, usages);
         k->raw = g_memdup2(data, len);
@@ -546,6 +551,7 @@ ns_crypto_ecdsa_der_to_raw(const guint8 *der, gsize der_len, int order,
     if (!sig) return NULL;
     const BIGNUM *r, *s;
     ECDSA_SIG_get0(sig, &r, &s);
+    if (!r || !s) { ECDSA_SIG_free(sig); return NULL; }
     guint8 *out = g_malloc0((gsize)order * 2);
     BN_bn2binpad(r, out, order);
     BN_bn2binpad(s, out + order, order);
@@ -562,6 +568,12 @@ ns_crypto_ecdsa_raw_to_der(const guint8 *raw, gsize raw_len, int order,
     ECDSA_SIG *sig = ECDSA_SIG_new();
     BIGNUM *r = BN_bin2bn(raw, order, NULL);
     BIGNUM *s = BN_bin2bn(raw + order, order, NULL);
+    if (!sig || !r || !s) {
+        BN_free(r);
+        BN_free(s);
+        ECDSA_SIG_free(sig);
+        return NULL;
+    }
     ECDSA_SIG_set0(sig, r, s);
     unsigned char *der = NULL;
     int n = i2d_ECDSA_SIG(sig, &der);
@@ -580,8 +592,13 @@ ns_crypto_pkey_sign_setup(EVP_PKEY_CTX *pctx, const ns_crypto_key *k,
     if (!g_strcmp0(k->algo, "RSA-PSS")) {
         if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PSS_PADDING) <= 0)
             return 0;
-        int salt = p->pss_salt_len >= 0 ? p->pss_salt_len
-                                        : EVP_MD_get_size(ns_crypto_md(k->hash));
+        int salt = p->pss_salt_len;
+        if (salt < 0) {
+            const EVP_MD *pss_md = ns_crypto_md(p->sign_hash ? p->sign_hash
+                                                             : k->hash);
+            if (!pss_md) return 0;
+            salt = EVP_MD_get_size(pss_md);
+        }
         if (EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, salt) <= 0) return 0;
     } else if (!g_strcmp0(k->algo, "RSASSA-PKCS1-v1_5")) {
         if (EVP_PKEY_CTX_set_rsa_padding(pctx, RSA_PKCS1_PADDING) <= 0) return 0;
@@ -685,6 +702,8 @@ ns_crypto_is_aes(const char *algo)
 static const EVP_CIPHER *
 ns_crypto_aes_cipher(const char *algo, int bits)
 {
+    if (bits != 128 && bits != 192 && bits != 256)
+        return NULL;
     if (!g_strcmp0(algo, "AES-GCM"))
         return bits == 128 ? EVP_aes_128_gcm()
              : bits == 192 ? EVP_aes_192_gcm() : EVP_aes_256_gcm();
@@ -704,6 +723,17 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
     const EVP_CIPHER *cipher = ns_crypto_aes_cipher(k->algo, k->bits);
     if (!cipher || !k->raw) { if (err) *err = g_strdup("NotSupportedError: AES"); return NULL; }
     gboolean gcm = !g_strcmp0(k->algo, "AES-GCM");
+    if (gcm) {
+        if (!p->iv || p->iv_len == 0) {
+            if (err) *err = g_strdup("OperationError: invalid AES-GCM IV");
+            return NULL;
+        }
+    } else {
+        if (!p->iv || p->iv_len != 16) {
+            if (err) *err = g_strdup("OperationError: invalid AES IV length");
+            return NULL;
+        }
+    }
     int tag_len = gcm ? (p->tag_bits > 0 ? p->tag_bits / 8 : 16) : 0;
     if (gcm) {
         switch (tag_len) {
