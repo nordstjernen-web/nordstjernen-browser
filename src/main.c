@@ -3906,9 +3906,9 @@ ns_window_image_box_near_view(const ns_window *w, const ns_box *box)
     if (ns_box_in_fixed_layer(box)) return TRUE;
     double top = gtk_adjustment_get_value(w->render_vadj);
     double page = ns_window_visible_page_height((ns_window *)w);
-    double margin = page * 5.0;
-    if (margin < 4000) margin = 4000;
-    if (margin > 12000) margin = 12000;
+    double margin = page * 3.0;
+    if (margin < 2400) margin = 2400;
+    if (margin > 6000) margin = 6000;
     double box_h = box->content_height + box->padding.top + box->padding.bottom +
                    box->border.top + box->border.bottom;
     if (box_h < 1) box_h = 1;
@@ -3973,13 +3973,12 @@ ns_image_inflight(const ns_image *img)
 }
 
 static guint
-ns_window_near_image_inflight_count(const ns_window *w, GPtrArray *imgs)
+ns_window_image_inflight_count(GPtrArray *imgs)
 {
     guint n = 0;
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box || !box->media) continue;
-        if (!ns_window_image_box_near_view(w, box)) continue;
         if (ns_image_inflight(box->media->image)) n++;
         if (ns_image_inflight(box->media->bg_image)) n++;
     }
@@ -3989,8 +3988,8 @@ ns_window_near_image_inflight_count(const ns_window *w, GPtrArray *imgs)
 static guint
 ns_window_image_inflight_limit(ns_window *w)
 {
-    double page = ns_window_visible_page_height(w);
-    return page > 1400 ? 30 : 24;
+    (void)w;
+    return 6;
 }
 
 static void
@@ -4001,7 +4000,7 @@ ns_window_kick_image_loads(ns_window *w)
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(w->layout_tree, imgs);
     ns_window_sort_images_by_view(w, imgs);
-    guint inflight = ns_window_near_image_inflight_count(w, imgs);
+    guint inflight = ns_window_image_inflight_count(imgs);
     guint limit = ns_window_image_inflight_limit(w);
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
