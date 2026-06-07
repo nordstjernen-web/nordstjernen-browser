@@ -2,11 +2,11 @@
 
 This document is the plan for the project's public website at
 `https://nordstjernen.org`. The domain is registered as of
-2026-05-12. The browser identifies as
-`Nordstjernen/1.0.0 (+https://nordstjernen.org)` and the
-`about:nordstjernen` page links here, so the site is on the
-critical path for the project's first impression — but it can
-start as a single static page and grow from there.
+2026-05-12. The browser sends a Mozilla-compatible User-Agent
+ending in `Nordstjernen/<version>` (`NS_USER_AGENT` in
+`src/net.h`) and the `about:start` page links here, so the site
+is on the critical path for the project's first impression — but
+it can start as a single static page and grow from there.
 
 ## Goals
 
@@ -86,8 +86,8 @@ a couple of paragraphs each:
 4. **Get it.** One big button: *Download*.
 
 Below the fold: the design constraints (one human's worth of
-code, no plugins, no WebGL, no telemetry, English only) so
-people self-select before downloading.
+code, no plugins, no WebGPU — WebGL is opt-in — no telemetry,
+English only) so people self-select before downloading.
 
 ## Things the website lets the browser do
 
@@ -97,8 +97,9 @@ land cleanly:
 - **Phase 11 auto-updater.** Browser fetches
   `https://nordstjernen.org/manifest.json` once per 24h, compares
   versions, shows a non-blocking popup if newer-by-30-days.
-- **`about:nordstjernen` link target.** Already linked from
-  the about page; just point at the live site.
+- **About-page link target.** The `about:start` page already
+  links to `https://nordstjernen.org`; a dedicated
+  `about:nordstjernen` page (sitemap `/about`) can follow.
 
 ## Things the website should never do
 

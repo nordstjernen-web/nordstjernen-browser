@@ -79,17 +79,22 @@ before any HTML is parsed.
   `~/.netrc`, other browsers' state, shell history — is **not**
   reachable. No directory the renderer can write to is also
   executable.
-- **seccomp-bpf (syscalls).** Default-deny filter that returns `EPERM`
-  for ~210 unrelated syscalls. `execve` / `execveat` are blocked, so a
-  compromised renderer cannot pivot to another interpreter or binary
+- **seccomp-bpf (syscalls).** Default-deny allow-list: the filter is
+  built with `SCMP_ACT_ERRNO(EPERM)` as the default action and then
+  permits only the ~266 syscalls the browser actually needs
+  (`ns_seccomp_allowed_names[]` in `src/security.c`); every other
+  syscall returns `EPERM`. `execve` / `execveat` are not on the list, so
+  a compromised renderer cannot pivot to another interpreter or binary
   even if Landlock would have allowed reading it. `ptrace`, `bpf`,
   `keyctl`, `mount`, `unshare`, `userfaultfd`, the `io_uring_*` family,
-  `perf_event_open`, `kexec_load`, and the module syscalls are not on
-  the list. TSYNC propagates the filter to every thread.
+  `perf_event_open`, `kexec_load`, and the module syscalls are likewise
+  absent from the allow-list. TSYNC propagates the filter to every
+  thread.
 - **Media launcher broker.** Nordstjernen ships no audio/video codecs;
   playback is handed off to an external player. Because the browser
-  process itself has `execve` blocked, a tiny launcher broker is forked
-  at startup **before** either layer is installed and connected over a
+  process itself has `execve` blocked, a tiny launcher broker
+  (`ns_media_broker_start` in `src/media.c`) is forked at startup
+  **before** either layer is installed and connected over a
   `socketpair`. The broker stays outside the sandbox; the browser stays
   inside it. When the user clicks an `<audio>`/`<video>` element the
   browser sends the broker **only** the resolved media URL — never a

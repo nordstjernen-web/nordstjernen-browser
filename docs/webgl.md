@@ -199,8 +199,9 @@ mitigations focus on the parts a hostile page can actually reach.
 - **Allocation + context caps.** A single buffer/texture upload is capped
   (1 GiB) and the number of simultaneous live contexts is capped (32) to
   bound memory and FD/context exhaustion. Canvas dimensions are clamped.
-- **Reduced fingerprinting.** `getParameter(VENDOR)` and `RENDERER` return
-  generic `"Nordstjernen"` strings, and `VERSION` /
+- **Reduced fingerprinting.** `getParameter(VENDOR)` returns a generic
+  `"Nordstjernen"` string and `RENDERER` returns `"Nordstjernen WebGL"`,
+  and `VERSION` /
   `SHADING_LANGUAGE_VERSION` return the WebGL-style version, not the raw
   driver string. There is no `WEBGL_debug_renderer_info` extension, and
   `getSupportedExtensions` returns an empty list. The numeric capability

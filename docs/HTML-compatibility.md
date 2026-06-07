@@ -224,7 +224,8 @@ validation.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | `customElements.define` / `get` | ✅ | `src/js.c` |
-| Autonomous + customized built-in | ✅ | name validation (hyphen required) |
+| Autonomous custom elements | ✅ | name validation (hyphen required); `customElements.define(name, ctor)` |
+| Customized built-in elements (`define(..., {extends})` / `is=`) | ❌ | the `options`/`extends` argument is ignored and there is no `is=` upgrade path (`ns_ce_define` in `src/js.c`) |
 | Lifecycle (`connected`/`disconnected`/`adopted`/`attributeChanged`) callbacks | ✅ | |
 | `observedAttributes` | ✅ | |
 | Shadow DOM (`attachShadow`, slots) | 🟡 | see §4.12 |

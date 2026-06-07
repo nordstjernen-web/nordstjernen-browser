@@ -8,9 +8,10 @@ Nordstjernen is built in Norway.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough.
 
-**Minimalism.** The whole engine is about **88,000 lines of C written by
-Claude and Codex** (93 files in `src/`, excluding the vendored lexbor, QuickJS and Wuffs
-libraries) — small enough for one person to read and audit end-to-end.
+**Minimalism.** The whole engine is about **102,000 lines of C written by
+Claude and Codex** (102 files in `src/`, excluding the vendored lexbor, QuickJS,
+WAMR and Wuffs libraries) — small enough for one person to read and audit
+end-to-end.
 
 **Correctness.** Behaviour is measured against the **spec text**,
 section by section, not against another browser. See the standards table
@@ -25,7 +26,7 @@ Nordstjernen is measured against the **spec text**, section by section,
 not against any other browser. The section-by-section walk-through of
 the in-scope WHATWG HTML standard (§1–§16) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) currently
-records **121 spec rows fully implemented, 57 partial, and 4 absent**
+records **114 spec rows fully implemented, 49 partial, and 4 absent**
 (June 2026), besides a handful that are non-goals by design, such as
 in-process media codecs. Highlights:
 
@@ -123,7 +124,7 @@ moving parts:
 
 | Library | Min version | Role |
 |---------|-------------|------|
-| GTK 4 | **≥ 4.22.4 on Windows** (MSYS2 stock), ≥ 4.14 elsewhere (≥ 4.22 preferred) | UI toolkit, GSK renderer |
+| GTK 4 | **≥ 4.22.1 on Windows** (MSYS2 stock), ≥ 4.14 elsewhere (≥ 4.22 preferred) | UI toolkit, GSK renderer |
 | GLib / GModule | (ships with GTK) | core types, dynamic module loading |
 | libepoxy | — | OpenGL/ES function dispatch for WebGL (`src/webgl.c`) |
 | Pango | (ships with GTK) | text shaping and layout |

@@ -94,8 +94,8 @@ Headless rendering works the same as on Linux:
   via `sudo` unless `NS_ALLOW_ROOT=1` is set.
 - **Keyboard shortcuts.** Every accelerator uses GTK's `<Primary>`
   modifier, which maps to ⌘ on macOS. So `⌘L` focuses the URL bar,
-  `⌘T` / `⌘N` open a new window, `⌘R` reloads, `⌘W` closes the
-  window, `⌘F` opens find-in-page, `⌘+` / `⌘-` / `⌘0` zoom, `⌘P`
+  `⌘T` opens a new tab and `⌘N` a new window, `⌘R` reloads, `⌘W`
+  closes the window, `⌘F` opens find-in-page, `⌘+` / `⌘-` / `⌘0` zoom, `⌘P`
   prints, `⌘⇧J` opens the JS console. Toolbar tooltips render the
   Mac glyphs (`⌘N`, `⌘⇧J`) instead of the Linux/Windows `Ctrl+...`
   strings.

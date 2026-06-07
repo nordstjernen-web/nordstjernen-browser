@@ -96,8 +96,9 @@ ND_WASM_LOG=1 ./builddir/src/nordstjernen --headless --dump=text \
 ## Security posture
 
 wasm runs in the same process as the page's JS, interpreted, with
-software bounds checks on every memory access (`OS_ENABLE_HW_BOUND_CHECK`
-is disabled — no guard-page tricks, no signal handlers). A wasm module
+software bounds checks on every memory access (the WAMR build sets
+`WASM_DISABLE_HW_BOUND_CHECK=1` and `WASM_DISABLE_STACK_HW_BOUND_CHECK=1`
+— no guard-page tricks, no signal handlers). A wasm module
 can reach exactly what its JS imports hand it: there are no WASI
 syscalls, no filesystem, no sockets. The interpreter's operand stack is
 capped (1 MB) and traps surface as catchable `RuntimeError`s.

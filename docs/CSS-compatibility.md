@@ -52,7 +52,7 @@ Snapshot: **1.0.0**, 2026-06-05.
 | `px`, `%`, `em`, `rem` | ✅ | `em`/`rem` resolved against a 16px root in the layout fast path |
 | Viewport units `vw`/`vh`/`vmin`/`vmax`, `sv*`/`lv*`/`dv*`, `vi`/`vb` | ✅ | |
 | Container units `cqw`/`cqh`/`cqi`/`cqb`/`cqmin`/`cqmax` | ✅ | resolved against the nearest container (`container-type`/`container-name`) |
-| Font-relative `cap`, `ic`, `ch`, `ex` | 🟡 | `cap`/`ic` supported; `ch`/`ex` approximated |
+| Font-relative `cap`, `ic`, `ch`, `ex` | 🟡 | fixed-factor approximations of `em`, not font-measured (`ex`/`ch` ≈ 0.5em, `cap` ≈ 0.7em, `ic` ≈ 1.0em in `src/css.c`) |
 | Absolute `Q`, `pt`, `cm`, `mm`, `in`, `pc` | ✅ | exact CSS ratios from `1in = 96px = 2.54cm` (`pt = 96/72`, `cm = 96/2.54`, `mm = 96/25.4`, `Q = 96/101.6`) |
 | `calc()` | ✅ | percentage + px mix; nested |
 | Math `round()` / `mod()` / `rem()` / `abs()` / `min()` / `max()` / `clamp()` | ✅ | the Values 4 length-math subset |
@@ -217,7 +217,8 @@ Snapshot: **1.0.0**, 2026-06-05.
 | `@property` | ✅ | `initial-value` + `inherits` honoured; `syntax` parsed |
 | `@scope` | ✅ | roots/limits, `:scope`, proximity |
 | `@container` + `container-type`/`container-name` | ✅ | container query units resolve |
-| `@page` / `@layer` | 🟡 | `@page` margins limited; `@layer` ordering simplified |
+| `@layer` | 🟡 | ordering simplified (named-layer rank tracking in `src/css.c`) |
+| `@page` | 🚫 | no paged/print path; the at-rule is not parsed |
 
 ---
 
@@ -229,8 +230,8 @@ Project non-goals (see `CLAUDE.md` / `README.md`), not defects:
 - No reliance on **Web/Service Workers** for style (e.g. paint worklets,
   `@property` registered via JS Houdini are not a goal).
 - **Writing modes** and full bidi are not yet implemented.
-- `border-image` and printing (`@page`) beyond basics are out of scope
-  for now.
+- `border-image` and printing (`@page`) are out of scope for now —
+  neither is implemented.
 
 ## Highest-leverage CSS gaps for real-world sites
 

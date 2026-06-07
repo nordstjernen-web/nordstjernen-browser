@@ -57,8 +57,10 @@ two roles they use:
    main loop every couple of seconds; a dedicated watchdog thread (which
    keeps running even when the main loop is wedged) watches that counter,
    and if it stops advancing for longer than the hang timeout it calls
-   `abort()`. The hang thus *becomes a crash*, which role 1 then restarts
-   — so there is exactly one restart path, not two.
+   `_Exit(70)` (`NS_WATCHDOG_HANG_EXIT` in `src/watchdog.c`). The hang
+   thus *becomes a non-zero exit*, which the supervisor in role 1 treats
+   as a crash and restarts — so there is exactly one restart path, not
+   two.
 
 The hang timeout is **`js_eval_budget_ms` + 30 s** (90 s with the default
 60 s JS budget). It is deliberately larger than the JS budget: a long
