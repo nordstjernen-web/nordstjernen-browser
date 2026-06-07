@@ -55,7 +55,10 @@ static GtkWidget *
 make_toolbar_button(const char *icon, const char *tooltip,
                     GCallback handler, ns_window *w)
 {
-    GtkWidget *b = gtk_button_new_from_icon_name(icon);
+    GtkWidget *b = gtk_button_new();
+    GtkWidget *img = gtk_image_new_from_icon_name(icon);
+    gtk_image_set_pixel_size(GTK_IMAGE(img), 24);
+    gtk_button_set_child(GTK_BUTTON(b), img);
     gtk_widget_set_tooltip_text(b, tooltip);
     if (handler) g_signal_connect(b, "clicked", handler, w);
     return b;

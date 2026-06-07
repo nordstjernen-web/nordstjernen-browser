@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="g" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#85cc85"/>
-      <stop offset="1" stop-color="#54a554"/>
+    <linearGradient id="g" x1="12" y1="2.8" x2="12" y2="21.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9ee69e"/>
+      <stop offset="0.5" stop-color="#64c56d"/>
+      <stop offset="1" stop-color="#368e45"/>
     </linearGradient>
   </defs>
-  <path d="M 4.6 11.6 A 7.8 7.8 0 1 1 12.4 19.4"
-        fill="none" stroke="url(#g)" stroke-width="3"
-        stroke-linecap="round"/>
-  <path d="M 7.6 7.6 L 1.5 8.6 L 4.5 14 Z"
-        fill="url(#g)" stroke="url(#g)" stroke-width="1.6"
+  <path d="M4.0 5.2 L7.9 2.7 L7.3 5.0 C9.9 3.5 13.2 3.4 15.8 4.8 C17.5 5.8 18.8 7.3 19.6 9.1 L17.3 10.0 C16.7 8.5 15.6 7.3 14.2 6.5 C12.0 5.3 9.1 5.5 7.1 7.2 L9.2 8.4 Z"
+        fill="url(#g)" stroke="#142033" stroke-width="0.62"
+        stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.0 18.8 L16.1 21.3 L16.7 19.0 C14.1 20.5 10.8 20.6 8.2 19.2 C6.5 18.2 5.2 16.7 4.4 14.9 L6.7 14.0 C7.3 15.5 8.4 16.7 9.8 17.5 C12.0 18.7 14.9 18.5 16.9 16.8 L14.8 15.6 Z"
+        fill="url(#g)" stroke="#142033" stroke-width="0.62"
         stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
