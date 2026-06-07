@@ -792,6 +792,9 @@ ns_image_should_retry(const ns_image *img, gint64 now_us)
         return FALSE;
     gint64 wait_us = img->attempts <= 1 ? 2 * G_USEC_PER_SEC
                                         : 10 * G_USEC_PER_SEC;
+    if (img->http_status == 429)
+        wait_us = img->attempts <= 1 ? 15 * G_USEC_PER_SEC
+                                     : 45 * G_USEC_PER_SEC;
     return img->failed_at_us == 0 || now_us - img->failed_at_us >= wait_us;
 }
 
