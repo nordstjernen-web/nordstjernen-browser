@@ -111,6 +111,7 @@ static void ns_setup_bookmarks_watch(GtkApplication *app);
 static void ns_window_kick_image_loads(ns_window *w);
 static void ns_window_kick_video_loads(ns_window *w);
 static void ns_window_kick_favicon(ns_window *w);
+static gboolean ns_window_scroll_image_load_cb(gpointer data);
 static void        ns_window_js_log(const char *line, gpointer user_data);
 static void        ns_window_js_soft_nav(const char *url, gboolean replace,
                                          gpointer user_data);
@@ -222,6 +223,14 @@ ns_window_schedule_image_retry(ns_window *w, const ns_image *img)
         return;
     w->image_retry_source =
         g_timeout_add(ns_image_retry_delay_ms(img), ns_window_image_retry_cb, w);
+}
+
+static void
+ns_window_schedule_image_kick(ns_window *w, guint delay_ms)
+{
+    if (!w || w->scroll_image_source) return;
+    w->scroll_image_source =
+        g_timeout_add(delay_ms, ns_window_scroll_image_load_cb, w);
 }
 
 static void
@@ -3319,10 +3328,10 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
             }
         }
     }
-    double overscan_y = clip_h * 1.25;
-    if (overscan_y < 900) overscan_y = 900;
-    if (overscan_y > 2400) overscan_y = 2400;
-    double overscan_x = 96;
+    double overscan_y = clip_h * 2.5;
+    if (overscan_y < 2000) overscan_y = 2000;
+    if (overscan_y > 5000) overscan_y = 5000;
+    double overscan_x = 128;
     clip_x -= overscan_x;
     clip_w += overscan_x * 2.0;
     clip_y -= overscan_y;
@@ -3331,11 +3340,13 @@ ns_draw_render(GtkDrawingArea *area, cairo_t *cr,
     double iy0 = floor(clip_y);
     double ix1 = ceil(clip_x + clip_w);
     double iy1 = ceil(clip_y + clip_h);
+    ns_paint_set_cull_margin(800.0);
     cairo_save(cr);
     cairo_rectangle(cr, ix0, iy0, ix1 - ix0, iy1 - iy0);
     cairo_clip(cr);
     ns_paint_with_selection(cr, w->layout_tree, w->search_query, &w->selection);
     cairo_restore(cr);
+    ns_paint_set_cull_margin(400.0);
     gint64 paint_us = g_get_monotonic_time() - t_paint;
     ns_paint_stats ps = {0};
     if (profile) ns_paint_stats_get(&ps);
@@ -3434,6 +3445,7 @@ on_image_ready(ns_image *img, gpointer user_data)
     } else {
         gtk_widget_queue_draw(w->drawing_area);
     }
+    ns_window_schedule_image_kick(w, 25);
 }
 
 static void
@@ -3894,8 +3906,9 @@ ns_window_image_box_near_view(const ns_window *w, const ns_box *box)
     if (ns_box_in_fixed_layer(box)) return TRUE;
     double top = gtk_adjustment_get_value(w->render_vadj);
     double page = ns_window_visible_page_height((ns_window *)w);
-    double margin = page * 2.5;
-    if (margin < 1500) margin = 1500;
+    double margin = page * 5.0;
+    if (margin < 4000) margin = 4000;
+    if (margin > 12000) margin = 12000;
     double box_h = box->content_height + box->padding.top + box->padding.bottom +
                    box->border.top + box->border.bottom;
     if (box_h < 1) box_h = 1;
@@ -3973,6 +3986,13 @@ ns_window_near_image_inflight_count(const ns_window *w, GPtrArray *imgs)
     return n;
 }
 
+static guint
+ns_window_image_inflight_limit(ns_window *w)
+{
+    double page = ns_window_visible_page_height(w);
+    return page > 1400 ? 30 : 24;
+}
+
 static void
 ns_window_kick_image_loads(ns_window *w)
 {
@@ -3982,6 +4002,7 @@ ns_window_kick_image_loads(ns_window *w)
     ns_layout_collect_images(w->layout_tree, imgs);
     ns_window_sort_images_by_view(w, imgs);
     guint inflight = ns_window_near_image_inflight_count(w, imgs);
+    guint limit = ns_window_image_inflight_limit(w);
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
@@ -3993,7 +4014,7 @@ ns_window_kick_image_loads(ns_window *w)
         if (box->media->image_src &&
             !box->media->image &&
             !g_str_has_prefix(box->media->image_src, "nd-inline-svg:")) {
-            if (inflight >= 12) continue;
+            if (inflight >= limit) continue;
             char *abs = ns_resolve_url(w, box->media->image_src);
             if (abs) {
                 if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
@@ -4007,7 +4028,7 @@ ns_window_kick_image_loads(ns_window *w)
             }
         }
         if (box->media->bg_image_src && !box->media->bg_image) {
-            if (inflight >= 12) continue;
+            if (inflight >= limit) continue;
             char *abs = ns_resolve_url(w, box->media->bg_image_src);
             if (abs) {
                 if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
@@ -4029,7 +4050,7 @@ ns_window_kick_image_loads(ns_window *w)
                     g_ptr_array_index(box->media->bg_layer_images, li);
                 if (ns_image_should_retry(cur, now_us)) cur = NULL;
                 if (cur) continue;
-                if (inflight >= 12) break;
+                if (inflight >= limit) break;
                 char *abs = ns_resolve_url(w, src);
                 if (!abs) continue;
                 if (ns_window_subresource_blocked(w, abs, NS_CSP_IMG, "image")) {
@@ -4064,9 +4085,8 @@ ns_window_render_vadjustment_changed(GtkAdjustment *adj, gpointer ud)
     (void)adj;
     ns_window *w = ud;
     if (!w || w->mode != NS_VIEW_RENDER) return;
-    if (w->scroll_image_source) return;
-    w->scroll_image_source =
-        g_timeout_add(120, ns_window_scroll_image_load_cb, w);
+    if (w->drawing_area) gtk_widget_queue_draw(w->drawing_area);
+    ns_window_schedule_image_kick(w, 40);
 }
 
 static void

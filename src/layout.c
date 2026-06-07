@@ -3521,6 +3521,11 @@ build_image_box(const ns_node *n)
     box->content_height = hs ? g_ascii_strtod(hs, NULL) : 0;
     m->declared_image_size =
         box->content_width > 0 && box->content_height > 0;
+    if (!m->declared_image_size && url &&
+        box->content_width <= 0 && box->content_height <= 0) {
+        box->content_width = 200;
+        box->content_height = 150;
+    }
     if (g_image_cache_for_layout) {
         char *abs = g_base_url_for_layout
             ? ns_url_resolve(g_base_url_for_layout, url)

@@ -3762,6 +3762,7 @@ static ns_paint_stats g_paint_stats;
 static gboolean g_paint_collect_stats;
 static gboolean g_paint_have_clip;
 static double g_paint_clip_y0, g_paint_clip_y1;
+static double g_paint_cull_margin = 400.0;
 
 static cairo_pattern_t *
 mask_gradient_pattern(const ns_css_gradient *gr,
@@ -3831,6 +3832,14 @@ ns_paint_stats_get(ns_paint_stats *out)
     g_paint_collect_stats = FALSE;
 }
 
+void
+ns_paint_set_cull_margin(double margin)
+{
+    if (margin < 0) margin = 0;
+    if (margin > 8000) margin = 8000;
+    g_paint_cull_margin = margin;
+}
+
 static void
 paint_cache_clip(cairo_t *cr)
 {
@@ -3854,8 +3863,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (!g_paint_no_cull && g_paint_have_clip &&
         b->paint_bottom > b->paint_top) {
-        if (b->paint_bottom < g_paint_clip_y0 - 400.0 ||
-            b->paint_top > g_paint_clip_y1 + 400.0) {
+        if (b->paint_bottom < g_paint_clip_y0 - g_paint_cull_margin ||
+            b->paint_top > g_paint_clip_y1 + g_paint_cull_margin) {
             if (g_paint_collect_stats) g_paint_stats.culled_bounds++;
             return;
         }
@@ -3890,8 +3899,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             double bh = b->content_height + b->padding.top + b->padding.bottom +
                         b->border.top + b->border.bottom;
             if (g_paint_have_clip &&
-                (by + bh < g_paint_clip_y0 - 400.0 ||
-                 by > g_paint_clip_y1 + 400.0))
+                (by + bh < g_paint_clip_y0 - g_paint_cull_margin ||
+                 by > g_paint_clip_y1 + g_paint_cull_margin))
                 box_offscreen = TRUE;
         }
     }

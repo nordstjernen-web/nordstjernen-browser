@@ -40,6 +40,7 @@ void ns_paint_with_selection(cairo_t *cr, const ns_box *root,
                              const struct ns_selection *sel);
 void ns_paint_stats_reset(void);
 void ns_paint_stats_get(ns_paint_stats *out);
+void ns_paint_set_cull_margin(double margin);
 void ns_paint_set_js(ns_js *js);
 void ns_paint_set_anim(struct ns_anim *anim);
 
