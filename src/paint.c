@@ -2932,6 +2932,33 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
 }
 
 static void
+paint_failed_image(cairo_t *cr, const ns_box *b)
+{
+    double w = b->content_width;
+    double h = b->content_height;
+    if (w <= 0 || h <= 0) return;
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_rectangle(cr, b->x, b->y, w, h);
+    cairo_fill_preserve(cr);
+    cairo_set_source_rgb(cr, 0.78, 0.78, 0.78);
+    cairo_set_line_width(cr, 1);
+    cairo_stroke(cr);
+    double s = MIN(10.0, MIN(w, h) - 2.0);
+    if (s < 4.0) return;
+    double x = b->x + 3.0;
+    double y = b->y + 3.0;
+    if (x + s > b->x + w) x = b->x + MAX(0.0, w - s - 1.0);
+    if (y + s > b->y + h) y = b->y + MAX(0.0, h - s - 1.0);
+    cairo_set_source_rgb(cr, 0.82, 0.0, 0.0);
+    cairo_set_line_width(cr, 2.0);
+    cairo_move_to(cr, x, y);
+    cairo_line_to(cr, x + s, y + s);
+    cairo_move_to(cr, x + s, y);
+    cairo_line_to(cr, x, y + s);
+    cairo_stroke(cr);
+}
+
+static void
 paint_image(cairo_t *cr, const ns_box *b)
 {
     const ns_image *img = NULL;
@@ -2942,6 +2969,8 @@ paint_image(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);
+    } else if (img && img->failed && img->http_status >= 400) {
+        paint_failed_image(cr, b);
     } else {
         const ns_style *s = b->style;
         rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
