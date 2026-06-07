@@ -1418,6 +1418,26 @@ ns_element_hidden_until_found(const ns_node *el)
     return hidden && g_ascii_strcasecmp(hidden, "until-found") == 0;
 }
 
+gboolean
+ns_details_fragment_needs_open(const ns_node *details, const ns_node *target)
+{
+    if (!ns_node_is_element_named(details, "details") ||
+        !target || target == details ||
+        ns_element_get_attr(details, "open"))
+        return FALSE;
+    const ns_node *child = target;
+    while (child && child->parent != details) child = child->parent;
+    if (!child) return FALSE;
+    const ns_node *summary = NULL;
+    for (const ns_node *c = details->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "summary")) {
+            summary = c;
+            break;
+        }
+    }
+    return !summary || child != summary;
+}
+
 static void
 collect_descendant_text_skip_script(const ns_node *n, GString *out, int depth)
 {

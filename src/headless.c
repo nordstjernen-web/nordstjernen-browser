@@ -130,24 +130,49 @@ headless_js_navigate(const char *url, gboolean reload, gpointer user_data)
     }
 }
 
+typedef enum headless_reveal_kind {
+    HEADLESS_REVEAL_HIDDEN,
+    HEADLESS_REVEAL_DETAILS,
+} headless_reveal_kind;
+
+typedef struct headless_reveal_item {
+    ns_node *node;
+    headless_reveal_kind kind;
+} headless_reveal_item;
+
+static void
+headless_reveal_add(GArray *items, ns_node *node, headless_reveal_kind kind)
+{
+    headless_reveal_item item = { node, kind };
+    g_array_append_val(items, item);
+}
+
 static void
 headless_reveal_fragment(ns_node *doc, const char *frag)
 {
     ns_node *target = ns_node_find_fragment_target(doc, frag);
     if (!target) return;
-    GPtrArray *hidden = g_ptr_array_new();
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(headless_reveal_item));
     for (ns_node *cur = target; cur; cur = cur->parent) {
         if (ns_element_hidden_until_found(cur))
-            g_ptr_array_add(hidden, cur);
+            headless_reveal_add(items, cur, HEADLESS_REVEAL_HIDDEN);
+        if (cur->parent && ns_details_fragment_needs_open(cur->parent, cur))
+            headless_reveal_add(items, cur->parent, HEADLESS_REVEAL_DETAILS);
         if (cur == doc) break;
     }
-    for (gint i = (gint)hidden->len - 1; i >= 0; i--) {
-        ns_node *el = g_ptr_array_index(hidden, i);
+    for (guint i = 0; i < items->len; i++) {
+        headless_reveal_item item =
+            g_array_index(items, headless_reveal_item, i);
+        ns_node *el = item.node;
         if (ns_node_root(el) != doc) break;
-        if (ns_element_hidden_until_found(el))
-            ns_element_remove_attr(el, "hidden");
+        if (item.kind == HEADLESS_REVEAL_HIDDEN) {
+            if (ns_element_hidden_until_found(el))
+                ns_element_remove_attr(el, "hidden");
+        } else if (!ns_element_get_attr(el, "open")) {
+            ns_element_set_attr(el, "open", "");
+        }
     }
-    g_ptr_array_free(hidden, TRUE);
+    g_array_free(items, TRUE);
 }
 
 static void

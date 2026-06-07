@@ -337,6 +337,24 @@ ns_window_scroll_to_fragment(ns_window *w)
     w->pending_fragment = NULL;
 }
 
+typedef enum ns_fragment_reveal_kind {
+    NS_FRAGMENT_REVEAL_HIDDEN,
+    NS_FRAGMENT_REVEAL_DETAILS,
+} ns_fragment_reveal_kind;
+
+typedef struct ns_fragment_reveal {
+    ns_node *node;
+    ns_fragment_reveal_kind kind;
+} ns_fragment_reveal;
+
+static void
+ns_fragment_reveal_add(GArray *items, ns_node *node,
+                       ns_fragment_reveal_kind kind)
+{
+    ns_fragment_reveal item = { node, kind };
+    g_array_append_val(items, item);
+}
+
 static gboolean
 ns_window_reveal_pending_fragment(ns_window *w, gboolean fire_event)
 {
@@ -347,27 +365,38 @@ ns_window_reveal_pending_fragment(ns_window *w, gboolean fire_event)
     ns_node *target =
         ns_node_find_fragment_target(w->parsed_doc, w->pending_fragment);
     if (!target) return FALSE;
-    GPtrArray *hidden = g_ptr_array_new();
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(ns_fragment_reveal));
     for (ns_node *cur = target; cur; cur = cur->parent) {
         if (ns_element_hidden_until_found(cur))
-            g_ptr_array_add(hidden, cur);
+            ns_fragment_reveal_add(items, cur, NS_FRAGMENT_REVEAL_HIDDEN);
+        if (cur->parent && ns_details_fragment_needs_open(cur->parent, cur))
+            ns_fragment_reveal_add(items, cur->parent,
+                                   NS_FRAGMENT_REVEAL_DETAILS);
         if (cur == w->parsed_doc) break;
     }
     gboolean changed = FALSE;
-    for (gint i = (gint)hidden->len - 1; i >= 0; i--) {
-        ns_node *el = g_ptr_array_index(hidden, i);
+    for (guint i = 0; i < items->len; i++) {
+        ns_fragment_reveal item = g_array_index(items, ns_fragment_reveal, i);
+        ns_node *el = item.node;
         if (ns_node_root(el) != w->parsed_doc) break;
-        if (!ns_element_hidden_until_found(el)) continue;
-        if (fire_event && w->js) {
-            ns_js_dispatch_beforematch(w->js, el);
-            if (ns_js_consume_mutated(w->js)) changed = TRUE;
+        if (item.kind == NS_FRAGMENT_REVEAL_HIDDEN) {
+            if (!ns_element_hidden_until_found(el)) continue;
+            if (fire_event && w->js) {
+                ns_js_dispatch_beforematch(w->js, el);
+                if (ns_js_consume_mutated(w->js)) changed = TRUE;
+            }
+            if (ns_node_root(el) != w->parsed_doc) break;
+            if (!ns_element_hidden_until_found(el)) continue;
+            ns_element_remove_attr(el, "hidden");
+            changed = TRUE;
+        } else if (!ns_element_get_attr(el, "open")) {
+            ns_element_set_attr(el, "open", "");
+            if (fire_event && w->js)
+                ns_js_details_toggle_open(w->js, el, TRUE);
+            changed = TRUE;
         }
-        if (ns_node_root(el) != w->parsed_doc) break;
-        if (!ns_element_hidden_until_found(el)) continue;
-        ns_element_remove_attr(el, "hidden");
-        changed = TRUE;
     }
-    g_ptr_array_free(hidden, TRUE);
+    g_array_free(items, TRUE);
     if (changed) {
         ns_window_drop_layout(w);
         w->layout_dirty = TRUE;
