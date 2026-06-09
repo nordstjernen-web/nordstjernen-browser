@@ -113,6 +113,7 @@ private:
     bool m_opened = false;
     bool m_recoveringRender = false;
     int m_renderRestarts = 0;
+    int m_jsRedirects = 0;
     bool m_renderInFlight = false;
     bool m_renderPending = false;
     bool m_linkInFlight = false;

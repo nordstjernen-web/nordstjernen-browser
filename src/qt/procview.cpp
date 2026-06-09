@@ -5,6 +5,7 @@
 #include "media.h"
 
 extern "C" {
+#include "proc_limits.h"
 #include "rproc_http.h"
 }
 
@@ -42,17 +43,13 @@ extern "C" {
 #include <cstdlib>
 #include <utility>
 
-static const int kMaxWidth = 2560;
-static const int kMaxHeight = 1600;
-static const int kMaxRenderRestarts = 3;
-static const int kSettleMs = 400;
 
 static int settleMs() {
     bool ok = false;
     int v = qEnvironmentVariableIntValue("NS_SETTLE_MS", &ok);
     if (ok && v >= 0 && v <= 10000)
         return v;
-    return kSettleMs;
+    return NS_PROC_SETTLE_MS;
 }
 
 static int qtMods(Qt::KeyboardModifiers mods) {
@@ -173,12 +170,14 @@ struct PageResult {
     int pageHeight = 0;
     QString title;
     QString url;
+    QString nav;
 };
 
 struct FrameResult {
     bool ok = false;
     bool animating = false;
     QImage image;
+    QString nav;
 };
 
 class ProcWorker : public QObject {
@@ -224,6 +223,10 @@ public:
         result.image = img.copy();
         result.image.setDevicePixelRatio(imageDpr);
         result.animating = fr.animating != 0;
+        if (fr.nav) {
+            result.nav = QString::fromUtf8(fr.nav);
+            free(fr.nav);
+        }
         result.ok = true;
         return result;
     }
@@ -363,7 +366,7 @@ private:
         if (m_proc)
             return true;
         QByteArray path = m_rendererPath.toUtf8();
-        m_proc = ns_rproc_http_spawn_shm(path.constData(), kMaxWidth, kMaxHeight);
+        m_proc = ns_rproc_http_spawn_shm(path.constData(), NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT);
         m_pid.store(m_proc ? ns_rproc_http_pid(m_proc) : -1,
                     std::memory_order_relaxed);
         return m_proc != nullptr;
@@ -390,6 +393,7 @@ private:
             out->title = page.title ? QString::fromUtf8(page.title)
                                     : QString();
             out->url = page.url ? QString::fromUtf8(page.url) : url;
+            out->nav = page.nav ? QString::fromUtf8(page.nav) : QString();
             m_opened = true;
         }
         ns_rproc_http_page_clear(&page);
@@ -494,6 +498,8 @@ void ProcView::doLoad(const QString &url, bool record) {
     if (url.isEmpty() || !m_worker)
         return;
 
+    if (record)
+        m_jsRedirects = 0;
     m_pendingRecord = record;
     emit loadingChanged(true);
     emit statusMessage(QStringLiteral("Loading %1…").arg(url));
@@ -540,6 +546,13 @@ void ProcView::doLoad(const QString &url, bool record) {
                 emit self->loadingChanged(false);
                 emit self->statusMessage(
                     QStringLiteral("Failed to load %1").arg(requested));
+                return;
+            }
+
+            if (!result.nav.isEmpty() &&
+                self->m_jsRedirects < NS_PROC_MAX_JS_REDIRECTS) {
+                self->m_jsRedirects++;
+                self->doLoad(result.nav, self->m_pendingRecord);
                 return;
             }
 
@@ -624,6 +637,12 @@ void ProcView::startRender() {
                 });
             }
             self->m_renderInFlight = false;
+            if (current && result.ok && !result.nav.isEmpty() &&
+                self->m_jsRedirects < NS_PROC_MAX_JS_REDIRECTS) {
+                self->m_jsRedirects++;
+                self->doLoad(result.nav, false);
+                return;
+            }
             if (self->m_renderPending) {
                 self->m_renderPending = false;
                 self->startRender();
@@ -631,7 +650,7 @@ void ProcView::startRender() {
             }
             if (current && !result.ok && !self->m_currentUrl.isEmpty() &&
                 !self->m_recoveringRender) {
-                if (self->m_renderRestarts < kMaxRenderRestarts) {
+                if (self->m_renderRestarts < NS_PROC_MAX_RESTARTS) {
                     self->m_renderRestarts++;
                     self->m_recoveringRender = true;
                     emit self->statusMessage(

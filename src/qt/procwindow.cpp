@@ -94,7 +94,8 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
         if (ProcView *view = currentView())
             view->savePageAs(false);
     });
-    QAction *menuConsole = appMenu->addAction(QStringLiteral("Console"));
+    QAction *menuConsole =
+        appMenu->addAction(QStringLiteral("JavaScript Console"));
     connect(menuConsole, &QAction::triggered, this, [this]() {
         if (ProcView *view = currentView())
             view->toggleConsole();
@@ -115,11 +116,17 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     menuButton->setAutoRaise(true);
     toolbar->addWidget(menuButton);
 
-    QLabel *brand = new QLabel(this);
+    QToolButton *brand = new QToolButton(this);
     if (!logo.isNull())
-        brand->setPixmap(logo.scaledToHeight(24, Qt::SmoothTransformation));
-    brand->setToolTip(QStringLiteral("Nordstjernen"));
-    brand->setContentsMargins(8, 0, 6, 0);
+        brand->setIcon(QIcon(logo.scaledToHeight(24, Qt::SmoothTransformation)));
+    brand->setToolTip(QStringLiteral("Visit nordstjernen.org"));
+    brand->setAutoRaise(true);
+    connect(brand, &QToolButton::clicked, this, [this]() {
+        if (ProcView *view = currentView())
+            view->load(QStringLiteral("https://nordstjernen.org"));
+        else
+            addTab(QStringLiteral("https://nordstjernen.org"));
+    });
     toolbar->addWidget(brand);
 
     m_tabs = new QTabWidget(this);

@@ -3,20 +3,13 @@
 #include "procview.h"
 
 #include "media.h"
+#include "proc_limits.h"
 #include "rproc_http.h"
 
 #include <cairo.h>
 #include <glib/gstdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-enum {
-    NS_PV_MAX_WIDTH = 2560,
-    NS_PV_MAX_HEIGHT = 1600,
-    NS_PV_MAX_RESTARTS = 3,
-    NS_PV_MAX_JS_REDIRECTS = 20,
-    NS_PV_SETTLE_MS = 400
-};
 
 static int
 pv_settle_ms(void)
@@ -27,7 +20,7 @@ pv_settle_ms(void)
         if (v >= 0 && v <= 10000)
             return v;
     }
-    return NS_PV_SETTLE_MS;
+    return NS_PROC_SETTLE_MS;
 }
 
 typedef enum {
@@ -305,7 +298,7 @@ worker_main(gpointer data)
         }
         if (!v->proc)
             pv_swap_proc(v, ns_rproc_http_spawn_shm(v->renderer_path,
-                                     NS_PV_MAX_WIDTH, NS_PV_MAX_HEIGHT));
+                                     NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT));
 
         if (req->type == REQ_LOAD) {
             Res *res = g_new0(Res, 1);
@@ -320,7 +313,7 @@ worker_main(gpointer data)
             if (rc != 0 && v->proc) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
                 pv_swap_proc(v, ns_rproc_http_spawn_shm(v->renderer_path,
-                                         NS_PV_MAX_WIDTH, NS_PV_MAX_HEIGHT));
+                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT));
                 rc = v->proc ? ns_rproc_http_open(v->proc, req->url, req->vw,
                                              req->vh, settle, &pg)
                              : -1;
@@ -1049,7 +1042,7 @@ on_result(gpointer data)
             goto done;
         }
         if (res->nav && *res->nav) {
-            if (v->js_redirects < NS_PV_MAX_JS_REDIRECTS) {
+            if (v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
                 v->js_redirects++;
                 do_load(v, res->nav, v->pending_record);
                 goto done;
@@ -1091,7 +1084,7 @@ on_result(gpointer data)
             gtk_widget_queue_draw(v->area);
         }
         if (current && res->ok && res->nav && *res->nav &&
-            v->js_redirects < NS_PV_MAX_JS_REDIRECTS) {
+            v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
             v->js_redirects++;
             do_load(v, res->nav, FALSE);
         }
@@ -1100,7 +1093,7 @@ on_result(gpointer data)
             v->render_pending = FALSE;
             start_render(v);
         } else if (current && !res->ok && v->current_url) {
-            if (v->render_restarts < NS_PV_MAX_RESTARTS) {
+            if (v->render_restarts < NS_PROC_MAX_RESTARTS) {
                 v->render_restarts++;
                 post_emit(v, NS_PROC_EVT_STATUS, "Renderer restarted");
                 do_load(v, v->current_url, FALSE);
