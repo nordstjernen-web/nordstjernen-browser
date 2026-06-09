@@ -7067,6 +7067,20 @@ layout_flex_column(ns_box *box, double cw,
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         explicit_h = resolve_used_height(box, hv, cw, -1);
     double min_h = resolve_used_height(box, mnh, parent_content_height, -1);
+    if (box->style && box->style->values[NS_CSS_BOX_SIZING] &&
+        box->style->values[NS_CSS_BOX_SIZING]->kind == NS_CSS_V_KEYWORD &&
+        strcmp(box->style->values[NS_CSS_BOX_SIZING]->u.keyword, "border-box") == 0) {
+        double vex = box->border.top + box->border.bottom +
+                     box->padding.top + box->padding.bottom;
+        if (explicit_h > 0) {
+            explicit_h -= vex;
+            if (explicit_h < 0) explicit_h = 0;
+        }
+        if (min_h > 0) {
+            min_h -= vex;
+            if (min_h < 0) min_h = 0;
+        }
+    }
     if (min_h > explicit_h) explicit_h = min_h;
 
     GArray *basis = g_array_new(FALSE, FALSE, sizeof(double));
