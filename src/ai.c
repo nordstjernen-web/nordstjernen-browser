@@ -732,6 +732,37 @@ ns_ai_try_factual_query(const char *msg)
     return subject;
 }
 
+static gboolean
+ns_ai_text_contains_ci(const char *haystack, const char *needle)
+{
+    if (!haystack || !needle || !*needle) return FALSE;
+    char *h = g_utf8_strdown(haystack, -1);
+    char *n = g_utf8_strdown(needle, -1);
+    gboolean found = h && n && strstr(h, n) != NULL;
+    g_free(h);
+    g_free(n);
+    return found;
+}
+
+static gboolean
+ns_ai_wiki_relevant(const char *query, const char *title, const char *extract)
+{
+    char **words = g_strsplit_set(query, " \t\n\r", -1);
+    char *key = NULL;
+    glong keylen = 0;
+    for (char **w = words; *w; w++) {
+        char *s = g_strstrip(*w);
+        glong l = g_utf8_strlen(s, -1);
+        if (l > keylen) { keylen = l; key = s; }
+    }
+    gboolean relevant = TRUE;
+    if (key && keylen >= 5)
+        relevant = ns_ai_text_contains_ci(title, key) ||
+                   ns_ai_text_contains_ci(extract, key);
+    g_strfreev(words);
+    return relevant;
+}
+
 static char *
 ns_ai_wiki_summary(const char *query)
 {
@@ -746,15 +777,18 @@ ns_ai_wiki_summary(const char *query)
     if (!json) return NULL;
 
     char *extract = ns_ai_json_first_string(json, "extract");
+    char *title = ns_ai_json_first_string(json, "title");
     char *page = ns_ai_json_first_string(json, "fullurl");
     g_free(json);
 
     char *reply = NULL;
-    if (extract && *g_strstrip(extract)) {
+    if (extract && *g_strstrip(extract) &&
+        ns_ai_wiki_relevant(query, title, extract)) {
         reply = g_strdup_printf("%s\n\n[Read more on Wikipedia](%s)",
             extract, page ? page : "https://en.wikipedia.org");
     }
     g_free(extract);
+    g_free(title);
     g_free(page);
     return reply;
 }
