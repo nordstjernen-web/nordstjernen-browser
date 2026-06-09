@@ -3143,7 +3143,7 @@ paint_image(cairo_t *cr, const ns_box *b)
     cairo_save(cr);
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);
-    } else if (img && img->failed && img->http_status >= 400) {
+    } else if (img && img->failed) {
         paint_failed_image(cr, b);
     } else {
         const ns_style *s = b->style;
