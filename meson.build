@@ -289,7 +289,7 @@ if not is_android and ai_feature.allowed()
     'GGML_NATIVE': false,
     'GGML_OPENMP': false,
     'GGML_METAL': use_metal,
-    'GGML_METAL_EMBED_LIBRARY': use_metal,
+    'GGML_METAL_EMBED_LIBRARY': false,
     'GGML_VULKAN': use_vulkan,
     'GGML_ACCELERATE': false,
     'GGML_BLAS': false,
