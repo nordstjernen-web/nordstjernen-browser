@@ -375,7 +375,24 @@ ns_ai_json_first_string(const char *json, const char *key)
             case 'n':  g_string_append_c(o, '\n'); break;
             case 't':  g_string_append_c(o, '\t'); break;
             case 'u':
-                if (p[1] && p[2] && p[3] && p[4]) p += 4;
+                if (p[1] && p[2] && p[3] && p[4]) {
+                    char hex[5] = { p[1], p[2], p[3], p[4], 0 };
+                    gunichar cp = (gunichar)strtol(hex, NULL, 16);
+                    if (cp >= 0xD800 && cp <= 0xDBFF &&
+                        p[5] == '\\' && p[6] == 'u' &&
+                        p[7] && p[8] && p[9] && p[10]) {
+                        char hex2[5] = { p[7], p[8], p[9], p[10], 0 };
+                        gunichar lo = (gunichar)strtol(hex2, NULL, 16);
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                        p += 6;
+                    }
+                    if (cp) {
+                        char utf8[8];
+                        int ln = g_unichar_to_utf8(cp, utf8);
+                        g_string_append_len(o, utf8, ln);
+                    }
+                    p += 4;
+                }
                 break;
             default:   g_string_append_c(o, *p);
             }
@@ -503,9 +520,10 @@ ns_ai_fetch_data_uri(const char *url)
 }
 
 static char *
-ns_ai_web_search(const char *query, char **sources_out)
+ns_ai_web_search(const char *query, char **sources_out, char **display_out)
 {
     if (sources_out) *sources_out = NULL;
+    if (display_out) *display_out = NULL;
     char *eq = g_uri_escape_string(query, NULL, TRUE);
     char *u = g_strdup_printf("https://html.duckduckgo.com/html/?q=%s", eq);
     g_free(eq);
@@ -515,6 +533,7 @@ ns_ai_web_search(const char *query, char **sources_out)
 
     GString *ctx = g_string_new(NULL);
     GString *src = g_string_new(NULL);
+    GString *disp = g_string_new(NULL);
     const char *p = html;
     int n = 0;
     while (n < 4) {
@@ -548,10 +567,12 @@ ns_ai_web_search(const char *query, char **sources_out)
         }
 
         n++;
+        const char *tt = (title && *title) ? title : (url ? url : "");
         g_string_append_printf(ctx, "[%d] %s\n%s\n%.280s\n\n",
             n, title ? title : "", url ? url : "", snippet ? snippet : "");
-        g_string_append_printf(src, "[%d] [%s](%s)\n",
-            n, (title && *title) ? title : (url ? url : ""), url ? url : "");
+        g_string_append_printf(src, "[%d] [%s](%s)\n", n, tt, url ? url : "");
+        g_string_append_printf(disp, "[%s](%s)\n%.240s\n\n",
+            tt, url ? url : "", snippet ? snippet : "");
         g_free(title);
         g_free(snippet);
         g_free(url);
@@ -562,10 +583,13 @@ ns_ai_web_search(const char *query, char **sources_out)
     if (n == 0) {
         g_string_free(ctx, TRUE);
         g_string_free(src, TRUE);
+        g_string_free(disp, TRUE);
         return NULL;
     }
     if (sources_out) *sources_out = g_string_free(src, FALSE);
     else g_string_free(src, TRUE);
+    if (display_out) *display_out = g_string_free(disp, FALSE);
+    else g_string_free(disp, TRUE);
     return g_string_free(ctx, FALSE);
 }
 
@@ -665,6 +689,117 @@ ns_ai_image_reply(const char *query)
     }
     g_free(img);
     g_free(page);
+    return reply;
+}
+
+static char *
+ns_ai_strip_lead_article(char *s)
+{
+    static const char *const arts[] = { "the ", "a ", "an " };
+    for (gsize i = 0; i < G_N_ELEMENTS(arts); i++) {
+        if (g_ascii_strncasecmp(s, arts[i], strlen(arts[i])) == 0) {
+            memmove(s, s + strlen(arts[i]), strlen(s + strlen(arts[i])) + 1);
+            break;
+        }
+    }
+    return s;
+}
+
+static char *
+ns_ai_try_factual_query(const char *msg)
+{
+    static const char *const cues[] = {
+        "who is ", "who was ", "who are ", "who were ",
+        "what is ", "what was ", "what are ", "what were ",
+        "tell me about ", "tell me more about ",
+    };
+    char *low = g_ascii_strdown(msg, -1);
+    char *subject = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
+        if (g_str_has_prefix(low, cues[i])) {
+            subject = g_strdup(msg + strlen(cues[i]));
+            break;
+        }
+    }
+    g_free(low);
+    if (subject) {
+        subject = g_strstrip(subject);
+        size_t n = strlen(subject);
+        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
+        subject = g_strstrip(ns_ai_strip_lead_article(subject));
+        if (strlen(subject) < 2) { g_free(subject); subject = NULL; }
+    }
+    return subject;
+}
+
+static char *
+ns_ai_wiki_summary(const char *query)
+{
+    char *eq = g_uri_escape_string(query, NULL, TRUE);
+    char *url = g_strdup_printf(
+        "https://en.wikipedia.org/w/api.php?action=query&format=json"
+        "&generator=search&gsrsearch=%s&gsrlimit=1&prop=extracts%%7Cinfo"
+        "&inprop=url&exintro&explaintext&exchars=700", eq);
+    char *json = ns_ai_http_get(url);
+    g_free(url);
+    g_free(eq);
+    if (!json) return NULL;
+
+    char *extract = ns_ai_json_first_string(json, "extract");
+    char *page = ns_ai_json_first_string(json, "fullurl");
+    g_free(json);
+
+    char *reply = NULL;
+    if (extract && *g_strstrip(extract)) {
+        reply = g_strdup_printf("%s\n\n[Read more on Wikipedia](%s)",
+            extract, page ? page : "https://en.wikipedia.org");
+    }
+    g_free(extract);
+    g_free(page);
+    return reply;
+}
+
+static char *
+ns_ai_try_search_query(const char *msg)
+{
+    static const char *const cues[] = {
+        "search the web for ", "search the web ", "search for ", "search ",
+        "look up ", "google ", "web search for ", "web search ",
+        "find information about ", "find info about ",
+    };
+    char *low = g_ascii_strdown(msg, -1);
+    char *subject = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
+        if (g_str_has_prefix(low, cues[i])) {
+            subject = g_strdup(msg + strlen(cues[i]));
+            break;
+        }
+    }
+    g_free(low);
+    if (subject) {
+        subject = g_strstrip(subject);
+        size_t n = strlen(subject);
+        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
+        if (strlen(subject) < 2) { g_free(subject); subject = NULL; }
+    }
+    return subject;
+}
+
+static char *
+ns_ai_search_reply(const char *query)
+{
+    char *display = NULL;
+    char *ctx = ns_ai_web_search(query, NULL, &display);
+    char *reply;
+    if (display && *display) {
+        reply = g_strdup_printf("Here's what I found for \"%s\":\n\n%s",
+                                query, display);
+    } else {
+        reply = g_strdup_printf(
+            "I couldn't search the web for \"%s\" right now.", query);
+    }
+    g_free(ctx);
+    g_free(display);
     return reply;
 }
 
@@ -1034,7 +1169,7 @@ ns_ai_run_tools_locked(const char *user_msg)
         reply = ns_ai_image_reply(query);
     } else {
         char *sources = NULL;
-        char *ctx = ns_ai_web_search(query, &sources);
+        char *ctx = ns_ai_web_search(query, &sources, NULL);
         if (ctx) {
             char *augmented = g_strdup_printf(
                 "Web search results for \"%s\":\n\n%s"
@@ -1078,6 +1213,21 @@ ns_ai_chat(const char *user_msg)
         char *reply = ns_ai_image_reply(imgq);
         g_free(imgq);
         return reply;
+    }
+
+    char *searchq = ns_ai_try_search_query(user_msg);
+    if (searchq) {
+        char *reply = ns_ai_search_reply(searchq);
+        g_free(searchq);
+        return reply;
+    }
+
+    char *factq = ns_ai_try_factual_query(user_msg);
+    if (factq) {
+        char *reply = ns_ai_wiki_summary(factq);
+        g_free(factq);
+        if (reply)
+            return reply;
     }
 
     g_mutex_lock(&g_model_lock);
