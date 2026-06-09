@@ -76,3 +76,6 @@ Thumbs.db
 # Claude harness state
 /.claude/
 perf.data
+
+# Local AI model weights (large; fetched separately, see docs/ai.md)
+/models/

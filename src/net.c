@@ -4,6 +4,7 @@
  */
 
 #include "net.h"
+#include "ai.h"
 #include "cache.h"
 #include "config.h"
 #include "history.h"
@@ -2283,45 +2284,81 @@ static const char k_about_start_template[] =
     "<meta charset=\"utf-8\">"
     "<title>Nordstjernen</title>"
     "<style>\n"
-    "html, body { background:#ffffff; color:#111111;"
+    "html, body { background:#0e1116; color:#e6e9ef;"
     " font-family: system-ui, -apple-system, \"Segoe UI\","
-    " Helvetica, Arial, sans-serif; margin:0; padding:0; min-height:100%; }\n"
-    ".wrap { max-width: 720px; margin: 9vh auto 0 auto;"
-    " padding: 0 24px 48px 24px; text-align:center; }\n"
-    ".logo { margin: 0 auto 1.0em auto; width: 128px; height: 128px;"
-    " display:block; border-radius: 18px; }\n"
-    ".title { font-size: 2.2em; font-weight: 600; margin: 0.1em 0 0.1em 0;"
-    " letter-spacing: 0.5px; color:#111111; }\n"
-    ".tagline { color:#666666; font-style: italic; margin: 0 0 3.4em 0;"
-    " font-size: 1.0em; }\n"
-    "form.search { margin: 0 auto 5.5em auto; display:flex; gap: 18px;"
-    " max-width: 560px; align-items: center; justify-content: center;"
-    " font-size: 1.15em; }\n"
-    "form.search input, form.search button {"
-    " display:inline; border:0; padding:0; margin:0;"
-    " background: transparent; font: inherit; }\n"
-    "form.search input { flex: 0 0 320px; text-align: left; }\n"
-    ".footer { color:#888888; font-size:0.85em; margin-top:0;"
-    " text-align:center; }\n"
-    ".footer a { color:#3a63d0; }\n"
+    " Helvetica, Arial, sans-serif; margin:0; padding:0; height:100%; }\n"
+    ".wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 20px 24px;"
+    " display:flex; flex-direction:column; height:100%;"
+    " box-sizing:border-box; }\n"
+    ".head { display:flex; align-items:center; gap:14px; margin-bottom:14px; }\n"
+    ".logo { width: 52px; height: 52px; display:block; border-radius: 12px; }\n"
+    ".title { font-size: 1.5em; font-weight: 600; letter-spacing: 0.3px; }\n"
+    ".tagline { color:#8b93a3; font-style: italic; font-size: 0.82em;"
+    " margin-top:2px; }\n"
+    "#log { flex: 1 1 auto; overflow-y:auto; padding: 6px 2px;"
+    " display:flex; flex-direction:column; gap: 14px; }\n"
+    ".msg { max-width: 82%; padding: 11px 14px; border-radius: 14px;"
+    " line-height: 1.45; white-space: pre-wrap; word-wrap:break-word; }\n"
+    ".user { align-self:flex-end; background:#2d6cf6; color:#fff;"
+    " border-bottom-right-radius:4px; }\n"
+    ".bot { align-self:flex-start; background:#1b2027; color:#e6e9ef;"
+    " border-bottom-left-radius:4px; }\n"
+    ".bot.think { color:#8b93a3; font-style:italic; }\n"
+    "form.ask { display:flex; gap:10px; padding-top:12px; }\n"
+    "form.ask input { flex:1 1 auto; border:1px solid #2a313c;"
+    " background:#161b22; color:#e6e9ef; border-radius:10px;"
+    " padding:12px 14px; font:inherit; outline:none; }\n"
+    "form.ask input:focus { border-color:#2d6cf6; }\n"
+    "form.ask button { border:0; background:#2d6cf6; color:#fff;"
+    " border-radius:10px; padding:0 20px; font:inherit; font-weight:600;"
+    " cursor:pointer; }\n"
+    "form.ask button:disabled { opacity:0.5; }\n"
+    ".footer { color:#6b7280; font-size:0.76em; text-align:center;"
+    " padding-top:10px; }\n"
+    ".footer a { color:#5b8dff; }\n"
     "</style></head>"
     "<body>"
     "<div class=\"wrap\">"
+    "<div class=\"head\">"
     "<img class=\"logo\" alt=\"Nordstjernen\" src=\"__ND_LOGO_URI__\">"
-    "<div class=\"title\">Nordstjernen " NS_VERSION "</div>"
-    "<div class=\"tagline\">__ND_TAGLINE__</div>"
-    "<form class=\"search\" action=\"https://html.duckduckgo.com/html/\""
-    " method=\"get\">"
-    "<input type=\"text\" name=\"q\" size=\"24\" autofocus"
-    " placeholder=\"Search DuckDuckGo\">"
-    "<button type=\"submit\">Search</button>"
-    "</form>"
-    "<p class=\"footer\">"
-    "<a href=\"about:license\">License</a>"
-    " &middot; "
-    "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
-    "</p>"
+    "<div><div class=\"title\">Nordstjernen AI " NS_VERSION "</div>"
+    "<div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
+    "<div id=\"log\">"
+    "<div class=\"msg bot\">Hi! I'm a small language model running locally on "
+    "your CPU through llama.cpp \xe2\x80\x94 no network, no cloud. Ask me "
+    "anything to get started.</div>"
+    "</div>"
+    "<form class=\"ask\" id=\"ask\">"
+    "<input id=\"q\" autocomplete=\"off\" autofocus"
+    " placeholder=\"Message the local model…\">"
+    "<button id=\"send\" type=\"submit\">Send</button>"
+    "</form>"
+    "<p class=\"footer\">Local inference \xc2\xb7 "
+    "<a href=\"about:license\">License</a> \xc2\xb7 "
+    "<a href=\"https://nordstjernen.org\">nordstjernen.org</a></p>"
+    "</div>"
+    "<script>\n"
+    "var log=document.getElementById('log');\n"
+    "var form=document.getElementById('ask');\n"
+    "var input=document.getElementById('q');\n"
+    "var send=document.getElementById('send');\n"
+    "function bubble(cls,text){var d=document.createElement('div');\n"
+    " d.className='msg '+cls; d.textContent=text; log.appendChild(d);\n"
+    " log.scrollTop=log.scrollHeight; return d;}\n"
+    "form.addEventListener('submit',function(e){e.preventDefault();\n"
+    " var q=input.value.trim(); if(!q) return;\n"
+    " bubble('user',q); input.value=''; input.disabled=true;\n"
+    " send.disabled=true;\n"
+    " var t=bubble('bot think','thinking…');\n"
+    " fetch('about:ai?q='+encodeURIComponent(q)).then(function(r){\n"
+    "   return r.text();}).then(function(txt){\n"
+    "   t.className='msg bot'; t.textContent=txt.trim()||'(no response)';\n"
+    "   log.scrollTop=log.scrollHeight;}).catch(function(err){\n"
+    "   t.className='msg bot'; t.textContent='Error: '+err;}).then(function(){\n"
+    "   input.disabled=false; send.disabled=false; input.focus();});\n"
+    "});\n"
+    "</script>"
     "</body></html>";
 
 static const char *
@@ -2359,6 +2396,27 @@ synthesize_about_response(const char *url, ns_response *resp)
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
+    } else if (g_str_has_prefix(what, "ai?") || g_str_equal(what, "ai")) {
+        const char *qs = strchr(url, '?');
+        char *msg = NULL;
+        if (qs) {
+            GHashTable *q = g_uri_parse_params(qs + 1, -1, "&",
+                                               G_URI_PARAMS_WWW_FORM, NULL);
+            if (q) {
+                const char *raw = g_hash_table_lookup(q, "q");
+                if (raw) msg = g_strdup(raw);
+                g_hash_table_destroy(q);
+            }
+        }
+        char *reply = ns_ai_chat(msg ? msg : "");
+        g_free(msg);
+        g_free(resp->content_type);
+        resp->content_type = g_strdup("text/plain; charset=utf-8");
+        if (reply) {
+            g_byte_array_append(resp->body, (const guint8 *)reply,
+                                (guint)strlen(reply));
+            g_free(reply);
+        }
     } else if (g_str_equal(what, "license") || g_str_equal(what, "licence")) {
         char *body = build_about_license();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));

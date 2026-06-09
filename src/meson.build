@@ -28,6 +28,7 @@ polyfills_h = custom_target(
 )
 
 nordstjernen_engine_sources = files(
+  'ai.c',
   'anim.c',
   'bcache.c',
   'bookmarks.c',
@@ -158,6 +159,27 @@ if have_freetype
 endif
 
 nordstjernen_deps += [libpsl]
+
+llama_lib_dir = meson.project_source_root() / 'third_party' / 'llamacpp' / 'lib'
+cxx = meson.get_compiler('cpp')
+llama_dep = declare_dependency(
+  include_directories: include_directories('../third_party/llamacpp/include'),
+  link_args: [
+    '-Wl,--start-group',
+    llama_lib_dir / 'libllama.a',
+    llama_lib_dir / 'libggml.a',
+    llama_lib_dir / 'libggml-cpu.a',
+    llama_lib_dir / 'libggml-base.a',
+    '-Wl,--end-group',
+  ],
+  dependencies: [
+    cxx.find_library('stdc++', required: true),
+    cc.find_library('gomp', required: false),
+    cc.find_library('dl', required: false),
+    dependency('threads'),
+  ],
+)
+nordstjernen_deps += [llama_dep]
 
 nordstjernen_win_subsystem = (
   host_machine.system() == 'windows' ? 'windows' : 'console'
