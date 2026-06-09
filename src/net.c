@@ -863,6 +863,8 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
     if (!url || !*url || !cookie) return;
     if (!g_str_has_prefix(url, "http://") && !g_str_has_prefix(url, "https://"))
         return;
+    for (const char *c = cookie; *c; c++)
+        if ((unsigned char)*c < 0x20) return;
     g_autoptr(ns_url_parts) parts = ns_url_parts_new(url);
     if (!parts || !parts->hostname || !*parts->hostname) return;
 
@@ -1005,7 +1007,8 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
             file_domain, tail, path, secure ? "TRUE" : "FALSE",
             expiry, name_dup, vdup);
     }
-    g_file_set_contents(jar_path, out->str, out->len, NULL);
+    if (g_file_set_contents(jar_path, out->str, out->len, NULL))
+        g_chmod(jar_path, 0600);
     g_string_free(out, TRUE);
     g_free(file_domain);
     g_free(domain_attr);

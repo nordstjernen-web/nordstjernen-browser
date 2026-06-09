@@ -11,7 +11,7 @@ Nordstjernen is built in Norway.
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 102,000 lines of C written by Claude and Codex (108 files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
+**Minimalism:** The whole engine is about 102,000 lines of C written by Claude and Codex (106 files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -67,7 +67,7 @@ The full section-by-section walk-through lives in
 - **Process-per-tab** — each tab's engine runs in its own sandboxed
   `nordstjernen-renderer` process; the GTK and Qt apps are thin shells
   that blit the renderer's shared-memory framebuffer and forward input
-  over an IPC control channel (`src/rproc.c`), so a page can't take down
+  over an IPC control channel (`src/rproc_http.c`), so a page can't take down
   the UI. See [`docs/tab-isolation.md`](docs/tab-isolation.md) and
   [`docs/Rendering.md`](docs/Rendering.md).
 - **Local AI start page** — the `about:start` new-tab page is a chat

@@ -46,7 +46,7 @@ Nordstjernen has a single renderer architecture. The GTK and Qt apps
 are thin shells (`src/gtk/procview.c`, `src/qt/procview.cpp`) that spawn
 one sandboxed `nordstjernen-renderer` process per tab
 (`src/renderer_main.c`) and drive it over a control channel +
-shared-memory framebuffer (`src/rproc.c`). The engine
+shared-memory framebuffer (`src/rproc_http.c`). The engine
 (`src/css.c`, `src/layout.c`, `src/js.c`, `src/dom.c`, `src/paint.c`,
 `src/net.c`, images) runs entirely inside the sandboxed child (Linux
 Landlock + seccomp); the UI process only blits frames and forwards
