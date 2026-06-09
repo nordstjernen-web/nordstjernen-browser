@@ -51,7 +51,19 @@ ns_ai_chat(const char *user_msg)
 #define NS_AI_MAX_REPLY    320
 #define NS_AI_SYSTEM_PROMPT \
     "You are the assistant built into the Nordstjernen web browser. " \
-    "Answer the user concisely and helpfully."
+    "Answer concisely and helpfully. You can reach the live web with three " \
+    "tools. If the user asks to see, show, or find a picture or image, reply " \
+    "with ONLY one line: IMAGE: <search terms>. If answering needs current " \
+    "facts, news, prices, or any web lookup, reply with ONLY one line: " \
+    "SEARCH: <search terms>. If the user asks to open, go to, visit, or " \
+    "navigate to a website or URL, reply with ONLY one line: GO: <url>. " \
+    "Otherwise answer directly from your own knowledge. Never describe the " \
+    "tools; either emit one tool line or give the answer."
+#define NS_AI_ANSWER_PROMPT \
+    "You are the assistant built into the Nordstjernen web browser. Answer " \
+    "the user's request using the web search results provided. Be concise. " \
+    "Cite sources inline as markdown links like [title](https://url). Do not " \
+    "mention tools and do not emit IMAGE: or SEARCH: lines."
 
 typedef struct {
     const char *id;
@@ -294,6 +306,305 @@ ns_ai_json_escape(const char *s)
     return g_string_free(o, FALSE);
 }
 
+typedef struct {
+    char  *data;
+    size_t len;
+} ns_ai_http_buf;
+
+static size_t
+ns_ai_http_write(char *ptr, size_t size, size_t nmemb, void *ud)
+{
+    ns_ai_http_buf *b = ud;
+    size_t add = size * nmemb;
+    if (b->len + add > 8u * 1024u * 1024u)
+        return 0;
+    b->data = g_realloc(b->data, b->len + add + 1);
+    memcpy(b->data + b->len, ptr, add);
+    b->len += add;
+    b->data[b->len] = '\0';
+    return add;
+}
+
+static char *
+ns_ai_http_get(const char *url)
+{
+    CURL *c = curl_easy_init();
+    if (!c) return NULL;
+    ns_ai_http_buf b = { 0 };
+    struct curl_slist *hdrs = NULL;
+    hdrs = curl_slist_append(hdrs, "Accept: text/html,application/json,*/*");
+    hdrs = curl_slist_append(hdrs, "Accept-Language: en-US,en;q=0.9");
+    hdrs = curl_slist_append(hdrs, "Referer: https://duckduckgo.com/");
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, ns_ai_http_write);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
+    curl_easy_setopt(c, CURLOPT_USERAGENT,
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, "
+        "like Gecko) Chrome/124.0 Safari/537.36");
+    CURLcode rc = curl_easy_perform(c);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    if (rc != CURLE_OK) {
+        g_free(b.data);
+        return NULL;
+    }
+    return b.data;
+}
+
+static char *
+ns_ai_json_first_string(const char *json, const char *key)
+{
+    if (!json) return NULL;
+    char *needle = g_strdup_printf("\"%s\":\"", key);
+    const char *p = strstr(json, needle);
+    size_t nl = strlen(needle);
+    g_free(needle);
+    if (!p) return NULL;
+    p += nl;
+    GString *o = g_string_new(NULL);
+    while (*p && *p != '"') {
+        if (*p == '\\' && p[1]) {
+            p++;
+            switch (*p) {
+            case '/':  g_string_append_c(o, '/'); break;
+            case 'n':  g_string_append_c(o, '\n'); break;
+            case 't':  g_string_append_c(o, '\t'); break;
+            case 'u':
+                if (p[1] && p[2] && p[3] && p[4]) p += 4;
+                break;
+            default:   g_string_append_c(o, *p);
+            }
+            p++;
+        } else {
+            g_string_append_c(o, *p++);
+        }
+    }
+    return g_string_free(o, FALSE);
+}
+
+static char *
+ns_ai_html_text(const char *start, const char *end)
+{
+    GString *o = g_string_new(NULL);
+    for (const char *p = start; p < end; p++) {
+        if (*p == '<') {
+            while (p < end && *p != '>') p++;
+            continue;
+        }
+        if (*p == '&') {
+            if (g_str_has_prefix(p, "&amp;"))  { g_string_append_c(o, '&'); p += 4; continue; }
+            if (g_str_has_prefix(p, "&lt;"))   { g_string_append_c(o, '<'); p += 3; continue; }
+            if (g_str_has_prefix(p, "&gt;"))   { g_string_append_c(o, '>'); p += 3; continue; }
+            if (g_str_has_prefix(p, "&quot;")) { g_string_append_c(o, '"'); p += 5; continue; }
+            if (g_str_has_prefix(p, "&#x27;")) { g_string_append_c(o, '\''); p += 5; continue; }
+            if (g_str_has_prefix(p, "&#39;"))  { g_string_append_c(o, '\''); p += 4; continue; }
+            if (g_str_has_prefix(p, "&nbsp;")) { g_string_append_c(o, ' '); p += 5; continue; }
+        }
+        g_string_append_c(o, *p);
+    }
+    return g_string_free(o, FALSE);
+}
+
+static char *
+ns_ai_ddg_decode_url(const char *href)
+{
+    const char *u = strstr(href, "uddg=");
+    if (u) {
+        u += 5;
+        const char *end = strchr(u, '&');
+        char *enc = end ? g_strndup(u, (gsize)(end - u)) : g_strdup(u);
+        char *dec = g_uri_unescape_string(enc, NULL);
+        g_free(enc);
+        return dec ? dec : g_strdup(href);
+    }
+    if (g_str_has_prefix(href, "//"))
+        return g_strconcat("https:", href, NULL);
+    return g_strdup(href);
+}
+
+static char *
+ns_ai_image_search(const char *query, char **page_out)
+{
+    if (page_out) *page_out = NULL;
+    char *eq = g_uri_escape_string(query, NULL, TRUE);
+    char *url = g_strdup_printf(
+        "https://en.wikipedia.org/w/api.php?action=query&format=json"
+        "&generator=search&gsrsearch=%s&gsrlimit=1&prop=pageimages"
+        "&piprop=thumbnail&pithumbsize=640", eq);
+    char *json = ns_ai_http_get(url);
+    g_free(url);
+    g_free(eq);
+    if (!json) return NULL;
+
+    char *img = ns_ai_json_first_string(json, "source");
+    char *title = ns_ai_json_first_string(json, "title");
+    g_free(json);
+
+    if (img && page_out && title) {
+        char *t = g_uri_escape_string(title, NULL, TRUE);
+        *page_out = g_strdup_printf("https://en.wikipedia.org/wiki/%s", t);
+        g_free(t);
+    }
+    g_free(title);
+    return img;
+}
+
+static char *
+ns_ai_web_search(const char *query, char **sources_out)
+{
+    if (sources_out) *sources_out = NULL;
+    char *eq = g_uri_escape_string(query, NULL, TRUE);
+    char *u = g_strdup_printf("https://html.duckduckgo.com/html/?q=%s", eq);
+    g_free(eq);
+    char *html = ns_ai_http_get(u);
+    g_free(u);
+    if (!html) return NULL;
+
+    GString *ctx = g_string_new(NULL);
+    GString *src = g_string_new(NULL);
+    const char *p = html;
+    int n = 0;
+    while (n < 4) {
+        p = strstr(p, "result__a");
+        if (!p) break;
+        const char *href = strstr(p, "href=\"");
+        if (!href) break;
+        href += 6;
+        const char *hend = strchr(href, '"');
+        if (!hend) break;
+        char *raw = g_strndup(href, (gsize)(hend - href));
+        char *url = ns_ai_ddg_decode_url(raw);
+        g_free(raw);
+
+        char *title = NULL;
+        const char *gt = strchr(hend, '>');
+        if (gt) {
+            const char *lt = strstr(gt + 1, "</a>");
+            if (lt) title = g_strstrip(ns_ai_html_text(gt + 1, lt));
+        }
+
+        char *snippet = NULL;
+        const char *sn = strstr(hend, "result__snippet");
+        const char *nextres = strstr(hend, "result__a");
+        if (sn && (!nextres || sn < nextres)) {
+            const char *sgt = strchr(sn, '>');
+            if (sgt) {
+                const char *slt = strstr(sgt + 1, "</a>");
+                if (slt) snippet = g_strstrip(ns_ai_html_text(sgt + 1, slt));
+            }
+        }
+
+        n++;
+        g_string_append_printf(ctx, "[%d] %s\n%s\n%.280s\n\n",
+            n, title ? title : "", url ? url : "", snippet ? snippet : "");
+        g_string_append_printf(src, "[%d] [%s](%s)\n",
+            n, (title && *title) ? title : (url ? url : ""), url ? url : "");
+        g_free(title);
+        g_free(snippet);
+        g_free(url);
+        p = hend;
+    }
+    g_free(html);
+
+    if (n == 0) {
+        g_string_free(ctx, TRUE);
+        g_string_free(src, TRUE);
+        return NULL;
+    }
+    if (sources_out) *sources_out = g_string_free(src, FALSE);
+    else g_string_free(src, TRUE);
+    return g_string_free(ctx, FALSE);
+}
+
+static gboolean
+ns_ai_parse_tool(const char *reply, char **kind, char **arg)
+{
+    for (const char *p = reply; p && *p; ) {
+        const char *eol = strchr(p, '\n');
+        size_t len = eol ? (size_t)(eol - p) : strlen(p);
+        const char *s = p;
+        size_t l = len;
+        while (l && (*s == ' ' || *s == '\t' || *s == '*' || *s == '`')) { s++; l--; }
+        if (l >= 6 && g_ascii_strncasecmp(s, "IMAGE:", 6) == 0) {
+            *kind = g_strdup("image");
+            *arg = g_strstrip(g_strndup(s + 6, l - 6));
+            return TRUE;
+        }
+        if (l >= 7 && g_ascii_strncasecmp(s, "SEARCH:", 7) == 0) {
+            *kind = g_strdup("search");
+            *arg = g_strstrip(g_strndup(s + 7, l - 7));
+            return TRUE;
+        }
+        if ((l >= 3 && g_ascii_strncasecmp(s, "GO:", 3) == 0)) {
+            *kind = g_strdup("go");
+            *arg = g_strstrip(g_strndup(s + 3, l - 3));
+            return TRUE;
+        }
+        if (l >= 9 && g_ascii_strncasecmp(s, "NAVIGATE:", 9) == 0) {
+            *kind = g_strdup("go");
+            *arg = g_strstrip(g_strndup(s + 9, l - 9));
+            return TRUE;
+        }
+        if (!eol) break;
+        p = eol + 1;
+    }
+    return FALSE;
+}
+
+static char *
+ns_ai_normalize_url(const char *raw)
+{
+    if (!raw || !*raw) return NULL;
+    char *s = g_strstrip(g_strdup(raw));
+    if (!*s) { g_free(s); return NULL; }
+    if (strstr(s, "://"))
+        return s;
+    char *full = g_strconcat("https://", s, NULL);
+    g_free(s);
+    return full;
+}
+
+static char *
+ns_ai_try_navigate(const char *msg)
+{
+    static const char *const verbs[] = {
+        "go to ", "goto ", "open ", "navigate to ", "visit ",
+        "take me to ", "browse to ", "bring up ",
+    };
+    char *trimmed = g_strstrip(g_strdup(msg));
+    char *low = g_ascii_strdown(trimmed, -1);
+    const char *rest = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(verbs); i++) {
+        if (g_str_has_prefix(low, verbs[i])) {
+            rest = trimmed + strlen(verbs[i]);
+            break;
+        }
+    }
+
+    char *result = NULL;
+    if (rest) {
+        char *r = g_strstrip(g_strdup(rest));
+        size_t n = strlen(r);
+        while (n && strchr(".!?,; ", r[n - 1])) r[--n] = '\0';
+        if (*r && !strchr(r, ' ') && (strstr(r, "://") || strchr(r, '.'))) {
+            char *url = ns_ai_normalize_url(r);
+            if (url) {
+                result = g_strdup_printf("@@NAVIGATE@@%s", url);
+                g_free(url);
+            }
+        }
+        g_free(r);
+    }
+    g_free(low);
+    g_free(trimmed);
+    return result;
+}
+
 char *
 ns_ai_status_json(void)
 {
@@ -516,11 +827,11 @@ ns_ai_ensure_loaded_locked(void)
 }
 
 static char *
-ns_ai_build_prompt(const char *user_msg)
+ns_ai_build_prompt(const char *system_prompt, const char *user_msg)
 {
     const char *tmpl = llama_model_chat_template(g_model, NULL);
     struct llama_chat_message msgs[2] = {
-        { "system", NS_AI_SYSTEM_PROMPT },
+        { "system", system_prompt },
         { "user",   user_msg },
     };
 
@@ -541,13 +852,13 @@ ns_ai_build_prompt(const char *user_msg)
         "<|im_start|>system\n%s<|im_end|>\n"
         "<|im_start|>user\n%s<|im_end|>\n"
         "<|im_start|>assistant\n",
-        NS_AI_SYSTEM_PROMPT, user_msg);
+        system_prompt, user_msg);
 }
 
 static char *
-ns_ai_run_locked(const char *user_msg)
+ns_ai_run_locked(const char *system_prompt, const char *user_msg)
 {
-    char *prompt = ns_ai_build_prompt(user_msg);
+    char *prompt = ns_ai_build_prompt(system_prompt, user_msg);
 
     int n_max = (int)strlen(prompt) + 8;
     llama_token *toks = g_malloc(sizeof(llama_token) * (gsize)n_max);
@@ -601,16 +912,86 @@ ns_ai_run_locked(const char *user_msg)
     return g_string_free(out, FALSE);
 }
 
+static char *
+ns_ai_run_tools_locked(const char *user_msg)
+{
+    char *first = ns_ai_run_locked(NS_AI_SYSTEM_PROMPT, user_msg);
+    if (!first) return NULL;
+
+    char *kind = NULL, *arg = NULL;
+    if (!ns_ai_parse_tool(first, &kind, &arg))
+        return first;
+    g_free(first);
+
+    const char *query = (arg && *arg) ? arg : user_msg;
+    char *reply = NULL;
+
+    if (g_str_equal(kind, "go")) {
+        char *url = ns_ai_normalize_url(query);
+        reply = url ? g_strdup_printf("@@NAVIGATE@@%s", url)
+                    : g_strdup("I couldn't work out which page to open.");
+        g_free(url);
+    } else if (g_str_equal(kind, "image")) {
+        char *page = NULL;
+        char *img = ns_ai_image_search(query, &page);
+        if (img) {
+            char *alt = g_strdup(query);
+            g_strdelimit(alt, "[]()", ' ');
+            reply = g_strdup_printf(
+                "Here's an image of %s:\n\n![%s](%s)\n\n[Image source](%s)",
+                query, alt, img, page ? page : img);
+            g_free(alt);
+        } else {
+            reply = g_strdup_printf("I couldn't find an image for \"%s\".",
+                                    query);
+        }
+        g_free(img);
+        g_free(page);
+    } else {
+        char *sources = NULL;
+        char *ctx = ns_ai_web_search(query, &sources);
+        if (ctx) {
+            char *augmented = g_strdup_printf(
+                "Web search results for \"%s\":\n\n%s"
+                "Using only these results, answer this request: %s",
+                query, ctx, user_msg);
+            char *answer = ns_ai_run_locked(NS_AI_ANSWER_PROMPT, augmented);
+            g_free(augmented);
+            if (answer && *g_strstrip(answer))
+                reply = sources
+                      ? g_strdup_printf("%s\n\nSources:\n%s", answer, sources)
+                      : g_strdup(answer);
+            else
+                reply = g_strdup_printf("Here's what I found:\n\n%s",
+                                        sources ? sources : ctx);
+            g_free(answer);
+        } else {
+            reply = g_strdup_printf(
+                "I couldn't search the web for \"%s\" right now.", query);
+        }
+        g_free(ctx);
+        g_free(sources);
+    }
+
+    g_free(kind);
+    g_free(arg);
+    return reply;
+}
+
 char *
 ns_ai_chat(const char *user_msg)
 {
     if (!user_msg || !*user_msg)
         return g_strdup("Please type a message.");
 
+    char *nav = ns_ai_try_navigate(user_msg);
+    if (nav)
+        return nav;
+
     g_mutex_lock(&g_model_lock);
     char *reply = NULL;
     if (ns_ai_ensure_loaded_locked())
-        reply = ns_ai_run_locked(user_msg);
+        reply = ns_ai_run_tools_locked(user_msg);
     g_mutex_unlock(&g_model_lock);
 
     if (!reply)
