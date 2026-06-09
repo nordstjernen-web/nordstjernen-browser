@@ -5,4 +5,6 @@ option('qt', type: 'feature', value: 'disabled',
 option('ipc_experiment', type: 'boolean', value: false,
        description: 'Build the HTTP-vs-binary IPC comparison renderer and benchmark (experiment branch).')
 option('ai', type: 'feature', value: 'enabled',
-       description: 'Build the local on-CPU AI chat start page (llama.cpp via CMake subproject).')
+       description: 'Build the local AI chat start page (llama.cpp via CMake subproject).')
+option('ai_gpu', type: 'feature', value: 'auto',
+       description: 'Build a llama.cpp GPU backend for partial offload when the platform toolchain is present (Metal on macOS; Vulkan elsewhere). Falls back to CPU at runtime when no GPU is found.')

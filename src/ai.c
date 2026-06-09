@@ -41,9 +41,11 @@ ns_ai_chat(const char *user_msg)
 #else
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <curl/curl.h>
 
 #include "llama.h"
+#include "ggml-backend.h"
 
 #define NS_AI_N_CTX        2048
 #define NS_AI_MAX_REPLY    320
@@ -75,12 +77,19 @@ static const ns_ai_model k_models[] = {
         "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/"
         "qwen2.5-3b-instruct-q4_k_m.gguf?download=true", 1930,
     },
+    {
+        "large", "Llama 3.1 8B", "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/"
+        "resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf?download=true", 4920,
+    },
 };
 
 static struct llama_model       *g_model;
 static struct llama_context     *g_ctx;
 static const struct llama_vocab *g_vocab;
 static char                     *g_loaded_path;
+static int                       g_gpu_layers_used;
+static char                     *g_gpu_device;
 static GMutex                    g_model_lock;
 
 static char    *g_active_id;
@@ -288,6 +297,11 @@ ns_ai_json_escape(const char *s)
 char *
 ns_ai_status_json(void)
 {
+    g_mutex_lock(&g_model_lock);
+    int gpu_layers = g_gpu_layers_used;
+    char *gpu_device = g_strdup(g_gpu_device);
+    g_mutex_unlock(&g_model_lock);
+
     g_mutex_lock(&g_dl_lock);
     gboolean downloading = g_downloading;
     char *dl_id = g_strdup(g_dl_id);
@@ -316,6 +330,12 @@ ns_ai_status_json(void)
                            state, models->str);
     if (active_id)
         g_string_append_printf(out, ",\"active\":\"%s\"", active_id);
+    if (gpu_device && gpu_layers != 0) {
+        char *esc = ns_ai_json_escape(gpu_device);
+        g_string_append_printf(out,
+            ",\"gpu\":\"%s\",\"gpu_layers\":%d", esc, gpu_layers);
+        g_free(esc);
+    }
     if (downloading) {
         int pct = total > 0 ? (int)((now * 100) / total) : 0;
         g_string_append_printf(out,
@@ -334,6 +354,7 @@ ns_ai_status_json(void)
     g_free(dl_id);
     g_free(err);
     g_free(active_id);
+    g_free(gpu_device);
     return g_string_free(out, FALSE);
 }
 
@@ -353,6 +374,85 @@ ns_ai_unload_locked(void)
     g_vocab = NULL;
     g_free(g_loaded_path);
     g_loaded_path = NULL;
+    g_gpu_layers_used = 0;
+    g_free(g_gpu_device);
+    g_gpu_device = NULL;
+}
+
+static gboolean
+ns_ai_device_is_software(const char *name)
+{
+    if (!name) return FALSE;
+    char *lower = g_ascii_strdown(name, -1);
+    gboolean soft = strstr(lower, "llvmpipe") || strstr(lower, "lavapipe") ||
+                    strstr(lower, "swiftshader") || strstr(lower, "software") ||
+                    strstr(lower, "cpu");
+    g_free(lower);
+    return soft;
+}
+
+static ggml_backend_dev_t
+ns_ai_pick_gpu(void)
+{
+    size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_dev_t d = ggml_backend_dev_get(i);
+        enum ggml_backend_dev_type t = ggml_backend_dev_type(d);
+        if (t != GGML_BACKEND_DEVICE_TYPE_GPU &&
+            t != GGML_BACKEND_DEVICE_TYPE_IGPU)
+            continue;
+        if (ns_ai_device_is_software(ggml_backend_dev_name(d)) ||
+            ns_ai_device_is_software(ggml_backend_dev_description(d)))
+            continue;
+        return d;
+    }
+    return NULL;
+}
+
+static int
+ns_ai_plan_gpu_offload(const char *path, int n_layers, char **device_out)
+{
+    *device_out = NULL;
+
+    const char *env = g_getenv("NORDSTJERNEN_AI_GPU_LAYERS");
+    gboolean forced = env && *env;
+    int want = forced ? atoi(env) : 0;
+    if (forced && want == 0)
+        return 0;
+
+    if (!llama_supports_gpu_offload())
+        return 0;
+
+    ggml_backend_dev_t dev = ns_ai_pick_gpu();
+    if (!dev)
+        return 0;
+
+    if (!forced) {
+        size_t freem = 0, totalm = 0;
+        ggml_backend_dev_memory(dev, &freem, &totalm);
+        GStatBuf st;
+        if (freem == 0 || n_layers <= 0 || g_stat(path, &st) != 0)
+            return 0;
+        double per_layer = (double)st.st_size / (double)n_layers;
+        double budget = (double)freem * 0.85;
+        want = per_layer > 0 ? (int)(budget / per_layer) : 0;
+        if (want < 1)
+            return 0;
+        if (want > n_layers)
+            want = n_layers;
+    }
+
+    const char *desc = ggml_backend_dev_description(dev);
+    *device_out = g_strdup(desc ? desc : ggml_backend_dev_name(dev));
+    return want;
+}
+
+static struct llama_model *
+ns_ai_load_model(const char *path, int n_gpu_layers)
+{
+    struct llama_model_params mparams = llama_model_default_params();
+    mparams.n_gpu_layers = n_gpu_layers;
+    return llama_model_load_from_file(path, mparams);
 }
 
 static gboolean
@@ -370,9 +470,23 @@ ns_ai_ensure_loaded_locked(void)
     llama_log_set(ns_ai_log_sink, NULL);
     llama_backend_init();
 
-    struct llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;
-    g_model = llama_model_load_from_file(path, mparams);
+    g_model = ns_ai_load_model(path, 0);
+    if (!g_model) { g_free(path); return FALSE; }
+
+    char *device = NULL;
+    int want = ns_ai_plan_gpu_offload(path, llama_model_n_layer(g_model),
+                                      &device);
+    if (want != 0) {
+        llama_model_free(g_model);
+        g_model = ns_ai_load_model(path, want);
+        if (g_model) {
+            g_gpu_layers_used = want;
+            g_gpu_device = device;
+        } else {
+            g_free(device);
+            g_model = ns_ai_load_model(path, 0);
+        }
+    }
     if (!g_model) { g_free(path); return FALSE; }
 
     struct llama_context_params cparams = llama_context_default_params();
@@ -381,9 +495,17 @@ ns_ai_ensure_loaded_locked(void)
     cparams.n_threads       = (int32_t)g_get_num_processors();
     cparams.n_threads_batch = (int32_t)g_get_num_processors();
     g_ctx = llama_init_from_model(g_model, cparams);
-    if (!g_ctx) {
+    if (!g_ctx && g_gpu_layers_used != 0) {
         llama_model_free(g_model);
-        g_model = NULL;
+        g_gpu_layers_used = 0;
+        g_free(g_gpu_device);
+        g_gpu_device = NULL;
+        g_model = ns_ai_load_model(path, 0);
+        if (g_model)
+            g_ctx = llama_init_from_model(g_model, cparams);
+    }
+    if (!g_ctx) {
+        if (g_model) { llama_model_free(g_model); g_model = NULL; }
         g_free(path);
         return FALSE;
     }

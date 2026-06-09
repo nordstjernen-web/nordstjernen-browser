@@ -257,17 +257,40 @@ install_data(
 )
 
 ai_feature = get_option('ai')
+ai_gpu_feature = get_option('ai_gpu')
 ai_deps = []
 have_ai = false
+ai_gpu_backend = 'none'
 if not is_android and ai_feature.allowed()
   cmake = import('cmake')
+
+  use_metal = false
+  use_vulkan = false
+  vulkan_dep = dependency('', required: false)
+  if ai_gpu_feature.allowed()
+    if host_machine.system() == 'darwin'
+      use_metal = true
+    else
+      vulkan_dep = dependency('vulkan', required: false)
+      glsl_compiler = find_program('glslc', 'glslangValidator', required: false)
+      if vulkan_dep.found() and glsl_compiler.found()
+        use_vulkan = true
+      endif
+    endif
+  endif
+  if ai_gpu_feature.enabled() and not (use_metal or use_vulkan)
+    error('ai_gpu was requested but no GPU toolchain (Metal/Vulkan + glslc) was found.')
+  endif
+
   llama_opts = cmake.subproject_options()
   llama_opts.add_cmake_defines({
     'BUILD_SHARED_LIBS': false,
     'LLAMA_CURL': false,
     'GGML_NATIVE': false,
     'GGML_OPENMP': false,
-    'GGML_METAL': false,
+    'GGML_METAL': use_metal,
+    'GGML_METAL_EMBED_LIBRARY': use_metal,
+    'GGML_VULKAN': use_vulkan,
     'GGML_ACCELERATE': false,
     'GGML_BLAS': false,
     'LLAMA_BUILD_TESTS': false,
@@ -287,8 +310,18 @@ if not is_android and ai_feature.allowed()
       llama_sp.dependency('ggml-cpu'),
       llama_sp.dependency('ggml-base'),
     ]
+    if use_metal
+      ai_deps += llama_sp.dependency('ggml-metal')
+      ai_gpu_backend = 'metal'
+    endif
+    if use_vulkan
+      ai_deps += llama_sp.dependency('ggml-vulkan')
+      ai_deps += vulkan_dep
+      ai_gpu_backend = 'vulkan'
+    endif
     have_ai = true
   endif
 endif
+summary({'AI chat': have_ai, 'AI GPU backend': ai_gpu_backend}, section: 'Features')
 
 subdir('src')
