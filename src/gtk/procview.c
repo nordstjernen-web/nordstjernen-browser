@@ -272,6 +272,8 @@ finish_loading(NsProcView *v)
     if (v->loading) {
         v->loading = FALSE;
         post_emit(v, NS_PROC_EVT_LOADING, "0");
+        if (v->area)
+            gtk_widget_set_cursor_from_name(v->area, NULL);
     }
 }
 
@@ -888,6 +890,8 @@ do_load(NsProcView *v, const char *url, gboolean record)
         v->loading = TRUE;
         post_emit(v, NS_PROC_EVT_LOADING, "1");
     }
+    if (v->area)
+        gtk_widget_set_cursor_from_name(v->area, "progress");
     post_emit(v, NS_PROC_EVT_STATUS, "Loading…");
 
     int vw = gtk_widget_get_width(v->area);
