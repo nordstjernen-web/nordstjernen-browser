@@ -416,6 +416,7 @@ ns_config_save(GError **error)
         }
     }
     gboolean ok = g_file_set_contents(g_cfg_path, s->str, (gssize)s->len, error);
+    if (ok) g_chmod(g_cfg_path, 0600);
     g_string_free(s, TRUE);
     return ok;
 }
