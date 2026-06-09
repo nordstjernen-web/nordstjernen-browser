@@ -117,6 +117,13 @@ downloads. Windows, Fedora, openSUSE and macOS instructions are in
 [docs/](docs/). Keyboard, mouse and touch controls are documented in
 [docs/Controls.md](docs/Controls.md).
 
+An **experimental Qt 6 frontend** lives in [`src/qt/`](src/qt/) as an
+alternative to the default GTK shell. It is off by default; enable it
+with `meson setup builddir -Dqt=enabled` (needs `qt6-base-dev`), which
+produces `./builddir/src/qt/nordstjernen-qt`. The
+[`qt` workflow](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml)
+builds it on every push and uploads a Linux binary artifact.
+
 ## Dependencies
 
 Nordstjernen is a clean-room engine — no upstream browser code. The
@@ -190,6 +197,7 @@ Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
 [![linux](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml)
 [![macos](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/macos.yml)
 [![windows](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/windows.yml)
+[![qt](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml)
 [![android](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/android.yml)
 [![java](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/java.yml)
 [![codeql](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/codeql.yml/badge.svg)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/codeql.yml)
