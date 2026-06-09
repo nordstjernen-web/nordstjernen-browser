@@ -839,24 +839,86 @@ proc_window_new(GtkApplication *app, const char *home_url)
     return pw;
 }
 
+#define NS_ABOUT_LICENSE_CORE \
+    "Nordstjernen is distributed under the Nordstjernen Source License " \
+    "v1.0 (NSL-1.0), © 2026 Andreas Røsdal. See License.md for the full " \
+    "terms.\n" \
+    "\n" \
+    "This program includes third-party open-source software. Full " \
+    "license texts are in THIRD-PARTY-LICENSES.md.\n" \
+    "\n" \
+    "Statically linked:\n" \
+    "  • lexbor — Apache License 2.0, © 2018–2025 Alexander Borisov\n" \
+    "  • Wuffs — Apache License 2.0, © 2017 The Wuffs Authors\n" \
+    "  • quickjs-ng — MIT License, © Fabrice Bellard, Charlie Gordon and " \
+    "the quickjs-ng contributors\n" \
+    "  • WebAssembly Micro Runtime — Apache License 2.0 with LLVM " \
+    "exceptions\n" \
+    "\n" \
+    "Dynamically linked:\n" \
+    "  • GTK 4, GLib, Pango, gdk-pixbuf — GNU LGPL 2.1 or later\n" \
+    "  • Cairo — GNU LGPL 2.1 or MPL 1.1\n" \
+    "  • libcurl — curl license (MIT-style), © 1996–2026 Daniel Stenberg " \
+    "and contributors\n" \
+    "  • OpenSSL (libcrypto) — Apache License 2.0, © The OpenSSL Project\n" \
+    "  • uchardet — MPL 1.1 / LGPL 2.1+ / GPL 2.0+\n" \
+    "  • libwebp — BSD 3-Clause, © Google Inc.\n" \
+    "  • libpsl — MIT License, © Tim Rühsen\n" \
+    "  • SQLite — public domain\n" \
+    "  • libepoxy — MIT License, © Intel Corporation\n" \
+    "  • zlib — zlib License, © Jean-loup Gailly and Mark Adler\n" \
+    "  • libseccomp (Linux) — GNU LGPL 2.1\n" \
+    "  • librsvg (Windows/macOS bundles) — GNU LGPL 2.1 or later\n"
+
+#ifdef NS_HAVE_AI
+#define NS_ABOUT_LICENSE_AI \
+    "\n" \
+    "Local AI inference (optional feature):\n" \
+    "  • llama.cpp and ggml — MIT License, © 2023–2024 The ggml authors\n" \
+    "\n" \
+    "AI models are downloaded at your request and are not bundled. Your " \
+    "use of a downloaded model is governed by that model's license:\n" \
+    "  • Built with Llama. Meta Llama 3.1 8B Instruct — Llama 3.1 " \
+    "Community License Agreement, © Meta Platforms, Inc. " \
+    "(https://www.llama.com/llama3_1/license/)\n" \
+    "  • Qwen2.5 0.5B and 1.5B Instruct — Apache License 2.0, © Alibaba " \
+    "Cloud\n" \
+    "  • Qwen2.5 3B Instruct — Qwen Research License Agreement " \
+    "(research / non-commercial use only), © Alibaba Cloud\n"
+#else
+#define NS_ABOUT_LICENSE_AI ""
+#endif
+
+#define NS_ABOUT_LICENSE_TEXT NS_ABOUT_LICENSE_CORE NS_ABOUT_LICENSE_AI
+
 static void
 act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
     ProcWindow *pw = user_data;
     const char *authors[] = { "Andreas Røsdal", NULL };
+    const char *comments =
+        "Northstar — the legendary web browser.\n"
+        "A clean-room browser in C with GTK 4 and libcurl, "
+        "rendering each tab in a sandboxed process."
+#ifdef NS_HAVE_AI
+        "\n\nBuilt with Llama. The optional local AI assistant can run "
+        "Meta Llama 3.1 and Alibaba Qwen2.5 models that you choose to "
+        "download."
+#endif
+        ;
     gtk_show_about_dialog(
         GTK_WINDOW(pw->window),
         "program-name", "Nordstjernen",
         "version", NS_VERSION,
-        "comments", "Northstar — the legendary web browser.\n"
-                    "A clean-room browser in C with GTK 4 and libcurl, "
-                    "rendering each tab in a sandboxed process.",
+        "comments", comments,
         "website", "https://nordstjernen.org",
         "website-label", "nordstjernen.org",
         "authors", authors,
         "copyright", "© 2026 Andreas Røsdal",
         "license-type", GTK_LICENSE_CUSTOM,
+        "license", NS_ABOUT_LICENSE_TEXT,
+        "wrap-license", TRUE,
         "logo-icon-name", "nordstjernen",
         NULL);
 }

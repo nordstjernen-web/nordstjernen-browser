@@ -341,16 +341,24 @@ void ProcWindow::onCurrentChanged(int index) {
 }
 
 void ProcWindow::onAbout() {
-    QMessageBox::about(
-        this, QStringLiteral("About Nordstjernen"),
-        QStringLiteral(
-            "<h3>Nordstjernen %1 (Qt)</h3>"
-            "<p>Northstar — the legendary web browser.</p>"
-            "<p>A clean-room browser in C with libcurl, rendering each tab in "
-            "a sandboxed process. This is the Qt 6 shell.</p>"
-            "<p><a href=\"https://nordstjernen.org\">nordstjernen.org</a></p>"
-            "<p>© 2026 Andreas Røsdal</p>")
-            .arg(QStringLiteral(NS_VERSION)));
+    QString body = QStringLiteral(
+        "<h3>Nordstjernen %1 (Qt)</h3>"
+        "<p>Northstar — the legendary web browser.</p>"
+        "<p>A clean-room browser in C with libcurl, rendering each tab in "
+        "a sandboxed process. This is the Qt 6 shell.</p>")
+        .arg(QStringLiteral(NS_VERSION));
+#ifdef NS_HAVE_AI
+    body += QStringLiteral(
+        "<p><b>Built with Llama.</b> The optional local AI assistant can run "
+        "Meta Llama 3.1 (Llama 3.1 Community License) and Alibaba Qwen2.5 "
+        "models that you choose to download.</p>");
+#endif
+    body += QStringLiteral(
+        "<p>Includes third-party open-source software; see "
+        "THIRD-PARTY-LICENSES.md for full notices.</p>"
+        "<p><a href=\"https://nordstjernen.org\">nordstjernen.org</a></p>"
+        "<p>Nordstjernen Source License v1.0 — © 2026 Andreas Røsdal</p>");
+    QMessageBox::about(this, QStringLiteral("About Nordstjernen"), body);
 }
 
 void ProcWindow::refreshTaskManager() {
