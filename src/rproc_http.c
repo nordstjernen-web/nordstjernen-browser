@@ -391,6 +391,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->stride = (int)head.x_stride;
     out->animating = head.x_anim > 0;
     out->pixels = r->shm ? r->map : r->rxbuf;
+    out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
     return 0;
 }
 

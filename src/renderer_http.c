@@ -228,10 +228,18 @@ main(int argc, char **argv)
             ns_browser_tick(cur, tick_budget_ms);
             ns_browser_render_argb32(cur, (int)sx, (int)sy, vw, vh, scale, fb,
                                      stride);
-            char hdrs[128];
-            snprintf(hdrs, sizeof hdrs,
+            char *nav = ns_browser_take_pending_nav(cur);
+            if (nav)
+                for (char *p = nav; *p; p++)
+                    if (*p == '\r' || *p == '\n') *p = ' ';
+            char hdrs[2304];
+            int hn = snprintf(hdrs, sizeof hdrs,
                      "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n",
                      vw, vh, stride, ns_browser_animating(cur) ? 1 : 0);
+            if (nav && *nav && hn > 0 && (size_t)hn < sizeof hdrs)
+                snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                         "X-Nav: %.2000s\r\n", nav);
+            free(nav);
             if (shm_mode)
                 http_write_response(ctrl_w, 200, "application/octet-stream",
                                     hdrs, NULL, 0);

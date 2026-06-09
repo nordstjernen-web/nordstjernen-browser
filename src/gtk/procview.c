@@ -350,6 +350,10 @@ worker_main(gpointer data)
                 res->animating = fr.animating ? TRUE : FALSE;
                 res->surface = frame_to_surface(fr.pixels, fr.width, fr.height,
                                                 fr.stride);
+                if (fr.nav) {
+                    res->nav = g_strdup(fr.nav);
+                    free(fr.nav);
+                }
             } else if (v->proc) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
             }
@@ -1085,6 +1089,11 @@ on_result(gpointer data)
             res->surface = NULL;
             v->render_restarts = 0;
             gtk_widget_queue_draw(v->area);
+        }
+        if (current && res->ok && res->nav && *res->nav &&
+            v->js_redirects < NS_PV_MAX_JS_REDIRECTS) {
+            v->js_redirects++;
+            do_load(v, res->nav, FALSE);
         }
         v->render_inflight = FALSE;
         if (v->render_pending) {

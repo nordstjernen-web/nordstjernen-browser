@@ -262,6 +262,13 @@ http_read_head(http_conn *c, http_head *out)
             out->x_stride = atol(val);
         else if (strcasecmp(line, "X-Anim") == 0)
             out->x_anim = atol(val);
+        else if (strcasecmp(line, "X-Nav") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_nav)
+                vlen = sizeof out->x_nav - 1;
+            memcpy(out->x_nav, val, vlen);
+            out->x_nav[vlen] = '\0';
+        }
     }
     if (out->content_length < 0 || out->content_length > NS_HTTP_MAX_BODY)
         return -1;

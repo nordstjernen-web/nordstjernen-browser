@@ -26,6 +26,7 @@ typedef struct {
     int   status;
     long  content_length;
     long  x_w, x_h, x_stride, x_anim;
+    char  x_nav[2048];
 } http_head;
 
 void http_conn_init(http_conn *c, int fd);
