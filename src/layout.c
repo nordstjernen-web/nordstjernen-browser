@@ -2696,6 +2696,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             ctx->active_link_node = n;
         }
     }
+    gsize elem_start = ctx->out->len;
     double ml = length_or(s ? s->values[NS_CSS_MARGIN_LEFT]  : NULL, 0);
     double mr = length_or(s ? s->values[NS_CSS_MARGIN_RIGHT] : NULL, 0);
     double pl = length_or(s ? s->values[NS_CSS_PADDING_LEFT]  : NULL, 0);
@@ -2897,6 +2898,15 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             (ctx->q_depth % 2 == 0) ? "\xe2\x80\x9d" : "\xe2\x80\x99");
     }
     if (mr >= 3.0 || pr >= 3.0) g_string_append_c(ctx->out, ' ');
+    if (ctx->out->len > elem_start) {
+        ns_inline_attr elem = {
+            .kind = NS_INLINE_ELEMENT,
+            .start = elem_start,
+            .len = ctx->out->len - elem_start,
+            .dom = n,
+        };
+        g_array_append_val(ctx->attrs, elem);
+    }
     ctx->active_href   = prev_href;
     ctx->active_target = prev_target;
     ctx->active_link_node = prev_link_node;
@@ -9646,4 +9656,60 @@ ns_box_hit_link(const ns_box *root, double x, double y)
 {
     const ns_link_range *r = ns_box_hit_link_range(root, x, y);
     return r ? r->href : NULL;
+}
+
+const ns_node *
+ns_box_hit_inline_dom(const ns_box *root, double x, double y)
+{
+    if (!root) return NULL;
+    if (root->paint_bottom > root->paint_top &&
+        (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
+        return NULL;
+    if (!box_blocks_hit_testing(root) &&
+        root->kind == NS_BOX_INLINE && root->attrs &&
+        root->attrs->len > 0 && root->text && *root->text) {
+        double box_x0 = root->x;
+        double box_y0 = root->y;
+        double box_y1 = box_y0 + root->content_height;
+        if (x >= box_x0 && x <= box_x0 + root->content_width &&
+            y >= box_y0 && y <= box_y1) {
+            gsize byte = 0;
+            if (ns_paint_inline_xy_to_byte(root, x - box_x0, y - box_y0, &byte)) {
+                const ns_node *best = NULL;
+                gsize best_len = 0;
+                for (guint i = 0; i < root->attrs->len; i++) {
+                    const ns_inline_attr *r =
+                        &g_array_index(root->attrs, ns_inline_attr, i);
+                    if (r->kind != NS_INLINE_ELEMENT || !r->dom) continue;
+                    if (byte < r->start || byte >= r->start + r->len) continue;
+                    if (!best || r->len < best_len) {
+                        best = r->dom;
+                        best_len = r->len;
+                    }
+                }
+                if (best) return best;
+            }
+            return NULL;
+        }
+    }
+    if (box_clips_children(root) && !box_padding_contains(root, x, y))
+        return NULL;
+    double cx = x + root->scroll_x;
+    double cy = y + root->scroll_y;
+    const ns_node *best = NULL;
+    guint sn = 0;
+    const ns_box **stacked = hit_children_stacked(root, &sn);
+    if (stacked) {
+        for (guint i = 0; i < sn; i++) {
+            const ns_node *m = ns_box_hit_inline_dom(stacked[i], cx, cy);
+            if (m) best = m;
+        }
+        g_free(stacked);
+    } else {
+        for (const ns_box *c = root->first_child; c; c = c->next_sibling) {
+            const ns_node *m = ns_box_hit_inline_dom(c, cx, cy);
+            if (m) best = m;
+        }
+    }
+    return best;
 }

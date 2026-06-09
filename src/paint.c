@@ -1894,6 +1894,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                     r->start, r->len);
                 break;
             case NS_INLINE_CARET:
+            case NS_INLINE_ELEMENT:
                 break;
             }
             attr_insert_range(attrs, a, r->start, r->len);

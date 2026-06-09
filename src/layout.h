@@ -68,6 +68,7 @@ typedef enum ns_inline_attr_kind {
     NS_INLINE_SMALL_CAPS,
     NS_INLINE_CARET,
     NS_INLINE_SELECTION,
+    NS_INLINE_ELEMENT,
 } ns_inline_attr_kind;
 
 typedef struct ns_inline_attr {
@@ -181,6 +182,8 @@ const ns_box *ns_box_hit_test(const ns_box *root, double x, double y);
 ns_box *ns_box_hit_scrollable(ns_box *root, double x, double y);
 
 const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
+
+const ns_node *ns_box_hit_inline_dom(const ns_box *root, double x, double y);
 
 guint ns_box_count_matches(const ns_box *root, const char *needle,
                            gboolean case_sensitive);

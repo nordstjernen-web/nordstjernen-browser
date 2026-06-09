@@ -602,6 +602,9 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 
     const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
     const ns_node *node = hit ? hit->dom : NULL;
+    const ns_node *inline_node =
+        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
+    if (inline_node) node = inline_node;
     const ns_node *form_node =
         ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
     if (form_node) node = form_node;
@@ -868,6 +871,10 @@ ns_browser_click(ns_browser *browser, int x, int y, int mods)
 
     const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
     const ns_node *node = hit ? hit->dom : NULL;
+    const ns_node *inline_node =
+        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
+    if (inline_node)
+        node = inline_node;
     const ns_node *form_node =
         ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
     if (form_node)

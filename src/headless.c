@@ -426,8 +426,10 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
     if (!layout) return;
     const ns_link_range *link = ns_box_hit_link_range(layout, x, y);
     const ns_node *form_target = ns_box_hit_form_dom(layout, x, y);
+    const ns_node *inline_target = ns_box_hit_inline_dom(layout, x, y);
     const ns_box *hit = ns_box_hit_test(layout, x, y);
     const ns_node *dom = form_target ? form_target
+                       : inline_target ? inline_target
                        : link ? link->dom
                        : hit ? hit->dom : NULL;
     if (!dom) { fc->focused = NULL; return; }
