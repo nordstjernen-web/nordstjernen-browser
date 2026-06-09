@@ -22,7 +22,7 @@ ZIP="$ROOT/dist/${SLUG}.zip"
 
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
-        -Db_ndebug=true --strip \
+        -Db_ndebug=true --strip -Dqt="${NS_PACK_QT:-auto}" \
         ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"}
 fi
 meson compile -C "$BUILDDIR" ${NS_BUILD_JOBS:+-j "$NS_BUILD_JOBS"}
@@ -30,6 +30,10 @@ strip --strip-all "$BUILDDIR/src/gtk/nordstjernen"
 # The GUI is a thin shell that spawns one sandboxed nordstjernen-renderer
 # process per tab; it must ship alongside the main binary.
 strip --strip-all "$BUILDDIR/src/nordstjernen-renderer"
+QT_BIN="$BUILDDIR/src/qt/nordstjernen-qt"
+if [ -f "$QT_BIN" ]; then
+    strip --strip-all "$QT_BIN"
+fi
 
 LOADER=$(ldd "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
     | grep -m1 -oE 'ld-(musl|linux)[^ ]*' || true)
@@ -62,6 +66,11 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE/data/icons/hicolor/scalable/apps"
 cp "$BUILDDIR/src/gtk/nordstjernen" "$STAGE/"
 cp "$BUILDDIR/src/nordstjernen-renderer" "$STAGE/"
+# The experimental Qt 6 frontend, when Qt 6 was available at build time. It is
+# a second thin shell over the same nordstjernen-renderer process.
+if [ -f "$QT_BIN" ]; then
+    cp "$QT_BIN" "$STAGE/"
+fi
 cp "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \
    "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen.gif \
    "$STAGE/data/icons/hicolor/scalable/apps/"
@@ -69,6 +78,29 @@ cp "$ROOT/data/nordstjernen.desktop" "$STAGE/data/"
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/License.md" "$STAGE/"
+
+if [ -f "$STAGE/nordstjernen-qt" ]; then
+    QT_REQ_NOTE='
+This build also ships **nordstjernen-qt**, the experimental Qt 6 frontend
+(`docs/qt.md`). It is a second thin shell that drives the same sandboxed
+nordstjernen-renderer process as the GTK app, so on top of the runtime above it
+needs the Qt 6 libraries:
+
+- Qt 6 Core, Gui, Widgets, Concurrent
+
+      sudo apt    install libqt6widgets6 libqt6gui6 libqt6core6     # Debian/Ubuntu
+      sudo dnf    install qt6-qtbase                                # Fedora/RHEL
+      sudo zypper install libQt6Widgets6 libQt6Gui6 libQt6Core6     # openSUSE
+'
+    QT_RUN_NOTE='
+### Qt frontend (experimental)
+
+    ./nordstjernen-qt https://example.com
+'
+else
+    QT_REQ_NOTE=''
+    QT_RUN_NOTE=''
+fi
 
 cat > "$STAGE/INSTALL.md" <<EOF
 # Nordstjernen ${VERSION} — Linux ${ARCH} binary
@@ -105,10 +137,11 @@ ${RUNTIME_INSTALL}
 
 For Linux distros without modern GTK 4, build an AppImage instead
 (future work).
-
+${QT_REQ_NOTE}
 ## Run
 
     ./nordstjernen https://example.com
+${QT_RUN_NOTE}
 
 ## Install on user path
 
@@ -132,5 +165,9 @@ zip_size=$(du -h "$ZIP" 2>/dev/null | cut -f1 || echo '?')
 bin_size=$(du -h "$STAGE/nordstjernen" 2>/dev/null | cut -f1 || echo '?')
 echo "Built: $ZIP ($zip_size)"
 echo "Binary size: $bin_size"
+if [ -f "$STAGE/nordstjernen-qt" ]; then
+    qt_size=$(du -h "$STAGE/nordstjernen-qt" 2>/dev/null | cut -f1 || echo '?')
+    echo "Qt frontend:  included (nordstjernen-qt, $qt_size)"
+fi
 echo
 echo "Smoke test: ./dist/${SLUG}/nordstjernen --headless --url=https://example.com --dump=text"

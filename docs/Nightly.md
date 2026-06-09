@@ -25,6 +25,13 @@ exactly the latest build. It contains:
 | macOS `.dmg` + binary | GitHub Actions `macos.yml` | `macos/` |
 | Java API jar + sources + javadoc + browsable API docs | `debian:trixie` container (native libs) + JDK 21 on the host | `java/` |
 
+Each Linux binary zip also bundles **`nordstjernen-qt`**, the experimental
+Qt 6 frontend (`docs/qt.md`), beside the GTK `nordstjernen` binary and the
+shared `nordstjernen-renderer`. The distro containers install that distro's
+Qt 6 base package and `scripts/pack-linux.sh` configures with `-Dqt=auto`, so
+the Qt client is included where Qt 6 is available and silently skipped where it
+is not (set `NS_PACK_QT=disabled` to force it off).
+
 Plus `SHA256SUMS`, `MANIFEST.txt` (version, commit, per-stage status,
 file sizes), and `nightly.log`.
 
