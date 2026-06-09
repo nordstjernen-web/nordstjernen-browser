@@ -14,7 +14,7 @@
 static int
 pv_settle_ms(void)
 {
-    const char *e = g_getenv("NS_SETTLE_MS");
+    const char *e = g_getenv(NS_PROC_SETTLE_ENV);
     if (e && *e) {
         int v = atoi(e);
         if (v >= 0 && v <= 10000)
@@ -157,8 +157,8 @@ struct NsProcView {
 };
 
 enum {
-    NS_PV_ZOOM_MIN_PERMILLE = 250,
-    NS_PV_ZOOM_MAX_PERMILLE = 5000
+    NS_PV_ZOOM_MIN_PERMILLE = (int)(NS_PROC_ZOOM_MIN * 1000.0 + 0.5),
+    NS_PV_ZOOM_MAX_PERMILLE = (int)(NS_PROC_ZOOM_MAX * 1000.0 + 0.5)
 };
 
 static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
@@ -214,34 +214,32 @@ pv_swap_proc(NsProcView *v, ns_rproc_http *newp)
 char *
 ns_proc_renderer_path(void)
 {
-    const char *env = g_getenv("NS_RENDERER");
+    const char *env = g_getenv(NS_PROC_RENDERER_ENV);
     if (env && *env)
         return g_strdup(env);
+#ifdef G_OS_WIN32
+    const char *name = NS_PROC_RENDERER_NAME ".exe";
+#else
+    const char *name = NS_PROC_RENDERER_NAME;
+#endif
     const char *exe = ns_app_self_exe();
     if (exe) {
         char *dir = g_path_get_dirname(exe);
-#ifdef G_OS_WIN32
-        const char *rel[] = { "nordstjernen-renderer.exe",
-                              "../nordstjernen-renderer.exe", NULL };
-#else
-        const char *rel[] = { "nordstjernen-renderer",
-                              "../nordstjernen-renderer", NULL };
-#endif
+        char *parent = g_build_filename("..", name, NULL);
+        const char *rel[] = { name, parent, NULL };
         for (int i = 0; rel[i]; i++) {
             char *cand = g_build_filename(dir, rel[i], NULL);
             if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
+                g_free(parent);
                 g_free(dir);
                 return cand;
             }
             g_free(cand);
         }
+        g_free(parent);
         g_free(dir);
     }
-#ifdef G_OS_WIN32
-    return g_strdup("nordstjernen-renderer.exe");
-#else
-    return g_strdup("nordstjernen-renderer");
-#endif
+    return g_strdup(name);
 }
 
 static cairo_surface_t *
@@ -1020,8 +1018,8 @@ set_zoom(NsProcView *v, double scale)
     }
 }
 
-void ns_proc_view_zoom_in(NsProcView *v)  { set_zoom(v, cur_scale(v) * 1.1); }
-void ns_proc_view_zoom_out(NsProcView *v) { set_zoom(v, cur_scale(v) / 1.1); }
+void ns_proc_view_zoom_in(NsProcView *v)  { set_zoom(v, cur_scale(v) * NS_PROC_ZOOM_STEP); }
+void ns_proc_view_zoom_out(NsProcView *v) { set_zoom(v, cur_scale(v) / NS_PROC_ZOOM_STEP); }
 void ns_proc_view_zoom_reset(NsProcView *v) { set_zoom(v, 1.0); }
 
 static gboolean
@@ -1857,7 +1855,7 @@ console_set_open(NsProcView *v, gboolean open)
         gtk_widget_set_visible(v->console_revealer, FALSE);
     if (open) {
         if (!v->console_poll_id)
-            v->console_poll_id = g_timeout_add(250, console_poll_cb, v);
+            v->console_poll_id = g_timeout_add(NS_PROC_CONSOLE_POLL_MS, console_poll_cb, v);
         gtk_widget_grab_focus(v->console_entry);
     } else {
         if (v->console_poll_id) {

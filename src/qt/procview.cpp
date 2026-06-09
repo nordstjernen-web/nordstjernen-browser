@@ -46,7 +46,7 @@ extern "C" {
 
 static int settleMs() {
     bool ok = false;
-    int v = qEnvironmentVariableIntValue("NS_SETTLE_MS", &ok);
+    int v = qEnvironmentVariableIntValue(NS_PROC_SETTLE_ENV, &ok);
     if (ok && v >= 0 && v <= 10000)
         return v;
     return NS_PROC_SETTLE_MS;
@@ -142,11 +142,11 @@ static int eventKeyCode(const QKeyEvent *event) {
 }
 
 static QString rendererPath() {
-    QByteArray path = qgetenv("NS_RENDERER");
+    QByteArray path = qgetenv(NS_PROC_RENDERER_ENV);
     if (!path.isEmpty())
         return QString::fromUtf8(path);
 
-    QString renderer = QStringLiteral("nordstjernen-renderer");
+    QString renderer = QStringLiteral(NS_PROC_RENDERER_NAME);
 #ifdef Q_OS_WIN
     renderer += QStringLiteral(".exe");
 #endif
@@ -1135,7 +1135,7 @@ void ProcView::wheelEvent(QWheelEvent *event) {
 }
 
 void ProcView::setZoom(double zoom) {
-    zoom = qBound(0.25, zoom, 5.0);
+    zoom = qBound(double(NS_PROC_ZOOM_MIN), zoom, double(NS_PROC_ZOOM_MAX));
     if (qFuzzyCompare(zoom, m_zoom))
         return;
     m_zoom = zoom;
@@ -1146,11 +1146,11 @@ void ProcView::setZoom(double zoom) {
 }
 
 void ProcView::zoomIn() {
-    setZoom(m_zoom * 1.1);
+    setZoom(m_zoom * NS_PROC_ZOOM_STEP);
 }
 
 void ProcView::zoomOut() {
-    setZoom(m_zoom / 1.1);
+    setZoom(m_zoom / NS_PROC_ZOOM_STEP);
 }
 
 void ProcView::zoomReset() {
@@ -1342,7 +1342,7 @@ void ProcView::ensureConsole() {
             &ProcView::runEval);
 
     m_consoleTimer = new QTimer(this);
-    m_consoleTimer->setInterval(250);
+    m_consoleTimer->setInterval(NS_PROC_CONSOLE_POLL_MS);
     connect(m_consoleTimer, &QTimer::timeout, this, &ProcView::pollConsole);
     m_console->hide();
 }
