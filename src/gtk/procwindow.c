@@ -313,6 +313,15 @@ on_home_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+on_logo_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    NsProcView *v = current_view(ud);
+    if (v)
+        ns_proc_view_load(v, "https://nordstjernen.org");
+}
+
+static void
 on_go_clicked(GtkButton *b, gpointer ud)
 {
     (void)b;
@@ -817,8 +826,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);
-    gtk_widget_set_tooltip_text(logo_button, "Nordstjernen");
-    g_signal_connect(logo_button, "clicked", G_CALLBACK(on_home_clicked), pw);
+    gtk_widget_set_tooltip_text(logo_button, "Visit nordstjernen.org");
+    g_signal_connect(logo_button, "clicked", G_CALLBACK(on_logo_clicked), pw);
 
     gtk_box_append(GTK_BOX(toolbar), pw->back);
     gtk_box_append(GTK_BOX(toolbar), pw->forward);
