@@ -49,8 +49,8 @@ variable.
 
 ### Dependencies
 
-Qt 6 Core, Gui, and Widgets. The engine and its dependencies are **not**
-linked into the Qt binary — they live in `nordstjernen-renderer`.
+Qt 6 Core, Gui, Widgets, and Concurrent. The engine and its dependencies are
+**not** linked into the Qt binary — they live in `nordstjernen-renderer`.
 
 ```sh
 # Debian/Ubuntu
