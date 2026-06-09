@@ -1677,6 +1677,93 @@ paint_inline_dashed_decorations(cairo_t *cr, const ns_box *b, PangoLayout *layou
 }
 
 static void
+ns_box_blur_a8(unsigned char *data, int w, int h, int stride, int radius)
+{
+    if (radius < 1 || w <= 0 || h <= 0) return;
+    int win = 2 * radius + 1;
+    unsigned char *tmp = g_malloc((gsize)stride * h);
+    for (int y = 0; y < h; y++) {
+        unsigned char *row = data + (gsize)y * stride;
+        unsigned char *out = tmp + (gsize)y * stride;
+        int sum = 0;
+        for (int k = -radius; k <= radius; k++) {
+            int xi = k < 0 ? 0 : (k >= w ? w - 1 : k);
+            sum += row[xi];
+        }
+        for (int x = 0; x < w; x++) {
+            out[x] = (unsigned char)(sum / win);
+            int xo = x - radius; xo = xo < 0 ? 0 : (xo >= w ? w - 1 : xo);
+            int xi = x + radius + 1; xi = xi < 0 ? 0 : (xi >= w ? w - 1 : xi);
+            sum += row[xi] - row[xo];
+        }
+    }
+    for (int x = 0; x < w; x++) {
+        int sum = 0;
+        for (int k = -radius; k <= radius; k++) {
+            int yi = k < 0 ? 0 : (k >= h ? h - 1 : k);
+            sum += tmp[(gsize)yi * stride + x];
+        }
+        for (int y = 0; y < h; y++) {
+            data[(gsize)y * stride + x] = (unsigned char)(sum / win);
+            int yo = y - radius; yo = yo < 0 ? 0 : (yo >= h ? h - 1 : yo);
+            int yi = y + radius + 1; yi = yi < 0 ? 0 : (yi >= h ? h - 1 : yi);
+            sum += tmp[(gsize)yi * stride + x] - tmp[(gsize)yo * stride + x];
+        }
+    }
+    g_free(tmp);
+}
+
+static void
+paint_text_shadow_layer(cairo_t *cr, PangoLayout *layout, double x, double y,
+                        const ns_css_shadow *sh)
+{
+    int lw = 0, lh = 0;
+    pango_layout_get_pixel_size(layout, &lw, &lh);
+    if (lw <= 0 || lh <= 0) return;
+
+    int blur = (int)(sh->blur + 0.5);
+    if (blur < 0) blur = 0;
+    int pad = blur * 3 + 2;
+    int sw = lw + 2 * pad, sht = lh + 2 * pad;
+
+    if (sw > 4096 || sht > 4096) {
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
+                              sh->b / 255.0, sh->a / 255.0);
+        cairo_move_to(cr, x + sh->x, y + sh->y);
+        pango_cairo_show_layout(cr, layout);
+        cairo_restore(cr);
+        return;
+    }
+
+    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, sw, sht);
+    if (cairo_surface_status(mask) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(mask);
+        return;
+    }
+    cairo_t *mcr = cairo_create(mask);
+    cairo_move_to(mcr, pad, pad);
+    pango_cairo_show_layout(mcr, layout);
+    cairo_destroy(mcr);
+    cairo_surface_flush(mask);
+
+    if (blur > 0) {
+        unsigned char *data = cairo_image_surface_get_data(mask);
+        int stride = cairo_image_surface_get_stride(mask);
+        ns_box_blur_a8(data, sw, sht, stride, blur);
+        ns_box_blur_a8(data, sw, sht, stride, blur);
+        cairo_surface_mark_dirty(mask);
+    }
+
+    cairo_save(cr);
+    cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
+                          sh->b / 255.0, sh->a / 255.0);
+    cairo_mask_surface(cr, mask, x + sh->x - pad, y + sh->y - pad);
+    cairo_restore(cr);
+    cairo_surface_destroy(mask);
+}
+
+static void
 paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b->text || !*b->text) return;
@@ -2049,38 +2136,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     if (s && s->values[NS_CSS_TEXT_SHADOW] &&
         s->values[NS_CSS_TEXT_SHADOW]->kind == NS_CSS_V_SHADOW) {
         const ns_css_shadow_list *sl = &s->values[NS_CSS_TEXT_SHADOW]->u.shadow;
-        for (int si = sl->n - 1; si >= 0; si--) {
-            const ns_css_shadow *sh = &sl->s[si];
-            int rings = sh->blur > 0 ? (int)(sh->blur + 0.5) : 0;
-            if (rings > 6) rings = 6;
-            double ring_alpha = rings > 0
-                ? (sh->a / 255.0) / (1 + 4 * rings)
-                : (sh->a / 255.0);
-            const int offsets[8][2] = {
-                {1,0},{-1,0},{0,1},{0,-1},{1,1},{1,-1},{-1,1},{-1,-1}
-            };
-            for (int ring = 1; ring <= rings; ring++) {
-                double off = (double)ring * 0.7;
-                for (int k = 0; k < 8; k++) {
-                    cairo_save(cr);
-                    cairo_set_source_rgba(cr,
-                        sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
-                        ring_alpha);
-                    cairo_move_to(cr,
-                        text_x + sh->x + offsets[k][0] * off,
-                        y_origin + sh->y + offsets[k][1] * off);
-                    pango_cairo_show_layout(cr, layout);
-                    cairo_restore(cr);
-                }
-            }
-            cairo_save(cr);
-            cairo_set_source_rgba(cr,
-                sh->r / 255.0, sh->g / 255.0, sh->b / 255.0,
-                rings > 0 ? ring_alpha : (sh->a / 255.0));
-            cairo_move_to(cr, text_x + sh->x, y_origin + sh->y);
-            pango_cairo_show_layout(cr, layout);
-            cairo_restore(cr);
-        }
+        for (int si = sl->n - 1; si >= 0; si--)
+            paint_text_shadow_layer(cr, layout, text_x, y_origin, &sl->s[si]);
     }
 
     cairo_save(cr);
