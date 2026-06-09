@@ -44,6 +44,7 @@ struct ns_browser {
     double          vh;
     gboolean        images_fetched;
     gboolean        dirty;
+    gboolean        relaying;
     char           *pending_nav;
     char           *pending_post_body;
     gsize           pending_post_len;
@@ -61,6 +62,8 @@ struct ns_browser {
 static void
 browser_relayout(ns_browser *b)
 {
+    if (b->relaying) { b->dirty = TRUE; return; }
+    b->relaying = TRUE;
     b->search_active = NULL;
     ns_selection_clear(&b->selection);
     if (b->js && b->layout) ns_js_set_layout_root(b->js, NULL);
@@ -74,6 +77,7 @@ browser_relayout(ns_browser *b)
                                    b->hover_node,
                                    b->caret_byte, b->sel_anchor_byte,
                                    &b->layout);
+    b->relaying = FALSE;
 }
 
 static void
