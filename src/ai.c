@@ -570,6 +570,54 @@ ns_ai_normalize_url(const char *raw)
 }
 
 static char *
+ns_ai_try_image_query(const char *msg)
+{
+    static const char *const cues[] = {
+        "image of ", "images of ", "picture of ", "pictures of ",
+        "photo of ", "photos of ", "pic of ", "pics of ",
+        "image for ", "picture for ", "photo for ",
+    };
+    char *low = g_ascii_strdown(msg, -1);
+    char *subject = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
+        char *hit = strstr(low, cues[i]);
+        if (hit) {
+            subject = g_strdup(msg + (hit - low) + strlen(cues[i]));
+            break;
+        }
+    }
+    g_free(low);
+    if (subject) {
+        subject = g_strstrip(subject);
+        size_t n = strlen(subject);
+        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
+        if (!*subject) { g_free(subject); subject = NULL; }
+    }
+    return subject;
+}
+
+static char *
+ns_ai_image_reply(const char *query)
+{
+    char *page = NULL;
+    char *img = ns_ai_image_search(query, &page);
+    char *reply;
+    if (img) {
+        char *alt = g_strdup(query);
+        g_strdelimit(alt, "[]()", ' ');
+        reply = g_strdup_printf(
+            "Here's an image of %s:\n\n![%s](%s)\n\n[Image source](%s)",
+            query, alt, img, page ? page : img);
+        g_free(alt);
+    } else {
+        reply = g_strdup_printf("I couldn't find an image for \"%s\".", query);
+    }
+    g_free(img);
+    g_free(page);
+    return reply;
+}
+
+static char *
 ns_ai_try_navigate(const char *msg)
 {
     static const char *const verbs[] = {
@@ -932,21 +980,7 @@ ns_ai_run_tools_locked(const char *user_msg)
                     : g_strdup("I couldn't work out which page to open.");
         g_free(url);
     } else if (g_str_equal(kind, "image")) {
-        char *page = NULL;
-        char *img = ns_ai_image_search(query, &page);
-        if (img) {
-            char *alt = g_strdup(query);
-            g_strdelimit(alt, "[]()", ' ');
-            reply = g_strdup_printf(
-                "Here's an image of %s:\n\n![%s](%s)\n\n[Image source](%s)",
-                query, alt, img, page ? page : img);
-            g_free(alt);
-        } else {
-            reply = g_strdup_printf("I couldn't find an image for \"%s\".",
-                                    query);
-        }
-        g_free(img);
-        g_free(page);
+        reply = ns_ai_image_reply(query);
     } else {
         char *sources = NULL;
         char *ctx = ns_ai_web_search(query, &sources);
@@ -987,6 +1021,13 @@ ns_ai_chat(const char *user_msg)
     char *nav = ns_ai_try_navigate(user_msg);
     if (nav)
         return nav;
+
+    char *imgq = ns_ai_try_image_query(user_msg);
+    if (imgq) {
+        char *reply = ns_ai_image_reply(imgq);
+        g_free(imgq);
+        return reply;
+    }
 
     g_mutex_lock(&g_model_lock);
     char *reply = NULL;
