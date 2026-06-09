@@ -23644,9 +23644,10 @@ ns_js_image_ready_idle(gpointer data)
     g_free(abs);
     ns_image *img = r->img;
     if (img && img->failed && js->log_cb) {
-        char *line = g_strdup_printf("[image] error: %s — %s",
+        char *line = g_strdup_printf("[image] error: %s — %s (HTTP %ld)",
             img->url ? img->url : "(no url)",
-            img->error ? img->error : "(no error msg)");
+            img->error ? img->error : "(no error msg)",
+            img->http_status);
         js->log_cb(line, js->log_user_data);
         g_free(line);
     }

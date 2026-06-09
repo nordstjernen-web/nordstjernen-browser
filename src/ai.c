@@ -455,6 +455,54 @@ ns_ai_image_search(const char *query, char **page_out)
 }
 
 static char *
+ns_ai_fetch_data_uri(const char *url)
+{
+    CURL *c = curl_easy_init();
+    if (!c) return NULL;
+    ns_ai_http_buf b = { 0 };
+    struct curl_slist *hdrs = NULL;
+    hdrs = curl_slist_append(hdrs, "Accept: image/*,*/*");
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, ns_ai_http_write);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(c, CURLOPT_USERAGENT,
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, "
+        "like Gecko) Chrome/124.0 Safari/537.36");
+    CURLcode rc = curl_easy_perform(c);
+    char *ctype = NULL;
+    if (rc == CURLE_OK) {
+        char *info = NULL;
+        curl_easy_getinfo(c, CURLINFO_CONTENT_TYPE, &info);
+        if (info) ctype = g_strdup(info);
+    }
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    if (rc != CURLE_OK || b.len == 0) {
+        g_free(b.data);
+        g_free(ctype);
+        return NULL;
+    }
+    if (!ctype || !g_str_has_prefix(ctype, "image/")) {
+        g_free(ctype);
+        ctype = g_strdup("image/jpeg");
+    } else {
+        char *semi = strchr(ctype, ';');
+        if (semi) *semi = '\0';
+        g_strstrip(ctype);
+    }
+    char *b64 = g_base64_encode((const guchar *)b.data, b.len);
+    g_free(b.data);
+    char *uri = g_strdup_printf("data:%s;base64,%s", ctype, b64);
+    g_free(b64);
+    g_free(ctype);
+    return uri;
+}
+
+static char *
 ns_ai_web_search(const char *query, char **sources_out)
 {
     if (sources_out) *sources_out = NULL;
@@ -605,9 +653,12 @@ ns_ai_image_reply(const char *query)
     if (img) {
         char *alt = g_strdup(query);
         g_strdelimit(alt, "[]()", ' ');
+        char *data_uri = ns_ai_fetch_data_uri(img);
+        const char *src = data_uri ? data_uri : img;
         reply = g_strdup_printf(
             "Here's an image of %s:\n\n![%s](%s)\n\n[Image source](%s)",
-            query, alt, img, page ? page : img);
+            query, alt, src, page ? page : img);
+        g_free(data_uri);
         g_free(alt);
     } else {
         reply = g_strdup_printf("I couldn't find an image for \"%s\".", query);

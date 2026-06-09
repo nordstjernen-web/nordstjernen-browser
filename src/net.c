@@ -2379,7 +2379,7 @@ static const char k_about_start_template[] =
     "  .test(u);}\n"
     "function renderMsg(el,txt){ el.className='msg bot'; el.textContent='';\n"
     " var s=(txt||'').trim()||'(no response)';\n"
-    " var re=/!\\[([^\\]]*)\\]\\((https?:\\/\\/[^\\s)]+)\\)|"
+    " var re=/!\\[([^\\]]*)\\]\\(((?:https?:\\/\\/|data:)[^\\s)]+)\\)|"
     "\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)|(https?:\\/\\/[^\\s<]+)/g;\n"
     " var last=0,m;\n"
     " while((m=re.exec(s))){\n"
