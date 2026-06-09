@@ -404,6 +404,13 @@ ns_ai_json_first_string(const char *json, const char *key)
     return g_string_free(o, FALSE);
 }
 
+static gboolean
+ns_ai_entity_at(const char *p, const char *end, const char *ent)
+{
+    gsize n = strlen(ent);
+    return (gsize)(end - p) >= n && memcmp(p, ent, n) == 0;
+}
+
 static char *
 ns_ai_html_text(const char *start, const char *end)
 {
@@ -414,13 +421,13 @@ ns_ai_html_text(const char *start, const char *end)
             continue;
         }
         if (*p == '&') {
-            if (g_str_has_prefix(p, "&amp;"))  { g_string_append_c(o, '&'); p += 4; continue; }
-            if (g_str_has_prefix(p, "&lt;"))   { g_string_append_c(o, '<'); p += 3; continue; }
-            if (g_str_has_prefix(p, "&gt;"))   { g_string_append_c(o, '>'); p += 3; continue; }
-            if (g_str_has_prefix(p, "&quot;")) { g_string_append_c(o, '"'); p += 5; continue; }
-            if (g_str_has_prefix(p, "&#x27;")) { g_string_append_c(o, '\''); p += 5; continue; }
-            if (g_str_has_prefix(p, "&#39;"))  { g_string_append_c(o, '\''); p += 4; continue; }
-            if (g_str_has_prefix(p, "&nbsp;")) { g_string_append_c(o, ' '); p += 5; continue; }
+            if (ns_ai_entity_at(p, end, "&amp;"))  { g_string_append_c(o, '&'); p += 4; continue; }
+            if (ns_ai_entity_at(p, end, "&lt;"))   { g_string_append_c(o, '<'); p += 3; continue; }
+            if (ns_ai_entity_at(p, end, "&gt;"))   { g_string_append_c(o, '>'); p += 3; continue; }
+            if (ns_ai_entity_at(p, end, "&quot;")) { g_string_append_c(o, '"'); p += 5; continue; }
+            if (ns_ai_entity_at(p, end, "&#x27;")) { g_string_append_c(o, '\''); p += 5; continue; }
+            if (ns_ai_entity_at(p, end, "&#39;"))  { g_string_append_c(o, '\''); p += 4; continue; }
+            if (ns_ai_entity_at(p, end, "&nbsp;")) { g_string_append_c(o, ' '); p += 5; continue; }
         }
         g_string_append_c(o, *p);
     }
