@@ -386,7 +386,7 @@ ns_ai_json_first_string(const char *json, const char *key)
                         cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
                         p += 6;
                     }
-                    if (cp) {
+                    if (cp && !(cp >= 0xD800 && cp <= 0xDFFF)) {
                         char utf8[8];
                         int ln = g_unichar_to_utf8(cp, utf8);
                         g_string_append_len(o, utf8, ln);
@@ -1158,13 +1158,14 @@ ns_ai_run_locked(const char *system_prompt, const char *user_msg)
     struct llama_batch batch = llama_batch_get_one(toks, n_prompt);
     int n_decoded = 0;
     gboolean failed = FALSE;
+    llama_token id = 0;
 
     while (n_decoded < NS_AI_MAX_REPLY) {
         if (llama_decode(g_ctx, batch) != 0) {
             failed = out->len == 0;
             break;
         }
-        llama_token id = llama_sampler_sample(smpl, g_ctx, -1);
+        id = llama_sampler_sample(smpl, g_ctx, -1);
         if (llama_vocab_is_eog(g_vocab, id))
             break;
 
