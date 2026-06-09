@@ -261,6 +261,27 @@ are shipped alongside the executable as ordinary DLLs / dylibs that you
 can replace; on Linux distributions they are loaded from the system
 package manager.
 
+### Qt 6 (Core, Gui, Widgets, Concurrent) — GNU LGPL v3 (optional Qt frontend)
+
+> Cross-platform application framework, used only by the optional Qt 6
+> frontend (`nordstjernen-qt`); the default GTK frontend does not use it.
+> <https://www.qt.io>
+>
+> Copyright The Qt Company Ltd and other contributors. Qt is a
+> trademark of The Qt Company Ltd.
+
+The Qt modules Nordstjernen links are used under the GNU Lesser General
+Public License version 3. The full license text is available at:
+
+  <https://www.gnu.org/licenses/lgpl-3.0.html>
+
+Per the LGPL, Nordstjernen links to Qt **dynamically** against the
+system Qt shared libraries (it does not modify Qt and does not statically
+link it), so you are entitled to replace them with your own — modified or
+newer — build of Qt and re-link Nordstjernen against it. The unmodified
+Qt source for the version you received is available from
+<https://download.qt.io> and from your distribution's package manager.
+
 ### Cairo — LGPL-2.1 or MPL-1.1
 
 > 2D drawing.

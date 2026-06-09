@@ -361,7 +361,13 @@ void ProcWindow::onAbout() {
         "models that you choose to download.</p>");
 #endif
     body += QStringLiteral(
-        "<p>Includes third-party open-source software; see "
+        "<p>This frontend uses the <a href=\"https://www.qt.io\">Qt</a> %1 "
+        "framework, dynamically linked under the GNU LGPL v3. Qt is a "
+        "trademark of The Qt Company Ltd; its source is available from "
+        "<a href=\"https://download.qt.io\">download.qt.io</a>.</p>")
+        .arg(QStringLiteral(QT_VERSION_STR));
+    body += QStringLiteral(
+        "<p>Includes other third-party open-source software; see "
         "THIRD-PARTY-LICENSES.md for full notices.</p>"
         "<p><a href=\"https://nordstjernen.org\">nordstjernen.org</a></p>"
         "<p>Nordstjernen Source License v1.0 — © 2026 Andreas Røsdal</p>");
