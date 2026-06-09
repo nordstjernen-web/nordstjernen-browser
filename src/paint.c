@@ -22,6 +22,7 @@ typedef struct rgba {
 } rgba;
 
 static gboolean       g_caret_visible = TRUE;
+static int            g_paint_no_cull;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
@@ -2323,7 +2324,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double sy = b->y + (double)pos.y / PANGO_SCALE;
             cairo_save(cr);
             cairo_translate(cr, sx, sy);
+            g_paint_no_cull++;
             paint_walk(cr, a->box, highlight);
+            g_paint_no_cull--;
             cairo_restore(cr);
         }
     }
@@ -4044,7 +4047,6 @@ mask_gradient_pattern(const ns_css_gradient *gr,
     return pat;
 }
 
-static int g_paint_no_cull;
 
 void
 ns_paint_stats_reset(void)
@@ -4118,7 +4120,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         || (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0);
 
     gboolean box_offscreen = FALSE;
-    if (!has_transform && !has_sticky) {
+    if (!has_transform && !has_sticky && !g_paint_no_cull) {
         const ns_css_value *posv = style ? style->values[NS_CSS_POSITION] : NULL;
         gboolean is_fixed = posv && posv->kind == NS_CSS_V_KEYWORD &&
                             posv->u.keyword && strcmp(posv->u.keyword, "fixed") == 0;
