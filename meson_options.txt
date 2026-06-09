@@ -4,3 +4,5 @@ option('qt', type: 'feature', value: 'disabled',
        description: 'Build the experimental Qt 6 frontend (off by default; links the libnordstjernen engine).')
 option('ipc_experiment', type: 'boolean', value: false,
        description: 'Build the HTTP-vs-binary IPC comparison renderer and benchmark (experiment branch).')
+option('ai', type: 'feature', value: 'enabled',
+       description: 'Build the local on-CPU AI chat start page (llama.cpp via CMake subproject).')

@@ -2316,6 +2316,17 @@ static const char k_about_start_template[] =
     ".footer { color:#6b7280; font-size:0.76em; text-align:center;"
     " padding-top:10px; }\n"
     ".footer a { color:#5b8dff; }\n"
+    ".banner { align-self:flex-start; max-width:82%; background:#1b2027;"
+    " color:#e6e9ef; padding:14px 16px; border-radius:14px;"
+    " border-bottom-left-radius:4px; line-height:1.45; }\n"
+    ".banner button { margin-top:12px; border:0; background:#2d6cf6;"
+    " color:#fff; border-radius:9px; padding:9px 16px; font:inherit;"
+    " font-weight:600; cursor:pointer; }\n"
+    ".banner .hint { color:#8b93a3; font-size:0.85em; margin-top:8px; }\n"
+    ".bar { margin-top:12px; height:8px; border-radius:5px;"
+    " background:#0e1116; overflow:hidden; }\n"
+    ".bar > div { height:100%; width:0; background:#2d6cf6;"
+    " transition:width 0.3s; }\n"
     "</style></head>"
     "<body>"
     "<div class=\"wrap\">"
@@ -2326,13 +2337,13 @@ static const char k_about_start_template[] =
     "</div>"
     "<div id=\"log\">"
     "<div class=\"msg bot\">Hi! I'm a small language model running locally on "
-    "your CPU through llama.cpp \xe2\x80\x94 no network, no cloud. Ask me "
-    "anything to get started.</div>"
+    "your CPU through llama.cpp \xe2\x80\x94 no network at inference time, no "
+    "cloud. Ask me anything to get started.</div>"
     "</div>"
     "<form class=\"ask\" id=\"ask\">"
-    "<input id=\"q\" autocomplete=\"off\" autofocus"
-    " placeholder=\"Message the local model…\">"
-    "<button id=\"send\" type=\"submit\">Send</button>"
+    "<input id=\"q\" autocomplete=\"off\""
+    " placeholder=\"Message the local model…\" disabled>"
+    "<button id=\"send\" type=\"submit\" disabled>Send</button>"
     "</form>"
     "<p class=\"footer\">Local inference \xc2\xb7 "
     "<a href=\"about:license\">License</a> \xc2\xb7 "
@@ -2343,11 +2354,52 @@ static const char k_about_start_template[] =
     "var form=document.getElementById('ask');\n"
     "var input=document.getElementById('q');\n"
     "var send=document.getElementById('send');\n"
+    "var ready=false, banner=null, poll=null;\n"
     "function bubble(cls,text){var d=document.createElement('div');\n"
     " d.className='msg '+cls; d.textContent=text; log.appendChild(d);\n"
     " log.scrollTop=log.scrollHeight; return d;}\n"
+    "function enableChat(){ready=true; input.disabled=false;\n"
+    " send.disabled=false; if(banner){banner.remove(); banner=null;}\n"
+    " input.focus();}\n"
+    "function showIdle(st){ if(!banner){banner=document.createElement('div');\n"
+    "  banner.className='banner'; log.appendChild(banner);} ready=false;\n"
+    " banner.innerHTML='';\n"
+    " var p=document.createElement('div');\n"
+    " p.textContent='To chat I need a local model ('+(st.model||'GGUF')+'). "
+    "It downloads once (a few hundred MB) and then runs entirely offline.';\n"
+    " var b=document.createElement('button'); b.textContent='Download model';\n"
+    " b.onclick=function(){b.disabled=true; b.textContent='Starting…';\n"
+    "  fetch('about:ai-download').then(refresh);};\n"
+    " banner.appendChild(p); banner.appendChild(b);\n"
+    " log.scrollTop=log.scrollHeight;}\n"
+    "function showDownloading(st){ if(!banner){banner=document.createElement('div');\n"
+    "  banner.className='banner'; log.appendChild(banner);} ready=false;\n"
+    " var mb=st.total?(st.total/1048576).toFixed(0):'?';\n"
+    " var got=st.received?(st.received/1048576).toFixed(0):'0';\n"
+    " banner.innerHTML='Downloading the model\\u2026 '+got+' / '+mb+' MB ('+\n"
+    "  (st.percent||0)+'%)<div class=\"bar\"><div style=\"width:'+\n"
+    "  (st.percent||0)+'%\"></div></div>"
+    "<div class=\"hint\">This happens once; afterwards everything is local.</div>';\n"
+    " log.scrollTop=log.scrollHeight;}\n"
+    "function showError(st){ if(!banner){banner=document.createElement('div');\n"
+    "  banner.className='banner'; log.appendChild(banner);} ready=false;\n"
+    " banner.innerHTML='';\n"
+    " var p=document.createElement('div');\n"
+    " p.textContent='Download failed: '+(st.message||'unknown error');\n"
+    " var b=document.createElement('button'); b.textContent='Retry';\n"
+    " b.onclick=function(){fetch('about:ai-download').then(refresh);};\n"
+    " banner.appendChild(p); banner.appendChild(b);}\n"
+    "function apply(st){ if(st.state==='ready'){enableChat();\n"
+    "  if(poll){clearInterval(poll); poll=null;}}\n"
+    " else if(st.state==='downloading'){showDownloading(st);\n"
+    "  if(!poll) poll=setInterval(refresh,1000);}\n"
+    " else if(st.state==='error'){showError(st);\n"
+    "  if(poll){clearInterval(poll); poll=null;}}\n"
+    " else { showIdle(st); }}\n"
+    "function refresh(){return fetch('about:ai-status').then(function(r){\n"
+    "  return r.json();}).then(apply).catch(function(){});}\n"
     "form.addEventListener('submit',function(e){e.preventDefault();\n"
-    " var q=input.value.trim(); if(!q) return;\n"
+    " if(!ready) return; var q=input.value.trim(); if(!q) return;\n"
     " bubble('user',q); input.value=''; input.disabled=true;\n"
     " send.disabled=true;\n"
     " var t=bubble('bot think','thinking…');\n"
@@ -2358,6 +2410,7 @@ static const char k_about_start_template[] =
     "   t.className='msg bot'; t.textContent='Error: '+err;}).then(function(){\n"
     "   input.disabled=false; send.disabled=false; input.focus();});\n"
     "});\n"
+    "refresh();\n"
     "</script>"
     "</body></html>";
 
@@ -2396,6 +2449,21 @@ synthesize_about_response(const char *url, ns_response *resp)
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
+    } else if (g_str_has_prefix(what, "ai-status")) {
+        char *json = ns_ai_status_json();
+        g_free(resp->content_type);
+        resp->content_type = g_strdup("application/json; charset=utf-8");
+        g_byte_array_append(resp->body, (const guint8 *)json,
+                            (guint)strlen(json));
+        g_free(json);
+    } else if (g_str_has_prefix(what, "ai-download")) {
+        ns_ai_start_download();
+        char *json = ns_ai_status_json();
+        g_free(resp->content_type);
+        resp->content_type = g_strdup("application/json; charset=utf-8");
+        g_byte_array_append(resp->body, (const guint8 *)json,
+                            (guint)strlen(json));
+        g_free(json);
     } else if (g_str_has_prefix(what, "ai?") || g_str_equal(what, "ai")) {
         const char *qs = strchr(url, '?');
         char *msg = NULL;

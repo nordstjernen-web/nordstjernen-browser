@@ -12,7 +12,9 @@ G_BEGIN_DECLS
 
 gboolean ns_ai_available(void);
 
-const char *ns_ai_model_name(void);
+void ns_ai_start_download(void);
+
+char *ns_ai_status_json(void);
 
 char *ns_ai_chat(const char *user_msg);
 

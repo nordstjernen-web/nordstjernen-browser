@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/ggml-org/llama.cpp.git
+revision = b9581
+depth = 1

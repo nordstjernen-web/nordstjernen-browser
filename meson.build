@@ -256,4 +256,36 @@ install_data(
   rename: 'com.nordstjernen.Browser.desktop',
 )
 
+ai_feature = get_option('ai')
+ai_deps = []
+have_ai = false
+if not is_android and ai_feature.allowed()
+  cmake = import('cmake')
+  llama_opts = cmake.subproject_options()
+  llama_opts.add_cmake_defines({
+    'BUILD_SHARED_LIBS': false,
+    'LLAMA_CURL': false,
+    'GGML_NATIVE': false,
+    'GGML_OPENMP': false,
+    'LLAMA_BUILD_TESTS': false,
+    'LLAMA_BUILD_EXAMPLES': false,
+    'LLAMA_BUILD_SERVER': false,
+    'LLAMA_BUILD_TOOLS': false,
+    'CMAKE_POSITION_INDEPENDENT_CODE': true,
+  })
+  llama_opts.set_install(false)
+  llama_sp = cmake.subproject('llama.cpp', options: llama_opts,
+                              required: ai_feature)
+  if llama_sp.found()
+    ai_deps = [
+      declare_dependency(compile_args: ['-DNS_HAVE_AI=1']),
+      llama_sp.dependency('llama'),
+      llama_sp.dependency('ggml'),
+      llama_sp.dependency('ggml-cpu'),
+      llama_sp.dependency('ggml-base'),
+    ]
+    have_ai = true
+  endif
+endif
+
 subdir('src')

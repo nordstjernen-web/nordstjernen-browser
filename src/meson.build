@@ -160,26 +160,15 @@ endif
 
 nordstjernen_deps += [libpsl]
 
-llama_lib_dir = meson.project_source_root() / 'third_party' / 'llamacpp' / 'lib'
-cxx = meson.get_compiler('cpp')
-llama_dep = declare_dependency(
-  include_directories: include_directories('../third_party/llamacpp/include'),
-  link_args: [
-    '-Wl,--start-group',
-    llama_lib_dir / 'libllama.a',
-    llama_lib_dir / 'libggml.a',
-    llama_lib_dir / 'libggml-cpu.a',
-    llama_lib_dir / 'libggml-base.a',
-    '-Wl,--end-group',
-  ],
-  dependencies: [
-    cxx.find_library('stdc++', required: true),
-    cc.find_library('gomp', required: false),
+if have_ai
+  cpp_stdlib_name = host_machine.system() == 'darwin' ? 'c++' : 'stdc++'
+  nordstjernen_deps += ai_deps
+  nordstjernen_deps += [
+    meson.get_compiler('cpp').find_library(cpp_stdlib_name, required: true),
     cc.find_library('dl', required: false),
     dependency('threads'),
-  ],
-)
-nordstjernen_deps += [llama_dep]
+  ]
+endif
 
 nordstjernen_win_subsystem = (
   host_machine.system() == 'windows' ? 'windows' : 'console'
