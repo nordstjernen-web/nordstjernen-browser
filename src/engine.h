@@ -20,6 +20,8 @@ G_BEGIN_DECLS
 ns_response *ns_engine_fetch_blocking(const char *url, const char *top_url,
                                       GError **error);
 
+gboolean ns_engine_in_blocking_fetch(void);
+
 ns_response *ns_engine_post_blocking(const char *url, const char *top_url,
                                      const void *body, gsize body_len,
                                      const char *content_type, GError **error);

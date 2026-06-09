@@ -22,6 +22,14 @@ typedef struct fetch_state {
     GError      *error;
 } fetch_state;
 
+static int g_engine_blocking_depth;
+
+gboolean
+ns_engine_in_blocking_fetch(void)
+{
+    return g_engine_blocking_depth > 0;
+}
+
 static void
 on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -37,7 +45,9 @@ ns_engine_fetch_blocking(const char *url, const char *top_url, GError **error)
     fetch_state st = {0};
     st.loop = g_main_loop_new(NULL, FALSE);
     ns_net_fetch_async(url, top_url, NULL, on_fetch_done, &st);
+    g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
+    g_engine_blocking_depth--;
     g_main_loop_unref(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);
@@ -53,7 +63,9 @@ ns_engine_post_blocking(const char *url, const char *top_url,
     st.loop = g_main_loop_new(NULL, FALSE);
     ns_net_post_async(url, top_url, body, body_len, content_type,
                       NULL, on_fetch_done, &st);
+    g_engine_blocking_depth++;
     g_main_loop_run(st.loop);
+    g_engine_blocking_depth--;
     g_main_loop_unref(st.loop);
     if (error) *error = st.error;
     else g_clear_error(&st.error);

@@ -881,6 +881,8 @@ ns_idle_deadline_time_remaining(JSContext *ctx, JSValueConst this_val,
     return JS_NewFloat64(ctx, 50.0);
 }
 
+gboolean ns_engine_in_blocking_fetch(void);
+
 static gboolean
 ns_timer_fire(gpointer data)
 {
@@ -891,7 +893,8 @@ ns_timer_fire(gpointer data)
         g_hash_table_remove(js->timers, GINT_TO_POINTER(t->id));
         return G_SOURCE_REMOVE;
     }
-    if (js->in_pump) return G_SOURCE_CONTINUE;
+    if (js->in_pump || ns_engine_in_blocking_fetch())
+        return G_SOURCE_CONTINUE;
     int timer_id = t->id;
     gboolean is_interval = t->is_interval;
     int prev_nesting = js->timer_nesting_level;
@@ -23623,7 +23626,7 @@ ns_js_image_ready_idle(gpointer data)
 {
     ns_js_image_load *r = data;
     ns_js *js = r->js;
-    if (js && !js->halted && js->in_pump) {
+    if (js && !js->halted && (js->in_pump || ns_engine_in_blocking_fetch())) {
         r->ready_idle = g_timeout_add(4, ns_js_image_ready_idle, r);
         return G_SOURCE_REMOVE;
     }
