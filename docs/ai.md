@@ -15,14 +15,17 @@ fetches pages.
   status state machine.
 - `src/net.c` exposes three internal endpoints that the start page calls with
   `fetch()` — answered synchronously by `synthesize_about_response()`:
-  - `about:ai-status` → JSON `{state, ...}` where `state` is `idle`,
-    `downloading` (with `percent`/`received`/`total`), `ready`, `error`, or
-    `disabled`.
-  - `about:ai-download` → kicks off the background download and returns status.
-  - `about:ai?q=…` → `text/plain` generated reply.
+  - `about:ai-status` → JSON `{state, active, models:[…], …}` where `state` is
+    `idle`, `downloading` (with the `downloading` id + `percent`/`received`/
+    `total`), `ready`, `error`, or `disabled`, and `models` lists each tier
+    with its size and an `installed` flag.
+  - `about:ai-download?model=<id>` → selects a model and, if it isn't already
+    on disk, starts the background download. Returns status.
+  - `about:ai?q=…` → `text/plain` generated reply from the active model.
 - The chat UI is the `about:start` HTML/JS template in `src/net.c`. On load it
-  polls `about:ai-status`; if no model is present it offers a one-click
-  download with a progress bar, then enables the chat once the model is ready.
+  polls `about:ai-status`; if no model is installed it shows a picker of the
+  available models, downloads the chosen one with a progress bar, then enables
+  the chat. The active model is shown in the footer with a "change" control.
 
 ## Building
 
@@ -40,20 +43,29 @@ meson setup builddir -Dai=disabled  # build without the local model
 
 When disabled, the start page reports that the build has no AI support.
 
-## The model
+## Models
 
 Model weights are **not** committed — they are downloaded on demand into the
 user data directory (`$XDG_DATA_HOME/nordstjernen/models/` on Linux, the
-platform-appropriate data dir elsewhere). The browser uses the first `*.gguf`
-it finds there.
+platform-appropriate data dir elsewhere).
 
-The default model is **Qwen2.5-0.5B-Instruct** quantized to `Q4_K_M` (~470 MB),
-which answers a short question in about a second on four CPU threads. Any GGUF
-chat model with a built-in chat template works.
+The browser offers a small catalog of CPU-friendly chat models (the `k_models[]`
+table in `src/ai.c`), all Qwen2.5-Instruct `Q4_K_M` GGUFs from Hugging Face:
+
+| Tier     | Model        | Size     |
+|----------|--------------|----------|
+| Fast     | Qwen2.5-0.5B | ~0.47 GB |
+| Balanced | Qwen2.5-1.5B | ~1.0 GB  |
+| Quality  | Qwen2.5-3B   | ~1.9 GB  |
+
+Bigger models answer better but download more and run slower. The user picks a
+tier on the start page; the loader switches between any installed models on
+demand. Add or change tiers by editing `k_models[]`. Any GGUF chat model with a
+built-in chat template works.
 
 Two environment variables override the defaults:
 
 - `NORDSTJERNEN_AI_MODEL` — an explicit path to an existing `.gguf` file;
-  skips the download entirely.
-- `NORDSTJERNEN_AI_MODEL_URL` — the URL to download the model from (defaults
-  to the official Hugging Face Qwen2.5-0.5B-Instruct-GGUF release).
+  skips the catalog and download entirely.
+- `NORDSTJERNEN_AI_MODEL_URL` — overrides the download source URL (the file is
+  still saved under the selected tier's name); handy for mirrors or testing.
