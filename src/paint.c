@@ -2114,9 +2114,13 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 }
             }
             const ns_css_value *cc = cstyle ? cstyle->values[NS_CSS_CARET_COLOR] : NULL;
+            const ns_css_value *tc = cstyle ? cstyle->values[NS_CSS_COLOR] : NULL;
             if (cc && cc->kind == NS_CSS_V_COLOR)
                 cairo_set_source_rgb(cr, cc->u.color.r / 255.0,
                                      cc->u.color.g / 255.0, cc->u.color.b / 255.0);
+            else if (tc && tc->kind == NS_CSS_V_COLOR)
+                cairo_set_source_rgb(cr, tc->u.color.r / 255.0,
+                                     tc->u.color.g / 255.0, tc->u.color.b / 255.0);
             else
                 cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
             cairo_set_line_width(cr, 1.5);
