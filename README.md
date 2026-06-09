@@ -100,6 +100,10 @@ latest build — bleeding edge, expect rough edges.
 [Checksums](https://www.nordstjernen.org/nightly/SHA256SUMS) ·
 [all nightly files](https://www.nordstjernen.org/nightly/)
 
+**Windows 10 or later** is required: the GTK 4 frontend links
+DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
+(and GTK 4 targets Windows 10 anyway).
+
 The Java API embeds the engine on the JVM (requires JDK 21); see
 [`java/README.md`](java/README.md).
 
