@@ -102,7 +102,9 @@ latest build — bleeding edge, expect rough edges.
 
 **Windows 10 or later** is required: the GTK 4 frontend links
 DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
-(and GTK 4 targets Windows 10 anyway).
+(and GTK 4 targets Windows 10 anyway). The Qt frontend has the same
+floor — Qt 6 also requires Windows 10 — so there is no older-Windows
+build of either frontend.
 
 The Java API embeds the engine on the JVM (requires JDK 21); see
 [`java/README.md`](java/README.md).
