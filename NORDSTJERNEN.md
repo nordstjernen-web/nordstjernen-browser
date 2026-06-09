@@ -187,6 +187,19 @@ committed, listed to keep the long view in one place:
   incremental re-cascade in *Now/Next* are the headline wins; both
   unblock smooth animated scrolling, which has been reverted twice for
   want of them. Treat them as the gating performance work.
+- **Frame-loop idling / animation throttling** *(known issue, deferred)*
+  — the renderer drives the JS animation-frame + paint loop at full rate
+  with no idle cap, so a page with a perpetual `requestAnimationFrame`
+  or an infinite CSS animation (e.g. the full `duckduckgo.com` SPA's
+  loading spinner) pins the renderer near 90% CPU even when visually
+  static. Only ~6 relayouts/s occur — the cost is JS rAF + per-frame
+  repaint, not re-cascade. Real engines cap to the display refresh and
+  stop ticking when no animation is actually needed. Fix: a vsync-tied
+  frame cap plus a "no pending work → sleep" path honouring
+  `ns_js_has_pending_animation_frame`. Sidestepped today by routing
+  about:start search through DuckDuckGo Lite (commit 0802a43). Note: the
+  separate re-entrant-relayout leak (one full style table orphaned per
+  forced layout) was a distinct bug, already fixed in commit 80ca0d5.
 - **Worker maturity** — dedicated workers are partial today (§10). Round
   out `postMessage` structured clone, transferables, and module workers
   so wasm-bindgen + worker bundles run unmodified.
