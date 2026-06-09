@@ -91,7 +91,8 @@ latest build — bleeding edge, expect rough edges.
 | Debian | [`nordstjernen-debian-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb) |
 | Ubuntu | [`nordstjernen-ubuntu-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb) |
 | openSUSE | [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm) |
-| Linux (portable) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
+| Linux (portable GTK+) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
+| Linux (portable, Qt) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-qt.x86_64.zip) |
 | Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
 | Java API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
 | Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |
@@ -116,13 +117,6 @@ lexbor, QuickJS and Wuffs are vendored in-tree — no submodules, no
 downloads. Windows, Fedora, openSUSE and macOS instructions are in
 [docs/](docs/). Keyboard, mouse and touch controls are documented in
 [docs/Controls.md](docs/Controls.md).
-
-An **experimental Qt 6 frontend** lives in [`src/qt/`](src/qt/) as an
-alternative to the default GTK shell. It is off by default; enable it
-with `meson setup builddir -Dqt=enabled` (needs `qt6-base-dev`), which
-produces `./builddir/src/qt/nordstjernen-qt`. The
-[`qt` workflow](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml)
-builds it on every push and uploads a Linux binary artifact.
 
 ## Dependencies
 
