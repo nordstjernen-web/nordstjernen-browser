@@ -28,7 +28,7 @@ service-worker network interception, push, background sync (the
 registration + lifecycle subset of Service Workers *is* supported);
 DRM / EME; **JIT** (QuickJS
 interpreter only — W^X holds process-wide); plugins (NPAPI / PPAPI /
-WebExtensions); persistent on-disk history; sync / accounts / telemetry /
+WebExtensions); sync / accounts / telemetry /
 "studies"; localization beyond English (for now).
 
 WebGL is the one exception to the no-GPU-APIs stance: a minimalist,
@@ -71,26 +71,25 @@ toolkit-agnostic:
   lands here in C, in the house style (`ns_` snake_case, one-line SPDX
   header, no comments).
 - **`src/gtk/` — GTK 4 frontend (reference).** A thin process-per-tab
-  shell (`appmain` entry point, `procwindow`/`procview` over `rproc`)
+  shell (`appmain` entry point, `procwindow`/`procview` over `rproc_http`)
   that spawns one sandboxed `nordstjernen-renderer` process per tab and
   blits its framebuffer. It carries the browser chrome — navigation,
   tabs, history, zoom, selection, `:hover`, find-in-page, a context menu,
   the DevTools console, save/export, media handoff, an app menu, settings,
   and bookmarks. The former in-process engine renderer has been removed.
 - **`src/qt/` — Qt 6 frontend (experimental, off by default).** A thin
-  C++ shell that links only Qt + `rproc.c` (no engine, no GTK), built with
+  C++ shell that links only Qt + `rproc_http.c` (no engine, no GTK), built with
   `-Dqt=enabled`. It is a tabbed browser driving one sandboxed renderer
   process per tab, so every tab shows full engine output; it matches the
   GTK shell on core browsing chrome (navigation, tabs, zoom, selection,
   hover, find, context menu) with the rest in progress. Qt is a C++-only
   toolkit, so the shell is C++; the logic underneath stays C in `src/`.
 
-**Direction — process-per-tab renderer boundary.** The next
-architectural step (see `docs/tab-isolation.md`) is to move each tab into
+**Process-per-tab renderer boundary — shipped.** Each tab now runs in
 its own sandboxed *process* running the engine and producing a rendered
-surface, with the GUI process reduced to hosting a widget per tab,
-blitting the framebuffer, and forwarding input. This is the payoff that
-makes the whole design cohere:
+surface (see `docs/tab-isolation.md`), with the GUI process reduced to
+hosting a widget per tab, blitting the framebuffer, and forwarding input.
+This is the payoff that makes the whole design cohere:
 
 - **Very thin GUIs.** Both GTK and Qt become display-plus-input shells;
   the toolkit — and its language — stops mattering to rendering.
@@ -131,7 +130,7 @@ themselves before opening any page.
    find-in-page, a right-click context menu, the DevTools console,
    save/export, media handoff, an app menu, settings, and bookmarks — and
    the Qt shell matches the core browsing chrome. The IPC protocol
-   (`rproc`) has grown to carry all of this: render/viewport, click/key/
+   (`rproc_http`) has grown to carry all of this: render/viewport, click/key/
    hover/select, find, export, media, console/eval.
 2. **Browser-process broker services** (networking, cookies, cache,
    storage) so the renderer can be credential-less rather than fetching
@@ -206,15 +205,12 @@ committed, listed to keep the long view in one place:
 - **Packaging reach** — Flathub (blocked only on AppStream
   `metainfo.xml`), a signed Windows build, and a notarized macOS DMG
   are the distribution-side levers.
-- **Process-per-tab renderers & thin frontends** — the structural
-  direction in *Architecture & frontends* (`docs/tab-isolation.md`):
-  sandboxed out-of-process per-tab engines behind an IPC +
-  shared-memory-framebuffer boundary, reducing GTK and Qt to thin display
-  clients showing identical engine output. The headline architectural and
-  security investment; the in-process renderers in both toolkits have been
-  removed in favour of it.
 
-**Done:** 10 embeddable `libnordstjernen` (built and header-installed
+**Done:** process-per-tab renderers behind the IPC +
+shared-memory-framebuffer boundary (both GTK and Qt are thin display
+clients now; in-process renderers removed — see *Architecture &
+frontends* and `docs/tab-isolation.md`),
+10 embeddable `libnordstjernen` (built and header-installed
 from meson, Java JNI binding in `java/`, see `docs/Embedding.md`),
 15 Debian/Ubuntu `.deb` packaging (built nightly, see `docs/Nightly.md`).
 

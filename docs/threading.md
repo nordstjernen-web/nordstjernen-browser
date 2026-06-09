@@ -36,7 +36,7 @@ that are transferred by ownership.
 
 The shell process (`src/gtk/procview.c`, `src/qt/procview.cpp`) has its
 own main/UI thread plus one **per-view worker thread** that runs the
-synchronous `rproc` IPC calls (open/render/click/key/find/…) off the UI
+synchronous `rproc_http` IPC calls (open/render/click/key/find/…) off the UI
 thread; it touches no DOM or JS — only the shared-memory framebuffer and
 Qt/GTK widgets.
 

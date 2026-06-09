@@ -7,7 +7,7 @@ independent browser shell over the same engine.
 The Qt frontend is **off by default** (a meson feature option). Like the GTK
 app, it is a **thin, process-per-tab shell**: `nordstjernen-qt` is a tabbed
 browser in which **each tab drives its own sandboxed `nordstjernen-renderer`
-process** over the shared-memory + control-channel IPC in `src/rproc.c`. The Qt
+process** over the shared-memory + control-channel IPC in `src/rproc_http.c`. The Qt
 side blits the renderer's framebuffer and forwards scroll, resize, clicks,
 hover, find, and navigation. Every tab shows the **full engine output** (the
 same HTML/CSS/layout/paint/JS as the GTK frontend) and is isolated in its own
@@ -18,7 +18,7 @@ renderers in both toolkits were removed).
 ## Architecture
 
 The Qt shell links **no GTK and not the engine**: it compiles only
-`src/qt/*.cpp` plus the renderer IPC client `src/rproc.c`, and talks to the
+`src/qt/*.cpp` plus the renderer IPC client `src/rproc_http.c`, and talks to the
 `nordstjernen-renderer` process for everything page-related. That keeps the Qt
 binary tiny (~170 KB) and the trusted UI process free of any untrusted-content
 parsing.
@@ -27,7 +27,7 @@ parsing.
 | --- | --- |
 | `src/qt/main.cpp` | `QApplication` bootstrap; launches the tabbed `ProcWindow`. |
 | `src/qt/procwindow.{h,cpp}` | Tabbed `QMainWindow`: a `QTabWidget` of `ProcView`s — one renderer process per tab — with a back/forward/reload toolbar, address bar, per-tab history, new-tab (Ctrl+T) / close-tab (Ctrl+W), Home, and a status bar. Middle-click or Ctrl+click on a link opens it in a new background tab (a fresh renderer process). |
-| `src/qt/procview.{h,cpp}` | A `QAbstractScrollArea` that owns one `nordstjernen-renderer` process (via `src/rproc.c`), blits its shared framebuffer, and dispatches load/scroll/resize/hover/link/click/find IPC off the GUI thread. Per-tab back/forward history, mouse-wheel and keyboard scrolling (arrows, PageUp/Down, Space/Shift+Space, Home/End), per-tab zoom (Ctrl +/−/0, Ctrl+wheel) at the renderer's `scale`, `:hover` + pointer events, find-in-page (Ctrl+F), and a right-click context menu. |
+| `src/qt/procview.{h,cpp}` | A `QAbstractScrollArea` that owns one `nordstjernen-renderer` process (via `src/rproc_http.c`), blits its shared framebuffer, and dispatches load/scroll/resize/hover/link/click/find IPC off the GUI thread. Per-tab back/forward history, mouse-wheel and keyboard scrolling (arrows, PageUp/Down, Space/Shift+Space, Home/End), per-tab zoom (Ctrl +/−/0, Ctrl+wheel) at the renderer's `scale`, `:hover` + pointer events, find-in-page (Ctrl+F), and a right-click context menu. |
 | `src/rproc.{h,c}` | Parent/client side of the renderer IPC: shared-memory framebuffer + control channel (`socketpair`/`shm` on POSIX, pipes + file mapping on Windows). |
 
 ## Building
@@ -85,6 +85,6 @@ shared IPC messages (`FIND`, `CONSOLE`/`EVAL`, `EXPORT`, `MEDIA`).
 
 Still GTK-only: the **Settings** dialog and **bookmarks**, because they edit
 the engine's `ns_config` / `ns_bookmarks` stores, which the thin Qt shell
-deliberately does not link (it links only Qt + `rproc.c`). Adding them would
+deliberately does not link (it links only Qt + `rproc_http.c`). Adding them would
 mean either pulling those C modules (and glib) into the Qt binary or moving
 config/bookmarks behind an IPC surface.

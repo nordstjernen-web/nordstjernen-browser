@@ -257,7 +257,7 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
   renderer keeps failing stops after a few attempts with an honest status
   message instead of thrashing. Middle-click or Ctrl+click on a link opens
   it in a new background tab, i.e. spawns a fresh renderer process. The Qt-side code
-  links Qt + `rproc.c` only — no engine, GTK, Cairo, lexbor, or QuickJS — yet
+  links Qt + `rproc_http.c` only — no engine, GTK, Cairo, lexbor, or QuickJS — yet
   every tab displays full-fidelity engine output (CSS colours, backgrounds,
   Pango text). Built with `-Dqt=enabled`; this is the only Qt mode (there is
   no in-process Qt renderer). Point `NS_RENDERER` at the renderer executable
@@ -265,7 +265,7 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
 - `src/gtk/procview.{h,c}` + `src/gtk/procwindow.{h,c}` — the **GTK** frontend's
   process-per-tab UI, the **only** GTK renderer (the former in-process engine
   renderer has been removed). `NsProcView` is a `GtkDrawingArea` that blits the
-  renderer framebuffer (cairo), runs `rproc` IPC on a per-view worker thread
+  renderer framebuffer (cairo), runs `rproc_http` IPC on a per-view worker thread
   (`GAsyncQueue` + `g_idle_add` replies, results guarded by a refcount and a
   closed flag), and handles wheel/keyboard scroll, link clicks, hover, text
   selection, find-in-page, a context menu, the DevTools console, save/export,
