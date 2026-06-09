@@ -200,6 +200,24 @@ committed, listed to keep the long view in one place:
   about:start search through DuckDuckGo Lite (commit 0802a43). Note: the
   separate re-entrant-relayout leak (one full style table orphaned per
   forced layout) was a distinct bug, already fixed in commit 80ca0d5.
+  **Tried and reverted (damage-based render skip):** a coarse
+  `frame_dirty` flag — set by any tick that ran work (rAF, active CSS
+  animation, a fired timer, DOM mutation) or any interaction, cleared on
+  render — that let the renderer skip re-rasterising + re-shipping a
+  pixel-identical frame (`X-Unchanged`, shell keeps its last surface). It
+  did **not** help the case that motivated it: the full `duckduckgo.com`
+  SPA runs a real rAF every frame, so `frame_dirty` was legitimately
+  true each frame and nothing was skipped (still ~96% CPU). Worse, on
+  pages that *did* skip it produced visible judder ("objects moving up
+  and down") — a one-frame lag whenever a paint was skipped while the
+  page was mid-motion, because a whether-anything-ran flag is too blunt:
+  it can't tell a no-op rAF from one that nudged a pixel. The correct
+  shape is real per-region paint **invalidation** (track *what* changed,
+  not *whether* something ran) — i.e. the dirty-region work above — not a
+  global skip flag. And the full-SPA case specifically needs
+  compositor-thread `transform`/`opacity` animation (animate off the
+  main thread, no relayout/repaint), a larger architectural effort.
+  Don't re-attempt the coarse-flag version.
 - **Worker maturity** — dedicated workers are partial today (§10). Round
   out `postMessage` structured clone, transferables, and module workers
   so wasm-bindgen + worker bundles run unmodified.
