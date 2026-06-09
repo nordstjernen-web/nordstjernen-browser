@@ -165,6 +165,7 @@ static void browser_js_navigate(const char *url, gboolean reload, gpointer ud)
 int
 ns_browser_init(void)
 {
+    ns_config_init();
     ns_net_init();
     ns_net_set_allow_file_urls(TRUE);
     ns_cache_init();
