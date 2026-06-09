@@ -2415,7 +2415,7 @@ static const char k_about_start_template[] =
     "var sq=document.getElementById('sq');\n"
     "dsearch.addEventListener('submit',function(e){e.preventDefault();\n"
     " var s=sq.value.trim(); if(!s) return;\n"
-    " window.location.href='https://duckduckgo.com/?q='+\n"
+    " window.location.href='https://lite.duckduckgo.com/lite/?q='+\n"
     "  encodeURIComponent(s);});\n"
     "try{sq.focus();}catch(e){}\n"
     "var ready=false, banner=null, poll=null, picking=false, gpuShown=false;\n"
