@@ -70,6 +70,12 @@ The full section-by-section walk-through lives in
   over an IPC control channel (`src/rproc.c`), so a page can't take down
   the UI. See [`docs/tab-isolation.md`](docs/tab-isolation.md) and
   [`docs/Rendering.md`](docs/Rendering.md).
+- **Local AI start page** — the `about:start` new-tab page is a chat
+  with a small language model running entirely on your machine via
+  llama.cpp (no cloud, no network at inference time). Pick a model and
+  it downloads once; optional GPU offload (Vulkan / Metal). The
+  assistant can also pull a Wikipedia image, run a DuckDuckGo web
+  search, or open a site for you.
 - **UI** — tabs, bookmarks, find-in-page, save-to-PDF, JS console,
   settings, headless mode, and a C embedding API.
 

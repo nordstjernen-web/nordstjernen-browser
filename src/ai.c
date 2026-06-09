@@ -75,14 +75,14 @@ typedef struct {
 
 static const ns_ai_model k_models[] = {
     {
-        "fast", "Qwen2.5 0.5B", "qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/"
-        "qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true", 470,
-    },
-    {
         "balanced", "Qwen2.5 1.5B", "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
         "qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true", 1010,
+    },
+    {
+        "gemma", "Gemma 2 2B (Google)", "gemma-2-2b-it-Q4_K_M.gguf",
+        "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/"
+        "gemma-2-2b-it-Q4_K_M.gguf?download=true", 1710,
     },
     {
         "quality", "Qwen2.5 3B", "qwen2.5-3b-instruct-q4_k_m.gguf",
