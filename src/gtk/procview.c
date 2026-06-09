@@ -962,6 +962,13 @@ ns_proc_view_reload(NsProcView *v)
         do_load(v, v->current_url, FALSE);
 }
 
+void
+ns_proc_view_toggle_console(NsProcView *v)
+{
+    if (v->opened)
+        console_set_open(v, !v->console_open);
+}
+
 const char *ns_proc_view_url(NsProcView *v) { return v->current_url; }
 const char *ns_proc_view_title(NsProcView *v) { return v->current_title; }
 gboolean ns_proc_view_is_loading(NsProcView *v) { return v->loading; }

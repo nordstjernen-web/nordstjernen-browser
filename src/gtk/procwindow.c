@@ -367,6 +367,16 @@ act_reload(GSimpleAction *a, GVariant *p, gpointer ud)
 }
 
 static void
+act_console(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    NsProcView *v = current_view(ud);
+    if (v)
+        ns_proc_view_toggle_console(v);
+}
+
+static void
 act_home(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a;
@@ -700,6 +710,8 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Alt>Right", NULL });
     install_action(pw, "reload", G_CALLBACK(act_reload),
                    (const char *[]){ "<Ctrl>r", "F5", NULL });
+    install_action(pw, "console", G_CALLBACK(act_console),
+                   (const char *[]){ NULL });
     install_action(pw, "home", G_CALLBACK(act_home),
                    (const char *[]){ "<Alt>Home", NULL });
     install_action(pw, "new-tab", G_CALLBACK(act_new_tab),
@@ -785,6 +797,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     GMenu *appmenu = g_menu_new();
     g_menu_append(appmenu, "New Tab", "win.new-tab");
     g_menu_append(appmenu, "Reload", "win.reload");
+    g_menu_append(appmenu, "JavaScript Console", "win.console");
     g_menu_append(appmenu, "Task Manager", "win.task-manager");
     g_menu_append(appmenu, "Settings", "win.settings");
     GMenu *appmenu_about = g_menu_new();

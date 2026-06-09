@@ -39,6 +39,7 @@ void ns_proc_view_load(NsProcView *view, const char *url);
 void ns_proc_view_back(NsProcView *view);
 void ns_proc_view_forward(NsProcView *view);
 void ns_proc_view_reload(NsProcView *view);
+void ns_proc_view_toggle_console(NsProcView *view);
 
 gboolean    ns_proc_view_can_back(NsProcView *view);
 gboolean    ns_proc_view_can_forward(NsProcView *view);
