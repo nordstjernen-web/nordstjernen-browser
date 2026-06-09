@@ -901,9 +901,26 @@ ns_timer_fire(gpointer data)
     js->timer_nesting_level = t->nesting_level;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
+
+    /* The callback can clear its own timer (clearInterval(myId)) — or, via a
+       re-entrant relayout/fetch, another timer that shares state — which would
+       drop the last reference and free the function while it is still running.
+       Hold owned copies of the callback, its code and its extra args for the
+       duration of the call so the engine never executes freed memory. */
+    JSValue cb = JS_IsUndefined(t->cb) ? JS_UNDEFINED
+                                       : JS_DupValue(js->ctx, t->cb);
+    char *code = t->code ? g_strdup(t->code) : NULL;
+    int n_extra = t->extra_args_count;
+    JSValue *extra = NULL;
+    if (n_extra > 0) {
+        extra = g_new(JSValue, n_extra);
+        for (int i = 0; i < n_extra; i++)
+            extra[i] = JS_DupValue(js->ctx, t->extra_args[i]);
+    }
+
     JSValue ret;
-    if (t->code) {
-        ret = JS_Eval(js->ctx, t->code, strlen(t->code), "<timer>",
+    if (code) {
+        ret = JS_Eval(js->ctx, code, strlen(code), "<timer>",
                       JS_EVAL_TYPE_GLOBAL);
     } else if (t->is_idle) {
         JSValue deadline = JS_NewObject(js->ctx);
@@ -912,13 +929,20 @@ ns_timer_fire(gpointer data)
                           JS_NewCFunction(js->ctx, ns_idle_deadline_time_remaining,
                                           "timeRemaining", 0));
         JSValueConst args[1] = { deadline };
-        ret = JS_Call(js->ctx, t->cb, JS_UNDEFINED, 1, args);
+        ret = JS_Call(js->ctx, cb, JS_UNDEFINED, 1, args);
         JS_FreeValue(js->ctx, deadline);
-    } else if (t->extra_args_count > 0) {
-        ret = JS_Call(js->ctx, t->cb, JS_UNDEFINED,
-                      t->extra_args_count, t->extra_args);
+    } else if (n_extra > 0) {
+        ret = JS_Call(js->ctx, cb, JS_UNDEFINED, n_extra, extra);
     } else {
-        ret = JS_Call(js->ctx, t->cb, JS_UNDEFINED, 0, NULL);
+        ret = JS_Call(js->ctx, cb, JS_UNDEFINED, 0, NULL);
+    }
+
+    JS_FreeValue(js->ctx, cb);
+    g_free(code);
+    if (extra) {
+        for (int i = 0; i < n_extra; i++)
+            JS_FreeValue(js->ctx, extra[i]);
+        g_free(extra);
     }
     ns_js_budget_pop(js, &bg);
     js->timer_nesting_level = prev_nesting;

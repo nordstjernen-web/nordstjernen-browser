@@ -9067,8 +9067,9 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     }
     GHashTable *box_map = g_hash_table_new(g_direct_hash, g_direct_equal);
     abs_box_map_build(box_map, root);
-    double *batch_y = g_new0(double, g_abs_pending->len);
-    gboolean *batch_resolved = g_new0(gboolean, g_abs_pending->len);
+    guint batch_len = g_abs_pending->len;
+    double *batch_y = g_new0(double, batch_len);
+    gboolean *batch_resolved = g_new0(gboolean, batch_len);
     static_abs_y_precompute(root, box_map, styles, batch_y, batch_resolved);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
@@ -9097,7 +9098,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             abox->y = st->run->y + st->rel_y;
         } else {
             double static_y = cb->y + cb->margin.top + cb->border.top + cb->padding.top;
-            if (batch_resolved[i])
+            if (i < batch_len && batch_resolved[i])
                 static_y = batch_y[i];
             else
                 static_abs_y_walk(cb, e.dom, &static_y);
