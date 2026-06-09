@@ -18,7 +18,7 @@ exactly the latest build. It contains:
 | --- | --- | --- |
 | Source tarballs (`.tar.gz`, `.tar.xz`) | `git archive` on the host | `source/` |
 | Debian package (`.deb`) + binary zip | `debian:trixie` container | `linux/debian/` |
-| Ubuntu package (`.deb`) + binary zip | `ubuntu:24.04` container | `linux/ubuntu/` |
+| Ubuntu package (`.deb`) + binary zip + Qt-frontend zip | `ubuntu:24.04` container | `linux/ubuntu/` |
 | openSUSE package (`.rpm`) + binary zip | `opensuse/tumbleweed` container | `linux/opensuse/` |
 | Alpine (musl) binary zip | `alpine:edge` container | `linux/alpine/` |
 | Windows bundle (`.zip`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
@@ -31,6 +31,14 @@ shared `nordstjernen-renderer`. The distro containers install that distro's
 Qt 6 base package and `scripts/pack-linux.sh` configures with `-Dqt=auto`, so
 the Qt client is included where Qt 6 is available and silently skipped where it
 is not (set `NS_PACK_QT=disabled` to force it off).
+
+The Ubuntu stage additionally repacks a dedicated **Qt-frontend** zip
+(`linux/ubuntu/nordstjernen-*-linux-qt-x86_64.zip`, published as the stable
+`nordstjernen-linux-qt-x86_64.zip`): `pack-linux.sh` is re-run with
+`NS_PACK_FLAVOR=qt`, which forces `-Dqt=enabled` and fails the repack if the Qt
+frontend was not built, so that download is guaranteed to ship
+`nordstjernen-qt`. If Qt 6 is unavailable in the container the repack is skipped
+and only the standard zip is produced.
 
 Plus `SHA256SUMS`, `MANIFEST.txt` (version, commit, per-stage status,
 file sizes), and `nightly.log`.
@@ -49,6 +57,7 @@ current build (a platform that didn't build simply has no link):
 - `https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb`
 - `https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm`
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip`
+- `https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip` (Qt 6 frontend)
 - `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip` (musl)
 - `https://www.nordstjernen.org/nightly/nordstjernen-java.jar`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar`

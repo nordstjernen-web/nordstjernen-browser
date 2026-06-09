@@ -377,6 +377,7 @@ stage_stable_links() {
     link_stable nordstjernen-ubuntu-amd64.deb    'linux/ubuntu/*.deb'
     link_stable nordstjernen-opensuse-x86_64.rpm 'linux/opensuse/*.rpm'
     link_stable nordstjernen-linux-x86_64.zip    'linux/ubuntu/*-linux-x86_64.zip'
+    link_stable nordstjernen-linux-qt-x86_64.zip 'linux/ubuntu/*-linux-qt-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.zip   'linux/alpine/*-linux-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.apk   'linux/alpine/*.apk'
     link_stable nordstjernen-src.tar.xz          'source/*.tar.xz'

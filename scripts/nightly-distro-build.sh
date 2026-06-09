@@ -85,6 +85,11 @@ echo "nightly-distro-build($DISTRO): building with -j${NS_BUILD_JOBS} lto=${NS_B
 
 ./scripts/pack-linux.sh
 
+if [ "$DISTRO" = ubuntu ]; then
+    NS_PACK_FLAVOR=qt ./scripts/pack-linux.sh \
+        || echo "nightly-distro-build($DISTRO): Qt-flavored pack failed (Qt 6 unavailable?); skipping qt zip" >&2
+fi
+
 case "$DISTRO" in
     debian|ubuntu) ./scripts/pack-deb.sh ;;
     opensuse)      ./scripts/pack-rpm.sh ;;

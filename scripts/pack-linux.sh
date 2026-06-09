@@ -16,7 +16,13 @@ VERSION=${VERSION:-$(awk -F"'" \
 ARCH=$(uname -m)
 FSVERSION=${VERSION//\~/-}
 FSVERSION=${FSVERSION//\//-}
-SLUG="nordstjernen-${FSVERSION}-linux-${ARCH}"
+FLAVOR=${NS_PACK_FLAVOR:-}
+if [ "$FLAVOR" = qt ]; then
+    : "${NS_PACK_QT:=enabled}"
+    SLUG="nordstjernen-${FSVERSION}-linux-qt-${ARCH}"
+else
+    SLUG="nordstjernen-${FSVERSION}-linux-${ARCH}"
+fi
 STAGE="$ROOT/dist/${SLUG}"
 ZIP="$ROOT/dist/${SLUG}.zip"
 
@@ -33,6 +39,10 @@ strip --strip-all "$BUILDDIR/src/nordstjernen-renderer"
 QT_BIN="$BUILDDIR/src/qt/nordstjernen-qt"
 if [ -f "$QT_BIN" ]; then
     strip --strip-all "$QT_BIN"
+fi
+if [ "$FLAVOR" = qt ] && [ ! -f "$QT_BIN" ]; then
+    log "ERROR: NS_PACK_FLAVOR=qt but $QT_BIN was not built (Qt 6 missing at configure time?)"
+    exit 1
 fi
 
 LOADER=$(ldd "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
