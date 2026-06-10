@@ -48,6 +48,14 @@ void ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us);
 void ns_engine_fetch_images(ns_box *root, const char *base_url,
                             ns_image_cache *cache);
 
+typedef struct ns_engine_img_session ns_engine_img_session;
+
+ns_engine_img_session *ns_engine_fetch_images_start(
+    ns_box *root, const char *base_url, ns_image_cache *cache,
+    void (*arrived_cb)(gpointer user_data), gpointer user_data);
+int  ns_engine_img_session_outstanding(const ns_engine_img_session *s);
+void ns_engine_img_session_close(ns_engine_img_session *s);
+
 int ns_engine_write_png(const ns_box *root, const char *path);
 int ns_engine_write_pdf(const ns_box *root, const char *path);
 

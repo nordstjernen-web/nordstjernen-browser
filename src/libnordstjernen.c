@@ -45,6 +45,7 @@ struct ns_browser {
     int             vw;
     double          vh;
     gboolean        images_fetched;
+    ns_engine_img_session *img_session;
     gboolean        dirty;
     gboolean        relaying;
     char           *pending_nav;
@@ -174,13 +175,35 @@ walk_max_bottom(const ns_box *b, double *out)
 }
 
 static void
+browser_image_arrived(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    if (b) b->dirty = TRUE;
+}
+
+static void
 browser_ensure_images(ns_browser *browser)
 {
     if (browser->images_fetched) return;
-    ns_engine_fetch_images(browser->layout, browser->base_url,
-                           browser->images);
-    browser_relayout(browser);
     browser->images_fetched = TRUE;
+    browser->img_session =
+        ns_engine_fetch_images_start(browser->layout, browser->base_url,
+                                     browser->images, browser_image_arrived,
+                                     browser);
+}
+
+static void
+browser_wait_images(ns_browser *browser)
+{
+    browser_ensure_images(browser);
+    gint64 deadline = g_get_monotonic_time() + (gint64)15 * G_USEC_PER_SEC;
+    while (ns_engine_img_session_outstanding(browser->img_session) > 0 &&
+           g_get_monotonic_time() < deadline)
+        g_main_context_iteration(NULL, TRUE);
+    if (browser->dirty) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+    }
 }
 
 static void
@@ -494,7 +517,7 @@ ns_browser_render_image(ns_browser *browser, const char *path)
 {
     if (!browser || !browser->layout || !path) return -1;
 
-    browser_ensure_images(browser);
+    browser_wait_images(browser);
 
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
@@ -565,6 +588,7 @@ ns_browser_animating(ns_browser *browser)
 {
     if (!browser) return 0;
     if (browser->refresh_due_us || browser->refresh_url) return 1;
+    if (ns_engine_img_session_outstanding(browser->img_session) > 0) return 1;
     gboolean damped = browser->layout_osc >= NS_LAYOUT_OSC_THRESHOLD;
     if (!damped && browser->js &&
         ns_js_has_pending_animation_frame(browser->js))
@@ -1483,6 +1507,7 @@ void
 ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
+    ns_engine_img_session_close(browser->img_session);
     ns_css_set_active_node(NULL);
     ns_paint_set_anim(NULL);
     if (browser->js) {

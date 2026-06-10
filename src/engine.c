@@ -403,11 +403,10 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_free(it);
 }
 
-void
-ns_engine_fetch_images(ns_box *root, const char *base_url,
-                       ns_image_cache *cache)
+static GHashTable *
+engine_collect_wanted_images(ns_box *root, const char *base_url,
+                             ns_image_cache *cache)
 {
-    if (!root || !base_url || !cache) return;
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(root, imgs);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -442,6 +441,114 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
         g_ptr_array_free(srcs, TRUE);
     }
     g_ptr_array_free(imgs, TRUE);
+    return wanted;
+}
+
+struct ns_engine_img_session {
+    int             refs;
+    gboolean        dead;
+    int             outstanding;
+    ns_image_cache *cache;
+    void          (*arrived_cb)(gpointer user_data);
+    gpointer        user_data;
+};
+
+static void
+img_session_unref(ns_engine_img_session *s)
+{
+    if (--s->refs == 0)
+        g_free(s);
+}
+
+typedef struct img_async_item {
+    ns_engine_img_session *session;
+    char                  *abs;
+} img_async_item;
+
+static void
+on_image_fetch_async_done(GObject *src, GAsyncResult *result,
+                          gpointer user_data)
+{
+    (void)src;
+    img_async_item *it = user_data;
+    ns_engine_img_session *s = it->session;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (!s->dead && resp && !resp->error && resp->body &&
+        resp->body->len > 0) {
+        int w = 0, h = 0;
+        ns_texture *tex = ns_image_decode_bytes(resp->body->data,
+                                                resp->body->len, &w, &h);
+        if (tex)
+            ns_image_cache_insert_loaded(s->cache, it->abs, tex, w, h);
+    }
+    if (resp) ns_response_free(resp);
+    g_clear_error(&err);
+    if (s->outstanding > 0) s->outstanding--;
+    if (!s->dead && s->arrived_cb)
+        s->arrived_cb(s->user_data);
+    img_session_unref(s);
+    g_free(it->abs);
+    g_free(it);
+}
+
+ns_engine_img_session *
+ns_engine_fetch_images_start(ns_box *root, const char *base_url,
+                             ns_image_cache *cache,
+                             void (*arrived_cb)(gpointer user_data),
+                             gpointer user_data)
+{
+    if (!root || !base_url || !cache) return NULL;
+    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache);
+    guint n = g_hash_table_size(wanted);
+    if (n == 0) {
+        g_hash_table_destroy(wanted);
+        return NULL;
+    }
+
+    ns_engine_img_session *s = g_new0(ns_engine_img_session, 1);
+    s->refs = 1;
+    s->outstanding = (int)n;
+    s->cache = cache;
+    s->arrived_cb = arrived_cb;
+    s->user_data = user_data;
+
+    GHashTableIter it;
+    gpointer key;
+    g_hash_table_iter_init(&it, wanted);
+    while (g_hash_table_iter_next(&it, &key, NULL)) {
+        img_async_item *item = g_new0(img_async_item, 1);
+        item->session = s;
+        item->abs = g_strdup(key);
+        s->refs++;
+        ns_net_fetch_async(item->abs, base_url, NULL,
+                           on_image_fetch_async_done, item);
+    }
+    g_hash_table_destroy(wanted);
+    return s;
+}
+
+int
+ns_engine_img_session_outstanding(const ns_engine_img_session *s)
+{
+    return s ? s->outstanding : 0;
+}
+
+void
+ns_engine_img_session_close(ns_engine_img_session *s)
+{
+    if (!s) return;
+    s->dead = TRUE;
+    s->arrived_cb = NULL;
+    img_session_unref(s);
+}
+
+void
+ns_engine_fetch_images(ns_box *root, const char *base_url,
+                       ns_image_cache *cache)
+{
+    if (!root || !base_url || !cache) return;
+    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache);
 
     guint n = g_hash_table_size(wanted);
     if (n == 0) {
