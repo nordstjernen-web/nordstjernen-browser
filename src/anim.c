@@ -570,7 +570,17 @@ ns_anim_observe(ns_anim *a, const ns_node *dom,
                 const ns_style *style, gint64 now_us)
 {
     if (!a || !dom || !style) return;
-    ns_anim_state *s = state_for(a, dom);
+    ns_anim_state *s = g_hash_table_lookup(a->states, dom);
+    if (!s) {
+        const ns_css_value *tv = style->values[NS_CSS_TRANSITION];
+        const ns_css_value *av = style->values[NS_CSS_ANIMATION];
+        gboolean animatable =
+            (tv && tv->kind == NS_CSS_V_ANIM) ||
+            (av && av->kind == NS_CSS_V_ANIM && av->u.anim.n > 0);
+        if (!animatable)
+            return;
+        s = state_for(a, dom);
+    }
     observe_transition(a, s, style, now_us, dom);
     observe_animation(a, s, style, now_us, dom);
     anim_track(a, s);

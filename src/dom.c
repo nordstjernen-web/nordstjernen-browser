@@ -1095,10 +1095,13 @@ ns_node_document_order_cmp(const ns_node *a, const ns_node *b)
         ca = ca->parent;
         cb = cb->parent;
     }
-    for (const ns_node *c = ca->parent ? ca->parent->first_child : NULL;
-         c; c = c->next_sibling) {
-        if (c == ca) return -1;
-        if (c == cb) return 1;
+    const ns_node *fwd = ca->next_sibling;
+    const ns_node *back = ca->prev_sibling;
+    while (fwd || back) {
+        if (fwd == cb) return -1;
+        if (back == cb) return 1;
+        if (fwd) fwd = fwd->next_sibling;
+        if (back) back = back->prev_sibling;
     }
     return 0;
 }
@@ -1114,20 +1117,19 @@ ns_doc_index_ordered_insert(GPtrArray *arr, ns_node *node)
             g_ptr_array_add(arr, node);
         return;
     }
-    for (guint k = 0; k < arr->len; k++)
-        if (g_ptr_array_index(arr, k) == node) {
-            g_ptr_array_remove_index(arr, k);
-            break;
-        }
     if (arr->len == 0 ||
-        ns_node_document_order_cmp(node, g_ptr_array_index(arr, arr->len - 1)) >= 0) {
+        ns_node_document_order_cmp(node, g_ptr_array_index(arr, arr->len - 1)) > 0) {
         g_ptr_array_add(arr, node);
         return;
     }
     guint lo = 0, hi = arr->len;
     while (lo < hi) {
         guint mid = (lo + hi) / 2;
-        if (ns_node_document_order_cmp(node, g_ptr_array_index(arr, mid)) < 0)
+        int c = ns_node_document_order_cmp(node,
+                                           g_ptr_array_index(arr, mid));
+        if (c == 0)
+            return;
+        if (c < 0)
             hi = mid;
         else
             lo = mid + 1;
