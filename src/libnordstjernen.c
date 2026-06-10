@@ -500,17 +500,19 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         gint64 now = g_get_monotonic_time();
         if (browser->images && ns_image_cache_tick(browser->images, now))
             changed = TRUE;
-        if (browser->anim) ns_anim_tick(browser->anim, now);
+        if (browser->anim && ns_anim_tick(browser->anim, now))
+            changed = TRUE;
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);
-        if (browser->js)
-            ns_js_run_animation_frame(browser->js);
+        if (browser->js && ns_js_run_animation_frame(browser->js))
+            changed = TRUE;
 
         gboolean did_iter = FALSE;
         int it = 0;
         while (g_main_context_pending(NULL) && it++ < 64) {
             g_main_context_iteration(NULL, FALSE);
             did_iter = TRUE;
+            changed = TRUE;
         }
 
         if (browser->dirty ||

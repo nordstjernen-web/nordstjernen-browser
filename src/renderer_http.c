@@ -155,6 +155,10 @@ main(int argc, char **argv)
 
     ns_browser *cur = NULL;
     int tick_budget_ms = 16;
+    int frame_valid = 0;
+    long frame_sx = 0, frame_sy = 0;
+    int frame_w = 0, frame_h = 0;
+    double frame_scale = 1.0;
 
     for (;;) {
         http_head head;
@@ -183,6 +187,7 @@ main(int argc, char **argv)
             json_get_long(body, "allow", &allow);
             if (cur && origin)
                 ns_browser_resolve_webgl(cur, origin, (int)allow);
+            frame_valid = 0;
             http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
             free(origin);
             free(body);
@@ -201,6 +206,7 @@ main(int argc, char **argv)
                 ns_browser_close(cur);
                 cur = NULL;
             }
+            frame_valid = 0;
             cur = url ? ns_browser_open_viewport(url, vw, vh, (int)settle)
                       : NULL;
             int pw = 0, ph = 0, ok = cur != NULL;
@@ -254,9 +260,21 @@ main(int argc, char **argv)
                 free(body);
                 continue;
             }
-            ns_browser_tick(cur, tick_budget_ms);
-            ns_browser_render_argb32(cur, (int)sx, (int)sy, vw, vh, scale, fb,
-                                     stride);
+            int ticked = ns_browser_tick(cur, tick_budget_ms);
+            int unchanged = frame_valid && ticked == 0 &&
+                            sx == frame_sx && sy == frame_sy &&
+                            vw == frame_w && vh == frame_h &&
+                            scale == frame_scale;
+            if (!unchanged) {
+                ns_browser_render_argb32(cur, (int)sx, (int)sy, vw, vh, scale,
+                                         fb, stride);
+                frame_valid = 1;
+                frame_sx = sx;
+                frame_sy = sy;
+                frame_w = vw;
+                frame_h = vh;
+                frame_scale = scale;
+            }
             char *nav = ns_browser_take_pending_nav(cur);
             if (nav)
                 for (char *p = nav; *p; p++)
@@ -267,8 +285,9 @@ main(int argc, char **argv)
                     if (*p == '\r' || *p == '\n') *p = ' ';
             char hdrs[4608];
             int hn = snprintf(hdrs, sizeof hdrs,
-                     "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n",
-                     vw, vh, stride, ns_browser_animating(cur) ? 1 : 0);
+                     "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n%s",
+                     vw, vh, stride, ns_browser_animating(cur) ? 1 : 0,
+                     unchanged ? "X-Unchanged: 1\r\n" : "");
             if (nav && *nav && hn > 0 && (size_t)hn < sizeof hdrs)
                 hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                                "X-Nav: %.2000s\r\n", nav);
@@ -277,7 +296,7 @@ main(int argc, char **argv)
                          "X-WebGL: %.2000s\r\n", webgl);
             free(nav);
             free(webgl);
-            if (shm_mode)
+            if (shm_mode || unchanged)
                 http_write_response(ctrl_w, 200, "application/octet-stream",
                                     hdrs, NULL, 0);
             else
@@ -305,6 +324,7 @@ main(int argc, char **argv)
                 free(body);
                 continue;
             }
+            frame_valid = 0;
             if (cur && strcmp(head.path, "/click") == 0)
                 href = ns_browser_click(cur, (int)x, (int)y, (int)mods);
             else if (cur)
@@ -322,6 +342,7 @@ main(int argc, char **argv)
             json_get_long(body, "mods", &mods);
             char *key = json_get_str(body, "key");
             char *code = json_get_str(body, "code");
+            frame_valid = 0;
             char *href = cur ? ns_browser_key(cur, (int)kind, key ? key : "",
                                               code ? code : "", (int)keycode,
                                               (int)mods)
@@ -335,6 +356,7 @@ main(int argc, char **argv)
         }
 
         if (strcmp(head.path, "/release") == 0) {
+            frame_valid = 0;
             int changed = cur ? ns_browser_release(cur) : 0;
             char json[32];
             int n = snprintf(json, sizeof json, "{\"changed\":%d}",
@@ -350,6 +372,8 @@ main(int argc, char **argv)
             json_get_long(body, "x", &x);
             json_get_long(body, "y", &y);
             int changed = cur ? ns_browser_hover(cur, (int)x, (int)y) : 0;
+            if (changed > 0)
+                frame_valid = 0;
             char json[32];
             int n = snprintf(json, sizeof json, "{\"changed\":%d}",
                              changed > 0 ? 1 : 0);
@@ -366,6 +390,7 @@ main(int argc, char **argv)
             json_get_long(body, "from_y", &from_y);
             char *q = json_get_str(body, "query");
             int total = 0, current = 0, scroll_y = 0;
+            frame_valid = 0;
             if (cur)
                 ns_browser_find(cur, q ? q : "", (int)cs, (int)dir, (int)from_y,
                                 &total, &current, &scroll_y);
@@ -387,6 +412,7 @@ main(int argc, char **argv)
             int vw = clamp((int)w, 1, max_w);
             int vh = clamp((int)h, 1, max_h);
             int pw = 0, ph = 0, ok = 0;
+            frame_valid = 0;
             if (cur && ns_browser_set_viewport(cur, vw, vh) == 0) {
                 ns_browser_page_size(cur, &pw, &ph);
                 ok = 1;
@@ -403,6 +429,7 @@ main(int argc, char **argv)
 
         if (strcmp(head.path, "/eval") == 0) {
             char *src = json_get_str(body, "src");
+            frame_valid = 0;
             char *res = cur ? ns_browser_eval(cur, src ? src : "") : NULL;
             reply_str(ctrl_w, "text", res);
             free(res);
@@ -444,6 +471,7 @@ main(int argc, char **argv)
 
         if (strcmp(head.path, "/export") == 0) {
             char *path = json_get_str(body, "path");
+            frame_valid = 0;
             int rc = (cur && path) ? ns_browser_render_image(cur, path) : -1;
             char json[24];
             int n = snprintf(json, sizeof json, "{\"ok\":%d}", rc);

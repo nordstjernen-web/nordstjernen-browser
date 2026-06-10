@@ -379,6 +379,14 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     if (head.content_length &&
         http_read_body(&r->conn, head.content_length, r->rxbuf) != 0)
         return -1;
+    if (head.x_unchanged > 0) {
+        out->ok = 1;
+        out->unchanged = 1;
+        out->animating = head.x_anim > 0;
+        out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
+        out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
+        return 0;
+    }
     if (head.x_w < 1 || head.x_w > r->max_w ||
         head.x_h < 1 || head.x_h > r->max_h ||
         head.x_stride < head.x_w * 4 || head.x_stride > (long)r->max_w * 4)

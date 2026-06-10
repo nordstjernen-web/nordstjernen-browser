@@ -179,6 +179,7 @@ struct PageResult {
 struct FrameResult {
     bool ok = false;
     bool animating = false;
+    bool unchanged = false;
     QImage image;
     QString nav;
     QString webgl;
@@ -222,10 +223,13 @@ public:
         }
         if (!fr.ok)
             return result;
-        QImage img(const_cast<uchar *>(fr.pixels), fr.width, fr.height,
-                   fr.stride, QImage::Format_ARGB32_Premultiplied);
-        result.image = img.copy();
-        result.image.setDevicePixelRatio(imageDpr);
+        result.unchanged = fr.unchanged != 0;
+        if (!result.unchanged) {
+            QImage img(const_cast<uchar *>(fr.pixels), fr.width, fr.height,
+                       fr.stride, QImage::Format_ARGB32_Premultiplied);
+            result.image = img.copy();
+            result.image.setDevicePixelRatio(imageDpr);
+        }
         result.animating = fr.animating != 0;
         if (fr.nav) {
             result.nav = QString::fromUtf8(fr.nav);
@@ -724,10 +728,12 @@ void ProcView::startRender() {
             if (!self)
                 return;
             const bool current = seq == self->m_renderSeq;
-            if (current && result.ok) {
+            if (current && result.ok && !result.unchanged) {
                 self->m_image = result.image;
                 self->m_renderRestarts = 0;
                 self->viewport()->update();
+            } else if (current && result.ok) {
+                self->m_renderRestarts = 0;
             }
             if (current && result.ok && result.animating) {
                 QPointer<ProcView> sp(self);

@@ -170,7 +170,11 @@ char *ns_browser_select(ns_browser *browser, int kind, int x, int y);
  * requestAnimationFrame callbacks and CSS animations, and relayout if the DOM
  * changed. Lets out-of-process renderers keep JavaScript alive past the
  * initial open() settle so deferred and animated content reaches the next
- * render. Returns 1 if the layout changed, 0 if nothing changed, -1 on error. */
+ * render. Returns 1 if the page may paint differently than the previous
+ * render — the layout changed, an animated image or CSS animation advanced,
+ * an animation-frame callback ran, or any main-loop source (timer, fetch
+ * completion, …) was dispatched — 0 if the rendered pixels are guaranteed
+ * unchanged for the same viewport/scroll/scale, -1 on error. */
 int ns_browser_tick(ns_browser *browser, int budget_ms);
 
 /* Whether the page wants to be rendered again continuously: it has active CSS

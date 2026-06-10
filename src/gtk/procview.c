@@ -76,6 +76,7 @@ typedef struct {
     LinkAct          action;
     int              kind;
     gboolean         animating;
+    gboolean         frame_unchanged;
     int              find_total, find_current, find_scroll_y;
     char            *media_url;
     int              media_is_video, media_stream;
@@ -355,8 +356,10 @@ worker_main(gpointer data)
             if (rendered) {
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
-                res->surface = frame_to_surface(fr.pixels, fr.width, fr.height,
-                                                fr.stride);
+                res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
+                if (!fr.unchanged)
+                    res->surface = frame_to_surface(fr.pixels, fr.width,
+                                                    fr.height, fr.stride);
                 if (fr.nav) {
                     res->nav = g_strdup(fr.nav);
                     free(fr.nav);
@@ -1255,6 +1258,8 @@ on_result(gpointer data)
             v->render_restarts = 0;
             gtk_widget_queue_draw(v->area);
             clear_busy_cursor(v);
+        } else if (current && res->ok && res->frame_unchanged) {
+            v->render_restarts = 0;
         }
         if (current && res->ok && res->nav && *res->nav &&
             v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {

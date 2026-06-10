@@ -25,7 +25,7 @@ typedef struct {
     char  path[128];
     int   status;
     long  content_length;
-    long  x_w, x_h, x_stride, x_anim;
+    long  x_w, x_h, x_stride, x_anim, x_unchanged;
     char  x_nav[2048];
     char  x_webgl[2048];
 } http_head;
