@@ -247,6 +247,7 @@ static void
 browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
+    if (browser_settle_quiet(b)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     settle_ctx ctx = { .b = b, .loop = loop };
     guint quit = g_timeout_add(settle_ms, settle_quit_cb, loop);

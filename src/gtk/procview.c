@@ -71,6 +71,7 @@ typedef struct {
     char            *nav;
     char            *webgl;
     cairo_surface_t *surface;
+    gboolean         surface_borrowed;
     char            *href;
     char            *cursor;
     LinkAct          action;
@@ -108,6 +109,8 @@ struct NsProcView {
     gboolean    opened;
 
     cairo_surface_t *frame;
+    cairo_surface_t *stage[2];
+    int              stage_next;
 
     gboolean    render_inflight;
     gboolean    render_pending;
@@ -185,8 +188,10 @@ pv_free(NsProcView *v)
         }
         g_async_queue_unref(v->queue);
     }
-    if (v->frame)
-        cairo_surface_destroy(v->frame);
+    if (v->stage[0])
+        cairo_surface_destroy(v->stage[0]);
+    if (v->stage[1])
+        cairo_surface_destroy(v->stage[1]);
     if (v->ctx_popover)
         gtk_widget_unparent(v->ctx_popover);
     if (v->ctx_actions)
@@ -250,19 +255,29 @@ ns_proc_renderer_path(void)
 }
 
 static cairo_surface_t *
-frame_to_surface(const unsigned char *px, int w, int h, int stride)
+stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
 {
-    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-    if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(s);
-        return NULL;
+    cairo_surface_t *s = v->stage[v->stage_next];
+    if (!s || cairo_image_surface_get_width(s) != w ||
+        cairo_image_surface_get_height(s) != h) {
+        if (s)
+            cairo_surface_destroy(s);
+        s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+        if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+            cairo_surface_destroy(s);
+            v->stage[v->stage_next] = NULL;
+            return NULL;
+        }
+        v->stage[v->stage_next] = s;
     }
+    cairo_surface_flush(s);
     unsigned char *dst = cairo_image_surface_get_data(s);
     int dstride = cairo_image_surface_get_stride(s);
     size_t row = (size_t)w * 4u;
     for (int y = 0; y < h; y++)
         memcpy(dst + (size_t)y * dstride, px + (size_t)y * stride, row);
     cairo_surface_mark_dirty(s);
+    v->stage_next ^= 1;
     return s;
 }
 
@@ -357,9 +372,11 @@ worker_main(gpointer data)
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
                 res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
-                if (!fr.unchanged)
-                    res->surface = frame_to_surface(fr.pixels, fr.width,
-                                                    fr.height, fr.stride);
+                if (!fr.unchanged) {
+                    res->surface = stage_fill(v, fr.pixels, fr.width,
+                                              fr.height, fr.stride);
+                    res->surface_borrowed = res->surface != NULL;
+                }
                 if (fr.nav) {
                     res->nav = g_strdup(fr.nav);
                     free(fr.nav);
@@ -953,10 +970,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
         gtk_label_set_text(GTK_LABEL(v->search_label), "");
     v->opened = FALSE;
     disarm_anim(v);
-    if (v->frame) {
-        cairo_surface_destroy(v->frame);
-        v->frame = NULL;
-    }
+    v->frame = NULL;
     gtk_widget_queue_draw(v->area);
     if (!v->loading) {
         v->loading = TRUE;
@@ -1254,8 +1268,6 @@ on_result(gpointer data)
                 disarm_anim(v);
         }
         if (current && res->ok && res->surface) {
-            if (v->frame)
-                cairo_surface_destroy(v->frame);
             v->frame = res->surface;
             res->surface = NULL;
             v->render_restarts = 0;
@@ -1449,7 +1461,7 @@ on_result(gpointer data)
     }
 
 done:
-    if (res->surface)
+    if (res->surface && !res->surface_borrowed)
         cairo_surface_destroy(res->surface);
     g_free(res->title);
     g_free(res->url);
