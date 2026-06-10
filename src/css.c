@@ -118,6 +118,16 @@ ns_css_set_hover_node(const ns_node *node)
     return prev;
 }
 
+static const ns_node *g_css_active_node = NULL;
+
+const ns_node *
+ns_css_set_active_node(const ns_node *node)
+{
+    const ns_node *prev = g_css_active_node;
+    g_css_active_node = node;
+    return prev;
+}
+
 static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_DISPLAY]              = "display",
     [NS_CSS_COLOR]                = "color",
@@ -1737,6 +1747,7 @@ typedef struct ns_css_scope_text {
 
 static gboolean g_sel_parse_error;
 static gboolean g_sel_has_hover;
+static gboolean g_sel_has_active;
 
 static ns_css_selector *parse_one_selector(const char **pp, const char *end,
                                            int depth);
@@ -2221,6 +2232,8 @@ parse_one_selector(const char **pp, const char *end, int depth)
                         g_array_append_val(cmp->pseudos, pc);
                         if (pc.kind == NS_CSS_PC_HOVER)
                             g_sel_has_hover = TRUE;
+                        if (pc.kind == NS_CSS_PC_ACTIVE)
+                            g_sel_has_active = TRUE;
                         sel->spec_b += 1;
                         int ma = 0, mb = 0, mc = 0;
                         selector_group_max_specificity(pc.of_group, &ma, &mb, &mc);
@@ -9260,6 +9273,7 @@ parse_rules_until(const char **pp, const char *end,
 
         gboolean ok = FALSE;
         g_sel_has_hover = FALSE;
+        g_sel_has_active = FALSE;
         while (parse_p < parse_end) {
             ns_css_selector *sel = parse_one_selector(&parse_p, parse_end, 0);
             if (sel) {
@@ -9275,6 +9289,8 @@ parse_rules_until(const char **pp, const char *end,
         }
         if (ok && g_sel_has_hover)
             sh->has_hover_rules = TRUE;
+        if (ok && g_sel_has_active)
+            sh->has_active_rules = TRUE;
         g_free(scoped_sel);
         if (!ok) {
             ns_css_rule_free(rule);
@@ -9640,6 +9656,12 @@ gboolean
 ns_css_stylesheet_has_hover_rules(const ns_css_stylesheet *sh)
 {
     return sh && sh->has_hover_rules;
+}
+
+gboolean
+ns_css_stylesheet_has_active_rules(const ns_css_stylesheet *sh)
+{
+    return sh && sh->has_active_rules;
 }
 
 void
@@ -10624,8 +10646,14 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 if (!on) return FALSE;
                 break;
             }
-            case NS_CSS_PC_ACTIVE:
-                return FALSE;
+            case NS_CSS_PC_ACTIVE: {
+                if (!g_css_active_node) return FALSE;
+                gboolean pressed = FALSE;
+                for (const ns_node *a = g_css_active_node; a; a = a->parent)
+                    if (a == el) { pressed = TRUE; break; }
+                if (!pressed) return FALSE;
+                break;
+            }
             case NS_CSS_PC_FOCUS:
                 if (!g_css_focus_node || el != g_css_focus_node) return FALSE;
                 break;

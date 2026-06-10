@@ -1087,6 +1087,12 @@ ns_browser_click(ns_browser *browser, int x, int y, int mods)
     if (form_node)
         node = form_node;
 
+    ns_css_set_active_node(node);
+    if (node && ns_render_page_uses_active()) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+    }
+
     gboolean prevented = FALSE;
     if (browser->js && node) {
         gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
@@ -1149,6 +1155,17 @@ ns_browser_click(ns_browser *browser, int x, int y, int mods)
     char *nav = browser->pending_nav;
     browser->pending_nav = NULL;
     return nav;
+}
+
+int
+ns_browser_release(ns_browser *browser)
+{
+    if (!browser) return -1;
+    const ns_node *prev = ns_css_set_active_node(NULL);
+    if (!prev || !ns_render_page_uses_active()) return 0;
+    browser_relayout(browser);
+    browser->dirty = FALSE;
+    return 1;
 }
 
 static void
@@ -1433,6 +1450,7 @@ void
 ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
+    ns_css_set_active_node(NULL);
     ns_paint_set_anim(NULL);
     if (browser->js) {
         ns_js_set_layout_root(browser->js, NULL);

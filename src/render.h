@@ -54,6 +54,7 @@ typedef struct ns_render_profile {
  * selector. Lets a renderer skip hover-driven restyle/repaint work on pages
  * that have no hover styling. */
 gboolean ns_render_page_uses_hover(void);
+gboolean ns_render_page_uses_active(void);
 
 GHashTable *ns_render_relayout(const ns_render_ctx *c, ns_box **out_layout);
 GHashTable *ns_render_relayout_profile(const ns_render_ctx *c,

@@ -505,6 +505,20 @@ ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
 }
 
 int
+ns_rproc_http_release(ns_rproc_http *r)
+{
+    if (!r)
+        return -1;
+    char *body = request(r, "/release", "{}");
+    if (!body)
+        return -1;
+    long changed = 0;
+    json_get_long(body, "changed", &changed);
+    free(body);
+    return changed != 0 ? 1 : 0;
+}
+
+int
 ns_rproc_http_hover(ns_rproc_http *r, int x, int y)
 {
     if (!r)

@@ -26,7 +26,8 @@ pv_settle_ms(void)
 
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
-    REQ_SELECT, REQ_HOVER, REQ_FIND, REQ_EXPORT, REQ_CONSOLE, REQ_EVAL,
+    REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
+    REQ_EVAL,
     REQ_WEBGL, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
@@ -55,7 +56,7 @@ typedef struct {
 
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
-    RES_SELECT, RES_COPY, RES_HOVER, RES_FIND, RES_EXPORT,
+    RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
     RES_CONSOLE, RES_EVAL
 } ResType;
 
@@ -433,6 +434,13 @@ worker_main(gpointer data)
             res->type = RES_HOVER;
             res->seq = req->seq;
             res->ok = v->proc && ns_rproc_http_hover(v->proc, req->x, req->y) == 1;
+            post(res);
+        } else if (req->type == REQ_RELEASE) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_RELEASE;
+            res->seq = req->seq;
+            res->ok = v->proc && ns_rproc_http_release(v->proc) == 1;
             post(res);
         } else if (req->type == REQ_FIND) {
             Res *res = g_new0(Res, 1);
@@ -825,6 +833,16 @@ on_im_commit(GtkIMContext *im, const char *text, gpointer data)
     NsProcView *v = data;
     if (!v || !v->opened || !text || !*text) return;
     start_key_text(v, 2, text);
+}
+
+static void
+start_release(NsProcView *v)
+{
+    if (!v->opened)
+        return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_RELEASE;
+    push_req(v, req);
 }
 
 static void
@@ -1371,6 +1389,9 @@ on_result(gpointer data)
             v->hover_pending = FALSE;
             start_hover(v, v->hover_pending_x, v->hover_pending_y);
         }
+    } else if (res->type == RES_RELEASE) {
+        if (res->ok)
+            request_render(v);
     } else if (res->type == RES_FIND) {
         if (res->seq != v->find_seq)
             goto done;
@@ -1814,6 +1835,16 @@ on_pressed(GtkGestureClick *gesture, int n_press, double x, double y,
 }
 
 static void
+on_released(GtkGestureClick *gesture, int n_press, double x, double y,
+            gpointer data)
+{
+    (void)gesture; (void)n_press; (void)x; (void)y;
+    NsProcView *v = data;
+    if (v->opened)
+        start_release(v);
+}
+
+static void
 on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
 {
     (void)ctrl;
@@ -2209,6 +2240,7 @@ ns_proc_view_new(void)
     GtkGesture *click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
     g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), v);
+    g_signal_connect(click, "released", G_CALLBACK(on_released), v);
     gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(click));
 
     GtkGesture *drag = gtk_gesture_drag_new();

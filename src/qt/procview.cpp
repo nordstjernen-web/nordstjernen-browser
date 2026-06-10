@@ -282,6 +282,12 @@ public:
         return ns_rproc_http_hover(m_proc, x, y) == 1;
     }
 
+    bool release() {
+        if (!m_proc || !m_opened)
+            return false;
+        return ns_rproc_http_release(m_proc) == 1;
+    }
+
     QString click(int x, int y, int mods) {
         if (!m_proc || !m_opened)
             return QString();
@@ -1190,8 +1196,22 @@ void ProcView::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void ProcView::mouseReleaseEvent(QMouseEvent *event) {
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton) {
         m_mouseDown = false;
+        if (m_opened && m_worker) {
+            QPointer<ProcView> self(this);
+            ProcWorker *worker = m_worker;
+            QMetaObject::invokeMethod(worker, [worker, self]() {
+                const bool changed = worker->release();
+                if (!self || !changed)
+                    return;
+                QMetaObject::invokeMethod(self.data(), [self]() {
+                    if (self)
+                        self->requestRender();
+                });
+            });
+        }
+    }
     QAbstractScrollArea::mouseReleaseEvent(event);
 }
 

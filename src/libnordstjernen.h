@@ -80,6 +80,12 @@ int ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
  * The result is newly allocated; the caller frees it with free(). */
 char *ns_browser_link_at(ns_browser *browser, int x, int y);
 
+/* Report the pointer button released after a click: clears the CSS :active
+ * state set by ns_browser_click and restyles if the page has :active rules.
+ * Returns 1 if the page's appearance changed and the caller should
+ * re-render, 0 if nothing changed, -1 if no page is open. */
+int ns_browser_release(ns_browser *browser);
+
 /* The computed CSS cursor keyword at page coordinates (CSS px) — one of the
  * standard cursor keywords ("pointer", "text", "move", ...) — or NULL when
  * the cursor is auto/default or no page is open. The keyword set matches the

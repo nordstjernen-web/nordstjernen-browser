@@ -630,6 +630,7 @@ typedef struct ns_css_stylesheet {
     GArray    *property_rules;
     gboolean   has_container_rules;
     gboolean   has_hover_rules;
+    gboolean   has_active_rules;
     gboolean   cached;
     guint      pseudo_mask;
     struct ns_css_rule_index *index;
@@ -637,6 +638,7 @@ typedef struct ns_css_stylesheet {
 
 gboolean ns_css_stylesheet_has_container_rules(const ns_css_stylesheet *sh);
 gboolean ns_css_stylesheet_has_hover_rules(const ns_css_stylesheet *sh);
+gboolean ns_css_stylesheet_has_active_rules(const ns_css_stylesheet *sh);
 
 #define NS_CSS_IMPORT_MAX_DEPTH 8
 
@@ -686,6 +688,7 @@ void ns_css_set_target_fragment(const char *fragment);
 
 const ns_node *ns_css_set_focus_node(const ns_node *node);
 const ns_node *ns_css_set_hover_node(const ns_node *node);
+const ns_node *ns_css_set_active_node(const ns_node *node);
 
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
 

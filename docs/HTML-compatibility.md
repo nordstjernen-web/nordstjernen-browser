@@ -537,8 +537,15 @@ CSS support (abridged):
   renderer: the element under the pointer and its ancestors match
   `:hover` and the page restyles/repaints as the pointer moves
   (`ns_css_set_hover_node` in `src/css.c`, `ns_browser_hover` in
-  `src/libnordstjernen.c`). `:active` is still inert (it always fails
-  to match — there is no pointer-press tracking yet).
+  `src/libnordstjernen.c`). The dynamic `:active` pseudo-class is live
+  too: a primary-button press sets the active element
+  (`ns_css_set_active_node`, set in `ns_browser_click`) so the pressed
+  element and its ancestors match `:active` and the page restyles; the
+  button release clears it through a dedicated renderer `release`
+  message (`ns_browser_release`, wired to the GTK click gesture's
+  `released` signal and Qt's `mouseReleaseEvent`). Restyle work is
+  gated to pages whose stylesheets actually contain `:active` rules
+  (`ns_css_stylesheet_has_active_rules`).
 - ✅ At-rules: `@media`, `@font-face`, `@keyframes` (subset),
   `@supports` (now evaluated, incl. `selector()`), `@scope`
   (selector-form roots/limits, relative scoped selectors, `:scope`,

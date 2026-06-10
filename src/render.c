@@ -19,6 +19,14 @@ ns_render_page_uses_hover(void)
     return g_render_page_uses_hover;
 }
 
+static gboolean g_render_page_uses_active = FALSE;
+
+gboolean
+ns_render_page_uses_active(void)
+{
+    return g_render_page_uses_active;
+}
+
 static void
 render_feed_animations(const ns_render_ctx *c, GHashTable *styles)
 {
@@ -173,6 +181,11 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     for (guint i = 0; i < c->n_sheets && !uses_hover; i++)
         uses_hover = ns_css_stylesheet_has_hover_rules(c->sheets[i]);
     g_render_page_uses_hover = uses_hover;
+
+    gboolean uses_active = FALSE;
+    for (guint i = 0; i < c->n_sheets && !uses_active; i++)
+        uses_active = ns_css_stylesheet_has_active_rules(c->sheets[i]);
+    g_render_page_uses_active = uses_active;
 
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);

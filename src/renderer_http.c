@@ -334,6 +334,17 @@ main(int argc, char **argv)
             continue;
         }
 
+        if (strcmp(head.path, "/release") == 0) {
+            int changed = cur ? ns_browser_release(cur) : 0;
+            char json[32];
+            int n = snprintf(json, sizeof json, "{\"changed\":%d}",
+                             changed > 0 ? 1 : 0);
+            http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                                (size_t)n);
+            free(body);
+            continue;
+        }
+
         if (strcmp(head.path, "/hover") == 0) {
             long x = 0, y = 0;
             json_get_long(body, "x", &x);
