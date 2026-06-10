@@ -99,23 +99,27 @@ static const ns_ai_model k_models[] = {
         "fast", "Llama 3.2 1B", "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
         "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/"
         "resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf?download=true",
-        810, NULL,
+        810,
+        "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
     },
     {
         "balanced", "Gemma 3 4B (Google)", "gemma-3-4b-it-Q4_K_M.gguf",
         "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/"
-        "gemma-3-4b-it-Q4_K_M.gguf?download=true", 2490, NULL,
+        "gemma-3-4b-it-Q4_K_M.gguf?download=true", 2490,
+        "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863",
     },
     {
         "quality", "Qwen3 4B", "Qwen3-4B-Q4_K_M.gguf",
         "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/"
-        "Qwen3-4B-Q4_K_M.gguf?download=true", 2440, NULL,
+        "Qwen3-4B-Q4_K_M.gguf?download=true", 2440,
+        "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
     },
     {
         "large", "Llama 3.1 8B", "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
         "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/"
         "resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf?download=true",
-        4920, NULL,
+        4920,
+        "7b064f5842bf9532c91456deda288a1b672397a54fa729aa665952863033557c",
     },
 };
 
