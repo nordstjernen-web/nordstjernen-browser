@@ -54,7 +54,11 @@ fetches pages.
 llama.cpp is built **from source** as a Meson CMake subproject (no prebuilt
 binaries are vendored), so it works on Linux, macOS, and Windows (MSYS2
 MINGW64). The wrap is pinned in `subprojects/llama.cpp.wrap`; Meson fetches
-and builds it (CPU-only: no CUDA/Vulkan/Metal, OpenMP off) at configure time.
+and builds it at configure time. The CPU backend is always built (no BLAS,
+OpenMP off); GPU offload is controlled by the `ai_gpu` Meson option (`auto`
+by default) — Metal on macOS, Vulkan on Linux/Windows when the Vulkan SDK
+and a GLSL compiler are found. `ns_ai_status_json` reports the active GPU
+device and offloaded layer count to the start page footer.
 
 The feature is controlled by the `ai` Meson option (enabled by default):
 
@@ -109,13 +113,13 @@ starts, the free space on the models filesystem is checked against the
 expected size.
 
 After the transfer completes the file's SHA-256 is computed. Each `k_models[]`
-entry has a `sha256` field: when it is set, a mismatch discards the download
-and surfaces an error; when it is `NULL` the computed digest is written to the
-log so it can be pinned. To pin a model, download it once from a trusted
-network, take the digest from the
-`nordstjernen-ai: downloaded … sha256=…` log line (or `sha256sum` over the
-file), and put it in the table. Downloads fetched through
-`NORDSTJERNEN_AI_MODEL_URL` are never checked against the catalog digest.
+entry has a `sha256` field, and all four catalog models are pinned: a
+mismatch discards the download and surfaces an error. If a catalog entry is
+ever added with a `NULL` digest, the computed digest is written to the
+log (`nordstjernen-ai: downloaded … sha256=…`) so it can be pinned — download
+once from a trusted network and put the digest in the table. Downloads fetched
+through `NORDSTJERNEN_AI_MODEL_URL` are never checked against the catalog
+digest.
 
 ## Network behaviour of the tools
 

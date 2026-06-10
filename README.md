@@ -15,7 +15,7 @@ Nordstjernen is built in Norway.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
-![Nordstjernen rendering the Muscat and Oman article on Wikipedia](docs/screenshot.png)   
+![Nordstjernen 1.0.3 start page — chatting with the local AI assistant](docs/screenshot.png)   
 
 <img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
 
@@ -52,7 +52,8 @@ The full section-by-section walk-through lives in
 - **HTML/CSS** via the lexbor parser — modern cascade, flex, grid,
   transforms, gradients, `@keyframes`.
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
-  APIs.
+  APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
+  (`crypto.subtle` over OpenSSL).
 - **Networking** over HTTP/2 with libcurl — HSTS, CSP, partitioned
   cookies.
 - **Media** — images, optional inline PDF; audio and video are handed
@@ -73,9 +74,10 @@ The full section-by-section walk-through lives in
 - **Local AI start page** — the `about:start` new-tab page is a chat
   with a small language model running entirely on your machine via
   llama.cpp (no cloud, no network at inference time). Pick a model and
-  it downloads once; optional GPU offload (Vulkan / Metal). The
-  assistant can also pull a Wikipedia image, run a DuckDuckGo web
-  search, or open a site for you.
+  it downloads once, integrity-checked against a pinned SHA-256 digest;
+  optional GPU offload (Vulkan / Metal). The assistant can also pull a
+  Wikipedia image, run a DuckDuckGo web search, or open a site for you.
+  See [`docs/ai.md`](docs/ai.md).
 - **UI** — tabs, bookmarks, find-in-page, save-to-PDF, JS console,
   settings, headless mode, and a C embedding API.
 
@@ -119,8 +121,11 @@ meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-lexbor, QuickJS and Wuffs are vendored in-tree — no submodules, no
-downloads. Windows, Fedora, openSUSE and macOS instructions are in
+lexbor, QuickJS, WAMR and Wuffs are vendored in-tree — no submodules, no
+downloads. The one exception is the optional local-AI feature: `meson
+setup` fetches and builds llama.cpp as a pinned subproject; pass
+`-Dai=disabled` for a fully offline build. Windows, Fedora, openSUSE and
+macOS instructions are in
 [docs/](docs/). Keyboard, mouse and touch controls are documented in
 [docs/Controls.md](docs/Controls.md).
 

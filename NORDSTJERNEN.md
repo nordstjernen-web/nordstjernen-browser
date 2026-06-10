@@ -57,7 +57,15 @@ Both the GTK reference frontend and the experimental Qt 6 frontend
 (`src/qt/`, off by default) are tabbed, **process-per-tab** browsers:
 each tab drives its own sandboxed renderer process over the engine and
 shows full-fidelity output. The shells are thin display/input clients —
-there is no in-process renderer in either toolkit anymore.
+there is no in-process renderer in either toolkit anymore. The
+`about:start` new-tab page hosts a local AI assistant (`src/ai.c`,
+llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
+tools, and digest-pinned model downloads, all on-device with no network
+at inference time (see `docs/ai.md`).
+
+Version 1.0.3 is the current release. New significant features land in
+`docs/NEWS-1-0-4.md` as they ship, so the next release's notes write
+themselves.
 
 ## Architecture & frontends
 
@@ -175,7 +183,7 @@ zygote, and re-enabled shell supervision, are the follow-ups.
   `com.nordstjernen.Browser.desktop`); the remaining blocker is a
   missing AppStream `metainfo.xml`.
 
-**Later (0.9.0+)**
+**Later**
 - 5 · Reader mode · 6 · APNG playback · 9 · macOS notarized DMG.
 
 ## Future focus areas
@@ -187,37 +195,22 @@ committed, listed to keep the long view in one place:
   incremental re-cascade in *Now/Next* are the headline wins; both
   unblock smooth animated scrolling, which has been reverted twice for
   want of them. Treat them as the gating performance work.
-- **Frame-loop idling / animation throttling** *(known issue, deferred)*
-  — the renderer drives the JS animation-frame + paint loop at full rate
-  with no idle cap, so a page with a perpetual `requestAnimationFrame`
-  or an infinite CSS animation (e.g. the full `duckduckgo.com` SPA's
-  loading spinner) pins the renderer near 90% CPU even when visually
-  static. Only ~6 relayouts/s occur — the cost is JS rAF + per-frame
-  repaint, not re-cascade. Real engines cap to the display refresh and
-  stop ticking when no animation is actually needed. Fix: a vsync-tied
-  frame cap plus a "no pending work → sleep" path honouring
-  `ns_js_has_pending_animation_frame`. Sidestepped today by routing
-  about:start search through DuckDuckGo Lite (commit 0802a43). Note: the
-  separate re-entrant-relayout leak (one full style table orphaned per
-  forced layout) was a distinct bug, already fixed in commit 80ca0d5.
-  **Tried and reverted (damage-based render skip):** a coarse
-  `frame_dirty` flag — set by any tick that ran work (rAF, active CSS
-  animation, a fired timer, DOM mutation) or any interaction, cleared on
-  render — that let the renderer skip re-rasterising + re-shipping a
-  pixel-identical frame (`X-Unchanged`, shell keeps its last surface). It
-  did **not** help the case that motivated it: the full `duckduckgo.com`
-  SPA runs a real rAF every frame, so `frame_dirty` was legitimately
-  true each frame and nothing was skipped (still ~96% CPU). Worse, on
-  pages that *did* skip it produced visible judder ("objects moving up
-  and down") — a one-frame lag whenever a paint was skipped while the
-  page was mid-motion, because a whether-anything-ran flag is too blunt:
-  it can't tell a no-op rAF from one that nudged a pixel. The correct
-  shape is real per-region paint **invalidation** (track *what* changed,
-  not *whether* something ran) — i.e. the dirty-region work above — not a
-  global skip flag. And the full-SPA case specifically needs
-  compositor-thread `transform`/`opacity` animation (animate off the
-  main thread, no relayout/repaint), a larger architectural effort.
-  Don't re-attempt the coarse-flag version.
+- **Frame-loop idling / animation throttling** *(partially landed)* —
+  quiet-page idling shipped: the renderer reports `X-Anim` from
+  `ns_browser_animating`, the shell stops requesting frames once a page
+  is quiet (6a519a6, 6d598fc), and a tick that ran no work reuses the
+  previous frame (`X-Unchanged`, staged-surface reuse in the shell) —
+  safe because it skips only when *nothing* ran, unlike the reverted
+  coarse `frame_dirty` flag that skipped after no-op rAFs and caused
+  judder; don't re-attempt that version. The reflow-loop dampener now
+  *defers* suppressed relayouts instead of discarding them (51659ba) —
+  pending JS work must always count as animating or the page freezes.
+  What remains is the rAF-pinned SPA case (the full `duckduckgo.com`
+  spinner still burns CPU because its rAF genuinely runs every frame):
+  that needs per-region paint invalidation (the dirty-region work above)
+  and, for transform/opacity spinners, compositor-thread animation — a
+  larger architectural effort. The re-entrant-relayout leak was a
+  distinct bug, fixed in 80ca0d5.
 - **Worker maturity** — dedicated workers are partial today (§10). Round
   out `postMessage` structured clone, transferables, and module workers
   so wasm-bindgen + worker bundles run unmodified.
