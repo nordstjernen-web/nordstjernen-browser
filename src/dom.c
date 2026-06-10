@@ -1095,6 +1095,11 @@ ns_node_document_order_cmp(const ns_node *a, const ns_node *b)
         ca = ca->parent;
         cb = cb->parent;
     }
+    const ns_node *par = ca->parent;
+    if (par) {
+        if (ca == par->first_child || cb == par->last_child) return -1;
+        if (cb == par->first_child || ca == par->last_child) return 1;
+    }
     const ns_node *fwd = ca->next_sibling;
     const ns_node *back = ca->prev_sibling;
     while (fwd || back) {
