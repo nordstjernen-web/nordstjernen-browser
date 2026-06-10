@@ -2429,7 +2429,7 @@ static const char k_about_start_template[] =
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
     "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
-    "<p class=\"intro\">Nordstjernen is a fast, private web browser built "
+    "<p class=\"intro\">Nordstjernen is a legendary web browser, built "
     "from scratch in C \xe2\x80\x94 it doesn't track you and doesn't phone "
     "home. Search the web below, or chat with a small AI model that runs "
     "entirely on your own computer.</p>"
