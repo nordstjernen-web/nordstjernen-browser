@@ -150,7 +150,7 @@ browser_relayout_from_mutation(ns_browser *b)
     if (b->layout && b->layout_osc >= NS_LAYOUT_OSC_THRESHOLD) {
         gint64 now = g_get_monotonic_time();
         if (now < b->damp_until_us) {
-            b->dirty = FALSE;
+            b->dirty = TRUE;
             return FALSE;
         }
         b->damp_until_us = now + NS_LAYOUT_DAMP_US;
@@ -212,8 +212,8 @@ browser_flush(gpointer user_data)
     ns_browser *b = user_data;
     if (!b || !b->js) return;
     if (!b->layout || b->dirty || ns_js_consume_mutated(b->js)) {
-        browser_relayout_from_mutation(b);
-        b->dirty = FALSE;
+        if (browser_relayout_from_mutation(b))
+            b->dirty = FALSE;
     }
 }
 
@@ -252,9 +252,11 @@ settle_tick_cb(gpointer user_data)
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->anim) ns_anim_tick(b->anim, now);
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
-    if (b->js && ns_js_run_animation_frame(b->js) &&
-        ns_js_consume_mutated(b->js))
-        browser_relayout_from_mutation(b);
+    if (b->js) ns_js_run_animation_frame(b->js);
+    if (b->dirty || (b->js && ns_js_consume_mutated(b->js))) {
+        if (browser_relayout_from_mutation(b))
+            b->dirty = FALSE;
+    }
     if (browser_settle_quiet(b)) {
         if (++ctx->quiet_ticks >= NS_SETTLE_QUIET_TICKS) {
             g_main_loop_quit(ctx->loop);
@@ -571,9 +573,10 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
 
         if (browser->dirty ||
             (browser->js && ns_js_consume_mutated(browser->js))) {
-            if (browser_relayout_from_mutation(browser))
+            if (browser_relayout_from_mutation(browser)) {
                 changed = TRUE;
-            browser->dirty = FALSE;
+                browser->dirty = FALSE;
+            }
         }
 
         if (!did_iter) break;
@@ -587,13 +590,12 @@ int
 ns_browser_animating(ns_browser *browser)
 {
     if (!browser) return 0;
+    if (browser->dirty) return 1;
     if (browser->refresh_due_us || browser->refresh_url) return 1;
     if (ns_engine_img_session_outstanding(browser->img_session) > 0) return 1;
-    gboolean damped = browser->layout_osc >= NS_LAYOUT_OSC_THRESHOLD;
-    if (!damped && browser->js &&
-        ns_js_has_pending_animation_frame(browser->js))
+    if (browser->js && ns_js_has_pending_animation_frame(browser->js))
         return 1;
-    if (!damped && browser->js && ns_js_has_pending_work(browser->js))
+    if (browser->js && ns_js_has_pending_work(browser->js))
         return 1;
     if (browser->anim && ns_anim_has_active(browser->anim))
         return 1;

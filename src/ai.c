@@ -1423,8 +1423,10 @@ ns_ai_ensure_loaded_locked(void)
     struct llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx           = NS_AI_N_CTX;
     cparams.n_batch         = NS_AI_N_CTX;
-    cparams.n_threads       = (int32_t)g_get_num_processors();
-    cparams.n_threads_batch = (int32_t)g_get_num_processors();
+    int32_t n_threads = (int32_t)g_get_num_processors() - 2;
+    if (n_threads < 1) n_threads = 1;
+    cparams.n_threads       = n_threads;
+    cparams.n_threads_batch = n_threads;
     g_ctx = llama_init_from_model(g_model, cparams);
     if (!g_ctx && g_gpu_layers_used != 0) {
         llama_model_free(g_model);
