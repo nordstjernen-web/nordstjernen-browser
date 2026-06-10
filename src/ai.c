@@ -279,10 +279,11 @@ static int
 ns_ai_xfer_cb(void *ud, curl_off_t dltotal, curl_off_t dlnow,
               curl_off_t ultotal, curl_off_t ulnow)
 {
-    (void)ud; (void)ultotal; (void)ulnow;
+    (void)ultotal; (void)ulnow;
+    gint64 resumed = ud ? *(const gint64 *)ud : 0;
     g_mutex_lock(&g_dl_lock);
-    g_dl_now = (gint64)dlnow;
-    g_dl_total = (gint64)dltotal;
+    g_dl_now = resumed + (gint64)dlnow;
+    g_dl_total = dltotal > 0 ? resumed + (gint64)dltotal : 0;
     g_mutex_unlock(&g_dl_lock);
     return 0;
 }
@@ -348,9 +349,13 @@ ns_ai_curl_fetch_part(const ns_ai_dl_job *job, const char *part,
         curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
         curl_easy_setopt(c, CURLOPT_USERAGENT, NS_USER_AGENT);
+        curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 30L);
+        curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
+        curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
         ns_net_apply_curl_proxy(c, job->url);
         curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
         curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, ns_ai_xfer_cb);
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, &have);
         curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
         if (have > 0)
             curl_easy_setopt(c, CURLOPT_RESUME_FROM_LARGE,
@@ -529,7 +534,13 @@ ns_ai_http_get(const char *url)
     ns_ai_http_buf b = { 0 };
     struct curl_slist *hdrs = NULL;
     hdrs = curl_slist_append(hdrs, "Accept: text/html,application/json,*/*");
-    hdrs = curl_slist_append(hdrs, "Accept-Language: en-US,en;q=0.9");
+    const ns_config *cfg = ns_config_get();
+    const char *accept_language =
+        (cfg && cfg->accept_language && *cfg->accept_language)
+        ? cfg->accept_language : ns_net_default_accept_language();
+    char *al_hdr = g_strdup_printf("Accept-Language: %s", accept_language);
+    hdrs = curl_slist_append(hdrs, al_hdr);
+    g_free(al_hdr);
     curl_easy_setopt(c, CURLOPT_URL, url);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, ns_ai_http_write);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &b);
@@ -1131,7 +1142,7 @@ ns_ai_status_json(void)
             "\"received\":%" G_GINT64_FORMAT ",\"total\":%" G_GINT64_FORMAT,
             dl_id ? dl_id : "", pct, now, total);
     }
-    if (err && !downloading && !active_id) {
+    if (err && !downloading) {
         char *esc = ns_ai_json_escape(err);
         g_string_append_printf(out, ",\"message\":\"%s\"", esc);
         g_free(esc);
@@ -1520,8 +1531,10 @@ ns_ai_run_locked(const char *system_prompt, const GPtrArray *history,
             g_string_append_len(out, piece, pn);
 
         if (stream && (!stream_decided || !stream_suppressed)) {
-            char *vis = ns_ai_strip_think(out->str, out->len, TRUE);
-            gsize vlen = strlen(vis);
+            char *stripped = g_model_thinks
+                ? ns_ai_strip_think(out->str, out->len, TRUE) : NULL;
+            const char *vis = stripped ? stripped : out->str;
+            gsize vlen = stripped ? strlen(stripped) : out->len;
             if (!stream_decided &&
                 (vlen >= 12 || memchr(vis, '\n', vlen))) {
                 stream_decided = TRUE;
@@ -1531,7 +1544,7 @@ ns_ai_run_locked(const char *system_prompt, const GPtrArray *history,
                 ns_ai_job_stream(vis + streamed, vlen - streamed);
                 streamed = vlen;
             }
-            g_free(vis);
+            g_free(stripped);
         }
 
         batch = llama_batch_get_one(&id, 1);

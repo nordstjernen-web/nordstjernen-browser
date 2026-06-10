@@ -2291,7 +2291,7 @@ static const char k_about_start_template[] =
     "#log { flex: 1 1 0; min-height:0; overflow-y:auto; padding: 6px 2px;"
     " display:flex; flex-direction:column; gap: 14px; }\n"
     ".msg { max-width: 94%; padding: 11px 14px; border-radius: 14px;"
-    " line-height: 1.45; white-space: pre-wrap; word-wrap:break-word; }\n"
+    " line-height: 1.45; white-space: pre-wrap; overflow-wrap:break-word; }\n"
     ".user { align-self:flex-end; background:#2d6cf6; color:#fff;"
     " border-bottom-right-radius:4px; }\n"
     ".bot { align-self:flex-start; background:#f1f3f6; color:#111418;"
@@ -2357,7 +2357,8 @@ static const char k_about_start_template[] =
     "<body>"
     "<div class=\"wrap\">"
     "<div class=\"head\">"
-    "<img class=\"logo\" alt=\"Nordstjernen\" src=\"__ND_LOGO_URI__\">"
+    "<img class=\"logo\" alt=\"Nordstjernen\" width=\"52\" height=\"52\""
+    " src=\"__ND_LOGO_URI__\">"
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
     "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
@@ -2366,8 +2367,8 @@ static const char k_about_start_template[] =
     "home. Search the web below, or chat with a small AI model that runs "
     "entirely on your own computer.</p>"
     "<form class=\"search\" id=\"dsearch\">"
-    "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus"
-    " aria-label=\"Search the web with DuckDuckGo\""
+    "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
+    " aria-label=\"Search the web\""
     " placeholder=\"Search __ND_SEARCH_NAME__\">"
     "<button type=\"submit\">Search</button>"
     "</form>"
@@ -2380,7 +2381,7 @@ static const char k_about_start_template[] =
     "</div>"
     "</div>"
     "<form class=\"ask\" id=\"ask\">"
-    "<input id=\"q\" name=\"q\" autocomplete=\"off\" size=\"48\""
+    "<input id=\"q\" name=\"q\" autocomplete=\"off\" size=\"48\" dir=\"auto\""
     " aria-label=\"Message the local model\""
     " placeholder=\"Message the local model…\" disabled>"
     "<button id=\"send\" type=\"submit\" disabled>Send</button>"
@@ -2426,7 +2427,8 @@ static const char k_about_start_template[] =
     "try{sq.focus();}catch(e){}\n"
     "var ready=false, banner=null, poll=null, picking=false, gpuShown=false;\n"
     "function bubble(cls,text){var d=document.createElement('div');\n"
-    " d.className='msg '+cls; d.textContent=text; log.appendChild(d);\n"
+    " d.className='msg '+cls; d.dir='auto'; d.textContent=text;\n"
+    " log.appendChild(d);\n"
     " log.scrollTop=log.scrollHeight; return d;}\n"
     "function isImgUrl(u){return /[.](png|jpe?g|gif|webp|bmp|svg)([?#]|$)/i\n"
     "  .test(u);}\n"
@@ -2458,7 +2460,7 @@ static const char k_about_start_template[] =
     "  banner.className='banner'; log.appendChild(banner);} return banner;}\n"
     "function clearBanner(){ if(banner){banner.remove(); banner=null;} }\n"
     "function pick(id){ picking=false; fetch('about:ai-download?model='+\n"
-    "  encodeURIComponent(id)).then(refresh); }\n"
+    "  encodeURIComponent(id)).then(refresh,refresh); }\n"
     "function showPicker(st){ var b=ensureBanner(); ready=false; b.innerHTML='';\n"
     " var p=document.createElement('div');\n"
     " p.textContent='Choose a local model. Bigger models answer better but "
@@ -2480,6 +2482,8 @@ static const char k_about_start_template[] =
     "   dl.onclick=function(){dl.disabled=true; dl.textContent='Starting…';\n"
     "    pick(m.id);}; row.appendChild(dl); }\n"
     "  b.appendChild(row); });\n"
+    " if(st.message){var e=document.createElement('div'); e.className='hint';\n"
+    "  e.textContent='Last download failed: '+st.message; b.appendChild(e);}\n"
     " log.scrollTop=log.scrollHeight;}\n"
     "function showDownloading(st){ var b=ensureBanner(); ready=false;\n"
     " var lab=''; (st.models||[]).forEach(function(m){if(m.id===st.downloading)lab=m.label;});\n"
@@ -2507,10 +2511,6 @@ static const char k_about_start_template[] =
     " if(poll){clearInterval(poll); poll=null;}\n"
     " if(picking){showPicker(st); return;}\n"
     " if(st.state==='ready'){enableChat(st);}\n"
-    " else if(st.state==='error'){showPicker(st);\n"
-    "  var e=document.createElement('div'); e.className='hint';\n"
-    "  e.textContent='Last download failed: '+(st.message||'unknown error');\n"
-    "  if(banner) banner.appendChild(e);}\n"
     " else { showPicker(st); }}\n"
     "function refresh(){return fetch('about:ai-status').then(function(r){\n"
     "  return r.json();}).then(apply).catch(function(){});}\n"
@@ -2583,10 +2583,27 @@ about_start_tagline(void)
 }
 
 static gboolean
-synthesize_about_response(const char *url, ns_response *resp)
+about_request_from_chrome(const char *top_url)
+{
+    return !top_url || !*top_url || g_str_has_prefix(top_url, "about:");
+}
+
+static gboolean
+synthesize_about_response(const char *url, const char *top_url,
+                          ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
+    if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history")) &&
+        !about_request_from_chrome(top_url)) {
+        resp->status = 403;
+        resp->final_url = g_strdup(url);
+        resp->content_type = g_strdup("text/plain; charset=utf-8");
+        const char *body = "about: pages are not available to web content";
+        g_byte_array_append(resp->body, (const guint8 *)body,
+                            (guint)strlen(body));
+        return TRUE;
+    }
     resp->status = 200;
     resp->final_url = g_strdup(url);
     resp->content_type = g_strdup("text/html; charset=utf-8");
@@ -2615,9 +2632,11 @@ synthesize_about_response(const char *url, ns_response *resp)
         char *with_search = about_substitute(k_about_start_template,
                                              "__ND_SEARCH_URL__",
                                              esc_engine->str);
+        char *esc_name = g_markup_escape_text(search_name, -1);
         char *with_name = about_substitute(with_search,
                                            "__ND_SEARCH_NAME__",
-                                           search_name);
+                                           esc_name);
+        g_free(esc_name);
         g_free(with_search);
         g_string_free(esc_engine, TRUE);
         g_free(engine_host);
@@ -2753,7 +2772,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, resp))
+    if (synthesize_about_response(url, top_url, resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
