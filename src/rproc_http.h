@@ -40,6 +40,8 @@ int  ns_rproc_http_render(ns_rproc_http *r, int width, int height,
                           int scroll_x, int scroll_y, double scale,
                           ns_rproc_http_frame *out);
 char *ns_rproc_http_link_at(ns_rproc_http *r, int x, int y);
+char *ns_rproc_http_link_cursor_at(ns_rproc_http *r, int x, int y,
+                                   char **out_cursor);
 char *ns_rproc_http_click(ns_rproc_http *r, int x, int y, int mods);
 char *ns_rproc_http_select(ns_rproc_http *r, int kind, int x, int y);
 char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,

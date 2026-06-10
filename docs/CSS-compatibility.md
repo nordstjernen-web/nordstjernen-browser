@@ -157,7 +157,7 @@ Snapshot: **1.0.3**, 2026-06-10.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `cursor` | 🟡 | parsed and inherited; the GTK shell shows a pointer cursor over links and a wait cursor while loading, but author `cursor` keywords are not yet mapped to native cursors |
+| `cursor` | ✅ | parsed and inherited; the computed keyword at the hovered point is resolved by the engine (`ns_browser_cursor_at` in `src/libnordstjernen.c`: hit-test, inherited `cursor`, the last recognised keyword of a `url(...)`-fallback list, validated against the CSS Basic UI keyword set) and carried over the renderer IPC `/link` reply; the GTK shell passes the keyword straight to GDK's named-cursor lookup and the Qt shell maps it to the matching `Qt::CursorShape`. `auto` keeps the UA behaviour (pointer over links, default elsewhere); custom `url(...)` images fall back to their keyword |
 | `pointer-events: none` | ✅ | |
 | `user-select: none` | ✅ | text in the subtree is skipped by drag selection, select-all, highlight painting, and clipboard collection (`src/selection.c`); treated as inherited, approximating the spec's `auto` resolution. Other values (`all`, `contain`) behave as `auto` |
 | `accent-color` / `caret-color` | ✅ | see Color |

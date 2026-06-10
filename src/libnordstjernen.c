@@ -48,6 +48,8 @@ struct ns_browser {
     gboolean        dirty;
     gboolean        relaying;
     char           *pending_nav;
+    char           *refresh_url;
+    gint64          refresh_due_us;
     char           *pending_post_body;
     gsize           pending_post_len;
     char           *pending_post_ct;
@@ -292,6 +294,42 @@ resolve_local_path(const char *url)
     return file_url;
 }
 
+static const char *
+browser_find_meta_refresh(const ns_node *n)
+{
+    if (!n) return NULL;
+    if (ns_node_is_element_named(n, "meta")) {
+        const char *equiv = ns_element_get_attr(n, "http-equiv");
+        if (equiv && g_ascii_strcasecmp(equiv, "refresh") == 0) {
+            const char *content = ns_element_get_attr(n, "content");
+            if (content && *content) return content;
+        }
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        const char *found = browser_find_meta_refresh(c);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void
+browser_arm_declarative_refresh(ns_browser *b, const char *header_value)
+{
+    double seconds = 0.0;
+    char *target = NULL;
+    gboolean armed = header_value &&
+        ns_net_parse_refresh(header_value, &seconds, &target);
+    if (!armed) {
+        const char *meta = browser_find_meta_refresh(b->doc);
+        armed = meta && ns_net_parse_refresh(meta, &seconds, &target);
+    }
+    if (!armed) return;
+    b->refresh_url = target ? ns_url_resolve(b->base_url, target) : NULL;
+    g_free(target);
+    if (!b->refresh_url) b->refresh_url = g_strdup(b->base_url);
+    b->refresh_due_us = g_get_monotonic_time() + (gint64)(seconds * 1e6);
+}
+
 static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
@@ -316,6 +354,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_clear_error(&err);
 
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
+    char *refresh_hdr = g_strdup(resp->refresh);
     g_free(file_url);
 
     char *doc_charset = NULL;
@@ -360,6 +399,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_run_scripts_in_doc(b->js, doc, base);
     }
+
+    browser_arm_declarative_refresh(b, refresh_hdr);
+    g_free(refresh_hdr);
 
     browser_settle(b, settle_ms);
     if (!b->layout || b->dirty)
@@ -444,6 +486,13 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     if (!browser) return -1;
     if (budget_ms < 0) budget_ms = 0;
 
+    if (browser->refresh_due_us && !browser->pending_nav &&
+        g_get_monotonic_time() >= browser->refresh_due_us) {
+        browser->refresh_due_us = 0;
+        browser->pending_nav = browser->refresh_url;
+        browser->refresh_url = NULL;
+    }
+
     gint64 deadline = g_get_monotonic_time() + (gint64)budget_ms * 1000;
     gboolean changed = FALSE;
     int guard = 0;
@@ -482,6 +531,7 @@ int
 ns_browser_animating(ns_browser *browser)
 {
     if (!browser) return 0;
+    if (browser->refresh_due_us || browser->refresh_url) return 1;
     gboolean damped = browser->layout_osc >= NS_LAYOUT_OSC_THRESHOLD;
     if (!damped && browser->js &&
         ns_js_has_pending_animation_frame(browser->js))
@@ -654,6 +704,51 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         if (href && *href) return ns_url_resolve(browser->base_url, href);
     }
     return NULL;
+}
+
+char *
+ns_browser_cursor_at(ns_browser *browser, int x, int y)
+{
+    static const char *const known[] = {
+        "default", "none", "context-menu", "help", "pointer", "progress",
+        "wait", "cell", "crosshair", "text", "vertical-text", "alias",
+        "copy", "move", "no-drop", "not-allowed", "grab", "grabbing",
+        "all-scroll", "col-resize", "row-resize", "n-resize", "e-resize",
+        "s-resize", "w-resize", "ne-resize", "nw-resize", "se-resize",
+        "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize",
+        "zoom-in", "zoom-out",
+    };
+    if (!browser || !browser->layout || !browser->styles) return NULL;
+
+    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
+    const ns_node *node = hit ? hit->dom : NULL;
+    const ns_node *inline_node =
+        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
+    if (inline_node) node = inline_node;
+    const ns_node *form_node =
+        ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
+    if (form_node) node = form_node;
+
+    const ns_style *style = NULL;
+    for (const ns_node *n = node; n && !style; n = n->parent)
+        style = g_hash_table_lookup(browser->styles, n);
+    if (!style) return NULL;
+
+    const ns_css_value *v = style->values[NS_CSS_CURSOR];
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
+
+    char *match = NULL;
+    char **tokens = g_strsplit_set(v->u.keyword, ", \t", -1);
+    for (int i = 0; tokens && tokens[i]; i++) {
+        if (!tokens[i][0]) continue;
+        for (gsize k = 0; k < G_N_ELEMENTS(known); k++)
+            if (g_ascii_strcasecmp(tokens[i], known[k]) == 0) {
+                g_free(match);
+                match = g_strdup(known[k]);
+            }
+    }
+    g_strfreev(tokens);
+    return match;
 }
 
 char *
@@ -1344,6 +1439,7 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->base_url);
     g_free(browser->doc_charset);
     g_free(browser->pending_nav);
+    g_free(browser->refresh_url);
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);
     g_free(browser->search_query);

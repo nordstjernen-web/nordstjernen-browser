@@ -127,7 +127,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | `link rel="preload"`/`prefetch`/`dns-prefetch` | 🟡 | parsed as a generic link; no dedicated preload queue |
 | `meta charset` | ✅ | feeds charset decode |
 | `meta name="viewport"` | 🟡 | parsed; viewport width/height come from `ns_css_set_viewport` (`src/css.c`); not all directives enforced |
-| `meta http-equiv` (CSP, refresh, etc.) | 🟡 | CSP/Referrer-Policy honoured where reflected; the `refresh` directive and the HTTP `Refresh` response header are parsed (WHATWG shared-declarative-refresh: digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL — `src/net.c`). The out-of-process renderer does not yet auto-apply the timed refresh navigation that the removed in-process GUI did |
+| `meta http-equiv` (CSP, refresh, etc.) | ✅ | CSP/Referrer-Policy honoured where reflected; **declarative refresh is applied**: the `refresh` directive and the HTTP `Refresh` response header are parsed per the WHATWG shared-declarative-refresh steps (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL — `ns_net_parse_refresh` in `src/net.c`), armed on document open (`browser_arm_declarative_refresh` in `src/libnordstjernen.c`, header first then the first `<meta>` in tree order), and after the timeout the navigation is handed to the shell through the pending-nav channel (`ns_browser_take_pending_nav` → the renderer's `X-Nav` header); an armed refresh keeps `ns_browser_animating` true so the shell's frame loop stays alive to deliver it |
 | `meta name="referrer"` | ✅ | Referrer-Policy applied in `src/net.c` |
 | `style` (inline sheet) | ✅ | parsed and cascaded by `src/css.c` |
 

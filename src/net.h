@@ -98,6 +98,9 @@ char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
 gboolean ns_url_is_http_or_https(const char *url);
 
+gboolean ns_net_parse_refresh(const char *input, double *time_out,
+                              char **url_out);
+
 gboolean ns_data_url_decode(const char *url, GByteArray *out, guint64 budget,
                             char **out_content_type, gboolean *too_large);
 gboolean ns_url_is_valid_absolute(const char *url);

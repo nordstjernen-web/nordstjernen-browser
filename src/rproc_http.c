@@ -443,6 +443,31 @@ ns_rproc_http_link_at(ns_rproc_http *r, int x, int y)
 }
 
 char *
+ns_rproc_http_link_cursor_at(ns_rproc_http *r, int x, int y, char **out_cursor)
+{
+    if (out_cursor)
+        *out_cursor = NULL;
+    if (!r)
+        return NULL;
+    char json[160];
+    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char *body = request(r, "/link", json);
+    if (!body)
+        return NULL;
+    char *href = json_get_str(body, "href");
+    if (out_cursor) {
+        char *cursor = json_get_str(body, "cursor");
+        if (cursor && !*cursor) {
+            free(cursor);
+            cursor = NULL;
+        }
+        *out_cursor = cursor;
+    }
+    free(body);
+    return href;
+}
+
+char *
 ns_rproc_http_click(ns_rproc_http *r, int x, int y, int mods)
 {
     return r ? request_xy_str(r, "/click", x, y, 1, mods, "href") : NULL;

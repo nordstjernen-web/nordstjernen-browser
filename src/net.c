@@ -256,6 +256,73 @@ ns_net_supported_encodings(void)
     return g_accept_encoding ? g_accept_encoding : "";
 }
 
+static gboolean
+refresh_is_space(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+}
+
+gboolean
+ns_net_parse_refresh(const char *input, double *time_out, char **url_out)
+{
+    if (time_out) *time_out = 0.0;
+    if (url_out) *url_out = NULL;
+    if (!input) return FALSE;
+
+    const char *p = input;
+    while (refresh_is_space(*p)) p++;
+
+    const char *digits = p;
+    while (g_ascii_isdigit(*p)) p++;
+    if (p == digits && *p != '.') return FALSE;
+
+    double seconds = 0.0;
+    for (const char *d = digits; d < p; d++) {
+        seconds = seconds * 10.0 + (double)(*d - '0');
+        if (seconds > 2147483647.0) { seconds = 2147483647.0; break; }
+    }
+    while (*p == '.' || g_ascii_isdigit(*p)) p++;
+
+    if (*p) {
+        if (*p != ';' && *p != ',' && !refresh_is_space(*p)) return FALSE;
+        while (refresh_is_space(*p)) p++;
+        if (*p == ';' || *p == ',') p++;
+        while (refresh_is_space(*p)) p++;
+    }
+
+    if (*p == 'u' || *p == 'U') {
+        const char *q = p + 1;
+        if (*q == 'r' || *q == 'R') {
+            q++;
+            if (*q == 'l' || *q == 'L') {
+                q++;
+                while (refresh_is_space(*q)) q++;
+                if (*q == '=') {
+                    q++;
+                    while (refresh_is_space(*q)) q++;
+                    p = q;
+                }
+            }
+        }
+    }
+
+    char *url = NULL;
+    if (*p == '\'' || *p == '"') {
+        char quote = *p++;
+        const char *end = strchr(p, quote);
+        url = end ? g_strndup(p, (gsize)(end - p)) : g_strdup(p);
+    } else if (*p) {
+        url = g_strdup(p);
+        g_strchomp(url);
+    }
+    if (url && !*url) g_clear_pointer(&url, g_free);
+
+    if (time_out) *time_out = seconds;
+    if (url_out) *url_out = url;
+    else g_free(url);
+    return TRUE;
+}
+
 static lxb_status_t
 ns_url_str_append_cb(const lxb_char_t *data, size_t length, void *ctx)
 {

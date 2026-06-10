@@ -257,6 +257,25 @@ public:
         return result;
     }
 
+    QString linkCursorAt(int x, int y, QString *cursorOut) {
+        if (cursorOut)
+            cursorOut->clear();
+        if (!m_proc || !m_opened)
+            return QString();
+        char *cursor = nullptr;
+        char *href = ns_rproc_http_link_cursor_at(m_proc, x, y, &cursor);
+        if (cursor) {
+            if (cursorOut)
+                *cursorOut = QString::fromUtf8(cursor);
+            free(cursor);
+        }
+        if (!href)
+            return QString();
+        QString result = QString::fromUtf8(href);
+        free(href);
+        return result;
+    }
+
     bool hover(int x, int y) {
         if (!m_proc || !m_opened)
             return false;
@@ -759,6 +778,58 @@ void ProcView::requestLinkAt(int x, int y, LinkAction action) {
     startLinkAt(x, y, action);
 }
 
+static QCursor cursorFromCssKeyword(const QString &name, bool overLink) {
+    if (name.isEmpty())
+        return overLink ? QCursor(Qt::PointingHandCursor)
+                        : QCursor(Qt::ArrowCursor);
+    if (name == QLatin1String("pointer"))
+        return QCursor(Qt::PointingHandCursor);
+    if (name == QLatin1String("text") ||
+        name == QLatin1String("vertical-text"))
+        return QCursor(Qt::IBeamCursor);
+    if (name == QLatin1String("wait"))
+        return QCursor(Qt::WaitCursor);
+    if (name == QLatin1String("progress"))
+        return QCursor(Qt::BusyCursor);
+    if (name == QLatin1String("crosshair") || name == QLatin1String("cell"))
+        return QCursor(Qt::CrossCursor);
+    if (name == QLatin1String("move") || name == QLatin1String("all-scroll"))
+        return QCursor(Qt::SizeAllCursor);
+    if (name == QLatin1String("not-allowed") ||
+        name == QLatin1String("no-drop"))
+        return QCursor(Qt::ForbiddenCursor);
+    if (name == QLatin1String("help"))
+        return QCursor(Qt::WhatsThisCursor);
+    if (name == QLatin1String("grab"))
+        return QCursor(Qt::OpenHandCursor);
+    if (name == QLatin1String("grabbing"))
+        return QCursor(Qt::ClosedHandCursor);
+    if (name == QLatin1String("copy"))
+        return QCursor(Qt::DragCopyCursor);
+    if (name == QLatin1String("alias"))
+        return QCursor(Qt::DragLinkCursor);
+    if (name == QLatin1String("none"))
+        return QCursor(Qt::BlankCursor);
+    if (name == QLatin1String("col-resize") ||
+        name == QLatin1String("ew-resize") ||
+        name == QLatin1String("e-resize") || name == QLatin1String("w-resize"))
+        return QCursor(Qt::SizeHorCursor);
+    if (name == QLatin1String("row-resize") ||
+        name == QLatin1String("ns-resize") ||
+        name == QLatin1String("n-resize") || name == QLatin1String("s-resize"))
+        return QCursor(Qt::SizeVerCursor);
+    if (name == QLatin1String("nesw-resize") ||
+        name == QLatin1String("ne-resize") ||
+        name == QLatin1String("sw-resize"))
+        return QCursor(Qt::SizeBDiagCursor);
+    if (name == QLatin1String("nwse-resize") ||
+        name == QLatin1String("nw-resize") ||
+        name == QLatin1String("se-resize"))
+        return QCursor(Qt::SizeFDiagCursor);
+    return overLink ? QCursor(Qt::PointingHandCursor)
+                    : QCursor(Qt::ArrowCursor);
+}
+
 void ProcView::startLinkAt(int x, int y, LinkAction action) {
     if (!m_opened || !m_worker)
         return;
@@ -768,20 +839,20 @@ void ProcView::startLinkAt(int x, int y, LinkAction action) {
     QPointer<ProcView> self(this);
     ProcWorker *worker = m_worker;
     QMetaObject::invokeMethod(worker, [worker, self, seq, x, y, action]() {
-        QString href = worker->linkAt(x, y);
+        QString cssCursor;
+        QString href = worker->linkCursorAt(x, y, &cssCursor);
         if (!self)
             return;
         QMetaObject::invokeMethod(self.data(), [self, seq, x, y, href,
-                                                action]() {
+                                                cssCursor, action]() {
             if (!self || seq != self->m_linkSeq ||
                 seq != self->m_linkActiveSeq)
                 return;
             self->m_linkInFlight = false;
             self->m_linkActiveSeq = 0;
             bool navigated = false;
-            self->viewport()->setCursor(href.isEmpty()
-                                            ? Qt::ArrowCursor
-                                            : Qt::PointingHandCursor);
+            self->viewport()->setCursor(
+                cursorFromCssKeyword(cssCursor, !href.isEmpty()));
             if (!href.isEmpty()) {
                 emit self->statusMessage(href);
                 if (action == LinkAction::Navigate) {

@@ -46,6 +46,23 @@ reply_str(int fd, const char *key, const char *val)
     free(e);
 }
 
+static void
+reply_str2(int fd, const char *key1, const char *val1,
+           const char *key2, const char *val2)
+{
+    char *e1 = json_escape(val1 ? val1 : "");
+    char *e2 = json_escape(val2 ? val2 : "");
+    char *json = NULL;
+    int n = asprintf(&json, "{\"%s\":\"%s\",\"%s\":\"%s\"}",
+                     key1, e1 ? e1 : "", key2, e2 ? e2 : "");
+    if (n > 0)
+        http_write_response(fd, 200, "application/json", NULL, json,
+                            (size_t)n);
+    free(json);
+    free(e1);
+    free(e2);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -279,9 +296,16 @@ main(int argc, char **argv)
             json_get_long(body, "mods", &mods);
             json_get_long(body, "kind", &kind);
             char *href = NULL;
-            if (cur && strcmp(head.path, "/link") == 0)
+            if (cur && strcmp(head.path, "/link") == 0) {
                 href = ns_browser_link_at(cur, (int)x, (int)y);
-            else if (cur && strcmp(head.path, "/click") == 0)
+                char *cursor = ns_browser_cursor_at(cur, (int)x, (int)y);
+                reply_str2(ctrl_w, "href", href, "cursor", cursor);
+                free(cursor);
+                free(href);
+                free(body);
+                continue;
+            }
+            if (cur && strcmp(head.path, "/click") == 0)
                 href = ns_browser_click(cur, (int)x, (int)y, (int)mods);
             else if (cur)
                 href = ns_browser_select(cur, (int)kind, (int)x, (int)y);

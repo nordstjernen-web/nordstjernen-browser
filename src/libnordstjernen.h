@@ -80,6 +80,13 @@ int ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
  * The result is newly allocated; the caller frees it with free(). */
 char *ns_browser_link_at(ns_browser *browser, int x, int y);
 
+/* The computed CSS cursor keyword at page coordinates (CSS px) — one of the
+ * standard cursor keywords ("pointer", "text", "move", ...) — or NULL when
+ * the cursor is auto/default or no page is open. The keyword set matches the
+ * CSS Basic UI names that GDK/Qt resolve natively. Newly allocated; the
+ * caller frees it with free(). */
+char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
+
 /* Dispatch a primary click at page coordinates (CSS px): hit-test the DOM,
  * fire the element's full button sequence
  * (pointerdown→mousedown→pointerup→mouseup→click), and — unless a click

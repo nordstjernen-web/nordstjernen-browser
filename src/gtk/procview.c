@@ -70,6 +70,7 @@ typedef struct {
     char            *webgl;
     cairo_surface_t *surface;
     char            *href;
+    char            *cursor;
     LinkAct          action;
     int              kind;
     gboolean         animating;
@@ -372,8 +373,11 @@ worker_main(gpointer data)
             res->type = RES_LINK;
             res->seq = req->seq;
             res->action = req->action;
-            res->href = v->proc ? ns_rproc_http_link_at(v->proc, req->x, req->y)
-                                : NULL;
+            if (v->proc && req->action == ACT_HOVER)
+                res->href = ns_rproc_http_link_cursor_at(v->proc, req->x,
+                                                         req->y, &res->cursor);
+            else if (v->proc)
+                res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
             post(res);
         } else if (req->type == REQ_CLICK) {
             Res *res = g_new0(Res, 1);
@@ -1332,7 +1336,8 @@ on_result(gpointer data)
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             if (!v->busy_cursor)
-                gtk_widget_set_cursor_from_name(area, "pointer");
+                gtk_widget_set_cursor_from_name(
+                    area, res->cursor ? res->cursor : "pointer");
             if (res->action == ACT_NAVIGATE) {
                 navigated = TRUE;
                 ns_proc_view_load(v, res->href);
@@ -1340,7 +1345,7 @@ on_result(gpointer data)
                 post_emit(v, NS_PROC_EVT_NEWTAB, res->href);
             }
         } else if (!v->busy_cursor) {
-            gtk_widget_set_cursor_from_name(area, NULL);
+            gtk_widget_set_cursor_from_name(area, res->cursor);
         }
         if (!navigated && v->link_pending) {
             v->link_pending = FALSE;
@@ -1406,6 +1411,7 @@ done:
     g_free(res->nav);
     g_free(res->webgl);
     free(res->href);
+    free(res->cursor);
     free(res->media_url);
     pv_unref(res->view);
     g_free(res);
