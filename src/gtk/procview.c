@@ -436,7 +436,10 @@ worker_main(gpointer data)
             res->view = pv_ref(v);
             res->type = RES_HOVER;
             res->seq = req->seq;
-            res->ok = v->proc && ns_rproc_http_hover(v->proc, req->x, req->y) == 1;
+            if (v->proc)
+                res->ok = ns_rproc_http_hover_full(v->proc, req->x, req->y,
+                                                   &res->href,
+                                                   &res->cursor) == 1;
             post(res);
         } else if (req->type == REQ_RELEASE) {
             Res *res = g_new0(Res, 1);
@@ -1388,6 +1391,14 @@ on_result(gpointer data)
         if (res->seq != v->hover_seq)
             goto done;
         v->hover_inflight = FALSE;
+        if (res->href && *res->href) {
+            post_emit(v, NS_PROC_EVT_STATUS, res->href);
+            if (!v->busy_cursor)
+                gtk_widget_set_cursor_from_name(
+                    v->area, res->cursor ? res->cursor : "pointer");
+        } else if (!v->busy_cursor) {
+            gtk_widget_set_cursor_from_name(v->area, res->cursor);
+        }
         if (res->ok)
             request_render(v);
         if (v->hover_pending) {
@@ -1858,7 +1869,6 @@ on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
         double s = cur_scale(v);
         int px = v->scroll_x + (int)(x / s);
         int py = v->scroll_y + (int)(y / s);
-        request_link(v, px, py, ACT_HOVER);
         request_hover(v, px, py);
     }
 }

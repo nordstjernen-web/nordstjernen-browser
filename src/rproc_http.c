@@ -527,8 +527,13 @@ ns_rproc_http_release(ns_rproc_http *r)
 }
 
 int
-ns_rproc_http_hover(ns_rproc_http *r, int x, int y)
+ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
+                         char **out_cursor)
 {
+    if (out_href)
+        *out_href = NULL;
+    if (out_cursor)
+        *out_cursor = NULL;
     if (!r)
         return -1;
     char json[48];
@@ -538,8 +543,30 @@ ns_rproc_http_hover(ns_rproc_http *r, int x, int y)
         return -1;
     long changed = 0;
     json_get_long(body, "changed", &changed);
+    if (out_href) {
+        char *href = json_get_str(body, "href");
+        if (href && !*href) {
+            free(href);
+            href = NULL;
+        }
+        *out_href = href;
+    }
+    if (out_cursor) {
+        char *cursor = json_get_str(body, "cursor");
+        if (cursor && !*cursor) {
+            free(cursor);
+            cursor = NULL;
+        }
+        *out_cursor = cursor;
+    }
     free(body);
     return changed != 0 ? 1 : 0;
+}
+
+int
+ns_rproc_http_hover(ns_rproc_http *r, int x, int y)
+{
+    return ns_rproc_http_hover_full(r, x, y, NULL, NULL);
 }
 
 int

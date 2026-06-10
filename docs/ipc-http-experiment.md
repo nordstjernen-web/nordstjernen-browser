@@ -35,7 +35,7 @@ pixels travel through shared memory. The whole protocol is this catalog:
 | `POST /render` | `{width,height,scroll_x,scroll_y,scale}` | `X-W/X-H/X-Stride/X-Anim` headers; **pixels in shm**, empty body. When the engine reports nothing changed since the last frame and the viewport/scroll/scale are identical, the reply is `X-Unchanged: 1` with no repaint — the client keeps its cached frame. `X-Anim`/`X-Nav`/`X-WebGL` still ride on unchanged replies, so the frame loop and pending navigations are unaffected |
 | `POST /link` `/click` `/select` | `{x,y[,mods\|kind]}` | `{href}` (`/link` also returns the computed `cursor` keyword) |
 | `POST /key` | `{kind,key,code,keycode,mods}` | `{href}` |
-| `POST /hover` | `{x,y}` | `{changed}` |
+| `POST /hover` | `{x,y}` | `{changed,href,cursor}` — one pointer-motion round trip carries the `:hover` restyle result, the link under the pointer, and the computed CSS cursor keyword, so the shells send a single message per mouse move |
 | `POST /release` | — | `{changed}` |
 | `POST /find` | `{query,case_sensitive,direction,from_y}` | `{total,current,scroll_y}` |
 | `POST /viewport` | `{width,height}` | `{ok,page_width,page_height}` |

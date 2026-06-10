@@ -48,6 +48,8 @@ char *ns_rproc_http_select(ns_rproc_http *r, int kind, int x, int y);
 char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
                         const char *code, int keycode, int mods);
 int   ns_rproc_http_hover(ns_rproc_http *r, int x, int y);
+int   ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y,
+                               char **out_href, char **out_cursor);
 int   ns_rproc_http_release(ns_rproc_http *r);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,
                          int case_sensitive, int direction, int from_y,

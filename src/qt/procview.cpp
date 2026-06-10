@@ -280,10 +280,27 @@ public:
         return result;
     }
 
-    bool hover(int x, int y) {
+    bool hover(int x, int y, QString *hrefOut, QString *cursorOut) {
+        if (hrefOut)
+            hrefOut->clear();
+        if (cursorOut)
+            cursorOut->clear();
         if (!m_proc || !m_opened)
             return false;
-        return ns_rproc_http_hover(m_proc, x, y) == 1;
+        char *href = nullptr;
+        char *cursor = nullptr;
+        int changed = ns_rproc_http_hover_full(m_proc, x, y, &href, &cursor);
+        if (href) {
+            if (hrefOut)
+                *hrefOut = QString::fromUtf8(href);
+            free(href);
+        }
+        if (cursor) {
+            if (cursorOut)
+                *cursorOut = QString::fromUtf8(cursor);
+            free(cursor);
+        }
+        return changed == 1;
     }
 
     bool release() {
@@ -913,13 +930,20 @@ void ProcView::startHover(int x, int y) {
     QPointer<ProcView> self(this);
     ProcWorker *worker = m_worker;
     QMetaObject::invokeMethod(worker, [worker, self, seq, x, y]() {
-        const bool changed = worker->hover(x, y);
+        QString href;
+        QString cssCursor;
+        const bool changed = worker->hover(x, y, &href, &cssCursor);
         if (!self)
             return;
-        QMetaObject::invokeMethod(self.data(), [self, seq, changed]() {
+        QMetaObject::invokeMethod(self.data(), [self, seq, changed, href,
+                                                cssCursor]() {
             if (!self || seq != self->m_hoverSeq)
                 return;
             self->m_hoverInFlight = false;
+            self->viewport()->setCursor(
+                cursorFromCssKeyword(cssCursor, !href.isEmpty()));
+            if (!href.isEmpty())
+                emit self->statusMessage(href);
             if (changed)
                 self->requestRender();
             if (self->m_hoverPending) {
@@ -1193,7 +1217,6 @@ void ProcView::mouseMoveEvent(QMouseEvent *event) {
             m_hasSelection = true;
             return;
         }
-        requestLinkAt(x, y, LinkAction::Hover);
         requestHover(x, y);
     } else {
         viewport()->setCursor(Qt::ArrowCursor);

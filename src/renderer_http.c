@@ -374,11 +374,23 @@ main(int argc, char **argv)
             int changed = cur ? ns_browser_hover(cur, (int)x, (int)y) : 0;
             if (changed > 0)
                 frame_valid = 0;
-            char json[32];
-            int n = snprintf(json, sizeof json, "{\"changed\":%d}",
-                             changed > 0 ? 1 : 0);
-            http_write_response(ctrl_w, 200, "application/json", NULL, json,
-                                (size_t)n);
+            char *href = cur ? ns_browser_link_at(cur, (int)x, (int)y) : NULL;
+            char *cursor = cur ? ns_browser_cursor_at(cur, (int)x, (int)y)
+                               : NULL;
+            char *he = json_escape(href ? href : "");
+            char *ce = json_escape(cursor ? cursor : "");
+            char *json = NULL;
+            int n = asprintf(&json,
+                             "{\"changed\":%d,\"href\":\"%s\",\"cursor\":\"%s\"}",
+                             changed > 0 ? 1 : 0, he ? he : "", ce ? ce : "");
+            if (n > 0)
+                http_write_response(ctrl_w, 200, "application/json", NULL,
+                                    json, (size_t)n);
+            free(json);
+            free(he);
+            free(ce);
+            free(href);
+            free(cursor);
             free(body);
             continue;
         }
