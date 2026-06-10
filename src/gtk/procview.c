@@ -1,6 +1,7 @@
 /* Nordstjernen — GTK thin client over the out-of-process renderer (rproc). */
 
 #include "procview.h"
+#include "i18n.h"
 
 #include "media.h"
 #include "proc_limits.h"
@@ -940,7 +941,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
     v->busy_cursor = TRUE;
     if (v->area)
         gtk_widget_set_cursor_from_name(v->area, "wait");
-    post_emit(v, NS_PROC_EVT_STATUS, "Loading…");
+    post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Loading…"));
 
     int vw = gtk_widget_get_width(v->area);
     int vh = gtk_widget_get_height(v->area);
@@ -1062,7 +1063,8 @@ set_zoom(NsProcView *v, double scale)
         return;
     v->scale = clamped;
     char status[32];
-    g_snprintf(status, sizeof status, "Zoom %d%%", permille / 10);
+    g_snprintf(status, sizeof status, "%s %d%%", ns_i18n("Zoom"),
+               permille / 10);
     post_emit(v, NS_PROC_EVT_STATUS, status);
     if (v->opened) {
         configure_adjustments(v);
@@ -1135,8 +1137,9 @@ pv_webgl_first_done(GObject *src, GAsyncResult *res, gpointer ud)
     char *detail = g_strdup_printf(
         "Give %s near-direct access to your GPU driver? This stays enabled "
         "for this origin for the rest of the session.", p->origin);
-    const char *buttons[] = { "Cancel", "Enable WebGL", NULL };
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("Are you sure?");
+    const char *buttons[] = { ns_i18n("Cancel"), ns_i18n("Enable WebGL"),
+                              NULL };
+    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", ns_i18n("Are you sure?"));
     gtk_alert_dialog_set_detail(dlg, detail);
     gtk_alert_dialog_set_buttons(dlg, buttons);
     gtk_alert_dialog_set_cancel_button(dlg, 0);
@@ -1159,7 +1162,8 @@ pv_webgl_prompt(NsProcView *v, const char *origin)
         "%s.\n\nWebGL hands the page near-direct access to your GPU driver — "
         "only allow it on sites you trust. Allowing keeps WebGL enabled for "
         "this site for the rest of the session and reloads the page.", origin);
-    const char *buttons[] = { "Block", "Allow and trust this site", NULL };
+    const char *buttons[] = { ns_i18n("Block"),
+                              ns_i18n("Allow and trust this site"), NULL };
     GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
     gtk_alert_dialog_set_detail(dlg, detail);
     gtk_alert_dialog_set_buttons(dlg, buttons);
@@ -1185,7 +1189,7 @@ on_result(gpointer data)
         if (res->seq != v->load_seq)
             goto done;
         if (!res->ok) {
-            post_emit(v, NS_PROC_EVT_STATUS, "Failed to load page");
+            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Failed to load page"));
             finish_loading(v);
             clear_busy_cursor(v);
             goto done;
@@ -1196,7 +1200,8 @@ on_result(gpointer data)
                 do_load(v, res->nav, v->pending_record);
                 goto done;
             }
-            post_emit(v, NS_PROC_EVT_STATUS, "Stopped after too many redirects");
+            post_emit(v, NS_PROC_EVT_STATUS,
+                      ns_i18n("Stopped after too many redirects"));
         }
         v->js_redirects = 0;
         g_free(v->current_url);
@@ -1213,7 +1218,7 @@ on_result(gpointer data)
             push_history(v, v->current_url);
         post_emit(v, NS_PROC_EVT_URL, v->current_url);
         post_emit(v, NS_PROC_EVT_TITLE, v->current_title);
-        post_emit(v, NS_PROC_EVT_STATUS, "Done");
+        post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Done"));
         finish_loading(v);
         request_render(v);
     } else if (res->type == RES_FRAME) {
@@ -1247,11 +1252,12 @@ on_result(gpointer data)
         } else if (current && !res->ok && v->current_url) {
             if (v->render_restarts < NS_PROC_MAX_RESTARTS) {
                 v->render_restarts++;
-                post_emit(v, NS_PROC_EVT_STATUS, "Renderer restarted");
+                post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Renderer restarted"));
                 do_load(v, v->current_url, FALSE);
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
-                          "This tab's renderer keeps failing — reload to retry");
+                          ns_i18n("This tab's renderer keeps failing — "
+                                  "reload to retry"));
                 finish_loading(v);
                 clear_busy_cursor(v);
             }
@@ -1272,7 +1278,7 @@ on_result(gpointer data)
         if (res->href && *res->href && v->area) {
             gdk_clipboard_set_text(gtk_widget_get_clipboard(v->area),
                                    res->href);
-            post_emit(v, NS_PROC_EVT_STATUS, "Copied selection");
+            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Copied selection"));
         }
     } else if (res->type == RES_KEY) {
         if (res->kind != 0)
@@ -1304,13 +1310,15 @@ on_result(gpointer data)
                 g_free(msg);
             } else if (st == NS_MEDIA_NEED_YTDLP) {
                 post_emit(v, NS_PROC_EVT_STATUS,
-                          "Install yt-dlp to play this stream externally");
+                          ns_i18n("Install yt-dlp to play this stream "
+                                  "externally"));
             } else if (st == NS_MEDIA_NO_PLAYER) {
                 post_emit(v, NS_PROC_EVT_STATUS,
-                          "No external media player found (install mpv or vlc)");
+                          ns_i18n("No external media player found "
+                                  "(install mpv or vlc)"));
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
-                          "Cannot play this media externally");
+                          ns_i18n("Cannot play this media externally"));
             }
             g_free(app);
             g_free(app_url);
@@ -1376,7 +1384,7 @@ on_result(gpointer data)
                 gtk_label_set_text(GTK_LABEL(v->search_label), buf);
             } else {
                 gtk_label_set_text(GTK_LABEL(v->search_label),
-                                   (q && *q) ? "No results" : "");
+                                   (q && *q) ? ns_i18n("No results") : "");
             }
         }
         if (res->find_total > 0) {
@@ -1389,7 +1397,7 @@ on_result(gpointer data)
         if (res->ok && res->url)
             post_emit(v, NS_PROC_EVT_STATUS, res->url);
         else
-            post_emit(v, NS_PROC_EVT_STATUS, "Could not save page");
+            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Could not save page"));
     } else if (res->type == RES_CONSOLE) {
         if (res->href && *res->href)
             console_append(v, res->href);
@@ -1517,7 +1525,8 @@ view_save(NsProcView *v, gboolean pdf)
     GtkRoot *root = gtk_widget_get_root(v->area);
     GtkFileDialog *dialog = gtk_file_dialog_new();
     gtk_file_dialog_set_title(dialog,
-        pdf ? "Save page as PDF" : "Save page as PNG");
+        pdf ? ns_i18n("Save page as PDF")
+                                      : ns_i18n("Save page as PNG"));
     const char *t = (v->current_title && *v->current_title)
         ? v->current_title : "page";
     char *name = g_strdup_printf("%s.%s", t, pdf ? "pdf" : "png");
@@ -1558,7 +1567,7 @@ on_ctx_copy_url(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
     NsProcView *v = ud;
-    ctx_set_clipboard(v, v->current_url, "Copied page address");
+    ctx_set_clipboard(v, v->current_url, ns_i18n("Copied page address"));
 }
 
 static void
@@ -1584,7 +1593,7 @@ on_ctx_copy_link(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a; (void)p;
     NsProcView *v = ud;
-    ctx_set_clipboard(v, v->ctx_link, "Copied link address");
+    ctx_set_clipboard(v, v->ctx_link, ns_i18n("Copied link address"));
 }
 
 static void
@@ -1656,29 +1665,29 @@ show_context_menu(NsProcView *v, const char *href)
     GMenu *menu = g_menu_new();
     if (v->ctx_link) {
         GMenu *s = g_menu_new();
-        g_menu_append(s, "Open Link", "ctx.open-link");
-        g_menu_append(s, "Open Link in New Tab", "ctx.open-newtab");
-        g_menu_append(s, "Copy Link Address", "ctx.copy-link");
+        g_menu_append(s, ns_i18n("Open Link"), "ctx.open-link");
+        g_menu_append(s, ns_i18n("Open Link in New Tab"), "ctx.open-newtab");
+        g_menu_append(s, ns_i18n("Copy Link Address"), "ctx.copy-link");
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s));
         g_object_unref(s);
     }
     if (v->has_selection) {
         GMenu *s = g_menu_new();
-        g_menu_append(s, "Copy", "ctx.copy-sel");
+        g_menu_append(s, ns_i18n("Copy"), "ctx.copy-sel");
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s));
         g_object_unref(s);
     }
     GMenu *nav = g_menu_new();
-    g_menu_append(nav, "Back", "ctx.back");
-    g_menu_append(nav, "Forward", "ctx.forward");
-    g_menu_append(nav, "Reload", "ctx.reload");
+    g_menu_append(nav, ns_i18n("Back"), "ctx.back");
+    g_menu_append(nav, ns_i18n("Forward"), "ctx.forward");
+    g_menu_append(nav, ns_i18n("Reload"), "ctx.reload");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(nav));
     g_object_unref(nav);
     GMenu *page = g_menu_new();
-    g_menu_append(page, "Select All", "ctx.select-all");
-    g_menu_append(page, "Copy Page Address", "ctx.copy-url");
-    g_menu_append(page, "Save Page as PDF…", "ctx.save-pdf");
-    g_menu_append(page, "Save Page as Image…", "ctx.save-png");
+    g_menu_append(page, ns_i18n("Select All"), "ctx.select-all");
+    g_menu_append(page, ns_i18n("Copy Page Address"), "ctx.copy-url");
+    g_menu_append(page, ns_i18n("Save Page as PDF…"), "ctx.save-pdf");
+    g_menu_append(page, ns_i18n("Save Page as Image…"), "ctx.save-png");
     g_menu_append_section(menu, NULL, G_MENU_MODEL(page));
     g_object_unref(page);
 
@@ -2052,14 +2061,14 @@ build_console_panel(NsProcView *v)
 
     GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_add_css_class(header, "toolbar");
-    GtkWidget *title = gtk_label_new("Console");
+    GtkWidget *title = gtk_label_new(ns_i18n("Console"));
     gtk_widget_set_hexpand(title, TRUE);
     gtk_widget_set_halign(title, GTK_ALIGN_START);
     gtk_widget_set_margin_start(title, 6);
     GtkWidget *clear = gtk_button_new_from_icon_name("edit-clear-symbolic");
     GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-    gtk_widget_set_tooltip_text(clear, "Clear console");
-    gtk_widget_set_tooltip_text(close, "Close console (F12)");
+    gtk_widget_set_tooltip_text(clear, ns_i18n("Clear console"));
+    gtk_widget_set_tooltip_text(close, ns_i18n("Close console (F12)"));
     g_signal_connect(clear, "clicked", G_CALLBACK(on_console_clear), v);
     g_signal_connect(close, "clicked", G_CALLBACK(on_console_close), v);
     gtk_box_append(GTK_BOX(header), title);
@@ -2081,7 +2090,7 @@ build_console_panel(NsProcView *v)
 
     v->console_entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(v->console_entry),
-                                   "Evaluate JavaScript and press Enter");
+                                   ns_i18n("Evaluate JavaScript and press Enter"));
     g_signal_connect(v->console_entry, "activate",
                      G_CALLBACK(on_console_eval), v);
 
@@ -2126,9 +2135,9 @@ build_search_bar(NsProcView *v)
     GtkWidget *prev = gtk_button_new_from_icon_name("go-up-symbolic");
     GtkWidget *next = gtk_button_new_from_icon_name("go-down-symbolic");
     GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
-    gtk_widget_set_tooltip_text(prev, "Previous match (Shift+Enter)");
-    gtk_widget_set_tooltip_text(next, "Next match (Enter)");
-    gtk_widget_set_tooltip_text(close, "Close (Esc)");
+    gtk_widget_set_tooltip_text(prev, ns_i18n("Previous match (Shift+Enter)"));
+    gtk_widget_set_tooltip_text(next, ns_i18n("Next match (Enter)"));
+    gtk_widget_set_tooltip_text(close, ns_i18n("Close (Esc)"));
     g_signal_connect(prev, "clicked", G_CALLBACK(on_search_prev), v);
     g_signal_connect(next, "clicked", G_CALLBACK(on_search_next), v);
     g_signal_connect(close, "clicked", G_CALLBACK(on_search_close_clicked), v);

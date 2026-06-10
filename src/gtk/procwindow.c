@@ -2,6 +2,7 @@
 
 #include "procwindow.h"
 #include "procview.h"
+#include "i18n.h"
 #include "rproc_http.h"
 #include "bookmarks.h"
 #include "config.h"
@@ -148,7 +149,7 @@ update_chrome(ProcWindow *pw)
     NsProcView *v = current_view(pw);
     if (!v) {
         gtk_editable_set_text(GTK_EDITABLE(pw->address), "");
-        gtk_window_set_title(GTK_WINDOW(pw->window), "Nordstjernen");
+        gtk_window_set_title(GTK_WINDOW(pw->window), ns_i18n("Nordstjernen"));
         gtk_widget_set_sensitive(pw->back, FALSE);
         gtk_widget_set_sensitive(pw->forward, FALSE);
         set_loading_ui(pw, FALSE);
@@ -158,8 +159,9 @@ update_chrome(ProcWindow *pw)
     const char *url = ns_proc_view_url(v);
     const char *title = ns_proc_view_title(v);
     gtk_editable_set_text(GTK_EDITABLE(pw->address), url ? url : "");
-    char *wt = g_strdup_printf("%s — Nordstjernen",
-                               title && *title ? title : "Nordstjernen");
+    const char *brand = ns_i18n("Nordstjernen");
+    char *wt = g_strdup_printf("%s — %s",
+                               title && *title ? title : brand, brand);
     gtk_window_set_title(GTK_WINDOW(pw->window), wt);
     g_free(wt);
     gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
@@ -185,7 +187,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             GtkWidget *p =
                 gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
             GtkWidget *label = g_object_get_data(G_OBJECT(p), "ns-tab-label");
-            const char *t = text && *text ? text : "Untitled";
+            const char *t = text && *text ? text : ns_i18n("Untitled");
             char *clip = g_strndup(t, 40);
             if (label)
                 gtk_label_set_text(GTK_LABEL(label), clip);
@@ -241,7 +243,7 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     g_object_set_data(G_OBJECT(page), "ns-proc-view", v);
 
     GtkWidget *tab = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
-    GtkWidget *label = gtk_label_new("New Tab");
+    GtkWidget *label = gtk_label_new(ns_i18n("New Tab"));
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(label), 16);
     gtk_box_append(GTK_BOX(tab), label);
@@ -557,7 +559,7 @@ task_mgr_refresh(NsTaskMgr *tm)
         const char *title = ns_proc_view_title(v);
         const char *url = ns_proc_view_url(v);
         const char *name = (title && *title) ? title
-                         : (url && *url)     ? url : "New Tab";
+                         : (url && *url)     ? url : ns_i18n("New Tab");
 
         GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
         gtk_widget_set_margin_start(box, 10);
@@ -646,7 +648,10 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     }
 
     GtkWidget *win = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(win), "Task Manager — Nordstjernen");
+    char *tm_title = g_strdup_printf("%s — %s", ns_i18n("Task Manager"),
+                                     ns_i18n("Nordstjernen"));
+    gtk_window_set_title(GTK_WINDOW(win), tm_title);
+    g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
     gtk_window_set_default_size(GTK_WINDOW(win), 560, 380);
 
@@ -660,10 +665,10 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_set_margin_end(hdr, 10);
     gtk_widget_set_margin_top(hdr, 8);
     gtk_widget_set_margin_bottom(hdr, 4);
-    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label("Task", 0, 0, TRUE));
-    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label("Process ID", 8, 1, FALSE));
-    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label("State", 11, 0, FALSE));
-    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label("Memory", 10, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Task"), 0, 0, TRUE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Process ID"), 8, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("State"), 11, 0, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Memory"), 10, 1, FALSE));
 
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(scroll, TRUE);
@@ -678,10 +683,10 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_set_margin_bottom(bar, 8);
     GtkWidget *spacer = gtk_label_new("");
     gtk_widget_set_hexpand(spacer, TRUE);
-    GtkWidget *refresh_btn = gtk_button_new_with_label("Refresh");
+    GtkWidget *refresh_btn = gtk_button_new_with_label(ns_i18n("Refresh"));
     g_signal_connect(refresh_btn, "clicked",
                      G_CALLBACK(task_mgr_refresh_clicked), tm);
-    GtkWidget *end_btn = gtk_button_new_with_label("End task");
+    GtkWidget *end_btn = gtk_button_new_with_label(ns_i18n("End task"));
     gtk_widget_add_css_class(end_btn, "destructive-action");
     g_signal_connect(end_btn, "clicked", G_CALLBACK(task_mgr_end_task), tm);
     gtk_box_append(GTK_BOX(bar), spacer);
@@ -769,7 +774,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->window = gtk_application_window_new(app);
     g_object_set_data_full(G_OBJECT(pw->window), "ns-procwindow", pw,
                            (GDestroyNotify)procwindow_free);
-    gtk_window_set_title(GTK_WINDOW(pw->window), "Nordstjernen");
+    gtk_window_set_title(GTK_WINDOW(pw->window), ns_i18n("Nordstjernen"));
     gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -780,43 +785,43 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_set_margin_start(toolbar, 4);
     gtk_widget_set_margin_end(toolbar, 4);
 
-    pw->back = toolbar_button("nordstjernen-back", "Back",
+    pw->back = toolbar_button("nordstjernen-back", ns_i18n("Back"),
                               G_CALLBACK(on_back_clicked), pw);
-    pw->forward = toolbar_button("nordstjernen-forward", "Forward",
+    pw->forward = toolbar_button("nordstjernen-forward", ns_i18n("Forward"),
                                  G_CALLBACK(on_forward_clicked), pw);
-    pw->reload = toolbar_button("nordstjernen-reload", "Reload",
+    pw->reload = toolbar_button("nordstjernen-reload", ns_i18n("Reload"),
                                 G_CALLBACK(on_reload_clicked), pw);
-    GtkWidget *home = toolbar_button("nordstjernen-home", "Home",
+    GtkWidget *home = toolbar_button("nordstjernen-home", ns_i18n("Home"),
                                      G_CALLBACK(on_home_clicked), pw);
 
     pw->spinner = gtk_spinner_new();
-    gtk_widget_set_tooltip_text(pw->spinner, "Loading");
+    gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));
     gtk_widget_set_valign(pw->spinner, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(pw->spinner, FALSE);
 
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
-                                   "Enter a URL and press Enter");
+                                   ns_i18n("Enter a URL and press Enter"));
     g_signal_connect(pw->address, "activate",
                      G_CALLBACK(on_address_activate), pw);
 
-    GtkWidget *go = toolbar_button("nordstjernen-go", "Go",
+    GtkWidget *go = toolbar_button("nordstjernen-go", ns_i18n("Go"),
                                    G_CALLBACK(on_go_clicked), pw);
-    GtkWidget *newtab = toolbar_button("tab-new-symbolic", "New tab",
+    GtkWidget *newtab = toolbar_button("tab-new-symbolic", ns_i18n("New tab"),
                                        G_CALLBACK(on_newtab_clicked), pw);
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
-                                          "Bookmarks",
+                                          ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
 
     GMenu *appmenu = g_menu_new();
-    g_menu_append(appmenu, "New Tab", "win.new-tab");
-    g_menu_append(appmenu, "Reload", "win.reload");
-    g_menu_append(appmenu, "JavaScript Console", "win.console");
-    g_menu_append(appmenu, "Task Manager", "win.task-manager");
-    g_menu_append(appmenu, "Settings", "win.settings");
+    g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
+    g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
+    g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
+    g_menu_append(appmenu, ns_i18n("Task Manager"), "win.task-manager");
+    g_menu_append(appmenu, ns_i18n("Settings"), "win.settings");
     GMenu *appmenu_about = g_menu_new();
-    g_menu_append(appmenu_about, "About Nordstjernen", "win.about");
+    g_menu_append(appmenu_about, ns_i18n("About Nordstjernen"), "win.about");
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
     g_object_unref(appmenu_about);
     GtkWidget *menu_button = gtk_menu_button_new();
@@ -824,7 +829,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
                                   "open-menu-symbolic");
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
                                    G_MENU_MODEL(appmenu));
-    gtk_widget_set_tooltip_text(menu_button, "Menu");
+    gtk_widget_set_tooltip_text(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("nordstjernen");
@@ -832,7 +837,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);
-    gtk_widget_set_tooltip_text(logo_button, "Visit nordstjernen.org");
+    gtk_widget_set_tooltip_text(logo_button, ns_i18n("Visit nordstjernen.org"));
     g_signal_connect(logo_button, "clicked", G_CALLBACK(on_logo_clicked), pw);
 
     gtk_box_append(GTK_BOX(toolbar), pw->back);
@@ -937,9 +942,9 @@ act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
         ;
     gtk_show_about_dialog(
         GTK_WINDOW(pw->window),
-        "program-name", "Nordstjernen",
+        "program-name", ns_i18n("Nordstjernen"),
         "version", NS_VERSION,
-        "comments", comments,
+        "comments", ns_i18n(comments),
         "website", "https://nordstjernen.org",
         "website-label", "nordstjernen.org",
         "authors", authors,
@@ -1062,7 +1067,7 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     SettingsDlg *s = g_new0(SettingsDlg, 1);
     s->pw = pw;
     s->window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(s->window), "Settings");
+    gtk_window_set_title(GTK_WINDOW(s->window), ns_i18n("Settings"));
     gtk_window_set_transient_for(GTK_WINDOW(s->window), GTK_WINDOW(pw->window));
     gtk_window_set_modal(GTK_WINDOW(s->window), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(s->window), 460, -1);
@@ -1078,7 +1083,7 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
     gtk_grid_set_column_spacing(GTK_GRID(grid), 14);
 
-    GtkWidget *home_l = gtk_label_new("Home page");
+    GtkWidget *home_l = gtk_label_new(ns_i18n("Home page"));
     gtk_widget_set_halign(home_l, GTK_ALIGN_START);
     s->home = gtk_entry_new();
     gtk_widget_set_hexpand(s->home, TRUE);
@@ -1096,12 +1101,12 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
             break;
         }
 
-    GtkWidget *search_l = gtk_label_new("Search engine");
+    GtkWidget *search_l = gtk_label_new(ns_i18n("Search engine"));
     gtk_widget_set_halign(search_l, GTK_ALIGN_START);
     const char *dd_names[G_N_ELEMENTS(k_search_engines) + 2];
     for (guint i = 0; i < G_N_ELEMENTS(k_search_engines); i++)
         dd_names[i] = k_search_engines[i].name;
-    dd_names[G_N_ELEMENTS(k_search_engines)] = "Custom\xe2\x80\xa6";
+    dd_names[G_N_ELEMENTS(k_search_engines)] = ns_i18n("Custom\xe2\x80\xa6");
     dd_names[G_N_ELEMENTS(k_search_engines) + 1] = NULL;
     s->search_dd = gtk_drop_down_new_from_strings(dd_names);
     gtk_widget_set_hexpand(s->search_dd, TRUE);
@@ -1109,7 +1114,7 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_grid_attach(GTK_GRID(grid), search_l, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), s->search_dd, 1, 1, 1, 1);
 
-    GtkWidget *custom_l = gtk_label_new("Custom URL");
+    GtkWidget *custom_l = gtk_label_new(ns_i18n("Custom URL"));
     gtk_widget_set_halign(custom_l, GTK_ALIGN_START);
     s->search = gtk_entry_new();
     gtk_widget_set_hexpand(s->search, TRUE);
@@ -1123,7 +1128,7 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     g_signal_connect(s->search_dd, "notify::selected",
                      G_CALLBACK(on_search_engine_selected), s);
 
-    GtkWidget *font_l = gtk_label_new("Default font size");
+    GtkWidget *font_l = gtk_label_new(ns_i18n("Default font size"));
     gtk_widget_set_halign(font_l, GTK_ALIGN_START);
     s->font_size = gtk_spin_button_new_with_range(8, 32, 1);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(s->font_size),
@@ -1132,29 +1137,29 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_grid_attach(GTK_GRID(grid), font_l, 0, 3, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), s->font_size, 1, 3, 1, 1);
 
-    s->images  = settings_add_switch(GTK_GRID(grid), 4, "Load images",
+    s->images  = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Load images"),
                                      cfg ? cfg->images_enabled : TRUE);
-    s->webgl   = settings_add_switch(GTK_GRID(grid), 5, "Enable WebGL",
+    s->webgl   = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Enable WebGL"),
                                      cfg ? cfg->webgl_enabled : FALSE);
-    s->storage = settings_add_switch(GTK_GRID(grid), 6, "Enable local storage",
+    s->storage = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Enable local storage"),
                                      cfg ? cfg->local_storage_enabled : TRUE);
-    s->dnt     = settings_add_switch(GTK_GRID(grid), 7, "Send Do Not Track",
+    s->dnt     = settings_add_switch(GTK_GRID(grid), 7, ns_i18n("Send Do Not Track"),
                                      cfg ? cfg->do_not_track : FALSE);
-    s->cache   = settings_add_switch(GTK_GRID(grid), 8, "Enable cache",
+    s->cache   = settings_add_switch(GTK_GRID(grid), 8, ns_i18n("Enable cache"),
                                      cfg ? cfg->cache_enabled : TRUE);
 
     gtk_box_append(GTK_BOX(box), grid);
 
     GtkWidget *note = gtk_label_new(
-        "Changes apply to newly opened pages.");
+        ns_i18n("Changes apply to newly opened pages."));
     gtk_widget_add_css_class(note, "dim-label");
     gtk_widget_set_halign(note, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(box), note);
 
     GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_halign(buttons, GTK_ALIGN_END);
-    GtkWidget *cancel = gtk_button_new_with_label("Cancel");
-    GtkWidget *save = gtk_button_new_with_label("Save");
+    GtkWidget *cancel = gtk_button_new_with_label(ns_i18n("Cancel"));
+    GtkWidget *save = gtk_button_new_with_label(ns_i18n("Save"));
     gtk_widget_add_css_class(save, "suggested-action");
     g_signal_connect(cancel, "clicked", G_CALLBACK(on_settings_close), s);
     g_signal_connect(save, "clicked", G_CALLBACK(on_settings_save), s);
@@ -1206,7 +1211,7 @@ on_add_bookmark(GtkButton *button, gpointer user_data)
     const char *title = ns_proc_view_title(v);
     if (url && *url && !ns_bookmarks_contains(pw->bookmarks, url)) {
         ns_bookmarks_add(pw->bookmarks, url, title);
-        gtk_label_set_text(GTK_LABEL(pw->status), "Bookmark added");
+        gtk_label_set_text(GTK_LABEL(pw->status), ns_i18n("Bookmark added"));
     }
 }
 
@@ -1220,7 +1225,7 @@ build_bookmarks_popover(ProcWindow *pw)
     gtk_widget_set_margin_end(box, 6);
     gtk_widget_set_size_request(box, 320, -1);
 
-    GtkWidget *add = gtk_button_new_with_label("Bookmark this page");
+    GtkWidget *add = gtk_button_new_with_label(ns_i18n("Bookmark this page"));
     g_signal_connect(add, "clicked", G_CALLBACK(on_add_bookmark), pw);
     gtk_box_append(GTK_BOX(box), add);
     gtk_box_append(GTK_BOX(box),
@@ -1233,7 +1238,7 @@ build_bookmarks_popover(ProcWindow *pw)
     GtkWidget *list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     guint n = pw->bookmarks ? ns_bookmarks_count(pw->bookmarks) : 0;
     if (n == 0) {
-        GtkWidget *empty = gtk_label_new("No bookmarks yet");
+        GtkWidget *empty = gtk_label_new(ns_i18n("No bookmarks yet"));
         gtk_widget_add_css_class(empty, "dim-label");
         gtk_box_append(GTK_BOX(list), empty);
     }
@@ -1339,8 +1344,8 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
         g_free(contents);
         if (opened)
             gtk_label_set_text(GTK_LABEL(pw->status),
-                               "Recovered the previous session after an "
-                               "unexpected exit");
+                               ns_i18n("Recovered the previous session after "
+                                       "an unexpected exit"));
     }
     if (!opened)
         proc_window_add_tab(pw, ctx->url ? ctx->url : "about:start", TRUE);

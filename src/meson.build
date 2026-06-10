@@ -47,6 +47,7 @@ nordstjernen_engine_sources = files(
   'glctx.c',
   'history.c',
   'html.c',
+  'i18n.c',
   'image.c',
   'image_ico.c',
   'image_webp.c',

@@ -24,6 +24,8 @@ typedef struct ns_selection {
 void ns_selection_clear(ns_selection *sel);
 gboolean ns_selection_has_range(const ns_selection *sel);
 
+gboolean ns_selection_text_at(const ns_box *root, double x, double y);
+
 gboolean ns_selection_anchor_at(ns_selection *sel, const ns_box *root,
                                 double x, double y);
 gboolean ns_selection_extend_to(ns_selection *sel, const ns_box *root,

@@ -25,6 +25,7 @@
 #include "font.h"
 #include "headless.h"
 #include "history.h"
+#include "i18n.h"
 #include "net.h"
 #include "procview.h"
 #include "procwindow.h"
@@ -408,6 +409,7 @@ main(int argc, char **argv)
 #endif
     if (!ns_security_refuse_root()) return 77;
     init_self_exe(argc > 0 ? argv[0] : NULL);
+    ns_i18n_init(g_self_exe);
     ns_config_init();
 
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);

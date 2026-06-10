@@ -60,6 +60,12 @@ inline_at_xy_walk(const ns_box *root, double x, double y)
     return NULL;
 }
 
+gboolean
+ns_selection_text_at(const ns_box *root, double x, double y)
+{
+    return inline_at_xy_walk(root, x, y) != NULL;
+}
+
 static const ns_box *
 nearest_inline_walk(const ns_box *root, double x, double y,
                     double *best_dist, const ns_box *best)

@@ -634,7 +634,9 @@ defects, and will not be added:
   external media player instead.
 - **JIT** (interpreter-only, to preserve W^X process-wide).
 - Telemetry, crash reporters, update pingers, "studies".
-- Localisation beyond English (for now).
+- gettext / `.po` localisation tooling. (UI strings *are* translated to
+  the OS language through the in-tree `src/i18n.c` catalogue lookup over
+  `data/i18n/*.lang`; English is the source and fallback.)
 
 ## Highest-leverage HTML/CSS gaps for real-world sites
 

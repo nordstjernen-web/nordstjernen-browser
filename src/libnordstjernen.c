@@ -735,20 +735,29 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     if (!style) return NULL;
 
     const ns_css_value *v = style->values[NS_CSS_CURSOR];
-    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return NULL;
-
     char *match = NULL;
-    char **tokens = g_strsplit_set(v->u.keyword, ", \t", -1);
-    for (int i = 0; tokens && tokens[i]; i++) {
-        if (!tokens[i][0]) continue;
-        for (gsize k = 0; k < G_N_ELEMENTS(known); k++)
-            if (g_ascii_strcasecmp(tokens[i], known[k]) == 0) {
-                g_free(match);
-                match = g_strdup(known[k]);
-            }
+    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
+        char **tokens = g_strsplit_set(v->u.keyword, ", \t", -1);
+        for (int i = 0; tokens && tokens[i]; i++) {
+            if (!tokens[i][0]) continue;
+            for (gsize k = 0; k < G_N_ELEMENTS(known); k++)
+                if (g_ascii_strcasecmp(tokens[i], known[k]) == 0) {
+                    g_free(match);
+                    match = g_strdup(known[k]);
+                }
+        }
+        g_strfreev(tokens);
     }
-    g_strfreev(tokens);
-    return match;
+    if (match) return match;
+
+    if (ns_box_hit_link(browser->layout, (double)x, (double)y)) return NULL;
+    if (form_node)
+        return ns_node_is_text_input(form_node) ? g_strdup("text") : NULL;
+    for (const ns_node *n = node; n; n = n->parent)
+        if (ns_node_is_contenteditable_host(n)) return g_strdup("text");
+    if (ns_selection_text_at(browser->layout, (double)x, (double)y))
+        return g_strdup("text");
+    return NULL;
 }
 
 char *

@@ -25,7 +25,10 @@ nothing imported.
   and play overlay; clicking resolves the media URL in the renderer
   (`ns_browser_media_at`) and the shell hands it to an external player
   (`src/media.c::ns_media_try_launch`).
-- English UI only (for now).
+- UI strings are English-source and translated to the operating-system
+  language at startup through the in-tree catalogue lookup (`src/i18n.c`,
+  `data/i18n/*.lang`); English is the fallback for any string a catalogue
+  does not cover. No gettext dependency.
 - Does not phone home, does not telemeter the user.
 
 ## Comments policy
@@ -230,6 +233,8 @@ don't add `meson test` targets.
 - Don't add WebGPU/AI surface area, even as stubs. (WebGL already
   exists as a deliberate, opt-in exception — extend `src/webgl.c`, don't
   re-architect it.)
-- Don't add translations, telemetry, crash reporters, update pingers,
-  or "studies" infrastructure.
+- Don't add telemetry, crash reporters, update pingers, or "studies"
+  infrastructure. UI translation goes through `src/i18n.c` and the
+  `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`
+  tooling.
 - Don't write planning docs unless asked.
