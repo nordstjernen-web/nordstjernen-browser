@@ -159,6 +159,22 @@ ns_ai_turn_free(gpointer data)
     g_free(t);
 }
 
+static char *
+ns_ai_history_compact(const char *content)
+{
+    GString *o = g_string_new(NULL);
+    for (const char *p = content; *p; ) {
+        if (g_str_has_prefix(p, "data:")) {
+            g_string_append(o, "data:,");
+            while (*p && *p != ')' && !g_ascii_isspace((guchar)*p))
+                p++;
+            continue;
+        }
+        g_string_append_c(o, *p++);
+    }
+    return g_string_free(o, FALSE);
+}
+
 static void
 ns_ai_history_append_locked(const char *role, const char *content)
 {
@@ -166,7 +182,7 @@ ns_ai_history_append_locked(const char *role, const char *content)
         g_history = g_ptr_array_new_with_free_func(ns_ai_turn_free);
     ns_ai_turn *t = g_new0(ns_ai_turn, 1);
     t->role = g_strdup(role);
-    t->content = g_strdup(content);
+    t->content = ns_ai_history_compact(content);
     g_ptr_array_add(g_history, t);
     while (g_history->len > NS_AI_HISTORY_MAX)
         g_ptr_array_remove_index(g_history, 0);
@@ -550,6 +566,7 @@ ns_ai_http_get(const char *url)
     curl_easy_setopt(c, CURLOPT_TIMEOUT, 20L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(c, CURLOPT_USERAGENT, NS_USER_AGENT);
+    curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
     ns_net_apply_curl_proxy(c, url);
     CURLcode rc = curl_easy_perform(c);
     curl_slist_free_all(hdrs);
@@ -656,15 +673,42 @@ ns_ai_ddg_decode_url(const char *href)
     return g_strdup(href);
 }
 
+static const char *
+ns_ai_wiki_lang(void)
+{
+    static char lang[4];
+    static gboolean tried;
+    if (tried)
+        return lang;
+    tried = TRUE;
+    const char *const *names = g_get_language_names();
+    for (int i = 0; names && names[i]; i++) {
+        const char *n = names[i];
+        gsize l = 0;
+        while (n[l] && g_ascii_isalpha((guchar)n[l]))
+            l++;
+        if ((l != 2 && l != 3) ||
+            (n[l] && n[l] != '_' && n[l] != '-' && n[l] != '.' && n[l] != '@'))
+            continue;
+        for (gsize k = 0; k < l; k++)
+            lang[k] = g_ascii_tolower(n[k]);
+        lang[l] = '\0';
+        break;
+    }
+    if (!lang[0])
+        g_strlcpy(lang, "en", sizeof lang);
+    return lang;
+}
+
 static char *
-ns_ai_image_search(const char *query, char **page_out)
+ns_ai_image_search_lang(const char *query, const char *lang, char **page_out)
 {
     if (page_out) *page_out = NULL;
     char *eq = g_uri_escape_string(query, NULL, TRUE);
     char *url = g_strdup_printf(
-        "https://en.wikipedia.org/w/api.php?action=query&format=json"
+        "https://%s.wikipedia.org/w/api.php?action=query&format=json"
         "&generator=search&gsrsearch=%s&gsrlimit=1&prop=pageimages"
-        "&piprop=thumbnail&pithumbsize=640", eq);
+        "&piprop=thumbnail&pithumbsize=640", lang, eq);
     char *json = ns_ai_http_get(url);
     g_free(url);
     g_free(eq);
@@ -676,10 +720,21 @@ ns_ai_image_search(const char *query, char **page_out)
 
     if (img && page_out && title) {
         char *t = g_uri_escape_string(title, NULL, TRUE);
-        *page_out = g_strdup_printf("https://en.wikipedia.org/wiki/%s", t);
+        *page_out = g_strdup_printf("https://%s.wikipedia.org/wiki/%s",
+                                    lang, t);
         g_free(t);
     }
     g_free(title);
+    return img;
+}
+
+static char *
+ns_ai_image_search(const char *query, char **page_out)
+{
+    const char *lang = ns_ai_wiki_lang();
+    char *img = ns_ai_image_search_lang(query, lang, page_out);
+    if (!img && !g_str_equal(lang, "en"))
+        img = ns_ai_image_search_lang(query, "en", page_out);
     return img;
 }
 
@@ -853,9 +908,14 @@ ns_ai_normalize_url(const char *raw)
 {
     if (!raw || !*raw) return NULL;
     char *s = g_strstrip(g_strdup(raw));
-    if (!*s) { g_free(s); return NULL; }
-    if (strstr(s, "://"))
-        return s;
+    if (!*s || strpbrk(s, " \t\r\n")) { g_free(s); return NULL; }
+    if (strstr(s, "://")) {
+        if (g_ascii_strncasecmp(s, "http://", 7) == 0 ||
+            g_ascii_strncasecmp(s, "https://", 8) == 0)
+            return s;
+        g_free(s);
+        return NULL;
+    }
     char *full = g_strconcat("https://", s, NULL);
     g_free(s);
     return full;
@@ -984,13 +1044,13 @@ ns_ai_wiki_relevant(const char *query, const char *title, const char *extract)
 }
 
 static char *
-ns_ai_wiki_summary(const char *query)
+ns_ai_wiki_summary_lang(const char *query, const char *lang)
 {
     char *eq = g_uri_escape_string(query, NULL, TRUE);
     char *url = g_strdup_printf(
-        "https://en.wikipedia.org/w/api.php?action=query&format=json"
+        "https://%s.wikipedia.org/w/api.php?action=query&format=json"
         "&generator=search&gsrsearch=%s&gsrlimit=1&prop=extracts%%7Cinfo"
-        "&inprop=url&exintro&explaintext&exchars=700", eq);
+        "&inprop=url&exintro&explaintext&exchars=700", lang, eq);
     char *json = ns_ai_http_get(url);
     g_free(url);
     g_free(eq);
@@ -1005,12 +1065,22 @@ ns_ai_wiki_summary(const char *query)
     if (extract && *g_strstrip(extract) &&
         ns_ai_wiki_relevant(query, title, extract)) {
         reply = g_strdup_printf("%s\n\n[Read more on Wikipedia](%s)",
-            extract, page ? page : "https://en.wikipedia.org");
+            extract, page ? page : "https://www.wikipedia.org");
     }
     g_free(extract);
     g_free(title);
     g_free(page);
     return reply ? ns_ai_strip_nav_markers(reply) : NULL;
+}
+
+static char *
+ns_ai_wiki_summary(const char *query)
+{
+    const char *lang = ns_ai_wiki_lang();
+    char *reply = ns_ai_wiki_summary_lang(query, lang);
+    if (!reply && !g_str_equal(lang, "en"))
+        reply = ns_ai_wiki_summary_lang(query, "en");
+    return reply;
 }
 
 static char *
@@ -1798,13 +1868,28 @@ ns_ai_chat_start(const char *user_msg)
     return g_strdup_printf("{\"job\":%d}", job);
 }
 
+static char *
+ns_ai_job_text_utf8_locked(gboolean running)
+{
+    const char *raw = g_job_text ? g_job_text->str : "";
+    gsize len = g_job_text ? g_job_text->len : 0;
+    const char *valid_end = NULL;
+    if (g_utf8_validate(raw, (gssize)len, &valid_end))
+        return g_strndup(raw, len);
+    if (running)
+        return g_strndup(raw, (gsize)(valid_end - raw));
+    return g_utf8_make_valid(raw, (gssize)len);
+}
+
 char *
 ns_ai_chat_poll(void)
 {
     g_mutex_lock(&g_job_lock);
     const char *state = g_job_running ? "running"
                       : g_job_error   ? "error" : "done";
-    char *text = ns_ai_json_escape(g_job_text ? g_job_text->str : "");
+    char *text_utf8 = ns_ai_job_text_utf8_locked(g_job_running);
+    char *text = ns_ai_json_escape(text_utf8);
+    g_free(text_utf8);
     char *phase = ns_ai_json_escape(g_job_phase ? g_job_phase : "");
     char *err = g_job_error ? ns_ai_json_escape(g_job_error) : NULL;
     int job = g_job_id;

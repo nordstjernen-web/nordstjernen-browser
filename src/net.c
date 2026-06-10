@@ -2519,6 +2519,7 @@ static const char k_about_start_template[] =
     " 'searching':'searching the web\\u2026'};\n"
     "function chatDone(t,txt){\n"
     " if(txt.indexOf('@@NAVIGATE@@')===0){var u=txt.slice(12).trim();\n"
+    "   if(!/^https?:\\/\\//i.test(u)){renderMsg(t,u); return;}\n"
     "   t.className='msg bot';\n"
     "   t.textContent='Opening '+u+' \\u2026';\n"
     "   log.scrollTop=log.scrollHeight;\n"
