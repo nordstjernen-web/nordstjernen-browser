@@ -561,10 +561,10 @@ configure_adjustments(NsProcView *v)
     double s = cur_scale(v);
     double cw = viewport_w(v) / s;
     double ch = viewport_h(v) / s;
-    gtk_adjustment_configure(v->hadj, v->scroll_x, 0,
-                             v->page_w > 0 ? v->page_w : cw, 60, cw, cw);
-    gtk_adjustment_configure(v->vadj, v->scroll_y, 0,
-                             v->page_h > 0 ? v->page_h : ch, 60, ch, ch);
+    double upper_w = v->page_w > cw ? v->page_w : cw;
+    double upper_h = v->page_h > ch ? v->page_h : ch;
+    gtk_adjustment_configure(v->hadj, v->scroll_x, 0, upper_w, 60, cw, cw);
+    gtk_adjustment_configure(v->vadj, v->scroll_y, 0, upper_h, 60, ch, ch);
     v->scroll_x = (int)gtk_adjustment_get_value(v->hadj);
     v->scroll_y = (int)gtk_adjustment_get_value(v->vadj);
 }
@@ -1319,11 +1319,9 @@ on_result(gpointer data)
             post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Copied selection"));
         }
     } else if (res->type == RES_KEY) {
-        if (res->kind != 0)
-            goto done;
         if (res->seq != v->key_seq)
             goto done;
-        if (res->href && *res->href) {
+        if (res->kind == 0 && res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             ns_proc_view_load(v, res->href);
         } else {
