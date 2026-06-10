@@ -75,13 +75,15 @@ ns_ai_chat_reset(void)
     "facts, news, prices, or any web lookup, reply with ONLY one line: " \
     "SEARCH: <search terms>. If the user asks to open, go to, visit, or " \
     "navigate to a website or URL, reply with ONLY one line: GO: <url>. " \
-    "Otherwise answer directly from your own knowledge. Never describe the " \
-    "tools; either emit one tool line or give the answer."
+    "Otherwise answer directly from your own knowledge, in the language " \
+    "the user writes in. Never describe the tools; either emit one tool " \
+    "line or give the answer."
 #define NS_AI_ANSWER_PROMPT \
     "You are the assistant built into the Nordstjernen web browser. Answer " \
-    "the user's request using the web search results provided. Be concise. " \
-    "Cite sources inline as markdown links like [title](https://url). Do not " \
-    "mention tools and do not emit IMAGE: or SEARCH: lines."
+    "the user's request using the web search results provided, in the " \
+    "language the user writes in. Be concise. Cite sources inline as " \
+    "markdown links like [title](https://url). Do not mention tools and do " \
+    "not emit IMAGE: or SEARCH: lines."
 
 typedef struct {
     const char *id;
@@ -785,13 +787,72 @@ ns_ai_fetch_data_uri(const char *url)
     return uri;
 }
 
+static const char *
+ns_ai_search_region(void)
+{
+    static const struct { const char *tag; const char *kl; } map[] = {
+        { "en_us", "us-en" }, { "en_gb", "uk-en" }, { "en_au", "au-en" },
+        { "en_ca", "ca-en" }, { "en_in", "in-en" }, { "de_at", "at-de" },
+        { "de_ch", "ch-de" }, { "de", "de-de" },    { "fr_ca", "ca-fr" },
+        { "fr_be", "be-fr" }, { "fr_ch", "ch-fr" }, { "fr", "fr-fr" },
+        { "es_mx", "mx-es" }, { "es_ar", "ar-es" }, { "es_cl", "cl-es" },
+        { "es_co", "co-es" }, { "es", "es-es" },    { "pt_pt", "pt-pt" },
+        { "pt", "br-pt" },    { "it", "it-it" },    { "nl_be", "be-nl" },
+        { "nl", "nl-nl" },    { "pl", "pl-pl" },    { "ru", "ru-ru" },
+        { "ja", "jp-jp" },    { "ko", "kr-kr" },    { "zh_tw", "tw-tzh" },
+        { "zh_hk", "hk-tzh" },{ "zh", "cn-zh" },    { "tr", "tr-tr" },
+        { "sv", "se-sv" },    { "nb", "no-no" },    { "nn", "no-no" },
+        { "no", "no-no" },    { "da", "dk-da" },    { "fi", "fi-fi" },
+        { "el", "gr-el" },    { "cs", "cz-cs" },    { "hu", "hu-hu" },
+        { "ro", "ro-ro" },    { "bg", "bg-bg" },    { "uk", "ua-uk" },
+        { "he", "il-he" },    { "ar", "xa-ar" },    { "th", "th-th" },
+        { "vi", "vn-vi" },    { "id", "id-id" },    { "ms", "my-ms" },
+        { "et", "ee-et" },    { "lv", "lv-lv" },    { "lt", "lt-lt" },
+        { "sk", "sk-sk" },    { "sl", "sl-sl" },    { "hr", "hr-hr" },
+        { "ca", "ct-ca" },
+    };
+    static const char *cached;
+    static gboolean tried;
+    if (tried)
+        return cached;
+    tried = TRUE;
+    const char *const *names = g_get_language_names();
+    const char *raw = names && names[0] ? names[0] : "";
+    char tag[16] = { 0 };
+    gsize n = 0;
+    for (const char *p = raw; *p && n < sizeof tag - 1; p++) {
+        if (*p == '.' || *p == '@')
+            break;
+        tag[n++] = (*p == '-') ? '_' : g_ascii_tolower(*p);
+    }
+    for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
+        if (g_str_equal(tag, map[i].tag)) {
+            cached = map[i].kl;
+            return cached;
+        }
+    char *us = strchr(tag, '_');
+    if (us) {
+        *us = '\0';
+        for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
+            if (g_str_equal(tag, map[i].tag)) {
+                cached = map[i].kl;
+                return cached;
+            }
+    }
+    return cached;
+}
+
 static char *
 ns_ai_web_search(const char *query, char **sources_out, char **display_out)
 {
     if (sources_out) *sources_out = NULL;
     if (display_out) *display_out = NULL;
     char *eq = g_uri_escape_string(query, NULL, TRUE);
-    char *u = g_strdup_printf("https://html.duckduckgo.com/html/?q=%s", eq);
+    const char *kl = ns_ai_search_region();
+    char *u = kl
+        ? g_strdup_printf("https://html.duckduckgo.com/html/?q=%s&kl=%s",
+                          eq, kl)
+        : g_strdup_printf("https://html.duckduckgo.com/html/?q=%s", eq);
     g_free(eq);
     char *html = ns_ai_http_get(u);
     g_free(u);

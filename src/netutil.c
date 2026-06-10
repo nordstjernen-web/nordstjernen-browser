@@ -73,6 +73,8 @@ ns_address_is_search(const char *s)
     for (const char *p = s; *p; p++)
         if (*p == ' ' || *p == '\t')
             return TRUE;
+    if (strstr(s, "\xe3\x80\x80"))
+        return TRUE;
     if (g_str_has_prefix(s, "localhost") &&
         (s[9] == '\0' || s[9] == ':' || s[9] == '/'))
         return FALSE;
