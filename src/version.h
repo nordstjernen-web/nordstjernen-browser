@@ -6,7 +6,7 @@
 #ifndef NS_VERSION_H
 #define NS_VERSION_H
 
-#define NS_VERSION "1.0.3-dev"
+#define NS_VERSION "1.0.3"
 
 #ifndef NS_BUILD_DATE
 #define NS_BUILD_DATE ""
