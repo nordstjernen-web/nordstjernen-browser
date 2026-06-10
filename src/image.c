@@ -1036,6 +1036,12 @@ ns_image_cache_animating(const ns_image_cache *cache)
     return FALSE;
 }
 
+gboolean
+ns_image_cache_has_pending(const ns_image_cache *cache)
+{
+    return cache && cache->pending->len > 0;
+}
+
 ns_image *
 ns_image_cache_insert_loaded(ns_image_cache *cache, const char *url,
                              ns_texture *texture, int width, int height)

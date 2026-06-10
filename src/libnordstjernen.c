@@ -198,13 +198,33 @@ static gboolean
 settle_quit_cb(gpointer user_data)
 {
     g_main_loop_quit(user_data);
-    return G_SOURCE_REMOVE;
+    return G_SOURCE_CONTINUE;
+}
+
+typedef struct settle_ctx {
+    ns_browser *b;
+    GMainLoop  *loop;
+    int         quiet_ticks;
+} settle_ctx;
+
+#define NS_SETTLE_QUIET_TICKS 3
+
+static gboolean
+browser_settle_quiet(ns_browser *b)
+{
+    if (b->dirty) return FALSE;
+    if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
+    if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
+    if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
+    if (g_main_context_pending(NULL)) return FALSE;
+    return TRUE;
 }
 
 static gboolean
 settle_tick_cb(gpointer user_data)
 {
-    ns_browser *b = user_data;
+    settle_ctx *ctx = user_data;
+    ns_browser *b = ctx->b;
     gint64 now = g_get_monotonic_time();
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->anim) ns_anim_tick(b->anim, now);
@@ -212,6 +232,14 @@ settle_tick_cb(gpointer user_data)
     if (b->js && ns_js_run_animation_frame(b->js) &&
         ns_js_consume_mutated(b->js))
         browser_relayout_from_mutation(b);
+    if (browser_settle_quiet(b)) {
+        if (++ctx->quiet_ticks >= NS_SETTLE_QUIET_TICKS) {
+            g_main_loop_quit(ctx->loop);
+            return G_SOURCE_CONTINUE;
+        }
+    } else {
+        ctx->quiet_ticks = 0;
+    }
     return G_SOURCE_CONTINUE;
 }
 
@@ -220,10 +248,12 @@ browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
-    g_timeout_add(settle_ms, settle_quit_cb, loop);
-    guint tick = g_timeout_add(16, settle_tick_cb, b);
+    settle_ctx ctx = { .b = b, .loop = loop };
+    guint quit = g_timeout_add(settle_ms, settle_quit_cb, loop);
+    guint tick = g_timeout_add(16, settle_tick_cb, &ctx);
     g_main_loop_run(loop);
     g_source_remove(tick);
+    g_source_remove(quit);
     g_main_loop_unref(loop);
 }
 

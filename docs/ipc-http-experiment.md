@@ -31,7 +31,7 @@ pixels travel through shared memory. The whole protocol is this catalog:
 
 | Request | Body | Response |
 | --- | --- | --- |
-| `POST /open` | `{url,width,height,settle_ms}` | `{ok,page_width,page_height,title,url}` |
+| `POST /open` | `{url,width,height,settle_ms}` | `{ok,page_width,page_height,title,url}`. `settle_ms` is a cap, not a fixed wait: the settle loop exits as soon as the page has been quiet (no pending fetches/XHRs/timers/animation-frame callbacks/image loads, empty main context) for a few consecutive ticks, so simple pages open in tens of milliseconds while busy pages get the full window |
 | `POST /render` | `{width,height,scroll_x,scroll_y,scale}` | `X-W/X-H/X-Stride/X-Anim` headers; **pixels in shm**, empty body. When the engine reports nothing changed since the last frame and the viewport/scroll/scale are identical, the reply is `X-Unchanged: 1` with no repaint — the client keeps its cached frame. `X-Anim`/`X-Nav`/`X-WebGL` still ride on unchanged replies, so the frame loop and pending navigations are unaffected |
 | `POST /link` `/click` `/select` | `{x,y[,mods\|kind]}` | `{href}` (`/link` also returns the computed `cursor` keyword) |
 | `POST /key` | `{kind,key,code,keycode,mods}` | `{href}` |

@@ -116,6 +116,7 @@ ns_texture *ns_image_decode_ico(const guchar *data, gsize len,
 
 gboolean ns_image_cache_tick(ns_image_cache *cache, gint64 now_us);
 gboolean ns_image_cache_animating(const ns_image_cache *cache);
+gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 
 void     ns_image_cache_begin_generation(ns_image_cache *cache);
 void     ns_image_cache_collect(ns_image_cache *cache);
