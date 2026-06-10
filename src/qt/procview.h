@@ -39,6 +39,7 @@ public:
 
     bool canGoBack() const;
     bool canGoForward() const;
+    bool isLoading() const { return m_isLoading; }
     QString currentUrl() const { return m_currentUrl; }
     QString currentTitle() const { return m_currentTitle; }
 
@@ -102,12 +103,14 @@ private:
     void pollConsole();
     void runEval();
     bool maybeLaunchMedia(int x, int y);
+    void setLoading(bool loading);
 
     ProcWorker *m_worker = nullptr;
     QThread *m_workerThread = nullptr;
     QString m_rendererPath;
     QString m_currentUrl;
     QString m_currentTitle;
+    bool m_isLoading = false;
     QStringList m_history;
     int m_historyIndex = -1;
     bool m_pendingRecord = true;

@@ -3,14 +3,21 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
+#include "bookmarks.h"
+#include "config.h"
+#include "net.h"
+#include "rproc_http.h"
+
 #include "procwindow.h"
 #include "procview.h"
-#include "rproc_http.h"
 
 #include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -19,7 +26,9 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPixmap>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStatusBar>
 #include <QStyle>
 #include <QKeyEvent>
@@ -28,15 +37,44 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
-#include <QUrl>
 #include <QVBoxLayout>
 
 #include "version.h"
 
+namespace {
+const struct { const char *name; const char *url; } kSearchEngines[] = {
+    { "DuckDuckGo Lite", "https://lite.duckduckgo.com/lite/?q=%s" },
+    { "DuckDuckGo",      "https://duckduckgo.com/?q=%s" },
+    { "Baidu",           "https://www.baidu.com/s?wd=%s" },
+    { "Google",          "https://www.google.com/search?q=%s" },
+    { "Bing",            "https://www.bing.com/search?q=%s" },
+    { "Yandex",          "https://yandex.com/search/?text=%s" },
+    { "Yahoo",           "https://search.yahoo.com/search?p=%s" },
+    { "Yahoo! Japan",    "https://search.yahoo.co.jp/search?p=%s" },
+    { "Sogou",           "https://www.sogou.com/web?query=%s" },
+    { "Naver",           "https://search.naver.com/search.naver?query=%s" },
+    { "Startpage",       "https://www.startpage.com/sp/search?query=%s" },
+    { "Brave Search",    "https://search.brave.com/search?q=%s" },
+    { "Ecosia",          "https://www.ecosia.org/search?q=%s" },
+};
+constexpr int kSearchEngineCount =
+    int(sizeof(kSearchEngines) / sizeof(kSearchEngines[0]));
+
+QString configuredHomeUrl() {
+    const ns_config *cfg = ns_config_get();
+    return (cfg && cfg->home_url && *cfg->home_url)
+        ? QString::fromUtf8(cfg->home_url)
+        : QStringLiteral("about:start");
+}
+}
+
 ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     const QPixmap logo(QStringLiteral(":/nordstjernen.gif"));
 
-    setWindowTitle(QStringLiteral("Nordstjernen (Qt)"));
+    m_homeUrl = configuredHomeUrl();
+    m_bookmarks = ns_bookmarks_load();
+
+    setWindowTitle(QStringLiteral("Nordstjernen"));
     setWindowIcon(QIcon(logo));
     resize(1024, 768);
 
@@ -64,15 +102,48 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     m_reloadAction->setToolTip(QStringLiteral("Reload (F5)"));
     m_homeAction->setToolTip(QStringLiteral("Home (Alt+Home)"));
 
+    m_spinner = new QProgressBar(this);
+    m_spinner->setRange(0, 0);
+    m_spinner->setTextVisible(false);
+    m_spinner->setFixedWidth(60);
+    m_spinner->setToolTip(QStringLiteral("Loading"));
+    m_spinner->setVisible(false);
+    toolbar->addWidget(m_spinner);
+
     m_address = new QLineEdit(this);
     m_address->setClearButtonEnabled(true);
     m_address->setPlaceholderText(
         QStringLiteral("Enter a URL and press Enter"));
     toolbar->addWidget(m_address);
 
+    QAction *goAction = toolbar->addAction(
+        style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("Go"));
+    connect(goAction, &QAction::triggered, this,
+            &ProcWindow::onAddressEntered);
+
+    QAction *newTabAction = toolbar->addAction(
+        style()->standardIcon(QStyle::SP_FileDialogNewFolder),
+        QStringLiteral("New tab"));
+    connect(newTabAction, &QAction::triggered, this, &ProcWindow::onNewTab);
+
+    QToolButton *bookmarksButton = new QToolButton(this);
+    bookmarksButton->setIcon(
+        style()->standardIcon(QStyle::SP_DialogYesButton));
+    bookmarksButton->setText(QStringLiteral("Bookmarks"));
+    bookmarksButton->setToolTip(QStringLiteral("Bookmarks"));
+    bookmarksButton->setPopupMode(QToolButton::InstantPopup);
+    bookmarksButton->setAutoRaise(true);
+    m_bookmarksMenu = new QMenu(bookmarksButton);
+    bookmarksButton->setMenu(m_bookmarksMenu);
+    connect(m_bookmarksMenu, &QMenu::aboutToShow, this,
+            &ProcWindow::rebuildBookmarksMenu);
+    toolbar->addWidget(bookmarksButton);
+
     QMenu *appMenu = new QMenu(this);
     QAction *menuNewTab = appMenu->addAction(QStringLiteral("New Tab"));
     connect(menuNewTab, &QAction::triggered, this, &ProcWindow::onNewTab);
+    QAction *menuReload = appMenu->addAction(QStringLiteral("Reload"));
+    connect(menuReload, &QAction::triggered, this, &ProcWindow::onReload);
     QAction *menuFind = appMenu->addAction(QStringLiteral("Find…"));
     menuFind->setShortcut(QKeySequence::Find);
     connect(menuFind, &QAction::triggered, this, [this]() {
@@ -103,10 +174,17 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     QAction *menuTaskMgr = appMenu->addAction(QStringLiteral("Task Manager"));
     menuTaskMgr->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Escape));
     connect(menuTaskMgr, &QAction::triggered, this, &ProcWindow::onTaskManager);
+    QAction *menuSettings = appMenu->addAction(QStringLiteral("Settings"));
+    menuSettings->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+    connect(menuSettings, &QAction::triggered, this, &ProcWindow::onSettings);
     appMenu->addSeparator();
     QAction *menuAbout =
         appMenu->addAction(QStringLiteral("About Nordstjernen"));
     connect(menuAbout, &QAction::triggered, this, &ProcWindow::onAbout);
+
+    addAction(menuFind);
+    addAction(menuTaskMgr);
+    addAction(menuSettings);
 
     QToolButton *menuButton = new QToolButton(this);
     menuButton->setText(QStringLiteral("☰"));
@@ -219,12 +297,26 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     });
     addAction(prevTab);
 
+    QAction *focusPage = new QAction(m_address);
+    focusPage->setShortcut(QKeySequence(Qt::Key_Escape));
+    focusPage->setShortcutContext(Qt::WidgetShortcut);
+    connect(focusPage, &QAction::triggered, this, [this]() {
+        if (ProcView *view = currentView())
+            view->setFocus();
+    });
+    m_address->addAction(focusPage);
+
     QAction *quitAct = new QAction(this);
     quitAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q));
     connect(quitAct, &QAction::triggered, this, [this]() { close(); });
     addAction(quitAct);
 
     updateNavActions();
+}
+
+ProcWindow::~ProcWindow() {
+    if (m_bookmarks)
+        ns_bookmarks_free(m_bookmarks);
 }
 
 ProcView *ProcWindow::viewAt(int index) const {
@@ -254,7 +346,7 @@ void ProcWindow::connectView(ProcView *view) {
         m_tabs->setTabText(index, label.left(40));
         m_tabs->setTabToolTip(index, label);
         if (view == currentView())
-            setWindowTitle(label + QStringLiteral(" — Nordstjernen (Qt)"));
+            setWindowTitle(label + QStringLiteral(" — Nordstjernen"));
     });
     connect(view, &ProcView::urlChanged, this, [this, view](const QString &u) {
         if (view == currentView())
@@ -266,7 +358,7 @@ void ProcWindow::connectView(ProcView *view) {
     });
     connect(view, &ProcView::loadingChanged, this, [this, view](bool loading) {
         if (view == currentView())
-            m_reloadAction->setEnabled(!loading);
+            setLoadingUi(loading);
     });
     connect(view, &ProcView::historyChanged, this, [this, view]() {
         if (view == currentView())
@@ -280,15 +372,17 @@ void ProcWindow::updateChrome() {
     ProcView *view = currentView();
     if (!view) {
         m_address->clear();
-        setWindowTitle(QStringLiteral("Nordstjernen (Qt)"));
+        setWindowTitle(QStringLiteral("Nordstjernen"));
+        setLoadingUi(false);
         updateNavActions();
         return;
     }
+    setLoadingUi(view->isLoading());
     m_address->setText(view->currentUrl());
     const QString title = view->currentTitle();
     setWindowTitle((title.isEmpty() ? QStringLiteral("Nordstjernen")
                                     : title) +
-                   QStringLiteral(" — Nordstjernen (Qt)"));
+                   QStringLiteral(" — Nordstjernen"));
     updateNavActions();
 }
 
@@ -297,6 +391,12 @@ void ProcWindow::updateNavActions() {
     m_backAction->setEnabled(view && view->canGoBack());
     m_forwardAction->setEnabled(view && view->canGoForward());
     m_reloadAction->setEnabled(view != nullptr);
+}
+
+void ProcWindow::setLoadingUi(bool loading) {
+    m_spinner->setVisible(loading);
+    ProcView *view = currentView();
+    m_reloadAction->setEnabled(view && !loading);
 }
 
 QString ProcWindow::normalizeUrl(const QString &input) const {
@@ -310,22 +410,12 @@ QString ProcWindow::normalizeUrl(const QString &input) const {
         trimmed.contains(QStringLiteral("://")))
         return trimmed;
 
-    bool isSearch = trimmed.contains(QLatin1Char(' ')) ||
-                    trimmed.contains(QLatin1Char('\t'));
-    if (!isSearch) {
-        const bool localhost = trimmed == QStringLiteral("localhost") ||
-                               trimmed.startsWith(QStringLiteral("localhost:")) ||
-                               trimmed.startsWith(QStringLiteral("localhost/"));
-        if (!localhost && !trimmed.contains(QLatin1Char('.')) &&
-            !trimmed.contains(QLatin1Char(':')))
-            isSearch = true;
-    }
-    if (isSearch) {
-        // The thin Qt shell does not link the engine's config store, so it
-        // uses the default engine; configurable search is GTK-only.
-        const QByteArray q = QUrl::toPercentEncoding(trimmed);
-        return QStringLiteral("https://lite.duckduckgo.com/lite/?q=") +
-               QString::fromUtf8(q);
+    const QByteArray utf8 = trimmed.toUtf8();
+    if (ns_address_is_search(utf8.constData())) {
+        char *url = ns_search_url_for(utf8.constData());
+        const QString out = QString::fromUtf8(url);
+        g_free(url);
+        return out;
     }
 
     return QStringLiteral("https://") + trimmed;
@@ -360,12 +450,14 @@ void ProcWindow::onReload() {
 }
 
 void ProcWindow::onHome() {
+    const QString home =
+        m_homeUrl.isEmpty() ? QStringLiteral("about:start") : m_homeUrl;
     ProcView *view = currentView();
     if (!view) {
-        addTab(QStringLiteral("about:start"));
+        addTab(home);
         return;
     }
-    view->load(QStringLiteral("about:start"));
+    view->load(home);
 }
 
 void ProcWindow::onNewTab() {
@@ -414,6 +506,171 @@ void ProcWindow::onAbout() {
         "<p><a href=\"https://nordstjernen.org\">nordstjernen.org</a></p>"
         "<p>Nordstjernen Source License v1.0 — © 2026 Andreas Røsdal</p>");
     QMessageBox::about(this, QStringLiteral("About Nordstjernen"), body);
+}
+
+void ProcWindow::bookmarkCurrentPage() {
+    ProcView *view = currentView();
+    if (!view || !m_bookmarks)
+        return;
+    const QByteArray url = view->currentUrl().toUtf8();
+    const QByteArray title = view->currentTitle().toUtf8();
+    if (!url.isEmpty() && !ns_bookmarks_contains(m_bookmarks, url.constData())) {
+        ns_bookmarks_add(m_bookmarks, url.constData(), title.constData());
+        statusBar()->showMessage(QStringLiteral("Bookmark added"));
+    }
+}
+
+void ProcWindow::rebuildBookmarksMenu() {
+    m_bookmarksMenu->clear();
+    QAction *add =
+        m_bookmarksMenu->addAction(QStringLiteral("Bookmark this page"));
+    connect(add, &QAction::triggered, this, &ProcWindow::bookmarkCurrentPage);
+    m_bookmarksMenu->addSeparator();
+
+    const guint n = m_bookmarks ? ns_bookmarks_count(m_bookmarks) : 0;
+    if (n == 0) {
+        QAction *empty =
+            m_bookmarksMenu->addAction(QStringLiteral("No bookmarks yet"));
+        empty->setEnabled(false);
+        return;
+    }
+
+    QMenu *removeMenu =
+        new QMenu(QStringLiteral("Remove bookmark"), m_bookmarksMenu);
+    for (guint i = 0; i < n; ++i) {
+        const ns_bookmark *bm = ns_bookmarks_get(m_bookmarks, i);
+        if (!bm || !bm->url)
+            continue;
+        const QString url = QString::fromUtf8(bm->url);
+        const QString label =
+            (bm->title && *bm->title) ? QString::fromUtf8(bm->title) : url;
+        QAction *open = m_bookmarksMenu->addAction(label.left(60));
+        open->setToolTip(url);
+        connect(open, &QAction::triggered, this, [this, url]() {
+            if (ProcView *view = currentView())
+                view->load(url);
+            else
+                addTab(url);
+        });
+        QAction *del = removeMenu->addAction(label.left(60));
+        connect(del, &QAction::triggered, this, [this, url]() {
+            if (m_bookmarks)
+                ns_bookmarks_remove(m_bookmarks, url.toUtf8().constData());
+        });
+    }
+    m_bookmarksMenu->addSeparator();
+    m_bookmarksMenu->addMenu(removeMenu);
+}
+
+void ProcWindow::onSettings() {
+    const ns_config *cfg = ns_config_get();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("Settings"));
+    dlg.setMinimumWidth(460);
+
+    QVBoxLayout *box = new QVBoxLayout(&dlg);
+    QFormLayout *form = new QFormLayout();
+
+    QLineEdit *home = new QLineEdit(&dlg);
+    home->setText(cfg && cfg->home_url ? QString::fromUtf8(cfg->home_url)
+                                       : QString());
+    form->addRow(QStringLiteral("Home page"), home);
+
+    const QString curEngine = cfg && cfg->search_engine
+        ? QString::fromUtf8(cfg->search_engine) : QString();
+    int match = kSearchEngineCount;
+    for (int i = 0; i < kSearchEngineCount; ++i)
+        if (curEngine == QLatin1String(kSearchEngines[i].url)) {
+            match = i;
+            break;
+        }
+
+    QComboBox *engines = new QComboBox(&dlg);
+    for (int i = 0; i < kSearchEngineCount; ++i)
+        engines->addItem(QString::fromUtf8(kSearchEngines[i].name));
+    engines->addItem(QStringLiteral("Custom…"));
+    engines->setCurrentIndex(match);
+    form->addRow(QStringLiteral("Search engine"), engines);
+
+    QLineEdit *custom = new QLineEdit(&dlg);
+    custom->setPlaceholderText(
+        QStringLiteral("https://example.com/search?q=%s"));
+    custom->setText(curEngine);
+    custom->setEnabled(match >= kSearchEngineCount);
+    form->addRow(QStringLiteral("Custom URL"), custom);
+
+    connect(engines, &QComboBox::currentIndexChanged, &dlg, [custom](int idx) {
+        if (idx < kSearchEngineCount) {
+            custom->setText(QLatin1String(kSearchEngines[idx].url));
+            custom->setEnabled(false);
+        } else {
+            custom->setEnabled(true);
+            custom->setFocus();
+        }
+    });
+
+    QSpinBox *fontSize = new QSpinBox(&dlg);
+    fontSize->setRange(8, 32);
+    fontSize->setValue(cfg ? cfg->default_font_size_px : 16);
+    form->addRow(QStringLiteral("Default font size"), fontSize);
+
+    QCheckBox *images = new QCheckBox(QStringLiteral("Load images"), &dlg);
+    images->setChecked(cfg ? cfg->images_enabled : true);
+    form->addRow(images);
+    QCheckBox *webgl = new QCheckBox(QStringLiteral("Enable WebGL"), &dlg);
+    webgl->setChecked(cfg ? cfg->webgl_enabled : false);
+    form->addRow(webgl);
+    QCheckBox *storage =
+        new QCheckBox(QStringLiteral("Enable local storage"), &dlg);
+    storage->setChecked(cfg ? cfg->local_storage_enabled : true);
+    form->addRow(storage);
+    QCheckBox *dnt = new QCheckBox(QStringLiteral("Send Do Not Track"), &dlg);
+    dnt->setChecked(cfg ? cfg->do_not_track : false);
+    form->addRow(dnt);
+    QCheckBox *cache = new QCheckBox(QStringLiteral("Enable cache"), &dlg);
+    cache->setChecked(cfg ? cfg->cache_enabled : true);
+    form->addRow(cache);
+
+    box->addLayout(form);
+
+    QLabel *note =
+        new QLabel(QStringLiteral("Changes apply to newly opened pages."),
+                   &dlg);
+    note->setEnabled(false);
+    box->addWidget(note);
+
+    QHBoxLayout *buttons = new QHBoxLayout();
+    buttons->addStretch(1);
+    QPushButton *cancel = new QPushButton(QStringLiteral("Cancel"), &dlg);
+    QPushButton *save = new QPushButton(QStringLiteral("Save"), &dlg);
+    save->setDefault(true);
+    buttons->addWidget(cancel);
+    buttons->addWidget(save);
+    box->addLayout(buttons);
+    connect(cancel, &QPushButton::clicked, &dlg, &QDialog::reject);
+    connect(save, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    ns_config *mut = ns_config_mut();
+    if (!mut)
+        return;
+    const auto setStr = [](char **slot, const QString &value) {
+        g_free(*slot);
+        *slot = g_strdup(value.toUtf8().constData());
+    };
+    setStr(&mut->home_url, home->text());
+    setStr(&mut->search_engine, custom->text());
+    mut->default_font_size_px = fontSize->value();
+    mut->images_enabled = images->isChecked();
+    mut->webgl_enabled = webgl->isChecked();
+    mut->local_storage_enabled = storage->isChecked();
+    mut->do_not_track = dnt->isChecked();
+    mut->cache_enabled = cache->isChecked();
+    ns_config_save(nullptr);
+    m_homeUrl = configuredHomeUrl();
 }
 
 void ProcWindow::refreshTaskManager() {

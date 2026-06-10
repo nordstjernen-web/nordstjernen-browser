@@ -499,6 +499,11 @@ void ProcView::reload() {
         doLoad(m_currentUrl, false);
 }
 
+void ProcView::setLoading(bool loading) {
+    m_isLoading = loading;
+    emit loadingChanged(loading);
+}
+
 void ProcView::pushHistory(const QString &url) {
     if (url.isEmpty())
         return;
@@ -518,7 +523,7 @@ void ProcView::doLoad(const QString &url, bool record) {
     if (record)
         m_jsRedirects = 0;
     m_pendingRecord = record;
-    emit loadingChanged(true);
+    setLoading(true);
     viewport()->setCursor(Qt::BusyCursor);
     emit statusMessage(QStringLiteral("Loading %1…").arg(url));
     const int seq = ++m_loadSeq;
@@ -561,7 +566,7 @@ void ProcView::doLoad(const QString &url, bool record) {
                 return;
             self->m_recoveringRender = false;
             if (!result.ok) {
-                emit self->loadingChanged(false);
+                self->setLoading(false);
                 self->viewport()->setCursor(Qt::ArrowCursor);
                 emit self->statusMessage(
                     QStringLiteral("Failed to load %1").arg(requested));
@@ -588,7 +593,7 @@ void ProcView::doLoad(const QString &url, bool record) {
 
             emit self->urlChanged(self->m_currentUrl);
             emit self->titleChanged(result.title);
-            emit self->loadingChanged(false);
+            self->setLoading(false);
 
             self->horizontalScrollBar()->setValue(0);
             self->verticalScrollBar()->setValue(0);

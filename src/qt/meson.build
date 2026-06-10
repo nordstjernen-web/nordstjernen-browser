@@ -27,7 +27,10 @@ if qt6_dep.found()
     'main.cpp',
     'procwindow.cpp',
     'procview.cpp',
+    '../bookmarks.c',
+    '../config.c',
     '../media.c',
+    '../netutil.c',
     '../rproc_http.c',
     '../ipc_http.c',
   )

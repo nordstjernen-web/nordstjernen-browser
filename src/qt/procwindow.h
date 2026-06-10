@@ -7,9 +7,14 @@
 #define NORDSTJERNEN_QT_PROCWINDOW_H
 
 #include <QMainWindow>
+#include <QString>
+
+typedef struct ns_bookmarks ns_bookmarks;
 
 class ProcView;
 class QLineEdit;
+class QMenu;
+class QProgressBar;
 class QTabWidget;
 class QAction;
 class QDialog;
@@ -20,6 +25,7 @@ class ProcWindow : public QMainWindow {
 
 public:
     explicit ProcWindow(QWidget *parent = nullptr);
+    ~ProcWindow() override;
 
     ProcView *addTab(const QString &url, bool foreground = true);
 
@@ -33,6 +39,7 @@ private slots:
     void onCloseTab(int index);
     void onCurrentChanged(int index);
     void onAbout();
+    void onSettings();
     void onTaskManager();
 
 private:
@@ -41,6 +48,9 @@ private:
     void connectView(ProcView *view);
     void updateChrome();
     void updateNavActions();
+    void setLoadingUi(bool loading);
+    void rebuildBookmarksMenu();
+    void bookmarkCurrentPage();
     void refreshTaskManager();
     QString normalizeUrl(const QString &input) const;
 
@@ -50,8 +60,12 @@ private:
     QAction *m_forwardAction = nullptr;
     QAction *m_reloadAction = nullptr;
     QAction *m_homeAction = nullptr;
+    QProgressBar *m_spinner = nullptr;
+    QMenu *m_bookmarksMenu = nullptr;
     QDialog *m_taskMgr = nullptr;
     QTableWidget *m_taskTable = nullptr;
+    QString m_homeUrl;
+    ns_bookmarks *m_bookmarks = nullptr;
 };
 
 #endif
