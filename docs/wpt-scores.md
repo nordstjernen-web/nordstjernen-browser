@@ -26,6 +26,7 @@ they regenerate.
 | 2026-06-12 | 7a67688 | 3be6ba111 | 191/696 (27%) | 15757/19492 (80%) | partial: dom/nodes |
 | 2026-06-12 | 7110c2f | 3be6ba111 | 191/696 (27%) | 15774/19525 (80%) | partial: dom/events |
 | 2026-06-12 | 78da000 | d8a8414e5 | 195/696 (28%) | 15958/19502 (81%) | partial: html/dom/elements html/semantics/forms/the-form-element |
+| 2026-06-12 | ffde346 | 3be6ba111 | 196/696 (28%) | 16080/19535 (82%) | partial: dom/lists dom/nodes |
 | 2026-06-12 | faf548f | d8a8414e5 | 200/696 (28%) | 15986/19535 (81%) | partial: html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
@@ -40,11 +41,11 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-12-faf548f.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 71/275 | 7206/8719 | 1444 | 50 | 13 | 6 |
+| `dom/nodes` | 71/275 | 7209/8719 | 1441 | 50 | 13 | 6 |
 | `dom/events` | 48/167 | 337/701 | 316 | 24 | 24 | 0 |
 | `dom/traversal` | 4/17 | 28/52 | 24 | 0 | 0 | 0 |
 | `dom/ranges` | 2/55 | 5/206 | 201 | 0 | 0 | 0 |
-| `dom/lists` | 3/5 | 85/189 | 104 | 0 | 0 | 0 |
+| `dom/lists` | 4/5 | 187/189 | 2 | 0 | 0 | 0 |
 | `dom/collections` | 1/10 | 23/53 | 30 | 0 | 0 | 0 |
 | `url` | 9/32 | 7059/7474 | 414 | 1 | 0 | 0 |
 | `console` | 3/12 | 21/56 | 35 | 0 | 0 | 0 |
@@ -55,7 +56,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-12-faf548f.tsv`.
 | `WebCryptoAPI/digest` | 0/5 | 84/535 | 451 | 0 | 0 | 0 |
 | `xhr/formdata` | 7/18 | 45/80 | 35 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **200/696** | **15986/19535** | **3426** | **78** | **39** | **6** |
+| **Total** | **201/696** | **16091/19535** | **3321** | **78** | **39** | **6** |
 
 ## ROI by area — 2026-06-12
 
@@ -70,19 +71,19 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/nodes` | 1513 | 204 | 7.4 | 30 | 101 |
+| `dom/nodes` | 1510 | 204 | 7.4 | 30 | 101 |
 | `WebCryptoAPI/digest` | 451 | 5 | 90.2 | 0 | 0 |
 | `url` | 415 | 23 | 18.0 | 3 | 6 |
 | `dom/events` | 364 | 119 | 3.1 | 71 | 29 |
 | `html/dom/elements` | 333 | 26 | 12.8 | 2 | 15 |
 | `dom/ranges` | 201 | 53 | 3.8 | 25 | 8 |
-| `dom/lists` | 104 | 2 | 52.0 | 0 | 1 |
 | `console` | 35 | 9 | 3.9 | 0 | 6 |
 | `xhr/formdata` | 35 | 11 | 3.2 | 0 | 5 |
 | `dom/collections` | 30 | 9 | 3.3 | 0 | 3 |
 | `dom/traversal` | 24 | 13 | 1.8 | 3 | 6 |
 | `html/semantics/forms/the-form-element` | 23 | 11 | 2.1 | 2 | 7 |
 | `hr-time` | 20 | 8 | 2.5 | 2 | 5 |
+| `dom/lists` | 2 | 1 | 2.0 | 0 | 1 |
 | `html/webappapis/timers` | 1 | 3 | 0.3 | 2 | 1 |
 | `html/webappapis/atob` | 0 | 0 | - | 0 | 0 |
 
@@ -99,7 +100,7 @@ the scores move materially, and date the heading.
 | 1 | Unblock the 71 harness-broken `dom/events` files (pages hang before reporting — missing event/`click()` infrastructure; one fix likely unblocks many files) | `Event-dispatch-click.html`, `EventListener-invoke-legacy.html`, … | 352 visible, real gain larger |
 | 2 | Realm-document identity: `iframe.contentDocument` and `element.ownerDocument` must be the same object per document, XHTML iframes need realm docs | remaining `Document-createElementNS.html` 289, `Document-createElement.html` 88 | ~380 |
 | 3 | Range API correctness; 25 of 55 `dom/ranges` files are harness-broken | `Range-cloneContents.html`, `Range-collapse.html`, … 201 visible | 201 visible, real gain larger |
-| 4 | Attribute-name validation (`setAttribute` must throw InvalidCharacterError for invalid names) | `dom/nodes/attributes.html` 57 | ~60 |
+| 4 | Attr-node APIs: `createAttribute(NS)`, `get/setAttributeNode`, `removeAttributeNode`, InUseAttributeError, namespace-aware node lookup | `dom/nodes/attributes.html` 54, `Document-createAttribute.html` 36 | ~90 |
 | 5 | Form collection named/indexed access and `requestSubmit` edge cases | `form-elements-*`, `form-nameditem.html`, `form-requestsubmit.html` | ~23 |
 | 6 | URL long tail: `idlharness` interface checks, `urlencoded-parser` edge cases, opaque-path percent-encoding of `%00` and space | `url/idlharness.any.html` 65, `urlencoded-parser.any.html` 42 | ~150 |
 
@@ -115,6 +116,8 @@ Completed (measured gain, slice subtests):
 | Qualified-name case handling (`createElementNS`, `setAttribute(NS)`, `getAttributeNS`, `getElementsByTagName`) | f0fb7b7 | `dom/nodes/case.html` 107→285/285 clean, `Element-getElementsByTagName` 6→14/19 |
 | URL/anchor setters reparse through lexbor, base-element-aware resolution, tuple origins | ce53924 | `url` area 4327→7059/7474 (94%): `toascii` 784/784 clean, `a-element` 1→863, `url-origin` 233→400 |
 | Iframes load before the window load event; XML roots become documentElement | 2bba43f | `Document-createElementNS` 197→307, `Node-cloneNode` iframe cases unblocked |
+| Checkbox/radio activation around click dispatch; handleEvent listener objects | 7110c2f, 813bec4 | `Event-dispatch-click` 0 reported→17/33 |
+| DOMTokenList property placement (htmlFor/relList/sandbox/sizes on owning interfaces) and toggleAttribute spec behavior | ffde346 | `DOMTokenList-coverage-for-attributes` 73→175/175 clean, `dom/lists` 187/189 |
 | Encoding-label table per the Encoding Standard on iframe documents | 7a67688 | `Document-characterSet-normalization-{1,2}` 297+0→315/315 + 339/339 clean |
 | Element-specific `name` reflection | 3ddd4d4 | `name-content-attribute-and-property.html` 17→141/141 clean |
 | Form autocomplete normalization and empty action fallback | 85ea33d, 78da000 | `form-autocomplete.html` 0→67/67 clean, `form-action-reflection*.html` 2→6/6 clean |
