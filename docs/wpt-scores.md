@@ -104,24 +104,7 @@ the scores move materially, and date the heading.
 | 5 | Form collection named/indexed access and `requestSubmit` edge cases | `form-elements-*`, `form-nameditem.html`, `form-requestsubmit.html` | ~23 |
 | 6 | URL long tail: `idlharness` interface checks, `urlencoded-parser` edge cases, opaque-path percent-encoding of `%00` and space | `url/idlharness.any.html` 65, `urlencoded-parser.any.html` 42 | ~150 |
 
-Completed (measured gain, slice subtests):
 
-| Improvement | Landed | Measured |
-|-------------|--------|----------|
-| IDNA/UTS-46 validity in lexbor + URL constructor validation | d192ab3, 600523f | `IdnaTestV2` 745→2621, `url` area 1236→4327 |
-| Selector parsing/API compliance (SyntaxError DOMExceptions, namespace forms, `webkitMatchesSelector`, NodeList instanceof) | ff5e7a4 | `querySelector-All` 1577→1877, `Element-matches` + `webkitMatchesSelector` →652/669 each |
-| DOMTokenList ordered-set semantics | 6bc9c63 | `Element-classlist` 760→1420/1420 clean, `dom/lists` stringifier/value/Iterable clean |
-| `atob` forgiving-base64 edge cases | 5cd79e7 | `html/webappapis/atob` 310→380/380 clean |
-| `document.createEvent` alias table + events adopt `new.target` prototype | 49de47c | `Document-createEvent` 12→272/279, `Event-constructors` 14/14 clean |
-| Qualified-name case handling (`createElementNS`, `setAttribute(NS)`, `getAttributeNS`, `getElementsByTagName`) | f0fb7b7 | `dom/nodes/case.html` 107→285/285 clean, `Element-getElementsByTagName` 6→14/19 |
-| URL/anchor setters reparse through lexbor, base-element-aware resolution, tuple origins | ce53924 | `url` area 4327→7059/7474 (94%): `toascii` 784/784 clean, `a-element` 1→863, `url-origin` 233→400 |
-| Iframes load before the window load event; XML roots become documentElement | 2bba43f | `Document-createElementNS` 197→307, `Node-cloneNode` iframe cases unblocked |
-| Checkbox/radio activation around click dispatch; handleEvent listener objects | 7110c2f, 813bec4 | `Event-dispatch-click` 0 reported→17/33 |
-| DOMTokenList property placement (htmlFor/relList/sandbox/sizes on owning interfaces) and toggleAttribute spec behavior | ffde346 | `DOMTokenList-coverage-for-attributes` 73→175/175 clean, `dom/lists` 187/189 |
-| Encoding-label table per the Encoding Standard on iframe documents | 7a67688 | `Document-characterSet-normalization-{1,2}` 297+0→315/315 + 339/339 clean |
-| Element-specific `name` reflection | 3ddd4d4 | `name-content-attribute-and-property.html` 17→141/141 clean |
-| Form autocomplete normalization and empty action fallback | 85ea33d, 78da000 | `form-autocomplete.html` 0→67/67 clean, `form-action-reflection*.html` 2→6/6 clean |
-| Native `DOMStringMap` dataset reflection | faf548f | `dataset*.html` cluster 35→46/46 clean, `html/dom/elements` 25→30 clean files |
 
 Not listed: `WebCryptoAPI/digest` — 419 of its 451 failures are
 `tentative` SHA-3/cSHAKE/K12/TurboSHAKE tests for algorithms not yet
