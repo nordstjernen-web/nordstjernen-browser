@@ -1710,7 +1710,18 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
         }
 
-        if (!prevented && kind == 0) {
+        if (!prevented && kind == 0 && key && strcmp(key, "Tab") == 0) {
+            gboolean backward = (mods & 1) != 0;
+            const ns_node *next =
+                ns_js_sequential_focus_target(browser->js, backward);
+            if (next) {
+                ns_js_set_focus(browser->js, (ns_node *)next);
+                const char *val = ns_node_editable_value(next);
+                browser->caret_byte = val ? strlen(val) : 0;
+                browser->sel_anchor_byte = browser->caret_byte;
+                browser->dirty = TRUE;
+            }
+        } else if (!prevented && kind == 0) {
             const ns_node *f = ns_js_focused_node(browser->js);
             if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods))

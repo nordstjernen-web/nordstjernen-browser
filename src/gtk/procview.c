@@ -2070,6 +2070,8 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     double vx = gtk_adjustment_get_value(v->hadj);
     double tx = vx, ty = vy;
     switch (keyval) {
+    case GDK_KEY_Tab:
+    case GDK_KEY_ISO_Left_Tab: start_key(v, 0, keyval, state); return TRUE;
     case GDK_KEY_Down:       ty = vy + line; break;
     case GDK_KEY_Up:         ty = vy - line; break;
     case GDK_KEY_Right:      tx = vx + line; break;

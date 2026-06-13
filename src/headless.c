@@ -895,6 +895,23 @@ headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
             ns_js_consume_mutated(fc->js);
         }
     }
+    if (g_ascii_strcasecmp(name, "Tab") == 0) {
+        if (!key_prevented && fc->js) {
+            const ns_node *next =
+                ns_js_sequential_focus_target(fc->js, FALSE);
+            if (next) {
+                if (fc->focused && fc->focused != next)
+                    ns_js_dispatch_event(fc->js, fc->focused, "blur", NULL);
+                fc->focused = next;
+                ns_js_set_focused_node(fc->js, next);
+                const char *nv = ns_node_editable_value(next);
+                fc->caret = nv ? strlen(nv) : 0;
+                fc->anchor = fc->caret;
+                ns_js_consume_mutated(fc->js);
+            }
+        }
+        return;
+    }
     if (g_ascii_strcasecmp(name, "Enter") == 0 ||
         g_ascii_strcasecmp(name, "Return") == 0) {
         if (multiline)
