@@ -66,7 +66,7 @@ pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
 license="custom"
-depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libseccomp libpsl libcrypto3"
+depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3"
 options="!check !tracedeps !strip"
 source=""
 
