@@ -69,9 +69,10 @@ the gap below is genuinely narrow.
 After auditing the recent-proposal surface (the list above), the gap
 narrows to three areas absent from `src/quickjs/` itself but present in
 LibJS: **Intl**, **Temporal**, and **JSON modules**. **Nordstjernen now
-supplies the first two natively in C, outside the QuickJS core**, so the
-practical gap against LibJS is reduced to JSON modules plus the
-conformance depth of the i18n data (see notes below).
+supplies all three** outside the QuickJS core — Intl and Temporal as
+native C built-ins, JSON modules in the module loader — so the only
+remaining shortfall against LibJS is the *conformance depth* of the i18n
+data (see notes below), not any missing API.
 
 > Note (re-verify 2026-06-13): an earlier revision listed **ShadowRealm**
 > as a LibJS-only gap. That was wrong — direct file checks against LibJS
@@ -163,9 +164,19 @@ LibJS evaluates **JSON modules** (`import data from "./x.json" with
 export is the parsed JSON. The bundled QuickJS *parses* the import-
 attributes syntax (`js_parse_with_clause`) but provides **no JSON
 module synthesis** — there is no `parse_json_module`/synthetic-module
-path, so a `type: "json"` import is not turned into a usable module by
-the engine itself. (The CSS/Wasm/HTML module variants are likewise
-LibJS-only and engine-external in QuickJS.)
+path, so the QuickJS *engine* does not turn a `type: "json"` import into a
+usable module by itself.
+
+**Nordstjernen status: implemented in the module loader
+(`src/js.c::ns_js_module_loader`).** The loader now uses
+`JS_SetModuleLoaderFunc2`, which delivers the import attributes; when
+`type: "json"` is present it parses the fetched bytes with `JS_ParseJSON`
+and builds a synthetic `JS_NewCModule` whose sole `default` export is the
+parsed value. Both static `import x from "…" with { type: "json" }` and
+dynamic `import("…", { with: { type: "json" } })` work, over `data:` and
+`http(s)` specifiers, and a malformed payload fails the import cleanly.
+(The CSS/Wasm/HTML module variants remain unimplemented and are rarely
+used on the open web.)
 
 ### Checked, and *not* a gap
 
@@ -200,13 +211,14 @@ what the browser exposes after its native C additions load.
 | Decorators (`@`) / ShadowRealm / AsyncContext | ❌ | ❌ | ❌ |
 | **Intl (ECMA-402)**       | ❌ | ✅ native, ICU-free | ✅ ICU |
 | **Temporal**              | ❌ | ✅ native (ISO/UTC) | ✅ full |
-| **JSON modules**          | ❌ (attr parsed) | ❌ | ✅ |
+| **JSON modules**          | ❌ (attr parsed) | ✅ loader | ✅ |
 
-The only remaining true gap against LibJS is **JSON modules**, plus the
-i18n/calendar/time-zone *data depth* that an ICU-backed engine provides
-and an ICU-free one deliberately does not. ShadowRealm, AsyncContext, and
-decorators are absent from *both* engines. Everything else in the
-recent-proposal set is already present in the bundled QuickJS.
+Nordstjernen now matches LibJS on every API surface in this table; the
+only remaining shortfall is the i18n/calendar/time-zone *data depth* that
+an ICU-backed engine provides and an ICU-free one deliberately does not.
+ShadowRealm, AsyncContext, and decorators are absent from *both* engines.
+Everything else in the recent-proposal set is already present in the
+bundled QuickJS.
 
 ## Implications for Nordstjernen
 
@@ -219,10 +231,10 @@ recent-proposal set is already present in the bundled QuickJS.
 - A future ICU/CLDR integration could raise i18n fidelity to full
   ECMA-402 conformance, but weighs against the project's no-bloat
   constraint; the current tables-based approach is the chosen balance.
-- **JSON modules** would need wiring in Nordstjernen's module loader
-  (`src/net.c` module path), since QuickJS parses the `with { type:
-  "json" }` attribute but does not synthesize the module; honouring it
-  means parsing the fetched JSON and exposing it as a default export.
+- **JSON modules** are now handled in `ns_js_module_loader`
+  (`JS_SetModuleLoaderFunc2` + `JS_ParseJSON` + a synthetic
+  `JS_NewCModule` default export), verified for static and dynamic
+  imports over `data:`/`http(s)`.
 - **ShadowRealm** is not implemented by either engine, so there is no
   gap to close versus LibJS; it is low priority anyway given negligible
   real-world web use. QuickJS can create isolated `JSContext`s at the C

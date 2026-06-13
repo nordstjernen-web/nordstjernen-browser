@@ -125,7 +125,8 @@ static char *ns_js_module_normalize(JSContext *ctx, const char *base_name,
                                     const char *name, void *opaque);
 static void ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin);
 static JSModuleDef *ns_js_module_loader(JSContext *ctx,
-                                        const char *module_name, void *opaque);
+                                        const char *module_name, void *opaque,
+                                        JSValueConst attributes);
 static void ns_js_set_attr_recorded(ns_js *js, ns_node *n, const char *name, const char *value);
 static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
 static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
@@ -29211,8 +29212,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     if (!js->ctx) { JS_FreeRuntime(js->rt); g_free(js); return NULL; }
     JS_SetContextOpaque(js->ctx, js);
     JS_SetRuntimeOpaque(js->rt, js);
-    JS_SetModuleLoaderFunc(js->rt, ns_js_module_normalize,
-                           ns_js_module_loader, js);
+    JS_SetModuleLoaderFunc2(js->rt, ns_js_module_normalize,
+                            ns_js_module_loader, NULL, js);
     JSContext *ctx = js->ctx;
     js->log_cb = log_cb;
     js->log_user_data = log_user_data;
@@ -32781,10 +32782,50 @@ ns_js_log_module_compile_error(ns_js *js, JSContext *ctx, const char *module_nam
     JS_Throw(ctx, exc);
 }
 
+static gboolean
+ns_js_attrs_type_is(JSContext *ctx, JSValueConst attributes, const char *want)
+{
+    if (!JS_IsObject(attributes)) return FALSE;
+    JSValue t = JS_GetPropertyStr(ctx, attributes, "type");
+    gboolean match = FALSE;
+    if (JS_IsString(t)) {
+        const char *s = JS_ToCString(ctx, t);
+        match = s && !strcmp(s, want);
+        if (s) JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, t);
+    return match;
+}
+
+static int
+ns_js_json_module_init(JSContext *ctx, JSModuleDef *m)
+{
+    return JS_SetModuleExport(ctx, m, "default",
+                              JS_GetModulePrivateValue(ctx, m));
+}
+
 static JSModuleDef *
-ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque)
+ns_js_make_json_module(JSContext *ctx, const char *module_name,
+                       const char *body, gsize body_len)
+{
+    JSValue json = JS_ParseJSON(ctx, body, body_len, module_name);
+    if (JS_IsException(json)) return NULL;
+    JSModuleDef *m = JS_NewCModule(ctx, module_name, ns_js_json_module_init);
+    if (!m) {
+        JS_FreeValue(ctx, json);
+        return NULL;
+    }
+    JS_AddModuleExport(ctx, m, "default");
+    JS_SetModulePrivateValue(ctx, m, json);
+    return m;
+}
+
+static JSModuleDef *
+ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
+                    JSValueConst attributes)
 {
     ns_js *js = opaque;
+    gboolean json_module = ns_js_attrs_type_is(ctx, attributes, "json");
     if (!module_name) return NULL;
     if (js && (js->module_load_count > NS_MODULE_LOAD_MAX_COUNT ||
                js->module_load_bytes > NS_MODULE_LOAD_MAX_BYTES)) {
@@ -32808,6 +32849,13 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque)
             return NULL;
         }
         if (js) js->module_load_bytes += body_len;
+        if (json_module) {
+            JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
+                                                    body, body_len);
+            g_free(body);
+            if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
+            return m;
+        }
         JSValue func_val = JS_Eval(ctx, body, body_len, module_name,
                                    JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
         g_free(body);
@@ -32845,6 +32893,13 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque)
     char *copy = g_strndup((const char *)resp->body->data, resp->body->len);
     gsize copy_len = resp->body->len;
     ns_response_free(resp);
+    if (json_module) {
+        JSModuleDef *m = ns_js_make_json_module(ctx, module_name,
+                                                copy, copy_len);
+        g_free(copy);
+        if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
+        return m;
+    }
     JSValue func_val = JS_Eval(ctx, copy, copy_len, module_name,
                                JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
     g_free(copy);
