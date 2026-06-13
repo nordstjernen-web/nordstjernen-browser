@@ -89,6 +89,7 @@ DEPLOY_GTK_VERSION=4 \
 "$LINUXDEPLOY" --appimage-extract-and-run \
     --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/nordstjernen" \
+    --executable "$APPDIR/usr/bin/nordstjernen-renderer" \
     --desktop-file "$APPDIR/usr/share/applications/nordstjernen.desktop" \
     --icon-file "$PNG_ICON" \
     --plugin gtk

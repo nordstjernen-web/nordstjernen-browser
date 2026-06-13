@@ -137,12 +137,18 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
 </plist>
 PLIST_EOF
 
+# Bundle both the launcher and the renderer: the renderer links the same
+# image-codec dylibs (libavif, …) via the shared engine, so it needs its
+# references rewritten to the bundled Frameworks too, or it fails to start
+# with "Library not loaded: …/libavif.dylib".
 if ! run_dylibbundler 300 dylibbundler -of -cd -b \
     -x "$STAGE/Contents/MacOS/nordstjernen-bin" \
+    -x "$STAGE/Contents/MacOS/nordstjernen-renderer" \
     -d "$STAGE/Contents/Frameworks/" \
     -p "@executable_path/../Frameworks/"; then
     echo "pack-macos.sh: dylibbundler failed; listing binary dylibs and continuing" >&2
     otool -L "$STAGE/Contents/MacOS/nordstjernen-bin" || true
+    otool -L "$STAGE/Contents/MacOS/nordstjernen-renderer" || true
     exit 1
 fi
 
