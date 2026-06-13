@@ -18178,13 +18178,23 @@ ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
 }
 
 static JSValue
+ns_pre_insert_validity(JSContext *ctx, ns_node *parent, ns_node *node,
+                       ns_node *child, gboolean child_is_null);
+
+static JSValue
 ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_node *parent = ns_unwrap_element_mut(this_val);
-    if (!parent || argc < 1) return JS_NULL;
+    if (!parent) return JS_NULL;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     ns_node *child = ns_unwrap_element_mut(argv[0]);
-    if (!child) return JS_NULL;
-    if (ns_node_ancestor_or_self(parent, child)) return JS_NULL;
+    if (!child)
+        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+    {
+        JSValue verr = ns_pre_insert_validity(ctx, parent, child, NULL, TRUE);
+        if (JS_IsException(verr)) return verr;
+    }
     ns_js *_j = js_from_ctx(ctx);
     gboolean inert_parent = ns_node_in_template_content(parent);
     if (child->kind == NS_NODE_DOCUMENT && !child->parent) {
@@ -18418,17 +18428,89 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
     return JS_DupValue(ctx, argv[0]);
 }
 
+static gboolean
+ns_node_has_child_kind_other(const ns_node *p, ns_node_kind kind,
+                             const ns_node *except)
+{
+    for (const ns_node *c = p->first_child; c; c = c->next_sibling)
+        if (c->kind == kind && c != except) return TRUE;
+    return FALSE;
+}
+
+static JSValue
+ns_pre_replace_validity(JSContext *ctx, ns_node *parent, ns_node *node,
+                        ns_node *child)
+{
+    gboolean parent_doc =
+        parent->kind == NS_NODE_DOCUMENT && !(parent->flags & NS_NODE_FRAGMENT);
+    gboolean parent_frag =
+        parent->kind == NS_NODE_DOCUMENT && (parent->flags & NS_NODE_FRAGMENT);
+    if (!(parent_doc || parent_frag || parent->kind == NS_NODE_ELEMENT))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "parent node cannot have children");
+    if (ns_node_ancestor_or_self(parent, node))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "the new child is an inclusive ancestor of the parent");
+    if (child->parent != parent)
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "the child to replace is not a child of this node");
+    if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "a Document cannot be inserted");
+    if ((node->kind == NS_NODE_TEXT && parent_doc) ||
+        (node->kind == NS_NODE_DOCTYPE && !parent_doc))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "invalid node type for this parent");
+    if (parent_doc) {
+        gboolean node_frag = node->kind == NS_NODE_DOCUMENT &&
+                             (node->flags & NS_NODE_FRAGMENT);
+        if (node_frag) {
+            int elems = 0;
+            gboolean has_text = FALSE;
+            for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
+                if (c->kind == NS_NODE_ELEMENT) elems++;
+                else if (c->kind == NS_NODE_TEXT) has_text = TRUE;
+            }
+            if (has_text || elems > 1)
+                return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "invalid fragment contents for a document");
+            if (elems == 1 &&
+                (ns_node_has_child_kind_other(parent, NS_NODE_ELEMENT, child) ||
+                 ns_node_doctype_follows(child)))
+                return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "document may have only one element child");
+        } else if (node->kind == NS_NODE_ELEMENT) {
+            if (ns_node_has_child_kind_other(parent, NS_NODE_ELEMENT, child) ||
+                ns_node_doctype_follows(child))
+                return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "document may have only one element child");
+        } else if (node->kind == NS_NODE_DOCTYPE) {
+            if (ns_node_has_child_kind_other(parent, NS_NODE_DOCTYPE, child) ||
+                ns_node_element_precedes(child))
+                return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "doctype must precede the document element");
+        }
+    }
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     ns_node *parent = ns_unwrap_element_mut(this_val);
-    if (!parent || argc < 2) return JS_NULL;
+    if (!parent) return JS_NULL;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required, but fewer present");
     ns_node *newc = ns_unwrap_element_mut(argv[0]);
     ns_node *oldc = ns_unwrap_element_mut(argv[1]);
-    if (!newc || !oldc || oldc->parent != parent) return JS_NULL;
+    if (!newc || !oldc)
+        return JS_ThrowTypeError(ctx, "Argument is not an object / Node");
+    {
+        JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
+        if (JS_IsException(verr)) return verr;
+    }
     if (newc == oldc) return JS_DupValue(ctx, argv[1]);
-    if (ns_node_ancestor_or_self(parent, newc)) return JS_NULL;
     ns_js *_j = js_from_ctx(ctx);
     gboolean inert_parent = ns_node_in_template_content(parent);
     if (_j) ns_ce_disconnect_subtree(_j, newc);
