@@ -31337,15 +31337,11 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     }
     ns_node *dt = ns_node_new_element(g_strdup(name));
+    ns_element_set_attr(dt, "publicId", public_id);
+    ns_element_set_attr(dt, "systemId", system_id);
     dt->kind = NS_NODE_DOCTYPE;
     g_hash_table_add(js->orphan_nodes, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
-    JS_DefinePropertyValueStr(ctx, wrapper, "name",
-        JS_NewString(ctx, name), 0);
-    JS_DefinePropertyValueStr(ctx, wrapper, "publicId",
-        JS_NewString(ctx, public_id), 0);
-    JS_DefinePropertyValueStr(ctx, wrapper, "systemId",
-        JS_NewString(ctx, system_id), 0);
     JS_FreeCString(ctx, name);
     JS_FreeCString(ctx, public_id);
     JS_FreeCString(ctx, system_id);
