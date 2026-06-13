@@ -15,7 +15,8 @@ class ProcView;
 class QLineEdit;
 class QMenu;
 class QProgressBar;
-class QTabWidget;
+class QTabBar;
+class QStackedWidget;
 class QAction;
 class QDialog;
 class QTableWidget;
@@ -62,7 +63,8 @@ private:
     void ensureDownloadsDialog();
     QString normalizeUrl(const QString &input) const;
 
-    QTabWidget *m_tabs = nullptr;
+    QTabBar *m_tabBar = nullptr;
+    QStackedWidget *m_stack = nullptr;
     QLineEdit *m_address = nullptr;
     QAction *m_backAction = nullptr;
     QAction *m_forwardAction = nullptr;

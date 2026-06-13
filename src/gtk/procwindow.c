@@ -18,6 +18,8 @@ typedef struct {
     GtkApplication *app;
     GtkWidget      *window;
     GtkWidget      *notebook;
+    GtkWidget      *tabstrip;
+    GtkWidget      *newtab_btn;
     GtkWidget      *address;
     GtkWidget      *back;
     GtkWidget      *forward;
@@ -100,12 +102,18 @@ install_status_css(void)
         "  min-height: 26px;"
         "}"
         ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
-        "notebook header tab {"
-        "  min-height: 0;"
-        "  padding-top: 1px;"
-        "  padding-bottom: 1px;"
+        ".ns-tabstrip { padding: 0; }"
+        ".ns-tab { padding: 0; }"
+        ".ns-tab button { min-height: 0; padding: 2px 4px; }"
+        ".ns-tab > button.ns-tab-label {"
+        "  padding: 2px 8px;"
+        "  border-bottom: 2px solid transparent;"
         "}"
-        "notebook header tab button { min-height: 20px; min-width: 20px; }");
+        ".ns-tab > button.ns-tab-label.ns-tab-active {"
+        "  border-bottom-color: @accent_color;"
+        "  font-weight: bold;"
+        "}"
+        ".ns-newtab { min-height: 0; padding: 2px 6px; }");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -543,13 +551,46 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
 }
 
 static void
-on_tab_close(GtkButton *button, gpointer user_data)
+update_active_tab(ProcWindow *pw)
+{
+    GtkWidget *current = NULL;
+    int idx = gtk_notebook_get_current_page(GTK_NOTEBOOK(pw->notebook));
+    if (idx >= 0)
+        current = gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
+    for (GtkWidget *w = gtk_widget_get_first_child(pw->tabstrip);
+         w; w = gtk_widget_get_next_sibling(w)) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(w), "ns-page");
+        GtkWidget *btn = g_object_get_data(G_OBJECT(w), "ns-tab-button");
+        if (!page || !btn)
+            continue;
+        if (page == current)
+            gtk_widget_add_css_class(btn, "ns-tab-active");
+        else
+            gtk_widget_remove_css_class(btn, "ns-tab-active");
+    }
+}
+
+static void
+on_tab_clicked(GtkButton *button, gpointer user_data)
 {
     ProcWindow *pw = g_object_get_data(G_OBJECT(button), "ns-pw");
     GtkWidget *page = user_data;
     int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
     if (idx >= 0)
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
+}
+
+static void
+on_tab_close(GtkButton *button, gpointer user_data)
+{
+    ProcWindow *pw = g_object_get_data(G_OBJECT(button), "ns-pw");
+    GtkWidget *page = user_data;
+    GtkWidget *wrapper = g_object_get_data(G_OBJECT(page), "ns-strip-tab");
+    int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
+    if (idx >= 0)
         gtk_notebook_remove_page(GTK_NOTEBOOK(pw->notebook), idx);
+    if (wrapper)
+        gtk_box_remove(GTK_BOX(pw->tabstrip), wrapper);
     if (gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) == 0)
         gtk_window_close(GTK_WINDOW(pw->window));
 }
@@ -562,22 +603,43 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     GtkWidget *page = ns_proc_view_widget(v);
     g_object_set_data(G_OBJECT(page), "ns-proc-view", v);
 
-    GtkWidget *tab = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *wrapper = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(wrapper, "ns-tab");
+
+    GtkWidget *tabbtn = gtk_button_new();
+    gtk_button_set_has_frame(GTK_BUTTON(tabbtn), FALSE);
+    gtk_widget_add_css_class(tabbtn, "ns-tab-label");
     GtkWidget *label = gtk_label_new(ns_i18n("New Tab"));
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(label), 16);
-    gtk_box_append(GTK_BOX(tab), label);
+    gtk_button_set_child(GTK_BUTTON(tabbtn), label);
+    g_object_set_data(G_OBJECT(tabbtn), "ns-pw", pw);
+    g_signal_connect(tabbtn, "clicked", G_CALLBACK(on_tab_clicked), page);
+    gtk_box_append(GTK_BOX(wrapper), tabbtn);
+
     GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
     g_object_set_data(G_OBJECT(close), "ns-pw", pw);
     g_signal_connect(close, "clicked", G_CALLBACK(on_tab_close), page);
-    gtk_box_append(GTK_BOX(tab), close);
+    gtk_box_append(GTK_BOX(wrapper), close);
 
+    g_object_set_data(G_OBJECT(wrapper), "ns-page", page);
+    g_object_set_data(G_OBJECT(wrapper), "ns-tab-button", tabbtn);
     g_object_set_data(G_OBJECT(page), "ns-tab-label", label);
-    int idx = gtk_notebook_append_page(GTK_NOTEBOOK(pw->notebook), page, tab);
-    gtk_notebook_set_tab_reorderable(GTK_NOTEBOOK(pw->notebook), page, TRUE);
+    g_object_set_data(G_OBJECT(page), "ns-strip-tab", wrapper);
+
+    GtkWidget *blank = gtk_label_new(NULL);
+    int idx = gtk_notebook_append_page(GTK_NOTEBOOK(pw->notebook), page, blank);
+
+    g_object_ref(pw->newtab_btn);
+    gtk_box_remove(GTK_BOX(pw->tabstrip), pw->newtab_btn);
+    gtk_box_append(GTK_BOX(pw->tabstrip), wrapper);
+    gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
+    g_object_unref(pw->newtab_btn);
+
     if (foreground)
         gtk_notebook_set_current_page(GTK_NOTEBOOK(pw->notebook), idx);
+    update_active_tab(pw);
 
     char *resolved = normalize_url(url);
     ns_proc_view_load(v, resolved);
@@ -686,6 +748,7 @@ on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
     (void)nb;
     (void)page;
     (void)num;
+    update_active_tab(ud);
     update_chrome(ud);
 }
 
@@ -1128,6 +1191,21 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
     gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
 
+    GtkWidget *header = gtk_header_bar_new();
+    gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
+    pw->tabstrip = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    gtk_widget_add_css_class(pw->tabstrip, "ns-tabstrip");
+    gtk_widget_set_hexpand(pw->tabstrip, TRUE);
+    pw->newtab_btn = gtk_button_new_from_icon_name("tab-new-symbolic");
+    gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);
+    gtk_widget_add_css_class(pw->newtab_btn, "ns-newtab");
+    gtk_widget_set_tooltip_text(pw->newtab_btn, ns_i18n("New tab"));
+    g_signal_connect(pw->newtab_btn, "clicked",
+                     G_CALLBACK(on_newtab_clicked), pw);
+    gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
+    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), pw->tabstrip);
+    gtk_window_set_titlebar(GTK_WINDOW(pw->window), header);
+
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
@@ -1164,8 +1242,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
     GtkWidget *go = toolbar_button("nordstjernen-go", ns_i18n("Go"),
                                    G_CALLBACK(on_go_clicked), pw);
-    GtkWidget *newtab = toolbar_button("tab-new-symbolic", ns_i18n("New tab"),
-                                       G_CALLBACK(on_newtab_clicked), pw);
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
@@ -1204,13 +1280,14 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
-    gtk_box_append(GTK_BOX(toolbar), newtab);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);
 
     pw->notebook = gtk_notebook_new();
+    gtk_notebook_set_show_tabs(GTK_NOTEBOOK(pw->notebook), FALSE);
+    gtk_notebook_set_show_border(GTK_NOTEBOOK(pw->notebook), FALSE);
     gtk_notebook_set_scrollable(GTK_NOTEBOOK(pw->notebook), TRUE);
     gtk_widget_set_hexpand(pw->notebook, TRUE);
     gtk_widget_set_vexpand(pw->notebook, TRUE);

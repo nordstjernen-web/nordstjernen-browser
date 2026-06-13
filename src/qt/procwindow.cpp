@@ -34,7 +34,8 @@
 #include <QStyle>
 #include <QKeyEvent>
 #include <QTableWidget>
-#include <QTabWidget>
+#include <QTabBar>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -89,6 +90,25 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     setWindowIcon(QIcon(logo));
     resize(1024, 768);
 
+    QToolBar *tabToolbar = addToolBar(QStringLiteral("Tabs"));
+    tabToolbar->setMovable(false);
+    tabToolbar->setStyleSheet("QToolBar { padding: 0; spacing: 2px; border: 0; }");
+    m_tabBar = new QTabBar(this);
+    m_tabBar->setTabsClosable(true);
+    m_tabBar->setMovable(true);
+    m_tabBar->setDocumentMode(true);
+    m_tabBar->setExpanding(false);
+    m_tabBar->setUsesScrollButtons(true);
+    m_tabBar->setStyleSheet("QTabBar::tab { padding: 2px 8px; }");
+    tabToolbar->addWidget(m_tabBar);
+    QToolButton *plusButton = new QToolButton(this);
+    plusButton->setText(QStringLiteral("+"));
+    plusButton->setToolTip(QStringLiteral("New tab"));
+    plusButton->setAutoRaise(true);
+    connect(plusButton, &QToolButton::clicked, this, &ProcWindow::onNewTab);
+    tabToolbar->addWidget(plusButton);
+    addToolBarBreak();
+
     QToolBar *toolbar = addToolBar(QStringLiteral("Navigation"));
     toolbar->setMovable(false);
     // Slightly slimmer toolbar (smaller icons + tighter padding).
@@ -137,11 +157,6 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
         style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("Go"));
     connect(goAction, &QAction::triggered, this,
             &ProcWindow::onAddressEntered);
-
-    QAction *newTabAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_FileDialogNewFolder),
-        QStringLiteral("New tab"));
-    connect(newTabAction, &QAction::triggered, this, &ProcWindow::onNewTab);
 
     QToolButton *bookmarksButton = new QToolButton(this);
     bookmarksButton->setIcon(
@@ -228,11 +243,8 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     });
     toolbar->addWidget(brand);
 
-    m_tabs = new QTabWidget(this);
-    m_tabs->setTabsClosable(true);
-    m_tabs->setMovable(true);
-    m_tabs->setDocumentMode(true);
-    setCentralWidget(m_tabs);
+    m_stack = new QStackedWidget(this);
+    setCentralWidget(m_stack);
 
     statusBar()->showMessage(QStringLiteral("Ready"));
 
@@ -243,10 +255,17 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
             &ProcWindow::onForward);
     connect(m_reloadAction, &QAction::triggered, this, &ProcWindow::onReload);
     connect(m_homeAction, &QAction::triggered, this, &ProcWindow::onHome);
-    connect(m_tabs, &QTabWidget::currentChanged, this,
+    connect(m_tabBar, &QTabBar::currentChanged, this,
             &ProcWindow::onCurrentChanged);
-    connect(m_tabs, &QTabWidget::tabCloseRequested, this,
+    connect(m_tabBar, &QTabBar::tabCloseRequested, this,
             &ProcWindow::onCloseTab);
+    connect(m_tabBar, &QTabBar::tabMoved, this, [this](int from, int to) {
+        QWidget *w = m_stack->widget(from);
+        if (w) {
+            m_stack->removeWidget(w);
+            m_stack->insertWidget(to, w);
+        }
+    });
 
     QAction *newTab = new QAction(this);
     newTab->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_T),
@@ -258,7 +277,7 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     closeTab->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_W),
                             QKeySequence::Close});
     connect(closeTab, &QAction::triggered, this,
-            [this]() { onCloseTab(m_tabs->currentIndex()); });
+            [this]() { onCloseTab(m_tabBar->currentIndex()); });
     addAction(closeTab);
 
     QAction *focusAddress = new QAction(this);
@@ -301,9 +320,9 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     nextTab->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_PageDown),
                            QKeySequence(Qt::CTRL | Qt::Key_Tab)});
     connect(nextTab, &QAction::triggered, this, [this]() {
-        int n = m_tabs->count();
+        int n = m_tabBar->count();
         if (n > 1)
-            m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % n);
+            m_tabBar->setCurrentIndex((m_tabBar->currentIndex() + 1) % n);
     });
     addAction(nextTab);
 
@@ -312,9 +331,9 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
                            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Tab),
                            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Backtab)});
     connect(prevTab, &QAction::triggered, this, [this]() {
-        int n = m_tabs->count();
+        int n = m_tabBar->count();
         if (n > 1)
-            m_tabs->setCurrentIndex((m_tabs->currentIndex() - 1 + n) % n);
+            m_tabBar->setCurrentIndex((m_tabBar->currentIndex() - 1 + n) % n);
     });
     addAction(prevTab);
 
@@ -341,31 +360,32 @@ ProcWindow::~ProcWindow() {
 }
 
 ProcView *ProcWindow::viewAt(int index) const {
-    return qobject_cast<ProcView *>(m_tabs->widget(index));
+    return qobject_cast<ProcView *>(m_stack->widget(index));
 }
 
 ProcView *ProcWindow::currentView() const {
-    return viewAt(m_tabs->currentIndex());
+    return viewAt(m_tabBar->currentIndex());
 }
 
 ProcView *ProcWindow::addTab(const QString &url, bool foreground) {
-    ProcView *view = new ProcView(m_tabs);
+    ProcView *view = new ProcView(m_stack);
     connectView(view);
-    const int index = m_tabs->addTab(view, QStringLiteral("New Tab"));
+    const int index = m_stack->addWidget(view);
+    m_tabBar->insertTab(index, QStringLiteral("New Tab"));
     if (foreground)
-        m_tabs->setCurrentIndex(index);
+        m_tabBar->setCurrentIndex(index);
     view->load(normalizeUrl(url));
     return view;
 }
 
 void ProcWindow::connectView(ProcView *view) {
     connect(view, &ProcView::titleChanged, this, [this, view](const QString &t) {
-        const int index = m_tabs->indexOf(view);
+        const int index = m_stack->indexOf(view);
         if (index < 0)
             return;
         const QString label = t.isEmpty() ? QStringLiteral("Untitled") : t;
-        m_tabs->setTabText(index, label.left(40));
-        m_tabs->setTabToolTip(index, label);
+        m_tabBar->setTabText(index, label.left(40));
+        m_tabBar->setTabToolTip(index, label);
         if (view == currentView())
             setWindowTitle(label + QStringLiteral(" — Nordstjernen"));
     });
@@ -505,17 +525,19 @@ void ProcWindow::onNewTab() {
 }
 
 void ProcWindow::onCloseTab(int index) {
-    QWidget *widget = m_tabs->widget(index);
+    QWidget *widget = m_stack->widget(index);
     if (!widget)
         return;
-    m_tabs->removeTab(index);
+    m_tabBar->removeTab(index);
+    m_stack->removeWidget(widget);
     widget->deleteLater();
-    if (m_tabs->count() == 0)
+    if (m_tabBar->count() == 0)
         close();
 }
 
 void ProcWindow::onCurrentChanged(int index) {
-    (void)index;
+    if (index >= 0)
+        m_stack->setCurrentIndex(index);
     updateChrome();
 }
 
@@ -714,7 +736,7 @@ void ProcWindow::onSettings() {
 void ProcWindow::refreshTaskManager() {
     if (!m_taskTable)
         return;
-    const int n = m_tabs ? m_tabs->count() : 0;
+    const int n = m_tabBar ? m_tabBar->count() : 0;
     m_taskTable->setRowCount(n);
     for (int i = 0; i < n; ++i) {
         ProcView *view = viewAt(i);
