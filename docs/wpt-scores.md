@@ -34,6 +34,7 @@ they regenerate.
 | 2026-06-13 | 7b9a177 | d8a8414e5 | 210/696 (30%) | 16258/20620 (78%) | full |
 | 2026-06-13 | 2639ddc | d8a8414e5 | 210/696 (30%) | 17245/20620 (83%) | partial: url |
 | 2026-06-13 | f9fb57c | d8a8414e5 | 212/696 (30%) | 17257/20620 (83%) | partial: url |
+| 2026-06-13 | f2448ed | d8a8414e5 | 223/696 (32%) | 18420/21529 (85%) | partial: dom/nodes |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -43,11 +44,11 @@ touch.
 
 ## Per-area results — 2026-06-13
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-13-f9fb57c.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-13-f2448ed.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 71/275 | 7209/8719 | 1441 | 50 | 13 | 6 |
+| `dom/nodes` | 82/275 | 8372/9628 | 1199 | 46 | 11 | 0 |
 | `dom/events` | 48/167 | 337/701 | 316 | 24 | 24 | 0 |
 | `dom/traversal` | 4/17 | 28/52 | 24 | 0 | 0 | 0 |
 | `dom/ranges` | 2/55 | 5/206 | 201 | 0 | 0 | 0 |
@@ -62,7 +63,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-13-f9fb57c.tsv`.
 | `WebCryptoAPI/digest` | 0/5 | 84/535 | 451 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **212/696** | **17257/20620** | **3240** | **78** | **39** | **6** |
+| **Total** | **223/696** | **18420/21529** | **2998** | **74** | **37** | **0** |
 
 ## ROI by area — 2026-06-13
 
@@ -77,7 +78,7 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/nodes` | 1510 | 204 | 7.4 | 30 | 101 |
+| `dom/nodes` | 1256 | 193 | 6.5 | 25 | 103 |
 | `WebCryptoAPI/digest` | 451 | 5 | 90.2 | 0 | 0 |
 | `url` | 415 | 21 | 19.8 | 2 | 5 |
 | `dom/events` | 364 | 119 | 3.1 | 71 | 29 |
