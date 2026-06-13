@@ -10418,6 +10418,48 @@ ns_window_document_fragment_ctor(JSContext *ctx, JSValueConst this_val,
     return ns_make_element(ctx, frag);
 }
 
+static JSValue
+ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NULL;
+    char *dup;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
+        const char *s = JS_ToCString(ctx, argv[0]);
+        if (!s) return JS_EXCEPTION;
+        dup = g_strdup(s);
+        JS_FreeCString(ctx, s);
+    } else {
+        dup = g_strdup("");
+    }
+    ns_node *n = ns_node_new_text(dup);
+    g_hash_table_add(js->orphan_nodes, n);
+    return ns_make_element(ctx, n);
+}
+
+static JSValue
+ns_window_comment_ctor(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NULL;
+    char *dup;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
+        const char *s = JS_ToCString(ctx, argv[0]);
+        if (!s) return JS_EXCEPTION;
+        dup = g_strdup(s);
+        JS_FreeCString(ctx, s);
+    } else {
+        dup = g_strdup("");
+    }
+    ns_node *n = ns_node_new_comment(dup);
+    g_hash_table_add(js->orphan_nodes, n);
+    return ns_make_element(ctx, n);
+}
+
 
 
 
@@ -16749,6 +16791,7 @@ ns_mouse_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueCons
     JS_SetPropertyStr(ctx, ev, "which",    JS_NewInt32(ctx, btn + 1));
     JS_SetPropertyStr(ctx, ev, "detail",   JS_NewInt32(ctx, detail));
     JS_SetPropertyStr(ctx, ev, "relatedTarget", related);
+    JS_DefinePropertyValueStr(ctx, ev, "__ndMouseEvent", JS_TRUE, 0);
     ns_event_apply_modifier_init(ctx, ev, have_init ? argv[1] : JS_UNDEFINED);
     return ev;
 }
@@ -24815,6 +24858,31 @@ ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
 }
 
 static JSValue
+ns_element_click_default_action(JSContext *ctx, const ns_node *el)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_UNDEFINED;
+    if (ns_element_activate_popover_target(ctx, el))
+        return JS_UNDEFINED;
+    if (ns_node_is_element_named(el, "a")) {
+        const char *href = ns_element_get_attr(el, "href");
+        if (ns_iframe_follow_href(ctx, el, href))
+            return JS_UNDEFINED;
+        if (href && *href && js->nav_cb)
+            js->nav_cb(href, FALSE, js->nav_user_data);
+        return JS_UNDEFINED;
+    }
+    if (ns_node_is_submit_trigger(el)) {
+        const ns_node *form = ns_js_form_owner_for(el, js);
+        if (form) return ns_js_request_submit_form(ctx, form, el);
+    } else if (ns_node_is_reset_trigger(el)) {
+        ns_node *form = (ns_node *)ns_js_form_owner_for(el, js);
+        if (form) return ns_js_reset_form(ctx, form);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_element_click(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
@@ -24836,24 +24904,7 @@ ns_element_click(JSContext *ctx, JSValueConst this_val,
     gboolean prevented = FALSE;
     ns_js_dispatch_event(js_from_ctx(ctx), el, "click", &prevented);
     if (prevented) return JS_UNDEFINED;
-    if (ns_element_activate_popover_target(ctx, el))
-        return JS_UNDEFINED;
-    if (ns_node_is_element_named(el, "a")) {
-        const char *href = ns_element_get_attr(el, "href");
-        if (ns_iframe_follow_href(ctx, el, href))
-            return JS_UNDEFINED;
-        if (href && *href && js_from_ctx(ctx)->nav_cb)
-            js_from_ctx(ctx)->nav_cb(href, FALSE, js_from_ctx(ctx)->nav_user_data);
-        return JS_UNDEFINED;
-    }
-    if (ns_node_is_submit_trigger(el)) {
-        const ns_node *form = ns_js_form_owner_for(el, js_from_ctx(ctx));
-        if (form) return ns_js_request_submit_form(ctx, form, el);
-    } else if (ns_node_is_reset_trigger(el)) {
-        ns_node *form = (ns_node *)ns_js_form_owner_for(el, js_from_ctx(ctx));
-        if (form) return ns_js_reset_form(ctx, form);
-    }
-    return JS_UNDEFINED;
+    return ns_element_click_default_action(ctx, el);
 }
 
 gboolean
@@ -25316,8 +25367,21 @@ ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, ev, "stopPropagation",          ns_event_stop_propagation, 0);
     ns_event_define_cancel_bubble(ctx, ev);
     ns_bind_fn(ctx, ev, "stopImmediatePropagation", ns_event_stop_immediate, 0);
+    ns_js *_j = js_from_ctx(ctx);
+    JSValue mouse_v = JS_GetPropertyStr(ctx, ev, "__ndMouseEvent");
+    gboolean is_mouse = JS_ToBool(ctx, mouse_v);
+    JS_FreeValue(ctx, mouse_v);
+    gboolean activates = is_mouse && strcmp(type, "click") == 0 &&
+                         !ns_element_effectively_inert(el) &&
+                         !ns_node_is_disabled_form_control(el);
+    int kind = activates ? ns_checkable_input_kind(el) : 0;
+    gboolean was_checked = FALSE;
+    if (kind)
+        was_checked = ns_checkable_pre_click(_j, (ns_node *)el, kind);
     gboolean prevented = FALSE;
-    ns_js_dispatch_built_event(js_from_ctx(ctx), el, type, ev, &prevented);
+    ns_js_dispatch_built_event(_j, el, type, ev, &prevented);
+    if (kind)
+        ns_checkable_post_click(_j, (ns_node *)el, kind, was_checked, prevented);
     JS_FreeCString(ctx, type);
     return prevented ? JS_FALSE : JS_TRUE;
 }
@@ -29632,6 +29696,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_SetPropertyStr(ctx, global, "webkitOfflineAudioContext", ac);
     }
     ns_bind_ctor(ctx, global, "DocumentFragment", ns_window_document_fragment_ctor, 0);
+    ns_bind_ctor(ctx, global, "Text",            ns_window_text_ctor,            1);
+    ns_bind_ctor(ctx, global, "Comment",         ns_window_comment_ctor,         1);
     ns_bind_ctor(ctx, global, "Option",          ns_window_option_ctor,          4);
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor,             1);
     ns_bind_ctor(ctx, global, "XMLHttpRequest",  ns_window_xhr_ctor,             0);
@@ -32048,8 +32114,8 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "HTMLFrameElement", 0 }, { "HTMLFrameSetElement", 0 },
         { "HTMLParamElement", 0 }, { "HTMLDirectoryElement", 0 },
         { "CharacterData", 0 },
-        { "Text", 0 }, { "CDATASection", 0 },
-        { "ProcessingInstruction", 0 }, { "Comment", 0 }, { "Attr", 0 },
+        { "CDATASection", 0 },
+        { "ProcessingInstruction", 0 }, { "Attr", 0 },
         { "DocumentType", 0 },
         { "HTMLOptionsCollection", 0 }, { "HTMLAllCollection", 0 },
         { "RadioNodeList", 0 }, { "TextMetrics", 0 },
