@@ -760,7 +760,12 @@ static ns_box *build_block(const ns_node *n, GHashTable *styles);
 static void layout_box(ns_box *box, double parent_content_width,
                        const ns_style *inherited_style);
 static ns_box *build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
+static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host);
+static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
+static void register_abs_pseudo(const ns_node *host, const ns_style *ps);
+static ns_box *build_blockified_inline_item(const ns_node *n, GHashTable *styles,
+                                            ns_box **pending_before);
 static void layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style);
 static void append_display_contents_children(ns_box *block, const ns_node *n,
                                              GHashTable *styles,
@@ -1222,6 +1227,7 @@ typedef struct collector_ctx {
     gsize strike_start;
     const char *text_transform;
     GArray     *atomics;
+    gboolean    abs_placeholders;
 } collector_ctx;
 
 typedef struct ns_atomic_raw {
@@ -2309,7 +2315,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             e.fixed = fixed;
             g_array_append_val(g_abs_pending, e);
         }
-        if (ctx->atomics && !fixed && g_abs_ph_set) {
+        if (ctx->atomics && !fixed && ctx->abs_placeholders && g_abs_ph_set) {
             ns_box *ph = box_new(NS_BOX_BLOCK);
             ns_atomic_raw rec = { .start = ctx->out->len, .box = ph };
             g_string_append(ctx->out, "\xef\xbf\xbc");
@@ -3045,7 +3051,8 @@ white_space_mode(const ns_node *node, GHashTable *styles)
 }
 
 static ns_box *
-build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *styles)
+build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
+                      GHashTable *styles, gboolean abs_placeholders)
 {
     GString *buf = g_string_new(NULL);
     GArray  *raw_links = g_array_new(FALSE, FALSE, sizeof(ns_link_range));
@@ -3054,7 +3061,7 @@ build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *sty
     g_array_set_clear_func(raw_links, link_clear);
     collector_ctx ctx = {
         .styles = styles, .out = buf, .links = raw_links, .attrs = raw_attrs,
-        .atomics = raw_atomics,
+        .atomics = raw_atomics, .abs_placeholders = abs_placeholders,
     };
     if (first && first->parent) {
         const ns_style *ps = g_hash_table_lookup(styles, first->parent);
@@ -3331,6 +3338,20 @@ build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *sty
 
     box->text = g_string_free(collapsed, FALSE);
     return box;
+}
+
+static ns_box *
+build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *styles)
+{
+    return build_inline_run_impl(first, last_excl, styles, TRUE);
+}
+
+static ns_box *
+build_inline_run_no_abs_placeholders(const ns_node *first,
+                                     const ns_node *last_excl,
+                                     GHashTable *styles)
+{
+    return build_inline_run_impl(first, last_excl, styles, FALSE);
 }
 
 static ns_box *
@@ -3930,17 +3951,8 @@ append_display_contents_children(ns_box *block, const ns_node *n,
                 c = c->next_sibling;
                 continue;
             }
-            ns_box *item = box_new(NS_BOX_BLOCK);
-            item->dom = c;
-            item->style = cs;
-            ns_box *run = build_inline_run(c, c->next_sibling, styles);
-            if (run && run->text && run->text[0]) {
-                box_append_child(item, run);
-                box_append_child(block, item);
-            } else {
-                if (run) ns_box_free(run);
-                ns_box_free(item);
-            }
+            ns_box *item = build_blockified_inline_item(c, styles, pending_before);
+            if (item) box_append_child(block, item);
             c = c->next_sibling;
             continue;
         }
@@ -4027,6 +4039,48 @@ register_abs_pseudo(const ns_node *host, const ns_style *ps)
     e.fixed = pv && pv->kind == NS_CSS_V_KEYWORD && pv->u.keyword &&
               strcmp(pv->u.keyword, "fixed") == 0;
     g_array_append_val(g_abs_pending, e);
+}
+
+static ns_box *
+build_blockified_inline_item(const ns_node *n, GHashTable *styles,
+                             ns_box **pending_before)
+{
+    const ns_style *s = g_hash_table_lookup(styles, n);
+    ns_box *item = box_new(NS_BOX_BLOCK);
+    item->dom = n;
+    item->style = s;
+    collect_box_bg_image(item, s);
+
+    if (s) {
+        register_abs_pseudo(n, s->before);
+        register_abs_pseudo(n, s->after);
+    }
+
+    ns_box *before_block = (s && s->before)
+        ? build_pseudo_block_for(s->before, n) : NULL;
+    if (before_block) box_append_child(item, before_block);
+
+    ns_box *run = build_inline_run_no_abs_placeholders(n, n->next_sibling,
+                                                       styles);
+    if (pending_before && *pending_before) {
+        run = inline_merge_prefix(*pending_before, run);
+        *pending_before = NULL;
+    }
+    if (run && run->text && run->text[0]) {
+        box_append_child(item, run);
+    } else if (run) {
+        ns_box_free(run);
+    }
+
+    ns_box *after_block = (s && s->after)
+        ? build_pseudo_block_for(s->after, n) : NULL;
+    if (after_block) box_append_child(item, after_block);
+
+    if (!item->first_child && !style_has_atomic_inline_box(s)) {
+        ns_box_free(item);
+        return NULL;
+    }
+    return item;
 }
 
 static ns_box *
@@ -4271,21 +4325,9 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 c = c->next_sibling;
                 continue;
             }
-            ns_box *item = box_new(NS_BOX_BLOCK);
-            item->dom = c;
-            item->style = cs;
-            ns_box *run = build_inline_run(c, c->next_sibling, styles);
-            if (pending_before) {
-                run = inline_merge_prefix(pending_before, run);
-                pending_before = NULL;
-            }
-            if (run && run->text && run->text[0]) {
-                box_append_child(item, run);
-                box_append_child(block, item);
-            } else {
-                if (run) ns_box_free(run);
-                ns_box_free(item);
-            }
+            ns_box *item = build_blockified_inline_item(c, styles,
+                                                        &pending_before);
+            if (item) box_append_child(block, item);
             c = c->next_sibling;
             continue;
         }
@@ -7831,7 +7873,8 @@ grid_track_px(const ns_css_track *t, double basis)
 {
     if (!t) return 0;
     if (t->kind == NS_CSS_TRACK_PX) return t->v;
-    if (t->kind == NS_CSS_TRACK_PERCENT) return t->v * basis / 100.0;
+    if (t->kind == NS_CSS_TRACK_PERCENT && basis >= 0)
+        return t->v * basis / 100.0;
     return 0;
 }
 
@@ -7868,6 +7911,10 @@ layout_grid_areas(ns_box *box, double cw,
                             box->style ? box->style->values[NS_CSS_GAP] : NULL, cw);
     double row_gap = number_or(box->style ? box->style->values[NS_CSS_ROW_GAP] : NULL, -1);
     if (row_gap < 0) row_gap = number_or(box->style ? box->style->values[NS_CSS_GAP] : NULL, 0);
+    const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    double row_basis = (hv_box && (hv_box->kind == NS_CSS_V_LENGTH ||
+                                   hv_box->kind == NS_CSS_V_CALC))
+        ? resolve_used_height(box, hv_box, cw, -1) : -1;
     ns_css_tracks cols_buf = expand_auto_repeat(cols_src, cw, col_gap);
     int n_cols = cols_buf.n > 0 ? cols_buf.n : 1;
     double avail = cw - (n_cols > 1 ? col_gap * (n_cols - 1) : 0);
@@ -8009,7 +8056,7 @@ layout_grid_areas(ns_box *box, double cw,
             const ns_css_track *t = &rows_v->u.tracks.tracks[r];
             if (t->kind == NS_CSS_TRACK_PX) row_height[r] = t->v;
             else if (t->kind == NS_CSS_TRACK_PERCENT)
-                row_height[r] = t->v * cw / 100.0;
+                row_height[r] = grid_track_px(t, row_basis);
         }
     }
     for (guint i = 0; i < items->len; i++) {
@@ -8105,6 +8152,10 @@ layout_grid(ns_box *box, double cw,
     double row_gap = number_or(box->style ? box->style->values[NS_CSS_ROW_GAP] : NULL, -1);
     if (row_gap < 0) row_gap = number_or(box->style ? box->style->values[NS_CSS_GAP] : NULL, 0);
     if (rows_subgrid) row_gap = sgr->gap;
+    const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    double row_basis = (hv_box && (hv_box->kind == NS_CSS_V_LENGTH ||
+                                   hv_box->kind == NS_CSS_V_CALC))
+        ? resolve_used_height(box, hv_box, cw, -1) : -1;
 
     ns_css_tracks cols_buf = expand_auto_repeat(cols_src, cw, col_gap);
     const ns_css_tracks *cols = &cols_buf;
@@ -8378,11 +8429,11 @@ layout_grid(ns_box *box, double cw,
         if (rows_subgrid) {
             base_row_height[r] = sgr->sizes[r];
         } else if (rows_tracks && r < rows_tracks->n) {
-            base_row_height[r] = grid_track_px(&rows_tracks->tracks[r], cw);
+            base_row_height[r] = grid_track_px(&rows_tracks->tracks[r], row_basis);
         } else if (auto_rows_tracks) {
             int ar = (r - explicit_rows) % auto_rows_tracks->n;
             if (ar < 0) ar = 0;
-            base_row_height[r] = grid_track_px(&auto_rows_tracks->tracks[ar], cw);
+            base_row_height[r] = grid_track_px(&auto_rows_tracks->tracks[ar], row_basis);
         }
     }
     double base_row_y[NS_CSS_TRACKS_MAX + 1];
@@ -8497,11 +8548,11 @@ layout_grid(ns_box *box, double cw,
         if (rows_subgrid) {
             fixed = sgr->sizes[r];
         } else if (rows_tracks && r < rows_tracks->n) {
-            fixed = grid_track_px(&rows_tracks->tracks[r], cw);
+            fixed = grid_track_px(&rows_tracks->tracks[r], row_basis);
         } else if (auto_rows_tracks) {
             int ar = (r - explicit_rows) % auto_rows_tracks->n;
             if (ar < 0) ar = 0;
-            fixed = grid_track_px(&auto_rows_tracks->tracks[ar], cw);
+            fixed = grid_track_px(&auto_rows_tracks->tracks[ar], row_basis);
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
@@ -8542,7 +8593,7 @@ layout_grid(ns_box *box, double cw,
             ? box->style->values[NS_CSS_HEIGHT] : NULL;
         if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC) &&
             grid_rows->len > 0) {
-            double eh = length_resolve(hv, cw, -1);
+            double eh = resolve_used_height(box, hv, cw, -1);
             if (box->style &&
                 keyword_is(box->style->values[NS_CSS_BOX_SIZING], "border-box"))
                 eh -= box->padding.top + box->padding.bottom +
