@@ -144,9 +144,21 @@ ns_win32_set_app_id(void)
 }
 
 static void
-ns_win32_use_fontconfig_backend(void)
+ns_win32_use_fontconfig_backend(const char *dir)
 {
 #ifdef NS_HAVE_FONTCONFIG
+    if (dir && !g_getenv("FONTCONFIG_FILE")) {
+        char *conf = g_build_filename(dir, "etc", "fonts", "fonts.conf", NULL);
+        if (g_file_test(conf, G_FILE_TEST_EXISTS))
+            g_setenv("FONTCONFIG_FILE", conf, TRUE);
+        g_free(conf);
+    }
+    if (dir && !g_getenv("FONTCONFIG_PATH")) {
+        char *fonts = g_build_filename(dir, "etc", "fonts", NULL);
+        if (g_file_test(fonts, G_FILE_TEST_IS_DIR))
+            g_setenv("FONTCONFIG_PATH", fonts, TRUE);
+        g_free(fonts);
+    }
     if (!g_getenv("PANGOCAIRO_BACKEND"))
         g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
     FcInit();
@@ -156,10 +168,16 @@ ns_win32_use_fontconfig_backend(void)
 static void
 ns_win32_anchor_gtk_data(void)
 {
-    ns_win32_use_fontconfig_backend();
-    if (!g_self_exe) return;
+    if (!g_self_exe) {
+        ns_win32_use_fontconfig_backend(NULL);
+        return;
+    }
     char *dir = g_path_get_dirname(g_self_exe);
-    if (!dir) return;
+    if (!dir) {
+        ns_win32_use_fontconfig_backend(NULL);
+        return;
+    }
+    ns_win32_use_fontconfig_backend(dir);
     char *share_dir = g_build_filename(dir, "share", NULL);
     if (g_file_test(share_dir, G_FILE_TEST_IS_DIR)) {
         if (!g_getenv("GTK_DATA_PREFIX")) g_setenv("GTK_DATA_PREFIX", dir, TRUE);

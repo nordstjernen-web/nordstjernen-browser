@@ -181,6 +181,30 @@ fail:
 
 #else /* _WIN32 */
 
+static char *
+win_dirname_dup(const char *path)
+{
+    if (!path || !*path)
+        return NULL;
+    const char *slash = strrchr(path, '\\');
+    const char *alt = strrchr(path, '/');
+    if (!slash || (alt && alt > slash))
+        slash = alt;
+    if (!slash)
+        return NULL;
+    size_t n = (size_t)(slash - path);
+    if (n == 0)
+        n = 1;
+    if (n == 2 && path[1] == ':')
+        n = 3;
+    char *dir = malloc(n + 1);
+    if (!dir)
+        return NULL;
+    memcpy(dir, path, n);
+    dir[n] = '\0';
+    return dir;
+}
+
 static ns_rproc_http *
 spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
 {
@@ -237,8 +261,10 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
     si.hStdInput = child_in;
     si.hStdOutput = child_out;
     si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-    BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW,
-                             NULL, NULL, &si, &pi);
+    char *workdir = win_dirname_dup(renderer_path);
+    BOOL ok = CreateProcessA(renderer_path, cmd, NULL, NULL, TRUE,
+                             CREATE_NO_WINDOW, NULL, workdir, &si, &pi);
+    free(workdir);
     CloseHandle(child_in);
     CloseHandle(child_out);
     if (!ok)

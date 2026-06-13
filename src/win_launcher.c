@@ -9,7 +9,8 @@
 #include <wchar.h>
 #include <io.h>
 
-#define NS_BROWSER_EXE L"nordstjernen-browser.exe"
+#define NS_APP_DIR L"app"
+#define NS_BROWSER_EXE L"nordstjernen-ui.exe"
 #define NS_EXIT_MISSING_RUNTIME 127
 #define NS_STATUS_DLL_NOT_FOUND ((DWORD)0xC0000135u)
 #define NS_STATUS_ENTRYPOINT_NOT_FOUND ((DWORD)0xC0000139u)
@@ -279,8 +280,7 @@ ns_report_runtime_error(bool console)
     const wchar_t *text =
         L"Nordstjernen could not find its bundled runtime files.\n\n"
         L"Extract the whole nordstjernen-win64 folder and keep "
-        L"nordstjernen.exe, nordstjernen-browser.exe, the DLLs, share, lib, "
-        L"and etc together.";
+        L"nordstjernen.exe and the app folder together.";
     ns_console_line(text);
     if (!console)
         MessageBoxW(NULL, text, L"Nordstjernen", MB_OK | MB_ICONERROR |
@@ -305,7 +305,8 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
     wchar_t *launcher_path = ns_module_path();
     wchar_t *dir = launcher_path ? ns_dirname(launcher_path) : NULL;
-    wchar_t *browser_path = dir ? ns_join_path(dir, NS_BROWSER_EXE) : NULL;
+    wchar_t *app_dir = dir ? ns_join_path(dir, NS_APP_DIR) : NULL;
+    wchar_t *browser_path = app_dir ? ns_join_path(app_dir, NS_BROWSER_EXE) : NULL;
     int rc = 1;
 
     if (!browser_path || !ns_file_exists(browser_path)) {
@@ -328,7 +329,7 @@ WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     si.cb = sizeof si;
 
     BOOL ok = CreateProcessW(browser_path, command_line, NULL, NULL, TRUE, 0,
-                             NULL, NULL, &si, &pi);
+                             NULL, app_dir, &si, &pi);
     ns_free(command_line);
     if (!ok) {
         ns_report_start_error(console, GetLastError());
@@ -352,6 +353,7 @@ out:
     SetErrorMode(old_error_mode);
     if (argv) LocalFree(argv);
     ns_free(browser_path);
+    ns_free(app_dir);
     ns_free(dir);
     ns_free(launcher_path);
     return rc;

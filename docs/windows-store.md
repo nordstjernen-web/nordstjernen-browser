@@ -104,9 +104,9 @@ that shaped the manifest:
 
 - `data/msix/AppxManifest.xml.in` — manifest template. Declares:
   - `runFullTrust` (the bundle is a normal Win32 process tree: the
-    launcher `nordstjernen.exe` execs `nordstjernen-browser.exe`,
-    which spawns one sandboxed `nordstjernen-renderer.exe` per tab —
-    child processes inherit the package identity, no changes
+    launcher `nordstjernen.exe` execs `app/nordstjernen-ui.exe`,
+    which spawns one sandboxed `app/nordstjernen-renderer.exe` per
+    tab — child processes inherit the package identity, no changes
     needed).
   - `windows.protocol` extensions for **http** and **https**, which
     is what makes a packaged app appear in Windows Settings →

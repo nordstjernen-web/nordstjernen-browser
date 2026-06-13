@@ -117,24 +117,27 @@ powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 about:start
 folder that runs on a Windows machine with no MSYS2 install. It:
 
 1. Copies a tiny Win32 launcher as `nordstjernen.exe`, copies the
-   real GTK browser as `nordstjernen-browser.exe`, and transitively resolves every imported
-   DLL via `objdump -p`, pulling each one from `/mingw64/bin/` into
-   the bundle (system DLLs like `KERNEL32.dll` are skipped because
+   real GTK shell as `app/nordstjernen-ui.exe`, copies
+   `app/nordstjernen-renderer.exe`, and transitively resolves every
+   imported DLL via `objdump -p`, pulling each one from `/mingw64/bin/`
+   into `app/` (system DLLs like `KERNEL32.dll` are skipped because
    they aren't found there).
 2. Copies the GTK runtime data the binary needs at startup:
-   `share/glib-2.0/schemas/gschemas.compiled`,
-   `lib/gdk-pixbuf-2.0/` (loader DLLs + `loaders.cache`),
-   `share/icons/Adwaita/`, `share/icons/hicolor/`.
-3. Copies the CA bundle to `etc/ssl/certs/ca-bundle.crt` so libcurl
+   `app/share/glib-2.0/schemas/gschemas.compiled`,
+   `app/lib/gdk-pixbuf-2.0/` (loader DLLs + `loaders.cache`),
+   `app/share/icons/Adwaita/`, `app/share/icons/hicolor/`,
+   `app/etc/fonts/`.
+3. Copies the CA bundle to `app/etc/ssl/certs/ca-bundle.crt` so libcurl
    can verify TLS certificates.
-4. Nothing else — `nordstjernen-browser.exe` bootstraps `GTK_DATA_PREFIX`,
-   `GDK_PIXBUF_MODULE_FILE`, `CURL_CA_BUNDLE`, and `SSL_CERT_FILE`
-   from its own install directory on startup, so no launcher script
-   is needed. Earlier bundles shipped a `nordstjernen.cmd` wrapper
-   for this; it flashed a brief console window on launch and has
-   been removed. The current `nordstjernen.exe` launcher exists only
-   to preserve the public executable name and to show a clear error if
-   a user runs it from inside the ZIP before extracting the whole folder.
+4. Leaves one user-facing executable at the bundle root. The launcher
+   starts `app/nordstjernen-ui.exe`; that process bootstraps
+   `GTK_DATA_PREFIX`, `GDK_PIXBUF_MODULE_FILE`, `CURL_CA_BUNDLE`, and
+   `SSL_CERT_FILE` from `app/` on startup, so no launcher script is
+   needed. Earlier bundles shipped a `nordstjernen.cmd` wrapper for
+   this; it flashed a brief console window on launch and has been
+   removed. The current `nordstjernen.exe` launcher exists to preserve
+   the public executable name and to show a clear error if a user runs
+   it from inside the ZIP before extracting the whole folder.
 
 Run it from the MINGW64 shell:
 
@@ -205,8 +208,8 @@ The installer is intentionally **per-user**:
 ### What the installer does
 
 1. Extracts the entire `dist/nordstjernen-win64/` tree into
-   `$INSTDIR` (preserving the bundle's `bin/`, `etc/`, `lib/`,
-   `share/` layout the exe expects).
+   `$INSTDIR` (preserving the root `nordstjernen.exe` plus the
+   `app/` runtime directory).
 2. Creates a Start Menu group `Nordstjernen` with shortcuts to
    `nordstjernen.exe` and the uninstaller.
 3. Optional desktop shortcut (component is selected by default on
@@ -240,8 +243,8 @@ the install dir.
 
 ### Shortcuts target `nordstjernen.exe` directly
 
-The public exe is a launcher that starts `nordstjernen-browser.exe`
-from the same directory. The browser exe self-bootstraps the runtime env (`GTK_DATA_PREFIX`,
+The public exe is a launcher that starts `app/nordstjernen-ui.exe`.
+The UI exe self-bootstraps the runtime env (`GTK_DATA_PREFIX`,
 `GTK_EXE_PREFIX`, `XDG_DATA_DIRS`, `GDK_PIXBUF_MODULE_FILE`,
 `CURL_CA_BUNDLE`, `SSL_CERT_FILE`) from its own install directory
 inside `ns_win32_anchor_gtk_data` (`src/gtk/appmain.c`). Earlier bundles
@@ -277,7 +280,7 @@ conflicts with policy 10.2.1), the manifest decisions, identity
 overrides, local sideload testing, and the full submission
 procedure are documented in `docs/windows-store.md`.
 
-## CA bundle (what `etc/ssl/certs/ca-bundle.crt` is)
+## CA bundle (what `app/etc/ssl/certs/ca-bundle.crt` is)
 
 A **CA bundle** is a plain-text file containing the
 PEM-encoded X.509 root certificates of the public Certificate
@@ -311,7 +314,8 @@ source Firefox uses. We bundle it because:
 2. `$SSL_CERT_FILE` env var, same condition.
 3. On Windows: `<exe_dir>/etc/ssl/certs/ca-bundle.crt`, then
    `<exe_dir>/ssl/certs/ca-bundle.crt`, then
-   `<exe_dir>/ca-bundle.crt`, then `<exe_dir>/cert.pem`.
+   `<exe_dir>/ca-bundle.crt`, then `<exe_dir>/cert.pem`. In the
+   redistributable bundle, `<exe_dir>` is `app/`.
 
 If found, the resolved path is applied to every `curl_easy`
 handle via `CURLOPT_CAINFO` before `curl_easy_perform`. The
@@ -376,13 +380,12 @@ so we don't ship a bundled copy there.
   bundle directory so Windows finds the bundled 64-bit DLLs first.
 - *Running from inside the ZIP shows "Extract All"* — extract the
   whole `nordstjernen-win64` folder first. Windows' ZIP view launches
-  a temporary copy of only the clicked file, without the sibling DLLs
-  and GTK runtime data the browser needs.
+  a temporary copy of only the clicked file, without the `app/` folder
+  the browser needs.
 - *Icons missing / buttons blank in the header bar* —
-  `share/icons/Adwaita` didn't make it into the bundle. Re-run
+  `app/share/icons/Adwaita` didn't make it into the bundle. Re-run
   `scripts/pack-windows.sh`.
 - *TLS errors (`SSL certificate problem`)* —
-  `etc/ssl/certs/ca-bundle.crt` isn't being picked up. The
-  launcher `.cmd` sets `CURL_CA_BUNDLE`; running `nordstjernen.exe`
-  directly from PowerShell bypasses that. Set the env var
-  manually or use the `.cmd`.
+  `app/etc/ssl/certs/ca-bundle.crt` isn't being picked up. Re-run
+  `scripts/pack-windows.sh` and keep the root `nordstjernen.exe`
+  together with its `app/` directory.
