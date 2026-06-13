@@ -7,14 +7,19 @@
     xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
     xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
     xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+    xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
     xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-    IgnorableNamespaces="uap uap3 uap10 desktop rescap">
+    IgnorableNamespaces="uap uap3 uap10 desktop mp rescap">
 
   <Identity
       Name="@IDENTITY_NAME@"
       Publisher="@PUBLISHER@"
       Version="@MSIX_VERSION@"
       ProcessorArchitecture="x64"/>
+
+  <mp:PhoneIdentity
+      PhoneProductId="@PHONE_PRODUCT_ID@"
+      PhonePublisherId="@PHONE_PUBLISHER_ID@"/>
 
   <Properties>
     <DisplayName>@DISPLAY_NAME@</DisplayName>

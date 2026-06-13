@@ -151,12 +151,17 @@ Partner Center product identity:
 NS_MSIX_IDENTITY_NAME='Nordstjernen.NordstjernenWebBrowser' \
 NS_MSIX_PUBLISHER='CN=631F98F7-2280-49EE-8EF8-534CC36D09CF' \
 NS_MSIX_PUBLISHER_DISPLAY='Nordstjernen' \
+NS_MSIX_PHONE_PRODUCT_ID='2c47a178-dfb0-4383-9dc0-aa7195bc8354' \
+NS_MSIX_PHONE_PUBLISHER_ID='eb62046e-1fa9-48a1-b651-cbf7237e9a03' \
 ./scripts/pack-msix.sh
 ```
 
 These are the script defaults. `NS_MSIX_DISPLAY_NAME` defaults to
 `Nordstjernen Web Browser`, matching the reserved Store listing name.
 Override any of them only for a different Partner Center product.
+The `mp:PhoneIdentity` values are included for Store submission;
+Microsoft's manifest schema requires both phone GUID fields, while
+the desktop package identity still comes from `Package/Identity`.
 
 Store discovery values:
 
