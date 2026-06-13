@@ -91,6 +91,11 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
 
     QToolBar *toolbar = addToolBar(QStringLiteral("Navigation"));
     toolbar->setMovable(false);
+    // Slightly slimmer toolbar (smaller icons + tighter padding).
+    toolbar->setIconSize(QSize(18, 18));
+    toolbar->setStyleSheet(
+        "QToolBar { padding: 1px; spacing: 2px; }"
+        "QToolButton { padding: 2px; }");
 
     m_backAction = toolbar->addAction(
         style()->standardIcon(QStyle::SP_ArrowBack), QStringLiteral("Back"));

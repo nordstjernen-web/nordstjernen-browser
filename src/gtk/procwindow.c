@@ -95,7 +95,17 @@ install_status_css(void)
         "  padding: 2px 8px;"
         "  border-top: 1px solid alpha(currentColor, 0.15);"
         "  font-size: smaller;"
-        "}");
+        "}"
+        ".ns-toolbar button, .ns-toolbar entry {"
+        "  min-height: 26px;"
+        "}"
+        ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
+        "notebook header tab {"
+        "  min-height: 0;"
+        "  padding-top: 1px;"
+        "  padding-bottom: 1px;"
+        "}"
+        "notebook header tab button { min-height: 20px; min-width: 20px; }");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -1121,8 +1131,9 @@ proc_window_new(GtkApplication *app, const char *home_url)
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
     GtkWidget *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-    gtk_widget_set_margin_top(toolbar, 4);
-    gtk_widget_set_margin_bottom(toolbar, 4);
+    gtk_widget_add_css_class(toolbar, "ns-toolbar");
+    gtk_widget_set_margin_top(toolbar, 2);
+    gtk_widget_set_margin_bottom(toolbar, 2);
     gtk_widget_set_margin_start(toolbar, 4);
     gtk_widget_set_margin_end(toolbar, 4);
 
