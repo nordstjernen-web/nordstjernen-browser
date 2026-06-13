@@ -198,10 +198,9 @@ pv_free(NsProcView *v)
         }
         g_async_queue_unref(v->queue);
     }
-    if (v->stage[0])
-        cairo_surface_destroy(v->stage[0]);
-    if (v->stage[1])
-        cairo_surface_destroy(v->stage[1]);
+    if (v->frame)
+        cairo_surface_destroy(v->frame);
+    v->frame = NULL;
     if (v->ctx_popover)
         gtk_widget_unparent(v->ctx_popover);
     if (v->ctx_actions)
@@ -267,18 +266,11 @@ ns_proc_renderer_path(void)
 static cairo_surface_t *
 stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
 {
-    cairo_surface_t *s = v->stage[v->stage_next];
-    if (!s || cairo_image_surface_get_width(s) != w ||
-        cairo_image_surface_get_height(s) != h) {
-        if (s)
-            cairo_surface_destroy(s);
-        s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
-            cairo_surface_destroy(s);
-            v->stage[v->stage_next] = NULL;
-            return NULL;
-        }
-        v->stage[v->stage_next] = s;
+    (void)v;
+    cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(s);
+        return NULL;
     }
     cairo_surface_flush(s);
     unsigned char *dst = cairo_image_surface_get_data(s);
@@ -291,7 +283,6 @@ stage_fill(NsProcView *v, const unsigned char *px, int w, int h, int stride)
             memcpy(dst + (size_t)y * dstride, px + (size_t)y * stride, row);
     }
     cairo_surface_mark_dirty(s);
-    v->stage_next ^= 1;
     return s;
 }
 
@@ -389,7 +380,7 @@ worker_main(gpointer data)
                 if (!fr.unchanged) {
                     res->surface = stage_fill(v, fr.pixels, fr.width,
                                               fr.height, fr.stride);
-                    res->surface_borrowed = res->surface != NULL;
+                    res->surface_borrowed = FALSE;
                 }
                 if (fr.nav) {
                     res->nav = g_strdup(fr.nav);
@@ -1286,6 +1277,8 @@ on_result(gpointer data)
                 disarm_anim(v);
         }
         if (current && res->ok && res->surface) {
+            if (v->frame)
+                cairo_surface_destroy(v->frame);
             v->frame = res->surface;
             res->surface = NULL;
             v->render_restarts = 0;
