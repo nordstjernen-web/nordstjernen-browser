@@ -19193,6 +19193,45 @@ ns_element_hasAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     return a ? JS_TRUE : JS_FALSE;
 }
 
+static gboolean
+ns_qname_structurally_valid(const char *q)
+{
+    if (!q || !*q) return FALSE;
+    const char *c1 = strchr(q, ':');
+    if (!c1) return TRUE;
+    if (c1 == q) return FALSE;
+    if (!*(c1 + 1)) return FALSE;
+    if (strchr(c1 + 1, ':')) return FALSE;
+    return TRUE;
+}
+
+static JSValue
+ns_validate_attr_ns(JSContext *ctx, const char *ns_uri, const char *qname)
+{
+    if (!ns_qname_structurally_valid(qname))
+        return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
+            "invalid qualified name");
+    const char *colon = strchr(qname, ':');
+    gboolean has_prefix = colon != NULL;
+    gsize plen = has_prefix ? (gsize)(colon - qname) : 0;
+    gboolean ns_is_xmlns = ns_uri &&
+        strcmp(ns_uri, "http://www.w3.org/2000/xmlns/") == 0;
+    gboolean ns_is_xml = ns_uri &&
+        strcmp(ns_uri, "http://www.w3.org/XML/1998/namespace") == 0;
+    gboolean name_is_xmlns = strcmp(qname, "xmlns") == 0 ||
+        (plen == 5 && strncmp(qname, "xmlns", 5) == 0);
+    if (has_prefix && !ns_uri)
+        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
+            "a prefix requires a namespace");
+    if (plen == 3 && strncmp(qname, "xml", 3) == 0 && !ns_is_xml)
+        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
+            "the xml prefix requires the XML namespace");
+    if (name_is_xmlns != ns_is_xmlns)
+        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
+            "xmlns must use the XMLNS namespace");
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_element_setAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -19200,11 +19239,25 @@ ns_element_setAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     if (argc < 3)
         return JS_ThrowTypeError(ctx,
             "3 arguments required, but only %d present", argc);
-    if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
+    gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+    const char *ns_uri = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    if (ns_uri && !*ns_uri) { JS_FreeCString(ctx, ns_uri); ns_uri = NULL; }
     const char *name = JS_ToCString(ctx, argv[1]);
+    JSValue verr = ns_validate_attr_ns(ctx, ns_uri, name);
+    if (JS_IsException(verr)) {
+        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        if (name) JS_FreeCString(ctx, name);
+        return verr;
+    }
+    if (!n || n->kind != NS_NODE_ELEMENT) {
+        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        if (name) JS_FreeCString(ctx, name);
+        return JS_UNDEFINED;
+    }
     const char *val  = JS_ToCString(ctx, argv[2]);
     if (name && val && !ns_attr_name_is_internal(name))
         ns_js_set_attr_recorded(js_from_ctx(ctx), n, name, val);
+    if (ns_uri) JS_FreeCString(ctx, ns_uri);
     if (name) JS_FreeCString(ctx, name);
     if (val)  JS_FreeCString(ctx, val);
     return JS_UNDEFINED;
@@ -19233,7 +19286,16 @@ static JSValue
 ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || n->kind != NS_NODE_ELEMENT || argc < 2) return JS_UNDEFINED;
+    if (argc < 2) return JS_UNDEFINED;
+    {
+        const char *check = JS_ToCString(ctx, argv[0]);
+        gboolean empty = !check || !*check;
+        if (check) JS_FreeCString(ctx, check);
+        if (empty)
+            return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
+                "setAttribute: name must not be empty");
+    }
+    if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
     const char *raw_name = JS_ToCString(ctx, argv[0]);
     char *lowered = NULL;
     if (raw_name && !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
@@ -30605,27 +30667,15 @@ ns_document_createAttributeNS(JSContext *ctx, JSValueConst this_val,
         if (ns_uri) JS_FreeCString(ctx, ns_uri);
         return JS_EXCEPTION;
     }
-    if (!ns_valid_element_local_name(qname)) {
+    JSValue verr = ns_validate_attr_ns(ctx, ns_uri, qname);
+    if (JS_IsException(verr)) {
         if (ns_uri) JS_FreeCString(ctx, ns_uri);
         JS_FreeCString(ctx, qname);
-        return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
-            "createAttributeNS: invalid qualified name");
+        return verr;
     }
     const char *colon = strchr(qname, ':');
     char *prefix = colon ? g_strndup(qname, (gsize)(colon - qname)) : NULL;
     const char *local = colon ? colon + 1 : qname;
-    if ((prefix && !ns_uri) ||
-        (prefix && strcmp(prefix, "xml") == 0 &&
-         (!ns_uri || strcmp(ns_uri, "http://www.w3.org/XML/1998/namespace") != 0)) ||
-        (((qname[0] == 'x' && strcmp(qname, "xmlns") == 0) ||
-          (prefix && strcmp(prefix, "xmlns") == 0)) !=
-         (ns_uri && strcmp(ns_uri, "http://www.w3.org/2000/xmlns/") == 0))) {
-        g_free(prefix);
-        if (ns_uri) JS_FreeCString(ctx, ns_uri);
-        JS_FreeCString(ctx, qname);
-        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
-            "createAttributeNS: namespace/qualified name mismatch");
-    }
     JSValue out = ns_make_attr_node(ctx, ns_uri, prefix, local, qname);
     g_free(prefix);
     if (ns_uri) JS_FreeCString(ctx, ns_uri);
