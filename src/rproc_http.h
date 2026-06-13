@@ -73,6 +73,7 @@ int   ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
 int   ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin,
                                   int allow);
 char *ns_rproc_http_eval(ns_rproc_http *r, const char *src);
+char *ns_rproc_http_dump(ns_rproc_http *r, const char *kind);
 char *ns_rproc_http_console_poll(ns_rproc_http *r);
 char *ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,
                              int *out_stream);

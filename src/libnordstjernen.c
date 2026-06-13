@@ -683,6 +683,23 @@ ns_browser_render_text(ns_browser *browser)
     return text;
 }
 
+char *
+ns_browser_dump_dom(ns_browser *browser)
+{
+    if (!browser || !browser->doc) return NULL;
+    GString *out = ns_node_dump(browser->doc);
+    return out ? g_string_free(out, FALSE) : NULL;
+}
+
+char *
+ns_browser_dump_layout(ns_browser *browser)
+{
+    if (!browser || !browser->layout) return NULL;
+    GString *out = g_string_new(NULL);
+    ns_engine_dump_layout(browser->layout, 0, out);
+    return g_string_free(out, FALSE);
+}
+
 int
 ns_browser_render_image(ns_browser *browser, const char *path)
 {

@@ -502,6 +502,23 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/dump") == 0) {
+        char *kind = json_get_str(body, "kind");
+        char *res = NULL;
+        if (s->cur && kind) {
+            if (strcmp(kind, "dom") == 0)
+                res = ns_browser_dump_dom(s->cur);
+            else if (strcmp(kind, "layout") == 0)
+                res = ns_browser_dump_layout(s->cur);
+            else if (strcmp(kind, "text") == 0)
+                res = ns_browser_render_text(s->cur);
+        }
+        reply_str(ctrl_w, "text", res);
+        free(res);
+        free(kind);
+        return 0;
+    }
+
     if (strcmp(head->path, "/console") == 0) {
         char *log = s->cur ? ns_browser_console_drain(s->cur) : NULL;
         reply_str(ctrl_w, "text", log);

@@ -811,6 +811,25 @@ ns_rproc_http_eval(ns_rproc_http *r, const char *src)
 }
 
 char *
+ns_rproc_http_dump(ns_rproc_http *r, const char *kind)
+{
+    if (!r || !kind)
+        return NULL;
+    char *ke = json_escape(kind);
+    char *json = NULL;
+    if (asprintf(&json, "{\"kind\":\"%s\"}", ke ? ke : "") < 0)
+        json = NULL;
+    free(ke);
+    char *body = json ? request(r, "/dump", json) : NULL;
+    free(json);
+    if (!body)
+        return NULL;
+    char *text = json_get_str(body, "text");
+    free(body);
+    return text;
+}
+
+char *
 ns_rproc_http_console_poll(ns_rproc_http *r)
 {
     if (!r)

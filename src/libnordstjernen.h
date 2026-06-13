@@ -41,6 +41,12 @@ char *ns_browser_take_post(ns_browser *browser, size_t *out_len,
 
 char *ns_browser_render_text(ns_browser *browser);
 
+/* Serialize the current DOM tree / layout box tree to a newly-allocated
+ * string (caller frees). Used by headless dumps driven over the renderer
+ * IPC so they exercise the same engine state as the GUI. */
+char *ns_browser_dump_dom(ns_browser *browser);
+char *ns_browser_dump_layout(ns_browser *browser);
+
 int ns_browser_render_image(ns_browser *browser, const char *path);
 
 /* Total laid-out page size in CSS pixels. Returns 0 on success. */
