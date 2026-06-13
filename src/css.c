@@ -6854,6 +6854,84 @@ parse_declaration_block(const char **pp, const char *end,
                     g_array_append_val(decls_out, d);
                 }
             }
+            if (strcmp(pname, "grid") == 0) {
+                char *cols_flow_probe = cols_trim
+                    ? g_ascii_strdown(cols_trim, -1) : NULL;
+                if (cols_trim && cols_flow_probe &&
+                    strstr(cols_flow_probe, "auto-flow")) {
+                    char *tokens[8] = {0};
+                    int n = split_ws_limit(cols_trim, tokens, G_N_ELEMENTS(tokens));
+                    GString *flow = g_string_new("column");
+                    GString *tracks = g_string_new(NULL);
+                    for (int i = 0; i < n; i++) {
+                        if (g_ascii_strcasecmp(tokens[i], "auto-flow") == 0)
+                            continue;
+                        if (g_ascii_strcasecmp(tokens[i], "dense") == 0) {
+                            g_string_append(flow, " dense");
+                            continue;
+                        }
+                        if (tracks->len) g_string_append_c(tracks, ' ');
+                        g_string_append(tracks, tokens[i]);
+                    }
+                    ns_css_value *fv = parse_value_for(NS_CSS_GRID_AUTO_FLOW,
+                                                       flow->str);
+                    if (fv) {
+                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_FLOW,
+                                          .value = fv, .important = important };
+                        g_array_append_val(decls_out, d);
+                    }
+                    ns_css_value *tv = parse_value_for(NS_CSS_GRID_AUTO_COLUMNS,
+                                                       tracks->len ? tracks->str : "auto");
+                    if (tv) {
+                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_COLUMNS,
+                                          .value = tv, .important = important };
+                        g_array_append_val(decls_out, d);
+                    }
+                    for (int i = 0; i < n; i++) g_free(tokens[i]);
+                    g_string_free(flow, TRUE);
+                    g_string_free(tracks, TRUE);
+                    g_clear_pointer(&cols_trim, g_free);
+                }
+                g_free(cols_flow_probe);
+                char *rows_flow_probe = rows_trim
+                    ? g_ascii_strdown(rows_trim, -1) : NULL;
+                if (rows_trim && rows_flow_probe &&
+                    strstr(rows_flow_probe, "auto-flow")) {
+                    char *tokens[8] = {0};
+                    int n = split_ws_limit(rows_trim, tokens, G_N_ELEMENTS(tokens));
+                    GString *flow = g_string_new("row");
+                    GString *tracks = g_string_new(NULL);
+                    for (int i = 0; i < n; i++) {
+                        if (g_ascii_strcasecmp(tokens[i], "auto-flow") == 0)
+                            continue;
+                        if (g_ascii_strcasecmp(tokens[i], "dense") == 0) {
+                            g_string_append(flow, " dense");
+                            continue;
+                        }
+                        if (tracks->len) g_string_append_c(tracks, ' ');
+                        g_string_append(tracks, tokens[i]);
+                    }
+                    ns_css_value *fv = parse_value_for(NS_CSS_GRID_AUTO_FLOW,
+                                                       flow->str);
+                    if (fv) {
+                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_FLOW,
+                                          .value = fv, .important = important };
+                        g_array_append_val(decls_out, d);
+                    }
+                    ns_css_value *tv = parse_value_for(NS_CSS_GRID_AUTO_ROWS,
+                                                       tracks->len ? tracks->str : "auto");
+                    if (tv) {
+                        ns_css_decl d = { .prop = NS_CSS_GRID_AUTO_ROWS,
+                                          .value = tv, .important = important };
+                        g_array_append_val(decls_out, d);
+                    }
+                    for (int i = 0; i < n; i++) g_free(tokens[i]);
+                    g_string_free(flow, TRUE);
+                    g_string_free(tracks, TRUE);
+                    g_clear_pointer(&rows_trim, g_free);
+                }
+                g_free(rows_flow_probe);
+            }
             if (rows_trim && *rows_trim) {
                 ns_css_value *v = parse_value_for(NS_CSS_GRID_TEMPLATE_ROWS, rows_trim);
                 if (v) {
