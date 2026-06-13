@@ -1733,15 +1733,15 @@ test	subtest	status
 /dom/lists/DOMTokenList-value.html	<harness>	OK
 /dom/lists/DOMTokenList-value.html	DOMTokenList value	PASS
 /dom/nodes/CharacterData-appendChild.html	<harness>	OK
-/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(Comment)	FAIL
-/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(ProcessingInstruction)	FAIL
-/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(Text)	FAIL
-/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(Comment)	FAIL
-/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(ProcessingInstruction)	FAIL
-/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(Text)	FAIL
-/dom/nodes/CharacterData-appendChild.html	Text.appendChild(Comment)	FAIL
-/dom/nodes/CharacterData-appendChild.html	Text.appendChild(ProcessingInstruction)	FAIL
-/dom/nodes/CharacterData-appendChild.html	Text.appendChild(Text)	FAIL
+/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(Comment)	PASS
+/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(ProcessingInstruction)	PASS
+/dom/nodes/CharacterData-appendChild.html	Comment.appendChild(Text)	PASS
+/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(Comment)	PASS
+/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(ProcessingInstruction)	PASS
+/dom/nodes/CharacterData-appendChild.html	ProcessingInstruction.appendChild(Text)	PASS
+/dom/nodes/CharacterData-appendChild.html	Text.appendChild(Comment)	PASS
+/dom/nodes/CharacterData-appendChild.html	Text.appendChild(ProcessingInstruction)	PASS
+/dom/nodes/CharacterData-appendChild.html	Text.appendChild(Text)	PASS
 /dom/nodes/CharacterData-appendData.html	<harness>	OK
 /dom/nodes/CharacterData-appendData.html	Comment.appendData('')	PASS
 /dom/nodes/CharacterData-appendData.html	Comment.appendData('', 'bar')	PASS
@@ -1763,7 +1763,7 @@ test	subtest	status
 /dom/nodes/CharacterData-data.html	Comment.data = '資料'	PASS
 /dom/nodes/CharacterData-data.html	Comment.data = '🌠 test 🌠 TEST'	FAIL
 /dom/nodes/CharacterData-data.html	Comment.data = 0	PASS
-/dom/nodes/CharacterData-data.html	Comment.data = null	FAIL
+/dom/nodes/CharacterData-data.html	Comment.data = null	PASS
 /dom/nodes/CharacterData-data.html	Comment.data = undefined	PASS
 /dom/nodes/CharacterData-data.html	Comment.data initial value	PASS
 /dom/nodes/CharacterData-data.html	Text.data = ''	PASS
@@ -1771,7 +1771,7 @@ test	subtest	status
 /dom/nodes/CharacterData-data.html	Text.data = '資料'	PASS
 /dom/nodes/CharacterData-data.html	Text.data = '🌠 test 🌠 TEST'	FAIL
 /dom/nodes/CharacterData-data.html	Text.data = 0	PASS
-/dom/nodes/CharacterData-data.html	Text.data = null	FAIL
+/dom/nodes/CharacterData-data.html	Text.data = null	PASS
 /dom/nodes/CharacterData-data.html	Text.data = undefined	PASS
 /dom/nodes/CharacterData-data.html	Text.data initial value	PASS
 /dom/nodes/CharacterData-deleteData.html	<harness>	OK
@@ -3020,12 +3020,12 @@ test	subtest	status
 /dom/nodes/Document-createCDATASection.html	<harness>	OK
 /dom/nodes/Document-createCDATASection.html	document.createCDATASection must throw in HTML documents	PASS
 /dom/nodes/Document-createComment.html	<harness>	OK
-/dom/nodes/Document-createComment.html	createComment("-b")	FAIL
-/dom/nodes/Document-createComment.html	createComment("\v")	FAIL
-/dom/nodes/Document-createComment.html	createComment("a -- b")	FAIL
-/dom/nodes/Document-createComment.html	createComment("a-")	FAIL
-/dom/nodes/Document-createComment.html	createComment(null)	FAIL
-/dom/nodes/Document-createComment.html	createComment(undefined)	FAIL
+/dom/nodes/Document-createComment.html	createComment("-b")	PASS
+/dom/nodes/Document-createComment.html	createComment("\v")	PASS
+/dom/nodes/Document-createComment.html	createComment("a -- b")	PASS
+/dom/nodes/Document-createComment.html	createComment("a-")	PASS
+/dom/nodes/Document-createComment.html	createComment(null)	PASS
+/dom/nodes/Document-createComment.html	createComment(undefined)	PASS
 /dom/nodes/Document-createElement-namespace.html	<harness>	OK
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in bare_mathml.html	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in bare_mathml.svg	FAIL
@@ -6002,8 +6002,8 @@ test	subtest	status
 /dom/nodes/MutationObserver-characterData.html	Range (r71) is created	PASS
 /dom/nodes/MutationObserver-characterData.html	Range (r80) is created	PASS
 /dom/nodes/MutationObserver-characterData.html	Range (r81) is created	PASS
-/dom/nodes/MutationObserver-characterData.html	characterData Comment: data mutations	TIMEOUT
-/dom/nodes/MutationObserver-characterData.html	characterData ProcessingInstruction: data mutations	TIMEOUT
+/dom/nodes/MutationObserver-characterData.html	characterData Comment: data mutations	FAIL
+/dom/nodes/MutationObserver-characterData.html	characterData ProcessingInstruction: data mutations	FAIL
 /dom/nodes/MutationObserver-characterData.html	characterData Range.deleteContents: child and data removal mutation	TIMEOUT
 /dom/nodes/MutationObserver-characterData.html	characterData Range.deleteContents: child and data removal mutation (2)	TIMEOUT
 /dom/nodes/MutationObserver-characterData.html	characterData Range.extractContents: child and data removal mutation	TIMEOUT
@@ -6105,14 +6105,14 @@ test	subtest	status
 /dom/nodes/Node-appendChild.html	Adopting a non-orphan	FAIL
 /dom/nodes/Node-appendChild.html	Adopting an orphan	FAIL
 /dom/nodes/Node-appendChild.html	Appending a document	FAIL
-/dom/nodes/Node-appendChild.html	Appending null to a comment	FAIL
-/dom/nodes/Node-appendChild.html	Appending null to a doctype	FAIL
-/dom/nodes/Node-appendChild.html	Appending null to a text node	FAIL
-/dom/nodes/Node-appendChild.html	Appending to a comment	FAIL
-/dom/nodes/Node-appendChild.html	Appending to a doctype	FAIL
+/dom/nodes/Node-appendChild.html	Appending null to a comment	PASS
+/dom/nodes/Node-appendChild.html	Appending null to a doctype	PASS
+/dom/nodes/Node-appendChild.html	Appending null to a text node	PASS
+/dom/nodes/Node-appendChild.html	Appending to a comment	PASS
+/dom/nodes/Node-appendChild.html	Appending to a doctype	PASS
 /dom/nodes/Node-appendChild.html	Appending to a leaf node.	PASS
-/dom/nodes/Node-appendChild.html	Appending to a text node	FAIL
-/dom/nodes/Node-appendChild.html	WebIDL tests	FAIL
+/dom/nodes/Node-appendChild.html	Appending to a text node	PASS
+/dom/nodes/Node-appendChild.html	WebIDL tests	PASS
 /dom/nodes/Node-baseURI.html	<harness>	OK
 /dom/nodes/Node-baseURI.html	For attributes in elements belonging to document fragments in document, baseURI should be document URL	FAIL
 /dom/nodes/Node-baseURI.html	For attributes in elements belonging to document fragments, baseURI should be document URL	FAIL
@@ -9223,46 +9223,46 @@ test	subtest	status
 /dom/nodes/Node-contains.html	xmlTextNode.contains(xmlElement)	PASS
 /dom/nodes/Node-contains.html	xmlTextNode.contains(xmlTextNode)	PASS
 /dom/nodes/Node-insertBefore.html	<harness>	OK
-/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node Comment must throw HIERARCHY_REQUEST_ERR.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node DocumentType must throw HIERARCHY_REQUEST_ERR.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node Text must throw HIERARCHY_REQUEST_ERR.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node Comment must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node DocumentType must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node Text must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with a reference child whose parent is not the context node must throw a NotFoundError.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with an inclusive ancestor of the context object must throw HIERARCHY_REQUEST_ERR.	FAIL
-/dom/nodes/Node-insertBefore.html	Calling insertBefore with second argument missing, or other than Node, null, or undefined, must throw TypeError.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a DocumentFragment with an element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a DocumentFragment with multiple elements and parent is a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a Text node and parent is a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is a document with another doctype, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is not a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is an Element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction, or Comment node, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a DocumentFragment, inserting a document or a doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document and a doctype is following the reference child, inserting a DocumentFragment with an element should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document and a doctype is following the reference child, inserting an element should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document with and element child, appending a doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment that contains a text node or too many elements should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment with an element before the doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment with an element if there already is an element child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a doctype after the document element should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a doctype if there already is a doctype child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a document or text node should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting an element before the doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting an element if there already is an element child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-insertBefore.html	If the context node is an element, inserting a document or a doctype should throw a HierarchyRequestError.	FAIL
+/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node Comment must throw HIERARCHY_REQUEST_ERR.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node DocumentType must throw HIERARCHY_REQUEST_ERR.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node ProcessingInstruction must throw HIERARCHY_REQUEST_ERR.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore an a leaf node Text must throw HIERARCHY_REQUEST_ERR.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node Comment must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node DocumentType must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node ProcessingInstruction must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a non-Node first argument on a leaf node Text must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with a reference child whose parent is not the context node must throw a NotFoundError.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with an inclusive ancestor of the context object must throw HIERARCHY_REQUEST_ERR.	PASS
+/dom/nodes/Node-insertBefore.html	Calling insertBefore with second argument missing, or other than Node, null, or undefined, must throw TypeError.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a DocumentFragment with an element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a DocumentFragment with multiple elements and parent is a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a Text node and parent is a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is a document with another doctype, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a doctype and parent is not a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is an Element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction, or Comment node, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a DocumentFragment, inserting a document or a doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document and a doctype is following the reference child, inserting a DocumentFragment with an element should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document and a doctype is following the reference child, inserting an element should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document with and element child, appending a doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment that contains a text node or too many elements should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment with an element before the doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a DocumentFragment with an element if there already is an element child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a doctype after the document element should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a doctype if there already is a doctype child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting a document or text node should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting an element before the doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is a document, inserting an element if there already is an element child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-insertBefore.html	If the context node is an element, inserting a document or a doctype should throw a HierarchyRequestError.	PASS
 /dom/nodes/Node-insertBefore.html	Inserting a node before itself should not move the node	PASS
-/dom/nodes/Node-insertBefore.html	Should check that 'node' is not an ancestor of 'parent' before checking whether 'child' is a child of 'parent'	FAIL
-/dom/nodes/Node-insertBefore.html	Should check the 'parent' type before checking whether 'child' is a child of 'parent'	FAIL
-/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' can be inserted into the document given the kids the document has right now.	FAIL
-/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent of the type that 'parent' is.	FAIL
-/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent.	FAIL
+/dom/nodes/Node-insertBefore.html	Should check that 'node' is not an ancestor of 'parent' before checking whether 'child' is a child of 'parent'	PASS
+/dom/nodes/Node-insertBefore.html	Should check the 'parent' type before checking whether 'child' is a child of 'parent'	PASS
+/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' can be inserted into the document given the kids the document has right now.	PASS
+/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent of the type that 'parent' is.	PASS
+/dom/nodes/Node-insertBefore.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent.	PASS
 /dom/nodes/Node-isConnected-shadow-dom.html	<harness>	OK
 /dom/nodes/Node-isConnected-shadow-dom.html	Node.isConnected in a closed shadow tree	PASS
 /dom/nodes/Node-isConnected-shadow-dom.html	Node.isConnected in a open shadow tree	PASS
@@ -9376,13 +9376,13 @@ test	subtest	status
 /dom/nodes/Node-nodeName.html	For Element nodes, nodeName should return the same as tagName.	PASS
 /dom/nodes/Node-nodeName.html	For Text nodes, nodeName should return "#text".	PASS
 /dom/nodes/Node-nodeValue.html	<harness>	OK
-/dom/nodes/Node-nodeValue.html	Comment.nodeValue	FAIL
+/dom/nodes/Node-nodeValue.html	Comment.nodeValue	PASS
 /dom/nodes/Node-nodeValue.html	Document.nodeValue	PASS
 /dom/nodes/Node-nodeValue.html	DocumentFragment.nodeValue	PASS
 /dom/nodes/Node-nodeValue.html	DocumentType.nodeValue	PASS
 /dom/nodes/Node-nodeValue.html	Element.nodeValue	PASS
-/dom/nodes/Node-nodeValue.html	ProcessingInstruction.nodeValue	FAIL
-/dom/nodes/Node-nodeValue.html	Text.nodeValue	FAIL
+/dom/nodes/Node-nodeValue.html	ProcessingInstruction.nodeValue	PASS
+/dom/nodes/Node-nodeValue.html	Text.nodeValue	PASS
 /dom/nodes/Node-normalize.html	<harness>	OK
 /dom/nodes/Node-normalize.html	Empty text nodes	FAIL
 /dom/nodes/Node-normalize.html	Empty text nodes separated by a non-empty text node	FAIL
@@ -9422,7 +9422,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	comment.parentElement	PASS
 /dom/nodes/Node-properties.html	comment.parentNode	PASS
 /dom/nodes/Node-properties.html	comment.previousSibling	PASS
-/dom/nodes/Node-properties.html	comment.textContent	FAIL
+/dom/nodes/Node-properties.html	comment.textContent	PASS
 /dom/nodes/Node-properties.html	detachedComment.childNodes.length	PASS
 /dom/nodes/Node-properties.html	detachedComment.data	PASS
 /dom/nodes/Node-properties.html	detachedComment.firstChild	PASS
@@ -9437,7 +9437,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	detachedComment.parentElement	PASS
 /dom/nodes/Node-properties.html	detachedComment.parentNode	PASS
 /dom/nodes/Node-properties.html	detachedComment.previousSibling	PASS
-/dom/nodes/Node-properties.html	detachedComment.textContent	FAIL
+/dom/nodes/Node-properties.html	detachedComment.textContent	PASS
 /dom/nodes/Node-properties.html	detachedDiv.childElementCount	PASS
 /dom/nodes/Node-properties.html	detachedDiv.childNodes.length	PASS
 /dom/nodes/Node-properties.html	detachedDiv.childNodes[0]	PASS
@@ -9481,7 +9481,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	detachedForeignComment.parentElement	PASS
 /dom/nodes/Node-properties.html	detachedForeignComment.parentNode	PASS
 /dom/nodes/Node-properties.html	detachedForeignComment.previousSibling	PASS
-/dom/nodes/Node-properties.html	detachedForeignComment.textContent	FAIL
+/dom/nodes/Node-properties.html	detachedForeignComment.textContent	PASS
 /dom/nodes/Node-properties.html	detachedForeignTextNode.childNodes.length	PASS
 /dom/nodes/Node-properties.html	detachedForeignTextNode.data	PASS
 /dom/nodes/Node-properties.html	detachedForeignTextNode.firstChild	PASS
@@ -9563,7 +9563,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	detachedProcessingInstruction.parentNode	PASS
 /dom/nodes/Node-properties.html	detachedProcessingInstruction.previousSibling	PASS
 /dom/nodes/Node-properties.html	detachedProcessingInstruction.target	PASS
-/dom/nodes/Node-properties.html	detachedProcessingInstruction.textContent	FAIL
+/dom/nodes/Node-properties.html	detachedProcessingInstruction.textContent	PASS
 /dom/nodes/Node-properties.html	detachedTextNode.childNodes.length	PASS
 /dom/nodes/Node-properties.html	detachedTextNode.data	PASS
 /dom/nodes/Node-properties.html	detachedTextNode.firstChild	PASS
@@ -9594,7 +9594,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	detachedXmlComment.parentElement	PASS
 /dom/nodes/Node-properties.html	detachedXmlComment.parentNode	PASS
 /dom/nodes/Node-properties.html	detachedXmlComment.previousSibling	PASS
-/dom/nodes/Node-properties.html	detachedXmlComment.textContent	FAIL
+/dom/nodes/Node-properties.html	detachedXmlComment.textContent	PASS
 /dom/nodes/Node-properties.html	detachedXmlElement.childElementCount	PASS
 /dom/nodes/Node-properties.html	detachedXmlElement.childNodes.length	PASS
 /dom/nodes/Node-properties.html	detachedXmlElement.children.length	PASS
@@ -9664,7 +9664,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	doctype.previousSibling	PASS
 /dom/nodes/Node-properties.html	doctype.publicId	FAIL
 /dom/nodes/Node-properties.html	doctype.systemId	FAIL
-/dom/nodes/Node-properties.html	doctype.textContent	FAIL
+/dom/nodes/Node-properties.html	doctype.textContent	PASS
 /dom/nodes/Node-properties.html	document.URL	PASS
 /dom/nodes/Node-properties.html	document.characterSet	PASS
 /dom/nodes/Node-properties.html	document.charset	PASS
@@ -9687,7 +9687,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	document.parentElement	PASS
 /dom/nodes/Node-properties.html	document.parentNode	PASS
 /dom/nodes/Node-properties.html	document.previousSibling	PASS
-/dom/nodes/Node-properties.html	document.textContent	FAIL
+/dom/nodes/Node-properties.html	document.textContent	PASS
 /dom/nodes/Node-properties.html	foreignComment.childNodes.length	PASS
 /dom/nodes/Node-properties.html	foreignComment.data	PASS
 /dom/nodes/Node-properties.html	foreignComment.firstChild	PASS
@@ -9702,7 +9702,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	foreignComment.parentElement	PASS
 /dom/nodes/Node-properties.html	foreignComment.parentNode	PASS
 /dom/nodes/Node-properties.html	foreignComment.previousSibling	PASS
-/dom/nodes/Node-properties.html	foreignComment.textContent	FAIL
+/dom/nodes/Node-properties.html	foreignComment.textContent	PASS
 /dom/nodes/Node-properties.html	foreignDoc.URL	FAIL
 /dom/nodes/Node-properties.html	foreignDoc.characterSet	FAIL
 /dom/nodes/Node-properties.html	foreignDoc.charset	FAIL
@@ -9725,7 +9725,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	foreignDoc.parentElement	PASS
 /dom/nodes/Node-properties.html	foreignDoc.parentNode	PASS
 /dom/nodes/Node-properties.html	foreignDoc.previousSibling	PASS
-/dom/nodes/Node-properties.html	foreignDoc.textContent	FAIL
+/dom/nodes/Node-properties.html	foreignDoc.textContent	PASS
 /dom/nodes/Node-properties.html	foreignDocfrag.childNodes.length	PASS
 /dom/nodes/Node-properties.html	foreignDocfrag.firstChild	PASS
 /dom/nodes/Node-properties.html	foreignDocfrag.hasChildNodes()	PASS
@@ -9754,7 +9754,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	foreignDoctype.previousSibling	PASS
 /dom/nodes/Node-properties.html	foreignDoctype.publicId	FAIL
 /dom/nodes/Node-properties.html	foreignDoctype.systemId	FAIL
-/dom/nodes/Node-properties.html	foreignDoctype.textContent	FAIL
+/dom/nodes/Node-properties.html	foreignDoctype.textContent	PASS
 /dom/nodes/Node-properties.html	foreignPara1.childElementCount	PASS
 /dom/nodes/Node-properties.html	foreignPara1.childNodes.length	PASS
 /dom/nodes/Node-properties.html	foreignPara1.children.length	PASS
@@ -9986,7 +9986,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	processingInstruction.parentNode	PASS
 /dom/nodes/Node-properties.html	processingInstruction.previousSibling	PASS
 /dom/nodes/Node-properties.html	processingInstruction.target	PASS
-/dom/nodes/Node-properties.html	processingInstruction.textContent	FAIL
+/dom/nodes/Node-properties.html	processingInstruction.textContent	PASS
 /dom/nodes/Node-properties.html	testDiv.childElementCount	PASS
 /dom/nodes/Node-properties.html	testDiv.childNodes.length	PASS
 /dom/nodes/Node-properties.html	testDiv.childNodes[0]	PASS
@@ -10038,7 +10038,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	xmlComment.parentElement	PASS
 /dom/nodes/Node-properties.html	xmlComment.parentNode	PASS
 /dom/nodes/Node-properties.html	xmlComment.previousSibling	PASS
-/dom/nodes/Node-properties.html	xmlComment.textContent	FAIL
+/dom/nodes/Node-properties.html	xmlComment.textContent	PASS
 /dom/nodes/Node-properties.html	xmlDoc.URL	PASS
 /dom/nodes/Node-properties.html	xmlDoc.characterSet	PASS
 /dom/nodes/Node-properties.html	xmlDoc.charset	PASS
@@ -10062,7 +10062,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	xmlDoc.parentElement	PASS
 /dom/nodes/Node-properties.html	xmlDoc.parentNode	PASS
 /dom/nodes/Node-properties.html	xmlDoc.previousSibling	PASS
-/dom/nodes/Node-properties.html	xmlDoc.textContent	FAIL
+/dom/nodes/Node-properties.html	xmlDoc.textContent	PASS
 /dom/nodes/Node-properties.html	xmlDocfrag.childNodes.length	PASS
 /dom/nodes/Node-properties.html	xmlDocfrag.firstChild	PASS
 /dom/nodes/Node-properties.html	xmlDocfrag.hasChildNodes()	PASS
@@ -10091,7 +10091,7 @@ test	subtest	status
 /dom/nodes/Node-properties.html	xmlDoctype.previousSibling	PASS
 /dom/nodes/Node-properties.html	xmlDoctype.publicId	PASS
 /dom/nodes/Node-properties.html	xmlDoctype.systemId	PASS
-/dom/nodes/Node-properties.html	xmlDoctype.textContent	FAIL
+/dom/nodes/Node-properties.html	xmlDoctype.textContent	PASS
 /dom/nodes/Node-properties.html	xmlElement.childElementCount	PASS
 /dom/nodes/Node-properties.html	xmlElement.childNodes.length	PASS
 /dom/nodes/Node-properties.html	xmlElement.childNodes[0]	PASS
@@ -10164,22 +10164,22 @@ test	subtest	status
 /dom/nodes/Node-removeChild.html	Passing a non-detached text from the main document to removeChild should not affect it.	FAIL
 /dom/nodes/Node-removeChild.html	Passing a value that is not a Node reference to removeChild should throw TypeError.	FAIL
 /dom/nodes/Node-replaceChild.html	<harness>	OK
-/dom/nodes/Node-replaceChild.html	If child's parent is not the context node, a NotFoundError exception should be thrown	FAIL
-/dom/nodes/Node-replaceChild.html	If node is an inclusive ancestor of the context node, a HierarchyRequestError should be thrown.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a DocumentFragment, inserting a document or a doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document (without element children), inserting a DocumentFragment that contains multiple elements should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment that contains a text node or too many elements should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment with an element before the doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment with an element if there already is an element child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a doctype after the document element should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a doctype if there already is a doctype child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a document or text node should throw a HierarchyRequestError.	FAIL
+/dom/nodes/Node-replaceChild.html	If child's parent is not the context node, a NotFoundError exception should be thrown	PASS
+/dom/nodes/Node-replaceChild.html	If node is an inclusive ancestor of the context node, a HierarchyRequestError should be thrown.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a DocumentFragment, inserting a document or a doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document (without element children), inserting a DocumentFragment that contains multiple elements should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment that contains a text node or too many elements should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment with an element before the doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a DocumentFragment with an element if there already is an element child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a doctype after the document element should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a doctype if there already is a doctype child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a document or text node should throw a HierarchyRequestError.	PASS
 /dom/nodes/Node-replaceChild.html	If the context node is a document, inserting a new doctype should work.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting an element before the doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting an element if there already is an element child should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is an element, inserting a document or a doctype should throw a HierarchyRequestError.	FAIL
-/dom/nodes/Node-replaceChild.html	If the context node is not a node that can contain children, a HierarchyRequestError exception should be thrown	FAIL
-/dom/nodes/Node-replaceChild.html	Passing null to replaceChild should throw a TypeError.	FAIL
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting an element before the doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is a document, inserting an element if there already is an element child should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is an element, inserting a document or a doctype should throw a HierarchyRequestError.	PASS
+/dom/nodes/Node-replaceChild.html	If the context node is not a node that can contain children, a HierarchyRequestError exception should be thrown	PASS
+/dom/nodes/Node-replaceChild.html	Passing null to replaceChild should throw a TypeError.	PASS
 /dom/nodes/Node-replaceChild.html	Replacing a node with its next sibling should work (2 children)	PASS
 /dom/nodes/Node-replaceChild.html	Replacing a node with its next sibling should work (4 children)	PASS
 /dom/nodes/Node-replaceChild.html	Replacing a node with itself should not move the node	PASS
@@ -10187,11 +10187,11 @@ test	subtest	status
 /dom/nodes/Node-replaceChild.html	Replacing the document element with a DocumentFragment containing a single element and comments should work.	FAIL
 /dom/nodes/Node-replaceChild.html	Replacing the document element with a DocumentFragment containing a single element should work.	FAIL
 /dom/nodes/Node-replaceChild.html	Replacing the document element with a single element should work.	PASS
-/dom/nodes/Node-replaceChild.html	Should check that 'node' is not an ancestor of 'parent' before checking whether 'child' is a child of 'parent'	FAIL
-/dom/nodes/Node-replaceChild.html	Should check the 'parent' type before checking whether 'child' is a child of 'parent'	FAIL
-/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' can be inserted into the document given the kids the document has right now.	FAIL
-/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent of the type that 'parent' is.	FAIL
-/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent.	FAIL
+/dom/nodes/Node-replaceChild.html	Should check that 'node' is not an ancestor of 'parent' before checking whether 'child' is a child of 'parent'	PASS
+/dom/nodes/Node-replaceChild.html	Should check the 'parent' type before checking whether 'child' is a child of 'parent'	PASS
+/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' can be inserted into the document given the kids the document has right now.	PASS
+/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent of the type that 'parent' is.	PASS
+/dom/nodes/Node-replaceChild.html	Should check whether 'child' is a child of 'parent' before checking whether 'node' is of a type that can have a parent.	PASS
 /dom/nodes/Node-replaceChild.html	replaceChild should work in the presence of mutation events.	PASS
 /dom/nodes/Node-textContent.html	<harness>	OK
 /dom/nodes/Node-textContent.html	DocumentFragment with children	PASS
@@ -10200,76 +10200,76 @@ test	subtest	status
 /dom/nodes/Node-textContent.html	DocumentFragment with children set to "abc"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with children set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	DocumentFragment with children set to 42	PASS
-/dom/nodes/Node-textContent.html	DocumentFragment with children set to null	FAIL
-/dom/nodes/Node-textContent.html	DocumentFragment with children set to undefined	FAIL
+/dom/nodes/Node-textContent.html	DocumentFragment with children set to null	PASS
+/dom/nodes/Node-textContent.html	DocumentFragment with children set to undefined	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants set to ""	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants set to "abc"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	DocumentFragment with descendants set to 42	PASS
-/dom/nodes/Node-textContent.html	DocumentFragment with descendants set to null	FAIL
-/dom/nodes/Node-textContent.html	DocumentFragment with descendants set to undefined	FAIL
+/dom/nodes/Node-textContent.html	DocumentFragment with descendants set to null	PASS
+/dom/nodes/Node-textContent.html	DocumentFragment with descendants set to undefined	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to ""	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to "abc"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to 42	PASS
-/dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to null	FAIL
-/dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to undefined	FAIL
+/dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to null	PASS
+/dom/nodes/Node-textContent.html	DocumentFragment with empty text node as child set to undefined	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment without children set to ""	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment without children set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment without children set to "abc"	PASS
 /dom/nodes/Node-textContent.html	DocumentFragment without children set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	DocumentFragment without children set to 42	PASS
-/dom/nodes/Node-textContent.html	DocumentFragment without children set to null	FAIL
-/dom/nodes/Node-textContent.html	DocumentFragment without children set to undefined	FAIL
+/dom/nodes/Node-textContent.html	DocumentFragment without children set to null	PASS
+/dom/nodes/Node-textContent.html	DocumentFragment without children set to undefined	PASS
 /dom/nodes/Node-textContent.html	Element with children	PASS
 /dom/nodes/Node-textContent.html	Element with children set to ""	PASS
 /dom/nodes/Node-textContent.html	Element with children set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	Element with children set to "abc"	PASS
 /dom/nodes/Node-textContent.html	Element with children set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	Element with children set to 42	PASS
-/dom/nodes/Node-textContent.html	Element with children set to null	FAIL
-/dom/nodes/Node-textContent.html	Element with children set to undefined	FAIL
+/dom/nodes/Node-textContent.html	Element with children set to null	PASS
+/dom/nodes/Node-textContent.html	Element with children set to undefined	PASS
 /dom/nodes/Node-textContent.html	Element with descendants	PASS
 /dom/nodes/Node-textContent.html	Element with descendants set to ""	PASS
 /dom/nodes/Node-textContent.html	Element with descendants set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	Element with descendants set to "abc"	PASS
 /dom/nodes/Node-textContent.html	Element with descendants set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	Element with descendants set to 42	PASS
-/dom/nodes/Node-textContent.html	Element with descendants set to null	FAIL
-/dom/nodes/Node-textContent.html	Element with descendants set to undefined	FAIL
+/dom/nodes/Node-textContent.html	Element with descendants set to null	PASS
+/dom/nodes/Node-textContent.html	Element with descendants set to undefined	PASS
 /dom/nodes/Node-textContent.html	Element with empty text node as child set to ""	PASS
 /dom/nodes/Node-textContent.html	Element with empty text node as child set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	Element with empty text node as child set to "abc"	PASS
 /dom/nodes/Node-textContent.html	Element with empty text node as child set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	Element with empty text node as child set to 42	PASS
-/dom/nodes/Node-textContent.html	Element with empty text node as child set to null	FAIL
-/dom/nodes/Node-textContent.html	Element with empty text node as child set to undefined	FAIL
+/dom/nodes/Node-textContent.html	Element with empty text node as child set to null	PASS
+/dom/nodes/Node-textContent.html	Element with empty text node as child set to undefined	PASS
 /dom/nodes/Node-textContent.html	Element without children set to ""	PASS
 /dom/nodes/Node-textContent.html	Element without children set to "<b>xyz</b>"	PASS
 /dom/nodes/Node-textContent.html	Element without children set to "abc"	PASS
 /dom/nodes/Node-textContent.html	Element without children set to "d\0e"	FAIL
 /dom/nodes/Node-textContent.html	Element without children set to 42	PASS
-/dom/nodes/Node-textContent.html	Element without children set to null	FAIL
-/dom/nodes/Node-textContent.html	Element without children set to undefined	FAIL
-/dom/nodes/Node-textContent.html	For DocumentType created by parser, setting textContent should do nothing	FAIL
-/dom/nodes/Node-textContent.html	For DocumentType created by parser, textContent should be null	FAIL
-/dom/nodes/Node-textContent.html	For DocumentType created by script, setting textContent should do nothing	FAIL
-/dom/nodes/Node-textContent.html	For DocumentType created by script, textContent should be null	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by createDocument, setting textContent should do nothing	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by createDocument, textContent should be null	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by createHTMLDocument, setting textContent should do nothing	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by createHTMLDocument, textContent should be null	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by parser, setting textContent should do nothing	FAIL
-/dom/nodes/Node-textContent.html	For Documents created by parser, textContent should be null	FAIL
-/dom/nodes/Node-textContent.html	For a Comment with data, textContent should be that data	FAIL
-/dom/nodes/Node-textContent.html	For a Comment, textContent should set the data	FAIL
-/dom/nodes/Node-textContent.html	For a ProcessingInstruction with data, textContent should be that data	FAIL
-/dom/nodes/Node-textContent.html	For a ProcessingInstruction, textContent should set the data	FAIL
+/dom/nodes/Node-textContent.html	Element without children set to null	PASS
+/dom/nodes/Node-textContent.html	Element without children set to undefined	PASS
+/dom/nodes/Node-textContent.html	For DocumentType created by parser, setting textContent should do nothing	PASS
+/dom/nodes/Node-textContent.html	For DocumentType created by parser, textContent should be null	PASS
+/dom/nodes/Node-textContent.html	For DocumentType created by script, setting textContent should do nothing	PASS
+/dom/nodes/Node-textContent.html	For DocumentType created by script, textContent should be null	PASS
+/dom/nodes/Node-textContent.html	For Documents created by createDocument, setting textContent should do nothing	PASS
+/dom/nodes/Node-textContent.html	For Documents created by createDocument, textContent should be null	PASS
+/dom/nodes/Node-textContent.html	For Documents created by createHTMLDocument, setting textContent should do nothing	PASS
+/dom/nodes/Node-textContent.html	For Documents created by createHTMLDocument, textContent should be null	PASS
+/dom/nodes/Node-textContent.html	For Documents created by parser, setting textContent should do nothing	PASS
+/dom/nodes/Node-textContent.html	For Documents created by parser, textContent should be null	PASS
+/dom/nodes/Node-textContent.html	For a Comment with data, textContent should be that data	PASS
+/dom/nodes/Node-textContent.html	For a Comment, textContent should set the data	PASS
+/dom/nodes/Node-textContent.html	For a ProcessingInstruction with data, textContent should be that data	PASS
+/dom/nodes/Node-textContent.html	For a ProcessingInstruction, textContent should set the data	PASS
 /dom/nodes/Node-textContent.html	For a Text with data, textContent should be that data	PASS
-/dom/nodes/Node-textContent.html	For a Text, textContent should set the data	FAIL
+/dom/nodes/Node-textContent.html	For a Text, textContent should set the data	PASS
 /dom/nodes/Node-textContent.html	For an empty Comment, textContent should be the empty string	PASS
 /dom/nodes/Node-textContent.html	For an empty DocumentFragment, textContent should be the empty string	PASS
 /dom/nodes/Node-textContent.html	For an empty Element, textContent should be the empty string	PASS
