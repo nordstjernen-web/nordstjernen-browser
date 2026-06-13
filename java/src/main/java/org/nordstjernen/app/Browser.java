@@ -53,6 +53,9 @@ public final class Browser {
 
     private int scrollY = 0;
     private boolean loading = false;
+    private javax.swing.Timer refreshTimer;
+    private boolean renderBusy = false;
+    private int stableFrames = 0;
 
     private Browser(String startUrl) {
         this.homeUrl = startUrl;
@@ -108,7 +111,7 @@ public final class Browser {
         canvas.addMouseWheelListener(e -> {
             int max = Math.max(0, engine.pageHeight() - canvas.getHeight());
             scrollY = Math.max(0, Math.min(max, scrollY + e.getWheelRotation() * 80));
-            renderViewport();
+            scheduleRefresh();
         });
         canvas.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override public void mouseClicked(java.awt.event.MouseEvent e) {
@@ -118,10 +121,11 @@ public final class Browser {
         frame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override public void componentResized(java.awt.event.ComponentEvent e) {
                 if (!loading && currentUrl() != null) {
+                    int w = Math.max(1, canvas.getWidth());
+                    int h = Math.max(1, canvas.getHeight());
                     io.submit(() -> {
-                        engine.setViewport(canvas.getWidth(),
-                                           Math.max(1, canvas.getHeight()));
-                        renderViewport();
+                        engine.setViewport(w, h);
+                        SwingUtilities.invokeLater(() -> scheduleRefresh());
                     });
                 }
             }
@@ -148,7 +152,6 @@ public final class Browser {
             String finalUrl = ok ? engine.url() : url;
             String title = ok ? engine.title() : "";
             scrollY = 0;
-            RemoteBrowser.Frame frm = ok ? engine.render(0, 0, vw, vh, 1.0) : null;
             SwingUtilities.invokeLater(() -> {
                 loading = false;
                 if (!ok) {
@@ -165,22 +168,61 @@ public final class Browser {
                 address.setText(finalUrl);
                 frame.setTitle((title.isEmpty() ? "Untitled" : title)
                     + " — Nordstjernen");
-                if (frm != null) canvas.setImage(frm.image);
                 updateNavButtons();
                 setStatus(title);
-                if (frm != null && frm.nav != null) navigate(frm.nav, true);
+                scheduleRefresh();
             });
         });
     }
 
-    private void renderViewport() {
-        int vw = Math.max(1, canvas.getWidth());
-        int vh = Math.max(1, canvas.getHeight());
+    /**
+     * Keep re-rendering the current viewport until the page settles. Async
+     * image loads, late layout, and animations all land after the first
+     * render, so (like the GTK shell) we render repeatedly until the renderer
+     * reports the frame unchanged and not animating.
+     */
+    private void scheduleRefresh() {
+        stableFrames = 0;
+        if (refreshTimer == null) {
+            refreshTimer = new javax.swing.Timer(120, e -> tickRefresh());
+        }
+        if (!refreshTimer.isRunning()) {
+            refreshTimer.start();
+        }
+    }
+
+    private void tickRefresh() {
+        if (renderBusy) {
+            return;
+        }
+        renderBusy = true;
+        final int vw = Math.max(1, canvas.getWidth());
+        final int vh = Math.max(1, canvas.getHeight());
+        final int sy = scrollY;
         io.submit(() -> {
-            RemoteBrowser.Frame frm = engine.render(0, scrollY, vw, vh, 1.0);
+            RemoteBrowser.Frame frm;
+            try {
+                frm = engine.render(0, sy, vw, vh, 1.0);
+            } catch (RuntimeException ex) {
+                SwingUtilities.invokeLater(() -> { renderBusy = false; });
+                return;
+            }
+            final RemoteBrowser.Frame f = frm;
             SwingUtilities.invokeLater(() -> {
-                canvas.setImage(frm.image);
-                if (frm.nav != null) navigate(frm.nav, true);
+                renderBusy = false;
+                if (f.image != null) {
+                    canvas.setImage(f.image);
+                }
+                if (f.unchanged && !f.animating) {
+                    if (++stableFrames >= 3 && refreshTimer != null) {
+                        refreshTimer.stop();
+                    }
+                } else {
+                    stableFrames = 0;
+                }
+                if (f.nav != null) {
+                    navigate(f.nav, true);
+                }
             });
         });
     }

@@ -26,12 +26,19 @@ public final class RemoteBrowser implements AutoCloseable {
 
     /** Result of a render: the image plus any navigation the page requested. */
     public static final class Frame {
+        /** The rendered image, or null when {@link #unchanged} (reuse the prior one). */
         public final BufferedImage image;
         public final String nav;
+        /** The renderer reported nothing changed since the last render. */
+        public final boolean unchanged;
+        /** The page is still animating / loading; keep rendering. */
+        public final boolean animating;
 
-        Frame(BufferedImage image, String nav) {
+        Frame(BufferedImage image, String nav, boolean unchanged, boolean animating) {
             this.image = image;
             this.nav = nav;
+            this.unchanged = unchanged;
+            this.animating = animating;
         }
     }
 
@@ -82,9 +89,17 @@ public final class RemoteBrowser implements AutoCloseable {
             + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
             + ",\"scale\":" + formatScale(scale) + "}";
         RendererProcess.Response resp = renderer.request("POST", "/render", body);
+        String nav = resp.header("X-Nav");
+        if (nav != null && nav.isEmpty()) {
+            nav = null;
+        }
+        boolean animating = "1".equals(resp.header("X-Anim"));
+        boolean unchanged = "1".equals(resp.header("X-Unchanged"));
+        if (unchanged || resp.body.length < 4) {
+            return new Frame(null, nav, true, animating);
+        }
         int w = headerInt(resp, "X-W", width);
         int h = headerInt(resp, "X-H", height);
-        String nav = resp.header("X-Nav");
         byte[] bgra = resp.body;
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
         int[] data = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
@@ -96,7 +111,7 @@ public final class RemoteBrowser implements AutoCloseable {
             int a = bgra[p + 3] & 0xFF;
             data[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
-        return new Frame(img, nav != null && nav.isEmpty() ? null : nav);
+        return new Frame(img, nav, false, animating);
     }
 
     /** The link URL at a document-coordinate point, or null. */
