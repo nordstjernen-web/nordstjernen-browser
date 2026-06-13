@@ -2100,20 +2100,37 @@ parse_one_selector(const char **pp, const char *end, int depth)
             } else if (cc == '#') {
                 p++;
                 char *id_str = read_css_ident(&p, end);
-                g_free(cmp->id);
-                cmp->id = id_str;
-                sel->spec_a += 1;
+                if (id_str && *id_str) {
+                    g_free(cmp->id);
+                    cmp->id = id_str;
+                    sel->spec_a += 1;
+                } else {
+                    g_sel_parse_error = TRUE;
+                    cmp->never_match = TRUE;
+                    g_free(id_str);
+                }
                 any = TRUE;
             } else if (cc == '.') {
                 p++;
+                gboolean bad_start = FALSE;
+                if (p < end) {
+                    unsigned char nc = (unsigned char)*p;
+                    if (g_ascii_isdigit(nc))
+                        bad_start = TRUE;
+                    else if (nc == '-' && p + 1 < end &&
+                             g_ascii_isdigit((unsigned char)p[1]))
+                        bad_start = TRUE;
+                }
                 char *cls = read_css_ident(&p, end);
-                if (cls && *cls) {
+                if (!bad_start && cls && *cls) {
                     g_ptr_array_add(cmp->classes, cls);
                     sel->spec_b += 1;
-                    any = TRUE;
                 } else {
+                    g_sel_parse_error = TRUE;
+                    cmp->never_match = TRUE;
                     g_free(cls);
                 }
+                any = TRUE;
             } else if (is_ident_start(cc) || cc == '\\') {
                 char *type = read_css_ident(&p, end);
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
@@ -11720,16 +11737,28 @@ ns_css_parse_selector_list(const char *text)
     if (!text) return out;
     const char *p = text;
     const char *end = text + strlen(text);
+    gboolean expect_selector = TRUE;
     while (p < end) {
         while (p < end && is_ws(*p)) p++;
         if (p >= end) break;
+        if (*p == ',') {
+            g_sel_parse_error = TRUE;
+            p++;
+            expect_selector = TRUE;
+            continue;
+        }
         const char *iter_start = p;
         ns_css_selector *sel = parse_one_selector(&p, end, 0);
-        if (sel) g_ptr_array_add(out, sel);
+        if (sel) {
+            g_ptr_array_add(out, sel);
+            expect_selector = FALSE;
+        }
         while (p < end && is_ws(*p)) p++;
-        if (p < end && *p == ',') p++;
+        if (p < end && *p == ',') { p++; expect_selector = TRUE; }
         else if (p == iter_start) break;
     }
+    if (expect_selector)
+        g_sel_parse_error = TRUE;
     return out;
 }
 
