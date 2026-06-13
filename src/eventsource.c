@@ -237,6 +237,7 @@ static size_t
 ns_es_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
 {
     ns_es_parse *p = userdata;
+    if (size != 0 && nitems > G_MAXSIZE / size) return 0;
     size_t total = size * nitems;
     if (total >= 5 && !g_ascii_strncasecmp(buffer, "HTTP/", 5)) {
         long code = 0;
@@ -278,8 +279,10 @@ ns_es_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     ns_es_parse *p = userdata;
     if (g_atomic_int_get(&p->es->exit_requested) || p->fatal) return 0;
-    ns_es_feed(p, ptr, size * nmemb);
-    return size * nmemb;
+    if (size != 0 && nmemb > G_MAXSIZE / size) return 0;
+    size_t total = size * nmemb;
+    ns_es_feed(p, ptr, total);
+    return total;
 }
 
 static int
