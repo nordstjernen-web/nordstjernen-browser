@@ -50,6 +50,7 @@ jobs:
             libwebp-dev
             libseccomp-dev
             qt6-base-dev
+            libqt6svg6-dev
             ca-certificates
           version: v2
 

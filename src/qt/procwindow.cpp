@@ -120,15 +120,16 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
         "QToolButton { padding: 2px; }");
 
     m_backAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_ArrowBack), QStringLiteral("Back"));
+        QIcon(QStringLiteral(":/nordstjernen-back.svg")),
+        QStringLiteral("Back"));
     m_forwardAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_ArrowForward),
+        QIcon(QStringLiteral(":/nordstjernen-forward.svg")),
         QStringLiteral("Forward"));
     m_reloadAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_BrowserReload),
+        QIcon(QStringLiteral(":/nordstjernen-reload.svg")),
         QStringLiteral("Reload"));
     m_homeAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_DirHomeIcon),
+        QIcon(QStringLiteral(":/nordstjernen-home.svg")),
         QStringLiteral("Home"));
 
     m_backAction->setShortcuts(QKeySequence::Back);
@@ -156,13 +157,13 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     toolbar->addWidget(m_address);
 
     QAction *goAction = toolbar->addAction(
-        style()->standardIcon(QStyle::SP_MediaPlay), QStringLiteral("Go"));
+        QIcon(QStringLiteral(":/nordstjernen-go.svg")), QStringLiteral("Go"));
     connect(goAction, &QAction::triggered, this,
             &ProcWindow::onAddressEntered);
 
     QToolButton *bookmarksButton = new QToolButton(this);
     bookmarksButton->setIcon(
-        style()->standardIcon(QStyle::SP_DialogYesButton));
+        QIcon(QStringLiteral(":/nordstjernen-bookmarks.svg")));
     bookmarksButton->setText(QStringLiteral("Bookmarks"));
     bookmarksButton->setToolTip(QStringLiteral("Bookmarks"));
     bookmarksButton->setPopupMode(QToolButton::InstantPopup);

@@ -3,7 +3,7 @@ qt6 = import('qt6')
 qt6_dep = dependency(
   'qt6',
   version: '>=6.4',
-  modules: ['Core', 'Gui', 'Widgets', 'Concurrent'],
+  modules: ['Core', 'Gui', 'Widgets', 'Concurrent', 'Svg'],
   required: qt_feature,
 )
 
@@ -50,6 +50,7 @@ if qt6_dep.found()
     link_with: libnordstjernen_static,
     include_directories: include_directories('..'),
     link_args: nordstjernen_link_args,
+    win_subsystem: nordstjernen_win_subsystem,
     install: true,
   )
 
