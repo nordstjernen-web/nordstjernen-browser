@@ -3380,6 +3380,11 @@ ns_element_get_textContent(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NULL;
+    if ((n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT)) ||
+        n->kind == NS_NODE_DOCTYPE)
+        return JS_NULL;
+    if (n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT)
+        return JS_NewString(ctx, n->text ? n->text : "");
     char *t = ns_node_collect_all_text(n);
     JSValue v = JS_NewString(ctx, t ? t : "");
     g_free(t);
@@ -3817,16 +3822,16 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
     if (n->kind != NS_NODE_TEXT && n->kind != NS_NODE_COMMENT) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (s) {
         char *old_copy = n->text ? g_strdup(n->text) : g_strdup("");
         ns_node_replace_text_owned(n, g_strdup(s));
-        JS_FreeCString(ctx, s);
+        if (free_s) JS_FreeCString(ctx, s);
         ns_js *_j = js_from_ctx(ctx);
         if (_j) {
             _j->mutated = TRUE;
-            if (n->kind == NS_NODE_TEXT)
-                ns_js_record_character_data(_j, n, old_copy);
+            ns_js_record_character_data(_j, n, old_copy);
         }
         g_free(old_copy);
     }
@@ -4482,10 +4487,13 @@ static JSValue
 ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
+    if (n && (n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT))
+        return ns_element_set_nodeValue(ctx, this_val, val);
     if (!n || (n->kind != NS_NODE_ELEMENT &&
                !(n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_FRAGMENT))))
         return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_element_clear_children_recorded(_j, n);
@@ -4495,7 +4503,7 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
         if (_j) ns_js_record_child_change(_j, n, added, NULL,
                                           added->prev_sibling, added->next_sibling);
     }
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
