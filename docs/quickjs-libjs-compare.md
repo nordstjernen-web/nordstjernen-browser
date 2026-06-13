@@ -8,9 +8,10 @@ identify language and built-in surface that LibJS implements but the
 bundled QuickJS does **not**, so we know what a site might exercise that
 our engine cannot service.
 
-This is a source-level comparison (LibJS `master`, June 2026) — it lists
-*presence* of features, not conformance depth. Both engines are
-independent implementations; QuickJS is a compact ES2023+ interpreter,
+This is a source-level comparison (LibJS `master`, re-verified
+2026-06-13) — it lists *presence* of features, not conformance depth.
+Both engines are independent implementations; QuickJS is a compact
+ES2023+ interpreter that also tracks the ES2024/ES2025 proposal set,
 LibJS is a spec-tracking engine that passes >90% of test262.
 
 ## Versions compared
@@ -66,12 +67,17 @@ the gap below is genuinely narrow.
 ## Features in LibJS that the bundled QuickJS does NOT have
 
 After auditing the recent-proposal surface (the list above), the gap
-narrows to four areas absent from `src/quickjs/` itself
-(`grep -ci "Intl\|Temporal\|ShadowRealm"  src/quickjs/quickjs.c` returns
-0). **Nordstjernen now supplies the first two — Intl and Temporal —
-natively in C, outside the QuickJS core**, so the practical gap against
-LibJS is reduced to ShadowRealm, JSON modules, and the conformance depth
-of the i18n data (see notes below).
+narrows to three areas absent from `src/quickjs/` itself but present in
+LibJS: **Intl**, **Temporal**, and **JSON modules**. **Nordstjernen now
+supplies the first two natively in C, outside the QuickJS core**, so the
+practical gap against LibJS is reduced to JSON modules plus the
+conformance depth of the i18n data (see notes below).
+
+> Note (re-verify 2026-06-13): an earlier revision listed **ShadowRealm**
+> as a LibJS-only gap. That was wrong — direct file checks against LibJS
+> `master` show no `ShadowRealm*` in `Libraries/LibJS/Runtime/` (nor
+> `AsyncContext`), so ShadowRealm is a *shared* gap (neither engine
+> implements it), like decorators. See "Checked, and *not* a gap".
 
 ### 1. Intl — Internationalization API (ECMA-402)
 
@@ -149,17 +155,7 @@ nanosecond precision in a signed 64-bit nanosecond field (≈ years
 balancing are not implemented. The common date arithmetic and
 formatting paths are correct.
 
-### 3. ShadowRealm — isolated execution context
-
-QuickJS has **no `ShadowRealm`**. LibJS implements the ShadowRealm
-constructor (`Libraries/LibJS/Runtime/ShadowRealm*`), providing a fresh
-global environment with `evaluate()` and `importValue()` for
-synchronous, isolated evaluation. QuickJS can create independent
-`JSContext`s at the C API level, but exposes no script-visible
-`ShadowRealm` binding. Nordstjernen does not implement it; real-world web
-use is negligible.
-
-### 4. JSON modules
+### 3. JSON modules
 
 LibJS evaluates **JSON modules** (`import data from "./x.json" with
 { type: "json" }`) through `SyntheticModule` — `parse_json_module` /
@@ -180,10 +176,12 @@ QuickJS and so are **not** LibJS-only: Set methods, `Promise.try`,
 resizable/transferable `ArrayBuffer`, RegExp `/v` and `/d` flags,
 symbols as weak-collection keys, `Iterator.prototype[Symbol.dispose]`,
 `Math.sumPrecise`, `Atomics.pause`, and import-attributes parsing.
-**Decorators** (`@decorator`) are absent from QuickJS *and* from LibJS's
-current (Rust) parser, so they are a shared gap, not a differentiator.
-RegExp inline modifiers (`(?i:…)`) live in Ladybird's separate LibRegex,
-outside the LibJS-vs-QuickJS scope of this note.
+**Shared gaps** — absent from QuickJS *and* from LibJS, so not
+differentiators: **ShadowRealm** (no `ShadowRealm*` in LibJS `Runtime/`,
+verified 2026-06-13), **AsyncContext**, and **decorators** (`@decorator`;
+not in LibJS's current Rust parser). RegExp inline modifiers (`(?i:…)`)
+live in Ladybird's separate LibRegex, outside the LibJS-vs-QuickJS scope
+of this note.
 
 ## Summary
 
@@ -199,17 +197,16 @@ what the browser exposes after its native C additions load.
 | Explicit Resource Mgmt (`using`) | ✅ | ✅ | ✅ |
 | Iterator Helpers          | ✅ | ✅ | ✅ |
 | Set methods / `Promise.try` / U8 base64-hex / resizable AB | ✅ | ✅ | ✅ |
-| Decorators (`@`)          | ❌ | ❌ | ❌ |
+| Decorators (`@`) / ShadowRealm / AsyncContext | ❌ | ❌ | ❌ |
 | **Intl (ECMA-402)**       | ❌ | ✅ native, ICU-free | ✅ ICU |
 | **Temporal**              | ❌ | ✅ native (ISO/UTC) | ✅ full |
 | **JSON modules**          | ❌ (attr parsed) | ❌ | ✅ |
-| **ShadowRealm**           | ❌ | ❌ | ✅ |
 
-The remaining true gaps against LibJS are **ShadowRealm** and **JSON
-modules**, plus the i18n/calendar/time-zone *data depth* that an
-ICU-backed engine provides and an ICU-free one deliberately does not.
-Everything else in the recent-proposal set is already present in the
-bundled QuickJS.
+The only remaining true gap against LibJS is **JSON modules**, plus the
+i18n/calendar/time-zone *data depth* that an ICU-backed engine provides
+and an ICU-free one deliberately does not. ShadowRealm, AsyncContext, and
+decorators are absent from *both* engines. Everything else in the
+recent-proposal set is already present in the bundled QuickJS.
 
 ## Implications for Nordstjernen
 
@@ -226,6 +223,7 @@ bundled QuickJS.
   (`src/net.c` module path), since QuickJS parses the `with { type:
   "json" }` attribute but does not synthesize the module; honouring it
   means parsing the fetched JSON and exposing it as a default export.
-- **ShadowRealm** remains unimplemented and is low priority given
-  negligible real-world web use; QuickJS can create isolated `JSContext`s
-  at the C level if a script-visible binding is ever wanted.
+- **ShadowRealm** is not implemented by either engine, so there is no
+  gap to close versus LibJS; it is low priority anyway given negligible
+  real-world web use. QuickJS can create isolated `JSContext`s at the C
+  level if a script-visible binding is ever wanted.
