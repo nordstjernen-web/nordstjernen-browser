@@ -64,7 +64,7 @@ public final class Browser {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) { }
-        String start = args.length > 0 ? args[0] : "https://example.com";
+        String start = args.length > 0 ? args[0] : "about:start";
         SwingUtilities.invokeLater(() -> new Browser(start));
     }
 
@@ -81,6 +81,15 @@ public final class Browser {
         bar.add(address);
         JButton go = navButton("go", "Go", "Go");
         bar.add(go);
+        ImageIcon logo = icon("logo");
+        if (logo != null) {
+            bar.addSeparator();
+            JLabel brand = new JLabel(logo);
+            brand.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
+            brand.setToolTipText("Nordstjernen");
+            bar.add(brand);
+            frame.setIconImage(logo.getImage());
+        }
 
         back.addActionListener(e -> goBack());
         forward.addActionListener(e -> goForward());
