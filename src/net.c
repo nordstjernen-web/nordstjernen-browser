@@ -4268,6 +4268,45 @@ ns_fetch_thread(GTask        *task,
     ns_fetch_throttle_dispatch();
 }
 
+static ns_net_blob_resolver g_blob_resolver = NULL;
+static gpointer g_blob_resolver_ud = NULL;
+
+void
+ns_net_set_blob_resolver(ns_net_blob_resolver resolver, gpointer user_data)
+{
+    g_blob_resolver = resolver;
+    g_blob_resolver_ud = user_data;
+}
+
+static gboolean
+ns_net_complete_blob(const char *url, GCancellable *cancellable,
+                     GAsyncReadyCallback callback, gpointer user_data)
+{
+    if (!g_blob_resolver || !g_str_has_prefix(url, "blob:")) return FALSE;
+    char *type = NULL;
+    GBytes *bytes = g_blob_resolver(url, &type, g_blob_resolver_ud);
+    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
+    g_task_set_source_tag(task, ns_net_fetch_async);
+    ns_response *resp = g_new0(ns_response, 1);
+    resp->body = g_byte_array_new();
+    resp->final_url = g_strdup(url);
+    if (bytes) {
+        gsize len = 0;
+        const guint8 *data = g_bytes_get_data(bytes, &len);
+        if (data && len) g_byte_array_append(resp->body, data, len);
+        resp->status = 200;
+        resp->content_type = type;
+        g_bytes_unref(bytes);
+    } else {
+        resp->status = 404;
+        resp->error = g_strdup("blob URL not found");
+        g_free(type);
+    }
+    g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
+    g_object_unref(task);
+    return TRUE;
+}
+
 void
 ns_net_fetch_async(const char        *url,
                    const char        *top_url,
@@ -4314,6 +4353,8 @@ ns_net_request_async(const char         *url,
                      gpointer            user_data)
 {
     g_return_if_fail(url != NULL);
+
+    if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
 
     ns_fetch_ctx *ctx = g_new0(ns_fetch_ctx, 1);
     ctx->url = g_strdup(url);

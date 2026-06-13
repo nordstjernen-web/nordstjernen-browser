@@ -12250,18 +12250,59 @@ ns_blob_entry_free(gpointer p)
     g_free(e);
 }
 
+static GPtrArray *g_blob_js_registry = NULL;
+
+static GBytes *
+ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
+{
+    (void)user_data;
+    if (out_type) *out_type = NULL;
+    if (!g_blob_js_registry || !url) return NULL;
+    for (guint i = 0; i < g_blob_js_registry->len; i++) {
+        ns_js *js = g_ptr_array_index(g_blob_js_registry, i);
+        if (!js || !js->blob_urls) continue;
+        ns_blob_entry *e = g_hash_table_lookup(js->blob_urls, url);
+        if (e) {
+            if (out_type) *out_type = e->type ? g_strdup(e->type) : NULL;
+            return e->bytes ? g_bytes_ref(e->bytes) : NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+ns_js_blob_registry_add(ns_js *js)
+{
+    if (!js) return;
+    if (!g_blob_js_registry) {
+        g_blob_js_registry = g_ptr_array_new();
+        ns_net_set_blob_resolver(ns_js_net_blob_resolver, NULL);
+    }
+    if (!g_ptr_array_find(g_blob_js_registry, js, NULL))
+        g_ptr_array_add(g_blob_js_registry, js);
+}
+
+static void
+ns_js_blob_registry_remove(ns_js *js)
+{
+    if (g_blob_js_registry && js)
+        g_ptr_array_remove_fast(g_blob_js_registry, js);
+}
+
 static JSValue
 ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
-    static uint64_t counter = 0;
-    counter++;
-    char buf[64];
-    g_snprintf(buf, sizeof buf, "blob:nordstjernen/%016" G_GINT64_MODIFIER "x",
-               (uint64_t)g_get_real_time() ^ counter);
-
     ns_js *js = js_from_ctx(ctx);
+    char *origin = (js && js->current_url) ? ns_url_origin_from(js->current_url)
+                                           : NULL;
+    char *uuid = g_uuid_string_random();
+    char *url = g_strdup_printf("blob:%s/%s",
+                                (origin && *origin) ? origin : "null", uuid);
+    g_free(origin);
+    g_free(uuid);
+
     if (js && argc >= 1 && JS_IsObject(argv[0])) {
         gsize len = 0;
         char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
@@ -12279,9 +12320,11 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
         ns_blob_entry *e = g_new0(ns_blob_entry, 1);
         e->bytes = g_bytes_new_take(bytes, len);
         e->type = type;
-        g_hash_table_replace(js->blob_urls, g_strdup(buf), e);
+        g_hash_table_replace(js->blob_urls, g_strdup(url), e);
     }
-    return JS_NewString(ctx, buf);
+    JSValue ret = JS_NewString(ctx, url);
+    g_free(url);
+    return ret;
 }
 
 static JSValue
@@ -21170,6 +21213,8 @@ ns_js_set_image_cache(ns_js *js, struct ns_image_cache *cache)
 {
     if (!js) return;
     js->image_cache = (ns_image_cache *)cache;
+    if (cache) ns_js_blob_registry_add(js);
+    else ns_js_blob_registry_remove(js);
 }
 
 void
@@ -32188,6 +32233,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_js_blob_registry_remove(js);
     ns_storage_flush(js);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
