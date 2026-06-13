@@ -13713,7 +13713,7 @@ static JSClassDef ns_worker_class = {
     .finalizer = ns_worker_class_finalizer,
 };
 
-#define NS_WORKER_SCRIPT_BYTES_MAX  (16u * 1024u * 1024u)
+#define NS_WORKER_SCRIPT_BYTES_MAX  (32u * 1024u * 1024u)
 #define NS_WORKER_MESSAGE_BYTES_MAX (16u * 1024u * 1024u)
 
 static ns_worker_host *
@@ -33116,7 +33116,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
     ns_drain_microtasks(js);
 }
 
-#define NS_MAX_SCRIPT_BYTES (16u * 1024u * 1024u)
+#define NS_MAX_SCRIPT_BYTES (32u * 1024u * 1024u)
 #define NS_MODULE_LOAD_MAX_COUNT 1024
 #define NS_MODULE_LOAD_MAX_BYTES ((gsize)128u * 1024u * 1024u)
 
