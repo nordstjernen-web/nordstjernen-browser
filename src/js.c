@@ -164,6 +164,7 @@ static JSValue ns_nodelist_new(JSContext *ctx);
 static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
+static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 static JSValue ns_element_getElementsByTagNameNS(JSContext *ctx, JSValueConst this_val,
@@ -3554,11 +3555,20 @@ ns_inner_text_collect(ns_js *js, const ns_node *n,
     if (block) ns_inner_text_require_break(c);
 }
 
+static gboolean
+ns_inner_outer_text_unsupported(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return TRUE;
+    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) return TRUE;
+    return ns_node_is_element_named(n, "svg") || ns_node_is_element_named(n, "math");
+}
+
 static JSValue
 ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NULL;
+    if (ns_inner_outer_text_unsupported(n)) return JS_UNDEFINED;
     ns_js *js = js_from_ctx(ctx);
     if (!js || !js->style_table)
         return ns_element_get_textContent(ctx, this_val);
@@ -4562,21 +4572,119 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    if (ns_inner_outer_text_unsupported(n)) return JS_UNDEFINED;
+    size_t len = 0;
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCStringLen(ctx, &len, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_js_clear_children(_j, n);
     const char *p = s;
-    while (*p) {
-        const char *nl = strchr(p, '\n');
-        gsize seg = nl ? (gsize)(nl - p) : strlen(p);
-        if (seg > 0)
-            ns_node_append_child(n, ns_node_new_text(g_strndup(p, seg)));
-        if (!nl) break;
-        ns_node_append_child(n, ns_node_new_element(g_strdup("br")));
-        p = nl + 1;
+    const char *end = s + len;
+    while (p < end) {
+        const char *text = p;
+        while (p < end && *p != '\n' && *p != '\r') p++;
+        if (p > text)
+            ns_node_append_child(n, ns_node_new_text(g_strndup(text, (gsize)(p - text))));
+        while (p < end && (*p == '\n' || *p == '\r')) {
+            if (*p == '\r' && p + 1 < end && p[1] == '\n') p++;
+            p++;
+            ns_node_append_child(n, ns_node_new_element(g_strdup("br")));
+        }
     }
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
+    if (_j) _j->mutated = TRUE;
+    return JS_UNDEFINED;
+}
+
+static ns_node *
+ns_rendered_text_fragment_new(const char *s, size_t len)
+{
+    ns_node *fragment = ns_node_new_document();
+    if (!fragment) return NULL;
+    fragment->flags |= NS_NODE_FRAGMENT;
+    const char *p = s;
+    const char *end = s + len;
+    while (p < end) {
+        const char *text = p;
+        while (p < end && *p != '\n' && *p != '\r') p++;
+        if (p > text)
+            ns_node_append_child(fragment,
+                ns_node_new_text(g_strndup(text, (gsize)(p - text))));
+        while (p < end && (*p == '\n' || *p == '\r')) {
+            if (*p == '\r' && p + 1 < end && p[1] == '\n') p++;
+            p++;
+            ns_node_append_child(fragment, ns_node_new_element(g_strdup("br")));
+        }
+    }
+    return fragment;
+}
+
+static void
+ns_merge_with_next_text_node(ns_js *js, ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_TEXT) return;
+    ns_node *next = n->next_sibling;
+    if (!next || next->kind != NS_NODE_TEXT) return;
+    const char *a = n->text ? n->text : "";
+    const char *b = next->text ? next->text : "";
+    gsize la = strlen(a);
+    gsize lb = strlen(b);
+    if (la > G_MAXSIZE - lb - 1) return;
+    char *merged = g_malloc(la + lb + 1);
+    if (la) memcpy(merged, a, la);
+    if (lb) memcpy(merged + la, b, lb);
+    merged[la + lb] = '\0';
+    ns_node_replace_text_owned(n, merged);
+    ns_node_remove(next);
+    ns_js_orphan_node(js, next);
+}
+
+static JSValue
+ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
+    if (ns_inner_outer_text_unsupported(n)) return JS_UNDEFINED;
+    if (!n->parent)
+        return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+                                      "Cannot set outerText on a detached node.");
+    size_t len = 0;
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCStringLen(ctx, &len, val) : "";
+    if (!s) return JS_UNDEFINED;
+    ns_node *fragment = ns_rendered_text_fragment_new(s, len);
+    if (free_s) JS_FreeCString(ctx, s);
+    if (!fragment) return JS_UNDEFINED;
+    if (!fragment->first_child)
+        ns_node_append_child(fragment, ns_node_new_text(g_strdup("")));
+    ns_node *parent = n->parent;
+    ns_node *previous = n->prev_sibling;
+    ns_node *next = n->next_sibling;
+    ns_js *_j = js_from_ctx(ctx);
+    GPtrArray *kids = g_ptr_array_new();
+    for (ns_node *c = fragment->first_child; c; c = c->next_sibling)
+        g_ptr_array_add(kids, c);
+    for (guint i = 0; i < kids->len; i++) {
+        ns_node *c = g_ptr_array_index(kids, i);
+        ns_node_remove(c);
+        ns_insert_sibling_before(n, c);
+        if (_j)
+            ns_js_record_child_change(_j, parent, c, NULL,
+                                      c->prev_sibling, c->next_sibling);
+    }
+    g_ptr_array_free(kids, TRUE);
+    ns_node_free(fragment);
+    ns_node *saved_prev = n->prev_sibling;
+    ns_node *saved_next = n->next_sibling;
+    ns_node_remove(n);
+    if (_j) {
+        ns_js_orphan_node(_j, n);
+        ns_js_record_child_change(_j, parent, NULL, n, saved_prev, saved_next);
+    }
+    if (next && next->prev_sibling)
+        ns_merge_with_next_text_node(_j, next->prev_sibling);
+    ns_merge_with_next_text_node(_j, previous);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -4715,8 +4823,6 @@ ns_xml_serializer_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "serializeToString", ns_xml_serializeToString, 1);
     return obj;
 }
-
-static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 
 static JSValue
 ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val)
@@ -26954,7 +27060,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("prefix",                 ns_element_get_prefix,                 ns_element_noop_set),
     JS_CGETSET_DEF("textContent",            ns_element_get_textContent,            ns_element_set_textContent),
     JS_CGETSET_DEF("innerText",              ns_element_get_innerText,              ns_element_set_innerText),
-    JS_CGETSET_DEF("outerText",              ns_element_get_innerText,              ns_element_set_innerText),
+    JS_CGETSET_DEF("outerText",              ns_element_get_innerText,              ns_element_set_outerText),
     JS_CGETSET_DEF("text",                   ns_element_get_text,                   ns_element_set_text),
     JS_CGETSET_DEF("id",                     ns_element_get_id,                     ns_element_set_id),
     JS_CGETSET_DEF("className",              ns_element_get_className,              ns_element_set_className),
