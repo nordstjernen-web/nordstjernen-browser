@@ -10338,6 +10338,10 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             "(function(init){"
             " var pairs=[];"
             " function add(k,v){pairs.push([String(k),String(v)]);}"
+            " function pdecode(s){"
+            "   s=String(s).replace(/\\+/g,' ').replace(/%(?![0-9a-fA-F]{2})/g,'%25');"
+            "   try{return decodeURIComponent(s);}catch(e){return s;}"
+            " }"
             " function parse(q){"
             "   if (q && q[0]==='?') q=q.slice(1);"
             "   if (!q) return;"
@@ -10347,29 +10351,22 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             "     var eq=parts[i].indexOf('=');"
             "     var k=eq<0?parts[i]:parts[i].slice(0,eq);"
             "     var v=eq<0?'':parts[i].slice(eq+1);"
-            "     try{k=decodeURIComponent(k.replace(/\\+/g,' '));}catch(e){}"
-            "     try{v=decodeURIComponent(v.replace(/\\+/g,' '));}catch(e){}"
-            "     add(k,v);"
+            "     add(pdecode(k),pdecode(v));"
             "   }"
             " }"
             " if (init == null) {"
             " } else if (typeof init === 'string') {"
             "   parse(init);"
-            " } else if (init._p && typeof init._p.length === 'number') {"
-            "   for (var ci=0;ci<init._p.length;ci++)"
-            "     if (init._p[ci] && init._p[ci].length >= 2) add(init._p[ci][0],init._p[ci][1]);"
-            " } else if (typeof Symbol !== 'undefined' && init[Symbol.iterator]) {"
+            " } else if (typeof init === 'object' && typeof Symbol !== 'undefined' && typeof init[Symbol.iterator] === 'function') {"
             "   var it=init[Symbol.iterator](), step;"
             "   while(!(step=it.next()).done){"
             "     var p=step.value;"
-            "     if (p && typeof p.length === 'number' && p.length >= 2) add(p[0],p[1]);"
-            "   }"
-            " } else if (typeof init.forEach === 'function') {"
-            "   init.forEach(function(v,k){add(k,v);});"
-            " } else if (typeof init.length === 'number') {"
-            "   for (var ai=0;ai<init.length;ai++){"
-            "     var a=init[ai];"
-            "     if (a && typeof a.length === 'number' && a.length >= 2) add(a[0],a[1]);"
+            "     if (p == null || typeof p[Symbol.iterator] !== 'function')"
+            "       throw new TypeError('Query pair must be iterable');"
+            "     var pa=[]; var pit=p[Symbol.iterator]();"
+            "     for (var ps;!(ps=pit.next()).done;) pa.push(ps.value);"
+            "     if (pa.length !== 2) throw new TypeError('Each query pair must be an iterable [name, value] tuple');"
+            "     add(pa[0],pa[1]);"
             "   }"
             " } else if (typeof init === 'object') {"
             "   var ks=Object.keys(init);"
@@ -10380,14 +10377,15 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             " var o = Object.create(null);"
             " o._p = pairs;"
             " o._owner = null;"
-            " o.toString = function(){return this._p.map(function(p){return encodeURIComponent(p[0])+'='+encodeURIComponent(p[1]);}).join('&');};"
+            " function fenc(s){return encodeURIComponent(String(s)).replace(/[!~'()]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();}).replace(/%20/g,'+');}"
+            " o.toString = function(){return this._p.map(function(p){return fenc(p[0])+'='+fenc(p[1]);}).join('&');};"
             " function notify(){ if (o._owner && o._owner._setSearchRaw) { var s = o.toString(); o._owner._setSearchRaw(s ? '?' + s : ''); } }"
             " o.get = function(k){k=String(k);for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k)return this._p[i][1];return null;};"
             " o.getAll = function(k){k=String(k);var r=[];for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k)r.push(this._p[i][1]);return r;};"
-            " o.has = function(k){k=String(k);for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k)return true;return false;};"
+            " o.has = function(k){k=String(k);var hv=arguments.length>1&&arguments[1]!==undefined;var vv=hv?String(arguments[1]):null;for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k&&(!hv||this._p[i][1]===vv))return true;return false;};"
             " o.set = function(k,v){k=String(k);v=String(v);var found=false;var out=[];for (var i=0;i<this._p.length;i++){if(this._p[i][0]===k){if(!found){out.push([k,v]);found=true;}}else out.push(this._p[i]);}if(!found)out.push([k,v]);this._p=out;notify();};"
             " o.append = function(k,v){this._p.push([String(k),String(v)]);notify();};"
-            " o.delete = function(k){k=String(k);this._p=this._p.filter(function(p){return p[0]!==k;});notify();};"
+            " o.delete = function(k){k=String(k);var hv=arguments.length>1&&arguments[1]!==undefined;var vv=hv?String(arguments[1]):null;this._p=this._p.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));});notify();};"
             " o.sort = function(){this._p.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;});notify();};"
             " o.forEach = function(cb,th){for (var i=0;i<this._p.length;i++)cb.call(th,this._p[i][1],this._p[i][0],this);};"
             " o.keys = function*(){for (var i=0;i<this._p.length;i++)yield this._p[i][0];};"
@@ -10409,12 +10407,7 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
     }
     if (!jsx || !jsx->search_params_helper_set) return JS_NewObject(ctx);
     JSValueConst args[1] = { init };
-    JSValue obj = JS_Call(ctx, jsx->search_params_helper, JS_UNDEFINED, 1, args);
-    if (JS_IsException(obj)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return JS_NewObject(ctx);
-    }
-    return obj;
+    return JS_Call(ctx, jsx->search_params_helper, JS_UNDEFINED, 1, args);
 }
 
 static JSValue
