@@ -199,6 +199,15 @@ intl_instance_proto(JSContext *ctx, JSValueConst this_val, const char *service)
     JS_FreeValue(ctx, ctor);
     if (JS_IsObject(p)) return p;
     JS_FreeValue(ctx, p);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue intl = JS_GetPropertyStr(ctx, global, "Intl");
+    JS_FreeValue(ctx, global);
+    ctor = JS_GetPropertyStr(ctx, intl, service);
+    JS_FreeValue(ctx, intl);
+    p = JS_GetPropertyStr(ctx, ctor, "prototype");
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsObject(p)) return p;
+    JS_FreeValue(ctx, p);
     return JS_NULL;
 }
 
