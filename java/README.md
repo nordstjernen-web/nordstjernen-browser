@@ -85,6 +85,25 @@ Point it at the renderer binary with the `nordstjernen.renderer` system
 property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
 probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
 
+`RemoteBrowser` is the persistent counterpart for interactive shells: one
+long-lived renderer per window, with `navigate`, `render`, `setViewport`,
+`linkAt`, and `press`/`release` — the model the GTK and Qt shells use.
+
+## Browser app
+
+`org.nordstjernen.app.Browser` is a standalone Swing browser with a
+GTK-shell-style chrome (back / forward / reload / home / URL bar / status bar,
+using the same toolbar icons) that drives a renderer process via
+`RemoteBrowser` — no native engine in the JVM.
+
+```sh
+./gradlew run --args="https://example.com"
+# or, after `installDist`: build/install/nordstjernen/bin/nordstjernen
+```
+
+Set `NORDSTJERNEN_RENDERER` (or `-Dnordstjernen.renderer=…`) to the renderer
+binary.
+
 ## Build
 
 ```sh

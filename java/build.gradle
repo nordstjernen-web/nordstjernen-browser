@@ -1,9 +1,17 @@
 plugins {
     id 'java-library'
+    id 'application'
 }
 
 group = 'org.nordstjernen'
 version = '1.0.1'
+
+// The official Java browser: a Swing shell over the renderer process.
+//   ./gradlew run --args="https://example.com"
+// Point at the renderer with -Dnordstjernen.renderer=… or NORDSTJERNEN_RENDERER.
+application {
+    mainClass = 'org.nordstjernen.app.Browser'
+}
 
 java {
     toolchain {
