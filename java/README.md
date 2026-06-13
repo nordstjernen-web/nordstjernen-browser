@@ -58,6 +58,33 @@ one thread and treat `Page` as non-thread-safe. `Page` holds native memory —
 always `close()` it (it is `AutoCloseable`). `Nordstjernen.shutdown()` releases
 process-wide engine state.
 
+## Renderer-process client (no JNI)
+
+`RemotePage` is an alternative that does **not** load the native engine into
+the JVM. Like the GTK and Qt shells, it spawns a separate
+`nordstjernen-renderer` process (in its `stdio` mode) and drives it over the
+renderer's HTTP/JSON protocol — so an engine crash can't take down the JVM, and
+no `libnordstjernen` needs to be on the Java library path. This is also the
+client the Android shell reuses.
+
+```java
+import org.nordstjernen.RemotePage;
+import javax.imageio.ImageIO;
+import java.io.File;
+
+try (RemotePage page = RemotePage.open("https://example.com", 1000, 700, 800)) {
+    page.title();                              // page <title>
+    page.url();                                // final URL
+    page.pageSize();                           // Size (CSS px)
+    page.renderRgba(0, 0, 1000, 700, 1.0);     // premultiplied RGBA8888 bytes
+    ImageIO.write(page.renderFullPage(1.0), "png", new File("example.png"));
+}
+```
+
+Point it at the renderer binary with the `nordstjernen.renderer` system
+property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
+probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
+
 ## Build
 
 ```sh
