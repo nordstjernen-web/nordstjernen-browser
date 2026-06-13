@@ -179,6 +179,7 @@ typedef enum ns_css_prop {
     NS_CSS_TRANSFORM_STYLE,
     NS_CSS_BACKFACE_VISIBILITY,
     NS_CSS_ANIMATION_PLAY_STATE,
+    NS_CSS_CLIP,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -197,6 +198,7 @@ typedef enum ns_css_value_kind {
     NS_CSS_V_TRANSFORM,
     NS_CSS_V_AREAS,
     NS_CSS_V_ANIM,
+    NS_CSS_V_RECT,
 } ns_css_value_kind;
 
 typedef enum ns_css_timing_kind {
@@ -426,6 +428,7 @@ typedef struct ns_css_value {
         ns_css_transform transform;
         ns_css_areas     areas;
         ns_css_anim_list anim;
+        struct { double v[4]; ns_css_unit unit[4]; gboolean is_auto[4]; } rect;
     } u;
     struct ns_css_value *next_layer;
 } ns_css_value;

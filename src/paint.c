@@ -3929,6 +3929,28 @@ box_is_positioned(const ns_box *b)
            strcmp(kw, "fixed") == 0    || strcmp(kw, "sticky") == 0;
 }
 
+static gboolean
+box_clip_hides(const ns_box *b)
+{
+    const ns_style *s = b ? b->style : NULL;
+    if (!s) return FALSE;
+    const ns_css_value *cv = s->values[NS_CSS_CLIP];
+    if (!cv || cv->kind != NS_CSS_V_RECT) return FALSE;
+    const ns_css_value *pv = s->values[NS_CSS_POSITION];
+    if (!pv || pv->kind != NS_CSS_V_KEYWORD || !pv->u.keyword) return FALSE;
+    if (strcmp(pv->u.keyword, "absolute") != 0 &&
+        strcmp(pv->u.keyword, "fixed") != 0) return FALSE;
+    double bw = b->content_width + b->padding.left + b->padding.right +
+                b->border.left + b->border.right;
+    double bh = b->content_height + b->padding.top + b->padding.bottom +
+                b->border.top + b->border.bottom;
+    double top    = cv->u.rect.is_auto[0] ? 0  : cv->u.rect.v[0];
+    double right  = cv->u.rect.is_auto[1] ? bw : cv->u.rect.v[1];
+    double bottom = cv->u.rect.is_auto[2] ? bh : cv->u.rect.v[2];
+    double left   = cv->u.rect.is_auto[3] ? 0  : cv->u.rect.v[3];
+    return (right - left) <= 0 || (bottom - top) <= 0;
+}
+
 static int
 box_z_index(const ns_box *b)
 {
@@ -4837,6 +4859,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (!b) return;
     if (g_paint_collect_stats) g_paint_stats.boxes_seen++;
     if (box_is_hidden(b)) {
+        if (g_paint_collect_stats) g_paint_stats.hidden++;
+        return;
+    }
+    if (box_clip_hides(b)) {
         if (g_paint_collect_stats) g_paint_stats.hidden++;
         return;
     }

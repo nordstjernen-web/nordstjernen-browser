@@ -2015,9 +2015,18 @@ resolve_pseudo_content(const char *raw, const ns_node *host)
             g_free(sub);
             g_free(body);
         } else {
-            const char *start = p;
-            while (*p && !g_ascii_isspace(*p) && *p != '"' && *p != '\'') p++;
-            g_string_append_len(out, start, p - start);
+            const char *id = p;
+            while (*p && (g_ascii_isalnum((guchar)*p) || *p == '-')) p++;
+            if (*p == '(') {
+                int depth = 0;
+                for (; *p; p++) {
+                    if (*p == '(') depth++;
+                    else if (*p == ')') { depth--; if (depth == 0) { p++; break; } }
+                }
+            } else {
+                while (*p && !g_ascii_isspace(*p) && *p != '"' && *p != '\'') p++;
+                g_string_append_len(out, id, p - id);
+            }
         }
     }
     return g_string_free(out, FALSE);

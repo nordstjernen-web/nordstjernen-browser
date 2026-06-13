@@ -227,6 +227,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_SCROLLBAR_COLOR]      = "scrollbar-color",
     [NS_CSS_IMAGE_RENDERING]      = "image-rendering",
     [NS_CSS_CONTENT]              = "content",
+    [NS_CSS_CLIP]                 = "clip",
     [NS_CSS_GRID_TEMPLATE_COLUMNS]= "grid-template-columns",
     [NS_CSS_GRID_TEMPLATE_ROWS]   = "grid-template-rows",
     [NS_CSS_GRID_TEMPLATE_AREAS]  = "grid-template-areas",
@@ -4959,6 +4960,39 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
         v->u.keyword = kw;
+        break;
+    }
+    case NS_CSS_CLIP: {
+        const char *open = strchr(t, '(');
+        const char *close = open ? strrchr(t, ')') : NULL;
+        if (!open || !close || close < open) break;
+        char *inner = g_strndup(open + 1, close - open - 1);
+        char **parts = g_strsplit_set(inner, ", \t", -1);
+        double cv[4] = {0,0,0,0};
+        ns_css_unit cu[4] = {NS_CSS_UNIT_PX, NS_CSS_UNIT_PX,
+                             NS_CSS_UNIT_PX, NS_CSS_UNIT_PX};
+        gboolean ca[4] = {TRUE, TRUE, TRUE, TRUE};
+        int idx = 0;
+        for (int i = 0; parts[i] && idx < 4; i++) {
+            if (!parts[i][0]) continue;
+            if (g_ascii_strcasecmp(parts[i], "auto") == 0) {
+                ca[idx] = TRUE;
+            } else if (parse_length(parts[i], &cv[idx], &cu[idx])) {
+                ca[idx] = FALSE;
+            }
+            idx++;
+        }
+        g_strfreev(parts);
+        g_free(inner);
+        if (idx == 4) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_RECT;
+            for (int i = 0; i < 4; i++) {
+                v->u.rect.v[i] = cv[i];
+                v->u.rect.unit[i] = cu[i];
+                v->u.rect.is_auto[i] = ca[i];
+            }
+        }
         break;
     }
     case NS_CSS_COLOR:
@@ -12167,6 +12201,18 @@ ns_css_value_serialize(const ns_css_value *v)
                 break;
             }
         }
+        return g_string_free(s, FALSE);
+    }
+    case NS_CSS_V_RECT: {
+        GString *s = g_string_new("rect(");
+        for (int i = 0; i < 4; i++) {
+            if (i) g_string_append(s, ", ");
+            if (v->u.rect.is_auto[i])
+                g_string_append(s, "auto");
+            else
+                g_string_append_printf(s, "%gpx", v->u.rect.v[i]);
+        }
+        g_string_append_c(s, ')');
         return g_string_free(s, FALSE);
     }
     }
