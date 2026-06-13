@@ -613,6 +613,18 @@ on_tab_close(GtkButton *button, gpointer user_data)
 static void
 proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
 {
+    if (ns_rproc_single_process_enabled() &&
+        gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
+        NsProcView *cur = current_view(pw);
+        if (cur) {
+            char *r = normalize_url(url);
+            gtk_editable_set_text(GTK_EDITABLE(pw->address), r);
+            ns_proc_view_load(cur, r);
+            g_free(r);
+            return;
+        }
+    }
+
     NsProcView *v = ns_proc_view_new();
     ns_proc_view_set_notify(v, on_view_notify, pw);
     GtkWidget *page = ns_proc_view_widget(v);
@@ -1197,6 +1209,12 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl>comma", NULL });
     install_action(pw, "quit", G_CALLBACK(act_quit),
                    (const char *[]){ "<Ctrl>q", NULL });
+
+    if (ns_rproc_single_process_enabled()) {
+        GAction *nt = g_action_map_lookup_action(G_ACTION_MAP(pw->window),
+                                                 "new-tab");
+        if (nt) g_simple_action_set_enabled(G_SIMPLE_ACTION(nt), FALSE);
+    }
 }
 
 static ProcWindow *
@@ -1224,6 +1242,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_signal_connect(pw->newtab_btn, "clicked",
                      G_CALLBACK(on_newtab_clicked), pw);
     gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
+    if (ns_rproc_single_process_enabled())
+        gtk_widget_set_visible(pw->newtab_btn, FALSE);
     gtk_header_bar_pack_start(GTK_HEADER_BAR(header), pw->tabstrip);
     gtk_window_set_titlebar(GTK_WINDOW(pw->window), header);
 

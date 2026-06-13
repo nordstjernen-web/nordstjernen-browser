@@ -6,6 +6,7 @@
 #include "media.h"
 #include "proc_limits.h"
 #include "rproc_http.h"
+#include "rproc_inproc.h"
 
 #include <cairo.h>
 #include <glib/gstdio.h>
@@ -1813,7 +1814,8 @@ show_context_menu(NsProcView *v, const char *href)
     if (v->ctx_link) {
         GMenu *s = g_menu_new();
         g_menu_append(s, ns_i18n("Open Link"), "ctx.open-link");
-        g_menu_append(s, ns_i18n("Open Link in New Tab"), "ctx.open-newtab");
+        if (!ns_rproc_single_process_enabled())
+            g_menu_append(s, ns_i18n("Open Link in New Tab"), "ctx.open-newtab");
         g_menu_append(s, ns_i18n("Copy Link Address"), "ctx.copy-link");
         g_menu_append_section(menu, NULL, G_MENU_MODEL(s));
         g_object_unref(s);
