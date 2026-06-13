@@ -203,11 +203,6 @@ need('DOMException is throwable / catchable as Error', function () {
     catch (e) { return e instanceof Error && e.name === 'NotFoundError' && e.code === 8; }
 });
 
-need('setImmediate / clearImmediate exist', function () {
-    return typeof setImmediate === 'function' &&
-           typeof clearImmediate === 'function';
-});
-
 need('scheduler.postTask returns a Promise', function () {
     var p = scheduler.postTask(function () { return 1; });
     return p instanceof Promise;

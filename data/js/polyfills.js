@@ -3071,26 +3071,6 @@
         defineCtor('DOMException', DomException);
     }
 
-    if (typeof global.setImmediate !== 'function') {
-        var immediateCounter = 0;
-        var immediateMap = {};
-        defineCtor('setImmediate', function (fn) {
-            var id = ++immediateCounter;
-            var args = Array.prototype.slice.call(arguments, 1);
-            immediateMap[id] = setTimeout(function () {
-                delete immediateMap[id];
-                fn.apply(null, args);
-            }, 0);
-            return id;
-        });
-        defineCtor('clearImmediate', function (id) {
-            var tid = immediateMap[id];
-            if (tid !== undefined) {
-                clearTimeout(tid);
-                delete immediateMap[id];
-            }
-        });
-    }
 
     if (typeof Event !== 'undefined' && Event.prototype &&
         typeof Event.prototype.composedPath !== 'function') {
