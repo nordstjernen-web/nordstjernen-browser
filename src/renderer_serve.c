@@ -26,7 +26,44 @@ struct ns_renderer_session {
     int            frame_w;
     int            frame_h;
     double         frame_scale;
+    char          *post_url;
+    char          *post_body;
+    size_t         post_len;
+    char          *post_ct;
 };
+
+static void
+session_stash_post(ns_renderer_session *s, const char *href)
+{
+    if (!s || !s->cur)
+        return;
+    size_t len = 0;
+    char *ct = NULL;
+    char *pb = ns_browser_take_post(s->cur, &len, &ct);
+    if (!pb)
+        return;
+    free(s->post_url);
+    free(s->post_body);
+    free(s->post_ct);
+    s->post_url = (href && *href) ? strdup(href) : NULL;
+    s->post_body = pb;
+    s->post_len = len;
+    s->post_ct = ct;
+}
+
+static void
+session_clear_post(ns_renderer_session *s)
+{
+    if (!s)
+        return;
+    free(s->post_url);
+    free(s->post_body);
+    free(s->post_ct);
+    s->post_url = NULL;
+    s->post_body = NULL;
+    s->post_ct = NULL;
+    s->post_len = 0;
+}
 
 static int
 clamp(int v, int lo, int hi)
@@ -144,6 +181,7 @@ ns_renderer_session_free(ns_renderer_session *s)
 {
     if (!s)
         return;
+    session_clear_post(s);
     if (s->cur)
         ns_browser_close(s->cur);
     free(s);
@@ -185,8 +223,15 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             s->cur = NULL;
         }
         s->frame_valid = 0;
-        s->cur = url ? ns_browser_open_viewport(url, vw, vh, (int)settle)
-                     : NULL;
+        if (url && s->post_body && s->post_url &&
+            strcmp(url, s->post_url) == 0)
+            s->cur = ns_browser_open_post_viewport(url, vw, vh, (int)settle,
+                                                   s->post_body, s->post_len,
+                                                   s->post_ct);
+        else
+            s->cur = url ? ns_browser_open_viewport(url, vw, vh, (int)settle)
+                         : NULL;
+        session_clear_post(s);
         int pw = 0, ph = 0, ok = s->cur != NULL;
         char *title = NULL, *final_url = NULL, *nav = NULL;
         char *te = NULL, *ue = NULL, *ne = NULL;
@@ -326,9 +371,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             return 0;
         }
         s->frame_valid = 0;
-        if (s->cur && strcmp(head->path, "/click") == 0)
+        if (s->cur && strcmp(head->path, "/click") == 0) {
             href = ns_browser_press(s->cur, (int)x, (int)y, (int)mods);
-        else if (s->cur)
+            session_stash_post(s, href);
+        } else if (s->cur)
             href = ns_browser_select(s->cur, (int)kind, (int)x, (int)y);
         reply_str(ctrl_w, "href", href);
         free(href);
@@ -350,6 +396,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                                                   (int)keycode, (int)mods,
                                                   &prevented)
                             : NULL;
+        session_stash_post(s, href);
         char *e = json_escape(href ? href : "");
         char *json = NULL;
         int n = asprintf(&json, "{\"href\":\"%s\",\"prevented\":%d}",
@@ -369,6 +416,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         s->frame_valid = 0;
         int changed = 0;
         char *href = s->cur ? ns_browser_release_click(s->cur, &changed) : NULL;
+        session_stash_post(s, href);
         reply_href_changed(ctrl_w, href, changed > 0);
         free(href);
         return 0;
