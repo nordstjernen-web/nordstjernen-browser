@@ -9608,6 +9608,42 @@ position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
     g_queue_clear(&q);
 }
 
+static gboolean
+box_has_transform_style(const ns_box *b)
+{
+    const ns_style *s = b ? b->style : NULL;
+    if (!s) return FALSE;
+    const ns_css_value *tv = s->values[NS_CSS_TRANSFORM];
+    if (tv && tv->kind == NS_CSS_V_TRANSFORM && tv->u.transform.n_ops > 0)
+        return TRUE;
+    return s->values[NS_CSS_TRANSLATE] || s->values[NS_CSS_ROTATE] ||
+           s->values[NS_CSS_SCALE] || s->values[NS_CSS_PERSPECTIVE];
+}
+
+static gboolean
+box_covers_viewport(const ns_box *b)
+{
+    double x = b->x + b->margin.left;
+    double y = b->y + b->margin.top;
+    double w = b->content_width + b->padding.left + b->padding.right +
+               b->border.left + b->border.right;
+    double h = b->content_height + b->padding.top + b->padding.bottom +
+               b->border.top + b->border.bottom;
+    return x <= 0.5 && y <= 0.5 &&
+           x + w >= ns_css_viewport_w() - 0.5 &&
+           y + h >= ns_css_viewport_h() - 0.5;
+}
+
+static gboolean
+box_can_host_fixed(const ns_box *anc)
+{
+    for (const ns_box *b = anc; b && b->parent; b = b->parent) {
+        if (box_has_transform_style(b)) return FALSE;
+        if (box_clips_children(b) && !box_covers_viewport(b)) return FALSE;
+    }
+    return TRUE;
+}
+
 static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
@@ -9632,6 +9668,14 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
         if (!cb) cb = root;
 
+        ns_box *paint_parent = cb;
+        if (e.fixed) {
+            const ns_node *anc_dom = abs_entry_cb_dom(&e, styles);
+            ns_box *anc = anc_dom ? g_hash_table_lookup(box_map, anc_dom) : NULL;
+            if (anc && box_can_host_fixed(anc))
+                paint_parent = anc;
+        }
+
         ns_box *abox;
         if (e.pseudo) {
             abox = box_new(NS_BOX_BLOCK);
@@ -9644,7 +9688,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         }
         if (!abox) continue;
 
-        box_append_child(cb, abox);
+        box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
         gboolean cb_is_icb = (cb_dom == NULL);
         double avail = cb->content_width > 0 ? cb->content_width : viewport_width;
