@@ -148,10 +148,10 @@ There is no iOS build today. The blockers are real, not speed-of-light:
    for users in the EU as of 2024, but the global rule still
    stands and the entitlements / notarisation paperwork for an
    alt-engine browser is non-trivial.
-3. **No `fork`/`exec` for new-window.** iOS apps run a single
-   process. The `ns_spawn_window` path that re-execs the binary
-   for OS-level isolation simply cannot exist; isolation would
-   need to be inside one process, or shelved.
+3. **No `fork`/`exec` for per-tab renderers.** iOS apps run a single
+   process. The per-tab renderer spawn (`ns_rproc_http_spawn`) that
+   re-execs the binary for OS-level isolation simply cannot exist;
+   isolation would need to be inside one process, or shelved.
 4. **Cairo and Pango are not first-class on iOS.** They build,
    but no one ships them in App Store apps; the native path is
    CoreGraphics + CoreText, which means re-targeting the paint

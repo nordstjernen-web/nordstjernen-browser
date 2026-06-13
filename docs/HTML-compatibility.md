@@ -180,7 +180,7 @@ elements (`head title meta link style script noscript template`) to
 | `iframe` | 🟡 | `src`/`srcdoc` load; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
-| `video` | 🟡 | poster + play overlay; click hands the source URL to the system media player (`ns_media_launch_external`) — no in-process codec. Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp |
+| `video` | 🟡 | poster + play overlay; click hands the source URL to the system media player (`ns_media_try_launch`) — no in-process codec. Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp |
 | `audio` | 🟡 | click hands the source URL to the system media player; no in-process codec |
 | `track` (captions) | ❌ | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path; not rendered |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |

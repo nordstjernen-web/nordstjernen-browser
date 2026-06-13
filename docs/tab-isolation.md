@@ -248,7 +248,7 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
   **default, tabbed, process-per-tab UI**. `ProcView` is a
   `QAbstractScrollArea` that blits the shared framebuffer and queues page
   loads, scroll/resize renders, and link hit-tests on a worker thread over
-  `ns_rproc_open` / `ns_rproc_render` / `ns_rproc_link_at`, applying only
+  `ns_rproc_http_open` / `ns_rproc_http_render` / `ns_rproc_http_link_at`, applying only
   current replies on the GUI thread; render and hover requests are coalesced
   so stale IPC work does not pile up while the user scrolls or moves the
   pointer. `ProcView` also handles mouse-wheel and keyboard scrolling and

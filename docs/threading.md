@@ -74,7 +74,7 @@ on the C stack. Two layers keep that safe:
   event dispatch, image-load callbacks — early-returns when `in_pump`
   is set, so reentrant *JavaScript* never runs nested inside the pump.
 - **`js->dispatch_depth`** is raised around event dispatch;
-  `ns_js_free_or_defer_node` then parks freed DOM nodes in
+  `ns_js_orphan_node` then parks freed DOM nodes in
   `orphan_nodes` and sweeps them after dispatch unwinds, so a handler
   can never free a node the outer frame still references.
 
