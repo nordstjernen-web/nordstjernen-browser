@@ -5808,6 +5808,28 @@ ns_bind_fns(JSContext *ctx, JSValueConst obj, JSCFunction *fn,
 }
 
 static void
+ns_install_namespace_object(JSContext *ctx, JSValueConst global,
+                            const char *name, JSValue obj,
+                            const char *tag)
+{
+    JSValue proto = JS_NewObject(ctx);
+    JS_SetPrototype(ctx, obj, proto);
+    JS_FreeValue(ctx, proto);
+    JSValue sym = JS_GetPropertyStr(ctx, global, "Symbol");
+    JSValue tag_sym = JS_GetPropertyStr(ctx, sym, "toStringTag");
+    JSAtom tag_atom = JS_ValueToAtom(ctx, tag_sym);
+    if (tag_atom != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, obj, tag_atom, JS_NewString(ctx, tag),
+            JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, tag_atom);
+    }
+    JS_FreeValue(ctx, tag_sym);
+    JS_FreeValue(ctx, sym);
+    JS_DefinePropertyValueStr(ctx, global, name, obj,
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+static void
 ns_bind_ctors(JSContext *ctx, JSValueConst obj, JSCFunction *fn,
               const ns_fn_def *defs, gsize n)
 {
@@ -14299,28 +14321,28 @@ ns_worker_install_console(JSContext *ctx, JSValueConst global)
 {
     JSValue console = JS_NewObject(ctx);
     static const ns_fn_def console_log_methods[] = {
-        { "log", 1 }, { "info", 1 }, { "debug", 1 }, { "trace", 1 },
-        { "table", 1 }, { "group", 1 }, { "groupCollapsed", 1 },
-        { "dir", 1 }, { "dirxml", 1 },
+        { "log", 0 }, { "info", 0 }, { "debug", 0 }, { "trace", 0 },
+        { "table", 0 }, { "group", 0 }, { "groupCollapsed", 0 },
+        { "dir", 0 }, { "dirxml", 0 },
     };
     static const ns_fn_def console_noop_methods[] = {
-        { "groupEnd", 0 }, { "profile", 1 }, { "profileEnd", 1 },
-        { "timeStamp", 1 }, { "context", 1 }, { "clear", 0 },
+        { "groupEnd", 0 }, { "profile", 0 }, { "profileEnd", 0 },
+        { "timeStamp", 0 }, { "context", 0 }, { "clear", 0 },
     };
     ns_bind_fns(ctx, console, ns_worker_console_log,
                 console_log_methods, G_N_ELEMENTS(console_log_methods));
-    ns_bind_fn(ctx, console, "warn",       ns_worker_console_warn,    1);
-    ns_bind_fn(ctx, console, "error",      ns_worker_console_error,   1);
-    ns_bind_fn(ctx, console, "assert",     ns_worker_console_assert,  2);
-    ns_bind_fn(ctx, console, "count",      ns_event_noop,             1);
-    ns_bind_fn(ctx, console, "countReset", ns_event_noop,             1);
-    ns_bind_fn(ctx, console, "time",       ns_event_noop,             1);
-    ns_bind_fn(ctx, console, "timeEnd",    ns_event_noop,             1);
-    ns_bind_fn(ctx, console, "timeLog",    ns_event_noop,             1);
+    ns_bind_fn(ctx, console, "warn",       ns_worker_console_warn,    0);
+    ns_bind_fn(ctx, console, "error",      ns_worker_console_error,   0);
+    ns_bind_fn(ctx, console, "assert",     ns_worker_console_assert,  0);
+    ns_bind_fn(ctx, console, "count",      ns_event_noop,             0);
+    ns_bind_fn(ctx, console, "countReset", ns_event_noop,             0);
+    ns_bind_fn(ctx, console, "time",       ns_event_noop,             0);
+    ns_bind_fn(ctx, console, "timeEnd",    ns_event_noop,             0);
+    ns_bind_fn(ctx, console, "timeLog",    ns_event_noop,             0);
     ns_bind_fns(ctx, console, ns_event_noop,
                 console_noop_methods, G_N_ELEMENTS(console_noop_methods));
     JS_SetPropertyStr(ctx, console, "memory", JS_NewObject(ctx));
-    JS_SetPropertyStr(ctx, global, "console", console);
+    ns_install_namespace_object(ctx, global, "console", console, "console");
 }
 
 static void
@@ -27839,7 +27861,10 @@ ns_js_console_label_dup(JSContext *ctx, int argc, JSValueConst *argv)
 {
     if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         const char *s = JS_ToCString(ctx, argv[0]);
-        if (s) { char *out = g_strdup(s); JS_FreeCString(ctx, s); return out; }
+        if (!s) return NULL;
+        char *out = g_strdup(s);
+        JS_FreeCString(ctx, s);
+        return out;
     }
     return g_strdup("default");
 }
@@ -27848,11 +27873,12 @@ static JSValue
 ns_js_console_count(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val;
+    char *label = ns_js_console_label_dup(ctx, argc, argv);
+    if (!label) return JS_EXCEPTION;
     ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
+    if (!js) { g_free(label); return JS_UNDEFINED; }
     if (!js->console_counts)
         js->console_counts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    char *label = ns_js_console_label_dup(ctx, argc, argv);
     int n = GPOINTER_TO_INT(g_hash_table_lookup(js->console_counts, label)) + 1;
     g_hash_table_replace(js->console_counts, g_strdup(label), GINT_TO_POINTER(n));
     if (js->log_cb) {
@@ -27869,9 +27895,10 @@ ns_js_console_count_reset(JSContext *ctx, JSValueConst this_val, int argc, JSVal
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->console_counts) return JS_UNDEFINED;
     char *label = ns_js_console_label_dup(ctx, argc, argv);
-    g_hash_table_remove(js->console_counts, label);
+    if (!label) return JS_EXCEPTION;
+    if (js && js->console_counts)
+        g_hash_table_remove(js->console_counts, label);
     g_free(label);
     return JS_UNDEFINED;
 }
@@ -27880,11 +27907,12 @@ static JSValue
 ns_js_console_time(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val;
+    char *label = ns_js_console_label_dup(ctx, argc, argv);
+    if (!label) return JS_EXCEPTION;
     ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
+    if (!js) { g_free(label); return JS_UNDEFINED; }
     if (!js->console_timers)
         js->console_timers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-    char *label = ns_js_console_label_dup(ctx, argc, argv);
     gint64 *now = g_new(gint64, 1);
     *now = g_get_monotonic_time();
     g_hash_table_replace(js->console_timers, g_strdup(label), now);
@@ -27918,11 +27946,11 @@ static JSValue
 ns_js_console_time_end(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
     char *label = ns_js_console_label_dup(ctx, argc, argv);
+    if (!label) return JS_EXCEPTION;
+    ns_js *js = js_from_ctx(ctx);
     ns_js_console_time_emit(js, ctx, label, 0, NULL);
-    if (js->console_timers) g_hash_table_remove(js->console_timers, label);
+    if (js && js->console_timers) g_hash_table_remove(js->console_timers, label);
     g_free(label);
     return JS_UNDEFINED;
 }
@@ -27931,9 +27959,9 @@ static JSValue
 ns_js_console_time_log(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js) return JS_UNDEFINED;
     char *label = ns_js_console_label_dup(ctx, argc, argv);
+    if (!label) return JS_EXCEPTION;
+    ns_js *js = js_from_ctx(ctx);
     ns_js_console_time_emit(js, ctx, label,
                             argc > 1 ? argc - 1 : 0,
                             argc > 1 ? argv + 1 : NULL);
@@ -29198,28 +29226,28 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue console = JS_NewObject(ctx);
     static const ns_fn_def console_log_methods[] = {
-        { "log", 1 }, { "info", 1 }, { "debug", 1 }, { "trace", 1 },
-        { "table", 1 }, { "group", 1 }, { "groupCollapsed", 1 },
-        { "dir", 1 }, { "dirxml", 1 },
+        { "log", 0 }, { "info", 0 }, { "debug", 0 }, { "trace", 0 },
+        { "table", 0 }, { "group", 0 }, { "groupCollapsed", 0 },
+        { "dir", 0 }, { "dirxml", 0 },
     };
     static const ns_fn_def console_noop_methods[] = {
-        { "groupEnd", 0 }, { "profile", 1 }, { "profileEnd", 1 },
-        { "timeStamp", 1 }, { "context", 1 }, { "clear", 0 },
+        { "groupEnd", 0 }, { "profile", 0 }, { "profileEnd", 0 },
+        { "timeStamp", 0 }, { "context", 0 }, { "clear", 0 },
     };
     ns_bind_fns(ctx, console, ns_js_console_log,
                 console_log_methods, G_N_ELEMENTS(console_log_methods));
-    ns_bind_fn(ctx,  console, "warn",  ns_js_console_warn,  1);
-    ns_bind_fn(ctx,  console, "error", ns_js_console_error, 1);
-    ns_bind_fn(ctx,  console, "assert",     ns_js_console_assert,      2);
-    ns_bind_fn(ctx,  console, "count",      ns_js_console_count,       1);
-    ns_bind_fn(ctx,  console, "countReset", ns_js_console_count_reset, 1);
-    ns_bind_fn(ctx,  console, "time",       ns_js_console_time,        1);
-    ns_bind_fn(ctx,  console, "timeEnd",    ns_js_console_time_end,    1);
-    ns_bind_fn(ctx,  console, "timeLog",    ns_js_console_time_log,    1);
+    ns_bind_fn(ctx,  console, "warn",  ns_js_console_warn,  0);
+    ns_bind_fn(ctx,  console, "error", ns_js_console_error, 0);
+    ns_bind_fn(ctx,  console, "assert",     ns_js_console_assert,      0);
+    ns_bind_fn(ctx,  console, "count",      ns_js_console_count,       0);
+    ns_bind_fn(ctx,  console, "countReset", ns_js_console_count_reset, 0);
+    ns_bind_fn(ctx,  console, "time",       ns_js_console_time,        0);
+    ns_bind_fn(ctx,  console, "timeEnd",    ns_js_console_time_end,    0);
+    ns_bind_fn(ctx,  console, "timeLog",    ns_js_console_time_log,    0);
     ns_bind_fns(ctx, console, ns_event_noop,
                 console_noop_methods, G_N_ELEMENTS(console_noop_methods));
     JS_SetPropertyStr(ctx, console, "memory", JS_NewObject(ctx));
-    JS_SetPropertyStr(ctx, global, "console", console);
+    ns_install_namespace_object(ctx, global, "console", console, "console");
 
     ns_bind_fn(ctx, global, "alert",         ns_js_alert,             1);
     ns_bind_fn(ctx, global, "__jsEngine",    ns_js_engine_name_js,    0);
