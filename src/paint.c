@@ -2405,7 +2405,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double sx = text_x + (double)pos.x / PANGO_SCALE;
             double sy = b->y + (double)pos.y / PANGO_SCALE;
             cairo_save(cr);
-            cairo_translate(cr, sx, sy);
+            cairo_translate(cr, sx - a->box->x, sy - a->box->y);
             g_paint_no_cull++;
             paint_walk(cr, a->box, highlight);
             g_paint_no_cull--;

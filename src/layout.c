@@ -4981,6 +4981,8 @@ inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout
     return g_string_free(key, FALSE);
 }
 
+static void shift_box_tree(ns_box *b, double dx, double dy);
+
 static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
@@ -5089,6 +5091,23 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->content_height = measured > expected ? measured : expected;
     double ta_h = inline_textarea_total_height(box);
     if (ta_h > box->content_height) box->content_height = ta_h;
+
+    if (box->inline_atomics && box->inline_atomics->len > 0) {
+        pango_layout_set_text(layout, box->text, -1);
+        double text_x0 = box->x;
+        double ti = ns_text_indent_px(parent_style, content_width);
+        if (ti < 0) text_x0 += ti;
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *a =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            if (!a->box) continue;
+            PangoRectangle pos;
+            pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            double nx = text_x0 + (double)pos.x / PANGO_SCALE;
+            double ny = box->y + (double)pos.y / PANGO_SCALE;
+            shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
+        }
+    }
 
     g_object_unref(layout);
 }
@@ -6160,8 +6179,6 @@ layout_table_captions(ns_box *box, gboolean bottom, double inner_x,
     }
 }
 
-static void shift_box_tree(ns_box *b, double dx, double dy);
-
 static void
 table_border_spacing(const ns_style *s, double *hsp, double *vsp)
 {
@@ -6810,6 +6827,12 @@ shift_box_tree(ns_box *b, double dx, double dy)
     b->y += dy;
     for (ns_box *c = b->first_child; c; c = c->next_sibling)
         shift_box_tree(c, dx, dy);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++) {
+            ns_box *ab =
+                g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+            if (ab) shift_box_tree(ab, dx, dy);
+        }
 }
 
 static double
