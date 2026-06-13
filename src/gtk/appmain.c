@@ -18,6 +18,10 @@
 #include <mach-o/dyld.h>
 #endif
 
+#if defined(G_OS_WIN32) && defined(NS_HAVE_FONTCONFIG)
+#include <fontconfig/fontconfig.h>
+#endif
+
 #include "bcache.h"
 #include "cache.h"
 #include "config.h"
@@ -140,8 +144,19 @@ ns_win32_set_app_id(void)
 }
 
 static void
+ns_win32_use_fontconfig_backend(void)
+{
+#ifdef NS_HAVE_FONTCONFIG
+    if (!g_getenv("PANGOCAIRO_BACKEND"))
+        g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
+    FcInit();
+#endif
+}
+
+static void
 ns_win32_anchor_gtk_data(void)
 {
+    ns_win32_use_fontconfig_backend();
     if (!g_self_exe) return;
     char *dir = g_path_get_dirname(g_self_exe);
     if (!dir) return;

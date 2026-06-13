@@ -149,6 +149,38 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
     gtk_spinner_set_spinning(GTK_SPINNER(pw->spinner), loading);
 }
 
+static char *
+address_display_url(const char *url)
+{
+    if (!url || !*url) return g_strdup("");
+    if (!strchr(url, '%')) return g_strdup(url);
+    char *dec = g_uri_unescape_string(url, NULL);
+    if (!dec) return g_strdup(url);
+    if (!g_utf8_validate(dec, -1, NULL)) {
+        g_free(dec);
+        return g_strdup(url);
+    }
+    for (const char *p = dec; *p; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (c < 0x20 || c == 0x7f ||
+            (c >= 0x200e && c <= 0x200f) ||
+            (c >= 0x202a && c <= 0x202e) ||
+            (c >= 0x2066 && c <= 0x2069)) {
+            g_free(dec);
+            return g_strdup(url);
+        }
+    }
+    return dec;
+}
+
+static void
+set_address_text(ProcWindow *pw, const char *url)
+{
+    char *shown = address_display_url(url);
+    gtk_editable_set_text(GTK_EDITABLE(pw->address), shown);
+    g_free(shown);
+}
+
 static void
 update_chrome(ProcWindow *pw)
 {
@@ -164,7 +196,7 @@ update_chrome(ProcWindow *pw)
     set_loading_ui(pw, ns_proc_view_is_loading(v));
     const char *url = ns_proc_view_url(v);
     const char *title = ns_proc_view_title(v);
-    gtk_editable_set_text(GTK_EDITABLE(pw->address), url ? url : "");
+    set_address_text(pw, url);
     const char *brand = ns_i18n("Nordstjernen");
     char *wt = g_strdup_printf("%s — %s",
                                title && *title ? title : brand, brand);
@@ -205,7 +237,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
     }
     case NS_PROC_EVT_URL:
         if (is_current)
-            gtk_editable_set_text(GTK_EDITABLE(pw->address), text ? text : "");
+            set_address_text(pw, text);
         break;
     case NS_PROC_EVT_STATUS:
         if (is_current)

@@ -4271,7 +4271,7 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx);
 }
 
-#define NS_MAX_CONCURRENT_FETCHES 6
+#define NS_MAX_CONCURRENT_FETCHES 5
 static GMutex g_fetch_throttle_mutex;
 static int    g_fetch_active;
 static GQueue g_fetch_queue = G_QUEUE_INIT;
