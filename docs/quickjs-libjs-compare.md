@@ -47,16 +47,18 @@ below:
 
 ## Features in LibJS that the bundled QuickJS does NOT have
 
-Three major areas account for essentially the entire gap. All three are
-absent from `src/quickjs/` — there are no atoms, classes, or
-intrinsics for them (`grep -ci "Intl\|Temporal\|ShadowRealm"
-src/quickjs/quickjs.c` returns 0).
+Three major areas account for essentially the entire gap, all absent
+from `src/quickjs/` itself (`grep -ci "Intl\|Temporal\|ShadowRealm"
+src/quickjs/quickjs.c` returns 0). **Nordstjernen now supplies the first
+two — Intl and Temporal — natively in C, outside the QuickJS core**, so
+the practical gap against LibJS is reduced to ShadowRealm plus the
+conformance depth of the i18n data (see notes below). ShadowRealm remains
+unimplemented.
 
 ### 1. Intl — Internationalization API (ECMA-402)
 
-QuickJS ships **no `Intl` object at all**. LibJS implements the full
-ECMA-402 surface (backed by ICU), under
-`Libraries/LibJS/Runtime/Intl/`:
+QuickJS-ng ships **no `Intl` object at all**. LibJS implements the full
+ECMA-402 surface backed by ICU, under `Libraries/LibJS/Runtime/Intl/`:
 
 | `Intl` constructor      | Purpose |
 | ----------------------- | ------- |
@@ -71,23 +73,29 @@ ECMA-402 surface (backed by ICU), under
 | `Intl.RelativeTimeFormat` | "3 days ago" style formatting |
 | `Intl.Segmenter`        | Grapheme/word/sentence segmentation |
 
-Knock-on effect: the locale-sensitive methods that *do* exist in QuickJS
-(`String.prototype.localeCompare`, `toLocaleLowerCase`/`UpperCase`,
-`Number.prototype.toLocaleString`, `Date.prototype.toLocale*String`) are
-present but **not locale-aware** — they fall back to default/`en`-ish
-behaviour. LibJS routes these through Intl/ICU for correct localized
-output.
+**Nordstjernen status: implemented natively in `src/js_intl.c`.** All ten
+constructors plus `getCanonicalLocales` and `supportedValuesOf` are
+provided over the public QuickJS C API, ICU-free. `Number/Date/String`'s
+`toLocaleString`/`toLocale*String`/`localeCompare` are wired through it,
+so they are now locale-aware (`localeCompare` uses GLib's Unicode
+casefold/normalize/collate; `Segmenter` uses Pango grapheme/word/sentence
+boundaries; `PluralRules` ships the common CLDR rule families). This
+supersedes — and removed — the older JavaScript `Intl` polyfill in
+`data/js/polyfills.js`, and adds `DisplayNames` and `DurationFormat`,
+which that polyfill lacked.
+
+The deliberate limitation versus LibJS is **data depth, not API
+coverage**: without ICU/CLDR, locale-specific month/weekday names,
+display names, and number/currency symbols come from compact built-in
+tables centred on English and a set of common European locales, with
+graceful fallback. Formatting is correct for the common cases; it is not
+full ECMA-402 conformance for every locale. This is the intended trade-off
+under the project's no-ICU/no-bloat constraint.
 
 ### 2. Temporal — modern date/time API
 
-QuickJS has **no Temporal implementation**. (The Nordstjernen shell
-injects an *empty* `Temporal` object in `src/js.c` —
-`ns_set_if_missing(ctx, global, "Temporal", JS_NewObject(ctx))` — so
-`typeof Temporal === "object"` is true, but it has no usable members.
-This is a feature-detection cushion, not an implementation.)
-
-LibJS implements the full proposal under
-`Libraries/LibJS/Runtime/Temporal/`:
+QuickJS-ng has **no Temporal implementation**. LibJS implements the full
+proposal under `Libraries/LibJS/Runtime/Temporal/`:
 
 | Temporal type            | Purpose |
 | ------------------------ | ------- |
@@ -104,6 +112,25 @@ LibJS implements the full proposal under
 plus the supporting calendar, time-zone, and ISO-8601 parsing
 machinery.
 
+**Nordstjernen status: implemented natively in `src/js_date.c`.** All
+nine types above are provided, sharing the civil-date math in
+`src/datetime.c`: `from()` (ISO-string and property-bag forms),
+`toString()`/`toJSON()`, the full getter surface (`year`, `monthCode`,
+`dayOfWeek`, `daysInMonth`, `inLeapYear`, `weekOfYear`, …),
+`add`/`subtract` (with ISO calendar month-overflow constrain and
+time/day carry), `with`, `until`/`since`, `equals`/`compare`, the
+`toPlainDate`/`toPlainTime`/`toPlainDateTime`/`toInstant` conversions,
+and `Temporal.Now`. This replaces the former empty `Temporal` stub.
+
+Deliberate limitations versus LibJS: the calendar is **ISO-8601 only**
+(no Hebrew/Islamic/Japanese/… calendars); time zones are limited to
+**UTC and fixed offsets** (no IANA tz database, so `Now.*ISO()` and
+`ZonedDateTime` are UTC-based); `Instant`/`ZonedDateTime` carry
+nanosecond precision in a signed 64-bit nanosecond field (≈ years
+1678–2262); and `round()`/`total()`/`largestUnit`-style `since`/`until`
+balancing are not implemented. The common date arithmetic and
+formatting paths are correct.
+
 ### 3. ShadowRealm — isolated execution context
 
 QuickJS has **no `ShadowRealm`**. LibJS implements the ShadowRealm
@@ -115,33 +142,36 @@ synchronous, isolated evaluation. QuickJS can create independent
 
 ## Summary
 
-| Feature area              | QuickJS-ng 0.15.1 | LibJS |
-| ------------------------- | :---------------: | :---: |
-| Core ES2023+ language     | ✅ | ✅ |
-| WeakRef / FinalizationRegistry | ✅ | ✅ |
-| SharedArrayBuffer / Atomics | ✅ | ✅ |
-| Float16 typed arrays      | ✅ | ✅ |
-| Explicit Resource Mgmt (`using`) | ✅ | ✅ |
-| Iterator Helpers          | ✅ | ✅ |
-| **Intl (ECMA-402)**       | ❌ | ✅ |
-| **Temporal**              | ❌ (empty stub) | ✅ |
-| **ShadowRealm**           | ❌ | ✅ |
+The QuickJS column is the bare engine; the Nordstjernen column reflects
+what the browser exposes after its native C additions load.
 
-The practical gap is **i18n and dates**: Intl and Temporal are the two
-features real-world sites are most likely to reach for and find missing.
-ShadowRealm is rarely used on the public web today.
+| Feature area              | QuickJS-ng 0.15.1 | Nordstjernen | LibJS |
+| ------------------------- | :---------------: | :----------: | :---: |
+| Core ES2023+ language     | ✅ | ✅ | ✅ |
+| WeakRef / FinalizationRegistry | ✅ | ✅ | ✅ |
+| SharedArrayBuffer / Atomics | ✅ | ✅ | ✅ |
+| Float16 typed arrays      | ✅ | ✅ | ✅ |
+| Explicit Resource Mgmt (`using`) | ✅ | ✅ | ✅ |
+| Iterator Helpers          | ✅ | ✅ | ✅ |
+| **Intl (ECMA-402)**       | ❌ | ✅ native, ICU-free | ✅ ICU |
+| **Temporal**              | ❌ | ✅ native (ISO/UTC) | ✅ full |
+| **ShadowRealm**           | ❌ | ❌ | ✅ |
+
+The remaining true gap against LibJS is **ShadowRealm**, plus the
+i18n/calendar/time-zone *data depth* that an ICU-backed engine provides
+and an ICU-free one deliberately does not.
 
 ## Implications for Nordstjernen
 
-- **Intl** is the highest-impact gap. A site calling
-  `new Intl.NumberFormat(...)` or `new Intl.DateTimeFormat(...)` throws
-  `TypeError: Intl is not defined`. A future option is a minimal,
-  ICU-free `Intl` shim covering the common formatters in the default
-  locale; a full implementation would mean an ICU (or equivalent)
-  dependency, which weighs against the project's "no bloat" constraint.
-- **Temporal** currently presents an empty object, which is arguably
-  worse than absent for feature detection (`Temporal.Now` is
-  `undefined`, not a clear `ReferenceError`). If we do not intend to
-  implement it, consider removing the stub so detection libraries see a
-  clean absence; if we do, it is a large, self-contained body of work.
-- **ShadowRealm** is low priority given negligible real-world use.
+- **Intl** and **Temporal** are now provided natively in C
+  (`src/js_intl.c`, `src/js_date.c`) and verified through the headless
+  `--eval` harness. Sites calling `new Intl.NumberFormat(...)`,
+  `Intl.DateTimeFormat`, `Temporal.Now.plainDateISO()`, etc. work. The
+  ICU-free trade-off is reduced locale/calendar/time-zone fidelity, not
+  missing API surface.
+- A future ICU/CLDR integration could raise i18n fidelity to full
+  ECMA-402 conformance, but weighs against the project's no-bloat
+  constraint; the current tables-based approach is the chosen balance.
+- **ShadowRealm** remains unimplemented and is low priority given
+  negligible real-world web use; QuickJS can create isolated `JSContext`s
+  at the C level if a script-visible binding is ever wanted.
