@@ -55,6 +55,10 @@ below:
 - RegExp `/v` flag (`unicodeSets`).
 - `Math.sumPrecise`; `Atomics.pause`.
 - Import attributes syntax (`import … with { type: … }` is parsed).
+- `Promise.withResolvers`; `Map.prototype.getOrInsert` /
+  `getOrInsertComputed` (upsert).
+- Symbols as `WeakMap`/`WeakSet` keys; `RegExp` `/d` match indices
+  (`hasIndices`); `Iterator.prototype[Symbol.dispose]`.
 
 So the bundled QuickJS is current through the ES2024/ES2025 proposal set;
 the gap below is genuinely narrow.
@@ -171,8 +175,10 @@ LibJS-only and engine-external in QuickJS.)
 
 To keep the comparison honest, these were verified present in the bundled
 QuickJS and so are **not** LibJS-only: Set methods, `Promise.try`,
-`Error.isError`, `Uint8Array` base64/hex, well-formed-string methods,
-resizable/transferable `ArrayBuffer`, the RegExp `/v` flag,
+`Promise.withResolvers`, `Map.prototype.getOrInsert`, `Error.isError`,
+`Uint8Array` base64/hex, well-formed-string methods,
+resizable/transferable `ArrayBuffer`, RegExp `/v` and `/d` flags,
+symbols as weak-collection keys, `Iterator.prototype[Symbol.dispose]`,
 `Math.sumPrecise`, `Atomics.pause`, and import-attributes parsing.
 **Decorators** (`@decorator`) are absent from QuickJS *and* from LibJS's
 current (Rust) parser, so they are a shared gap, not a differentiator.
