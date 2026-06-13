@@ -7,6 +7,7 @@
 #define NORDSTJERNEN_QT_PROCVIEW_H
 
 #include <QAbstractScrollArea>
+#include <QIcon>
 #include <QImage>
 #include <QPointF>
 #include <QString>
@@ -56,6 +57,7 @@ signals:
     void historyChanged();
     void linkRequestedInNewTab(const QString &url);
     void downloadRequested(const QString &url, const QString &filename);
+    void faviconChanged(const QIcon &icon);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -80,6 +82,7 @@ private:
     void pushHistory(const QString &url);
     void requestRender();
     void startRender();
+    void requestFavicon();
     void requestLinkAt(int x, int y, LinkAction action);
     void startLinkAt(int x, int y, LinkAction action);
     void requestClick(int x, int y, int mods);

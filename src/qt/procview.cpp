@@ -19,8 +19,10 @@ extern "C" {
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
+#include <QPixmap>
 #include <QLabel>
 #include <QRect>
 #include <QLineEdit>
@@ -255,6 +257,19 @@ public:
             return;
         ns_rproc_http_resolve_webgl(m_proc, origin.toUtf8().constData(),
                                     allow ? 1 : 0);
+    }
+
+    QImage favicon() {
+        if (!m_proc || !m_opened)
+            return QImage();
+        int w = 0, h = 0, stride = 0;
+        unsigned char *px = ns_rproc_http_favicon(m_proc, &w, &h, &stride);
+        if (!px)
+            return QImage();
+        QImage img(px, w, h, stride, QImage::Format_ARGB32_Premultiplied);
+        QImage copy = img.copy();
+        free(px);
+        return copy;
     }
 
     QString linkAt(int x, int y) {
@@ -674,7 +689,28 @@ void ProcView::doLoad(const QString &url, bool record) {
             self->verticalScrollBar()->setValue(0);
             self->updateScrollRanges();
             self->requestRender();
+            self->requestFavicon();
             emit self->statusMessage(QStringLiteral("Done"));
+        }, Qt::QueuedConnection);
+    }, Qt::QueuedConnection);
+}
+
+void ProcView::requestFavicon() {
+    if (!m_opened || !m_worker)
+        return;
+    QPointer<ProcView> self(this);
+    ProcWorker *worker = m_worker;
+    const int seq = m_loadSeq;
+    QMetaObject::invokeMethod(worker, [worker, self, seq]() {
+        QImage icon = worker->favicon();
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self.data(), [self, seq, icon]() {
+            if (!self || seq != self->m_loadSeq)
+                return;
+            emit self->faviconChanged(
+                icon.isNull() ? QIcon()
+                              : QIcon(QPixmap::fromImage(icon)));
         }, Qt::QueuedConnection);
     }, Qt::QueuedConnection);
 }

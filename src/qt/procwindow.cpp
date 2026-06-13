@@ -409,6 +409,12 @@ void ProcWindow::connectView(ProcView *view) {
             [this](const QString &url) { addTab(url, false); });
     connect(view, &ProcView::downloadRequested, this,
             &ProcWindow::startDownload);
+    connect(view, &ProcView::faviconChanged, this,
+            [this, view](const QIcon &icon) {
+        const int index = m_stack->indexOf(view);
+        if (index >= 0)
+            m_tabBar->setTabIcon(index, icon);
+    });
 }
 
 void ProcWindow::updateChrome() {
