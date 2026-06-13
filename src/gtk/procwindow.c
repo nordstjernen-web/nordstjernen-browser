@@ -1306,6 +1306,7 @@ session_url_recoverable(const char *u)
 {
     return u && (g_str_has_prefix(u, "http://") ||
                  g_str_has_prefix(u, "https://") ||
+                 g_str_has_prefix(u, "ftp://") ||
                  g_str_has_prefix(u, "file://"));
 }
 
