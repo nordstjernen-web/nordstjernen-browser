@@ -7500,10 +7500,29 @@ layout_flex_column(ns_box *box, double cw,
         double main_size = g_array_index(basis, double, i)
                          + extra_per_grow * flex_grow_of(c);
         if (main_size < 0) main_size = 0;
-        double content_outer = c->content_height +
-                               c->padding.top + c->padding.bottom +
-                               c->border.top + c->border.bottom;
-        if (main_size < content_outer) main_size = content_outer;
+        double vextra = c->padding.top + c->padding.bottom +
+                        c->border.top + c->border.bottom;
+        double content_outer = c->content_height + vextra;
+        const char *covy = c->style
+            ? overflow_axis_keyword(c->style, NS_CSS_OVERFLOW_Y) : NULL;
+        gboolean covy_clips = overflow_kw_clips(covy);
+        const ns_css_value *cmnh = c->style
+            ? c->style->values[NS_CSS_MIN_HEIGHT] : NULL;
+        gboolean cmin_explicit = cmnh &&
+            (cmnh->kind == NS_CSS_V_LENGTH || cmnh->kind == NS_CSS_V_CALC);
+        gboolean definite_col = explicit_h > 0;
+        gboolean can_shrink =
+            (flex_shrink_of(c) > 0 || flex_grow_of(c) > 0) &&
+            (covy_clips || cmin_explicit);
+        if (definite_col && can_shrink) {
+            double min_inner = cmin_explicit ? length_resolve(cmnh, cw, 0) : 0;
+            if (min_inner < 0) min_inner = 0;
+            double min_outer = min_inner + vextra;
+            if (main_size < min_outer) main_size = min_outer;
+        } else if (main_size < content_outer) {
+            main_size = content_outer;
+        }
+        if (main_size < 0) main_size = 0;
 
         double item_outer_w = c->content_width
             + c->padding.left + c->padding.right
@@ -7545,11 +7564,22 @@ layout_flex_column(ns_box *box, double cw,
         c->x = cx;
         c->y = cursor_y + c->margin.top;
 
-        if (extra_per_grow > 0 && flex_grow_of(c) > 0) {
-            double target_h = main_size -
-                              c->padding.top - c->padding.bottom -
-                              c->border.top - c->border.bottom;
-            if (target_h > c->content_height) c->content_height = target_h;
+        {
+            double target_h = main_size - vextra;
+            if (target_h < 0) target_h = 0;
+            if (extra_per_grow > 0 && flex_grow_of(c) > 0 &&
+                target_h > c->content_height) {
+                c->content_height = target_h;
+            } else if (definite_col && can_shrink &&
+                       target_h < c->content_height) {
+                double natural_h = c->content_height;
+                c->content_height = target_h;
+                if (overflow_kw_scrolls(covy)) {
+                    c->scrolls = TRUE;
+                    c->scroll_max_y = natural_h - target_h;
+                    if (c->scroll_max_y < 0) c->scroll_max_y = 0;
+                }
+            }
         }
 
         cursor_y += main_size + c->margin.top + c->margin.bottom + row_gap + between;
