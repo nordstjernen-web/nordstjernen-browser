@@ -63,9 +63,8 @@ llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
 tools, and digest-pinned model downloads, all on-device with no network
 at inference time (see `docs/ai.md`).
 
-Version 1.0.3 is the current release. New significant features land in
-`docs/NEWS-1-0-4.md` as they ship, so the next release's notes write
-themselves.
+Version 1.0.4 is the current release (the tree carries 1.0.5 in
+`src/version.h` as development advances toward the next tag).
 
 ## Architecture & frontends
 
@@ -92,6 +91,17 @@ toolkit-agnostic:
   GTK shell on core browsing chrome (navigation, tabs, zoom, selection,
   hover, find, context menu) with the rest in progress. Qt is a C++-only
   toolkit, so the shell is C++; the logic underneath stays C in `src/`.
+- **`java/` — Java / JVM binding and Swing app.** A Java library
+  (`org.nordstjernen.Nordstjernen`, JDK 21) embeds the engine on the JVM
+  through a thin JNI bridge over the C embedding API
+  (`src/libnordstjernen.h`), with a no-JNI `RemotePage`/`RemoteBrowser`
+  client that drives a separate `nordstjernen-renderer` process over the
+  renderer's HTTP/JSON protocol. `org.nordstjernen.app.Browser` is a
+  standalone Swing browser app built on that client with GTK-shell-style
+  chrome. See `java/README.md`.
+- **`android/` — Android port (in progress).** A Kotlin shell
+  (`MainActivity`, `PageView`, `NativeBrowser`) over the same engine via
+  JNI; see `docs/Android.md`.
 
 **Process-per-tab renderer boundary — shipped.** Each tab now runs in
 its own sandboxed *process* running the engine and producing a rendered
@@ -235,7 +245,8 @@ shared-memory-framebuffer boundary (both GTK and Qt are thin display
 clients now; in-process renderers removed — see *Architecture &
 frontends* and `docs/tab-isolation.md`),
 10 embeddable `libnordstjernen` (built and header-installed
-from meson, Java JNI binding in `java/`, see `docs/Embedding.md`),
+from meson, see `docs/Embedding.md`; Java JNI binding and Swing app in
+`java/`, see `java/README.md`),
 15 Debian/Ubuntu `.deb` packaging (built nightly, see `docs/Nightly.md`).
 
 **Ongoing — security hardening passes.** Recurring source audits of the

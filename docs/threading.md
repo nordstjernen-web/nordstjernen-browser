@@ -28,7 +28,7 @@ that are transferred by ownership.
 
 | Thread | Created in | Lifetime | Touches DOM/JS? |
 |--------|-----------|----------|------------------|
-| **Main** | `renderer_main.c` | whole process | yes — owns the DOM, layout, paint, page JS |
+| **Main** | `renderer_http.c` | whole process | yes — owns the DOM, layout, paint, page JS |
 | **Fetch pool** (≤6) | `net.c`, GLib `GTask` thread pool | per request | no |
 | **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |

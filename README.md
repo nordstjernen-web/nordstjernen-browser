@@ -11,7 +11,7 @@ Nordstjernen is built in Norway.
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 105,000 lines of C (plus a thin C++ Qt shell) written by Claude and Codex (109 non-vendored files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
+**Minimalism:** The whole engine is about 114,000 lines of C (plus a thin C++ Qt shell) written by Claude and Codex (113 non-vendored files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -112,8 +112,16 @@ DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
 floor — Qt 6 also requires Windows 10 — so there is no older-Windows
 build of either frontend.
 
-The Java API embeds the engine on the JVM (requires JDK 21); see
-[`java/README.md`](java/README.md).
+**Java (JVM).** A Java binding embeds the engine on the JVM (requires
+JDK 21): `org.nordstjernen.Nordstjernen` drives fetch / parse / layout /
+script / render from Java — to RGBA, a `BufferedImage`, a PNG/PDF file, or
+extracted text — through a thin JNI bridge over the C embedding API
+(`src/libnordstjernen.h`). A no-JNI alternative (`RemotePage` /
+`RemoteBrowser`) drives a separate `nordstjernen-renderer` process over the
+renderer's HTTP/JSON protocol instead, so an engine crash can't take down
+the JVM. On top of that sits `org.nordstjernen.app.Browser`, a standalone
+**Swing browser app** with GTK-shell-style chrome (back / forward / reload /
+home / URL bar). See [`java/README.md`](java/README.md).
 
 ## Build
 

@@ -77,7 +77,8 @@ work without writable executable pages.
 
 Two independent layers, both default-deny, both installed before any HTML
 is parsed. They describe the **per-tab renderer process**
-(`ns_browser_sandbox` in `renderer_main.c`), which parses all untrusted
+(`ns_browser_sandbox`, applied by the `nordstjernen-renderer` entry point
+in `src/renderer_http.c`), which parses all untrusted
 content and therefore holds the strongest confinement. The thin UI shell
 parses no untrusted bytes but must `fork`/`execve` the renderer processes,
 so it runs under a **widened Landlock** (executable renderer directory, with

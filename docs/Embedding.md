@@ -11,6 +11,9 @@ shared library (`libnordstjernen.so` / `.dll` / `.dylib`). The header
 is plain C with no GLib or GTK types, so a consumer only needs the
 header and the link flag.
 
+For the JVM, the Java binding in `java/` wraps this same API through a JNI
+bridge (`org.nordstjernen.Nordstjernen`, JDK 21) — see `java/README.md`.
+
 ## API
 
 ```c

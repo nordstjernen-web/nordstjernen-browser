@@ -22,7 +22,6 @@ rounding error, so the readable one wins.
 | HTTP renderer | `src/renderer_http.c` | the engine behind a full HTTP server (see message catalog below) |
 | HTTP client | `src/rproc_http.{h,c}` | mirrors the `ns_rproc_*` API over HTTP (open/render/link/click/key/hover/find/viewport/select/eval/console/media/close) |
 | Demo | `src/ipc_http_demo.c` | drives a real page through every operation and prints the results |
-| Benchmark | `src/ipc_bench.c` | drives both protocols through the same render workload and reports timings/CPU |
 
 ### The model: HTTP for messages, shared memory for frames
 
