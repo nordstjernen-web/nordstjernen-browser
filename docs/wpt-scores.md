@@ -28,6 +28,9 @@ they regenerate.
 | 2026-06-12 | 78da000 | d8a8414e5 | 195/696 (28%) | 15958/19502 (81%) | partial: html/dom/elements html/semantics/forms/the-form-element |
 | 2026-06-12 | ffde346 | 3be6ba111 | 196/696 (28%) | 16080/19535 (82%) | partial: dom/lists dom/nodes |
 | 2026-06-12 | faf548f | d8a8414e5 | 200/696 (28%) | 15986/19535 (81%) | partial: html/dom/elements |
+| 2026-06-12 | d54d3b8 | d8a8414e5 | 199/696 (28%) | 16302/20746 (78%) | full |
+| 2026-06-13 | fcfeaf1 | d8a8414e5 | 206/696 (29%) | 16227/20620 (78%) | full |
+| 2026-06-13 | fcfeaf1 | d8a8414e5 | 206/696 (29%) | 16327/20746 (78%) | partial: html/dom/elements console html/webappapis/timers |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -35,9 +38,9 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-12
+## Per-area results — 2026-06-13
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-12-faf548f.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-13-fcfeaf1.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
@@ -47,18 +50,18 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-12-faf548f.tsv`.
 | `dom/ranges` | 2/55 | 5/206 | 201 | 0 | 0 | 0 |
 | `dom/lists` | 4/5 | 187/189 | 2 | 0 | 0 | 0 |
 | `dom/collections` | 1/10 | 23/53 | 30 | 0 | 0 | 0 |
-| `url` | 9/32 | 7059/7474 | 414 | 1 | 0 | 0 |
-| `console` | 3/12 | 21/56 | 35 | 0 | 0 | 0 |
+| `url` | 9/32 | 7271/8685 | 1413 | 1 | 0 | 0 |
+| `console` | 2/12 | 21/56 | 35 | 0 | 0 | 0 |
 | `hr-time` | 5/13 | 31/51 | 19 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
-| `html/webappapis/timers` | 9/12 | 13/14 | 1 | 0 | 0 | 0 |
+| `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
 | `html/dom/elements` | 30/56 | 574/907 | 329 | 2 | 2 | 0 |
 | `WebCryptoAPI/digest` | 0/5 | 84/535 | 451 | 0 | 0 | 0 |
-| `xhr/formdata` | 7/18 | 45/80 | 35 | 0 | 0 | 0 |
+| `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **201/696** | **16091/19535** | **3321** | **78** | **39** | **6** |
+| **Total** | **206/696** | **16327/20746** | **4296** | **78** | **39** | **6** |
 
-## ROI by area — 2026-06-12
+## ROI by area — 2026-06-13
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -72,19 +75,19 @@ file.
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
 | `dom/nodes` | 1510 | 204 | 7.4 | 30 | 101 |
+| `url` | 1414 | 23 | 61.5 | 2 | 6 |
 | `WebCryptoAPI/digest` | 451 | 5 | 90.2 | 0 | 0 |
-| `url` | 415 | 23 | 18.0 | 3 | 6 |
 | `dom/events` | 364 | 119 | 3.1 | 71 | 29 |
 | `html/dom/elements` | 333 | 26 | 12.8 | 2 | 15 |
 | `dom/ranges` | 201 | 53 | 3.8 | 25 | 8 |
-| `console` | 35 | 9 | 3.9 | 0 | 6 |
-| `xhr/formdata` | 35 | 11 | 3.2 | 0 | 5 |
+| `console` | 35 | 10 | 3.5 | 1 | 6 |
 | `dom/collections` | 30 | 9 | 3.3 | 0 | 3 |
 | `dom/traversal` | 24 | 13 | 1.8 | 3 | 6 |
 | `html/semantics/forms/the-form-element` | 23 | 11 | 2.1 | 2 | 7 |
 | `hr-time` | 20 | 8 | 2.5 | 2 | 5 |
+| `xhr/formdata` | 10 | 4 | 2.5 | 0 | 3 |
 | `dom/lists` | 2 | 1 | 2.0 | 0 | 1 |
-| `html/webappapis/timers` | 1 | 3 | 0.3 | 2 | 1 |
+| `html/webappapis/timers` | 2 | 4 | 0.5 | 2 | 2 |
 | `html/webappapis/atob` | 0 | 0 | - | 0 | 0 |
 
 ## Top 10 improvements — 2026-06-12
@@ -139,6 +142,7 @@ interval. Treat the trend, not the point value, as the signal.
 | Date | Nordstjernen | WPT | Sample | Est. passing subtests (95% CI) | % of Chrome (~6M) |
 |------|--------------|-----|--------|--------------------------------|-------------------|
 | 2026-06-12 | 9526465 | 3be6ba111 | 250 of 29259 | ~44,000 (22,000 – 72,000) | ~0.7% |
+| 2026-06-13 | fcfeaf1 | d8a8414e5 | 250 of 29259 | ~255,256 (21,184 – 706,429) | ~4.3% |
 
 Runtime estimate: a 696-file tracked-slice run on this Windows/MSYS2
 machine took 36m25s, or about 3.1 seconds per file with the 15000 ms
