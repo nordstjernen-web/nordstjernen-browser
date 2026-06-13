@@ -41,9 +41,28 @@ main(int argc, char **argv)
 #endif
 
     int shm_mode = argc > 3 && strcmp(argv[3], "shm") == 0;
+    int stdio_mode = argc > 3 && strcmp(argv[3], "stdio") == 0;
     size_t fb_size = (size_t)max_w * (size_t)max_h * 4u;
     unsigned char *fb;
+    int ctrl_r, ctrl_w;
 
+    if (stdio_mode) {
+        /* Control channel over stdin/stdout (fd 0/1), pixels in the body.
+         * This is the transport used by JVM / Android clients, which can
+         * give a child only its standard streams, not an inherited fd 3
+         * or a named pipe. */
+#ifdef _WIN32
+        _setmode(0, _O_BINARY);
+        _setmode(1, _O_BINARY);
+#else
+        signal(SIGPIPE, SIG_IGN);
+#endif
+        ctrl_r = 0;
+        ctrl_w = 1;
+        fb = malloc(fb_size);
+        if (!fb)
+            return 2;
+    } else {
 #ifdef _WIN32
     HANDLE proc = GetCurrentProcess();
     HANDLE ipc_in = NULL, ipc_out = NULL;
@@ -66,8 +85,8 @@ main(int argc, char **argv)
     FILE *redir_out = freopen("NUL", "w", stdout);
     (void)redir_in;
     (void)redir_out;
-    int ctrl_r = _open_osfhandle((intptr_t)ipc_in, _O_BINARY);
-    int ctrl_w = _open_osfhandle((intptr_t)ipc_out, _O_BINARY);
+    ctrl_r = _open_osfhandle((intptr_t)ipc_in, _O_BINARY);
+    ctrl_w = _open_osfhandle((intptr_t)ipc_out, _O_BINARY);
     if (ctrl_r < 0 || ctrl_w < 0)
         return 2;
     HANDLE shm_handle = NULL;
@@ -86,7 +105,8 @@ main(int argc, char **argv)
     }
 #else
     signal(SIGPIPE, SIG_IGN);
-    int ctrl_r = 3, ctrl_w = 3;
+    ctrl_r = 3;
+    ctrl_w = 3;
     if (shm_mode) {
         int fd = http_recv_fd(ctrl_r);
         if (fd < 0)
@@ -101,6 +121,7 @@ main(int argc, char **argv)
             return 2;
     }
 #endif
+    }
 
     if (ns_browser_init() != 0) {
         free(fb);
