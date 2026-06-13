@@ -1195,7 +1195,7 @@ pv_window(NsProcView *v)
 }
 
 static void
-pv_webgl_confirm_done(GObject *src, GAsyncResult *res, gpointer ud)
+pv_webgl_first_done(GObject *src, GAsyncResult *res, gpointer ud)
 {
     PvWebglPrompt *p = ud;
     GError *err = NULL;
@@ -1204,35 +1204,6 @@ pv_webgl_confirm_done(GObject *src, GAsyncResult *res, gpointer ud)
     if (!p->v->closed)
         pv_webgl_resolve(p->v, p->origin, idx == 1);
     pv_webgl_prompt_free(p);
-}
-
-static void
-pv_webgl_first_done(GObject *src, GAsyncResult *res, gpointer ud)
-{
-    PvWebglPrompt *p = ud;
-    GError *err = NULL;
-    int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, &err);
-    if (err) { idx = 0; g_error_free(err); }
-    if (idx != 1 || p->v->closed) {
-        if (!p->v->closed)
-            pv_webgl_resolve(p->v, p->origin, FALSE);
-        pv_webgl_prompt_free(p);
-        return;
-    }
-    char *detail = g_strdup_printf(
-        "Give %s near-direct access to your GPU driver? This stays enabled "
-        "for this origin for the rest of the session.", p->origin);
-    const char *buttons[] = { ns_i18n("Cancel"), ns_i18n("Enable WebGL"),
-                              NULL };
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", ns_i18n("Are you sure?"));
-    gtk_alert_dialog_set_detail(dlg, detail);
-    gtk_alert_dialog_set_buttons(dlg, buttons);
-    gtk_alert_dialog_set_cancel_button(dlg, 0);
-    gtk_alert_dialog_set_modal(dlg, TRUE);
-    gtk_alert_dialog_choose(dlg, pv_window(p->v), NULL,
-                            pv_webgl_confirm_done, p);
-    g_object_unref(dlg);
-    g_free(detail);
 }
 
 static void
@@ -1598,10 +1569,15 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
     GdkModifierType mods =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(ctrl));
+    GdkEvent *ev =
+        gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(ctrl));
+    if (ev)
+        mods |= gdk_event_get_modifier_state(ev);
     if (mods & GDK_CONTROL_MASK) {
-        if (dy < 0)
+        double delta = dy != 0.0 ? dy : dx;
+        if (delta < 0)
             ns_proc_view_zoom_in(v);
-        else if (dy > 0)
+        else if (delta > 0)
             ns_proc_view_zoom_out(v);
         return TRUE;
     }

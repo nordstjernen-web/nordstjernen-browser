@@ -472,11 +472,15 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         width = r->max_w;
     if (height > r->max_h)
         height = r->max_h;
+    if (!(scale > 0))
+        scale = 1.0;
+    int scale_milli = (int)(scale * 1000.0 + 0.5);
     char json[160];
     int jn = snprintf(json, sizeof json,
                       "{\"width\":%d,\"height\":%d,\"scroll_x\":%d,"
-                      "\"scroll_y\":%d,\"scale\":%g}",
-                      width, height, scroll_x, scroll_y, scale);
+                      "\"scroll_y\":%d,\"scale\":%d.%03d}",
+                      width, height, scroll_x, scroll_y,
+                      scale_milli / 1000, scale_milli % 1000);
     if (http_write_request(r->wfd, "POST", "/render", "application/json",
                            json, (size_t)jn) != 0)
         return -1;

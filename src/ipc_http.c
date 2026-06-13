@@ -412,7 +412,32 @@ json_get_double(const char *body, const char *key, double *out)
     const char *v = json_find_value(body, key);
     if (!v)
         return -1;
-    *out = atof(v);
+    int sign = 1;
+    if (*v == '-') { sign = -1; v++; }
+    else if (*v == '+') { v++; }
+    double val = 0.0;
+    while (*v >= '0' && *v <= '9') { val = val * 10.0 + (*v - '0'); v++; }
+    if (*v == '.') {
+        v++;
+        double frac = 0.1;
+        while (*v >= '0' && *v <= '9') {
+            val += (*v - '0') * frac;
+            frac *= 0.1;
+            v++;
+        }
+    }
+    if (*v == 'e' || *v == 'E') {
+        v++;
+        int esign = 1;
+        if (*v == '-') { esign = -1; v++; }
+        else if (*v == '+') { v++; }
+        int e = 0;
+        while (*v >= '0' && *v <= '9') { e = e * 10 + (*v - '0'); v++; }
+        double p = 1.0;
+        while (e-- > 0) p *= 10.0;
+        val = esign > 0 ? val * p : val / p;
+    }
+    *out = sign * val;
     return 0;
 }
 

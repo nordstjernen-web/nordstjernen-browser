@@ -312,6 +312,22 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     g_free(resolved);
 }
 
+static gboolean
+address_select_all_idle(gpointer user_data)
+{
+    ProcWindow *pw = user_data;
+    if (pw->address && gtk_widget_has_focus(pw->address))
+        gtk_editable_select_region(GTK_EDITABLE(pw->address), 0, -1);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_address_focus_enter(GtkEventControllerFocus *ctrl, gpointer user_data)
+{
+    (void)ctrl;
+    g_idle_add(address_select_all_idle, user_data);
+}
+
 static void
 on_address_activate(GtkEntry *entry, gpointer user_data)
 {
@@ -859,6 +875,10 @@ proc_window_new(GtkApplication *app, const char *home_url)
                                    ns_i18n("Enter a URL and press Enter"));
     g_signal_connect(pw->address, "activate",
                      G_CALLBACK(on_address_activate), pw);
+    GtkEventController *addr_focus = gtk_event_controller_focus_new();
+    g_signal_connect(addr_focus, "enter",
+                     G_CALLBACK(on_address_focus_enter), pw);
+    gtk_widget_add_controller(pw->address, addr_focus);
 
     GtkWidget *go = toolbar_button("nordstjernen-go", ns_i18n("Go"),
                                    G_CALLBACK(on_go_clicked), pw);
