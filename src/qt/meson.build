@@ -2,6 +2,7 @@ qt6 = import('qt6')
 
 qt6_dep = dependency(
   'qt6',
+  version: '>=6.4',
   modules: ['Core', 'Gui', 'Widgets', 'Concurrent'],
   required: qt_feature,
 )
