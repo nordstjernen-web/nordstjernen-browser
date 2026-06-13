@@ -3603,13 +3603,62 @@ static JSValue ns_form_elements_named_lookup(JSContext *ctx,
                                              JSValueConst this_val,
                                              const char *name);
 
+static glong
+ns_utf16_length(const char *s)
+{
+    glong units = 0;
+    for (const char *p = s; *p; p = g_utf8_next_char(p))
+        units += (g_utf8_get_char(p) > 0xFFFF) ? 2 : 1;
+    return units;
+}
+
+static const char *
+ns_utf16_offset_to_ptr(const char *s, glong offset)
+{
+    glong units = 0;
+    const char *p = s;
+    while (*p && units < offset) {
+        glong w = (g_utf8_get_char(p) > 0xFFFF) ? 2 : 1;
+        if (units + w > offset) break;
+        units += w;
+        p = g_utf8_next_char(p);
+    }
+    return p;
+}
+
+static gboolean
+ns_cdata_uint_arg(JSContext *ctx, JSValueConst v, uint32_t *out)
+{
+    int32_t t = 0;
+    if (JS_ToInt32(ctx, &t, v)) return FALSE;
+    *out = (uint32_t)t;
+    return TRUE;
+}
+
+static void
+ns_cdata_splice(ns_node *n, glong off_units, glong cnt_units,
+                const char *ins, gsize ins_len)
+{
+    const char *cur = n->text ? n->text : "";
+    const char *start = ns_utf16_offset_to_ptr(cur, off_units);
+    const char *end = ns_utf16_offset_to_ptr(start, cnt_units);
+    gsize head = (gsize)(start - cur);
+    gsize tail = strlen(end);
+    char *merged = g_malloc(head + ins_len + tail + 1);
+    memcpy(merged, cur, head);
+    if (ins_len) memcpy(merged + head, ins, ins_len);
+    memcpy(merged + head + ins_len, end, tail);
+    merged[head + ins_len + tail] = '\0';
+    ns_node_replace_text_owned(n, merged);
+}
+
 static JSValue
 ns_element_get_text_length(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) return JS_NewInt32(ctx, 0);
     if (n->kind == NS_NODE_TEXT || n->kind == NS_NODE_COMMENT)
-        return JS_NewInt32(ctx, n->text ? (int)g_utf8_strlen(n->text, -1) : 0);
+        return JS_NewInt32(ctx, n->text ? (int)ns_utf16_length(n->text) : 0);
     if (n->name && g_ascii_strcasecmp(n->name, "select") == 0)
         return ns_element_get_select_length(ctx, this_val);
     if (n->name && g_ascii_strcasecmp(n->name, "form") == 0) {
@@ -3626,18 +3675,20 @@ ns_element_substring_data(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || !n->text || argc < 1) return JS_NewString(ctx, "");
-    int32_t off = 0, cnt = 0;
-    JS_ToInt32(ctx, &off, argv[0]);
-    if (argc >= 2) JS_ToInt32(ctx, &cnt, argv[1]);
-    else cnt = (int32_t)strlen(n->text);
-    glong total = g_utf8_strlen(n->text, -1);
-    if (off < 0) off = 0;
-    if (off > total) off = (int32_t)total;
-    if (cnt < 0) cnt = 0;
-    if (cnt > total - off) cnt = (int32_t)(total - off);
-    const char *start = g_utf8_offset_to_pointer(n->text, off);
-    const char *end   = g_utf8_offset_to_pointer(start, cnt);
+    if (!n) return JS_NewString(ctx, "");
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required, but only %d present", argc);
+    uint32_t off = 0, cnt = 0;
+    if (!ns_cdata_uint_arg(ctx, argv[0], &off)) return JS_EXCEPTION;
+    if (!ns_cdata_uint_arg(ctx, argv[1], &cnt)) return JS_EXCEPTION;
+    const char *cur = n->text ? n->text : "";
+    glong total = ns_utf16_length(cur);
+    if ((glong)off > total)
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "offset is greater than length");
+    glong end_units = ((guint64)off + cnt > (guint64)total) ? total : (glong)(off + cnt);
+    const char *start = ns_utf16_offset_to_ptr(cur, (glong)off);
+    const char *end   = ns_utf16_offset_to_ptr(cur, end_units);
     return JS_NewStringLen(ctx, start, (gsize)(end - start));
 }
 
@@ -3646,9 +3697,11 @@ ns_element_append_data(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || argc < 1) return JS_UNDEFINED;
+    if (!n) return JS_UNDEFINED;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     const char *s = JS_ToCString(ctx, argv[0]);
-    if (!s) return JS_UNDEFINED;
+    if (!s) return JS_EXCEPTION;
     char *merged = g_strconcat(n->text ? n->text : "", s, NULL);
     ns_node_replace_text_owned(n, merged);
     JS_FreeCString(ctx, s);
@@ -3661,26 +3714,18 @@ ns_element_delete_data(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || !n->text || argc < 2) return JS_UNDEFINED;
-    int32_t off = 0, cnt = 0;
-    JS_ToInt32(ctx, &off, argv[0]);
-    JS_ToInt32(ctx, &cnt, argv[1]);
-    glong total = g_utf8_strlen(n->text, -1);
-    if (off < 0) off = 0;
-    if (off > total) off = (int32_t)total;
-    if (cnt < 0) cnt = 0;
-    if (cnt > total - off) cnt = (int32_t)total - off;
-    const char *start = g_utf8_offset_to_pointer(n->text, off);
-    const char *end   = g_utf8_offset_to_pointer(start, cnt);
-    gsize head = (gsize)(start - n->text);
-    gsize tail = strlen(end);
-    if (head > G_MAXSIZE - 1 || tail > G_MAXSIZE - 1 - head)
-        return JS_ThrowRangeError(ctx, "deleteData: combined string too large");
-    char *merged = g_malloc(head + tail + 1);
-    memcpy(merged, n->text, head);
-    memcpy(merged + head, end, tail);
-    merged[head + tail] = '\0';
-    ns_node_replace_text_owned(n, merged);
+    if (!n) return JS_UNDEFINED;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required, but only %d present", argc);
+    uint32_t off = 0, cnt = 0;
+    if (!ns_cdata_uint_arg(ctx, argv[0], &off)) return JS_EXCEPTION;
+    if (!ns_cdata_uint_arg(ctx, argv[1], &cnt)) return JS_EXCEPTION;
+    glong total = ns_utf16_length(n->text ? n->text : "");
+    if ((glong)off > total)
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "offset is greater than length");
+    glong cnt_units = ((guint64)off + cnt > (guint64)total) ? total - (glong)off : (glong)cnt;
+    ns_cdata_splice(n, (glong)off, cnt_units, NULL, 0);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
@@ -3690,30 +3735,20 @@ ns_element_insert_data(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || argc < 2) return JS_UNDEFINED;
-    int32_t off = 0;
-    JS_ToInt32(ctx, &off, argv[0]);
+    if (!n) return JS_UNDEFINED;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required, but only %d present", argc);
+    uint32_t off = 0;
+    if (!ns_cdata_uint_arg(ctx, argv[0], &off)) return JS_EXCEPTION;
     const char *ins = JS_ToCString(ctx, argv[1]);
-    if (!ins) return JS_UNDEFINED;
-    glong total = n->text ? g_utf8_strlen(n->text, -1) : 0;
-    if (off < 0) off = 0;
-    if (off > total) off = (int32_t)total;
-    const char *p = n->text ? g_utf8_offset_to_pointer(n->text, off) : "";
-    gsize head = n->text ? (gsize)(p - n->text) : 0;
-    gsize tail = n->text ? strlen(p) : 0;
-    gsize ilen = strlen(ins);
-    if (head > G_MAXSIZE - 1 ||
-        ilen > G_MAXSIZE - 1 - head ||
-        tail > G_MAXSIZE - 1 - head - ilen) {
+    if (!ins) return JS_EXCEPTION;
+    glong total = ns_utf16_length(n->text ? n->text : "");
+    if ((glong)off > total) {
         JS_FreeCString(ctx, ins);
-        return JS_ThrowRangeError(ctx, "insertData: combined string too large");
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "offset is greater than length");
     }
-    char *merged = g_malloc(head + ilen + tail + 1);
-    if (head) memcpy(merged, n->text, head);
-    memcpy(merged + head, ins, ilen);
-    if (tail) memcpy(merged + head + ilen, p, tail);
-    merged[head + ilen + tail] = '\0';
-    ns_node_replace_text_owned(n, merged);
+    ns_cdata_splice(n, (glong)off, 0, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
@@ -3724,35 +3759,22 @@ ns_element_replace_data(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || argc < 3) return JS_UNDEFINED;
-    int32_t off = 0, cnt = 0;
-    JS_ToInt32(ctx, &off, argv[0]);
-    JS_ToInt32(ctx, &cnt, argv[1]);
+    if (!n) return JS_UNDEFINED;
+    if (argc < 3)
+        return JS_ThrowTypeError(ctx, "3 arguments required, but only %d present", argc);
+    uint32_t off = 0, cnt = 0;
+    if (!ns_cdata_uint_arg(ctx, argv[0], &off)) return JS_EXCEPTION;
+    if (!ns_cdata_uint_arg(ctx, argv[1], &cnt)) return JS_EXCEPTION;
     const char *ins = JS_ToCString(ctx, argv[2]);
-    if (!ins) return JS_UNDEFINED;
-    const char *cur = n->text ? n->text : "";
-    glong total = g_utf8_strlen(cur, -1);
-    if (off < 0) off = 0;
-    if (off > total) off = (int32_t)total;
-    if (cnt < 0) cnt = 0;
-    if (cnt > total - off) cnt = (int32_t)total - off;
-    const char *start = g_utf8_offset_to_pointer(cur, off);
-    const char *end   = g_utf8_offset_to_pointer(start, cnt);
-    gsize head = (gsize)(start - cur);
-    gsize tail = strlen(end);
-    gsize ilen = strlen(ins);
-    if (head > G_MAXSIZE - 1 ||
-        ilen > G_MAXSIZE - 1 - head ||
-        tail > G_MAXSIZE - 1 - head - ilen) {
+    if (!ins) return JS_EXCEPTION;
+    glong total = ns_utf16_length(n->text ? n->text : "");
+    if ((glong)off > total) {
         JS_FreeCString(ctx, ins);
-        return JS_ThrowRangeError(ctx, "replaceData: combined string too large");
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "offset is greater than length");
     }
-    char *merged = g_malloc(head + ilen + tail + 1);
-    memcpy(merged, cur, head);
-    memcpy(merged + head, ins, ilen);
-    memcpy(merged + head + ilen, end, tail);
-    merged[head + ilen + tail] = '\0';
-    ns_node_replace_text_owned(n, merged);
+    glong cnt_units = ((guint64)off + cnt > (guint64)total) ? total - (glong)off : (glong)cnt;
+    ns_cdata_splice(n, (glong)off, cnt_units, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
@@ -3763,13 +3785,16 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || n->kind != NS_NODE_TEXT || !n->text || argc < 1) return JS_NULL;
-    int32_t off = 0;
-    JS_ToInt32(ctx, &off, argv[0]);
-    glong total = g_utf8_strlen(n->text, -1);
-    if (off < 0) off = 0;
-    if (off > total) off = (int32_t)total;
-    const char *split = g_utf8_offset_to_pointer(n->text, off);
+    if (!n || n->kind != NS_NODE_TEXT || !n->text) return JS_NULL;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
+    uint32_t off = 0;
+    if (!ns_cdata_uint_arg(ctx, argv[0], &off)) return JS_EXCEPTION;
+    glong total = ns_utf16_length(n->text);
+    if ((glong)off > total)
+        return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
+            "offset is greater than length");
+    const char *split = ns_utf16_offset_to_ptr(n->text, (glong)off);
     char *tail_text = g_strdup(split);
     gsize head_len = (gsize)(split - n->text);
     char *head = g_strndup(n->text, head_len);
@@ -18245,9 +18270,15 @@ static JSValue
 ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_node *parent = ns_unwrap_element_mut(this_val);
-    if (!parent || argc < 1) return JS_NULL;
+    if (!parent) return JS_NULL;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     ns_node *child = ns_unwrap_element_mut(argv[0]);
-    if (!child || child->parent != parent) return JS_NULL;
+    if (!child)
+        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+    if (child->parent != parent)
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "the node to be removed is not a child of this node");
     ns_node *saved_prev = child->prev_sibling;
     ns_node *saved_next = child->next_sibling;
     ns_js *_j2 = js_from_ctx(ctx);

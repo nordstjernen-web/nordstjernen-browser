@@ -5261,6 +5261,12 @@
                 if (v > hi) v = hi;
                 return v;
             }
+            function clampU(v, hi) {
+                v = Number(v);
+                if (!isFinite(v)) v = 0;
+                v = v >>> 0;
+                return v > hi ? hi : v;
+            }
             function curLen(node) {
                 return node.data ? node.data.length : 0;
             }
@@ -5288,15 +5294,15 @@
             }
 
             wrapMethod('replaceData', function (len, args) {
-                var off = clamp(args[0], 0, len);
-                return [off, clamp(args[1], 0, len - off), strLen(args[2])];
+                var off = clampU(args[0], len);
+                return [off, clampU(args[1], len - off), strLen(args[2])];
             });
             wrapMethod('insertData', function (len, args) {
-                return [clamp(args[0], 0, len), 0, strLen(args[1])];
+                return [clampU(args[0], len), 0, strLen(args[1])];
             });
             wrapMethod('deleteData', function (len, args) {
-                var off = clamp(args[0], 0, len);
-                return [off, clamp(args[1], 0, len - off), 0];
+                var off = clampU(args[0], len);
+                return [off, clampU(args[1], len - off), 0];
             });
 
             function wrapAccessor(name) {
