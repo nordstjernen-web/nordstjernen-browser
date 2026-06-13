@@ -5175,4 +5175,505 @@
         global.DOMPoint = NSDOMPoint;
         global.DOMPointReadOnly = NSDOMPointReadOnly;
     })();
+
+    (function () {
+        var doc = global.document;
+        if (!doc || typeof doc.createElement !== 'function') return;
+
+        function domEx(name) {
+            try { return new DOMException(name, name); }
+            catch (e) {
+                var err = new Error(name);
+                err.name = name;
+                return err;
+            }
+        }
+
+        function isCharData(n) {
+            var t = n.nodeType;
+            return t === 3 || t === 4 || t === 7 || t === 8;
+        }
+
+        function isTextNode(n) {
+            return n.nodeType === 3 || n.nodeType === 4;
+        }
+
+        function nodeLength(n) {
+            if (n.nodeType === 10) return 0;
+            if (isCharData(n)) return n.data ? n.data.length : 0;
+            return n.childNodes ? n.childNodes.length : 0;
+        }
+
+        function indexOfNode(n) {
+            var i = 0;
+            while ((n = n.previousSibling)) i++;
+            return i;
+        }
+
+        function rootOf(n) {
+            while (n.parentNode) n = n.parentNode;
+            return n;
+        }
+
+        function ownerDoc(n) {
+            if (n.nodeType === 9) return n;
+            return n.ownerDocument || doc;
+        }
+
+        function isInclusiveAncestor(a, b) {
+            while (b) {
+                if (b === a) return true;
+                b = b.parentNode;
+            }
+            return false;
+        }
+
+        function pathTo(n) {
+            var p = [];
+            while (n) { p.unshift(n); n = n.parentNode; }
+            return p;
+        }
+
+        function bpCompare(nodeA, offsetA, nodeB, offsetB) {
+            if (nodeA === nodeB)
+                return offsetA < offsetB ? -1 : offsetA > offsetB ? 1 : 0;
+            var pa = pathTo(nodeA), pb = pathTo(nodeB);
+            var i = 0;
+            while (i < pa.length && i < pb.length && pa[i] === pb[i]) i++;
+            if (i === pa.length)
+                return indexOfNode(pb[i]) < offsetA ? 1 : -1;
+            if (i === pb.length)
+                return indexOfNode(pa[i]) < offsetB ? -1 : 1;
+            return indexOfNode(pa[i]) < indexOfNode(pb[i]) ? -1 : 1;
+        }
+
+        function replaceData(n, off, count, s) {
+            if (typeof n.replaceData === 'function') {
+                n.replaceData(off, count, s);
+                return;
+            }
+            var d = n.data || '';
+            n.data = d.substring(0, off) + s + d.substring(off + count);
+        }
+
+        function checkBoundary(node, offset) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            offset = Number(offset) >>> 0;
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            return offset;
+        }
+
+        function NdRange() {
+            this._sc = doc; this._so = 0;
+            this._ec = doc; this._eo = 0;
+        }
+
+        function mkRange(sc, so, ec, eo) {
+            var r = new NdRange();
+            r._sc = sc; r._so = so; r._ec = ec; r._eo = eo;
+            return r;
+        }
+
+        function containedIn(n, r) {
+            return rootOf(n) === rootOf(r._sc) &&
+                   bpCompare(n, 0, r._sc, r._so) > 0 &&
+                   bpCompare(n, nodeLength(n), r._ec, r._eo) < 0;
+        }
+
+        function partiallyContainedIn(n, r) {
+            var a = isInclusiveAncestor(n, r._sc);
+            var b = isInclusiveAncestor(n, r._ec);
+            return (a && !b) || (b && !a);
+        }
+
+        Object.defineProperties(NdRange.prototype, {
+            startContainer: { get: function () { return this._sc; }, configurable: true },
+            startOffset:    { get: function () { return this._so; }, configurable: true },
+            endContainer:   { get: function () { return this._ec; }, configurable: true },
+            endOffset:      { get: function () { return this._eo; }, configurable: true },
+            collapsed:      { get: function () {
+                return this._sc === this._ec && this._so === this._eo;
+            }, configurable: true },
+            commonAncestorContainer: { get: function () {
+                for (var a = this._sc; a; a = a.parentNode)
+                    if (isInclusiveAncestor(a, this._ec)) return a;
+                return null;
+            }, configurable: true }
+        });
+
+        NdRange.prototype.setStart = function (node, offset) {
+            offset = checkBoundary(node, offset);
+            this._sc = node; this._so = offset;
+            if (rootOf(node) !== rootOf(this._ec) ||
+                bpCompare(node, offset, this._ec, this._eo) > 0) {
+                this._ec = node; this._eo = offset;
+            }
+        };
+
+        NdRange.prototype.setEnd = function (node, offset) {
+            offset = checkBoundary(node, offset);
+            this._ec = node; this._eo = offset;
+            if (rootOf(node) !== rootOf(this._sc) ||
+                bpCompare(node, offset, this._sc, this._so) < 0) {
+                this._sc = node; this._so = offset;
+            }
+        };
+
+        NdRange.prototype.setStartBefore = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var parent = node.parentNode;
+            if (!parent) throw domEx('InvalidNodeTypeError');
+            this.setStart(parent, indexOfNode(node));
+        };
+
+        NdRange.prototype.setStartAfter = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var parent = node.parentNode;
+            if (!parent) throw domEx('InvalidNodeTypeError');
+            this.setStart(parent, indexOfNode(node) + 1);
+        };
+
+        NdRange.prototype.setEndBefore = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var parent = node.parentNode;
+            if (!parent) throw domEx('InvalidNodeTypeError');
+            this.setEnd(parent, indexOfNode(node));
+        };
+
+        NdRange.prototype.setEndAfter = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var parent = node.parentNode;
+            if (!parent) throw domEx('InvalidNodeTypeError');
+            this.setEnd(parent, indexOfNode(node) + 1);
+        };
+
+        NdRange.prototype.collapse = function (toStart) {
+            if (toStart) { this._ec = this._sc; this._eo = this._so; }
+            else { this._sc = this._ec; this._so = this._eo; }
+        };
+
+        NdRange.prototype.selectNode = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var parent = node.parentNode;
+            if (!parent) throw domEx('InvalidNodeTypeError');
+            var i = indexOfNode(node);
+            this._sc = parent; this._so = i;
+            this._ec = parent; this._eo = i + 1;
+        };
+
+        NdRange.prototype.selectNodeContents = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            this._sc = node; this._so = 0;
+            this._ec = node; this._eo = nodeLength(node);
+        };
+
+        NdRange.prototype.cloneRange = function () {
+            return mkRange(this._sc, this._so, this._ec, this._eo);
+        };
+
+        NdRange.prototype.detach = function () {};
+
+        NdRange.prototype.comparePoint = function (node, offset) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            if (rootOf(node) !== rootOf(this._sc))
+                throw domEx('WrongDocumentError');
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            offset = Number(offset) >>> 0;
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            if (bpCompare(node, offset, this._sc, this._so) < 0) return -1;
+            if (bpCompare(node, offset, this._ec, this._eo) > 0) return 1;
+            return 0;
+        };
+
+        NdRange.prototype.isPointInRange = function (node, offset) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            if (rootOf(node) !== rootOf(this._sc)) return false;
+            if (node.nodeType === 10) throw domEx('InvalidNodeTypeError');
+            offset = Number(offset) >>> 0;
+            if (offset > nodeLength(node)) throw domEx('IndexSizeError');
+            return bpCompare(node, offset, this._sc, this._so) >= 0 &&
+                   bpCompare(node, offset, this._ec, this._eo) <= 0;
+        };
+
+        NdRange.prototype.intersectsNode = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            if (rootOf(node) !== rootOf(this._sc)) return false;
+            var parent = node.parentNode;
+            if (!parent) return true;
+            var offset = indexOfNode(node);
+            return bpCompare(parent, offset, this._ec, this._eo) < 0 &&
+                   bpCompare(parent, offset + 1, this._sc, this._so) > 0;
+        };
+
+        NdRange.prototype.compareBoundaryPoints = function (how, sourceRange) {
+            how = (how >>> 0) & 0xffff;
+            if (!sourceRange || !(sourceRange instanceof NdRange))
+                throw new TypeError('parameter 2 is not of type Range');
+            if (how > 3) throw domEx('NotSupportedError');
+            if (rootOf(this._sc) !== rootOf(sourceRange._sc))
+                throw domEx('WrongDocumentError');
+            var tn, to, on, oo;
+            if (how === 0) { tn = this._sc; to = this._so; on = sourceRange._sc; oo = sourceRange._so; }
+            else if (how === 1) { tn = this._ec; to = this._eo; on = sourceRange._sc; oo = sourceRange._so; }
+            else if (how === 2) { tn = this._ec; to = this._eo; on = sourceRange._ec; oo = sourceRange._eo; }
+            else { tn = this._sc; to = this._so; on = sourceRange._ec; oo = sourceRange._eo; }
+            return bpCompare(tn, to, on, oo);
+        };
+
+        NdRange.prototype.toString = function () {
+            var sc = this._sc, so = this._so, ec = this._ec, eo = this._eo;
+            if (sc === ec && isTextNode(sc))
+                return (sc.data || '').substring(so, eo);
+            var s = '';
+            if (isTextNode(sc)) s += (sc.data || '').substring(so);
+            var self = this;
+            (function walk(n) {
+                for (var c = n.firstChild; c; c = c.nextSibling) {
+                    if (isTextNode(c) && containedIn(c, self)) s += c.data || '';
+                    walk(c);
+                }
+            })(this.commonAncestorContainer || rootOf(sc));
+            if (isTextNode(ec) && ec !== sc) s += (ec.data || '').substring(0, eo);
+            return s;
+        };
+
+        function collectContainedRoots(r) {
+            var out = [];
+            (function walk(n) {
+                for (var c = n.firstChild; c; c = c.nextSibling) {
+                    if (containedIn(c, r)) { out.push(c); continue; }
+                    walk(c);
+                }
+            })(r.commonAncestorContainer || rootOf(r._sc));
+            return out;
+        }
+
+        function cloneOrExtract(r, extract) {
+            var sc = r._sc, so = r._so, ec = r._ec, eo = r._eo;
+            var frag = ownerDoc(sc).createDocumentFragment();
+            if (r.collapsed) return frag;
+            if (sc === ec && isCharData(sc)) {
+                var c0 = sc.cloneNode(false);
+                c0.data = (sc.data || '').substring(so, eo);
+                frag.appendChild(c0);
+                if (extract) replaceData(sc, so, eo - so, '');
+                return frag;
+            }
+            var commonAncestor = r.commonAncestorContainer;
+            var firstPartial = null, lastPartial = null;
+            if (!isInclusiveAncestor(sc, ec))
+                for (var f = commonAncestor.firstChild; f; f = f.nextSibling)
+                    if (partiallyContainedIn(f, r)) { firstPartial = f; break; }
+            if (!isInclusiveAncestor(ec, sc))
+                for (var l = commonAncestor.lastChild; l; l = l.previousSibling)
+                    if (partiallyContainedIn(l, r)) { lastPartial = l; break; }
+            var contained = [];
+            for (var ch = commonAncestor.firstChild; ch; ch = ch.nextSibling)
+                if (containedIn(ch, r)) {
+                    if (ch.nodeType === 10) throw domEx('HierarchyRequestError');
+                    contained.push(ch);
+                }
+            var newNode = null, newOffset = 0;
+            if (extract) {
+                if (isInclusiveAncestor(sc, ec)) {
+                    newNode = sc; newOffset = so;
+                } else {
+                    var ref = sc;
+                    while (ref.parentNode &&
+                           !isInclusiveAncestor(ref.parentNode, ec))
+                        ref = ref.parentNode;
+                    newNode = ref.parentNode;
+                    newOffset = indexOfNode(ref) + 1;
+                }
+            }
+            if (firstPartial && isCharData(firstPartial)) {
+                var c1 = sc.cloneNode(false);
+                c1.data = (sc.data || '').substring(so);
+                frag.appendChild(c1);
+                if (extract) replaceData(sc, so, nodeLength(sc) - so, '');
+            } else if (firstPartial) {
+                var c2 = firstPartial.cloneNode(false);
+                frag.appendChild(c2);
+                var sub1 = mkRange(sc, so, firstPartial, nodeLength(firstPartial));
+                c2.appendChild(cloneOrExtract(sub1, extract));
+            }
+            for (var i = 0; i < contained.length; i++) {
+                if (extract) frag.appendChild(contained[i]);
+                else frag.appendChild(contained[i].cloneNode(true));
+            }
+            if (lastPartial && isCharData(lastPartial)) {
+                var c3 = ec.cloneNode(false);
+                c3.data = (ec.data || '').substring(0, eo);
+                frag.appendChild(c3);
+                if (extract) replaceData(ec, 0, eo, '');
+            } else if (lastPartial) {
+                var c4 = lastPartial.cloneNode(false);
+                frag.appendChild(c4);
+                var sub2 = mkRange(lastPartial, 0, ec, eo);
+                c4.appendChild(cloneOrExtract(sub2, extract));
+            }
+            if (extract) {
+                r._sc = newNode; r._so = newOffset;
+                r._ec = newNode; r._eo = newOffset;
+            }
+            return frag;
+        }
+
+        NdRange.prototype.cloneContents = function () {
+            return cloneOrExtract(this, false);
+        };
+
+        NdRange.prototype.extractContents = function () {
+            return cloneOrExtract(this, true);
+        };
+
+        NdRange.prototype.deleteContents = function () {
+            if (this.collapsed) return;
+            var sc = this._sc, so = this._so, ec = this._ec, eo = this._eo;
+            if (sc === ec && isCharData(sc)) {
+                replaceData(sc, so, eo - so, '');
+                return;
+            }
+            var toRemove = collectContainedRoots(this);
+            var newNode, newOffset;
+            if (isInclusiveAncestor(sc, ec)) {
+                newNode = sc; newOffset = so;
+            } else {
+                var ref = sc;
+                while (ref.parentNode && !isInclusiveAncestor(ref.parentNode, ec))
+                    ref = ref.parentNode;
+                newNode = ref.parentNode;
+                newOffset = indexOfNode(ref) + 1;
+            }
+            if (isCharData(sc)) replaceData(sc, so, nodeLength(sc) - so, '');
+            for (var i = 0; i < toRemove.length; i++)
+                if (toRemove[i].parentNode)
+                    toRemove[i].parentNode.removeChild(toRemove[i]);
+            if (isCharData(ec)) replaceData(ec, 0, eo, '');
+            this._sc = newNode; this._so = newOffset;
+            this._ec = newNode; this._eo = newOffset;
+        };
+
+        function ensurePreInsertion(node, parent, child) {
+            var pt = parent.nodeType;
+            if (pt !== 1 && pt !== 9 && pt !== 11)
+                throw domEx('HierarchyRequestError');
+            if (isInclusiveAncestor(node, parent))
+                throw domEx('HierarchyRequestError');
+            if (child && child.parentNode !== parent)
+                throw domEx('NotFoundError');
+            var nt = node.nodeType;
+            if (nt !== 1 && nt !== 3 && nt !== 4 && nt !== 7 && nt !== 8 &&
+                nt !== 10 && nt !== 11)
+                throw domEx('HierarchyRequestError');
+            if ((nt === 3 || nt === 4) && pt === 9)
+                throw domEx('HierarchyRequestError');
+            if (nt === 10 && pt !== 9)
+                throw domEx('HierarchyRequestError');
+        }
+
+        NdRange.prototype.insertNode = function (node) {
+            if (!node || typeof node.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            var sc = this._sc, so = this._so;
+            var sct = sc.nodeType;
+            if (sct === 7 || sct === 8 ||
+                (isTextNode(sc) && !sc.parentNode) || node === sc)
+                throw domEx('HierarchyRequestError');
+            var referenceNode;
+            if (isTextNode(sc)) referenceNode = sc;
+            else referenceNode = (sc.childNodes && sc.childNodes[so]) || null;
+            var parent = referenceNode ? referenceNode.parentNode : sc;
+            ensurePreInsertion(node, parent, referenceNode);
+            if (isTextNode(sc)) referenceNode = sc.splitText(so);
+            if (node === referenceNode) referenceNode = referenceNode.nextSibling;
+            if (node.parentNode) node.parentNode.removeChild(node);
+            var newOffset = referenceNode ? indexOfNode(referenceNode)
+                                          : nodeLength(parent);
+            newOffset += node.nodeType === 11 ? nodeLength(node) : 1;
+            var wasCollapsed = this.collapsed;
+            parent.insertBefore(node, referenceNode);
+            if (wasCollapsed) { this._ec = parent; this._eo = newOffset; }
+        };
+
+        NdRange.prototype.surroundContents = function (newParent) {
+            if (!newParent || typeof newParent.nodeType !== 'number')
+                throw new TypeError('parameter 1 is not of type Node');
+            for (var a = this._sc; a && !isInclusiveAncestor(a, this._ec);
+                 a = a.parentNode)
+                if (!isTextNode(a)) throw domEx('InvalidStateError');
+            for (var b = this._ec; b && !isInclusiveAncestor(b, this._sc);
+                 b = b.parentNode)
+                if (!isTextNode(b)) throw domEx('InvalidStateError');
+            var nt = newParent.nodeType;
+            if (nt === 9 || nt === 10 || nt === 11)
+                throw domEx('InvalidNodeTypeError');
+            var fragment = this.extractContents();
+            while (newParent.firstChild)
+                newParent.removeChild(newParent.firstChild);
+            this.insertNode(newParent);
+            newParent.appendChild(fragment);
+            this.selectNode(newParent);
+        };
+
+        NdRange.prototype.createContextualFragment = function (html) {
+            var node = this._sc;
+            var el = node.nodeType === 1 ? node
+                   : isCharData(node) ? node.parentNode : null;
+            var tag = el && el.nodeType === 1 ? el.localName : 'body';
+            if (tag === 'html') tag = 'body';
+            var scratch;
+            try { scratch = doc.createElement(tag); }
+            catch (e) { scratch = doc.createElement('body'); }
+            scratch.innerHTML = String(html);
+            var frag = ownerDoc(node).createDocumentFragment();
+            while (scratch.firstChild) frag.appendChild(scratch.firstChild);
+            return frag;
+        };
+
+        function nativeProxy(self) {
+            if (typeof global.__ndNativeRange !== 'function') return null;
+            var r = global.__ndNativeRange();
+            r.startContainer = self._sc;
+            r.startOffset = self._so;
+            r.endContainer = self._ec;
+            r.endOffset = self._eo;
+            r.collapsed = self.collapsed;
+            return r;
+        }
+
+        NdRange.prototype.getBoundingClientRect = function () {
+            var r = nativeProxy(this);
+            return r ? r.getBoundingClientRect() : null;
+        };
+
+        NdRange.prototype.getClientRects = function () {
+            var r = nativeProxy(this);
+            return r ? r.getClientRects() : [];
+        };
+
+        var rangeConstants = {
+            START_TO_START: 0, START_TO_END: 1,
+            END_TO_END: 2, END_TO_START: 3
+        };
+        for (var rk in rangeConstants) {
+            NdRange[rk] = rangeConstants[rk];
+            NdRange.prototype[rk] = rangeConstants[rk];
+        }
+
+        global.Range = NdRange;
+        global.__ndCreateRange = function () { return new NdRange(); };
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);

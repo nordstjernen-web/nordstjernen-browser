@@ -66,7 +66,16 @@ lxb_node_convert(lxb_dom_node_t *src)
         ns_node_set_text_borrow(out, cd->data.data ? (const char *)cd->data.data : "");
         return out;
     }
-    case LXB_DOM_NODE_TYPE_DOCUMENT_TYPE:
+    case LXB_DOM_NODE_TYPE_DOCUMENT_TYPE: {
+        lxb_dom_document_type_t *dt = lxb_dom_interface_document_type(src);
+        size_t nlen = 0;
+        const lxb_char_t *name = lxb_dom_document_type_name(dt, &nlen);
+        ns_node *out = ns_node_new_element(NULL);
+        out->kind = NS_NODE_DOCTYPE;
+        ns_node_set_name_borrow(out,
+            name && nlen ? (const char *)name : "html");
+        return out;
+    }
     case LXB_DOM_NODE_TYPE_PROCESSING_INSTRUCTION:
     case LXB_DOM_NODE_TYPE_ATTRIBUTE:
     case LXB_DOM_NODE_TYPE_ENTITY_REFERENCE:

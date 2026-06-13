@@ -47,6 +47,9 @@ typedef void (*ns_node_invalidator)(ns_node *self);
 #define NS_NODE_SVG_NS         (1u << 7)
 #define NS_NODE_LINK_LOAD_FIRED (1u << 8)
 #define NS_NODE_FOREIGN_NS     (1u << 9)
+#define NS_NODE_CDATA          (1u << 10)
+#define NS_NODE_PI             (1u << 11)
+#define NS_NODE_KEEP_CASE      (1u << 12)
 
 struct ns_node {
     ns_node_kind kind;

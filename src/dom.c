@@ -840,7 +840,8 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
     switch (src->kind) {
     case NS_NODE_ELEMENT:
         out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
-        out->flags |= src->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS);
+        out->flags |= src->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
+                                    NS_NODE_KEEP_CASE);
         for (const ns_attr *a = src->attrs; a; a = a->next)
             ns_element_set_attr(out, a->name ? a->name : "",
                                 a->value ? a->value : "");
@@ -860,9 +861,13 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
             out->name = g_strdup(src->name);
             out->flags |= NS_NODE_OWN_NAME;
         }
+        for (const ns_attr *a = src->attrs; a; a = a->next)
+            ns_element_set_attr(out, a->name ? a->name : "",
+                                a->value ? a->value : "");
         break;
     }
-    if (out) out->flags |= src->flags & NS_NODE_FRAGMENT;
+    if (out) out->flags |= src->flags & (NS_NODE_FRAGMENT | NS_NODE_CDATA |
+                                         NS_NODE_PI);
     if (deep && out)
         for (const ns_node *c = src->first_child; c; c = c->next_sibling) {
             ns_node *cc = ns_node_clone_depth(c, TRUE, depth + 1);
