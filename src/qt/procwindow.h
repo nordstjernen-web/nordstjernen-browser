@@ -19,6 +19,7 @@ class QTabWidget;
 class QAction;
 class QDialog;
 class QTableWidget;
+class QVBoxLayout;
 
 class ProcWindow : public QMainWindow {
     Q_OBJECT
@@ -45,6 +46,9 @@ private slots:
     void onSettings();
     void onTaskManager();
 
+    void startDownload(const QString &url, const QString &filename);
+    void showDownloads();
+
 private:
     ProcView *currentView() const;
     ProcView *viewAt(int index) const;
@@ -55,6 +59,7 @@ private:
     void rebuildBookmarksMenu();
     void bookmarkCurrentPage();
     void refreshTaskManager();
+    void ensureDownloadsDialog();
     QString normalizeUrl(const QString &input) const;
 
     QTabWidget *m_tabs = nullptr;
@@ -67,6 +72,8 @@ private:
     QMenu *m_bookmarksMenu = nullptr;
     QDialog *m_taskMgr = nullptr;
     QTableWidget *m_taskTable = nullptr;
+    QDialog *m_downloadsDialog = nullptr;
+    QVBoxLayout *m_downloadsLayout = nullptr;
     QString m_homeUrl;
     ns_bookmarks *m_bookmarks = nullptr;
 };

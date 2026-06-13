@@ -39,6 +39,16 @@
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QScrollArea>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFileInfo>
+#include <QFile>
+#include <QPointer>
+#include <QApplication>
+#include <thread>
 
 #include "version.h"
 
@@ -173,6 +183,9 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
         if (ProcView *view = currentView())
             view->toggleConsole();
     });
+    QAction *menuDownloads = appMenu->addAction(QStringLiteral("Downloads"));
+    menuDownloads->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_J));
+    connect(menuDownloads, &QAction::triggered, this, &ProcWindow::showDownloads);
     QAction *menuTaskMgr = appMenu->addAction(QStringLiteral("Task Manager"));
     menuTaskMgr->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Escape));
     connect(menuTaskMgr, &QAction::triggered, this, &ProcWindow::onTaskManager);
@@ -185,6 +198,7 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     connect(menuAbout, &QAction::triggered, this, &ProcWindow::onAbout);
 
     addAction(menuFind);
+    addAction(menuDownloads);
     addAction(menuTaskMgr);
     addAction(menuSettings);
 
@@ -368,6 +382,8 @@ void ProcWindow::connectView(ProcView *view) {
     });
     connect(view, &ProcView::linkRequestedInNewTab, this,
             [this](const QString &url) { addTab(url, false); });
+    connect(view, &ProcView::downloadRequested, this,
+            &ProcWindow::startDownload);
 }
 
 void ProcWindow::updateChrome() {
@@ -783,4 +799,146 @@ void ProcWindow::onTaskManager() {
 
     refreshTaskManager();
     dlg->show();
+}
+
+static QWidget *download_recent_row(const QString &name, const QString &path) {
+    QWidget *row = new QWidget;
+    QVBoxLayout *rl = new QVBoxLayout(row);
+    rl->setContentsMargins(8, 6, 8, 6);
+    QLabel *label = new QLabel(name);
+    QHBoxLayout *hb = new QHBoxLayout;
+    QPushButton *open = new QPushButton(QStringLiteral("Open"));
+    QObject::connect(open, &QPushButton::clicked, open, [path]() {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    });
+    hb->addStretch(1);
+    hb->addWidget(open);
+    rl->addWidget(label);
+    rl->addLayout(hb);
+    return row;
+}
+
+void ProcWindow::ensureDownloadsDialog() {
+    if (m_downloadsDialog)
+        return;
+    m_downloadsDialog = new QDialog(this);
+    m_downloadsDialog->setWindowTitle(QStringLiteral("Downloads"));
+    m_downloadsDialog->resize(460, 420);
+    QVBoxLayout *outer = new QVBoxLayout(m_downloadsDialog);
+    QHBoxLayout *header = new QHBoxLayout;
+    header->addStretch(1);
+    QPushButton *folder = new QPushButton(QStringLiteral("Open folder"));
+    connect(folder, &QPushButton::clicked, this, []() {
+        QString dir = QStandardPaths::writableLocation(
+            QStandardPaths::DownloadLocation);
+        if (dir.isEmpty())
+            dir = QDir::homePath();
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+    });
+    header->addWidget(folder);
+    outer->addLayout(header);
+
+    QScrollArea *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    QWidget *container = new QWidget;
+    m_downloadsLayout = new QVBoxLayout(container);
+
+    QString dir = QStandardPaths::writableLocation(
+        QStandardPaths::DownloadLocation);
+    if (dir.isEmpty())
+        dir = QDir::homePath();
+    const QFileInfoList recent =
+        QDir(dir).entryInfoList(QDir::Files, QDir::Time);
+    for (int i = 0; i < recent.size() && i < 25; i++)
+        m_downloadsLayout->addWidget(
+            download_recent_row(recent.at(i).fileName(),
+                                recent.at(i).absoluteFilePath()));
+    m_downloadsLayout->addStretch(1);
+
+    scroll->setWidget(container);
+    outer->addWidget(scroll, 1);
+}
+
+void ProcWindow::showDownloads() {
+    ensureDownloadsDialog();
+    m_downloadsDialog->show();
+    m_downloadsDialog->raise();
+    m_downloadsDialog->activateWindow();
+}
+
+void ProcWindow::startDownload(const QString &url, const QString &filename) {
+    if (url.isEmpty())
+        return;
+    QString name = filename;
+    if (name.isEmpty())
+        name = QUrl(url).fileName();
+    if (name.isEmpty())
+        name = QStringLiteral("download");
+
+    QString dir = QStandardPaths::writableLocation(
+        QStandardPaths::DownloadLocation);
+    if (dir.isEmpty())
+        dir = QDir::homePath();
+    QString path = QDir(dir).filePath(name);
+    for (int n = 1; QFile::exists(path) && n < 1000; n++)
+        path = QDir(dir).filePath(QStringLiteral("%1.%2").arg(name).arg(n));
+
+    ensureDownloadsDialog();
+    QWidget *row = new QWidget;
+    QVBoxLayout *rl = new QVBoxLayout(row);
+    rl->setContentsMargins(8, 6, 8, 6);
+    QLabel *status = new QLabel(name);
+    QProgressBar *bar = new QProgressBar;
+    bar->setRange(0, 0);
+    QPushButton *open = new QPushButton(QStringLiteral("Open"));
+    open->setEnabled(false);
+    QHBoxLayout *hb = new QHBoxLayout;
+    hb->addWidget(bar, 1);
+    hb->addWidget(open);
+    rl->addWidget(status);
+    rl->addLayout(hb);
+    m_downloadsLayout->insertWidget(0, row);
+    showDownloads();
+
+    QPointer<ProcWindow> self = this;
+    const QString u = url;
+    const QString p = path;
+    std::thread([self, u, p, name, status, bar, open]() {
+        GError *err = nullptr;
+        ns_response *resp =
+            ns_net_fetch_blocking(u.toUtf8().constData(), nullptr, &err);
+        bool ok = false;
+        qint64 size = 0;
+        if (resp && !resp->error && resp->body) {
+            QFile f(p);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(reinterpret_cast<const char *>(resp->body->data),
+                        static_cast<qint64>(resp->body->len));
+                f.close();
+                ok = true;
+                size = static_cast<qint64>(resp->body->len);
+            }
+        }
+        if (resp)
+            ns_response_free(resp);
+        if (err)
+            g_error_free(err);
+        QMetaObject::invokeMethod(qApp, [self, status, bar, open, name, p,
+                                         ok, size]() {
+            if (!self)
+                return;
+            bar->setRange(0, 1);
+            bar->setValue(ok ? 1 : 0);
+            if (ok) {
+                status->setText(QStringLiteral("%1 — %2 bytes")
+                                    .arg(name).arg(size));
+                open->setEnabled(true);
+                QObject::connect(open, &QPushButton::clicked, open, [p]() {
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+                });
+            } else {
+                status->setText(QStringLiteral("%1 — Failed").arg(name));
+            }
+        }, Qt::QueuedConnection);
+    }).detach();
 }

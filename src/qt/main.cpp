@@ -8,6 +8,7 @@
 #include "proc_limits.h"
 #include "procwindow.h"
 #include "rproc_inproc.h"
+#include "net.h"
 
 #include <glib.h>
 
@@ -26,6 +27,7 @@ int main(int argc, char *argv[]) {
         QStringLiteral("Nordstjernen (Qt)"));
 
     ns_config_init();
+    ns_net_init();
     const ns_config *cfg = ns_config_get();
     const QString home = (cfg && cfg->home_url && *cfg->home_url)
         ? QString::fromUtf8(cfg->home_url)
@@ -61,6 +63,7 @@ int main(int argc, char *argv[]) {
         window.addTab(url);
         status = app.exec();
     }
+    ns_net_shutdown();
     ns_config_shutdown();
     return status;
 }

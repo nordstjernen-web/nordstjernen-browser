@@ -55,6 +55,7 @@ signals:
     void loadingChanged(bool loading);
     void historyChanged();
     void linkRequestedInNewTab(const QString &url);
+    void downloadRequested(const QString &url, const QString &filename);
 
 protected:
     void paintEvent(QPaintEvent *event) override;

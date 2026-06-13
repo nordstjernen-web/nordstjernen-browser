@@ -185,6 +185,7 @@ struct FrameResult {
     QImage image;
     QString nav;
     QString webgl;
+    QString download;
 };
 
 class ProcWorker : public QObject {
@@ -240,6 +241,10 @@ public:
         if (fr.webgl) {
             result.webgl = QString::fromUtf8(fr.webgl);
             free(fr.webgl);
+        }
+        if (fr.download) {
+            result.download = QString::fromUtf8(fr.download);
+            free(fr.download);
         }
         result.ok = true;
         return result;
@@ -792,6 +797,14 @@ void ProcView::startRender() {
             }
             if (result.ok && !result.webgl.isEmpty())
                 self->promptWebgl(result.webgl);
+            if (result.ok && !result.download.isEmpty()) {
+                const int tab = result.download.indexOf(QLatin1Char('\t'));
+                const QString url = tab >= 0 ? result.download.left(tab)
+                                             : result.download;
+                const QString name = tab >= 0 ? result.download.mid(tab + 1)
+                                              : QString();
+                emit self->downloadRequested(url, name);
+            }
             if (self->m_renderPending) {
                 self->m_renderPending = false;
                 self->startRender();
