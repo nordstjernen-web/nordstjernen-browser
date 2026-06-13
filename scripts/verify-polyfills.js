@@ -85,9 +85,8 @@ need('TransformStream ctor',  function () { return typeof TransformStream === 'f
 need('TextEncoderStream ctor', function () { return typeof TextEncoderStream === 'function'; });
 need('TextDecoderStream ctor', function () { return typeof TextDecoderStream === 'function'; });
 
-need('Intl is object', function () { return typeof Intl === 'object' && Intl !== null; });
-need('Intl.DateTimeFormat', function () { return typeof Intl.DateTimeFormat === 'function'; });
-need('Intl.NumberFormat',  function () { return typeof Intl.NumberFormat  === 'function'; });
+// Intl (ECMA-402) is provided natively by src/js_intl.c, not by polyfills.js,
+// so it is intentionally absent when this script runs polyfills.js in bare qjs.
 
 need('CompressionStream ctor',   function () { return typeof CompressionStream === 'function'; });
 need('DecompressionStream ctor', function () { return typeof DecompressionStream === 'function'; });

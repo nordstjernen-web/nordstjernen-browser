@@ -63,6 +63,8 @@ nordstjernen_engine_sources = files(
   'idb.c',
   'js.c',
   'js_canvas.c',
+  'js_intl.c',
+  'js_date.c',
   'layout.c',
   'mobile.c',
   'net.c',
