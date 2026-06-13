@@ -1590,86 +1590,6 @@ ns_tlist_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 }
 
 static JSValue
-ns_tlist_tokens_array(JSContext *ctx, JSValueConst this_val)
-{
-    const char *attr;
-    ns_node *n = ns_tlist_node(this_val, &attr);
-    JSValue arr = JS_NewArray(ctx);
-    if (!n) return arr;
-    GPtrArray *set = ns_tlist_set_parse(ns_element_get_attr(n, attr));
-    for (guint i = 0; i < set->len; i++)
-        JS_SetPropertyUint32(ctx, arr, i,
-            JS_NewString(ctx, g_ptr_array_index(set, i)));
-    g_ptr_array_free(set, TRUE);
-    return arr;
-}
-
-static JSValue
-ns_tlist_array_iter(JSContext *ctx, JSValueConst this_val, const char *method)
-{
-    JSValue arr = ns_tlist_tokens_array(ctx, this_val);
-    JSValue fn = JS_GetPropertyStr(ctx, arr, method);
-    JSValue iter = JS_IsFunction(ctx, fn)
-        ? JS_Call(ctx, fn, arr, 0, NULL) : JS_NULL;
-    JS_FreeValue(ctx, fn);
-    JS_FreeValue(ctx, arr);
-    if (JS_IsException(iter)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-        return JS_NULL;
-    }
-    return iter;
-}
-
-static JSValue
-ns_tlist_values(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    return ns_tlist_array_iter(ctx, this_val, "values");
-}
-
-static JSValue
-ns_tlist_keys(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    return ns_tlist_array_iter(ctx, this_val, "keys");
-}
-
-static JSValue
-ns_tlist_entries(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    return ns_tlist_array_iter(ctx, this_val, "entries");
-}
-
-static JSValue
-ns_tlist_forEach(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    const char *attr;
-    ns_node *n = ns_tlist_node(this_val, &attr);
-    if (!n || argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
-    JSValueConst this_arg = argc >= 2 ? argv[1] : JS_UNDEFINED;
-    const char *cls = ns_element_get_attr(n, attr);
-    if (!cls) return JS_UNDEFINED;
-    int idx = 0;
-    const char *p = cls;
-    while (*p) {
-        while (ns_ascii_ws(*p)) p++;
-        if (!*p) break;
-        const char *tok = p;
-        while (*p && !ns_ascii_ws(*p)) p++;
-        JSValue val = JS_NewStringLen(ctx, tok, (gsize)(p - tok));
-        JSValue idx_v = JS_NewInt32(ctx, idx++);
-        JSValueConst cb_argv[3] = { val, idx_v, this_val };
-        JSValue r = JS_Call(ctx, argv[0], this_arg, 3, cb_argv);
-        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-        JS_FreeValue(ctx, r);
-        JS_FreeValue(ctx, val);
-        JS_FreeValue(ctx, idx_v);
-    }
-    return JS_UNDEFINED;
-}
-
-static JSValue
 ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     static const char *const rel_tokens[] = {
@@ -2238,10 +2158,6 @@ static const JSCFunctionListEntry ns_tlist_proto_funcs[] = {
     JS_CFUNC_DEF("toggle",   1, ns_tlist_toggle),
     JS_CFUNC_DEF("replace",  2, ns_tlist_replace),
     JS_CFUNC_DEF("item",     1, ns_tlist_item),
-    JS_CFUNC_DEF("forEach",  1, ns_tlist_forEach),
-    JS_CFUNC_DEF("values",   0, ns_tlist_values),
-    JS_CFUNC_DEF("keys",     0, ns_tlist_keys),
-    JS_CFUNC_DEF("entries",  0, ns_tlist_entries),
     JS_CFUNC_DEF("supports", 1, ns_tlist_supports),
     JS_CFUNC_DEF("toString", 0, ns_tlist_toString),
     JS_CGETSET_DEF("length", ns_tlist_get_length, NULL),
@@ -29168,14 +29084,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     {
         static const char *iter_src =
             "(function(p){"
-            " p[Symbol.iterator] = function(){"
-            "   var self=this, i=0;"
-            "   return { next: function(){"
-            "     return i < self.length"
-            "       ? { value: self.item(i++), done: false }"
-            "       : { value: undefined, done: true };"
-            "   }, '@@iterator': function(){ return this; } };"
-            " };"
+            " var a = Array.prototype;"
+            " if (a) Object.setPrototypeOf(p, a);"
             " Object.defineProperty(p, Symbol.toStringTag,"
             "   { value: 'DOMTokenList', configurable: true });"
             "})";
