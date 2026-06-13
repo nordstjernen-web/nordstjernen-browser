@@ -107,6 +107,8 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     plusButton->setAutoRaise(true);
     connect(plusButton, &QToolButton::clicked, this, &ProcWindow::onNewTab);
     tabToolbar->addWidget(plusButton);
+    if (ns_rproc_single_process_enabled())
+        plusButton->setVisible(false);
     addToolBarBreak();
 
     QToolBar *toolbar = addToolBar(QStringLiteral("Navigation"));
@@ -271,6 +273,7 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     newTab->setShortcuts({QKeySequence(Qt::CTRL | Qt::Key_T),
                           QKeySequence::AddTab});
     connect(newTab, &QAction::triggered, this, &ProcWindow::onNewTab);
+    newTab->setEnabled(!ns_rproc_single_process_enabled());
     addAction(newTab);
 
     QAction *closeTab = new QAction(this);
@@ -368,6 +371,14 @@ ProcView *ProcWindow::currentView() const {
 }
 
 ProcView *ProcWindow::addTab(const QString &url, bool foreground) {
+    if (ns_rproc_single_process_enabled() && m_tabBar->count() > 0) {
+        ProcView *cur = viewAt(m_tabBar->currentIndex());
+        if (cur) {
+            cur->load(normalizeUrl(url));
+            return cur;
+        }
+    }
+
     ProcView *view = new ProcView(m_stack);
     connectView(view);
     const int index = m_stack->addWidget(view);

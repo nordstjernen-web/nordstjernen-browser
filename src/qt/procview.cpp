@@ -7,6 +7,7 @@
 extern "C" {
 #include "proc_limits.h"
 #include "rproc_http.h"
+#include "rproc_inproc.h"
 }
 
 #include <QClipboard>
@@ -329,6 +330,20 @@ public:
         if (!m_proc || !m_opened)
             return false;
         return ns_rproc_http_release(m_proc) == 1;
+    }
+
+    QString releaseFull(bool *changed) {
+        if (changed)
+            *changed = false;
+        if (!m_proc || !m_opened)
+            return QString();
+        int ch = 0;
+        char *href = ns_rproc_http_release_full(m_proc, &ch);
+        if (changed)
+            *changed = ch == 1;
+        QString result = href ? QString::fromUtf8(href) : QString();
+        free(href);
+        return result;
     }
 
     QString click(int x, int y, int mods) {
@@ -1300,17 +1315,32 @@ void ProcView::mouseReleaseEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         m_mouseDown = false;
         if (m_opened && m_worker) {
+            const int x = horizontalScrollBar()->value() +
+                          int(event->position().x() / m_zoom);
+            const int y = verticalScrollBar()->value() +
+                          int(event->position().y() / m_zoom);
             QPointer<ProcView> self(this);
             ProcWorker *worker = m_worker;
-            QMetaObject::invokeMethod(worker, [worker, self]() {
-                const bool changed = worker->release();
-                if (!self || !changed)
+            QMetaObject::invokeMethod(worker, [worker, self, x, y]() {
+                bool changed = false;
+                QString href = worker->releaseFull(&changed);
+                if (!self)
                     return;
-                QMetaObject::invokeMethod(self.data(), [self]() {
-                    if (self)
+                QMetaObject::invokeMethod(self.data(),
+                                          [self, x, y, href, changed]() {
+                    if (!self)
+                        return;
+                    if (!href.isEmpty()) {
+                        emit self->statusMessage(href);
+                        self->load(href);
+                        return;
+                    }
+                    if (self->maybeLaunchMedia(x, y))
+                        return;
+                    if (changed)
                         self->requestRender();
-                });
-            });
+                }, Qt::QueuedConnection);
+            }, Qt::QueuedConnection);
         }
     }
     QAbstractScrollArea::mouseReleaseEvent(event);
@@ -1414,6 +1444,9 @@ void ProcView::keyPressEvent(QKeyEvent *event) {
     case Qt::Key_End:
         v->setValue(v->maximum());
         break;
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab:
+        break;
     default:
         QAbstractScrollArea::keyPressEvent(event);
         return;
@@ -1424,6 +1457,12 @@ void ProcView::keyPressEvent(QKeyEvent *event) {
 void ProcView::keyReleaseEvent(QKeyEvent *event) {
     sendKey(1, event);
     QAbstractScrollArea::keyReleaseEvent(event);
+}
+
+bool ProcView::focusNextPrevChild(bool next) {
+    if (m_opened)
+        return false;
+    return QAbstractScrollArea::focusNextPrevChild(next);
 }
 
 void ProcView::wheelEvent(QWheelEvent *event) {
@@ -1493,8 +1532,9 @@ void ProcView::contextMenuEvent(QContextMenuEvent *event) {
     if (!href.isEmpty()) {
         menu.addAction(QStringLiteral("Open Link"), this,
                        [this, href]() { load(href); });
-        menu.addAction(QStringLiteral("Open Link in New Tab"), this,
-                       [this, href]() { emit linkRequestedInNewTab(href); });
+        if (!ns_rproc_single_process_enabled())
+            menu.addAction(QStringLiteral("Open Link in New Tab"), this,
+                           [this, href]() { emit linkRequestedInNewTab(href); });
         menu.addAction(QStringLiteral("Copy Link Address"), this, [href]() {
             QGuiApplication::clipboard()->setText(href);
         });
