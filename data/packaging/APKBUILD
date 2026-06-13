@@ -1,0 +1,54 @@
+# Contributor: Andreas Røsdal <andreas.rosdal@gmail.com>
+# Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
+pkgname=nordstjernen
+pkgver=1.0.5
+pkgrel=0
+pkgdesc="Small, hand-written web browser written in C with GTK 4 and libcurl"
+url="https://nordstjernen.org"
+# quickjs and lexbor are vendored C and build in-tree; the engine also links
+# a little C++ (poppler, libavif). Restrict to arches the deps + WAMR asm cover.
+arch="x86_64 aarch64"
+license="custom"
+makedepends="
+	meson
+	ninja
+	gtk4.0-dev
+	libepoxy-dev
+	curl-dev
+	openssl-dev
+	uchardet-dev
+	librsvg-dev
+	libpsl-dev
+	sqlite-dev
+	libseccomp-dev
+	libwebp-dev
+	libavif-dev
+	poppler-dev
+	fontconfig-dev
+	pango-dev
+	"
+source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen/archive/refs/tags/$pkgver.tar.gz"
+# No test suite upstream — behaviour is verified by running the browser.
+options="!check"
+
+build() {
+	# -Dai=disabled drops the llama.cpp CMake subproject, the only build-time
+	# network dependency, so the build runs fully offline. Runtime depends are
+	# auto-detected by abuild's tracedeps from the linked shared libraries —
+	# nothing is bundled.
+	abuild-meson \
+		-Dai=disabled \
+		-Dqt=disabled \
+		. output
+	meson compile -C output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	install -Dm644 License.md \
+		"$pkgdir"/usr/share/licenses/$pkgname/License.md
+}
+
+sha512sums="
+b7c88dfa22dad18a432b6fd6835084d95d8b3f2b07cf9dd6d177658722b7491ff5fa0142d4e68209a78ae3fee625d0ece8f62bfb5dd0f1ef18e0f10de650288c  nordstjernen-1.0.5.tar.gz
+"
