@@ -2353,6 +2353,213 @@ synthesize_data_response(const char *url, ns_response *resp)
     return TRUE;
 }
 
+typedef struct ns_file_listing_entry {
+    char     *name;
+    char     *display;
+    char     *uri;
+    guint64   size;
+    gint64    mtime;
+    gboolean  is_dir;
+    gboolean  have_stat;
+} ns_file_listing_entry;
+
+static void
+file_listing_entry_free(gpointer data)
+{
+    ns_file_listing_entry *e = data;
+    if (!e) return;
+    g_free(e->name);
+    g_free(e->display);
+    g_free(e->uri);
+    g_free(e);
+}
+
+static gint
+file_listing_entry_compare(gconstpointer ap, gconstpointer bp)
+{
+    const ns_file_listing_entry *a =
+        *(const ns_file_listing_entry * const *)ap;
+    const ns_file_listing_entry *b =
+        *(const ns_file_listing_entry * const *)bp;
+    if (a->is_dir != b->is_dir)
+        return a->is_dir ? -1 : 1;
+    return g_utf8_collate(a->display ? a->display : "",
+                          b->display ? b->display : "");
+}
+
+static char *
+file_uri_for_path(const char *path, gboolean is_dir)
+{
+    if (!path || !*path) return NULL;
+    char *p = g_strdup(path);
+    if (is_dir && !g_str_has_suffix(p, G_DIR_SEPARATOR_S)) {
+        char *with_sep = g_strconcat(p, G_DIR_SEPARATOR_S, NULL);
+        g_free(p);
+        p = with_sep;
+    }
+    char *uri = g_filename_to_uri(p, NULL, NULL);
+    g_free(p);
+    return uri;
+}
+
+static char *
+file_size_label(guint64 size)
+{
+    static const char *const units[] = { "B", "KB", "MB", "GB", "TB" };
+    double v = (double)size;
+    guint unit = 0;
+    while (v >= 1024.0 && unit + 1 < G_N_ELEMENTS(units)) {
+        v /= 1024.0;
+        unit++;
+    }
+    if (unit == 0)
+        return g_strdup_printf("%" G_GUINT64_FORMAT " B", size);
+    if (v >= 100.0)
+        return g_strdup_printf("%.0f %s", v, units[unit]);
+    return g_strdup_printf("%.1f %s", v, units[unit]);
+}
+
+static char *
+file_mtime_label(gint64 mtime)
+{
+    if (mtime <= 0) return g_strdup("");
+    GDateTime *dt = g_date_time_new_from_unix_local(mtime);
+    if (!dt) return g_strdup("");
+    char *out = g_date_time_format(dt, "%Y-%m-%d %H:%M");
+    g_date_time_unref(dt);
+    return out ? out : g_strdup("");
+}
+
+static char *
+file_listing_parent_uri(const char *path)
+{
+    if (!path || !*path) return NULL;
+    char *parent = g_path_get_dirname(path);
+    if (!parent || !*parent || strcmp(parent, ".") == 0 ||
+        strcmp(parent, path) == 0) {
+        g_free(parent);
+        return NULL;
+    }
+    char *uri = file_uri_for_path(parent, TRUE);
+    g_free(parent);
+    return uri;
+}
+
+static char *
+file_directory_error_page(const char *url, long status, const char *error)
+{
+    char *html = ns_build_error_page(url, status, error);
+    return html ? html : g_strdup("<!doctype html><meta charset=utf-8>"
+                                  "<title>Cannot read folder</title>"
+                                  "<p>Cannot read folder.</p>");
+}
+
+static char *
+file_directory_listing_page(const char *path, const char *url, long *status_out)
+{
+    if (status_out) *status_out = 200;
+    GError *err = NULL;
+    GDir *dir = g_dir_open(path, 0, &err);
+    if (!dir) {
+        long status = g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_ACCES)
+            ? 403 : 404;
+        char *msg = g_strdup(err ? err->message : "cannot read folder");
+        g_clear_error(&err);
+        if (status_out) *status_out = status;
+        char *html = file_directory_error_page(url, status, msg);
+        g_free(msg);
+        return html;
+    }
+
+    GPtrArray *entries = g_ptr_array_new_with_free_func(file_listing_entry_free);
+    const char *name;
+    while ((name = g_dir_read_name(dir)) != NULL) {
+        char *full = g_build_filename(path, name, NULL);
+        ns_file_listing_entry *e = g_new0(ns_file_listing_entry, 1);
+        e->name = g_strdup(name);
+        e->display = g_filename_display_name(name);
+        e->is_dir = g_file_test(full, G_FILE_TEST_IS_DIR);
+        GStatBuf st;
+        if (g_stat(full, &st) == 0) {
+            e->have_stat = TRUE;
+            if (st.st_size > 0)
+                e->size = (guint64)st.st_size;
+            e->mtime = (gint64)st.st_mtime;
+        }
+        e->uri = file_uri_for_path(full, e->is_dir);
+        if (e->uri)
+            g_ptr_array_add(entries, e);
+        else
+            file_listing_entry_free(e);
+        g_free(full);
+    }
+    g_dir_close(dir);
+    g_ptr_array_sort(entries, file_listing_entry_compare);
+
+    char *display_path = g_filename_display_name(path);
+    char *esc_path = ns_html_escape_text(display_path ? display_path : path);
+    char *parent_uri = file_listing_parent_uri(path);
+    char *esc_parent = parent_uri ? ns_html_escape_text(parent_uri) : NULL;
+    GString *out = g_string_new(NULL);
+    g_string_append(out, "<!doctype html><html><head><meta charset=\"utf-8\">");
+    g_string_append(out, "<title>Index of ");
+    g_string_append(out, esc_path);
+    g_string_append(out, "</title><style>"
+        "body{font-family:serif;margin:8px;color:#000;background:#fff}"
+        "h1{font-size:2em;margin:.4em 0}"
+        "table{border-collapse:collapse}"
+        "th{text-align:left;font-weight:bold;padding:0 3em .25em 0}"
+        "td{padding:0 3em 0 0;white-space:nowrap}"
+        "td.name{min-width:22em}"
+        "td.size{text-align:right}"
+        "a{color:#00e;text-decoration:underline}"
+        "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
+        "</style></head><body><h1>Index of ");
+    g_string_append(out, esc_path);
+    g_string_append(out, "</h1><hr><table><thead><tr>"
+        "<th>Name</th><th>Size</th><th>Date modified</th>"
+        "</tr></thead><tbody>");
+    if (parent_uri) {
+        g_string_append(out, "<tr><td class=\"name\"><a href=\"");
+        g_string_append(out, esc_parent);
+        g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
+            "<td></td></tr>");
+    }
+    for (guint i = 0; i < entries->len; i++) {
+        ns_file_listing_entry *e = g_ptr_array_index(entries, i);
+        char *esc_uri = ns_html_escape_text(e->uri);
+        char *esc_name = ns_html_escape_text(e->display ? e->display : e->name);
+        char *size = e->is_dir ? g_strdup("") : file_size_label(e->size);
+        char *date = e->have_stat ? file_mtime_label(e->mtime) : g_strdup("");
+        char *esc_size = ns_html_escape_text(size);
+        char *esc_date = ns_html_escape_text(date);
+        g_string_append(out, "<tr><td class=\"name\"><a href=\"");
+        g_string_append(out, esc_uri);
+        g_string_append(out, "\">");
+        g_string_append(out, esc_name);
+        if (e->is_dir)
+            g_string_append_c(out, '/');
+        g_string_append(out, "</a></td><td class=\"size\">");
+        g_string_append(out, esc_size);
+        g_string_append(out, "</td><td>");
+        g_string_append(out, esc_date);
+        g_string_append(out, "</td></tr>");
+        g_free(esc_uri);
+        g_free(esc_name);
+        g_free(size);
+        g_free(date);
+        g_free(esc_size);
+        g_free(esc_date);
+    }
+    g_string_append(out, "</tbody></table><hr></body></html>");
+    g_ptr_array_free(entries, TRUE);
+    g_free(display_path);
+    g_free(esc_path);
+    g_free(parent_uri);
+    g_free(esc_parent);
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 ns_file_access_allowed(const char *top_url)
 {
@@ -2373,13 +2580,33 @@ synthesize_file_response(const char *url, const char *top_url, ns_response *resp
                                "remote page");
         return TRUE;
     }
-    char *path = g_filename_from_uri(url, NULL, NULL);
+    char *uri_path = g_filename_from_uri(url, NULL, NULL);
+    char *path = uri_path ? g_canonicalize_filename(uri_path, NULL) : NULL;
+    g_free(uri_path);
     resp->final_url = g_strdup(url);
     if (!path) {
         resp->status = 400;
         resp->error = g_strdup("invalid file URL");
         return TRUE;
     }
+
+    if (g_file_test(path, G_FILE_TEST_IS_DIR)) {
+        g_free(resp->final_url);
+        resp->final_url = file_uri_for_path(path, TRUE);
+        if (!resp->final_url)
+            resp->final_url = g_strdup(url);
+        long status = 200;
+        char *html = file_directory_listing_page(path, resp->final_url, &status);
+        resp->status = status;
+        resp->content_type = g_strdup("text/html; charset=utf-8");
+        if (html) {
+            g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+            g_free(html);
+        }
+        g_free(path);
+        return TRUE;
+    }
+
     guint64 budget = ns_net_response_budget();
     char *read_error = NULL;
     if (!read_file_budgeted(path, resp->body, budget, &read_error)) {

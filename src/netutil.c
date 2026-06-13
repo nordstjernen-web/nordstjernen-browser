@@ -4,6 +4,7 @@
 #include "net.h"
 #include "config.h"
 
+#include <glib/gstdio.h>
 #include <string.h>
 
 static char *
@@ -78,6 +79,9 @@ ns_address_is_search(const char *s)
     if (g_str_has_prefix(s, "localhost") &&
         (s[9] == '\0' || s[9] == ':' || s[9] == '/'))
         return FALSE;
+    g_autofree char *local = ns_url_from_local_path(s);
+    if (local)
+        return FALSE;
     if (strchr(s, '.') || strchr(s, ':'))
         return FALSE;
     return TRUE;
@@ -101,6 +105,42 @@ ns_search_url_for(const char *query)
     }
     g_free(enc);
     return out;
+}
+
+char *
+ns_url_from_local_path(const char *path)
+{
+    if (!path || !*path) return NULL;
+    if (g_str_has_prefix(path, "about:") || g_str_has_prefix(path, "file:") ||
+        g_str_has_prefix(path, "data:") || strstr(path, "://"))
+        return NULL;
+
+    char *candidate = NULL;
+#ifdef G_OS_WIN32
+    if (g_ascii_isalpha((guchar)path[0]) && path[1] == ':' && path[2] == '\0') {
+        char root[4] = { path[0], ':', G_DIR_SEPARATOR, '\0' };
+        candidate = g_strdup(root);
+    }
+#endif
+
+    if (!candidate) {
+        if (!g_file_test(path, G_FILE_TEST_EXISTS))
+            return NULL;
+        candidate = g_canonicalize_filename(path, NULL);
+    }
+    if (!candidate)
+        return NULL;
+
+    if (g_file_test(candidate, G_FILE_TEST_IS_DIR) &&
+        !g_str_has_suffix(candidate, G_DIR_SEPARATOR_S)) {
+        char *with_sep = g_strconcat(candidate, G_DIR_SEPARATOR_S, NULL);
+        g_free(candidate);
+        candidate = with_sep;
+    }
+
+    char *uri = g_filename_to_uri(candidate, NULL, NULL);
+    g_free(candidate);
+    return uri;
 }
 
 char *

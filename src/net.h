@@ -141,6 +141,7 @@ void  ns_net_apply_curl_tls(void *curl_handle);
 
 gboolean ns_address_is_search(const char *s);
 char *ns_search_url_for(const char *query);
+char *ns_url_from_local_path(const char *path);
 
 char *ns_multipart_boundary(void);
 void  ns_multipart_quote_field(GString *out, const char *s);

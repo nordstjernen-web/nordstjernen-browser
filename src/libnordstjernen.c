@@ -455,6 +455,68 @@ browser_arm_declarative_refresh(ns_browser *b, const char *header_value)
     b->refresh_due_us = g_get_monotonic_time() + (gint64)(seconds * 1e6);
 }
 
+static gboolean
+browser_content_type_starts(const char *content_type, const char *prefix)
+{
+    return content_type && prefix &&
+        g_ascii_strncasecmp(content_type, prefix, strlen(prefix)) == 0;
+}
+
+static gboolean
+browser_content_type_is_html(const char *content_type)
+{
+    return browser_content_type_starts(content_type, "text/html") ||
+           browser_content_type_starts(content_type, "application/xhtml");
+}
+
+static char *
+browser_text_document(const char *url, const char *text)
+{
+    char *esc_url = ns_html_escape_text(url && *url ? url : "text file");
+    char *esc_text = ns_html_escape_text(text ? text : "");
+    char *html = g_strconcat(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>",
+        esc_url,
+        "</title><style>"
+        "body{margin:0;background:#fff;color:#111}"
+        "pre{margin:0;padding:12px;font:13px/1.45 ui-monospace,"
+        "\"SF Mono\",Menlo,Consolas,monospace;white-space:pre-wrap;"
+        "overflow-wrap:anywhere}"
+        "</style></head><body><pre>",
+        esc_text,
+        "</pre></body></html>",
+        NULL);
+    g_free(esc_url);
+    g_free(esc_text);
+    return html;
+}
+
+static void
+browser_prepare_document_response(ns_response *resp)
+{
+    if (!resp || !resp->body || !resp->content_type)
+        return;
+    const char *final_url = resp->final_url ? resp->final_url : "";
+    char *html = NULL;
+    if (browser_content_type_starts(resp->content_type, "image/")) {
+        html = ns_html_image_document(final_url);
+    } else if (browser_content_type_starts(resp->content_type, "text/") &&
+               !browser_content_type_is_html(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = browser_text_document(final_url, decoded);
+        g_free(decoded);
+    }
+    if (!html)
+        return;
+    g_byte_array_set_size(resp->body, 0);
+    g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+    g_free(html);
+    g_free(resp->content_type);
+    resp->content_type = g_strdup("text/html; charset=utf-8");
+}
+
 static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
@@ -481,6 +543,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
     char *refresh_hdr = g_strdup(resp->refresh);
     g_free(file_url);
+    browser_prepare_document_response(resp);
 
     char *doc_charset = NULL;
     char *decoded = ns_html_decode_body_full((const char *)resp->body->data,

@@ -127,6 +127,11 @@ normalize_url(const char *input)
         g_str_has_prefix(trimmed, "file:") ||
         g_str_has_prefix(trimmed, "data:") || strstr(trimmed, "://"))
         return trimmed;
+    char *local = ns_url_from_local_path(trimmed);
+    if (local) {
+        g_free(trimmed);
+        return local;
+    }
     if (ns_address_is_search(trimmed)) {
         char *out = ns_search_url_for(trimmed);
         g_free(trimmed);

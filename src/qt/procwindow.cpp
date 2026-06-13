@@ -412,6 +412,11 @@ QString ProcWindow::normalizeUrl(const QString &input) const {
         return trimmed;
 
     const QByteArray utf8 = trimmed.toUtf8();
+    if (char *local = ns_url_from_local_path(utf8.constData())) {
+        const QString out = QString::fromUtf8(local);
+        g_free(local);
+        return out;
+    }
     if (ns_address_is_search(utf8.constData())) {
         char *url = ns_search_url_for(utf8.constData());
         const QString out = QString::fromUtf8(url);
