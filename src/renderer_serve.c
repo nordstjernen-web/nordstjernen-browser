@@ -218,6 +218,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (webgl)
             for (char *p = webgl; *p; p++)
                 if (*p == '\r' || *p == '\n') *p = ' ';
+        char *download = ns_browser_take_pending_download(s->cur);
+        if (download)
+            for (char *p = download; *p; p++)
+                if (*p == '\r' || *p == '\n') *p = ' ';
         char hdrs[4608];
         int hn = snprintf(hdrs, sizeof hdrs,
                  "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n%s",
@@ -227,10 +231,14 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                            "X-Nav: %.2000s\r\n", nav);
         if (webgl && *webgl && hn > 0 && (size_t)hn < sizeof hdrs)
-            snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                      "X-WebGL: %.2000s\r\n", webgl);
+        if (download && *download && hn > 0 && (size_t)hn < sizeof hdrs)
+            snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                     "X-Download: %.3000s\r\n", download);
         free(nav);
         free(webgl);
+        free(download);
         if (s->shm_mode || unchanged)
             http_write_response(ctrl_w, 200, "application/octet-stream",
                                 hdrs, NULL, 0);

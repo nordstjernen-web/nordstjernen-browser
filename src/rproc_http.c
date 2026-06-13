@@ -502,6 +502,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->animating = head.x_anim > 0;
         out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
         out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
+        out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
         return 0;
     }
     if (head.x_w < 1 || head.x_w > r->max_w ||
@@ -518,6 +519,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->pixels = r->shm ? r->map : r->rxbuf;
     out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
     out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
+    out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
     return 0;
 }
 

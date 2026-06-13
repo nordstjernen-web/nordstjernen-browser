@@ -283,6 +283,13 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_webgl, val, vlen);
             out->x_webgl[vlen] = '\0';
         }
+        else if (strcasecmp(line, "X-Download") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_download)
+                vlen = sizeof out->x_download - 1;
+            memcpy(out->x_download, val, vlen);
+            out->x_download[vlen] = '\0';
+        }
     }
     if (out->content_length < 0 || out->content_length > NS_HTTP_MAX_BODY)
         return -1;

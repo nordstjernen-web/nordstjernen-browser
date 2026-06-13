@@ -28,6 +28,7 @@ typedef struct {
     const unsigned char *pixels;
     char                *nav;
     char                *webgl;
+    char                *download;
 } ns_rproc_http_frame;
 
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,

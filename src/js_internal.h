@@ -52,6 +52,8 @@ struct ns_js {
     gpointer      mut_user_data;
     ns_js_navigate_cb nav_cb;
     gpointer      nav_user_data;
+    ns_js_download_cb download_cb;
+    gpointer      download_user_data;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;
     ns_js_form_submit_cb form_submit_cb;

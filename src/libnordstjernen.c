@@ -50,6 +50,7 @@ struct ns_browser {
     gboolean        dirty;
     gboolean        relaying;
     char           *pending_nav;
+    char           *pending_download;
     char           *refresh_url;
     gint64          refresh_due_us;
     char           *pending_post_body;
@@ -394,6 +395,17 @@ static void browser_js_navigate(const char *url, gboolean reload, gpointer ud)
     b->pending_nav = browser_resolve_navigation(b, url);
 }
 
+static void browser_js_download(const char *url, const char *filename, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !url || !*url) return;
+    char *abs = browser_resolve_navigation(b, url);
+    g_free(b->pending_download);
+    b->pending_download = g_strdup_printf("%s\t%s", abs ? abs : url,
+                                          filename ? filename : "");
+    g_free(abs);
+}
+
 int
 ns_browser_init(void)
 {
@@ -609,6 +621,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_image_cache(b->js, b->images);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_run_scripts_in_doc(b->js, doc, base);
     }
 
@@ -1779,6 +1792,15 @@ ns_browser_take_pending_webgl(ns_browser *browser)
     return ns_webgl_take_pending_origin();
 }
 
+char *
+ns_browser_take_pending_download(ns_browser *browser)
+{
+    if (!browser || !browser->pending_download) return NULL;
+    char *out = browser->pending_download;
+    browser->pending_download = NULL;
+    return out;
+}
+
 void
 ns_browser_resolve_webgl(ns_browser *browser, const char *origin, int allow)
 {
@@ -1850,6 +1872,7 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->base_url);
     g_free(browser->doc_charset);
     g_free(browser->pending_nav);
+    g_free(browser->pending_download);
     g_free(browser->refresh_url);
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);

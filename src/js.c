@@ -25179,6 +25179,12 @@ ns_element_click_default_action(JSContext *ctx, const ns_node *el)
         const char *href = ns_element_get_attr(el, "href");
         if (ns_iframe_follow_href(ctx, el, href))
             return JS_UNDEFINED;
+        if (href && *href && ns_element_get_attr(el, "download") && js->download_cb) {
+            g_autofree char *abs = ns_element_anchor_resolved_href(el, js);
+            const char *dl = ns_element_get_attr(el, "download");
+            js->download_cb(abs ? abs : href, dl, js->download_user_data);
+            return JS_UNDEFINED;
+        }
         if (href && *href && js->nav_cb)
             js->nav_cb(href, FALSE, js->nav_user_data);
         return JS_UNDEFINED;
@@ -34937,6 +34943,14 @@ ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data)
     if (!js) return;
     js->soft_nav_cb = cb;
     js->soft_nav_user_data = user_data;
+}
+
+void
+ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->download_cb = cb;
+    js->download_user_data = user_data;
 }
 
 void

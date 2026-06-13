@@ -30,6 +30,8 @@ typedef struct {
     char           *session_path;
     guint           session_timer;
     GtkWidget      *task_mgr_win;
+    GtkWidget      *downloads_win;
+    GtkWidget      *downloads_list;
 } ProcWindow;
 
 static const char *
@@ -219,6 +221,258 @@ update_chrome(ProcWindow *pw)
 static void proc_window_add_tab(ProcWindow *pw, const char *url,
                                 gboolean foreground);
 
+typedef struct {
+    char      *url;
+    char      *path;
+    char      *name;
+    GtkWidget *progress;
+    GtkWidget *status;
+    GtkWidget *open;
+    guint      pulse;
+    gboolean   ok;
+    gint64     size;
+} NsDownload;
+
+static void show_downloads_window(ProcWindow *pw);
+static void pw_start_download(ProcWindow *pw, const char *url,
+                              const char *suggested);
+
+static const char *
+downloads_dir(void)
+{
+    const char *d = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
+    return d && *d ? d : g_get_home_dir();
+}
+
+static void
+download_open_path(const char *path)
+{
+    char *uri = g_filename_to_uri(path, NULL, NULL);
+    if (uri) {
+        g_app_info_launch_default_for_uri(uri, NULL, NULL);
+        g_free(uri);
+    }
+}
+
+static void
+on_download_open(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    download_open_path((const char *)ud);
+}
+
+static void
+download_free_str(gpointer data, GClosure *closure)
+{
+    (void)closure;
+    g_free(data);
+}
+
+static void
+on_open_downloads_folder(GtkButton *b, gpointer ud)
+{
+    (void)b; (void)ud;
+    download_open_path(downloads_dir());
+}
+
+static gboolean
+download_pulse(gpointer ud)
+{
+    NsDownload *d = ud;
+    gtk_progress_bar_pulse(GTK_PROGRESS_BAR(d->progress));
+    return G_SOURCE_CONTINUE;
+}
+
+static gboolean
+download_finish_idle(gpointer ud)
+{
+    NsDownload *d = ud;
+    if (d->pulse) { g_source_remove(d->pulse); d->pulse = 0; }
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(d->progress),
+                                  d->ok ? 1.0 : 0.0);
+    if (d->ok) {
+        char *sz = g_format_size((guint64)d->size);
+        char *msg = g_strdup_printf("%s — %s", d->name, sz);
+        gtk_label_set_text(GTK_LABEL(d->status), msg);
+        gtk_widget_set_sensitive(d->open, TRUE);
+        g_free(sz);
+        g_free(msg);
+    } else {
+        char *msg = g_strdup_printf("%s — %s", d->name, ns_i18n("Failed"));
+        gtk_label_set_text(GTK_LABEL(d->status), msg);
+        g_free(msg);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer
+download_worker(gpointer ud)
+{
+    NsDownload *d = ud;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_blocking(d->url, NULL, &err);
+    if (resp && !resp->error && resp->body &&
+        g_file_set_contents(d->path, (const char *)resp->body->data,
+                            resp->body->len, NULL)) {
+        d->ok = TRUE;
+        d->size = resp->body->len;
+    }
+    if (resp) ns_response_free(resp);
+    g_clear_error(&err);
+    g_idle_add(download_finish_idle, d);
+    return NULL;
+}
+
+static GtkWidget *
+download_row_new(const char *name, gboolean done, const char *open_path,
+                 NsDownload *d)
+{
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+    gtk_widget_set_margin_start(row, 8);
+    gtk_widget_set_margin_end(row, 8);
+    gtk_widget_set_margin_top(row, 6);
+    gtk_widget_set_margin_bottom(row, 6);
+    GtkWidget *status = gtk_label_new(name);
+    gtk_label_set_xalign(GTK_LABEL(status), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(status), PANGO_ELLIPSIZE_MIDDLE);
+    GtkWidget *hb = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *open = gtk_button_new_with_label(ns_i18n("Open"));
+    gtk_widget_set_sensitive(open, done);
+    g_signal_connect_data(open, "clicked", G_CALLBACK(on_download_open),
+                          g_strdup(open_path), download_free_str, 0);
+    if (d) {
+        GtkWidget *progress = gtk_progress_bar_new();
+        gtk_widget_set_hexpand(progress, TRUE);
+        gtk_widget_set_valign(progress, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(hb), progress);
+        d->progress = progress;
+        d->status = status;
+        d->open = open;
+    } else {
+        GtkWidget *spacer = gtk_label_new("");
+        gtk_widget_set_hexpand(spacer, TRUE);
+        gtk_box_append(GTK_BOX(hb), spacer);
+    }
+    gtk_box_append(GTK_BOX(hb), open);
+    gtk_box_append(GTK_BOX(row), status);
+    gtk_box_append(GTK_BOX(row), hb);
+    return row;
+}
+
+static void
+downloads_populate_recent(ProcWindow *pw)
+{
+    const char *dir = downloads_dir();
+    GDir *gd = g_dir_open(dir, 0, NULL);
+    if (!gd) return;
+    GPtrArray *files = g_ptr_array_new_with_free_func(g_free);
+    const char *nm;
+    while ((nm = g_dir_read_name(gd)) && files->len < 200) {
+        if (nm[0] == '.') continue;
+        g_ptr_array_add(files, g_build_filename(dir, nm, NULL));
+    }
+    g_dir_close(gd);
+    g_ptr_array_sort(files, (GCompareFunc)g_strcmp0);
+    for (guint i = 0; i < files->len && i < 25; i++) {
+        const char *path = g_ptr_array_index(files, i);
+        if (!g_file_test(path, G_FILE_TEST_IS_REGULAR)) continue;
+        char *base = g_path_get_basename(path);
+        GtkWidget *row = download_row_new(base, TRUE, path, NULL);
+        gtk_list_box_append(GTK_LIST_BOX(pw->downloads_list), row);
+        g_free(base);
+    }
+    g_ptr_array_free(files, TRUE);
+}
+
+static gboolean
+downloads_win_close(GtkWindow *win, gpointer ud)
+{
+    (void)ud;
+    gtk_widget_set_visible(GTK_WIDGET(win), FALSE);
+    return TRUE;
+}
+
+static void
+show_downloads_window(ProcWindow *pw)
+{
+    if (pw->downloads_win) {
+        gtk_window_present(GTK_WINDOW(pw->downloads_win));
+        return;
+    }
+    GtkWidget *win = gtk_window_new();
+    gtk_window_set_title(GTK_WINDOW(win), ns_i18n("Downloads"));
+    gtk_window_set_default_size(GTK_WINDOW(win), 460, 420);
+    gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
+    g_signal_connect(win, "close-request",
+                     G_CALLBACK(downloads_win_close), NULL);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_margin_start(header, 8);
+    gtk_widget_set_margin_end(header, 8);
+    gtk_widget_set_margin_top(header, 8);
+    gtk_widget_set_margin_bottom(header, 4);
+    GtkWidget *spacer = gtk_label_new("");
+    gtk_widget_set_hexpand(spacer, TRUE);
+    GtkWidget *folder = gtk_button_new_with_label(ns_i18n("Open folder"));
+    g_signal_connect(folder, "clicked",
+                     G_CALLBACK(on_open_downloads_folder), NULL);
+    gtk_box_append(GTK_BOX(header), spacer);
+    gtk_box_append(GTK_BOX(header), folder);
+
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    GtkWidget *list = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_NONE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), list);
+    gtk_box_append(GTK_BOX(box), header);
+    gtk_box_append(GTK_BOX(box), scroll);
+    gtk_window_set_child(GTK_WINDOW(win), box);
+
+    pw->downloads_win = win;
+    pw->downloads_list = list;
+    downloads_populate_recent(pw);
+    gtk_window_present(GTK_WINDOW(win));
+}
+
+static void
+pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
+{
+    if (!url || !*url) return;
+    char *name = NULL;
+    if (suggested && *suggested)
+        name = g_path_get_basename(suggested);
+    if (!name || !*name || strcmp(name, ".") == 0 || strcmp(name, "/") == 0) {
+        g_free(name);
+        char *base = g_path_get_basename(url);
+        char *q = base ? strchr(base, '?') : NULL;
+        if (q) *q = '\0';
+        if (base && *base && strcmp(base, ".") != 0 && strcmp(base, "/") != 0)
+            name = base;
+        else { g_free(base); name = g_strdup("download"); }
+    }
+    const char *dir = downloads_dir();
+    char *path = g_build_filename(dir, name, NULL);
+    for (int n = 1; g_file_test(path, G_FILE_TEST_EXISTS) && n < 1000; n++) {
+        g_free(path);
+        char *alt = g_strdup_printf("%s.%d", name, n);
+        path = g_build_filename(dir, alt, NULL);
+        g_free(alt);
+    }
+
+    show_downloads_window(pw);
+
+    NsDownload *d = g_new0(NsDownload, 1);
+    d->url = g_strdup(url);
+    d->path = path;
+    d->name = name;
+    GtkWidget *row = download_row_new(name, FALSE, path, d);
+    gtk_list_box_prepend(GTK_LIST_BOX(pw->downloads_list), row);
+    d->pulse = g_timeout_add(120, download_pulse, d);
+    GThread *t = g_thread_new("ns-download", download_worker, d);
+    if (t) g_thread_unref(t);
+}
+
 static void
 on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                gpointer user_data)
@@ -266,6 +520,14 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
     case NS_PROC_EVT_LOADING:
         if (is_current)
             set_loading_ui(pw, text && *text == '1');
+        break;
+    case NS_PROC_EVT_DOWNLOAD:
+        if (text && *text) {
+            char **parts = g_strsplit(text, "\t", 2);
+            pw_start_download(pw, parts[0],
+                              parts[1] && *parts[1] ? parts[1] : NULL);
+            g_strfreev(parts);
+        }
         break;
     }
 }
@@ -708,6 +970,13 @@ task_mgr_destroyed(GtkWidget *win, gpointer data)
 }
 
 static void
+act_downloads(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    show_downloads_window((ProcWindow *)user_data);
+}
+
+static void
 act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
@@ -827,6 +1096,8 @@ install_shortcuts(ProcWindow *pw)
                                      NULL });
     install_action(pw, "task-manager", G_CALLBACK(act_task_manager),
                    (const char *[]){ "<Shift>Escape", NULL });
+    install_action(pw, "downloads", G_CALLBACK(act_downloads),
+                   (const char *[]){ "<Ctrl>j", NULL });
     install_action(pw, "about", G_CALLBACK(act_about), NULL);
     install_action(pw, "settings", G_CALLBACK(act_settings),
                    (const char *[]){ "<Ctrl>comma", NULL });
@@ -892,6 +1163,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
     g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
+    g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");
     g_menu_append(appmenu, ns_i18n("Task Manager"), "win.task-manager");
     g_menu_append(appmenu, ns_i18n("Settings"), "win.settings");
     GMenu *appmenu_about = g_menu_new();

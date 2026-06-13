@@ -210,6 +210,11 @@ char *ns_browser_take_pending_webgl(ns_browser *browser);
 void  ns_browser_resolve_webgl(ns_browser *browser, const char *origin,
                                int allow);
 
+/* Download: the page activated a link with a download attribute. Returns a
+ * newly-allocated "url\tfilename" string (free() it) or NULL. The host
+ * should fetch the URL and save it under the user's Downloads directory. */
+char *ns_browser_take_pending_download(ns_browser *browser);
+
 /* All <a href> links on the page, resolved to absolute URLs, de-duplicated and
  * in document order, separated by '\n'. javascript: and pure-fragment (#…)
  * links are skipped. NULL if there are none. Newly allocated; free() it. */

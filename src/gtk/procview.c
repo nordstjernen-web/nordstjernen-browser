@@ -73,6 +73,7 @@ typedef struct {
     char            *url;
     char            *nav;
     char            *webgl;
+    char            *download;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
     char            *href;
@@ -389,6 +390,10 @@ worker_main(gpointer data)
                 if (fr.webgl) {
                     res->webgl = g_strdup(fr.webgl);
                     free(fr.webgl);
+                }
+                if (fr.download) {
+                    res->download = g_strdup(fr.download);
+                    free(fr.download);
                 }
             } else if (v->proc) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
@@ -1294,6 +1299,8 @@ on_result(gpointer data)
         }
         if (res->ok && res->webgl && *res->webgl)
             pv_webgl_prompt(v, res->webgl);
+        if (res->ok && res->download && *res->download)
+            post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         v->render_inflight = FALSE;
         if (v->render_pending) {
             v->render_pending = FALSE;
@@ -1509,6 +1516,7 @@ done:
     g_free(res->url);
     g_free(res->nav);
     g_free(res->webgl);
+    g_free(res->download);
     free(res->href);
     free(res->cursor);
     free(res->media_url);

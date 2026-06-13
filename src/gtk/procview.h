@@ -20,7 +20,8 @@ typedef enum {
     NS_PROC_EVT_STATUS,
     NS_PROC_EVT_NEWTAB,
     NS_PROC_EVT_HISTORY,
-    NS_PROC_EVT_LOADING
+    NS_PROC_EVT_LOADING,
+    NS_PROC_EVT_DOWNLOAD
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
