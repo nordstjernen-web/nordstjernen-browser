@@ -4630,7 +4630,7 @@ field_blank_cell_px(const ns_style *s)
 }
 
 static gboolean
-field_attr_is_empty_text_input(const ns_inline_attr *r)
+field_attr_is_text_input(const ns_inline_attr *r)
 {
     if (r->kind != NS_INLINE_INPUT_FIELD &&
         r->kind != NS_INLINE_INPUT_FIELD_FOCUSED)
@@ -4638,7 +4638,7 @@ field_attr_is_empty_text_input(const ns_inline_attr *r)
     const ns_node *n = r->dom;
     if (!n || !n->name || strcmp(n->name, "input") != 0) return FALSE;
     const char *type = ns_element_get_attr(n, "type");
-    gboolean text_like = !type || !*type ||
+    return !type || !*type ||
         g_ascii_strcasecmp(type, "text") == 0 ||
         g_ascii_strcasecmp(type, "search") == 0 ||
         g_ascii_strcasecmp(type, "email") == 0 ||
@@ -4646,12 +4646,6 @@ field_attr_is_empty_text_input(const ns_inline_attr *r)
         g_ascii_strcasecmp(type, "tel") == 0 ||
         g_ascii_strcasecmp(type, "number") == 0 ||
         g_ascii_strcasecmp(type, "password") == 0;
-    if (!text_like) return FALSE;
-    const char *v = ns_element_get_attr(n, "value");
-    if (v && *v) return FALSE;
-    const char *ph = ns_element_get_attr(n, "placeholder");
-    if (ph && *ph) return FALSE;
-    return TRUE;
 }
 
 void
@@ -4700,7 +4694,7 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
-        if (!field_attr_is_empty_text_input(r)) continue;
+        if (!field_attr_is_text_input(r)) continue;
         if (r->len < 4) continue;
         double css_w = inline_attr_control_width(r, box);
         if (css_w <= 0) continue;
