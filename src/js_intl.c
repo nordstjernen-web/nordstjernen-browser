@@ -4,10 +4,31 @@
 
 #include <math.h>
 #include <string.h>
+#include <time.h>
 #include <glib.h>
 #include <pango/pango.h>
 
 #include "i18n.h"
+
+static void
+intl_gmtime(const time_t *t, struct tm *out)
+{
+#ifdef _WIN32
+    gmtime_s(out, t);
+#else
+    gmtime_r(t, out);
+#endif
+}
+
+static void
+intl_localtime(const time_t *t, struct tm *out)
+{
+#ifdef _WIN32
+    localtime_s(out, t);
+#else
+    localtime_r(t, out);
+#endif
+}
 
 static void
 intl_bind_bound(JSContext *ctx, JSValueConst obj, const char *name,
@@ -985,8 +1006,8 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
     time_t secs = (time_t)floor(ms / 1000.0);
     struct tm tmv;
     gboolean utc = tz && !strcmp(tz, "UTC");
-    if (utc) gmtime_r(&secs, &tmv);
-    else localtime_r(&secs, &tmv);
+    if (utc) intl_gmtime(&secs, &tmv);
+    else intl_localtime(&secs, &tmv);
 
     int Y = tmv.tm_year + 1900, Mo = tmv.tm_mon, D = tmv.tm_mday,
         Wd = tmv.tm_wday, H = tmv.tm_hour, Mi = tmv.tm_min, S = tmv.tm_sec;
