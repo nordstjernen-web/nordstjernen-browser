@@ -11,4 +11,8 @@ public class NordstjernenException extends RuntimeException {
     public NordstjernenException(String message) {
         super(message);
     }
+
+    public NordstjernenException(String message, Throwable cause) {
+        super(message, cause);
+    }
 }
