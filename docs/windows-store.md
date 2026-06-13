@@ -90,9 +90,10 @@ that shaped the manifest:
   **Revision = 0** (the Store reserves the fourth part). Meson's
   `1.0.4-dev` maps to `1.0.4.0`.
 - `Package/Identity/Name` and `Publisher` must exactly match the
-  values Partner Center assigns when the app name is reserved; the
-  defaults in the script are placeholders.
-- Max package size 25 GB (ours is ~90 MB staged, ~30 MB packed).
+  values Partner Center assigns for the reserved Store product
+  **Nordstjernen Web Browser**. The script defaults match the
+  current Partner Center identity.
+- Max package size 25 GB (ours is ~117 MB staged, ~49 MB packed).
 - Full-trust desktop apps declare
   `TargetDeviceFamily Name="Windows.Desktop"` with
   `MinVersion 10.0.17763.0` (1809, the MSIX baseline — same floor
@@ -144,15 +145,27 @@ that shaped the manifest:
   artifact, so every merge revalidates the manifest and produces an
   installable-after-signing package.
 
-Identity overrides, once Partner Center has assigned real values
-(Partner Center → Product → Product identity):
+Partner Center product identity:
 
 ```sh
-NS_MSIX_IDENTITY_NAME='12345PublisherName.Nordstjernen' \
-NS_MSIX_PUBLISHER='CN=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' \
-NS_MSIX_PUBLISHER_DISPLAY='Publisher Name' \
+NS_MSIX_IDENTITY_NAME='29567TheFreecivProject.NordstjernenWebBrowser' \
+NS_MSIX_PUBLISHER='CN=631F98F7-2280-49EE-8EF8-534CC36D09CF' \
+NS_MSIX_PUBLISHER_DISPLAY='The Freeciv Project' \
 ./scripts/pack-msix.sh
 ```
+
+These are the script defaults. `NS_MSIX_DISPLAY_NAME` defaults to
+`Nordstjernen Web Browser`, matching the reserved Store listing name.
+Override any of them only for a different Partner Center product.
+
+Store discovery values:
+
+- Store ID: `9NW8T7W5Z4PL`
+- Store URL: `https://apps.microsoft.com/detail/9NW8T7W5Z4PL`
+- Store protocol link:
+  `ms-windows-store://pdp/?productid=9NW8T7W5Z4PL`
+- Package Family Name:
+  `29567TheFreecivProject.NordstjernenWebBrowser_ga6t65cntcpba`
 
 ### Local testing (sideload)
 
@@ -171,7 +184,7 @@ install an unsigned MSIX locally. Two options:
 
    ```powershell
    New-SelfSignedCertificate -Type Custom -CertStoreLocation Cert:\CurrentUser\My `
-     -Subject 'CN=00000000-0000-0000-0000-000000000000' `
+     -Subject 'CN=631F98F7-2280-49EE-8EF8-534CC36D09CF' `
      -KeyUsage DigitalSignature -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3')
    # export to .pfx, then:
    #   NS_MSIX_CERT_PFX=/c/path/test.pfx ./scripts/pack-msix.sh
@@ -225,11 +238,11 @@ inside the package), and uninstall from Start removes it cleanly.
    one-time fee, ~19 USD individual / ~99 USD company. Company
    accounts get publisher verification, which avoids the
    "unverified publisher" treatment.
-2. **Reserve the app name** ("Nordstjernen Web Navigator", fallback
-   "Nordstjernen Browser"). Reservation is what mints the real
-   `Identity/Name` and `Publisher` GUID.
-3. **Build the package** with the real identity via the
-   `NS_MSIX_*` overrides above; upload the `.msix` in a new
+2. **Reserve the app name**: **Nordstjernen Web Browser**.
+   Reservation is what mints the real `Identity/Name` and
+   `Publisher` GUID.
+3. **Build the package** with the Partner Center identity defaults
+   above; upload the `.msix` in a new
    submission. Do **not** sign it — the Store does that. The MSIX
    packaging path builds with `-Dai=disabled` by default, so the
    Store package has no model downloader, AI chat surface, or
@@ -256,7 +269,7 @@ inside the package), and uninstall from Start removes it cleanly.
 
 ## Appendix: listing copy (ready to paste)
 
-**Display name:** Nordstjernen Web Navigator
+**Display name:** Nordstjernen Web Browser
 
 **Short description** (≤100 chars):
 
