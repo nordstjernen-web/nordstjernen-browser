@@ -83,7 +83,8 @@ if command -v patchelf >/dev/null 2>&1; then
     # BFS over the dependency closure of the seed codec libs, so every backend
     # libavif pulls in (gav1, aom, dav1d, rav1e, SvtAv1, yuv, sharpyuv, …)
     # is bundled too -- no per-name allow-list to keep in sync.
-    worklist=$(ldd "$PKGROOT/usr/bin/nordstjernen" 2>/dev/null \
+    worklist=$( { ldd "$PKGROOT/usr/bin/nordstjernen" 2>/dev/null; \
+                  ldd "$PKGROOT/usr/bin/nordstjernen-renderer" 2>/dev/null; } \
                  | grep -oE '/[^ ]+\.so[^ ]*' | grep -E "$SEED_RE")
     seen=""
     while [ -n "$worklist" ]; do
@@ -107,11 +108,23 @@ if command -v patchelf >/dev/null 2>&1; then
         done
         worklist=$next
     done
-    if [ -n "$(ls -A "$BUNDLE_DIR" 2>/dev/null)" ] \
-       && patchelf --set-rpath '$ORIGIN/../lib/nordstjernen' \
-            "$PKGROOT/usr/bin/nordstjernen" 2>/dev/null; then
-        bundled_any=1
-        echo "pack-deb: bundled$(ls "$BUNDLE_DIR" | sed 's/^/ /' | tr -d '\n')"
+    if [ -n "$(ls -A "$BUNDLE_DIR" 2>/dev/null)" ]; then
+        rpath_ok=1
+        # Both the launcher and the renderer link libavif (image decoding
+        # lives in the engine both share), so both need the bundle on their
+        # rpath -- otherwise the renderer fails to start with
+        # "libavif.so.NN: cannot open shared object file".
+        for bin in nordstjernen nordstjernen-renderer; do
+            [ -e "$PKGROOT/usr/bin/$bin" ] || continue
+            patchelf --set-rpath '$ORIGIN/../lib/nordstjernen' \
+                "$PKGROOT/usr/bin/$bin" 2>/dev/null || rpath_ok=0
+        done
+        if [ "$rpath_ok" = 1 ]; then
+            bundled_any=1
+            echo "pack-deb: bundled$(ls "$BUNDLE_DIR" | sed 's/^/ /' | tr -d '\n')"
+        else
+            rm -rf "$BUNDLE_DIR"
+        fi
     else
         rm -rf "$BUNDLE_DIR"
     fi
