@@ -4796,9 +4796,47 @@
             return offset;
         }
 
+        var liveRanges = [];
+        var canTrack = typeof WeakRef === 'function';
+
+        function trackRange(r) {
+            if (canTrack) liveRanges.push(new WeakRef(r));
+            return r;
+        }
+
+        function forEachLiveRange(cb) {
+            if (!canTrack) return;
+            var kept = 0;
+            for (var i = 0; i < liveRanges.length; i++) {
+                var r = liveRanges[i].deref();
+                if (r === undefined) continue;
+                liveRanges[kept++] = liveRanges[i];
+                cb(r);
+            }
+            liveRanges.length = kept;
+        }
+
+        function rangeReplaceData(node, offset, count, newLength) {
+            var delta = newLength - count;
+            forEachLiveRange(function (r) {
+                var o;
+                if (r._sc === node) {
+                    o = r._so;
+                    if (o > offset && o <= offset + count) r._so = offset;
+                    else if (o > offset + count) r._so = o + delta;
+                }
+                if (r._ec === node) {
+                    o = r._eo;
+                    if (o > offset && o <= offset + count) r._eo = offset;
+                    else if (o > offset + count) r._eo = o + delta;
+                }
+            });
+        }
+
         function NdRange() {
             this._sc = doc; this._so = 0;
             this._ec = doc; this._eo = 0;
+            trackRange(this);
         }
 
         function mkRange(sc, so, ec, eo) {
@@ -5203,6 +5241,198 @@
             NdRange[rk] = rangeConstants[rk];
             NdRange.prototype[rk] = rangeConstants[rk];
         }
+
+        (function wrapCharacterDataMutations() {
+            var tn;
+            try { tn = doc.createTextNode('x'); } catch (e) { return; }
+
+            function ownerProtoWith(obj, prop) {
+                var p = obj;
+                while (p) {
+                    if (Object.prototype.hasOwnProperty.call(p, prop)) return p;
+                    p = Object.getPrototypeOf(p);
+                }
+                return null;
+            }
+            function clamp(v, lo, hi) {
+                v = Math.trunc(Number(v));
+                if (!isFinite(v)) v = 0;
+                if (v < lo) v = lo;
+                if (v > hi) v = hi;
+                return v;
+            }
+            function curLen(node) {
+                return node.data ? node.data.length : 0;
+            }
+            function strLen(v) {
+                return (v === null || v === undefined ? '' : String(v)).length;
+            }
+
+            function wrapMethod(name, plan) {
+                var proto = ownerProtoWith(tn, name);
+                if (!proto) return;
+                var orig = proto[name];
+                if (typeof orig !== 'function') return;
+                var fn = function () {
+                    var len = curLen(this);
+                    var ret = orig.apply(this, arguments);
+                    var p = plan(len, arguments);
+                    if (p) rangeReplaceData(this, p[0], p[1], p[2]);
+                    return ret;
+                };
+                try { Object.defineProperty(fn, 'length', { value: orig.length, configurable: true }); } catch (e) {}
+                try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
+                Object.defineProperty(proto, name, {
+                    value: fn, writable: true, configurable: true, enumerable: false
+                });
+            }
+
+            wrapMethod('replaceData', function (len, args) {
+                var off = clamp(args[0], 0, len);
+                return [off, clamp(args[1], 0, len - off), strLen(args[2])];
+            });
+            wrapMethod('insertData', function (len, args) {
+                return [clamp(args[0], 0, len), 0, strLen(args[1])];
+            });
+            wrapMethod('deleteData', function (len, args) {
+                var off = clamp(args[0], 0, len);
+                return [off, clamp(args[1], 0, len - off), 0];
+            });
+
+            function wrapAccessor(name) {
+                var proto = ownerProtoWith(tn, name);
+                if (!proto) return;
+                var d = Object.getOwnPropertyDescriptor(proto, name);
+                if (!d || typeof d.set !== 'function') return;
+                var origSet = d.set, origGet = d.get;
+                Object.defineProperty(proto, name, {
+                    get: origGet,
+                    set: function (v) {
+                        if (!isCharData(this)) { origSet.call(this, v); return; }
+                        var len = curLen(this);
+                        origSet.call(this, v);
+                        rangeReplaceData(this, 0, len, strLen(v));
+                    },
+                    configurable: true, enumerable: d.enumerable === true
+                });
+            }
+
+            wrapAccessor('data');
+            wrapAccessor('nodeValue');
+            wrapAccessor('textContent');
+
+            var splitProto = ownerProtoWith(tn, 'splitText');
+            if (splitProto && typeof splitProto.splitText === 'function') {
+                var origSplit = splitProto.splitText;
+                Object.defineProperty(splitProto, 'splitText', {
+                    value: function (rawOffset) {
+                        var len = curLen(this);
+                        var offset = clamp(rawOffset, 0, len);
+                        var count = len - offset;
+                        var parent = this.parentNode;
+                        var index = parent ? indexOfNode(this) : 0;
+                        var node = this;
+                        var newNode = origSplit.apply(this, arguments);
+                        if (parent && newNode) {
+                            forEachLiveRange(function (r) {
+                                if (r._sc === node && r._so > offset) {
+                                    r._sc = newNode; r._so -= offset;
+                                } else if (r._sc === parent && r._so === index + 1) {
+                                    r._so += 1;
+                                }
+                                if (r._ec === node && r._eo > offset) {
+                                    r._ec = newNode; r._eo -= offset;
+                                } else if (r._ec === parent && r._eo === index + 1) {
+                                    r._eo += 1;
+                                }
+                            });
+                        }
+                        rangeReplaceData(node, offset, count, 0);
+                        return newNode;
+                    },
+                    writable: true, configurable: true, enumerable: false
+                });
+            }
+        })();
+
+        (function wrapNodeMutations() {
+            var el;
+            try { el = doc.createElement('span'); } catch (e) { return; }
+
+            function nodeProtoWith(name) {
+                var p = el;
+                while (p) {
+                    if (Object.prototype.hasOwnProperty.call(p, name)) return p;
+                    p = Object.getPrototypeOf(p);
+                }
+                return null;
+            }
+            function preState(node) {
+                var parent = node && node.parentNode;
+                return parent ? { node: node, parent: parent, index: indexOfNode(node) } : null;
+            }
+            function applyRemove(st) {
+                if (!st) return;
+                forEachLiveRange(function (r) {
+                    if (isInclusiveAncestor(st.node, r._sc)) { r._sc = st.parent; r._so = st.index; }
+                    else if (r._sc === st.parent && r._so > st.index) r._so -= 1;
+                    if (isInclusiveAncestor(st.node, r._ec)) { r._ec = st.parent; r._eo = st.index; }
+                    else if (r._ec === st.parent && r._eo > st.index) r._eo -= 1;
+                });
+            }
+            function applyInsert(node) {
+                var parent = node && node.parentNode;
+                if (!parent) return;
+                var index = indexOfNode(node);
+                forEachLiveRange(function (r) {
+                    if (r._sc === parent && r._so > index) r._so += 1;
+                    if (r._ec === parent && r._eo > index) r._eo += 1;
+                });
+            }
+            function wrap(name, handler) {
+                var proto = nodeProtoWith(name);
+                if (!proto) return;
+                var orig = proto[name];
+                if (typeof orig !== 'function') return;
+                var fn = function () { return handler.call(this, orig, arguments); };
+                try { Object.defineProperty(fn, 'length', { value: orig.length, configurable: true }); } catch (e) {}
+                try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
+                Object.defineProperty(proto, name, {
+                    value: fn, writable: true, configurable: true, enumerable: false
+                });
+            }
+
+            wrap('appendChild', function (orig, args) {
+                var st = preState(args[0]);
+                var ret = orig.apply(this, args);
+                applyRemove(st);
+                applyInsert(args[0]);
+                return ret;
+            });
+            wrap('insertBefore', function (orig, args) {
+                var st = preState(args[0]);
+                var ret = orig.apply(this, args);
+                applyRemove(st);
+                applyInsert(args[0]);
+                return ret;
+            });
+            wrap('removeChild', function (orig, args) {
+                var st = preState(args[0]);
+                var ret = orig.apply(this, args);
+                applyRemove(st);
+                return ret;
+            });
+            wrap('replaceChild', function (orig, args) {
+                var newChild = args[0], oldChild = args[1];
+                var stOld = preState(oldChild);
+                var stNew = (newChild !== oldChild) ? preState(newChild) : null;
+                var ret = orig.apply(this, args);
+                applyRemove(stOld);
+                applyRemove(stNew);
+                applyInsert(newChild);
+                return ret;
+            });
+        })();
 
         global.Range = NdRange;
         global.__ndCreateRange = function () { return new NdRange(); };
