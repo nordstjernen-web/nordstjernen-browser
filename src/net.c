@@ -2512,6 +2512,9 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
         "td{padding:0 3em 0 0;white-space:nowrap}"
         "td.name{min-width:22em}"
         "td.size{text-align:right}"
+        ".ico{display:inline-block;width:1.35em;margin-right:.35em;"
+        "text-align:center;font-family:\"Segoe UI Emoji\",\"Apple Color Emoji\","
+        "\"Noto Color Emoji\",sans-serif}"
         "a{color:#00e;text-decoration:underline}"
         "hr{border:0;border-top:1px solid #bbb;margin:.6em 0}"
         "</style></head><body><h1>Index of ");
@@ -2520,7 +2523,8 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
         "<th>Name</th><th>Size</th><th>Date modified</th>"
         "</tr></thead><tbody>");
     if (parent_uri) {
-        g_string_append(out, "<tr><td class=\"name\"><a href=\"");
+        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico dir\""
+            " aria-hidden=\"true\">&#128193;</span><a href=\"");
         g_string_append(out, esc_parent);
         g_string_append(out, "\">../</a></td><td class=\"size\"></td>"
             "<td></td></tr>");
@@ -2533,7 +2537,11 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
         char *date = e->have_stat ? file_mtime_label(e->mtime) : g_strdup("");
         char *esc_size = ns_html_escape_text(size);
         char *esc_date = ns_html_escape_text(date);
-        g_string_append(out, "<tr><td class=\"name\"><a href=\"");
+        g_string_append(out, "<tr><td class=\"name\"><span class=\"ico ");
+        g_string_append(out, e->is_dir ? "dir" : "file");
+        g_string_append(out, "\" aria-hidden=\"true\">");
+        g_string_append(out, e->is_dir ? "&#128193;" : "&#128196;");
+        g_string_append(out, "</span><a href=\"");
         g_string_append(out, esc_uri);
         g_string_append(out, "\">");
         g_string_append(out, esc_name);
