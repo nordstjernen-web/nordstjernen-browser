@@ -28874,8 +28874,15 @@ ns_js_sync_window_metrics(ns_js *js)
 void
 ns_js_dispatch_resize(ns_js *js)
 {
-    if (!js || !js->current_doc) return;
-    ns_js_dispatch_event(js, js->current_doc, "resize", NULL);
+    if (!js || !js->ctx) return;
+    JSContext *ctx = js->ctx;
+    JSValue ev = ns_make_event(ctx, "resize", NULL);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
+    JS_FreeValue(ctx, global);
+    ns_js_dispatch_window_only_event(js, "resize", ev, NULL);
+    if (js->current_doc)
+        ns_js_dispatch_event(js, js->current_doc, "resize", NULL);
 }
 
 static void
