@@ -31208,6 +31208,20 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
                ns_document_create_range, 0);
     ns_synthdoc_define_getter(ctx, wrapper, "doctype",
                               ns_synthdoc_get_doctype);
+    JS_DefinePropertyValueStr(ctx, wrapper, "URL",
+        JS_NewString(ctx, "about:blank"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "documentURI",
+        JS_NewString(ctx, "about:blank"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "compatMode",
+        JS_NewString(ctx, "CSS1Compat"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "charset",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "inputEncoding",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
+        JS_NewString(ctx, "text/html"), JS_PROP_ENUMERABLE);
     return wrapper;
 }
 
