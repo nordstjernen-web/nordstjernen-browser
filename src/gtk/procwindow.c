@@ -32,6 +32,16 @@ typedef struct {
     GtkWidget      *task_mgr_win;
 } ProcWindow;
 
+static const char *
+ns_brand_versioned(void)
+{
+    static char brand[128];
+    if (!brand[0])
+        g_snprintf(brand, sizeof brand, "%s %s",
+                   ns_i18n("Nordstjernen"), NS_VERSION);
+    return brand;
+}
+
 static void
 procwindow_free(gpointer data)
 {
@@ -187,7 +197,7 @@ update_chrome(ProcWindow *pw)
     NsProcView *v = current_view(pw);
     if (!v) {
         gtk_editable_set_text(GTK_EDITABLE(pw->address), "");
-        gtk_window_set_title(GTK_WINDOW(pw->window), ns_i18n("Nordstjernen"));
+        gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
         gtk_widget_set_sensitive(pw->back, FALSE);
         gtk_widget_set_sensitive(pw->forward, FALSE);
         set_loading_ui(pw, FALSE);
@@ -197,7 +207,7 @@ update_chrome(ProcWindow *pw)
     const char *url = ns_proc_view_url(v);
     const char *title = ns_proc_view_title(v);
     set_address_text(pw, url);
-    const char *brand = ns_i18n("Nordstjernen");
+    const char *brand = ns_brand_versioned();
     char *wt = g_strdup_printf("%s — %s",
                                title && *title ? title : brand, brand);
     gtk_window_set_title(GTK_WINDOW(pw->window), wt);
@@ -818,7 +828,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->window = gtk_application_window_new(app);
     g_object_set_data_full(G_OBJECT(pw->window), "ns-procwindow", pw,
                            (GDestroyNotify)procwindow_free);
-    gtk_window_set_title(GTK_WINDOW(pw->window), ns_i18n("Nordstjernen"));
+    gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
     gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
