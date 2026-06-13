@@ -29,6 +29,9 @@ public:
 
     ProcView *addTab(const QString &url, bool foreground = true);
 
+protected:
+    bool eventFilter(QObject *obj, QEvent *event) override;
+
 private slots:
     void onAddressEntered();
     void onBack();

@@ -115,6 +115,7 @@ ProcWindow::ProcWindow(QWidget *parent) : QMainWindow(parent) {
     m_address->setClearButtonEnabled(true);
     m_address->setPlaceholderText(
         QStringLiteral("Enter a URL and press Enter"));
+    m_address->installEventFilter(this);
     toolbar->addWidget(m_address);
 
     QAction *goAction = toolbar->addAction(
@@ -425,6 +426,16 @@ QString ProcWindow::normalizeUrl(const QString &input) const {
     }
 
     return QStringLiteral("https://") + trimmed;
+}
+
+bool ProcWindow::eventFilter(QObject *obj, QEvent *event) {
+    if (obj == m_address && event->type() == QEvent::FocusIn) {
+        QTimer::singleShot(0, m_address, [this]() {
+            if (m_address)
+                m_address->selectAll();
+        });
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void ProcWindow::onAddressEntered() {

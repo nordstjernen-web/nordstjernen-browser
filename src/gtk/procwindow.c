@@ -316,7 +316,7 @@ static gboolean
 address_select_all_idle(gpointer user_data)
 {
     ProcWindow *pw = user_data;
-    if (pw->address && gtk_widget_has_focus(pw->address))
+    if (pw->address && GTK_IS_EDITABLE(pw->address))
         gtk_editable_select_region(GTK_EDITABLE(pw->address), 0, -1);
     return G_SOURCE_REMOVE;
 }
