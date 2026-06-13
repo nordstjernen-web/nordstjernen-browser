@@ -12702,8 +12702,8 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	float on the element itself ("<div style='float:left'>123")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	floats induce a block boundary ("<div>abc<div style='float:left'>123</div>def")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	floats induce a block boundary ("<div>abc<span style='float:left'>123</span>def")	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/getter.html	innerText not supported on MathML elements ("<math>abc")	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/getter.html	innerText not supported on SVG elements ("<svg>abc")	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/getter.html	innerText not supported on MathML elements ("<math>abc")	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/getter.html	innerText not supported on SVG elements ("<svg>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	non-display-none child of svg ("<div id='target'>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	opacity:0 child rendered ("<div>123<span style='opacity:0'>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	opacity:0 container ("<div style='opacity:0'>abc")	PASS
@@ -12736,7 +12736,133 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:hidden child not rendered ("<div>123<span style='visibility:hidden'>abc")	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:hidden container ("<div style='visibility:hidden'>abc")	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:visible child rendered ("<div style='visibility:hidden'>123<span style='visibility:visible'>abc")	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	<harness>	NONE
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	" preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	" preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	& preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	& preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	' preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	' preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	< preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	< preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	<harness>	OK
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	> preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	> preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning null	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning null, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning the empty string	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning the empty string, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning undefined	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning undefined, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in <pre> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in non-white-space:pre elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CR, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CRLF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with LF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with LF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing <br> deleted	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing <br> deleted, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing text deleted	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing text deleted, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Leading whitespace preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Leading whitespace preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <pre> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <textarea> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <textarea> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in non-white-space:pre elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Null characters preserved	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Null characters preserved, detached	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Simplest possible test	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Simplest possible test, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CR, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CRLF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with LF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with LF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Tabs preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Tabs preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Trailing whitespace preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Trailing whitespace preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Whitespace not compressed	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Whitespace not compressed, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on MathML elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on MathML elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on SVG elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on SVG elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <area> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <area> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <base> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <base> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <basefont> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <basefont> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <bgsound> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <bgsound> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <br> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <br> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <col> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <col> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <colgroup> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <colgroup> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <embed> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <embed> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frame> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frame> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frameset> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frameset> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <head> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <head> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <hr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <hr> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <html> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <html> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <image> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <image> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <img> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <img> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <input> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <input> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <keygen> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <keygen> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <link> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <link> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <menuitem> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <menuitem> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <meta> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <meta> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <param> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <param> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <source> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <source> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <table> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <table> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tbody> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tbody> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tfoot> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tfoot> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <thead> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <thead> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tr> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <track> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <track> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <wbr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <wbr> element, detached	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	<harness>	OK
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	innerText has collapsed whitespace but preserved newlines with pre-line	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	innerText should be the same for the pre-line and pre examples	FAIL
@@ -12820,52 +12946,51 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html	white-spaces between <br>s should be invisible if they are collapsible	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html	white-spaces between <div>s should be invisible if they are collapsible	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html	white-spaces between <hr>s should be invisible if they are collapsible	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/multiple-text-nodes.window.html	<harness>	OK
-/html/dom/elements/the-innertext-and-outertext-properties/multiple-text-nodes.window.html	Ensure multiple text nodes get rendered properly	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/multiple-text-nodes.window.html	<harness>	TIMEOUT
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	" preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	& preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	' preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	< preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	<harness>	OK
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	> preserved	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning null	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning the empty string	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning undefined	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in <pre> element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in non-white-space:pre elements	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in white-space:pre element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Detached node	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Empty string	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Empty string with surrounding text nodes	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with CR	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with CRLF	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with LF	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning null	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning the empty string	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Assigning undefined	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	CRs convert to <br> in white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Detached node	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Empty string	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Empty string with surrounding text nodes	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	End with LF	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Existing <br> deleted	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Existing text deleted	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Leading whitespace preserved	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in <pre> element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in <textarea> element	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in non-white-space:pre elements	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in white-space:pre element	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in <textarea> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Newlines convert to <br> in white-space:pre element	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Null characters preserved	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Only merges with the previous and following text nodes, does not completely normalize	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Removing a node	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the following text node	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the previous and following text node	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the previous text node	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Setting outerText to a bunch of newlines creates a bunch of <br>s with no text nodes	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Only merges with the previous and following text nodes, does not completely normalize	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Removing a node	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the following text node	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the previous and following text node	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Replacing a node and merging with the previous text node	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Setting outerText to a bunch of newlines creates a bunch of <br>s with no text nodes	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Simplest possible test	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with CR	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with CRLF	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with LF	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Start with LF	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Tabs preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Trailing whitespace preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Whitespace not compressed	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	PASS
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	<harness>	OK
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	A missing action content attribute should cause the IDL attribute to return the document's URL (not the document's base URL)	PASS
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	An action URL should be resolved relative to the document's base URL (not the document's URL)	PASS

@@ -36,6 +36,7 @@ they regenerate.
 | 2026-06-13 | f9fb57c | d8a8414e5 | 212/696 (30%) | 17257/20620 (83%) | partial: url |
 | 2026-06-13 | f2448ed | d8a8414e5 | 223/696 (32%) | 18420/21529 (85%) | partial: dom/nodes |
 | 2026-06-13 | 726e248 | d8a8414e5 | 227/696 (32%) | 18551/21529 (86%) | partial: dom/nodes |
+| 2026-06-13 | f30dab1 | d8a8414e5 | 227/696 (32%) | 18707/21654 (86%) | partial: html/dom/elements/the-innertext-and-outertext-properties |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -45,7 +46,7 @@ touch.
 
 ## Per-area results — 2026-06-13
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-13-726e248.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-13-f30dab1.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
@@ -60,11 +61,11 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-13-726e248.tsv`.
 | `hr-time` | 4/13 | 30/51 | 20 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
 | `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
-| `html/dom/elements` | 30/56 | 474/781 | 303 | 2 | 2 | 0 |
+| `html/dom/elements` | 30/56 | 630/906 | 272 | 2 | 2 | 0 |
 | `WebCryptoAPI/digest` | 0/5 | 84/535 | 451 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **227/696** | **18551/21529** | **2869** | **72** | **37** | **0** |
+| **Total** | **227/696** | **18707/21654** | **2838** | **72** | **37** | **0** |
 
 ## ROI by area — 2026-06-13
 
@@ -83,7 +84,7 @@ file.
 | `WebCryptoAPI/digest` | 451 | 5 | 90.2 | 0 | 0 |
 | `url` | 415 | 21 | 19.8 | 2 | 5 |
 | `dom/events` | 364 | 119 | 3.1 | 71 | 29 |
-| `html/dom/elements` | 307 | 26 | 11.8 | 3 | 15 |
+| `html/dom/elements` | 276 | 26 | 10.6 | 3 | 16 |
 | `dom/ranges` | 201 | 53 | 3.8 | 25 | 8 |
 | `dom/collections` | 30 | 9 | 3.3 | 0 | 3 |
 | `dom/traversal` | 24 | 13 | 1.8 | 3 | 6 |
