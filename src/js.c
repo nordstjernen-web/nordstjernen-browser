@@ -11863,26 +11863,43 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "has",     ns_form_data_has,    1);
     ns_bind_fn(ctx, obj, "delete",  ns_form_data_delete, 1);
     ns_bind_fn(ctx, obj, "forEach", ns_form_data_forEach, 1);
-    if (argc >= 1) {
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         const ns_node *form = ns_unwrap_element(argv[0]);
-        if (form && form->name && strcmp(form->name, "form") == 0)
-            ns_form_data_populate_from_form(ctx, obj, form);
+        if (!form || !form->name || strcmp(form->name, "form") != 0) {
+            JS_FreeValue(ctx, obj);
+            return JS_ThrowTypeError(ctx, "FormData constructor argument must be a form");
+        }
+        ns_form_data_populate_from_form(ctx, obj, form);
     }
     ns_js *jsx = js_from_ctx(ctx);
     if (jsx && !jsx->form_data_helper_set) {
         static const char *helper_src =
             "(function(fd){"
+            " var rawAppend=fd.append,rawSet=fd.set;"
+            " function isBlob(v){return typeof Blob==='function'&&v instanceof Blob;}"
+            " function isFile(v){return typeof File==='function'&&v instanceof File;}"
+            " function fileValue(v,name,hasName){"
+            "   if(hasName&&!isBlob(v))throw new TypeError('filename requires Blob');"
+            "   if(!isBlob(v))return String(v);"
+            "   if(isFile(v)&&!hasName)return v;"
+            "   var opts={type:v.type||''};"
+            "   if(isFile(v))opts.lastModified=v.lastModified;"
+            "   return new File([v],hasName?String(name):'blob',opts);"
+            " }"
+            " fd.append=function(name,value,filename){"
+            "   rawAppend.call(fd,String(name),fileValue(value,filename,arguments.length>=3));"
+            " };"
+            " fd.set=function(name,value,filename){"
+            "   rawSet.call(fd,String(name),fileValue(value,filename,arguments.length>=3));"
+            " };"
             " fd.entries = function*(){"
-            "   var e = fd._entries;"
-            "   for (var i = 0; i < e.length; i++) yield [e[i][0], e[i][1]];"
+            "   for (var i = 0; i < fd._entries.length; i++) yield [fd._entries[i][0], fd._entries[i][1]];"
             " };"
             " fd.keys = function*(){"
-            "   var e = fd._entries;"
-            "   for (var i = 0; i < e.length; i++) yield e[i][0];"
+            "   for (var i = 0; i < fd._entries.length; i++) yield fd._entries[i][0];"
             " };"
             " fd.values = function*(){"
-            "   var e = fd._entries;"
-            "   for (var i = 0; i < e.length; i++) yield e[i][1];"
+            "   for (var i = 0; i < fd._entries.length; i++) yield fd._entries[i][1];"
             " };"
             " fd[Symbol.iterator] = fd.entries;"
             " return fd;"

@@ -97,15 +97,21 @@ subtsv, jsonl, filetsv, doc, date, ns_rev, wpt_rev, note, prefixes = sys.argv[1:
 areas = sys.argv[10:]
 prefixes = [p for p in prefixes.split(',') if p]
 
+def read_doc(path):
+    try:
+        return open(path, encoding='utf-8').read().splitlines()
+    except UnicodeDecodeError:
+        return open(path, encoding='cp1252').read().splitlines()
+
 old = []
 if os.path.exists(subtsv):
-    with open(subtsv) as f:
+    with open(subtsv, encoding='utf-8') as f:
         next(f)
         old = [tuple(line.rstrip('\n').split('\t')) for line in f]
 
 new = []
 new_tests = set()
-for line in open(jsonl):
+for line in open(jsonl, encoding='utf-8'):
     d = json.loads(line)
     r = d.get('result') or {}
     new_tests.add(d['test'])
@@ -120,7 +126,7 @@ def dropped(row):
     return t in new_tests or any(t.startswith(p) for p in prefixes)
 
 merged = sorted([r for r in old if not dropped(r)] + new)
-with open(subtsv, 'w') as f:
+with open(subtsv, 'w', encoding='utf-8') as f:
     f.write("test\tsubtest\tstatus\n")
     for r in merged:
         f.write('\t'.join(r) + '\n')
@@ -135,7 +141,7 @@ for test, sub, status in merged:
     else:
         e[status] = e.get(status, 0) + 1
 
-with open(filetsv, 'w') as f:
+with open(filetsv, 'w', encoding='utf-8') as f:
     f.write("test\tharness\ttotal\tpass\tfail\ttimeout\tnotrun\tprecondition_failed\n")
     for test in sorted(files):
         e = files[test]
@@ -229,7 +235,7 @@ for a in sorted(areas, key=lambda a: -roi[a][0]):
         a, r[0], r[1], density, r[2], r[3]))
 roi_section.append("")
 
-lines = open(doc).read().splitlines()
+lines = read_doc(doc)
 
 hi = lines.index("## History")
 last = None
@@ -252,7 +258,7 @@ else:
     rj = next(i for i in range(ri + 1, len(lines)) if lines[i].startswith("## "))
     lines[ri:rj] = roi_section
 
-with open(doc, 'w') as f:
+with open(doc, 'w', encoding='utf-8') as f:
     f.write('\n'.join(lines) + '\n')
 
 print(hist_row)

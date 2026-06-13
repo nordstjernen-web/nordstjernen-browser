@@ -48,10 +48,9 @@ trap 'rm -rf "$work"' EXIT
 
 (cd "$WPT_ROOT" && git ls-files '*.any.js' '*.window.js' \
     | grep -vE '/(resources|support|tools|crashtests)/') > "$work/pop.lst"
-(cd "$WPT_ROOT" && git ls-files '*.html' '*.htm' \
+(cd "$WPT_ROOT" && git grep -l 'testharness\.js' -- '*.html' '*.htm' \
     | grep -vE '/(resources|support|tools|crashtests)/' \
-    | grep -vE -- '-ref\.html$|-manual\.html$' \
-    | tr '\n' '\0' | xargs -0 grep -l 'testharness\.js' 2>/dev/null) >> "$work/pop.lst"
+    | grep -vE -- '-ref\.html$|-manual\.html$') >> "$work/pop.lst"
 sort "$work/pop.lst" -o "$work/pop.lst"
 pop=$(wc -l < "$work/pop.lst")
 echo "population: $pop testharness test files" >&2
@@ -92,6 +91,12 @@ python3 - "$work/results.tsv" "$pop" "$ROOT/docs/wpt-scores.md" \
 import random, sys
 
 path, pop, doc, date, ns_rev, wpt_rev = sys.argv[1:7]
+def read_doc(path):
+    try:
+        return open(path, encoding='utf-8').read().splitlines()
+    except UnicodeDecodeError:
+        return open(path, encoding='cp1252').read().splitlines()
+
 pop = int(pop)
 passes = [int(line.split('\t')[2]) for line in open(path)]
 n = len(passes)
@@ -108,7 +113,7 @@ row = "| %s | %s | %s | %d of %d | ~%s (%s – %s) | ~%.1f%% |" % (
     format(est, ','), format(lo, ','), format(hi, ','),
     100.0 * est / 6_000_000)
 
-lines = open(doc).read().splitlines()
+lines = read_doc(doc)
 wi = lines.index("## Whole-suite score")
 last = None
 for i in range(wi + 1, len(lines)):
@@ -117,7 +122,7 @@ for i in range(wi + 1, len(lines)):
     if lines[i].startswith("|"):
         last = i
 lines.insert(last + 1, row)
-with open(doc, 'w') as f:
+with open(doc, 'w', encoding='utf-8') as f:
     f.write('\n'.join(lines) + '\n')
 
 print(row)
