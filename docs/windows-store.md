@@ -148,9 +148,9 @@ that shaped the manifest:
 Partner Center product identity:
 
 ```sh
-NS_MSIX_IDENTITY_NAME='29567TheFreecivProject.NordstjernenWebBrowser' \
+NS_MSIX_IDENTITY_NAME='Nordstjernen.NordstjernenWebBrowser' \
 NS_MSIX_PUBLISHER='CN=631F98F7-2280-49EE-8EF8-534CC36D09CF' \
-NS_MSIX_PUBLISHER_DISPLAY='The Freeciv Project' \
+NS_MSIX_PUBLISHER_DISPLAY='Nordstjernen' \
 ./scripts/pack-msix.sh
 ```
 
@@ -165,7 +165,7 @@ Store discovery values:
 - Store protocol link:
   `ms-windows-store://pdp/?productid=9NW8T7W5Z4PL`
 - Package Family Name:
-  `29567TheFreecivProject.NordstjernenWebBrowser_ga6t65cntcpba`
+  `Nordstjernen.NordstjernenWebBrowser_ga6t65cntcpba`
 
 ### Local testing (sideload)
 

@@ -25,9 +25,9 @@ NS_MESON_SETUP_ARGS="-Dai=disabled ${NS_MSIX_MESON_SETUP_ARGS:-}" \
 VERSION=$(grep -E "^[[:space:]]*version:" "$ROOT/meson.build" \
           | head -1 | sed -E "s/.*'([^']+)'.*/\\1/")
 MSIX_VERSION=${NS_MSIX_VERSION:-${VERSION%%-*}.0}
-IDENTITY_NAME=${NS_MSIX_IDENTITY_NAME:-29567TheFreecivProject.NordstjernenWebBrowser}
+IDENTITY_NAME=${NS_MSIX_IDENTITY_NAME:-Nordstjernen.NordstjernenWebBrowser}
 PUBLISHER=${NS_MSIX_PUBLISHER:-CN=631F98F7-2280-49EE-8EF8-534CC36D09CF}
-PUBLISHER_DISPLAY=${NS_MSIX_PUBLISHER_DISPLAY:-The Freeciv Project}
+PUBLISHER_DISPLAY=${NS_MSIX_PUBLISHER_DISPLAY:-Nordstjernen}
 DISPLAY_NAME=${NS_MSIX_DISPLAY_NAME:-Nordstjernen Web Browser}
 
 BUNDLE=$ROOT/dist/nordstjernen-win64
