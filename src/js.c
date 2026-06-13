@@ -4492,7 +4492,7 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     if (!n || (n->kind != NS_NODE_ELEMENT &&
                !(n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_FRAGMENT))))
         return JS_UNDEFINED;
-    gboolean free_s = !JS_IsNull(val);
+    gboolean free_s = !JS_IsNull(val) && !JS_IsUndefined(val);
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
