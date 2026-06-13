@@ -21,7 +21,8 @@ typedef enum {
     NS_PROC_EVT_NEWTAB,
     NS_PROC_EVT_HISTORY,
     NS_PROC_EVT_LOADING,
-    NS_PROC_EVT_DOWNLOAD
+    NS_PROC_EVT_DOWNLOAD,
+    NS_PROC_EVT_FAVICON
 } NsProcEvent;
 
 typedef void (*NsProcNotify)(NsProcView *view, NsProcEvent evt,
@@ -47,6 +48,10 @@ gboolean    ns_proc_view_can_forward(NsProcView *view);
 const char *ns_proc_view_url(NsProcView *view);
 const char *ns_proc_view_title(NsProcView *view);
 gboolean    ns_proc_view_is_loading(NsProcView *view);
+
+/* The tab's current favicon as a paintable, or NULL. Owned by the view; ref it
+ * if you keep it. Updated just before an NS_PROC_EVT_FAVICON notification. */
+GdkPaintable *ns_proc_view_favicon(NsProcView *view);
 
 /* Task-manager support: this tab's renderer OS pid (-1 if none), and a
  * forceful "End task" that kills the renderer (the tab respawns on next use). */

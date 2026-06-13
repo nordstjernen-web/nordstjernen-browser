@@ -1845,6 +1845,64 @@ ns_browser_links(ns_browser *browser)
     return result;
 }
 
+static gboolean
+rel_token_is_icon(const char *rel)
+{
+    if (!rel)
+        return FALSE;
+    for (const char *p = rel; *p;) {
+        while (*p && g_ascii_isspace(*p))
+            p++;
+        const char *start = p;
+        while (*p && !g_ascii_isspace(*p))
+            p++;
+        if ((size_t)(p - start) == 4 &&
+            g_ascii_strncasecmp(start, "icon", 4) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static const char *
+find_icon_href(const ns_node *node)
+{
+    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "link")) {
+            const char *href = ns_element_get_attr(c, "href");
+            if (href && *href && rel_token_is_icon(ns_element_get_attr(c, "rel")))
+                return href;
+        }
+        const char *found = find_icon_href(c);
+        if (found)
+            return found;
+    }
+    return NULL;
+}
+
+char *
+ns_browser_favicon_url(ns_browser *browser)
+{
+    if (!browser || !browser->doc)
+        return NULL;
+    const char *href = find_icon_href(browser->doc);
+    char *abs = (href && *href) ? ns_url_resolve(browser->base_url, href) : NULL;
+    if (abs && *abs) {
+        char *out = strdup(abs);
+        g_free(abs);
+        return out;
+    }
+    g_free(abs);
+    char *origin = ns_url_origin_from(browser->base_url);
+    char *out = (origin && *origin) ? g_strconcat(origin, "/favicon.ico", NULL)
+                                    : NULL;
+    g_free(origin);
+    if (!out)
+        return NULL;
+    char *dup = strdup(out);
+    g_free(out);
+    return dup;
+}
+
 void
 ns_browser_close(ns_browser *browser)
 {

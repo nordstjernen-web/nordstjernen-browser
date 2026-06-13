@@ -870,6 +870,40 @@ ns_rproc_http_export(ns_rproc_http *r, const char *path)
     return ok == 0 ? 0 : -1;
 }
 
+unsigned char *
+ns_rproc_http_favicon(ns_rproc_http *r, int *out_w, int *out_h, int *out_stride)
+{
+    *out_w = 0;
+    *out_h = 0;
+    *out_stride = 0;
+    if (!r)
+        return NULL;
+    if (http_write_request(r->wfd, "POST", "/favicon", "application/json", "",
+                           0) != 0)
+        return NULL;
+    http_head head;
+    if (http_read_head(&r->conn, &head) != 0)
+        return NULL;
+    if (head.content_length <= 0 || head.content_length > NS_HTTP_MAX_REPLY)
+        return NULL;
+    unsigned char *body = malloc((size_t)head.content_length);
+    if (!body)
+        return NULL;
+    if (http_read_body(&r->conn, head.content_length, body) != 0) {
+        free(body);
+        return NULL;
+    }
+    if (head.x_w < 1 || head.x_h < 1 || head.x_stride < head.x_w * 4 ||
+        head.x_stride * head.x_h > head.content_length) {
+        free(body);
+        return NULL;
+    }
+    *out_w = (int)head.x_w;
+    *out_h = (int)head.x_h;
+    *out_stride = (int)head.x_stride;
+    return body;
+}
+
 void
 ns_rproc_http_page_clear(ns_rproc_http_page *out)
 {

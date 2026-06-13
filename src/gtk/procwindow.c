@@ -547,6 +547,21 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             g_strfreev(parts);
         }
         break;
+    case NS_PROC_EVT_FAVICON:
+        if (idx >= 0) {
+            GtkWidget *p =
+                gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
+            GtkWidget *icon = g_object_get_data(G_OBJECT(p), "ns-tab-icon");
+            GdkPaintable *fav = ns_proc_view_favicon(v);
+            if (icon && fav)
+                gtk_image_set_from_paintable(GTK_IMAGE(icon), fav);
+            else if (icon)
+                gtk_image_set_from_icon_name(GTK_IMAGE(icon),
+                                             "text-x-generic-symbolic");
+            if (icon)
+                gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
+        }
+        break;
     }
 }
 
@@ -609,10 +624,15 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     GtkWidget *tabbtn = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(tabbtn), FALSE);
     gtk_widget_add_css_class(tabbtn, "ns-tab-label");
+    GtkWidget *tabcontent = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    GtkWidget *icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
     GtkWidget *label = gtk_label_new(ns_i18n("New Tab"));
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(label), 16);
-    gtk_button_set_child(GTK_BUTTON(tabbtn), label);
+    gtk_box_append(GTK_BOX(tabcontent), icon);
+    gtk_box_append(GTK_BOX(tabcontent), label);
+    gtk_button_set_child(GTK_BUTTON(tabbtn), tabcontent);
     g_object_set_data(G_OBJECT(tabbtn), "ns-pw", pw);
     g_signal_connect(tabbtn, "clicked", G_CALLBACK(on_tab_clicked), page);
     gtk_box_append(GTK_BOX(wrapper), tabbtn);
@@ -626,6 +646,7 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     g_object_set_data(G_OBJECT(wrapper), "ns-page", page);
     g_object_set_data(G_OBJECT(wrapper), "ns-tab-button", tabbtn);
     g_object_set_data(G_OBJECT(page), "ns-tab-label", label);
+    g_object_set_data(G_OBJECT(page), "ns-tab-icon", icon);
     g_object_set_data(G_OBJECT(page), "ns-strip-tab", wrapper);
 
     GtkWidget *blank = gtk_label_new(NULL);

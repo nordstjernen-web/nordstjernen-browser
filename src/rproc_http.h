@@ -78,6 +78,12 @@ char *ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,
                              int *out_stream);
 int   ns_rproc_http_export(ns_rproc_http *r, const char *path);
 
+/* Fetch and decode the current page's favicon to BGRA premultiplied pixels.
+   Returns a malloc'd buffer (free() it) with *out_w x *out_h pixels at
+   *out_stride bytes/row, or NULL if the page has no usable favicon. */
+unsigned char *ns_rproc_http_favicon(ns_rproc_http *r, int *out_w, int *out_h,
+                                     int *out_stride);
+
 void ns_rproc_http_page_clear(ns_rproc_http_page *out);
 void ns_rproc_http_close(ns_rproc_http *r);
 

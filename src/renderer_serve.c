@@ -4,6 +4,9 @@
 #define _GNU_SOURCE
 #include "renderer_serve.h"
 #include "libnordstjernen.h"
+#include "net.h"
+#include "image.h"
+#include "texture.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +80,44 @@ reply_href_changed(int fd, const char *href, int changed)
                             (size_t)n);
     free(json);
     free(e);
+}
+
+static unsigned char *
+favicon_bgra(ns_browser *b, int *out_w, int *out_h)
+{
+    char *url = ns_browser_favicon_url(b);
+    if (!url || !*url) {
+        free(url);
+        return NULL;
+    }
+    ns_response *resp = ns_net_fetch_blocking(url, NULL, NULL);
+    free(url);
+    if (!resp || resp->status >= 400 || !resp->body || resp->body->len == 0) {
+        if (resp)
+            ns_response_free(resp);
+        return NULL;
+    }
+    int w = 0, h = 0;
+    ns_texture *tex =
+        ns_image_decode_bytes(resp->body->data, resp->body->len, &w, &h);
+    ns_response_free(resp);
+    if (!tex)
+        return NULL;
+    if (w < 1 || h < 1 || w > 512 || h > 512) {
+        ns_texture_unref(tex);
+        return NULL;
+    }
+    gsize stride = (gsize)w * 4u;
+    unsigned char *px = malloc(stride * (gsize)h);
+    if (!px) {
+        ns_texture_unref(tex);
+        return NULL;
+    }
+    ns_texture_download(tex, px, stride);
+    ns_texture_unref(tex);
+    *out_w = w;
+    *out_h = h;
+    return px;
 }
 
 ns_renderer_session *
@@ -245,6 +286,25 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         else
             http_write_response(ctrl_w, 200, "application/octet-stream",
                                 hdrs, s->fb, (size_t)stride * (size_t)vh);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/favicon") == 0) {
+        int fw = 0, fh = 0;
+        unsigned char *px = s->cur ? favicon_bgra(s->cur, &fw, &fh) : NULL;
+        if (px) {
+            char hdrs[96];
+            int hn = snprintf(hdrs, sizeof hdrs,
+                              "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\n",
+                              fw, fh, fw * 4);
+            http_write_response(ctrl_w, 200, "application/octet-stream",
+                                hn > 0 ? hdrs : NULL, px,
+                                (size_t)fw * (size_t)fh * 4u);
+            free(px);
+        } else {
+            http_write_response(ctrl_w, 200, "application/octet-stream",
+                                "X-W: 0\r\nX-H: 0\r\nX-Stride: 0\r\n", NULL, 0);
+        }
         return 0;
     }
 

@@ -220,6 +220,11 @@ char *ns_browser_take_pending_download(ns_browser *browser);
  * links are skipped. NULL if there are none. Newly allocated; free() it. */
 char *ns_browser_links(ns_browser *browser);
 
+/* Absolute URL of the page's favicon: the first <link rel="…icon…"> href
+ * resolved against the base URL, else the origin's /favicon.ico. NULL if the
+ * page has no origin. Newly allocated; free() it. */
+char *ns_browser_favicon_url(ns_browser *browser);
+
 void ns_browser_close(ns_browser *browser);
 
 void ns_browser_shutdown(void);

@@ -28,7 +28,7 @@ typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL,
-    REQ_WEBGL, REQ_QUIT
+    REQ_WEBGL, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
 
@@ -60,7 +60,7 @@ typedef struct {
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL
+    RES_CONSOLE, RES_EVAL, RES_FAVICON
 } ResType;
 
 typedef struct {
@@ -89,6 +89,8 @@ typedef struct {
     int              find_total, find_current, find_scroll_y;
     char            *media_url;
     int              media_is_video, media_stream;
+    unsigned char   *favicon_data;
+    int              favicon_w, favicon_h, favicon_stride;
 } Res;
 
 struct NsProcView {
@@ -121,6 +123,8 @@ struct NsProcView {
     cairo_surface_t *frame;
     cairo_surface_t *stage[2];
     int              stage_next;
+
+    GdkPaintable    *favicon;
 
     gboolean    render_inflight;
     gboolean    render_pending;
@@ -202,6 +206,9 @@ pv_free(NsProcView *v)
     if (v->frame)
         cairo_surface_destroy(v->frame);
     v->frame = NULL;
+    if (v->favicon)
+        g_object_unref(v->favicon);
+    v->favicon = NULL;
     if (v->ctx_popover)
         gtk_widget_unparent(v->ctx_popover);
     if (v->ctx_actions)
@@ -529,6 +536,16 @@ worker_main(gpointer data)
         } else if (req->type == REQ_WEBGL) {
             if (v->proc)
                 ns_rproc_http_resolve_webgl(v->proc, req->url, req->mods);
+        } else if (req->type == REQ_FAVICON) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_FAVICON;
+            res->seq = req->seq;
+            if (v->proc)
+                res->favicon_data = ns_rproc_http_favicon(
+                    v->proc, &res->favicon_w, &res->favicon_h,
+                    &res->favicon_stride);
+            post(res);
         }
         g_free(req->url);
         g_free(req->key);
@@ -547,6 +564,15 @@ static void
 push_req(NsProcView *v, Req *req)
 {
     g_async_queue_push(v->queue, req);
+}
+
+static void
+request_favicon(NsProcView *v)
+{
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_FAVICON;
+    req->seq = v->load_seq;
+    push_req(v, req);
 }
 
 static int
@@ -1101,6 +1127,7 @@ ns_proc_view_toggle_console(NsProcView *v)
 const char *ns_proc_view_url(NsProcView *v) { return v->current_url; }
 const char *ns_proc_view_title(NsProcView *v) { return v->current_title; }
 gboolean ns_proc_view_is_loading(NsProcView *v) { return v->loading; }
+GdkPaintable *ns_proc_view_favicon(NsProcView *v) { return v ? v->favicon : NULL; }
 
 int
 ns_proc_view_renderer_pid(NsProcView *v)
@@ -1273,6 +1300,7 @@ on_result(gpointer data)
         post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Done"));
         finish_loading(v);
         request_render(v);
+        request_favicon(v);
     } else if (res->type == RES_FRAME) {
         gboolean current = res->seq == v->render_seq;
         if (current && res->ok) {
@@ -1507,6 +1535,20 @@ on_result(gpointer data)
             console_append(v, "undefined\n");
         }
         request_render(v);
+    } else if (res->type == RES_FAVICON) {
+        if (res->seq != v->load_seq)
+            goto done;
+        g_clear_object(&v->favicon);
+        if (res->favicon_data && res->favicon_w > 0 && res->favicon_h > 0) {
+            gsize len = (gsize)res->favicon_stride * (gsize)res->favicon_h;
+            GBytes *bytes = g_bytes_new(res->favicon_data, len);
+            GdkTexture *tex = gdk_memory_texture_new(
+                res->favicon_w, res->favicon_h,
+                GDK_MEMORY_B8G8R8A8_PREMULTIPLIED, bytes, res->favicon_stride);
+            g_bytes_unref(bytes);
+            v->favicon = GDK_PAINTABLE(tex);
+        }
+        post_emit(v, NS_PROC_EVT_FAVICON, NULL);
     }
 
 done:
@@ -1520,6 +1562,7 @@ done:
     free(res->href);
     free(res->cursor);
     free(res->media_url);
+    free(res->favicon_data);
     pv_unref(res->view);
     g_free(res);
     return G_SOURCE_REMOVE;
