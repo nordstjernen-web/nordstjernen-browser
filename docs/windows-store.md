@@ -182,23 +182,11 @@ Restricted capability approval text:
 ```text
 Capability requested: runFullTrust
 
-Nordstjernen Web Browser is a packaged Win32 desktop browser
-distributed as an MSIX package. It is written in C with GTK 4 and
-libcurl, and the packaged app entry point launches the bundled desktop
-executable rather than a UWP/AppContainer application. Microsoft MSIX
-documentation requires the runFullTrust restricted capability for
-packages that contain full-trust desktop apps.
-
-The capability is used only to launch the packaged Nordstjernen desktop
-browser process and its packaged renderer subprocesses under the
-current user's normal account. The browser process is
-nordstjernen-browser.exe, and each tab is isolated in a bundled
-nordstjernen-renderer.exe child process.
-
-Nordstjernen does not request elevation, install drivers or services,
-manage other packages, modify system settings, mine cryptocurrency, or
-collect telemetry. User data is limited to normal browser profile data,
-and network connections are initiated by the user when browsing the web.
+Nordstjernen Web Browser is a packaged Win32 desktop browser. The
+capability is required only to launch the bundled desktop executable and
+its renderer subprocesses from the MSIX package. The app does not request
+elevation, install services or drivers, modify system settings, manage
+other packages, mine cryptocurrency, or collect telemetry.
 ```
 
 ### Local testing (sideload)
