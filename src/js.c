@@ -30550,6 +30550,90 @@ ns_document_createProcessingInstruction(JSContext *ctx,
 }
 
 static JSValue
+ns_make_attr_node(JSContext *ctx, const char *ns_uri, const char *prefix,
+                  const char *local, const char *qname)
+{
+    JSValue out = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, out, "name",      JS_NewString(ctx, qname));
+    JS_SetPropertyStr(ctx, out, "nodeName",  JS_NewString(ctx, qname));
+    JS_SetPropertyStr(ctx, out, "localName", JS_NewString(ctx, local));
+    JS_SetPropertyStr(ctx, out, "value",       JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, out, "nodeValue",   JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, out, "textContent", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, out, "nodeType",  JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, out, "namespaceURI",
+                      ns_uri ? JS_NewString(ctx, ns_uri) : JS_NULL);
+    JS_SetPropertyStr(ctx, out, "prefix",
+                      prefix ? JS_NewString(ctx, prefix) : JS_NULL);
+    JS_SetPropertyStr(ctx, out, "specified",    JS_TRUE);
+    JS_SetPropertyStr(ctx, out, "ownerElement", JS_NULL);
+    return out;
+}
+
+static JSValue
+ns_document_createAttribute(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
+    const char *raw = JS_ToCString(ctx, argv[0]);
+    if (!raw) return JS_EXCEPTION;
+    if (!*raw) {
+        JS_FreeCString(ctx, raw);
+        return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
+            "createAttribute: name must not be empty");
+    }
+    char *name = ns_doc_wrapper_is_xml(ctx, this_val)
+        ? g_strdup(raw) : g_ascii_strdown(raw, -1);
+    JS_FreeCString(ctx, raw);
+    JSValue out = ns_make_attr_node(ctx, NULL, NULL, name, name);
+    g_free(name);
+    return out;
+}
+
+static JSValue
+ns_document_createAttributeNS(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required");
+    const char *ns_uri = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])
+        ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *qname = JS_ToCString(ctx, argv[1]);
+    if (!qname) {
+        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        return JS_EXCEPTION;
+    }
+    if (!ns_valid_element_local_name(qname)) {
+        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        JS_FreeCString(ctx, qname);
+        return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
+            "createAttributeNS: invalid qualified name");
+    }
+    const char *colon = strchr(qname, ':');
+    char *prefix = colon ? g_strndup(qname, (gsize)(colon - qname)) : NULL;
+    const char *local = colon ? colon + 1 : qname;
+    if ((prefix && !ns_uri) ||
+        (prefix && strcmp(prefix, "xml") == 0 &&
+         (!ns_uri || strcmp(ns_uri, "http://www.w3.org/XML/1998/namespace") != 0)) ||
+        (((qname[0] == 'x' && strcmp(qname, "xmlns") == 0) ||
+          (prefix && strcmp(prefix, "xmlns") == 0)) !=
+         (ns_uri && strcmp(ns_uri, "http://www.w3.org/2000/xmlns/") == 0))) {
+        g_free(prefix);
+        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        JS_FreeCString(ctx, qname);
+        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
+            "createAttributeNS: namespace/qualified name mismatch");
+    }
+    JSValue out = ns_make_attr_node(ctx, ns_uri, prefix, local, qname);
+    g_free(prefix);
+    if (ns_uri) JS_FreeCString(ctx, ns_uri);
+    JS_FreeCString(ctx, qname);
+    return out;
+}
+
+static JSValue
 ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
@@ -30701,6 +30785,10 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
                ns_document_createCDATASection, 1);
     ns_bind_fn(ctx, wrapper, "createProcessingInstruction",
                ns_document_createProcessingInstruction, 2);
+    ns_bind_fn(ctx, wrapper, "createAttribute",
+               ns_document_createAttribute, 1);
+    ns_bind_fn(ctx, wrapper, "createAttributeNS",
+               ns_document_createAttributeNS, 2);
     ns_bind_fn(ctx, wrapper, "createRange",
                ns_document_create_range, 0);
     ns_synthdoc_define_getter(ctx, wrapper, "doctype",
@@ -30791,6 +30879,10 @@ ns_make_synth_xml_document(JSContext *ctx)
                ns_document_createCDATASection, 1);
     ns_bind_fn(ctx, wrapper, "createProcessingInstruction",
                ns_document_createProcessingInstruction, 2);
+    ns_bind_fn(ctx, wrapper, "createAttribute",
+               ns_document_createAttribute, 1);
+    ns_bind_fn(ctx, wrapper, "createAttributeNS",
+               ns_document_createAttributeNS, 2);
     ns_bind_fn(ctx, wrapper, "createDocumentFragment",
                ns_document_createDocumentFragment, 0);
     ns_bind_fn(ctx, wrapper, "importNode",
@@ -31597,6 +31689,8 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CFUNC_DEF("createCDATASection",       1, ns_document_createCDATASection),
     JS_CFUNC_DEF("createProcessingInstruction", 2,
                  ns_document_createProcessingInstruction),
+    JS_CFUNC_DEF("createAttribute",          1, ns_document_createAttribute),
+    JS_CFUNC_DEF("createAttributeNS",        2, ns_document_createAttributeNS),
     JS_CFUNC_DEF("createEvent",              1, ns_document_createEvent),
     JS_CFUNC_DEF("createDocumentFragment",   0, ns_document_createDocumentFragment),
     JS_CFUNC_DEF("getElementsByTagName",    1, ns_document_getElementsByTagName),
