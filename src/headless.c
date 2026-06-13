@@ -25,8 +25,11 @@
 #include "image.h"
 #include "js.h"
 #include "layout.h"
+#include "libnordstjernen.h"
 #include "net.h"
 #include "paint.h"
+#include "rproc_http.h"
+#include "rproc_inproc.h"
 #include "video.h"
 #include "wpt_hook.h"
 
@@ -238,6 +241,180 @@ static int ns_headless_run_one(const ns_headless_opts *opts,
                                const char *post_body, gsize post_len,
                                const char *post_ct);
 
+typedef struct {
+    const char *name;
+    const char *jskey;
+    int         code;
+} rdrv_keymap;
+
+static const rdrv_keymap rdrv_keys[] = {
+    {"Enter", "Enter", 13}, {"Return", "Enter", 13},
+    {"Backspace", "Backspace", 8}, {"Delete", "Delete", 46},
+    {"Tab", "Tab", 9}, {"Escape", "Escape", 27},
+    {"Left", "ArrowLeft", 37}, {"Right", "ArrowRight", 39},
+    {"Up", "ArrowUp", 38}, {"Down", "ArrowDown", 40},
+    {"Home", "Home", 36}, {"End", "End", 35},
+};
+
+static char *
+rdrv_follow_nav(ns_rproc_http *r, char *href, int vw, int vh, int settle_ms)
+{
+    int hops = 0;
+    while (href && *href && hops < 6) {
+        ns_rproc_http_page pg;
+        if (ns_rproc_http_open(r, href, vw, vh, settle_ms, &pg) != 0) {
+            ns_rproc_http_page_clear(&pg);
+            break;
+        }
+        fprintf(stderr, "[headless] open -> %s\n", href);
+        g_free(href);
+        href = pg.nav ? g_strdup(pg.nav) : NULL;
+        ns_rproc_http_page_clear(&pg);
+        hops++;
+    }
+    g_free(href);
+    return NULL;
+}
+
+static void
+rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
+                 int settle_ms)
+{
+    char **acts = g_strsplit(spec, ";", -1);
+    for (int i = 0; acts[i]; i++) {
+        char *a = g_strstrip(acts[i]);
+        if (!*a) continue;
+        if (g_str_has_prefix(a, "click ")) {
+            double x = 0, y = 0;
+            if (sscanf(a + 6, "%lf , %lf", &x, &y) != 2) continue;
+            fprintf(stderr, "[headless] click %g,%g\n", x, y);
+            char *h = ns_rproc_http_click(r, (int)x, (int)y, 0);
+            g_free(h);
+            int changed = 0;
+            char *href = ns_rproc_http_release_full(r, &changed);
+            if (href && *href)
+                rdrv_follow_nav(r, href, vw, vh, settle_ms);
+            else
+                g_free(href);
+        } else if (g_str_has_prefix(a, "type ")) {
+            const char *text = a + 5;
+            fprintf(stderr, "[headless] type \"%s\"\n", text);
+            char *h = ns_rproc_http_key(r, 2, text, "", 0, 0);
+            g_free(h);
+        } else if (g_str_has_prefix(a, "key ")) {
+            const char *name = g_strstrip(a + 4);
+            fprintf(stderr, "[headless] key %s\n", name);
+            const char *jskey = name;
+            int code = 0;
+            for (gsize k = 0; k < G_N_ELEMENTS(rdrv_keys); k++)
+                if (g_ascii_strcasecmp(name, rdrv_keys[k].name) == 0) {
+                    jskey = rdrv_keys[k].jskey;
+                    code = rdrv_keys[k].code;
+                    break;
+                }
+            char *h = ns_rproc_http_key(r, 0, jskey, jskey, code, 0);
+            if (h && *h)
+                rdrv_follow_nav(r, g_strdup(h), vw, vh, settle_ms);
+            g_free(h);
+            char *hu = ns_rproc_http_key(r, 1, jskey, jskey, code, 0);
+            g_free(hu);
+        }
+    }
+    g_strfreev(acts);
+}
+
+typedef struct {
+    const ns_headless_opts *opts;
+    GMainLoop              *loop;
+    int                     rc;
+} rdrv_ctx;
+
+static gboolean
+rdrv_quit(gpointer data)
+{
+    g_main_loop_quit((GMainLoop *)data);
+    return G_SOURCE_REMOVE;
+}
+
+static gpointer
+rdrv_thread(gpointer data)
+{
+    rdrv_ctx *c = data;
+    const ns_headless_opts *o = c->opts;
+    int vw = o->viewport_width > 0 ? o->viewport_width : 1000;
+    int vh = o->viewport_height > 0 ? o->viewport_height
+                                    : (int)((double)vw * 0.75);
+    ns_rproc_http *r = ns_rproc_http_spawn_shm(NULL, vw, vh);
+    if (!r) {
+        c->rc = 2;
+        g_idle_add(rdrv_quit, c->loop);
+        return NULL;
+    }
+
+    ns_rproc_http_page pg;
+    if (ns_rproc_http_open(r, o->url, vw, vh, o->settle_ms, &pg) != 0) {
+        c->rc = 2;
+        ns_rproc_http_close(r);
+        g_idle_add(rdrv_quit, c->loop);
+        return NULL;
+    }
+    char *nav = pg.nav ? g_strdup(pg.nav) : NULL;
+    ns_rproc_http_page_clear(&pg);
+    if (nav)
+        rdrv_follow_nav(r, nav, vw, vh, o->settle_ms);
+
+    if (o->actions && *o->actions)
+        rdrv_run_actions(r, o->actions, vw, vh, o->settle_ms);
+
+    if (o->eval && *o->eval) {
+        char *res = ns_rproc_http_eval(r, o->eval);
+        if (res) {
+            fprintf(stdout, "eval: %s\n", res);
+            g_free(res);
+        }
+    }
+
+    const char *kind = NULL;
+    if (o->dump == NS_DUMP_TEXT)        kind = "text";
+    else if (o->dump == NS_DUMP_DOM)    kind = "dom";
+    else if (o->dump == NS_DUMP_LAYOUT) kind = "layout";
+    if (kind) {
+        char *d = ns_rproc_http_dump(r, kind);
+        if (d) {
+            fwrite(d, 1, strlen(d), stdout);
+            g_free(d);
+        }
+    }
+
+    ns_rproc_http_close(r);
+    c->rc = 0;
+    g_idle_add(rdrv_quit, c->loop);
+    return NULL;
+}
+
+static int
+ns_headless_run_via_renderer(const ns_headless_opts *opts)
+{
+    ns_rproc_single_process_enable();
+    rdrv_ctx ctx = { opts, g_main_loop_new(NULL, FALSE), 0 };
+    GThread *t = g_thread_new("ns-headless-drv", rdrv_thread, &ctx);
+    g_main_loop_run(ctx.loop);
+    g_thread_join(t);
+    g_main_loop_unref(ctx.loop);
+    return ctx.rc;
+}
+
+static gboolean
+ns_headless_renderer_capable(const ns_headless_opts *opts)
+{
+    if (g_getenv("NS_HEADLESS_LEGACY")) return FALSE;
+    if (opts->wpt) return FALSE;
+    if (opts->inspect && *opts->inspect) return FALSE;
+    if (opts->inspect_at && *opts->inspect_at) return FALSE;
+    if (opts->dump == NS_DUMP_PNG || opts->dump == NS_DUMP_PDF) return FALSE;
+    return TRUE;
+}
+
 int
 ns_headless_run(const ns_headless_opts *opts)
 {
@@ -255,7 +432,9 @@ ns_headless_run(const ns_headless_opts *opts)
     if (opts->debug_levels)
         dlog_sub = ns_debug_log_subscribe(headless_dlog_listener,
                                           GUINT_TO_POINTER(opts->debug_levels));
-    int rc = ns_headless_run_one(opts, opts->url, 0, NULL, 0, NULL);
+    int rc = ns_headless_renderer_capable(opts)
+             ? ns_headless_run_via_renderer(opts)
+             : ns_headless_run_one(opts, opts->url, 0, NULL, 0, NULL);
     if (dlog_sub) ns_debug_log_unsubscribe(dlog_sub);
     return rc;
 }
