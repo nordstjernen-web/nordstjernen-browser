@@ -35,7 +35,7 @@ $process = Start-Process -FilePath $Exe -ArgumentList @($Url) -PassThru -WindowS
 try {
     Start-Sleep -Seconds $Seconds
     if (Get-Process -Id $process.Id -ErrorAction SilentlyContinue) {
-        Stop-Process -Id $process.Id -Force
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
         "smoke-launch-ok"
     } else {
         throw "Browser exited before the smoke interval elapsed"
@@ -43,6 +43,6 @@ try {
 } finally {
     $leftover = Get-Process -Id $process.Id -ErrorAction SilentlyContinue
     if ($leftover) {
-        Stop-Process -Id $process.Id -Force
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     }
 }

@@ -148,7 +148,7 @@ that shaped the manifest:
 Partner Center product identity:
 
 ```sh
-NS_MSIX_IDENTITY_NAME='Nordstjernen.NordstjernenWebBrowser' \
+NS_MSIX_IDENTITY_NAME='29567TheFreecivProject.NordstjernenWebBrowser' \
 NS_MSIX_PUBLISHER='CN=631F98F7-2280-49EE-8EF8-534CC36D09CF' \
 NS_MSIX_PUBLISHER_DISPLAY='Nordstjernen' \
 NS_MSIX_PHONE_PRODUCT_ID='2c47a178-dfb0-4383-9dc0-aa7195bc8354' \
@@ -159,6 +159,11 @@ NS_MSIX_PHONE_PUBLISHER_ID='eb62046e-1fa9-48a1-b651-cbf7237e9a03' \
 These are the script defaults. `NS_MSIX_DISPLAY_NAME` defaults to
 `Nordstjernen Web Browser`, matching the reserved Store listing name.
 Override any of them only for a different Partner Center product.
+`NS_MSIX_IDENTITY_NAME` must remain the exact Partner Center-assigned
+package identity, even when its prefix does not match the current
+customer-facing publisher name. Store validation rejects packages with
+renamed identities because the Package Family Name is derived from this
+value and the publisher certificate subject.
 The `mp:PhoneIdentity` values are included for Store submission;
 Microsoft's manifest schema requires both phone GUID fields, while
 the desktop package identity still comes from `Package/Identity`.
@@ -170,7 +175,7 @@ Store discovery values:
 - Store protocol link:
   `ms-windows-store://pdp/?productid=9NW8T7W5Z4PL`
 - Package Family Name:
-  `Nordstjernen.NordstjernenWebBrowser_ga6t65cntcpba`
+  `29567TheFreecivProject.NordstjernenWebBrowser_ga6t65cntcpba`
 
 ### Local testing (sideload)
 
