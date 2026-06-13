@@ -4,11 +4,11 @@
  */
 
 #include "config.h"
+#include "net.h"
 
 #include "proc_limits.h"
 #include "procwindow.h"
 #include "rproc_inproc.h"
-#include "net.h"
 
 #include <glib.h>
 
