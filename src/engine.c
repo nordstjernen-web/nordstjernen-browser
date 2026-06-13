@@ -73,14 +73,14 @@ ns_engine_post_blocking(const char *url, const char *top_url,
 }
 
 static GBytes *
-fetch_css_bytes(const char *url, GHashTable *cache)
+fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache)
 {
     if (!url || !*url) return NULL;
     if (cache) {
         GBytes *hit = g_hash_table_lookup(cache, url);
         if (hit) return g_bytes_get_size(hit) ? g_bytes_ref(hit) : NULL;
     }
-    ns_response *resp = ns_engine_fetch_blocking(url, NULL, NULL);
+    ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
     GBytes *bytes = NULL;
     if (resp && !resp->error && resp->status < 400 &&
         resp->body && resp->body->len > 0) {
@@ -119,8 +119,8 @@ rel_is_stylesheet(const char *rel)
 
 static void
 append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
-                           const char *base_url, GHashTable *seen,
-                           GHashTable *cache, int depth)
+                           const char *base_url, const char *top_url,
+                           GHashTable *seen, GHashTable *cache, int depth)
 {
     if (!out || !sh) return;
     if (depth < NS_CSS_IMPORT_MAX_DEPTH && sh->imports) {
@@ -137,7 +137,7 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             }
             if (seen) g_hash_table_add(seen, g_strdup(abs));
-            GBytes *bytes = fetch_css_bytes(abs, cache);
+            GBytes *bytes = fetch_css_bytes(abs, top_url, cache);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
@@ -146,8 +146,8 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 if (child) {
                     if (im->layer_name)
                         ns_css_stylesheet_force_layer(child, im->layer_name);
-                    append_stylesheet_expanded(out, child, abs, seen, cache,
-                                               depth + 1);
+                    append_stylesheet_expanded(out, child, abs, top_url, seen,
+                                               cache, depth + 1);
                 }
                 g_bytes_unref(bytes);
             }
@@ -163,6 +163,7 @@ typedef struct {
     GHashTable *cache;
     GString    *run;
     const char *run_base;
+    const char *top_url;
 } sheet_collect_ctx;
 
 static void
@@ -174,7 +175,7 @@ sheet_run_flush(sheet_collect_ctx *cc)
     if (sh) {
         GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, NULL);
-        append_stylesheet_expanded(cc->out, sh, cc->run_base, seen,
+        append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url, seen,
                                    cc->cache, 0);
         g_hash_table_destroy(seen);
     }
@@ -207,8 +208,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                     GHashTable *seen =
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
-                    append_stylesheet_expanded(out, sh, base_url, seen,
-                                               cache, 0);
+                    append_stylesheet_expanded(out, sh, base_url, cc->top_url,
+                                               seen, cache, 0);
                     g_hash_table_destroy(seen);
                 }
             } else {
@@ -226,7 +227,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
         if (href && *href && rel_is_stylesheet(rel) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
-            GBytes *bytes = fetch_css_bytes(abs, cache);
+            GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
@@ -237,7 +238,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
                     if (abs) g_hash_table_add(seen, g_strdup(abs));
-                    append_stylesheet_expanded(out, sh, abs, seen, cache, 0);
+                    append_stylesheet_expanded(out, sh, abs, cc->top_url, seen,
+                                               cache, 0);
                     g_hash_table_destroy(seen);
                 }
                 g_bytes_unref(bytes);
@@ -256,6 +258,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
     sheet_collect_ctx cc = {
         .out = out, .cache = css_cache,
         .run = g_string_new(NULL), .run_base = NULL,
+        .top_url = base_url,
     };
     collect_stylesheets_walk(doc, base_url, &cc);
     sheet_run_flush(&cc);

@@ -365,13 +365,33 @@ browser_js_log(const char *line, gpointer ud)
     g_string_append_c(b->console_buf, '\n');
 }
 static void browser_js_mutated(gpointer ud) { ns_browser *b = ud; if (b) b->dirty = TRUE; }
+
+static gboolean
+browser_allows_navigation_url(ns_browser *b, const char *url)
+{
+    if (!url || !g_str_has_prefix(url, "file:")) return TRUE;
+    return b && b->base_url && g_str_has_prefix(b->base_url, "file:");
+}
+
+static char *
+browser_resolve_navigation(ns_browser *b, const char *href)
+{
+    if (!b || !href) return NULL;
+    char *abs = ns_url_resolve(b->base_url, href);
+    if (!browser_allows_navigation_url(b, abs)) {
+        g_free(abs);
+        return NULL;
+    }
+    return abs;
+}
+
 static void browser_js_navigate(const char *url, gboolean reload, gpointer ud)
 {
     (void)reload;
     ns_browser *b = ud;
     if (!b || !url || !*url) return;
     g_free(b->pending_nav);
-    b->pending_nav = ns_url_resolve(b->base_url, url);
+    b->pending_nav = browser_resolve_navigation(b, url);
 }
 
 int
@@ -449,9 +469,13 @@ browser_arm_declarative_refresh(ns_browser *b, const char *header_value)
         armed = meta && ns_net_parse_refresh(meta, &seconds, &target);
     }
     if (!armed) return;
-    b->refresh_url = target ? ns_url_resolve(b->base_url, target) : NULL;
-    g_free(target);
-    if (!b->refresh_url) b->refresh_url = g_strdup(b->base_url);
+    if (target) {
+        b->refresh_url = browser_resolve_navigation(b, target);
+        g_free(target);
+        if (!b->refresh_url) return;
+    } else {
+        b->refresh_url = g_strdup(b->base_url);
+    }
     b->refresh_due_us = g_get_monotonic_time() + (gint64)(seconds * 1e6);
 }
 
@@ -926,7 +950,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         const char *href = ns_box_hit_link(browser->layout,
                                            (double)(x + probe[i][0]),
                                            (double)(y + probe[i][1]));
-        if (href && *href) return ns_url_resolve(browser->base_url, href);
+        if (href && *href) return browser_resolve_navigation(browser, href);
     }
     return NULL;
 }
@@ -1264,6 +1288,10 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
     char *abs_action = (action && *action) ? ns_url_resolve(b->base_url, action)
                                            : g_strdup(b->base_url);
     if (!abs_action) return;
+    if (!browser_allows_navigation_url(b, abs_action)) {
+        g_free(abs_action);
+        return;
+    }
 
     const char *accept_charset = ns_element_get_attr(form, "accept-charset");
     ns_form_set_submission_charset(
@@ -1432,7 +1460,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         if (!href)
             href = ns_box_hit_link(browser->layout, (double)x, (double)y);
         if (href && *href)
-            browser->pending_nav = ns_url_resolve(browser->base_url, href);
+            browser->pending_nav = browser_resolve_navigation(browser, href);
     }
 
     const ns_node *prev = ns_css_set_active_node(NULL);

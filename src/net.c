@@ -2571,10 +2571,9 @@ file_directory_listing_page(const char *path, const char *url, long *status_out)
 static gboolean
 ns_file_access_allowed(const char *top_url)
 {
-    if (g_allow_file_urls) return TRUE;
+    if (!g_allow_file_urls) return FALSE;
     if (!top_url || !*top_url) return TRUE;
-    if (g_str_has_prefix(top_url, "file:")) return TRUE;
-    return FALSE;
+    return g_str_has_prefix(top_url, "file:");
 }
 
 static gboolean
