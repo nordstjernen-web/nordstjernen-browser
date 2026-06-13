@@ -230,7 +230,10 @@ inside the package), and uninstall from Start removes it cleanly.
    `Identity/Name` and `Publisher` GUID.
 3. **Build the package** with the real identity via the
    `NS_MSIX_*` overrides above; upload the `.msix` in a new
-   submission. Do **not** sign it — the Store does that.
+   submission. Do **not** sign it — the Store does that. The MSIX
+   packaging path builds with `-Dai=disabled` by default, so the
+   Store package has no model downloader, AI chat surface, or
+   llama.cpp runtime.
 4. **Properties**: category *Productivity* (no dedicated browser
    category), system requirements: Windows 10 1809+, x64.
 5. **Age rating**: complete the IARC questionnaire (unfiltered
@@ -245,7 +248,8 @@ inside the package), and uninstall from Start removes it cleanly.
 8. **Submission notes for the certification tester**: state that
    the app is a web browser with its own open-source engine,
    reference any pre-submission 10.2.1 correspondence, and note the
-   first-run behavior (opens `about:start`, no account, no setup).
+   first-run behavior (opens the search-only `about:start`, no
+   account, no setup).
 9. Certification takes ~24–72 h. If rejected on 10.2.1, attach the
    rejection to an exception request (see blocker section) rather
    than resubmitting unchanged.

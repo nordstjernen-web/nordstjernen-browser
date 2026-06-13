@@ -14,6 +14,10 @@ BIN_SRC=$BUILDDIR/src/gtk/nordstjernen.exe
 RENDERER_SRC=$BUILDDIR/src/nordstjernen-renderer.exe
 LAUNCHER_SRC=$BUILDDIR/src/nordstjernen-launcher.exe
 BROWSER_EXE=nordstjernen-browser.exe
+EXTRA_MESON_SETUP_ARGS=()
+if [ -n "${NS_MESON_SETUP_ARGS:-}" ]; then
+    EXTRA_MESON_SETUP_ARGS=($NS_MESON_SETUP_ARGS)
+fi
 
 resolve_mingw_prefix() {
     for cand in "${MINGW_PREFIX:-}" /c/msys64/mingw64 "C:/msys64/mingw64" \
@@ -32,7 +36,9 @@ MINGW_PREFIX=$(resolve_mingw_prefix) || {
 }
 
 if [ ! -d "$BUILDDIR" ]; then
-    meson setup "$BUILDDIR" --buildtype=release
+    meson setup "$BUILDDIR" --buildtype=release "${EXTRA_MESON_SETUP_ARGS[@]}"
+elif [ ${#EXTRA_MESON_SETUP_ARGS[@]} -gt 0 ]; then
+    meson configure "$BUILDDIR" "${EXTRA_MESON_SETUP_ARGS[@]}"
 fi
 meson compile -C "$BUILDDIR"
 

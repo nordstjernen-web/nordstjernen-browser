@@ -18,7 +18,9 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-"$SCRIPT_DIR/pack-windows.sh"
+BUILDDIR=${BUILDDIR:-$ROOT/builddir-msix} \
+NS_MESON_SETUP_ARGS="-Dai=disabled ${NS_MSIX_MESON_SETUP_ARGS:-}" \
+    "$SCRIPT_DIR/pack-windows.sh"
 
 VERSION=$(grep -E "^[[:space:]]*version:" "$ROOT/meson.build" \
           | head -1 | sed -E "s/.*'([^']+)'.*/\\1/")

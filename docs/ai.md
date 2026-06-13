@@ -67,7 +67,8 @@ meson setup builddir -Dai=enabled   # default
 meson setup builddir -Dai=disabled  # build without the local model
 ```
 
-When disabled, the start page reports that the build has no AI support.
+When disabled, `about:start` uses a simpler search-only page with no AI
+controls or model download prompts.
 
 ## Models
 
