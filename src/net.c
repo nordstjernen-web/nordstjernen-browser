@@ -386,6 +386,10 @@ ns_url_resolve(const char *base, const char *href)
         base_url = lxb_url_parse(parser, NULL,
                                  (const lxb_char_t *)base, strlen(base));
         lxb_url_parser_clean(parser);
+        if (!base_url) {
+            ns_url_parser_close(parser);
+            return NULL;
+        }
     }
     lxb_url_t *resolved = lxb_url_parse(parser, base_url,
                                         (const lxb_char_t *)href, strlen(href));

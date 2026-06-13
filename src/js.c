@@ -9243,6 +9243,17 @@ ns_window_randomUUID(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, buf);
 }
 
+static gboolean
+ns_js_url_parses(ns_js *js, const char *url)
+{
+    if (!url) return FALSE;
+    g_autofree char *base = ns_js_doc_base_url(js);
+    g_autofree char *resolved = (base && *base)
+        ? ns_url_resolve(base, url)
+        : ns_url_resolve(NULL, url);
+    return resolved != NULL;
+}
+
 static JSValue
 ns_window_open_method(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -9251,6 +9262,11 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
     if (argc < 1 || !js_from_ctx(ctx) || !js_from_ctx(ctx)->nav_cb) return JS_NULL;
     const char *url = JS_ToCString(ctx, argv[0]);
     if (url) {
+        if (*url && !ns_js_url_parses(js_from_ctx(ctx), url)) {
+            JS_FreeCString(ctx, url);
+            return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+                                          "window.open: invalid URL");
+        }
         js_from_ctx(ctx)->nav_cb(url, FALSE, js_from_ctx(ctx)->nav_user_data);
         JS_FreeCString(ctx, url);
     }
@@ -11329,6 +11345,12 @@ ns_xhr_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     if (argc < 2) return JS_UNDEFINED;
     const char *method = JS_ToCString(ctx, argv[0]);
     const char *url    = JS_ToCString(ctx, argv[1]);
+    if (url && !ns_js_url_parses(js_from_ctx(ctx), url)) {
+        if (method) JS_FreeCString(ctx, method);
+        JS_FreeCString(ctx, url);
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+                                      "XMLHttpRequest.open: invalid URL");
+    }
     if (method) {
         JS_SetPropertyStr(ctx, this_val, "_method", JS_NewString(ctx, method));
         JS_FreeCString(ctx, method);
@@ -28633,10 +28655,11 @@ ns_navigator_sendBeacon(JSContext *ctx, JSValueConst this_val,
         ? ns_url_resolve(js->current_url, raw_url)
         : g_strdup(raw_url);
     JS_FreeCString(ctx, raw_url);
-    if (!abs_url) return JS_FALSE;
+    if (!abs_url)
+        return JS_ThrowTypeError(ctx, "sendBeacon: invalid URL");
     if (!ns_url_is_http_or_https(abs_url)) {
         g_free(abs_url);
-        return JS_FALSE;
+        return JS_ThrowTypeError(ctx, "sendBeacon: URL scheme must be http or https");
     }
 
     char *body = NULL;
@@ -31776,6 +31799,11 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     if (!js || !js->nav_cb) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
+    if (!ns_js_url_parses(js, s)) {
+        JS_FreeCString(ctx, s);
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+                                      "location.href: invalid URL");
+    }
     if (!ns_location_target_allowed(s)) {
         ns_location_log_blocked(js, s);
         JS_FreeCString(ctx, s);
@@ -32119,6 +32147,21 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                                G_N_ELEMENTS(ns_location_funcs));
     JS_SetPropertyStr(ctx, global, "location", location);
     JS_SetPropertyStr(ctx, document, "location", JS_DupValue(ctx, location));
+    {
+        static const char *loc_fwd =
+            "(function(){"
+            " var loc = location;"
+            " var d = { configurable: true, enumerable: true,"
+            "   get: function(){ return loc; },"
+            "   set: function(v){ loc.href = v; } };"
+            " Object.defineProperty(globalThis, 'location', d);"
+            " try { Object.defineProperty(document, 'location', d); } catch(e){}"
+            "})();";
+        JSValue r = JS_Eval(ctx, loc_fwd, strlen(loc_fwd),
+                            "<location-forward>", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+    }
 
     static const ns_fn_def shim_ctors[] = {
         { "XMLDocument", 0 }, { "XSLTProcessor", 0 },
