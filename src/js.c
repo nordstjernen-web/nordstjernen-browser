@@ -19869,15 +19869,21 @@ ns_collect_by_tag(const ns_node *n, const char *tag, JSContext *ctx,
 }
 
 static gboolean
+class_is_ascii_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\f' || c == '\r';
+}
+
+static gboolean
 element_has_class_token(const ns_node *n, const char *want, gsize wl)
 {
     const char *cls = ns_element_get_attr(n, "class");
     if (!cls) return FALSE;
     const char *p = cls;
     while (*p) {
-        while (*p == ' ' || *p == '\t') p++;
+        while (class_is_ascii_ws(*p)) p++;
         const char *tok = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
+        while (*p && !class_is_ascii_ws(*p)) p++;
         if ((gsize)(p - tok) == wl && strncmp(tok, want, wl) == 0) return TRUE;
     }
     return FALSE;
@@ -19888,10 +19894,10 @@ element_has_class(const ns_node *n, const char *want)
 {
     const char *p = want;
     while (*p) {
-        while (*p == ' ' || *p == '\t') p++;
+        while (class_is_ascii_ws(*p)) p++;
         if (!*p) break;
         const char *tok = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
+        while (*p && !class_is_ascii_ws(*p)) p++;
         gsize wl = (gsize)(p - tok);
         if (wl == 0) continue;
         if (!element_has_class_token(n, tok, wl)) return FALSE;
