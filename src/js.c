@@ -29,6 +29,7 @@
 #include "image.h"
 #include "js_date.h"
 #include "js_intl.h"
+#include "js_realm.h"
 #include "layout.h"
 #include "mobile.h"
 #include "net.h"
@@ -28995,6 +28996,7 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
     ns_js_intl_install(ctx, global);
     ns_js_temporal_install(ctx, global);
+    ns_js_realm_install(ctx, global);
 
     ns_bind_fn_if_missing(ctx, global, "captureEvents", ns_event_noop, 0);
     ns_bind_fn_if_missing(ctx, global, "releaseEvents", ns_event_noop, 0);

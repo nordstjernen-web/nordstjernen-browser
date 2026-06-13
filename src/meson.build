@@ -65,6 +65,7 @@ nordstjernen_engine_sources = files(
   'js_canvas.c',
   'js_intl.c',
   'js_date.c',
+  'js_realm.c',
   'layout.c',
   'mobile.c',
   'net.c',

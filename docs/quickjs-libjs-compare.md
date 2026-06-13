@@ -178,21 +178,49 @@ dynamic `import("…", { with: { type: "json" } })` work, over `data:` and
 (The CSS/Wasm/HTML module variants remain unimplemented and are rarely
 used on the open web.)
 
+## Beyond LibJS: extras Nordstjernen adds that LibJS lacks
+
+These were *shared gaps* (absent from the bundled QuickJS **and** from
+LibJS). Nordstjernen now implements the first two natively, so on these it
+is ahead of both bare QuickJS and LibJS:
+
+- **ShadowRealm** — native, in `src/js_realm.c`. `new ShadowRealm()`
+  spins up a fresh standard-library global in a child `JSContext` of the
+  same runtime; `evaluate(sourceText)` runs code in that isolated global
+  and enforces the realm boundary (primitives pass through; callables are
+  returned as wrapped functions that reject non-callable object arguments;
+  any other object result throws `TypeError`). Limitation:
+  `importValue()` is not supported (returns a rejected promise), since the
+  child realm has no module loader wired.
+- **AsyncContext** — native, in `src/js_realm.c`. `AsyncContext.Variable`
+  (`run`/`get`) and `AsyncContext.Snapshot` (`run`, static `wrap`) are
+  implemented with correct **synchronous** semantics: `run` sets the value
+  for the dynamic extent of the callback and restores it afterwards (even
+  on throw), and a `Snapshot` captures/restores all live variables.
+  Limitation: values do **not** auto-propagate across real async
+  boundaries (`await`, `setTimeout`, promise reactions), which would
+  require engine-level continuation hooks QuickJS does not expose.
+
 ### Checked, and *not* a gap
 
-To keep the comparison honest, these were verified present in the bundled
-QuickJS and so are **not** LibJS-only: Set methods, `Promise.try`,
-`Promise.withResolvers`, `Map.prototype.getOrInsert`, `Error.isError`,
-`Uint8Array` base64/hex, well-formed-string methods,
-resizable/transferable `ArrayBuffer`, RegExp `/v` and `/d` flags,
-symbols as weak-collection keys, `Iterator.prototype[Symbol.dispose]`,
-`Math.sumPrecise`, `Atomics.pause`, and import-attributes parsing.
-**Shared gaps** — absent from QuickJS *and* from LibJS, so not
-differentiators: **ShadowRealm** (no `ShadowRealm*` in LibJS `Runtime/`,
-verified 2026-06-13), **AsyncContext**, and **decorators** (`@decorator`;
-not in LibJS's current Rust parser). RegExp inline modifiers (`(?i:…)`)
-live in Ladybird's separate LibRegex, outside the LibJS-vs-QuickJS scope
-of this note.
+Verified present in the bundled QuickJS, so **not** LibJS-only: Set
+methods, `Promise.try`, `Promise.withResolvers`,
+`Map.prototype.getOrInsert`, `Error.isError`, `Uint8Array` base64/hex,
+well-formed-string methods, resizable/transferable `ArrayBuffer`, RegExp
+`/v` and `/d` flags, symbols as weak-collection keys,
+`Iterator.prototype[Symbol.dispose]`, `Math.sumPrecise`, `Atomics.pause`,
+and import-attributes parsing.
+
+**Decorators** (`@decorator`) remain **unimplemented in all three** — the
+bundled QuickJS, Nordstjernen, and LibJS's current (Rust) parser. Unlike
+the runtime additions above, decorators are a *syntax/compiler* feature:
+supporting them means changing the QuickJS lexer (`@` token), the class
+parser (`js_parse_class`), bytecode generation, and the decorator
+application/initializer/metadata runtime — a deep, high-risk change to the
+core class compiler that would jeopardise parsing for every page, so it
+was deliberately not attempted in the same pass. RegExp inline modifiers
+(`(?i:…)`) live in Ladybird's separate LibRegex, outside the
+LibJS-vs-QuickJS scope of this note.
 
 ## Summary
 
@@ -208,17 +236,19 @@ what the browser exposes after its native C additions load.
 | Explicit Resource Mgmt (`using`) | ✅ | ✅ | ✅ |
 | Iterator Helpers          | ✅ | ✅ | ✅ |
 | Set methods / `Promise.try` / U8 base64-hex / resizable AB | ✅ | ✅ | ✅ |
-| Decorators (`@`) / ShadowRealm / AsyncContext | ❌ | ❌ | ❌ |
+| Decorators (`@`)          | ❌ | ❌ | ❌ |
 | **Intl (ECMA-402)**       | ❌ | ✅ native, ICU-free | ✅ ICU |
 | **Temporal**              | ❌ | ✅ native (ISO/UTC) | ✅ full |
 | **JSON modules**          | ❌ (attr parsed) | ✅ loader | ✅ |
+| ShadowRealm               | ❌ | ✅ native (no `importValue`) | ❌ |
+| AsyncContext              | ❌ | ✅ native (sync-only) | ❌ |
 
-Nordstjernen now matches LibJS on every API surface in this table; the
-only remaining shortfall is the i18n/calendar/time-zone *data depth* that
-an ICU-backed engine provides and an ICU-free one deliberately does not.
-ShadowRealm, AsyncContext, and decorators are absent from *both* engines.
-Everything else in the recent-proposal set is already present in the
-bundled QuickJS.
+Nordstjernen now matches LibJS on every LibJS-provided API surface here
+(its only remaining shortfall is the i18n/calendar/time-zone *data depth*
+an ICU-backed engine provides), and is *ahead* of LibJS on ShadowRealm
+and AsyncContext, which LibJS does not implement. **Decorators** are the
+sole feature absent from all three. Everything else in the recent-proposal
+set is already present in the bundled QuickJS.
 
 ## Implications for Nordstjernen
 
@@ -235,7 +265,16 @@ bundled QuickJS.
   (`JS_SetModuleLoaderFunc2` + `JS_ParseJSON` + a synthetic
   `JS_NewCModule` default export), verified for static and dynamic
   imports over `data:`/`http(s)`.
-- **ShadowRealm** is not implemented by either engine, so there is no
-  gap to close versus LibJS; it is low priority anyway given negligible
-  real-world web use. QuickJS can create isolated `JSContext`s at the C
-  level if a script-visible binding is ever wanted.
+- **ShadowRealm** and **AsyncContext** are now provided natively in
+  `src/js_realm.c` (the former over a child `JSContext`, the latter as
+  synchronous `Variable`/`Snapshot`), putting Nordstjernen ahead of LibJS
+  here. Their documented limits — no `ShadowRealm.importValue`, no
+  AsyncContext propagation across `await`/timers — would each require
+  deeper engine plumbing (a child-realm module loader; promise/task
+  continuation hooks).
+- **Decorators** are not implemented and were intentionally not attempted
+  in this pass: they are a core-compiler change (lexer/parser/codegen plus
+  the decorator-application runtime), where a defect would break class
+  parsing site-wide. Worth a dedicated, well-tested effort against
+  `src/quickjs/` rather than a rushed one. LibJS does not implement them
+  either, so there is no competitive gap today.
