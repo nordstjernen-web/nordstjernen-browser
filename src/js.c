@@ -2429,6 +2429,20 @@ ns_make_element(JSContext *ctx, const ns_node *cnode)
     JS_SetOpaque(obj, node);
     node->js_wrapper = JS_VALUE_GET_PTR(obj);
     node->js_invalidate = ns_invalidate_wrapper;
+    if (node->kind == NS_NODE_DOCTYPE) {
+        const char *pub = "", *sys = "";
+        for (const ns_attr *a = node->attrs; a; a = a->next) {
+            if (!a->name) continue;
+            if (strcmp(a->name, "publicId") == 0) pub = a->value ? a->value : "";
+            else if (strcmp(a->name, "systemId") == 0) sys = a->value ? a->value : "";
+        }
+        JS_DefinePropertyValueStr(ctx, obj, "name",
+            JS_NewString(ctx, node->name ? node->name : ""), JS_PROP_ENUMERABLE);
+        JS_DefinePropertyValueStr(ctx, obj, "publicId",
+            JS_NewString(ctx, pub), JS_PROP_ENUMERABLE);
+        JS_DefinePropertyValueStr(ctx, obj, "systemId",
+            JS_NewString(ctx, sys), JS_PROP_ENUMERABLE);
+    }
     if (js && js->pinned_wrappers_set) {
         JS_DupValue(ctx, obj);
         g_hash_table_add(js->pinned_wrappers_set, node);
@@ -2457,6 +2471,7 @@ enum {
     NS_INSTOF_TEXT,
     NS_INSTOF_COMMENT,
     NS_INSTOF_CHARDATA,
+    NS_INSTOF_DOCTYPE,
     NS_INSTOF_HTMLCOLLECTION,
     NS_INSTOF_NODELIST,
 };
@@ -2536,6 +2551,7 @@ static const ns_instof_def ns_instof_table[] = {
     { "ProcessingInstruction",    NULL,                 NS_INSTOF_CHARDATA },
     { "Comment",                  NULL,                 NS_INSTOF_COMMENT },
     { "CharacterData",            NULL,                 NS_INSTOF_CHARDATA },
+    { "DocumentType",             NULL,                 NS_INSTOF_DOCTYPE },
 };
 
 static JSValue
@@ -2572,6 +2588,8 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     case NS_INSTOF_CHARDATA:
         return JS_NewBool(ctx, n->kind == NS_NODE_TEXT ||
                                n->kind == NS_NODE_COMMENT);
+    case NS_INSTOF_DOCTYPE:
+        return JS_NewBool(ctx, n->kind == NS_NODE_DOCTYPE);
     default:
         break;
     }

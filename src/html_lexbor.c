@@ -68,12 +68,18 @@ lxb_node_convert(lxb_dom_node_t *src)
     }
     case LXB_DOM_NODE_TYPE_DOCUMENT_TYPE: {
         lxb_dom_document_type_t *dt = lxb_dom_interface_document_type(src);
-        size_t nlen = 0;
+        size_t nlen = 0, plen = 0, slen = 0;
         const lxb_char_t *name = lxb_dom_document_type_name(dt, &nlen);
+        const lxb_char_t *pub = lxb_dom_document_type_public_id(dt, &plen);
+        const lxb_char_t *sys = lxb_dom_document_type_system_id(dt, &slen);
         ns_node *out = ns_node_new_element(NULL);
-        out->kind = NS_NODE_DOCTYPE;
         ns_node_set_name_borrow(out,
             name && nlen ? (const char *)name : "html");
+        ns_element_set_attr(out, "publicId",
+            pub && plen ? (const char *)pub : "");
+        ns_element_set_attr(out, "systemId",
+            sys && slen ? (const char *)sys : "");
+        out->kind = NS_NODE_DOCTYPE;
         return out;
     }
     case LXB_DOM_NODE_TYPE_PROCESSING_INSTRUCTION:
