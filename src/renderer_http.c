@@ -15,6 +15,10 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#if defined(NS_HAVE_FONTCONFIG)
+#include <glib.h>
+#include <fontconfig/fontconfig.h>
+#endif
 #else
 #include <signal.h>
 #include <sys/mman.h>
@@ -24,11 +28,55 @@
 #endif
 #endif
 
+#if defined(_WIN32) && defined(NS_HAVE_FONTCONFIG)
+/* Force pango's fontconfig backend and point fontconfig at the bundled
+ * config, mirroring the GTK shell's startup. The GTK app sets these and the
+ * renderer it spawns inherits them, but a renderer spawned by the Qt/Java
+ * shells (or run standalone) would otherwise use the win32 pango backend and
+ * render CJK / many scripts as tofu. Must run before any pango/font use. */
+static void
+renderer_win32_fontconfig(void)
+{
+    wchar_t wexe[4096];
+    DWORD n = GetModuleFileNameW(NULL, wexe, 4096);
+    char *dir = NULL;
+    if (n > 0 && n < 4096) {
+        char *exe = g_utf16_to_utf8((const gunichar2 *)wexe, -1, NULL, NULL, NULL);
+        if (exe) {
+            dir = g_path_get_dirname(exe);
+            g_free(exe);
+        }
+    }
+    if (dir) {
+        if (!g_getenv("FONTCONFIG_FILE")) {
+            char *conf = g_build_filename(dir, "etc", "fonts", "fonts.conf", NULL);
+            if (g_file_test(conf, G_FILE_TEST_EXISTS))
+                g_setenv("FONTCONFIG_FILE", conf, TRUE);
+            g_free(conf);
+        }
+        if (!g_getenv("FONTCONFIG_PATH")) {
+            char *fonts = g_build_filename(dir, "etc", "fonts", NULL);
+            if (g_file_test(fonts, G_FILE_TEST_IS_DIR))
+                g_setenv("FONTCONFIG_PATH", fonts, TRUE);
+            g_free(fonts);
+        }
+        g_free(dir);
+    }
+    if (!g_getenv("PANGOCAIRO_BACKEND"))
+        g_setenv("PANGOCAIRO_BACKEND", "fc", TRUE);
+    FcInit();
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
     if (argc < 3)
         return 2;
+
+#if defined(_WIN32) && defined(NS_HAVE_FONTCONFIG)
+    renderer_win32_fontconfig();
+#endif
     int max_w = atoi(argv[1]);
     int max_h = atoi(argv[2]);
     if (max_w <= 0 || max_h <= 0)
