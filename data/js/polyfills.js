@@ -703,7 +703,7 @@
     }
 
     function makeTreeWalker(root, whatToShow, filterArg) {
-        var what = (whatToShow == null) ? 0xFFFFFFFF : (whatToShow >>> 0);
+        var what = (whatToShow === undefined) ? 0xFFFFFFFF : (whatToShow >>> 0);
         var filterFn = null;
         if (typeof filterArg === 'function') filterFn = filterArg;
         else if (filterArg && typeof filterArg.acceptNode === 'function')
@@ -817,24 +817,48 @@
                 }
             }
         };
+        walker[Symbol.toStringTag] = 'TreeWalker';
+        Object.defineProperty(walker, 'root',
+            { value: root, writable: false, enumerable: true });
+        Object.defineProperty(walker, 'whatToShow',
+            { value: what, writable: false, enumerable: true });
+        Object.defineProperty(walker, 'filter',
+            { value: filterArg || null, writable: false, enumerable: true });
         return walker;
+    }
+
+    function requireNodeRoot(root, method) {
+        if (!root || typeof root.nodeType !== 'number')
+            throw new TypeError("Failed to execute '" + method +
+                "' on 'Document': parameter 1 is not of type 'Node'.");
     }
 
     if (global.document) {
         global.document.createTreeWalker = function (root, whatToShow, filter) {
+            requireNodeRoot(root, 'createTreeWalker');
             return makeTreeWalker(root, whatToShow, filter);
         };
         var origNI = global.document.createNodeIterator;
         global.document.createNodeIterator = function (root, whatToShow, filter) {
+            requireNodeRoot(root, 'createNodeIterator');
             var w = makeTreeWalker(root, whatToShow, filter);
-            return {
-                root: w.root, whatToShow: w.whatToShow, filter: w.filter,
-                referenceNode: w.currentNode,
-                pointerBeforeReferenceNode: true,
+            var it = {
                 nextNode: function () { return w.nextNode(); },
                 previousNode: function () { return w.previousNode(); },
                 detach: function () {}
             };
+            it[Symbol.toStringTag] = 'NodeIterator';
+            Object.defineProperty(it, 'root',
+                { value: w.root, writable: false, enumerable: true });
+            Object.defineProperty(it, 'whatToShow',
+                { value: w.whatToShow, writable: false, enumerable: true });
+            Object.defineProperty(it, 'filter',
+                { value: w.filter, writable: false, enumerable: true });
+            Object.defineProperty(it, 'referenceNode',
+                { get: function () { return w.currentNode; }, enumerable: true });
+            Object.defineProperty(it, 'pointerBeforeReferenceNode',
+                { value: true, writable: false, enumerable: true });
+            return it;
         };
     }
 
