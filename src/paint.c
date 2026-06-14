@@ -28,6 +28,17 @@ static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
+static PangoLayout *
+paint_create_layout(void)
+{
+    static PangoContext *cached_ctx;
+    if (!cached_ctx) {
+        PangoFontMap *fm = pango_cairo_font_map_get_default();
+        cached_ctx = pango_font_map_create_context(fm);
+    }
+    return pango_layout_new(cached_ctx);
+}
+
 static PangoWeight
 pango_weight_from_css(int weight)
 {
@@ -1855,7 +1866,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                            s ? s->values[NS_CSS_COLOR] : NULL,
                            0.07, 0.07, 0.07, 1);
 
-    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
 
     if (ns_style_is_nowrap(s) &&
@@ -2419,10 +2430,11 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 PangoLayout *
 ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
 {
+    (void)cr;
     if (!b || !b->text) return NULL;
     const ns_style *s = inherited_style(b);
 
-    PangoLayout *layout = pango_cairo_create_layout(cr);
+    PangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
     if (ns_style_is_nowrap(s) &&
         !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
@@ -3221,8 +3233,13 @@ paint_image(cairo_t *cr, const ns_box *b)
     if (img && img->loaded && img->texture) {
         paint_texture(cr, b, img->texture);
     } else if (img && img->failed) {
-        paint_failed_image(cr, b);
+        if (b->content_width > 24 || b->content_height > 24)
+            paint_failed_image(cr, b);
     } else {
+        if (b->content_width <= 24 && b->content_height <= 24) {
+            cairo_restore(cr);
+            return;
+        }
         const ns_style *s = b->style;
         rgba bg = rgba_anim(b, NS_CSS_ANIM_TARGET_BG_COLOR,
                             s ? s->values[NS_CSS_BACKGROUND_COLOR] : NULL,
@@ -3238,7 +3255,7 @@ paint_image(cairo_t *cr, const ns_box *b)
         }
         const char *alt = b->dom ? ns_element_get_attr(b->dom, "alt") : NULL;
         if (alt && *alt && b->content_width > 24 && b->content_height > 16) {
-            PangoLayout *layout = pango_cairo_create_layout(cr);
+            PangoLayout *layout = paint_create_layout();
             pango_layout_set_text(layout, alt, -1);
             pango_layout_set_width(layout,
                 (int)((b->content_width - 8) * PANGO_SCALE));
@@ -3327,7 +3344,7 @@ paint_video(cairo_t *cr, const ns_box *b)
         }
         double text_w = 0;
         if (dtext[0]) {
-            PangoLayout *layout = pango_cairo_create_layout(cr);
+            PangoLayout *layout = paint_create_layout();
             PangoFontDescription *fd = pango_font_description_from_string("sans 9");
             pango_layout_set_font_description(layout, fd);
             pango_layout_set_text(layout, dtext, -1);

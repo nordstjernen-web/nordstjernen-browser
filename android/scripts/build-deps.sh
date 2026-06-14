@@ -58,21 +58,23 @@ case "${ABI}" in
 esac
 
 HOST_TAG="linux-x86_64"
+TOOL_EXT=""
+EXE_EXT=""
 case "$(uname -s)" in
     Darwin) HOST_TAG="darwin-x86_64" ;;
-    MINGW*|MSYS*|CYGWIN*) HOST_TAG="windows-x86_64" ;;
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG="windows-x86_64"; TOOL_EXT=".cmd"; EXE_EXT=".exe" ;;
 esac
 TOOLCHAIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${HOST_TAG}"
-CC="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang"
-CXX="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang++"
-AR="${TOOLCHAIN}/bin/llvm-ar"
-STRIP="${TOOLCHAIN}/bin/llvm-strip"
+CC="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang${TOOL_EXT}"
+CXX="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang++${TOOL_EXT}"
+AR="${TOOLCHAIN}/bin/llvm-ar${EXE_EXT}"
+STRIP="${TOOLCHAIN}/bin/llvm-strip${EXE_EXT}"
 
-if [ ! -x "${CC}" ]; then
+if [ ! -f "${CC}" ]; then
     echo "compiler not found: ${CC}" >&2
     exit 2
 fi
-if [ ! -x "${CXX}" ]; then
+if [ ! -f "${CXX}" ]; then
     echo "compiler not found: ${CXX}" >&2
     exit 2
 fi
@@ -91,23 +93,42 @@ if [ -n "${NORDSTJERNEN_ANDROID_SYSROOT:-}" ]; then
     SYSROOT_PKGCONFIG="${SYSROOT_PREFIX}/lib/pkgconfig"
 fi
 
+CC_MESON="${CC}"
+CXX_MESON="${CXX}"
+AR_MESON="${AR}"
+STRIP_MESON="${STRIP}"
+TOOLCHAIN_SYSROOT="${TOOLCHAIN}/sysroot"
+TOOLCHAIN_SYSROOT_MESON="${TOOLCHAIN_SYSROOT}"
+SYSROOT_PKGCONFIG_MESON="${SYSROOT_PKGCONFIG}"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        CC_MESON="$(cygpath -m "${CC}")"
+        CXX_MESON="$(cygpath -m "${CXX}")"
+        AR_MESON="$(cygpath -m "${AR}")"
+        STRIP_MESON="$(cygpath -m "${STRIP}")"
+        TOOLCHAIN_SYSROOT_MESON="$(cygpath -m "${TOOLCHAIN_SYSROOT}")"
+        [ -n "${SYSROOT_PKGCONFIG}" ] &&
+            SYSROOT_PKGCONFIG_MESON="$(cygpath -m "${SYSROOT_PKGCONFIG}")"
+        ;;
+esac
+
 cat > "${CROSS}" <<EOF
 [binaries]
-c = '${CC}'
-cpp = '${CXX}'
-ar = '${AR}'
-strip = '${STRIP}'
+c = '${CC_MESON}'
+cpp = '${CXX_MESON}'
+ar = '${AR_MESON}'
+strip = '${STRIP_MESON}'
 pkg-config = 'pkg-config'
 
 [built-in options]
-c_args = ['-fPIC', '--sysroot=${TOOLCHAIN}/sysroot']
-cpp_args = ['-fPIC', '--sysroot=${TOOLCHAIN}/sysroot']
-c_link_args = ['--sysroot=${TOOLCHAIN}/sysroot', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
-cpp_link_args = ['--sysroot=${TOOLCHAIN}/sysroot', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
+c_args = ['-fPIC', '--sysroot=${TOOLCHAIN_SYSROOT_MESON}']
+cpp_args = ['-fPIC', '--sysroot=${TOOLCHAIN_SYSROOT_MESON}']
+c_link_args = ['--sysroot=${TOOLCHAIN_SYSROOT_MESON}', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
+cpp_link_args = ['--sysroot=${TOOLCHAIN_SYSROOT_MESON}', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
 
 [properties]
 needs_exe_wrapper = true
-pkg_config_libdir = '${SYSROOT_PKGCONFIG}'
+pkg_config_libdir = '${SYSROOT_PKGCONFIG_MESON}'
 
 [host_machine]
 system = 'android'
