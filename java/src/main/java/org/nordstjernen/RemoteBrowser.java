@@ -24,7 +24,7 @@ public final class RemoteBrowser implements AutoCloseable {
     public static final int MAX_W = 2560;
     public static final int MAX_H = 1600;
 
-    /** Result of a render: the image plus any navigation the page requested. */
+    /** Result of a render: the image plus any side-channel the page requested. */
     public static final class Frame {
         /** The rendered image, or null when {@link #unchanged} (reuse the prior one). */
         public final BufferedImage image;
@@ -33,16 +33,62 @@ public final class RemoteBrowser implements AutoCloseable {
         public final boolean unchanged;
         /** The page is still animating / loading; keep rendering. */
         public final boolean animating;
+        /** Origin requesting WebGL (needs a trust prompt), or null. */
+        public final String webgl;
+        /** A download the page initiated (URL), or null. */
+        public final String download;
 
-        Frame(BufferedImage image, String nav, boolean unchanged, boolean animating) {
+        Frame(BufferedImage image, String nav, boolean unchanged,
+              boolean animating, String webgl, String download) {
             this.image = image;
             this.nav = nav;
             this.unchanged = unchanged;
             this.animating = animating;
+            this.webgl = webgl;
+            this.download = download;
         }
     }
 
-    private final RendererProcess renderer;
+    /** A hover probe: whether the frame changed, the link under the point, and the CSS cursor. */
+    public static final class Hover {
+        public final boolean changed;
+        public final String href;
+        public final String cursor;
+
+        Hover(boolean changed, String href, String cursor) {
+            this.changed = changed;
+            this.href = href;
+            this.cursor = cursor;
+        }
+    }
+
+    /** Result of a find-in-page query: match count, the current 1-based index, and where to scroll. */
+    public static final class Find {
+        public final int total;
+        public final int current;
+        public final int scrollY;
+
+        Find(int total, int current, int scrollY) {
+            this.total = total;
+            this.current = current;
+            this.scrollY = scrollY;
+        }
+    }
+
+    /** A clickable media element resolved at a point: its URL, whether it is video, and if it streams. */
+    public static final class Media {
+        public final String url;
+        public final boolean video;
+        public final boolean stream;
+
+        Media(String url, boolean video, boolean stream) {
+            this.url = url;
+            this.video = video;
+            this.stream = stream;
+        }
+    }
+
+    private RendererProcess renderer;
     private String title = "";
     private String url = "";
     private String pendingNav = "";
@@ -100,14 +146,13 @@ public final class RemoteBrowser implements AutoCloseable {
             + ",\"scroll_x\":" + scrollX + ",\"scroll_y\":" + scrollY
             + ",\"scale\":" + formatScale(scale) + "}";
         RendererProcess.Response resp = renderer.request("POST", "/render", body);
-        String nav = resp.header("X-Nav");
-        if (nav != null && nav.isEmpty()) {
-            nav = null;
-        }
+        String nav = emptyToNull(resp.header("X-Nav"));
+        String webgl = emptyToNull(resp.header("X-WebGL"));
+        String download = emptyToNull(resp.header("X-Download"));
         boolean animating = "1".equals(resp.header("X-Anim"));
         boolean unchanged = "1".equals(resp.header("X-Unchanged"));
         if (unchanged || resp.body.length < 4) {
-            return new Frame(null, nav, true, animating);
+            return new Frame(null, nav, true, animating, webgl, download);
         }
         int w = headerInt(resp, "X-W", width);
         int h = headerInt(resp, "X-H", height);
@@ -122,7 +167,7 @@ public final class RemoteBrowser implements AutoCloseable {
             int a = bgra[p + 3] & 0xFF;
             data[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
-        return new Frame(img, nav, false, animating);
+        return new Frame(img, nav, false, animating, webgl, download);
     }
 
     /** The link URL at a document-coordinate point, or null. */
@@ -131,6 +176,118 @@ public final class RemoteBrowser implements AutoCloseable {
             "{\"x\":" + x + ",\"y\":" + y + "}");
         String href = jsonString(new String(resp.body, StandardCharsets.UTF_8), "href");
         return href.isEmpty() ? null : href;
+    }
+
+    /**
+     * Probe the point under the pointer: moves the engine's hover state (firing
+     * {@code :hover} / {@code mouseover}), and reports the link there and the CSS
+     * cursor name so the shell can mirror the GTK status bar and pointer shape.
+     */
+    public Hover hover(int x, int y) {
+        RendererProcess.Response resp = renderer.request("POST", "/hover",
+            "{\"x\":" + x + ",\"y\":" + y + "}");
+        String json = new String(resp.body, StandardCharsets.UTF_8);
+        boolean changed = jsonInt(json, "changed", 0) != 0;
+        String href = jsonString(json, "href");
+        String cursor = jsonString(json, "cursor");
+        return new Hover(changed, href.isEmpty() ? null : href,
+                         cursor.isEmpty() ? null : cursor);
+    }
+
+    /**
+     * Drive a text selection. {@code kind} is 0 to anchor a new selection at the
+     * point, 1 to extend it, 3 to select the whole document, and 4 to return the
+     * currently selected text (the copy path). Returns the selected text for
+     * {@code kind == 4}, otherwise null.
+     */
+    public String select(int kind, int x, int y) {
+        RendererProcess.Response resp = renderer.request("POST", "/select",
+            "{\"kind\":" + kind + ",\"x\":" + x + ",\"y\":" + y + "}");
+        String href = jsonString(new String(resp.body, StandardCharsets.UTF_8), "href");
+        return href.isEmpty() ? null : href;
+    }
+
+    /**
+     * Find {@code query} in the page. {@code direction} is 0 to (re)search from
+     * {@code fromY}, 1 for the next match, 2 for the previous. Returns the match
+     * count, the current match index, and the document Y to scroll the match into
+     * view.
+     */
+    public Find find(String query, boolean caseSensitive, int direction, int fromY) {
+        String body = "{\"query\":\"" + jsonEscape(query == null ? "" : query)
+            + "\",\"case_sensitive\":" + (caseSensitive ? 1 : 0)
+            + ",\"direction\":" + direction + ",\"from_y\":" + fromY + "}";
+        RendererProcess.Response resp = renderer.request("POST", "/find", body);
+        String json = new String(resp.body, StandardCharsets.UTF_8);
+        return new Find(jsonInt(json, "total", 0), jsonInt(json, "current", 0),
+                        jsonInt(json, "scroll_y", 0));
+    }
+
+    /** Evaluate JavaScript in the page and return its result rendered as text. */
+    public String eval(String src) {
+        String body = "{\"src\":\"" + jsonEscape(src == null ? "" : src) + "\"}";
+        RendererProcess.Response resp = renderer.request("POST", "/eval", body);
+        String text = jsonString(new String(resp.body, StandardCharsets.UTF_8), "text");
+        return text.isEmpty() ? null : text;
+    }
+
+    /** Drain any buffered {@code console.*} output the page produced, or null. */
+    public String consoleDrain() {
+        RendererProcess.Response resp = renderer.request("POST", "/console", "{}");
+        String text = jsonString(new String(resp.body, StandardCharsets.UTF_8), "text");
+        return text.isEmpty() ? null : text;
+    }
+
+    /** The media element (audio/video URL) at a document-coordinate point, or null. */
+    public Media mediaAt(int x, int y) {
+        RendererProcess.Response resp = renderer.request("POST", "/media",
+            "{\"x\":" + x + ",\"y\":" + y + "}");
+        String json = new String(resp.body, StandardCharsets.UTF_8);
+        String url = jsonString(json, "url");
+        if (url.isEmpty()) {
+            return null;
+        }
+        return new Media(url, jsonInt(json, "is_video", 0) != 0,
+                         jsonInt(json, "stream", 0) != 0);
+    }
+
+    /** Render the whole page to {@code path} (a {@code .pdf} → PDF, else PNG); true on success. */
+    public boolean export(String path) {
+        String body = "{\"path\":\"" + jsonEscape(path) + "\"}";
+        RendererProcess.Response resp = renderer.request("POST", "/export", body);
+        return jsonInt(new String(resp.body, StandardCharsets.UTF_8), "ok", -1) == 0;
+    }
+
+    /** Allow or block WebGL for {@code origin} for the rest of the session. */
+    public void resolveWebgl(String origin, boolean allow) {
+        renderer.request("POST", "/webgl",
+            "{\"origin\":\"" + jsonEscape(origin) + "\",\"allow\":" + (allow ? 1 : 0) + "}");
+    }
+
+    /** The current page's favicon as an image, or null if it has none. */
+    public BufferedImage favicon() {
+        RendererProcess.Response resp = renderer.request("POST", "/favicon", "{}");
+        int w = headerInt(resp, "X-W", 0);
+        int h = headerInt(resp, "X-H", 0);
+        int stride = headerInt(resp, "X-Stride", w * 4);
+        if (w <= 0 || h <= 0 || resp.body.length < stride * h) {
+            return null;
+        }
+        byte[] bgra = resp.body;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB_PRE);
+        int[] data = ((DataBufferInt) img.getRaster().getDataBuffer()).getData();
+        for (int y = 0; y < h; y++) {
+            int row = y * stride;
+            for (int x = 0; x < w; x++) {
+                int p = row + x * 4;
+                int b = bgra[p] & 0xFF;
+                int g = bgra[p + 1] & 0xFF;
+                int r = bgra[p + 2] & 0xFF;
+                int a = bgra[p + 3] & 0xFF;
+                data[y * w + x] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+        return img;
     }
 
     /** Press at a document-coordinate point (then call {@link #release}). */
@@ -183,9 +340,28 @@ public final class RemoteBrowser implements AutoCloseable {
     public int pageWidth() { return pageWidth; }
     public int pageHeight() { return pageHeight; }
 
+    /**
+     * Replace a dead renderer with a fresh process. Call after a request throws
+     * (the child crashed or wedged); the caller must then re-navigate, since the
+     * new process starts with no page loaded.
+     */
+    public void restart() {
+        try { renderer.close(); } catch (RuntimeException ignored) { }
+        this.renderer = new RendererProcess(MAX_W, MAX_H);
+        this.title = "";
+        this.url = "";
+        this.pendingNav = "";
+        this.pageWidth = 0;
+        this.pageHeight = 0;
+    }
+
     @Override
     public void close() {
         renderer.close();
+    }
+
+    private static String emptyToNull(String s) {
+        return (s == null || s.isEmpty()) ? null : s;
     }
 
     private static int headerInt(RendererProcess.Response resp, String name, int fb) {
