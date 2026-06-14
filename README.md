@@ -3,7 +3,7 @@ Nordstjernen web browser
 
 Nordstjernen is a web browser, written from scratch in C.
 Focused on supporting the HTML and CSS standards.  
-Runs on Windows, Mac and Linux, with an Android port in progress (see `android/`).
+Runs on Windows, Mac and Linux, Android and Java.
 Nordstjernen is built in Norway. 
 
 
