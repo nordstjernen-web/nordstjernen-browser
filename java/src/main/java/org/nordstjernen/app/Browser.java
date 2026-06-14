@@ -63,8 +63,11 @@ public final class Browser {
     private int historyIndex = -1;
     private final String homeUrl;
 
+    private static final int MAX_JS_REDIRECTS = 10;
+
     private int scrollY = 0;
     private boolean loading = false;
+    private int jsRedirects = 0;
     private boolean syncingScrollbar = false;
     private javax.swing.Timer refreshTimer;
     private boolean renderBusy = false;
@@ -255,8 +258,15 @@ public final class Browser {
     }
 
     private void navigate(String url, boolean record) {
+        navigate(url, record, false);
+    }
+
+    private void navigate(String url, boolean record, boolean isRedirect) {
         if (url == null || url.isEmpty() || loading) {
             return;
+        }
+        if (!isRedirect) {
+            jsRedirects = 0;
         }
         loading = true;
         canvas.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
@@ -267,6 +277,7 @@ public final class Browser {
             boolean ok = engine.navigate(url, vw, vh, SETTLE_MS);
             String finalUrl = ok ? engine.url() : url;
             String title = ok ? engine.title() : "";
+            String redirect = ok ? engine.pendingNav() : null;
             scrollY = 0;
             SwingUtilities.invokeLater(() -> {
                 loading = false;
@@ -281,6 +292,8 @@ public final class Browser {
                     }
                     history.add(finalUrl);
                     historyIndex = history.size() - 1;
+                } else if (isRedirect && historyIndex >= 0) {
+                    history.set(historyIndex, finalUrl);
                 }
                 address.setText(finalUrl);
                 frame.setTitle((title.isEmpty() ? "Untitled" : title)
@@ -290,6 +303,10 @@ public final class Browser {
                 setStatus(title);
                 canvas.requestFocusInWindow();
                 scheduleRefresh();
+                if (redirect != null && jsRedirects < MAX_JS_REDIRECTS) {
+                    jsRedirects++;
+                    navigate(redirect, false, true);
+                }
             });
         });
     }

@@ -45,6 +45,7 @@ public final class RemoteBrowser implements AutoCloseable {
     private final RendererProcess renderer;
     private String title = "";
     private String url = "";
+    private String pendingNav = "";
     private int pageWidth;
     private int pageHeight;
 
@@ -68,9 +69,19 @@ public final class RemoteBrowser implements AutoCloseable {
         }
         this.title = jsonString(json, "title");
         this.url = jsonString(json, "url");
+        this.pendingNav = jsonString(json, "nav");
         this.pageWidth = jsonInt(json, "page_width", viewportWidthCss);
         this.pageHeight = jsonInt(json, "page_height", viewportHeightCss);
         return true;
+    }
+
+    /**
+     * A client-side redirect (meta refresh or JS {@code location}) that fired
+     * while the just-opened page settled, or null. Follow it to land on the
+     * real destination — e.g. a {@code duckduckgo.com/l/?uddg=…} result link.
+     */
+    public String pendingNav() {
+        return (pendingNav == null || pendingNav.isEmpty()) ? null : pendingNav;
     }
 
     /** Tell the engine the viewport changed (re-lays out, fires resize). */
