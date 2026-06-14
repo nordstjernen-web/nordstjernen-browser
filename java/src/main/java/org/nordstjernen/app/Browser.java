@@ -39,6 +39,8 @@ public final class Browser {
 
     private static final int SETTLE_MS = 900;
     private static final int LINE_SCROLL = 60;
+    private static final String VERSION = resolveVersion();
+    private static final String TITLE_SUFFIX = " (Java " + VERSION + ")";
 
     private final RemoteBrowser engine = new RemoteBrowser();
     private final ExecutorService io = Executors.newSingleThreadExecutor(r -> {
@@ -47,7 +49,7 @@ public final class Browser {
         return t;
     });
 
-    private final JFrame frame = new JFrame("Nordstjernen");
+    private final JFrame frame = new JFrame("Nordstjernen" + TITLE_SUFFIX);
     private final JButton back = navButton("back", "◀", "Back (Alt+Left)");
     private final JButton forward = navButton("forward", "▶", "Forward (Alt+Right)");
     private final JButton reload = navButton("reload", "↻", "Reload (Ctrl+R)");
@@ -295,7 +297,7 @@ public final class Browser {
                 }
                 address.setText(finalUrl);
                 frame.setTitle((title.isEmpty() ? "Untitled" : title)
-                    + " — Nordstjernen");
+                    + " — Nordstjernen" + TITLE_SUFFIX);
                 updateNavButtons();
                 updateScrollModel();
                 setStatus(title);
@@ -390,6 +392,11 @@ public final class Browser {
 
     private void setStatus(String s) {
         status.setText(s == null || s.isEmpty() ? " " : s);
+    }
+
+    private static String resolveVersion() {
+        String v = Browser.class.getPackage().getImplementationVersion();
+        return (v == null || v.isBlank()) ? "1.0.6" : v;
     }
 
     private static ImageIcon icon(String name) {

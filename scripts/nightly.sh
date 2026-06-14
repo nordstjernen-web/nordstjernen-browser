@@ -327,8 +327,8 @@ stage_java() {
     if [ -d "$ROOT/java/src/main/resources/org" ]; then
         cp -r "$ROOT/java/src/main/resources/org" "$work/stage/"
     fi
-    printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.nordstjernen.app.Browser\n' \
-        > "$work/mf.txt"
+    printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.nordstjernen.app.Browser\nImplementation-Title: Nordstjernen\nImplementation-Version: %s\n' \
+        "$MESON_VERSION" > "$work/mf.txt"
 
     local base="nordstjernen-java-${NVERSION}"
     log "Java: fat jar (library API + browser app + icons + native libs)"

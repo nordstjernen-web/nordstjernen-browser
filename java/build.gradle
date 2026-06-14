@@ -4,7 +4,7 @@ plugins {
 }
 
 group = 'org.nordstjernen'
-version = '1.0.1'
+version = '1.0.6'
 
 // The official Java browser: a Swing shell over the renderer process.
 //   ./gradlew run --args="https://example.com"
@@ -33,6 +33,9 @@ tasks.named('jar') {
             // Make the jar runnable as the browser (java -jar …), matching
             // the nightly fat jar.
             'Main-Class': 'org.nordstjernen.app.Browser',
+            // Surfaces in the window title as "(Java <version>)".
+            'Implementation-Title': 'Nordstjernen',
+            'Implementation-Version': version,
         )
     }
 }
