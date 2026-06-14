@@ -31197,15 +31197,25 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
     char *title = NULL;
     if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         const char *t = JS_ToCString(ctx, argv[0]);
-        if (t) { title = g_markup_escape_text(t, -1); JS_FreeCString(ctx, t); }
+        if (t) { title = g_strdup(t); JS_FreeCString(ctx, t); }
     }
-    char *src = g_strdup_printf(
-        "<!DOCTYPE html><html><head><title>%s</title></head><body></body></html>",
-        title ? title : "");
+    ns_node *doc = ns_html_parse(
+        "<!DOCTYPE html><html><head></head><body></body></html>", -1);
+    if (!doc) { g_free(title); return JS_NULL; }
+    if (title) {
+        ns_node *head = NULL;
+        for (ns_node *h = doc->first_child; h && !head; h = h->next_sibling)
+            if (ns_node_is_element_named(h, "html"))
+                for (ns_node *c = h->first_child; c; c = c->next_sibling)
+                    if (ns_node_is_element_named(c, "head")) { head = c; break; }
+        if (head) {
+            ns_node *t = ns_node_new_element(g_strdup("title"));
+            ns_node_append_child(t, ns_node_new_text(title));
+            ns_node_append_child(head, t);
+            title = NULL;
+        }
+    }
     g_free(title);
-    ns_node *doc = ns_html_parse(src, -1);
-    g_free(src);
-    if (!doc) return JS_NULL;
     ns_mark_scripts_already_started(doc);
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_element(ctx, doc);
@@ -31250,6 +31260,8 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
         JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
         JS_NewString(ctx, "text/html"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "location", JS_NULL,
+        JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, wrapper, "implementation",
         ns_make_dom_implementation(ctx, wrapper), JS_PROP_ENUMERABLE);
     {
@@ -31411,11 +31423,32 @@ static JSValue
 ns_impl_create_document(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required");
+    if (argc >= 3 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
+        const ns_node *dt = JS_IsObject(argv[2]) ? ns_unwrap_element(argv[2])
+                                                 : NULL;
+        if (!dt || dt->kind != NS_NODE_DOCTYPE)
+            return JS_ThrowTypeError(ctx, "doctype must be a DocumentType");
+    }
     JSValue wrapper = ns_make_synth_xml_document(ctx);
     if (!JS_IsObject(wrapper)) return wrapper;
+    if (!JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+        const char *nsuri = JS_ToCString(ctx, argv[0]);
+        if (nsuri) {
+            const char *ct = "application/xml";
+            if (strcmp(nsuri, "http://www.w3.org/1999/xhtml") == 0)
+                ct = "application/xhtml+xml";
+            else if (strcmp(nsuri, "http://www.w3.org/2000/svg") == 0)
+                ct = "image/svg+xml";
+            JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
+                JS_NewString(ctx, ct), JS_PROP_C_W_E);
+            JS_FreeCString(ctx, nsuri);
+        }
+    }
     JSValue root = JS_NULL;
     gboolean has_root = FALSE;
-    if (argc >= 2 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+    if (!JS_IsNull(argv[1])) {
         const char *q = JS_ToCString(ctx, argv[1]);
         if (!q) { JS_FreeValue(ctx, wrapper); return JS_EXCEPTION; }
         has_root = *q != 0;
