@@ -53,7 +53,8 @@ class PageView @JvmOverloads constructor(
     private val doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout().toLong()
     private val scaleDetector = ScaleGestureDetector(context, ScaleListener())
 
-    private val minZoom = 1.0
+    private val minZoom = 0.5
+    private val normalZoom = 1.0
     private val maxZoom = 5.0
     private val doubleTapZoom = 2.5
 
@@ -214,7 +215,7 @@ class PageView @JvmOverloads constructor(
         handle = newHandle
         pageWidthCss = pageWidthCssArg
         pageHeightCss = pageHeightCssArg
-        userZoom = 1.0
+        userZoom = normalZoom
         scrollXpx = 0
         scrollYpx = if (pendingScrollFraction >= 0f)
             (pendingScrollFraction * contentH()).roundToInt().coerceIn(0, maxScrollY())
@@ -229,7 +230,7 @@ class PageView @JvmOverloads constructor(
     fun updateDocument(pageWidthCssArg: Int, pageHeightCssArg: Int) {
         pageWidthCss = pageWidthCssArg
         pageHeightCss = pageHeightCssArg
-        userZoom = 1.0
+        userZoom = normalZoom
         scrollXpx = 0
         scrollYpx = 0
         pendingScrollFraction = -1f
@@ -634,7 +635,11 @@ class PageView @JvmOverloads constructor(
         val old = effScale()
         val cssX = (scrollXpx + viewX) / old
         val cssY = (scrollYpx + viewY) / old
-        userZoom = if (userZoom > minZoom + 0.01) minZoom else doubleTapZoom
+        userZoom =
+            if (userZoom > normalZoom + 0.01 || userZoom < normalZoom - 0.01)
+                normalZoom
+            else
+                doubleTapZoom
         val neo = effScale()
         scrollXpx = (cssX * neo - viewX).roundToInt().coerceIn(0, maxScrollX())
         scrollYpx = (cssY * neo - viewY).roundToInt().coerceIn(0, maxScrollY())
