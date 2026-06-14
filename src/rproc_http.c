@@ -991,7 +991,8 @@ ns_rproc_http_favicon(ns_rproc_http *r, int *out_w, int *out_h, int *out_stride)
         free(body);
         return NULL;
     }
-    if (head.x_w < 1 || head.x_h < 1 || head.x_stride < head.x_w * 4 ||
+    if (head.x_w < 1 || head.x_w > 1024 || head.x_h < 1 || head.x_h > 1024 ||
+        head.x_stride < head.x_w * 4 || head.x_stride > (long)1024 * 4 ||
         head.x_stride * head.x_h > head.content_length) {
         free(body);
         return NULL;
