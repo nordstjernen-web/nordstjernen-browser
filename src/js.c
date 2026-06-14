@@ -2468,6 +2468,9 @@ ns_unwrap_element_mut(JSValueConst val)
 
 enum {
     NS_INSTOF_TAG = 0,
+    NS_INSTOF_NODE,
+    NS_INSTOF_ELEMENT,
+    NS_INSTOF_DOCUMENT,
     NS_INSTOF_FRAGMENT,
     NS_INSTOF_TEXT,
     NS_INSTOF_COMMENT,
@@ -2550,6 +2553,11 @@ static const ns_instof_def ns_instof_table[] = {
     { "HTMLTrackElement",         "track",              NS_INSTOF_TAG },
     { "HTMLUListElement",         "ul",                 NS_INSTOF_TAG },
     { "HTMLVideoElement",         "video",              NS_INSTOF_TAG },
+    { "Node",                     NULL,                 NS_INSTOF_NODE },
+    { "Element",                  NULL,                 NS_INSTOF_ELEMENT },
+    { "HTMLElement",              NULL,                 NS_INSTOF_ELEMENT },
+    { "HTMLDocument",             NULL,                 NS_INSTOF_DOCUMENT },
+    { "Document",                 NULL,                 NS_INSTOF_DOCUMENT },
     { "HTMLCollection",           NULL,                 NS_INSTOF_HTMLCOLLECTION },
     { "NodeList",                 NULL,                 NS_INSTOF_NODELIST },
     { "DocumentFragment",         NULL,                 NS_INSTOF_FRAGMENT },
@@ -2586,6 +2594,13 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(argv[0]);
     if (!n) return JS_FALSE;
     switch (d->special) {
+    case NS_INSTOF_NODE:
+        return JS_NewBool(ctx, TRUE);
+    case NS_INSTOF_ELEMENT:
+        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT);
+    case NS_INSTOF_DOCUMENT:
+        return JS_NewBool(ctx, n->kind == NS_NODE_DOCUMENT &&
+                               !(n->flags & NS_NODE_FRAGMENT));
     case NS_INSTOF_FRAGMENT:
         return JS_NewBool(ctx, (n->flags & NS_NODE_FRAGMENT) != 0);
     case NS_INSTOF_TEXT:
@@ -10740,6 +10755,9 @@ ns_window_usp_ctor(JSContext *ctx, JSValueConst this_val,
     return ns_url_get_searchParams_value(ctx, JS_UNDEFINED);
 }
 
+static void ns_document_define_implementation_getter(JSContext *ctx,
+                                                     JSValueConst obj);
+
 static void
 ns_attach_document_view(JSContext *ctx, JSValueConst wrapper, ns_node *doc)
 {
@@ -10764,6 +10782,7 @@ ns_attach_document_view(JSContext *ctx, JSValueConst wrapper, ns_node *doc)
     g_free(title_text);
     JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
         JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
+    ns_document_define_implementation_getter(ctx, wrapper);
 }
 
 static JSValue
@@ -26990,6 +27009,57 @@ static JSValue ns_document_createTextNode(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 static JSValue ns_document_ctor(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
+static JSValue ns_document_implementation(JSContext *ctx,
+                                          JSValueConst this_val);
+
+static void
+ns_document_use_document_prototype(JSContext *ctx, JSValueConst obj)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "Document");
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
+static void
+ns_document_use_xml_document_prototype(JSContext *ctx, JSValueConst obj)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "XMLDocument");
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    JSValue doc_ctor = JS_GetPropertyStr(ctx, global, "Document");
+    JSValue doc_proto = JS_GetPropertyStr(ctx, doc_ctor, "prototype");
+    if (JS_IsObject(proto) && JS_IsObject(doc_proto))
+        JS_SetPrototype(ctx, proto, doc_proto);
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, obj, proto);
+    JS_FreeValue(ctx, doc_proto);
+    JS_FreeValue(ctx, doc_ctor);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
+static JSValue
+ns_document_implementation_getter_fn(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_document_implementation(ctx, this_val);
+}
+
+static void
+ns_document_define_implementation_getter(JSContext *ctx, JSValueConst obj)
+{
+    JSAtom atom = JS_NewAtom(ctx, "implementation");
+    JSValue getter = JS_NewCFunction(ctx, ns_document_implementation_getter_fn,
+                                     "get implementation", 0);
+    JS_DefinePropertyGetSet(ctx, obj, atom, getter, JS_UNDEFINED,
+                            JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx, atom);
+}
 
 static JSValue
 ns_docfacade_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
@@ -27015,6 +27085,10 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
     JS_SetPropertyStr(ctx, cd, "head",
                       head ? ns_make_element(ctx, head) : JS_NULL);
     JS_SetPropertyStr(ctx, cd, "nodeType", JS_NewInt32(ctx, 9));
+    JS_SetPropertyStr(ctx, cd, "nodeName", JS_NewString(ctx, "#document"));
+    JS_SetPropertyStr(ctx, cd, "ownerDocument", JS_NULL);
+    ns_document_use_document_prototype(ctx, cd);
+    ns_document_define_implementation_getter(ctx, cd);
     {
         ns_node *holder = iframe;
         const char *cs = holder
@@ -28248,12 +28322,31 @@ static JSValue ns_impl_create_document_type(JSContext *ctx,
 static JSValue
 ns_document_implementation(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
+    if (JS_IsObject(this_val)) {
+        JSValue cached = JS_GetPropertyStr(ctx, this_val, "__ndImplementation");
+        if (JS_IsObject(cached)) return cached;
+        JS_FreeValue(ctx, cached);
+    }
     JSValue impl = JS_NewObject(ctx);
+    {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMImplementation");
+        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+        if (JS_IsObject(proto)) JS_SetPrototype(ctx, impl, proto);
+        JS_FreeValue(ctx, proto);
+        JS_FreeValue(ctx, ctor);
+        JS_FreeValue(ctx, global);
+    }
+    if (JS_IsObject(this_val))
+        JS_DefinePropertyValueStr(ctx, impl, "__ndDocument",
+                                  JS_DupValue(ctx, this_val), 0);
     ns_bind_fn(ctx, impl, "hasFeature",          ns_event_true, 2);
     ns_bind_fn(ctx, impl, "createHTMLDocument",  ns_impl_create_html_document, 1);
     ns_bind_fn(ctx, impl, "createDocument",      ns_impl_create_document, 3);
     ns_bind_fn(ctx, impl, "createDocumentType",  ns_impl_create_document_type, 3);
+    if (JS_IsObject(this_val))
+        JS_DefinePropertyValueStr(ctx, this_val, "__ndImplementation",
+                                  JS_DupValue(ctx, impl), 0);
     return impl;
 }
 
@@ -30755,6 +30848,19 @@ ns_valid_element_local_name(const char *s)
 }
 
 static gboolean
+ns_valid_doctype_name(const char *s, size_t len)
+{
+    if (!s) return FALSE;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == 0 || c == '>' || c == ' ' || c == '\t' ||
+            c == '\n' || c == '\f' || c == '\r')
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
 ns_doc_wrapper_is_xml(JSContext *ctx, JSValueConst doc_val)
 {
     if (!JS_IsObject(doc_val)) return FALSE;
@@ -31183,6 +31289,38 @@ static JSValue ns_synthdoc_get_doctype(JSContext *ctx, JSValueConst this_val,
 static void ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj,
                                       const char *name, JSCFunction *fn);
 
+static void
+ns_document_init_synthetic(JSContext *ctx, JSValueConst wrapper,
+                           const char *content_type)
+{
+    ns_document_use_document_prototype(ctx, wrapper);
+    JS_DefinePropertyValueStr(ctx, wrapper, "URL",
+        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "documentURI",
+        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "baseURI",
+        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "compatMode",
+        JS_NewString(ctx, "CSS1Compat"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "charset",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "inputEncoding",
+        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
+        JS_NewString(ctx, content_type), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "location", JS_NULL,
+        JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "ownerDocument", JS_NULL,
+        JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "nodeName",
+        JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
+        JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
+    ns_document_define_implementation_getter(ctx, wrapper);
+}
+
 static JSValue
 ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
@@ -31193,18 +31331,30 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
     char *title = NULL;
     if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         const char *t = JS_ToCString(ctx, argv[0]);
-        if (t) { title = g_markup_escape_text(t, -1); JS_FreeCString(ctx, t); }
+        if (!t) return JS_EXCEPTION;
+        title = g_strdup(t);
+        JS_FreeCString(ctx, t);
     }
-    char *src = g_strdup_printf(
-        "<!DOCTYPE html><html><head><title>%s</title></head><body></body></html>",
-        title ? title : "");
-    g_free(title);
-    ns_node *doc = ns_html_parse(src, -1);
-    g_free(src);
-    if (!doc) return JS_NULL;
-    ns_mark_scripts_already_started(doc);
+    ns_node *doc = ns_node_new_document();
+    ns_node *doctype = ns_node_new_element(g_strdup("html"));
+    ns_element_set_attr(doctype, "publicId", "");
+    ns_element_set_attr(doctype, "systemId", "");
+    doctype->kind = NS_NODE_DOCTYPE;
+    ns_node *html = ns_node_new_element(g_strdup("html"));
+    ns_node *head = ns_node_new_element(g_strdup("head"));
+    ns_node *body = ns_node_new_element(g_strdup("body"));
+    ns_node_append_child(doc, doctype);
+    ns_node_append_child(doc, html);
+    ns_node_append_child(html, head);
+    if (title) {
+        ns_node *title_el = ns_node_new_element(g_strdup("title"));
+        ns_node_append_child(title_el, ns_node_new_text(g_strdup(title)));
+        ns_node_append_child(head, title_el);
+    }
+    ns_node_append_child(html, body);
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_element(ctx, doc);
+    ns_document_init_synthetic(ctx, wrapper, "text/html");
     ns_attach_document_view(ctx, wrapper, doc);
     ns_bind_fn(ctx, wrapper, "createElement",
                ns_document_createElement, 1);
@@ -31232,20 +31382,7 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
                ns_document_create_range, 0);
     ns_synthdoc_define_getter(ctx, wrapper, "doctype",
                               ns_synthdoc_get_doctype);
-    JS_DefinePropertyValueStr(ctx, wrapper, "URL",
-        JS_NewString(ctx, "about:blank"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "documentURI",
-        JS_NewString(ctx, "about:blank"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "compatMode",
-        JS_NewString(ctx, "CSS1Compat"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "charset",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "inputEncoding",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
-    JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
-        JS_NewString(ctx, "text/html"), JS_PROP_ENUMERABLE);
+    g_free(title);
     return wrapper;
 }
 
@@ -31285,6 +31422,20 @@ ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj, const char *name,
 }
 
 static JSValue
+ns_impl_associated_document(JSContext *ctx, JSValueConst this_val)
+{
+    if (JS_IsObject(this_val)) {
+        JSValue doc = JS_GetPropertyStr(ctx, this_val, "__ndDocument");
+        if (JS_IsObject(doc)) return doc;
+        JS_FreeValue(ctx, doc);
+    }
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue doc = JS_GetPropertyStr(ctx, global, "document");
+    JS_FreeValue(ctx, global);
+    return doc;
+}
+
+static JSValue
 ns_make_synth_xml_document(JSContext *ctx)
 {
     ns_js *js = js_from_ctx(ctx);
@@ -31293,33 +31444,8 @@ ns_make_synth_xml_document(JSContext *ctx)
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_element(ctx, doc);
     JS_DefinePropertyValueStr(ctx, wrapper, "__ndXmlDoc", JS_TRUE, 0);
-    JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
-        JS_NewString(ctx, "application/xml"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "charset",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "inputEncoding",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "URL",
-        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "documentURI",
-        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "compatMode",
-        JS_NewString(ctx, "CSS1Compat"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "location", JS_NULL,
-        JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "ownerDocument", JS_NULL,
-        JS_PROP_C_W_E);
-    {
-        JSValue g = JS_GetGlobalObject(ctx);
-        JSValue ctor = JS_GetPropertyStr(ctx, g, "Document");
-        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
-        if (JS_IsObject(proto)) JS_SetPrototype(ctx, wrapper, proto);
-        JS_FreeValue(ctx, proto);
-        JS_FreeValue(ctx, ctor);
-        JS_FreeValue(ctx, g);
-    }
+    ns_document_init_synthetic(ctx, wrapper, "application/xml");
+    ns_document_use_xml_document_prototype(ctx, wrapper);
     ns_bind_fn(ctx, wrapper, "createElement",
                ns_document_createElement, 1);
     ns_bind_fn(ctx, wrapper, "createElementNS",
@@ -31360,9 +31486,10 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
     if (!js) return JS_NULL;
     if (argc < 3)
         return JS_ThrowTypeError(ctx, "3 arguments required");
-    const char *name = JS_ToCString(ctx, argv[0]);
+    size_t name_len = 0;
+    const char *name = JS_ToCStringLen(ctx, &name_len, argv[0]);
     if (!name) return JS_EXCEPTION;
-    if (!ns_valid_element_local_name(name)) {
+    if (!ns_valid_doctype_name(name, name_len)) {
         JS_FreeCString(ctx, name);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
             "invalid doctype name");
@@ -31374,12 +31501,15 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
         if (public_id) JS_FreeCString(ctx, public_id);
         return JS_EXCEPTION;
     }
-    ns_node *dt = ns_node_new_element(g_strdup(name));
+    ns_node *dt = ns_node_new_element(g_strndup(name, name_len));
     ns_element_set_attr(dt, "publicId", public_id);
     ns_element_set_attr(dt, "systemId", system_id);
     dt->kind = NS_NODE_DOCTYPE;
     g_hash_table_add(js->orphan_nodes, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
+    JSValue owner = ns_impl_associated_document(ctx, this_val);
+    if (JS_IsObject(owner)) ns_tag_owner_document(ctx, owner, wrapper);
+    JS_FreeValue(ctx, owner);
     JS_FreeCString(ctx, name);
     JS_FreeCString(ctx, public_id);
     JS_FreeCString(ctx, system_id);
@@ -31390,28 +31520,60 @@ static JSValue
 ns_impl_create_document(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required");
     JSValue wrapper = ns_make_synth_xml_document(ctx);
     if (!JS_IsObject(wrapper)) return wrapper;
     JSValue root = JS_NULL;
     gboolean has_root = FALSE;
-    if (argc >= 2 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+    const char *ns_uri = NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0]))
+        ns_uri = JS_ToCString(ctx, argv[0]);
+    if (ns_uri) {
+        const char *content_type =
+            strcmp(ns_uri, "http://www.w3.org/1999/xhtml") == 0
+                ? "application/xhtml+xml"
+                : strcmp(ns_uri, "http://www.w3.org/2000/svg") == 0
+                    ? "image/svg+xml" : "application/xml";
+        JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
+            JS_NewString(ctx, content_type), JS_PROP_C_W_E);
+    }
+    if (argc >= 2 && !JS_IsNull(argv[1])) {
         const char *q = JS_ToCString(ctx, argv[1]);
-        if (!q) { JS_FreeValue(ctx, wrapper); return JS_EXCEPTION; }
+        if (!q) {
+            if (ns_uri) JS_FreeCString(ctx, ns_uri);
+            JS_FreeValue(ctx, wrapper);
+            return JS_EXCEPTION;
+        }
         has_root = *q != 0;
         JS_FreeCString(ctx, q);
     }
     if (has_root) {
-        root = ns_document_createElementNS(ctx, this_val, 2, argv);
-        if (JS_IsException(root)) { JS_FreeValue(ctx, wrapper); return root; }
+        root = ns_document_createElementNS(ctx, wrapper, 2, argv);
+        if (JS_IsException(root)) {
+            if (ns_uri) JS_FreeCString(ctx, ns_uri);
+            JS_FreeValue(ctx, wrapper);
+            return root;
+        }
     }
     JSAtom append_atom = JS_NewAtom(ctx, "appendChild");
-    if (argc >= 3 && JS_IsObject(argv[2])) {
+    if (argc >= 3 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
+        ns_node *doctype = ns_unwrap_element_mut(argv[2]);
+        if (!doctype || doctype->kind != NS_NODE_DOCTYPE) {
+            JS_FreeAtom(ctx, append_atom);
+            JS_FreeValue(ctx, root);
+            JS_FreeValue(ctx, wrapper);
+            if (ns_uri) JS_FreeCString(ctx, ns_uri);
+            return JS_ThrowTypeError(ctx, "doctype must be a DocumentType");
+        }
         JSValue r = JS_Invoke(ctx, wrapper, append_atom, 1,
                               (JSValueConst *)&argv[2]);
         if (JS_IsException(r)) {
             JS_FreeAtom(ctx, append_atom);
             JS_FreeValue(ctx, root);
             JS_FreeValue(ctx, wrapper);
+            if (ns_uri) JS_FreeCString(ctx, ns_uri);
             return r;
         }
         JS_FreeValue(ctx, r);
@@ -31423,11 +31585,13 @@ ns_impl_create_document(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(r)) {
             JS_FreeAtom(ctx, append_atom);
             JS_FreeValue(ctx, wrapper);
+            if (ns_uri) JS_FreeCString(ctx, ns_uri);
             return r;
         }
         JS_FreeValue(ctx, r);
     }
     JS_FreeAtom(ctx, append_atom);
+    if (ns_uri) JS_FreeCString(ctx, ns_uri);
     return wrapper;
 }
 

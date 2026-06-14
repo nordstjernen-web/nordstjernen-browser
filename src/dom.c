@@ -849,8 +849,14 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
     case NS_NODE_TEXT:
         out = ns_node_new_text(g_strdup(src->text ? src->text : ""));
         break;
-    case NS_NODE_DOCUMENT:
     case NS_NODE_DOCTYPE:
+        out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
+        for (const ns_attr *a = src->attrs; a; a = a->next)
+            ns_element_set_attr(out, a->name ? a->name : "",
+                                a->value ? a->value : "");
+        out->kind = NS_NODE_DOCTYPE;
+        break;
+    case NS_NODE_DOCUMENT:
     case NS_NODE_COMMENT:
         out = ns_node_new(src->kind);
         if (src->text) {
