@@ -190,38 +190,40 @@ enum {
 
 static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
 
+/* Closed silhouette of both glass bulbs, drawn around centre (16,16) so the
+   whole glyph fits a compact 32px cursor with rounded bulbs. */
 static void
-hourglass_side_path(cairo_t *cr, double ox, double oy)
+hourglass_bulbs_path(cairo_t *cr, double ox, double oy)
 {
-    cairo_move_to(cr, 15.8 + ox, 10.8 + oy);
-    cairo_curve_to(cr, 18.4 + ox, 15.4 + oy,
-                   21.4 + ox, 19.4 + oy,
-                   24.0 + ox, 24.0 + oy);
-    cairo_curve_to(cr, 21.4 + ox, 28.6 + oy,
-                   18.4 + ox, 32.6 + oy,
-                   15.8 + ox, 37.2 + oy);
-    cairo_move_to(cr, 32.2 + ox, 10.8 + oy);
-    cairo_curve_to(cr, 29.6 + ox, 15.4 + oy,
-                   26.6 + ox, 19.4 + oy,
-                   24.0 + ox, 24.0 + oy);
-    cairo_curve_to(cr, 26.6 + ox, 28.6 + oy,
-                   29.6 + ox, 32.6 + oy,
-                   32.2 + ox, 37.2 + oy);
+    cairo_move_to(cr, 14.6 + ox, 16.0 + oy);
+    cairo_curve_to(cr, 12.0 + ox, 13.2 + oy, 9.9 + ox, 10.6 + oy, 10.1 + ox, 8.0 + oy);
+    cairo_curve_to(cr, 10.0 + ox, 6.8 + oy, 10.8 + ox, 6.1 + oy, 12.2 + ox, 6.1 + oy);
+    cairo_curve_to(cr, 14.2 + ox, 5.6 + oy, 17.8 + ox, 5.6 + oy, 19.8 + ox, 6.1 + oy);
+    cairo_curve_to(cr, 21.2 + ox, 6.1 + oy, 22.0 + ox, 6.8 + oy, 21.9 + ox, 8.0 + oy);
+    cairo_curve_to(cr, 22.1 + ox, 10.6 + oy, 20.0 + ox, 13.2 + oy, 17.4 + ox, 16.0 + oy);
+    cairo_close_path(cr);
+    cairo_move_to(cr, 14.6 + ox, 16.0 + oy);
+    cairo_curve_to(cr, 12.0 + ox, 18.8 + oy, 9.9 + ox, 21.4 + oy, 10.1 + ox, 24.0 + oy);
+    cairo_curve_to(cr, 10.0 + ox, 25.2 + oy, 10.8 + ox, 25.9 + oy, 12.2 + ox, 25.9 + oy);
+    cairo_curve_to(cr, 14.2 + ox, 26.4 + oy, 17.8 + ox, 26.4 + oy, 19.8 + ox, 25.9 + oy);
+    cairo_curve_to(cr, 21.2 + ox, 25.9 + oy, 22.0 + ox, 25.2 + oy, 21.9 + ox, 24.0 + oy);
+    cairo_curve_to(cr, 22.1 + ox, 21.4 + oy, 20.0 + ox, 18.8 + oy, 17.4 + ox, 16.0 + oy);
+    cairo_close_path(cr);
 }
 
 static void
-hourglass_cap_path(cairo_t *cr, double ox, double oy)
+hourglass_caps_path(cairo_t *cr, double ox, double oy)
 {
-    cairo_move_to(cr, 15.2 + ox, 9.8 + oy);
-    cairo_line_to(cr, 32.8 + ox, 9.8 + oy);
-    cairo_move_to(cr, 15.2 + ox, 38.2 + oy);
-    cairo_line_to(cr, 32.8 + ox, 38.2 + oy);
+    cairo_move_to(cr, 9.7 + ox, 6.2 + oy);
+    cairo_line_to(cr, 22.3 + ox, 6.2 + oy);
+    cairo_move_to(cr, 9.7 + ox, 25.8 + oy);
+    cairo_line_to(cr, 22.3 + ox, 25.8 + oy);
 }
 
 static GdkTexture *
 hourglass_texture(void)
 {
-    const int size = 48;
+    const int size = 32;
     cairo_surface_t *surface =
         cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
     if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
@@ -234,76 +236,65 @@ hourglass_texture(void)
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
     cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
 
-    cairo_set_source_rgba(cr, 0.02, 0.025, 0.03, 0.24);
-    cairo_set_line_width(cr, 4.5);
-    hourglass_cap_path(cr, 1.5, 1.8);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.22);
+    cairo_set_line_width(cr, 3.0);
+    hourglass_caps_path(cr, 0.7, 0.9);
     cairo_stroke(cr);
-    cairo_set_line_width(cr, 3.6);
-    hourglass_side_path(cr, 1.5, 1.8);
+    cairo_set_line_width(cr, 2.6);
+    hourglass_bulbs_path(cr, 0.7, 0.9);
     cairo_stroke(cr);
 
-    cairo_pattern_t *glass =
-        cairo_pattern_create_linear(16.0, 12.0, 32.0, 36.0);
-    cairo_pattern_add_color_stop_rgba(glass, 0.0, 0.98, 1.0, 1.0, 0.58);
-    cairo_pattern_add_color_stop_rgba(glass, 0.45, 0.66, 0.83, 0.95, 0.28);
-    cairo_pattern_add_color_stop_rgba(glass, 1.0, 0.94, 0.98, 1.0, 0.50);
+    cairo_pattern_t *glass = cairo_pattern_create_linear(16.0, 7.0, 16.0, 26.0);
+    cairo_pattern_add_color_stop_rgba(glass, 0.0, 0.97, 1.0, 1.0, 0.55);
+    cairo_pattern_add_color_stop_rgba(glass, 0.5, 0.62, 0.80, 0.95, 0.30);
+    cairo_pattern_add_color_stop_rgba(glass, 1.0, 0.93, 0.98, 1.0, 0.52);
     cairo_set_source(cr, glass);
-    cairo_move_to(cr, 17.3, 12.8);
-    cairo_curve_to(cr, 20.5, 16.0, 22.7, 19.9, 24.0, 22.5);
-    cairo_curve_to(cr, 25.3, 19.9, 27.5, 16.0, 30.7, 12.8);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-    cairo_move_to(cr, 24.0, 25.5);
-    cairo_curve_to(cr, 22.7, 28.1, 20.5, 32.0, 17.3, 35.2);
-    cairo_curve_to(cr, 21.4, 34.3, 26.6, 34.3, 30.7, 35.2);
-    cairo_curve_to(cr, 27.5, 32.0, 25.3, 28.1, 24.0, 25.5);
-    cairo_close_path(cr);
+    hourglass_bulbs_path(cr, 0.0, 0.0);
     cairo_fill(cr);
     cairo_pattern_destroy(glass);
 
-    cairo_pattern_t *sand =
-        cairo_pattern_create_linear(19.0, 15.0, 29.0, 35.0);
-    cairo_pattern_add_color_stop_rgba(sand, 0.0, 1.0, 0.86, 0.36, 0.98);
-    cairo_pattern_add_color_stop_rgba(sand, 1.0, 0.88, 0.50, 0.12, 0.98);
+    cairo_pattern_t *sand = cairo_pattern_create_linear(16.0, 7.0, 16.0, 25.0);
+    cairo_pattern_add_color_stop_rgba(sand, 0.0, 1.0, 0.85, 0.40, 0.98);
+    cairo_pattern_add_color_stop_rgba(sand, 1.0, 0.90, 0.52, 0.14, 0.98);
     cairo_set_source(cr, sand);
-    cairo_move_to(cr, 19.0, 15.4);
-    cairo_curve_to(cr, 21.5, 16.2, 26.5, 16.2, 29.0, 15.4);
-    cairo_curve_to(cr, 27.4, 18.2, 25.5, 20.7, 24.0, 22.9);
-    cairo_curve_to(cr, 22.5, 20.7, 20.6, 18.2, 19.0, 15.4);
+    cairo_move_to(cr, 11.7, 8.0);
+    cairo_curve_to(cr, 14.0, 7.6, 18.0, 7.6, 20.3, 8.0);
+    cairo_curve_to(cr, 18.9, 10.9, 17.4, 13.3, 16.0, 15.3);
+    cairo_curve_to(cr, 14.6, 13.3, 13.1, 10.9, 11.7, 8.0);
     cairo_close_path(cr);
     cairo_fill(cr);
-    cairo_move_to(cr, 18.8, 34.5);
-    cairo_curve_to(cr, 21.0, 32.0, 22.7, 31.3, 24.0, 31.3);
-    cairo_curve_to(cr, 25.3, 31.3, 27.0, 32.0, 29.2, 34.5);
-    cairo_curve_to(cr, 26.2, 35.1, 21.8, 35.1, 18.8, 34.5);
+    cairo_move_to(cr, 11.7, 24.0);
+    cairo_curve_to(cr, 13.5, 21.6, 14.8, 20.9, 16.0, 20.9);
+    cairo_curve_to(cr, 17.2, 20.9, 18.5, 21.6, 20.3, 24.0);
+    cairo_curve_to(cr, 17.6, 24.7, 14.4, 24.7, 11.7, 24.0);
     cairo_close_path(cr);
     cairo_fill(cr);
-    cairo_set_line_width(cr, 1.45);
-    cairo_move_to(cr, 24.0, 23.0);
-    cairo_line_to(cr, 24.0, 31.1);
+    cairo_set_line_width(cr, 1.1);
+    cairo_move_to(cr, 16.0, 15.3);
+    cairo_line_to(cr, 16.0, 20.9);
     cairo_stroke(cr);
     cairo_pattern_destroy(sand);
 
-    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.86);
-    cairo_set_line_width(cr, 1.25);
-    cairo_move_to(cr, 19.1, 13.1);
-    cairo_curve_to(cr, 21.0, 15.9, 22.2, 18.2, 23.1, 20.3);
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.80);
+    cairo_set_line_width(cr, 0.9);
+    cairo_move_to(cr, 12.6, 8.2);
+    cairo_curve_to(cr, 13.7, 10.4, 14.6, 12.2, 15.3, 13.8);
     cairo_stroke(cr);
-    cairo_move_to(cr, 25.2, 27.4);
-    cairo_curve_to(cr, 26.6, 30.0, 28.2, 32.3, 29.9, 34.1);
-    cairo_stroke(cr);
-
-    cairo_set_source_rgba(cr, 0.08, 0.095, 0.11, 0.98);
-    cairo_set_line_width(cr, 3.0);
-    hourglass_cap_path(cr, 0.0, 0.0);
-    cairo_stroke(cr);
-    cairo_set_line_width(cr, 2.15);
-    hourglass_side_path(cr, 0.0, 0.0);
+    cairo_move_to(cr, 16.7, 18.4);
+    cairo_curve_to(cr, 17.6, 20.2, 18.7, 22.2, 19.6, 24.0);
     cairo_stroke(cr);
 
-    cairo_set_source_rgba(cr, 0.70, 0.78, 0.86, 0.95);
-    cairo_set_line_width(cr, 0.95);
-    hourglass_side_path(cr, 0.0, 0.0);
+    cairo_set_source_rgba(cr, 0.10, 0.12, 0.14, 0.98);
+    cairo_set_line_width(cr, 2.0);
+    hourglass_caps_path(cr, 0.0, 0.0);
+    cairo_stroke(cr);
+    cairo_set_line_width(cr, 1.5);
+    hourglass_bulbs_path(cr, 0.0, 0.0);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.74, 0.82, 0.90, 0.85);
+    cairo_set_line_width(cr, 0.6);
+    hourglass_bulbs_path(cr, 0.0, 0.0);
     cairo_stroke(cr);
 
     cairo_destroy(cr);
@@ -330,7 +321,7 @@ busy_hourglass_cursor(NsProcView *v)
     if (texture) {
         GdkCursor *fallback = gdk_cursor_new_from_name("wait", NULL);
         v->hourglass_cursor =
-            gdk_cursor_new_from_texture(texture, 24, 24, fallback);
+            gdk_cursor_new_from_texture(texture, 16, 16, fallback);
         if (fallback)
             g_object_unref(fallback);
         g_object_unref(texture);
