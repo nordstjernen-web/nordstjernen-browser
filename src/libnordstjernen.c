@@ -145,6 +145,10 @@ browser_relayout(ns_browser *b)
     b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
     b->relaying = FALSE;
     b->images_fetched = FALSE;
+    if (b->js) {
+        ns_js_set_style_table(b->js, b->styles);
+        ns_js_set_layout_root(b->js, b->layout);
+    }
 
     gint64 now = g_get_monotonic_time();
     gboolean rapid = now - b->last_layout_us < NS_LAYOUT_RAPID_US;
@@ -282,8 +286,8 @@ browser_flush(gpointer user_data)
     ns_browser *b = user_data;
     if (!b || !b->js) return;
     if (!b->layout || b->dirty || ns_js_consume_mutated(b->js)) {
-        if (browser_relayout_from_mutation(b))
-            b->dirty = FALSE;
+        browser_relayout(b);
+        b->dirty = FALSE;
     }
 }
 
