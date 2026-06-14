@@ -19311,6 +19311,11 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
             JS_SetPropertyStr(ctx, out, "specified", JS_TRUE);
             JS_SetPropertyStr(ctx, out, "ownerElement",
                               JS_DupValue(ctx, this_val));
+            {
+                g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
+                JS_SetPropertyStr(ctx, out, "baseURI",
+                    JS_NewString(ctx, base && *base ? base : "about:blank"));
+            }
             break;
         }
     }
@@ -22489,6 +22494,16 @@ ns_element_get_isConnected(JSContext *ctx, JSValueConst this_val)
     for (const ns_node *p = n; p; p = p->parent)
         if (p == js_from_ctx(ctx)->current_doc) return JS_TRUE;
     return JS_FALSE;
+}
+
+static JSValue
+ns_element_get_baseURI(JSContext *ctx, JSValueConst this_val)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NewString(ctx, "about:blank");
+    g_autofree char *base = ns_js_doc_base_url(js);
+    return JS_NewString(ctx, base && *base ? base : "about:blank");
 }
 
 static JSValue
@@ -27435,6 +27450,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("popoverTargetElement",   ns_element_get_popoverTargetElement, ns_element_set_popoverTargetElement),
     JS_CGETSET_DEF("tabIndex",               ns_element_get_tabIndex, ns_element_set_tabIndex),
     JS_CGETSET_DEF("isConnected",            ns_element_get_isConnected,    ns_element_noop_set),
+    JS_CGETSET_DEF("baseURI",                ns_element_get_baseURI,        ns_element_noop_set),
     JS_CGETSET_DEF("ownerDocument",          ns_element_get_ownerDocument,  ns_element_noop_set),
     JS_CGETSET_DEF("namespaceURI",           ns_element_get_namespaceURI,   ns_element_noop_set),
     JS_CGETSET_DEF("shadowRoot",             ns_element_get_shadowRoot,     ns_element_noop_set),
@@ -30997,6 +31013,11 @@ ns_make_attr_node(JSContext *ctx, const char *ns_uri, const char *prefix,
                       prefix ? JS_NewString(ctx, prefix) : JS_NULL);
     JS_SetPropertyStr(ctx, out, "specified",    JS_TRUE);
     JS_SetPropertyStr(ctx, out, "ownerElement", JS_NULL);
+    {
+        g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
+        JS_SetPropertyStr(ctx, out, "baseURI",
+            JS_NewString(ctx, base && *base ? base : "about:blank"));
+    }
     return out;
 }
 
