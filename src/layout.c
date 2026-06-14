@@ -945,6 +945,10 @@ typedef struct ns_abs_static {
     double  rel_y;
 } ns_abs_static;
 
+enum {
+    NS_LAYOUT_DATA_IMAGE_BUDGET = 64ULL * 1024ULL * 1024ULL,
+};
+
 static GArray      *g_abs_pending;
 static gboolean     g_abs_force_build;
 static GHashTable  *g_abs_ph_set;
@@ -3648,6 +3652,31 @@ image_dimension_attr(const ns_node *n, const char *name)
     return v;
 }
 
+static ns_image *
+decode_data_image_for_layout(const char *url, const char *key)
+{
+    if (!url || !key || !g_image_cache_for_layout ||
+        !g_str_has_prefix(url, "data:image/"))
+        return NULL;
+    ns_image *cached = ns_image_cache_peek(g_image_cache_for_layout, key);
+    if (cached) return cached;
+    GByteArray *bytes = g_byte_array_new();
+    char *ctype = NULL;
+    gboolean too_large = FALSE;
+    gboolean ok = ns_data_url_decode(url, bytes, NS_LAYOUT_DATA_IMAGE_BUDGET,
+                                     &ctype, &too_large);
+    g_free(ctype);
+    if (!ok || too_large || bytes->len == 0) {
+        g_byte_array_free(bytes, TRUE);
+        return NULL;
+    }
+    int w = 0, h = 0;
+    ns_texture *tex = ns_image_decode_bytes(bytes->data, bytes->len, &w, &h);
+    g_byte_array_free(bytes, TRUE);
+    if (!tex) return NULL;
+    return ns_image_cache_insert_loaded(g_image_cache_for_layout, key, tex, w, h);
+}
+
 static ns_box *
 build_image_box(const ns_node *n)
 {
@@ -3690,19 +3719,21 @@ build_image_box(const ns_node *n)
         box->content_height = box->content_width * file_h / file_w;
     m->declared_image_size =
         box->content_width > 0 && box->content_height > 0;
-    if (!m->declared_image_size && url &&
-        box->content_width <= 0 && box->content_height <= 0) {
-        box->content_width = 200;
-        box->content_height = 150;
-        m->placeholder_image_size = TRUE;
-    }
     if (g_image_cache_for_layout) {
         char *abs = g_base_url_for_layout
             ? ns_url_resolve(g_base_url_for_layout, url)
             : NULL;
-        m->image = ns_image_cache_peek(g_image_cache_for_layout,
-                                       abs ? abs : url);
+        const char *key = abs ? abs : url;
+        m->image = decode_data_image_for_layout(url, key);
+        if (!m->image)
+            m->image = ns_image_cache_peek(g_image_cache_for_layout, key);
         g_free(abs);
+    }
+    if (!m->declared_image_size && url && !m->image &&
+        box->content_width <= 0 && box->content_height <= 0) {
+        box->content_width = 200;
+        box->content_height = 150;
+        m->placeholder_image_size = TRUE;
     }
     return box;
 }
