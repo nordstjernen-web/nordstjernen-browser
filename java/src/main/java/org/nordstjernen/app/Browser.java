@@ -165,6 +165,12 @@ public final class Browser {
             bar.add(brand);
         }
 
+        JButton menu = new JButton("⋮");
+        menu.setFocusable(false);
+        menu.setToolTipText("Menu");
+        menu.addActionListener(e -> showMenu(menu));
+        bar.add(menu);
+
         back.addActionListener(e -> goBack());
         forward.addActionListener(e -> goForward());
         reload.addActionListener(e -> reloadPage());
@@ -1036,6 +1042,95 @@ public final class Browser {
         savePng.addActionListener(e -> savePage(false));
         menu.add(savePng);
         menu.show(canvas, cx, cy);
+    }
+
+    // --- Kebab (overflow) menu ----------------------------------------------
+
+    private void showMenu(Component anchor) {
+        boolean hasPage = currentUrl() != null;
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem reloadItem = new JMenuItem("Reload");
+        reloadItem.setAccelerator(KeyStroke.getKeyStroke("control R"));
+        reloadItem.setEnabled(hasPage);
+        reloadItem.addActionListener(e -> reloadPage());
+        menu.add(reloadItem);
+
+        JMenuItem findItem = new JMenuItem("Find in Page…");
+        findItem.setAccelerator(KeyStroke.getKeyStroke("control F"));
+        findItem.setEnabled(hasPage);
+        findItem.addActionListener(e -> openFind());
+        menu.add(findItem);
+
+        JMenu zoom = new JMenu("Zoom (" + Math.round(scale * 100) + "%)");
+        JMenuItem zin = new JMenuItem("Zoom In");
+        zin.setAccelerator(KeyStroke.getKeyStroke("control PLUS"));
+        zin.addActionListener(e -> zoomIn());
+        JMenuItem zout = new JMenuItem("Zoom Out");
+        zout.setAccelerator(KeyStroke.getKeyStroke("control MINUS"));
+        zout.addActionListener(e -> zoomOut());
+        JMenuItem zreset = new JMenuItem("Reset Zoom");
+        zreset.setAccelerator(KeyStroke.getKeyStroke("control 0"));
+        zreset.addActionListener(e -> zoomReset());
+        zoom.add(zin);
+        zoom.add(zout);
+        zoom.add(zreset);
+        zoom.setEnabled(hasPage);
+        menu.add(zoom);
+
+        menu.addSeparator();
+
+        JMenuItem savePdf = new JMenuItem("Save Page as PDF…");
+        savePdf.setAccelerator(KeyStroke.getKeyStroke("control P"));
+        savePdf.setEnabled(hasPage);
+        savePdf.addActionListener(e -> savePage(true));
+        menu.add(savePdf);
+
+        JMenuItem savePng = new JMenuItem("Save Page as Image…");
+        savePng.setEnabled(hasPage);
+        savePng.addActionListener(e -> savePage(false));
+        menu.add(savePng);
+
+        JMenuItem copyUrl = new JMenuItem("Copy Page Address");
+        copyUrl.setEnabled(hasPage);
+        copyUrl.addActionListener(e -> {
+            setClipboard(currentUrl());
+            setStatus("Copied page address");
+        });
+        menu.add(copyUrl);
+
+        menu.addSeparator();
+
+        JMenuItem console = new JMenuItem("JavaScript Console");
+        console.setAccelerator(KeyStroke.getKeyStroke("F12"));
+        console.addActionListener(e -> toggleConsole());
+        menu.add(console);
+
+        JMenuItem site = new JMenuItem("Visit nordstjernen.org");
+        site.addActionListener(e -> navigate("https://nordstjernen.org", true));
+        menu.add(site);
+
+        JMenuItem about = new JMenuItem("About Nordstjernen");
+        about.addActionListener(e -> showAbout());
+        menu.add(about);
+
+        menu.show(anchor, anchor.getWidth() - menu.getPreferredSize().width,
+                  anchor.getHeight());
+    }
+
+    private void showAbout() {
+        JOptionPane.showMessageDialog(frame,
+            "Nordstjernen " + VERSION + " (Java shell)\n\n"
+            + "A legendary web browser, built from scratch in C.\n"
+            + "It doesn't track you and doesn't phone home.\n\n"
+            + "This Swing shell drives the Nordstjernen renderer process.\n"
+            + "nordstjernen.org",
+            "About Nordstjernen",
+            JOptionPane.INFORMATION_MESSAGE, logoIcon());
+    }
+
+    private static Icon logoIcon() {
+        return icon("logo");
     }
 
     // --- Save / export -------------------------------------------------------
