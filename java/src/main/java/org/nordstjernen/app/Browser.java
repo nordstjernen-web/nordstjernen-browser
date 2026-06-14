@@ -113,6 +113,7 @@ public final class Browser {
     private boolean dragAnchored = false;
     private int pressDocX, pressDocY;
     private boolean hasSelection = false;
+    private boolean suppressTextInsert = false;
 
     private final Set<String> webglAsked = new HashSet<>();
 
@@ -678,7 +679,20 @@ public final class Browser {
 
     // --- Keyboard ------------------------------------------------------------
 
+    /**
+     * Insert typed text only for keys that {@code keyPressed} did not already
+     * deliver as a printable. The engine inserts a single printable character
+     * on {@code keydown} (its {@code browser_edit_key} path), so for ordinary
+     * keys {@code keyPressed} has done the insertion and we must not insert
+     * again here — that is what produced doubled characters. We still run for
+     * the IME / dead-key / compose path, where the composed character surfaces
+     * only in {@code keyTyped} and no printable {@code keydown} was sent.
+     */
     private void onCanvasKeyTyped(java.awt.event.KeyEvent e) {
+        if (suppressTextInsert) {
+            suppressTextInsert = false;
+            return;
+        }
         char c = e.getKeyChar();
         if (c == java.awt.event.KeyEvent.CHAR_UNDEFINED || Character.isISOControl(c)) {
             return;
@@ -701,6 +715,7 @@ public final class Browser {
     }
 
     private void onCanvasKeyPressed(java.awt.event.KeyEvent e) {
+        suppressTextInsert = false;
         if (e.isControlDown() && !e.isAltDown()) {
             switch (e.getKeyCode()) {
                 case java.awt.event.KeyEvent.VK_C: copySelection(); e.consume(); return;
@@ -713,8 +728,25 @@ public final class Browser {
         }
         String name = jsKeyName(e.getKeyCode());
         if (name == null) {
-            String pk = printableKey(e);
-            if (pk != null) {
+            String pk = printableForPress(e);
+            if (pk != null && !e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
+                final String fpk = pk;
+                final String fcode = printableCode(e);
+                final int fkc = e.getKeyCode();
+                final int fmods = swingMods(e);
+                suppressTextInsert = true;
+                io.submit(() -> {
+                    RemoteBrowser.Key res = engine.key(0, fpk, fcode, fkc, fmods);
+                    engine.key(3, fpk, fcode, fkc, fmods);
+                    SwingUtilities.invokeLater(() -> {
+                        if (res.nav != null) {
+                            navigate(res.nav, true);
+                        } else {
+                            scheduleRefresh();
+                        }
+                    });
+                });
+            } else if (pk != null) {
                 final String fpk = pk;
                 final String fcode = printableCode(e);
                 final int fkc = e.getKeyCode();
@@ -785,6 +817,20 @@ public final class Browser {
             case java.awt.event.KeyEvent.VK_PAGE_DOWN:  return "PageDown";
             default: return null;
         }
+    }
+
+    /**
+     * The character a printable key produces at {@code keyPressed} time, used
+     * to drive the engine's keydown insertion. Prefer the event's own
+     * {@code keyChar} (which respects Shift and the keyboard layout — e.g. the
+     * shifted number row), falling back to a keycode-derived letter/digit.
+     */
+    private static String printableForPress(java.awt.event.KeyEvent e) {
+        char ch = e.getKeyChar();
+        if (ch != java.awt.event.KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(ch)) {
+            return String.valueOf(ch);
+        }
+        return printableKey(e);
     }
 
     private static String printableKey(java.awt.event.KeyEvent e) {
