@@ -140,6 +140,18 @@ page_from_handle(jlong handle)
     return (AndroidPage *)(intptr_t)handle;
 }
 
+static jstring
+jstring_take(JNIEnv *env, char *s)
+{
+    if (!s || !*s) {
+        free(s);
+        return NULL;
+    }
+    jstring out = (*env)->NewStringUTF(env, s);
+    free(s);
+    return out;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeEngineAvailable(JNIEnv *env,
                                                                   jclass clazz)
@@ -405,13 +417,83 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeLinkAt(JNIEnv *env,
     char *url = page && page->renderer ? ns_rproc_http_link_at(page->renderer,
                                                                x, y)
                                       : NULL;
-    if (!url || !*url) {
-        free(url);
-        return NULL;
-    }
-    jstring s = (*env)->NewStringUTF(env, url);
-    free(url);
-    return s;
+    return jstring_take(env, url);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeClick(JNIEnv *env,
+                                                        jclass clazz,
+                                                        jlong handle,
+                                                        jint x, jint y,
+                                                        jint mods)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    char *url = page && page->renderer ? ns_rproc_http_click(page->renderer,
+                                                             x, y, mods)
+                                      : NULL;
+    LOGI("nativeClick x=%d y=%d mods=%d nav=%s", (int)x, (int)y, (int)mods,
+         url ? url : "");
+    return jstring_take(env, url);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeRelease(JNIEnv *env,
+                                                          jclass clazz,
+                                                          jlong handle)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    int changed = 0;
+    char *url = page && page->renderer ?
+        ns_rproc_http_release_full(page->renderer, &changed) : NULL;
+    LOGI("nativeRelease changed=%d nav=%s", changed, url ? url : "");
+    return jstring_take(env, url);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeKey(JNIEnv *env,
+                                                      jclass clazz,
+                                                      jlong handle,
+                                                      jint kind,
+                                                      jstring key,
+                                                      jstring code,
+                                                      jint keycode,
+                                                      jint mods)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    char *k = jstr_dup(env, key);
+    char *c = jstr_dup(env, code);
+    int prevented = 0;
+    char *url = page && page->renderer ?
+        ns_rproc_http_key_full(page->renderer, kind, k ? k : "",
+                               c ? c : "", keycode, mods, &prevented) : NULL;
+    LOGI("nativeKey kind=%d key_len=%zu code=%s keycode=%d mods=%d prevented=%d nav=%s",
+         (int)kind, k ? strlen(k) : 0, c ? c : "", (int)keycode,
+         (int)mods, prevented, url ? url : "");
+    free(k);
+    free(c);
+    return jstring_take(env, url);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeKeyText(JNIEnv *env,
+                                                          jclass clazz,
+                                                          jlong handle,
+                                                          jstring text)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    char *t = jstr_dup(env, text);
+    int prevented = 0;
+    char *url = page && page->renderer ?
+        ns_rproc_http_key_full(page->renderer, 2, t ? t : "", "", 0, 0,
+                               &prevented) : NULL;
+    LOGI("nativeKeyText text_len=%zu prevented=%d nav=%s",
+         t ? strlen(t) : 0, prevented, url ? url : "");
+    free(t);
+    return jstring_take(env, url);
 }
 
 JNIEXPORT void JNICALL

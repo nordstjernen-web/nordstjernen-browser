@@ -30,6 +30,10 @@ object NativeBrowser {
     external fun nativeRenderText(handle: Long): String?
     external fun nativeTitle(handle: Long): String?
     external fun nativeLinkAt(handle: Long, x: Int, y: Int): String?
+    external fun nativeClick(handle: Long, x: Int, y: Int, mods: Int): String?
+    external fun nativeRelease(handle: Long): String?
+    external fun nativeKey(handle: Long, kind: Int, key: String, code: String, keyCode: Int, mods: Int): String?
+    external fun nativeKeyText(handle: Long, text: String): String?
     external fun nativeClose(handle: Long)
     external fun nativeShutdown()
 }

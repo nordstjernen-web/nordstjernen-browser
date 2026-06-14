@@ -80,6 +80,42 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeLinkAt(JNIEnv *env, jclass cla
     return NULL;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeClick(JNIEnv *env, jclass clazz,
+                                                        jlong handle, jint x, jint y,
+                                                        jint mods)
+{
+    (void)env; (void)clazz; (void)handle; (void)x; (void)y; (void)mods;
+    return NULL;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeRelease(JNIEnv *env, jclass clazz,
+                                                          jlong handle)
+{
+    (void)env; (void)clazz; (void)handle;
+    return NULL;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeKey(JNIEnv *env, jclass clazz,
+                                                      jlong handle, jint kind,
+                                                      jstring key, jstring code,
+                                                      jint keycode, jint mods)
+{
+    (void)env; (void)clazz; (void)handle; (void)kind; (void)key; (void)code;
+    (void)keycode; (void)mods;
+    return NULL;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeKeyText(JNIEnv *env, jclass clazz,
+                                                          jlong handle, jstring text)
+{
+    (void)env; (void)clazz; (void)handle; (void)text;
+    return NULL;
+}
+
 JNIEXPORT void JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeClose(JNIEnv *env, jclass clazz,
                                                         jlong handle)
