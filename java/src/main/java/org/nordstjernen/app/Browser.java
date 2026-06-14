@@ -513,7 +513,7 @@ public final class Browser {
 
     private static String resolveVersion() {
         String v = Browser.class.getPackage().getImplementationVersion();
-        return (v == null || v.isBlank()) ? "1.0.6" : v;
+        return (v == null || v.isBlank()) ? "1.0.7-dev" : v;
     }
 
     private static ImageIcon icon(String name) {
