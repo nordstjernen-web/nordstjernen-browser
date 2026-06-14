@@ -129,7 +129,16 @@ static JSModuleDef *ns_js_module_loader(JSContext *ctx,
                                         const char *module_name, void *opaque,
                                         JSValueConst attributes);
 static void ns_js_set_attr_recorded(ns_js *js, ns_node *n, const char *name, const char *value);
+static void ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n,
+                                       const char *namespace_uri,
+                                       const char *prefix,
+                                       const char *local_name,
+                                       const char *name,
+                                       const char *value);
 static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
+static void ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n,
+                                          const char *namespace_uri,
+                                          const char *local_name);
 static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
                                const char *old_value, const char *new_value);
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
@@ -4933,10 +4942,22 @@ ns_element_getAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || argc < 1) return JS_NULL;
-    const char *name = JS_ToCString(ctx, argv[0]);
-    if (!name) return JS_NULL;
-    const char *val = ns_element_get_attr(n, name);
-    JS_FreeCString(ctx, name);
+    const char *raw_name = JS_ToCString(ctx, argv[0]);
+    if (!raw_name) return JS_NULL;
+    char *lowered = NULL;
+    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+        lowered = g_ascii_strdown(raw_name, -1);
+    const char *name = lowered ? lowered : raw_name;
+    const char *val = NULL;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name || ns_attr_name_is_internal(a->name)) continue;
+        if (strcmp(a->name, name) == 0) {
+            val = a->value;
+            break;
+        }
+    }
+    JS_FreeCString(ctx, raw_name);
+    g_free(lowered);
     return val ? JS_NewString(ctx, val) : JS_NULL;
 }
 
@@ -4945,11 +4966,23 @@ ns_element_hasAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || argc < 1) return JS_FALSE;
-    const char *name = JS_ToCString(ctx, argv[0]);
-    if (!name) return JS_FALSE;
-    const char *val = ns_element_get_attr(n, name);
-    JS_FreeCString(ctx, name);
-    return val ? JS_TRUE : JS_FALSE;
+    const char *raw_name = JS_ToCString(ctx, argv[0]);
+    if (!raw_name) return JS_FALSE;
+    char *lowered = NULL;
+    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+        lowered = g_ascii_strdown(raw_name, -1);
+    const char *name = lowered ? lowered : raw_name;
+    gboolean found = FALSE;
+    for (const ns_attr *a = n->attrs; a; a = a->next) {
+        if (!a->name || ns_attr_name_is_internal(a->name)) continue;
+        if (strcmp(a->name, name) == 0) {
+            found = TRUE;
+            break;
+        }
+    }
+    JS_FreeCString(ctx, raw_name);
+    g_free(lowered);
+    return found ? JS_TRUE : JS_FALSE;
 }
 
 static void
@@ -15783,6 +15816,30 @@ ns_js_set_attr_recorded(ns_js *js, ns_node *n, const char *name, const char *val
 }
 
 static void
+ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
+                           const char *prefix, const char *local_name,
+                           const char *name, const char *value)
+{
+    if (!n || !local_name || !name) return;
+    const char *new_value = value ? value : "";
+    const ns_attr *old_attr = ns_element_find_attr_ns(n, namespace_uri,
+                                                       local_name);
+    const char *record_name = old_attr && old_attr->name ? old_attr->name : name;
+    const char *old = old_attr ? old_attr->value : NULL;
+    gboolean changed = !(old && strcmp(old, new_value) == 0);
+    char *old_copy = old ? g_strdup(old) : NULL;
+    char *record_copy = g_strdup(record_name);
+    ns_element_set_attr_ns(n, namespace_uri, prefix, local_name, name, new_value);
+    if (js) {
+        if (changed) js->mutated = TRUE;
+        ns_js_record_attr_change(js, n, record_copy, old_copy);
+        ns_ce_attr_changed(js, n, record_copy, old_copy, new_value);
+    }
+    g_free(record_copy);
+    g_free(old_copy);
+}
+
+static void
 ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name)
 {
     if (!n || !name) return;
@@ -15795,6 +15852,26 @@ ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name)
         ns_js_record_attr_change(js, n, name, old_copy);
         ns_ce_attr_changed(js, n, name, old_copy, NULL);
     }
+    g_free(old_copy);
+}
+
+static void
+ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n, const char *namespace_uri,
+                              const char *local_name)
+{
+    if (!n || !local_name) return;
+    const ns_attr *old_attr = ns_element_find_attr_ns(n, namespace_uri,
+                                                       local_name);
+    if (!old_attr) return;
+    char *old_copy = g_strdup(old_attr->value ? old_attr->value : "");
+    char *record_copy = g_strdup(old_attr->name ? old_attr->name : local_name);
+    ns_element_remove_attr_ns(n, namespace_uri, local_name);
+    if (js) {
+        js->mutated = TRUE;
+        ns_js_record_attr_change(js, n, record_copy, old_copy);
+        ns_ce_attr_changed(js, n, record_copy, old_copy, NULL);
+    }
+    g_free(record_copy);
     g_free(old_copy);
 }
 
@@ -19270,6 +19347,42 @@ ns_namedmap_item(JSContext *ctx, JSValueConst this_val,
     return e;
 }
 
+static const ns_attr *ns_element_attr_by_namespace(const ns_node *n,
+                                                   const char *namespace_uri,
+                                                   const char *local);
+
+static JSValue
+ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
+              gboolean include_base)
+{
+    const char *name = a && a->name ? a->name : "";
+    const char *local = ns_attr_local_name(a);
+    JSValue entry = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, entry, "name", JS_NewString(ctx, name));
+    JS_SetPropertyStr(ctx, entry, "nodeName", JS_NewString(ctx, name));
+    JS_SetPropertyStr(ctx, entry, "localName", JS_NewString(ctx, local));
+    JS_SetPropertyStr(ctx, entry, "value",
+                      JS_NewString(ctx, a && a->value ? a->value : ""));
+    JS_SetPropertyStr(ctx, entry, "nodeValue",
+                      JS_NewString(ctx, a && a->value ? a->value : ""));
+    JS_SetPropertyStr(ctx, entry, "textContent",
+                      JS_NewString(ctx, a && a->value ? a->value : ""));
+    JS_SetPropertyStr(ctx, entry, "nodeType", JS_NewInt32(ctx, 2));
+    JS_SetPropertyStr(ctx, entry, "namespaceURI",
+                      a && a->namespace_uri ? JS_NewString(ctx, a->namespace_uri)
+                                            : JS_NULL);
+    JS_SetPropertyStr(ctx, entry, "prefix",
+                      a && a->prefix ? JS_NewString(ctx, a->prefix) : JS_NULL);
+    JS_SetPropertyStr(ctx, entry, "specified", JS_TRUE);
+    JS_SetPropertyStr(ctx, entry, "ownerElement", JS_DupValue(ctx, owner));
+    if (include_base) {
+        g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
+        JS_SetPropertyStr(ctx, entry, "baseURI",
+            JS_NewString(ctx, base && *base ? base : "about:blank"));
+    }
+    return entry;
+}
+
 static JSValue
 ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
 {
@@ -19279,28 +19392,7 @@ ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
     uint32_t i = 0;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (ns_attr_name_is_internal(a->name)) continue;
-        JSValue entry = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, entry, "name",
-                          JS_NewString(ctx, a->name ? a->name : ""));
-        JS_SetPropertyStr(ctx, entry, "nodeName",
-                          JS_NewString(ctx, a->name ? a->name : ""));
-        const char *colon = a->name ? strchr(a->name, ':') : NULL;
-        JS_SetPropertyStr(ctx, entry, "localName",
-                          JS_NewString(ctx, colon ? colon + 1
-                                              : (a->name ? a->name : "")));
-        JS_SetPropertyStr(ctx, entry, "value",
-                          JS_NewString(ctx, a->value ? a->value : ""));
-        JS_SetPropertyStr(ctx, entry, "nodeValue",
-                          JS_NewString(ctx, a->value ? a->value : ""));
-        JS_SetPropertyStr(ctx, entry, "nodeType", JS_NewInt32(ctx, 2));
-        JS_SetPropertyStr(ctx, entry, "namespaceURI", JS_NULL);
-        JS_SetPropertyStr(ctx, entry, "prefix",
-                          colon ? JS_NewStringLen(ctx, a->name,
-                                                  (size_t)(colon - a->name))
-                                : JS_NULL);
-        JS_SetPropertyStr(ctx, entry, "specified",    JS_TRUE);
-        JS_SetPropertyStr(ctx, entry, "ownerElement",
-                          JS_DupValue(ctx, this_val));
+        JSValue entry = ns_attr_to_js(ctx, this_val, a, FALSE);
         if (a->name)
             JS_SetPropertyStr(ctx, arr, a->name, JS_DupValue(ctx, entry));
         JS_SetPropertyUint32(ctx, arr, i++, entry);
@@ -19336,32 +19428,32 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
         if (a->name && g_ascii_strcasecmp(a->name, want) == 0) {
-            out = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, out, "name",
-                              JS_NewString(ctx, a->name));
-            JS_SetPropertyStr(ctx, out, "nodeName",
-                              JS_NewString(ctx, a->name));
-            JS_SetPropertyStr(ctx, out, "localName",
-                              JS_NewString(ctx, a->name));
-            JS_SetPropertyStr(ctx, out, "value",
-                              JS_NewString(ctx, a->value ? a->value : ""));
-            JS_SetPropertyStr(ctx, out, "nodeValue",
-                              JS_NewString(ctx, a->value ? a->value : ""));
-            JS_SetPropertyStr(ctx, out, "nodeType", JS_NewInt32(ctx, 2));
-            JS_SetPropertyStr(ctx, out, "namespaceURI", JS_NULL);
-            JS_SetPropertyStr(ctx, out, "prefix", JS_NULL);
-            JS_SetPropertyStr(ctx, out, "specified", JS_TRUE);
-            JS_SetPropertyStr(ctx, out, "ownerElement",
-                              JS_DupValue(ctx, this_val));
-            {
-                g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
-                JS_SetPropertyStr(ctx, out, "baseURI",
-                    JS_NewString(ctx, base && *base ? base : "about:blank"));
-            }
+            out = ns_attr_to_js(ctx, this_val, a, TRUE);
             break;
         }
     }
     JS_FreeCString(ctx, want);
+    return out;
+}
+
+static JSValue
+ns_element_getAttributeNodeNS(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n || n->kind != NS_NODE_ELEMENT || argc < 2) return JS_NULL;
+    gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+    const char *ns_raw = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
+    const char *local = JS_ToCString(ctx, argv[1]);
+    if (!local) {
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
+        return JS_NULL;
+    }
+    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    JSValue out = a ? ns_attr_to_js(ctx, this_val, a, TRUE) : JS_NULL;
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
+    JS_FreeCString(ctx, local);
     return out;
 }
 
@@ -19373,19 +19465,24 @@ ns_element_removeAttributeNode(JSContext *ctx, JSValueConst this_val,
     if (!n || n->kind != NS_NODE_ELEMENT || argc < 1 || !JS_IsObject(argv[0]))
         return argc >= 1 ? JS_DupValue(ctx, argv[0]) : JS_NULL;
     JSValue name_v = JS_GetPropertyStr(ctx, argv[0], "name");
+    JSValue ns_v = JS_GetPropertyStr(ctx, argv[0], "namespaceURI");
+    JSValue local_v = JS_GetPropertyStr(ctx, argv[0], "localName");
     const char *name = JS_ToCString(ctx, name_v);
-    if (name && *name) {
-        const char *old = ns_element_get_attr(n, name);
-        char *old_copy = old ? g_strdup(old) : NULL;
-        ns_element_remove_attr(n, name);
-        ns_js *_j = js_from_ctx(ctx);
-        if (_j) {
-            _j->mutated = TRUE;
-            ns_js_record_attr_change(_j, n, name, old_copy);
-        }
-        g_free(old_copy);
+    const char *ns_raw = JS_IsNull(ns_v) || JS_IsUndefined(ns_v)
+        ? NULL : JS_ToCString(ctx, ns_v);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
+    const char *local = JS_IsNull(local_v) || JS_IsUndefined(local_v)
+        ? NULL : JS_ToCString(ctx, local_v);
+    if (local && *local)
+        ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
+    else if (name && *name) {
+        ns_js_remove_attr_recorded(js_from_ctx(ctx), n, name);
     }
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
+    if (local) JS_FreeCString(ctx, local);
     if (name) JS_FreeCString(ctx, name);
+    JS_FreeValue(ctx, ns_v);
+    JS_FreeValue(ctx, local_v);
     JS_FreeValue(ctx, name_v);
     return JS_DupValue(ctx, argv[0]);
 }
@@ -19399,23 +19496,33 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
         return JS_NULL;
     JSValue name_v = JS_GetPropertyStr(ctx, argv[0], "name");
     JSValue val_v  = JS_GetPropertyStr(ctx, argv[0], "value");
+    JSValue ns_v = JS_GetPropertyStr(ctx, argv[0], "namespaceURI");
+    JSValue prefix_v = JS_GetPropertyStr(ctx, argv[0], "prefix");
+    JSValue local_v = JS_GetPropertyStr(ctx, argv[0], "localName");
     const char *name = JS_ToCString(ctx, name_v);
     const char *val  = JS_ToCString(ctx, val_v);
+    const char *ns_raw = JS_IsNull(ns_v) || JS_IsUndefined(ns_v)
+        ? NULL : JS_ToCString(ctx, ns_v);
+    const char *prefix = JS_IsNull(prefix_v) || JS_IsUndefined(prefix_v)
+        ? NULL : JS_ToCString(ctx, prefix_v);
+    const char *local = JS_IsNull(local_v) || JS_IsUndefined(local_v)
+        ? NULL : JS_ToCString(ctx, local_v);
     if (name && *name && !ns_attr_name_is_internal(name)) {
-        const char *old = ns_element_get_attr(n, name);
-        char *old_copy = old ? g_strdup(old) : NULL;
-        ns_element_set_attr(n, name, val ? val : "");
-        ns_js *_j = js_from_ctx(ctx);
-        if (_j) {
-            _j->mutated = TRUE;
-            ns_js_record_attr_change(_j, n, name, old_copy);
-        }
-        g_free(old_copy);
+        const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
+        ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, prefix,
+                                   local && *local ? local : name,
+                                   name, val ? val : "");
     }
     if (name) JS_FreeCString(ctx, name);
     if (val)  JS_FreeCString(ctx, val);
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
+    if (prefix) JS_FreeCString(ctx, prefix);
+    if (local) JS_FreeCString(ctx, local);
     JS_FreeValue(ctx, name_v);
     JS_FreeValue(ctx, val_v);
+    JS_FreeValue(ctx, ns_v);
+    JS_FreeValue(ctx, prefix_v);
+    JS_FreeValue(ctx, local_v);
     return JS_NULL;
 }
 
@@ -19550,14 +19657,11 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
 }
 
 static const ns_attr *
-ns_element_attr_by_local(const ns_node *n, const char *local)
+ns_element_attr_by_namespace(const ns_node *n, const char *namespace_uri,
+                             const char *local)
 {
-    for (const ns_attr *a = n->attrs; a; a = a->next) {
-        if (!a->name || ns_attr_name_is_internal(a->name)) continue;
-        const char *colon = strchr(a->name, ':');
-        if (strcmp(colon ? colon + 1 : a->name, local) == 0) return a;
-    }
-    return NULL;
+    const ns_attr *a = ns_element_find_attr_ns(n, namespace_uri, local);
+    return a && !ns_attr_name_is_internal(a->name) ? a : NULL;
 }
 
 static JSValue
@@ -19566,9 +19670,16 @@ ns_element_getAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     if (argc < 2) return JS_NULL;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_NULL;
+    gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+    const char *ns_raw = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
     const char *local = JS_ToCString(ctx, argv[1]);
-    if (!local) return JS_NULL;
-    const ns_attr *a = ns_element_attr_by_local(n, local);
+    if (!local) {
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
+        return JS_NULL;
+    }
+    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_NewString(ctx, a->value ? a->value : "") : JS_NULL;
 }
@@ -19579,9 +19690,16 @@ ns_element_hasAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     if (argc < 2) return JS_FALSE;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_FALSE;
+    gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+    const char *ns_raw = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
     const char *local = JS_ToCString(ctx, argv[1]);
-    if (!local) return JS_FALSE;
-    const ns_attr *a = ns_element_attr_by_local(n, local);
+    if (!local) {
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
+        return JS_FALSE;
+    }
+    const ns_attr *a = ns_element_attr_by_namespace(n, ns_uri, local);
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return a ? JS_TRUE : JS_FALSE;
 }
@@ -19633,24 +19751,28 @@ ns_element_setAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
         return JS_ThrowTypeError(ctx,
             "3 arguments required, but only %d present", argc);
     gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
-    const char *ns_uri = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
-    if (ns_uri && !*ns_uri) { JS_FreeCString(ctx, ns_uri); ns_uri = NULL; }
+    const char *ns_raw = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
     const char *name = JS_ToCString(ctx, argv[1]);
     JSValue verr = ns_validate_attr_ns(ctx, ns_uri, name);
     if (JS_IsException(verr)) {
-        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
         if (name) JS_FreeCString(ctx, name);
         return verr;
     }
     if (!n || n->kind != NS_NODE_ELEMENT) {
-        if (ns_uri) JS_FreeCString(ctx, ns_uri);
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
         if (name) JS_FreeCString(ctx, name);
         return JS_UNDEFINED;
     }
     const char *val  = JS_ToCString(ctx, argv[2]);
-    if (name && val && !ns_attr_name_is_internal(name))
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, name, val);
-    if (ns_uri) JS_FreeCString(ctx, ns_uri);
+    const char *colon = name ? strchr(name, ':') : NULL;
+    g_autofree char *prefix = colon ? g_strndup(name, (gsize)(colon - name)) : NULL;
+    const char *local = colon ? colon + 1 : name;
+    if (name && val && local && !ns_attr_name_is_internal(name))
+        ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, prefix,
+                                   local, name, val);
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
     if (name) JS_FreeCString(ctx, name);
     if (val)  JS_FreeCString(ctx, val);
     return JS_UNDEFINED;
@@ -19662,15 +19784,16 @@ ns_element_removeAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JS
     if (argc < 2) return JS_UNDEFINED;
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
+    gboolean ns_null = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+    const char *ns_raw = ns_null ? NULL : JS_ToCString(ctx, argv[0]);
+    const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
     const char *local = JS_ToCString(ctx, argv[1]);
-    if (!local) return JS_UNDEFINED;
-    const ns_attr *a = ns_element_attr_by_local(n, local);
-    if (a) {
-        JSValueConst forwarded[1] = { JS_NewString(ctx, a->name) };
-        JSValue r = ns_element_removeAttribute(ctx, this_val, 1, forwarded);
-        JS_FreeValue(ctx, (JSValue)forwarded[0]);
-        JS_FreeValue(ctx, r);
+    if (!local) {
+        if (ns_raw) JS_FreeCString(ctx, ns_raw);
+        return JS_UNDEFINED;
     }
+    ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, local);
+    if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return JS_UNDEFINED;
 }
@@ -19748,6 +19871,9 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
             *prev = a->next;
             if (a->flags & NS_ATTR_OWN_NAME)  g_free(a->name);
             if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
+            g_free(a->namespace_uri);
+            g_free(a->prefix);
+            g_free(a->local_name);
             g_free(a);
             ns_js *_j = js_from_ctx(ctx);
             if (_j) {
@@ -20789,10 +20915,12 @@ ns_element_hasChildNodes(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
-ns_attr_lookup_value(const ns_attr *a, const char *name, const char **out)
+ns_attr_lookup_equal_value(const ns_attr *a, const ns_attr *want,
+                           const char **out)
 {
     for (; a; a = a->next) {
-        if (a->name && strcmp(a->name, name) == 0) {
+        if (g_strcmp0(a->namespace_uri, want->namespace_uri) == 0 &&
+            strcmp(ns_attr_local_name(a), ns_attr_local_name(want)) == 0) {
             if (out) *out = a->value;
             return TRUE;
         }
@@ -20814,7 +20942,7 @@ ns_node_attrs_equal(const ns_node *a, const ns_node *b)
     if (ns_attr_count(a->attrs) != ns_attr_count(b->attrs)) return FALSE;
     for (const ns_attr *p = a->attrs; p; p = p->next) {
         const char *bv = NULL;
-        if (!ns_attr_lookup_value(b->attrs, p->name, &bv)) return FALSE;
+        if (!ns_attr_lookup_equal_value(b->attrs, p, &bv)) return FALSE;
         const char *av = p->value ? p->value : "";
         bv = bv ? bv : "";
         if (strcmp(av, bv) != 0) return FALSE;
@@ -27340,6 +27468,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("replaceChildren",         0, ns_element_replaceChildren),
     JS_CFUNC_DEF("getAttributeNames",       0, ns_element_getAttributeNames),
     JS_CFUNC_DEF("getAttributeNode",        1, ns_element_getAttributeNode),
+    JS_CFUNC_DEF("getAttributeNodeNS",      2, ns_element_getAttributeNodeNS),
     JS_CFUNC_DEF("removeAttributeNode",     1, ns_element_removeAttributeNode),
     JS_CFUNC_DEF("setAttributeNode",        1, ns_element_setAttributeNode),
     JS_CFUNC_DEF("setAttributeNodeNS",      1, ns_element_setAttributeNode),
