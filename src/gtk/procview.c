@@ -171,6 +171,7 @@ struct NsProcView {
     double      scale;
     gboolean    loading;
     gboolean    busy_cursor;
+    GdkCursor  *hourglass_cursor;
 
     int         load_seq, render_seq, link_seq, click_seq, viewport_seq;
     int         key_seq, select_seq, hover_seq;
@@ -188,6 +189,169 @@ enum {
 };
 
 static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
+
+static void
+hourglass_side_path(cairo_t *cr, double ox, double oy)
+{
+    cairo_move_to(cr, 13.5 + ox, 9.0 + oy);
+    cairo_curve_to(cr, 17.0 + ox, 14.5 + oy,
+                   20.5 + ox, 19.4 + oy,
+                   24.0 + ox, 24.0 + oy);
+    cairo_curve_to(cr, 20.5 + ox, 28.6 + oy,
+                   17.0 + ox, 33.5 + oy,
+                   13.5 + ox, 39.0 + oy);
+    cairo_move_to(cr, 34.5 + ox, 9.0 + oy);
+    cairo_curve_to(cr, 31.0 + ox, 14.5 + oy,
+                   27.5 + ox, 19.4 + oy,
+                   24.0 + ox, 24.0 + oy);
+    cairo_curve_to(cr, 27.5 + ox, 28.6 + oy,
+                   31.0 + ox, 33.5 + oy,
+                   34.5 + ox, 39.0 + oy);
+}
+
+static void
+hourglass_cap_path(cairo_t *cr, double ox, double oy)
+{
+    cairo_move_to(cr, 13.0 + ox, 8.0 + oy);
+    cairo_line_to(cr, 35.0 + ox, 8.0 + oy);
+    cairo_move_to(cr, 13.0 + ox, 40.0 + oy);
+    cairo_line_to(cr, 35.0 + ox, 40.0 + oy);
+}
+
+static GdkTexture *
+hourglass_texture(void)
+{
+    const int size = 48;
+    cairo_surface_t *surface =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, size, size);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surface);
+        return NULL;
+    }
+
+    cairo_t *cr = cairo_create(surface);
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
+    cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+    cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+
+    cairo_set_source_rgba(cr, 0.02, 0.025, 0.03, 0.24);
+    cairo_set_line_width(cr, 5.2);
+    hourglass_cap_path(cr, 1.8, 2.2);
+    cairo_stroke(cr);
+    cairo_set_line_width(cr, 4.2);
+    hourglass_side_path(cr, 1.8, 2.2);
+    cairo_stroke(cr);
+
+    cairo_pattern_t *glass =
+        cairo_pattern_create_linear(14.0, 10.0, 34.0, 38.0);
+    cairo_pattern_add_color_stop_rgba(glass, 0.0, 0.98, 1.0, 1.0, 0.58);
+    cairo_pattern_add_color_stop_rgba(glass, 0.45, 0.66, 0.83, 0.95, 0.28);
+    cairo_pattern_add_color_stop_rgba(glass, 1.0, 0.94, 0.98, 1.0, 0.50);
+    cairo_set_source(cr, glass);
+    cairo_move_to(cr, 15.8, 11.5);
+    cairo_curve_to(cr, 19.5, 15.8, 22.2, 20.0, 24.0, 22.8);
+    cairo_curve_to(cr, 25.8, 20.0, 28.5, 15.8, 32.2, 11.5);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_move_to(cr, 24.0, 25.2);
+    cairo_curve_to(cr, 22.2, 28.0, 19.5, 32.2, 15.8, 36.5);
+    cairo_line_to(cr, 32.2, 36.5);
+    cairo_curve_to(cr, 28.5, 32.2, 25.8, 28.0, 24.0, 25.2);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_pattern_destroy(glass);
+
+    cairo_pattern_t *sand =
+        cairo_pattern_create_linear(18.0, 14.0, 30.0, 36.0);
+    cairo_pattern_add_color_stop_rgba(sand, 0.0, 1.0, 0.86, 0.36, 0.98);
+    cairo_pattern_add_color_stop_rgba(sand, 1.0, 0.88, 0.50, 0.12, 0.98);
+    cairo_set_source(cr, sand);
+    cairo_move_to(cr, 18.0, 15.0);
+    cairo_curve_to(cr, 21.0, 16.0, 27.0, 16.0, 30.0, 15.0);
+    cairo_curve_to(cr, 28.0, 18.0, 25.8, 20.8, 24.0, 23.0);
+    cairo_curve_to(cr, 22.2, 20.8, 20.0, 18.0, 18.0, 15.0);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_move_to(cr, 17.4, 36.4);
+    cairo_curve_to(cr, 19.8, 32.6, 22.1, 31.4, 24.0, 31.4);
+    cairo_curve_to(cr, 25.9, 31.4, 28.2, 32.6, 30.6, 36.4);
+    cairo_close_path(cr);
+    cairo_fill(cr);
+    cairo_set_line_width(cr, 1.7);
+    cairo_move_to(cr, 24.0, 23.0);
+    cairo_line_to(cr, 24.0, 31.3);
+    cairo_stroke(cr);
+    cairo_pattern_destroy(sand);
+
+    cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.86);
+    cairo_set_line_width(cr, 1.5);
+    cairo_move_to(cr, 18.0, 12.0);
+    cairo_curve_to(cr, 20.6, 15.4, 22.2, 18.3, 23.3, 20.6);
+    cairo_stroke(cr);
+    cairo_move_to(cr, 25.4, 27.2);
+    cairo_curve_to(cr, 27.0, 30.4, 28.9, 33.0, 31.0, 35.4);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.08, 0.095, 0.11, 0.98);
+    cairo_set_line_width(cr, 3.4);
+    hourglass_cap_path(cr, 0.0, 0.0);
+    cairo_stroke(cr);
+    cairo_set_line_width(cr, 2.45);
+    hourglass_side_path(cr, 0.0, 0.0);
+    cairo_stroke(cr);
+
+    cairo_set_source_rgba(cr, 0.70, 0.78, 0.86, 0.95);
+    cairo_set_line_width(cr, 1.15);
+    hourglass_side_path(cr, 0.0, 0.0);
+    cairo_stroke(cr);
+
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
+
+    int stride = cairo_image_surface_get_stride(surface);
+    unsigned char *data = cairo_image_surface_get_data(surface);
+    GBytes *bytes = g_bytes_new(data, (gsize)stride * (gsize)size);
+    GdkTexture *texture =
+        gdk_memory_texture_new(size, size, GDK_MEMORY_DEFAULT, bytes,
+                               (gsize)stride);
+    g_bytes_unref(bytes);
+    cairo_surface_destroy(surface);
+    return texture;
+}
+
+static GdkCursor *
+busy_hourglass_cursor(NsProcView *v)
+{
+    if (v->hourglass_cursor)
+        return v->hourglass_cursor;
+
+    GdkTexture *texture = hourglass_texture();
+    if (texture) {
+        GdkCursor *fallback = gdk_cursor_new_from_name("wait", NULL);
+        v->hourglass_cursor =
+            gdk_cursor_new_from_texture(texture, 24, 24, fallback);
+        if (fallback)
+            g_object_unref(fallback);
+        g_object_unref(texture);
+    }
+    if (!v->hourglass_cursor)
+        v->hourglass_cursor = gdk_cursor_new_from_name("wait", NULL);
+    return v->hourglass_cursor;
+}
+
+static void
+set_busy_cursor(NsProcView *v)
+{
+    v->busy_cursor = TRUE;
+    if (!v->area)
+        return;
+
+    GdkCursor *cursor = busy_hourglass_cursor(v);
+    if (cursor)
+        gtk_widget_set_cursor(v->area, cursor);
+    else
+        gtk_widget_set_cursor_from_name(v->area, "wait");
+}
 
 static void
 pv_free(NsProcView *v)
@@ -221,6 +385,8 @@ pv_free(NsProcView *v)
     g_free(v->current_url);
     g_free(v->current_title);
     g_free(v->deferred_url);
+    if (v->hourglass_cursor)
+        g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
     g_free(v);
 }
@@ -1046,9 +1212,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
         v->loading = TRUE;
         post_emit(v, NS_PROC_EVT_LOADING, "1");
     }
-    v->busy_cursor = TRUE;
-    if (v->area)
-        gtk_widget_set_cursor_from_name(v->area, "wait");
+    set_busy_cursor(v);
     post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Loading…"));
 
     int vw = gtk_widget_get_width(v->area);
