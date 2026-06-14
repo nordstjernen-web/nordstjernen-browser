@@ -1,7 +1,7 @@
 project(
   'nordstjernen',
   ['c', 'cpp'],
-  version: '1.0.6-dev',
+  version: '1.0.6',
   license: 'LicenseRef-NSL-1.0',
   default_options: [
     'c_std=gnu2x,c2x,gnu11,c11',
@@ -251,6 +251,7 @@ if build_date == ''
   endif
 endif
 add_project_arguments('-DNS_BUILD_DATE="' + build_date + '"', language: 'c')
+add_project_arguments('-DNS_VERSION="' + meson.project_version() + '"', language: 'c')
 
 subdir('src/lexbor')
 subdir('src/quickjs')
