@@ -23,6 +23,7 @@
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if !defined(__ANDROID__)
 #ifndef MFD_CLOEXEC
 #define MFD_CLOEXEC 0x0001U
 #endif
@@ -51,6 +52,7 @@ open_fb_fd(size_t size)
     }
     return fd;
 }
+#endif
 #endif
 
 struct ns_rproc_http {
@@ -92,6 +94,17 @@ wait_child(pid_t pid)
 #endif
 
 #ifndef _WIN32
+#if defined(__ANDROID__)
+static ns_rproc_http *
+spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
+{
+    (void)renderer_path;
+    (void)max_width;
+    (void)max_height;
+    (void)shm;
+    return NULL;
+}
+#else
 static ns_rproc_http *
 spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
 {
@@ -178,6 +191,7 @@ fail:
     free(rxbuf);
     return NULL;
 }
+#endif
 
 #else /* _WIN32 */
 

@@ -156,9 +156,11 @@ class MainActivity : AppCompatActivity() {
         // scaled by the density for crisp text.
         val density = resources.displayMetrics.density.toDouble()
         val widthPx = if (pageView.width > 0) pageView.width else resources.displayMetrics.widthPixels
+        val heightPx = if (pageView.height > 0) pageView.height else resources.displayMetrics.heightPixels
         val viewportCss = Math.max(320, (widthPx / density).toInt())
+        val viewportCssHeight = Math.max(240, (heightPx / density).toInt())
         ioExecutor.execute {
-            val handle = NativeBrowser.nativeOpen(url, viewportCss, 600)
+            val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, 600)
             val size = if (handle != 0L) NativeBrowser.nativePageSize(handle) else null
             val title = if (handle != 0L) NativeBrowser.nativeTitle(handle) else null
             runOnUiThread {

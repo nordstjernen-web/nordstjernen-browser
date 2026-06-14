@@ -108,6 +108,12 @@ if host_machine.system() == 'windows'
 endif
 
 if is_android
+  nordstjernen_embed_sources += files(
+    'ipc_http.c',
+    'renderer_serve.c',
+    'rproc_http.c',
+  )
+
   nordstjernen_deps = [
     glib,
     gobject,

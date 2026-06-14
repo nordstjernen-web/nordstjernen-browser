@@ -26,9 +26,11 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz
 JNIEXPORT jlong JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz,
                                                        jstring url, jint viewport_width,
+                                                       jint viewport_height,
                                                        jint settle_ms)
 {
-    (void)env; (void)clazz; (void)url; (void)viewport_width; (void)settle_ms;
+    (void)env; (void)clazz; (void)url; (void)viewport_width;
+    (void)viewport_height; (void)settle_ms;
     return 0;
 }
 

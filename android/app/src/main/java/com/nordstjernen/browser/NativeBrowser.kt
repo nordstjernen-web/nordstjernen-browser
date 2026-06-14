@@ -1,4 +1,4 @@
-/* Nordstjernen — Kotlin facade over the native engine JNI bridge. */
+/* Nordstjernen — Kotlin facade over the native renderer IPC bridge. */
 
 package com.nordstjernen.browser
 
@@ -21,7 +21,7 @@ object NativeBrowser {
 
     external fun nativeEngineAvailable(): Boolean
     external fun nativeInit(dataDir: String, caBundle: String): Int
-    external fun nativeOpen(url: String, viewportWidth: Int, settleMs: Int): Long
+    external fun nativeOpen(url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Long
     external fun nativePageSize(handle: Long): IntArray?
     external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Boolean
     external fun nativeRenderText(handle: Long): String?
