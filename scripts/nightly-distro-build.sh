@@ -23,8 +23,8 @@ install_apt() {
     apt-get install -y --no-install-recommends \
         libpoppler-glib-dev \
         libfontconfig-dev libpango1.0-dev libavif-dev qt6-base-dev || true
-    pip3 install --break-system-packages --upgrade 'meson>=1.3' \
-        || pip3 install --upgrade 'meson>=1.3'
+    pip3 install --break-system-packages --upgrade 'meson>=1.4' \
+        || pip3 install --upgrade 'meson>=1.4'
 }
 
 install_zypper() {

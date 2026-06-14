@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Nordstjernen nightly build orchestrator. Builds, from a single Linux host,
-# a source tarball, per-distro Linux packages (debian/ubuntu/opensuse via
-# containers), and Windows + macOS builds (by driving the GitHub Actions
-# runners), then collects everything into a dated directory under
-# $NIGHTLY_ROOT with checksums, a manifest, a 'latest' symlink, and pruning
-# of old builds. Intended to run unattended from cron. See --help.
+# a source tarball, per-distro Linux packages (debian/ubuntu/opensuse/alpine
+# via containers, in parallel), and Windows + macOS builds (by driving the
+# GitHub Actions runners, dispatched up front so they run while the local
+# container builds proceed), then collects everything into $NIGHTLY_ROOT with
+# checksums, a manifest, and stable download symlinks. Intended to run
+# unattended from cron. See --help.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,6 +18,14 @@ NIGHTLY_GHA_DISPATCH=${NIGHTLY_GHA_DISPATCH:-1}
 NIGHTLY_PULL=${NIGHTLY_PULL:-1}
 NIGHTLY_PULL_BRANCH=${NIGHTLY_PULL_BRANCH:-main}
 DOCKER=${NS_DOCKER:-docker}
+
+# Run the four distro container builds concurrently (1) or one at a time (0).
+# When concurrent, the per-container compile job count is bounded so the host
+# is not oversubscribed (see run_distro_builds).
+NIGHTLY_PARALLEL=${NIGHTLY_PARALLEL:-1}
+# Retry counts for flaky network operations.
+NIGHTLY_DOCKER_PULL_RETRIES=${NIGHTLY_DOCKER_PULL_RETRIES:-3}
+NIGHTLY_GH_RETRIES=${NIGHTLY_GH_RETRIES:-4}
 
 NIGHTLY_DEBIAN_IMAGE=${NIGHTLY_DEBIAN_IMAGE:-debian:trixie}
 NIGHTLY_UBUNTU_IMAGE=${NIGHTLY_UBUNTU_IMAGE:-ubuntu:24.04}
@@ -33,8 +42,9 @@ usage() {
     cat <<EOF
 Usage: ./scripts/nightly.sh [options]
 
-Builds nightly artifacts for source, Linux (debian/ubuntu/opensuse via
-containers), Windows and macOS (via GitHub Actions) into a dated dir.
+Builds nightly artifacts for source, Linux (debian/ubuntu/opensuse/alpine via
+containers, in parallel), Windows and macOS (via GitHub Actions) into
+\$NIGHTLY_ROOT.
 
 Options:
   --date YYYY-MM-DD   Output dir date stamp (default: today, UTC).
@@ -44,8 +54,13 @@ Options:
   --no-docker         Skip the Linux container builds.
   --no-gha            Skip driving Windows/macOS via GitHub Actions.
   --no-java           Skip the Java API jar/javadoc stage.
+  --no-parallel       Build the Linux containers one at a time.
   --no-pull           Don't fast-forward the working tree to origin/main first.
   -h, --help          Show this help.
+
+The Windows/macOS GitHub Actions runs are dispatched before the local
+container builds start, so the remote builds proceed while the containers
+compile; their artifacts are collected afterwards.
 
 Before building, the script fast-forwards its own checkout to
 origin/\$NIGHTLY_PULL_BRANCH (default main) and re-runs itself if that
@@ -53,8 +68,10 @@ moved nightly.sh, so a plain cron invocation always builds the latest
 orchestrator. A dirty or diverged working tree is left untouched.
 
 Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
-NIGHTLY_PULL_BRANCH, NIGHTLY_GHA_TIMEOUT, NIGHTLY_GHA_BRANCH, NS_DOCKER,
-and the NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE}_IMAGE image tags.
+NIGHTLY_PULL_BRANCH, NIGHTLY_PARALLEL, NIGHTLY_GHA_TIMEOUT,
+NIGHTLY_GHA_BRANCH, NIGHTLY_GHA_DISPATCH, NIGHTLY_DOCKER_PULL_RETRIES,
+NIGHTLY_GH_RETRIES, NS_DOCKER, and the
+NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags.
 EOF
 }
 
@@ -62,15 +79,16 @@ ORIG_ARGS=("$@")
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --date)      DATE="$2"; shift 2 ;;
-        --root)      NIGHTLY_ROOT="$2"; shift 2 ;;
-        --ref)       NIGHTLY_REF="$2"; shift 2 ;;
+        --date)       DATE="$2"; shift 2 ;;
+        --root)       NIGHTLY_ROOT="$2"; shift 2 ;;
+        --ref)        NIGHTLY_REF="$2"; shift 2 ;;
         --no-tarball) DO_TARBALL=0; shift ;;
         --no-docker)  DO_DOCKER=0; shift ;;
         --no-gha)     DO_GHA=0; shift ;;
         --no-java)    DO_JAVA=0; shift ;;
+        --no-parallel) NIGHTLY_PARALLEL=0; shift ;;
         --no-pull)    NIGHTLY_PULL=0; shift ;;
-        -h|--help)   usage; exit 0 ;;
+        -h|--help)    usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; usage; exit 2 ;;
     esac
 done
@@ -107,7 +125,8 @@ NVERSION="${MESON_VERSION}+nightly.${DATESTAMP}.g${COMMIT}"
 
 OUTDIR="$NIGHTLY_ROOT"
 WORK=$(mktemp -d)
-mkdir -p "$OUTDIR"
+STATUSDIR="$WORK/status"
+mkdir -p "$OUTDIR" "$STATUSDIR"
 rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos" "$OUTDIR/java"
 rm -f "$OUTDIR"/SHA256SUMS "$OUTDIR"/MANIFEST.txt "$OUTDIR"/nightly.log \
       "$OUTDIR"/nordstjernen-*
@@ -116,12 +135,15 @@ trap 'rm -rf "$WORK"' EXIT
 
 exec > >(tee -a "$LOG") 2>&1
 
-declare -A STATUS
+# Stage results are recorded as files under $STATUSDIR rather than an
+# in-memory array so that background (parallel) stages report their outcome
+# back to this process. Each file holds a tab-separated "<state>\t<message>".
+set_status() { printf '%s\t%s\n' "$2" "${3:-}" > "$STATUSDIR/$1"; }
 
 log()  { printf '\n=== %s ===\n' "$*"; }
-ok()   { STATUS[$1]=ok;      printf '[ ok ]   %s\n' "$1"; }
-fail() { STATUS[$1]=FAILED;  printf '[FAIL]   %s — %s\n' "$1" "${2:-}"; }
-skip() { STATUS[$1]=skipped; printf '[skip]   %s\n' "$1"; }
+ok()   { set_status "$1" ok;      printf '[ ok ]   %s\n' "$1"; }
+fail() { set_status "$1" FAILED "${2:-}"; printf '[FAIL]   %s — %s\n' "$1" "${2:-}"; }
+skip() { set_status "$1" skipped; printf '[skip]   %s\n' "$1"; }
 dump_tail() {
     local f="$1" n="${2:-80}"
     if [ ! -s "$f" ]; then
@@ -132,6 +154,24 @@ dump_tail() {
     tail -n "$n" "$f"
     printf -- '----- end %s -----\n' "$f"
 }
+
+# Run a command, retrying with exponential backoff (2s, 4s, 8s, ...) on
+# failure. Usage: retry <attempts> <cmd> [args...].
+retry() {
+    local attempts="$1"; shift
+    local i=1 delay=2
+    until "$@"; do
+        if [ "$i" -ge "$attempts" ]; then
+            return 1
+        fi
+        echo "retry: '$1' failed (attempt $i/$attempts); waiting ${delay}s..." >&2
+        sleep "$delay"
+        delay=$((delay * 2))
+        i=$((i + 1))
+    done
+}
+
+docker_pull() { retry "$NIGHTLY_DOCKER_PULL_RETRIES" "$DOCKER" pull "$1"; }
 
 log "Nordstjernen nightly $DATE"
 printf 'ref=%s commit=%s version=%s\nroot=%s\n' \
@@ -162,7 +202,7 @@ stage_distro() {
     local key="linux-$distro"
     log "Stage: $distro container build ($image)"
     if ! $DOCKER image inspect "$image" >/dev/null 2>&1; then
-        $DOCKER pull "$image" || { fail "$key" "pull $image failed"; return; }
+        docker_pull "$image" || { fail "$key" "pull $image failed"; return; }
     fi
     local src="$WORK/$distro"
     mkdir -p "$src"
@@ -170,11 +210,10 @@ stage_distro() {
     local tree="$src/nordstjernen-${NVERSION}"
     local dst="$OUTDIR/linux/$distro"
     mkdir -p "$dst"
-    if $DOCKER run --rm \
-        -v "$tree:/build:z" -w /build \
-        -e "VERSION=$version" \
-        -e "NS_BUILD_DATE=$DATE" \
-        "$image" \
+    local -a dargs=( --rm -v "$tree:/build:z" -w /build
+        -e "VERSION=$version" -e "NS_BUILD_DATE=$DATE" )
+    [ -n "${DISTRO_JOBS:-}" ] && dargs+=( -e "NS_BUILD_JOBS=$DISTRO_JOBS" )
+    if $DOCKER run "${dargs[@]}" "$image" \
         sh -c 'command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true; exec bash scripts/nightly-distro-build.sh "$1"' sh "$distro" 2>&1 | tee "$dst/build.log"; then
         local n=0
         shopt -s nullglob
@@ -189,10 +228,52 @@ stage_distro() {
     rm -rf "$src"
 }
 
-gha_run() {
+run_distro_builds() {
+    local specs=(
+        "debian:$NIGHTLY_DEBIAN_IMAGE"
+        "ubuntu:$NIGHTLY_UBUNTU_IMAGE"
+        "opensuse:$NIGHTLY_OPENSUSE_IMAGE"
+        "alpine:$NIGHTLY_ALPINE_IMAGE"
+    )
+    local spec distro image
+    if [ "$NIGHTLY_PARALLEL" != 1 ]; then
+        DISTRO_JOBS=""
+        for spec in "${specs[@]}"; do
+            distro=${spec%%:*}; image=${spec#*:}
+            stage_distro "$distro" "$image" "$NVERSION"
+        done
+        return
+    fi
+
+    # Bound total concurrency: split a memory-derived job budget (the same
+    # heuristic each container would otherwise pick alone) across the distros
+    # building at once, so four parallel compiles don't oversubscribe the host.
+    local cores mem_gb budget
+    cores=$(nproc 2>/dev/null || echo 2)
+    mem_gb=$(awk '/MemTotal/{print int($2/1024/1024)}' /proc/meminfo 2>/dev/null || echo 4)
+    budget=$(( mem_gb / 2 ))
+    [ "$budget" -lt 1 ] && budget=1
+    [ "$budget" -gt "$cores" ] && budget=$cores
+    DISTRO_JOBS=$(( budget / ${#specs[@]} ))
+    [ "$DISTRO_JOBS" -lt 2 ] && DISTRO_JOBS=2
+    log "Parallel container builds: ${#specs[@]} distros @ -j${DISTRO_JOBS} each (host ${cores} cores / ${mem_gb} GiB)"
+    for spec in "${specs[@]}"; do
+        distro=${spec%%:*}; image=${spec#*:}
+        stage_distro "$distro" "$image" "$NVERSION" > "$WORK/joblog.linux-$distro" 2>&1 &
+    done
+    wait
+    for spec in "${specs[@]}"; do
+        distro=${spec%%:*}
+        cat "$WORK/joblog.linux-$distro" 2>/dev/null || true
+    done
+}
+
+gha_dispatch() {
     local wf="$1" plat="$2"
     local key="gha-$plat"
-    log "Stage: GitHub Actions $plat ($wf)"
+    local idfile="$WORK/gha-$plat.id"
+    echo 0 > "$idfile"
+    log "Stage: GitHub Actions $plat ($wf) — dispatch"
     if ! gh auth status >/dev/null 2>&1; then
         fail "$key" "gh not authenticated"
         return
@@ -215,7 +296,7 @@ gha_run() {
         fi
         printf 'no usable %s run for %s; dispatching on %s\n' \
             "$wf" "${sha:0:7}" "$NIGHTLY_GHA_BRANCH"
-        if ! gh workflow run "$wf" --ref "$NIGHTLY_GHA_BRANCH"; then
+        if ! retry "$NIGHTLY_GH_RETRIES" gh workflow run "$wf" --ref "$NIGHTLY_GHA_BRANCH"; then
             fail "$key" "workflow_dispatch failed"
             return
         fi
@@ -233,6 +314,19 @@ gha_run() {
             return
         fi
     fi
+    echo "$rid" > "$idfile"
+    printf 'tracking %s run %s for %s\n' "$wf" "$rid" "$plat"
+}
+
+gha_collect() {
+    local plat="$1"
+    local key="gha-$plat"
+    local rid
+    rid=$(cat "$WORK/gha-$plat.id" 2>/dev/null || echo 0)
+    if [ "${rid:-0}" = 0 ]; then
+        return
+    fi
+    log "Stage: GitHub Actions $plat — collect run $rid"
     printf 'watching run %s (timeout %ss)\n' "$rid" "$NIGHTLY_GHA_TIMEOUT"
     local deadline=$(( $(date +%s) + NIGHTLY_GHA_TIMEOUT ))
     local status conclusion
@@ -248,7 +342,7 @@ gha_run() {
     conclusion=$(gh run view "$rid" --json conclusion --jq '.conclusion' 2>/dev/null || echo unknown)
     local dst="$OUTDIR/$plat"
     mkdir -p "$dst"
-    gh run download "$rid" -D "$dst" 2>/dev/null || true
+    retry "$NIGHTLY_GH_RETRIES" gh run download "$rid" -D "$dst" 2>/dev/null || true
     if [ "$conclusion" = success ] && [ -n "$(find "$dst" -type f 2>/dev/null)" ]; then
         ok "$key"
     else
@@ -290,7 +384,7 @@ stage_java() {
         archive_to "$jsrc"
         local jtree="$jsrc/nordstjernen-${NVERSION}"
         if ! $DOCKER image inspect "$NIGHTLY_DEBIAN_IMAGE" >/dev/null 2>&1; then
-            $DOCKER pull "$NIGHTLY_DEBIAN_IMAGE" >> "$blog" 2>&1 || true
+            docker_pull "$NIGHTLY_DEBIAN_IMAGE" >> "$blog" 2>&1 || true
         fi
         if $DOCKER run --rm -v "$jtree:/build:z" -w /build \
                 -e "CC=${CC:-cc}" "$NIGHTLY_DEBIAN_IMAGE" \
@@ -387,14 +481,21 @@ stage_stable_links() {
     link_stable nordstjernen-src.tar.gz          'source/*.tar.gz'
 }
 
+# Dispatch the remote (Windows/macOS) builds first so they run on GitHub's
+# hosted runners while the local container builds compile, then collect their
+# artifacts once the local work is done.
+if [ "$DO_GHA" = 1 ]; then
+    gha_dispatch windows.yml windows
+    gha_dispatch macos.yml   macos
+else
+    skip "gha-windows"; skip "gha-macos"
+fi
+
 [ "$DO_TARBALL" = 1 ] && stage_tarball || skip "source-tarball"
 
 if [ "$DO_DOCKER" = 1 ]; then
     if command -v "$DOCKER" >/dev/null 2>&1; then
-        stage_distro debian   "$NIGHTLY_DEBIAN_IMAGE"   "$NVERSION"
-        stage_distro ubuntu   "$NIGHTLY_UBUNTU_IMAGE"   "$NVERSION"
-        stage_distro opensuse "$NIGHTLY_OPENSUSE_IMAGE" "$NVERSION"
-        stage_distro alpine   "$NIGHTLY_ALPINE_IMAGE"   "$NVERSION"
+        run_distro_builds
     else
         fail "linux-debian" "$DOCKER not found"
         fail "linux-ubuntu" "$DOCKER not found"
@@ -407,10 +508,8 @@ else
 fi
 
 if [ "$DO_GHA" = 1 ]; then
-    gha_run windows.yml windows
-    gha_run macos.yml   macos
-else
-    skip "gha-windows"; skip "gha-macos"
+    gha_collect windows
+    gha_collect macos
 fi
 
 [ "$DO_JAVA" = 1 ] && stage_java || skip "java"
@@ -420,6 +519,9 @@ stage_stable_links
 log "Checksums"
 ( cd "$OUTDIR" && find . -type f ! -name SHA256SUMS ! -name nightly.log \
     -exec sha256sum {} + > SHA256SUMS ) && ok "checksums" || fail "checksums"
+
+status_state() { cut -f1 "$STATUSDIR/$1" 2>/dev/null; }
+status_keys()  { ls -1 "$STATUSDIR" 2>/dev/null | sort; }
 
 log "Manifest"
 {
@@ -431,8 +533,8 @@ log "Manifest"
     echo "built:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo
     echo "Stage status:"
-    for k in $(printf '%s\n' "${!STATUS[@]}" | sort); do
-        printf '  %-18s %s\n' "$k" "${STATUS[$k]}"
+    for k in $(status_keys); do
+        printf '  %-18s %s\n' "$k" "$(status_state "$k")"
     done
     echo
     echo "Artifacts:"
@@ -443,9 +545,10 @@ cat "$OUTDIR/MANIFEST.txt"
 
 log "Summary"
 rc=0
-for k in $(printf '%s\n' "${!STATUS[@]}" | sort); do
-    printf '  %-18s %s\n' "$k" "${STATUS[$k]}"
-    [ "${STATUS[$k]}" = FAILED ] && rc=1
+for k in $(status_keys); do
+    st=$(status_state "$k")
+    printf '  %-18s %s\n' "$k" "$st"
+    [ "$st" = FAILED ] && rc=1
 done
 printf '\nOutput: %s\n' "$OUTDIR"
 exit $rc
