@@ -22677,6 +22677,47 @@ ns_element_get_baseURI(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_element_requestPointerLock(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *el = ns_unwrap_element(this_val);
+    if (js && el && js->pointer_lock_element != el) {
+        js->pointer_lock_element = el;
+        if (js->current_doc)
+            ns_js_dispatch_event(js, js->current_doc,
+                                 "pointerlockchange", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_document_exitPointerLock(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->pointer_lock_element) {
+        js->pointer_lock_element = NULL;
+        if (js->current_doc)
+            ns_js_dispatch_event(js, js->current_doc,
+                                 "pointerlockchange", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_document_get_pointerLockElement(JSContext *ctx, JSValueConst this_val)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->pointer_lock_element)
+        return ns_make_element(ctx, js->pointer_lock_element);
+    return JS_NULL;
+}
+
+static JSValue
 ns_element_get_ownerDocument(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
@@ -27359,7 +27400,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("scrollTo",                2, ns_element_scroll_to),
     JS_CFUNC_DEF("scroll",                  2, ns_element_scroll_to),
     JS_CFUNC_DEF("scrollIntoViewIfNeeded",  1, ns_element_scrollIntoView),
-    JS_CFUNC_DEF("requestPointerLock",      0, ns_event_noop),
+    JS_CFUNC_DEF("requestPointerLock",      0, ns_element_requestPointerLock),
     JS_CFUNC_DEF("releasePointerLock",      0, ns_event_noop),
     JS_CFUNC_DEF("releaseCapture",          0, ns_event_noop),
     JS_CFUNC_DEF("setCapture",              0, ns_event_noop),
@@ -32496,6 +32537,7 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CFUNC_DEF("adoptNode",         1, ns_document_adopt_node),
     JS_CFUNC_DEF("importNode",        2, ns_document_import_node),
     JS_CFUNC_DEF("exitFullscreen", 0, ns_event_noop),
+    JS_CFUNC_DEF("exitPointerLock", 0, ns_document_exitPointerLock),
     JS_CFUNC_DEF("queryCommandSupported", 1, ns_event_false),
     JS_CFUNC_DEF("queryCommandEnabled",   1, ns_event_false),
     JS_CFUNC_DEF("queryCommandState",     1, ns_event_false),
@@ -32503,6 +32545,7 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CGETSET_DEF("currentScript",      ns_document_get_currentScript, ns_element_noop_set),
     JS_CGETSET_DEF("rootElement",        ns_document_get_documentElement, ns_element_noop_set),
     JS_CGETSET_DEF("fullscreenElement",  ns_element_get_null,  ns_element_noop_set),
+    JS_CGETSET_DEF("pointerLockElement", ns_document_get_pointerLockElement, ns_element_noop_set),
     JS_CGETSET_DEF("fullscreenEnabled",  ns_element_get_zero_int, ns_element_noop_set),
     JS_CGETSET_DEF("scrollingElement",   ns_document_get_scrollingElement, ns_element_noop_set),
     JS_CFUNC_DEF("addEventListener",    2, ns_document_addEventListener),
