@@ -3,8 +3,10 @@
 package com.nordstjernen.browser
 
 import android.graphics.Bitmap
+import android.util.Log
 
 object NativeBrowser {
+    private const val TAG = "nordstjernen"
     @Volatile private var libraryLoaded = false
 
     init {
@@ -12,6 +14,7 @@ object NativeBrowser {
             System.loadLibrary("nordstjernen_jni")
             true
         } catch (t: Throwable) {
+            Log.e(TAG, "failed to load native bridge", t)
             false
         }
     }

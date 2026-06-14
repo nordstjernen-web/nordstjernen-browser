@@ -161,6 +161,27 @@ fi
 cp -v "${ENGINE_SO}" "${JNILIBS}/libnordstjernen.so"
 "${STRIP}" "${JNILIBS}/libnordstjernen.so" || true
 
+python3 - "${JNILIBS}/libnordstjernen.so" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+for match in list(re.finditer(rb"[^\0]+", data)):
+    raw = bytes(match.group(0))
+    if b"nordstjernen-android-sysroot" not in raw and b"$ORIGIN" not in raw:
+        continue
+    if b".so" in raw:
+        cut = max(raw.rfind(b"/"), raw.rfind(b"\\"))
+        new = raw[cut + 1:] if cut >= 0 else raw
+    else:
+        new = b"$ORIGIN"
+    if len(new) > len(raw):
+        raise SystemExit(f"replacement longer than original in {path}: {raw!r}")
+    data[match.start():match.end()] = new + (b"\0" * (len(raw) - len(new)))
+open(path, "wb").write(data)
+PY
+
 for so in "${SYSROOT_PREFIX}"/lib/*.so; do
     [ -e "${so}" ] || continue
     cp -v "${so}" "${JNILIBS}/"
