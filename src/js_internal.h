@@ -99,6 +99,9 @@ struct ns_js {
     const ns_node *active_modal;
     const ns_node *focus_before_modal;
     const ns_node *pointer_lock_element;
+    double         last_mouse_x[2];
+    double         last_mouse_y[2];
+    gboolean       has_last_mouse[2];
     GHashTable   *canvas_states;
     ns_image_cache *image_cache;
     GHashTable   *js_image_loads;

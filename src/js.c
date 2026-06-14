@@ -18287,8 +18287,19 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "screenY", JS_NewFloat64(ctx, client_y));
     JS_SetPropertyStr(ctx, event, "offsetX", JS_NewFloat64(ctx, client_x));
     JS_SetPropertyStr(ctx, event, "offsetY", JS_NewFloat64(ctx, client_y));
-    JS_SetPropertyStr(ctx, event, "movementX", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, event, "movementY", JS_NewInt32(ctx, 0));
+    int move_x = 0, move_y = 0;
+    if (strcmp(type, "mousemove") == 0 || strcmp(type, "pointermove") == 0) {
+        int slot = type[0] == 'p' ? 1 : 0;
+        if (js->has_last_mouse[slot]) {
+            move_x = (int)(client_x - js->last_mouse_x[slot]);
+            move_y = (int)(client_y - js->last_mouse_y[slot]);
+        }
+        js->last_mouse_x[slot] = client_x;
+        js->last_mouse_y[slot] = client_y;
+        js->has_last_mouse[slot] = TRUE;
+    }
+    JS_SetPropertyStr(ctx, event, "movementX", JS_NewInt32(ctx, move_x));
+    JS_SetPropertyStr(ctx, event, "movementY", JS_NewInt32(ctx, move_y));
     JS_SetPropertyStr(ctx, event, "button",  JS_NewInt32(ctx, button));
     JS_SetPropertyStr(ctx, event, "buttons", JS_NewInt32(ctx, buttons));
     JS_SetPropertyStr(ctx, event, "which",   JS_NewInt32(ctx, button + 1));
