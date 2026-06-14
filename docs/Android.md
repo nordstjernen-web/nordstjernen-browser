@@ -26,6 +26,53 @@ the free binary only. Treat Play as reach and reputation.
   **arm64-v8a** + **x86_64**.
   AGP 8.11.1, Gradle 8.14.5, NDK r27, JDK 17.
 
+## Remaining Play Store steps
+
+As of **14 June 2026**, the Android code path is close to publishable:
+`targetSdk 36`, `minSdk 35`, `arm64-v8a` + `x86_64`, 16 KB page-size linker
+flags, edge-to-edge handling, Play upload-key wiring, a manual release AAB
+workflow, and the minimal `INTERNET` / `ACCESS_NETWORK_STATE` permissions are
+already in-tree. The remaining work is mostly Play Console setup and release
+paperwork:
+
+1. **Finish developer account verification.** Decide personal vs organisation
+   account. Organisation accounts need D-U-N-S-backed business details; personal
+   accounts need verified identity and contact details. Keep the public
+   developer email/phone operational because Play verifies those fields.
+2. **Publish the privacy policy.** Publish `docs/privacy-policy.md` at
+   `https://nordstjernen.org/privacy`, add that URL in Play Console, and make
+   the same policy reachable from inside the Android app before production
+   review. The Play policy requires both the store-field link and an in-app link
+   or text, even when the app collects no project-side user data.
+3. **Create production store assets.** Prepare the app name, 80-character short
+   description, full description, category **Browsers**, 512x512 icon, 1024x500
+   feature graphic, and 2-8 phone screenshots captured from a real-engine
+   Android build. Avoid screenshots that imply filtering, VPN, privacy proxying,
+   sync, or ad blocking unless those features are actually present.
+4. **Complete Play Console App content forms.** Data safety should say the
+   Nordstjernen project collects and shares no user data; browser traffic goes
+   only to sites the user visits and to the configured search engine. Also
+   complete content rating, target audience, ads, app access, financial/health/
+   government/news declarations, and any permissions declarations Play asks for.
+5. **Create and protect the upload key.** Use Play App Signing, store the upload
+   keystore offline, and set the four `ANDROID_*` GitHub secrets documented
+   below so `.github/workflows/android-release.yml` emits a signed `.aab`.
+6. **Build the release bundle.** Trigger the `android-release` workflow or run
+   `gradle bundleRelease` locally, then upload the resulting `.aab` to an
+   internal testing track first. Play requires Android App Bundles for new apps.
+7. **Run Play-delivered smoke tests.** Install from the internal track on at
+   least a real Pixel and an emulator. Re-check startup, default-browser role,
+   `about:start`, DuckDuckGo search, Hacker News login/cookies, Wikipedia
+   mobile routing, rotation, text input, back/reload/home, and crash-free launch.
+8. **Run closed testing if required.** New personal developer accounts created
+   after 13 November 2023 must run a closed test with at least 12 testers opted
+   in for 14 continuous days before requesting production access. Organisation
+   accounts are not subject to that personal-account production-access gate.
+9. **Request production access / submit production.** Answer the production
+   access questionnaire if Play shows it, upload the first production release,
+   and use staged rollout (for example 10% -> 50% -> 100%) while watching Play
+   Console vitals and crash reports.
+
 ## Building
 
 ```sh
@@ -81,13 +128,14 @@ yearly.
 
 ## Play policy — the non-negotiables
 
-(Verified against Play policy as of June 2026.)
+(Checked against Google documentation on 14 June 2026.)
 
-- **Target API level.** From **31 August 2026** every new app and update must
-  target **Android 16 (API 36)**; existing apps must target at least API 35 to
-  stay visible to new users ([policy](https://developer.android.com/google/play/requirements/target-sdk)).
-  The project targets 36. `compileSdk 36` needs AGP ≥ 8.9.1, hence the AGP
-  8.11.1 pin. Expect the bar to move up one API level every August.
+- **Target API level.** Google's currently published upload requirement says
+  that, from **31 August 2025**, new apps and updates must target **Android 15
+  (API 35)** or higher ([policy](https://developer.android.com/google/play/requirements/target-sdk)).
+  The project already targets **API 36**, so this gate is done, but re-check the
+  policy page immediately before upload because Google usually moves the target
+  API bar annually.
 - **16 KB page sizes.** Since **1 November 2025** (final extension 31 May
   2026), all submissions targeting Android 15+ must run on devices with 16 KB
   memory pages ([docs](https://developer.android.com/guide/practices/page-sizes)).
@@ -112,7 +160,8 @@ yearly.
   F-Droid/sideload story as well, not just the Play listing.
 - **Data safety form.** Declare *no data collected, no data shared, encrypted
   in transit, deletion via uninstall* — all true. Play surfaces this on the
-  listing.
+  listing. Internal testing is exempt from showing Data safety; closed, open,
+  and production tracks require the form to be complete.
 - **Permissions.** Only `INTERNET` + `ACCESS_NETWORK_STATE` (already in the
   manifest). No notifications, location, contacts, camera, or microphone. Add
   `READ_MEDIA_IMAGES` only when `<input type=file>` upload lands.
@@ -123,27 +172,22 @@ yearly.
   (already present). The app requests `RoleManager.ROLE_BROWSER` once on first
   launch (Android 10+), which shows the system default-browser chooser; the
   user can change it any time in Settings, so it never re-prompts.
-- **Privacy policy.** Every listing needs a privacy policy URL, even with an
-  all-"No" data safety form. Point it at a page on `nordstjernen.org` stating
-  the obvious: no collection, no telemetry, browsing data stays on the device.
-  Cloud backup is disabled in the manifest (`allowBackup="false"`), so history
-  and cookies never leave the device through Google's backups either.
+- **Privacy policy.** Every app needs a privacy policy URL in Play Console and
+  a privacy policy link or text inside the app, even with an all-"No" data
+  safety form ([policy](https://support.google.com/googleplay/android-developer/answer/17105854)).
+  Point it at `https://nordstjernen.org/privacy`, using
+  `docs/privacy-policy.md` as the source. Cloud backup is disabled in the
+  manifest (`allowBackup="false"`), so history and cookies never leave the
+  device through Google's backups either.
 - **Don't wire** the Play Integrity API or any ads/advertising-ID SDK.
 
 ## Submission & rollout
 
-1. **Store listing** — name, 80-char short and 4000-char full descriptions,
-   512×512 icon, 1024×500 feature graphic, 2–8 phone screenshots (captured from
-   a real-engine build), category **Browsers**.
-2. **Forms** — complete data safety + content rating (above).
-3. **Internal testing** — upload the first signed AAB; review takes minutes.
-4. **Closed testing** — a personal developer account (created after Nov 2023)
-   needs **≥12 testers opted in for 14 consecutive days** before it can apply
-   for production, followed by a production-access questionnaire; organisation
-   accounts are exempt. Recruit a few spare testers — only continuously
-   opted-in ones count.
-5. **Production** — first browser review takes 3–7 days; roll out in stages
-   (10% → 100%) watching the crash dashboard.
+Follow the checklist above. The key sequencing is: account verification,
+privacy policy, signed release AAB, internal testing, closed testing if Play
+requires it, then production staged rollout. Personal accounts created after
+13 November 2023 need **at least 12 testers opted in for 14 consecutive days**
+before applying for production access ([Play Console Help](https://support.google.com/googleplay/android-developer/answer/14151465)).
 
 Versioning: `versionCode` is a monotonic int; `versionName` tracks the desktop
 version ("1.0.x"). For a critical security fix, halt rollout, then re-submit
