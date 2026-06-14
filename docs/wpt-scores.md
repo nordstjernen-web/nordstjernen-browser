@@ -37,6 +37,7 @@ they regenerate.
 | 2026-06-13 | f2448ed | d8a8414e5 | 223/696 (32%) | 18420/21529 (85%) | partial: dom/nodes |
 | 2026-06-13 | 726e248 | d8a8414e5 | 227/696 (32%) | 18551/21529 (86%) | partial: dom/nodes |
 | 2026-06-13 | f30dab1 | d8a8414e5 | 227/696 (32%) | 18707/21654 (86%) | partial: html/dom/elements/the-innertext-and-outertext-properties |
+| 2026-06-14 | 9fe9c25 | f01d00b69 | 276/696 (39%) | 60345/66800 (90%) | full |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -44,30 +45,30 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-13
+## Per-area results — 2026-06-14
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-13-f30dab1.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-14-9fe9c25.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 86/275 | 8503/9628 | 1070 | 44 | 11 | 0 |
-| `dom/events` | 48/167 | 337/701 | 316 | 24 | 24 | 0 |
-| `dom/traversal` | 4/17 | 28/52 | 24 | 0 | 0 | 0 |
-| `dom/ranges` | 2/55 | 5/206 | 201 | 0 | 0 | 0 |
+| `dom/nodes` | 107/275 | 9122/10060 | 883 | 44 | 11 | 0 |
+| `dom/events` | 48/167 | 363/744 | 334 | 23 | 24 | 0 |
+| `dom/traversal` | 5/17 | 1308/1602 | 294 | 0 | 0 | 0 |
+| `dom/ranges` | 24/55 | 40882/44537 | 3655 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 1/10 | 23/53 | 30 | 0 | 0 | 0 |
-| `url` | 11/32 | 8270/8685 | 414 | 1 | 0 | 0 |
-| `console` | 6/12 | 51/56 | 5 | 0 | 0 | 0 |
-| `hr-time` | 4/13 | 30/51 | 20 | 1 | 0 | 0 |
+| `url` | 11/32 | 7071/7474 | 402 | 1 | 0 | 0 |
+| `console` | 7/12 | 51/56 | 5 | 0 | 0 | 0 |
+| `hr-time` | 5/13 | 31/51 | 19 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
-| `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
-| `html/dom/elements` | 30/56 | 630/906 | 272 | 2 | 2 | 0 |
-| `WebCryptoAPI/digest` | 0/5 | 84/535 | 451 | 0 | 0 | 0 |
+| `html/webappapis/timers` | 9/12 | 13/14 | 1 | 0 | 0 | 0 |
+| `html/dom/elements` | 31/56 | 631/907 | 272 | 2 | 2 | 0 |
+| `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **227/696** | **18707/21654** | **2838** | **72** | **37** | **0** |
+| **Total** | **276/696** | **60345/66800** | **6347** | **71** | **37** | **0** |
 
-## ROI by area — 2026-06-13
+## ROI by area — 2026-06-14
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -80,19 +81,19 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/nodes` | 1125 | 189 | 6.0 | 25 | 104 |
-| `WebCryptoAPI/digest` | 451 | 5 | 90.2 | 0 | 0 |
-| `url` | 415 | 21 | 19.8 | 2 | 5 |
-| `dom/events` | 364 | 119 | 3.1 | 71 | 29 |
-| `html/dom/elements` | 276 | 26 | 10.6 | 3 | 16 |
-| `dom/ranges` | 201 | 53 | 3.8 | 25 | 8 |
+| `dom/ranges` | 3655 | 31 | 117.9 | 0 | 6 |
+| `dom/nodes` | 938 | 168 | 5.6 | 25 | 91 |
+| `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
+| `url` | 403 | 21 | 19.2 | 3 | 5 |
+| `dom/events` | 381 | 119 | 3.2 | 72 | 29 |
+| `dom/traversal` | 294 | 12 | 24.5 | 0 | 6 |
+| `html/dom/elements` | 276 | 25 | 11.0 | 2 | 16 |
 | `dom/collections` | 30 | 9 | 3.3 | 0 | 3 |
-| `dom/traversal` | 24 | 13 | 1.8 | 3 | 6 |
 | `html/semantics/forms/the-form-element` | 23 | 11 | 2.1 | 2 | 7 |
-| `hr-time` | 21 | 9 | 2.3 | 2 | 6 |
+| `hr-time` | 20 | 8 | 2.5 | 2 | 5 |
 | `xhr/formdata` | 10 | 4 | 2.5 | 0 | 3 |
-| `console` | 5 | 6 | 0.8 | 1 | 5 |
-| `html/webappapis/timers` | 2 | 4 | 0.5 | 2 | 2 |
+| `console` | 5 | 5 | 1.0 | 0 | 5 |
+| `html/webappapis/timers` | 1 | 3 | 0.3 | 2 | 1 |
 | `dom/lists` | 0 | 0 | - | 0 | 0 |
 | `html/webappapis/atob` | 0 | 0 | - | 0 | 0 |
 
