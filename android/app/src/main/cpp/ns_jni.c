@@ -20,6 +20,7 @@
 
 #define NS_ANDROID_MAX_W 2560
 #define NS_ANDROID_MAX_H 4096
+#define NS_ANDROID_MAX_REDIRECTS 8
 
 typedef struct {
     int                  ctrl_r;
@@ -236,6 +237,36 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
         free(u);
         return 0;
     }
+    int redirects = 0;
+    while (opened.nav && *opened.nav && redirects < NS_ANDROID_MAX_REDIRECTS) {
+        char *next = strdup(opened.nav);
+        if (!next) {
+            ns_rproc_http_page_clear(&opened);
+            ns_rproc_http_close(renderer);
+            free(u);
+            return 0;
+        }
+        LOGI("nativeOpen redirect #%d from=%s to=%s", redirects + 1,
+             opened.url ? opened.url : u, next);
+        ns_rproc_http_page_clear(&opened);
+        open_rc = ns_rproc_http_open(renderer, next, vw, vh, settle_ms,
+                                     &opened);
+        if (open_rc != 0 || !opened.ok) {
+            LOGE("nativeOpen redirect failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
+                 open_rc, opened.ok, next, opened.page_width,
+                 opened.page_height, opened.nav ? opened.nav : "");
+            ns_rproc_http_page_clear(&opened);
+            ns_rproc_http_close(renderer);
+            free(next);
+            free(u);
+            return 0;
+        }
+        free(next);
+        redirects++;
+    }
+    if (opened.nav && *opened.nav)
+        LOGE("nativeOpen stopped after %d redirects at nav=%s",
+             NS_ANDROID_MAX_REDIRECTS, opened.nav);
     AndroidPage *page = calloc(1, sizeof *page);
     if (!page) {
         ns_rproc_http_page_clear(&opened);
@@ -273,6 +304,18 @@ Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env,
     jint vals[2] = { page->page_width, page->page_height };
     (*env)->SetIntArrayRegion(env, arr, 0, 2, vals);
     return arr;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeUrl(JNIEnv *env,
+                                                      jclass clazz,
+                                                      jlong handle)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!page || !page->url)
+        return NULL;
+    return (*env)->NewStringUTF(env, page->url);
 }
 
 JNIEXPORT jboolean JNICALL

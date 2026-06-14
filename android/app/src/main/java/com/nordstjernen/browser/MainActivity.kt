@@ -81,6 +81,7 @@ class MainActivity : AppCompatActivity() {
         urlBar.isFocusableInTouchMode = true
         findViewById<ImageButton>(R.id.goButton).setOnClickListener { navigate(urlBar.text.toString()) }
         findViewById<ImageButton>(R.id.reloadButton).setOnClickListener { reload() }
+        findViewById<ImageButton>(R.id.homeButton).setOnClickListener { navigate(getString(R.string.home_url)) }
         findViewById<ImageButton>(R.id.logoButton).setOnClickListener { navigate("https://nordstjernen.org") }
         backButton.setOnClickListener { goBack() }
         urlBar.setOnEditorActionListener { _, actionId, _ ->
@@ -191,9 +192,10 @@ class MainActivity : AppCompatActivity() {
         ioExecutor.execute {
             val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, 600)
             val size = if (handle != 0L) NativeBrowser.nativePageSize(handle) else null
+            val finalUrl = if (handle != 0L) NativeBrowser.nativeUrl(handle) else null
             val title = if (handle != 0L) NativeBrowser.nativeTitle(handle) else null
             val elapsed = SystemClock.uptimeMillis() - started
-            Log.i(TAG, "load nativeOpen url=$url handle=$handle size=${size?.getOrNull(0)}x${size?.getOrNull(1)} title=${title ?: ""} elapsed=${elapsed}ms")
+            Log.i(TAG, "load nativeOpen url=$url final=${finalUrl ?: ""} handle=$handle size=${size?.getOrNull(0)}x${size?.getOrNull(1)} title=${title ?: ""} elapsed=${elapsed}ms")
             runOnUiThread {
                 if (gen != loadGen.get()) {
                     Log.i(TAG, "load stale url=$url gen=$gen current=${loadGen.get()}")
@@ -206,6 +208,12 @@ class MainActivity : AppCompatActivity() {
                     if (handle != 0L) NativeBrowser.nativeClose(handle)
                     Toast.makeText(this, getString(R.string.load_failed, url), Toast.LENGTH_SHORT).show()
                     return@runOnUiThread
+                }
+                val displayUrl = if (!finalUrl.isNullOrEmpty()) finalUrl else url
+                if (displayUrl != currentUrl) {
+                    Log.i(TAG, "load displayUrl requested=$url final=$displayUrl")
+                    currentUrl = displayUrl
+                    urlBar.setText(displayUrl)
                 }
                 setTitle(if (!title.isNullOrEmpty()) title else getString(R.string.app_name))
                 pageView.setDocument(handle, size[0], size[1])

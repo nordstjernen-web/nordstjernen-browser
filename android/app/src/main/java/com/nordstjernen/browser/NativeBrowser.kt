@@ -26,6 +26,7 @@ object NativeBrowser {
     external fun nativeInit(dataDir: String, caBundle: String): Int
     external fun nativeOpen(url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Long
     external fun nativePageSize(handle: Long): IntArray?
+    external fun nativeUrl(handle: Long): String?
     external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Boolean
     external fun nativeRenderText(handle: Long): String?
     external fun nativeTitle(handle: Long): String?

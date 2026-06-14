@@ -3348,9 +3348,7 @@ static const char k_about_start_template[] =
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
     "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
-    "<p class=\"intro\">A small, source-readable browser written from scratch "
-    "in C. Search the web without telemetry, accounts, or browser startup "
-    "noise.</p>"
+    "<p class=\"intro\">A legendary web browser</p>"
     "<form class=\"search\" id=\"dsearch\">"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
     " aria-label=\"Search the web\""
