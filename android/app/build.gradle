@@ -12,6 +12,15 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 
+def licenseAssetsDir = layout.buildDirectory.dir('generated/license-assets').get().asFile
+def syncLicenseAssets = tasks.register('syncLicenseAssets', Sync) {
+    from(rootProject.projectDir.parentFile) {
+        include 'License.md'
+        include 'THIRD-PARTY-LICENSES.md'
+    }
+    into licenseAssetsDir
+}
+
 android {
     namespace 'com.nordstjernen.browser'
     compileSdk 36
@@ -77,6 +86,18 @@ android {
                 signingConfig signingConfigs.release
             }
         }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDir licenseAssetsDir
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith('merge') && task.name.endsWith('Assets')) {
+        task.dependsOn(syncLicenseAssets)
     }
 }
 

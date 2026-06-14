@@ -281,6 +281,7 @@ install_data(
 
 install_data(
   'License.md',
+  'THIRD-PARTY-LICENSES.md',
   install_dir: get_option('datadir') / 'nordstjernen',
 )
 

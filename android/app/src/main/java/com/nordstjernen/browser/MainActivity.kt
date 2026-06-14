@@ -145,6 +145,7 @@ class MainActivity : AppCompatActivity() {
 
         ioExecutor.execute {
             val caBundle = extractCaBundle()
+            extractBundledDocs()
             val rc = NativeBrowser.nativeInit(filesDir.absolutePath, caBundle)
             initialized = rc == 0
             runOnUiThread {
@@ -392,6 +393,23 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return if (out.exists()) out.absolutePath else ""
+    }
+
+    private fun extractBundledDocs() {
+        val outDir = File(filesDir, "nordstjernen")
+        extractAsset("License.md", File(outDir, "License.md"))
+        extractAsset("THIRD-PARTY-LICENSES.md", File(outDir, "THIRD-PARTY-LICENSES.md"))
+    }
+
+    private fun extractAsset(name: String, out: File) {
+        runCatching {
+            out.parentFile?.mkdirs()
+            assets.open(name).use { input ->
+                out.outputStream().use { input.copyTo(it) }
+            }
+        }.onFailure {
+            Log.w(TAG, "asset extract failed name=$name", it)
+        }
     }
 
     private fun hideKeyboard() {

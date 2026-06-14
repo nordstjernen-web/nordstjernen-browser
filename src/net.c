@@ -1737,12 +1737,27 @@ about_read_first(const char *const *rel_paths, gsize *out_len)
 {
     const char *exe = ns_app_self_exe();
     char *exe_dir = exe ? g_path_get_dirname(exe) : g_strdup(".");
+    const char *user_data_dir = g_get_user_data_dir();
+    const char *const *system_data_dirs = g_get_system_data_dirs();
     char *contents = NULL;
     gsize len = 0;
     for (int i = 0; rel_paths[i]; i++) {
         char *path = g_build_filename(exe_dir, rel_paths[i], NULL);
         gboolean ok = g_file_get_contents(path, &contents, &len, NULL);
         g_free(path);
+        if (ok) break;
+        if (user_data_dir && *user_data_dir) {
+            path = g_build_filename(user_data_dir, rel_paths[i], NULL);
+            ok = g_file_get_contents(path, &contents, &len, NULL);
+            g_free(path);
+            if (ok) break;
+        }
+        for (int j = 0; system_data_dirs && system_data_dirs[j]; j++) {
+            path = g_build_filename(system_data_dirs[j], rel_paths[i], NULL);
+            ok = g_file_get_contents(path, &contents, &len, NULL);
+            g_free(path);
+            if (ok) break;
+        }
         if (ok) break;
     }
     g_free(exe_dir);
@@ -1809,8 +1824,10 @@ static char *
 build_about_license(void)
 {
     static const char *const license_paths[] = {
+        "nordstjernen/License.md",
         "share/nordstjernen/License.md",
         "../share/nordstjernen/License.md",
+        "../../../License.md",
         "../../License.md",
         "License.md",
         NULL,
