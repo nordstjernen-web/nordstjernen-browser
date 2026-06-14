@@ -82,6 +82,10 @@ class MainActivity : AppCompatActivity() {
         urlBar.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) { navigate(urlBar.text.toString()); true } else false
         }
+        urlBar.setOnClickListener { showUrlKeyboard() }
+        urlBar.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus && initialized) showUrlKeyboard()
+        }
 
         pageView.renderScale = resources.displayMetrics.density.toDouble()
         pageView.onNavigate = { url -> navigate(url) }
@@ -252,6 +256,14 @@ class MainActivity : AppCompatActivity() {
     private fun hideKeyboard() {
         val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(urlBar.windowToken, 0)
+    }
+
+    private fun showUrlKeyboard() {
+        urlBar.post {
+            urlBar.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(urlBar, InputMethodManager.SHOW_IMPLICIT)
+        }
     }
 
     override fun onDestroy() {

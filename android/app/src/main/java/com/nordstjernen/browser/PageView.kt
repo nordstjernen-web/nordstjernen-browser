@@ -9,14 +9,20 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.os.SystemClock
+import android.text.InputType
 import android.util.AttributeSet
 import android.util.Log
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -82,6 +88,8 @@ class PageView @JvmOverloads constructor(
     init {
         // Double-tap is our zoom toggle; don't let the detector hijack it for
         // quick-scale (double-tap-drag).
+        isFocusable = true
+        isFocusableInTouchMode = true
         scaleDetector.isQuickScaleEnabled = false
     }
 
@@ -151,6 +159,143 @@ class PageView @JvmOverloads constructor(
             val href = if (h != 0L) NativeBrowser.nativeLinkAt(h, cssX, cssY) else null
             post { cb(href) }
         }
+    }
+
+    private fun pagePoint(viewX: Float, viewY: Float): Pair<Int, Int> {
+        val eff = effScale()
+        val cssX = ((scrollXpx + viewX) / eff).roundToInt()
+        val cssY = ((scrollYpx + viewY) / eff).roundToInt()
+        return Pair(cssX, cssY)
+    }
+
+    private fun showPageKeyboard() {
+        if (!hasFocus()) requestFocus()
+        post {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun activatePage(viewX: Float, viewY: Float) {
+        val h = handle
+        if (h == 0L) return
+        val point = pagePoint(viewX, viewY)
+        requestFocus()
+        renderExecutor.execute {
+            val pressNav = NativeBrowser.nativeClick(h, point.first, point.second, 0)
+            val releaseNav = NativeBrowser.nativeRelease(h)
+            val nav = if (!releaseNav.isNullOrEmpty()) releaseNav else pressNav
+            post {
+                if (handle != h) return@post
+                if (!nav.isNullOrEmpty()) {
+                    onNavigate?.invoke(nav)
+                } else {
+                    showPageKeyboard()
+                    scheduleRender()
+                    invalidate()
+                }
+            }
+        }
+    }
+
+    private fun sendTextToPage(text: String) {
+        if (text.isEmpty()) return
+        val h = handle
+        if (h == 0L) return
+        renderExecutor.execute {
+            val nav = NativeBrowser.nativeKeyText(h, text)
+            post {
+                if (handle != h) return@post
+                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else scheduleRender()
+            }
+        }
+    }
+
+    private fun sendKeyToPage(kind: Int, key: String, code: String, keyCode: Int, mods: Int) {
+        if (key.isEmpty()) return
+        val h = handle
+        if (h == 0L) return
+        renderExecutor.execute {
+            val nav = NativeBrowser.nativeKey(h, kind, key, code, keyCode, mods)
+            post {
+                if (handle != h) return@post
+                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else scheduleRender()
+            }
+        }
+    }
+
+    private fun eventMods(event: KeyEvent): Int {
+        var mods = 0
+        if (event.isShiftPressed) mods = mods or 1
+        if (event.isCtrlPressed) mods = mods or 2
+        if (event.isAltPressed) mods = mods or 4
+        if (event.isMetaPressed) mods = mods or 8
+        return mods
+    }
+
+    private fun keyName(event: KeyEvent): String? = when (event.keyCode) {
+        KeyEvent.KEYCODE_DEL -> "Backspace"
+        KeyEvent.KEYCODE_FORWARD_DEL -> "Delete"
+        KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> "Enter"
+        KeyEvent.KEYCODE_TAB -> "Tab"
+        KeyEvent.KEYCODE_ESCAPE -> "Escape"
+        KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
+        KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
+        KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
+        KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
+        KeyEvent.KEYCODE_MOVE_HOME -> "Home"
+        KeyEvent.KEYCODE_MOVE_END -> "End"
+        KeyEvent.KEYCODE_SPACE -> " "
+        else -> null
+    }
+
+    private fun keyCodeName(keyCode: Int): String = when (keyCode) {
+        KeyEvent.KEYCODE_DEL -> "Backspace"
+        KeyEvent.KEYCODE_FORWARD_DEL -> "Delete"
+        KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> "Enter"
+        KeyEvent.KEYCODE_TAB -> "Tab"
+        KeyEvent.KEYCODE_ESCAPE -> "Escape"
+        KeyEvent.KEYCODE_DPAD_LEFT -> "ArrowLeft"
+        KeyEvent.KEYCODE_DPAD_RIGHT -> "ArrowRight"
+        KeyEvent.KEYCODE_DPAD_UP -> "ArrowUp"
+        KeyEvent.KEYCODE_DPAD_DOWN -> "ArrowDown"
+        KeyEvent.KEYCODE_MOVE_HOME -> "Home"
+        KeyEvent.KEYCODE_MOVE_END -> "End"
+        KeyEvent.KEYCODE_SPACE -> "Space"
+        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z ->
+            "Key" + ('A'.code + keyCode - KeyEvent.KEYCODE_A).toChar()
+        in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 ->
+            "Digit" + (keyCode - KeyEvent.KEYCODE_0).toString()
+        else -> ""
+    }
+
+    private fun domKeyCode(keyCode: Int, key: String): Int = when (keyCode) {
+        KeyEvent.KEYCODE_DEL -> 8
+        KeyEvent.KEYCODE_TAB -> 9
+        KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> 13
+        KeyEvent.KEYCODE_ESCAPE -> 27
+        KeyEvent.KEYCODE_SPACE -> 32
+        KeyEvent.KEYCODE_DPAD_LEFT -> 37
+        KeyEvent.KEYCODE_DPAD_UP -> 38
+        KeyEvent.KEYCODE_DPAD_RIGHT -> 39
+        KeyEvent.KEYCODE_DPAD_DOWN -> 40
+        KeyEvent.KEYCODE_FORWARD_DEL -> 46
+        KeyEvent.KEYCODE_MOVE_HOME -> 36
+        KeyEvent.KEYCODE_MOVE_END -> 35
+        in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 65 + keyCode - KeyEvent.KEYCODE_A
+        in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> 48 + keyCode - KeyEvent.KEYCODE_0
+        else -> if (key.length == 1) key[0].uppercaseChar().code else keyCode
+    }
+
+    private fun unicodeKey(event: KeyEvent): String? {
+        val value = event.getUnicodeChar(event.metaState)
+        return if (value > 0) String(Character.toChars(value)) else null
+    }
+
+    private fun dispatchKeyEventToPage(event: KeyEvent, kind: Int): Boolean {
+        val key = keyName(event) ?: unicodeKey(event) ?: return false
+        sendKeyToPage(kind, key, keyCodeName(event.keyCode), domKeyCode(event.keyCode, key), eventMods(event))
+        return true
     }
 
     private fun setScroll(x: Int, y: Int) {
@@ -283,12 +428,7 @@ class PageView @JvmOverloads constructor(
                         }
                     }
                     !longPressFired && handle != 0L -> {
-                        val tapX = downX
-                        val tapY = downY
-                        hitLink(tapX.toInt(), tapY.toInt()) { url ->
-                            if (url != null) onNavigate?.invoke(url)
-                            else handleContentTap(tapX, tapY)
-                        }
+                        activatePage(downX, downY)
                     }
                 }
                 releaseTracker()
@@ -301,6 +441,56 @@ class PageView @JvmOverloads constructor(
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    override fun onCheckIsTextEditor(): Boolean = handle != 0L
+
+    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        if (handle == 0L) return null
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
+            InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        return PageInputConnection()
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        return if (dispatchKeyEventToPage(event, 0)) true else super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        return if (dispatchKeyEventToPage(event, 1)) true else super.onKeyUp(keyCode, event)
+    }
+
+    private inner class PageInputConnection : BaseInputConnection(this@PageView, true) {
+        override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+            if (!text.isNullOrEmpty()) sendTextToPage(text.toString())
+            return true
+        }
+
+        override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+            repeat(beforeLength.coerceAtLeast(0)) {
+                sendKeyToPage(0, "Backspace", "Backspace", 8, 0)
+            }
+            repeat(afterLength.coerceAtLeast(0)) {
+                sendKeyToPage(0, "Delete", "Delete", 46, 0)
+            }
+            return true
+        }
+
+        override fun sendKeyEvent(event: KeyEvent): Boolean {
+            return when (event.action) {
+                KeyEvent.ACTION_DOWN -> dispatchKeyEventToPage(event, 0)
+                KeyEvent.ACTION_UP -> dispatchKeyEventToPage(event, 1)
+                else -> true
+            }
+        }
+
+        override fun performEditorAction(actionCode: Int): Boolean {
+            sendKeyToPage(0, "Enter", "Enter", 13, 0)
+            sendKeyToPage(1, "Enter", "Enter", 13, 0)
+            return true
+        }
     }
 
     private fun releaseTracker() {
