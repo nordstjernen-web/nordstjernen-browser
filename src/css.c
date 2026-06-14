@@ -472,6 +472,8 @@ static int calc_split_args(const char *args, const char *body_end,
 static const char *match_close_paren(const char *p, const char *end);
 static gboolean parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b,
                             guint8 *a);
+static gboolean parse_color_depth(const char *s, guint8 *r, guint8 *g,
+                                  guint8 *b, guint8 *a, int depth);
 
 static char *
 ascii_lower(const char *s, gsize len)
@@ -1399,7 +1401,7 @@ color_mix_percent(const char *s, double *out)
 
 static gboolean
 parse_color_mix_stop(const char *text, guint8 rgba[4], double *pct,
-                     gboolean *has_pct)
+                     gboolean *has_pct, int depth)
 {
     *has_pct = FALSE;
     char *tokens[3] = {0};
@@ -1410,7 +1412,8 @@ parse_color_mix_stop(const char *text, guint8 rgba[4], double *pct,
             if (!color_mix_percent(tokens[1], pct)) goto done;
             *has_pct = TRUE;
         }
-        ok = parse_color(tokens[0], &rgba[0], &rgba[1], &rgba[2], &rgba[3]);
+        ok = parse_color_depth(tokens[0], &rgba[0], &rgba[1], &rgba[2],
+                               &rgba[3], depth + 1);
     }
 done:
     for (int i = 0; i < n; i++) g_free(tokens[i]);
@@ -1419,7 +1422,7 @@ done:
 
 static gboolean
 parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
-                     guint8 *a)
+                     guint8 *a, int depth)
 {
     if (g_ascii_strncasecmp(s, "color-mix(", 10) != 0) return FALSE;
     const char *p = strchr(s, '(');
@@ -1460,8 +1463,8 @@ parse_color_mix_func(const char *s, guint8 *r, guint8 *g, guint8 *b,
     double p1 = 50, p2 = 50;
     gboolean h1 = FALSE, h2 = FALSE;
     if (ok)
-        ok = parse_color_mix_stop(parts[1], c1, &p1, &h1) &&
-             parse_color_mix_stop(parts[2], c2, &p2, &h2);
+        ok = parse_color_mix_stop(parts[1], c1, &p1, &h1, depth) &&
+             parse_color_mix_stop(parts[2], c2, &p2, &h2, depth);
     if (ok) {
         if (h1 && !h2) p2 = 100.0 - p1;
         else if (!h1 && h2) p1 = 100.0 - p2;
@@ -1624,14 +1627,16 @@ color_resolve_calcs(const char *s)
 }
 
 static gboolean
-parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
+parse_color_depth(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a,
+                  int depth)
 {
     *a = 255;
     if (!s || !*s) return FALSE;
+    if (depth > 32) return FALSE;
     if (strstr(s, "calc(")) {
         char *flat = color_resolve_calcs(s);
         if (flat) {
-            gboolean ok = parse_color(flat, r, g, b, a);
+            gboolean ok = parse_color_depth(flat, r, g, b, a, depth + 1);
             g_free(flat);
             return ok;
         }
@@ -1646,7 +1651,7 @@ parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
     if (parse_hwb_func(s, r, g, b, a)) return TRUE;
     if (parse_lab_func(s, r, g, b, a)) return TRUE;
     if (parse_oklab_func(s, r, g, b, a)) return TRUE;
-    if (parse_color_mix_func(s, r, g, b, a)) return TRUE;
+    if (parse_color_mix_func(s, r, g, b, a, depth)) return TRUE;
     if (s[0] == '#') {
         gsize n = strlen(s + 1);
         if (n == 3 || n == 4) {
@@ -1677,6 +1682,12 @@ parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
         return FALSE;
     }
     return named_color(s, r, g, b);
+}
+
+static gboolean
+parse_color(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
+{
+    return parse_color_depth(s, r, g, b, a, 0);
 }
 
 gboolean
@@ -1756,6 +1767,7 @@ typedef struct ns_css_scope_text {
 } ns_css_scope_text;
 
 #define NS_CSS_MAX_SELECTOR_NESTING 48
+#define NS_CSS_MAX_AT_NESTING 32
 
 static gboolean g_sel_parse_error;
 static gboolean g_sel_has_hover;
@@ -8619,8 +8631,9 @@ media_find_top_level_or(const char *p, const char *end)
 }
 
 static gboolean
-media_query_one_matches(const char *q)
+media_query_one_matches(const char *q, int depth)
 {
+    if (depth > NS_CSS_MAX_AT_NESTING) return FALSE;
     while (*q && is_ws(*q)) q++;
     gboolean invert = FALSE;
     if (g_str_has_prefix(q, "not ") || g_str_has_prefix(q, "NOT ")) {
@@ -8636,8 +8649,8 @@ media_query_one_matches(const char *q)
     if (or_pos) {
         char *left = css_trim_dup_range(q, or_pos);
         char *right = css_trim_dup_range(or_pos + 2, qe);
-        gboolean ok = media_query_one_matches(left) ||
-                      media_query_one_matches(right);
+        gboolean ok = media_query_one_matches(left, depth + 1) ||
+                      media_query_one_matches(right, depth + 1);
         g_free(left);
         g_free(right);
         return invert ? !ok : ok;
@@ -8684,7 +8697,7 @@ media_query_matches(const char *query)
         char term = 0;
         const char *seg = css_scan_until(p, end, ",", &term);
         char *alt = css_trim_dup_range(p, seg);
-        if (*alt && media_query_one_matches(alt)) any = TRUE;
+        if (*alt && media_query_one_matches(alt, 0)) any = TRUE;
         g_free(alt);
         p = term == ',' ? seg + 1 : seg;
     }
@@ -8763,7 +8776,6 @@ ns_css_sizes_resolve(const char *sizes)
 }
 
 #define NS_CSS_LAYER_NONE INT_MAX
-#define NS_CSS_MAX_AT_NESTING 32
 
 static gboolean supports_expr(const char **pp, const char *end, int depth);
 
