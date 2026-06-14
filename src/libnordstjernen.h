@@ -126,6 +126,7 @@ char *ns_browser_key(ns_browser *browser, int kind, const char *key,
 char *ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                           const char *code, int keycode, int mods,
                           int *out_prevented);
+int   ns_browser_focused_editable(ns_browser *browser);
 
 /* Report the pointer hovering at page coordinates (CSS px): hit-test the DOM,
  * update the element's CSS :hover state (and its ancestors'), and fire the

@@ -689,6 +689,20 @@ ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed)
 }
 
 int
+ns_rproc_http_focused_editable(ns_rproc_http *r)
+{
+    if (!r)
+        return 0;
+    char *body = request(r, "/focused-editable", "{}");
+    if (!body)
+        return 0;
+    long active = 0;
+    json_get_long(body, "active", &active);
+    free(body);
+    return active != 0 ? 1 : 0;
+}
+
+int
 ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
                          char **out_cursor)
 {

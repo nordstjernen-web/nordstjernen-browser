@@ -38,6 +38,8 @@ typedef struct {
     int            unchanged_count;
     char          *title;
     char          *url;
+    char          *nav;
+    char          *download;
 } AndroidPage;
 
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -158,6 +160,8 @@ page_take_opened(AndroidPage *page, ns_rproc_http_page *opened)
 {
     free(page->title);
     free(page->url);
+    free(page->nav);
+    free(page->download);
     page->page_width = opened->page_width;
     page->page_height = opened->page_height;
     page->render_count = 0;
@@ -165,8 +169,23 @@ page_take_opened(AndroidPage *page, ns_rproc_http_page *opened)
     page->unchanged_count = 0;
     page->title = opened->title;
     page->url = opened->url;
+    page->nav = NULL;
+    page->download = NULL;
     opened->title = NULL;
     opened->url = NULL;
+}
+
+static void
+page_store_frame_events(AndroidPage *page, ns_rproc_http_frame *frame)
+{
+    if (frame->nav && *frame->nav) {
+        free(page->nav);
+        page->nav = strdup(frame->nav);
+    }
+    if (frame->download && *frame->download) {
+        free(page->download);
+        page->download = strdup(frame->download);
+    }
 }
 
 static int
@@ -379,6 +398,46 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeUrl(JNIEnv *env,
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
+                                                                  jclass clazz,
+                                                                  jlong handle)
+{
+    (void)env; (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    return page && page->renderer &&
+           ns_rproc_http_focused_editable(page->renderer) ? JNI_TRUE
+                                                         : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
+                                                                 jclass clazz,
+                                                                 jlong handle)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!page)
+        return NULL;
+    char *nav = page->nav;
+    page->nav = NULL;
+    return jstring_take(env, nav);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
+                                                               jclass clazz,
+                                                               jlong handle)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!page)
+        return NULL;
+    char *download = page->download;
+    page->download = NULL;
+    return jstring_take(env, download);
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
                                                          jclass clazz,
                                                          jlong handle,
@@ -417,6 +476,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
         frame_clear(&frame);
         return JNI_FALSE;
     }
+    page_store_frame_events(page, &frame);
     if (frame.unchanged) {
         page->unchanged_count++;
         if (page->unchanged_count <= 4)
@@ -614,6 +674,8 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeClose(JNIEnv *env,
          page->url ? page->url : "");
     free(page->title);
     free(page->url);
+    free(page->nav);
+    free(page->download);
     free(page);
 }
 

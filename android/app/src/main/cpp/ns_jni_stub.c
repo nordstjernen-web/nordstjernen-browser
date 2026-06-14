@@ -55,6 +55,33 @@ Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env, jclass c
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
+                                                                  jclass clazz,
+                                                                  jlong handle)
+{
+    (void)env; (void)clazz; (void)handle;
+    return JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
+                                                                 jclass clazz,
+                                                                 jlong handle)
+{
+    (void)env; (void)clazz; (void)handle;
+    return NULL;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
+                                                               jclass clazz,
+                                                               jlong handle)
+{
+    (void)env; (void)clazz; (void)handle;
+    return NULL;
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env, jclass clazz,
                                                          jlong handle, jint scroll_x,
                                                          jint scroll_y, jdouble scale,

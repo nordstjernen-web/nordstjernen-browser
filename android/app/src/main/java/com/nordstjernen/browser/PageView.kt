@@ -79,6 +79,7 @@ class PageView @JvmOverloads constructor(
     private var pendingScrollFraction = -1f
 
     var onNavigate: ((url: String) -> Unit)? = null
+    var onDownload: ((download: String) -> Unit)? = null
     var onLinkLongPress: ((url: String) -> Unit)? = null
     var onViewportWidthChanged: ((cssWidth: Int) -> Unit)? = null
 
@@ -225,6 +226,12 @@ class PageView @JvmOverloads constructor(
         }
     }
 
+    private fun hidePageKeyboard() {
+        pageInputActive = false
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(windowToken, 0)
+    }
+
     private fun activatePage(viewX: Float, viewY: Float) {
         val h = handle
         if (h == 0L) return
@@ -234,12 +241,17 @@ class PageView @JvmOverloads constructor(
             val pressNav = NativeBrowser.nativeClick(h, point.first, point.second, 0)
             val releaseNav = NativeBrowser.nativeRelease(h)
             val nav = if (!releaseNav.isNullOrEmpty()) releaseNav else pressNav
+            val inputActive = NativeBrowser.nativeFocusedEditable(h)
             post {
                 if (handle != h) return@post
                 if (!nav.isNullOrEmpty()) {
                     onNavigate?.invoke(nav)
-                } else {
+                } else if (inputActive) {
                     showPageKeyboard()
+                    scheduleRender()
+                    invalidate()
+                } else {
+                    hidePageKeyboard()
                     scheduleRender()
                     invalidate()
                 }
@@ -373,9 +385,19 @@ class PageView @JvmOverloads constructor(
         val syc = (scrollYpx / eff).roundToInt()
         renderExecutor.execute {
             val ok = NativeBrowser.nativeRender(h, sxc, syc, eff, bmp)
+            val nav = if (ok) NativeBrowser.nativeTakeNavigation(h) else null
+            val download = if (ok) NativeBrowser.nativeTakeDownload(h) else null
             post {
+                if (handle != h) {
+                    renderPending = false
+                    return@post
+                }
                 renderPending = false
-                if (ok) {
+                if (!nav.isNullOrEmpty()) {
+                    onNavigate?.invoke(nav)
+                    return@post
+                } else if (ok) {
+                    if (!download.isNullOrEmpty()) onDownload?.invoke(download)
                     invalidate()
                 } else {
                     Log.e(TAG, "PageView render failed handle=$h view=${bmp.width}x${bmp.height} scroll=${sxc},${syc} scale=$eff")

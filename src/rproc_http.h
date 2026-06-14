@@ -66,6 +66,7 @@ int   ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y,
                                char **out_href, char **out_cursor);
 int   ns_rproc_http_release(ns_rproc_http *r);
 char *ns_rproc_http_release_full(ns_rproc_http *r, int *out_changed);
+int   ns_rproc_http_focused_editable(ns_rproc_http *r);
 int   ns_rproc_http_find(ns_rproc_http *r, const char *query,
                          int case_sensitive, int direction, int from_y,
                          int *out_total, int *out_current, int *out_scroll_y);

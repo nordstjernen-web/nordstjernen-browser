@@ -1792,6 +1792,15 @@ ns_browser_key(ns_browser *browser, int kind, const char *key,
     return ns_browser_key_full(browser, kind, key, code, keycode, mods, NULL);
 }
 
+int
+ns_browser_focused_editable(ns_browser *browser)
+{
+    if (!browser || !browser->js)
+        return 0;
+    const ns_node *f = ns_js_focused_node(browser->js);
+    return f && ns_node_editable_value(f) ? 1 : 0;
+}
+
 char *
 ns_browser_title(ns_browser *browser)
 {

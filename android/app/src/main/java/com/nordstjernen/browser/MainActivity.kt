@@ -4,17 +4,21 @@
 package com.nordstjernen.browser
 
 import android.app.role.RoleManager
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.SystemClock
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.URLUtil
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ProgressBar
@@ -82,7 +86,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<ImageButton>(R.id.goButton).setOnClickListener { navigate(urlBar.text.toString()) }
         findViewById<ImageButton>(R.id.reloadButton).setOnClickListener { reload() }
         findViewById<ImageButton>(R.id.homeButton).setOnClickListener { navigate(getString(R.string.home_url)) }
-        findViewById<ImageButton>(R.id.logoButton).setOnClickListener { navigate("https://nordstjernen.org") }
+        val logoButton = findViewById<ImageButton>(R.id.logoButton)
+        logoButton.setOnClickListener { navigate("https://nordstjernen.org") }
+        logoButton.setOnLongClickListener { showAppMenu(); true }
         backButton.setOnClickListener { goBack() }
         urlBar.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) { navigate(urlBar.text.toString()); true } else false
@@ -105,6 +111,7 @@ class MainActivity : AppCompatActivity() {
 
         pageView.renderScale = resources.displayMetrics.density.toDouble()
         pageView.onNavigate = { url -> navigateFromPage(url) }
+        pageView.onDownload = { download -> handleDownload(download) }
         pageView.onLinkLongPress = { url -> showLinkMenu(url) }
         pageView.onViewportWidthChanged = { currentUrl?.let { load(it) } }
 
@@ -267,6 +274,55 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             .show()
+    }
+
+    private fun showAppMenu() {
+        val items = arrayOf(getString(R.string.open_website), getString(R.string.privacy_policy))
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> navigate("https://nordstjernen.org")
+                    1 -> navigate("https://nordstjernen.org/privacy")
+                }
+            }
+            .show()
+    }
+
+    private fun handleDownload(download: String) {
+        val tab = download.indexOf('\t')
+        val url = if (tab >= 0) download.substring(0, tab) else download
+        val suggested = if (tab >= 0) download.substring(tab + 1) else ""
+        val uri = runCatching { Uri.parse(url) }.getOrNull()
+        val scheme = uri?.scheme ?: ""
+        if (uri == null || !(scheme.equals("http", true) || scheme.equals("https", true))) {
+            Toast.makeText(this, getString(R.string.download_failed), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val guessed = if (suggested.isNotBlank()) suggested else URLUtil.guessFileName(url, null, null)
+        val filename = safeDownloadName(guessed)
+        val request = DownloadManager.Request(uri)
+            .setTitle(filename)
+            .setDescription(url)
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+        runCatching {
+            (getSystemService(DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+        }.onSuccess {
+            Toast.makeText(this, getString(R.string.download_started, filename), Toast.LENGTH_SHORT).show()
+        }.onFailure { t ->
+            Log.e(TAG, "download failed url=$url filename=$filename", t)
+            Toast.makeText(this, getString(R.string.download_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun safeDownloadName(name: String): String {
+        var out = name.substringAfterLast('/').substringAfterLast('\\').trim()
+        if (out.isEmpty() || out == "." || out == "..") out = "download"
+        out = out.replace(Regex("[\\r\\n\\t\\u0000/\\\\:*?\"<>|]"), "_")
+        return out.take(96).ifEmpty { "download" }
     }
 
     private fun normalizeUrl(input: String): String {

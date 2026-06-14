@@ -9,12 +9,16 @@
     <string name="home_action">Home</string>
     <string name="go_action">Go</string>
     <string name="visit_nordstjernen">Visit nordstjernen.org</string>
+    <string name="open_website">Open website</string>
+    <string name="privacy_policy">Privacy policy</string>
     <string name="url_hint">Search or enter address</string>
     <string name="home_url">about:start</string>
     <string name="load_failed">Couldn\'t load %1$s</string>
     <string name="open">Open</string>
     <string name="copy_link">Copy link</string>
     <string name="link_copied">Link copied</string>
+    <string name="download_started">Downloading %1$s</string>
+    <string name="download_failed">Couldn\'t start download</string>
     <string name="engine_unavailable">The Nordstjernen native engine is not bundled in this build. Cross-compile the dependency stack (see android/scripts/build-deps.sh) and rebuild.</string>
     <string name="engine_init_failed">The Nordstjernen engine failed to initialize.</string>
 </resources>
