@@ -688,14 +688,6 @@ void ProcWindow::onSettings() {
         }
     });
 
-    QSpinBox *fontSize = new QSpinBox(&dlg);
-    fontSize->setRange(8, 32);
-    fontSize->setValue(cfg ? cfg->default_font_size_px : 16);
-    form->addRow(QStringLiteral("Default font size"), fontSize);
-
-    QCheckBox *images = new QCheckBox(QStringLiteral("Load images"), &dlg);
-    images->setChecked(cfg ? cfg->images_enabled : true);
-    form->addRow(images);
     QCheckBox *webgl = new QCheckBox(QStringLiteral("Enable WebGL"), &dlg);
     webgl->setChecked(cfg ? cfg->webgl_enabled : false);
     form->addRow(webgl);
@@ -741,8 +733,6 @@ void ProcWindow::onSettings() {
     };
     setStr(&mut->home_url, home->text());
     setStr(&mut->search_engine, custom->text());
-    mut->default_font_size_px = fontSize->value();
-    mut->images_enabled = images->isChecked();
     mut->webgl_enabled = webgl->isChecked();
     mut->local_storage_enabled = storage->isChecked();
     mut->do_not_track = dnt->isChecked();

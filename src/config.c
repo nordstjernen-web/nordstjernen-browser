@@ -153,7 +153,6 @@ static const cfg_field cfg_fields[] = {
     FB(tls_allow_insecure_override, FALSE),
     FB(watchdog_enabled,      TRUE),
     FI(cache_cap_mb,          256),
-    FI(default_font_size_px,  16),
     FI(js_eval_budget_ms,     60000),
     FI(js_memory_cap_mb,      2048),
     FI(max_redirects,         NS_MAX_REDIRECTS),
@@ -471,7 +470,6 @@ ns_config_dump(void)
     g_string_append_printf(s, "tls_allow_insecure_override = %s\n", c->tls_allow_insecure_override ? "true" : "false");
     g_string_append_printf(s, "watchdog_enabled      = %s\n", c->watchdog_enabled ? "true" : "false");
     g_string_append_printf(s, "cache_cap_mb          = %d\n", c->cache_cap_mb);
-    g_string_append_printf(s, "default_font_size_px  = %d\n", c->default_font_size_px);
     g_string_append_printf(s, "js_eval_budget_ms     = %d\n", c->js_eval_budget_ms);
     g_string_append_printf(s, "js_memory_cap_mb      = %d\n", c->js_memory_cap_mb);
     g_string_append_printf(s, "max_redirects         = %d\n", c->max_redirects);

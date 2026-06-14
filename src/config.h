@@ -57,7 +57,6 @@ typedef struct ns_config {
     gboolean tls_allow_insecure_override;
     gboolean watchdog_enabled;
     int      cache_cap_mb;
-    int      default_font_size_px;
     int      js_eval_budget_ms;
     int      js_memory_cap_mb;
     int      max_redirects;

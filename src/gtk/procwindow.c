@@ -1453,8 +1453,6 @@ typedef struct {
     GtkWidget  *home;
     GtkWidget  *search;
     GtkWidget  *search_dd;
-    GtkWidget  *font_size;
-    GtkWidget  *images;
     GtkWidget  *webgl;
     GtkWidget  *storage;
     GtkWidget  *dnt;
@@ -1495,9 +1493,6 @@ on_settings_save(GtkButton *button, gpointer user_data)
             gtk_editable_get_text(GTK_EDITABLE(s->home)));
         settings_set_str(&cfg->search_engine,
             gtk_editable_get_text(GTK_EDITABLE(s->search)));
-        cfg->default_font_size_px =
-            gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(s->font_size));
-        cfg->images_enabled = gtk_switch_get_active(GTK_SWITCH(s->images));
         cfg->webgl_enabled = gtk_switch_get_active(GTK_SWITCH(s->webgl));
         cfg->local_storage_enabled =
             gtk_switch_get_active(GTK_SWITCH(s->storage));
@@ -1603,24 +1598,13 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     g_signal_connect(s->search_dd, "notify::selected",
                      G_CALLBACK(on_search_engine_selected), s);
 
-    GtkWidget *font_l = gtk_label_new(ns_i18n("Default font size"));
-    gtk_widget_set_halign(font_l, GTK_ALIGN_START);
-    s->font_size = gtk_spin_button_new_with_range(8, 32, 1);
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(s->font_size),
-                              cfg ? cfg->default_font_size_px : 16);
-    gtk_widget_set_halign(s->font_size, GTK_ALIGN_START);
-    gtk_grid_attach(GTK_GRID(grid), font_l, 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), s->font_size, 1, 3, 1, 1);
-
-    s->images  = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Load images"),
-                                     cfg ? cfg->images_enabled : TRUE);
-    s->webgl   = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Enable WebGL"),
+    s->webgl   = settings_add_switch(GTK_GRID(grid), 3, ns_i18n("Enable WebGL"),
                                      cfg ? cfg->webgl_enabled : FALSE);
-    s->storage = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Enable local storage"),
+    s->storage = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Enable local storage"),
                                      cfg ? cfg->local_storage_enabled : TRUE);
-    s->dnt     = settings_add_switch(GTK_GRID(grid), 7, ns_i18n("Send Do Not Track"),
+    s->dnt     = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Send Do Not Track"),
                                      cfg ? cfg->do_not_track : FALSE);
-    s->cache   = settings_add_switch(GTK_GRID(grid), 8, ns_i18n("Enable cache"),
+    s->cache   = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Enable cache"),
                                      cfg ? cfg->cache_enabled : TRUE);
 
     gtk_box_append(GTK_BOX(box), grid);
