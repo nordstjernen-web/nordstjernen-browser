@@ -34,8 +34,8 @@
 #
 # Usage:
 #   ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
-#   NORDSTJERNEN_ANDROID_SYSROOT=~/nd-android-sysroot/arm64-v8a \
-#   android/scripts/build-deps.sh arm64-v8a 26
+#   NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
+#   android/scripts/build-deps.sh x86_64 26
 
 set -euo pipefail
 
@@ -45,6 +45,7 @@ API="${2:-26}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 JNILIBS="${REPO_ROOT}/android/app/src/main/jniLibs/${ABI}"
 WORK="${REPO_ROOT}/android/.build/${ABI}"
+LOGDIR="${REPO_ROOT}/android/.build/logs"
 
 : "${ANDROID_NDK_HOME:?set ANDROID_NDK_HOME to your NDK path}"
 
@@ -59,6 +60,7 @@ esac
 HOST_TAG="linux-x86_64"
 case "$(uname -s)" in
     Darwin) HOST_TAG="darwin-x86_64" ;;
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG="windows-x86_64" ;;
 esac
 TOOLCHAIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${HOST_TAG}"
 CC="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang"
@@ -70,12 +72,18 @@ if [ ! -x "${CC}" ]; then
     exit 2
 fi
 
-mkdir -p "${WORK}" "${JNILIBS}"
+mkdir -p "${WORK}" "${JNILIBS}" "${LOGDIR}"
 CROSS="${WORK}/android-${ABI}.cross"
 
+SYSROOT_PREFIX=""
 SYSROOT_PKGCONFIG=""
 if [ -n "${NORDSTJERNEN_ANDROID_SYSROOT:-}" ]; then
-    SYSROOT_PKGCONFIG="${NORDSTJERNEN_ANDROID_SYSROOT}/lib/pkgconfig"
+    if [ -d "${NORDSTJERNEN_ANDROID_SYSROOT}/${ABI}/lib/pkgconfig" ]; then
+        SYSROOT_PREFIX="${NORDSTJERNEN_ANDROID_SYSROOT}/${ABI}"
+    else
+        SYSROOT_PREFIX="${NORDSTJERNEN_ANDROID_SYSROOT}"
+    fi
+    SYSROOT_PKGCONFIG="${SYSROOT_PREFIX}/lib/pkgconfig"
 fi
 
 cat > "${CROSS}" <<EOF
@@ -102,6 +110,10 @@ endian = 'little'
 EOF
 
 echo "Wrote cross file: ${CROSS}"
+echo "Android ABI: ${ABI}"
+echo "NDK toolchain: ${TOOLCHAIN}"
+echo "Dependency sysroot: ${SYSROOT_PREFIX:-not set}"
+echo "pkg-config dir: ${SYSROOT_PKGCONFIG:-not set}"
 
 if [ -z "${NORDSTJERNEN_ANDROID_SYSROOT:-}" ] || [ ! -d "${SYSROOT_PKGCONFIG}" ]; then
     cat >&2 <<MSG
@@ -111,7 +123,8 @@ cannot be cross-compiled without the dependency sysroot. Cross file has been
 generated at:
   ${CROSS}
 Build the dependency stack for ${ABI}, point NORDSTJERNEN_ANDROID_SYSROOT at
-its prefix, and re-run. The APK will build with the stub engine until then.
+the sysroot base or ABI prefix, and re-run. The APK will build with the stub
+engine until then.
 MSG
     exit 0
 fi
@@ -120,7 +133,10 @@ BUILDDIR="${WORK}/builddir"
 rm -rf "${BUILDDIR}"
 
 export PKG_CONFIG_LIBDIR="${SYSROOT_PKGCONFIG}"
-export PKG_CONFIG_SYSROOT_DIR="${NORDSTJERNEN_ANDROID_SYSROOT}"
+unset PKG_CONFIG_SYSROOT_DIR || true
+echo "Using pkg-config: $(command -v pkg-config || echo missing)"
+pkg-config --list-all | sort > "${LOGDIR}/pkg-config-${ABI}.txt" || true
+echo "Wrote pkg-config module list: ${LOGDIR}/pkg-config-${ABI}.txt"
 
 meson setup "${BUILDDIR}" "${REPO_ROOT}" \
     --cross-file "${CROSS}" \
@@ -138,7 +154,7 @@ fi
 cp -v "${ENGINE_SO}" "${JNILIBS}/libnordstjernen.so"
 "${STRIP}" "${JNILIBS}/libnordstjernen.so" || true
 
-for so in "${NORDSTJERNEN_ANDROID_SYSROOT}"/lib/*.so; do
+for so in "${SYSROOT_PREFIX}"/lib/*.so; do
     [ -e "${so}" ] || continue
     cp -v "${so}" "${JNILIBS}/"
 done

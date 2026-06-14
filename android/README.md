@@ -58,6 +58,7 @@ android/
     src/main/java/.../PageView.kt       scrolling render surface
     src/main/java/.../MainActivity.kt   URL bar + navigation
     src/main/res/raw/cacert.pem         CA bundle for libcurl
+  scripts/fetch-prebuilt-deps.ps1       fetch CI-built Android dependency sysroots
   scripts/build-deps.sh                 cross-compile engine → jniLibs/<abi>/
   settings.gradle · build.gradle · gradle.properties
 ```
@@ -89,15 +90,28 @@ the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
 
 ### Producing the engine .so
 
+The Android dependency sysroot is produced by
+`nordstjernen-web/nordstjernen-android`. Once that repo has a successful
+`build-deps` workflow run, fetch the prebuilt sysroot and then build the engine
+for the emulator ABI:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File android\scripts\fetch-prebuilt-deps.ps1 `
+  -Abi x86_64 `
+  -Sysroot "$env:USERPROFILE\.cache\nordstjernen-android-sysroot"
+```
+
 ```sh
 ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
-NORDSTJERNEN_ANDROID_SYSROOT=~/nd-android-sysroot/arm64-v8a \
-android/scripts/build-deps.sh arm64-v8a 26
+NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
+android/scripts/build-deps.sh x86_64 26
 ```
 
 The script generates a meson cross-file for the NDK toolchain, cross-compiles
 the `nordstjernen` shared library, and stages it plus its `.so` dependencies
-into `jniLibs/arm64-v8a/`.
+into `jniLibs/<abi>/`. `NORDSTJERNEN_ANDROID_SYSROOT` can point either at a
+base directory containing `<abi>/lib/pkgconfig`, or directly at one ABI prefix.
+Each run writes diagnostic files under `android/.build/logs/`.
 
 ## Status
 
@@ -122,8 +136,6 @@ into `jniLibs/arm64-v8a/`.
   the desktop `compile_commands.json` — no NDK required. It runs in the Linux
   CI job, so Android-source regressions are caught on every build. All 36
   engine sources pass.
-* **Remaining:** cross-compiling the native dependency sysroot (the
-  GLib/cairo/pango stack). It is all plain C now — no Rust — and cross-builds
-  with meson against the NDK. Once a sysroot exists, run `build-deps.sh` and
-  the same APK ships the real engine. This step needs the NDK + network access
-  (wrapdb / dependency sources) and so is driven in CI / on an NDK box.
+* **Remaining:** consume a successful prebuilt dependency artifact from
+  `nordstjernen-web/nordstjernen-android`, run `build-deps.sh` for the emulator
+  ABI, and rebuild the APK with the real engine instead of the stub bridge.
