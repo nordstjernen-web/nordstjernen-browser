@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         pageView.renderScale = resources.displayMetrics.density.toDouble()
-        pageView.onNavigate = { url -> navigate(url) }
+        pageView.onNavigate = { url -> navigateFromPage(url) }
         pageView.onLinkLongPress = { url -> showLinkMenu(url) }
         pageView.onViewportWidthChanged = { currentUrl?.let { load(it) } }
 
@@ -158,6 +158,12 @@ class MainActivity : AppCompatActivity() {
         load(url)
     }
 
+    private fun navigateFromPage(url: String) {
+        if (!initialized || url.isEmpty()) return
+        currentUrl?.let { if (it != url) backStack.addLast(it) }
+        load(url, reuseCurrent = true)
+    }
+
     private fun reload() {
         currentUrl?.let { load(it) }
     }
@@ -168,7 +174,7 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun load(url: String) {
+    private fun load(url: String, reuseCurrent: Boolean = false) {
         if (!initialized) return
         currentUrl = url
         urlBar.setText(url)
@@ -189,6 +195,31 @@ class MainActivity : AppCompatActivity() {
         val viewportCssHeight = Math.max(240, (heightPx / density).toInt())
         val started = SystemClock.uptimeMillis()
         Log.i(TAG, "load start url=$url viewport=${viewportCss}x$viewportCssHeight view=${widthPx}x$heightPx density=$density gen=$gen")
+        if (reuseCurrent) {
+            pageView.navigateCurrent(url, viewportCss, viewportCssHeight, 600) nav@{ ok, size, finalUrl, title ->
+                val elapsed = SystemClock.uptimeMillis() - started
+                Log.i(TAG, "load nativeNavigate url=$url final=${finalUrl ?: ""} ok=$ok size=${size?.getOrNull(0)}x${size?.getOrNull(1)} title=${title ?: ""} elapsed=${elapsed}ms")
+                if (gen != loadGen.get()) {
+                    Log.i(TAG, "load stale url=$url gen=$gen current=${loadGen.get()}")
+                    return@nav
+                }
+                progress.visibility = View.GONE
+                if (!ok || size == null) {
+                    Log.e(TAG, "load failed url=$url sameRenderer=$reuseCurrent")
+                    Toast.makeText(this, getString(R.string.load_failed, url), Toast.LENGTH_SHORT).show()
+                    return@nav
+                }
+                val displayUrl = if (!finalUrl.isNullOrEmpty()) finalUrl else url
+                if (displayUrl != currentUrl) {
+                    Log.i(TAG, "load displayUrl requested=$url final=$displayUrl")
+                    currentUrl = displayUrl
+                    urlBar.setText(displayUrl)
+                }
+                setTitle(if (!title.isNullOrEmpty()) title else getString(R.string.app_name))
+                pageView.updateDocument(size[0], size[1])
+            }
+            return
+        }
         ioExecutor.execute {
             val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, 600)
             val size = if (handle != 0L) NativeBrowser.nativePageSize(handle) else null

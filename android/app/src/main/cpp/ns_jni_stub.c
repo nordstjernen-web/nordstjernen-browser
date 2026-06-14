@@ -34,6 +34,18 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
     return 0;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeNavigate(JNIEnv *env, jclass clazz,
+                                                           jlong handle, jstring url,
+                                                           jint viewport_width,
+                                                           jint viewport_height,
+                                                           jint settle_ms)
+{
+    (void)env; (void)clazz; (void)handle; (void)url; (void)viewport_width;
+    (void)viewport_height; (void)settle_ms;
+    return JNI_FALSE;
+}
+
 JNIEXPORT jintArray JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env, jclass clazz,
                                                            jlong handle)

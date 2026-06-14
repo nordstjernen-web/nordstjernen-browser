@@ -129,6 +129,46 @@ class PageView @JvmOverloads constructor(
         scheduleRender()
     }
 
+    fun updateDocument(pageWidthCssArg: Int, pageHeightCssArg: Int) {
+        pageWidthCss = pageWidthCssArg
+        pageHeightCss = pageHeightCssArg
+        userZoom = 1.0
+        scrollXpx = 0
+        scrollYpx = 0
+        pendingScrollFraction = -1f
+        pageInputActive = false
+        scroller.forceFinished(true)
+        Log.i(TAG, "PageView updateDocument handle=$handle page=${pageWidthCssArg}x$pageHeightCssArg view=${width}x${height} scale=$renderScale")
+        scheduleRender()
+    }
+
+    fun navigateCurrent(
+        url: String,
+        viewportWidthCss: Int,
+        viewportHeightCss: Int,
+        settleMs: Int,
+        callback: (Boolean, IntArray?, String?, String?) -> Unit,
+    ) {
+        val h = handle
+        if (h == 0L) {
+            callback(false, null, null, null)
+            return
+        }
+        renderExecutor.execute {
+            val ok = NativeBrowser.nativeNavigate(h, url, viewportWidthCss, viewportHeightCss, settleMs)
+            val size = if (ok) NativeBrowser.nativePageSize(h) else null
+            val finalUrl = if (ok) NativeBrowser.nativeUrl(h) else null
+            val title = if (ok) NativeBrowser.nativeTitle(h) else null
+            post {
+                if (handle != h) {
+                    callback(false, null, null, null)
+                } else {
+                    callback(ok, size, finalUrl, title)
+                }
+            }
+        }
+    }
+
     fun recycleDocument() {
         val h = handle
         handle = 0

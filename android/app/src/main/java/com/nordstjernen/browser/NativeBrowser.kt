@@ -25,6 +25,7 @@ object NativeBrowser {
     external fun nativeEngineAvailable(): Boolean
     external fun nativeInit(dataDir: String, caBundle: String): Int
     external fun nativeOpen(url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Long
+    external fun nativeNavigate(handle: Long, url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Boolean
     external fun nativePageSize(handle: Long): IntArray?
     external fun nativeUrl(handle: Long): String?
     external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Boolean

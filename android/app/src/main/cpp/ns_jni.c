@@ -153,6 +153,64 @@ jstring_take(JNIEnv *env, char *s)
     return out;
 }
 
+static void
+page_take_opened(AndroidPage *page, ns_rproc_http_page *opened)
+{
+    free(page->title);
+    free(page->url);
+    page->page_width = opened->page_width;
+    page->page_height = opened->page_height;
+    page->render_count = 0;
+    page->render_fail_count = 0;
+    page->unchanged_count = 0;
+    page->title = opened->title;
+    page->url = opened->url;
+    opened->title = NULL;
+    opened->url = NULL;
+}
+
+static int
+android_open_on_renderer(ns_rproc_http *renderer, const char *label,
+                         const char *url, int vw, int vh, int settle_ms,
+                         ns_rproc_http_page *opened)
+{
+    memset(opened, 0, sizeof *opened);
+    int open_rc = ns_rproc_http_open(renderer, url, vw, vh, settle_ms, opened);
+    if (open_rc != 0 || !opened->ok) {
+        LOGE("%s failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
+             label, open_rc, opened->ok, url, opened->page_width,
+             opened->page_height, opened->nav ? opened->nav : "");
+        return -1;
+    }
+
+    int redirects = 0;
+    while (opened->nav && *opened->nav &&
+           redirects < NS_ANDROID_MAX_REDIRECTS) {
+        char *next = strdup(opened->nav);
+        if (!next)
+            return -1;
+        LOGI("%s redirect #%d from=%s to=%s", label, redirects + 1,
+             opened->url ? opened->url : url, next);
+        ns_rproc_http_page_clear(opened);
+        open_rc = ns_rproc_http_open(renderer, next, vw, vh, settle_ms,
+                                     opened);
+        if (open_rc != 0 || !opened->ok) {
+            LOGE("%s redirect failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
+                 label, open_rc, opened->ok, next, opened->page_width,
+                 opened->page_height, opened->nav ? opened->nav : "");
+            free(next);
+            return -1;
+        }
+        free(next);
+        redirects++;
+    }
+
+    if (opened->nav && *opened->nav)
+        LOGE("%s stopped after %d redirects at nav=%s", label,
+             NS_ANDROID_MAX_REDIRECTS, opened->nav);
+    return 0;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeEngineAvailable(JNIEnv *env,
                                                                   jclass clazz)
@@ -227,46 +285,13 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
     }
 
     ns_rproc_http_page opened;
-    int open_rc = ns_rproc_http_open(renderer, u, vw, vh, settle_ms, &opened);
-    if (open_rc != 0 || !opened.ok) {
-        LOGE("nativeOpen failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
-             open_rc, opened.ok, u, opened.page_width, opened.page_height,
-             opened.nav ? opened.nav : "");
+    if (android_open_on_renderer(renderer, "nativeOpen", u, vw, vh, settle_ms,
+                                 &opened) != 0) {
         ns_rproc_http_page_clear(&opened);
         ns_rproc_http_close(renderer);
         free(u);
         return 0;
     }
-    int redirects = 0;
-    while (opened.nav && *opened.nav && redirects < NS_ANDROID_MAX_REDIRECTS) {
-        char *next = strdup(opened.nav);
-        if (!next) {
-            ns_rproc_http_page_clear(&opened);
-            ns_rproc_http_close(renderer);
-            free(u);
-            return 0;
-        }
-        LOGI("nativeOpen redirect #%d from=%s to=%s", redirects + 1,
-             opened.url ? opened.url : u, next);
-        ns_rproc_http_page_clear(&opened);
-        open_rc = ns_rproc_http_open(renderer, next, vw, vh, settle_ms,
-                                     &opened);
-        if (open_rc != 0 || !opened.ok) {
-            LOGE("nativeOpen redirect failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
-                 open_rc, opened.ok, next, opened.page_width,
-                 opened.page_height, opened.nav ? opened.nav : "");
-            ns_rproc_http_page_clear(&opened);
-            ns_rproc_http_close(renderer);
-            free(next);
-            free(u);
-            return 0;
-        }
-        free(next);
-        redirects++;
-    }
-    if (opened.nav && *opened.nav)
-        LOGE("nativeOpen stopped after %d redirects at nav=%s",
-             NS_ANDROID_MAX_REDIRECTS, opened.nav);
     AndroidPage *page = calloc(1, sizeof *page);
     if (!page) {
         ns_rproc_http_page_clear(&opened);
@@ -275,18 +300,53 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
         return 0;
     }
     page->renderer = renderer;
-    page->page_width = opened.page_width;
-    page->page_height = opened.page_height;
-    page->title = opened.title;
-    page->url = opened.url;
-    opened.title = NULL;
-    opened.url = NULL;
+    page_take_opened(page, &opened);
     LOGI("nativeOpen ok url=%s final=%s page=%dx%d title=%s",
          u, page->url ? page->url : "", page->page_width, page->page_height,
          page->title ? page->title : "");
     ns_rproc_http_page_clear(&opened);
     free(u);
     return (jlong)(intptr_t)page;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeNavigate(JNIEnv *env,
+                                                           jclass clazz,
+                                                           jlong handle,
+                                                           jstring url,
+                                                           jint viewport_width,
+                                                           jint viewport_height,
+                                                           jint settle_ms)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!g_engine_inited || !page || !page->renderer)
+        return JNI_FALSE;
+
+    char *u = jstr_dup(env, url);
+    if (!u)
+        return JNI_FALSE;
+
+    int vw = viewport_width > 0 ? viewport_width : 360;
+    int vh = viewport_height > 0 ? viewport_height : (vw * 3) / 4;
+    LOGI("nativeNavigate start url=%s viewport=%dx%d settle=%d",
+         u, vw, vh, (int)settle_ms);
+
+    ns_rproc_http_page opened;
+    if (android_open_on_renderer(page->renderer, "nativeNavigate", u, vw, vh,
+                                 settle_ms, &opened) != 0) {
+        ns_rproc_http_page_clear(&opened);
+        free(u);
+        return JNI_FALSE;
+    }
+
+    page_take_opened(page, &opened);
+    LOGI("nativeNavigate ok url=%s final=%s page=%dx%d title=%s",
+         u, page->url ? page->url : "", page->page_width, page->page_height,
+         page->title ? page->title : "");
+    ns_rproc_http_page_clear(&opened);
+    free(u);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jintArray JNICALL
