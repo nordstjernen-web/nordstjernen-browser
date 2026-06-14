@@ -27,6 +27,7 @@ typedef enum ns_node_kind {
 #define NS_CUSTOM_VALIDITY_ATTR "data-nd-custom-validity"
 #define NS_MEDIA_SRC_ATTR "data-nd-media-src"
 #define NS_MEDIA_POSTER_ATTR "data-nd-media-poster"
+#define NS_MEDIA_STREAM_ATTR "data-nd-media-stream"
 
 typedef struct ns_attr {
     char *name;

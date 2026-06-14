@@ -587,7 +587,8 @@ static gboolean
 node_has_media_metadata(const ns_node *n)
 {
     return n && n->kind == NS_NODE_ELEMENT &&
-           ns_element_get_attr(n, NS_MEDIA_SRC_ATTR) != NULL;
+           (ns_element_get_attr(n, NS_MEDIA_SRC_ATTR) != NULL ||
+            ns_element_get_attr(n, NS_MEDIA_STREAM_ATTR) != NULL);
 }
 
 #define NS_LAYOUT_MAX_DEPTH 512

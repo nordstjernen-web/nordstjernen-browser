@@ -339,6 +339,86 @@ script_media_target(ns_node *script)
     return NULL;
 }
 
+static ns_node *
+find_element_with_attr_contains(ns_node *n, const char *attr, const char *word,
+                                int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (n->kind == NS_NODE_ELEMENT && attr_contains_word(n, attr, word))
+        return n;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        ns_node *hit = find_element_with_attr_contains(c, attr, word, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
+}
+
+static ns_node *
+script_document_media_target(ns_node *script)
+{
+    const ns_node *root = ns_node_root(script);
+    ns_node *video = ns_node_find_first_element(root, "video");
+    if (video) return video;
+    ns_node *target = ns_node_find_by_id(root, "movie_player");
+    if (target) return target;
+    target = ns_node_find_by_id(root, "player");
+    if (target) return target;
+    target = ns_node_find_by_id(root, "player-container-id");
+    if (target) return target;
+    return find_element_with_attr_contains((ns_node *)root, "class", "player",
+                                           0);
+}
+
+static int
+yt_thumbnail_score(const char *url)
+{
+    if (!url || !strstr(url, "ytimg.com")) return -1;
+    int score = 10;
+    if (strstr(url, "maxresdefault")) score += 80;
+    if (strstr(url, "sddefault")) score += 60;
+    if (strstr(url, "hqdefault")) score += 50;
+    if (strstr(url, "mqdefault")) score += 30;
+    if (strstr(url, "default")) score += 10;
+    if (strstr(url, "/vi/")) score += 10;
+    return score;
+}
+
+static char *
+yt_best_thumbnail_url(const char *text)
+{
+    static const char key[] = "\"url\"";
+    char *best = NULL;
+    int best_score = -1;
+    const char *p = text;
+    const char *match = NULL;
+    while (p && (p = json_string_value_for_key(p, key, &match))) {
+        char *url = json_string_unescape(p);
+        int score = yt_thumbnail_score(url);
+        if (score > best_score) {
+            g_free(best);
+            best = url;
+            best_score = score;
+        } else {
+            g_free(url);
+        }
+        p++;
+    }
+    if (best) return best;
+    g_autofree char *video_id = json_first_url_for_key(text, "\"videoId\"");
+    if (video_id && *video_id)
+        return g_strdup_printf("https://i.ytimg.com/vi/%s/hqdefault.jpg",
+                               video_id);
+    return NULL;
+}
+
+static gboolean
+script_is_youtube_player_response(const char *text)
+{
+    return text && strstr(text, "ytInitialPlayerResponse") &&
+           strstr(text, "\"videoDetails\"") &&
+           strstr(text, "\"videoId\"");
+}
+
 static void
 ns_media_metadata_convert(ns_node *n, int depth)
 {
@@ -357,6 +437,15 @@ ns_media_metadata_convert(ns_node *n, int depth)
                     if (poster && *poster)
                         ns_element_set_attr(target, NS_MEDIA_POSTER_ATTR, poster);
                 }
+            }
+        } else if (script_is_youtube_player_response(text)) {
+            ns_node *target = script_document_media_target(n);
+            if (target && !ns_element_get_attr(target, NS_MEDIA_SRC_ATTR) &&
+                !ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR)) {
+                g_autofree char *poster = yt_best_thumbnail_url(text);
+                ns_element_set_attr(target, NS_MEDIA_STREAM_ATTR, "1");
+                if (poster && *poster)
+                    ns_element_set_attr(target, NS_MEDIA_POSTER_ATTR, poster);
             }
         }
     }

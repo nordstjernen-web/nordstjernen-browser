@@ -1170,7 +1170,8 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
             b->media && (b->media->video_src || b->media->video_audio_src);
         gboolean has_internal_video =
             b->dom && b->dom->kind == NS_NODE_ELEMENT &&
-            ns_element_get_attr(b->dom, NS_MEDIA_SRC_ATTR) != NULL;
+            (ns_element_get_attr(b->dom, NS_MEDIA_SRC_ATTR) != NULL ||
+             ns_element_get_attr(b->dom, NS_MEDIA_STREAM_ATTR) != NULL);
         if (b->dom && (ns_node_is_element_named(b->dom, "video") ||
                        ns_node_is_element_named(b->dom, "audio") ||
                        has_media_url || has_internal_video)) {
@@ -1184,7 +1185,11 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
         ns_node_is_element_named(media->dom, "video") ||
         (media->media && media->media->video_src) ||
         (media->dom->kind == NS_NODE_ELEMENT &&
-         ns_element_get_attr(media->dom, NS_MEDIA_SRC_ATTR) != NULL);
+         (ns_element_get_attr(media->dom, NS_MEDIA_SRC_ATTR) != NULL ||
+          ns_element_get_attr(media->dom, NS_MEDIA_STREAM_ATTR) != NULL));
+    gboolean force_stream =
+        media->dom->kind == NS_NODE_ELEMENT &&
+        ns_element_get_attr(media->dom, NS_MEDIA_STREAM_ATTR) != NULL;
     const char *msrc = NULL;
     if (media->media) {
         if (is_video) {
@@ -1196,8 +1201,9 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
     }
     if ((!msrc || !*msrc) && media->dom->kind == NS_NODE_ELEMENT)
         msrc = ns_element_get_attr(media->dom, NS_MEDIA_SRC_ATTR);
-    char *abs = msrc ? ns_url_resolve(browser->base_url, msrc) : NULL;
-    gboolean stream = !abs || g_str_has_prefix(abs, "blob:") ||
+    char *abs = (!force_stream && msrc) ? ns_url_resolve(browser->base_url, msrc)
+                                        : NULL;
+    gboolean stream = force_stream || !abs || g_str_has_prefix(abs, "blob:") ||
                       g_str_has_prefix(abs, "data:");
     if (stream) {
         g_free(abs);
