@@ -22,7 +22,7 @@ install_apt() {
         libsqlite3-dev librsvg2-dev libseccomp-dev libwebp-dev
     apt-get install -y --no-install-recommends \
         libpoppler-glib-dev \
-        libfontconfig-dev libpango1.0-dev libavif-dev qt6-base-dev || true
+        libfontconfig-dev libpango1.0-dev libavif-dev qt6-base-dev libqt6svg6-dev || true
     pip3 install --break-system-packages --upgrade 'meson>=1.4' \
         || pip3 install --upgrade 'meson>=1.4'
 }
@@ -49,7 +49,7 @@ install_zypper() {
         sqlite3-devel librsvg-devel libseccomp-devel libwebp-devel
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libpoppler-glib-devel \
-        fontconfig-devel pango-devel libavif-devel qt6-base-devel || true
+        fontconfig-devel pango-devel libavif-devel qt6-base-devel qt6-svg-devel || true
 }
 
 install_apk() {
@@ -60,7 +60,7 @@ install_apk() {
         librsvg-dev libseccomp-dev libwebp-dev
     apk add --no-cache \
         poppler-dev \
-        fontconfig-dev pango-dev libavif-dev qt6-qtbase-dev || true
+        fontconfig-dev pango-dev libavif-dev qt6-qtbase-dev qt6-qtsvg-dev || true
 }
 
 case "$DISTRO" in
