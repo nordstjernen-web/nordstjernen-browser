@@ -609,13 +609,23 @@ ns_node_attach_backing(ns_node *root, void *backing, void (*destroy)(void *))
 }
 
 static void
+ns_attr_free_one(ns_attr *a)
+{
+    if (!a) return;
+    if (a->flags & NS_ATTR_OWN_NAME)  g_free(a->name);
+    if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
+    g_free(a->namespace_uri);
+    g_free(a->prefix);
+    g_free(a->local_name);
+    g_free(a);
+}
+
+static void
 ns_attr_free(ns_attr *a)
 {
     while (a) {
         ns_attr *next = a->next;
-        if (a->flags & NS_ATTR_OWN_NAME)  g_free(a->name);
-        if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
-        g_free(a);
+        ns_attr_free_one(a);
         a = next;
     }
 }
@@ -778,6 +788,37 @@ ns_attr_name_is_internal(const char *name)
     return name && g_ascii_strncasecmp(name, "data-nd-", 8) == 0;
 }
 
+const char *
+ns_attr_local_name(const ns_attr *attr)
+{
+    if (!attr) return "";
+    return attr->local_name ? attr->local_name : (attr->name ? attr->name : "");
+}
+
+static const char *
+ns_attr_normalize_namespace(const char *namespace_uri)
+{
+    return (namespace_uri && *namespace_uri) ? namespace_uri : NULL;
+}
+
+static gboolean
+ns_attr_namespace_equal(const char *a, const char *b)
+{
+    a = ns_attr_normalize_namespace(a);
+    b = ns_attr_normalize_namespace(b);
+    if (!a || !b) return a == b;
+    return strcmp(a, b) == 0;
+}
+
+static gboolean
+ns_attr_matches_ns(const ns_attr *attr, const char *namespace_uri,
+                   const char *local_name)
+{
+    if (!attr || !local_name) return FALSE;
+    return ns_attr_namespace_equal(attr->namespace_uri, namespace_uri) &&
+           strcmp(ns_attr_local_name(attr), local_name) == 0;
+}
+
 void
 ns_element_set_attr(ns_node *el, const char *name, const char *value)
 {
@@ -810,6 +851,46 @@ ns_element_set_attr(ns_node *el, const char *name, const char *value)
 }
 
 void
+ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
+                       const char *prefix, const char *local_name,
+                       const char *name, const char *value)
+{
+    g_return_if_fail(el != NULL);
+    g_return_if_fail(el->kind == NS_NODE_ELEMENT);
+    g_return_if_fail(local_name != NULL);
+
+    const char *ns = ns_attr_normalize_namespace(namespace_uri);
+    const char *pfx = prefix && *prefix ? prefix : NULL;
+    const char *qualified = name && *name ? name : local_name;
+
+    if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
+        ns_class_set_clear(el);
+    el->attr_bloom = 0;
+
+    ns_attr *tail = NULL;
+    for (ns_attr *a = el->attrs; a; a = a->next) {
+        if (ns_attr_matches_ns(a, ns, local_name)) {
+            if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
+            a->value = g_strdup(value ? value : "");
+            a->flags |= NS_ATTR_OWN_VALUE;
+            return;
+        }
+        tail = a;
+    }
+
+    ns_attr *a = g_new0(ns_attr, 1);
+    a->name = g_strdup(qualified);
+    a->value = g_strdup(value ? value : "");
+    a->namespace_uri = ns ? g_strdup(ns) : NULL;
+    a->prefix = pfx ? g_strdup(pfx) : NULL;
+    a->local_name = g_strdup(local_name);
+    a->flags = NS_ATTR_OWN_NAME | NS_ATTR_OWN_VALUE |
+               (ns_str_is_ascii_lower(qualified) ? NS_ATTR_NAME_LOWER : 0);
+    if (tail) tail->next = a;
+    else      el->attrs = a;
+}
+
+void
 ns_element_remove_attr(ns_node *el, const char *name)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
@@ -821,9 +902,28 @@ ns_element_remove_attr(ns_node *el, const char *name)
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
             ns_attr *dead = *link;
             *link = dead->next;
-            if (dead->flags & NS_ATTR_OWN_NAME)  g_free(dead->name);
-            if (dead->flags & NS_ATTR_OWN_VALUE) g_free(dead->value);
-            g_free(dead);
+            ns_attr_free_one(dead);
+            return;
+        }
+        link = &(*link)->next;
+    }
+}
+
+void
+ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
+                          const char *local_name)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT || !local_name) return;
+    const char *ns = ns_attr_normalize_namespace(namespace_uri);
+    if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
+        ns_class_set_clear(el);
+    el->attr_bloom = 0;
+    ns_attr **link = &el->attrs;
+    while (*link) {
+        if (ns_attr_matches_ns(*link, ns, local_name)) {
+            ns_attr *dead = *link;
+            *link = dead->next;
+            ns_attr_free_one(dead);
             return;
         }
         link = &(*link)->next;
@@ -843,14 +943,22 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
         out->flags |= src->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS |
                                     NS_NODE_KEEP_CASE);
         for (const ns_attr *a = src->attrs; a; a = a->next)
-            ns_element_set_attr(out, a->name ? a->name : "",
-                                a->value ? a->value : "");
+            ns_element_set_attr_ns(out, a->namespace_uri, a->prefix,
+                                   ns_attr_local_name(a), a->name,
+                                   a->value ? a->value : "");
         break;
     case NS_NODE_TEXT:
         out = ns_node_new_text(g_strdup(src->text ? src->text : ""));
         break;
-    case NS_NODE_DOCUMENT:
     case NS_NODE_DOCTYPE:
+        out = ns_node_new_element(src->name ? g_strdup(src->name) : g_strdup(""));
+        for (const ns_attr *a = src->attrs; a; a = a->next)
+            ns_element_set_attr_ns(out, a->namespace_uri, a->prefix,
+                                   ns_attr_local_name(a), a->name,
+                                   a->value ? a->value : "");
+        out->kind = NS_NODE_DOCTYPE;
+        break;
+    case NS_NODE_DOCUMENT:
     case NS_NODE_COMMENT:
         out = ns_node_new(src->kind);
         if (src->text) {
@@ -862,8 +970,9 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
             out->flags |= NS_NODE_OWN_NAME;
         }
         for (const ns_attr *a = src->attrs; a; a = a->next)
-            ns_element_set_attr(out, a->name ? a->name : "",
-                                a->value ? a->value : "");
+            ns_element_set_attr_ns(out, a->namespace_uri, a->prefix,
+                                   ns_attr_local_name(a), a->name,
+                                   a->value ? a->value : "");
         break;
     }
     if (out) out->flags |= src->flags & (NS_NODE_FRAGMENT | NS_NODE_CDATA |
@@ -933,6 +1042,27 @@ ns_element_get_attr(const ns_node *el, const char *name)
             return a->value;
     }
     return NULL;
+}
+
+const ns_attr *
+ns_element_find_attr_ns(const ns_node *el, const char *namespace_uri,
+                        const char *local_name)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT || !local_name)
+        return NULL;
+    const char *ns = ns_attr_normalize_namespace(namespace_uri);
+    for (const ns_attr *a = el->attrs; a; a = a->next)
+        if (ns_attr_matches_ns(a, ns, local_name))
+            return a;
+    return NULL;
+}
+
+const char *
+ns_element_get_attr_ns(const ns_node *el, const char *namespace_uri,
+                       const char *local_name)
+{
+    const ns_attr *a = ns_element_find_attr_ns(el, namespace_uri, local_name);
+    return a ? a->value : NULL;
 }
 
 gboolean

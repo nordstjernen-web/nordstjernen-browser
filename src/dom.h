@@ -29,6 +29,9 @@ typedef enum ns_node_kind {
 typedef struct ns_attr {
     char *name;
     char *value;
+    char *namespace_uri;
+    char *prefix;
+    char *local_name;
     struct ns_attr *next;
     guint8 flags;
 } ns_attr;
@@ -101,14 +104,22 @@ void ns_node_append_child(ns_node *parent, ns_node *child);
 void ns_node_remove(ns_node *child);
 
 void        ns_element_set_attr(ns_node *el, const char *name, const char *value);
+void        ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
+                                   const char *prefix, const char *local_name,
+                                   const char *name, const char *value);
 void        ns_element_remove_attr(ns_node *el, const char *name);
-/* TRUE for the reserved "data-nd-*" namespace, which the engine uses for
-   trusted internal state (file-input paths, iframe URLs, …). Untrusted sources
-   (HTML parsing, JS setAttribute) must never set these. */
+void        ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
+                                      const char *local_name);
 gboolean    ns_attr_name_is_internal(const char *name);
 
 ns_node    *ns_node_clone(const ns_node *src, gboolean deep);
 const char *ns_element_get_attr(const ns_node *el, const char *name);
+const char *ns_element_get_attr_ns(const ns_node *el, const char *namespace_uri,
+                                   const char *local_name);
+const ns_attr *ns_element_find_attr_ns(const ns_node *el,
+                                       const char *namespace_uri,
+                                       const char *local_name);
+const char *ns_attr_local_name(const ns_attr *attr);
 guint64     ns_attr_name_bloom_bit(const char *name);
 guint64     ns_node_attr_bloom(const ns_node *el);
 gboolean    ns_node_has_class(const ns_node *el, const char *name, gsize len);
