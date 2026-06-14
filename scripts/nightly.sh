@@ -257,15 +257,47 @@ run_distro_builds() {
     DISTRO_JOBS=$(( budget / ${#specs[@]} ))
     [ "$DISTRO_JOBS" -lt 2 ] && DISTRO_JOBS=2
     log "Parallel container builds: ${#specs[@]} distros @ -j${DISTRO_JOBS} each (host ${cores} cores / ${mem_gb} GiB)"
+
+    # Stream each container's output live, tagged with its distro, instead of
+    # buffering it until every build finishes, so the console shows progress
+    # as it happens. The untagged full log is still saved per distro by
+    # stage_distro (linux/<distro>/build.log).
+    local start; start=$(date +%s)
+    local -a pairs=()
     for spec in "${specs[@]}"; do
         distro=${spec%%:*}; image=${spec#*:}
-        stage_distro "$distro" "$image" "$NVERSION" > "$WORK/joblog.linux-$distro" 2>&1 &
+        printf '[nightly] launching %-9s build (%s, -j%s)\n' "$distro" "$image" "$DISTRO_JOBS"
+        ( stage_distro "$distro" "$image" "$NVERSION" 2>&1 \
+            | awk -v t="$distro" '{ printf "[%s] %s\n", t, $0; fflush() }' ) &
+        pairs+=("$!:$distro")
     done
-    wait
-    for spec in "${specs[@]}"; do
-        distro=${spec%%:*}
-        cat "$WORK/joblog.linux-$distro" 2>/dev/null || true
+
+    # Heartbeat: every 30s, name the builds still running and the elapsed time,
+    # so a quiet compile phase doesn't look like a hang.
+    local hb_pid
+    (
+        while :; do
+            sleep 30
+            local now running=() pn p n
+            now=$(( ($(date +%s) - start) / 60 ))
+            for pn in "${pairs[@]}"; do
+                p=${pn%%:*}; n=${pn#*:}
+                kill -0 "$p" 2>/dev/null && running+=("$n")
+            done
+            [ "${#running[@]}" -eq 0 ] && break
+            printf '[nightly] +%dm still building: %s\n' "$now" "${running[*]}"
+        done
+    ) &
+    hb_pid=$!
+
+    local pn
+    for pn in "${pairs[@]}"; do
+        wait "${pn%%:*}" 2>/dev/null
     done
+    kill "$hb_pid" 2>/dev/null
+    wait "$hb_pid" 2>/dev/null
+    printf '[nightly] all container builds finished in %dm\n' \
+        "$(( ($(date +%s) - start) / 60 ))"
 }
 
 gha_dispatch() {
