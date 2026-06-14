@@ -4,6 +4,8 @@
 
 package com.nordstjernen.browser
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -21,6 +23,8 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedText
+import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import android.widget.OverScroller
@@ -68,7 +72,11 @@ class PageView @JvmOverloads constructor(
     private var viewport: Bitmap? = null
     @Volatile private var renderPending = false
     @Volatile private var renderDirty = false
+    @Volatile private var lastRenderStartedAt = 0L
     @Volatile private var pageInputActive = false
+    private var pageInputText = ""
+    private var pageInputCaret = 0
+    private var pageInputAnchor = 0
 
     private var lastContentTapTime = 0L
     private var lastContentTapX = 0f
@@ -101,6 +109,91 @@ class PageView @JvmOverloads constructor(
     private fun maxScrollX(): Int = maxOf(0, contentW() - width)
     private fun maxScrollY(): Int = maxOf(0, contentH() - height)
 
+    private fun utf8Size(codePoint: Int): Int = when {
+        codePoint <= 0x7f -> 1
+        codePoint <= 0x7ff -> 2
+        codePoint <= 0xffff -> 3
+        else -> 4
+    }
+
+    private fun utf8ByteOffsetToCharIndex(text: String, byteOffset: Int): Int {
+        val target = byteOffset.coerceAtLeast(0)
+        var bytes = 0
+        var i = 0
+        while (i < text.length) {
+            val codePoint = text.codePointAt(i)
+            val nextBytes = bytes + utf8Size(codePoint)
+            if (nextBytes > target) break
+            bytes = nextBytes
+            i += Character.charCount(codePoint)
+        }
+        return i
+    }
+
+    private fun charIndexToUtf8ByteOffset(text: String, index: Int): Int {
+        val end = index.coerceIn(0, text.length)
+        var bytes = 0
+        var i = 0
+        while (i < end) {
+            val codePoint = text.codePointAt(i)
+            bytes += utf8Size(codePoint)
+            i += Character.charCount(codePoint)
+        }
+        return bytes
+    }
+
+    private fun clearPageInputState() {
+        pageInputText = ""
+        pageInputCaret = 0
+        pageInputAnchor = 0
+    }
+
+    private fun updateCachedPageInputState(state: Array<String?>?): Boolean {
+        if (state == null || state.size < 3) {
+            clearPageInputState()
+            return false
+        }
+        val text = state.getOrNull(0) ?: ""
+        val caretByte = state.getOrNull(1)?.toIntOrNull() ?: 0
+        val anchorByte = state.getOrNull(2)?.toIntOrNull() ?: caretByte
+        pageInputText = text
+        pageInputCaret = utf8ByteOffsetToCharIndex(text, caretByte)
+        pageInputAnchor = utf8ByteOffsetToCharIndex(text, anchorByte)
+        return true
+    }
+
+    private fun selectedInputBounds(): Pair<Int, Int>? {
+        val lo = minOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        val hi = maxOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        return if (lo < hi) Pair(lo, hi) else null
+    }
+
+    private fun replaceCachedInputSelection(text: String) {
+        val lo = minOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        val hi = maxOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        pageInputText = pageInputText.substring(0, lo) + text + pageInputText.substring(hi)
+        pageInputCaret = lo + text.length
+        pageInputAnchor = pageInputCaret
+        updateImeSelection()
+    }
+
+    private fun removeCachedInputRange(start: Int, end: Int) {
+        val lo = start.coerceIn(0, pageInputText.length)
+        val hi = end.coerceIn(lo, pageInputText.length)
+        pageInputText = pageInputText.substring(0, lo) + pageInputText.substring(hi)
+        pageInputCaret = lo
+        pageInputAnchor = lo
+        updateImeSelection()
+    }
+
+    private fun updateImeSelection() {
+        if (!pageInputActive) return
+        val start = minOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        val end = maxOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.updateSelection(this, start, end, -1, -1)
+    }
+
     private val longPressRunnable = Runnable {
         if (!dragging && !scaleDetector.isInProgress && handle != 0L) {
             hitLink(downX.toInt(), downY.toInt()) { url ->
@@ -125,6 +218,7 @@ class PageView @JvmOverloads constructor(
             (pendingScrollFraction * contentH()).roundToInt().coerceIn(0, maxScrollY())
         else 0
         pendingScrollFraction = -1f
+        clearPageInputState()
         scroller.forceFinished(true)
         Log.i(TAG, "PageView setDocument handle=$newHandle page=${pageWidthCssArg}x$pageHeightCssArg view=${width}x${height} scale=$renderScale")
         scheduleRender()
@@ -138,6 +232,7 @@ class PageView @JvmOverloads constructor(
         scrollYpx = 0
         pendingScrollFraction = -1f
         pageInputActive = false
+        clearPageInputState()
         scroller.forceFinished(true)
         Log.i(TAG, "PageView updateDocument handle=$handle page=${pageWidthCssArg}x$pageHeightCssArg view=${width}x${height} scale=$renderScale")
         scheduleRender()
@@ -174,11 +269,13 @@ class PageView @JvmOverloads constructor(
         val h = handle
         handle = 0
         pageInputActive = false
+        clearPageInputState()
         if (h != 0L) renderExecutor.execute { NativeBrowser.nativeClose(h) }
     }
 
     fun releaseTextInput() {
         pageInputActive = false
+        clearPageInputState()
         if (hasFocus()) clearFocus()
     }
 
@@ -216,10 +313,80 @@ class PageView @JvmOverloads constructor(
         return Pair(cssX, cssY)
     }
 
+    private fun refreshPageInputState(after: (() -> Unit)? = null) {
+        val h = handle
+        if (h == 0L) {
+            pageInputActive = false
+            clearPageInputState()
+            after?.invoke()
+            return
+        }
+        renderExecutor.execute {
+            val state = NativeBrowser.nativeFocusedEditableState(h)
+            post {
+                if (handle != h) return@post
+                pageInputActive = updateCachedPageInputState(state)
+                updateImeSelection()
+                after?.invoke()
+            }
+        }
+    }
+
+    private fun syncPageSelection(start: Int, end: Int): Boolean {
+        val h = handle
+        if (h == 0L) return false
+        pageInputAnchor = start.coerceIn(0, pageInputText.length)
+        pageInputCaret = end.coerceIn(0, pageInputText.length)
+        updateImeSelection()
+        val caretByte = charIndexToUtf8ByteOffset(pageInputText, pageInputCaret)
+        val anchorByte = charIndexToUtf8ByteOffset(pageInputText, pageInputAnchor)
+        renderExecutor.execute {
+            val ok = NativeBrowser.nativeSetFocusedEditableSelection(h, caretByte, anchorByte)
+            post {
+                if (handle != h) return@post
+                if (!ok) refreshPageInputState()
+                scheduleRender()
+                invalidate()
+            }
+        }
+        return true
+    }
+
+    private fun clipboardText(): String {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = cm.primaryClip ?: return ""
+        if (clip.itemCount <= 0) return ""
+        return clip.getItemAt(0).coerceToText(context)?.toString() ?: ""
+    }
+
+    private fun copySelectedPageInput(): Boolean {
+        val bounds = selectedInputBounds() ?: return false
+        val text = pageInputText.substring(bounds.first, bounds.second)
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("text", text))
+        return true
+    }
+
+    private fun cutSelectedPageInput(): Boolean {
+        val bounds = selectedInputBounds() ?: return false
+        copySelectedPageInput()
+        sendKeyToPage(0, "Backspace", "Backspace", 8, 0)
+        removeCachedInputRange(bounds.first, bounds.second)
+        return true
+    }
+
+    private fun pasteIntoPageInput(): Boolean {
+        val text = clipboardText()
+        if (text.isEmpty()) return true
+        replaceCachedInputSelection(text)
+        sendTextToPage(text)
+        return true
+    }
+
     private fun showPageKeyboard() {
         pageInputActive = true
         if (!hasFocus()) requestFocus()
-        post {
+        refreshPageInputState {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.restartInput(this)
             imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
@@ -228,6 +395,7 @@ class PageView @JvmOverloads constructor(
 
     private fun hidePageKeyboard() {
         pageInputActive = false
+        clearPageInputState()
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(windowToken, 0)
     }
@@ -267,7 +435,10 @@ class PageView @JvmOverloads constructor(
             val nav = NativeBrowser.nativeKeyText(h, text)
             post {
                 if (handle != h) return@post
-                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else scheduleRender()
+                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else {
+                    scheduleRender()
+                    if (pageInputActive) refreshPageInputState()
+                }
             }
         }
     }
@@ -280,7 +451,10 @@ class PageView @JvmOverloads constructor(
             val nav = NativeBrowser.nativeKey(h, kind, key, code, keyCode, mods)
             post {
                 if (handle != h) return@post
-                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else scheduleRender()
+                if (!nav.isNullOrEmpty()) onNavigate?.invoke(nav) else {
+                    scheduleRender()
+                    if (pageInputActive) refreshPageInputState()
+                }
             }
         }
     }
@@ -375,11 +549,19 @@ class PageView @JvmOverloads constructor(
         val h = handle
         if (h == 0L) return
         if (renderPending) {
-            renderDirty = true
-            return
+            val age = SystemClock.uptimeMillis() - lastRenderStartedAt
+            if (lastRenderStartedAt > 0L && age > 1500L) {
+                Log.w(TAG, "PageView stale render recovered handle=$h age=${age}ms")
+                renderPending = false
+                renderDirty = false
+            } else {
+                renderDirty = true
+                return
+            }
         }
         renderPending = true
         renderDirty = false
+        lastRenderStartedAt = SystemClock.uptimeMillis()
         val eff = effScale()
         val sxc = (scrollXpx / eff).roundToInt()
         val syc = (scrollYpx / eff).roundToInt()
@@ -390,9 +572,11 @@ class PageView @JvmOverloads constructor(
             post {
                 if (handle != h) {
                     renderPending = false
+                    lastRenderStartedAt = 0L
                     return@post
                 }
                 renderPending = false
+                lastRenderStartedAt = 0L
                 if (!nav.isNullOrEmpty()) {
                     onNavigate?.invoke(nav)
                     return@post
@@ -407,12 +591,31 @@ class PageView @JvmOverloads constructor(
         }
     }
 
+    fun redrawCurrentPage() {
+        if (handle == 0L) return
+        if (viewport == null && width > 0 && height > 0)
+            viewport = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { it.eraseColor(Color.WHITE) }
+        if (renderPending && lastRenderStartedAt > 0L &&
+            SystemClock.uptimeMillis() - lastRenderStartedAt > 1500L) {
+            renderPending = false
+            renderDirty = true
+        }
+        scheduleRender()
+        invalidate()
+        postDelayed({ if (handle != 0L) scheduleRender() }, 120)
+    }
+
     override fun onDraw(canvas: Canvas) {
         val bmp = viewport
         canvas.drawColor(Color.WHITE)
         if (bmp != null && handle != 0L) {
             canvas.drawBitmap(bmp, 0f, 0f, null)
         }
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) redrawCurrentPage()
     }
 
     override fun computeScroll() {
@@ -522,11 +725,39 @@ class PageView @JvmOverloads constructor(
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
         outAttrs.imeOptions = EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        outAttrs.initialSelStart = minOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+        outAttrs.initialSelEnd = maxOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
         return PageInputConnection()
     }
 
+    private fun handlePageEditShortcut(event: KeyEvent): Boolean {
+        if (!pageInputActive || !(event.isCtrlPressed || event.isMetaPressed)) return false
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_A -> {
+                syncPageSelection(0, pageInputText.length)
+                true
+            }
+            KeyEvent.KEYCODE_C -> {
+                copySelectedPageInput()
+                true
+            }
+            KeyEvent.KEYCODE_X -> {
+                cutSelectedPageInput()
+                true
+            }
+            KeyEvent.KEYCODE_V -> {
+                pasteIntoPageInput()
+                true
+            }
+            else -> false
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        return if (pageInputActive && dispatchKeyEventToPage(event, 0)) true else super.onKeyDown(keyCode, event)
+        return if (handlePageEditShortcut(event) || (pageInputActive && dispatchKeyEventToPage(event, 0)))
+            true
+        else
+            super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
@@ -535,23 +766,83 @@ class PageView @JvmOverloads constructor(
 
     private inner class PageInputConnection : BaseInputConnection(this@PageView, true) {
         override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-            if (!text.isNullOrEmpty()) sendTextToPage(text.toString())
+            if (!text.isNullOrEmpty()) {
+                val value = text.toString()
+                replaceCachedInputSelection(value)
+                sendTextToPage(value)
+            }
             return true
         }
 
+        override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+            return commitText(text, newCursorPosition)
+        }
+
+        override fun finishComposingText(): Boolean = true
+
+        override fun setComposingRegion(start: Int, end: Int): Boolean {
+            return syncPageSelection(start, end)
+        }
+
         override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-            repeat(beforeLength.coerceAtLeast(0)) {
+            val selected = selectedInputBounds()
+            if (selected != null) {
                 sendKeyToPage(0, "Backspace", "Backspace", 8, 0)
+                removeCachedInputRange(selected.first, selected.second)
+                return true
             }
-            repeat(afterLength.coerceAtLeast(0)) {
-                sendKeyToPage(0, "Delete", "Delete", 46, 0)
+            val caret = pageInputCaret.coerceIn(0, pageInputText.length)
+            val start = (caret - beforeLength.coerceAtLeast(0)).coerceAtLeast(0)
+            val end = (caret + afterLength.coerceAtLeast(0)).coerceAtMost(pageInputText.length)
+            if (start < end) {
+                syncPageSelection(start, end)
+                sendKeyToPage(0, "Backspace", "Backspace", 8, 0)
+                removeCachedInputRange(start, end)
             }
             return true
+        }
+
+        override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+            return deleteSurroundingText(beforeLength, afterLength)
+        }
+
+        override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence {
+            val end = pageInputCaret.coerceIn(0, pageInputText.length)
+            val start = (end - n.coerceAtLeast(0)).coerceAtLeast(0)
+            return pageInputText.substring(start, end)
+        }
+
+        override fun getTextAfterCursor(n: Int, flags: Int): CharSequence {
+            val start = pageInputCaret.coerceIn(0, pageInputText.length)
+            val end = (start + n.coerceAtLeast(0)).coerceAtMost(pageInputText.length)
+            return pageInputText.substring(start, end)
+        }
+
+        override fun getSelectedText(flags: Int): CharSequence? {
+            val bounds = selectedInputBounds() ?: return null
+            return pageInputText.substring(bounds.first, bounds.second)
+        }
+
+        override fun getExtractedText(request: ExtractedTextRequest?, flags: Int): ExtractedText {
+            val start = minOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+            val end = maxOf(pageInputCaret, pageInputAnchor).coerceIn(0, pageInputText.length)
+            return ExtractedText().also {
+                it.text = pageInputText
+                it.startOffset = 0
+                it.partialStartOffset = -1
+                it.partialEndOffset = -1
+                it.selectionStart = start
+                it.selectionEnd = end
+            }
+        }
+
+        override fun setSelection(start: Int, end: Int): Boolean {
+            return syncPageSelection(start, end)
         }
 
         override fun sendKeyEvent(event: KeyEvent): Boolean {
             return when (event.action) {
-                KeyEvent.ACTION_DOWN -> dispatchKeyEventToPage(event, 0)
+                KeyEvent.ACTION_DOWN -> handlePageEditShortcut(event) || dispatchKeyEventToPage(event, 0)
                 KeyEvent.ACTION_UP -> dispatchKeyEventToPage(event, 1)
                 else -> true
             }
@@ -561,6 +852,28 @@ class PageView @JvmOverloads constructor(
             sendKeyToPage(0, "Enter", "Enter", 13, 0)
             sendKeyToPage(1, "Enter", "Enter", 13, 0)
             return true
+        }
+
+        override fun performContextMenuAction(id: Int): Boolean {
+            return when (id) {
+                android.R.id.selectAll -> {
+                    syncPageSelection(0, pageInputText.length)
+                    true
+                }
+                android.R.id.copy -> {
+                    copySelectedPageInput()
+                    true
+                }
+                android.R.id.cut -> {
+                    cutSelectedPageInput()
+                    true
+                }
+                android.R.id.paste, android.R.id.pasteAsPlainText -> {
+                    pasteIntoPageInput()
+                    true
+                }
+                else -> super.performContextMenuAction(id)
+            }
         }
     }
 

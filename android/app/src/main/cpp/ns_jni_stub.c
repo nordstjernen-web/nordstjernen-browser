@@ -63,6 +63,26 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
     return JNI_FALSE;
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditableState(JNIEnv *env,
+                                                                       jclass clazz,
+                                                                       jlong handle)
+{
+    (void)env; (void)clazz; (void)handle;
+    return NULL;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeSetFocusedEditableSelection(JNIEnv *env,
+                                                                              jclass clazz,
+                                                                              jlong handle,
+                                                                              jint caret,
+                                                                              jint anchor)
+{
+    (void)env; (void)clazz; (void)handle; (void)caret; (void)anchor;
+    return JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
                                                                  jclass clazz,

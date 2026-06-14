@@ -29,6 +29,8 @@ object NativeBrowser {
     external fun nativePageSize(handle: Long): IntArray?
     external fun nativeUrl(handle: Long): String?
     external fun nativeFocusedEditable(handle: Long): Boolean
+    external fun nativeFocusedEditableState(handle: Long): Array<String?>?
+    external fun nativeSetFocusedEditableSelection(handle: Long, caret: Int, anchor: Int): Boolean
     external fun nativeTakeNavigation(handle: Long): String?
     external fun nativeTakeDownload(handle: Long): String?
     external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Boolean

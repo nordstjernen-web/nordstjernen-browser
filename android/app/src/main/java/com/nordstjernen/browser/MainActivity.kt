@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
@@ -50,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var banner: TextView
     private lateinit var backButton: ImageButton
+    private lateinit var goButton: ImageButton
 
     private var initialized = false
     private var currentUrl: String? = null
@@ -80,10 +83,12 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
         banner = findViewById(R.id.banner)
         backButton = findViewById(R.id.backButton)
+        goButton = findViewById(R.id.goButton)
 
         urlBar.isFocusable = true
         urlBar.isFocusableInTouchMode = true
-        findViewById<ImageButton>(R.id.goButton).setOnClickListener { navigate(urlBar.text.toString()) }
+        goButton.visibility = View.GONE
+        goButton.setOnClickListener { navigate(urlBar.text.toString()) }
         findViewById<ImageButton>(R.id.reloadButton).setOnClickListener { reload() }
         findViewById<ImageButton>(R.id.homeButton).setOnClickListener { navigate(getString(R.string.home_url)) }
         val logoButton = findViewById<ImageButton>(R.id.logoButton)
@@ -103,11 +108,19 @@ class MainActivity : AppCompatActivity() {
         }
         urlBar.setOnClickListener { showUrlKeyboard() }
         urlBar.setOnFocusChangeListener { _, hasFocus ->
+            updateUrlGoButton()
             if (hasFocus) {
                 pageView.releaseTextInput()
                 showUrlKeyboard(true)
             }
         }
+        urlBar.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                updateUrlGoButton()
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
 
         pageView.renderScale = resources.displayMetrics.density.toDouble()
         pageView.onNavigate = { url -> navigateFromPage(url) }
@@ -151,6 +164,11 @@ class MainActivity : AppCompatActivity() {
         if (initialized) navigate(initialUrl())
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (::pageView.isInitialized) pageView.redrawCurrentPage()
+    }
+
     private fun initialUrl(): String {
         val data = intent?.data?.toString()
         return if (!data.isNullOrEmpty()) data else getString(R.string.home_url)
@@ -186,6 +204,7 @@ class MainActivity : AppCompatActivity() {
         currentUrl = url
         urlBar.setText(url)
         urlBar.clearFocus()
+        updateUrlGoButton()
         pageView.requestFocus()
         hideKeyboard()
         updateBackButton()
@@ -336,6 +355,14 @@ class MainActivity : AppCompatActivity() {
     private fun updateBackButton() {
         backButton.isEnabled = backStack.isNotEmpty()
         backButton.alpha = if (backStack.isNotEmpty()) 1f else 0.38f
+    }
+
+    private fun updateUrlGoButton() {
+        goButton.visibility =
+            if (urlBar.hasFocus() && urlBar.text.toString().trim().isNotEmpty())
+                View.VISIBLE
+            else
+                View.GONE
     }
 
     // Offer the system default-browser chooser once, on first launch

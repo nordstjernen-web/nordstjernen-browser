@@ -467,6 +467,45 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/focused-editable-state") == 0) {
+        size_t caret = 0, anchor = 0;
+        char *value = s->cur ? ns_browser_focused_editable_value(s->cur,
+                                                                 &caret,
+                                                                 &anchor)
+                             : NULL;
+        char *e = json_escape(value ? value : "");
+        char *json = NULL;
+        int n = asprintf(&json,
+                         "{\"active\":%d,\"caret\":%zu,\"anchor\":%zu,"
+                         "\"value\":\"%s\"}",
+                         value ? 1 : 0, caret, anchor, e ? e : "");
+        if (n > 0)
+            http_write_response(ctrl_w, 200, "application/json", NULL,
+                                json, (size_t)n);
+        free(json);
+        free(e);
+        free(value);
+        return 0;
+    }
+
+    if (strcmp(head->path, "/focused-editable-selection") == 0) {
+        long caret = 0, anchor = 0;
+        json_get_long(body, "caret", &caret);
+        json_get_long(body, "anchor", &anchor);
+        int ok = s->cur ? ns_browser_set_focused_editable_selection(
+                              s->cur,
+                              caret > 0 ? (size_t)caret : 0,
+                              anchor > 0 ? (size_t)anchor : 0)
+                        : 0;
+        if (ok)
+            s->frame_valid = 0;
+        char json[16];
+        int n = snprintf(json, sizeof json, "{\"ok\":%d}", ok ? 1 : 0);
+        http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                            (size_t)n);
+        return 0;
+    }
+
     if (strcmp(head->path, "/find") == 0) {
         long cs = 0, dir = 0, from_y = 0;
         json_get_long(body, "case_sensitive", &cs);

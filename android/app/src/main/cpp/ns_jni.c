@@ -409,6 +409,68 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
                                                          : JNI_FALSE;
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditableState(JNIEnv *env,
+                                                                       jclass clazz,
+                                                                       jlong handle)
+{
+    (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!page || !page->renderer)
+        return NULL;
+
+    size_t caret = 0, anchor = 0;
+    char *value = ns_rproc_http_focused_editable_value(page->renderer,
+                                                       &caret, &anchor);
+    if (!value)
+        return NULL;
+
+    jclass string_class = (*env)->FindClass(env, "java/lang/String");
+    if (!string_class) {
+        free(value);
+        return NULL;
+    }
+    jobjectArray arr = (*env)->NewObjectArray(env, 3, string_class, NULL);
+    if (!arr) {
+        free(value);
+        return NULL;
+    }
+
+    char caret_buf[32], anchor_buf[32];
+    snprintf(caret_buf, sizeof caret_buf, "%zu", caret);
+    snprintf(anchor_buf, sizeof anchor_buf, "%zu", anchor);
+    jstring v = (*env)->NewStringUTF(env, value);
+    jstring c = (*env)->NewStringUTF(env, caret_buf);
+    jstring a = (*env)->NewStringUTF(env, anchor_buf);
+    free(value);
+    if (!v || !c || !a)
+        return arr;
+    (*env)->SetObjectArrayElement(env, arr, 0, v);
+    (*env)->SetObjectArrayElement(env, arr, 1, c);
+    (*env)->SetObjectArrayElement(env, arr, 2, a);
+    (*env)->DeleteLocalRef(env, v);
+    (*env)->DeleteLocalRef(env, c);
+    (*env)->DeleteLocalRef(env, a);
+    return arr;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeSetFocusedEditableSelection(JNIEnv *env,
+                                                                              jclass clazz,
+                                                                              jlong handle,
+                                                                              jint caret,
+                                                                              jint anchor)
+{
+    (void)env; (void)clazz;
+    AndroidPage *page = page_from_handle(handle);
+    if (!page || !page->renderer)
+        return JNI_FALSE;
+    return ns_rproc_http_set_focused_editable_selection(
+               page->renderer,
+               caret > 0 ? (size_t)caret : 0,
+               anchor > 0 ? (size_t)anchor : 0) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
                                                                  jclass clazz,

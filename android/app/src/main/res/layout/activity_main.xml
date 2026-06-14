@@ -54,6 +54,17 @@
             android:importantForAutofill="no" />
 
         <ImageButton
+            android:id="@+id/goButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:contentDescription="@string/go_action"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_nav_go"
+            android:visibility="gone" />
+
+        <ImageButton
             android:id="@+id/reloadButton"
             android:layout_width="40dp"
             android:layout_height="40dp"
@@ -72,16 +83,6 @@
             android:padding="8dp"
             android:scaleType="center"
             android:src="@drawable/ic_nav_home" />
-
-        <ImageButton
-            android:id="@+id/goButton"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="@drawable/bg_toolbar_button"
-            android:contentDescription="@string/go_action"
-            android:padding="8dp"
-            android:scaleType="center"
-            android:src="@drawable/ic_nav_go" />
 
         <ImageButton
             android:id="@+id/logoButton"

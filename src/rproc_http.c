@@ -702,6 +702,54 @@ ns_rproc_http_focused_editable(ns_rproc_http *r)
     return active != 0 ? 1 : 0;
 }
 
+char *
+ns_rproc_http_focused_editable_value(ns_rproc_http *r, size_t *out_caret,
+                                     size_t *out_anchor)
+{
+    if (out_caret)
+        *out_caret = 0;
+    if (out_anchor)
+        *out_anchor = 0;
+    if (!r)
+        return NULL;
+    char *body = request(r, "/focused-editable-state", "{}");
+    if (!body)
+        return NULL;
+    long active = 0, caret = 0, anchor = 0;
+    json_get_long(body, "active", &active);
+    json_get_long(body, "caret", &caret);
+    json_get_long(body, "anchor", &anchor);
+    char *value = active != 0 ? json_get_str(body, "value") : NULL;
+    free(body);
+    if (!value && active != 0)
+        value = strdup("");
+    if (out_caret && caret > 0)
+        *out_caret = (size_t)caret;
+    if (out_anchor && anchor > 0)
+        *out_anchor = (size_t)anchor;
+    return active != 0 ? value : NULL;
+}
+
+int
+ns_rproc_http_set_focused_editable_selection(ns_rproc_http *r, size_t caret,
+                                             size_t anchor)
+{
+    if (!r)
+        return 0;
+    char json[96];
+    int n = snprintf(json, sizeof json, "{\"caret\":%zu,\"anchor\":%zu}",
+                     caret, anchor);
+    if (n < 0 || (size_t)n >= sizeof json)
+        return 0;
+    char *body = request(r, "/focused-editable-selection", json);
+    if (!body)
+        return 0;
+    long ok = 0;
+    json_get_long(body, "ok", &ok);
+    free(body);
+    return ok != 0 ? 1 : 0;
+}
+
 int
 ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
                          char **out_cursor)

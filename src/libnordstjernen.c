@@ -1801,6 +1801,62 @@ ns_browser_focused_editable(ns_browser *browser)
     return f && ns_node_editable_value(f) ? 1 : 0;
 }
 
+static gsize
+browser_utf8_boundary(const char *s, gsize off)
+{
+    gsize len = s ? strlen(s) : 0;
+    if (off >= len)
+        return len;
+    while (off > 0 && (((unsigned char)s[off] & 0xc0) == 0x80))
+        off--;
+    return off;
+}
+
+char *
+ns_browser_focused_editable_value(ns_browser *browser, size_t *out_caret,
+                                  size_t *out_anchor)
+{
+    if (out_caret)
+        *out_caret = 0;
+    if (out_anchor)
+        *out_anchor = 0;
+    if (!browser || !browser->js)
+        return NULL;
+    const ns_node *f = ns_js_focused_node(browser->js);
+    const char *cur = f ? ns_node_editable_value(f) : NULL;
+    if (!cur)
+        return NULL;
+    gsize len = strlen(cur);
+    gsize caret = browser->caret_byte > len ? len : browser->caret_byte;
+    gsize anchor = browser->sel_anchor_byte > len ? len
+                                                  : browser->sel_anchor_byte;
+    caret = browser_utf8_boundary(cur, caret);
+    anchor = browser_utf8_boundary(cur, anchor);
+    if (out_caret)
+        *out_caret = caret;
+    if (out_anchor)
+        *out_anchor = anchor;
+    return strdup(cur);
+}
+
+int
+ns_browser_set_focused_editable_selection(ns_browser *browser, size_t caret,
+                                          size_t anchor)
+{
+    if (!browser || !browser->js)
+        return 0;
+    const ns_node *f = ns_js_focused_node(browser->js);
+    const char *cur = f ? ns_node_editable_value(f) : NULL;
+    if (!cur)
+        return 0;
+    browser->caret_byte = browser_utf8_boundary(cur, (gsize)caret);
+    browser->sel_anchor_byte = browser_utf8_boundary(cur, (gsize)anchor);
+    browser->dirty = TRUE;
+    browser_relayout(browser);
+    browser->dirty = FALSE;
+    return 1;
+}
+
 char *
 ns_browser_title(ns_browser *browser)
 {
