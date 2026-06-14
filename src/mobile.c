@@ -27,6 +27,16 @@ host_eq(const char *host, const char *want)
 }
 
 static gboolean
+host_suffix(const char *host, const char *suffix)
+{
+    if (!host || !suffix) return FALSE;
+    gsize hlen = strlen(host);
+    gsize slen = strlen(suffix);
+    return hlen >= slen &&
+           g_ascii_strcasecmp(host + hlen - slen, suffix) == 0;
+}
+
+static gboolean
 facebook_host(const char *host)
 {
     return host_eq(host, "facebook.com")        ||
@@ -67,12 +77,22 @@ reddit_site_host(const char *host)
            host_eq(host, "old.reddit.com");
 }
 
+static gboolean
+wikipedia_site_host(const char *host)
+{
+    return host_eq(host, "wikipedia.org")        ||
+           host_eq(host, "www.wikipedia.org")    ||
+           host_eq(host, "m.wikipedia.org")      ||
+           host_suffix(host, ".wikipedia.org");
+}
+
 gboolean
 ns_mobile_force_host(const char *host)
 {
     return facebook_host(host)     ||
            youtube_site_host(host) ||
-           youtube_media_host(host);
+           youtube_media_host(host) ||
+           wikipedia_site_host(host);
 }
 
 static const char *
