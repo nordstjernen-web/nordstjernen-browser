@@ -2993,8 +2993,11 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
             px[2] = (guchar)(r * a * 255.0 + 0.5);
         }
     }
-    if (blur_radius > 0)
-        box_blur_argb(data, stride, w, h, (int)(blur_radius + 0.5));
+    if (blur_radius > 0) {
+        int r = (int)(blur_radius + 0.5);
+        if (r > 512) r = 512;
+        box_blur_argb(data, stride, w, h, r);
+    }
 }
 
 static gboolean

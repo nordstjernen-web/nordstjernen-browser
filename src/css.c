@@ -522,20 +522,22 @@ ns_css_value_dup(const ns_css_value *v)
 static void
 ns_css_value_free(ns_css_value *v)
 {
-    if (!v) return;
-    if (v->ref > 0) { v->ref--; return; }
-    if (v->kind == NS_CSS_V_KEYWORD) g_free(v->u.keyword);
-    else if (v->kind == NS_CSS_V_URL) g_free(v->u.url);
-    else if (v->kind == NS_CSS_V_AREAS) {
-        for (int i = 0; i < v->u.areas.n_rects; i++)
-            g_free(v->u.areas.rects[i].name);
+    while (v) {
+        if (v->ref > 0) { v->ref--; return; }
+        if (v->kind == NS_CSS_V_KEYWORD) g_free(v->u.keyword);
+        else if (v->kind == NS_CSS_V_URL) g_free(v->u.url);
+        else if (v->kind == NS_CSS_V_AREAS) {
+            for (int i = 0; i < v->u.areas.n_rects; i++)
+                g_free(v->u.areas.rects[i].name);
+        }
+        else if (v->kind == NS_CSS_V_ANIM) {
+            for (int i = 0; i < v->u.anim.n; i++)
+                g_free(v->u.anim.entries[i].name);
+        }
+        ns_css_value *next = v->next_layer;
+        g_free(v);
+        v = next;
     }
-    else if (v->kind == NS_CSS_V_ANIM) {
-        for (int i = 0; i < v->u.anim.n; i++)
-            g_free(v->u.anim.entries[i].name);
-    }
-    ns_css_value_free(v->next_layer);
-    g_free(v);
 }
 
 int
@@ -5728,9 +5730,10 @@ split_ws(const char *s, char *out[4])
 }
 
 static char *
-substitute_var_fallbacks(const char *vtext)
+substitute_var_fallbacks(const char *vtext, int depth)
 {
     if (!vtext) return NULL;
+    if (depth > 16) return g_strdup(vtext);
     GString *out = g_string_new(NULL);
     const char *p = vtext;
     const char *end = vtext + strlen(vtext);
@@ -5753,7 +5756,7 @@ substitute_var_fallbacks(const char *vtext)
                                            &comma_term);
         if (comma_term == ',') {
             char *nested = css_trim_dup_range(comma + 1, args_end);
-            char *sub = substitute_var_fallbacks(nested);
+            char *sub = substitute_var_fallbacks(nested, depth + 1);
             if (sub) g_string_append(out, sub);
             g_free(nested);
             g_free(sub);
@@ -6147,7 +6150,7 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
-        char *vtext = substitute_var_fallbacks(raw_vtext);
+        char *vtext = substitute_var_fallbacks(raw_vtext, 0);
         g_free(raw_vtext);
         gboolean important = FALSE;
         css_strip_important(vtext, &important);
@@ -8762,7 +8765,7 @@ ns_css_sizes_resolve(const char *sizes)
 #define NS_CSS_LAYER_NONE INT_MAX
 #define NS_CSS_MAX_AT_NESTING 32
 
-static gboolean supports_expr(const char **pp, const char *end);
+static gboolean supports_expr(const char **pp, const char *end, int depth);
 
 static gboolean
 supports_feature_matches(const char *src, gsize len)
@@ -8838,8 +8841,9 @@ match_kw(const char *p, const char *end, const char *kw)
 }
 
 static gboolean
-supports_term(const char **pp, const char *end)
+supports_term(const char **pp, const char *end, int depth)
 {
+    if (depth > NS_CSS_MAX_AT_NESTING) { *pp = end; return FALSE; }
     const char *p = *pp;
     p = css_skip_ws_comments(p, end);
     gboolean negate = FALSE;
@@ -8866,7 +8870,7 @@ supports_term(const char **pp, const char *end)
     gboolean is_nested = (p < end && *p == '(') || match_kw(p, end, "not");
     gboolean result;
     if (is_nested) {
-        result = supports_expr(&p, end);
+        result = supports_expr(&p, end, depth + 1);
         p = css_skip_ws_comments(p, end);
     } else {
         const char *fstart = p;
@@ -8883,22 +8887,22 @@ supports_term(const char **pp, const char *end)
 }
 
 static gboolean
-supports_expr(const char **pp, const char *end)
+supports_expr(const char **pp, const char *end, int depth)
 {
-    gboolean acc = supports_term(pp, end);
+    gboolean acc = supports_term(pp, end, depth);
     const char *p = *pp;
     while (1) {
         p = css_skip_ws_comments(p, end);
         if (match_kw(p, end, "and")) {
             p += 3;
             *pp = p;
-            gboolean rhs = supports_term(pp, end);
+            gboolean rhs = supports_term(pp, end, depth);
             p = *pp;
             acc = acc && rhs;
         } else if (match_kw(p, end, "or")) {
             p += 2;
             *pp = p;
-            gboolean rhs = supports_term(pp, end);
+            gboolean rhs = supports_term(pp, end, depth);
             p = *pp;
             acc = acc || rhs;
         } else {
@@ -8915,7 +8919,7 @@ supports_query_matches(const char *query)
     if (!query) return FALSE;
     const char *p = query;
     const char *end = query + strlen(query);
-    return supports_expr(&p, end);
+    return supports_expr(&p, end, 0);
 }
 
 /* Container query context: a stack of ancestor query containers, innermost
