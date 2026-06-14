@@ -25,6 +25,7 @@ typedef struct {
     int                  stride;
     int                  animating;
     int                  unchanged;
+    int                  render_rc;
     const unsigned char *pixels;
     char                *nav;
     char                *webgl;

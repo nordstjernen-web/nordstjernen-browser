@@ -32,6 +32,9 @@ typedef struct {
     ns_rproc_http *renderer;
     int            page_width;
     int            page_height;
+    int            render_count;
+    int            render_fail_count;
+    int            unchanged_count;
     char          *title;
     char          *url;
 } AndroidPage;
@@ -92,6 +95,7 @@ renderer_thread_main(void *data)
     close_pair(r->ctrl_r, r->ctrl_w);
     free(r->fb);
     free(r);
+    LOGI("renderer thread exited");
     return NULL;
 }
 
@@ -118,6 +122,7 @@ android_inproc_attach(int ctrl_r, int ctrl_w, unsigned char *fb,
         return -1;
     }
     pthread_detach(thread);
+    LOGI("renderer thread attached max=%dx%d", max_w, max_h);
     return 0;
 }
 
@@ -186,36 +191,44 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
                                                        jint settle_ms)
 {
     (void)clazz;
-    if (!g_engine_inited)
+    if (!g_engine_inited) {
+        LOGE("nativeOpen before nativeInit");
         return 0;
+    }
 
     char *u = jstr_dup(env, url);
     if (!u)
         return 0;
 
+    int vw = viewport_width > 0 ? viewport_width : 360;
+    int vh = viewport_height > 0 ? viewport_height : (vw * 3) / 4;
+    LOGI("nativeOpen start url=%s viewport=%dx%d settle=%d",
+         u, vw, vh, (int)settle_ms);
+
     ns_rproc_http *renderer =
         ns_rproc_http_spawn(NULL, NS_ANDROID_MAX_W, NS_ANDROID_MAX_H);
     if (!renderer) {
+        LOGE("nativeOpen renderer spawn failed url=%s", u);
         free(u);
         return 0;
     }
 
-    int vw = viewport_width > 0 ? viewport_width : 360;
-    int vh = viewport_height > 0 ? viewport_height : (vw * 3) / 4;
     ns_rproc_http_page opened;
-    if (ns_rproc_http_open(renderer, u, vw, vh, settle_ms, &opened) != 0 ||
-        !opened.ok) {
+    int open_rc = ns_rproc_http_open(renderer, u, vw, vh, settle_ms, &opened);
+    if (open_rc != 0 || !opened.ok) {
+        LOGE("nativeOpen failed rc=%d ok=%d url=%s page=%dx%d nav=%s",
+             open_rc, opened.ok, u, opened.page_width, opened.page_height,
+             opened.nav ? opened.nav : "");
         ns_rproc_http_page_clear(&opened);
         ns_rproc_http_close(renderer);
         free(u);
         return 0;
     }
-    free(u);
-
     AndroidPage *page = calloc(1, sizeof *page);
     if (!page) {
         ns_rproc_http_page_clear(&opened);
         ns_rproc_http_close(renderer);
+        free(u);
         return 0;
     }
     page->renderer = renderer;
@@ -225,7 +238,11 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
     page->url = opened.url;
     opened.title = NULL;
     opened.url = NULL;
+    LOGI("nativeOpen ok url=%s final=%s page=%dx%d title=%s",
+         u, page->url ? page->url : "", page->page_width, page->page_height,
+         page->title ? page->title : "");
     ns_rproc_http_page_clear(&opened);
+    free(u);
     return (jlong)(intptr_t)page;
 }
 
@@ -257,36 +274,74 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
 {
     (void)clazz;
     AndroidPage *page = page_from_handle(handle);
-    if (!page || !page->renderer || !bitmap)
+    if (!page || !page->renderer || !bitmap) {
+        LOGE("nativeRender invalid handle=%lld", (long long)handle);
         return JNI_FALSE;
+    }
 
     AndroidBitmapInfo info;
-    if (AndroidBitmap_getInfo(env, bitmap, &info) != ANDROID_BITMAP_RESULT_SUCCESS ||
+    memset(&info, 0, sizeof info);
+    int info_rc = AndroidBitmap_getInfo(env, bitmap, &info);
+    if (info_rc != ANDROID_BITMAP_RESULT_SUCCESS ||
         info.format != ANDROID_BITMAP_FORMAT_RGBA_8888) {
-        LOGE("nativeRender: bad bitmap format");
+        LOGE("nativeRender bad bitmap handle=%lld info_rc=%d format=%u size=%ux%u",
+             (long long)handle, info_rc, info.format, info.width,
+             info.height);
         return JNI_FALSE;
     }
 
     ns_rproc_http_frame frame;
-    if (ns_rproc_http_render(page->renderer, (int)info.width, (int)info.height,
-                             scroll_x, scroll_y, scale, &frame) != 0 ||
-        !frame.ok) {
+    int render_rc = ns_rproc_http_render(page->renderer, (int)info.width,
+                                         (int)info.height, scroll_x, scroll_y,
+                                         scale, &frame);
+    if (render_rc != 0 || !frame.ok) {
+        page->render_fail_count++;
+        LOGE("nativeRender failed rc=%d ok=%d failures=%d view=%ux%u scroll=%d,%d scale=%.3f",
+             render_rc, frame.ok, page->render_fail_count, info.width,
+             info.height, (int)scroll_x, (int)scroll_y, (double)scale);
         frame_clear(&frame);
         return JNI_FALSE;
     }
     if (frame.unchanged) {
+        page->unchanged_count++;
+        if (page->unchanged_count <= 4)
+            LOGI("nativeRender unchanged #%d rc=%d view=%ux%u scroll=%d,%d scale=%.3f",
+                 page->unchanged_count, frame.render_rc, info.width,
+                 info.height, (int)scroll_x, (int)scroll_y, (double)scale);
         frame_clear(&frame);
         return JNI_TRUE;
+    }
+    if (frame.render_rc != 0) {
+        page->render_fail_count++;
+        LOGE("nativeRender renderer rc=%d failures=%d frame=%dx%d view=%ux%u scroll=%d,%d scale=%.3f",
+             frame.render_rc, page->render_fail_count, frame.width,
+             frame.height, info.width, info.height, (int)scroll_x,
+             (int)scroll_y, (double)scale);
+    }
+    if (!frame.pixels) {
+        page->render_fail_count++;
+        LOGE("nativeRender missing pixels failures=%d frame=%dx%d stride=%d",
+             page->render_fail_count, frame.width, frame.height, frame.stride);
+        frame_clear(&frame);
+        return JNI_FALSE;
     }
 
     void *pixels = NULL;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
+        LOGE("nativeRender lockPixels failed view=%ux%u", info.width, info.height);
         frame_clear(&frame);
         return JNI_FALSE;
     }
 
     int rows = frame.height < (int)info.height ? frame.height : (int)info.height;
     int cols = frame.width < (int)info.width ? frame.width : (int)info.width;
+    for (uint32_t y = 0; y < info.height; y++) {
+        unsigned char *dst = (unsigned char *)pixels + (size_t)y * info.stride;
+        memset(dst, 0xff, (size_t)info.width * 4u);
+    }
+    uint32_t first_pixel = 0;
+    if (rows > 0 && cols > 0)
+        memcpy(&first_pixel, frame.pixels, sizeof first_pixel);
     for (int y = 0; y < rows; y++) {
         const unsigned char *src = frame.pixels + (size_t)y * frame.stride;
         unsigned char *dst = (unsigned char *)pixels + (size_t)y * info.stride;
@@ -299,6 +354,13 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
     }
 
     AndroidBitmap_unlockPixels(env, bitmap);
+    if (page->render_count < 6 || first_pixel == 0)
+        LOGI("nativeRender frame #%d rc=%d frame=%dx%d stride=%d view=%ux%u scroll=%d,%d scale=%.3f first=%08x anim=%d",
+             page->render_count + 1, frame.render_rc, frame.width,
+             frame.height, frame.stride, info.width, info.height,
+             (int)scroll_x, (int)scroll_y, (double)scale, first_pixel,
+             frame.animating);
+    page->render_count++;
     frame_clear(&frame);
     return JNI_TRUE;
 }
@@ -362,6 +424,9 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeClose(JNIEnv *env,
     if (!page)
         return;
     ns_rproc_http_close(page->renderer);
+    LOGI("nativeClose page renders=%d unchanged=%d failures=%d url=%s",
+         page->render_count, page->unchanged_count, page->render_fail_count,
+         page->url ? page->url : "");
     free(page->title);
     free(page->url);
     free(page);

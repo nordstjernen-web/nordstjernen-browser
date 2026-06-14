@@ -9,6 +9,8 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -29,6 +31,10 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val TAG = "nordstjernen"
+    }
 
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val loadGen = AtomicInteger(0)
@@ -159,17 +165,23 @@ class MainActivity : AppCompatActivity() {
         val heightPx = if (pageView.height > 0) pageView.height else resources.displayMetrics.heightPixels
         val viewportCss = Math.max(320, (widthPx / density).toInt())
         val viewportCssHeight = Math.max(240, (heightPx / density).toInt())
+        val started = SystemClock.uptimeMillis()
+        Log.i(TAG, "load start url=$url viewport=${viewportCss}x$viewportCssHeight view=${widthPx}x$heightPx density=$density gen=$gen")
         ioExecutor.execute {
             val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, 600)
             val size = if (handle != 0L) NativeBrowser.nativePageSize(handle) else null
             val title = if (handle != 0L) NativeBrowser.nativeTitle(handle) else null
+            val elapsed = SystemClock.uptimeMillis() - started
+            Log.i(TAG, "load nativeOpen url=$url handle=$handle size=${size?.getOrNull(0)}x${size?.getOrNull(1)} title=${title ?: ""} elapsed=${elapsed}ms")
             runOnUiThread {
                 if (gen != loadGen.get()) {
+                    Log.i(TAG, "load stale url=$url gen=$gen current=${loadGen.get()}")
                     if (handle != 0L) NativeBrowser.nativeClose(handle)
                     return@runOnUiThread
                 }
                 progress.visibility = View.GONE
                 if (handle == 0L || size == null) {
+                    Log.e(TAG, "load failed url=$url handle=$handle")
                     if (handle != 0L) NativeBrowser.nativeClose(handle)
                     Toast.makeText(this, getString(R.string.load_failed, url), Toast.LENGTH_SHORT).show()
                     return@runOnUiThread
