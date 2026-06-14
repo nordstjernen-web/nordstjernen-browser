@@ -2037,6 +2037,7 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
     gunichar uc = gdk_keyval_to_unicode(keyval);
     if (uc && uc != ' ' && !g_unichar_iscntrl(uc) &&
         !(state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_META_MASK))) {
+        start_key(v, 0, keyval, state);
         start_key(v, 3, keyval, state);
         return FALSE;
     }

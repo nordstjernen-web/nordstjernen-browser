@@ -407,6 +407,14 @@ public final class Browser {
     private void onCanvasKeyPressed(java.awt.event.KeyEvent e) {
         String name = jsKeyName(e.getKeyCode());
         if (name == null) {
+            String pk = printableKey(e);
+            if (pk != null) {
+                final String fpk = pk;
+                final String fcode = printableCode(e);
+                final int fkc = e.getKeyCode();
+                final int fmods = swingMods(e);
+                io.submit(() -> engine.key(0, fpk, fcode, fkc, fmods));
+            }
             return;
         }
         e.consume();
@@ -467,6 +475,33 @@ public final class Browser {
             case java.awt.event.KeyEvent.VK_PAGE_DOWN:  return "PageDown";
             default: return null;
         }
+    }
+
+    private static String printableKey(java.awt.event.KeyEvent e) {
+        int vk = e.getKeyCode();
+        if (vk >= java.awt.event.KeyEvent.VK_A && vk <= java.awt.event.KeyEvent.VK_Z) {
+            char c = (char) ('a' + (vk - java.awt.event.KeyEvent.VK_A));
+            return e.isShiftDown() ? String.valueOf(Character.toUpperCase(c)) : String.valueOf(c);
+        }
+        if (vk >= java.awt.event.KeyEvent.VK_0 && vk <= java.awt.event.KeyEvent.VK_9) {
+            return String.valueOf((char) ('0' + (vk - java.awt.event.KeyEvent.VK_0)));
+        }
+        char ch = e.getKeyChar();
+        if (ch != java.awt.event.KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(ch)) {
+            return String.valueOf(ch);
+        }
+        return null;
+    }
+
+    private static String printableCode(java.awt.event.KeyEvent e) {
+        int vk = e.getKeyCode();
+        if (vk >= java.awt.event.KeyEvent.VK_A && vk <= java.awt.event.KeyEvent.VK_Z) {
+            return "Key" + (char) ('A' + (vk - java.awt.event.KeyEvent.VK_A));
+        }
+        if (vk >= java.awt.event.KeyEvent.VK_0 && vk <= java.awt.event.KeyEvent.VK_9) {
+            return "Digit" + (char) ('0' + (vk - java.awt.event.KeyEvent.VK_0));
+        }
+        return "";
     }
 
     private static int jsKeycode(String name) {
