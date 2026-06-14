@@ -72,7 +72,7 @@ gradle wrapper          # once, to generate ./gradlew (or use a system gradle)
 ```
 
 Requires JDK 17, the Android SDK (compileSdk 36), and CMake 3.22+ from the SDK.
-`minSdk` is 26, `targetSdk` 36. Native code is built 16 KB page-size aligned
+`minSdk` is 35, `targetSdk` 36. Native code is built 16 KB page-size aligned
 (Play requirement): the JNI bridge via `ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES`,
 the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
 
