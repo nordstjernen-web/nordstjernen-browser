@@ -583,6 +583,13 @@ is_inline_level_replaced(const ns_node *n, GHashTable *styles)
     return TRUE;
 }
 
+static gboolean
+node_has_media_metadata(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT &&
+           ns_element_get_attr(n, NS_MEDIA_SRC_ATTR) != NULL;
+}
+
 #define NS_LAYOUT_MAX_DEPTH 512
 #define NS_TABLE_MAX_COLS 4096
 
@@ -599,7 +606,8 @@ contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         if (tag_is_non_rendering(c->name)) continue;
         if (node_has_hidden_utility(c)) continue;
-        if ((is_replaced_block_tag(c->name) &&
+        if (node_has_media_metadata(c) ||
+            (is_replaced_block_tag(c->name) &&
              !is_inline_level_replaced(c, styles)) ||
             strcmp(c->name, "iframe") == 0)
             return TRUE;
@@ -645,6 +653,7 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (n->kind != NS_NODE_ELEMENT) return FALSE;
     if (node_has_hidden_utility(n)) return FALSE;
     if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
+    if (node_has_media_metadata(n)) return FALSE;
     if (is_replaced_block_tag(n->name)) {
         if (strcmp(n->name, "table") == 0) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);
@@ -3700,7 +3709,13 @@ build_image_box(const ns_node *n)
 static const char *
 first_media_source_url(const ns_node *n)
 {
-    const char *src = ns_element_get_attr(n, "src");
+    const char *src = ns_element_get_attr(n, NS_MEDIA_SRC_ATTR);
+    if (src && *src) return src;
+    src = ns_element_get_attr(n, "src");
+    if (src && *src) return src;
+    src = ns_element_get_attr(n, "data-mp4");
+    if (src && *src) return src;
+    src = ns_element_get_attr(n, "data-webm");
     if (src && *src) return src;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
@@ -3737,11 +3752,19 @@ build_video_box(const ns_node *n)
     ns_box_media *m = ns_box_media_ensure(box);
     if (src) m->video_src = g_strdup(src);
     const char *poster = ns_element_get_attr(n, "poster");
+    const char *data_poster = ns_element_get_attr(n, "data-poster");
+    const char *fallback_poster = ns_element_get_attr(n, NS_MEDIA_POSTER_ATTR);
+    if ((!poster || !*poster || g_str_has_prefix(poster, "data:image/")) &&
+        data_poster && *data_poster)
+        poster = data_poster;
+    if ((!poster || !*poster) && fallback_poster && *fallback_poster)
+        poster = fallback_poster;
     if (poster && *poster) m->video_poster = g_strdup(poster);
     const char *ws = ns_element_get_attr(n, "width");
     const char *hs = ns_element_get_attr(n, "height");
-    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : 320;
-    box->content_height = hs ? g_ascii_strtod(hs, NULL) : 180;
+    gboolean metadata = node_has_media_metadata(n);
+    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : (metadata ? 640 : 320);
+    box->content_height = hs ? g_ascii_strtod(hs, NULL) : (metadata ? 360 : 180);
     const char *audio = ns_element_get_attr(n, "data-audio-src");
     if (audio && *audio) m->video_audio_src = g_strdup(audio);
     return box;
@@ -3940,6 +3963,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
             }
             if (style_is_block(cs) ||
                 contains_block_media(c, styles) ||
+                node_has_media_metadata(c) ||
                 (c->name && (strcmp(c->name, "img") == 0 ||
                              strcmp(c->name, "picture") == 0 ||
                              strcmp(c->name, "svg") == 0 ||
@@ -4204,6 +4228,15 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return vb;
     }
 
+    if (node_has_media_metadata(n)) {
+        ns_box *vb = build_video_box(n);
+        if (vb) {
+            vb->style = s;
+            collect_box_bg_image(vb, s);
+        }
+        return vb;
+    }
+
     if (is_table_box(n, styles))
         return build_table(n, styles);
 
@@ -4314,6 +4347,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             }
             if (style_is_block(cs) ||
                 contains_block_media(c, styles) ||
+                node_has_media_metadata(c) ||
                 (c->name && (strcmp(c->name, "img") == 0 ||
                              strcmp(c->name, "picture") == 0 ||
                              strcmp(c->name, "svg") == 0 ||
@@ -5812,6 +5846,8 @@ layout_image(ns_box *box, double parent_content_width)
         box->media->size_independent_of_image =
             (w >= 0 && h >= 0) || declared_size || placeholder_size;
 
+    gboolean metadata_video =
+        box->kind == NS_BOX_VIDEO && node_has_media_metadata(box->dom);
     if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
     if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
@@ -5823,6 +5859,10 @@ layout_image(ns_box *box, double parent_content_width)
     } else if (h < 0) {
         h = (nat_w > 0 && nat_h > 0) ? w * (nat_h / nat_w) : w;
     }
+    if (metadata_video && h <= 0 && w > 0 && nat_w > 0 && nat_h > 0)
+        h = w * (nat_h / nat_w);
+    if (metadata_video && w <= 0 && h > 0 && nat_w > 0 && nat_h > 0)
+        w = h * (nat_w / nat_h);
 
     double max_w = length_resolve(mxw, parent_content_width, -1);
     double max_h = resolve_used_height(box, mxh, parent_content_width, -1);
