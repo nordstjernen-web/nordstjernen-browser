@@ -96,6 +96,17 @@ static QString eventKey(const QKeyEvent *event) {
     }
 }
 
+// A key that produces text and so should also fire a JS keypress (mirroring the
+// GTK shell). Space is excluded: like GTK it is handled as a scroll key.
+static bool isPrintableKeyEvent(const QKeyEvent *event) {
+    if (event->modifiers() &
+        (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+        return false;
+    const QString text = event->text();
+    return !text.isEmpty() && text.at(0).unicode() >= 0x20 &&
+           text.at(0).unicode() != 0x7f && text.at(0) != QLatin1Char(' ');
+}
+
 static QString eventCode(const QKeyEvent *event) {
     const int key = event->key();
     if (key >= Qt::Key_A && key <= Qt::Key_Z)
@@ -358,13 +369,19 @@ public:
     }
 
     QString key(int kind, const QString &key, const QString &code,
-                int keycode, int mods) {
+                int keycode, int mods, int *outPrevented = nullptr) {
+        if (outPrevented)
+            *outPrevented = 0;
         if (!m_proc || !m_opened)
             return QString();
         QByteArray keyBytes = key.toUtf8();
         QByteArray codeBytes = code.toUtf8();
-        char *href = ns_rproc_http_key(m_proc, kind, keyBytes.constData(),
-                                  codeBytes.constData(), keycode, mods);
+        int prevented = 0;
+        char *href = ns_rproc_http_key_full(m_proc, kind, keyBytes.constData(),
+                                  codeBytes.constData(), keycode, mods,
+                                  &prevented);
+        if (outPrevented)
+            *outPrevented = prevented;
         if (!href)
             return QString();
         QString result = QString::fromUtf8(href);
@@ -699,6 +716,7 @@ void ProcView::doLoad(const QString &url, bool record) {
             emit self->urlChanged(self->m_currentUrl);
             emit self->titleChanged(result.title);
             self->setLoading(false);
+            self->viewport()->setCursor(Qt::ArrowCursor);
 
             self->horizontalScrollBar()->setValue(0);
             self->verticalScrollBar()->setValue(0);
@@ -1171,7 +1189,8 @@ void ProcView::startViewport(int width, int height) {
     }, Qt::QueuedConnection);
 }
 
-void ProcView::sendKey(int kind, QKeyEvent *event) {
+void ProcView::sendKey(int kind, QKeyEvent *event, bool fallbackScroll,
+                       int targetX, int targetY) {
     if (!m_opened || !m_worker)
         return;
     const QString key = eventKey(event);
@@ -1182,17 +1201,28 @@ void ProcView::sendKey(int kind, QKeyEvent *event) {
     QPointer<ProcView> self(this);
     ProcWorker *worker = m_worker;
     QMetaObject::invokeMethod(worker, [worker, self, seq, kind, key, code,
-                                       keycode, mods]() {
-        QString href = worker->key(kind, key, code, keycode, mods);
+                                       keycode, mods, fallbackScroll, targetX,
+                                       targetY]() {
+        int prevented = 0;
+        QString href = worker->key(kind, key, code, keycode, mods, &prevented);
         if (!self)
             return;
-        QMetaObject::invokeMethod(self.data(), [self, seq, kind, href]() {
+        QMetaObject::invokeMethod(self.data(), [self, seq, kind, href, prevented,
+                                                fallbackScroll, targetX,
+                                                targetY]() {
             if (!self || (kind == 0 && seq != self->m_keySeq))
                 return;
             if (kind == 0 && !href.isEmpty()) {
                 emit self->statusMessage(href);
                 self->load(href);
             } else if (kind == 0) {
+                // Apply the shell's default scroll only if the page (a focused
+                // editable or a JS handler calling preventDefault) didn't claim
+                // the key — mirroring the GTK shell's fallback-scroll logic.
+                if (fallbackScroll && !prevented) {
+                    self->horizontalScrollBar()->setValue(targetX);
+                    self->verticalScrollBar()->setValue(targetY);
+                }
                 self->requestRender();
             }
         }, Qt::QueuedConnection);
@@ -1413,45 +1443,62 @@ void ProcView::keyPressEvent(QKeyEvent *event) {
         event->accept();
         return;
     }
-    sendKey(0, event);
+
+    // Scroll keys are the shell's default action: send the keydown and let the
+    // renderer report whether the page consumed it, applying the scroll target
+    // only when it did not (see sendKey). This keeps arrow/space/page keys
+    // working inside focused inputs and on pages that call preventDefault.
+    int targetX = h->value();
+    int targetY = v->value();
+    bool scrollKey = true;
     switch (event->key()) {
     case Qt::Key_Down:
-        v->setValue(v->value() + v->singleStep());
+        targetY = v->value() + v->singleStep();
         break;
     case Qt::Key_Up:
-        v->setValue(v->value() - v->singleStep());
+        targetY = v->value() - v->singleStep();
         break;
     case Qt::Key_Right:
-        h->setValue(h->value() + h->singleStep());
+        targetX = h->value() + h->singleStep();
         break;
     case Qt::Key_Left:
-        h->setValue(h->value() - h->singleStep());
+        targetX = h->value() - h->singleStep();
         break;
     case Qt::Key_PageDown:
-        v->setValue(v->value() + v->pageStep());
+        targetY = v->value() + v->pageStep();
         break;
     case Qt::Key_PageUp:
-        v->setValue(v->value() - v->pageStep());
+        targetY = v->value() - v->pageStep();
         break;
     case Qt::Key_Space:
-        v->setValue(v->value() + (event->modifiers() & Qt::ShiftModifier
-                                      ? -v->pageStep()
-                                      : v->pageStep()));
+        targetY = v->value() + (event->modifiers() & Qt::ShiftModifier
+                                    ? -v->pageStep()
+                                    : v->pageStep());
         break;
     case Qt::Key_Home:
-        v->setValue(0);
+        targetY = 0;
         break;
     case Qt::Key_End:
-        v->setValue(v->maximum());
-        break;
-    case Qt::Key_Tab:
-    case Qt::Key_Backtab:
+        targetY = v->maximum();
         break;
     default:
-        QAbstractScrollArea::keyPressEvent(event);
+        scrollKey = false;
+        break;
+    }
+    if (scrollKey) {
+        sendKey(0, event, true, targetX, targetY);
+        event->accept();
         return;
     }
-    event->accept();
+
+    sendKey(0, event);
+    if (isPrintableKeyEvent(event))
+        sendKey(3, event);
+    if (event->key() == Qt::Key_Tab || event->key() == Qt::Key_Backtab) {
+        event->accept();
+        return;
+    }
+    QAbstractScrollArea::keyPressEvent(event);
 }
 
 void ProcView::keyReleaseEvent(QKeyEvent *event) {

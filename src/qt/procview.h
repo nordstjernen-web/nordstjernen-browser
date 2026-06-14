@@ -95,7 +95,8 @@ private:
     void startSelect(int kind, int x, int y);
     void copySelection();
     void selectAll();
-    void sendKey(int kind, QKeyEvent *event);
+    void sendKey(int kind, QKeyEvent *event, bool fallbackScroll = false,
+                 int targetX = 0, int targetY = 0);
     void sendKeyText(const QString &text);
     void updateScrollRanges();
     void setZoom(double zoom);
