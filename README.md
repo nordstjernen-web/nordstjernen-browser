@@ -100,7 +100,7 @@ latest build — bleeding edge, expect rough edges.
 | Linux (portable GTK+) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
 | Linux (portable, Qt) | [`nordstjernen-linux-qt-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip) |
 | Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
-| Java API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
+| Java browser + API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) (runnable fat jar: `java -jar`) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
 | Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |
 
 [Checksums](https://www.nordstjernen.org/nightly/SHA256SUMS) ·
@@ -121,7 +121,10 @@ extracted text — through a thin JNI bridge over the C embedding API
 renderer's HTTP/JSON protocol instead, so an engine crash can't take down
 the JVM. On top of that sits `org.nordstjernen.app.Browser`, a standalone
 **Swing browser app** with GTK-shell-style chrome (back / forward / reload /
-home / URL bar). See [`java/README.md`](java/README.md).
+home / URL bar, a scrollbar, and keyboard shortcuts). The nightly ships a
+single runnable fat jar — `java -jar nordstjernen-java.jar <url>` launches the
+browser, and the same jar is the embedding library. See
+[`java/README.md`](java/README.md).
 
 ## Build
 

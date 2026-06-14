@@ -257,7 +257,7 @@ gha_run() {
 }
 
 stage_java() {
-    log "Stage: Java API (jar + sources + javadoc)"
+    log "Stage: Java (runnable fat jar + sources + javadoc)"
     local key="java"
     local jhome="${JAVA_HOME:-}"
     if [ -z "$jhome" ] && command -v javac >/dev/null 2>&1; then
@@ -317,18 +317,21 @@ stage_java() {
     fi
     log "Java: javac"
     if ! "$jhome/bin/javac" -d "$work/classes" \
-            "$ROOT"/java/src/main/java/org/nordstjernen/*.java >> "$blog" 2>&1; then
+            $(find "$ROOT/java/src/main/java" -name '*.java') >> "$blog" 2>&1; then
         dump_tail "$blog"
         fail "$key" "javac failed — see $blog"
         return
     fi
 
     cp -r "$work/classes/." "$work/stage/"
-    printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\n' \
+    if [ -d "$ROOT/java/src/main/resources/org" ]; then
+        cp -r "$ROOT/java/src/main/resources/org" "$work/stage/"
+    fi
+    printf 'Automatic-Module-Name: org.nordstjernen\nEnable-Native-Access: ALL-UNNAMED\nMain-Class: org.nordstjernen.app.Browser\n' \
         > "$work/mf.txt"
 
     local base="nordstjernen-java-${NVERSION}"
-    log "Java: jar"
+    log "Java: fat jar (library API + browser app + icons + native libs)"
     if ! "$jhome/bin/jar" --create --file "$dst/${base}.jar" \
              --manifest "$work/mf.txt" -C "$work/stage" . >> "$blog" 2>&1 \
        || ! "$jhome/bin/jar" --create --file "$dst/${base}-sources.jar" \

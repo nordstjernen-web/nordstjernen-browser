@@ -30,6 +30,9 @@ tasks.named('jar') {
             // Grant native access so the JNI load doesn't warn on JDK 24+
             // (and stays usable when that restriction is enforced).
             'Enable-Native-Access': 'ALL-UNNAMED',
+            // Make the jar runnable as the browser (java -jar …), matching
+            // the nightly fat jar.
+            'Main-Class': 'org.nordstjernen.app.Browser',
         )
     }
 }

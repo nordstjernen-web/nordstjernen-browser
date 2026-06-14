@@ -1,14 +1,55 @@
 # Nordstjernen for Java
 
-A Java library that embeds the Nordstjernen browser engine through its C
-embedding API (`src/libnordstjernen.h`) via a thin JNI bridge. Fetch, parse,
-lay out, script and render web pages from the JVM — to raw RGBA, a
-`BufferedImage`, a PNG/PDF file, or extracted text — plus the page title and
-final URL, all links, and pixel link hit-testing.
+**A web browser for the JVM** — and the library it is built on. `org.nordstjernen.app.Browser`
+is a standalone, pure-Java desktop browser (Swing chrome over the Nordstjernen
+rendering engine); the same jar doubles as an embedding library for fetching,
+laying out, scripting and rendering web pages from your own Java code.
 
 **Requires JDK 21.**
 
-## Use
+## Run the browser
+
+The Java browser is a Swing application with GTK-shell-style chrome — back,
+forward, reload, home, a URL bar and a status bar. It drives a separate
+`nordstjernen-renderer` process (no native engine is loaded into the JVM), so
+an engine crash can never take down the JVM.
+
+```sh
+# Nightly fat jar — library + browser app + icons + native libs in one file:
+java -jar nordstjernen-java.jar https://example.com
+
+# From source:
+./gradlew run --args="https://example.com"
+# or, after `installDist`: build/install/nordstjernen/bin/nordstjernen
+```
+
+Point it at the renderer binary with the `nordstjernen.renderer` system
+property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
+probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
+
+### Keyboard & mouse
+
+| Action | Keys |
+| --- | --- |
+| Back / Forward | `Alt+Left` / `Alt+Right`, or the mouse back/forward buttons |
+| Reload | `Ctrl+R` or `F5` |
+| Home | `Alt+Home` |
+| Focus the URL bar | `Ctrl+L` or `Alt+D` |
+| Close the window | `Ctrl+W` or `Ctrl+Q` |
+| Scroll a line | `↑` / `↓`, mouse wheel, or the scrollbar |
+| Scroll a page | `PageUp` / `PageDown` / `Space` |
+| Top / bottom | `Home` / `End` |
+
+(Scroll keys act on the page once it has focus — click the page, or press
+`Esc` to move focus off the URL bar.)
+
+## Use as a library
+
+The same jar is an embedding API. The in-process path loads the engine through
+its C embedding API (`src/libnordstjernen.h`) via a thin JNI bridge — fetch,
+parse, lay out, script and render web pages from the JVM to raw RGBA, a
+`BufferedImage`, a PNG/PDF file, or extracted text, plus the page title and
+final URL, all links, and pixel link hit-testing.
 
 ```java
 import org.nordstjernen.Nordstjernen;
@@ -58,14 +99,14 @@ one thread and treat `Page` as non-thread-safe. `Page` holds native memory —
 always `close()` it (it is `AutoCloseable`). `Nordstjernen.shutdown()` releases
 process-wide engine state.
 
-## Renderer-process client (no JNI)
+### Renderer-process client (no JNI)
 
 `RemotePage` is an alternative that does **not** load the native engine into
-the JVM. Like the GTK and Qt shells, it spawns a separate
-`nordstjernen-renderer` process (in its `stdio` mode) and drives it over the
-renderer's HTTP/JSON protocol — so an engine crash can't take down the JVM, and
-no `libnordstjernen` needs to be on the Java library path. This is also the
-client the Android shell reuses.
+the JVM. Like the GTK and Qt shells — and the browser app above — it spawns a
+separate `nordstjernen-renderer` process (in its `stdio` mode) and drives it
+over the renderer's HTTP/JSON protocol, so an engine crash can't take down the
+JVM and no `libnordstjernen` needs to be on the Java library path. This is also
+the client the Android shell reuses.
 
 ```java
 import org.nordstjernen.RemotePage;
@@ -81,28 +122,22 @@ try (RemotePage page = RemotePage.open("https://example.com", 1000, 700, 800)) {
 }
 ```
 
-Point it at the renderer binary with the `nordstjernen.renderer` system
-property or the `NORDSTJERNEN_RENDERER` environment variable; otherwise it
-probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
+`RemoteBrowser` is the persistent counterpart for interactive shells (the one
+the browser app uses): one long-lived renderer per window, with `navigate`,
+`render`, `setViewport`, `linkAt`, and `press`/`release`.
 
-`RemoteBrowser` is the persistent counterpart for interactive shells: one
-long-lived renderer per window, with `navigate`, `render`, `setViewport`,
-`linkAt`, and `press`/`release` — the model the GTK and Qt shells use.
+## Download
 
-## Browser app
-
-`org.nordstjernen.app.Browser` is a standalone Swing browser with a
-GTK-shell-style chrome (back / forward / reload / home / URL bar / status bar,
-using the same toolbar icons) that drives a renderer process via
-`RemoteBrowser` — no native engine in the JVM.
-
-```sh
-./gradlew run --args="https://example.com"
-# or, after `installDist`: build/install/nordstjernen/bin/nordstjernen
-```
-
-Set `NORDSTJERNEN_RENDERER` (or `-Dnordstjernen.renderer=…`) to the renderer
-binary.
+Nightly builds publish a single runnable **fat jar** —
+[`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar)
+— bundling the library API, the browser app, its icons, and the JNI native
+libraries, alongside
+[sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar),
+[javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar)
+and [API docs](https://www.nordstjernen.org/nightly/java/apidocs/). Run it with
+`java -jar nordstjernen-java.jar <url>` (see the renderer note under
+[Run the browser](#run-the-browser) about pointing it at a
+`nordstjernen-renderer` binary).
 
 ## Build
 
@@ -118,6 +153,12 @@ cd java && gradle build      # -> build/libs/nordstjernen-java-<version>.jar
 `libnordstjernenjni` (the JNI bridge, linked with `RPATH=$ORIGIN` so it finds
 the engine beside it), staging both into `src/main/resources/native/`. The
 Gradle jar bundles them; `NativeLoader` extracts and loads them at runtime.
+
+The nightly **fat jar** (`scripts/nightly.sh`, `stage_java`) goes one step
+further: it compiles every source under `src/main/java` (library **and** the
+`org.nordstjernen.app` browser), folds in the toolbar icons and the staged
+native libs, and writes a `Main-Class` manifest — so the one jar is both the
+embedding library and the `java -jar`-launchable browser.
 
 ### Native library resolution
 
