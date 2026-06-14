@@ -63,8 +63,11 @@ public final class Browser {
     private int historyIndex = -1;
     private final String homeUrl;
 
+    private static final int MAX_JS_REDIRECTS = 10;
+
     private int scrollY = 0;
     private boolean loading = false;
+    private int jsRedirects = 0;
     private boolean syncingScrollbar = false;
     private javax.swing.Timer refreshTimer;
     private boolean renderBusy = false;
@@ -133,6 +136,7 @@ public final class Browser {
         });
 
         canvas.setFocusable(true);
+        canvas.setFocusTraversalKeysEnabled(false);
         canvas.addMouseWheelListener(e ->
             setScrollY(scrollY + e.getWheelRotation() * LINE_SCROLL));
         canvas.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -146,6 +150,11 @@ public final class Browser {
                     onCanvasClick(e.getX(), e.getY());
                 }
             }
+        });
+        canvas.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override public void keyPressed(java.awt.event.KeyEvent e) { onCanvasKeyPressed(e); }
+            @Override public void keyReleased(java.awt.event.KeyEvent e) { onCanvasKeyReleased(e); }
+            @Override public void keyTyped(java.awt.event.KeyEvent e) { onCanvasKeyTyped(e); }
         });
         frame.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override public void componentResized(java.awt.event.ComponentEvent e) {
@@ -180,27 +189,12 @@ public final class Browser {
         bindWindow(root, "alt D", "focusUrl2", this::focusAddress);
         bindWindow(root, "control W", "close", () -> frame.dispose());
         bindWindow(root, "control Q", "quit", () -> frame.dispose());
-        bindWindow(root, "ESCAPE", "blur", () -> canvas.requestFocusInWindow());
-
-        bindCanvas("DOWN", "lineDown", () -> scrollBy(LINE_SCROLL));
-        bindCanvas("UP", "lineUp", () -> scrollBy(-LINE_SCROLL));
-        bindCanvas("PAGE_DOWN", "pageDown", () -> scrollBy(pageStep()));
-        bindCanvas("SPACE", "pageDown2", () -> scrollBy(pageStep()));
-        bindCanvas("PAGE_UP", "pageUp", () -> scrollBy(-pageStep()));
-        bindCanvas("HOME", "top", () -> setScrollY(0));
-        bindCanvas("END", "bottom", () -> setScrollY(Integer.MAX_VALUE));
     }
 
     private void bindWindow(JComponent c, String ks, String name, Runnable action) {
         c.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
             .put(KeyStroke.getKeyStroke(ks), name);
         c.getActionMap().put(name, asAction(action));
-    }
-
-    private void bindCanvas(String ks, String name, Runnable action) {
-        canvas.getInputMap(JComponent.WHEN_FOCUSED)
-            .put(KeyStroke.getKeyStroke(ks), name);
-        canvas.getActionMap().put(name, asAction(action));
     }
 
     private static AbstractAction asAction(Runnable action) {
@@ -222,10 +216,6 @@ public final class Browser {
 
     private int pageStep() {
         return Math.max(LINE_SCROLL, canvas.getHeight() - LINE_SCROLL);
-    }
-
-    private void scrollBy(int delta) {
-        setScrollY(scrollY + delta);
     }
 
     private int maxScroll() {
@@ -268,8 +258,15 @@ public final class Browser {
     }
 
     private void navigate(String url, boolean record) {
+        navigate(url, record, false);
+    }
+
+    private void navigate(String url, boolean record, boolean isRedirect) {
         if (url == null || url.isEmpty() || loading) {
             return;
+        }
+        if (!isRedirect) {
+            jsRedirects = 0;
         }
         loading = true;
         canvas.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
@@ -280,6 +277,7 @@ public final class Browser {
             boolean ok = engine.navigate(url, vw, vh, SETTLE_MS);
             String finalUrl = ok ? engine.url() : url;
             String title = ok ? engine.title() : "";
+            String redirect = ok ? engine.pendingNav() : null;
             scrollY = 0;
             SwingUtilities.invokeLater(() -> {
                 loading = false;
@@ -294,6 +292,8 @@ public final class Browser {
                     }
                     history.add(finalUrl);
                     historyIndex = history.size() - 1;
+                } else if (isRedirect && historyIndex >= 0) {
+                    history.set(historyIndex, finalUrl);
                 }
                 address.setText(finalUrl);
                 frame.setTitle((title.isEmpty() ? "Untitled" : title)
@@ -303,6 +303,10 @@ public final class Browser {
                 setStatus(title);
                 canvas.requestFocusInWindow();
                 scheduleRefresh();
+                if (redirect != null && jsRedirects < MAX_JS_REDIRECTS) {
+                    jsRedirects++;
+                    navigate(redirect, false, true);
+                }
             });
         });
     }
@@ -361,14 +365,127 @@ public final class Browser {
     }
 
     private void onCanvasClick(int cx, int cy) {
-        int docX = cx;
-        int docY = scrollY + cy;
+        final int docX = cx;
+        final int docY = scrollY + cy;
         io.submit(() -> {
-            String href = engine.linkAt(docX, docY);
-            if (href != null && !href.isEmpty()) {
-                SwingUtilities.invokeLater(() -> navigate(href, true));
-            }
+            String pressed = engine.press(docX, docY, 0);
+            String released = engine.release();
+            String nav = pressed != null ? pressed : released;
+            SwingUtilities.invokeLater(() -> {
+                if (nav != null) {
+                    navigate(nav, true);
+                } else {
+                    scheduleRefresh();
+                }
+            });
         });
+    }
+
+    private void onCanvasKeyTyped(java.awt.event.KeyEvent e) {
+        char c = e.getKeyChar();
+        if (c == java.awt.event.KeyEvent.CHAR_UNDEFINED || Character.isISOControl(c)) {
+            return;
+        }
+        if (e.isControlDown() || e.isAltDown() || e.isMetaDown()) {
+            return;
+        }
+        final String s = String.valueOf(c);
+        final int mods = e.isShiftDown() ? 1 : 0;
+        io.submit(() -> {
+            engine.key(3, s, "", 0, mods);
+            RemoteBrowser.Key res = engine.key(2, s, "", 0, 0);
+            SwingUtilities.invokeLater(() -> {
+                if (res.nav != null) {
+                    navigate(res.nav, true);
+                } else {
+                    scheduleRefresh();
+                }
+            });
+        });
+    }
+
+    private void onCanvasKeyPressed(java.awt.event.KeyEvent e) {
+        String name = jsKeyName(e.getKeyCode());
+        if (name == null) {
+            return;
+        }
+        e.consume();
+        final String fname = name;
+        final int fcode = jsKeycode(name);
+        final int fmods = swingMods(e);
+        io.submit(() -> {
+            RemoteBrowser.Key res = engine.key(0, fname, fname, fcode, fmods);
+            SwingUtilities.invokeLater(() -> {
+                if (res.nav != null) {
+                    navigate(res.nav, true);
+                    return;
+                }
+                if (!res.prevented) {
+                    switch (fname) {
+                        case "ArrowDown": setScrollY(scrollY + LINE_SCROLL); return;
+                        case "ArrowUp":   setScrollY(scrollY - LINE_SCROLL); return;
+                        case "PageDown":  setScrollY(scrollY + pageStep()); return;
+                        case "PageUp":    setScrollY(scrollY - pageStep()); return;
+                        default: break;
+                    }
+                }
+                scheduleRefresh();
+            });
+        });
+    }
+
+    private void onCanvasKeyReleased(java.awt.event.KeyEvent e) {
+        String name = jsKeyName(e.getKeyCode());
+        if (name == null) {
+            return;
+        }
+        final String fname = name;
+        final int fcode = jsKeycode(name);
+        final int fmods = swingMods(e);
+        io.submit(() -> engine.key(1, fname, fname, fcode, fmods));
+    }
+
+    private static int swingMods(java.awt.event.KeyEvent e) {
+        return (e.isShiftDown() ? 1 : 0) | (e.isControlDown() ? 2 : 0)
+             | (e.isAltDown() ? 4 : 0) | (e.isMetaDown() ? 8 : 0);
+    }
+
+    private static String jsKeyName(int vk) {
+        switch (vk) {
+            case java.awt.event.KeyEvent.VK_BACK_SPACE: return "Backspace";
+            case java.awt.event.KeyEvent.VK_DELETE:     return "Delete";
+            case java.awt.event.KeyEvent.VK_ENTER:      return "Enter";
+            case java.awt.event.KeyEvent.VK_TAB:        return "Tab";
+            case java.awt.event.KeyEvent.VK_ESCAPE:     return "Escape";
+            case java.awt.event.KeyEvent.VK_LEFT:       return "ArrowLeft";
+            case java.awt.event.KeyEvent.VK_RIGHT:      return "ArrowRight";
+            case java.awt.event.KeyEvent.VK_UP:         return "ArrowUp";
+            case java.awt.event.KeyEvent.VK_DOWN:       return "ArrowDown";
+            case java.awt.event.KeyEvent.VK_HOME:       return "Home";
+            case java.awt.event.KeyEvent.VK_END:        return "End";
+            case java.awt.event.KeyEvent.VK_PAGE_UP:    return "PageUp";
+            case java.awt.event.KeyEvent.VK_PAGE_DOWN:  return "PageDown";
+            default: return null;
+        }
+    }
+
+    private static int jsKeycode(String name) {
+        switch (name) {
+            case "Backspace":  return 8;
+            case "Tab":        return 9;
+            case "Enter":      return 13;
+            case "Escape":     return 27;
+            case "PageUp":     return 33;
+            case "PageDown":   return 34;
+            case "End":        return 35;
+            case "Home":       return 36;
+            case "ArrowLeft":  return 37;
+            case "ArrowUp":    return 38;
+            case "ArrowRight": return 39;
+            case "ArrowDown":  return 40;
+            case "Delete":     return 46;
+            default:           return 0;
+        }
     }
 
     private void goBack() {

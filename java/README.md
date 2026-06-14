@@ -36,12 +36,13 @@ probes `nordstjernen-renderer` on the working directory and `builddir/src/`.
 | Home | `Alt+Home` |
 | Focus the URL bar | `Ctrl+L` or `Alt+D` |
 | Close the window | `Ctrl+W` or `Ctrl+Q` |
-| Scroll a line | `↑` / `↓`, mouse wheel, or the scrollbar |
-| Scroll a page | `PageUp` / `PageDown` / `Space` |
-| Top / bottom | `Home` / `End` |
+| Scroll | `↑` / `↓` / `PageUp` / `PageDown`, mouse wheel, or the scrollbar |
 
-(Scroll keys act on the page once it has focus — click the page, or press
-`Esc` to move focus off the URL bar.)
+**Text input.** Click an input field, textarea or other editable element to
+focus it, then type — characters, `Backspace`/`Delete`, caret movement
+(`←`/`→`/`Home`/`End`), `Enter`, and `Tab` between fields are all forwarded to
+the page. Key events go to whatever the page has focused, so the arrow keys
+edit a focused field rather than scrolling.
 
 ## Use as a library
 

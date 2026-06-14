@@ -269,6 +269,8 @@ http_read_head(http_conn *c, http_head *out)
             out->x_anim = atol(val);
         else if (strcasecmp(line, "X-Unchanged") == 0)
             out->x_unchanged = atol(val);
+        else if (strcasecmp(line, "X-Render-RC") == 0)
+            out->x_render_rc = atol(val);
         else if (strcasecmp(line, "X-Nav") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_nav)

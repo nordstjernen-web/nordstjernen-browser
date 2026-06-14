@@ -45,6 +45,7 @@ public final class RemoteBrowser implements AutoCloseable {
     private final RendererProcess renderer;
     private String title = "";
     private String url = "";
+    private String pendingNav = "";
     private int pageWidth;
     private int pageHeight;
 
@@ -68,9 +69,19 @@ public final class RemoteBrowser implements AutoCloseable {
         }
         this.title = jsonString(json, "title");
         this.url = jsonString(json, "url");
+        this.pendingNav = jsonString(json, "nav");
         this.pageWidth = jsonInt(json, "page_width", viewportWidthCss);
         this.pageHeight = jsonInt(json, "page_height", viewportHeightCss);
         return true;
+    }
+
+    /**
+     * A client-side redirect (meta refresh or JS {@code location}) that fired
+     * while the just-opened page settled, or null. Follow it to land on the
+     * real destination — e.g. a {@code duckduckgo.com/l/?uddg=…} result link.
+     */
+    public String pendingNav() {
+        return (pendingNav == null || pendingNav.isEmpty()) ? null : pendingNav;
     }
 
     /** Tell the engine the viewport changed (re-lays out, fires resize). */
@@ -130,9 +141,41 @@ public final class RemoteBrowser implements AutoCloseable {
         return href.isEmpty() ? null : href;
     }
 
-    /** Release a pending press. */
-    public void release() {
-        renderer.request("POST", "/release", "");
+    /** Release a pending press; returns a navigation URL if the click followed a link. */
+    public String release() {
+        RendererProcess.Response resp = renderer.request("POST", "/release", "{}");
+        String href = jsonString(new String(resp.body, StandardCharsets.UTF_8), "href");
+        return href.isEmpty() ? null : href;
+    }
+
+    /** Result of a key event: any navigation it triggered, and whether the page consumed it. */
+    public static final class Key {
+        /** Navigation URL the key triggered (e.g. Enter submitting a form), or null. */
+        public final String nav;
+        /** The page called preventDefault() — the shell should not apply its default. */
+        public final boolean prevented;
+
+        Key(String nav, boolean prevented) {
+            this.nav = nav;
+            this.prevented = prevented;
+        }
+    }
+
+    /**
+     * Forward a key event to the focused element. {@code kind} is 0 for keydown,
+     * 1 for keyup, 2 to insert {@code key} as text, 3 for keypress. {@code key}
+     * and {@code code} are the {@code KeyboardEvent.key}/{@code .code} values.
+     */
+    public Key key(int kind, String key, String code, int keycode, int mods) {
+        String body = "{\"kind\":" + kind
+            + ",\"key\":\"" + jsonEscape(key == null ? "" : key)
+            + "\",\"code\":\"" + jsonEscape(code == null ? "" : code)
+            + "\",\"keycode\":" + keycode + ",\"mods\":" + mods + "}";
+        RendererProcess.Response resp = renderer.request("POST", "/key", body);
+        String json = new String(resp.body, StandardCharsets.UTF_8);
+        String href = jsonString(json, "href");
+        boolean prevented = jsonInt(json, "prevented", 0) != 0;
+        return new Key(href.isEmpty() ? null : href, prevented);
     }
 
     public String title() { return title; }

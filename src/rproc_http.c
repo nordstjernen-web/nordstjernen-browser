@@ -338,6 +338,7 @@ spawn_inproc(int max_width, int max_height)
     unsigned char *fb = malloc(size);
     if (!fb)
         return NULL;
+    memset(fb, 0xff, size);
     ns_rproc_http *r = calloc(1, sizeof *r);
     if (!r) {
         free(fb);
@@ -514,6 +515,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->ok = 1;
         out->unchanged = 1;
         out->animating = head.x_anim > 0;
+        out->render_rc = (int)head.x_render_rc;
         out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
         out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
         out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
@@ -530,6 +532,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->height = (int)head.x_h;
     out->stride = (int)head.x_stride;
     out->animating = head.x_anim > 0;
+    out->render_rc = (int)head.x_render_rc;
     out->pixels = r->shm ? r->map : r->rxbuf;
     out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
     out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;

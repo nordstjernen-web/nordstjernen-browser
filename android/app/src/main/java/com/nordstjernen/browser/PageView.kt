@@ -10,6 +10,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.os.SystemClock
 import android.util.AttributeSet
+import android.util.Log
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -26,6 +27,10 @@ class PageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
+
+    companion object {
+        private const val TAG = "nordstjernen"
+    }
 
     private val renderExecutor = Executors.newSingleThreadExecutor()
     private val scroller = OverScroller(context)
@@ -56,6 +61,7 @@ class PageView @JvmOverloads constructor(
     private var velocityTracker: VelocityTracker? = null
     private var viewport: Bitmap? = null
     @Volatile private var renderPending = false
+    @Volatile private var renderDirty = false
 
     private var lastContentTapTime = 0L
     private var lastContentTapX = 0f
@@ -110,6 +116,7 @@ class PageView @JvmOverloads constructor(
         else 0
         pendingScrollFraction = -1f
         scroller.forceFinished(true)
+        Log.i(TAG, "PageView setDocument handle=$newHandle page=${pageWidthCssArg}x$pageHeightCssArg view=${width}x${height} scale=$renderScale")
         scheduleRender()
     }
 
@@ -121,8 +128,10 @@ class PageView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        viewport?.recycle()
-        viewport = if (w > 0 && h > 0) Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) else null
+        viewport = if (w > 0 && h > 0) {
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.eraseColor(Color.WHITE) }
+        } else null
+        Log.i(TAG, "PageView viewport=${w}x$h old=${oldw}x$oldh")
         scheduleRender()
         if (oldw > 0 && w != oldw) {
             pendingScrollFraction = if (contentH() > 0) scrollYpx.toFloat() / contentH() else 0f
@@ -157,24 +166,36 @@ class PageView @JvmOverloads constructor(
 
     private fun scheduleRender() {
         val bmp = viewport ?: return
-        if (handle == 0L || renderPending) return
+        val h = handle
+        if (h == 0L) return
+        if (renderPending) {
+            renderDirty = true
+            return
+        }
         renderPending = true
+        renderDirty = false
         val eff = effScale()
         val sxc = (scrollXpx / eff).roundToInt()
         val syc = (scrollYpx / eff).roundToInt()
         renderExecutor.execute {
-            val ok = NativeBrowser.nativeRender(handle, sxc, syc, eff, bmp)
-            renderPending = false
-            if (ok) postInvalidate()
+            val ok = NativeBrowser.nativeRender(h, sxc, syc, eff, bmp)
+            post {
+                renderPending = false
+                if (ok) {
+                    invalidate()
+                } else {
+                    Log.e(TAG, "PageView render failed handle=$h view=${bmp.width}x${bmp.height} scroll=${sxc},${syc} scale=$eff")
+                }
+                if (renderDirty) scheduleRender()
+            }
         }
     }
 
     override fun onDraw(canvas: Canvas) {
         val bmp = viewport
+        canvas.drawColor(Color.WHITE)
         if (bmp != null && handle != 0L) {
             canvas.drawBitmap(bmp, 0f, 0f, null)
-        } else {
-            canvas.drawColor(Color.WHITE)
         }
     }
 

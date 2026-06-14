@@ -286,15 +286,22 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                         sx == s->frame_sx && sy == s->frame_sy &&
                         vw == s->frame_w && vh == s->frame_h &&
                         scale == s->frame_scale;
+        int render_rc = 0;
         if (!unchanged) {
-            ns_browser_render_argb32(s->cur, (int)sx, (int)sy, vw, vh, scale,
-                                     s->fb, stride);
-            s->frame_valid = 1;
-            s->frame_sx = sx;
-            s->frame_sy = sy;
-            s->frame_w = vw;
-            s->frame_h = vh;
-            s->frame_scale = scale;
+            render_rc = ns_browser_render_argb32(s->cur, (int)sx, (int)sy,
+                                                 vw, vh, scale, s->fb,
+                                                 stride);
+            if (render_rc == 0) {
+                s->frame_valid = 1;
+                s->frame_sx = sx;
+                s->frame_sy = sy;
+                s->frame_w = vw;
+                s->frame_h = vh;
+                s->frame_scale = scale;
+            } else {
+                memset(s->fb, 0xff, (size_t)stride * (size_t)vh);
+                s->frame_valid = 0;
+            }
         }
         char *nav = ns_browser_take_pending_nav(s->cur);
         if (nav)
@@ -310,9 +317,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 if (*p == '\r' || *p == '\n') *p = ' ';
         char hdrs[4608];
         int hn = snprintf(hdrs, sizeof hdrs,
-                 "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n%s",
+                 "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
+                 "X-Render-RC: %d\r\n%s",
                  vw, vh, stride, ns_browser_animating(s->cur) ? 1 : 0,
-                 unchanged ? "X-Unchanged: 1\r\n" : "");
+                 render_rc, unchanged ? "X-Unchanged: 1\r\n" : "");
         if (nav && *nav && hn > 0 && (size_t)hn < sizeof hdrs)
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                            "X-Nav: %.2000s\r\n", nav);
