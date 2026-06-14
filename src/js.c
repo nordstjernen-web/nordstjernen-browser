@@ -20124,6 +20124,7 @@ ns_nodelist_namedItem(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
+    if (!*name) { JS_FreeCString(ctx, name); return JS_NULL; }
     uint32_t len = ns_js_array_length(ctx, this_val);
     JSValue out = JS_NULL;
     for (uint32_t i = 0; i < len; i++) {
@@ -23603,6 +23604,7 @@ static JSValue
 ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
               const char *name)
 {
+    if (!name || !*name) return JS_UNDEFINED;
     if (b->kind == NS_LIVE_FORM_ELEMENTS) {
         JSValue r = ns_form_elements_named_lookup(ctx, snap, name);
         return JS_IsNull(r) ? JS_UNDEFINED : r;
@@ -24134,6 +24136,7 @@ ns_array_namedItem(JSContext *ctx, JSValueConst this_val,
     if (argc < 1 || !JS_IsString(argv[0])) return JS_NULL;
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_NULL;
+    if (!*name) { JS_FreeCString(ctx, name); return JS_NULL; }
     JSValue result = JS_NULL;
     JSValue lenv = JS_GetPropertyStr(ctx, this_val, "length");
     uint32_t n = 0; JS_ToUint32(ctx, &n, lenv); JS_FreeValue(ctx, lenv);
