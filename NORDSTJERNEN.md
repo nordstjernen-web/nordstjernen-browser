@@ -63,8 +63,9 @@ llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
 tools, and digest-pinned model downloads, all on-device with no network
 at inference time (see `docs/ai.md`).
 
-Version 1.0.4 is the current release (the tree carries 1.0.5 in
-`src/version.h` as development advances toward the next tag).
+Version 1.0.6 is the current release (the tree carries 1.0.7-dev in
+the meson project definition — surfaced through `src/version.h` — as
+development advances toward the next tag).
 
 ## Architecture & frontends
 
@@ -257,9 +258,19 @@ allocation, the renderer/IPC boundary). Landed so far: `document.cookie`
 table layout caps accumulated column counts (`NS_TABLE_MAX_COLS`) so a
 colspan-packed table can't overflow the `guint` column counter and
 under-size the collapse-borders grid; `http_read_body`/`http_skip_body`
-reject negative lengths before the copy loop; and HTTP requests set
+reject negative lengths before the copy loop; HTTP requests set
 `CURLOPT_UNRESTRICTED_AUTH = 0` so credentials are never replayed to a
-different host on a redirect. The broader fundamentals stay strong:
+different host on a redirect; the renderer/IPC favicon reply now clamps
+the `X-W`/`X-H`/`X-Stride` dimensions before multiplying them, so a
+crafted reply can't integer-overflow the size check and have the shell
+read past a bounded buffer (the `/render` path already clamped against
+the session's `max_w`/`max_h`); and the CSS engine caps the recursive
+parsers reachable from untrusted stylesheets — `var()` fallbacks,
+`@supports`, `color-mix()`, and `@media … or …` all carry depth limits,
+`ns_css_value_free` frees the background-layer chain iteratively, and
+`filter: blur()` clamps its radius — so a deeply nested or absurdly
+large value can't exhaust the stack or overflow the blur window. The
+broader fundamentals stay strong:
 http/https-only scheme allow-listing with no HTTPS→HTTP redirect
 downgrade, CRLF-filtered request headers, percent-encoded multipart
 field names, and per-renderer Landlock + seccomp confinement applied

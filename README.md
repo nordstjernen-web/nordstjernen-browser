@@ -11,7 +11,7 @@ Nordstjernen is built in Norway.
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 114,000 lines of C (plus a thin C++ Qt shell) written by Claude and Codex (113 non-vendored files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
+**Minimalism:** The whole engine is about 116,000 lines of C (plus a thin C++ Qt shell) written by Claude and Codex (120 non-vendored C files in src/, excluding the vendored libraries) — small enough for one person to read and audit end-to-end.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 

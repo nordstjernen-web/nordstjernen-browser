@@ -247,6 +247,17 @@ attacker-controlled bytes and no path-traversal is possible.
   transpiled-to-C). GdkPixbuf and librsvg handle the remaining formats
   inside the same sandbox.
 - Charset sniffing is delegated to uchardet, not hand-rolled.
+- The engine's own parsers bound attacker-controlled nesting and sizes.
+  The recursive CSS parsers — selectors, `@supports`, `@media` queries,
+  `var()` fallbacks, and `color-mix()` — all carry depth caps, the
+  background-layer list is torn down iteratively, and layout's box-tree
+  walkers stop at a fixed depth, so a pathologically nested stylesheet or
+  DOM cannot exhaust the stack. Sizes from untrusted sources — decoded
+  image dimensions and the renderer's `X-W`/`X-H`/`X-Stride` reply
+  headers — are clamped before any `width × height`/`stride × height`
+  multiplication, so a crafted dimension cannot integer-overflow a
+  bounds check or allocation. `filter: blur()` likewise clamps its
+  radius before building the convolution window.
 
 ### JavaScript
 
