@@ -1217,6 +1217,32 @@ install_shortcuts(ProcWindow *pw)
     }
 }
 
+static gboolean
+on_window_key_pressed(GtkEventControllerKey *controller, guint keyval,
+                      guint keycode, GdkModifierType state, gpointer user_data)
+{
+    (void)controller;
+    (void)keycode;
+    (void)state;
+    ProcWindow *pw = user_data;
+    GtkWindow *win = GTK_WINDOW(pw->window);
+    if (keyval == GDK_KEY_F11) {
+        if (gtk_window_is_fullscreen(win)) {
+            gtk_window_unfullscreen(win);
+            gtk_window_maximize(win);
+        } else {
+            gtk_window_fullscreen(win);
+        }
+        return TRUE;
+    }
+    if (keyval == GDK_KEY_Escape && gtk_window_is_fullscreen(win)) {
+        gtk_window_unfullscreen(win);
+        gtk_window_maximize(win);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static ProcWindow *
 proc_window_new(GtkApplication *app, const char *home_url)
 {
@@ -1229,6 +1255,13 @@ proc_window_new(GtkApplication *app, const char *home_url)
                            (GDestroyNotify)procwindow_free);
     gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
     gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
+    gtk_window_maximize(GTK_WINDOW(pw->window));
+
+    GtkEventController *winkeys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(winkeys, GTK_PHASE_CAPTURE);
+    g_signal_connect(winkeys, "key-pressed",
+                     G_CALLBACK(on_window_key_pressed), pw);
+    gtk_widget_add_controller(pw->window, winkeys);
 
     GtkWidget *header = gtk_header_bar_new();
     gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(header), TRUE);
