@@ -68,6 +68,7 @@ class PageView @JvmOverloads constructor(
     private var viewport: Bitmap? = null
     @Volatile private var renderPending = false
     @Volatile private var renderDirty = false
+    @Volatile private var pageInputActive = false
 
     private var lastContentTapTime = 0L
     private var lastContentTapX = 0f
@@ -131,7 +132,13 @@ class PageView @JvmOverloads constructor(
     fun recycleDocument() {
         val h = handle
         handle = 0
+        pageInputActive = false
         if (h != 0L) renderExecutor.execute { NativeBrowser.nativeClose(h) }
+    }
+
+    fun releaseTextInput() {
+        pageInputActive = false
+        if (hasFocus()) clearFocus()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -169,9 +176,11 @@ class PageView @JvmOverloads constructor(
     }
 
     private fun showPageKeyboard() {
+        pageInputActive = true
         if (!hasFocus()) requestFocus()
         post {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.restartInput(this)
             imm.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT)
         }
     }
@@ -443,10 +452,10 @@ class PageView @JvmOverloads constructor(
         return super.onTouchEvent(event)
     }
 
-    override fun onCheckIsTextEditor(): Boolean = handle != 0L
+    override fun onCheckIsTextEditor(): Boolean = pageInputActive && handle != 0L
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
-        if (handle == 0L) return null
+        if (!pageInputActive || handle == 0L) return null
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -455,11 +464,11 @@ class PageView @JvmOverloads constructor(
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        return if (dispatchKeyEventToPage(event, 0)) true else super.onKeyDown(keyCode, event)
+        return if (pageInputActive && dispatchKeyEventToPage(event, 0)) true else super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        return if (dispatchKeyEventToPage(event, 1)) true else super.onKeyUp(keyCode, event)
+        return if (pageInputActive && dispatchKeyEventToPage(event, 1)) true else super.onKeyUp(keyCode, event)
     }
 
     private inner class PageInputConnection : BaseInputConnection(this@PageView, true) {

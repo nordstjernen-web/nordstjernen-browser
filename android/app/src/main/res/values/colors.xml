@@ -5,4 +5,10 @@
     <color name="primaryDark">#0E1830</color>
     <color name="accent">#F5C542</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="toolbar_button_pressed">#2B3C62</color>
+    <color name="toolbar_field">#F8FAFF</color>
+    <color name="toolbar_field_stroke">#7181A6</color>
+    <color name="toolbar_field_text">#111B2F</color>
+    <color name="toolbar_field_hint">#6F7786</color>
+    <color name="toolbar_icon">#EAF1FF</color>
 </resources>

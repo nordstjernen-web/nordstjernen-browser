@@ -7,46 +7,81 @@
     android:background="@color/toolbar">
 
     <LinearLayout
+        android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:minHeight="52dp"
         android:orientation="horizontal"
-        android:padding="6dp"
+        android:paddingStart="6dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="5dp"
         android:background="@color/toolbar">
 
-        <Button
+        <ImageButton
             android:id="@+id/backButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:text="@string/back"
-            android:contentDescription="@string/back" />
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:contentDescription="@string/back_action"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_nav_back" />
 
         <EditText
             android:id="@+id/urlBar"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
             android:layout_weight="1"
+            android:background="@drawable/bg_url_bar"
+            android:gravity="center_vertical"
             android:hint="@string/url_hint"
             android:imeOptions="actionGo"
+            android:includeFontPadding="false"
             android:inputType="textUri"
             android:maxLines="1"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
             android:selectAllOnFocus="true"
+            android:singleLine="true"
+            android:textColor="@color/toolbar_field_text"
+            android:textColorHint="@color/toolbar_field_hint"
+            android:textSize="15sp"
             android:importantForAutofill="no" />
 
-        <Button
+        <ImageButton
             android:id="@+id/reloadButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:text="@string/reload"
-            android:contentDescription="@string/reload" />
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:contentDescription="@string/reload_action"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_nav_reload" />
 
-        <Button
+        <ImageButton
             android:id="@+id/goButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="0dp"
-            android:text="@string/go" />
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:contentDescription="@string/go_action"
+            android:padding="8dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_nav_go" />
+
+        <ImageButton
+            android:id="@+id/logoButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_toolbar_button"
+            android:contentDescription="@string/visit_nordstjernen"
+            android:padding="5dp"
+            android:scaleType="center"
+            android:src="@drawable/ic_nordstjernen_n" />
     </LinearLayout>
 
     <ProgressBar

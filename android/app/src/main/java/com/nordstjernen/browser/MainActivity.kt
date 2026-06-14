@@ -11,11 +11,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -44,7 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pageView: PageView
     private lateinit var progress: ProgressBar
     private lateinit var banner: TextView
-    private lateinit var backButton: Button
+    private lateinit var backButton: ImageButton
 
     private var initialized = false
     private var currentUrl: String? = null
@@ -76,15 +77,29 @@ class MainActivity : AppCompatActivity() {
         banner = findViewById(R.id.banner)
         backButton = findViewById(R.id.backButton)
 
-        findViewById<Button>(R.id.goButton).setOnClickListener { navigate(urlBar.text.toString()) }
-        findViewById<Button>(R.id.reloadButton).setOnClickListener { reload() }
+        urlBar.isFocusable = true
+        urlBar.isFocusableInTouchMode = true
+        findViewById<ImageButton>(R.id.goButton).setOnClickListener { navigate(urlBar.text.toString()) }
+        findViewById<ImageButton>(R.id.reloadButton).setOnClickListener { reload() }
+        findViewById<ImageButton>(R.id.logoButton).setOnClickListener { navigate("https://nordstjernen.org") }
         backButton.setOnClickListener { goBack() }
         urlBar.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_GO) { navigate(urlBar.text.toString()); true } else false
         }
+        urlBar.setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                pageView.releaseTextInput()
+                urlBar.requestFocusFromTouch()
+                showUrlKeyboard(true)
+            }
+            false
+        }
         urlBar.setOnClickListener { showUrlKeyboard() }
         urlBar.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus && initialized) showUrlKeyboard()
+            if (hasFocus) {
+                pageView.releaseTextInput()
+                showUrlKeyboard(true)
+            }
         }
 
         pageView.renderScale = resources.displayMetrics.density.toDouble()
@@ -156,6 +171,8 @@ class MainActivity : AppCompatActivity() {
         if (!initialized) return
         currentUrl = url
         urlBar.setText(url)
+        urlBar.clearFocus()
+        pageView.requestFocus()
         hideKeyboard()
         updateBackButton()
         progress.visibility = View.VISIBLE
@@ -223,6 +240,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateBackButton() {
         backButton.isEnabled = backStack.isNotEmpty()
+        backButton.alpha = if (backStack.isNotEmpty()) 1f else 0.38f
     }
 
     // Offer the system default-browser chooser once, on first launch
@@ -258,11 +276,14 @@ class MainActivity : AppCompatActivity() {
         imm.hideSoftInputFromWindow(urlBar.windowToken, 0)
     }
 
-    private fun showUrlKeyboard() {
+    private fun showUrlKeyboard(selectAll: Boolean = false) {
         urlBar.post {
-            urlBar.requestFocus()
+            urlBar.requestFocusFromTouch()
+            if (selectAll) urlBar.selectAll()
             val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.restartInput(urlBar)
             imm.showSoftInput(urlBar, InputMethodManager.SHOW_IMPLICIT)
+            Log.i(TAG, "urlBar focus=${urlBar.hasFocus()} textLen=${urlBar.length()}")
         }
     }
 

@@ -4,6 +4,10 @@
     <string name="go">Go</string>
     <string name="back">‹</string>
     <string name="reload">↻</string>
+    <string name="back_action">Back</string>
+    <string name="reload_action">Reload</string>
+    <string name="go_action">Go</string>
+    <string name="visit_nordstjernen">Visit nordstjernen.org</string>
     <string name="url_hint">Search or enter address</string>
     <string name="home_url">about:start</string>
     <string name="load_failed">Couldn\'t load %1$s</string>
