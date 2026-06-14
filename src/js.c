@@ -2475,6 +2475,7 @@ enum {
     NS_INSTOF_DOCTYPE,
     NS_INSTOF_HTMLCOLLECTION,
     NS_INSTOF_NODELIST,
+    NS_INSTOF_HTMLELEMENT,
 };
 
 static int ns_live_collection_kind(JSValueConst val);
@@ -2559,6 +2560,7 @@ static const ns_instof_def ns_instof_table[] = {
     { "Comment",                  NULL,                 NS_INSTOF_COMMENT },
     { "CharacterData",            NULL,                 NS_INSTOF_CHARDATA },
     { "DocumentType",             NULL,                 NS_INSTOF_DOCTYPE },
+    { "HTMLElement",              NULL,                 NS_INSTOF_HTMLELEMENT },
 };
 
 static JSValue
@@ -2600,7 +2602,12 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
     default:
         break;
     }
+    if (d->special == NS_INSTOF_HTMLELEMENT)
+        return JS_NewBool(ctx, n->kind == NS_NODE_ELEMENT &&
+                          !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)));
     if (n->kind != NS_NODE_ELEMENT || !n->name || !d->tags)
+        return JS_FALSE;
+    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS))
         return JS_FALSE;
     const char *s = d->tags;
     size_t nlen = strlen(n->name);
@@ -2609,7 +2616,7 @@ ns_ctor_hasInstance(JSContext *ctx, JSValueConst this_val,
         const char *tok = s;
         while (*s && *s != ' ') s++;
         size_t tlen = (size_t)(s - tok);
-        if (tlen == nlen && g_ascii_strncasecmp(tok, n->name, tlen) == 0)
+        if (tlen == nlen && strncmp(tok, n->name, tlen) == 0)
             return JS_TRUE;
     }
     return JS_FALSE;
@@ -28227,15 +28234,23 @@ static JSValue ns_impl_create_document_type(JSContext *ctx,
                                             int argc, JSValueConst *argv);
 
 static JSValue
-ns_document_implementation(JSContext *ctx, JSValueConst this_val)
+ns_make_dom_implementation(JSContext *ctx, JSValueConst doc)
 {
-    (void)this_val;
     JSValue impl = JS_NewObject(ctx);
     ns_bind_fn(ctx, impl, "hasFeature",          ns_event_true, 2);
     ns_bind_fn(ctx, impl, "createHTMLDocument",  ns_impl_create_html_document, 1);
     ns_bind_fn(ctx, impl, "createDocument",      ns_impl_create_document, 3);
     ns_bind_fn(ctx, impl, "createDocumentType",  ns_impl_create_document_type, 3);
+    if (JS_IsObject(doc))
+        JS_DefinePropertyValueStr(ctx, impl, "__ndImplDoc",
+                                  JS_DupValue(ctx, doc), 0);
     return impl;
+}
+
+static JSValue
+ns_document_implementation(JSContext *ctx, JSValueConst this_val)
+{
+    return ns_make_dom_implementation(ctx, this_val);
 }
 
 static JSValue
@@ -30736,6 +30751,19 @@ ns_valid_element_local_name(const char *s)
 }
 
 static gboolean
+ns_valid_doctype_name(const char *s)
+{
+    if (!s) return FALSE;
+    for (const char *p = s; *p; p++) {
+        guchar c = (guchar)*p;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\f' ||
+            c == '\r' || c == '\0' || c == '>')
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
 ns_doc_wrapper_is_xml(JSContext *ctx, JSValueConst doc_val)
 {
     if (!JS_IsObject(doc_val)) return FALSE;
@@ -30783,7 +30811,7 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
     char *stored = is_xml ? g_strdup(name) : g_ascii_strdown(name, -1);
     JS_FreeCString(ctx, name);
     ns_node *el = ns_node_new_element(stored);
-    if (is_xml) el->flags |= NS_NODE_KEEP_CASE;
+    if (is_xml) el->flags |= NS_NODE_KEEP_CASE | NS_NODE_FOREIGN_NS;
     ns_js *js = js_from_ctx(ctx);
     g_hash_table_add(js->orphan_nodes, el);
     JSValue wrapper = ns_make_element(ctx, el);
@@ -31222,6 +31250,17 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
         JS_NewString(ctx, "UTF-8"), JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
         JS_NewString(ctx, "text/html"), JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, wrapper, "implementation",
+        ns_make_dom_implementation(ctx, wrapper), JS_PROP_ENUMERABLE);
+    {
+        JSValue g = JS_GetGlobalObject(ctx);
+        JSValue ctor = JS_GetPropertyStr(ctx, g, "Document");
+        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+        if (JS_IsObject(proto)) JS_SetPrototype(ctx, wrapper, proto);
+        JS_FreeValue(ctx, proto);
+        JS_FreeValue(ctx, ctor);
+        JS_FreeValue(ctx, g);
+    }
     return wrapper;
 }
 
@@ -31269,6 +31308,8 @@ ns_make_synth_xml_document(JSContext *ctx)
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_element(ctx, doc);
     JS_DefinePropertyValueStr(ctx, wrapper, "__ndXmlDoc", JS_TRUE, 0);
+    JS_DefinePropertyValueStr(ctx, wrapper, "implementation",
+        ns_make_dom_implementation(ctx, wrapper), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
         JS_NewString(ctx, "application/xml"), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
@@ -31289,7 +31330,7 @@ ns_make_synth_xml_document(JSContext *ctx)
         JS_PROP_C_W_E);
     {
         JSValue g = JS_GetGlobalObject(ctx);
-        JSValue ctor = JS_GetPropertyStr(ctx, g, "Document");
+        JSValue ctor = JS_GetPropertyStr(ctx, g, "XMLDocument");
         JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
         if (JS_IsObject(proto)) JS_SetPrototype(ctx, wrapper, proto);
         JS_FreeValue(ctx, proto);
@@ -31331,14 +31372,13 @@ static JSValue
 ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_NULL;
     if (argc < 3)
         return JS_ThrowTypeError(ctx, "3 arguments required");
     const char *name = JS_ToCString(ctx, argv[0]);
     if (!name) return JS_EXCEPTION;
-    if (!ns_valid_element_local_name(name)) {
+    if (!ns_valid_doctype_name(name)) {
         JS_FreeCString(ctx, name);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
             "invalid doctype name");
@@ -31356,6 +31396,11 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
     dt->kind = NS_NODE_DOCTYPE;
     g_hash_table_add(js->orphan_nodes, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
+    JSValue owner = JS_GetPropertyStr(ctx, this_val, "__ndImplDoc");
+    if (JS_IsObject(owner))
+        JS_DefinePropertyValueStr(ctx, wrapper, "__ndOwnerDoc",
+                                  JS_DupValue(ctx, owner), 0);
+    JS_FreeValue(ctx, owner);
     JS_FreeCString(ctx, name);
     JS_FreeCString(ctx, public_id);
     JS_FreeCString(ctx, system_id);
@@ -32744,6 +32789,18 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         { "Crypto", 0 }, { "SubtleCrypto", 0 }, { "CryptoKey", 0 },
     };
     ns_bind_ctors(ctx, global, ns_window_event_ctor, shim_ctors, G_N_ELEMENTS(shim_ctors));
+    {
+        JSValue doc_ctor = JS_GetPropertyStr(ctx, global, "Document");
+        JSValue doc_proto = JS_GetPropertyStr(ctx, doc_ctor, "prototype");
+        JSValue xml_ctor = JS_GetPropertyStr(ctx, global, "XMLDocument");
+        JSValue xml_proto = JS_GetPropertyStr(ctx, xml_ctor, "prototype");
+        if (JS_IsObject(doc_proto) && JS_IsObject(xml_proto))
+            JS_SetPrototype(ctx, xml_proto, doc_proto);
+        JS_FreeValue(ctx, doc_ctor);
+        JS_FreeValue(ctx, doc_proto);
+        JS_FreeValue(ctx, xml_ctor);
+        JS_FreeValue(ctx, xml_proto);
+    }
     ns_bind_ctor(ctx, global, "FontFace", ns_window_fontface_ctor, 3);
     {
         JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleDeclaration");
