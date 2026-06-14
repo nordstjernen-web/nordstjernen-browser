@@ -4886,12 +4886,23 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
 }
 
 static JSValue
+ns_pre_insert_validity(JSContext *ctx, ns_node *parent, ns_node *node,
+                       ns_node *child, gboolean child_is_null);
+
+static JSValue
 ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    for (int i = 0; i < argc; i++) {
+        ns_node *child = ns_unwrap_element_mut(argv[i]);
+        if (child) {
+            JSValue verr = ns_pre_insert_validity(ctx, self, child, NULL, TRUE);
+            if (JS_IsException(verr)) return verr;
+        }
+    }
     ns_element_clear_children_recorded(_j, self);
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
@@ -18352,10 +18363,6 @@ ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
 }
 
 static JSValue
-ns_pre_insert_validity(JSContext *ctx, ns_node *parent, ns_node *node,
-                       ns_node *child, gboolean child_is_null);
-
-static JSValue
 ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_node *parent = ns_unwrap_element_mut(this_val);
@@ -19146,6 +19153,13 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
     ns_js *_j = js_from_ctx(ctx);
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
+        if (child) {
+            JSValue verr = ns_pre_insert_validity(ctx, parent, child, NULL, TRUE);
+            if (JS_IsException(verr)) return verr;
+        }
+    }
+    for (int i = 0; i < argc; i++) {
+        ns_node *child = ns_unwrap_element_mut(argv[i]);
         ns_node *added = NULL;
         if (child) {
             if (ns_node_ancestor_or_self(parent, child)) continue;
@@ -19176,6 +19190,15 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
     ns_node *parent = ns_unwrap_element_mut(this_val);
     if (!parent) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    for (int i = 0; i < argc; i++) {
+        ns_node *child = ns_unwrap_element_mut(argv[i]);
+        if (child) {
+            ns_node *first = parent->first_child;
+            JSValue verr = ns_pre_insert_validity(ctx, parent, child,
+                                                  first, first == NULL);
+            if (JS_IsException(verr)) return verr;
+        }
+    }
     ns_node *ref = parent->first_child;
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
