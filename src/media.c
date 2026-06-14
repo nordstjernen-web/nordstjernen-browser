@@ -34,8 +34,6 @@ ns_media_url_is_safe(const char *u, gboolean allow_local)
     return g_str_has_prefix(u, "file://") || u[0] == '/';
 }
 
-#ifndef G_OS_WIN32
-
 static gboolean
 ns_media_spawnv(char **argv)
 {
@@ -52,6 +50,8 @@ ns_media_spawnv(char **argv)
     }
     return ok;
 }
+
+#ifndef G_OS_WIN32
 
 #ifndef __APPLE__
 static const char *const ns_media_mime_types[] = {
@@ -218,6 +218,40 @@ ns_media_broker_start(void)
 }
 #endif
 
+#if defined(G_OS_WIN32)
+static char *
+ns_media_find_windows_player(void)
+{
+    static const char *const path_players[] = {
+        "mpv.exe", "mpv", "vlc.exe", "vlc", NULL,
+    };
+    static const char *const fixed_players[] = {
+        "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe",
+        "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe",
+        NULL,
+    };
+    for (int i = 0; path_players[i]; i++) {
+        char *path = g_find_program_in_path(path_players[i]);
+        if (path) return path;
+    }
+    for (int i = 0; fixed_players[i]; i++)
+        if (g_file_test(fixed_players[i], G_FILE_TEST_IS_EXECUTABLE))
+            return g_strdup(fixed_players[i]);
+    return NULL;
+}
+
+static gboolean
+ns_media_run_windows_player(const char *url)
+{
+    char *player = ns_media_find_windows_player();
+    if (!player) return FALSE;
+    char *argv[] = { player, (char *)url, NULL };
+    gboolean ok = ns_media_spawnv(argv);
+    g_free(player);
+    return ok;
+}
+#endif
+
 ns_media_status
 ns_media_try_launch(const char *url, gboolean stream,
                     char **suggest_app, char **suggest_url)
@@ -232,6 +266,7 @@ ns_media_try_launch(const char *url, gboolean stream,
 
 #if defined(G_OS_WIN32)
     if (!ns_media_url_is_safe(url, FALSE)) return NS_MEDIA_UNSAFE;
+    if (ns_media_run_windows_player(url)) return NS_MEDIA_LAUNCHED;
     gunichar2 *wurl = g_utf8_to_utf16(url, -1, NULL, NULL, NULL);
     if (wurl) {
         HINSTANCE rc = ShellExecuteW(NULL, L"open", (LPCWSTR)wurl,

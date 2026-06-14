@@ -25,6 +25,8 @@ typedef enum ns_node_kind {
 #define NS_SHADOW_ATTR     "data-nd-shadow-root"
 #define NS_HOST_SCOPE_ATTR "data-nd-host"
 #define NS_CUSTOM_VALIDITY_ATTR "data-nd-custom-validity"
+#define NS_MEDIA_SRC_ATTR "data-nd-media-src"
+#define NS_MEDIA_POSTER_ATTR "data-nd-media-poster"
 
 typedef struct ns_attr {
     char *name;

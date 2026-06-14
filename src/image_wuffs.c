@@ -138,7 +138,9 @@ ns_image_wuffs_decode_to_bgra(const guchar *data, gsize len,
     g_free(workbuf);
     free(dec);
 
-    if (!wuffs_base__status__is_ok(&st) && kind != NS_WUFFS_GIF) {
+    gboolean frame_ok = wuffs_base__status__is_ok(&st) ||
+                        st.repr == wuffs_base__error__too_much_data;
+    if (!frame_ok && kind != NS_WUFFS_GIF) {
         g_free(pix);
         return NULL;
     }
