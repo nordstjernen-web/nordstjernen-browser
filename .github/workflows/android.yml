@@ -23,6 +23,8 @@ jobs:
     env:
       NDK_VERSION: '27.3.13750724'
       CMAKE_VERSION: '3.22.1'
+      ANDROID_API: '35'
+      NORDSTJERNEN_ANDROID_SYSROOT: ${{ runner.temp }}/nordstjernen-android-sysroot
 
     steps:
       - name: Checkout
@@ -60,17 +62,18 @@ jobs:
           gradle --version
           echo "NDK: ${ANDROID_NDK_HOME}"
 
-      # Generates the meson cross-files and, when a dependency sysroot is
-      # provided (NORDSTJERNEN_ANDROID_SYSROOT), cross-compiles the engine into
-      # jniLibs/<abi>/. Without a sysroot it is a no-op and the APK is built
-      # with the stub bridge. Best-effort: never blocks the APK build.
-      - name: Cross-compile engine (best-effort)
-        continue-on-error: true
+      - name: Fetch prebuilt dependency sysroots
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File android/scripts/fetch-prebuilt-deps.ps1 \
+            -Abi arm64-v8a x86_64 \
+            -Sysroot "${NORDSTJERNEN_ANDROID_SYSROOT}"
+
+      - name: Cross-compile engine
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq meson ninja-build pkg-config
-          android/scripts/build-deps.sh arm64-v8a 26 || true
-          android/scripts/build-deps.sh x86_64 26 || true
+          android/scripts/build-deps.sh arm64-v8a "${ANDROID_API}"
+          android/scripts/build-deps.sh x86_64 "${ANDROID_API}"
 
       - name: Assemble debug APK
         working-directory: android

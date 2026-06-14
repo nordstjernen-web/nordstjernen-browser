@@ -3,10 +3,9 @@
 param(
     [string]$Sysroot = "$env:USERPROFILE\.cache\nordstjernen-android-sysroot",
     [string]$Repo = "nordstjernen-web/nordstjernen-android",
-    [string]$Branch = "main",
-    [string]$RunId = "",
+    [string]$Tag = "sysroot-latest",
     [string[]]$Abi = @("arm64-v8a", "x86_64"),
-    [string]$Token = $env:GITHUB_TOKEN
+    [string]$Token = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,21 +14,9 @@ function Write-Step($Message) {
     Write-Host "[deps] $Message"
 }
 
-function Invoke-GitHubJson($Url) {
-    $headers = @{
-        "User-Agent" = "nordstjernen-android-fetch"
-        "Accept" = "application/vnd.github+json"
-    }
-    if ($Token) {
-        $headers["Authorization"] = "Bearer $Token"
-    }
-    Invoke-RestMethod -Headers $headers -Uri $Url
-}
-
 function Invoke-GitHubDownload($Url, $OutFile) {
     $headers = @{
         "User-Agent" = "nordstjernen-android-fetch"
-        "Accept" = "application/vnd.github+json"
     }
     if ($Token) {
         $headers["Authorization"] = "Bearer $Token"
@@ -37,6 +24,7 @@ function Invoke-GitHubDownload($Url, $OutFile) {
     Invoke-WebRequest -Headers $headers -MaximumRedirection 5 -Uri $Url -OutFile $OutFile
 }
 
+$Abi = @($Abi | ForEach-Object { $_ -split "," } | Where-Object { $_ })
 $validAbi = @("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 foreach ($item in $Abi) {
     if ($validAbi -notcontains $item) {
@@ -46,6 +34,8 @@ foreach ($item in $Abi) {
 
 New-Item -ItemType Directory -Force -Path $Sysroot | Out-Null
 $Sysroot = (Resolve-Path $Sysroot).Path
+$sysrootFull = [System.IO.Path]::GetFullPath($Sysroot)
+$sysrootPrefix = $sysrootFull.TrimEnd([char[]]@("\", "/")) + [System.IO.Path]::DirectorySeparatorChar
 $logDir = Join-Path (Resolve-Path "$PSScriptRoot\..") ".build\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -54,51 +44,42 @@ Start-Transcript -Path $log -Force | Out-Null
 
 try {
     Write-Step "repo: $Repo"
-    Write-Step "branch: $Branch"
+    Write-Step "tag: $Tag"
     Write-Step "sysroot: $Sysroot"
     Write-Step "abis: $($Abi -join ', ')"
 
-    if (-not $RunId) {
-        $runsUrl = "https://api.github.com/repos/$Repo/actions/workflows/build-deps.yml/runs?branch=$Branch&status=success&per_page=1"
-        Write-Step "resolving latest successful workflow run"
-        $runs = Invoke-GitHubJson $runsUrl
-        if (-not $runs.workflow_runs -or $runs.workflow_runs.Count -eq 0) {
-            throw "no successful build-deps workflow run found for $Repo@$Branch"
-        }
-        $RunId = [string]$runs.workflow_runs[0].id
-    }
-    Write-Step "run: $RunId"
-
-    $artifacts = Invoke-GitHubJson "https://api.github.com/repos/$Repo/actions/runs/$RunId/artifacts?per_page=100"
-    if (-not $artifacts.artifacts) {
-        throw "workflow run $RunId has no artifacts"
-    }
-
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "nordstjernen-android-deps-$stamp"
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $baseUrl = "https://github.com/$Repo/releases/download/$Tag"
+    $shaFile = Join-Path $tmp "SHA256SUMS"
+    Invoke-GitHubDownload "$baseUrl/SHA256SUMS" $shaFile
+    $shaLines = Get-Content $shaFile
 
     foreach ($item in $Abi) {
-        $name = "nordstjernen-android-sysroot-$item"
-        $artifact = $artifacts.artifacts | Where-Object { $_.name -eq $name } | Select-Object -First 1
-        if (-not $artifact) {
-            throw "artifact not found: $name"
+        $asset = "nordstjernen-android-sysroot-$item.tar.gz"
+        $line = $shaLines | Where-Object { $_ -match [regex]::Escape($asset) } | Select-Object -First 1
+        if (-not $line) {
+            throw "checksum not found for $asset"
         }
 
-        $zip = Join-Path $tmp "$name.zip"
-        $unzip = Join-Path $tmp $name
-        Write-Step "downloading $name"
-        Invoke-GitHubDownload $artifact.archive_download_url $zip
-        New-Item -ItemType Directory -Force -Path $unzip | Out-Null
-        Expand-Archive -Force -Path $zip -DestinationPath $unzip
+        $expected = (($line -split "\s+") | Where-Object { $_ })[0].ToLowerInvariant()
+        $archive = Join-Path $tmp $asset
+        $unpack = Join-Path $tmp "unpack-$item"
+        Write-Step "downloading $asset"
+        Invoke-GitHubDownload "$baseUrl/$asset" $archive
+        $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "checksum mismatch for $asset"
+        }
 
-        $source = Join-Path $unzip $item
+        New-Item -ItemType Directory -Force -Path $unpack | Out-Null
+        tar -xzf $archive -C $unpack
+        $source = Join-Path $unpack $item
         if (-not (Test-Path $source)) {
-            $source = $unzip
+            throw "archive did not contain expected $item directory"
         }
-
         $dest = Join-Path $Sysroot $item
         $destFull = [System.IO.Path]::GetFullPath($dest)
-        $sysrootPrefix = $Sysroot.TrimEnd("\") + "\"
         if (-not $destFull.StartsWith($sysrootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "refusing to replace path outside sysroot: $destFull"
         }
@@ -107,6 +88,17 @@ try {
         }
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item -Recurse -Force -Path (Join-Path $source "*") -Destination $dest
+        $localPrefix = $destFull.Replace("\", "/")
+        $ciPrefix = "/home/runner/work/nordstjernen-android/nordstjernen-android/sysroot/$item"
+        $metadata = Get-ChildItem -Path $dest -Recurse -File -Include *.pc,*.cmake,*.la,*.pri
+        foreach ($file in $metadata) {
+            $text = [System.IO.File]::ReadAllText($file.FullName)
+            $updated = $text.Replace($ciPrefix, $localPrefix)
+            if ($updated -ne $text) {
+                $utf8 = [System.Text.UTF8Encoding]::new($false)
+                [System.IO.File]::WriteAllText($file.FullName, $updated, $utf8)
+            }
+        }
         Write-Step "installed $item -> $dest"
     }
 

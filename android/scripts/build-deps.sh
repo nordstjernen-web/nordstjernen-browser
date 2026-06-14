@@ -35,12 +35,12 @@
 # Usage:
 #   ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
 #   NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
-#   android/scripts/build-deps.sh x86_64 26
+#   android/scripts/build-deps.sh x86_64 35
 
 set -euo pipefail
 
 ABI="${1:-arm64-v8a}"
-API="${2:-26}"
+API="${2:-35}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 JNILIBS="${REPO_ROOT}/android/app/src/main/jniLibs/${ABI}"
@@ -64,11 +64,16 @@ case "$(uname -s)" in
 esac
 TOOLCHAIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/${HOST_TAG}"
 CC="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang"
+CXX="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang++"
 AR="${TOOLCHAIN}/bin/llvm-ar"
 STRIP="${TOOLCHAIN}/bin/llvm-strip"
 
 if [ ! -x "${CC}" ]; then
     echo "compiler not found: ${CC}" >&2
+    exit 2
+fi
+if [ ! -x "${CXX}" ]; then
+    echo "compiler not found: ${CXX}" >&2
     exit 2
 fi
 
@@ -89,17 +94,19 @@ fi
 cat > "${CROSS}" <<EOF
 [binaries]
 c = '${CC}'
+cpp = '${CXX}'
 ar = '${AR}'
 strip = '${STRIP}'
 pkg-config = 'pkg-config'
 
 [built-in options]
 c_args = ['-fPIC', '--sysroot=${TOOLCHAIN}/sysroot']
+cpp_args = ['-fPIC', '--sysroot=${TOOLCHAIN}/sysroot']
 c_link_args = ['--sysroot=${TOOLCHAIN}/sysroot', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
+cpp_link_args = ['--sysroot=${TOOLCHAIN}/sysroot', '-Wl,-z,max-page-size=16384', '-Wl,-z,common-page-size=16384']
 
 [properties]
 needs_exe_wrapper = true
-sys_root = '${TOOLCHAIN}/sysroot'
 pkg_config_libdir = '${SYSROOT_PKGCONFIG}'
 
 [host_machine]
@@ -159,4 +166,15 @@ for so in "${SYSROOT_PREFIX}"/lib/*.so; do
     cp -v "${so}" "${JNILIBS}/"
 done
 
+CMAKE_CACHE_ROOT="${REPO_ROOT}/android/app/.cxx"
+if [ -d "${CMAKE_CACHE_ROOT}" ]; then
+    find "${CMAKE_CACHE_ROOT}" -mindepth 3 -maxdepth 3 -type d -name "${ABI}" -exec rm -rf {} +
+fi
+
+CMAKE_OBJ_ROOT="${REPO_ROOT}/android/app/build/intermediates/cxx"
+if [ -d "${CMAKE_OBJ_ROOT}" ]; then
+    find "${CMAKE_OBJ_ROOT}" -path "*/obj/${ABI}" -type d -exec rm -rf {} +
+fi
+
+echo "Invalidated Android CMake cache for ${ABI}"
 echo "Staged engine + deps into ${JNILIBS}"

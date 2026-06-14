@@ -58,7 +58,7 @@ android/
     src/main/java/.../PageView.kt       scrolling render surface
     src/main/java/.../MainActivity.kt   URL bar + navigation
     src/main/res/raw/cacert.pem         CA bundle for libcurl
-  scripts/fetch-prebuilt-deps.ps1       fetch CI-built Android dependency sysroots
+  scripts/fetch-prebuilt-deps.ps1       fetch release-built Android dependency sysroots
   scripts/build-deps.sh                 cross-compile engine → jniLibs/<abi>/
   settings.gradle · build.gradle · gradle.properties
 ```
@@ -85,14 +85,13 @@ the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
   it. The app loads and renders real pages.
 * **absent** — the stub bridge (`ns_jni_stub.c`) is built so the APK still
   assembles and runs; `NativeBrowser.available` is `false` and the UI shows a
-  banner. This is what CI produces today and what lets UI work proceed before
-  the dependency stack is cross-built.
+  banner. This lets UI work proceed before the dependency stack is available.
 
 ### Producing the engine .so
 
 The Android dependency sysroot is produced by
-`nordstjernen-web/nordstjernen-android`. Once that repo has a successful
-`build-deps` workflow run, fetch the prebuilt sysroot and then build the engine
+`nordstjernen-web/nordstjernen-android` and published on the public
+`sysroot-latest` release. Fetch the prebuilt sysroot and then build the engine
 for the emulator ABI:
 
 ```powershell
@@ -104,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File android\scripts\fetch-prebuilt-deps.ps1
 ```sh
 ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
 NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
-android/scripts/build-deps.sh x86_64 26
+android/scripts/build-deps.sh x86_64 35
 ```
 
 The script generates a meson cross-file for the NDK toolchain, cross-compiles
@@ -122,8 +121,9 @@ Each run writes diagnostic files under `android/.build/logs/`.
   link-test against the built library), the JNI bridge, the full Kotlin app
   (history, reload, link following, fling, intent handling, mobile-width
   rendering, title), and the CMake auto-detect/stub wiring.
-* **Wired, CI-built as the stub:** the Android Gradle/NDK build assembles an
-  APK on every push via `.github/workflows/android.yml`.
+* **Wired, CI-built with the prebuilt sysroot:** the Android workflow fetches
+  `sysroot-latest`, cross-compiles the engine, and assembles an APK on every
+  push via `.github/workflows/android.yml`.
 * **Done & verified on desktop (dependency shrink):** the engine no longer
   needs GTK 4, librsvg or gdk-pixbuf — `GdkTexture` is abstracted behind
   `ns_texture` (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on
@@ -136,6 +136,3 @@ Each run writes diagnostic files under `android/.build/logs/`.
   the desktop `compile_commands.json` — no NDK required. It runs in the Linux
   CI job, so Android-source regressions are caught on every build. All 36
   engine sources pass.
-* **Remaining:** consume a successful prebuilt dependency artifact from
-  `nordstjernen-web/nordstjernen-android`, run `build-deps.sh` for the emulator
-  ABI, and rebuild the APK with the real engine instead of the stub bridge.

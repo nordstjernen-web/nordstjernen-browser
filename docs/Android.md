@@ -22,8 +22,8 @@ the free binary only. Treat Play as reach and reputation.
   On Android it drops GTK 4, librsvg and gdk-pixbuf (see `android/README.md`),
   so its only native deps are the GLib/cairo/pango stack plus
   libcurl/sqlite3/uchardet/libpsl — all plain C, no Rust.
-- Targets: `compileSdk`/`targetSdk` **36**, `minSdk` **26**; ABIs
-  **arm64-v8a** + **x86_64** (add `armeabi-v7a` once its sysroot builds).
+- Targets: `compileSdk`/`targetSdk` **36**, `minSdk` **35**; ABIs
+  **arm64-v8a** + **x86_64**.
   AGP 8.11.1, Gradle 8.14.5, NDK r27, JDK 17.
 
 ## Building
@@ -48,10 +48,10 @@ that file is absent, `CMakeLists.txt` links a **stub** bridge so the APK still
 builds and runs (engine reported unavailable); once present, the real bridge is
 linked and pages render.
 
-Cross-building the sysroot (glib, gobject, gio, gmodule, cairo, pango,
-pangocairo, harfbuzz, freetype, fontconfig and their transitive C deps, plus
-libcurl, sqlite3, uchardet, libpsl) is the remaining porting work. It is all
-plain C and builds with meson against the NDK.
+The dependency sysroot is built by
+`nordstjernen-web/nordstjernen-android` and published as the public
+`sysroot-latest` release. `android/scripts/fetch-prebuilt-deps.ps1` downloads
+those release assets and verifies them against `SHA256SUMS`.
 
 ## Signing
 
@@ -151,8 +151,9 @@ on a fast rollout.
 
 ## CI
 
-`.github/workflows/android.yml` builds the debug APK on every push/PR (stub
-engine until a sysroot is wired) and captures an emulator screenshot.
+`.github/workflows/android.yml` fetches the public prebuilt dependency sysroot,
+cross-compiles the native engine for `arm64-v8a` and `x86_64`, and builds the
+debug APK on every push/PR.
 
 `.github/workflows/android-release.yml` is the Play build: trigger it manually
 (`workflow_dispatch`), and it runs `gradle bundleRelease` and uploads the

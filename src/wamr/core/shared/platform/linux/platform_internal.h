@@ -31,7 +31,9 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/time.h>
+#ifndef __ANDROID__
 #include <sys/timeb.h>
+#endif
 #include <sys/uio.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>

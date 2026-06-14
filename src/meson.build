@@ -3,7 +3,7 @@ python = import('python').find_installation()
 qjsc_prog = find_program('qjsc', required: false)
 qjs_prog  = find_program('qjs',  required: false)
 
-if qjsc_prog.found() and qjs_prog.found()
+if not meson.is_cross_build() and qjsc_prog.found() and qjs_prog.found()
   # files() so the script path is absolute — a raw '../scripts/...' string would
   # be resolved relative to the build dir and break out-of-tree builds.
   verify_polyfills_py = files('../scripts/verify-polyfills.py')
@@ -108,12 +108,6 @@ if host_machine.system() == 'windows'
 endif
 
 if is_android
-  nordstjernen_embed_sources += files(
-    'ipc_http.c',
-    'renderer_serve.c',
-    'rproc_http.c',
-  )
-
   nordstjernen_deps = [
     glib,
     gobject,
@@ -221,6 +215,14 @@ nordstjernen_embed_sources = nordstjernen_engine_sources + files(
   'embed_shim.c',
   'libnordstjernen.c',
 ) + [polyfills_h]
+
+if is_android
+  nordstjernen_embed_sources += files(
+    'ipc_http.c',
+    'renderer_serve.c',
+    'rproc_http.c',
+  )
+endif
 
 libnordstjernen_lib = library(
   'nordstjernen',
