@@ -151,8 +151,17 @@ public final class Browser {
         bar.add(address);
         JButton go = navButton("go", "Go", "Go");
         bar.add(go);
+
+        bar.addSeparator();
+        JButton menu = new JButton("⋮");
+        menu.setFocusable(false);
+        menu.setToolTipText("Menu");
+        menu.setFont(menu.getFont().deriveFont(Font.BOLD, 22f));
+        menu.setMargin(new Insets(2, 10, 2, 10));
+        menu.addActionListener(e -> showMenu(menu));
+        bar.add(menu);
+
         if (logoImage != null) {
-            bar.addSeparator();
             JLabel brand = new JLabel(new ImageIcon(logoImage));
             brand.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
             brand.setToolTipText("Nordstjernen — nordstjernen.org");
@@ -164,12 +173,6 @@ public final class Browser {
             });
             bar.add(brand);
         }
-
-        JButton menu = new JButton("⋮");
-        menu.setFocusable(false);
-        menu.setToolTipText("Menu");
-        menu.addActionListener(e -> showMenu(menu));
-        bar.add(menu);
 
         back.addActionListener(e -> goBack());
         forward.addActionListener(e -> goForward());
