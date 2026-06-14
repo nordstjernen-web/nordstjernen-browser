@@ -24,6 +24,7 @@ object NativeBrowser {
 
     external fun nativeEngineAvailable(): Boolean
     external fun nativeInit(dataDir: String, caBundle: String): Int
+    external fun nativeDefaultSettleMs(): Int
     external fun nativeOpen(url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Long
     external fun nativeNavigate(handle: Long, url: String, viewportWidth: Int, viewportHeight: Int, settleMs: Int): Boolean
     external fun nativePageSize(handle: Long): IntArray?
@@ -33,7 +34,7 @@ object NativeBrowser {
     external fun nativeSetFocusedEditableSelection(handle: Long, caret: Int, anchor: Int): Boolean
     external fun nativeTakeNavigation(handle: Long): String?
     external fun nativeTakeDownload(handle: Long): String?
-    external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Boolean
+    external fun nativeRender(handle: Long, scrollX: Int, scrollY: Int, scale: Double, bitmap: Bitmap): Int
     external fun nativeRenderText(handle: Long): String?
     external fun nativeTitle(handle: Long): String?
     external fun nativeLinkAt(handle: Long, x: Int, y: Int): String?

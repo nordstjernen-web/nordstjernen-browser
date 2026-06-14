@@ -11,6 +11,7 @@
 
 #include "ipc_http.h"
 #include "libnordstjernen.h"
+#include "proc_limits.h"
 #include "renderer_serve.h"
 #include "rproc_http.h"
 
@@ -44,6 +45,18 @@ typedef struct {
 
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
 static int             g_engine_inited;
+
+static int
+android_default_settle_ms(void)
+{
+    const char *e = getenv(NS_PROC_SETTLE_ENV);
+    if (e && *e) {
+        int v = atoi(e);
+        if (v >= 0 && v <= 10000)
+            return v;
+    }
+    return NS_PROC_SETTLE_MS;
+}
 
 static char *
 jstr_dup(JNIEnv *env, jstring s)
@@ -273,6 +286,14 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz
     return rc;
 }
 
+JNIEXPORT jint JNICALL
+Java_com_nordstjernen_browser_NativeBrowser_nativeDefaultSettleMs(JNIEnv *env,
+                                                                  jclass clazz)
+{
+    (void)env; (void)clazz;
+    return android_default_settle_ms();
+}
+
 JNIEXPORT jlong JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz,
                                                        jstring url,
@@ -499,7 +520,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
     return jstring_take(env, download);
 }
 
-JNIEXPORT jboolean JNICALL
+JNIEXPORT jint JNICALL
 Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
                                                          jclass clazz,
                                                          jlong handle,
@@ -512,7 +533,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
     AndroidPage *page = page_from_handle(handle);
     if (!page || !page->renderer || !bitmap) {
         LOGE("nativeRender invalid handle=%lld", (long long)handle);
-        return JNI_FALSE;
+        return 0;
     }
 
     AndroidBitmapInfo info;
@@ -523,7 +544,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
         LOGE("nativeRender bad bitmap handle=%lld info_rc=%d format=%u size=%ux%u",
              (long long)handle, info_rc, info.format, info.width,
              info.height);
-        return JNI_FALSE;
+        return 0;
     }
 
     ns_rproc_http_frame frame;
@@ -536,8 +557,9 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
              render_rc, frame.ok, page->render_fail_count, info.width,
              info.height, (int)scroll_x, (int)scroll_y, (double)scale);
         frame_clear(&frame);
-        return JNI_FALSE;
+        return 0;
     }
+    jint flags = 1 | (frame.animating ? 2 : 0) | (frame.unchanged ? 4 : 0);
     page_store_frame_events(page, &frame);
     if (frame.unchanged) {
         page->unchanged_count++;
@@ -546,7 +568,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
                  page->unchanged_count, frame.render_rc, info.width,
                  info.height, (int)scroll_x, (int)scroll_y, (double)scale);
         frame_clear(&frame);
-        return JNI_TRUE;
+        return flags;
     }
     if (frame.render_rc != 0) {
         page->render_fail_count++;
@@ -560,14 +582,14 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
         LOGE("nativeRender missing pixels failures=%d frame=%dx%d stride=%d",
              page->render_fail_count, frame.width, frame.height, frame.stride);
         frame_clear(&frame);
-        return JNI_FALSE;
+        return 0;
     }
 
     void *pixels = NULL;
     if (AndroidBitmap_lockPixels(env, bitmap, &pixels) != ANDROID_BITMAP_RESULT_SUCCESS) {
         LOGE("nativeRender lockPixels failed view=%ux%u", info.width, info.height);
         frame_clear(&frame);
-        return JNI_FALSE;
+        return 0;
     }
 
     int rows = frame.height < (int)info.height ? frame.height : (int)info.height;
@@ -599,7 +621,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env,
              frame.animating);
     page->render_count++;
     frame_clear(&frame);
-    return JNI_TRUE;
+    return flags;
 }
 
 JNIEXPORT jstring JNICALL

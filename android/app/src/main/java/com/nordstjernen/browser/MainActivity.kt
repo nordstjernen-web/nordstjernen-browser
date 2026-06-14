@@ -219,10 +219,11 @@ class MainActivity : AppCompatActivity() {
         val heightPx = if (pageView.height > 0) pageView.height else resources.displayMetrics.heightPixels
         val viewportCss = Math.max(320, (widthPx / density).toInt())
         val viewportCssHeight = Math.max(240, (heightPx / density).toInt())
+        val settleMs = NativeBrowser.nativeDefaultSettleMs()
         val started = SystemClock.uptimeMillis()
-        Log.i(TAG, "load start url=$url viewport=${viewportCss}x$viewportCssHeight view=${widthPx}x$heightPx density=$density gen=$gen")
+        Log.i(TAG, "load start url=$url viewport=${viewportCss}x$viewportCssHeight view=${widthPx}x$heightPx density=$density settle=$settleMs gen=$gen")
         if (reuseCurrent) {
-            pageView.navigateCurrent(url, viewportCss, viewportCssHeight, 600) nav@{ ok, size, finalUrl, title ->
+            pageView.navigateCurrent(url, viewportCss, viewportCssHeight, settleMs) nav@{ ok, size, finalUrl, title ->
                 val elapsed = SystemClock.uptimeMillis() - started
                 Log.i(TAG, "load nativeNavigate url=$url final=${finalUrl ?: ""} ok=$ok size=${size?.getOrNull(0)}x${size?.getOrNull(1)} title=${title ?: ""} elapsed=${elapsed}ms")
                 if (gen != loadGen.get()) {
@@ -247,7 +248,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         ioExecutor.execute {
-            val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, 600)
+            val handle = NativeBrowser.nativeOpen(url, viewportCss, viewportCssHeight, settleMs)
             val size = if (handle != 0L) NativeBrowser.nativePageSize(handle) else null
             val finalUrl = if (handle != 0L) NativeBrowser.nativeUrl(handle) else null
             val title = if (handle != 0L) NativeBrowser.nativeTitle(handle) else null

@@ -40,6 +40,8 @@ class PageView @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "nordstjernen"
+        private const val RENDER_OK = 1
+        private const val RENDER_ANIMATING = 2
     }
 
     private val renderExecutor = Executors.newSingleThreadExecutor()
@@ -566,7 +568,9 @@ class PageView @JvmOverloads constructor(
         val sxc = (scrollXpx / eff).roundToInt()
         val syc = (scrollYpx / eff).roundToInt()
         renderExecutor.execute {
-            val ok = NativeBrowser.nativeRender(h, sxc, syc, eff, bmp)
+            val renderState = NativeBrowser.nativeRender(h, sxc, syc, eff, bmp)
+            val ok = (renderState and RENDER_OK) != 0
+            val animating = (renderState and RENDER_ANIMATING) != 0
             val nav = if (ok) NativeBrowser.nativeTakeNavigation(h) else null
             val download = if (ok) NativeBrowser.nativeTakeDownload(h) else null
             post {
@@ -587,6 +591,7 @@ class PageView @JvmOverloads constructor(
                     Log.e(TAG, "PageView render failed handle=$h view=${bmp.width}x${bmp.height} scroll=${sxc},${syc} scale=$eff")
                 }
                 if (renderDirty) scheduleRender()
+                else if (animating) postDelayed({ if (handle == h) scheduleRender() }, 32L)
             }
         }
     }
