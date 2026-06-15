@@ -38,6 +38,7 @@ jobs:
           run: |
             set -e
             export PATH="/usr/pkg/bin:/usr/pkg/sbin:$PATH"
+            export PKG_CONFIG_PATH="/usr/X11R7/lib/pkgconfig:/usr/pkg/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             export CC="ccache cc"
             export CXX="ccache c++"
             # AI (llama.cpp) is a CMake subproject; skip it on the BSD VM

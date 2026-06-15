@@ -28,7 +28,6 @@ jobs:
       - name: Build, smoke and pack in an OpenBSD VM
         uses: vmactions/openbsd-vm@v1
         with:
-          release: '7.6'
           usesh: true
           copyback: true
           prepare: |
