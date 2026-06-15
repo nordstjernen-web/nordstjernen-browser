@@ -702,129 +702,201 @@
         defineCtor('NodeFilter', NF);
     }
 
-    function makeTreeWalker(root, whatToShow, filterArg) {
-        var what = (whatToShow === undefined) ? 0xFFFFFFFF : (whatToShow >>> 0);
+    function makeTraversalFilter(whatToShow, filterArg) {
+        var what = (whatToShow === undefined || whatToShow === null)
+            ? 0xFFFFFFFF : (whatToShow >>> 0);
         var filterFn = null;
         if (typeof filterArg === 'function') filterFn = filterArg;
         else if (filterArg && typeof filterArg.acceptNode === 'function')
             filterFn = function (n) { return filterArg.acceptNode(n); };
-
-        function matchesWhat(n) {
-            if (!n || typeof n.nodeType !== 'number') return false;
+        var active = false;
+        function filter(n) {
+            if (active)
+                throw new DOMException(
+                    'A NodeFilter is already being run.', 'InvalidStateError');
             var bit = 1 << (n.nodeType - 1);
-            return (what & bit) !== 0;
-        }
-        function decide(n) {
-            if (!matchesWhat(n)) return 3; /* SKIP */
+            if ((what & bit) === 0) return 3;
             if (!filterFn) return 1;
-            var r = filterFn(n);
-            return r === 2 ? 2 : (r === 3 ? 3 : (r === 1 ? 1 : 3));
+            active = true;
+            var r;
+            try { r = filterFn(n); }
+            finally { active = false; }
+            r = r >>> 0;
+            return r === 1 ? 1 : (r === 2 ? 2 : 3);
         }
-        function nextDescendantOrSibling(n, stopAt) {
-            if (!n) return null;
-            if (n.firstChild) return n.firstChild;
-            while (n && n !== stopAt) {
+        return { what: what, filter: filter, raw: filterArg || null };
+    }
+
+    function makeTreeWalker(root, whatToShow, filterArg) {
+        var F = makeTraversalFilter(whatToShow, filterArg);
+        var filter = F.filter;
+
+        var walker = {
+            currentNode: root,
+            parentNode: function () {
+                var node = this.currentNode;
+                while (node && node !== root) {
+                    node = node.parentNode;
+                    if (node && filter(node) === 1) {
+                        this.currentNode = node; return node;
+                    }
+                }
+                return null;
+            },
+            firstChild: function () { return traverseChildren(this, false); },
+            lastChild: function () { return traverseChildren(this, true); },
+            nextSibling: function () { return traverseSiblings(this, false); },
+            previousSibling: function () { return traverseSiblings(this, true); },
+            nextNode: function () {
+                var node = this.currentNode, result = 1;
+                for (;;) {
+                    while (result !== 2 && node.firstChild) {
+                        node = node.firstChild;
+                        result = filter(node);
+                        if (result === 1) { this.currentNode = node; return node; }
+                    }
+                    var following = null, temp = node;
+                    while (temp) {
+                        if (temp === root) return null;
+                        if (temp.nextSibling) { following = temp.nextSibling; break; }
+                        temp = temp.parentNode;
+                    }
+                    if (!following) return null;
+                    node = following;
+                    result = filter(node);
+                    if (result === 1) { this.currentNode = node; return node; }
+                }
+            },
+            previousNode: function () {
+                var node = this.currentNode;
+                while (node !== root) {
+                    var sibling = node.previousSibling;
+                    while (sibling) {
+                        node = sibling;
+                        var result = filter(node);
+                        while (result !== 2 && node.lastChild) {
+                            node = node.lastChild;
+                            result = filter(node);
+                        }
+                        if (result === 1) { this.currentNode = node; return node; }
+                        sibling = node.previousSibling;
+                    }
+                    if (node === root || !node.parentNode) return null;
+                    node = node.parentNode;
+                    if (filter(node) === 1) { this.currentNode = node; return node; }
+                }
+                return null;
+            }
+        };
+
+        function traverseChildren(w, last) {
+            var current = w.currentNode;
+            var node = last ? current.lastChild : current.firstChild;
+            while (node) {
+                var result = filter(node);
+                if (result === 1) { w.currentNode = node; return node; }
+                if (result === 3) {
+                    var child = last ? node.lastChild : node.firstChild;
+                    if (child) { node = child; continue; }
+                }
+                for (;;) {
+                    var sibling = last ? node.previousSibling : node.nextSibling;
+                    if (sibling) { node = sibling; break; }
+                    var parent = node.parentNode;
+                    if (!parent || parent === current) return null;
+                    node = parent;
+                }
+            }
+            return null;
+        }
+
+        function traverseSiblings(w, prev) {
+            var node = w.currentNode;
+            if (node === root) return null;
+            for (;;) {
+                var sibling = prev ? node.previousSibling : node.nextSibling;
+                while (sibling) {
+                    node = sibling;
+                    var result = filter(node);
+                    if (result === 1) { w.currentNode = node; return node; }
+                    sibling = prev ? node.lastChild : node.firstChild;
+                    if (result === 2 || !sibling)
+                        sibling = prev ? node.previousSibling : node.nextSibling;
+                }
+                node = node.parentNode;
+                if (!node || node === root) return null;
+                if (filter(node) === 1) return null;
+            }
+        }
+
+        walker[Symbol.toStringTag] = 'TreeWalker';
+        Object.defineProperty(walker, 'root',
+            { value: root, writable: false, enumerable: true });
+        Object.defineProperty(walker, 'whatToShow',
+            { value: F.what, writable: false, enumerable: true });
+        Object.defineProperty(walker, 'filter',
+            { value: F.raw, writable: false, enumerable: true });
+        return walker;
+    }
+
+    function makeNodeIterator(root, whatToShow, filterArg) {
+        var F = makeTraversalFilter(whatToShow, filterArg);
+        var filter = F.filter;
+        var referenceNode = root;
+        var beforeReference = true;
+
+        function following(node) {
+            if (node.firstChild) return node.firstChild;
+            var n = node;
+            while (n && n !== root) {
                 if (n.nextSibling) return n.nextSibling;
                 n = n.parentNode;
             }
             return null;
         }
-        function previousDescendantOrSibling(n, stopAt) {
-            if (!n || n === stopAt) return null;
-            if (n.previousSibling) {
-                var p = n.previousSibling;
+        function preceding(node) {
+            if (node === root) return null;
+            if (node.previousSibling) {
+                var p = node.previousSibling;
                 while (p.lastChild) p = p.lastChild;
                 return p;
             }
-            return n.parentNode === stopAt ? null : n.parentNode;
+            return node.parentNode;
+        }
+        function traverse(forward) {
+            var node = referenceNode, before = beforeReference;
+            for (;;) {
+                if (forward) {
+                    if (!before) { var c = following(node); if (!c) return null; node = c; }
+                    else before = false;
+                } else {
+                    if (before) { var c2 = preceding(node); if (!c2) return null; node = c2; }
+                    else before = true;
+                }
+                if (filter(node) === 1) break;
+            }
+            referenceNode = node;
+            beforeReference = before;
+            return node;
         }
 
-        var walker = {
-            root: root,
-            whatToShow: what,
-            filter: filterArg || null,
-            currentNode: root,
-            firstChild: function () {
-                var n = this.currentNode && this.currentNode.firstChild;
-                while (n) {
-                    var d = decide(n);
-                    if (d === 1) { this.currentNode = n; return n; }
-                    if (d === 2) {
-                        var sib = n.nextSibling;
-                        while (!sib && n.parentNode && n.parentNode !== this.currentNode) {
-                            n = n.parentNode; sib = n.nextSibling;
-                        }
-                        n = sib;
-                    } else {
-                        n = n.firstChild || (function step(x, stop) {
-                            while (x && x !== stop) {
-                                if (x.nextSibling) return x.nextSibling;
-                                x = x.parentNode;
-                            }
-                            return null;
-                        })(n, this.currentNode);
-                    }
-                }
-                return null;
-            },
-            lastChild: function () {
-                var n = this.currentNode && this.currentNode.lastChild;
-                while (n) {
-                    var d = decide(n);
-                    if (d === 1) { this.currentNode = n; return n; }
-                    n = n.previousSibling;
-                }
-                return null;
-            },
-            parentNode: function () {
-                var n = this.currentNode && this.currentNode.parentNode;
-                while (n && n !== this.root) {
-                    if (decide(n) === 1) { this.currentNode = n; return n; }
-                    n = n.parentNode;
-                }
-                return null;
-            },
-            nextSibling: function () {
-                var n = this.currentNode && this.currentNode.nextSibling;
-                while (n) {
-                    if (decide(n) === 1) { this.currentNode = n; return n; }
-                    n = n.nextSibling;
-                }
-                return null;
-            },
-            previousSibling: function () {
-                var n = this.currentNode && this.currentNode.previousSibling;
-                while (n) {
-                    if (decide(n) === 1) { this.currentNode = n; return n; }
-                    n = n.previousSibling;
-                }
-                return null;
-            },
-            nextNode: function () {
-                var n = this.currentNode;
-                while (true) {
-                    n = nextDescendantOrSibling(n, this.root);
-                    if (!n) return null;
-                    if (decide(n) === 1) { this.currentNode = n; return n; }
-                }
-            },
-            previousNode: function () {
-                var n = this.currentNode;
-                while (true) {
-                    n = previousDescendantOrSibling(n, this.root);
-                    if (!n) return null;
-                    if (decide(n) === 1) { this.currentNode = n; return n; }
-                }
-            }
+        var it = {
+            nextNode: function () { return traverse(true); },
+            previousNode: function () { return traverse(false); },
+            detach: function () {}
         };
-        walker[Symbol.toStringTag] = 'TreeWalker';
-        Object.defineProperty(walker, 'root',
+        it[Symbol.toStringTag] = 'NodeIterator';
+        Object.defineProperty(it, 'root',
             { value: root, writable: false, enumerable: true });
-        Object.defineProperty(walker, 'whatToShow',
-            { value: what, writable: false, enumerable: true });
-        Object.defineProperty(walker, 'filter',
-            { value: filterArg || null, writable: false, enumerable: true });
-        return walker;
+        Object.defineProperty(it, 'whatToShow',
+            { value: F.what, writable: false, enumerable: true });
+        Object.defineProperty(it, 'filter',
+            { value: F.raw, writable: false, enumerable: true });
+        Object.defineProperty(it, 'referenceNode',
+            { get: function () { return referenceNode; }, enumerable: true });
+        Object.defineProperty(it, 'pointerBeforeReferenceNode',
+            { get: function () { return beforeReference; }, enumerable: true });
+        return it;
     }
 
     function requireNodeRoot(root, method) {
@@ -838,27 +910,9 @@
             requireNodeRoot(root, 'createTreeWalker');
             return makeTreeWalker(root, whatToShow, filter);
         };
-        var origNI = global.document.createNodeIterator;
         global.document.createNodeIterator = function (root, whatToShow, filter) {
             requireNodeRoot(root, 'createNodeIterator');
-            var w = makeTreeWalker(root, whatToShow, filter);
-            var it = {
-                nextNode: function () { return w.nextNode(); },
-                previousNode: function () { return w.previousNode(); },
-                detach: function () {}
-            };
-            it[Symbol.toStringTag] = 'NodeIterator';
-            Object.defineProperty(it, 'root',
-                { value: w.root, writable: false, enumerable: true });
-            Object.defineProperty(it, 'whatToShow',
-                { value: w.whatToShow, writable: false, enumerable: true });
-            Object.defineProperty(it, 'filter',
-                { value: w.filter, writable: false, enumerable: true });
-            Object.defineProperty(it, 'referenceNode',
-                { get: function () { return w.currentNode; }, enumerable: true });
-            Object.defineProperty(it, 'pointerBeforeReferenceNode',
-                { value: true, writable: false, enumerable: true });
-            return it;
+            return makeNodeIterator(root, whatToShow, filter);
         };
     }
 
