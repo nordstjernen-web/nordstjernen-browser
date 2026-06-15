@@ -197,10 +197,11 @@ static JSValue ns_target_removeEventListener(JSContext *ctx, JSValueConst this_v
                                              int argc, JSValueConst *argv);
 static JSValue ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
-static ns_node *ns_iframe_find_descendant(ns_node *root, const char *tag);
 static void ns_js_purge_subtree_rafs(ns_js *js, ns_node *root);
-static void ns_iframe_set_doc_roots(JSContext *ctx, JSValue doc,
-                                    ns_node *content_root);
+static JSValue ns_make_realm_document(JSContext *ctx, ns_node *doc_node,
+                                      const char *url, const char *charset,
+                                      const char *content_type,
+                                      gboolean is_xml);
 
 #define NS_SANDBOX_ACTIVE              (1u << 0)
 #define NS_SANDBOX_ALLOW_SCRIPTS       (1u << 1)
@@ -20053,7 +20054,8 @@ static JSValue
 ns_element_get_parentElement(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || !n->parent || n->parent->kind != NS_NODE_ELEMENT) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT) return JS_NULL;
+    if (!n->parent || n->parent->kind != NS_NODE_ELEMENT) return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -20061,7 +20063,7 @@ static JSValue
 ns_element_get_parentNode(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || !n->parent) return JS_NULL;
+    if (!n || n->kind == NS_NODE_DOCUMENT || !n->parent) return JS_NULL;
     return ns_make_element(ctx, n->parent);
 }
 
@@ -26895,11 +26897,26 @@ ns_element_scroll_by(JSContext *ctx, JSValueConst this_val,
 }
 
 static ns_node *
-ns_iframe_content_root(const ns_node *iframe)
+ns_iframe_document_node(const ns_node *iframe)
 {
     if (!iframe) return NULL;
     for (ns_node *c = iframe->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_DOCUMENT) return c;
+    return NULL;
+}
+
+static ns_node *
+ns_iframe_content_root(const ns_node *iframe)
+{
+    if (!iframe) return NULL;
+    for (ns_node *c = iframe->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_DOCUMENT) {
+            for (ns_node *e = c->first_child; e; e = e->next_sibling)
+                if (e->kind == NS_NODE_ELEMENT) return e;
+            return NULL;
+        }
         if (c->kind == NS_NODE_ELEMENT) return c;
+    }
     return NULL;
 }
 
@@ -26912,7 +26929,9 @@ ns_iframe_ensure_content_root(ns_node *iframe)
     root = ns_node_new_element(g_strdup("html"));
     ns_node_append_child(root, ns_node_new_element(g_strdup("head")));
     ns_node_append_child(root, ns_node_new_element(g_strdup("body")));
-    ns_node_append_child(iframe, root);
+    ns_node *doc = ns_node_new_document();
+    ns_node_append_child(doc, root);
+    ns_node_append_child(iframe, doc);
     return root;
 }
 
@@ -26942,74 +26961,6 @@ ns_js_doc_exit(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         g_array_set_size(js->doc_stack, js->doc_stack->len - 1);
     }
     return JS_UNDEFINED;
-}
-
-static const char ns_iframe_doc_bootstrap[] =
-    "(function(root, realDoc, g, sandbox){"
-    "  var enter = g.__ndDocEnter, exit = g.__ndDocExit;"
-    "  var doc = Object.create(realDoc);"
-    "  function S(m){ return function(){"
-    "    enter(root); try { return realDoc[m].apply(realDoc, arguments); }"
-    "    finally { exit(); } }; }"
-    "  ['getElementById','querySelector','querySelectorAll','getElementsByTagName',"
-    "   'getElementsByClassName','getElementsByName','getElementsByTagNameNS',"
-    "   'elementFromPoint'].forEach(function(m){"
-    "     try { doc[m] = S(m); } catch(e){} });"
-    "  ['body','head','documentElement','scrollingElement','activeElement']"
-    "   .forEach(function(p){ try { Object.defineProperty(doc, p, { configurable:true,"
-    "     get: function(){ enter(root); try { return realDoc[p]; } finally { exit(); } } }); } catch(e){} });"
-    "  if ((sandbox & 8192) || ((sandbox & 1) && !(sandbox & 8))) {"
-    "    try { Object.defineProperty(doc, 'cookie', { configurable:true,"
-    "      get: function(){ return ''; }, set: function(){} }); } catch(e){}"
-    "  }"
-    "  return doc;"
-    "})";
-
-static JSValue
-ns_iframe_make_realm_doc(JSContext *ctx, ns_node *content_root, unsigned sandbox)
-{
-    if (!content_root) return JS_NULL;
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue realdoc = JS_GetPropertyStr(ctx, global, "document");
-    JSValue maker = JS_Eval(ctx, ns_iframe_doc_bootstrap,
-                            strlen(ns_iframe_doc_bootstrap),
-                            "<iframe-realm>", JS_EVAL_TYPE_GLOBAL);
-    JSValue doc = JS_NULL;
-    if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
-        JSValue rootw = ns_make_element(ctx, content_root);
-        JSValue sbv = JS_NewInt32(ctx, (int32_t)sandbox);
-        JSValueConst args[4] = { rootw, realdoc, global, sbv };
-        doc = JS_Call(ctx, maker, JS_UNDEFINED, 4, args);
-        if (JS_IsException(doc)) { JS_FreeValue(ctx, JS_GetException(ctx)); doc = JS_NULL; }
-        else ns_iframe_set_doc_roots(ctx, doc, content_root);
-        JS_FreeValue(ctx, rootw);
-    } else if (JS_IsException(maker)) {
-        JS_FreeValue(ctx, JS_GetException(ctx));
-    }
-    JS_FreeValue(ctx, maker);
-    JS_FreeValue(ctx, realdoc);
-    JS_FreeValue(ctx, global);
-    return doc;
-}
-
-static void
-ns_iframe_set_doc_roots(JSContext *ctx, JSValue doc, ns_node *content_root)
-{
-    if (!JS_IsObject(doc) || !content_root) return;
-    JSValue rootv = ns_make_element(ctx, content_root);
-    JS_DefinePropertyValueStr(ctx, doc, "documentElement",
-                              JS_DupValue(ctx, rootv),
-                              JS_PROP_CONFIGURABLE);
-    ns_node *body = ns_iframe_find_descendant(content_root, "body");
-    JS_DefinePropertyValueStr(ctx, doc, "body",
-                              body ? ns_make_element(ctx, body) : JS_NULL,
-                              JS_PROP_CONFIGURABLE);
-    ns_node *head = ns_iframe_find_descendant(content_root, "head");
-    JS_DefinePropertyValueStr(ctx, doc, "head",
-                              head ? ns_make_element(ctx, head) : JS_NULL,
-                              JS_PROP_CONFIGURABLE);
-    JS_DefinePropertyValueStr(ctx, doc, "scrollingElement", rootv,
-                              JS_PROP_CONFIGURABLE);
 }
 
 static const char ns_iframe_scope_bootstrap[] =
@@ -27150,69 +27101,6 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     return scope;
 }
 
-static ns_node *
-ns_iframe_find_descendant(ns_node *root, const char *tag)
-{
-    if (!root) return NULL;
-    if (ns_node_is_element_named(root, tag)) return root;
-    for (ns_node *c = root->first_child; c; c = c->next_sibling) {
-        ns_node *m = ns_iframe_find_descendant(c, tag);
-        if (m) return m;
-    }
-    return NULL;
-}
-
-static ns_node *
-ns_docfacade_root_node(JSContext *ctx, JSValueConst this_val)
-{
-    JSValue rootv = JS_GetPropertyStr(ctx, this_val, "_ndRoot");
-    ns_node *n = ns_unwrap_element_mut(rootv);
-    JS_FreeValue(ctx, rootv);
-    return n;
-}
-
-static JSValue
-ns_docfacade_delegate(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv, const char *method)
-{
-    JSValue root = JS_GetPropertyStr(ctx, this_val, "_ndRoot");
-    JSValue fn = JS_GetPropertyStr(ctx, root, method);
-    JSValue r = JS_IsFunction(ctx, fn)
-        ? JS_Call(ctx, fn, root, argc, (JSValueConst *)argv)
-        : JS_NULL;
-    JS_FreeValue(ctx, fn);
-    JS_FreeValue(ctx, root);
-    return r;
-}
-
-static JSValue
-ns_docfacade_querySelector(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
-{
-    return ns_docfacade_delegate(ctx, this_val, argc, argv, "querySelector");
-}
-
-static JSValue
-ns_docfacade_querySelectorAll(JSContext *ctx, JSValueConst this_val,
-                              int argc, JSValueConst *argv)
-{
-    return ns_docfacade_delegate(ctx, this_val, argc, argv, "querySelectorAll");
-}
-
-static JSValue
-ns_docfacade_getElementById(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
-{
-    if (argc < 1) return JS_NULL;
-    ns_node *root = ns_docfacade_root_node(ctx, this_val);
-    if (!root) return JS_NULL;
-    const char *id = JS_ToCString(ctx, argv[0]);
-    if (!id) return JS_NULL;
-    ns_node *found = ns_node_find_by_id(root, id);
-    JS_FreeCString(ctx, id);
-    return found ? ns_make_element(ctx, found) : JS_NULL;
-}
-
 static JSValue ns_document_createElement(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
 static JSValue ns_document_createTextNode(JSContext *ctx, JSValueConst this_val,
@@ -27272,62 +27160,18 @@ ns_document_define_implementation_getter(JSContext *ctx, JSValueConst obj)
 }
 
 static JSValue
-ns_docfacade_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
-                                  int argc, JSValueConst *argv)
-{
-    return ns_docfacade_delegate(ctx, this_val, argc, argv,
-                                 "getElementsByTagName");
-}
-
-static JSValue
 ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
 {
-    ns_node *root = ns_iframe_ensure_content_root(iframe);
-    if (!root) return JS_NULL;
-    JSValue cd = JS_NewObject(ctx);
-    JSValue rootv = ns_make_element(ctx, root);
-    JS_SetPropertyStr(ctx, cd, "_ndRoot", JS_DupValue(ctx, rootv));
-    JS_SetPropertyStr(ctx, cd, "documentElement", rootv);
-    ns_node *body = ns_iframe_find_descendant(root, "body");
-    JS_SetPropertyStr(ctx, cd, "body",
-                      body ? ns_make_element(ctx, body) : JS_NULL);
-    ns_node *head = ns_iframe_find_descendant(root, "head");
-    JS_SetPropertyStr(ctx, cd, "head",
-                      head ? ns_make_element(ctx, head) : JS_NULL);
-    JS_SetPropertyStr(ctx, cd, "nodeType", JS_NewInt32(ctx, 9));
-    JS_SetPropertyStr(ctx, cd, "nodeName", JS_NewString(ctx, "#document"));
-    JS_SetPropertyStr(ctx, cd, "ownerDocument", JS_NULL);
-    ns_document_use_document_prototype(ctx, cd);
-    ns_document_define_implementation_getter(ctx, cd);
-    {
-        ns_node *holder = iframe;
-        const char *cs = holder
-            ? ns_element_get_attr(holder, "data-nd-frame-charset") : NULL;
-        if (!cs || !*cs) cs = "UTF-8";
-        JS_SetPropertyStr(ctx, cd, "characterSet", JS_NewString(ctx, cs));
-        JS_SetPropertyStr(ctx, cd, "charset",      JS_NewString(ctx, cs));
-        JS_SetPropertyStr(ctx, cd, "inputEncoding", JS_NewString(ctx, cs));
-    }
-    JSValue global = JS_GetGlobalObject(ctx);
-    JS_SetPropertyStr(ctx, cd, "defaultView", global);
-    JS_SetPropertyStr(ctx, cd, "getElementById",
-                      JS_NewCFunction(ctx, ns_docfacade_getElementById,
-                                      "getElementById", 1));
-    JS_SetPropertyStr(ctx, cd, "querySelector",
-                      JS_NewCFunction(ctx, ns_docfacade_querySelector,
-                                      "querySelector", 1));
-    JS_SetPropertyStr(ctx, cd, "querySelectorAll",
-                      JS_NewCFunction(ctx, ns_docfacade_querySelectorAll,
-                                      "querySelectorAll", 1));
-    JS_SetPropertyStr(ctx, cd, "getElementsByTagName",
-                      JS_NewCFunction(ctx, ns_docfacade_getElementsByTagName,
-                                      "getElementsByTagName", 1));
-    JS_SetPropertyStr(ctx, cd, "createElement",
-                      JS_NewCFunction(ctx, ns_document_createElement,
-                                      "createElement", 1));
-    JS_SetPropertyStr(ctx, cd, "createTextNode",
-                      JS_NewCFunction(ctx, ns_document_createTextNode,
-                                      "createTextNode", 1));
+    if (!ns_iframe_ensure_content_root(iframe)) return JS_NULL;
+    ns_node *doc = ns_iframe_document_node(iframe);
+    if (!doc) return JS_NULL;
+    const char *cs = iframe
+        ? ns_element_get_attr(iframe, "data-nd-frame-charset") : NULL;
+    const char *url = iframe
+        ? ns_element_get_attr(iframe, "data-nd-frame-url") : NULL;
+    JSValue cd = ns_make_realm_document(ctx, doc, url, cs, "text/html", FALSE);
+    if (JS_IsObject(cd))
+        JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
 }
 
@@ -31506,37 +31350,6 @@ static JSValue ns_synthdoc_get_doctype(JSContext *ctx, JSValueConst this_val,
 static void ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj,
                                       const char *name, JSCFunction *fn);
 
-static void
-ns_document_init_synthetic(JSContext *ctx, JSValueConst wrapper,
-                           const char *content_type)
-{
-    ns_document_use_document_prototype(ctx, wrapper);
-    JS_DefinePropertyValueStr(ctx, wrapper, "URL",
-        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "documentURI",
-        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "baseURI",
-        JS_NewString(ctx, "about:blank"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "compatMode",
-        JS_NewString(ctx, "CSS1Compat"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "characterSet",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "charset",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "inputEncoding",
-        JS_NewString(ctx, "UTF-8"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "contentType",
-        JS_NewString(ctx, content_type), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "location", JS_NULL,
-        JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "ownerDocument", JS_NULL,
-        JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "nodeName",
-        JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
-        JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
-    ns_document_define_implementation_getter(ctx, wrapper);
-}
 
 static JSValue
 ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
@@ -31570,35 +31383,11 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
     }
     ns_node_append_child(html, body);
     g_hash_table_add(js->orphan_nodes, doc);
-    JSValue wrapper = ns_make_element(ctx, doc);
-    ns_document_init_synthetic(ctx, wrapper, "text/html");
-    ns_attach_document_view(ctx, wrapper, doc);
-    ns_bind_fn(ctx, wrapper, "createElement",
-               ns_document_createElement, 1);
-    ns_bind_fn(ctx, wrapper, "createElementNS",
-               ns_document_createElementNS, 2);
-    ns_bind_fn(ctx, wrapper, "createTextNode",
-               ns_document_createTextNode, 1);
-    ns_bind_fn(ctx, wrapper, "createComment",
-               ns_document_createComment, 1);
-    ns_bind_fn(ctx, wrapper, "createDocumentFragment",
-               ns_document_createDocumentFragment, 0);
-    ns_bind_fn(ctx, wrapper, "importNode",
-               ns_document_import_node, 2);
-    ns_bind_fn(ctx, wrapper, "adoptNode",
-               ns_document_adopt_node, 1);
-    ns_bind_fn(ctx, wrapper, "createCDATASection",
-               ns_document_createCDATASection, 1);
-    ns_bind_fn(ctx, wrapper, "createProcessingInstruction",
-               ns_document_createProcessingInstruction, 2);
-    ns_bind_fn(ctx, wrapper, "createAttribute",
-               ns_document_createAttribute, 1);
-    ns_bind_fn(ctx, wrapper, "createAttributeNS",
-               ns_document_createAttributeNS, 2);
-    ns_bind_fn(ctx, wrapper, "createRange",
-               ns_document_create_range, 0);
-    ns_synthdoc_define_getter(ctx, wrapper, "doctype",
-                              ns_synthdoc_get_doctype);
+    JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
+                                             "text/html", FALSE);
+    if (JS_IsObject(wrapper))
+        JS_DefinePropertyValueStr(ctx, wrapper, "defaultView", JS_NULL,
+                                  JS_PROP_C_W_E);
     g_free(title);
     return wrapper;
 }
@@ -31638,6 +31427,144 @@ ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj, const char *name,
     JS_FreeAtom(ctx, atom);
 }
 
+static ns_node *
+ns_synthdoc_html_node(JSValueConst this_val)
+{
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (!doc) return NULL;
+    for (ns_node *c = doc->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) return c;
+    return NULL;
+}
+
+static JSValue
+ns_synthdoc_get_body(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *html = ns_synthdoc_html_node(this_val);
+    if (!html) return JS_NULL;
+    for (ns_node *c = html->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (strcmp(c->name, "body") == 0 || strcmp(c->name, "frameset") == 0))
+            return ns_make_element(ctx, c);
+    return JS_NULL;
+}
+
+static JSValue
+ns_synthdoc_get_head(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *html = ns_synthdoc_html_node(this_val);
+    if (!html) return JS_NULL;
+    for (ns_node *c = html->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "head"))
+            return ns_make_element(ctx, c);
+    return JS_NULL;
+}
+
+static JSValue
+ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val)
+{
+    (void)this_val;
+    return JS_NewString(ctx, "");
+}
+
+static void
+ns_realmdoc_deny_cookie(JSContext *ctx, JSValueConst doc)
+{
+    if (!JS_IsObject(doc)) return;
+    JSAtom atom = JS_NewAtom(ctx, "cookie");
+    JSValue getter = JS_NewCFunction(ctx, ns_realmdoc_empty_cookie_get,
+                                     "get cookie", 0);
+    JS_DefinePropertyGetSet(ctx, doc, atom, getter, JS_UNDEFINED,
+                            JS_PROP_CONFIGURABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static JSValue
+ns_realmdoc_getElementById(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_NULL;
+    ns_node *root = ns_unwrap_element_mut(this_val);
+    if (!root) return JS_NULL;
+    const char *id = JS_ToCString(ctx, argv[0]);
+    if (!id) return JS_NULL;
+    ns_node *found = ns_node_find_by_id(root, id);
+    JS_FreeCString(ctx, id);
+    return found ? ns_make_element(ctx, found) : JS_NULL;
+}
+
+static JSValue
+ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
+                       const char *charset, const char *content_type,
+                       gboolean is_xml)
+{
+    if (!doc_node) return JS_NULL;
+    JSValue w = ns_make_element(ctx, doc_node);
+    if (!JS_IsObject(w)) return w;
+    if (is_xml) {
+        ns_document_use_xml_document_prototype(ctx, w);
+        JS_DefinePropertyValueStr(ctx, w, "__ndXmlDoc", JS_TRUE, 0);
+    } else {
+        ns_document_use_document_prototype(ctx, w);
+    }
+    const char *cs = (charset && *charset) ? charset : "UTF-8";
+    const char *ct = (content_type && *content_type) ? content_type
+                     : (is_xml ? "application/xml" : "text/html");
+    const char *u  = (url && *url) ? url : "about:blank";
+    JS_DefinePropertyValueStr(ctx, w, "URL", JS_NewString(ctx, u), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "documentURI",
+        JS_NewString(ctx, u), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "baseURI",
+        JS_NewString(ctx, u), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "compatMode",
+        JS_NewString(ctx, "CSS1Compat"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "characterSet",
+        JS_NewString(ctx, cs), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "charset",
+        JS_NewString(ctx, cs), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "inputEncoding",
+        JS_NewString(ctx, cs), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "contentType",
+        JS_NewString(ctx, ct), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "nodeType",
+        JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "nodeName",
+        JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "ownerDocument", JS_NULL, JS_PROP_C_W_E);
+    ns_synthdoc_define_getter(ctx, w, "documentElement",
+                              ns_synthdoc_get_documentElement);
+    ns_synthdoc_define_getter(ctx, w, "doctype", ns_synthdoc_get_doctype);
+    ns_synthdoc_define_getter(ctx, w, "body", ns_synthdoc_get_body);
+    ns_synthdoc_define_getter(ctx, w, "head", ns_synthdoc_get_head);
+    ns_document_define_implementation_getter(ctx, w);
+    ns_bind_fn(ctx, w, "createElement",      ns_document_createElement, 1);
+    ns_bind_fn(ctx, w, "createElementNS",    ns_document_createElementNS, 2);
+    ns_bind_fn(ctx, w, "createTextNode",     ns_document_createTextNode, 1);
+    ns_bind_fn(ctx, w, "createComment",      ns_document_createComment, 1);
+    ns_bind_fn(ctx, w, "createDocumentFragment",
+               ns_document_createDocumentFragment, 0);
+    ns_bind_fn(ctx, w, "createCDATASection", ns_document_createCDATASection, 1);
+    ns_bind_fn(ctx, w, "createProcessingInstruction",
+               ns_document_createProcessingInstruction, 2);
+    ns_bind_fn(ctx, w, "createAttribute",    ns_document_createAttribute, 1);
+    ns_bind_fn(ctx, w, "createAttributeNS",  ns_document_createAttributeNS, 2);
+    ns_bind_fn(ctx, w, "createRange",        ns_document_create_range, 0);
+    ns_bind_fn(ctx, w, "importNode",         ns_document_import_node, 2);
+    ns_bind_fn(ctx, w, "adoptNode",          ns_document_adopt_node, 1);
+    ns_bind_fn(ctx, w, "getElementById",     ns_realmdoc_getElementById, 1);
+    ns_bind_fn(ctx, w, "querySelector",      ns_element_querySelector, 1);
+    ns_bind_fn(ctx, w, "querySelectorAll",   ns_element_querySelectorAll, 1);
+    ns_bind_fn(ctx, w, "getElementsByTagName",
+               ns_element_getElementsByTagName, 1);
+    ns_bind_fn(ctx, w, "getElementsByClassName",
+               ns_element_getElementsByClassName, 1);
+    return w;
+}
+
 static JSValue
 ns_impl_associated_document(JSContext *ctx, JSValueConst this_val)
 {
@@ -31659,38 +31586,11 @@ ns_make_synth_xml_document(JSContext *ctx)
     if (!js) return JS_NULL;
     ns_node *doc = ns_node_new_document();
     g_hash_table_add(js->orphan_nodes, doc);
-    JSValue wrapper = ns_make_element(ctx, doc);
-    JS_DefinePropertyValueStr(ctx, wrapper, "__ndXmlDoc", JS_TRUE, 0);
-    ns_document_init_synthetic(ctx, wrapper, "application/xml");
-    ns_document_use_xml_document_prototype(ctx, wrapper);
-    ns_bind_fn(ctx, wrapper, "createElement",
-               ns_document_createElement, 1);
-    ns_bind_fn(ctx, wrapper, "createElementNS",
-               ns_document_createElementNS, 2);
-    ns_bind_fn(ctx, wrapper, "createTextNode",
-               ns_document_createTextNode, 1);
-    ns_bind_fn(ctx, wrapper, "createComment",
-               ns_document_createComment, 1);
-    ns_bind_fn(ctx, wrapper, "createCDATASection",
-               ns_document_createCDATASection, 1);
-    ns_bind_fn(ctx, wrapper, "createProcessingInstruction",
-               ns_document_createProcessingInstruction, 2);
-    ns_bind_fn(ctx, wrapper, "createAttribute",
-               ns_document_createAttribute, 1);
-    ns_bind_fn(ctx, wrapper, "createAttributeNS",
-               ns_document_createAttributeNS, 2);
-    ns_bind_fn(ctx, wrapper, "createDocumentFragment",
-               ns_document_createDocumentFragment, 0);
-    ns_bind_fn(ctx, wrapper, "importNode",
-               ns_document_import_node, 2);
-    ns_bind_fn(ctx, wrapper, "adoptNode",
-               ns_document_adopt_node, 1);
-    ns_bind_fn(ctx, wrapper, "createRange",
-               ns_document_create_range, 0);
-    ns_synthdoc_define_getter(ctx, wrapper, "documentElement",
-                              ns_synthdoc_get_documentElement);
-    ns_synthdoc_define_getter(ctx, wrapper, "doctype",
-                              ns_synthdoc_get_doctype);
+    JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
+                                             "application/xml", TRUE);
+    if (JS_IsObject(wrapper))
+        JS_DefinePropertyValueStr(ctx, wrapper, "defaultView", JS_NULL,
+                                  JS_PROP_C_W_E);
     return wrapper;
 }
 
@@ -35295,13 +35195,13 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         && strstr(resp->content_type, "html") == NULL;
 
     ns_node *content_root = NULL;
+    ns_node *content_doc = NULL;
     if (decoded) {
         ns_node *cdoc = ns_html_parse(decoded, (gssize)strlen(decoded));
         if (cdoc) {
-            content_root = ns_node_find_first_element(cdoc, "html");
-            if (is_plain_xml && content_root) {
-                ns_node *body = ns_node_find_first_element(content_root,
-                                                           "body");
+            ns_node *html = ns_node_find_first_element(cdoc, "html");
+            if (is_plain_xml && html) {
+                ns_node *body = ns_node_find_first_element(html, "body");
                 ns_node *root_el = NULL;
                 for (ns_node *c = body ? body->first_child : NULL; c;
                      c = c->next_sibling)
@@ -35309,39 +35209,45 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                         if (root_el) { root_el = NULL; break; }
                         root_el = c;
                     }
-                if (root_el) content_root = root_el;
+                if (root_el) {
+                    content_doc = ns_node_new_document();
+                    ns_node_remove(root_el);
+                    ns_node_append_child(content_doc, root_el);
+                    content_root = root_el;
+                    ns_node_free(cdoc);
+                }
             }
-            if (content_root) {
-                ns_node_remove(content_root);
-                ns_node_own_strings_deep(content_root);
-                ns_node_append_child(iframe, content_root);
+            if (!content_doc && html) {
+                content_doc = cdoc;
+                content_root = html;
+            } else if (!content_doc) {
+                ns_node_free(cdoc);
             }
-            ns_node_free(cdoc);
+            if (content_doc) {
+                ns_node_own_strings_deep(content_doc);
+                ns_node_append_child(iframe, content_doc);
+            }
         }
     }
 
-    if (content_root) {
+    if (content_root && content_doc) {
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
-        ns_js_record_child_change(js, iframe, content_root, NULL, NULL, NULL);
+        ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
 
         const char *iorigin = abs && *abs ? abs : origin;
         ns_js_mark_iframe_source(iframe, origin, abs);
         if (iorigin && js->current_url &&
             !ns_url_same_origin(iorigin, js->current_url))
             sandbox |= NS_FRAME_CROSS_ORIGIN;
-        JSValue realm_doc = ns_iframe_make_realm_doc(js->ctx, content_root,
-                                                     sandbox);
-        if (JS_IsObject(realm_doc)) {
-            const char *cs = ns_element_get_attr(iframe,
-                                                 "data-nd-frame-charset");
-            if (!cs || !*cs) cs = "UTF-8";
-            JS_SetPropertyStr(js->ctx, realm_doc, "characterSet",
-                              JS_NewString(js->ctx, cs));
-            JS_SetPropertyStr(js->ctx, realm_doc, "charset",
-                              JS_NewString(js->ctx, cs));
-            JS_SetPropertyStr(js->ctx, realm_doc, "inputEncoding",
-                              JS_NewString(js->ctx, cs));
-        }
+        const char *cs = ns_element_get_attr(iframe, "data-nd-frame-charset");
+        if (!cs || !*cs) cs = "UTF-8";
+        JSValue realm_doc = ns_make_realm_document(
+            js->ctx, content_doc, iorigin, cs,
+            resp ? resp->content_type : NULL, is_plain_xml);
+        if ((sandbox & NS_FRAME_CROSS_ORIGIN) ||
+            ((sandbox & NS_SANDBOX_ACTIVE) &&
+             !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)))
+            ns_realmdoc_deny_cookie(js->ctx, realm_doc);
         JSValue realm_scope = JS_NULL;
         if (JS_IsObject(realm_doc))
             realm_scope = ns_iframe_make_scope(js->ctx, realm_doc, iorigin,
