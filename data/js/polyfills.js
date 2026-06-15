@@ -922,16 +922,22 @@
                 "' on 'Document': parameter 1 is not of type 'Node'.");
     }
 
-    if (global.document) {
-        global.document.createTreeWalker = function (root, whatToShow, filter) {
+    function installTraversalFactories(target) {
+        if (!target) return;
+        target.createTreeWalker = function (root, whatToShow, filter) {
             requireNodeRoot(root, 'createTreeWalker');
             return makeTreeWalker(root, whatToShow, filter);
         };
-        global.document.createNodeIterator = function (root, whatToShow, filter) {
+        target.createNodeIterator = function (root, whatToShow, filter) {
             requireNodeRoot(root, 'createNodeIterator');
             return makeNodeIterator(root, whatToShow, filter);
         };
     }
+    installTraversalFactories(global.document);
+    try {
+        Object.defineProperty(global, '__ndInstallTraversal',
+            { value: installTraversalFactories });
+    } catch (e) {}
 
     try {
         var doc = global.document;

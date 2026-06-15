@@ -31946,6 +31946,15 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                ns_element_getElementsByTagName, 1);
     ns_bind_fn(ctx, w, "getElementsByClassName",
                ns_element_getElementsByClassName, 1);
+    {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue install = JS_GetPropertyStr(ctx, global, "__ndInstallTraversal");
+        if (JS_IsFunction(ctx, install))
+            JS_FreeValue(ctx, JS_Call(ctx, install, JS_UNDEFINED, 1,
+                                      (JSValueConst[]){ w }));
+        JS_FreeValue(ctx, install);
+        JS_FreeValue(ctx, global);
+    }
     return w;
 }
 
