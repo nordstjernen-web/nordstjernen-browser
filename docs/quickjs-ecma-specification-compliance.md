@@ -35,6 +35,7 @@ The known-failing baseline is captured in
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
 | RegExp `v` flag (unicodeSets) property escapes | ~10 | high | open |
 | RegExp `\p{Script=Unknown}` value | 6 | medium | open |
+| Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
 | Destructuring / computed-key evaluation order | ~8 | medium | open |
 | Module ambiguous star-export resolution | ~6 | medium | open |
 | AnnexB CallExpression assignment-target type | 7 | medium | open |
@@ -98,3 +99,35 @@ two arguments) in the length-tracking, `end`-undefined case, otherwise
 Covers test262
 `built-ins/TypedArray/prototype/subarray/speciesctor-get-species-custom-ctor-invocation.js`
 (plain + BigInt).
+
+### 3. Class field named `get`/`set` followed by a generator method (ASI)
+
+**Spec:** [Class definitions](https://tc39.es/ecma262/#sec-class-definitions)
+grammar. `get` and `set` introduce an accessor `MethodDefinition` only
+when a `ClassElementName` follows. A getter/setter can never be a
+generator, so `get` (or `set`) followed by `*` cannot be an accessor.
+When the `*` is on the next line, ASI terminates a `FieldDefinition`, so
+
+```js
+class C {
+  get
+  *gen() {}
+}
+```
+
+is a field named `get` followed by a generator method `gen` — both valid.
+
+**Bug:** `js_parse_property_name` treated any token after `get`/`set`
+other than `: , } ( = ;` as the start of an accessor name, so it tried to
+parse `*gen` as the getter's property name and raised
+`SyntaxError: invalid property name`.
+
+**Fix:** in a class body (`allow_private`), when `get`/`set` is followed
+by `*` with an intervening line terminator (`s->got_lf`), treat the
+keyword as a field name. The same construct without the line terminator
+(`get *gen(){}`) still has no ASI and stays a `SyntaxError`, and a real
+accessor (`get foo(){}`, even split across lines) is unaffected.
+`src/quickjs/quickjs.c`, `js_parse_property_name`.
+
+Covers test262
+`language/statements/class/elements/syntax/valid/grammar-field-named-{get,set}-followed-by-generator-asi.js`.
