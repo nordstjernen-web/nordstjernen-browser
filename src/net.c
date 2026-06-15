@@ -2189,6 +2189,12 @@ decode_data_base64_budgeted(const char *data,
     if (too_large) *too_large = FALSE;
     for (const char *p = data; *p; p++) {
         unsigned char c = (unsigned char)*p;
+        if (c == '%' && g_ascii_isxdigit((guchar)p[1]) &&
+            g_ascii_isxdigit((guchar)p[2])) {
+            c = (unsigned char)((g_ascii_xdigit_value(p[1]) << 4) |
+                                g_ascii_xdigit_value(p[2]));
+            p += 2;
+        }
         if (g_ascii_isspace(c)) continue;
         if (ended) return FALSE;
         if (c == '=') {

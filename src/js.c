@@ -33616,20 +33616,33 @@ ns_js_free(ns_js *js)
     }
     if (js->orphan_nodes) {
         GList *list = g_hash_table_get_keys(js->orphan_nodes);
-        g_hash_table_remove_all(js->orphan_nodes);
+        GPtrArray *roots = g_ptr_array_new();
         for (GList *l = list; l; l = l->next) {
             ns_node *node = l->data;
-            if (node && node->js_wrapper) {
+            if (!node) continue;
+            if (node->js_wrapper) {
                 JSValue v = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
                 JS_SetOpaque(v, NULL);
                 node->js_wrapper = NULL;
                 node->js_invalidate = NULL;
             }
-            ns_node_free(node);
+            gboolean owned = FALSE;
+            for (ns_node *a = node->parent; a; a = a->parent) {
+                if (a == js->current_doc ||
+                    g_hash_table_contains(js->orphan_nodes, a)) {
+                    owned = TRUE;
+                    break;
+                }
+            }
+            if (!owned)
+                g_ptr_array_add(roots, node);
         }
         g_list_free(list);
         g_hash_table_destroy(js->orphan_nodes);
         js->orphan_nodes = NULL;
+        for (guint i = 0; i < roots->len; i++)
+            ns_node_free(g_ptr_array_index(roots, i));
+        g_ptr_array_free(roots, TRUE);
     }
     if (js->iframe_globals) {
         g_hash_table_destroy(js->iframe_globals);
@@ -35607,6 +35620,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 if (root_el) {
                     content_doc = ns_node_new_document();
                     ns_node_remove(root_el);
+                    ns_node_own_strings_deep(root_el);
                     ns_node_append_child(content_doc, root_el);
                     content_root = root_el;
                     ns_node_free(cdoc);

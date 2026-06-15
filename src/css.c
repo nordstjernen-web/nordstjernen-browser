@@ -6243,11 +6243,13 @@ parse_declaration_block(const char **pp, const char *end,
         if (strcmp(pname, "border") == 0 || is_border_side) {
             char *tokens[4] = {0};
             int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
+            gboolean saw_color = FALSE, saw_width = FALSE, saw_style = FALSE;
             for (int i = 0; i < n; i++) {
                 guint8 r, g, b, a;
                 double num; ns_css_unit u;
                 if (parse_color(tokens[i], &r, &g, &b, &a) ||
                     is_color_keyword(tokens[i])) {
+                    saw_color = TRUE;
                     if (is_border_side) {
                         ns_css_value *v = parse_value_for(border_sides[side_idx].r, tokens[i]);
                         if (v) {
@@ -6265,6 +6267,7 @@ parse_declaration_block(const char **pp, const char *end,
                            g_ascii_strcasecmp(tokens[i], "thin") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "medium") == 0 ||
                            g_ascii_strcasecmp(tokens[i], "thick") == 0) {
+                    saw_width = TRUE;
                     if (is_border_side) {
                         ns_css_value *v = parse_value_for(border_sides[side_idx].t, tokens[i]);
                         if (v) {
@@ -6279,6 +6282,7 @@ parse_declaration_block(const char **pp, const char *end,
                             quad, 4, important);
                     }
                 } else {
+                    saw_style = TRUE;
                     if (is_border_side) {
                         ns_css_value *v = parse_value_for(border_sides[side_idx].b, tokens[i]);
                         if (v) {
@@ -6291,6 +6295,40 @@ parse_declaration_block(const char **pp, const char *end,
                             NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
                             NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
                             quad, 4, important);
+                    }
+                }
+            }
+            if (n > 0 && !(saw_color && saw_width && saw_style)) {
+                static const struct { ns_css_prop t, r, b, l; const char *def; }
+                    border_initials[3] = {
+                    { NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
+                      NS_CSS_BORDER_BOTTOM_COLOR, NS_CSS_BORDER_LEFT_COLOR,
+                      "currentcolor" },
+                    { NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH,
+                      NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_LEFT_WIDTH,
+                      "medium" },
+                    { NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+                      NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
+                      "none" },
+                };
+                gboolean seen[3] = { saw_color, saw_width, saw_style };
+                for (int k = 0; k < 3; k++) {
+                    if (seen[k]) continue;
+                    if (is_border_side) {
+                        ns_css_prop sp = k == 0 ? border_sides[side_idx].r
+                                       : k == 1 ? border_sides[side_idx].t
+                                                : border_sides[side_idx].b;
+                        ns_css_value *v = parse_value_for(sp, border_initials[k].def);
+                        if (v) {
+                            ns_css_decl d = { .prop = sp, .value = v, .important = important };
+                            g_array_append_val(decls_out, d);
+                        }
+                    } else {
+                        char *q = (char *)border_initials[k].def;
+                        char *quad[4] = { q, q, q, q };
+                        emit_quad(decls_out, border_initials[k].t, border_initials[k].r,
+                                  border_initials[k].b, border_initials[k].l,
+                                  quad, 4, important);
                     }
                 }
             }
