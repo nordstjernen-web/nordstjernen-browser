@@ -23,6 +23,9 @@ exactly the latest build. It contains:
 | Alpine (musl) binary zip | `alpine:edge` container | `linux/alpine/` |
 | Windows bundle (`.zip`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
 | macOS `.dmg` + binary | GitHub Actions `macos.yml` | `macos/` |
+| FreeBSD portable zip | GitHub Actions `freebsd.yml` (vmactions VM) | `freebsd/` |
+| OpenBSD portable zip | GitHub Actions `openbsd.yml` (vmactions VM) | `openbsd/` |
+| NetBSD portable zip | GitHub Actions `netbsd.yml` (vmactions VM) | `netbsd/` |
 | Java API jar + sources + javadoc + browsable API docs | `debian:trixie` container (native libs) + JDK 21 on the host | `java/` |
 
 Each Linux binary zip also bundles **`nordstjernen-qt`**, the experimental
@@ -59,6 +62,9 @@ current build (a platform that didn't build simply has no link):
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip` (Qt 6 frontend)
 - `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip` (musl)
+- `https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip`
+- `https://www.nordstjernen.org/nightly/nordstjernen-openbsd-x86_64.zip`
+- `https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java.jar`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar`
@@ -85,6 +91,19 @@ packages are built locally in distro containers so each binary links
 against that distro's own glibc / GTK, and the source tarball is a
 plain `git archive` (the engine — lexbor, quickjs, wuffs — is vendored
 in-tree, so the tarball is buildable fully offline).
+
+The FreeBSD, OpenBSD and NetBSD builds run the same way as Windows/macOS —
+driven through GitHub Actions — but GitHub has no native BSD runners, so
+`freebsd.yml` / `openbsd.yml` / `netbsd.yml` boot a BSD guest inside the
+Linux runner with the `vmactions/*-vm` actions, install the runtime
+dependencies from that OS's package collection (`pkg` / `pkg_add` /
+`pkgin`), build with meson, and `scripts/pack-bsd.sh` zips the binary plus
+the sandboxed renderer and runtime data. These zips are portable but not
+self-contained — GTK 4 and the other shared libraries come from the user's
+system (the bundled `INSTALL.md` lists the packages). The BSD workflows are
+`workflow_dispatch` + nightly `schedule` only (the VM boot makes them too
+slow for every push/PR), and the syscall sandbox (seccomp) is Linux-only,
+so it is compiled out on the BSDs.
 
 **The build server itself needs no GTK / curl / meson toolchain.** All
 compilation happens inside the distro containers or on the GitHub

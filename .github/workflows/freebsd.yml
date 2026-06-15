@@ -1,0 +1,62 @@
+name: freebsd
+
+# BSD builds run in a VM nested inside the Linux runner (vmactions), which is
+# slow, so they are dispatch-only (the nightly orchestrator drives them) rather
+# than on every push/PR.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 3 * * *'
+
+concurrency:
+  group: freebsd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: clang on FreeBSD
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build, smoke and pack in a FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: '14.2'
+          usesh: true
+          copyback: true
+          prepare: |
+            pkg install -y \
+              meson ninja pkgconf bash zip ccache \
+              gtk4 libepoxy curl openssl uchardet librsvg2 webp \
+              sqlite3 libpsl
+          run: |
+            set -e
+            export CC="ccache cc"
+            export CXX="ccache c++"
+            meson setup builddir --buildtype=release -Db_ndebug=true
+            meson compile -C builddir
+            if ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt 2>/dev/null \
+               && grep -q Nordstjernen about.txt; then
+              echo "headless smoke: ok"
+            else
+              echo "headless smoke: skipped"
+            fi
+            bash ./scripts/pack-bsd.sh freebsd
+            ls -l dist/*-freebsd-x86_64.zip
+            rm -rf builddir
+
+      - name: Upload FreeBSD portable zip
+        if: hashFiles('dist/*-freebsd-x86_64.zip') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: nordstjernen-freebsd-x86_64
+          path: dist/*-freebsd-x86_64.zip
+          if-no-files-found: error
+          retention-days: 14

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Nordstjernen nightly build orchestrator. Builds, from a single Linux host,
 # a source tarball, per-distro Linux packages (debian/ubuntu/opensuse/alpine
-# via containers, in parallel), and Windows + macOS builds (by driving the
-# GitHub Actions runners, dispatched up front so they run while the local
-# container builds proceed), then collects everything into $NIGHTLY_ROOT with
+# via containers, in parallel), and Windows, macOS and BSD (FreeBSD/OpenBSD/
+# NetBSD) builds (by driving the GitHub Actions runners, dispatched up front so
+# they run while the local container builds proceed), then collects everything
+# into $NIGHTLY_ROOT with
 # checksums, a manifest, and stable download symlinks. Intended to run
 # unattended from cron. See --help.
 set -uo pipefail
@@ -130,7 +131,8 @@ OUTDIR="$NIGHTLY_ROOT"
 WORK=$(mktemp -d)
 STATUSDIR="$WORK/status"
 mkdir -p "$OUTDIR" "$STATUSDIR"
-rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos" "$OUTDIR/java"
+rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos" "$OUTDIR/java" \
+       "$OUTDIR/freebsd" "$OUTDIR/openbsd" "$OUTDIR/netbsd"
 rm -f "$OUTDIR"/SHA256SUMS "$OUTDIR"/MANIFEST.txt "$OUTDIR"/nightly.log \
       "$OUTDIR"/nordstjernen-*
 LOG="$OUTDIR/nightly.log"
@@ -535,6 +537,9 @@ stage_stable_links() {
     link_stable nordstjernen-linux-qt-x86_64.zip 'linux/ubuntu/*-linux-qt-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.zip   'linux/alpine/*-linux-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.apk   'linux/alpine/*.apk'
+    link_stable nordstjernen-freebsd-x86_64.zip  'freebsd/*/*-freebsd-x86_64.zip'
+    link_stable nordstjernen-openbsd-x86_64.zip  'openbsd/*/*-openbsd-x86_64.zip'
+    link_stable nordstjernen-netbsd-x86_64.zip   'netbsd/*/*-netbsd-x86_64.zip'
     link_stable nordstjernen-x86_64.flatpak      'linux/flatpak/*.flatpak'
     link_stable nordstjernen-src.tar.xz          'source/*.tar.xz'
     link_stable nordstjernen-src.tar.gz          'source/*.tar.gz'
@@ -546,8 +551,12 @@ stage_stable_links() {
 if [ "$DO_GHA" = 1 ]; then
     gha_dispatch windows.yml windows
     gha_dispatch macos.yml   macos
+    gha_dispatch freebsd.yml freebsd
+    gha_dispatch openbsd.yml openbsd
+    gha_dispatch netbsd.yml  netbsd
 else
     skip "gha-windows"; skip "gha-macos"
+    skip "gha-freebsd"; skip "gha-openbsd"; skip "gha-netbsd"
 fi
 
 [ "$DO_TARBALL" = 1 ] && stage_tarball || skip "source-tarball"
@@ -569,6 +578,9 @@ fi
 if [ "$DO_GHA" = 1 ]; then
     gha_collect windows
     gha_collect macos
+    gha_collect freebsd
+    gha_collect openbsd
+    gha_collect netbsd
 fi
 
 [ "$DO_JAVA" = 1 ] && stage_java || skip "java"
