@@ -76,4 +76,203 @@
             }
         }
     });
+
+    function elementCenter(element) {
+        var x = 0, y = 0;
+        try {
+            var r = element.getBoundingClientRect();
+            x = r.left + r.width / 2;
+            y = r.top + r.height / 2;
+        } catch (e) {}
+        return { x: x, y: y };
+    }
+
+    function fireMouse(target, type, x, y, button) {
+        if (!target) return;
+        var ev;
+        try {
+            ev = new global.MouseEvent(type, {
+                bubbles: true, cancelable: true, composed: true,
+                view: global, button: button || 0,
+                clientX: x || 0, clientY: y || 0
+            });
+        } catch (e) {
+            ev = new global.Event(type, { bubbles: true, cancelable: true });
+        }
+        try { target.dispatchEvent(ev); } catch (e) {}
+    }
+
+    function firePointer(target, type, x, y, pointerType) {
+        if (!target) return;
+        var ev;
+        try {
+            ev = new global.PointerEvent(type, {
+                bubbles: true, cancelable: true, composed: true,
+                view: global, clientX: x || 0, clientY: y || 0,
+                pointerType: pointerType || 'mouse', isPrimary: true
+            });
+        } catch (e) {
+            try {
+                ev = new global.MouseEvent(type, {
+                    bubbles: true, cancelable: true, composed: true,
+                    clientX: x || 0, clientY: y || 0
+                });
+            } catch (e2) { return; }
+        }
+        try { target.dispatchEvent(ev); } catch (e) {}
+    }
+
+    function realClick(element) {
+        if (!element) return;
+        var c = elementCenter(element);
+        var pt = 'mouse';
+        firePointer(element, 'pointerover', c.x, c.y, pt);
+        firePointer(element, 'pointerenter', c.x, c.y, pt);
+        firePointer(element, 'pointerdown', c.x, c.y, pt);
+        fireMouse(element, 'mousedown', c.x, c.y, 0);
+        firePointer(element, 'pointerup', c.x, c.y, pt);
+        fireMouse(element, 'mouseup', c.x, c.y, 0);
+        try { element.click(); } catch (e) {}
+    }
+
+    function sendKeysTo(element, keys) {
+        if (!element) return;
+        try { element.focus(); } catch (e) {}
+        var doc = element.ownerDocument || global.document;
+        var active = (doc && doc.activeElement) || element;
+        for (var i = 0; i < keys.length; i++) {
+            var ch = keys[i];
+            var down, up;
+            try {
+                down = new global.KeyboardEvent('keydown',
+                    { bubbles: true, cancelable: true, key: ch });
+                up = new global.KeyboardEvent('keyup',
+                    { bubbles: true, cancelable: true, key: ch });
+            } catch (e) {
+                down = new global.Event('keydown', { bubbles: true, cancelable: true });
+                up = new global.Event('keyup', { bubbles: true, cancelable: true });
+            }
+            try { active.dispatchEvent(down); } catch (e) {}
+            if (active && 'value' in active && ch >= ' ') {
+                try {
+                    active.value += ch;
+                    active.dispatchEvent(new global.Event('input',
+                        { bubbles: true }));
+                } catch (e) {}
+            }
+            try { active.dispatchEvent(up); } catch (e) {}
+        }
+    }
+
+    function resolveOrigin(origin, state) {
+        if (origin && typeof origin === 'object' && origin.nodeType) {
+            var c = elementCenter(origin);
+            return { target: origin, x: c.x, y: c.y };
+        }
+        var x = state.x || 0, y = state.y || 0;
+        var target = state.target;
+        if (!target) {
+            try { target = global.document.elementFromPoint(x, y); } catch (e) {}
+        }
+        return { target: target, x: x, y: y };
+    }
+
+    function runPointerSource(src) {
+        var pt = (src.parameters && src.parameters.pointerType) || 'mouse';
+        var state = { x: 0, y: 0, target: null, downTarget: null };
+        var acts = src.actions || [];
+        for (var i = 0; i < acts.length; i++) {
+            var a = acts[i];
+            if (a.type === 'pointerMove') {
+                var r = resolveOrigin(a.origin, state);
+                state.x = (a.x || 0) + (a.origin && a.origin.nodeType ? r.x : 0);
+                state.y = (a.y || 0) + (a.origin && a.origin.nodeType ? r.y : 0);
+                state.target = r.target;
+                firePointer(state.target, 'pointermove', state.x, state.y, pt);
+                if (pt === 'mouse')
+                    fireMouse(state.target, 'mousemove', state.x, state.y, 0);
+            } else if (a.type === 'pointerDown') {
+                if (!state.target) state.target = resolveOrigin(null, state).target;
+                state.downTarget = state.target;
+                firePointer(state.target, 'pointerdown', state.x, state.y, pt);
+                if (pt === 'mouse')
+                    fireMouse(state.target, 'mousedown', state.x, state.y,
+                              a.button || 0);
+            } else if (a.type === 'pointerUp') {
+                firePointer(state.target, 'pointerup', state.x, state.y, pt);
+                if (pt === 'mouse')
+                    fireMouse(state.target, 'mouseup', state.x, state.y,
+                              a.button || 0);
+                if (state.target && state.target === state.downTarget) {
+                    try { state.target.click(); } catch (e) {}
+                }
+                state.downTarget = null;
+            }
+        }
+    }
+
+    function runKeySource(src) {
+        var acts = src.actions || [];
+        var doc = global.document;
+        var target = (doc && doc.activeElement) || (doc && doc.body);
+        for (var i = 0; i < acts.length; i++) {
+            var a = acts[i];
+            if (a.type !== 'keyDown' && a.type !== 'keyUp') continue;
+            var type = a.type === 'keyDown' ? 'keydown' : 'keyup';
+            var ev;
+            try {
+                ev = new global.KeyboardEvent(type,
+                    { bubbles: true, cancelable: true, key: a.value });
+            } catch (e) {
+                ev = new global.Event(type, { bubbles: true, cancelable: true });
+            }
+            try { (target || doc).dispatchEvent(ev); } catch (e) {}
+        }
+    }
+
+    function runActions(actions) {
+        if (!actions) return;
+        for (var i = 0; i < actions.length; i++) {
+            var src = actions[i];
+            if (!src) continue;
+            if (src.type === 'pointer') runPointerSource(src);
+            else if (src.type === 'key') runKeySource(src);
+        }
+    }
+
+    var bridge = {
+        click: function (element) {
+            return new Promise(function (resolve) {
+                try { realClick(element); } catch (e) {}
+                Promise.resolve().then(resolve);
+            });
+        },
+        send_keys: function (element, keys) {
+            return new Promise(function (resolve) {
+                try { sendKeysTo(element, keys); } catch (e) {}
+                Promise.resolve().then(resolve);
+            });
+        },
+        action_sequence: function (actions) {
+            return new Promise(function (resolve) {
+                try { runActions(actions); } catch (e) {}
+                Promise.resolve().then(resolve);
+            });
+        }
+    };
+
+    function patchInternal(obj) {
+        if (!obj || typeof obj !== 'object') return obj;
+        for (var k in bridge) {
+            try { obj[k] = bridge[k]; } catch (e) {}
+        }
+        return obj;
+    }
+
+    var internalStore;
+    Object.defineProperty(global, 'test_driver_internal', {
+        configurable: true,
+        get: function () { return internalStore; },
+        set: function (v) { internalStore = patchInternal(v); }
+    });
 })(typeof globalThis !== 'undefined' ? globalThis : this);
