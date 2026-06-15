@@ -13449,6 +13449,33 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             }
         }
     }
+    {
+        ns_css_value *disp = out->values[NS_CSS_DISPLAY];
+        if (disp && disp->kind == NS_CSS_V_KEYWORD && disp->u.keyword &&
+            strcmp(disp->u.keyword, "none") != 0) {
+            const ns_css_value *posv = out->values[NS_CSS_POSITION];
+            const ns_css_value *flt = out->values[NS_CSS_FLOAT];
+            gboolean out_of_flow =
+                posv && posv->kind == NS_CSS_V_KEYWORD && posv->u.keyword &&
+                (strcmp(posv->u.keyword, "absolute") == 0 ||
+                 strcmp(posv->u.keyword, "fixed") == 0);
+            if (!out_of_flow && flt && flt->kind == NS_CSS_V_KEYWORD &&
+                flt->u.keyword && strcmp(flt->u.keyword, "none") != 0)
+                out_of_flow = TRUE;
+            if (out_of_flow) {
+                const char *k = disp->u.keyword, *b = NULL;
+                if (strcmp(k, "inline") == 0 || strcmp(k, "inline-block") == 0 ||
+                    strcmp(k, "run-in") == 0)            b = "block";
+                else if (strcmp(k, "inline-table") == 0) b = "table";
+                else if (strcmp(k, "inline-flex") == 0)  b = "flex";
+                else if (strcmp(k, "inline-grid") == 0)  b = "grid";
+                if (b) {
+                    g_free(disp->u.keyword);
+                    disp->u.keyword = g_strdup(b);
+                }
+            }
+        }
+    }
     resolve_em_units(out, parent_style, root_px);
 }
 
