@@ -5591,6 +5591,32 @@ parse_value_for(ns_css_prop prop, const char *text)
         v->u.keyword = kw;
         break;
     }
+    case NS_CSS_CURSOR: {
+        if (strchr(t, '(')) {
+            char *kw = ascii_lower(t, strlen(t));
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = kw;
+            break;
+        }
+        char *kw = ascii_lower(t, strlen(t));
+        static const char *const ok[] = {
+            "auto", "default", "none", "context-menu", "help", "pointer",
+            "progress", "wait", "cell", "crosshair", "text", "vertical-text",
+            "alias", "copy", "move", "no-drop", "not-allowed", "grab",
+            "grabbing", "e-resize", "n-resize", "ne-resize", "nw-resize",
+            "s-resize", "se-resize", "sw-resize", "w-resize", "ew-resize",
+            "ns-resize", "nesw-resize", "nwse-resize", "col-resize",
+            "row-resize", "all-scroll", "zoom-in", "zoom-out" };
+        gboolean valid = FALSE;
+        for (gsize i = 0; i < G_N_ELEMENTS(ok); i++)
+            if (strcmp(kw, ok[i]) == 0) { valid = TRUE; break; }
+        if (!valid) { g_free(kw); g_free(t); return NULL; }
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = kw;
+        break;
+    }
     default: {
 
         char *kw = ascii_lower(t, strlen(t));
