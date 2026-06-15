@@ -34,13 +34,15 @@ jobs:
           prepare: |
             pkg install -y \
               meson ninja pkgconf bash zip ccache \
-              gtk4 libepoxy curl openssl uchardet librsvg2 webp \
+              gtk4 libepoxy curl uchardet librsvg2 webp \
               sqlite3 libpsl
           run: |
             set -e
             export CC="ccache cc"
             export CXX="ccache c++"
-            meson setup builddir --buildtype=release -Db_ndebug=true
+            # AI (llama.cpp) is a CMake subproject; skip it on the BSD VM
+            # builds to avoid the extra toolchain and a long C++ compile.
+            meson setup builddir --buildtype=release -Db_ndebug=true -Dai=disabled
             meson compile -C builddir
             if ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt 2>/dev/null \
                && grep -q Nordstjernen about.txt; then
