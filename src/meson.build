@@ -202,6 +202,17 @@ if host_machine.system() == 'windows'
   nordstjernen_link_args += ['-lbcrypt', '-ladvapi32', '-lshell32', '-luser32']
 endif
 
+# NetBSD pkgsrc gnutls (pulled in transitively) carries an undefined
+# reference to libc's mbrtoc32, which the hardened --no-undefined link
+# rejects even though the dynamic linker resolves it at runtime. Allow
+# undefined symbols originating from shared libraries on NetBSD only; our
+# own objects are still checked.
+if host_machine.system() == 'netbsd'
+  nordstjernen_link_args += cc.get_supported_link_arguments(
+    ['-Wl,--allow-shlib-undefined'],
+  )
+endif
+
 if host_machine.system() == 'windows'
   executable(
     'nordstjernen-launcher',
