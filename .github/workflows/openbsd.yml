@@ -33,11 +33,23 @@ jobs:
           prepare: |
             pkg_add -I \
               meson ninja pkgconf bash zip ccache \
-              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
+              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl \
+              eopenssl35
           run: |
             set -e
             export CC="ccache cc"
             export CXX="ccache c++"
+            # OpenBSD's base libcrypto is LibreSSL, which lacks OpenSSL 3's
+            # provider/OSSL_PARAM APIs (openssl/core_names.h) that
+            # src/webcrypto.c is written against. The eopenssl3x port installs
+            # a parallel OpenSSL 3 under /usr/local/{include,lib}/eopenssl3x;
+            # point pkg-config at it so dependency('libcrypto') resolves there.
+            eossl_pc=$(ls -d /usr/local/lib/eopenssl*/pkgconfig 2>/dev/null | sort -V | tail -1)
+            if [ -z "$eossl_pc" ]; then
+              echo "error: eopenssl pkg-config dir not found" >&2
+              exit 1
+            fi
+            export PKG_CONFIG_PATH="$eossl_pc:${PKG_CONFIG_PATH:-}"
             # AI (llama.cpp) is a CMake subproject; skip it on the BSD VM
             # builds to avoid the extra toolchain and a long C++ compile.
             # WAMR's posix platform layer uses MAP_32BIT, which OpenBSD does
