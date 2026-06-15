@@ -37,7 +37,6 @@ DO_TARBALL=1
 DO_DOCKER=1
 DO_GHA=1
 DO_JAVA=1
-DO_FLATPAK=1
 DATE=""
 
 usage() {
@@ -56,7 +55,6 @@ Options:
   --no-docker         Skip the Linux container builds.
   --no-gha            Skip driving Windows/macOS via GitHub Actions.
   --no-java           Skip the Java API jar/javadoc stage.
-  --no-flatpak        Skip the Flatpak bundle stage (built on the host).
   --no-parallel       Build the Linux containers one at a time.
   --no-pull           Don't fast-forward the working tree to origin/main first.
   -h, --help          Show this help.
@@ -89,7 +87,6 @@ while [ $# -gt 0 ]; do
         --no-docker)  DO_DOCKER=0; shift ;;
         --no-gha)     DO_GHA=0; shift ;;
         --no-java)    DO_JAVA=0; shift ;;
-        --no-flatpak) DO_FLATPAK=0; shift ;;
         --no-parallel) NIGHTLY_PARALLEL=0; shift ;;
         --no-pull)    NIGHTLY_PULL=0; shift ;;
         -h|--help)    usage; exit 0 ;;
@@ -387,29 +384,6 @@ gha_collect() {
     fi
 }
 
-stage_flatpak() {
-    log "Stage: Flatpak bundle (host build, GNOME runtime)"
-    local key="flatpak"
-    if ! command -v flatpak-builder >/dev/null 2>&1 \
-       && ! flatpak info org.flatpak.Builder >/dev/null 2>&1; then
-        fail "$key" "flatpak-builder not found on host; install flatpak-builder or the org.flatpak.Builder flatpak"
-        return
-    fi
-    local dst="$OUTDIR/linux/flatpak"
-    mkdir -p "$dst"
-    local blog="$dst/build.log"
-    if "$ROOT/scripts/pack-flatpak.sh" > "$blog" 2>&1; then
-        local n=0
-        for f in "$ROOT"/dist/*.flatpak; do
-            [ -e "$f" ] || continue
-            cp -f "$f" "$dst/" && n=$((n + 1))
-        done
-        if [ "$n" -gt 0 ]; then ok "$key"; else fail "$key" "no .flatpak produced (see $blog)"; fi
-    else
-        fail "$key" "pack-flatpak.sh failed (see $blog)"
-    fi
-}
-
 stage_java() {
     log "Stage: Java (runnable fat jar + sources + javadoc)"
     local key="java"
@@ -540,7 +514,6 @@ stage_stable_links() {
     link_stable nordstjernen-freebsd-x86_64.zip  'freebsd/*/*-freebsd-x86_64.zip'
     link_stable nordstjernen-openbsd-x86_64.zip  'openbsd/*/*-openbsd-x86_64.zip'
     link_stable nordstjernen-netbsd-x86_64.zip   'netbsd/*/*-netbsd-x86_64.zip'
-    link_stable nordstjernen-x86_64.flatpak      'linux/flatpak/*.flatpak'
     link_stable nordstjernen-src.tar.xz          'source/*.tar.xz'
     link_stable nordstjernen-src.tar.gz          'source/*.tar.gz'
 }
@@ -584,8 +557,6 @@ if [ "$DO_GHA" = 1 ]; then
 fi
 
 [ "$DO_JAVA" = 1 ] && stage_java || skip "java"
-
-[ "$DO_FLATPAK" = 1 ] && stage_flatpak || skip "flatpak"
 
 stage_stable_links
 
