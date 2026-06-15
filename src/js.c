@@ -27866,9 +27866,11 @@ ns_document_getElementById(JSContext *ctx, JSValueConst this_val, int argc, JSVa
 {
     (void)this_val;
     if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc || argc < 1) return JS_NULL;
-    const char *id = JS_ToCString(ctx, argv[0]);
+    size_t len = 0;
+    const char *id = JS_ToCStringLen(ctx, &len, argv[0]);
     if (!id) return JS_NULL;
-    ns_node *found = ns_node_find_by_id(js_from_ctx(ctx)->current_doc, id);
+    ns_node *found = strlen(id) == len
+        ? ns_node_find_by_id(js_from_ctx(ctx)->current_doc, id) : NULL;
     JS_FreeCString(ctx, id);
     return ns_make_element(ctx, found);
 }
@@ -27879,9 +27881,11 @@ ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
 {
     const ns_node *root = ns_unwrap_element(this_val);
     if (!root || argc < 1) return JS_NULL;
-    const char *id = JS_ToCString(ctx, argv[0]);
+    size_t len = 0;
+    const char *id = JS_ToCStringLen(ctx, &len, argv[0]);
     if (!id) return JS_NULL;
-    ns_node *found = ns_node_find_by_id((ns_node *)root, id);
+    ns_node *found = strlen(id) == len
+        ? ns_node_find_by_id((ns_node *)root, id) : NULL;
     JS_FreeCString(ctx, id);
     return ns_make_element(ctx, found);
 }
@@ -31223,9 +31227,10 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
     if (!js_from_ctx(ctx) || argc < 1) return JS_NULL;
-    const char *name = JS_ToCString(ctx, argv[0]);
+    size_t name_len = 0;
+    const char *name = JS_ToCStringLen(ctx, &name_len, argv[0]);
     if (!name) return JS_NULL;
-    if (!ns_valid_element_local_name(name)) {
+    if (strlen(name) != name_len || !ns_valid_element_local_name(name)) {
         JS_FreeCString(ctx, name);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
                                       "invalid element name");
