@@ -213,7 +213,7 @@ fi
 rm -f "$DMG"
 if ! hdiutil create -volname "Nordstjernen ${VERSION}" \
     -srcfolder "$STAGE" \
-    -ov -format UDZO \
+    -ov -format UDZO -imagekey zlib-level=1 \
     "$DMG"; then
     echo "pack-macos.sh: hdiutil create failed" >&2
     ls -la "$STAGE" || true

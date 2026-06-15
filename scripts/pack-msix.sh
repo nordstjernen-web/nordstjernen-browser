@@ -73,15 +73,25 @@ render_wide_scaled() {
             $(( ($2 * scale + 50) / 100 )) $(( ($3 * scale + 50) / 100 ))
     done
 }
-render_scaled StoreLogo 50
-render_scaled Square44x44Logo 44
-render_scaled Square71x71Logo 71
-render_scaled Square150x150Logo 150
-render_scaled Square310x310Logo 310
-render_wide_scaled Wide310x150Logo 310 150
+render_pids=()
+render_in_background() { "$@" & render_pids+=($!); }
+
+render_in_background render_scaled StoreLogo 50
+render_in_background render_scaled Square44x44Logo 44
+render_in_background render_scaled Square71x71Logo 71
+render_in_background render_scaled Square150x150Logo 150
+render_in_background render_scaled Square310x310Logo 310
+render_in_background render_wide_scaled Wide310x150Logo 310 150
 for ts in 16 24 32 48 256; do
-    render_asset "Square44x44Logo.targetsize-$ts.png" "$ts"
-    render_asset "Square44x44Logo.targetsize-${ts}_altform-unplated.png" "$ts"
+    render_in_background render_asset "Square44x44Logo.targetsize-$ts.png" "$ts"
+    render_in_background render_asset "Square44x44Logo.targetsize-${ts}_altform-unplated.png" "$ts"
+done
+
+for pid in "${render_pids[@]}"; do
+    if ! wait "$pid"; then
+        echo "pack-msix: asset rendering failed" >&2
+        exit 1
+    fi
 done
 
 sed -e "s|@MSIX_VERSION@|$MSIX_VERSION|g" \
