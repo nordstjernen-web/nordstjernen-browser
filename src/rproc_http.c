@@ -525,7 +525,8 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         head.x_h < 1 || head.x_h > r->max_h ||
         head.x_stride < head.x_w * 4 || head.x_stride > (long)r->max_w * 4)
         return -1;
-    if (!r->shm && head.content_length < head.x_stride * head.x_h)
+    if (!r->shm && (uint64_t)head.content_length <
+            (uint64_t)head.x_stride * (uint64_t)head.x_h)
         return -1;
     out->ok = 1;
     out->width = (int)head.x_w;
@@ -993,7 +994,8 @@ ns_rproc_http_favicon(ns_rproc_http *r, int *out_w, int *out_h, int *out_stride)
     }
     if (head.x_w < 1 || head.x_w > 1024 || head.x_h < 1 || head.x_h > 1024 ||
         head.x_stride < head.x_w * 4 || head.x_stride > (long)1024 * 4 ||
-        head.x_stride * head.x_h > head.content_length) {
+        (uint64_t)head.x_stride * (uint64_t)head.x_h >
+            (uint64_t)head.content_length) {
         free(body);
         return NULL;
     }

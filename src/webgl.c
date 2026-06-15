@@ -736,6 +736,20 @@ wgl_flip_rows(const uint8_t *src, int w, int h, int bpp)
     return dst;
 }
 
+static gboolean
+wgl_flip_safe(ns_webgl *g, int w, int h, int format, int type,
+              size_t need, size_t len)
+{
+    if (!g->unpack_flip_y || type != GL_UNSIGNED_BYTE) return FALSE;
+    int bpp = wgl_components(format);
+    size_t tight;
+    if (__builtin_mul_overflow((size_t)w, (size_t)h, &tight) ||
+        __builtin_mul_overflow(tight, (size_t)bpp, &tight))
+        return FALSE;
+    if (need != tight) return FALSE;
+    return wgl_flip_fits(w, h, bpp, len);
+}
+
 #define WGL_GET(name) \
     ns_webgl *g = wgl_cur(ctx, this_val); \
     if (!g) return JS_UNDEFINED; \
@@ -1925,8 +1939,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (!px) {
             zero = need ? g_try_malloc0(need) : NULL;
             px = zero;
-        } else if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
-                   wgl_flip_fits(w, h, wgl_components(format), len)) {
+        } else if (wgl_flip_safe(g, w, h, format, type, need, len)) {
             flipped = wgl_flip_rows(px, w, h, wgl_components(format));
             if (flipped) px = flipped;
         }
@@ -1949,8 +1962,7 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
-            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
-                wgl_flip_fits(w, h, wgl_components(format), len)) {
+            if (wgl_flip_safe(g, w, h, format, type, need, len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }
@@ -1996,8 +2008,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
             return JS_UNDEFINED;
         }
         uint8_t *flipped = NULL;
-        if (px && g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
-            wgl_flip_fits(w, h, wgl_components(format), len)) {
+        if (px && wgl_flip_safe(g, w, h, format, type, need, len)) {
             flipped = wgl_flip_rows(px, w, h, wgl_components(format));
             if (flipped) px = flipped;
         }
@@ -2020,8 +2031,7 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         if (px && w > 0 && h > 0 && need > 0 && need <= NS_WEBGL_MAX_ALLOC &&
             len >= need) {
             uint8_t *flipped = NULL;
-            if (g->unpack_flip_y && type == GL_UNSIGNED_BYTE &&
-                wgl_flip_fits(w, h, wgl_components(format), len)) {
+            if (wgl_flip_safe(g, w, h, format, type, need, len)) {
                 flipped = wgl_flip_rows(px, w, h, wgl_components(format));
                 if (flipped) px = flipped;
             }

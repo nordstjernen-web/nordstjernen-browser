@@ -335,6 +335,7 @@ ns_crypto_import_rsa_jwk(const guint8 *n, gsize n_len, const guint8 *e, gsize e_
     } else {
         ns_crypto_err(err, "DataError: RSA JWK import");
     }
+    if (!k && pkey) EVP_PKEY_free(pkey);
     OSSL_PARAM_free(params);
     OSSL_PARAM_BLD_free(bld);
     EVP_PKEY_CTX_free(ctx);
@@ -388,6 +389,7 @@ ns_crypto_import_ec_jwk(const char *curve, const guint8 *x, gsize x_len,
     } else {
         ns_crypto_err(err, "DataError: EC JWK import");
     }
+    if (!k && pkey) EVP_PKEY_free(pkey);
     OSSL_PARAM_free(params);
     OSSL_PARAM_BLD_free(bld);
     EVP_PKEY_CTX_free(ctx);
