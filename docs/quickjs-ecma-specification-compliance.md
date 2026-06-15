@@ -40,7 +40,7 @@ The known-failing baseline is captured in
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
 | Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
 | Destructuring assignment-target evaluation order | ~6 | medium | open |
-| Module ambiguous star-export resolution | ~6 | medium | open |
+| Module star-export of the same namespace is unambiguous | ~5 | medium | **done** |
 | AnnexB CallExpression assignment-target type | 7 | medium | open |
 
 ## Changes
@@ -253,3 +253,30 @@ the no-close behavior per spec. `src/quickjs/quickjs.c`.
 
 Covers test262
 `built-ins/AsyncFromSyncIteratorPrototype/{next,throw}/*-{rejected-promise-close,poisoned-wrapper}.js`.
+
+### 8. `ResolveExport` treats the same re-exported namespace as unambiguous
+
+**Spec:** [`ResolveExport`](https://tc39.es/ecma262/#sec-resolveexport).
+When a name is found through several `export *` stars, the results are
+ambiguous only if they denote different bindings: *different Module
+Record* **or** *different BindingName*. A `export * as ns from "mod"`
+binding's identity is `{ [[Module]]: mod, [[BindingName]]: namespace }` —
+the *imported* module, not the re-exporting one — so the same namespace
+re-exported through two different modules is a single binding.
+
+**Bug:** `js_resolve_export1` compared the re-exporting module and the raw
+entry `local_name`, so two modules each doing `export * as foo from
+"./common.js"` (both re-exported by a third) were reported as
+`ambiguous` even though they resolve to the same `common` namespace.
+
+**Fix:** add `js_resolved_export_binding`, which maps a resolved entry to
+its canonical `(Module, BindingName)` — for a `export * as ns` entry
+(`local_name == JS_ATOM__star_`) that is the imported module plus the
+`namespace` marker. The star-merge step compares those canonical
+bindings. Genuinely distinct bindings (two local exports, or namespaces of
+*different* modules sharing an export name) still resolve to `ambiguous`.
+`src/quickjs/quickjs.c`, `js_resolve_export1`.
+
+Covers test262
+`language/module-code/ambiguous-export-bindings/namespace-unambiguous-if-*.js`
+and `import-and-export-propagates-binding.js`.
