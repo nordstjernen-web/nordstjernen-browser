@@ -31,7 +31,8 @@ The known-failing baseline is captured in
 | TypedArray `[[Set]]` value-coercion on invalid index | ~12 | low | **done** |
 | `with` / Proxy / `Symbol.unscopables` trap ordering | ~10 | medium | open |
 | AsyncFromSyncIterator close ordering on rejected promises | ~8 | medium | open |
-| TypedArray `subarray`/`slice` species-ctor + detach | ~8 | medium | open |
+| TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
+| TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
 | RegExp `v` flag (unicodeSets) property escapes | ~10 | high | open |
 | RegExp `\p{Script=Unknown}` value | 6 | medium | open |
 | Destructuring / computed-key evaluation order | ~8 | medium | open |
@@ -75,3 +76,25 @@ seen = false; Reflect.set(ta, 10, v, 5);             // false (primitive receive
 seen = false; Object.create(ta)[10] = v;             // false (prototype chain)
 seen = false; Reflect.set(ta, 10, v, ta);            // true  (receiver IS ta)
 ```
+
+### 2. `%TypedArray%.prototype.subarray` omits the length argument for a length-tracking source
+
+**Spec:** [`%TypedArray%.prototype.subarray`](https://tc39.es/ecma262/#sec-%typedarray%.prototype.subarray)
+step 13: when `O.[[ArrayLength]]` is `auto` (a length-tracking view over a
+resizable `ArrayBuffer`) **and** `end` is `undefined`, the argument list
+handed to `TypedArraySpeciesCreate` is `« buffer, 𝔽(beginByteOffset) »` —
+two arguments. Only when an explicit `end` is given (step 14) is the
+computed `newLength` appended as a third argument.
+
+**Bug:** `js_typed_array_subarray` always passed four entries to
+`js_typed_array___speciesCreate` (which forwards all but the first), so a
+length-tracking `subarray(start)` invoked the species constructor with
+`(buffer, byteOffset, undefined)` instead of `(buffer, byteOffset)`.
+
+**Fix:** call `js_typed_array___speciesCreate` with `argc == 3` (forwards
+two arguments) in the length-tracking, `end`-undefined case, otherwise
+`argc == 4`. `src/quickjs/quickjs.c`, `js_typed_array_subarray`.
+
+Covers test262
+`built-ins/TypedArray/prototype/subarray/speciesctor-get-species-custom-ctor-invocation.js`
+(plain + BigInt).

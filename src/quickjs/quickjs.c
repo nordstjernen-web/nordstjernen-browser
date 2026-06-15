@@ -59870,10 +59870,13 @@ static JSValue js_typed_array_subarray(JSContext *ctx, JSValueConst this_val,
     args[1] = safe_const(ta_buffer);
     args[2] = safe_const(js_int32(offset));
     args[3] = safe_const(js_int32(count));
-    // result is length-tracking if source TA is and no explicit count is given
+    // result is length-tracking if source TA is and no explicit count is
+    // given; in that case the spec omits the length argument entirely
+    // rather than passing undefined
     if (ta->track_rab && JS_IsUndefined(argv[1]))
-        args[3] = JS_UNDEFINED;
-    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args);
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 3, args);
+    else
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args);
     JS_FreeValue(ctx, ta_buffer);
     return arr;
  exception:
