@@ -31465,9 +31465,10 @@ ns_synthdoc_get_head(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val)
+ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
 {
-    (void)this_val;
+    (void)this_val; (void)argc; (void)argv;
     return JS_NewString(ctx, "");
 }
 
