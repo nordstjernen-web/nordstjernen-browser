@@ -69,7 +69,11 @@ if [ "$LIST" -eq 0 ] && [ ! -x "$BIN" ]; then
 fi
 
 host=$(echo "$BASE" | sed -E 's#^[a-z]+://##; s#[:/].*$##')
-if [ "$LIST" -eq 0 ] && ! getent hosts "$host" >/dev/null 2>&1; then
+case "$host" in
+    localhost|127.0.0.1|::1|*.*.*.*) host_ok=1 ;;
+    *) command -v getent >/dev/null 2>&1 && getent hosts "$host" >/dev/null 2>&1 && host_ok=1 || host_ok=0 ;;
+esac
+if [ "$LIST" -eq 0 ] && [ "$host_ok" -eq 0 ]; then
     echo "error: '$host' does not resolve. WPT needs its hosts entries:" >&2
     echo "  cd $WPT_ROOT && ./wpt make-hosts-file | sudo tee -a /etc/hosts" >&2
     echo "(or pass --base=http://localhost:8000 for origin-insensitive tests)" >&2

@@ -1765,9 +1765,8 @@ about_read_first(const char *const *rel_paths, gsize *out_len)
     return contents;
 }
 
-#if defined(__ANDROID__)
 static const char *
-about_logo_data_uri(void)
+about_logo_png_fallback(void)
 {
     return "data:image/png;base64,"
            "iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAABmJLR0QA/wD/AP+gvaeTAAAO20lE"
@@ -1840,18 +1839,40 @@ about_logo_data_uri(void)
            "fBH/qFmlAC8jwoxv9VB4obbrwEejkCaCe1uVx5zJ7tNs4ZkCwf8B9ekLQ1VEh84AAAAASUVORK5C"
            "YII=";
 }
-#endif
+
+static const char *
+about_logo_data_uri(void)
+{
+    static char *cached = NULL;
+    if (cached) return cached;
+
+    static const char *const gif_paths[] = {
+        "share/icons/hicolor/scalable/apps/nordstjernen.gif",
+        "../share/icons/hicolor/scalable/apps/nordstjernen.gif",
+        "../../data/icons/hicolor/scalable/apps/nordstjernen.gif",
+        "data/icons/hicolor/scalable/apps/nordstjernen.gif",
+        NULL,
+    };
+    gsize gif_len = 0;
+    char *gif = about_read_first(gif_paths, &gif_len);
+    if (gif) {
+        gchar *b64 = g_base64_encode((const guchar *)gif, gif_len);
+        g_free(gif);
+        cached = g_strconcat("data:image/gif;base64,", b64, NULL);
+        g_free(b64);
+        return cached;
+    }
+
+    cached = g_strdup(about_logo_png_fallback());
+    return cached;
+}
 
 static char *
 about_logo_markup(void)
 {
-#if defined(__ANDROID__)
     return g_strdup_printf("<img class=\"mark-img\" src=\"%s\" alt=\"\" "
                            "aria-hidden=\"true\">",
                            about_logo_data_uri());
-#else
-    return g_strdup("<div class=\"mark\" aria-hidden=\"true\">N</div>");
-#endif
 }
 
 static char *

@@ -211,12 +211,14 @@ ns_win32_args_need_console(int argc, char **argv)
         if (!argv[i]) continue;
         if (g_strcmp0(argv[i], "--headless")     == 0 ||
             g_strcmp0(argv[i], "--print-config") == 0 ||
+            g_strcmp0(argv[i], "--wpt")          == 0 ||
             g_str_has_prefix(argv[i], "--dump=") ||
             g_str_has_prefix(argv[i], "--url=")  ||
             g_str_has_prefix(argv[i], "--viewport=") ||
             g_str_has_prefix(argv[i], "--eval=") ||
             g_str_has_prefix(argv[i], "--inspect=") ||
             g_str_has_prefix(argv[i], "--inspect-at=") ||
+            g_str_has_prefix(argv[i], "--wpt-timeout-ms=") ||
             g_str_has_prefix(argv[i], "--settle-ms="))
             return TRUE;
     }
