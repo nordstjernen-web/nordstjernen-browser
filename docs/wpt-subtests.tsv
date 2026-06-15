@@ -56704,46 +56704,46 @@ test	subtest	status
 /dom/ranges/tentative/OpaqueRange-validation.html	createValueRange throws IndexSizeError for out-of-bounds offsets.	FAIL
 /dom/traversal/NodeFilter-constants.html	<harness>	OK
 /dom/traversal/NodeFilter-constants.html	Constants for acceptNode on NodeFilter interface object.	PASS
-/dom/traversal/NodeFilter-constants.html	Constants for whatToShow on NodeFilter interface object.	FAIL
+/dom/traversal/NodeFilter-constants.html	Constants for whatToShow on NodeFilter interface object.	PASS
 /dom/traversal/NodeIterator-removal.html	<harness>	OK
-/dom/traversal/NodeIterator-removal.html	Test removing node comment	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1.firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2.firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node doctype	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignComment	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignDoctype	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1.firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara2	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignTextNode	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[0]	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[0].firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[1]	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[1].firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[5].firstChild	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node processingInstruction	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node testDiv	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlComment	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlDoctype	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlElement	PASS
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlTextNode	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node comment	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1.firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2.firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node doctype	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignComment	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignDoctype	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1.firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara2	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignTextNode	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[0]	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[0].firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[1]	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[1].firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[5].firstChild	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node processingInstruction	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node testDiv	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlComment	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlDoctype	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlElement	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlTextNode	FAIL
 /dom/traversal/NodeIterator.html	<harness>	OK
 /dom/traversal/NodeIterator.html	Propagate exception from filter function	PASS
-/dom/traversal/NodeIterator.html	Recursive filters need to throw	FAIL
-/dom/traversal/NodeIterator.html	createNodeIterator() parameter defaults	FAIL
-/dom/traversal/NodeIterator.html	createNodeIterator() with null as arguments	FAIL
-/dom/traversal/NodeIterator.html	createNodeIterator() with undefined as arguments	FAIL
+/dom/traversal/NodeIterator.html	Recursive filters need to throw	PASS
+/dom/traversal/NodeIterator.html	createNodeIterator() parameter defaults	PASS
+/dom/traversal/NodeIterator.html	createNodeIterator() with null as arguments	PASS
+/dom/traversal/NodeIterator.html	createNodeIterator() with undefined as arguments	PASS
 /dom/traversal/NodeIterator.html	detach() should be a no-op	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(comment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56761,9 +56761,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56781,29 +56781,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedDiv, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56821,9 +56821,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedForeignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56841,29 +56841,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56881,29 +56881,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56922,8 +56922,8 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedProcessingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56941,9 +56941,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56961,9 +56961,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -56982,28 +56982,28 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlElement, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(detachedXmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57021,9 +57021,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57042,8 +57042,8 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57061,29 +57061,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57101,29 +57101,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoc, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57142,8 +57142,8 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57161,29 +57161,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57201,29 +57201,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignPara2, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57241,29 +57241,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0], NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57281,29 +57281,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1], NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57321,9 +57321,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57342,8 +57342,8 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57361,29 +57361,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(testDiv, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57401,29 +57401,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoc, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57442,8 +57442,8 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57461,29 +57461,29 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlElement, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57511,41 +57511,41 @@ test	subtest	status
 /dom/traversal/TreeWalker-acceptNode-filter.html	Testing with function having acceptNode function	PASS
 /dom/traversal/TreeWalker-acceptNode-filter.html	Testing with null filter	PASS
 /dom/traversal/TreeWalker-acceptNode-filter.html	Testing with object filter	PASS
-/dom/traversal/TreeWalker-acceptNode-filter.html	Testing with object lacking acceptNode property	FAIL
-/dom/traversal/TreeWalker-acceptNode-filter.html	Testing with object with non-function acceptNode property	FAIL
+/dom/traversal/TreeWalker-acceptNode-filter.html	Testing with object lacking acceptNode property	PASS
+/dom/traversal/TreeWalker-acceptNode-filter.html	Testing with object with non-function acceptNode property	PASS
 /dom/traversal/TreeWalker-acceptNode-filter.html	Testing with raw function filter	PASS
 /dom/traversal/TreeWalker-acceptNode-filter.html	Testing with undefined filter	PASS
-/dom/traversal/TreeWalker-acceptNode-filter.html	performs `Get` on every traverse	FAIL
-/dom/traversal/TreeWalker-acceptNode-filter.html	rethrows errors when getting `acceptNode`	FAIL
+/dom/traversal/TreeWalker-acceptNode-filter.html	performs `Get` on every traverse	PASS
+/dom/traversal/TreeWalker-acceptNode-filter.html	rethrows errors when getting `acceptNode`	PASS
 /dom/traversal/TreeWalker-basic.html	<harness>	OK
-/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root).	FAIL
-/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root, null, null).	FAIL
-/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root, undefined, undefined).	FAIL
-/dom/traversal/TreeWalker-basic.html	Give an invalid root node to document.createTreeWalker().	FAIL
+/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root).	PASS
+/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root, null, null).	PASS
+/dom/traversal/TreeWalker-basic.html	Construct a TreeWalker by document.createTreeWalker(root, undefined, undefined).	PASS
+/dom/traversal/TreeWalker-basic.html	Give an invalid root node to document.createTreeWalker().	PASS
 /dom/traversal/TreeWalker-basic.html	Optional arguments to createTreeWalker should be optional (3 passed, null).	PASS
 /dom/traversal/TreeWalker-basic.html	Walk over nodes.	PASS
 /dom/traversal/TreeWalker-currentNode.html	<harness>	OK
-/dom/traversal/TreeWalker-currentNode.html	Test how we handle the case when the traversed to node is within the root, but the currentElement is not.	FAIL
+/dom/traversal/TreeWalker-currentNode.html	Test how we handle the case when the traversed to node is within the root, but the currentElement is not.	PASS
 /dom/traversal/TreeWalker-currentNode.html	Test that TreeWalker.parent() doesn't set the currentNode to a node not under the root.	PASS
-/dom/traversal/TreeWalker-currentNode.html	Test that setting currentNode to non-Node values throws.	FAIL
-/dom/traversal/TreeWalker-currentNode.html	Test that we handle setting the currentNode to arbitrary nodes not under the root element.	FAIL
+/dom/traversal/TreeWalker-currentNode.html	Test that setting currentNode to non-Node values throws.	PASS
+/dom/traversal/TreeWalker-currentNode.html	Test that we handle setting the currentNode to arbitrary nodes not under the root element.	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	<harness>	OK
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null after exhausting a detached subtree	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null when currentNode is a detached element with no descendants and whatToShow does not match it	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() terminates when iterating over template.content not under the walker's root	PASS
 /dom/traversal/TreeWalker-previousNodeLastChildReject.html	<harness>	OK
-/dom/traversal/TreeWalker-previousNodeLastChildReject.html	Test that previousNode properly respects the filter.	FAIL
+/dom/traversal/TreeWalker-previousNodeLastChildReject.html	Test that previousNode properly respects the filter.	PASS
 /dom/traversal/TreeWalker-previousSiblingLastChildSkip.html	<harness>	OK
-/dom/traversal/TreeWalker-previousSiblingLastChildSkip.html	Test that previousSibling properly respects the filter.	FAIL
+/dom/traversal/TreeWalker-previousSiblingLastChildSkip.html	Test that previousSibling properly respects the filter.	PASS
 /dom/traversal/TreeWalker-realm.html	<harness>	OK
 /dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm	FAIL
 /dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm with acceptNode	FAIL
 /dom/traversal/TreeWalker-traversal-reject.html	<harness>	OK
 /dom/traversal/TreeWalker-traversal-reject.html	Testing firstChild	PASS
-/dom/traversal/TreeWalker-traversal-reject.html	Testing nextNode	FAIL
+/dom/traversal/TreeWalker-traversal-reject.html	Testing nextNode	PASS
 /dom/traversal/TreeWalker-traversal-reject.html	Testing nextSibling	PASS
 /dom/traversal/TreeWalker-traversal-reject.html	Testing parentNode	PASS
-/dom/traversal/TreeWalker-traversal-reject.html	Testing previousNode	FAIL
+/dom/traversal/TreeWalker-traversal-reject.html	Testing previousNode	PASS
 /dom/traversal/TreeWalker-traversal-reject.html	Testing previousSibling	PASS
 /dom/traversal/TreeWalker-traversal-skip-most.html	<harness>	OK
 /dom/traversal/TreeWalker-traversal-skip-most.html	Testing nextSibling	PASS
@@ -57560,7 +57560,7 @@ test	subtest	status
 /dom/traversal/TreeWalker-walking-outside-a-tree.html	<harness>	OK
 /dom/traversal/TreeWalker-walking-outside-a-tree.html	walking outside a tree	PASS
 /dom/traversal/TreeWalker.html	<harness>	OK
-/dom/traversal/TreeWalker.html	Recursive filters need to throw	FAIL
+/dom/traversal/TreeWalker.html	Recursive filters need to throw	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0, (function(node) { return true }))	PASS
@@ -57568,7 +57568,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57576,11 +57576,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(comment, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedComment, 0, (function(node) { return true }))	PASS
@@ -57607,7 +57607,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57615,11 +57615,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedForeignComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedForeignComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57666,9 +57666,9 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57676,11 +57676,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0, (function(node) { return true }))	PASS
@@ -57688,7 +57688,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57696,19 +57696,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara1.firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57716,11 +57716,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0, (function(node) { return true }))	PASS
@@ -57728,7 +57728,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57736,11 +57736,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedPara2.firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedProcessingInstruction, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedProcessingInstruction, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedProcessingInstruction, 0, (function(node) { return true }))	PASS
@@ -57868,7 +57868,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57876,18 +57876,18 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(doctype, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57895,11 +57895,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57908,7 +57908,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57916,18 +57916,18 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignComment, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57935,11 +57935,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDocfrag, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDocfrag, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -57968,7 +57968,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57976,19 +57976,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoctype, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -57996,11 +57996,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0, (function(node) { return true }))	PASS
@@ -58008,7 +58008,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58016,19 +58016,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara1.firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58036,11 +58036,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignPara2, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0, (function(node) { return true }))	PASS
@@ -58048,7 +58048,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58056,19 +58056,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignTextNode, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58076,11 +58076,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0], NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0, (function(node) { return true }))	PASS
@@ -58088,7 +58088,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58096,19 +58096,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[0].firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58116,11 +58116,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1], NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0, (function(node) { return true }))	PASS
@@ -58128,7 +58128,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58136,11 +58136,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[1].firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0, (function(node) { return true }))	PASS
@@ -58148,7 +58148,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58156,11 +58156,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(paras[5].firstChild, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0, (function(node) { return true }))	PASS
@@ -58168,7 +58168,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58176,31 +58176,31 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(processingInstruction, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0, (function(node) { return true }))	PASS
@@ -58208,7 +58208,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58216,18 +58216,18 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlComment, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -58235,11 +58235,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDocfrag, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDocfrag, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
@@ -58268,7 +58268,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58276,19 +58276,19 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoctype, NodeFilter.SHOW_ELEMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, (function(node) { return true }))	FAIL
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, (function(node) { return true }))	PASS
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58296,7 +58296,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlElement, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
@@ -58308,7 +58308,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, 0xFFFFFFFF, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, 0xFFFFFFFF, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, 0xFFFFFFFF, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
@@ -58316,11 +58316,11 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT, null)	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlTextNode, NodeFilter.SHOW_ELEMENT, null)	PASS
 /hr-time/basic.any.html	<harness>	OK
 /hr-time/basic.any.html	High resolution time has approximately the right relative magnitude	PASS
 /hr-time/basic.any.html	Performance interface extends EventTarget.	FAIL

@@ -38,6 +38,7 @@ they regenerate.
 | 2026-06-13 | 726e248 | d8a8414e5 | 227/696 (32%) | 18551/21529 (86%) | partial: dom/nodes |
 | 2026-06-13 | f30dab1 | d8a8414e5 | 227/696 (32%) | 18707/21654 (86%) | partial: html/dom/elements/the-innertext-and-outertext-properties |
 | 2026-06-14 | 9fe9c25 | f01d00b69 | 276/696 (39%) | 60345/66800 (90%) | full |
+| 2026-06-15 | d52628c | d8a8414e5 | 283/696 (40%) | 60603/66800 (90%) | partial: dom/traversal |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -45,15 +46,15 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-14
+## Per-area results — 2026-06-15
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-14-9fe9c25.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-15-d52628c.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 107/275 | 9122/10060 | 883 | 44 | 11 | 0 |
 | `dom/events` | 48/167 | 363/744 | 334 | 23 | 24 | 0 |
-| `dom/traversal` | 5/17 | 1308/1602 | 294 | 0 | 0 | 0 |
+| `dom/traversal` | 12/17 | 1566/1602 | 36 | 0 | 0 | 0 |
 | `dom/ranges` | 24/55 | 40882/44537 | 3655 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 1/10 | 23/53 | 30 | 0 | 0 | 0 |
@@ -66,9 +67,9 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-14-9fe9c25.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 95/118 | 23 | 0 | 0 | 0 |
-| **Total** | **276/696** | **60345/66800** | **6347** | **71** | **37** | **0** |
+| **Total** | **283/696** | **60603/66800** | **6089** | **71** | **37** | **0** |
 
-## ROI by area — 2026-06-14
+## ROI by area — 2026-06-15
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -86,8 +87,8 @@ file.
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `url` | 403 | 21 | 19.2 | 3 | 5 |
 | `dom/events` | 381 | 119 | 3.2 | 72 | 29 |
-| `dom/traversal` | 294 | 12 | 24.5 | 0 | 6 |
 | `html/dom/elements` | 276 | 25 | 11.0 | 2 | 16 |
+| `dom/traversal` | 36 | 5 | 7.2 | 0 | 2 |
 | `dom/collections` | 30 | 9 | 3.3 | 0 | 3 |
 | `html/semantics/forms/the-form-element` | 23 | 11 | 2.1 | 2 | 7 |
 | `hr-time` | 20 | 8 | 2.5 | 2 | 5 |
