@@ -37,7 +37,8 @@ The known-failing baseline is captured in
 | RegExp `v` flag (unicodeSets) property escapes | ~10 | high | open |
 | RegExp `\p{Script=Unknown}` value | 6 | medium | open |
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
-| Destructuring / computed-key evaluation order | ~8 | medium | open |
+| Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
+| Destructuring assignment-target evaluation order | ~6 | medium | open |
 | Module ambiguous star-export resolution | ~6 | medium | open |
 | AnnexB CallExpression assignment-target type | 7 | medium | open |
 
@@ -166,3 +167,25 @@ and `OP_put_ref_value` is shared with non-`with` reference stores (function
 -name dummy objects, captured-local ref objects), so the extra
 `HasProperty` can't be added there unconditionally. It needs a dedicated
 `with`-store opcode.
+
+### 5. Object literal computed key is `ToPropertyKey`-converted before the value
+
+**Spec:** [`PropertyDefinition : PropertyName : AssignmentExpression`](https://tc39.es/ecma262/#sec-runtime-semantics-propertydefinitionevaluation).
+The `PropertyName` is evaluated first — and `Evaluation of ComputedPropertyName`
+includes `? ToPropertyKey(propName)` — *before* the value
+`AssignmentExpression` is evaluated.
+
+**Bug:** `js_parse_object_literal` emitted the key expression, then the
+value expression, then `OP_define_array_el` (which performs
+`ToPropertyKey` internally). So a computed key's `toString`/`Symbol.toPrimitive`
+ran *after* the value expression, e.g. `{ [key]: (sideEffect(), 1) }`
+produced the order `[value, key-toString]` instead of
+`[key-toString, value]`.
+
+**Fix:** emit `OP_to_propkey` for a computed key (`name == JS_ATOM_NULL`)
+immediately after the `:`, before parsing the value. The later
+`OP_define_array_el` re-converts an already-primitive key, so there is no
+double `toString`. `src/quickjs/quickjs.c`, `js_parse_object_literal`.
+
+Covers test262
+`language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js`.
