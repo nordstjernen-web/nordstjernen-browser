@@ -13508,8 +13508,11 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                 else if (strcmp(k, "inline-flex") == 0)  b = "flex";
                 else if (strcmp(k, "inline-grid") == 0)  b = "grid";
                 if (b) {
-                    g_free(disp->u.keyword);
-                    disp->u.keyword = g_strdup(b);
+                    ns_css_value *nv = g_new0(ns_css_value, 1);
+                    nv->kind = NS_CSS_V_KEYWORD;
+                    nv->u.keyword = g_strdup(b);
+                    ns_css_value_free(out->values[NS_CSS_DISPLAY]);
+                    out->values[NS_CSS_DISPLAY] = nv;
                 }
             }
         }
