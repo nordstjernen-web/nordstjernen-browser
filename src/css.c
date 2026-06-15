@@ -1066,6 +1066,9 @@ parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
         if (count == 0) {
             v = css_angle_value_degrees(v, &end);
             if (is_ident(*end)) return FALSE;
+        } else if (count == 1 || count == 2) {
+            if (*end != '%') return FALSE;   /* saturation/lightness need % */
+            end++;
         } else if (*end == '%') {
             end++;
         }
