@@ -4857,48 +4857,6 @@ inline_textarea_total_height(const ns_box *box)
     return out;
 }
 
-typedef struct {
-    double height;
-    int    lines;
-} ns_inline_measure;
-
-static GHashTable *g_inline_measure_cache;
-static GHashTable *g_inline_width_cache;
-static guint       g_inline_measure_serial;
-
-static void
-inline_measure_cache_validate(void)
-{
-    PangoFontMap *fm = pango_cairo_font_map_get_default();
-    guint serial = fm ? pango_font_map_get_serial(fm) : 0;
-    if (!g_inline_measure_cache) {
-        g_inline_measure_cache =
-            g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-        g_inline_width_cache =
-            g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-        g_inline_measure_serial = serial;
-        return;
-    }
-    if (serial != g_inline_measure_serial ||
-        g_hash_table_size(g_inline_measure_cache) > 262144 ||
-        g_hash_table_size(g_inline_width_cache) > 262144) {
-        g_hash_table_remove_all(g_inline_measure_cache);
-        g_hash_table_remove_all(g_inline_width_cache);
-        g_inline_measure_serial = serial;
-    }
-}
-
-static const char *
-inline_measure_nearest_attr(const ns_node *n, const char *name)
-{
-    for (; n; n = n->parent) {
-        if (n->kind != NS_NODE_ELEMENT) continue;
-        const char *v = ns_element_get_attr(n, name);
-        if (v) return v;
-    }
-    return NULL;
-}
-
 static gboolean
 inline_attr_cacheable_kind(ns_inline_attr_kind k)
 {
@@ -5045,96 +5003,6 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
     return pw;
 }
 
-static void
-inline_measure_key_append_attrs(GString *out, const ns_box *box)
-{
-    if (!out) return;
-    if (!box || !box->attrs || box->attrs->len == 0) {
-        g_string_append(out, "|A0");
-        return;
-    }
-    guint n_measure = 0;
-    for (guint i = 0; i < box->attrs->len; i++) {
-        const ns_inline_attr *a =
-            &g_array_index(box->attrs, ns_inline_attr, i);
-        if (inline_attr_affects_measure(a->kind)) n_measure++;
-    }
-    g_string_append_printf(out, "|A%u", n_measure);
-    for (guint i = 0; i < box->attrs->len; i++) {
-        const ns_inline_attr *a =
-            &g_array_index(box->attrs, ns_inline_attr, i);
-        if (!inline_attr_affects_measure(a->kind)) continue;
-        g_string_append_printf(out,
-            "|%d:%" G_GSIZE_FORMAT ":%" G_GSIZE_FORMAT
-            ":%.3f:%d:%d:%d:%s:%s:%s:%s",
-            (int)a->kind, a->start, a->len,
-            a->font_size_px, a->font_weight, a->font_stretch,
-            a->font_kerning,
-            a->family ? a->family : "",
-            a->font_ligatures ? a->font_ligatures : "",
-            a->font_features ? a->font_features : "",
-            a->font_variations ? a->font_variations : "");
-    }
-}
-
-static char *
-inline_measure_key(const ns_box *box, const ns_style *style, PangoLayout *layout)
-{
-    inline_measure_cache_validate();
-    const PangoFontDescription *desc = pango_layout_get_font_description(layout);
-    char *fd = desc ? pango_font_description_to_string(desc) : g_strdup("");
-    double ls_px = 0, ws_px = 0;
-    const ns_css_value *lv = style ? style->values[NS_CSS_LETTER_SPACING] : NULL;
-    if (lv && lv->kind == NS_CSS_V_LENGTH && lv->u.length.unit == NS_CSS_UNIT_PX)
-        ls_px = lv->u.length.v;
-    const ns_css_value *wv = style ? style->values[NS_CSS_WORD_SPACING] : NULL;
-    if (wv && wv->kind == NS_CSS_V_LENGTH && wv->u.length.unit == NS_CSS_UNIT_PX)
-        ws_px = wv->u.length.v;
-    const ns_node *dn = box->dom;
-    for (const ns_box *p = box->parent; !dn && p; p = p->parent) dn = p->dom;
-    const char *lang = inline_measure_nearest_attr(dn, "lang");
-    if (!lang) lang = inline_measure_nearest_attr(dn, "xml:lang");
-    const char *dir  = inline_measure_nearest_attr(dn, "dir");
-    int bd = 0;
-    if (dir) {
-        if (g_ascii_strcasecmp(dir, "rtl") == 0) bd = 2;
-        else if (g_ascii_strcasecmp(dir, "ltr") == 0) bd = 1;
-    }
-    if (!bd && style && keyword_is(style->values[NS_CSS_DIRECTION], "rtl"))
-        bd = 2;
-    if (!bd)
-        bd = pango_context_get_base_dir(pango_layout_get_context(layout)) ==
-             PANGO_DIRECTION_RTL ? 4 : 3;
-    const char *fk = style ? ns_style_keyword(style, NS_CSS_FONT_KERNING) : NULL;
-    const char *flig =
-        style ? ns_style_keyword(style, NS_CSS_FONT_VARIANT_LIGATURES) : NULL;
-    const char *ffeat =
-        style ? ns_style_keyword(style, NS_CSS_FONT_FEATURE_SETTINGS) : NULL;
-    const char *fvar =
-        style ? ns_style_keyword(style, NS_CSS_FONT_VARIATION_SETTINGS) : NULL;
-    char *prefix = g_strdup_printf("%d|%d|%d|%d|%d|%.3f|%.3f|%.4f|%d|%s|%s|%s|%s|%s|%s",
-                                pango_layout_get_width(layout),
-                                (int)pango_layout_get_wrap(layout),
-                                (int)pango_layout_get_ellipsize(layout),
-                                pango_layout_get_height(layout),
-                                pango_layout_get_indent(layout),
-                                ls_px, ws_px,
-                                (double)pango_layout_get_line_spacing(layout),
-                                bd, fd,
-                                lang ? lang : "",
-                                fk ? fk : "",
-                                flig ? flig : "",
-                                ffeat ? ffeat : "",
-                                fvar ? fvar : "");
-    GString *key = g_string_new(prefix);
-    inline_measure_key_append_attrs(key, box);
-    g_string_append_c(key, '|');
-    g_string_append(key, box->text ? box->text : "");
-    g_free(prefix);
-    g_free(fd);
-    return g_string_free(key, FALSE);
-}
-
 static void shift_box_tree(ns_box *b, double dx, double dy);
 
 static void
@@ -5198,44 +5066,28 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     pango_layout_set_attributes(layout, i18n);
     pango_attr_list_unref(i18n);
 
-    char *mkey = cacheable
-        ? inline_measure_key(box, parent_style, layout) : NULL;
-    const ns_inline_measure *cached =
-        mkey ? g_hash_table_lookup(g_inline_measure_cache, mkey) : NULL;
     double measured;
     int line_count;
-    if (cached) {
-        measured   = cached->height;
-        line_count = cached->lines;
-        g_free(mkey);
-    } else {
-        pango_layout_set_text(layout, box->text, -1);
-        int pw, ph;
-        pango_layout_get_pixel_size(layout, &pw, &ph);
-        line_count = pango_layout_get_line_count(layout);
-        measured = ph;
-        if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
-            double indent = ns_text_indent_px(parent_style, content_width);
-            for (guint i = 0; i < box->inline_atomics->len; i++) {
-                const ns_inline_atomic *a =
-                    &g_array_index(box->inline_atomics, ns_inline_atomic, i);
-                if (!a->box) continue;
-                const ns_node *dom = g_hash_table_lookup(g_abs_ph_set, a->box);
-                if (!dom) continue;
-                PangoRectangle pos;
-                pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
-                ns_abs_static *st = g_new0(ns_abs_static, 1);
-                st->run   = box;
-                st->rel_x = indent + (double)pos.x / PANGO_SCALE;
-                st->rel_y = (double)pos.y / PANGO_SCALE;
-                g_hash_table_insert(g_abs_static, (gpointer)dom, st);
-            }
-        }
-        if (mkey) {
-            ns_inline_measure *e = g_new(ns_inline_measure, 1);
-            e->height = measured;
-            e->lines  = line_count;
-            g_hash_table_insert(g_inline_measure_cache, mkey, e);
+    pango_layout_set_text(layout, box->text, -1);
+    int ph;
+    pango_layout_get_pixel_size(layout, NULL, &ph);
+    line_count = pango_layout_get_line_count(layout);
+    measured = ph;
+    if (g_abs_static && g_abs_ph_set && box->inline_atomics) {
+        double indent = ns_text_indent_px(parent_style, content_width);
+        for (guint i = 0; i < box->inline_atomics->len; i++) {
+            const ns_inline_atomic *a =
+                &g_array_index(box->inline_atomics, ns_inline_atomic, i);
+            if (!a->box) continue;
+            const ns_node *dom = g_hash_table_lookup(g_abs_ph_set, a->box);
+            if (!dom) continue;
+            PangoRectangle pos;
+            pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            ns_abs_static *st = g_new0(ns_abs_static, 1);
+            st->run   = box;
+            st->rel_x = indent + (double)pos.x / PANGO_SCALE;
+            st->rel_y = (double)pos.y / PANGO_SCALE;
+            g_hash_table_insert(g_abs_static, (gpointer)dom, st);
         }
     }
     if (line_count < 1) line_count = 1;
@@ -6070,18 +5922,6 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             return box->inline_natural_cache_width;
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, -1);
-        char *mkey = cacheable
-            ? inline_measure_key(box, parent_style, layout) : NULL;
-        const double *hit =
-            mkey ? g_hash_table_lookup(g_inline_width_cache, mkey) : NULL;
-        if (hit) {
-            box->inline_natural_cache_style = parent_style;
-            box->inline_natural_cache_width = *hit;
-            box->inline_natural_cache_valid = TRUE;
-            g_free(mkey);
-            g_object_unref(layout);
-            return *hit;
-        }
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
@@ -6101,11 +5941,6 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         int pw, ph;
         pango_layout_get_pixel_size(layout, &pw, &ph);
         g_object_unref(layout);
-        if (mkey) {
-            double *e = g_new(double, 1);
-            *e = pw;
-            g_hash_table_insert(g_inline_width_cache, mkey, e);
-        }
         if (cacheable) {
             box->inline_natural_cache_style = parent_style;
             box->inline_natural_cache_width = pw;
@@ -6194,18 +6029,6 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, 1);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
-        char *mkey = cacheable
-            ? inline_measure_key(box, parent_style, layout) : NULL;
-        const double *hit =
-            mkey ? g_hash_table_lookup(g_inline_width_cache, mkey) : NULL;
-        if (hit) {
-            box->inline_min_cache_style = parent_style;
-            box->inline_min_cache_width = *hit;
-            box->inline_min_cache_valid = TRUE;
-            g_free(mkey);
-            g_object_unref(layout);
-            return *hit;
-        }
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
@@ -6225,11 +6048,6 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         int pw, ph;
         pango_layout_get_pixel_size(layout, &pw, &ph);
         g_object_unref(layout);
-        if (mkey) {
-            double *e = g_new(double, 1);
-            *e = pw;
-            g_hash_table_insert(g_inline_width_cache, mkey, e);
-        }
         if (cacheable) {
             box->inline_min_cache_style = parent_style;
             box->inline_min_cache_width = pw;
