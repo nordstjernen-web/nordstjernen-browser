@@ -10435,29 +10435,11 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (!resolved) {
-        gboolean is_absolute = FALSE;
-        const char *p = raw;
-        while (*p && (g_ascii_isalpha(*p) || g_ascii_isdigit(*p) ||
-                      *p == '+' || *p == '-' || *p == '.'))
-            p++;
-        if (p > raw && *p == ':') is_absolute = TRUE;
-        if (!is_absolute) {
-            ns_js *js = js_from_ctx(ctx);
-            g_autofree char *doc_base = ns_js_doc_base_url(js);
-            if (ns_url_is_http_or_https(doc_base)) {
-                resolved = ns_url_resolve(doc_base, raw);
-            }
-            if (!resolved) {
-                JS_FreeCString(ctx, raw);
-                return JS_ThrowTypeError(ctx,
-                    "URL: relative URL requires a base");
-            }
-        } else {
-            resolved = ns_url_resolve(NULL, raw);
-            if (!resolved) {
-                JS_FreeCString(ctx, raw);
-                return JS_ThrowTypeError(ctx, "URL: invalid url");
-            }
+        resolved = ns_url_resolve(NULL, raw);
+        if (!resolved) {
+            JS_FreeCString(ctx, raw);
+            return JS_ThrowTypeError(ctx,
+                "URL: invalid or relative URL requires a base");
         }
     }
     JS_FreeCString(ctx, raw);
@@ -10470,8 +10452,14 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, obj, "hostname", JS_NewString(ctx, parts->hostname));
         JS_SetPropertyStr(ctx, obj, "port",     JS_NewString(ctx, parts->port));
         JS_SetPropertyStr(ctx, obj, "origin",   JS_NewString(ctx, parts->origin));
+        const char *proto = parts->protocol;
+        gboolean special = proto && (!strcmp(proto, "http:") ||
+            !strcmp(proto, "https:") || !strcmp(proto, "ws:") ||
+            !strcmp(proto, "wss:") || !strcmp(proto, "ftp:") ||
+            !strcmp(proto, "file:"));
         JS_SetPropertyStr(ctx, obj, "pathname",
-                          JS_NewString(ctx, *parts->pathname ? parts->pathname : "/"));
+                          JS_NewString(ctx, (special && !*parts->pathname)
+                                            ? "/" : parts->pathname));
         JS_SetPropertyStr(ctx, obj, "search",   JS_NewString(ctx, parts->search));
         JS_SetPropertyStr(ctx, obj, "hash",     JS_NewString(ctx, parts->hash));
         JS_SetPropertyStr(ctx, obj, "username", JS_NewString(ctx, parts->username));
