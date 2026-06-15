@@ -11213,15 +11213,6 @@ ns_el_is_blank(const ns_node *el)
 }
 
 static gboolean
-ns_text_is_document_ws(const char *text)
-{
-    if (!text) return TRUE;
-    for (const char *p = text; *p; p++)
-        if (!is_ws(*p)) return FALSE;
-    return TRUE;
-}
-
-static gboolean
 ns_el_is_empty(const ns_node *el)
 {
     for (const ns_node *c = el ? el->first_child : NULL; c; c = c->next_sibling) {
