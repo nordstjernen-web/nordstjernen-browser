@@ -19278,12 +19278,45 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_validate_doc_batch(JSContext *ctx, ns_node *parent,
+                      int argc, JSValueConst *argv)
+{
+    if (parent->kind != NS_NODE_DOCUMENT || (parent->flags & NS_NODE_FRAGMENT))
+        return JS_UNDEFINED;
+    int new_elems = 0;
+    gboolean has_text = FALSE;
+    for (int i = 0; i < argc; i++) {
+        ns_node *n = ns_unwrap_element_mut(argv[i]);
+        if (!n) { has_text = TRUE; continue; }
+        if (n->kind == NS_NODE_ELEMENT) new_elems++;
+        else if (n->kind == NS_NODE_TEXT) has_text = TRUE;
+        else if (n->kind == NS_NODE_DOCUMENT && (n->flags & NS_NODE_FRAGMENT))
+            for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+                if (c->kind == NS_NODE_ELEMENT) new_elems++;
+                else if (c->kind == NS_NODE_TEXT) has_text = TRUE;
+            }
+    }
+    if (has_text)
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "Nodes of type 'Text' may not be inserted inside a Document.");
+    int existing = 0;
+    for (ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) existing++;
+    if (existing + new_elems > 1)
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "A Document may contain at most one element child.");
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_element_append(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
     ns_node *parent = ns_unwrap_element_mut(this_val);
     if (!parent) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    JSValue berr = ns_validate_doc_batch(ctx, parent, argc, argv);
+    if (JS_IsException(berr)) return berr;
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
         if (child) {
@@ -19323,6 +19356,8 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
     ns_node *parent = ns_unwrap_element_mut(this_val);
     if (!parent) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    JSValue berr = ns_validate_doc_batch(ctx, parent, argc, argv);
+    if (JS_IsException(berr)) return berr;
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
         if (child) {
