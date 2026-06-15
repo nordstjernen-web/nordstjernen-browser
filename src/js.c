@@ -10869,29 +10869,30 @@ ns_window_usp_ctor(JSContext *ctx, JSValueConst this_val,
 
 static void ns_document_define_implementation_getter(JSContext *ctx,
                                                      JSValueConst obj);
+static void ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj,
+                                      const char *name, JSCFunction *fn);
+static JSValue ns_synthdoc_get_documentElement(JSContext *ctx,
+                                               JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+static JSValue ns_synthdoc_get_head(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv);
+static JSValue ns_synthdoc_get_body(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv);
+static JSValue ns_synthdoc_get_title(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
+static JSValue ns_synthdoc_get_forms(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
 
 static void
 ns_attach_document_view(JSContext *ctx, JSValueConst wrapper, ns_node *doc)
 {
     if (!doc) return;
-    ns_node *html = ns_node_find_first_element(doc, "html");
-    ns_node *head = html ? ns_node_find_first_element(html, "head") : NULL;
-    ns_node *body = html ? ns_node_find_first_element(html, "body") : NULL;
-    ns_node *title = ns_node_find_first_element(doc, "title");
-    JS_DefinePropertyValueStr(ctx, wrapper, "documentElement",
-        html ? ns_make_element(ctx, html) : JS_NULL,
-        JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "head",
-        head ? ns_make_element(ctx, head) : JS_NULL,
-        JS_PROP_C_W_E);
-    JS_DefinePropertyValueStr(ctx, wrapper, "body",
-        body ? ns_make_element(ctx, body) : JS_NULL,
-        JS_PROP_C_W_E);
-    char *title_text = title ? ns_node_collect_text(title) : NULL;
-    JS_DefinePropertyValueStr(ctx, wrapper, "title",
-        JS_NewString(ctx, title_text ? title_text : ""),
-        JS_PROP_C_W_E);
-    g_free(title_text);
+    ns_synthdoc_define_getter(ctx, wrapper, "documentElement",
+                              ns_synthdoc_get_documentElement);
+    ns_synthdoc_define_getter(ctx, wrapper, "head", ns_synthdoc_get_head);
+    ns_synthdoc_define_getter(ctx, wrapper, "body", ns_synthdoc_get_body);
+    ns_synthdoc_define_getter(ctx, wrapper, "title", ns_synthdoc_get_title);
+    ns_synthdoc_define_getter(ctx, wrapper, "forms", ns_synthdoc_get_forms);
     JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
         JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
     ns_document_define_implementation_getter(ctx, wrapper);
@@ -31848,6 +31849,27 @@ ns_synthdoc_get_head(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_synthdoc_get_title(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    ns_node *title = doc ? ns_node_find_first_element(doc, "title") : NULL;
+    char *t = title ? ns_node_collect_text(title) : NULL;
+    JSValue v = JS_NewString(ctx, t ? t : "");
+    g_free(t);
+    return v;
+}
+
+static JSValue
+ns_synthdoc_get_forms(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, "form");
+}
+
+static JSValue
 ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -31924,6 +31946,8 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_synthdoc_define_getter(ctx, w, "doctype", ns_synthdoc_get_doctype);
     ns_synthdoc_define_getter(ctx, w, "body", ns_synthdoc_get_body);
     ns_synthdoc_define_getter(ctx, w, "head", ns_synthdoc_get_head);
+    ns_synthdoc_define_getter(ctx, w, "title", ns_synthdoc_get_title);
+    ns_synthdoc_define_getter(ctx, w, "forms", ns_synthdoc_get_forms);
     ns_document_define_implementation_getter(ctx, w);
     ns_bind_fn(ctx, w, "createElement",      ns_document_createElement, 1);
     ns_bind_fn(ctx, w, "createElementNS",    ns_document_createElementNS, 2);
