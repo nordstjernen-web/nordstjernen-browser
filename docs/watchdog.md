@@ -68,10 +68,11 @@ two roles they use:
    as a crash and restarts — so there is exactly one restart path, not
    two.
 
-The hang timeout is **30 s** of no heartbeat. Because page JavaScript now
-runs in the renderer processes — not in the shell's main loop — the shell
-loop is never legitimately blocked by a long synchronous script, so a
-shorter, fixed budget is enough; the watchdog is the backstop for *native*
+The hang timeout is **at least 60 s** of no heartbeat (the configured JS
+eval budget plus a 60 s floor, `NS_WATCHDOG_HANG_MIN_SECS`). Because page
+JavaScript now runs in the renderer processes — not in the shell's main
+loop — the shell loop is never legitimately blocked by a long synchronous
+script; the watchdog is the backstop for *native*
 deadlocks in the shell (a wedged blit or a stuck IPC call). (Runaway
 scripts are interrupted separately, in-engine, at the JS budget; see
 `src/js.c`.)

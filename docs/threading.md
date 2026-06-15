@@ -29,7 +29,7 @@ that are transferred by ownership.
 | Thread | Created in | Lifetime | Touches DOM/JS? |
 |--------|-----------|----------|------------------|
 | **Main** | `renderer_http.c` | whole process | yes — owns the DOM, layout, paint, page JS |
-| **Fetch pool** (≤6) | `net.c`, GLib `GTask` thread pool | per request | no |
+| **Fetch pool** (≤5) | `net.c`, GLib `GTask` thread pool | per request | no |
 | **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |
 | **RNG warm-up** (transient) | `net.c` | one-shot at startup | no |
@@ -102,9 +102,10 @@ Every blocking or unbounded operation has a bound:
 | WebSocket transfer | none (long-lived); 10 ms poll cadence | `ws.c` |
 | Page JS eval slice | `js_eval_budget_ms` (config default 60 s, max 60 s; 5 s no-config fallback) | `ns_js_budget_push`, `js.c` |
 | Page JS hard monitor | 60 s of wall-clock per top-level entry | `NS_JS_MONITOR_LIMIT_US`, `js.c` |
-| JS heap | `js_memory_cap_mb` (config default 2048, clamped to max 512; 256 no-config fallback) | `JS_SetMemoryLimit`, `js.c` |
+| JS heap (page runtime) | `js_memory_cap_mb` (config default 2048; 2048 no-config fallback, no clamp) | `JS_SetMemoryLimit`, `js.c` |
+| JS heap (worker runtime) | `js_memory_cap_mb` clamped to ≤512; 256 no-config fallback | `JS_SetMemoryLimit`, `js.c` |
 | Per-origin in-flight requests | 6 | `NS_NET_MAX_PER_ORIGIN`, `net.c` |
-| Total in-flight requests | 6 | `NS_MAX_CONCURRENT_FETCHES`, `net.c` |
+| Total in-flight requests | 5 | `NS_MAX_CONCURRENT_FETCHES`, `net.c` |
 
 The origin-slot wait (`ns_net_acquire_origin_slot`) uses
 `g_cond_wait_until` with a 250 ms re-check so a cancelled request never
@@ -203,7 +204,8 @@ Two parts (GTK; see `docs/watchdog.md`). A **supervisor process**
 with `g_child_watch_add`, and restarts it on crash/hang with capped burst
 control plus session recovery. Inside the shell, a **hang-monitor thread**
 (`ns_watchdog_hang_thread`) compares an atomic heartbeat (`g_beat`, bumped
-by a 2 s shell-main-loop timeout) against a 30 s deadline; if the loop
+by a 2 s shell-main-loop timeout) against a deadline of the JS eval budget
+plus a 60 s floor; if the loop
 stops beating it `_Exit`s with code 70 so the supervisor restarts. The
 shell runs no page JS, so the loop is never legitimately blocked long.
 This supervises the *shell*; per-tab engine crashes are already contained
@@ -305,7 +307,7 @@ semantics; and every GTK teardown path defers (see the pump reentrancy
 contract above), so the context cannot be freed mid-fetch. Completion is
 a plain C callback, so it fires and quits the nested loop even while
 `in_pump` defers everything else. The wait is bounded by the curl
-transfer timeout, and concurrency still flows through the 6-slot
+transfer timeout, and concurrency still flows through the 5-slot
 throttle. On a worker thread (`js->worker_host`) there is no GUI to keep
 alive, so `ns_js_fetch_resource` falls back to a direct blocking fetch.
 

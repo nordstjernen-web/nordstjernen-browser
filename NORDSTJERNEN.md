@@ -29,7 +29,7 @@ registration + lifecycle subset of Service Workers *is* supported);
 DRM / EME; **JIT** (QuickJS
 interpreter only — W^X holds process-wide); plugins (NPAPI / PPAPI /
 WebExtensions); sync / accounts / telemetry /
-"studies"; localization beyond English (for now).
+"studies".
 
 WebGL is the one exception to the no-GPU-APIs stance: a minimalist,
 opt-in WebGL 1 / 2 implementation mapped directly onto OpenGL ES, off by
@@ -142,7 +142,7 @@ themselves before opening any page.
    scroll (wheel + keyboard + scrollbars), reflow on resize, hit-test
    links, open links in new process-tabs, and recover from renderer
    crashes; JavaScript stays live (the renderer pumps the bundled QuickJS
-   each frame via `ns_browser_tick`, budget `NS_TICK_MS`, default 16 ms),
+   each frame via `ns_browser_tick`, budget `tick_budget_ms`, default 16 ms),
    and there is a continuous frame loop while a page animates. The GTK
    shell carries the full chrome — toolbar, address bar, status bar,
    tabs/history, zoom, text selection, `:hover` + pointer events,
@@ -183,7 +183,7 @@ zygote, and re-enabled shell supervision, are the follow-ups.
 - **14 · YouTube watch-page playback** — baseline shipped: clicking a
   streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL to
   the external player, which resolves it with yt-dlp
-  (`ns_media_launch_external`, `stream=TRUE`). Next: detect more sites and
+  (`ns_media_try_launch`, with its `stream` flag set). Next: detect more sites and
   surface a clearer in-page affordance; optionally run the `base.js`
   signature-cipher transform in QuickJS to get a direct URL without
   yt-dlp.

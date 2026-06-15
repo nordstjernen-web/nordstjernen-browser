@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.3**, 2026-06-10.
+Snapshot: **1.0.9-dev**, 2026-06-15.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -74,8 +74,8 @@ Qt shell — are tracked here:
 | Context menu (right-click) | ✅ | ✅ | open/copy link, back/forward/reload, copy page address, select-all/copy selection (GTK), save as PDF/image |
 | DevTools / console | ✅ | ✅ | F12 / Ctrl+Shift+J panel: streams `console.log`/`warn`/`error`/`info`/`debug` (`CONSOLE` poll) and evaluates JS in the live page (`EVAL` → `ns_browser_eval`). No DOM/network inspector |
 | Save / print / PDF export | ✅ | ✅ | full-page PDF or PNG (context menu / Ctrl+P / Ctrl+S) via an `EXPORT` message → `ns_browser_render_image`; the sandboxed renderer writes to its runtime dir and the shell copies to the chosen path |
-| External audio/video player handoff | ✅ | ✅ | clicking a `<video>`/`<audio>` resolves the media URL (`MEDIA` → `ns_browser_media_at`); GTK hands it to the shared `ns_media_try_launch` (mpv/vlc, yt-dlp), Qt opens it via `QDesktopServices` |
-| App menu · About | ✅ | ✅ | toolbar menu button with About; **Settings & bookmarks are GTK-only** (they need the engine's config/bookmarks store, which the thin Qt shell does not link) |
+| External audio/video player handoff | ✅ | ✅ | clicking a `<video>`/`<audio>` resolves the media URL (`MEDIA` → `ns_browser_media_at`); both shells hand it to the shared `ns_media_try_launch` (mpv/vlc, yt-dlp) |
+| App menu · About | ✅ | ✅ | toolbar menu button with About, Settings, and bookmarks in both shells (the Qt shell links the engine's config/bookmarks store: `ns_config_get`, `ns_bookmarks_load`/`_add`) |
 
 ---
 
@@ -317,7 +317,7 @@ surface).
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| Browsing context / `Window` | ✅ | single top-level context per tab; no per-tab process isolation |
+| Browsing context / `Window` | ✅ | single top-level context per tab; each tab's engine runs in its own sandboxed renderer process |
 | `WindowProxy` / named access | 🟡 | basic |
 | Origins & same-origin policy | ✅ | enforced for fetch/XHR/storage/cookies |
 | `iframe` sandboxing | ✅ | token list enforced: `allow-scripts`, `allow-forms`, `allow-same-origin`, `allow-popups`, `allow-modals`, `allow-top-navigation*`, `allow-downloads`, etc. parsed; scripts/forms/popups/modals and opaque-origin (cookie/storage) restrictions applied and inherited by nested frames |
@@ -401,15 +401,13 @@ events are never dispatched, so a worker cannot serve requests by
 intercepting navigations/subresources, and registrations live for the
 session rather than persisting across loads.
 
-The **Cache API** (`caches` / `CacheStorage` / `Cache`) is implemented as
-a real in-memory store on the page: `caches.open` / `has` / `delete` /
-`keys` / `match`, and per-cache `put`, `match`, `matchAll`, `add`,
-`addAll`, `delete`, and `keys`, with `ignoreSearch`. Entries hold the
-response bytes, status, and headers, so a `match` returns a fresh
-readable `Response`. `add` / `addAll` fetch and store. The store is
-per-session (not persisted to disk) and is not shared into the Service
-Worker thread (which keeps the inert stub, since it cannot intercept
-anyway).
+The **Cache API** surface (`caches` / `CacheStorage` / `Cache`) is exposed
+for feature detection but is a no-op stub: `caches.open` returns a `Cache`
+object whose `put` / `add` / `addAll` store nothing and whose `match` /
+`matchAll` / `keys` always resolve empty, and the top-level
+`caches.has` / `delete` / `keys` / `match` are likewise stubs. Nothing is
+stored or retrievable, and nothing is shared into the Service Worker
+thread (which keeps the inert stub, since it cannot intercept anyway).
 
 🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
 transferable `ArrayBuffer`s, worker `fetch`, and nested workers are not
@@ -619,8 +617,8 @@ path in `src/layout.h`.
 |---------|:--:|------|
 | `frame` / `frameset` | 🚫 | `display:none`; not rendered |
 | `applet` | 🚫 | no Java; `display:none` |
-| `marquee` | 🟡 | renders as static block; no scrolling |
-| `basefont` `noembed` `plaintext` `xmp` `isindex` | 🚫 | `display:none` / inert |
+| `marquee` | 🚫 | `display:none`; not rendered |
+| `basefont` `noembed` `isindex` | 🚫 | `display:none` / inert |
 | Presentational attributes (`align`, `bgcolor`, `<font>`) | 🟡 | a subset mapped to CSS where common (`presentational_hints_css` in `src/css.c`): `bgcolor`/`text`/`<font color/face/size>`, `width`/`height`, `hspace`/`vspace`, `<hr align/color/size/noshade>` (`color` drives the rule's `background-color`, `noshade` renders a solid grey bar), `<img align>` (left/right float plus top/middle/bottom `vertical-align`), `<textarea wrap=off>`→`white-space: pre`, `<table frame/rules>` (see §4.9), and the table family — `cellspacing`→`border-spacing`, `cellpadding`→cell `padding`, `<td/th align/valign/nowrap>`, `<table align=left/right>`→`float` and `align=center`→auto side margins (centred by `layout_table`), and **`<table border=N>`** maps the legacy grid: an outer table border plus a `1px solid` border on every `td`/`th` (the classic `border="1"` grid), while `border="0"` stays gridless. The legacy **list attributes** are honoured in `src/paint.c`: `<ol start>`/`<ol reversed>`/`<li value>` drive ordinal numbering (`list_item_ordinal` — start seeds the first number, reversed counts down, a `value` resets the running count), and `<ol type>`/`<ul type>`/`<li type>` map to `list-style-type` as a presentational hint (`presentational_hints_css` in `src/css.c`, applied at `NS_CSS_ORIGIN_PRESENTATIONAL` so it overrides the UA default but loses to author CSS): ol/li `1`/`a`/`A`/`i`/`I` → decimal / lower- and upper-alpha / lower- and upper-roman (case-sensitive), ul/li `disc`/`circle`/`square` (case-insensitive) |
 
 ---

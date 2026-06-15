@@ -334,13 +334,14 @@ renderers have different threat models, so they are confined differently.
   guarantee, and the shell's attack surface is low (no untrusted parsing). A
   tailored profile, or a pre-sandbox zygote that forks renderers so the shell
   can keep the no-`execve` filter, is the eventual fix.
-- **Watchdog ("guarddog")** supervision is disabled in proc mode. Its main
-  value — recovering from engine crashes/hangs — is now provided structurally:
-  the engine runs in renderer processes, a renderer crash is contained to its
-  tab, and `NsProcView` transparently restarts a dead renderer (bounded so a
-  reliably-crashing page can't thrash). A shell crash is rare (thin, no engine)
-  and would only lose the window. Re-enabling shell-level supervision is a
-  low-priority follow-up.
+- **Watchdog ("guarddog")** supervision is active in proc mode (the default):
+  when `watchdog_enabled` is set, `ns_watchdog_run_supervisor` (`src/gtk/appmain.c`)
+  spawns the thin engine-free shell and restarts it on crash or hang. Engine
+  crashes are additionally contained structurally: the engine runs in renderer
+  processes, a renderer crash is confined to its tab, and `NsProcView`
+  transparently restarts a dead renderer (bounded so a reliably-crashing page
+  can't thrash). A shell crash is rare (thin, no engine) and the supervisor
+  recovers it.
 
 Net effect vs. a single-process browser: the renderer confinement is
 **stronger** (per-process, credential-narrowing is the next step), while the

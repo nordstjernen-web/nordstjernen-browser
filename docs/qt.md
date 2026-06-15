@@ -31,7 +31,7 @@ flag is given.
 | `src/qt/main.cpp` | `QApplication` bootstrap; launches the tabbed `ProcWindow`. |
 | `src/qt/procwindow.{h,cpp}` | Tabbed `QMainWindow`: a `QTabWidget` of `ProcView`s — one renderer process per tab — with a back/forward/reload toolbar, address bar, per-tab history, new-tab (Ctrl+T) / close-tab (Ctrl+W), Home, and a status bar. Middle-click or Ctrl+click on a link opens it in a new background tab (a fresh renderer process). |
 | `src/qt/procview.{h,cpp}` | A `QAbstractScrollArea` that owns one `nordstjernen-renderer` process (via `src/rproc_http.c`), blits its shared framebuffer, and dispatches load/scroll/resize/hover/link/click/find IPC off the GUI thread. Per-tab back/forward history, mouse-wheel and keyboard scrolling (arrows, PageUp/Down, Space/Shift+Space, Home/End), per-tab zoom (Ctrl +/−/0, Ctrl+wheel) at the renderer's `scale`, `:hover` + pointer events, find-in-page (Ctrl+F), and a right-click context menu. |
-| `src/rproc.{h,c}` | Parent/client side of the renderer IPC: shared-memory framebuffer + control channel (`socketpair`/`shm` on POSIX, pipes + file mapping on Windows). |
+| `src/rproc_http.{h,c}` | Parent/client side of the renderer IPC: shared-memory framebuffer + control channel (`socketpair`/`shm` on POSIX, pipes + file mapping on Windows). |
 
 ## Building
 

@@ -228,7 +228,7 @@ testing and for unattended deployment:
 
 ```sh
 # Silent install to a custom path
-./dist/nordstjernen-0.4.0-win64-setup.exe /S /D=C:\Tools\Nordstjernen
+./dist/nordstjernen-1.0.7-win64-setup.exe /S /D=C:\Tools\Nordstjernen
 
 # Silent uninstall
 "%LOCALAPPDATA%\Programs\Nordstjernen\uninstall.exe" /S
@@ -320,10 +320,10 @@ source Firefox uses. We bundle it because:
 If found, the resolved path is applied to every `curl_easy`
 handle via `CURLOPT_CAINFO` before `curl_easy_perform`. The
 resolution is per-process and cached for the lifetime of the
-process. The launcher `.cmd` also exports `CURL_CA_BUNDLE` /
-`SSL_CERT_FILE` for the same path, but those are redundant
-now that the binary self-resolves; they only matter for
-third-party tooling that spawns from the same env.
+process. The UI exe also exports `CURL_CA_BUNDLE` /
+`SSL_CERT_FILE` for the same path in `ns_win32_anchor_gtk_data`,
+but those are redundant now that the binary self-resolves; they
+only matter for third-party tooling that spawns from the same env.
 
 On Linux / macOS the env-var path applies; otherwise libcurl's
 own system-default resolution wins (`/etc/ssl/certs/...` and

@@ -15,7 +15,7 @@ Runs on the platforms Windows, Mac and Linux, Android, Java, FreeBSD, NetBSD and
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
-![Nordstjernen 1.0.3 start page — chatting with the local AI assistant](docs/screenshot.png)   
+![Nordstjernen start page — chatting with the local AI assistant](docs/screenshot.png)   
 
 <img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
 

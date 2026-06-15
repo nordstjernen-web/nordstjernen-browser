@@ -12,7 +12,7 @@ guarantee; the browser's runtime behaviour is the source of truth.
 Re-check any row by running the browser against a page that exercises
 the feature (see [How to re-check](#how-to-re-check-this-document)).
 
-Snapshot: **1.0.3**, 2026-06-10.
+Snapshot: **1.0.9-dev**, 2026-06-15.
 
 **Legend:** ✅ implemented · 🟡 partial / approximated · ❌ absent ·
 🚫 absent by design (a project non-goal — see

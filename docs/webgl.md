@@ -1,14 +1,17 @@
 # WebGL
 
 Nordstjernen ships a **minimalist, opt-in WebGL implementation**. It maps
-the WebGL API more or less directly onto **OpenGL ES** through a
-toolkit-independent **offscreen EGL context** (`src/glctx.c`) and
-**libepoxy** for GL/EGL dispatch. The context is surfaceless: WebGL renders
-into an FBO and the result is read back and composited by the page painter,
-so it needs no window, no display server, and no GTK — it works in the
-out-of-process renderer and in GTK-less (e.g. Qt-only) builds. There is no
-ANGLE layer and no GL command-stream validator between the page and the
-driver: WebGL calls become GLES calls.
+the WebGL API more or less directly onto GL through a toolkit-independent
+**offscreen GL context** (`src/glctx.c`) and **libepoxy** for GL dispatch.
+The backend is platform-specific: on Linux it is a surfaceless EGL context
+bound to the OpenGL ES API (preferring `EGL_MESA_platform_surfaceless`),
+and on Windows it is a desktop-OpenGL context created via WGL on a hidden
+popup window. WebGL renders into an FBO and the result is read back and
+composited by the page painter, so on the EGL path it needs no window, no
+display server, and no GTK — it works in the out-of-process renderer and in
+GTK-less (e.g. Qt-only) builds. There is no ANGLE layer and no GL
+command-stream validator between the page and the driver: WebGL calls
+become GL calls.
 
 Because that is a deliberately thin bridge to the GPU driver, WebGL is
 **off by default** and **gated per site** behind an explicit permission
@@ -74,12 +77,15 @@ out-of-process renderer. The Android engine build gets a stub that returns
 `null`. The GTK trust dialog is the only GTK-specific part and is compiled
 in only when `NS_HAVE_GTK` is defined (the GTK shell).
 
-1. **Context** — `ns_gl_context_create()` (`src/glctx.c`) creates a
-   surfaceless **EGL** context bound to the OpenGL ES API, preferring
-   `EGL_MESA_platform_surfaceless` so it needs no display server, with a
-   1×1 pbuffer fallback where surfaceless current is unsupported. GLES is
-   requested so GLSL ES shaders (`#version 100` / `#version 300 es`)
-   compile natively, no translation.
+1. **Context** — `ns_gl_context_create()` (`src/glctx.c`) creates the
+   offscreen GL context. On Linux this is a surfaceless **EGL** context
+   bound to the OpenGL ES API, preferring `EGL_MESA_platform_surfaceless`
+   so it needs no display server, with a 1×1 pbuffer fallback where
+   surfaceless current is unsupported; GLES is requested so GLSL ES shaders
+   (`#version 100` / `#version 300 es`) compile natively, no translation.
+   On Windows it is a desktop-OpenGL context created via **WGL** on a
+   hidden popup window, where GLSL-ES shaders rely on the desktop driver
+   accepting them.
 2. **Offscreen render target** — the context renders into an offscreen
    framebuffer object (FBO) sized to the canvas, with a colour texture and,
    when requested, a depth/stencil renderbuffer.
