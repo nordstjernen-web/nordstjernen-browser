@@ -691,7 +691,10 @@
         NF.SHOW_ATTRIBUTE            = 0x2;
         NF.SHOW_TEXT                 = 0x4;
         NF.SHOW_CDATA_SECTION        = 0x8;
+        NF.SHOW_ENTITY_REFERENCE     = 0x10;
+        NF.SHOW_ENTITY               = 0x20;
         NF.SHOW_PROCESSING_INSTRUCTION = 0x40;
+        NF.SHOW_NOTATION             = 0x800;
         NF.SHOW_COMMENT              = 0x80;
         NF.SHOW_DOCUMENT             = 0x100;
         NF.SHOW_DOCUMENT_TYPE        = 0x200;
@@ -703,12 +706,10 @@
     }
 
     function makeTraversalFilter(whatToShow, filterArg) {
-        var what = (whatToShow === undefined || whatToShow === null)
-            ? 0xFFFFFFFF : (whatToShow >>> 0);
-        var filterFn = null;
-        if (typeof filterArg === 'function') filterFn = filterArg;
-        else if (filterArg && typeof filterArg.acceptNode === 'function')
-            filterFn = function (n) { return filterArg.acceptNode(n); };
+        var what = (whatToShow === undefined) ? 0xFFFFFFFF : (whatToShow >>> 0);
+        var isFn = typeof filterArg === 'function';
+        var isObj = !isFn && filterArg !== null && filterArg !== undefined &&
+                    typeof filterArg === 'object';
         var active = false;
         function filter(n) {
             if (active)
@@ -716,11 +717,16 @@
                     'A NodeFilter is already being run.', 'InvalidStateError');
             var bit = 1 << (n.nodeType - 1);
             if ((what & bit) === 0) return 3;
-            if (!filterFn) return 1;
+            if (!isFn && !isObj) return 1;
             active = true;
             var r;
-            try { r = filterFn(n); }
-            finally { active = false; }
+            try {
+                var cb = isFn ? filterArg : filterArg.acceptNode;
+                if (typeof cb !== 'function')
+                    throw new TypeError("Failed to execute 'acceptNode' on " +
+                        "'NodeFilter': The provided value is not callable.");
+                r = isFn ? cb(n) : cb.call(filterArg, n);
+            } finally { active = false; }
             r = r >>> 0;
             return r === 1 ? 1 : (r === 2 ? 2 : 3);
         }
@@ -731,8 +737,8 @@
         var F = makeTraversalFilter(whatToShow, filterArg);
         var filter = F.filter;
 
+        var current = root;
         var walker = {
-            currentNode: root,
             parentNode: function () {
                 var node = this.currentNode;
                 while (node && node !== root) {
@@ -830,6 +836,17 @@
         }
 
         walker[Symbol.toStringTag] = 'TreeWalker';
+        Object.defineProperty(walker, 'currentNode', {
+            get: function () { return current; },
+            set: function (v) {
+                if (!v || typeof v.nodeType !== 'number')
+                    throw new TypeError("Failed to set the 'currentNode' " +
+                        "property on 'TreeWalker': The provided value is not " +
+                        "of type 'Node'.");
+                current = v;
+            },
+            enumerable: true
+        });
         Object.defineProperty(walker, 'root',
             { value: root, writable: false, enumerable: true });
         Object.defineProperty(walker, 'whatToShow',
