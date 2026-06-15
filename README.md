@@ -99,6 +99,9 @@ latest build — bleeding edge, expect rough edges.
 | Linux (portable GTK+) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
 | Linux (portable, Qt) | [`nordstjernen-linux-qt-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip) |
 | Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
+| FreeBSD (portable) | [`nordstjernen-freebsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip) |
+| OpenBSD (portable) | [`nordstjernen-openbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-openbsd-x86_64.zip) |
+| NetBSD (portable) | [`nordstjernen-netbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip) |
 | Java browser + API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) (runnable fat jar: `java -jar`) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
 | Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |
 
