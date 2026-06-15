@@ -9,6 +9,8 @@
 #include "config.h"
 #include "net.h"
 #include "version.h"
+#include "image.h"
+#include "about_logo_gif.h"
 
 #include <string.h>
 
@@ -1433,12 +1435,116 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
 #define NS_ABOUT_LICENSE_TEXT NS_ABOUT_LICENSE_CORE NS_ABOUT_LICENSE_AI
 
+#define NS_TYPE_ANIM_LOGO (ns_anim_logo_get_type())
+G_DECLARE_FINAL_TYPE(NsAnimLogo, ns_anim_logo, NS, ANIM_LOGO, GObject)
+
+struct _NsAnimLogo {
+    GObject     parent_instance;
+    GPtrArray  *frames;
+    GArray     *delays;
+    guint       cur;
+    int         width, height;
+    guint       timer;
+};
+
+static void ns_anim_logo_paintable_init(GdkPaintableInterface *iface);
+
+G_DEFINE_TYPE_WITH_CODE(NsAnimLogo, ns_anim_logo, G_TYPE_OBJECT,
+    G_IMPLEMENT_INTERFACE(GDK_TYPE_PAINTABLE, ns_anim_logo_paintable_init))
+
+static gboolean
+ns_anim_logo_tick(gpointer data)
+{
+    NsAnimLogo *self = data;
+    if (!self->frames || self->frames->len < 2) { self->timer = 0; return G_SOURCE_REMOVE; }
+    self->cur = (self->cur + 1) % self->frames->len;
+    gdk_paintable_invalidate_contents(GDK_PAINTABLE(self));
+    int delay = g_array_index(self->delays, int, self->cur);
+    if (delay < 20) delay = 20;
+    self->timer = g_timeout_add(delay, ns_anim_logo_tick, self);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_anim_logo_snapshot(GdkPaintable *paintable, GdkSnapshot *snapshot,
+                      double width, double height)
+{
+    NsAnimLogo *self = NS_ANIM_LOGO(paintable);
+    if (!self->frames || self->cur >= self->frames->len) return;
+    GdkTexture *tex = g_ptr_array_index(self->frames, self->cur);
+    if (tex)
+        gdk_paintable_snapshot(GDK_PAINTABLE(tex), snapshot, width, height);
+}
+
+static int ns_anim_logo_get_intrinsic_width(GdkPaintable *p)
+{ return NS_ANIM_LOGO(p)->width; }
+static int ns_anim_logo_get_intrinsic_height(GdkPaintable *p)
+{ return NS_ANIM_LOGO(p)->height; }
+
+static void
+ns_anim_logo_paintable_init(GdkPaintableInterface *iface)
+{
+    iface->snapshot = ns_anim_logo_snapshot;
+    iface->get_intrinsic_width = ns_anim_logo_get_intrinsic_width;
+    iface->get_intrinsic_height = ns_anim_logo_get_intrinsic_height;
+}
+
+static void
+ns_anim_logo_dispose(GObject *obj)
+{
+    NsAnimLogo *self = NS_ANIM_LOGO(obj);
+    if (self->timer) { g_source_remove(self->timer); self->timer = 0; }
+    g_clear_pointer(&self->frames, g_ptr_array_unref);
+    g_clear_pointer(&self->delays, g_array_unref);
+    G_OBJECT_CLASS(ns_anim_logo_parent_class)->dispose(obj);
+}
+
+static void ns_anim_logo_class_init(NsAnimLogoClass *klass)
+{ G_OBJECT_CLASS(klass)->dispose = ns_anim_logo_dispose; }
+static void ns_anim_logo_init(NsAnimLogo *self) { (void)self; }
+
+static GdkPaintable *
+ns_anim_logo_new(void)
+{
+    gsize len = 0;
+    guchar *data = g_base64_decode(about_logo_gif_b64, &len);
+    if (!data || len == 0) { g_free(data); return NULL; }
+    int w = 0, h = 0;
+    GArray *pf = ns_image_decode_wuffs_anim_to_pixels(data, len, &w, &h);
+    g_free(data);
+    if (!pf || pf->len == 0) { if (pf) g_array_free(pf, TRUE); return NULL; }
+
+    NsAnimLogo *self = g_object_new(NS_TYPE_ANIM_LOGO, NULL);
+    self->frames = g_ptr_array_new_with_free_func(g_object_unref);
+    self->delays = g_array_new(FALSE, FALSE, sizeof(int));
+    self->width = w;
+    self->height = h;
+    for (guint i = 0; i < pf->len; i++) {
+        ns_image_pixel_frame *f = &g_array_index(pf, ns_image_pixel_frame, i);
+        GBytes *bytes = g_bytes_new(f->pixels, f->pixels_len);
+        GdkTexture *tex = gdk_memory_texture_new(
+            f->width, f->height, GDK_MEMORY_B8G8R8A8_PREMULTIPLIED,
+            bytes, f->stride);
+        g_bytes_unref(bytes);
+        g_ptr_array_add(self->frames, tex);
+        int d = f->delay_ms > 0 ? f->delay_ms : 60;
+        g_array_append_val(self->delays, d);
+    }
+    g_array_free(pf, TRUE);
+
+    if (self->frames->len > 1) {
+        int delay = g_array_index(self->delays, int, 0);
+        if (delay < 20) delay = 20;
+        self->timer = g_timeout_add(delay, ns_anim_logo_tick, self);
+    }
+    return GDK_PAINTABLE(self);
+}
+
 static void
 act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
     ProcWindow *pw = user_data;
-    const char *authors[] = { "Andreas Røsdal", NULL };
     const char *comments =
         "Northstar — the legendary web browser.\n"
         "A clean-room browser in C with GTK 4 and libcurl, "
@@ -1449,20 +1555,28 @@ act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
         "download."
 #endif
         ;
-    gtk_show_about_dialog(
-        GTK_WINDOW(pw->window),
-        "program-name", ns_i18n("Nordstjernen"),
-        "version", NS_VERSION,
-        "comments", ns_i18n(comments),
-        "website", "https://nordstjernen.org",
-        "website-label", "nordstjernen.org",
-        "authors", authors,
-        "copyright", "© 2026 Andreas Røsdal",
-        "license-type", GTK_LICENSE_CUSTOM,
-        "license", NS_ABOUT_LICENSE_TEXT,
-        "wrap-license", TRUE,
-        "logo-icon-name", "nordstjernen",
-        NULL);
+    GtkAboutDialog *about = GTK_ABOUT_DIALOG(gtk_about_dialog_new());
+    gtk_window_set_transient_for(GTK_WINDOW(about), GTK_WINDOW(pw->window));
+    gtk_window_set_modal(GTK_WINDOW(about), TRUE);
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(about), TRUE);
+    gtk_about_dialog_set_program_name(about, ns_i18n("Nordstjernen"));
+    gtk_about_dialog_set_version(about, NS_VERSION);
+    gtk_about_dialog_set_comments(about, ns_i18n(comments));
+    gtk_about_dialog_set_website(about, "https://nordstjernen.org");
+    gtk_about_dialog_set_website_label(about, "nordstjernen.org");
+    gtk_about_dialog_set_copyright(about, "© 2026 Andreas Røsdal");
+    gtk_about_dialog_set_license_type(about, GTK_LICENSE_CUSTOM);
+    gtk_about_dialog_set_license(about, NS_ABOUT_LICENSE_TEXT);
+    gtk_about_dialog_set_wrap_license(about, TRUE);
+
+    GdkPaintable *logo = ns_anim_logo_new();
+    if (logo) {
+        gtk_about_dialog_set_logo(about, logo);
+        g_object_unref(logo);
+    } else {
+        gtk_about_dialog_set_logo_icon_name(about, "nordstjernen");
+    }
+    gtk_window_present(GTK_WINDOW(about));
 }
 
 static const struct { const char *name; const char *url; } k_search_engines[] = {
