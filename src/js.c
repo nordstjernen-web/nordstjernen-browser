@@ -3944,6 +3944,51 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_node_is_object_element(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT && n->name &&
+           g_ascii_strcasecmp(n->name, "object") == 0;
+}
+
+static JSValue
+ns_element_get_data(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (ns_node_is_object_element(n)) {
+        const char *v = ns_element_get_attr(n, "data");
+        if (!v || !*v) return JS_NewString(ctx, "");
+        ns_js *js = js_from_ctx(ctx);
+        const char *base = js ? js->current_url : NULL;
+        if (base && *base) {
+            char *resolved = ns_url_resolve(base, v);
+            if (resolved) {
+                JSValue ret = JS_NewString(ctx, resolved);
+                g_free(resolved);
+                return ret;
+            }
+        }
+        return JS_NewString(ctx, v);
+    }
+    return ns_element_get_nodeValue(ctx, this_val);
+}
+
+static JSValue
+ns_element_set_data(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (ns_node_is_object_element(n)) {
+        const char *s = JS_ToCString(ctx, val);
+        if (s) {
+            ns_js *js = js_from_ctx(ctx);
+            ns_js_set_attr_recorded(js, n, "data", s);
+            JS_FreeCString(ctx, s);
+        }
+        return JS_UNDEFINED;
+    }
+    return ns_element_set_nodeValue(ctx, this_val, val);
+}
+
 static JSValue
 ns_element_get_id(JSContext *ctx, JSValueConst this_val)
 {
@@ -27657,7 +27702,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("toDataURL",               0, ns_element_toDataURL),
     JS_CGETSET_DEF("nodeType",      ns_element_get_nodeType, ns_element_noop_set),
     JS_CGETSET_DEF("nodeValue",     ns_element_get_nodeValue, ns_element_set_nodeValue),
-    JS_CGETSET_DEF("data",          ns_element_get_nodeValue, ns_element_set_nodeValue),
+    JS_CGETSET_DEF("data",          ns_element_get_data, ns_element_set_data),
     JS_CGETSET_DEF("wholeText",     ns_element_get_wholeText, ns_element_noop_set),
     JS_CGETSET_DEF("nodeName",      ns_element_get_nodeName, ns_element_noop_set),
     JS_CGETSET_DEF("dataset",       ns_element_get_dataset,  ns_element_noop_set),
