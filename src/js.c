@@ -19531,6 +19531,8 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
         ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, prefix,
                                    local && *local ? local : name,
                                    name, val ? val : "");
+        JS_SetPropertyStr(ctx, argv[0], "ownerElement",
+                          JS_DupValue(ctx, this_val));
     }
     if (name) JS_FreeCString(ctx, name);
     if (val)  JS_FreeCString(ctx, val);
@@ -31295,10 +31297,61 @@ ns_document_createProcessingInstruction(JSContext *ctx,
 }
 
 static JSValue
+ns_attr_owner_delegate(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv,
+                       JSValue (*fn)(JSContext *, JSValueConst, int, JSValueConst *),
+                       JSValue none)
+{
+    JSValue owner = JS_GetPropertyStr(ctx, this_val, "ownerElement");
+    JSValue ret = none;
+    if (!JS_IsNull(owner) && !JS_IsUndefined(owner))
+        ret = fn(ctx, owner, argc, argv);
+    JS_FreeValue(ctx, owner);
+    return ret;
+}
+
+static JSValue
+ns_attr_lookupNamespaceURI(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{ return ns_attr_owner_delegate(ctx, this_val, argc, argv,
+                                ns_element_lookupNamespaceURI, JS_NULL); }
+
+static JSValue
+ns_attr_lookupPrefix(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{ return ns_attr_owner_delegate(ctx, this_val, argc, argv,
+                                ns_element_lookupPrefix, JS_NULL); }
+
+static JSValue
+ns_attr_isDefaultNamespace(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    JSValue owner = JS_GetPropertyStr(ctx, this_val, "ownerElement");
+    gboolean has_owner = !JS_IsNull(owner) && !JS_IsUndefined(owner);
+    JSValue ret;
+    if (has_owner) {
+        ret = ns_element_isDefaultNamespace(ctx, owner, argc, argv);
+    } else {
+        gboolean empty = argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0]);
+        if (!empty) {
+            const char *s = JS_ToCString(ctx, argv[0]);
+            empty = (s && !*s);
+            if (s) JS_FreeCString(ctx, s);
+        }
+        ret = JS_NewBool(ctx, empty);
+    }
+    JS_FreeValue(ctx, owner);
+    return ret;
+}
+
+static JSValue
 ns_make_attr_node(JSContext *ctx, const char *ns_uri, const char *prefix,
                   const char *local, const char *qname)
 {
     JSValue out = JS_NewObject(ctx);
+    ns_bind_fn(ctx, out, "lookupNamespaceURI", ns_attr_lookupNamespaceURI, 1);
+    ns_bind_fn(ctx, out, "lookupPrefix",       ns_attr_lookupPrefix,       1);
+    ns_bind_fn(ctx, out, "isDefaultNamespace", ns_attr_isDefaultNamespace, 1);
     JS_SetPropertyStr(ctx, out, "name",      JS_NewString(ctx, qname));
     JS_SetPropertyStr(ctx, out, "nodeName",  JS_NewString(ctx, qname));
     JS_SetPropertyStr(ctx, out, "localName", JS_NewString(ctx, local));
