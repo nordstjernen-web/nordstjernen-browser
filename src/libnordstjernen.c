@@ -967,6 +967,8 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     return 0;
 }
 
+static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);
+
 char *
 ns_browser_link_at(ns_browser *browser, int x, int y)
 {
@@ -981,9 +983,15 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         { -kR, -kR }, { kR, -kR }, { -kR, kR }, { kR, kR },
     };
     for (int i = 0; i < (int)(sizeof probe / sizeof probe[0]); i++) {
+        int px = x + probe[i][0], py = y + probe[i][1];
         const char *href = ns_box_hit_link(browser->layout,
-                                           (double)(x + probe[i][0]),
-                                           (double)(y + probe[i][1]));
+                                           (double)px, (double)py);
+        if (!href || !*href) {
+            const ns_node *node = browser_hit_node(browser, px, py);
+            for (const ns_node *a = node; a && (!href || !*href); a = a->parent)
+                if (ns_node_is_element_named(a, "a"))
+                    href = ns_element_get_attr(a, "href");
+        }
         if (href && *href) return browser_resolve_navigation(browser, href);
     }
     return NULL;
