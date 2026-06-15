@@ -11226,7 +11226,7 @@ ns_el_is_empty(const ns_node *el)
 {
     for (const ns_node *c = el ? el->first_child : NULL; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT) return FALSE;
-        if (c->kind == NS_NODE_TEXT && !ns_text_is_document_ws(c->text))
+        if (c->kind == NS_NODE_TEXT && c->text && c->text[0] != '\0')
             return FALSE;
     }
     return TRUE;
