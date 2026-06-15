@@ -6,7 +6,6 @@ Focused on supporting the HTML and CSS standards.
 Runs on Windows, Mac and Linux, Android and Java.
 Nordstjernen is built in Norway. 
 
-
 **HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 114 spec rows fully implemented, 49 partial, 4 absent as of June 2026. 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
@@ -215,6 +214,8 @@ The Functional Source License (FSL) is a Fair Source license that converts to Ap
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.  
 
 [Join the Discord](https://discord.gg/4W959nW5vF)  
+
+𝒩𝑜𝓇𝒹𝓈𝓉𝒿𝑒𝓇𝓃𝑒𝓃  
 
 ## Builds
 [![linux](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml)
