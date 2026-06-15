@@ -213,9 +213,10 @@ The Functional Source License (FSL) is a Fair Source license that converts to Ap
 
 Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.  
 
+----
+
 [Join the Discord](https://discord.gg/4W959nW5vF)  
 
-𝒩𝑜𝓇𝒹𝓈𝓉𝒿𝑒𝓇𝓃𝑒𝓃  
 
 ## Builds
 [![linux](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml)
