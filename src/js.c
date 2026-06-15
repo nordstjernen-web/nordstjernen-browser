@@ -2279,13 +2279,6 @@ ns_style_get_null(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
-ns_style_get_empty(JSContext *ctx, JSValueConst this_val)
-{
-    (void)this_val;
-    return JS_NewString(ctx, "");
-}
-
-static JSValue
 ns_style_item(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
@@ -2306,11 +2299,32 @@ ns_style_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
     return JS_NewString(ctx, "");
 }
 
+static JSValue
+ns_style_get_cssFloat(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue name = JS_NewString(ctx, "float");
+    JSValueConst args[1] = { name };
+    JSValue r = ns_style_getPropertyValue(ctx, this_val, 1, args);
+    JS_FreeValue(ctx, name);
+    return r;
+}
+
+static JSValue
+ns_style_set_cssFloat(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    JSValue name = JS_NewString(ctx, "float");
+    JSValueConst args[2] = { name, val };
+    JSValue r = ns_style_setProperty(ctx, this_val, 2, args);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, r);
+    return JS_UNDEFINED;
+}
+
 static const JSCFunctionListEntry ns_style_proto_funcs[] = {
     JS_CGETSET_DEF("cssText", ns_style_get_cssText, ns_style_set_cssText),
     JS_CGETSET_DEF("length",      ns_style_get_length, NULL),
     JS_CGETSET_DEF("parentRule",  ns_style_get_null,  NULL),
-    JS_CGETSET_DEF("cssFloat",    ns_style_get_empty, NULL),
+    JS_CGETSET_DEF("cssFloat",    ns_style_get_cssFloat, ns_style_set_cssFloat),
     JS_CFUNC_DEF("getPropertyValue",   1, ns_style_getPropertyValue),
     JS_CFUNC_DEF("setProperty",        2, ns_style_setProperty),
     JS_CFUNC_DEF("removeProperty",     1, ns_style_removeProperty),
