@@ -518,6 +518,7 @@ typedef struct ns_css_simple {
     char *type;
     char *id;
     GPtrArray *classes;
+    GArray    *class_lens;
     GArray    *attrs;
     GArray    *pseudos;
     GPtrArray *matches_any;

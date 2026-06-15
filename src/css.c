@@ -1723,6 +1723,7 @@ ns_css_simple_new(void)
 {
     ns_css_simple *s = g_new0(ns_css_simple, 1);
     s->classes = g_ptr_array_new_with_free_func(g_free);
+    s->class_lens = g_array_new(FALSE, FALSE, sizeof(gsize));
     s->attrs   = g_array_new(FALSE, FALSE, sizeof(ns_css_attr_pred));
     g_array_set_clear_func(s->attrs, ns_attr_pred_clear);
     s->pseudos = g_array_new(FALSE, FALSE, sizeof(ns_css_pseudo_pred));
@@ -1737,6 +1738,7 @@ ns_css_simple_free(ns_css_simple *s)
     g_free(s->type);
     g_free(s->id);
     g_ptr_array_free(s->classes, TRUE);
+    g_array_free(s->class_lens, TRUE);
     if (s->attrs)   g_array_free(s->attrs,   TRUE);
     if (s->pseudos) g_array_free(s->pseudos, TRUE);
     if (s->matches_any)  g_ptr_array_free(s->matches_any,  TRUE);
@@ -2137,7 +2139,9 @@ parse_one_selector(const char **pp, const char *end, int depth)
                 }
                 char *cls = read_css_ident(&p, end);
                 if (!bad_start && cls && *cls) {
+                    gsize cls_len = strlen(cls);
                     g_ptr_array_add(cmp->classes, cls);
+                    g_array_append_val(cmp->class_lens, cls_len);
                     sel->spec_b += 1;
                 } else {
                     g_sel_parse_error = TRUE;
@@ -10558,6 +10562,21 @@ typedef struct css_candidate {
     guint selector_idx;
 } css_candidate;
 
+typedef enum css_index_kind {
+    CSS_INDEX_NONE,
+    CSS_INDEX_ID,
+    CSS_INDEX_CLASS,
+    CSS_INDEX_TAG,
+    CSS_INDEX_ATTR,
+} css_index_kind;
+
+typedef struct css_index_counts {
+    GHashTable *by_id;
+    GHashTable *by_class;
+    GHashTable *by_tag;
+    GHashTable *by_attr;
+} css_index_counts;
+
 typedef struct ns_css_rule_index {
     GHashTable *by_id;
     GHashTable *by_class;
@@ -10698,6 +10717,126 @@ index_add_lowercase(GHashTable *table, const char *key, guint rule_idx,
     g_free(lk);
 }
 
+static void
+index_count_inc(GHashTable *table, const char *key)
+{
+    guint n = GPOINTER_TO_UINT(g_hash_table_lookup(table, key));
+    g_hash_table_replace(table, g_strdup(key), GUINT_TO_POINTER(n + 1));
+}
+
+static void
+index_count_inc_lowercase(GHashTable *table, const char *key)
+{
+    char *lk = g_ascii_strdown(key, -1);
+    guint n = GPOINTER_TO_UINT(g_hash_table_lookup(table, lk));
+    g_hash_table_replace(table, lk, GUINT_TO_POINTER(n + 1));
+}
+
+static guint
+index_count_lookup_lowercase(GHashTable *table, const char *key)
+{
+    char *lk = g_ascii_strdown(key, -1);
+    guint n = GPOINTER_TO_UINT(g_hash_table_lookup(table, lk));
+    g_free(lk);
+    return n;
+}
+
+static css_index_counts
+index_counts_new(void)
+{
+    css_index_counts counts = {
+        .by_id = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL),
+        .by_class = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL),
+        .by_tag = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL),
+        .by_attr = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL),
+    };
+    return counts;
+}
+
+static void
+index_counts_free(css_index_counts *counts)
+{
+    g_hash_table_destroy(counts->by_id);
+    g_hash_table_destroy(counts->by_class);
+    g_hash_table_destroy(counts->by_tag);
+    g_hash_table_destroy(counts->by_attr);
+}
+
+static void
+index_counts_add_subject(css_index_counts *counts, const ns_css_simple *subj)
+{
+    if (!counts || !subj || subj->never_match) return;
+    if (subj->id && *subj->id)
+        index_count_inc(counts->by_id, subj->id);
+    for (guint i = 0; subj->classes && i < subj->classes->len; i++) {
+        const char *cls = g_ptr_array_index(subj->classes, i);
+        if (cls && *cls) index_count_inc(counts->by_class, cls);
+    }
+    if (subj->type && *subj->type && strcmp(subj->type, "*") != 0)
+        index_count_inc_lowercase(counts->by_tag, subj->type);
+    for (guint i = 0; subj->attrs && i < subj->attrs->len; i++) {
+        const ns_css_attr_pred *a =
+            &g_array_index(subj->attrs, ns_css_attr_pred, i);
+        if (a && a->name && *a->name)
+            index_count_inc_lowercase(counts->by_attr, a->name);
+    }
+}
+
+static gboolean
+index_choice_take(guint count, guint *best)
+{
+    if (count == 0 || count >= *best) return FALSE;
+    *best = count;
+    return TRUE;
+}
+
+static css_index_kind
+index_subject_kind(const css_index_counts *counts,
+                   const ns_css_simple *subj,
+                   guint *out_class_i,
+                   guint *out_attr_i)
+{
+    css_index_kind kind = CSS_INDEX_NONE;
+    guint best = G_MAXUINT;
+    if (out_class_i) *out_class_i = 0;
+    if (out_attr_i) *out_attr_i = 0;
+    if (!counts || !subj || subj->never_match) return kind;
+    if (subj->id && *subj->id &&
+        index_choice_take(GPOINTER_TO_UINT(g_hash_table_lookup(counts->by_id,
+                                                               subj->id)),
+                          &best)) {
+        kind = CSS_INDEX_ID;
+    }
+    for (guint i = 0; subj->classes && i < subj->classes->len; i++) {
+        const char *cls = g_ptr_array_index(subj->classes, i);
+        if (!cls || !*cls) continue;
+        guint count = GPOINTER_TO_UINT(g_hash_table_lookup(counts->by_class,
+                                                           cls));
+        if (index_choice_take(count, &best)) {
+            kind = CSS_INDEX_CLASS;
+            if (out_class_i) *out_class_i = i;
+        }
+    }
+    if (subj->type && *subj->type && strcmp(subj->type, "*") != 0 &&
+        index_choice_take(index_count_lookup_lowercase(counts->by_tag,
+                                                       subj->type),
+                          &best)) {
+        kind = CSS_INDEX_TAG;
+    }
+    for (guint i = 0; subj->attrs && i < subj->attrs->len; i++) {
+        const ns_css_attr_pred *a =
+            &g_array_index(subj->attrs, ns_css_attr_pred, i);
+        if (!a || !a->name || !*a->name) continue;
+        if (index_choice_take(index_count_lookup_lowercase(counts->by_attr,
+                                                           a->name),
+                              &best)) {
+            kind = CSS_INDEX_ATTR;
+            if (out_attr_i) *out_attr_i = i;
+        }
+    }
+    return kind;
+}
+
 static ns_css_rule_index *
 ns_css_rule_index_build(const ns_css_stylesheet *sheet)
 {
@@ -10707,6 +10846,18 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
     idx->by_tag   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->by_attr  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->universal = g_array_new(FALSE, FALSE, sizeof(css_candidate));
+
+    css_index_counts counts = index_counts_new();
+    for (guint ri = 0; ri < sheet->rules->len; ri++) {
+        const ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
+        for (guint si = 0; si < r->selectors->len; si++) {
+            const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
+            if (!sel || sel->compounds->len == 0) continue;
+            const ns_css_simple *subj =
+                g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
+            index_counts_add_subject(&counts, subj);
+        }
+    }
 
     for (guint ri = 0; ri < sheet->rules->len; ri++) {
         const ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
@@ -10727,33 +10878,39 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
                 g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
             if (!subj || subj->never_match) continue;
             had_matchable_selector = TRUE;
-            if (subj->id) {
+            guint class_i = 0, attr_i = 0;
+            switch (index_subject_kind(&counts, subj, &class_i, &attr_i)) {
+            case CSS_INDEX_ID:
                 index_add(idx->by_id, subj->id, ri, si);
                 continue;
-            }
-            if (subj->classes && subj->classes->len > 0) {
-                const char *cls = g_ptr_array_index(subj->classes, 0);
+            case CSS_INDEX_CLASS: {
+                const char *cls = g_ptr_array_index(subj->classes, class_i);
                 if (cls && *cls) {
                     index_add(idx->by_class, cls, ri, si);
                     continue;
                 }
+                break;
             }
-            if (subj->type && strcmp(subj->type, "*") != 0) {
+            case CSS_INDEX_TAG:
                 index_add_lowercase(idx->by_tag, subj->type, ri, si);
                 continue;
-            }
-            if (subj->attrs && subj->attrs->len > 0) {
+            case CSS_INDEX_ATTR: {
                 const ns_css_attr_pred *a0 =
-                    &g_array_index(subj->attrs, ns_css_attr_pred, 0);
+                    &g_array_index(subj->attrs, ns_css_attr_pred, attr_i);
                 if (a0 && a0->name && *a0->name) {
                     index_add_lowercase(idx->by_attr, a0->name, ri, si);
                     continue;
                 }
+                break;
+            }
+            case CSS_INDEX_NONE:
+                break;
             }
             index_add_candidate_array(idx->universal, ri, si);
         }
         if (!had_matchable_selector) continue;
     }
+    index_counts_free(&counts);
     return idx;
 }
 
@@ -11393,7 +11550,10 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     if (sel->classes->len > 0) {
         for (guint i = 0; i < sel->classes->len; i++) {
             const char *want = g_ptr_array_index(sel->classes, i);
-            if (!ns_node_has_class(el, want, strlen(want)))
+            gsize want_len = sel->class_lens && i < sel->class_lens->len
+                ? g_array_index(sel->class_lens, gsize, i)
+                : strlen(want);
+            if (!ns_node_has_class(el, want, want_len))
                 return FALSE;
         }
     }
