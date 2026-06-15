@@ -72,8 +72,18 @@ ns_engine_post_blocking(const char *url, const char *top_url,
     return st.resp;
 }
 
+static gboolean
+content_type_is_css(const char *ct)
+{
+    if (!ct || !*ct) return TRUE; /* missing type: be lenient */
+    while (*ct == ' ' || *ct == '\t') ct++;
+    return g_ascii_strncasecmp(ct, "text/css", 8) == 0 &&
+           (ct[8] == '\0' || ct[8] == ';' || ct[8] == ' ' || ct[8] == '\t');
+}
+
 static GBytes *
-fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache)
+fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
+                gboolean strict_mime)
 {
     if (!url || !*url) return NULL;
     if (cache) {
@@ -82,7 +92,9 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache)
     }
     ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
     GBytes *bytes = NULL;
-    if (resp && !resp->error && resp->status < 400 &&
+    gboolean mime_ok = !strict_mime || !resp ||
+                       content_type_is_css(resp->content_type);
+    if (resp && !resp->error && resp->status < 400 && mime_ok &&
         resp->body && resp->body->len > 0) {
         bytes = g_bytes_new(resp->body->data, resp->body->len);
         if (cache)
@@ -137,7 +149,7 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             }
             if (seen) g_hash_table_add(seen, g_strdup(abs));
-            GBytes *bytes = fetch_css_bytes(abs, top_url, cache);
+            GBytes *bytes = fetch_css_bytes(abs, top_url, cache, TRUE);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
@@ -164,6 +176,7 @@ typedef struct {
     GString    *run;
     const char *run_base;
     const char *top_url;
+    gboolean    strict_css_mime;
 } sheet_collect_ctx;
 
 static void
@@ -227,7 +240,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
         if (href && *href && rel_is_stylesheet(rel) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
-            GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache);
+            GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,
+                                            cc->strict_css_mime);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
@@ -259,6 +273,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
         .out = out, .cache = css_cache,
         .run = g_string_new(NULL), .run_base = NULL,
         .top_url = base_url,
+        .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
     };
     collect_stylesheets_walk(doc, base_url, &cc);
     sheet_run_flush(&cc);
