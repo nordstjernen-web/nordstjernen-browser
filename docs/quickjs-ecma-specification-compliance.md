@@ -31,7 +31,7 @@ The known-failing baseline is captured in
 | TypedArray `[[Set]]` value-coercion on invalid index | ~12 | low | **done** |
 | `with` GetBindingValue re-probe (read trap order + strict) | ~5 | medium | **done** |
 | `with` SetMutableBinding re-probe (write trap order) | ~3 | medium | open (needs a dedicated with-store opcode) |
-| AsyncFromSyncIterator close ordering on rejected promises | ~8 | medium | open |
+| AsyncFromSyncIterator close on rejection (`closeOnRejection`) | ~8 | medium | **done** |
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
 | RegExp `v` flag — Unicode semantics (property escapes, `\u{}`, casing) | ~8 | medium | **done** |
@@ -224,3 +224,32 @@ intersection, `[A--B]` subtraction), nested classes `[[…][…]]`, string
 disjunctions `\q{…}`, and properties-of-strings such as `\p{RGI_Emoji}`
 (the `rgi-emoji-*` subtests) — these need the ClassSetExpression grammar,
 which this change does not add.
+
+### 7. AsyncFromSyncIterator closes the sync iterator on rejection
+
+**Spec:** [`AsyncFromSyncIteratorContinuation`](https://tc39.es/ecma262/#sec-asyncfromsynciteratorcontinuation)
+takes a `closeOnRejection` flag (true for `%AsyncFromSyncIteratorPrototype%.next`,
+false for `return`/`throw`). When `closeOnRejection` is true and the
+result is not `done`:
+- step 6: if `PromiseResolve(%Promise%, value)` completes abruptly, the
+  sync iterator is closed (`AsyncFromSyncIteratorClose`) before rejecting;
+- step 11: the `onRejected` reaction passed to `PerformPromiseThen` closes
+  the sync iterator (then rethrows) when the wrapped value promise rejects.
+
+**Bug:** `js_async_from_sync_iterator_next` always passed `JS_UNDEFINED`
+as the `onRejected` handler and went straight to `reject` when
+`js_promise_resolve` threw, so the underlying sync iterator's `return()`
+was never called for a rejected/abrupt value. `for await … of` over a
+sync iterable whose values are rejected promises leaked the iterator
+(no `finally`, no `return`).
+
+**Fix:** add a captured `onRejected` closure
+(`js_async_from_sync_iterator_close_on_reject`) that performs
+`IteratorClose(syncIterator, ThrowCompletion(reason))` via
+`JS_IteratorClose(…, /*is_exception_pending*/true)`, and wire it (and the
+`PromiseResolve`-abrupt close) only for `GEN_MAGIC_NEXT` with `done` false.
+`return`/`throw` and the `done`-true and `IteratorValue`-abrupt cases keep
+the no-close behavior per spec. `src/quickjs/quickjs.c`.
+
+Covers test262
+`built-ins/AsyncFromSyncIteratorPrototype/{next,throw}/*-{rejected-promise-close,poisoned-wrapper}.js`.
