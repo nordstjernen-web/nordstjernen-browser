@@ -32,6 +32,13 @@ jobs:
           usesh: true
           copyback: true
           prepare: |
+            if [ ! -f /usr/X11R7/lib/pkgconfig/x11.pc ]; then
+              base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/amd64/binary/sets
+              for s in xbase xcomp; do
+                ftp -o "/tmp/$s.tar.xz" "$base/$s.tar.xz"
+                tar -C / -xJpf "/tmp/$s.tar.xz"
+              done
+            fi
             /usr/sbin/pkg_add -U \
               meson ninja-build pkgconf bash zip ccache \
               gtk4 curl openssl uchardet librsvg sqlite3 libwebp libpsl

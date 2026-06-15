@@ -31,7 +31,8 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(__OpenBSD__) && !defined(__NetBSD__) \
+    && !defined(__FreeBSD__)
 #include <sys/timeb.h>
 #endif
 #include <sys/uio.h>
