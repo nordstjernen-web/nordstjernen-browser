@@ -332,6 +332,50 @@ busy_hourglass_cursor(NsProcView *v)
 }
 
 static void
+pv_set_named_cursor(GtkWidget *w, const char *name)
+{
+    if (!name || !*name) {
+        gtk_widget_set_cursor(w, NULL);
+        return;
+    }
+    static const struct { const char *name; const char *fallback; } fb[] = {
+        { "context-menu",  "default" },
+        { "help",          "default" },
+        { "progress",      "wait" },
+        { "cell",          "crosshair" },
+        { "vertical-text", "text" },
+        { "alias",         "copy" },
+        { "copy",          "default" },
+        { "move",          "all-scroll" },
+        { "no-drop",       "not-allowed" },
+        { "not-allowed",   "default" },
+        { "grab",          "all-scroll" },
+        { "grabbing",      "all-scroll" },
+        { "all-scroll",    "move" },
+        { "col-resize",    "ew-resize" },
+        { "row-resize",    "ns-resize" },
+        { "ne-resize",     "nesw-resize" },
+        { "sw-resize",     "nesw-resize" },
+        { "nw-resize",     "nwse-resize" },
+        { "se-resize",     "nwse-resize" },
+        { "nesw-resize",   "crosshair" },
+        { "nwse-resize",   "crosshair" },
+        { "zoom-in",       "crosshair" },
+        { "zoom-out",      "crosshair" },
+    };
+    const char *fallback = NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(fb); i++)
+        if (strcmp(name, fb[i].name) == 0) { fallback = fb[i].fallback; break; }
+    GdkCursor *fb_cur = fallback ? gdk_cursor_new_from_name(fallback, NULL) : NULL;
+    GdkCursor *cur = gdk_cursor_new_from_name(name, fb_cur);
+    gtk_widget_set_cursor(w, cur ? cur : fb_cur);
+    if (cur)
+        g_object_unref(cur);
+    if (fb_cur)
+        g_object_unref(fb_cur);
+}
+
+static void
 set_busy_cursor(NsProcView *v)
 {
     v->busy_cursor = TRUE;
@@ -1587,8 +1631,7 @@ on_result(gpointer data)
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             if (!v->busy_cursor)
-                gtk_widget_set_cursor_from_name(
-                    area, res->cursor ? res->cursor : "pointer");
+                pv_set_named_cursor(area, res->cursor ? res->cursor : "pointer");
             if (res->action == ACT_NAVIGATE) {
                 navigated = TRUE;
                 ns_proc_view_load(v, res->href);
@@ -1596,7 +1639,7 @@ on_result(gpointer data)
                 post_emit(v, NS_PROC_EVT_NEWTAB, res->href);
             }
         } else if (!v->busy_cursor) {
-            gtk_widget_set_cursor_from_name(area, res->cursor);
+            pv_set_named_cursor(area, res->cursor);
         }
         if (!navigated && v->link_pending) {
             v->link_pending = FALSE;
@@ -1611,10 +1654,9 @@ on_result(gpointer data)
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
             if (!v->busy_cursor)
-                gtk_widget_set_cursor_from_name(
-                    v->area, res->cursor ? res->cursor : "pointer");
+                pv_set_named_cursor(v->area, res->cursor ? res->cursor : "pointer");
         } else if (!v->busy_cursor) {
-            gtk_widget_set_cursor_from_name(v->area, res->cursor);
+            pv_set_named_cursor(v->area, res->cursor);
         }
         if (res->ok)
             request_render(v);
