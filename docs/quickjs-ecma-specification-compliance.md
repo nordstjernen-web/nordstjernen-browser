@@ -34,7 +34,8 @@ The known-failing baseline is captured in
 | AsyncFromSyncIterator close ordering on rejected promises | ~8 | medium | open |
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
-| RegExp `v` flag (unicodeSets) property escapes | ~10 | high | open |
+| RegExp `v` flag — Unicode semantics (property escapes, `\u{}`, casing) | ~8 | medium | **done** |
+| RegExp `v` flag — set operations / strings (`&&`, `--`, `\q{}`, RGI_Emoji) | ~4 | high | open |
 | RegExp `\p{Script=Unknown}` value | 6 | medium | open |
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
 | Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
@@ -189,3 +190,37 @@ double `toString`. `src/quickjs/quickjs.c`, `js_parse_object_literal`.
 
 Covers test262
 `language/expressions/object/computed-property-name-topropertykey-before-value-evaluation.js`.
+
+### 6. RegExp `v` flag carries full Unicode semantics
+
+**Spec:** [`RegExp` `v` flag (`unicodeSets`)](https://tc39.es/ecma262/#sec-regexp-pattern-flags).
+The `v` flag is a superset of `u`: it enables full Unicode semantics
+(`\p{…}`/`\P{…}` property escapes, `\u{…}` code-point escapes, code-point
+iteration over astral characters, Unicode case folding) **and** the
+unicodeSets class extensions.
+
+**Bug:** `libregexp.c` derived `is_unicode` solely from `LRE_FLAG_UNICODE`
+(the `u` flag) and treated `is_unicode`/`unicode_sets` as mutually
+exclusive. Every Unicode-semantic branch in the parser and matcher is
+gated on `is_unicode`, so under `/…/v` property escapes silently matched
+nothing, `\u{1F600}` failed, astral characters weren't iterated by code
+point, and case folding fell back to ASCII. e.g. `/\p{ASCII}/v.test("a")`
+returned `false` and `"a".match(/\p{L}/v)` returned `null`.
+
+**Fix:** set `is_unicode` from `LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS`
+in both the compiler (`lre_compile`) and the matcher (`lre_exec`);
+`unicode_sets` still selects the `v`-only class syntax. Audit confirmed
+nothing relied on the old mutual exclusivity, and the change only affects
+`/v` regexps (previously broken) — `u` and plain regexps are byte-for-byte
+unchanged. `src/quickjs/libregexp.c`.
+
+Covers test262
+`built-ins/RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js` and the
+`String.prototype.{match,matchAll,replace,search}` `*-v-u-flag.js`
+property-escape subtests.
+
+Still open under `v`: the unicodeSets **set operations** (`[A&&B]`
+intersection, `[A--B]` subtraction), nested classes `[[…][…]]`, string
+disjunctions `\q{…}`, and properties-of-strings such as `\p{RGI_Emoji}`
+(the `rgi-emoji-*` subtests) — these need the ClassSetExpression grammar,
+which this change does not add.

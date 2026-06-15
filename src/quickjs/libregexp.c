@@ -67,7 +67,9 @@ typedef enum {
 
 #define TMP_BUF_SIZE 128
 
-// invariant: is_unicode ^ unicode_sets (or neither, but not both)
+// the `v` flag (unicode_sets) implies full Unicode semantics, so it also
+// sets is_unicode; unicode_sets then selects the unicodeSets-only behaviour
+
 typedef struct {
     DynBuf byte_code;
     const uint8_t *buf_ptr;
@@ -1810,11 +1812,13 @@ uint8_t *lre_compile(int *plen, char *error_msg, int error_msg_size,
     s->buf_end = s->buf_ptr + buf_len;
     s->buf_start = s->buf_ptr;
     s->re_flags = re_flags;
-    s->is_unicode = ((re_flags & LRE_FLAG_UNICODE) != 0);
+    s->unicode_sets = ((re_flags & LRE_FLAG_UNICODE_SETS) != 0);
+    /* the `v` flag implies full Unicode semantics on top of the
+       unicodeSets extensions, so it enables `is_unicode` as well */
+    s->is_unicode = ((re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0);
     is_sticky = ((re_flags & LRE_FLAG_STICKY) != 0);
     s->ignore_case = ((re_flags & LRE_FLAG_IGNORECASE) != 0);
     s->dotall = ((re_flags & LRE_FLAG_DOTALL) != 0);
-    s->unicode_sets = ((re_flags & LRE_FLAG_UNICODE_SETS) != 0);
     s->capture_count = 1;
     s->total_capture_count = -1;
     s->has_named_captures = -1;
@@ -2505,7 +2509,7 @@ int lre_exec(uint8_t **capture,
     re_flags = lre_get_flags(bc_buf);
     s->multi_line = (re_flags & LRE_FLAG_MULTILINE) != 0;
     s->ignore_case = (re_flags & LRE_FLAG_IGNORECASE) != 0;
-    s->is_unicode = (re_flags & LRE_FLAG_UNICODE) != 0;
+    s->is_unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
     s->capture_count = bc_buf[RE_HEADER_CAPTURE_COUNT];
     s->stack_size_max = bc_buf[RE_HEADER_STACK_SIZE];
     s->cbuf = cbuf;
