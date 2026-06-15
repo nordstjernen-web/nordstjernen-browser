@@ -5575,6 +5575,19 @@ parse_value_for(ns_css_prop prop, const char *text)
         for (int i = 0; i < nt; i++) g_free(tokens[i]);
         break;
     }
+    case NS_CSS_WHITE_SPACE: {
+        char *kw = ascii_lower(t, strlen(t));
+        static const char *const ok[] = { "normal", "nowrap", "pre",
+            "pre-wrap", "pre-line", "break-spaces" };
+        gboolean valid = FALSE;
+        for (gsize i = 0; i < G_N_ELEMENTS(ok); i++)
+            if (strcmp(kw, ok[i]) == 0) { valid = TRUE; break; }
+        if (!valid) { g_free(kw); g_free(t); return NULL; }
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = kw;
+        break;
+    }
     default: {
 
         char *kw = ascii_lower(t, strlen(t));
