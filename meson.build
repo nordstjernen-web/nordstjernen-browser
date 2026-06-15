@@ -255,7 +255,15 @@ add_project_arguments('-DNS_VERSION="' + meson.project_version() + '"', language
 
 subdir('src/lexbor')
 subdir('src/quickjs')
-subdir('src/wamr')
+
+wasm_feature = get_option('wasm')
+have_wasm = false
+if wasm_feature.allowed()
+  subdir('src/wamr')
+  have_wasm = true
+else
+  libwamr = declare_dependency()
+endif
 
 install_data(
   'data/icons/hicolor/scalable/apps/nordstjernen.svg',
@@ -406,6 +414,7 @@ if not is_android and ai_feature.allowed()
     have_ai = true
   endif
 endif
+summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AI chat': have_ai, 'AI GPU backend': ai_gpu_backend}, section: 'Features')
 summary({'GTK 4 shell': have_gtk, 'Qt 6 shell': get_option('qt').allowed()},
         section: 'Shells')

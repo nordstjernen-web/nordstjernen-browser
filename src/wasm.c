@@ -5,6 +5,16 @@
 
 #include "wasm.h"
 
+#if !defined(NS_HAVE_WAMR)
+
+void ns_wasm_install(JSContext *ctx, JSValueConst global)
+{
+    (void)ctx;
+    (void)global;
+}
+
+#else
+
 #include <glib.h>
 #include <string.h>
 
@@ -2227,3 +2237,5 @@ ns_wasm_install(JSContext *ctx, JSValueConst global)
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, boot);
 }
+
+#endif /* NS_HAVE_WAMR */
