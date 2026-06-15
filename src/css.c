@@ -8661,10 +8661,30 @@ media_feature_matches(const char *name, const char *value)
     }
     if (g_ascii_strcasecmp(name, "grid") == 0)
         return value && strcmp(value, "0") == 0;
-    if (g_ascii_strcasecmp(name, "monochrome") == 0)
-        return value && strcmp(value, "0") == 0;
-    if (g_ascii_strcasecmp(name, "color") == 0)
-        return !value || strcmp(value, "0") != 0;
+    if (g_ascii_strcasecmp(name, "color") == 0 ||
+        g_ascii_strcasecmp(name, "min-color") == 0 ||
+        g_ascii_strcasecmp(name, "max-color") == 0) {
+        const double depth = 8;
+        if (!value) return depth != 0;
+        char *e = NULL;
+        double want = g_ascii_strtod(value, &e);
+        if (e == value) return FALSE;
+        if (g_ascii_strncasecmp(name, "min-", 4) == 0) return depth >= want;
+        if (g_ascii_strncasecmp(name, "max-", 4) == 0) return depth <= want;
+        return depth == want;
+    }
+    if (g_ascii_strcasecmp(name, "monochrome") == 0 ||
+        g_ascii_strcasecmp(name, "min-monochrome") == 0 ||
+        g_ascii_strcasecmp(name, "max-monochrome") == 0) {
+        const double mono = 0;
+        if (!value) return mono != 0;
+        char *e = NULL;
+        double want = g_ascii_strtod(value, &e);
+        if (e == value) return FALSE;
+        if (g_ascii_strncasecmp(name, "min-", 4) == 0) return mono >= want;
+        if (g_ascii_strncasecmp(name, "max-", 4) == 0) return mono <= want;
+        return mono == want;
+    }
     return FALSE;
 }
 

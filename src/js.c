@@ -9146,6 +9146,7 @@ ns_computed_initial_value(const char *name)
         strcmp(name, "background-image") == 0 ||
         strcmp(name, "box-shadow") == 0 ||
         strcmp(name, "text-decoration-line") == 0 ||
+        strcmp(name, "text-transform") == 0 ||
         strcmp(name, "float") == 0 ||
         strcmp(name, "clear") == 0)
         return "none";
@@ -20227,12 +20228,50 @@ ns_element_get_children(JSContext *ctx, JSValueConst this_val)
     return ns_make_live(ctx, this_val, NS_LIVE_CHILDREN, NULL);
 }
 
+static gboolean
+ns_node_is_embedded_doc(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
+}
+
+static ns_node *
+ns_dom_first_child(const ns_node *n)
+{
+    ns_node *c = n ? n->first_child : NULL;
+    while (ns_node_is_embedded_doc(c)) c = c->next_sibling;
+    return c;
+}
+
+static ns_node *
+ns_dom_last_child(const ns_node *n)
+{
+    ns_node *c = n ? n->last_child : NULL;
+    while (ns_node_is_embedded_doc(c)) c = c->prev_sibling;
+    return c;
+}
+
+static ns_node *
+ns_dom_next_sibling(const ns_node *n)
+{
+    ns_node *c = n ? n->next_sibling : NULL;
+    while (ns_node_is_embedded_doc(c)) c = c->next_sibling;
+    return c;
+}
+
+static ns_node *
+ns_dom_prev_sibling(const ns_node *n)
+{
+    ns_node *c = n ? n->prev_sibling : NULL;
+    while (ns_node_is_embedded_doc(c)) c = c->prev_sibling;
+    return c;
+}
+
 static JSValue
 ns_element_get_firstChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (ns_node_is_element_named(n, "template")) return JS_NULL;
-    return ns_make_element(ctx, n ? n->first_child : NULL);
+    return ns_make_element(ctx, ns_dom_first_child(n));
 }
 
 static JSValue
@@ -20240,7 +20279,7 @@ ns_element_get_lastChild(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (ns_node_is_element_named(n, "template")) return JS_NULL;
-    return ns_make_element(ctx, n ? n->last_child : NULL);
+    return ns_make_element(ctx, ns_dom_last_child(n));
 }
 
 static JSValue
@@ -20258,14 +20297,14 @@ static JSValue
 ns_element_get_nextSibling(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    return ns_make_element(ctx, n ? n->next_sibling : NULL);
+    return ns_make_element(ctx, ns_dom_next_sibling(n));
 }
 
 static JSValue
 ns_element_get_previousSibling(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    return ns_make_element(ctx, n ? n->prev_sibling : NULL);
+    return ns_make_element(ctx, ns_dom_prev_sibling(n));
 }
 
 static JSValue
@@ -24068,7 +24107,8 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_CHILDNODES:
         if (!ns_node_is_element_named(root, "template"))
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
+                if (!ns_node_is_embedded_doc(c))
+                    JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, c));
         break;
     case NS_LIVE_BY_TAG:
     case NS_LIVE_DOC_TAG:
