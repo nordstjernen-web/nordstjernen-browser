@@ -5154,6 +5154,15 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         }
     }
 
+    gboolean cacheable = inline_box_measure_cacheable(box);
+    if (cacheable && box->inline_layout_cache_valid &&
+        box->inline_layout_cache_style == parent_style &&
+        fabs(box->inline_layout_cache_width - content_width) < 0.001) {
+        box->content_width = content_width;
+        box->content_height = box->inline_layout_cache_height;
+        return;
+    }
+
     box->content_width = content_width;
     PangoLayout *layout = make_pango_layout(parent_style);
     gboolean ws_nowrap = keyword_is(
@@ -5189,7 +5198,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     pango_layout_set_attributes(layout, i18n);
     pango_attr_list_unref(i18n);
 
-    gboolean cacheable = inline_box_measure_cacheable(box);
     char *mkey = cacheable
         ? inline_measure_key(box, parent_style, layout) : NULL;
     const ns_inline_measure *cached =
@@ -5245,6 +5253,12 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         box->content_height = measured > expected ? measured : expected;
     double ta_h = inline_textarea_total_height(box);
     if (ta_h > box->content_height) box->content_height = ta_h;
+    if (cacheable) {
+        box->inline_layout_cache_style = parent_style;
+        box->inline_layout_cache_width = content_width;
+        box->inline_layout_cache_height = box->content_height;
+        box->inline_layout_cache_valid = TRUE;
+    }
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
         pango_layout_set_text(layout, box->text, -1);
@@ -6050,14 +6064,20 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             }
             return sum;
         }
+        gboolean cacheable = inline_box_measure_cacheable(box);
+        if (cacheable && box->inline_natural_cache_valid &&
+            box->inline_natural_cache_style == parent_style)
+            return box->inline_natural_cache_width;
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, -1);
-        gboolean cacheable = inline_box_measure_cacheable(box);
         char *mkey = cacheable
             ? inline_measure_key(box, parent_style, layout) : NULL;
         const double *hit =
             mkey ? g_hash_table_lookup(g_inline_width_cache, mkey) : NULL;
         if (hit) {
+            box->inline_natural_cache_style = parent_style;
+            box->inline_natural_cache_width = *hit;
+            box->inline_natural_cache_valid = TRUE;
             g_free(mkey);
             g_object_unref(layout);
             return *hit;
@@ -6085,6 +6105,11 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
             double *e = g_new(double, 1);
             *e = pw;
             g_hash_table_insert(g_inline_width_cache, mkey, e);
+        }
+        if (cacheable) {
+            box->inline_natural_cache_style = parent_style;
+            box->inline_natural_cache_width = pw;
+            box->inline_natural_cache_valid = TRUE;
         }
         return pw;
     }
@@ -6153,17 +6178,30 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
         if (!box->text || !*box->text) return 0;
+        gboolean cacheable = inline_box_measure_cacheable(box);
+        if (cacheable && box->inline_min_cache_valid &&
+            box->inline_min_cache_style == parent_style)
+            return box->inline_min_cache_width;
         double fast = measure_inline_ascii_min_width(box, parent_style);
-        if (fast >= 0) return fast;
+        if (fast >= 0) {
+            if (cacheable) {
+                box->inline_min_cache_style = parent_style;
+                box->inline_min_cache_width = fast;
+                box->inline_min_cache_valid = TRUE;
+            }
+            return fast;
+        }
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, 1);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
-        gboolean cacheable = inline_box_measure_cacheable(box);
         char *mkey = cacheable
             ? inline_measure_key(box, parent_style, layout) : NULL;
         const double *hit =
             mkey ? g_hash_table_lookup(g_inline_width_cache, mkey) : NULL;
         if (hit) {
+            box->inline_min_cache_style = parent_style;
+            box->inline_min_cache_width = *hit;
+            box->inline_min_cache_valid = TRUE;
             g_free(mkey);
             g_object_unref(layout);
             return *hit;
@@ -6191,6 +6229,11 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
             double *e = g_new(double, 1);
             *e = pw;
             g_hash_table_insert(g_inline_width_cache, mkey, e);
+        }
+        if (cacheable) {
+            box->inline_min_cache_style = parent_style;
+            box->inline_min_cache_width = pw;
+            box->inline_min_cache_valid = TRUE;
         }
         return pw;
     }

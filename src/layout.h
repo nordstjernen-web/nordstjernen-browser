@@ -132,6 +132,17 @@ typedef struct ns_box {
 
     char *text;
 
+    const ns_style *inline_layout_cache_style;
+    double inline_layout_cache_width;
+    double inline_layout_cache_height;
+    gboolean inline_layout_cache_valid;
+    const ns_style *inline_natural_cache_style;
+    double inline_natural_cache_width;
+    gboolean inline_natural_cache_valid;
+    const ns_style *inline_min_cache_style;
+    double inline_min_cache_width;
+    gboolean inline_min_cache_valid;
+
     GArray *links;
     GArray *attrs;
     GArray *inline_atomics;
