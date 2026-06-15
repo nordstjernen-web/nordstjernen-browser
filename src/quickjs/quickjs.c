@@ -10184,17 +10184,25 @@ retry:
                         if (ret < 0)
                             goto fail;
                     typed_array_oob:
-                        // per spec: evaluate value for side effects
-                        if (p1->class_id == JS_CLASS_BIG_INT64_ARRAY ||
-                            p1->class_id == JS_CLASS_BIG_UINT64_ARRAY) {
-                            int64_t v;
-                            if (JS_ToBigInt64Free(ctx, &v, val))
-                                return -1;
+                        /* TypedArray [[Set]] only coerces the value (for its
+                           side effects) when the receiver is the typed array
+                           itself; for an out-of-bounds index with a different
+                           receiver IsValidIntegerIndex is false and the value
+                           is left untouched */
+                        if (p == p1) {
+                            if (p1->class_id == JS_CLASS_BIG_INT64_ARRAY ||
+                                p1->class_id == JS_CLASS_BIG_UINT64_ARRAY) {
+                                int64_t v;
+                                if (JS_ToBigInt64Free(ctx, &v, val))
+                                    return -1;
+                            } else {
+                                val = JS_ToNumberFree(ctx, val);
+                                JS_FreeValue(ctx, val);
+                                if (JS_IsException(val))
+                                    return -1;
+                            }
                         } else {
-                            val = JS_ToNumberFree(ctx, val);
                             JS_FreeValue(ctx, val);
-                            if (JS_IsException(val))
-                                return -1;
                         }
                         return true;
                     }
