@@ -31583,6 +31583,27 @@ ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "initUIEvent requires at least 1 argument");
+    JSValue dispatching = JS_GetPropertyStr(ctx, this_val, "_dispatching");
+    gboolean in_dispatch = JS_ToBool(ctx, dispatching) ? TRUE : FALSE;
+    JS_FreeValue(ctx, dispatching);
+    if (in_dispatch) return JS_UNDEFINED;
+    JSValueConst base[3] = { argv[0],
+                             argc >= 2 ? argv[1] : JS_FALSE,
+                             argc >= 3 ? argv[2] : JS_FALSE };
+    JS_FreeValue(ctx, ns_event_initEvent(ctx, this_val, 3, base));
+    JS_SetPropertyStr(ctx, this_val, "view",
+                      argc >= 4 ? JS_DupValue(ctx, argv[3]) : JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "detail",
+                      argc >= 5 ? JS_DupValue(ctx, argv[4]) : JS_NewInt32(ctx, 0));
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_document_createEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
@@ -31641,6 +31662,7 @@ ns_document_createEvent(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_FALSE);
     ns_bind_fn(ctx, ev, "initEvent",       ns_event_initEvent, 3);
     ns_bind_fn(ctx, ev, "initCustomEvent", ns_event_initEvent, 4);
+    ns_bind_fn(ctx, ev, "initUIEvent",     ns_event_initUIEvent, 5);
     return ev;
 }
 
