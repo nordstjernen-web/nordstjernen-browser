@@ -18979,6 +18979,39 @@ ns_insert_adjacent_node(ns_node *self, const char *pos, ns_node *to_insert,
     return FALSE;
 }
 
+static int
+ns_insert_adjacent_check(JSContext *ctx, ns_node *self, const char *pos,
+                         gboolean is_text, ns_node *to_insert)
+{
+    gboolean sibling = g_ascii_strcasecmp(pos, "beforebegin") == 0 ||
+                       g_ascii_strcasecmp(pos, "afterend") == 0;
+    gboolean inside = g_ascii_strcasecmp(pos, "afterbegin") == 0 ||
+                      g_ascii_strcasecmp(pos, "beforeend") == 0;
+    if (!sibling && !inside) {
+        ns_throw_dom_exception(ctx, "SyntaxError", 12,
+            "The value provided is not one of 'beforebegin', 'afterbegin', "
+            "'beforeend', or 'afterend'.");
+        return -1;
+    }
+    ns_node *parent = sibling ? self->parent : self;
+    if (sibling && !parent) return 0;
+    if (parent && parent->kind == NS_NODE_DOCUMENT &&
+        !(parent->flags & NS_NODE_FRAGMENT)) {
+        if (is_text) {
+            ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "Nodes of type 'Text' may not be inserted inside a Document.");
+            return -1;
+        }
+        for (ns_node *c = parent->first_child; c; c = c->next_sibling)
+            if (c->kind == NS_NODE_ELEMENT && c != to_insert) {
+                ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                    "A Document may contain at most one element child.");
+                return -1;
+            }
+    }
+    return 1;
+}
+
 static JSValue
 ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
@@ -18989,6 +19022,8 @@ ns_element_insertAdjacentElement(JSContext *ctx, JSValueConst this_val,
     if (!pos) return JS_NULL;
     ns_node *child = ns_unwrap_element_mut(argv[1]);
     if (!child) { JS_FreeCString(ctx, pos); return JS_NULL; }
+    int chk = ns_insert_adjacent_check(ctx, self, pos, FALSE, child);
+    if (chk <= 0) { JS_FreeCString(ctx, pos); return chk < 0 ? JS_EXCEPTION : JS_NULL; }
     ns_js *_j = js_from_ctx(ctx);
     if (_j) g_hash_table_remove(_j->orphan_nodes, child);
     ns_node *parent = NULL;
@@ -19013,6 +19048,8 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     if (!self || argc < 2) return JS_UNDEFINED;
     const char *pos = JS_ToCString(ctx, argv[0]);
     if (!pos) return JS_UNDEFINED;
+    int chk = ns_insert_adjacent_check(ctx, self, pos, TRUE, NULL);
+    if (chk <= 0) { JS_FreeCString(ctx, pos); return chk < 0 ? JS_EXCEPTION : JS_UNDEFINED; }
     const char *text = JS_ToCString(ctx, argv[1]);
     if (!text) { JS_FreeCString(ctx, pos); return JS_UNDEFINED; }
     ns_node *node = ns_node_new_text(g_strdup(text));
