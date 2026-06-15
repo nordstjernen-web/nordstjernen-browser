@@ -11173,6 +11173,40 @@ ns_el_is_link(const ns_node *el)
            ns_node_is_element_named(el, "area");
 }
 
+static GHashTable *g_visited_urls = NULL;
+static char       *g_css_doc_base = NULL;
+
+void
+ns_css_mark_visited(const char *abs_url)
+{
+    if (!abs_url || !*abs_url) return;
+    if (!g_visited_urls)
+        g_visited_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, NULL);
+    if (!g_hash_table_contains(g_visited_urls, abs_url))
+        g_hash_table_add(g_visited_urls, g_strdup(abs_url));
+}
+
+void
+ns_css_set_doc_base(const char *base_url)
+{
+    g_free(g_css_doc_base);
+    g_css_doc_base = (base_url && *base_url) ? g_strdup(base_url) : NULL;
+}
+
+static gboolean
+ns_el_is_visited_link(const ns_node *el)
+{
+    if (!g_visited_urls || !g_css_doc_base || !ns_el_is_link(el)) return FALSE;
+    const char *href = ns_element_get_attr(el, "href");
+    if (!href || !*href) return FALSE;
+    char *abs = ns_url_resolve(g_css_doc_base, href);
+    if (!abs) return FALSE;
+    gboolean v = g_hash_table_contains(g_visited_urls, abs);
+    g_free(abs);
+    return v;
+}
+
 static gboolean
 selector_group_matches_element(const GPtrArray *group, const ns_node *el)
 {
@@ -11780,12 +11814,16 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 }
                 break;
             }
-            case NS_CSS_PC_LINK:
             case NS_CSS_PC_ANY_LINK:
                 if (!ns_el_is_link(el)) return FALSE;
                 break;
+            case NS_CSS_PC_LINK:
+                if (!ns_el_is_link(el) || ns_el_is_visited_link(el))
+                    return FALSE;
+                break;
             case NS_CSS_PC_VISITED:
-                return FALSE;
+                if (!ns_el_is_visited_link(el)) return FALSE;
+                break;
             case NS_CSS_PC_HOVER: {
                 if (!g_css_hover_node) return FALSE;
                 gboolean on = FALSE;

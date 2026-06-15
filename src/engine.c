@@ -269,6 +269,7 @@ GHashTable *
 ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                           GHashTable *css_cache)
 {
+    ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
@@ -290,6 +291,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
                    gsize caret_byte,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
+    ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *sheets = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, sheets, css_cache);

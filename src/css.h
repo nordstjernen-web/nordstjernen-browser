@@ -722,6 +722,9 @@ const ns_node *ns_css_set_focus_node(const ns_node *node);
 const ns_node *ns_css_set_hover_node(const ns_node *node);
 const ns_node *ns_css_set_active_node(const ns_node *node);
 
+void ns_css_mark_visited(const char *abs_url);
+void ns_css_set_doc_base(const char *base_url);
+
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
 
 int ns_css_used_column_count(const ns_style *s, double avail_w,

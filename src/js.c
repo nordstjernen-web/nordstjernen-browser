@@ -34673,6 +34673,7 @@ ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs)
     ns_element_set_attr(iframe, "data-nd-frame-srcdoc", "");
     ns_element_set_attr(iframe, "data-nd-frame-url",
                         abs && *abs ? abs : origin);
+    if (abs && *abs) ns_css_mark_visited(abs);
 }
 
 static gboolean
