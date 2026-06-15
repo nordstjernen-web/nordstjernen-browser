@@ -5181,15 +5181,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
         }
     }
-    PangoAttrList *i18n = pango_attr_list_new();
-    ns_paint_apply_i18n(layout, i18n, box);
-    ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
-    ns_inline_apply_atomic_shapes(i18n, box);
-    apply_inline_spacing(i18n, parent_style, box->text);
-    apply_inline_layout_attrs(i18n, box);
-    pango_layout_set_attributes(layout, i18n);
-    pango_attr_list_unref(i18n);
-
     gboolean cacheable = inline_box_measure_cacheable(box);
     char *mkey = cacheable
         ? inline_measure_key(box, parent_style, layout) : NULL;
@@ -5202,6 +5193,14 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         line_count = cached->lines;
         g_free(mkey);
     } else {
+        PangoAttrList *i18n = pango_attr_list_new();
+        ns_paint_apply_i18n(layout, i18n, box);
+        ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
+        ns_inline_apply_atomic_shapes(i18n, box);
+        apply_inline_spacing(i18n, parent_style, box->text);
+        apply_inline_layout_attrs(i18n, box);
+        pango_layout_set_attributes(layout, i18n);
+        pango_attr_list_unref(i18n);
         pango_layout_set_text(layout, box->text, -1);
         int pw, ph;
         pango_layout_get_pixel_size(layout, &pw, &ph);
