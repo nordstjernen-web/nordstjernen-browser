@@ -146,6 +146,7 @@ static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
+static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
 static void ns_js_process_pending_iframes(ns_js *js);
@@ -17951,6 +17952,9 @@ ns_js_has_pending_work(const ns_js *js)
         return TRUE;
     if (js->mutation_drain_scheduled) return TRUE;
     if (js->observer_tick_source) return TRUE;
+    if (js->async_script_source) return TRUE;
+    if (js->async_script_roots && js->async_script_roots->len > 0)
+        return TRUE;
     if (js->ce_pending && g_hash_table_size(js->ce_pending) > 0)
         return TRUE;
     return FALSE;
@@ -32945,6 +32949,13 @@ ns_js_reset_runtime_state(ns_js *js)
     if (js->ce_pending)  g_hash_table_remove_all(js->ce_pending);
     js->ce_in_attr_callback = 0;
 
+    if (js->async_script_source) {
+        g_source_remove(js->async_script_source);
+        js->async_script_source = 0;
+    }
+    if (js->async_script_roots)
+        g_ptr_array_set_size(js->async_script_roots, 0);
+
     if (js->pinned_wrappers_set) {
         GList *pinned = g_hash_table_get_keys(js->pinned_wrappers_set);
         g_hash_table_remove_all(js->pinned_wrappers_set);
@@ -33428,6 +33439,10 @@ ns_js_free(ns_js *js)
         g_source_remove(js->observer_tick_source);
         js->observer_tick_source = 0;
     }
+    if (js->async_script_source) {
+        g_source_remove(js->async_script_source);
+        js->async_script_source = 0;
+    }
     if (js->filereader_idles) {
         for (guint i = 0; i < js->filereader_idles->len; i++) {
             ns_filereader_idle *fr = g_ptr_array_index(js->filereader_idles, i);
@@ -33459,6 +33474,10 @@ ns_js_free(ns_js *js)
     if (js->deferred_script_roots) {
         g_ptr_array_free(js->deferred_script_roots, TRUE);
         js->deferred_script_roots = NULL;
+    }
+    if (js->async_script_roots) {
+        g_ptr_array_free(js->async_script_roots, TRUE);
+        js->async_script_roots = NULL;
     }
     if (js->pending_iframe_loads) {
         g_ptr_array_free(js->pending_iframe_loads, TRUE);
@@ -34438,15 +34457,79 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
     ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
 }
 
+static gboolean
+ns_js_root_connected(ns_js *js, const ns_node *root)
+{
+    if (!js || !root || !js->current_doc) return FALSE;
+    for (const ns_node *p = root; p; p = p->parent)
+        if (p == js->current_doc) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_js_tasks_have_schedule(GArray *tasks, ns_script_schedule schedule)
+{
+    if (!tasks) return FALSE;
+    for (guint i = 0; i < tasks->len; i++) {
+        ns_script_task *task = &g_array_index(tasks, ns_script_task, i);
+        if (task->schedule == schedule) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_js_async_script_timer(gpointer data)
+{
+    ns_js *js = data;
+    if (!js) return G_SOURCE_REMOVE;
+    js->async_script_source = 0;
+    ns_js_drain_async_script_roots(js);
+    if (js->async_script_roots && js->async_script_roots->len > 0 &&
+        !js->async_script_source)
+        js->async_script_source =
+            ns_js_attach_timeout(js, 4, ns_js_async_script_timer, js);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_js_schedule_async_script_root(ns_js *js, ns_node *root)
+{
+    if (!js || !root) return;
+    if (!js->async_script_roots)
+        js->async_script_roots = g_ptr_array_new();
+    for (guint i = 0; i < js->async_script_roots->len; i++)
+        if (g_ptr_array_index(js->async_script_roots, i) == root) return;
+    g_ptr_array_add(js->async_script_roots, root);
+    if (!js->async_script_source)
+        js->async_script_source =
+            ns_js_attach_timeout(js, 4, ns_js_async_script_timer, js);
+}
+
+static void
+ns_js_drain_async_script_roots(ns_js *js)
+{
+    if (!js || !js->async_script_roots || js->halted) return;
+    guint batch = js->async_script_roots->len;
+    while (js->async_script_roots->len > 0 && batch-- > 0 && !js->halted) {
+        ns_node *root = g_ptr_array_index(js->async_script_roots, 0);
+        g_ptr_array_remove_index(js->async_script_roots, 0);
+        if (!ns_js_root_connected(js, root)) continue;
+        g_autofree char *origin =
+            g_strdup((js->current_url && *js->current_url)
+                     ? js->current_url : "inline");
+        GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+        ns_js_collect_script_tasks(root, tasks);
+        ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
+        g_array_free(tasks, TRUE);
+    }
+}
+
 static void
 ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
 {
     if (!js || !root || !js->current_doc || js->halted || js->in_pump) return;
     if (js->ce_upgrading) return;
-    gboolean connected = FALSE;
-    for (const ns_node *p = root; p; p = p->parent)
-        if (p == js->current_doc) { connected = TRUE; break; }
-    if (!connected) return;
+    if (!ns_js_root_connected(js, root)) return;
     GPtrArray *sheets = g_ptr_array_new();
     ns_js_collect_pending_stylesheets(root, sheets);
     if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
@@ -34466,7 +34549,8 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     ns_js_collect_script_tasks(root, tasks);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
-    ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
+    if (ns_js_tasks_have_schedule(tasks, NS_SCRIPT_ASYNC))
+        ns_js_schedule_async_script_root(js, root);
     g_array_free(tasks, TRUE);
     for (guint i = 0; i < sheets->len; i++)
         ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i), origin);
@@ -34481,11 +34565,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
     while (js->deferred_script_roots->len > 0 && !js->halted && safety-- > 0) {
         ns_node *root = g_ptr_array_index(js->deferred_script_roots, 0);
         g_ptr_array_remove_index(js->deferred_script_roots, 0);
-        if (!root || !js->current_doc) continue;
-        gboolean connected = FALSE;
-        for (const ns_node *p = root; p; p = p->parent)
-            if (p == js->current_doc) { connected = TRUE; break; }
-        if (!connected) continue;
+        if (!ns_js_root_connected(js, root)) continue;
         GPtrArray *sheets = g_ptr_array_new();
         ns_js_collect_pending_stylesheets(root, sheets);
         if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
@@ -34499,7 +34579,8 @@ ns_js_drain_deferred_scripts(ns_js *js)
         ns_js_collect_script_tasks(root, tasks);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
-        ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
+        if (ns_js_tasks_have_schedule(tasks, NS_SCRIPT_ASYNC))
+            ns_js_schedule_async_script_root(js, root);
         g_array_free(tasks, TRUE);
         for (guint i = 0; i < sheets->len; i++)
             ns_js_load_stylesheet_element(js, g_ptr_array_index(sheets, i),

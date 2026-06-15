@@ -136,6 +136,8 @@ struct ns_js {
     GString      *document_write_buffer;
     ns_node      *document_write_script;
     GPtrArray    *deferred_script_roots;
+    GPtrArray    *async_script_roots;
+    guint         async_script_source;
     GPtrArray    *pending_iframe_loads;
     GHashTable   *iframe_globals;
     int           iframe_load_depth;
