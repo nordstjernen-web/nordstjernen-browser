@@ -6481,6 +6481,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
     gboolean *col_fixed = g_new0(gboolean, max_cols);
     double *col_explicit = g_new(double, max_cols);
     for (guint i = 0; i < max_cols; i++) col_explicit[i] = -1;
+    gboolean has_explicit_cols = FALSE;
     gboolean fixed_layout = explicit_width &&
         keyword_is(box->style ? box->style->values[NS_CSS_TABLE_LAYOUT] : NULL, "fixed");
     if (fixed_layout) {
@@ -6505,7 +6506,6 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                     + cell->border.left + cell->border.right
                     + cell->margin.left + cell->margin.right;
                 double cell_outer = natural + h_extra;
-                double cell_min_outer = measure_min_width(cell, cs) + h_extra;
                 gboolean cell_fixed = FALSE;
                 double cell_explicit = -1;
                 if (cell->style && cell->style->values[NS_CSS_WIDTH]) {
@@ -6517,16 +6517,18 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                     }
                 }
                 double per_col = cell_outer / (double)span;
-                double per_col_min = cell_min_outer / (double)span;
                 for (int i = 0; i < span && col + (guint)i < max_cols; i++) {
                     if (per_col > col_widths[col + i])
                         col_widths[col + i] = per_col;
-                    if (per_col_min > col_min[col + i])
-                        col_min[col + i] = per_col_min;
-                    if (cell_fixed && span == 1) col_fixed[col + i] = TRUE;
+                    if (cell_fixed && span == 1) {
+                        col_fixed[col + i] = TRUE;
+                        has_explicit_cols = TRUE;
+                    }
                     if (cell_explicit >= 0 && span == 1 &&
-                        cell_explicit > col_explicit[col + i])
+                        cell_explicit > col_explicit[col + i]) {
                         col_explicit[col + i] = cell_explicit;
+                        has_explicit_cols = TRUE;
+                    }
                 }
                 col += (guint)span;
             }
@@ -6539,11 +6541,35 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
                 int hspan = hint->span > 0 ? hint->span : 1;
                 double w = 0;
                 if (table_width_from_style(hint->style, col_avail, &w)) {
+                    has_explicit_cols = TRUE;
                     double per = w / (double)hspan;
                     for (int k = 0; k < hspan && col + (guint)k < max_cols; k++)
                         if (per > col_explicit[col + k]) col_explicit[col + k] = per;
                 }
                 col += (guint)hspan;
+            }
+        }
+        double natural_sum_pre = 0;
+        for (guint i = 0; i < max_cols; i++) natural_sum_pre += col_widths[i];
+        if (has_explicit_cols || (natural_sum_pre > col_avail && col_avail > 0)) {
+            for (ns_box *row = box->first_child; row; row = row->next_sibling) {
+                if (row->kind != NS_BOX_TABLE_ROW) continue;
+                guint col = 0;
+                for (ns_box *cell = row->first_child; cell; cell = cell->next_sibling) {
+                    int span = cell->colspan > 0 ? cell->colspan : 1;
+                    const ns_style *cs = cell->style ? cell->style : measure_inherited;
+                    ns_edges m = {0}, pd = {0}, bd = {0};
+                    edges_from_style(cell->style, cw > 0 ? cw : 1000.0,
+                                     &m, &pd, &bd);
+                    double h_extra = pd.left + pd.right + bd.left + bd.right +
+                                     m.left + m.right;
+                    double per_col_min =
+                        (measure_min_width(cell, cs) + h_extra) / (double)span;
+                    for (int i = 0; i < span && col + (guint)i < max_cols; i++)
+                        if (per_col_min > col_min[col + i])
+                            col_min[col + i] = per_col_min;
+                    col += (guint)span;
+                }
             }
         }
         for (guint i = 0; i < max_cols; i++) {
