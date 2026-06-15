@@ -4957,6 +4957,95 @@ inline_box_measure_cacheable(const ns_box *box)
     return TRUE;
 }
 
+static double measure_natural_width(ns_box *box, const ns_style *parent_style);
+
+static gboolean
+inline_box_has_measure_attrs(const ns_box *box)
+{
+    if (!box || !box->attrs) return FALSE;
+    for (guint i = 0; i < box->attrs->len; i++) {
+        const ns_inline_attr *a =
+            &g_array_index(box->attrs, ns_inline_attr, i);
+        if (inline_attr_affects_measure(a->kind)) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+inline_style_has_measure_adjustments(const ns_style *style)
+{
+    const ns_css_value *lv = style ? style->values[NS_CSS_LETTER_SPACING] : NULL;
+    if (lv && lv->kind == NS_CSS_V_LENGTH && lv->u.length.unit == NS_CSS_UNIT_PX &&
+        fabs(lv->u.length.v) > 0.001)
+        return TRUE;
+    const ns_css_value *wv = style ? style->values[NS_CSS_WORD_SPACING] : NULL;
+    if (wv && wv->kind == NS_CSS_V_LENGTH && wv->u.length.unit == NS_CSS_UNIT_PX &&
+        fabs(wv->u.length.v) > 0.001)
+        return TRUE;
+    const char *fk = style ? ns_style_keyword(style, NS_CSS_FONT_KERNING) : NULL;
+    if (fk && strcmp(fk, "auto") != 0 && strcmp(fk, "normal") != 0) return TRUE;
+    const char *fl = style ? ns_style_keyword(style, NS_CSS_FONT_VARIANT_LIGATURES) : NULL;
+    if (fl && strcmp(fl, "normal") != 0) return TRUE;
+    const char *ff = style ? ns_style_keyword(style, NS_CSS_FONT_FEATURE_SETTINGS) : NULL;
+    if (ff && strcmp(ff, "normal") != 0) return TRUE;
+    const char *fv = style ? ns_style_keyword(style, NS_CSS_FONT_VARIATION_SETTINGS) : NULL;
+    return fv && strcmp(fv, "normal") != 0;
+}
+
+static gboolean
+inline_text_simple_ascii(const char *text)
+{
+    if (!text) return FALSE;
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        if (*p >= 0x80) return FALSE;
+    }
+    return TRUE;
+}
+
+static double
+measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
+{
+    if (!box || !box->text || !*box->text) return 0;
+    if (box->inline_atomics && box->inline_atomics->len > 0) return -1;
+    if (inline_box_has_measure_attrs(box)) return -1;
+    if (inline_style_has_measure_adjustments(parent_style)) return -1;
+    if (!inline_text_simple_ascii(box->text)) return -1;
+    if (keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "nowrap") ||
+        keyword_is(parent_style ? parent_style->values[NS_CSS_WHITE_SPACE] : NULL, "pre"))
+        return measure_natural_width(box, parent_style);
+
+    const char *best = NULL;
+    gsize best_len = 0;
+    const char *run = NULL;
+    gsize run_len = 0;
+    for (const char *p = box->text;; p++) {
+        gboolean br = *p == '\0' || *p == ' ' || *p == '\t' ||
+                      *p == '\r' || *p == '\n' || *p == '\f';
+        if (br) {
+            if (run_len > best_len) {
+                best = run;
+                best_len = run_len;
+            }
+            run = NULL;
+            run_len = 0;
+            if (*p == '\0') break;
+        } else {
+            if (!run) run = p;
+            run_len++;
+        }
+    }
+    if (best_len == 0) return 0;
+    if (best_len == strlen(box->text)) return measure_natural_width(box, parent_style);
+
+    PangoLayout *layout = make_pango_layout(parent_style);
+    pango_layout_set_width(layout, -1);
+    pango_layout_set_text(layout, best, (int)best_len);
+    int pw = 0;
+    pango_layout_get_pixel_size(layout, &pw, NULL);
+    g_object_unref(layout);
+    return pw;
+}
+
 static void
 inline_measure_key_append_attrs(GString *out, const ns_box *box)
 {
@@ -5724,8 +5813,6 @@ ns_form_hit_walk(const ns_box *box, double x, double y,
 }
 
 static double
-measure_natural_width(ns_box *box, const ns_style *parent_style);
-static double
 measure_min_width(ns_box *box, const ns_style *parent_style);
 
 static int
@@ -6067,6 +6154,8 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
         if (!box->text || !*box->text) return 0;
+        double fast = measure_inline_ascii_min_width(box, parent_style);
+        if (fast >= 0) return fast;
         PangoLayout *layout = make_pango_layout(parent_style);
         pango_layout_set_width(layout, 1);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD);
