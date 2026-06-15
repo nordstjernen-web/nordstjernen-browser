@@ -10553,6 +10553,11 @@ ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s, const char *base_url)
     }
 }
 
+typedef struct css_candidate {
+    guint rule_idx;
+    guint selector_idx;
+} css_candidate;
+
 typedef struct ns_css_rule_index {
     GHashTable *by_id;
     GHashTable *by_class;
@@ -10655,31 +10660,41 @@ ns_css_rule_index_free(ns_css_rule_index *idx)
 }
 
 static void
-index_add(GHashTable *table, const char *key, guint rule_idx)
+index_add_candidate_array(GArray *bucket, guint rule_idx, guint selector_idx)
 {
-    GArray *bucket = g_hash_table_lookup(table, key);
-    if (!bucket) {
-        bucket = g_array_new(FALSE, FALSE, sizeof(guint));
-        g_hash_table_insert(table, g_strdup(key), bucket);
+    css_candidate cand = { rule_idx, selector_idx };
+    if (bucket->len > 0) {
+        css_candidate last =
+            g_array_index(bucket, css_candidate, bucket->len - 1);
+        if (last.rule_idx == rule_idx && last.selector_idx == selector_idx)
+            return;
     }
-    g_array_append_val(bucket, rule_idx);
+    g_array_append_val(bucket, cand);
 }
 
 static void
-index_add_lowercase(GHashTable *table, const char *key, guint rule_idx)
+index_add(GHashTable *table, const char *key, guint rule_idx, guint selector_idx)
+{
+    GArray *bucket = g_hash_table_lookup(table, key);
+    if (!bucket) {
+        bucket = g_array_new(FALSE, FALSE, sizeof(css_candidate));
+        g_hash_table_insert(table, g_strdup(key), bucket);
+    }
+    index_add_candidate_array(bucket, rule_idx, selector_idx);
+}
+
+static void
+index_add_lowercase(GHashTable *table, const char *key, guint rule_idx,
+                    guint selector_idx)
 {
     char *lk = g_ascii_strdown(key, -1);
     GArray *bucket = g_hash_table_lookup(table, lk);
     if (!bucket) {
-        bucket = g_array_new(FALSE, FALSE, sizeof(guint));
+        bucket = g_array_new(FALSE, FALSE, sizeof(css_candidate));
         g_hash_table_insert(table, lk, bucket);
         lk = NULL;
     }
-    if (bucket) {
-        guint last = bucket->len > 0 ? g_array_index(bucket, guint, bucket->len - 1) : G_MAXUINT;
-        if (last != rule_idx)
-            g_array_append_val(bucket, rule_idx);
-    }
+    if (bucket) index_add_candidate_array(bucket, rule_idx, selector_idx);
     g_free(lk);
 }
 
@@ -10691,12 +10706,10 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
     idx->by_class = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->by_tag   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
     idx->by_attr  = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, free_bucket_array);
-    idx->universal = g_array_new(FALSE, FALSE, sizeof(guint));
+    idx->universal = g_array_new(FALSE, FALSE, sizeof(css_candidate));
 
     for (guint ri = 0; ri < sheet->rules->len; ri++) {
         const ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
-        gboolean placed_anywhere = FALSE;
-        gboolean force_universal = FALSE;
         gboolean had_matchable_selector = FALSE;
         for (guint si = 0; si < r->selectors->len; si++) {
             const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
@@ -10706,48 +10719,40 @@ ns_css_rule_index_build(const ns_css_stylesheet *sheet)
                 ((ns_css_rule *)r)->pe_mask |= (1u << sel->pseudo_element);
             }
             if (!sel || sel->compounds->len == 0) {
-                force_universal = TRUE; had_matchable_selector = TRUE; continue;
+                index_add_candidate_array(idx->universal, ri, si);
+                had_matchable_selector = TRUE;
+                continue;
             }
             const ns_css_simple *subj =
                 g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
             if (!subj || subj->never_match) continue;
             had_matchable_selector = TRUE;
             if (subj->id) {
-                index_add(idx->by_id, subj->id, ri);
-                placed_anywhere = TRUE;
+                index_add(idx->by_id, subj->id, ri, si);
                 continue;
             }
             if (subj->classes && subj->classes->len > 0) {
                 const char *cls = g_ptr_array_index(subj->classes, 0);
                 if (cls && *cls) {
-                    index_add(idx->by_class, cls, ri);
-                    placed_anywhere = TRUE;
+                    index_add(idx->by_class, cls, ri, si);
                     continue;
                 }
             }
             if (subj->type && strcmp(subj->type, "*") != 0) {
-                index_add_lowercase(idx->by_tag, subj->type, ri);
-                placed_anywhere = TRUE;
+                index_add_lowercase(idx->by_tag, subj->type, ri, si);
                 continue;
             }
             if (subj->attrs && subj->attrs->len > 0) {
                 const ns_css_attr_pred *a0 =
                     &g_array_index(subj->attrs, ns_css_attr_pred, 0);
                 if (a0 && a0->name && *a0->name) {
-                    index_add_lowercase(idx->by_attr, a0->name, ri);
-                    placed_anywhere = TRUE;
+                    index_add_lowercase(idx->by_attr, a0->name, ri, si);
                     continue;
                 }
             }
-            force_universal = TRUE;
+            index_add_candidate_array(idx->universal, ri, si);
         }
         if (!had_matchable_selector) continue;
-        if (force_universal || !placed_anywhere) {
-            guint last = idx->universal->len > 0
-                ? g_array_index(idx->universal, guint, idx->universal->len - 1)
-                : G_MAXUINT;
-            if (last != ri) g_array_append_val(idx->universal, ri);
-        }
     }
     return idx;
 }
@@ -12476,11 +12481,23 @@ add_hidden_utility_match(const ns_node *el, GArray *matches,
     g_array_append_val(matches, e);
 }
 
-static __thread guint *g_cand_pool = NULL;
+typedef struct css_rule_match_accum {
+    guint epoch;
+    int layer_order;
+    gboolean any[9];
+    int spec_a[9];
+    int spec_b[9];
+    int spec_c[9];
+    int scope_order[9];
+} css_rule_match_accum;
+
+static __thread css_candidate *g_cand_pool = NULL;
 static __thread guint g_cand_pool_cap = 0;
-static __thread guint *g_cand_seen = NULL;
-static __thread guint g_cand_seen_cap = 0;
-static __thread guint g_cand_seen_epoch = 0;
+static __thread css_rule_match_accum *g_rule_accum = NULL;
+static __thread guint g_rule_accum_cap = 0;
+static __thread guint *g_rule_matched = NULL;
+static __thread guint g_rule_matched_cap = 0;
+static __thread guint g_rule_match_epoch = 0;
 
 static GArray *
 css_index_lookup_ci(GHashTable *table, const char *name, gsize nlen)
@@ -12519,7 +12536,7 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     const ns_css_rule_index *idx = ns_css_rule_index_ensure(sheet);
     if (!idx) return;
 
-    guint *cands = g_cand_pool;
+    css_candidate *cands = g_cand_pool;
     guint cand_cap = g_cand_pool_cap;
     guint cand_n = 0;
     #define CAND_PUSH_ARR(_arr) do { \
@@ -12532,13 +12549,13 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                     if (new_cap > G_MAXUINT / 2) { new_cap = G_MAXUINT; break; } \
                     new_cap *= 2; \
                 } \
-                if (new_cap > G_MAXUINT / sizeof(guint)) break; \
-                cands = g_renew(guint, cands, new_cap); \
+                if (new_cap > G_MAXUINT / sizeof(css_candidate)) break; \
+                cands = g_renew(css_candidate, cands, new_cap); \
                 cand_cap = new_cap; \
                 g_cand_pool = cands; \
                 g_cand_pool_cap = cand_cap; \
             } \
-            if (_n) memcpy(cands + cand_n, (_arr)->data, _n * sizeof(guint)); \
+            if (_n) memcpy(cands + cand_n, (_arr)->data, _n * sizeof(css_candidate)); \
             cand_n += _n; \
         } \
     } while (0)
@@ -12586,69 +12603,100 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     #undef CAND_PUSH_ARR
 
     guint n_rules = sheet->rules ? sheet->rules->len : 0;
-    if (g_cand_seen_cap < n_rules) {
-        guint new_cap = g_cand_seen_cap < 64 ? 64 : g_cand_seen_cap;
+    if (g_rule_accum_cap < n_rules) {
+        guint new_cap = g_rule_accum_cap < 64 ? 64 : g_rule_accum_cap;
         while (new_cap < n_rules) {
             if (new_cap > G_MAXUINT / 2) { new_cap = n_rules; break; }
             new_cap *= 2;
         }
-        g_cand_seen = g_renew(guint, g_cand_seen, new_cap);
-        memset(g_cand_seen + g_cand_seen_cap, 0,
-               (gsize)(new_cap - g_cand_seen_cap) * sizeof(guint));
-        g_cand_seen_cap = new_cap;
+        g_rule_accum = g_renew(css_rule_match_accum, g_rule_accum, new_cap);
+        memset(g_rule_accum + g_rule_accum_cap, 0,
+               (gsize)(new_cap - g_rule_accum_cap) * sizeof(css_rule_match_accum));
+        g_rule_accum_cap = new_cap;
     }
-    if (++g_cand_seen_epoch == 0) {
-        memset(g_cand_seen, 0, (gsize)g_cand_seen_cap * sizeof(guint));
-        g_cand_seen_epoch = 1;
+    if (g_rule_matched_cap < n_rules) {
+        guint new_cap = g_rule_matched_cap < 64 ? 64 : g_rule_matched_cap;
+        while (new_cap < n_rules) {
+            if (new_cap > G_MAXUINT / 2) { new_cap = n_rules; break; }
+            new_cap *= 2;
+        }
+        g_rule_matched = g_renew(guint, g_rule_matched, new_cap);
+        g_rule_matched_cap = new_cap;
+    }
+    if (++g_rule_match_epoch == 0) {
+        memset(g_rule_accum, 0,
+               (gsize)g_rule_accum_cap * sizeof(css_rule_match_accum));
+        g_rule_match_epoch = 1;
     }
 
+    guint matched_n = 0;
     for (guint ci = 0; ci < cand_n; ci++) {
-        guint ri = cands[ci];
-        if (g_cand_seen[ri] == g_cand_seen_epoch) continue;
-        g_cand_seen[ri] = g_cand_seen_epoch;
+        css_candidate cand = cands[ci];
+        guint ri = cand.rule_idx;
+        if (ri >= n_rules) continue;
         ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
+        if (!r || cand.selector_idx >= r->selectors->len) continue;
         if (r->container_condition &&
             !container_cond_matches(r->container_condition))
             continue;
-        int layer_order = INT_MIN;
         for (guint dd = 0; dd < n_dests; dd++) {
             gather_dest *dst = &dests[dd];
             ns_css_pseudo_element pe = dst->pe;
             if (pe != NS_CSS_PE_NONE && !(r->pe_mask & (1u << pe)))
                 continue;
-            gboolean any = FALSE;
-            int best_a = 0, best_b = 0, best_c = 0;
-            int best_scope_order = 0;
-            for (guint si = 0; si < r->selectors->len; si++) {
-                ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
-                if (sel && sel->pseudo_element != pe) continue;
-                int scope_order = 0;
-                gboolean matched = rule_selector_matches(r, sel, el, pe,
-                                                         &scope_order);
-                if (!matched) continue;
-                if (!any || sel->spec_a > best_a ||
-                    (sel->spec_a == best_a && sel->spec_b > best_b) ||
-                    (sel->spec_a == best_a && sel->spec_b == best_b && sel->spec_c > best_c)) {
-                    best_a = sel->spec_a; best_b = sel->spec_b; best_c = sel->spec_c;
-                    best_scope_order = scope_order;
-                } else if (sel->spec_a == best_a && sel->spec_b == best_b &&
-                           sel->spec_c == best_c &&
-                           scope_order > best_scope_order) {
-                    best_scope_order = scope_order;
-                }
-                any = TRUE;
+            ns_css_selector *sel = g_ptr_array_index(r->selectors, cand.selector_idx);
+            if (sel && sel->pseudo_element != pe) continue;
+            int scope_order = 0;
+            gboolean matched = rule_selector_matches(r, sel, el, pe,
+                                                     &scope_order);
+            if (!matched) continue;
+            css_rule_match_accum *acc = &g_rule_accum[ri];
+            if (acc->epoch != g_rule_match_epoch) {
+                acc->epoch = g_rule_match_epoch;
+                acc->layer_order = INT_MIN;
+                memset(acc->any, 0, sizeof acc->any);
+                if (matched_n < g_rule_matched_cap)
+                    g_rule_matched[matched_n++] = ri;
             }
-            if (!any) continue;
-            if (layer_order == INT_MIN)
-                layer_order = css_layer_rank_for(layer_ranks, r->layer_name);
+            if (!acc->any[dd] || sel->spec_a > acc->spec_a[dd] ||
+                (sel->spec_a == acc->spec_a[dd] &&
+                 sel->spec_b > acc->spec_b[dd]) ||
+                (sel->spec_a == acc->spec_a[dd] &&
+                 sel->spec_b == acc->spec_b[dd] &&
+                 sel->spec_c > acc->spec_c[dd])) {
+                acc->any[dd] = TRUE;
+                acc->spec_a[dd] = sel->spec_a;
+                acc->spec_b[dd] = sel->spec_b;
+                acc->spec_c[dd] = sel->spec_c;
+                acc->scope_order[dd] = scope_order;
+            } else if (sel->spec_a == acc->spec_a[dd] &&
+                       sel->spec_b == acc->spec_b[dd] &&
+                       sel->spec_c == acc->spec_c[dd] &&
+                       scope_order > acc->scope_order[dd]) {
+                acc->scope_order[dd] = scope_order;
+            }
+        }
+    }
+
+    for (guint mi = 0; mi < matched_n; mi++) {
+        guint ri = g_rule_matched[mi];
+        ns_css_rule *r = g_ptr_array_index(sheet->rules, ri);
+        css_rule_match_accum *acc = &g_rule_accum[ri];
+        if (acc->layer_order == INT_MIN)
+            acc->layer_order = css_layer_rank_for(layer_ranks, r->layer_name);
+        for (guint dd = 0; dd < n_dests; dd++) {
+            if (!acc->any[dd]) continue;
+            gather_dest *dst = &dests[dd];
             for (guint di = 0; di < r->decls->len; di++) {
                 ns_css_decl *d = &g_array_index(r->decls, ns_css_decl, di);
                 match_entry e = {
                     .origin = origin,
-                    .spec_a = best_a, .spec_b = best_b, .spec_c = best_c,
+                    .spec_a = acc->spec_a[dd],
+                    .spec_b = acc->spec_b[dd],
+                    .spec_c = acc->spec_c[dd],
                     .sheet_index = sheet_index,
-                    .layer_order = layer_order,
-                    .scope_order = best_scope_order,
+                    .layer_order = acc->layer_order,
+                    .scope_order = acc->scope_order[dd],
                     .source_order = r->source_order,
                     .decl_order = (int)di,
                     .important = d->important,
@@ -12665,10 +12713,12 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                 while (g_hash_table_iter_next(&it, &k, &v)) {
                     var_match vm = {
                         .origin = origin,
-                        .spec_a = best_a, .spec_b = best_b, .spec_c = best_c,
+                        .spec_a = acc->spec_a[dd],
+                        .spec_b = acc->spec_b[dd],
+                        .spec_c = acc->spec_c[dd],
                         .sheet_index = sheet_index,
-                        .layer_order = layer_order,
-                        .scope_order = best_scope_order,
+                        .layer_order = acc->layer_order,
+                        .scope_order = acc->scope_order[dd],
                         .source_order = r->source_order,
                         .decl_order = decl_i++,
                         .important = r->var_important &&
@@ -12685,10 +12735,12 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                         &g_array_index(r->pending, ns_css_pending_decl, pi);
                     pending_match pm = {
                         .origin = origin,
-                        .spec_a = best_a, .spec_b = best_b, .spec_c = best_c,
+                        .spec_a = acc->spec_a[dd],
+                        .spec_b = acc->spec_b[dd],
+                        .spec_c = acc->spec_c[dd],
                         .sheet_index = sheet_index,
-                        .layer_order = layer_order,
-                        .scope_order = best_scope_order,
+                        .layer_order = acc->layer_order,
+                        .scope_order = acc->scope_order[dd],
                         .source_order = r->source_order,
                         .decl_order_base = (int)(r->decls->len + pi),
                         .pd = pd,
