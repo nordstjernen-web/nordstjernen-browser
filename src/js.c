@@ -23158,20 +23158,152 @@ ns_element_getRootNode(JSContext *ctx, JSValueConst this_val,
 }
 
 
+static const char *
+ns_node_element_namespace(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    const char *stored = ns_element_get_attr(n, "data-nd-ns-uri");
+    if (stored) return *stored ? stored : NULL;
+    if (n->flags & NS_NODE_SVG_NS) return "http://www.w3.org/2000/svg";
+    if (n->flags & NS_NODE_FOREIGN_NS) return NULL;
+    return "http://www.w3.org/1999/xhtml";
+}
+
+static char *
+ns_node_element_prefix_dup(const ns_node *n)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return NULL;
+    const char *stored = ns_element_get_attr(n, "data-nd-ns-prefix");
+    if (stored && *stored) return g_strdup(stored);
+    if ((n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) && n->name) {
+        const char *colon = strchr(n->name, ':');
+        if (colon) return g_strndup(n->name, (gsize)(colon - n->name));
+    }
+    return NULL;
+}
+
+static const char *
+ns_locate_namespace(const ns_node *node, const char *prefix)
+{
+    if (!node || (node->flags & NS_NODE_FRAGMENT)) return NULL;
+    switch (node->kind) {
+    case NS_NODE_ELEMENT: {
+        if (prefix && strcmp(prefix, "xml") == 0)
+            return "http://www.w3.org/XML/1998/namespace";
+        if (prefix && strcmp(prefix, "xmlns") == 0)
+            return "http://www.w3.org/2000/xmlns/";
+        const char *ns = ns_node_element_namespace(node);
+        char *pfx = ns_node_element_prefix_dup(node);
+        gboolean self_match = ns && ((prefix == NULL && pfx == NULL) ||
+                   (prefix && pfx && strcmp(prefix, pfx) == 0));
+        g_free(pfx);
+        if (self_match) return ns;
+        for (const ns_attr *a = node->attrs; a; a = a->next) {
+            if (!a->namespace_uri ||
+                strcmp(a->namespace_uri, "http://www.w3.org/2000/xmlns/") != 0)
+                continue;
+            if (a->prefix && strcmp(a->prefix, "xmlns") == 0 && a->local_name &&
+                prefix && strcmp(a->local_name, prefix) == 0)
+                return (a->value && *a->value) ? a->value : NULL;
+            if (!a->prefix && a->local_name &&
+                strcmp(a->local_name, "xmlns") == 0 && prefix == NULL)
+                return (a->value && *a->value) ? a->value : NULL;
+        }
+        if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
+            return ns_locate_namespace(node->parent, prefix);
+        return NULL;
+    }
+    case NS_NODE_DOCUMENT:
+        for (const ns_node *c = node->first_child; c; c = c->next_sibling)
+            if (c->kind == NS_NODE_ELEMENT)
+                return ns_locate_namespace(c, prefix);
+        return NULL;
+    case NS_NODE_DOCTYPE:
+        return NULL;
+    default:
+        if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
+            return ns_locate_namespace(node->parent, prefix);
+        return NULL;
+    }
+}
+
+static char *
+ns_locate_prefix(const ns_node *node, const char *ns)
+{
+    if (!node || node->kind != NS_NODE_ELEMENT) return NULL;
+    const char *ens = ns_node_element_namespace(node);
+    char *epfx = ns_node_element_prefix_dup(node);
+    if (ens && ns && strcmp(ens, ns) == 0 && epfx) return epfx;
+    g_free(epfx);
+    for (const ns_attr *a = node->attrs; a; a = a->next)
+        if (a->prefix && strcmp(a->prefix, "xmlns") == 0 &&
+            a->value && ns && strcmp(a->value, ns) == 0 && a->local_name)
+            return g_strdup(a->local_name);
+    if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
+        return ns_locate_prefix(node->parent, ns);
+    return NULL;
+}
+
 static JSValue
 ns_element_lookupNamespaceURI(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_NULL;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NULL;
+    const char *prefix = NULL, *tmp = NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+        tmp = JS_ToCString(ctx, argv[0]);
+        if (tmp && *tmp) prefix = tmp;
+    }
+    const char *result = ns_locate_namespace(n, prefix);
+    JSValue ret = result ? JS_NewString(ctx, result) : JS_NULL;
+    if (tmp) JS_FreeCString(ctx, tmp);
+    return ret;
+}
+
+static JSValue
+ns_element_lookupPrefix(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NULL;
+    if (argc < 1 || JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) return JS_NULL;
+    const char *ns = JS_ToCString(ctx, argv[0]);
+    if (!ns || !*ns) { if (ns) JS_FreeCString(ctx, ns); return JS_NULL; }
+    char *result = NULL;
+    if (n->flags & NS_NODE_FRAGMENT) {
+        result = NULL;
+    } else if (n->kind == NS_NODE_ELEMENT) {
+        result = ns_locate_prefix(n, ns);
+    } else if (n->kind == NS_NODE_DOCUMENT) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+            if (c->kind == NS_NODE_ELEMENT) { result = ns_locate_prefix(c, ns); break; }
+    } else if (n->kind != NS_NODE_DOCTYPE && n->parent &&
+               n->parent->kind == NS_NODE_ELEMENT) {
+        result = ns_locate_prefix(n->parent, ns);
+    }
+    JSValue ret = result ? JS_NewString(ctx, result) : JS_NULL;
+    g_free(result);
+    JS_FreeCString(ctx, ns);
+    return ret;
 }
 
 static JSValue
 ns_element_isDefaultNamespace(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_TRUE;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_FALSE;
+    const char *ns = NULL, *tmp = NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+        tmp = JS_ToCString(ctx, argv[0]);
+        if (tmp && *tmp) ns = tmp;
+    }
+    const char *def = ns_locate_namespace(n, NULL);
+    gboolean eq = (def == NULL && ns == NULL) ||
+                  (def && ns && strcmp(def, ns) == 0);
+    if (tmp) JS_FreeCString(ctx, tmp);
+    return JS_NewBool(ctx, eq);
 }
 
 static JSValue
@@ -27254,7 +27386,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("isEqualNode",             1, ns_element_isEqualNode),
     JS_CFUNC_DEF("isSameNode",              1, ns_element_isSameNode),
     JS_CFUNC_DEF("compareDocumentPosition", 1, ns_element_compareDocumentPosition),
-    JS_CFUNC_DEF("lookupPrefix",            1, ns_element_lookupNamespaceURI),
+    JS_CFUNC_DEF("lookupPrefix",            1, ns_element_lookupPrefix),
     JS_CFUNC_DEF("lookupNamespaceURI",      1, ns_element_lookupNamespaceURI),
     JS_CFUNC_DEF("isDefaultNamespace",      1, ns_element_isDefaultNamespace),
     JS_CFUNC_DEF("getClientRects",          0, ns_element_getClientRects),
