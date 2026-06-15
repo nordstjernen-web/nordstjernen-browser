@@ -29,7 +29,8 @@ The known-failing baseline is captured in
 | Cluster | Subtests | Difficulty | Status |
 | --- | --- | --- | --- |
 | TypedArray `[[Set]]` value-coercion on invalid index | ~12 | low | **done** |
-| `with` / Proxy / `Symbol.unscopables` trap ordering | ~10 | medium | open |
+| `with` GetBindingValue re-probe (read trap order + strict) | ~5 | medium | **done** |
+| `with` SetMutableBinding re-probe (write trap order) | ~3 | medium | open (needs a dedicated with-store opcode) |
 | AsyncFromSyncIterator close ordering on rejected promises | ~8 | medium | open |
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
@@ -131,3 +132,37 @@ accessor (`get foo(){}`, even split across lines) is unaffected.
 
 Covers test262
 `language/statements/class/elements/syntax/valid/grammar-field-named-{get,set}-followed-by-generator-asi.js`.
+
+### 4. `with` GetBindingValue re-probes the binding object
+
+**Spec:** [Object Environment Records `GetBindingValue`](https://tc39.es/ecma262/#sec-object-environment-records-getbindingvalue-n-s).
+After `HasBinding` (which itself does `HasProperty` + reads
+`@@unscopables`), `GetBindingValue(N, S)` performs a *second*
+`HasProperty(bindingObject, N)`; if that is false the result is a
+`ReferenceError` when `S` is true and `undefined` otherwise. The
+`@@unscopables` getter can delete the binding between the two probes.
+
+**Bug:** the `OP_with_get_var` / `OP_with_get_ref` / `OP_with_get_ref_undef`
+interpreter cases went straight from the `@@unscopables` check to
+`[[Get]]`, skipping the `GetBindingValue` `HasProperty`. With a Proxy
+binding object the second `has` trap was missing; with a deleted binding
+the strict-mode `ReferenceError` was not raised.
+
+**Fix:** new helper `js_with_get_binding_value` does `HasProperty` then
+either `[[Get]]`, returns `undefined` (sloppy), or throws a
+`ReferenceError` (strict, taken from the executing frame's
+`is_strict_mode` — `with` bodies are sloppy but may contain nested strict
+functions/evals). Used by the three read opcodes.
+`src/quickjs/quickjs.c`, interpreter `OP_with_*` and the new helper.
+
+Covers test262
+`language/statements/with/get-binding-value-{idref,call}-with-proxy-env.js`
+and `.../get-mutable-binding-binding-deleted-in-get-unscopables-strict-mode.js`.
+
+The write side (`SetMutableBinding`,
+`language/statements/with/set-mutable-binding-*`) is not yet fixed: a
+`with` assignment `p = 1` lowers to `OP_with_make_ref` + `OP_put_ref_value`,
+and `OP_put_ref_value` is shared with non-`with` reference stores (function
+-name dummy objects, captured-local ref objects), so the extra
+`HasProperty` can't be added there unconditionally. It needs a dedicated
+`with`-store opcode.

@@ -16029,6 +16029,32 @@ static __exception int js_has_unscopable(JSContext *ctx, JSValue obj,
     return ret;
 }
 
+static __exception int js_with_get_binding_value(JSContext *ctx,
+                                                 JSValueConst obj, JSAtom atom,
+                                                 bool is_strict, JSValue *pval)
+{
+    int ret;
+    /* GetBindingValue for an object Environment Record: the binding
+       object is re-probed (it may have been mutated while reading
+       @@unscopables); a missing binding is a ReferenceError in strict
+       mode and undefined otherwise */
+    ret = JS_HasProperty(ctx, obj, atom);
+    if (ret < 0)
+        return -1;
+    if (!ret) {
+        if (is_strict) {
+            JS_ThrowReferenceErrorNotDefined(ctx, atom);
+            return -1;
+        }
+        *pval = JS_UNDEFINED;
+        return 0;
+    }
+    *pval = JS_GetProperty(ctx, obj, atom);
+    if (JS_IsException(*pval))
+        return -1;
+    return 0;
+}
+
 static __exception int js_operator_instanceof(JSContext *ctx, JSValue *sp)
 {
     JSValue op1, op2;
@@ -20233,13 +20259,21 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     }
                     switch (opcode) {
                     case OP_with_get_var:
-                        val = JS_GetProperty(ctx, obj, atom);
-                        if (unlikely(JS_IsException(val)))
+                        if (js_with_get_binding_value(ctx, obj, atom,
+                                                      sf->is_strict_mode, &val))
                             goto exception;
                         set_value(ctx, &sp[-1], val);
                         break;
                     case OP_with_put_var:
-                        /* XXX: check if strict mode */
+                        /* SetMutableBinding: re-probe the binding; a missing
+                           binding is a ReferenceError in strict mode */
+                        ret = JS_HasProperty(ctx, obj, atom);
+                        if (unlikely(ret < 0))
+                            goto exception;
+                        if (!ret && sf->is_strict_mode) {
+                            JS_ThrowReferenceErrorNotDefined(ctx, atom);
+                            goto exception;
+                        }
                         ret = JS_SetPropertyInternal(ctx, obj, atom, sp[-2],
                                                      JS_PROP_THROW_STRICT);
                         JS_FreeValue(ctx, sp[-1]);
@@ -20260,15 +20294,15 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                         break;
                     case OP_with_get_ref:
                         /* produce a pair object/method on the stack */
-                        val = JS_GetProperty(ctx, obj, atom);
-                        if (unlikely(JS_IsException(val)))
+                        if (js_with_get_binding_value(ctx, obj, atom,
+                                                      sf->is_strict_mode, &val))
                             goto exception;
                         *sp++ = val;
                         break;
                     case OP_with_get_ref_undef:
                         /* produce a pair undefined/function on the stack */
-                        val = JS_GetProperty(ctx, obj, atom);
-                        if (unlikely(JS_IsException(val)))
+                        if (js_with_get_binding_value(ctx, obj, atom,
+                                                      sf->is_strict_mode, &val))
                             goto exception;
                         JS_FreeValue(ctx, sp[-1]);
                         sp[-1] = JS_UNDEFINED;
