@@ -76,6 +76,11 @@ ns_image       *ns_image_cache_insert_loaded(ns_image_cache *cache,
                                              int             width,
                                              int             height);
 
+ns_image       *ns_image_cache_insert_encoded(ns_image_cache *cache,
+                                              const char     *url,
+                                              const guchar   *data,
+                                              gsize           len);
+
 ns_texture *ns_image_decode_bytes(const guchar *data, gsize len,
                                   int *out_w, int *out_h);
 

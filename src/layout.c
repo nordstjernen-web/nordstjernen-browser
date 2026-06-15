@@ -3670,11 +3670,10 @@ decode_data_image_for_layout(const char *url, const char *key)
         g_byte_array_free(bytes, TRUE);
         return NULL;
     }
-    int w = 0, h = 0;
-    ns_texture *tex = ns_image_decode_bytes(bytes->data, bytes->len, &w, &h);
+    ns_image *img = ns_image_cache_insert_encoded(g_image_cache_for_layout, key,
+                                                  bytes->data, bytes->len);
     g_byte_array_free(bytes, TRUE);
-    if (!tex) return NULL;
-    return ns_image_cache_insert_loaded(g_image_cache_for_layout, key, tex, w, h);
+    return img;
 }
 
 static ns_box *

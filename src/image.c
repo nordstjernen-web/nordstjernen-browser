@@ -1093,6 +1093,50 @@ ns_image_cache_insert_loaded(ns_image_cache *cache, const char *url,
     return img;
 }
 
+ns_image *
+ns_image_cache_insert_encoded(ns_image_cache *cache, const char *url,
+                              const guchar *data, gsize len)
+{
+    if (!cache || !url || !data || len == 0) return NULL;
+    ns_image *existing = g_hash_table_lookup(cache->by_url, url);
+    if (existing) return existing;
+
+    int w = 0, h = 0;
+    if (len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F') {
+        GArray *pixel_frames =
+            ns_image_decode_wuffs_anim_to_pixels(data, len, &w, &h);
+        if (pixel_frames && pixel_frames->len > 1) {
+            int fw = 0, fh = 0, total = 0;
+            GArray *frames = ns_image_anim_frames_from_pixels(pixel_frames,
+                                                              &fw, &fh, &total);
+            g_array_free(pixel_frames, TRUE);
+            if (frames && frames->len > 1) {
+                ns_image *img = g_new0(ns_image, 1);
+                img->url = g_strdup(url);
+                img->anim_frames = frames;
+                ns_image_anim_frame *f0 =
+                    &g_array_index(frames, ns_image_anim_frame, 0);
+                img->texture = f0->texture;
+                img->natural_width = fw;
+                img->natural_height = fh;
+                img->anim_total_ms = total;
+                img->anim_start_us = g_get_monotonic_time();
+                img->loaded = TRUE;
+                g_hash_table_insert(cache->by_url, g_strdup(url), img);
+                ns_image_cache_account(cache, img);
+                return img;
+            }
+            if (frames) g_array_free(frames, TRUE);
+        } else if (pixel_frames) {
+            g_array_free(pixel_frames, TRUE);
+        }
+    }
+
+    ns_texture *tex = ns_image_decode_bytes(data, len, &w, &h);
+    if (!tex) return NULL;
+    return ns_image_cache_insert_loaded(cache, url, tex, w, h);
+}
+
 void
 ns_image_cache_begin_generation(ns_image_cache *cache)
 {
