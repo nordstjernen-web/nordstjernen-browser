@@ -99,30 +99,32 @@ file.
 | `dom/lists` | 0 | 0 | - | 0 | 0 |
 | `html/webappapis/atob` | 0 | 0 | - | 0 | 0 |
 
-## Top 10 improvements — 2026-06-12
+## Top 10 improvements — 2026-06-15
 
-Root-cause clusters mined from `docs/wpt-subtests.tsv`, ranked by
-expected subtest gain inside the tracked slice. Unlike the tables
-above, this list is analysis, not arithmetic — the scripts do not
-regenerate it. Refresh it (re-cluster the failing subtests) whenever
-the scores move materially, and date the heading.
+Root-cause clusters mined from `docs/wpt-runs/2026-06-15-3a754e8.tsv`,
+ranked by expected subtest gain inside the tracked slice. Unlike the
+tables above, this list is analysis, not arithmetic — the scripts do
+not regenerate it. Refresh it (re-cluster the failing subtests)
+whenever the scores move materially, and date the heading.
+
+NOTE on layering: `NodeIterator`/`TreeWalker`/`Range`/`NodeFilter` and
+much of the DOM are implemented in **`data/js/polyfills.js`**, which
+OVERRIDES the C in `src/js.c`. Fix the polyfill, not the dead C path —
+grep `polyfills.js` first.
 
 | # | Improvement | Evidence | Est. gain |
 |---|-------------|----------|-----------|
-| 1 | Unblock the 71 harness-broken `dom/events` files (pages hang before reporting — missing event/`click()` infrastructure; one fix likely unblocks many files) | `Event-dispatch-click.html`, `EventListener-invoke-legacy.html`, … | 352 visible, real gain larger |
-| 2 | Realm-document identity: `iframe.contentDocument` and `element.ownerDocument` must be the same object per document, XHTML iframes need realm docs | remaining `Document-createElementNS.html` 289, `Document-createElement.html` 88 | ~380 |
-| 3 | Range API correctness; 25 of 55 `dom/ranges` files are harness-broken | `Range-cloneContents.html`, `Range-collapse.html`, … 201 visible | 201 visible, real gain larger |
-| 4 | Attr-node APIs: `createAttribute(NS)`, `get/setAttributeNode`, `removeAttributeNode`, InUseAttributeError, namespace-aware node lookup | `dom/nodes/attributes.html` 54, `Document-createAttribute.html` 36 | ~90 |
-| 5 | Form collection named/indexed access and `requestSubmit` edge cases | `form-elements-*`, `form-nameditem.html`, `form-requestsubmit.html` | ~23 |
-| 6 | URL long tail: `idlharness` interface checks, `urlencoded-parser` edge cases, opaque-path percent-encoding of `%00` and space | `url/idlharness.any.html` 65, `urlencoded-parser.any.html` 42 | ~150 |
+| 1 | **Real `iframe.contentDocument` realm documents** — the single dominant lever. Tests build reference DOMs in iframes and read `contentDocument` (null today). Gates most of `dom/ranges` (`Range-surroundContents` 1573, `Range-insertNode`, `Range-extractContents` 59), `Document-characterSet-normalization-1/2` (636), and `Document-contentType/*`. Needs the shell to load an iframe subresource, parse it, and expose a realm document with correct `characterSet`/`contentType` | `Range-surroundContents.html`, `Document-characterSet-normalization-2.html` 339, `…-1.html` 297 | 2000+ |
+| 2 | XML/XHTML **document variants + namespaced node model** — `Document-createElementNS` (281) and `Document-createElement` (88) fail only their "in XML/XHTML document" cases; `Node-lookupNamespaceURI` (48), `lookupPrefix`, `isDefaultNamespace` are stubs; per-element/attr namespace not tracked | `Document-createElementNS.html`, `Node-lookupNamespaceURI.html` | ~450 |
+| 3 | Unblock the **72 harness-broken `dom/events` files** (pages hang/ERROR before reporting — missing event/activation infrastructure; one fix likely unblocks many) | `passive-by-default.html` (ERROR), `Event-dispatch-single-activation-behavior.html` 52 | 379 visible, real gain larger |
+| 4 | **`innerText`/`outerText` rendered-text algorithm** — white-space:pre preservation and the trailing-strip eat preserved spaces | `the-innertext-and-outertext-properties/getter.html` 117, `innertext-with-white-spaces.html` 79 | ~196 |
+| 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA | `url-setters-a-area.window.html` 64, `url-constructor.any.html` 55, `IdnaTestV2.any.html` 50 | ~250 |
+| 6 | **Exotic platform objects** — `querySelectorAll` returns a real `Array` (should be a `NodeList`: `[object NodeList]`, no tamperable `length`); `HTMLCollection` wrongly has `values`/`entries`/`forEach` and an own `length`. Make both proper WebIDL legacy-platform objects | `dom/collections/*` (23), `dom/nodes/NodeList-static-length-getter-tampered-*` ×6 | ~30 |
 
-
-
-Not listed: `WebCryptoAPI/digest` — 419 of its 451 failures are
-`tentative` SHA-3/cSHAKE/K12/TurboSHAKE tests for algorithms not yet
-standardized; only the 32 failures in `digest.https.any.html` are
-mandatory surface.
-
+Not listed: `WebCryptoAPI/digest` — 419 of its failures are
+`tentative` SHA-3/cSHAKE/K12/TurboSHAKE tests (`kangarootwelve` 148,
+`turboshake` 135, `cshake` 88) for algorithms not yet standardized;
+only the failures in `digest.https.any.html` are mandatory surface.
 ## Whole-suite score
 
 Full browsers are compared by total passing subtests across the
