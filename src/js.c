@@ -31961,6 +31961,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_bind_fn(ctx, w, "createAttribute",    ns_document_createAttribute, 1);
     ns_bind_fn(ctx, w, "createAttributeNS",  ns_document_createAttributeNS, 2);
     ns_bind_fn(ctx, w, "createRange",        ns_document_create_range, 0);
+    ns_bind_fn(ctx, w, "createEvent",        ns_document_createEvent, 1);
     ns_bind_fn(ctx, w, "importNode",         ns_document_import_node, 2);
     ns_bind_fn(ctx, w, "adoptNode",          ns_document_adopt_node, 1);
     ns_bind_fn(ctx, w, "getElementById",     ns_realmdoc_getElementById, 1);
