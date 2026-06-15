@@ -2112,6 +2112,10 @@ parse_one_selector(const char **pp, const char *end, int depth)
                     }
                 }
                 else {
+                    if (cmp->type) {
+                        g_sel_parse_error = TRUE;
+                        cmp->never_match = TRUE;
+                    }
                     g_free(cmp->type);
                     cmp->type = g_strdup("*");
                 }
@@ -2169,6 +2173,10 @@ parse_one_selector(const char **pp, const char *end, int depth)
                 else if (!cmp->type) {
                     cmp->type = ascii_lower(type, strlen(type));
                     sel->spec_c += 1;
+                }
+                else {
+                    g_sel_parse_error = TRUE;
+                    cmp->never_match = TRUE;
                 }
                 g_free(type);
                 any = TRUE;
