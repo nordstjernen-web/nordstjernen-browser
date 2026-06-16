@@ -119,8 +119,10 @@ headless_js_log(const char *line, gpointer user_data)
     fprintf(stderr, "[js] %s\n", line);
 }
 
+static gboolean g_headless_layout_dirty;
+
 static void
-headless_js_mutated(gpointer user_data) { (void)user_data; }
+headless_js_mutated(gpointer user_data) { (void)user_data; g_headless_layout_dirty = TRUE; }
 
 typedef struct headless_nav_capture {
     char *pending_url;
@@ -477,8 +479,9 @@ headless_flush_layout(gpointer ud)
     headless_flush_ctx *c = ud;
     if (!c || !c->js) return;
     gboolean mutated = ns_js_consume_mutated(c->js);
-    gboolean dirty = !c->layout || !*c->layout || mutated;
+    gboolean dirty = !c->layout || !*c->layout || mutated || g_headless_layout_dirty;
     if (!dirty) return;
+    g_headless_layout_dirty = FALSE;
     headless_relayout(c);
 }
 
