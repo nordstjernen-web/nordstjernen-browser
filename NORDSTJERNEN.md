@@ -188,13 +188,6 @@ zygote, and re-enabled shell supervision, are the follow-ups.
   yt-dlp.
 - **8 · Sign the Windows build** — biggest distribution-side ROI. Wire
   signtool + timestamp now; flip on once a cert is procured.
-- **11 · Flathub packaging** — canonical Linux install path. The
-  packaging pieces now exist: the `.desktop` file and the AppStream
-  `metainfo.xml` both install from meson (as
-  `org.nordstjernen.WebBrowser.desktop` / `.metainfo.xml`), a Flatpak
-  manifest ships at `data/packaging/org.nordstjernen.WebBrowser.yml`,
-  and `scripts/pack-flatpak.sh` builds a bundle. The remaining step is
-  the Flathub submission itself (see `docs/flatpak.md`).
 
 **Later**
 - 5 · Reader mode · 6 · APNG playback · 9 · macOS notarized DMG.
@@ -239,10 +232,8 @@ committed, listed to keep the long view in one place:
   allow-list of widely-used, safe extensions (e.g. instancing,
   `OES_*` float textures) would unblock more content without
   re-architecting `src/webgl.c`.
-- **Packaging reach** — Flathub (manifest, `.desktop`, and AppStream
-  `metainfo.xml` all ship; the remaining step is the Flathub
-  submission), a signed Windows build, and a notarized macOS DMG
-  are the distribution-side levers.
+- **Packaging reach** — a signed Windows build and a notarized macOS
+  DMG are the distribution-side levers.
 
 **Done:** process-per-tab renderers behind the IPC +
 shared-memory-framebuffer boundary (both GTK and Qt are thin display

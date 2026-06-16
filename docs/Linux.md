@@ -131,5 +131,5 @@ The lower-bound glibc version pinned to `libc.so.6(GLIBC_2.x)` in
 auto-generated requires reflects whatever the build host ships. If
 you want broader portability than the build host's libc allows,
 build inside an older base container (e.g. Rocky 8) and re-run
-`pack-linux.sh` + `pack-rpm.sh` from there. AppImage / Flatpak
-packaging is future work.
+`pack-linux.sh` + `pack-rpm.sh` from there. AppImage packaging is
+future work.
