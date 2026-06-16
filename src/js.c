@@ -31737,13 +31737,8 @@ ns_document_createDocumentFragment(JSContext *ctx, JSValueConst this_val,
     return wrapper;
 }
 
-static JSValue ns_synthdoc_get_documentElement(JSContext *ctx,
-                                               JSValueConst this_val,
-                                               int argc, JSValueConst *argv);
 static JSValue ns_synthdoc_get_doctype(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
-static void ns_synthdoc_define_getter(JSContext *ctx, JSValueConst obj,
-                                      const char *name, JSCFunction *fn);
 
 
 static JSValue
