@@ -145,6 +145,7 @@ static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
 static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
 static void ns_js_flush_document_write(ns_js *js);
+static void ns_js_flush_layout(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
@@ -3469,15 +3470,24 @@ ns_element_get_textContent(JSContext *ctx, JSValueConst this_val)
 typedef struct {
     GString *out;
     gboolean pending_space;
-    gboolean at_line_start;
+    int pending_breaks;
+    gboolean have_content;
 } ns_inner_text_ctx;
+
+typedef enum {
+    NS_IT_WS_NORMAL,
+    NS_IT_WS_PRE,
+    NS_IT_WS_PRE_LINE
+} ns_inner_text_ws;
 
 static gboolean
 ns_inner_text_skip_tag(const char *nm)
 {
     static const char *const set[] = {
         "script", "style", "head", "title", "meta", "link", "base",
-        "noscript", "template", "datalist", NULL };
+        "noscript", "template", "datalist",
+        "textarea", "iframe", "audio", "video", "canvas", "img",
+        "object", "embed", "frame", "frameset", "svg", "math", NULL };
     if (!nm) return FALSE;
     for (int i = 0; set[i]; i++)
         if (g_ascii_strcasecmp(nm, set[i]) == 0) return TRUE;
@@ -3493,6 +3503,7 @@ ns_inner_text_is_block(const ns_style *s, const char *nm)
             const char *k = d->u.keyword;
             if (strstr(k, "inline")) return FALSE;
             if (strcmp(k, "none") == 0) return FALSE;
+            if (strcmp(k, "contents") == 0) return FALSE;
             if (strcmp(k, "table-cell") == 0 ||
                 strcmp(k, "table-column") == 0 ||
                 strcmp(k, "table-column-group") == 0) return FALSE;
@@ -3503,8 +3514,8 @@ ns_inner_text_is_block(const ns_style *s, const char *nm)
         "address", "article", "aside", "blockquote", "body", "dd",
         "details", "div", "dl", "dt", "fieldset", "figcaption", "figure",
         "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
-        "hgroup", "hr", "html", "li", "main", "nav", "ol", "p", "pre",
-        "section", "summary", "table", "tbody", "tfoot", "thead", "tr",
+        "hgroup", "hr", "html", "li", "main", "nav", "ol", "option", "p",
+        "pre", "section", "summary", "table", "tbody", "tfoot", "thead", "tr",
         "ul", NULL };
     if (!nm) return FALSE;
     for (int i = 0; block[i]; i++)
@@ -3512,64 +3523,142 @@ ns_inner_text_is_block(const ns_style *s, const char *nm)
     return FALSE;
 }
 
-static gboolean
-ns_inner_text_preserve_ws(const ns_style *s, const char *nm, gboolean inherited)
+static ns_inner_text_ws
+ns_inner_text_ws_mode(const ns_style *s, const char *nm, ns_inner_text_ws inherited)
 {
     if (s) {
         const ns_css_value *w = s->values[NS_CSS_WHITE_SPACE];
         if (w && w->kind == NS_CSS_V_KEYWORD && w->u.keyword) {
             const char *k = w->u.keyword;
             if (strcmp(k, "pre") == 0 || strcmp(k, "pre-wrap") == 0 ||
-                strcmp(k, "pre-line") == 0 || strcmp(k, "break-spaces") == 0)
-                return TRUE;
+                strcmp(k, "break-spaces") == 0)
+                return NS_IT_WS_PRE;
+            if (strcmp(k, "pre-line") == 0)
+                return NS_IT_WS_PRE_LINE;
             if (strcmp(k, "normal") == 0 || strcmp(k, "nowrap") == 0)
-                return FALSE;
+                return NS_IT_WS_NORMAL;
         }
     }
-    if (nm && g_ascii_strcasecmp(nm, "pre") == 0) return TRUE;
+    if (nm && (g_ascii_strcasecmp(nm, "pre") == 0 ||
+               g_ascii_strcasecmp(nm, "listing") == 0 ||
+               g_ascii_strcasecmp(nm, "xmp") == 0))
+        return NS_IT_WS_PRE;
     return inherited;
 }
 
-static void
-ns_inner_text_emit_newline(ns_inner_text_ctx *c)
+static gboolean
+ns_inner_text_visible(const ns_style *s, gboolean inherited)
 {
-    c->pending_space = FALSE;
-    g_string_append_c(c->out, '\n');
-    c->at_line_start = TRUE;
+    if (s) {
+        const ns_css_value *v = s->values[NS_CSS_VISIBILITY];
+        if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword) {
+            const char *k = v->u.keyword;
+            if (strcmp(k, "hidden") == 0 || strcmp(k, "collapse") == 0)
+                return FALSE;
+            if (strcmp(k, "visible") == 0)
+                return TRUE;
+        }
+    }
+    return inherited;
+}
+
+static const char *
+ns_inner_text_transform(const ns_style *s)
+{
+    if (!s) return NULL;
+    const ns_css_value *t = s->values[NS_CSS_TEXT_TRANSFORM];
+    if (t && t->kind == NS_CSS_V_KEYWORD && t->u.keyword) {
+        const char *k = t->u.keyword;
+        if (strcmp(k, "uppercase") == 0 || strcmp(k, "lowercase") == 0 ||
+            strcmp(k, "capitalize") == 0)
+            return k;
+    }
+    return NULL;
 }
 
 static void
-ns_inner_text_require_break(ns_inner_text_ctx *c)
+ns_inner_text_materialize_breaks(ns_inner_text_ctx *c)
 {
-    if (c->out->len == 0) { c->at_line_start = TRUE; return; }
-    if (!c->at_line_start) ns_inner_text_emit_newline(c);
+    if (!c->have_content) { c->pending_breaks = 0; c->pending_space = FALSE; return; }
+    if (c->pending_breaks > 0) {
+        for (int i = 0; i < c->pending_breaks; i++)
+            g_string_append_c(c->out, '\n');
+        c->pending_breaks = 0;
+        c->pending_space = FALSE;
+    }
+}
+
+static void
+ns_inner_text_require_break(ns_inner_text_ctx *c, int count)
+{
+    if (count > c->pending_breaks) c->pending_breaks = count;
 }
 
 static void
 ns_inner_text_emit_glyph(ns_inner_text_ctx *c, char ch)
 {
+    ns_inner_text_materialize_breaks(c);
     if (c->pending_space) {
-        if (!c->at_line_start) g_string_append_c(c->out, ' ');
+        if (c->have_content) g_string_append_c(c->out, ' ');
         c->pending_space = FALSE;
     }
     g_string_append_c(c->out, ch);
-    c->at_line_start = FALSE;
+    c->have_content = TRUE;
 }
 
 static void
-ns_inner_text_emit_text(ns_inner_text_ctx *c, const char *t, gboolean preserve)
+ns_inner_text_forced_break(ns_inner_text_ctx *c)
 {
-    for (const char *p = t; *p; p++) {
-        unsigned char ch = (unsigned char)*p;
-        if (preserve) {
-            if (ch == '\r') continue;
-            if (ch == '\n') { ns_inner_text_emit_newline(c); continue; }
-            if (c->pending_space) {
-                if (!c->at_line_start) g_string_append_c(c->out, ' ');
-                c->pending_space = FALSE;
+    ns_inner_text_materialize_breaks(c);
+    c->pending_space = FALSE;
+    g_string_append_c(c->out, '\n');
+    c->have_content = TRUE;
+}
+
+static char *
+ns_inner_text_apply_transform(const char *src, const char *tt)
+{
+    if (!src || !tt) return NULL;
+    if (strcmp(tt, "uppercase") == 0) return g_utf8_strup(src, -1);
+    if (strcmp(tt, "lowercase") == 0) return g_utf8_strdown(src, -1);
+    if (strcmp(tt, "capitalize") == 0) {
+        GString *out = g_string_new(NULL);
+        gboolean at_word_start = TRUE;
+        for (const char *p = src; *p; ) {
+            gunichar ch = g_utf8_get_char(p);
+            const char *next = g_utf8_next_char(p);
+            if (g_unichar_isspace(ch) || ch == '-' || ch == '/') {
+                g_string_append_len(out, p, next - p);
+                at_word_start = TRUE;
+            } else if (at_word_start) {
+                char buf[8];
+                gint nb = g_unichar_to_utf8(g_unichar_totitle(ch), buf);
+                g_string_append_len(out, buf, nb);
+                at_word_start = FALSE;
+            } else {
+                g_string_append_len(out, p, next - p);
             }
-            g_string_append_c(c->out, *p);
-            c->at_line_start = FALSE;
+            p = next;
+        }
+        return g_string_free(out, FALSE);
+    }
+    return NULL;
+}
+
+static void
+ns_inner_text_emit_text(ns_inner_text_ctx *c, const char *t,
+                        ns_inner_text_ws ws, const char *tt)
+{
+    char *xf = tt ? ns_inner_text_apply_transform(t, tt) : NULL;
+    const char *src = xf ? xf : t;
+    for (const char *p = src; *p; p++) {
+        unsigned char ch = (unsigned char)*p;
+        if (ws == NS_IT_WS_PRE) {
+            if (ch == '\r') continue;
+            if (ch == '\n') ns_inner_text_forced_break(c);
+            else ns_inner_text_emit_glyph(c, *p);
+        } else if (ws == NS_IT_WS_PRE_LINE && (ch == '\n' || ch == '\r')) {
+            ns_inner_text_forced_break(c);
         } else if (ch == ' ' || ch == '\t' || ch == '\n' ||
                    ch == '\r' || ch == '\f') {
             c->pending_space = TRUE;
@@ -3577,32 +3666,60 @@ ns_inner_text_emit_text(ns_inner_text_ctx *c, const char *t, gboolean preserve)
             ns_inner_text_emit_glyph(c, *p);
         }
     }
+    g_free(xf);
+}
+
+static gboolean
+ns_inner_text_blockifies_children(const ns_style *s)
+{
+    if (!s) return FALSE;
+    const ns_css_value *d = s->values[NS_CSS_DISPLAY];
+    if (d && d->kind == NS_CSS_V_KEYWORD && d->u.keyword) {
+        const char *k = d->u.keyword;
+        if (strstr(k, "flex") || strstr(k, "grid")) return TRUE;
+    }
+    return FALSE;
 }
 
 static void
-ns_inner_text_collect(ns_js *js, const ns_node *n,
-                      ns_inner_text_ctx *c, gboolean preserve)
+ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
+                      ns_inner_text_ws ws, gboolean visible, const char *tt,
+                      gboolean force_block)
 {
     if (!n) return;
     if (n->kind == NS_NODE_TEXT) {
-        if (n->text) ns_inner_text_emit_text(c, n->text, preserve);
+        if (visible && n->text) ns_inner_text_emit_text(c, n->text, ws, tt);
         return;
     }
     if (n->kind != NS_NODE_ELEMENT) return;
     if (ns_inner_text_skip_tag(n->name)) return;
+    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) return;
     const ns_style *s = js && js->style_table
                       ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (s && ns_css_keyword_is(s->values[NS_CSS_DISPLAY], "none")) return;
     if (n->name && g_ascii_strcasecmp(n->name, "br") == 0) {
-        ns_inner_text_emit_newline(c);
+        ns_inner_text_forced_break(c);
         return;
     }
-    gboolean block = ns_inner_text_is_block(s, n->name);
-    gboolean child_preserve = ns_inner_text_preserve_ws(s, n->name, preserve);
-    if (block) ns_inner_text_require_break(c);
+    gboolean is_p = n->name && g_ascii_strcasecmp(n->name, "p") == 0;
+    gboolean is_optgroup = n->name && g_ascii_strcasecmp(n->name, "optgroup") == 0;
+    gboolean block = force_block || ns_inner_text_is_block(s, n->name);
+    int breaks = is_p ? 2 : (block ? 1 : 0);
+    if (is_optgroup) {
+        ns_inner_text_require_break(c, 1);
+        ns_inner_text_require_break(c, 1);
+        return;
+    }
+    ns_inner_text_ws child_ws = ns_inner_text_ws_mode(s, n->name, ws);
+    gboolean child_visible = ns_inner_text_visible(s, visible);
+    const char *own_tt = ns_inner_text_transform(s);
+    const char *child_tt = own_tt ? own_tt : tt;
+    gboolean child_block = ns_inner_text_blockifies_children(s);
+    if (breaks) ns_inner_text_require_break(c, breaks);
     for (const ns_node *ch = n->first_child; ch; ch = ch->next_sibling)
-        ns_inner_text_collect(js, ch, c, child_preserve);
-    if (block) ns_inner_text_require_break(c);
+        ns_inner_text_collect(js, ch, c, child_ws, child_visible, child_tt,
+                              child_block);
+    if (breaks) ns_inner_text_require_break(c, breaks);
 }
 
 static gboolean
@@ -3620,6 +3737,7 @@ ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
     if (!n) return JS_NULL;
     if (ns_inner_outer_text_unsupported(n)) return JS_UNDEFINED;
     ns_js *js = js_from_ctx(ctx);
+    if (js) ns_js_flush_layout(js);
     if (!js || !js->style_table)
         return ns_element_get_textContent(ctx, this_val);
     if (n->kind == NS_NODE_ELEMENT) {
@@ -3627,12 +3745,8 @@ ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
         if (s && ns_css_keyword_is(s->values[NS_CSS_DISPLAY], "none"))
             return ns_element_get_textContent(ctx, this_val);
     }
-    ns_inner_text_ctx c = { g_string_new(NULL), FALSE, TRUE };
-    ns_inner_text_collect(js, n, &c, FALSE);
-    while (c.out->len &&
-           (c.out->str[c.out->len - 1] == '\n' ||
-            c.out->str[c.out->len - 1] == ' '))
-        g_string_truncate(c.out, c.out->len - 1);
+    ns_inner_text_ctx c = { g_string_new(NULL), FALSE, 0, FALSE };
+    ns_inner_text_collect(js, n, &c, NS_IT_WS_NORMAL, TRUE, NULL, FALSE);
     JSValue v = JS_NewString(ctx, c.out->str);
     g_string_free(c.out, TRUE);
     return v;
