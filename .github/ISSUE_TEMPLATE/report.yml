@@ -1,0 +1,18 @@
+name: Report an issue
+description: File a bug report or request for Nordstjernen.
+body:
+  - type: input
+    id: reporter-name
+    attributes:
+      label: Your real name
+      description: Please report under your real full name.
+      placeholder: Jane Doe
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Issue
+      description: What happened, and what did you expect?
+    validations:
+      required: true
