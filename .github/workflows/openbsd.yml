@@ -33,8 +33,18 @@ jobs:
           prepare: |
             pkg_add -I \
               meson ninja pkgconf bash zip ccache \
-              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl \
-              eopenssl35
+              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
+            # The eopenssl3x port name tracks the OpenSSL minor version and
+            # changes across OpenBSD releases (eopenssl34, eopenssl35, ...),
+            # so don't hardcode it: query the repo and install the newest
+            # eopenssl3x available for whichever release the VM image is.
+            eossl=$(pkg_info -Q eopenssl | awk '/^eopenssl[0-9]/{print $1}' \
+              | sort -V | tail -1)
+            if [ -z "$eossl" ]; then
+              echo "error: no eopenssl3x package available" >&2
+              exit 1
+            fi
+            pkg_add -I "$eossl"
           run: |
             set -e
             export CC="ccache cc"
