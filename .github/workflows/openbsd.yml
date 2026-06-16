@@ -34,21 +34,19 @@ jobs:
             set -e
             # pkg-config ships in the OpenBSD base system, so there is no
             # pkgconf port to install (pkg_add would print "Can't find pkgconf").
-            pkg_add -I \
-              meson ninja bash zip ccache \
-              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
             # OpenBSD base libcrypto is LibreSSL, which lacks the OpenSSL 3
             # provider/OSSL_PARAM APIs (openssl/core_names.h) src/webcrypto.c is
-            # written against. The eopenssl3x port installs a parallel OpenSSL 3;
-            # its minor version is part of the stem (eopenssl35, eopenssl36, ...)
-            # and bumps across releases. Discover the newest one the release
-            # ships and fall back to a known-good pin. pkg_info -Q searches
-            # PKG_PATH (not /etc/installurl), so point it at the release repo.
-            base=$(sed 's,/*$,,' /etc/installurl)
-            export PKG_PATH="$base/$(uname -r)/packages/$(uname -m)/"
-            eossl=$(pkg_info -Q eopenssl | awk '/^eopenssl[0-9]/{print $1}' \
-              | sort -V | tail -1)
-            pkg_add -I "${eossl:-eopenssl35}"
+            # written against, so pull in the eopenssl3x port too. Install it in
+            # the same pkg_add so it resolves through /etc/installurl -- the repo
+            # the VM image is actually provisioned from (snapshots). Do NOT build
+            # a PKG_PATH from $(uname -r): that points at the frozen release repo,
+            # which can lag the image and omit eopenssl entirely. The minor
+            # version is part of the stem (eopenssl35, eopenssl36, ...) and tracks
+            # ports' current openssl; bump this pin when ports moves on.
+            pkg_add -I \
+              meson ninja bash zip ccache \
+              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl \
+              eopenssl35
             # The eopenssl3x port moves its pkg-config files into the standard
             # /usr/local/lib/pkgconfig and renames them so they don't collide
             # with base LibreSSL (libcrypto.pc -> libecrypto3x.pc). meson asks
