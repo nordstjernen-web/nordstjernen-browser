@@ -12153,7 +12153,7 @@ ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd, const ns_node *
         }
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0)) {
-            if (!ns_element_get_attr(el, "checked")) { JS_FreeValue(ctx, elv); continue; }
+            if (!ns_input_is_checked(el)) { JS_FreeValue(ctx, elv); continue; }
         }
         char *owned_value = NULL;
         const char *value = NULL;
@@ -23638,6 +23638,7 @@ ns_element_set_hidden(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 }
 
 static void ns_js_clear_radio_group(ns_js *js, const ns_node *radio);
+static void ns_js_set_checkedness(ns_js *js, ns_node *n, gboolean checked);
 
 static JSValue
 ns_element_get_disabled(JSContext *ctx, JSValueConst this_val)
@@ -23665,7 +23666,7 @@ ns_element_get_checked(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_FALSE;
-    return ns_element_get_attr(el, "checked") ? JS_TRUE : JS_FALSE;
+    return ns_input_is_checked(el) ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
@@ -23678,10 +23679,11 @@ ns_element_set_checked(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         const char *type = ns_element_get_attr(el, "type");
         if (type && g_ascii_strcasecmp(type, "radio") == 0)
             ns_js_clear_radio_group(_j, el);
-        ns_js_set_attr_recorded(_j, el, "checked", "");
+        ns_element_set_attr(el, "data-nd-checked", "1");
     } else {
-        ns_js_remove_attr_recorded(_j, el, "checked");
+        ns_element_set_attr(el, "data-nd-checked", "0");
     }
+    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
@@ -24745,7 +24747,7 @@ ns_radio_node_list_get_value(JSContext *ctx, JSValueConst this_val,
     for (uint32_t i = 0; i < n; i++) {
         JSValue item = JS_GetPropertyUint32(ctx, this_val, i);
         const ns_node *el = ns_unwrap_element(item);
-        if (ns_node_is_radio_input(el) && ns_element_get_attr(el, "checked")) {
+        if (ns_node_is_radio_input(el) && ns_input_is_checked(el)) {
             const char *value = ns_element_get_attr(el, "value");
             JS_FreeValue(ctx, item);
             return JS_NewString(ctx, value ? value : "on");
@@ -24780,10 +24782,10 @@ ns_radio_node_list_set_value(JSContext *ctx, JSValueConst this_val,
             JSValue item = JS_GetPropertyUint32(ctx, this_val, i);
             ns_node *el = (ns_node *)ns_unwrap_element(item);
             if (ns_node_is_radio_input(el) && el != chosen)
-                ns_js_remove_attr_recorded(js, el, "checked");
+                ns_js_set_checkedness(js, el, FALSE);
             JS_FreeValue(ctx, item);
         }
-        ns_js_set_attr_recorded(js, chosen, "checked", "");
+        ns_js_set_checkedness(js, chosen, TRUE);
     }
     JS_FreeCString(ctx, wanted);
     return JS_UNDEFINED;
@@ -25823,12 +25825,18 @@ ns_js_clear_radio_group(ns_js *js, const ns_node *radio)
             if (t && nm && g_ascii_strcasecmp(t, "radio") == 0 &&
                 strcmp(nm, group) == 0 &&
                 ns_form_owner(n, doc) == owner)
-                ns_js_remove_attr_recorded(js, n, "checked");
+                ns_js_set_checkedness(js, n, FALSE);
         }
         for (ns_node *c = n->first_child; c; c = c->next_sibling)
             g_queue_push_tail(&q, c);
     }
     g_queue_clear(&q);
+}
+
+static void
+ns_js_set_checkedness(ns_js *js, ns_node *n, gboolean checked)
+{
+    ns_js_set_attr_recorded(js, n, "data-nd-checked", checked ? "1" : "0");
 }
 
 static const ns_node *
@@ -25872,16 +25880,13 @@ ns_checkable_input_kind(const ns_node *el)
 static gboolean
 ns_checkable_pre_click(ns_js *js, ns_node *el, int kind)
 {
-    gboolean was_checked = ns_element_get_attr(el, "checked") != NULL;
+    gboolean was_checked = ns_input_is_checked(el);
     if (kind == 1) {
-        if (was_checked)
-            ns_js_remove_attr_recorded(js, el, "checked");
-        else
-            ns_js_set_attr_recorded(js, el, "checked", "");
+        ns_js_set_checkedness(js, el, !was_checked);
     }
     else if (!was_checked) {
         ns_js_clear_radio_group(js, el);
-        ns_js_set_attr_recorded(js, el, "checked", "");
+        ns_js_set_checkedness(js, el, TRUE);
     }
     return was_checked;
 }
@@ -25892,13 +25897,10 @@ ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
 {
     if (prevented) {
         if (kind == 1) {
-            if (was_checked)
-                ns_js_set_attr_recorded(js, el, "checked", "");
-            else
-                ns_js_remove_attr_recorded(js, el, "checked");
+            ns_js_set_checkedness(js, el, was_checked);
         }
         else if (!was_checked) {
-            ns_js_remove_attr_recorded(js, el, "checked");
+            ns_js_set_checkedness(js, el, FALSE);
         }
         return;
     }
@@ -25989,13 +25991,10 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
     if (!type) return FALSE;
     if (g_ascii_strcasecmp(type, "checkbox") == 0) {
         ns_node *mut = (ns_node *)control;
-        if (ns_element_get_attr(mut, "checked"))
-            ns_js_remove_attr_recorded(js, mut, "checked");
-        else
-            ns_js_set_attr_recorded(js, mut, "checked", "");
+        ns_js_set_checkedness(js, mut, !ns_input_is_checked(mut));
     } else if (g_ascii_strcasecmp(type, "radio") == 0) {
         ns_js_clear_radio_group(js, control);
-        ns_js_set_attr_recorded(js, (ns_node *)control, "checked", "");
+        ns_js_set_checkedness(js, (ns_node *)control, TRUE);
     } else {
         return FALSE;
     }

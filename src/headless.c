@@ -844,12 +844,10 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
             strcmp(cur->name, "input") == 0) {
             const char *type = ns_element_get_attr(cur, "type");
             if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {
-                if (ns_element_get_attr(cur, "checked"))
-                    ns_element_remove_attr((ns_node *)cur, "checked");
-                else
-                    ns_element_set_attr((ns_node *)cur, "checked", "");
+                ns_element_set_attr((ns_node *)cur, "data-nd-checked",
+                                    ns_input_is_checked(cur) ? "0" : "1");
             } else if (type && g_ascii_strcasecmp(type, "radio") == 0) {
-                ns_element_set_attr((ns_node *)cur, "checked", "");
+                ns_element_set_attr((ns_node *)cur, "data-nd-checked", "1");
             } else {
                 continue;
             }

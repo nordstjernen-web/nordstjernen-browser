@@ -201,6 +201,7 @@ gboolean    ns_node_is_contenteditable_host(const ns_node *n);
 gboolean    ns_node_is_editable(const ns_node *n);
 const char *ns_node_editable_value(const ns_node *n);
 const char *ns_input_used_value(const ns_node *n);
+gboolean    ns_input_is_checked(const ns_node *n);
 gboolean    ns_input_value_is_dirty_mode(const ns_node *n);
 void        ns_node_set_editable_value(ns_node *n, const char *value);
 void        ns_node_flatten_editable(ns_node *n);

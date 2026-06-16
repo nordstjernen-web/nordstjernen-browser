@@ -304,7 +304,7 @@ ns_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
         if (!scan_name) scan_name = "";
         if (strcmp(scan_name, name) == 0 &&
             ns_form_owner(scan, doc) == owner &&
-            ns_element_get_attr(scan, "checked"))
+            ns_input_is_checked(scan))
             return TRUE;
     }
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
@@ -320,7 +320,7 @@ ns_form_control_value_missing(const ns_node *control, const char *value,
     if (!control || control->kind != NS_NODE_ELEMENT || !control->name)
         return FALSE;
     if (ns_input_type_is(control, "checkbox"))
-        return ns_element_get_attr(control, "checked") == NULL;
+        return !ns_input_is_checked(control);
     if (ns_input_type_is(control, "radio")) {
         const char *name = ns_element_get_attr(control, "name");
         if (!name) name = "";
@@ -436,6 +436,15 @@ ns_input_used_value(const ns_node *n)
         if (dirty) return dirty;
     }
     return ns_element_get_attr(n, "value");
+}
+
+gboolean
+ns_input_is_checked(const ns_node *n)
+{
+    if (!n) return FALSE;
+    const char *dirty = ns_element_get_attr(n, "data-nd-checked");
+    if (dirty) return strcmp(dirty, "1") == 0;
+    return ns_element_get_attr(n, "checked") != NULL;
 }
 
 const char *
@@ -1768,10 +1777,7 @@ ns_form_reset_control(ns_node *n)
         const char *type = ns_element_get_attr(n, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0)) {
-            if (ns_element_get_attr(n, "defaultChecked"))
-                ns_element_set_attr(n, "checked", "");
-            else
-                ns_element_remove_attr(n, "checked");
+            ns_element_remove_attr(n, "data-nd-checked");
         }
         ns_element_remove_attr(n, "data-nd-value");
     } else if (strcmp(n->name, "select") == 0) {

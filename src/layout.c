@@ -2538,7 +2538,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             emit_form_attr_sized(ctx->attrs, NS_INLINE_BUTTON, start, ctx->out->len, n, ctx->styles);
             g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "checkbox") == 0) {
-            const char *checked = ns_element_get_attr(n, "checked");
+            gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
             g_string_append(ctx->out, checked ? "\xe2\x98\x91" : "\xe2\x98\x90");
             emit_form_attr_sized(ctx->attrs,
@@ -2546,7 +2546,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 start, ctx->out->len, n, ctx->styles);
             g_string_append_c(ctx->out, ' ');
         } else if (type && g_ascii_strcasecmp(type, "radio") == 0) {
-            const char *checked = ns_element_get_attr(n, "checked");
+            gboolean checked = ns_input_is_checked(n);
             gsize start = ctx->out->len;
             g_string_append(ctx->out, checked ? "\xe2\x97\x89" : "\xe2\x97\x8b");
             emit_form_attr_sized(ctx->attrs,

@@ -23,7 +23,7 @@ ns_clear_radio_group(ns_node *root, const ns_node *doc, const ns_node *owner,
         if (type && grp && g_ascii_strcasecmp(type, "radio") == 0 &&
             strcmp(grp, name) == 0 &&
             ns_form_owner(root, doc) == owner)
-            ns_element_remove_attr(root, "checked");
+            ns_element_set_attr(root, "data-nd-checked", "0");
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_clear_radio_group(c, doc, owner, name, keep, depth + 1);
@@ -227,7 +227,7 @@ ns_form_collect_multipart_depth(const ns_node *form, const ns_node *n,
                 }
                 if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                              g_ascii_strcasecmp(type, "radio") == 0)) {
-                    if (!ns_element_get_attr(n, "checked")) goto recurse_mp;
+                    if (!ns_input_is_checked(n)) goto recurse_mp;
                 }
                 if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                              g_ascii_strcasecmp(type, "image") == 0)) {
@@ -313,7 +313,7 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
                 const char *type = ns_element_get_attr(n, "type");
                 if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                              g_ascii_strcasecmp(type, "radio") == 0)) {
-                    if (!ns_element_get_attr(n, "checked")) goto recurse;
+                    if (!ns_input_is_checked(n)) goto recurse;
                 }
                 if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                              g_ascii_strcasecmp(type, "image") == 0)) {

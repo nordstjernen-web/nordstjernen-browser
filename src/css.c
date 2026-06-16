@@ -11105,12 +11105,13 @@ ns_el_is_checked(const ns_node *el)
 {
     if (ns_node_is_element_named(el, "option"))
         return ns_element_get_attr(el, "selected") != NULL;
-    if (!ns_node_is_element_named(el, "input") ||
-        !ns_element_get_attr(el, "checked"))
+    if (!ns_node_is_element_named(el, "input"))
         return FALSE;
     const char *type = ns_element_get_attr(el, "type");
-    return type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
-                    g_ascii_strcasecmp(type, "radio") == 0);
+    if (!type || (g_ascii_strcasecmp(type, "checkbox") != 0 &&
+                  g_ascii_strcasecmp(type, "radio") != 0))
+        return FALSE;
+    return ns_input_is_checked(el);
 }
 
 static gboolean
@@ -11178,7 +11179,7 @@ ns_css_radio_group_has_checked(const ns_node *scan, const ns_node *doc,
             if (!scan_name) scan_name = "";
             if (strcmp(scan_name, name) == 0 &&
                 ns_form_owner(scan, doc) == owner &&
-                ns_element_get_attr(scan, "checked"))
+                ns_input_is_checked(scan))
                 return TRUE;
         }
     }
