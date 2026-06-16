@@ -5549,6 +5549,7 @@
             function applyInsert(node) {
                 var parent = node && node.parentNode;
                 if (!parent) return;
+                if (node.nextSibling === null) return;
                 var index = indexOfNode(node);
                 forEachLiveRange(function (r) {
                     if (r._sc === parent && r._so > index) r._so += 1;
