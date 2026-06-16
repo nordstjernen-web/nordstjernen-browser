@@ -28649,12 +28649,13 @@ static JSValue
 ns_document_create_range(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue factory = JS_GetPropertyStr(ctx, global, "__ndCreateRange");
     JS_FreeValue(ctx, global);
     if (JS_IsFunction(ctx, factory)) {
-        JSValue r = JS_Call(ctx, factory, JS_UNDEFINED, 0, NULL);
+        JSValueConst args[1] = { this_val };
+        JSValue r = JS_Call(ctx, factory, JS_UNDEFINED, 1, args);
         JS_FreeValue(ctx, factory);
         if (!JS_IsException(r)) return r;
         JS_FreeValue(ctx, r);

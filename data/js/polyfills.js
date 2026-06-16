@@ -4992,9 +4992,10 @@
             });
         }
 
-        function NdRange() {
-            this._sc = doc; this._so = 0;
-            this._ec = doc; this._eo = 0;
+        function NdRange(ownerDoc) {
+            var d = ownerDoc || doc;
+            this._sc = d; this._so = 0;
+            this._ec = d; this._eo = 0;
             trackRange(this);
         }
 
@@ -5602,6 +5603,8 @@
         })();
 
         global.Range = NdRange;
-        global.__ndCreateRange = function () { return new NdRange(); };
+        global.__ndCreateRange = function (ownerDoc) {
+            return new NdRange(ownerDoc && ownerDoc.nodeType === 9 ? ownerDoc : doc);
+        };
     })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -42,6 +42,7 @@ they regenerate.
 | 2026-06-15 | 3a754e8 | d8a8414e5 | 284/696 (40%) | 50415/55389 (91%) | full |
 | 2026-06-16 | 5442142 | a72c94d4a | 286/696 (41%) | 50493/55389 (91%) | partial: html/dom/elements |
 | 2026-06-16 | fec36c7 | a72c94d4a | 290/696 (41%) | 50646/55464 (91%) | partial: url |
+| 2026-06-16 | 9531924 | a72c94d4a | 292/696 (41%) | 61026/66617 (91%) | partial: dom/ranges |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -51,14 +52,14 @@ touch.
 
 ## Per-area results — 2026-06-16
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-16-fec36c7.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-16-9531924.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 112/275 | 8552/10060 | 1453 | 44 | 11 | 0 |
 | `dom/events` | 48/167 | 363/742 | 334 | 22 | 23 | 0 |
 | `dom/traversal` | 12/17 | 1566/1602 | 36 | 0 | 0 | 0 |
-| `dom/ranges` | 23/55 | 31446/33384 | 1938 | 0 | 0 | 0 |
+| `dom/ranges` | 25/55 | 41826/44537 | 2711 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 2/10 | 30/53 | 23 | 0 | 0 | 0 |
 | `url` | 15/32 | 7205/7474 | 268 | 1 | 0 | 0 |
@@ -70,7 +71,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-16-fec36c7.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 94/118 | 24 | 0 | 0 | 0 |
-| **Total** | **290/696** | **50646/55464** | **4713** | **69** | **36** | **0** |
+| **Total** | **292/696** | **61026/66617** | **5486** | **69** | **36** | **0** |
 
 ## ROI by area — 2026-06-16
 
@@ -85,7 +86,7 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/ranges` | 1938 | 32 | 60.6 | 2 | 6 |
+| `dom/ranges` | 2711 | 30 | 90.4 | 0 | 6 |
 | `dom/nodes` | 1508 | 163 | 9.3 | 25 | 89 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 379 | 119 | 3.2 | 72 | 29 |
@@ -122,6 +123,8 @@ grep `polyfills.js` first.
 | 4 | ~~**`innerText`/`outerText` rendered-text algorithm**~~ — **largely landed.** The getter now flushes layout before reading (so dynamically-set `white-space`/`visibility`/`text-transform` are seen — `dynamic-getter.html` went 4/7→7/7), collects rendered text with a spec-style *required-line-break-count* model (`<p>` yields blank lines, `<br>` at end of block is kept, leading/trailing block breaks are dropped without eating preserved `white-space:pre` spaces), honours `visibility:hidden`/`collapse`, treats `display:contents` as boxless and flex/grid items as blockified, skips replaced/non-rendered subtrees (`textarea`/`iframe`/`audio`/`video`/`canvas`/`img`/`object`/`embed`/SVG/MathML), renders `<option>` and (label-less) `<optgroup>` as blocks, and applies `text-transform`. `getter.html` 159→232. **Remaining** is layout-geometry-dependent: tab-separated table cells, `::first-line`/`::first-letter` pseudo styling, shadow-DOM exclusion, whitespace at inline-block boundaries, and the `?white-space=` variant files the local runner cannot expand | `getter.html` (159→232), `dynamic-getter.html` (4/7→7/7) | landed (~80) |
 | 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA. **Partly landed:** the JS→C marshalling for URL/`<a>`/`<area>` component setters used `JS_ToCString`+`strlen`, which truncated the value at the first embedded U+0000; setters now pass the real byte length (`JS_ToCStringLen` → `ns_url_set_component_len`) so NULs are percent-encoded (`%00`) per the WHATWG percent-encode sets instead of cutting the value short. `url-setters-stripping` 217→260, `urlencoded-parser` 66→105, `url-setters-a-area` +28, `url-setters`/`url-constructor`/`percent-encoding` smaller gains (~153 total). **Remaining**, each its own root cause: lexbor host-setter port parsing (`host='example.com:invalid'` should set hostname and stop the port parser), opaque-path erasure for non-special schemes, trailing-space handling when clearing `search`/`hash` on opaque paths, legacy query-encoding (`big5`/`euc-kr`/…) percent-encoding, and `IdnaTestV2` | `url-setters-stripping.any.html` (217→260), `urlencoded-parser.any.html` (66→105) | landed (~153) |
 | 6 | **Exotic platform objects** — `querySelectorAll` returns a real `Array` (should be a `NodeList`: `[object NodeList]`, no tamperable `length`); `HTMLCollection` wrongly has `values`/`entries`/`forEach` and an own `length`. Make both proper WebIDL legacy-platform objects | `dom/collections/*` (23), `dom/nodes/NodeList-static-length-getter-tampered-*` ×6 | ~30 |
+| 7 | **`document.createRange()` bound to the wrong document** — `NdRange`'s constructor hard-coded the main-realm `document` as the initial start/end container, so `foreignDoc.createRange()`/`xmlDoc.createRange()` (and the ranges cloned from them) reported the *main* document as their container instead of the document the method was called on. `createRange` now passes its receiver document through `__ndCreateRange(ownerDoc)` to the constructor. `Range-cloneRange` 40→62 (all pass). | `Range-cloneRange.html` (40→62) | landed (~22) |
+| 8 | **`Range-surroundContents` transient `textContent` no-op** — the single biggest remaining cluster (690/1840). The cross-iframe harness reuses one `<iframe>` across ~1058 `(range,node)` cells; after the first cell, the *next* `setupRangeTests` call's `element.textContent = "…"` silently produces no child text node (the element is healthy — a fresh `textContent` and a retry both work, and the document tree is intact), so `paras[0].firstChild` is null and range setup throws. `?subtest=0,1` passes in isolation; only the full loop triggers it, and ~12 faithful hand-built reproductions (single iframe ×2, two iframes A/B/A, with/without the real `surroundContents` and doctype steps) all pass — so the trigger is some accumulated engine/realm state not yet isolated. Needs C-level tracing of the `textContent` setter / `appendChild` under the exact harness choreography; not safe to patch blind (would risk the 690 already passing). The same transient hits `Range-extractContents`/`cloneContents`/`deleteContents` (shared harness). | `Range-surroundContents.html` (690/1840) | ~1150 (blocked) |
 
 Not listed: `WebCryptoAPI/digest` — 419 of its failures are
 `tentative` SHA-3/cSHAKE/K12/TurboSHAKE tests (`kangarootwelve` 148,
