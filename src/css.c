@@ -12190,47 +12190,42 @@ ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el)
 }
 
 static gboolean
+match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
+{
+    if (idx <= 0) return TRUE;
+    ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, idx);
+    const ns_css_simple *prev = g_ptr_array_index(sel->compounds, idx - 1);
+    if (comb == NS_CSS_COMB_CHILD) {
+        const ns_node *p = cur->parent;
+        return p && match_simple(prev, p) &&
+               match_complex_chain(sel, idx - 1, p);
+    }
+    if (comb == NS_CSS_COMB_ADJACENT) {
+        const ns_node *s = cur->prev_sibling;
+        while (s && s->kind != NS_NODE_ELEMENT) s = s->prev_sibling;
+        return s && match_simple(prev, s) &&
+               match_complex_chain(sel, idx - 1, s);
+    }
+    if (comb == NS_CSS_COMB_SIBLING) {
+        for (const ns_node *s = cur->prev_sibling; s; s = s->prev_sibling)
+            if (s->kind == NS_NODE_ELEMENT && match_simple(prev, s) &&
+                match_complex_chain(sel, idx - 1, s))
+                return TRUE;
+        return FALSE;
+    }
+    for (const ns_node *p = cur->parent; p; p = p->parent)
+        if (match_simple(prev, p) && match_complex_chain(sel, idx - 1, p))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 match_selector_structural(const ns_css_selector *sel, const ns_node *el)
 {
     if (!sel || sel->compounds->len == 0) return FALSE;
     int idx = (int)sel->compounds->len - 1;
-    const ns_node *cur = el;
-    if (!match_simple(g_ptr_array_index(sel->compounds, idx), cur)) return FALSE;
-    while (idx > 0) {
-        ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, idx);
-        const ns_css_simple *prev = g_ptr_array_index(sel->compounds, idx - 1);
-        if (comb == NS_CSS_COMB_CHILD) {
-            cur = cur->parent;
-            if (!cur || !match_simple(prev, cur)) return FALSE;
-        } else if (comb == NS_CSS_COMB_ADJACENT) {
-            const ns_node *s = cur->prev_sibling;
-            while (s && s->kind != NS_NODE_ELEMENT) s = s->prev_sibling;
-            if (!s || !match_simple(prev, s)) return FALSE;
-            cur = s;
-        } else if (comb == NS_CSS_COMB_SIBLING) {
-            const ns_node *s = cur->prev_sibling;
-            gboolean ok = FALSE;
-            while (s) {
-                if (s->kind == NS_NODE_ELEMENT && match_simple(prev, s)) {
-                    cur = s;
-                    ok = TRUE;
-                    break;
-                }
-                s = s->prev_sibling;
-            }
-            if (!ok) return FALSE;
-        } else {
-            const ns_node *p = cur->parent;
-            gboolean ok = FALSE;
-            while (p) {
-                if (match_simple(prev, p)) { cur = p; ok = TRUE; break; }
-                p = p->parent;
-            }
-            if (!ok) return FALSE;
-        }
-        idx--;
-    }
-    return TRUE;
+    if (!match_simple(g_ptr_array_index(sel->compounds, idx), el)) return FALSE;
+    return match_complex_chain(sel, idx, el);
 }
 
 static gboolean
