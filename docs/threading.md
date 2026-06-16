@@ -95,7 +95,7 @@ Every blocking or unbounded operation has a bound:
 
 | Operation | Bound | Where |
 |-----------|-------|-------|
-| HTTP connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `net.c` |
+| HTTP connect | 15 s navigation / 6 s subresource | `CURLOPT_CONNECTTIMEOUT`, `net.c` |
 | HTTP transfer | 30 s default, 60 s max (`X-ND-Timeout-Seconds`) | `CURLOPT_TIMEOUT`, `net.c` |
 | HTTP redirects | 10 | `CURLOPT_MAXREDIRS`, `net.c` |
 | WebSocket connect | 15 s | `CURLOPT_CONNECTTIMEOUT`, `ws.c` |

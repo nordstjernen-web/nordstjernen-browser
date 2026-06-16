@@ -63,9 +63,8 @@ llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
 tools, and digest-pinned model downloads, all on-device with no network
 at inference time (see `docs/ai.md`).
 
-Version 1.0.7 is the current release (the tree carries 1.0.9-dev in
-the meson project definition — surfaced through `src/version.h` — as
-development advances toward the next tag).
+Version 1.0.9 is the current release (the meson project definition
+carries `1.0.9`, surfaced through `src/version.h`).
 
 ## Architecture & frontends
 
@@ -190,9 +189,12 @@ zygote, and re-enabled shell supervision, are the follow-ups.
 - **8 · Sign the Windows build** — biggest distribution-side ROI. Wire
   signtool + timestamp now; flip on once a cert is procured.
 - **11 · Flathub packaging** — canonical Linux install path. The
-  `.desktop` file now installs from meson (as
-  `org.nordstjernen.WebBrowser.desktop`); the remaining blocker is a
-  missing AppStream `metainfo.xml`.
+  packaging pieces now exist: the `.desktop` file and the AppStream
+  `metainfo.xml` both install from meson (as
+  `org.nordstjernen.WebBrowser.desktop` / `.metainfo.xml`), a Flatpak
+  manifest ships at `data/packaging/org.nordstjernen.WebBrowser.yml`,
+  and `scripts/pack-flatpak.sh` builds a bundle. The remaining step is
+  the Flathub submission itself (see `docs/flatpak.md`).
 
 **Later**
 - 5 · Reader mode · 6 · APNG playback · 9 · macOS notarized DMG.
@@ -237,8 +239,9 @@ committed, listed to keep the long view in one place:
   allow-list of widely-used, safe extensions (e.g. instancing,
   `OES_*` float textures) would unblock more content without
   re-architecting `src/webgl.c`.
-- **Packaging reach** — Flathub (blocked only on AppStream
-  `metainfo.xml`), a signed Windows build, and a notarized macOS DMG
+- **Packaging reach** — Flathub (manifest, `.desktop`, and AppStream
+  `metainfo.xml` all ship; the remaining step is the Flathub
+  submission), a signed Windows build, and a notarized macOS DMG
   are the distribution-side levers.
 
 **Done:** process-per-tab renderers behind the IPC +

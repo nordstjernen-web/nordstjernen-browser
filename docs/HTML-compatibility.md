@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.9-dev**, 2026-06-15.
+Snapshot: **1.0.9**, 2026-06-16.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see

@@ -60,6 +60,11 @@
   </branding>
 
   <releases>
+    <release version="1.0.9" date="2026-06-16">
+      <description>
+        <p>Engine and documentation maintenance release.</p>
+      </description>
+    </release>
     <release version="1.0.7" date="2026-06-14">
       <description>
         <p>First Flatpak release.</p>
