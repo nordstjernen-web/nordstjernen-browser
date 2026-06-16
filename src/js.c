@@ -9235,7 +9235,6 @@ ns_history_go(JSContext *ctx, JSValueConst this_val,
     return ns_history_navigate(ctx, delta);
 }
 
-static void ns_js_flush_layout(ns_js *js);
 
 static const char *
 ns_computed_initial_value(const char *name)
