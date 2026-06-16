@@ -7,7 +7,7 @@ option('qt', type: 'feature', value: 'disabled',
 option('ipc_experiment', type: 'boolean', value: false,
        description: 'Build the HTTP-vs-binary IPC comparison renderer and benchmark (experiment branch).')
 option('wasm', type: 'feature', value: 'auto',
-       description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default; disable on platforms WAMR does not support, e.g. OpenBSD/NetBSD).')
+       description: 'Build the WebAssembly JS API over the vendored WAMR interpreter (on by default; disable on platforms WAMR does not support, e.g. NetBSD).')
 option('ai', type: 'feature', value: 'enabled',
        description: 'Build the local AI chat start page (llama.cpp via CMake subproject).')
 option('ai_gpu', type: 'feature', value: 'auto',

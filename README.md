@@ -5,7 +5,7 @@ Nordstjernen is a web browser, written from scratch in C.
 Focused on supporting the HTML and CSS standards.  
 Nordstjernen is built in Norway. 
 
-Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , Mac and Linux, Android, Java, FreeBSD, NetBSD and OpenBSD.  
+Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , Mac and Linux, Android, Java, FreeBSD and NetBSD.  
 
 **HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 114 spec rows fully implemented, 49 partial, 4 absent as of June 2026. 
 
@@ -101,7 +101,6 @@ latest build — bleeding edge, expect rough edges.
 | Linux (portable, Qt) | [`nordstjernen-linux-qt-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip) |
 | Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
 | FreeBSD (portable) | [`nordstjernen-freebsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip) |
-| OpenBSD (portable) | [`nordstjernen-openbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-openbsd-x86_64.zip) |
 | NetBSD (portable) | [`nordstjernen-netbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip) |
 | Java browser + API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) (runnable fat jar: `java -jar`) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
 | Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |

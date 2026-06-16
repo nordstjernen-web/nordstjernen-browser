@@ -1265,7 +1265,7 @@ ns_net_resolve_ca_bundle(void)
            "CURL_CA_BUNDLE to an extracted cacert.pem before ns_browser_init().");
 #endif
 
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__FreeBSD__) || defined(__NetBSD__)
     const char *unix_paths[] = {
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/pki/tls/certs/ca-bundle.crt",
@@ -3908,7 +3908,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             "\"macOS\"";
 #elif defined(__linux__)
             "\"Linux\"";
-#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#elif defined(__FreeBSD__) || defined(__NetBSD__)
             "\"Unknown\"";
 #else
             "\"Unknown\"";

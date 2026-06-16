@@ -24,7 +24,6 @@ exactly the latest build. It contains:
 | Windows bundle (`.zip`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
 | macOS `.dmg` + binary | GitHub Actions `macos.yml` | `macos/` |
 | FreeBSD portable zip | GitHub Actions `freebsd.yml` (vmactions VM) | `freebsd/` |
-| OpenBSD portable zip | GitHub Actions `openbsd.yml` (vmactions VM) | `openbsd/` |
 | NetBSD portable zip | GitHub Actions `netbsd.yml` (vmactions VM) | `netbsd/` |
 | Java API jar + sources + javadoc + browsable API docs | `debian:trixie` container (native libs) + JDK 21 on the host | `java/` |
 
@@ -63,7 +62,6 @@ current build (a platform that didn't build simply has no link):
 - `https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip` (Qt 6 frontend)
 - `https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip` (musl)
 - `https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip`
-- `https://www.nordstjernen.org/nightly/nordstjernen-openbsd-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java.jar`
 - `https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar`
@@ -92,9 +90,9 @@ against that distro's own glibc / GTK, and the source tarball is a
 plain `git archive` (the engine — lexbor, quickjs, wuffs — is vendored
 in-tree, so the tarball is buildable fully offline).
 
-The FreeBSD, OpenBSD and NetBSD builds run the same way as Windows/macOS —
+The FreeBSD and NetBSD builds run the same way as Windows/macOS —
 driven through GitHub Actions — but GitHub has no native BSD runners, so
-`freebsd.yml` / `openbsd.yml` / `netbsd.yml` boot a BSD guest inside the
+`freebsd.yml` / `netbsd.yml` boot a BSD guest inside the
 Linux runner with the `vmactions/*-vm` actions, install the runtime
 dependencies from that OS's package collection (`pkg` / `pkg_add` /
 `pkgin`), build with meson, and `scripts/pack-bsd.sh` zips the binary plus
