@@ -241,7 +241,7 @@ ns_form_collect_multipart_depth(const ns_node *form, const ns_node *n,
                 if (type && (g_ascii_strcasecmp(type, "button") == 0 ||
                              g_ascii_strcasecmp(type, "reset")  == 0))
                     goto recurse_mp;
-                const char *value = ns_element_get_attr(n, "value");
+                const char *value = ns_input_used_value(n);
                 if (!value && type &&
                     (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0))
@@ -327,7 +327,7 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
                              g_ascii_strcasecmp(type, "reset")  == 0 ||
                              g_ascii_strcasecmp(type, "file")   == 0))
                     goto recurse;
-                const char *value = ns_element_get_attr(n, "value");
+                const char *value = ns_input_used_value(n);
                 if (!value && type &&
                     (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                      g_ascii_strcasecmp(type, "radio") == 0))
@@ -453,7 +453,7 @@ ns_form_first_invalid_depth(const ns_node *form, const ns_node *n,
                         g_ptr_array_free(opts, TRUE);
                         value = collected ? collected : "";
                     } else {
-                        value = ns_element_get_attr(n, "value");
+                        value = ns_input_used_value(n);
                         if (!value) value = "";
                     }
                     gboolean required = ns_form_control_supports_required(n) &&

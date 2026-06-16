@@ -411,6 +411,33 @@ ns_node_is_editable(const ns_node *n)
     return ns_node_is_text_input(n) || ns_node_is_contenteditable_host(n);
 }
 
+gboolean
+ns_input_value_is_dirty_mode(const ns_node *n)
+{
+    if (!n || !n->name || strcmp(n->name, "input") != 0) return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    if (!type) return TRUE;
+    return !(g_ascii_strcasecmp(type, "checkbox") == 0 ||
+             g_ascii_strcasecmp(type, "radio")    == 0 ||
+             g_ascii_strcasecmp(type, "submit")   == 0 ||
+             g_ascii_strcasecmp(type, "reset")    == 0 ||
+             g_ascii_strcasecmp(type, "button")   == 0 ||
+             g_ascii_strcasecmp(type, "image")    == 0 ||
+             g_ascii_strcasecmp(type, "file")     == 0 ||
+             g_ascii_strcasecmp(type, "hidden")   == 0);
+}
+
+const char *
+ns_input_used_value(const ns_node *n)
+{
+    if (!n) return NULL;
+    if (ns_input_value_is_dirty_mode(n)) {
+        const char *dirty = ns_element_get_attr(n, "data-nd-value");
+        if (dirty) return dirty;
+    }
+    return ns_element_get_attr(n, "value");
+}
+
 const char *
 ns_node_editable_value(const ns_node *n)
 {
@@ -422,7 +449,7 @@ ns_node_editable_value(const ns_node *n)
                 return c->text;
         return "";
     }
-    const char *v = ns_element_get_attr(n, "value");
+    const char *v = ns_input_used_value(n);
     return v ? v : "";
 }
 
@@ -439,6 +466,8 @@ ns_node_set_editable_value(ns_node *n, const char *value)
             c = next;
         }
         ns_node_append_child(n, ns_node_new_text(g_strdup(value ? value : "")));
+    } else if (ns_input_value_is_dirty_mode(n)) {
+        ns_element_set_attr(n, "data-nd-value", value ? value : "");
     } else {
         ns_element_set_attr(n, "value", value ? value : "");
     }
@@ -1744,6 +1773,7 @@ ns_form_reset_control(ns_node *n)
             else
                 ns_element_remove_attr(n, "checked");
         }
+        ns_element_remove_attr(n, "data-nd-value");
     } else if (strcmp(n->name, "select") == 0) {
         for (ns_node *o = n->first_child; o; o = o->next_sibling) {
             if (ns_node_is_element_named(o, "option"))

@@ -2403,7 +2403,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             int leading = text_input_leading_spaces(s);
             for (int i = 0; i < leading; i++)
                 g_string_append(ctx->out, "\xc2\xa0");
-            const char *real_value = ns_element_get_attr(n, "value");
+            const char *real_value = ns_input_used_value(n);
             const char *v = real_value;
             gboolean is_placeholder = FALSE;
             if (!v || !*v) {

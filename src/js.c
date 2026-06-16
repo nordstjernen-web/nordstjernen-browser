@@ -12165,7 +12165,7 @@ ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd, const ns_node *
             owned_value = ns_node_collect_text(el);
             value = owned_value ? owned_value : "";
         } else {
-            value = ns_element_get_attr(el, "value");
+            value = ns_input_used_value(el);
             if (!value && type &&
                 (g_ascii_strcasecmp(type, "checkbox") == 0 ||
                  g_ascii_strcasecmp(type, "radio") == 0))
@@ -22171,7 +22171,7 @@ ns_js_compute_validity(const ns_node *n,
         owned_value = opt ? ns_option_value_dup(opt) : g_strdup("");
         value = owned_value ? owned_value : "";
     } else {
-        value = ns_element_get_attr(n, "value");
+        value = ns_input_used_value(n);
         if (!value) value = "";
     }
     gboolean required = ns_form_control_supports_required(n) &&
@@ -22758,9 +22758,17 @@ ns_element_get_value_as_number(JSContext *ctx, JSValueConst this_val)
     if (!n) return JS_NewFloat64(ctx, (double)NAN);
     double out;
     if (ns_input_value_to_ms(ns_input_kind_of(n),
-                             ns_element_get_attr(n, "value"), FALSE, &out))
+                             ns_input_used_value(n), FALSE, &out))
         return JS_NewFloat64(ctx, out);
     return JS_NewFloat64(ctx, (double)NAN);
+}
+
+static void
+ns_js_set_input_used_value(ns_js *js, ns_node *n, const char *s)
+{
+    ns_element_set_attr(n, ns_input_value_is_dirty_mode(n) ? "data-nd-value"
+                                                           : "value", s ? s : "");
+    if (js) js->mutated = TRUE;
 }
 
 static JSValue
@@ -22778,12 +22786,12 @@ ns_element_set_value_as_number(JSContext *ctx, JSValueConst this_val, JSValueCon
         return JS_ThrowTypeError(ctx,
             "The value provided is non-finite.");
     if (isnan(d)) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "value", "");
+        ns_js_set_input_used_value(js_from_ctx(ctx), n, "");
         return JS_UNDEFINED;
     }
     char *s = ns_input_ms_to_value(kind, d);
     if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "value", s);
+        ns_js_set_input_used_value(js_from_ctx(ctx), n, s);
         g_free(s);
     }
     return JS_UNDEFINED;
@@ -22799,7 +22807,7 @@ ns_element_get_value_as_date(JSContext *ctx, JSValueConst this_val)
         kind != NDIN_WEEK && kind != NDIN_TIME)
         return JS_NULL;
     double ms;
-    if (!ns_input_value_to_ms(kind, ns_element_get_attr(n, "value"), TRUE, &ms))
+    if (!ns_input_value_to_ms(kind, ns_input_used_value(n), TRUE, &ms))
         return JS_NULL;
     JSValue g = JS_GetGlobalObject(ctx);
     JSValue ctor = JS_GetPropertyStr(ctx, g, "Date");
@@ -22822,7 +22830,7 @@ ns_element_set_value_as_date(JSContext *ctx, JSValueConst this_val, JSValueConst
         return JS_ThrowTypeError(ctx,
             "InvalidStateError: valueAsDate is not applicable to this input type.");
     if (JS_IsNull(val)) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "value", "");
+        ns_js_set_input_used_value(js_from_ctx(ctx), n, "");
         return JS_UNDEFINED;
     }
     JSValue getTime = JS_GetPropertyStr(ctx, val, "getTime");
@@ -22836,7 +22844,7 @@ ns_element_set_value_as_date(JSContext *ctx, JSValueConst this_val, JSValueConst
     int ok = JS_ToFloat64(ctx, &ms, r);
     JS_FreeValue(ctx, r);
     if (ok < 0 || isnan(ms)) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "value", "");
+        ns_js_set_input_used_value(js_from_ctx(ctx), n, "");
         return JS_UNDEFINED;
     }
     char *s = ns_input_ms_to_value(kind == NDIN_MONTH ? NDIN_DATE : kind, ms);
@@ -22845,7 +22853,7 @@ ns_element_set_value_as_date(JSContext *ctx, JSValueConst this_val, JSValueConst
         if (cut) *cut = '\0';
     }
     if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "value", s);
+        ns_js_set_input_used_value(js_from_ctx(ctx), n, s);
         g_free(s);
     }
     return JS_UNDEFINED;
@@ -23875,7 +23883,7 @@ ns_element_get_value_prop(JSContext *ctx, JSValueConst this_val)
         g_free(t);
         return v;
     }
-    const char *v = ns_element_get_attr(el, "value");
+    const char *v = ns_input_used_value(el);
     if (!v && ns_node_is_element_named(el, "input")) {
         const char *type = ns_element_get_attr(el, "type");
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
@@ -23975,7 +23983,8 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
-    ns_element_set_attr(el, "value", s);
+    ns_element_set_attr(el, ns_input_value_is_dirty_mode(el) ? "data-nd-value"
+                                                             : "value", s);
     JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
