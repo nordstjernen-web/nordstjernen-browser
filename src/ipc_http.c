@@ -450,6 +450,46 @@ json_get_double(const char *body, const char *key, double *out)
     return 0;
 }
 
+static int
+json_hex4(const char *s)
+{
+    int v = 0;
+    for (int i = 0; i < 4; i++) {
+        int c = (unsigned char)s[i];
+        if (c >= '0' && c <= '9') c -= '0';
+        else if (c >= 'a' && c <= 'f') c -= 'a' - 10;
+        else if (c >= 'A' && c <= 'F') c -= 'A' - 10;
+        else return -1;
+        v = (v << 4) | c;
+    }
+    return v;
+}
+
+static int
+json_utf8_encode(unsigned int cp, char *out)
+{
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
 char *
 json_get_str(const char *body, const char *key)
 {
@@ -470,11 +510,21 @@ json_get_str(const char *body, const char *key)
             case 'r': *w++ = '\r'; break;
             case 't': *w++ = '\t'; break;
             case 'u': {
-                if (v[1] && v[2] && v[3] && v[4]) {
-                    char hex[5] = { v[1], v[2], v[3], v[4], 0 };
-                    *w++ = (char)strtol(hex, NULL, 16);
-                    v += 4;
+                int hi = json_hex4(v + 1);
+                if (hi < 0)
+                    break;
+                v += 4;
+                unsigned int cp = (unsigned int)hi;
+                if (cp >= 0xD800 && cp <= 0xDBFF &&
+                    v[1] == '\\' && v[2] == 'u') {
+                    int lo = json_hex4(v + 3);
+                    if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                        cp = 0x10000u + ((cp - 0xD800u) << 10) +
+                             ((unsigned int)lo - 0xDC00u);
+                        v += 6;
+                    }
                 }
+                w += json_utf8_encode(cp, w);
                 break;
             }
             default: *w++ = *v; break;

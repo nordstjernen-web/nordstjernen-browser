@@ -1981,7 +1981,7 @@ intl_string_localeCompare(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
     const char *a = JS_ToCString(ctx, this_val);
-    const char *b = argc >= 1 ? JS_ToCString(ctx, argv[0]) : g_strdup("");
+    const char *b = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
     char *sens = NULL;
     int numeric = 0;
     if (argc >= 3 && JS_IsObject(argv[2])) {

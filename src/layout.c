@@ -427,7 +427,7 @@ inline_merge_prefix(ns_box *prefix, ns_box *suffix)
     if (!suffix) return prefix;
     gsize plen = prefix->text ? strlen(prefix->text) : 0;
     gsize slen = suffix->text ? strlen(suffix->text) : 0;
-    if (plen > G_MAXSIZE - slen - 1) return prefix;
+    if (plen > G_MAXSIZE - slen - 1) { ns_box_free(suffix); return prefix; }
     char *combined = g_malloc(plen + slen + 1);
     if (plen) memcpy(combined, prefix->text, plen);
     if (slen) memcpy(combined + plen, suffix->text, slen);
