@@ -40,6 +40,7 @@ they regenerate.
 | 2026-06-14 | 9fe9c25 | f01d00b69 | 276/696 (39%) | 60345/66800 (90%) | full |
 | 2026-06-15 | d52628c | d8a8414e5 | 283/696 (40%) | 60603/66800 (90%) | partial: dom/traversal |
 | 2026-06-15 | 3a754e8 | d8a8414e5 | 284/696 (40%) | 50415/55389 (91%) | full |
+| 2026-06-16 | 5442142 | a72c94d4a | 286/696 (41%) | 50493/55389 (91%) | partial: html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -47,9 +48,9 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-15
+## Per-area results — 2026-06-16
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-15-3a754e8.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-16-5442142.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
@@ -64,13 +65,13 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-15-3a754e8.tsv`.
 | `hr-time` | 4/13 | 14/23 | 8 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
 | `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
-| `html/dom/elements` | 32/56 | 508/781 | 269 | 2 | 2 | 0 |
+| `html/dom/elements` | 34/56 | 586/781 | 192 | 1 | 2 | 0 |
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 94/118 | 24 | 0 | 0 | 0 |
-| **Total** | **284/696** | **50415/55389** | **4868** | **70** | **36** | **0** |
+| **Total** | **286/696** | **50493/55389** | **4791** | **69** | **36** | **0** |
 
-## ROI by area — 2026-06-15
+## ROI by area — 2026-06-16
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -88,7 +89,7 @@ file.
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 379 | 119 | 3.2 | 72 | 29 |
 | `url` | 347 | 21 | 16.5 | 3 | 6 |
-| `html/dom/elements` | 273 | 24 | 11.4 | 3 | 14 |
+| `html/dom/elements` | 195 | 22 | 8.9 | 2 | 14 |
 | `dom/traversal` | 36 | 5 | 7.2 | 0 | 2 |
 | `html/semantics/forms/the-form-element` | 24 | 12 | 2.0 | 2 | 8 |
 | `dom/collections` | 23 | 8 | 2.9 | 0 | 3 |
@@ -117,7 +118,7 @@ grep `polyfills.js` first.
 | 1 | ~~**Real `iframe.contentDocument` realm documents**~~ — **landed.** `contentDocument` is now backed by a real `NS_NODE_DOCUMENT` node parented under the iframe (the old `Object.create(document)` facade silently routed `appendChild`/`removeChild`/`firstChild` to the *main* document and never terminated `parentNode` chains at a Document). `createHTMLDocument`/`createDocument` were unified onto the same live document-node machinery (no more stale snapshot getters). `Document-characterSet-normalization-1/2` now pass fully (315+339), and `Range-surroundContents`/`insertNode`/`extractContents`/`cloneContents`/`deleteContents` jumped from harness-broken to majority-passing. Residual `dom/ranges` failures are now a *separate* root cause — deeper Range-algorithm bugs (e.g. `surroundContents` setup throwing `TypeError` on text-node `newParent` cases), not the realm-document gate | `Document-characterSet-normalization-{1,2}.html` (now 315/339 pass), `Range-surroundContents.html` (0→690/1840) | landed |
 | 2 | XML/XHTML **document variants + namespaced node model** — `Document-createElementNS` (281) and `Document-createElement` (88) fail only their "in XML/XHTML document" cases; `Node-lookupNamespaceURI` (48), `lookupPrefix`, `isDefaultNamespace` are stubs; per-element/attr namespace not tracked | `Document-createElementNS.html`, `Node-lookupNamespaceURI.html` | ~450 |
 | 3 | Unblock the harness-broken `dom/events` files (pages hang waiting on `test_driver`). **Partly landed:** a testdriver bridge in the WPT hook (`data/js/wpt-hook.js`) now implements `test_driver.click`, `send_keys`, and a pointer/key `action_sequence`, synthesising real mouse/pointer/keyboard events through the engine. Files that only needed a click/keypress flipped from TIMEOUT to passing (`pointer-event-document-move`, `focus-event-document-move`, `handler-count`, `label-default-action`, `legacy-pre-activation-behavior`, `preventDefault-during-activation-behavior`). **Remaining** is two larger engine features, each its own root cause: (a) the ~40-file `non-cancelable-when-passive/` cluster needs passive-listener tracking (today `addEventListener` parses `passive` then discards it) plus `TouchEvent`/`WheelEvent` synthesis with cancelability derived from passivity; (b) the `scrolling/*` cluster needs real scroll + `scrollend` infrastructure | `non-cancelable-when-passive/*` (40 files), `scrolling/scrollend-*` | ~379 |
-| 4 | **`innerText`/`outerText` rendered-text algorithm** — white-space:pre preservation and the trailing-strip eat preserved spaces | `the-innertext-and-outertext-properties/getter.html` 117, `innertext-with-white-spaces.html` 79 | ~196 |
+| 4 | ~~**`innerText`/`outerText` rendered-text algorithm**~~ — **largely landed.** The getter now flushes layout before reading (so dynamically-set `white-space`/`visibility`/`text-transform` are seen — `dynamic-getter.html` went 4/7→7/7), collects rendered text with a spec-style *required-line-break-count* model (`<p>` yields blank lines, `<br>` at end of block is kept, leading/trailing block breaks are dropped without eating preserved `white-space:pre` spaces), honours `visibility:hidden`/`collapse`, treats `display:contents` as boxless and flex/grid items as blockified, skips replaced/non-rendered subtrees (`textarea`/`iframe`/`audio`/`video`/`canvas`/`img`/`object`/`embed`/SVG/MathML), renders `<option>` and (label-less) `<optgroup>` as blocks, and applies `text-transform`. `getter.html` 159→232. **Remaining** is layout-geometry-dependent: tab-separated table cells, `::first-line`/`::first-letter` pseudo styling, shadow-DOM exclusion, whitespace at inline-block boundaries, and the `?white-space=` variant files the local runner cannot expand | `getter.html` (159→232), `dynamic-getter.html` (4/7→7/7) | landed (~80) |
 | 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA | `url-setters-a-area.window.html` 64, `url-constructor.any.html` 55, `IdnaTestV2.any.html` 50 | ~250 |
 | 6 | **Exotic platform objects** — `querySelectorAll` returns a real `Array` (should be a `NodeList`: `[object NodeList]`, no tamperable `length`); `HTMLCollection` wrongly has `values`/`entries`/`forEach` and an own `length`. Make both proper WebIDL legacy-platform objects | `dom/collections/*` (23), `dom/nodes/NodeList-static-length-getter-tampered-*` ×6 | ~30 |
 
