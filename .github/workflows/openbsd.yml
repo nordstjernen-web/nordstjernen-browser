@@ -36,17 +36,17 @@ jobs:
             # pkgconf port to install (pkg_add would print "Can't find pkgconf").
             # OpenBSD base libcrypto is LibreSSL, which lacks the OpenSSL 3
             # provider/OSSL_PARAM APIs (openssl/core_names.h) src/webcrypto.c is
-            # written against, so pull in the eopenssl3x port too. Install it in
-            # the same pkg_add so it resolves through /etc/installurl -- the repo
-            # the VM image is actually provisioned from (snapshots). Do NOT build
-            # a PKG_PATH from $(uname -r): that points at the frozen release repo,
-            # which can lag the image and omit eopenssl entirely. The minor
-            # version is part of the stem (eopenssl35, eopenssl36, ...) and tracks
-            # ports' current openssl; bump this pin when ports moves on.
+            # written against, so pull in the security/openssl port too. Its
+            # package stem is "openssl" (openssl-3.5.x); the "eopenssl3x" label
+            # is only the install path / .pc name inside the package, NOT a
+            # package name -- pkg_add eopenssl3x just prints "Can't find ...".
+            # Several openssl branches can coexist, so install via a version
+            # spec (newest >= 3) rather than a bare stem, resolving through
+            # /etc/installurl (the repo the VM image is provisioned from).
             pkg_add -I \
               meson ninja bash zip ccache \
-              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl \
-              eopenssl35
+              gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
+            pkg_add -I 'openssl->=3'
             # The eopenssl3x port moves its pkg-config files into the standard
             # /usr/local/lib/pkgconfig and renames them so they don't collide
             # with base LibreSSL (libcrypto.pc -> libecrypto3x.pc). meson asks
@@ -59,6 +59,7 @@ jobs:
             fi
             if [ -z "$cpc" ]; then
               echo "error: eopenssl libcrypto .pc not found" >&2
+              pkg_info -A 2>/dev/null | grep -i ssl >&2 || true
               ls -lR /usr/local/lib/pkgconfig /usr/local/lib/eopenssl* 2>/dev/null >&2 || true
               exit 1
             fi
