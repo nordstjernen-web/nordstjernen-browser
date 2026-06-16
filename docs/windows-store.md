@@ -1,5 +1,9 @@
 # Nordstjernen in the Microsoft Store
 
+available in Microsoft store here now:
+https://apps.microsoft.com/detail/9nw8t7w5z4pl
+
+
 This document records the research, the packaging work, and the
 submission procedure for shipping Nordstjernen through the Microsoft
 Store on Windows 10/11. It complements `docs/Windows.md` (build,
@@ -12,20 +16,8 @@ version 7.19, effective October 14, 2025 — re-check the live page
 before every submission, the version number bumps several times a
 year.
 
-## The one hard blocker: policy 10.2.1 (browser engines)
 
-Store policy **10.2.1** states, verbatim:
 
-> Products that browse the web must use either the Chromium or the
-> Gecko open-source engine.
-
-with a currency requirement (no older than 2 major versions behind
-upstream, security issues patched promptly) and a grandfather clause
-that only covers apps already in the Store on the old EdgeHTML
-engine:
-
-> Existing browsers in the Windows Store may continue to use the
-> EdgeHTML engine.
 
 Nordstjernen is a clean-room engine — neither Chromium nor Gecko —
 so a straightforward "Web browser" submission **fails certification
