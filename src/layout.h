@@ -23,6 +23,7 @@ typedef enum ns_box_kind {
     NS_BOX_TABLE_ROW,
     NS_BOX_TABLE_CELL,
     NS_BOX_VIDEO,
+    NS_BOX_MATH,
 } ns_box_kind;
 
 const char *ns_box_kind_name(ns_box_kind k);

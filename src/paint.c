@@ -15,6 +15,7 @@
 #include "dom.h"
 #include "font.h"
 #include "image.h"
+#include "mathml.h"
 #include "selection.h"
 #include "video.h"
 
@@ -3226,6 +3227,25 @@ paint_failed_image(cairo_t *cr, const ns_box *b)
 }
 
 static void
+paint_math(cairo_t *cr, const ns_box *b)
+{
+    if (!b->dom) return;
+    const ns_style *s = b->style;
+    double fpx = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
+    double r = 0, g = 0, bl = 0, a = 1;
+    const ns_css_value *col = s ? s->values[NS_CSS_COLOR] : NULL;
+    if (col && col->kind == NS_CSS_V_COLOR) {
+        r = col->u.color.r / 255.0;
+        g = col->u.color.g / 255.0;
+        bl = col->u.color.b / 255.0;
+        a = col->u.color.a / 255.0;
+    }
+    double ox = b->x + b->margin.left + b->border.left + b->padding.left;
+    double oy = b->y + b->margin.top + b->border.top + b->padding.top;
+    ns_math_paint(cr, b->dom, ox, oy, fpx, r, g, bl, a);
+}
+
+static void
 paint_image(cairo_t *cr, const ns_box *b)
 {
     if (ns_node_is_element_named(b->dom, "canvas")) return;
@@ -4986,7 +5006,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
             b->kind == NS_BOX_TABLE_CAPTION ||
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
-            b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO) {
+            b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO ||
+            b->kind == NS_BOX_MATH) {
             if (g_paint_collect_stats) g_paint_stats.blocks++;
             paint_block(cr, b);
         }
@@ -5007,6 +5028,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (g_paint_collect_stats) g_paint_stats.videos++;
             paint_video(cr, b);
         }
+        if (b->kind == NS_BOX_MATH)
+            paint_math(cr, b);
     }
     if (ns_node_is_element_named(b->dom, "canvas") && g_paint_js) {
         if (g_paint_collect_stats) g_paint_stats.canvases++;

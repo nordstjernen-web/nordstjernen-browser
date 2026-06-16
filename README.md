@@ -33,7 +33,7 @@ in-process media codecs. Highlights:
 |-----------|:------:|
 | §2 Common infrastructure — WHATWG URL, IDN, origins, encodings | ✅ |
 | §3–§4 Semantics, document structure & tabular content | ✅ |
-| §4.8 Embedded content — images, SVG, `iframe`; audio/video hand off to an external player by design; no MathML layout | 🟡 |
+| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; audio/video hand off to an external player by design | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
 | §4.12–§4.13 Scripting, custom elements | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`; native-file drag-and-drop pending | 🟡 |
@@ -58,6 +58,10 @@ The full section-by-section walk-through lives in
   cookies.
 - **Media** — images, optional inline PDF; audio and video are handed
   off to an external player; any script the host has fonts for.
+- **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
+  covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
+  `mfrac`, `msqrt`/`mroot`, `munder`/`mover`/`munderover`, and `mtable`,
+  laid out over Pango/Cairo and embedded inline on the text baseline.
 - **WebGL** — opt-in, per-site WebGL 1 / 2 mapped onto OpenGL ES;
   off by default and gated behind a trust prompt. See
   [`docs/webgl.md`](docs/webgl.md).

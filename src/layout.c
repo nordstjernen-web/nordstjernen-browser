@@ -12,6 +12,7 @@
 
 #include "css.h"
 #include "image.h"
+#include "mathml.h"
 #include "net.h"
 #include "paint.h"
 
@@ -563,6 +564,7 @@ is_replaced_block_tag(const char *name)
                     strcmp(name, "svg") == 0 ||
                     strcmp(name, "audio") == 0 ||
                     strcmp(name, "video") == 0 ||
+                    strcmp(name, "math") == 0 ||
                     strcmp(name, "table") == 0);
 }
 
@@ -572,7 +574,7 @@ is_inline_level_replaced(const ns_node *n, GHashTable *styles)
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     if (!(strcmp(n->name, "img") == 0 || strcmp(n->name, "svg") == 0 ||
           strcmp(n->name, "picture") == 0 || strcmp(n->name, "audio") == 0 ||
-          strcmp(n->name, "video") == 0))
+          strcmp(n->name, "video") == 0 || strcmp(n->name, "math") == 0))
         return FALSE;
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     const ns_css_value *d = s ? s->values[NS_CSS_DISPLAY] : NULL;
@@ -884,6 +886,7 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     }
     if (strcmp(nm, "img") == 0 || strcmp(nm, "svg") == 0 ||
         strcmp(nm, "audio") == 0 || strcmp(nm, "video") == 0 ||
+        strcmp(nm, "math") == 0 ||
         strcmp(nm, "picture") == 0)
         return is_inline_level_replaced(n, styles);
     if (strcmp(nm, "input") == 0 || strcmp(nm, "textarea") == 0 ||
@@ -4192,6 +4195,13 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return ib;
     }
 
+    if (n->name && strcmp(n->name, "math") == 0) {
+        ns_box *mb = box_new(NS_BOX_MATH);
+        mb->dom = n;
+        mb->style = s;
+        return mb;
+    }
+
     if (n->name && strcmp(n->name, "input") == 0) {
         if (s && (style_is_absolute_or_fixed(s) || style_is_block_level(s)))
             return build_form_control_block(n, s, styles);
@@ -4743,6 +4753,11 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
                                             : NULL, 16);
             double asc = fs * 0.8, desc = fs * 0.2, xh = fs * 0.5;
             double top = -h;
+            if (ab->kind == NS_BOX_MATH) {
+                double mw = 0, ma = 0, md = 0;
+                ns_math_measure(ab->dom, fs, &mw, &ma, &md);
+                top = -(ab->margin.top + ab->border.top + ab->padding.top + ma);
+            }
             const char *va = ab->style
                 ? ns_style_keyword(ab->style, NS_CSS_VERTICAL_ALIGN) : NULL;
             if (va) {
@@ -6742,6 +6757,13 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
         layout_table(box, parent_content_width, inherited_style);
     } else if (box->kind == NS_BOX_TABLE_CAPTION) {
         layout_block(box, parent_content_width, inherited_style);
+    } else if (box->kind == NS_BOX_MATH) {
+        double fpx = length_or(box->style
+                               ? box->style->values[NS_CSS_FONT_SIZE] : NULL, 16);
+        double w = 0, asc = 0, desc = 0;
+        ns_math_measure(box->dom, fpx, &w, &asc, &desc);
+        box->content_width = w;
+        box->content_height = asc + desc;
     } else {
         box->content_width = parent_content_width;
         box->content_height = 0;
@@ -10011,6 +10033,7 @@ ns_box_kind_name(ns_box_kind k)
     case NS_BOX_TABLE_ROW:  return "row";
     case NS_BOX_TABLE_CELL: return "cell";
     case NS_BOX_VIDEO:      return "video";
+    case NS_BOX_MATH:       return "math";
     }
     return "?";
 }
