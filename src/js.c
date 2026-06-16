@@ -27560,7 +27560,21 @@ ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
     return JS_NULL;
 }
 
+static JSValue
+ns_element_getNumberOfChars(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NewInt32(ctx, 0);
+    char *t = ns_node_collect_text(n);
+    glong len = t ? g_utf8_strlen(t, -1) : 0;
+    g_free(t);
+    return JS_NewInt32(ctx, (int)len);
+}
+
 static const JSCFunctionListEntry ns_element_proto_funcs[] = {
+    JS_CFUNC_DEF("getNumberOfChars",         0, ns_element_getNumberOfChars),
     JS_CFUNC_DEF("getSVGDocument",           0, ns_element_getSVGDocument),
     JS_CGETSET_DEF("contentDocument",        ns_element_get_contentDocument,        ns_element_noop_set),
     JS_CGETSET_DEF("contentWindow",          ns_element_get_contentWindow,          ns_element_noop_set),
