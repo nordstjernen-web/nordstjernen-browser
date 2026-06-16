@@ -856,6 +856,22 @@
         return walker;
     }
 
+    var ndNodeIterators = [];
+    function ndRegisterNodeIterator(it) {
+        try {
+            ndNodeIterators.push(typeof WeakRef === 'function'
+                ? new WeakRef(it) : it);
+        } catch (e) { ndNodeIterators.push(it); }
+    }
+    function ndIteratorPreRemove(removed) {
+        for (var i = ndNodeIterators.length - 1; i >= 0; i--) {
+            var ref = ndNodeIterators[i];
+            var it = (ref && ref.deref) ? ref.deref() : ref;
+            if (!it) { ndNodeIterators.splice(i, 1); continue; }
+            if (it._ndPreRemove) it._ndPreRemove(removed);
+        }
+    }
+
     function makeNodeIterator(root, whatToShow, filterArg) {
         var F = makeTraversalFilter(whatToShow, filterArg);
         var filter = F.filter;
@@ -880,21 +896,60 @@
             }
             return node.parentNode;
         }
+        function followingOutside(node) {
+            var n = node;
+            while (n && n !== root) {
+                if (n.nextSibling) return n.nextSibling;
+                n = n.parentNode;
+            }
+            return null;
+        }
+        function lastInclusive(node) {
+            while (node.lastChild) node = node.lastChild;
+            return node;
+        }
+        function isInclusiveAncestor(anc, node) {
+            for (var a = node; a; a = a.parentNode) if (a === anc) return true;
+            return false;
+        }
+        function preRemove(removed) {
+            if (removed === root || !isInclusiveAncestor(removed, referenceNode))
+                return;
+            if (beforeReference) {
+                var next = followingOutside(removed);
+                if (next) { referenceNode = next; return; }
+                beforeReference = false;
+            }
+            referenceNode = removed.previousSibling
+                ? lastInclusive(removed.previousSibling)
+                : removed.parentNode;
+        }
         function traverse(forward) {
-            var node = referenceNode, before = beforeReference;
+            var savedRef = referenceNode, savedBefore = beforeReference;
             for (;;) {
                 if (forward) {
-                    if (!before) { var c = following(node); if (!c) return null; node = c; }
-                    else before = false;
+                    if (!beforeReference) {
+                        var c = following(referenceNode);
+                        if (!c) return null;
+                        referenceNode = c;
+                    } else beforeReference = false;
                 } else {
-                    if (before) { var c2 = preceding(node); if (!c2) return null; node = c2; }
-                    else before = true;
+                    if (beforeReference) {
+                        var c2 = preceding(referenceNode);
+                        if (!c2) return null;
+                        referenceNode = c2;
+                    } else beforeReference = true;
                 }
-                if (filter(node) === 1) break;
+                var candidate = referenceNode;
+                var result;
+                try { result = filter(candidate); }
+                catch (e) {
+                    referenceNode = savedRef;
+                    beforeReference = savedBefore;
+                    throw e;
+                }
+                if (result === 1) return candidate;
             }
-            referenceNode = node;
-            beforeReference = before;
-            return node;
         }
 
         var it = {
@@ -902,6 +957,9 @@
             previousNode: function () { return traverse(false); },
             detach: function () {}
         };
+        Object.defineProperty(it, '_ndPreRemove',
+            { value: preRemove, enumerable: false });
+        ndRegisterNodeIterator(it);
         it[Symbol.toStringTag] = 'NodeIterator';
         Object.defineProperty(it, 'root',
             { value: root, writable: false, enumerable: true });
@@ -5525,6 +5583,7 @@
             });
             wrap('removeChild', function (orig, args) {
                 var st = preState(args[0]);
+                if (st) ndIteratorPreRemove(args[0]);
                 var ret = orig.apply(this, args);
                 applyRemove(st);
                 return ret;
@@ -5533,6 +5592,7 @@
                 var newChild = args[0], oldChild = args[1];
                 var stOld = preState(oldChild);
                 var stNew = (newChild !== oldChild) ? preState(newChild) : null;
+                if (stOld) ndIteratorPreRemove(oldChild);
                 var ret = orig.apply(this, args);
                 applyRemove(stOld);
                 applyRemove(stNew);
