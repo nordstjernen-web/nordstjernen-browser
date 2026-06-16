@@ -3038,6 +3038,9 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
         }
         if (changed && magic == 3 && n->name && strcmp(n->name, "iframe") == 0)
             ns_js_schedule_iframe_load(js, n);
+        if (changed && n->name && strcmp(n->name, "object") == 0 &&
+            g_ascii_strcasecmp(names[magic], "data") == 0)
+            ns_js_schedule_iframe_load(js, n);
         JS_FreeCString(ctx, s);
     }
     return JS_UNDEFINED;
@@ -3981,7 +3984,10 @@ ns_element_set_data(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         const char *s = JS_ToCString(ctx, val);
         if (s) {
             ns_js *js = js_from_ctx(ctx);
+            const char *old = ns_element_get_attr(n, "data");
+            gboolean changed = !old || strcmp(old, s) != 0;
             ns_js_set_attr_recorded(js, n, "data", s);
+            if (changed) ns_js_schedule_iframe_load(js, n);
             JS_FreeCString(ctx, s);
         }
         return JS_UNDEFINED;
@@ -19996,9 +20002,12 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         if (changed && g_ascii_strcasecmp(name, "src") == 0 &&
             n->name && strcmp(n->name, "img") == 0)
             ns_js_start_image_load(js_from_ctx(ctx), n, val);
-        if (changed && (g_ascii_strcasecmp(name, "src") == 0 ||
-             g_ascii_strcasecmp(name, "srcdoc") == 0) &&
-            n->name && strcmp(n->name, "iframe") == 0)
+        if (changed && n->name &&
+            ((strcmp(n->name, "iframe") == 0 &&
+              (g_ascii_strcasecmp(name, "src") == 0 ||
+               g_ascii_strcasecmp(name, "srcdoc") == 0)) ||
+             (strcmp(n->name, "object") == 0 &&
+              g_ascii_strcasecmp(name, "data") == 0)))
             ns_js_schedule_iframe_load(js_from_ctx(ctx), n);
     }
     if (raw_name) JS_FreeCString(ctx, raw_name);
@@ -27496,10 +27505,12 @@ static JSValue
 ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || !ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!n || (!ns_node_is_element_named(n, "iframe") &&
+               !ns_node_is_element_named(n, "object"))) return JS_NULL;
     JSValue realm = JS_GetPropertyStr(ctx, this_val, "__ndRealmDoc");
     if (JS_IsObject(realm)) return realm;
     JS_FreeValue(ctx, realm);
+    if (!ns_node_is_element_named(n, "iframe")) return JS_NULL;
     return ns_iframe_build_content_document(ctx, n);
 }
 
@@ -34855,6 +34866,14 @@ ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs)
     if (abs && *abs) ns_css_mark_visited(abs);
 }
 
+static const char *
+ns_frame_src_attr(const ns_node *n)
+{
+    if (ns_node_is_element_named(n, "iframe")) return "src";
+    if (ns_node_is_element_named(n, "object")) return "data";
+    return NULL;
+}
+
 static gboolean
 ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
 {
@@ -34865,7 +34884,8 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     if (srcdoc && *srcdoc)
         return loaded_srcdoc && strcmp(loaded_srcdoc, srcdoc) == 0;
 
-    const char *src = ns_element_get_attr(iframe, "src");
+    const char *attr = ns_frame_src_attr(iframe);
+    const char *src = attr ? ns_element_get_attr(iframe, attr) : NULL;
     if (!src || !*src || g_str_has_prefix(src, "about:")) return FALSE;
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
@@ -34881,7 +34901,7 @@ static void
 ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe)
 {
     if (!js || !iframe || js->halted) return;
-    if (!ns_node_is_element_named(iframe, "iframe")) return;
+    if (!ns_frame_src_attr(iframe)) return;
     if (ns_js_iframe_source_loaded(js, iframe)) return;
     if (!js->pending_iframe_loads)
         js->pending_iframe_loads = g_ptr_array_new();
@@ -35644,7 +35664,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
-    const char *src    = ns_element_get_attr(iframe, "src");
+    const char *src_attr = ns_frame_src_attr(iframe);
+    const char *src    = src_attr ? ns_element_get_attr(iframe, src_attr) : NULL;
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
 
     char *abs = NULL;
@@ -35699,6 +35720,18 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 g_free(line);
             }
             g_clear_error(&err);
+        }
+    }
+
+    if (ns_node_is_element_named(iframe, "object")) {
+        gboolean doc_type = resp && resp->content_type &&
+            (strstr(resp->content_type, "html") != NULL ||
+             strstr(resp->content_type, "xml") != NULL);
+        if (!doc_type) {
+            if (resp) ns_response_free(resp);
+            g_free(decoded);
+            g_free(abs);
+            return;
         }
     }
 
@@ -35858,9 +35891,10 @@ static void
 ns_js_schedule_static_iframes(ns_js *js, ns_node *n)
 {
     if (!n) return;
-    if (ns_node_is_element_named(n, "iframe")) {
+    const char *frame_attr = ns_frame_src_attr(n);
+    if (frame_attr) {
         if (!ns_element_get_attr(n, "data-nd-frame-loaded")) {
-            const char *src    = ns_element_get_attr(n, "src");
+            const char *src    = ns_element_get_attr(n, frame_attr);
             const char *srcdoc = ns_element_get_attr(n, "srcdoc");
             if ((src && *src) || (srcdoc && *srcdoc))
                 ns_js_schedule_iframe_load(js, n);
