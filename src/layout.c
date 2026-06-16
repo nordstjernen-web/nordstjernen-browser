@@ -8943,6 +8943,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     box->columns = n_cols;
 
     GArray *floats = g_array_new(FALSE, FALSE, sizeof(float_ref));
+    double inline_line_top = -1;
 
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
         c->x = inner_x;
@@ -8982,6 +8983,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 + c->border.left + c->border.right
                 + c->margin.left + c->margin.right;
             double float_y = cursor_y;
+            if (!clr && inline_line_top >= 0 && inline_line_top < cursor_y)
+                float_y = inline_line_top;
             if (clr) {
                 double y_after_clear = floats_clear_y(floats, float_y, clr);
                 if (y_after_clear > float_y) float_y = y_after_clear;
@@ -9072,6 +9075,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                         c->padding.top + c->padding.bottom +
                         c->border.top + c->border.bottom;
             prev_margin_bottom = c->margin.bottom;
+            inline_line_top = -1;
         } else {
             cursor_y += prev_margin_bottom;
             prev_margin_bottom = 0;
@@ -9084,6 +9088,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->x = inner_x + left_off;
             c->y = cursor_y;
             layout_box(c, cw_avail, child_inherited);
+            inline_line_top = c->content_height <= 24 ? c->y : -1;
             cursor_y += c->content_height;
         }
         if ((c->kind == NS_BOX_IMAGE || c->kind == NS_BOX_VIDEO ||
