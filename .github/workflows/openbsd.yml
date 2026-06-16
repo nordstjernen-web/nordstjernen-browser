@@ -31,35 +31,49 @@ jobs:
           usesh: true
           copyback: true
           prepare: |
+            set -e
+            # pkg-config ships in the OpenBSD base system, so there is no
+            # pkgconf port to install (pkg_add would print "Can't find pkgconf").
             pkg_add -I \
-              meson ninja pkgconf bash zip ccache \
+              meson ninja bash zip ccache \
               gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
-            # The eopenssl3x port name tracks the OpenSSL minor version and
-            # changes across OpenBSD releases (eopenssl34, eopenssl35, ...),
-            # so don't hardcode it: query the repo and install the newest
-            # eopenssl3x available for whichever release the VM image is.
+            # OpenBSD base libcrypto is LibreSSL, which lacks the OpenSSL 3
+            # provider/OSSL_PARAM APIs (openssl/core_names.h) src/webcrypto.c is
+            # written against. The eopenssl3x port installs a parallel OpenSSL 3;
+            # its minor version is part of the stem (eopenssl35, eopenssl36, ...)
+            # and bumps across releases. Discover the newest one the release
+            # ships and fall back to a known-good pin. pkg_info -Q searches
+            # PKG_PATH (not /etc/installurl), so point it at the release repo.
+            base=$(sed 's,/*$,,' /etc/installurl)
+            export PKG_PATH="$base/$(uname -r)/packages/$(uname -m)/"
             eossl=$(pkg_info -Q eopenssl | awk '/^eopenssl[0-9]/{print $1}' \
               | sort -V | tail -1)
-            if [ -z "$eossl" ]; then
-              echo "error: no eopenssl3x package available" >&2
+            pkg_add -I "${eossl:-eopenssl35}"
+            # The eopenssl3x port moves its pkg-config files into the standard
+            # /usr/local/lib/pkgconfig and renames them so they don't collide
+            # with base LibreSSL (libcrypto.pc -> libecrypto3x.pc). meson asks
+            # for dependency('libcrypto'), so alias the renamed crypto module
+            # back to the canonical name. Older layouts kept an unrenamed
+            # libcrypto.pc under the versioned dir; handle both.
+            cpc=$(ls /usr/local/lib/pkgconfig/libecrypto*.pc 2>/dev/null | sort -V | tail -1)
+            if [ -z "$cpc" ]; then
+              cpc=$(ls /usr/local/lib/eopenssl*/pkgconfig/libcrypto.pc 2>/dev/null | sort -V | tail -1)
+            fi
+            if [ -z "$cpc" ]; then
+              echo "error: eopenssl libcrypto .pc not found" >&2
+              ls -lR /usr/local/lib/pkgconfig /usr/local/lib/eopenssl* 2>/dev/null >&2 || true
               exit 1
             fi
-            pkg_add -I "$eossl"
+            ln -sf "$cpc" /usr/local/lib/pkgconfig/libcrypto.pc
           run: |
             set -e
             export CC="ccache cc"
             export CXX="ccache c++"
-            # OpenBSD's base libcrypto is LibreSSL, which lacks OpenSSL 3's
-            # provider/OSSL_PARAM APIs (openssl/core_names.h) that
-            # src/webcrypto.c is written against. The eopenssl3x port installs
-            # a parallel OpenSSL 3 under /usr/local/{include,lib}/eopenssl3x;
-            # point pkg-config at it so dependency('libcrypto') resolves there.
-            eossl_pc=$(ls -d /usr/local/lib/eopenssl*/pkgconfig 2>/dev/null | sort -V | tail -1)
-            if [ -z "$eossl_pc" ]; then
-              echo "error: eopenssl pkg-config dir not found" >&2
-              exit 1
-            fi
-            export PKG_CONFIG_PATH="$eossl_pc:${PKG_CONFIG_PATH:-}"
+            # The eopenssl3x libcrypto.pc alias was installed into the standard
+            # pkg-config dir during prepare; make sure it is on the search path
+            # so dependency('libcrypto') resolves to OpenSSL 3 rather than base
+            # LibreSSL.
+            export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
             # AI (llama.cpp) is a CMake subproject; skip it on the BSD VM
             # builds to avoid the extra toolchain and a long C++ compile.
             # WAMR's posix platform layer uses MAP_32BIT, which OpenBSD does
