@@ -10430,6 +10430,22 @@ static void css_flatten_style_rule(GString *out, const char *sel,
 #define NS_CSS_NEST_MAX_DEPTH 128
 
 static void
+css_trim_selector(char *sel)
+{
+    char *s = sel;
+    while (*s && is_ws(*s)) s++;
+    if (s != sel) memmove(sel, s, strlen(s) + 1);
+    size_t n = strlen(sel);
+    while (n > 0 && is_ws((unsigned char)sel[n - 1])) {
+        size_t bs = 0, i = n - 1;
+        while (i > 0 && sel[i - 1] == '\\') { bs++; i--; }
+        if (bs % 2 == 1) break;
+        n--;
+    }
+    sel[n] = '\0';
+}
+
+static void
 css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
 {
     if (depth > NS_CSS_NEST_MAX_DEPTH) return;
@@ -10482,7 +10498,7 @@ css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
             continue;
         }
         char *sel = g_strndup(p, (gsize)(seg_end - p));
-        g_strstrip(sel);
+        css_trim_selector(sel);
         const char *body_s = seg_end + 1;
         const char *block_end = css_skip_to_block_end(seg_end, end);
         const char *body_e = css_block_body_end(body_s, block_end);
@@ -10544,7 +10560,7 @@ css_flatten_style_rule(GString *out, const char *sel,
         const char *seg_end = css_scan_segment(p, body_e, &term);
         if (term == '{') {
             char *nsel = g_strndup(p, (gsize)(seg_end - p));
-            g_strstrip(nsel);
+            css_trim_selector(nsel);
             const char *nbody_s = seg_end + 1;
             const char *nblock_end = css_skip_to_block_end(seg_end, body_e);
             const char *nbody_e = css_block_body_end(nbody_s, nblock_end);

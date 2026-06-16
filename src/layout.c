@@ -596,6 +596,15 @@ node_has_media_metadata(const ns_node *n)
 
 static gboolean tag_is_non_rendering(const char *name);
 
+static gboolean
+node_is_frame_fallback(const ns_node *n)
+{
+    if (!n || n->kind == NS_NODE_DOCUMENT) return FALSE;
+    const ns_node *p = n->parent;
+    return p && p->kind == NS_NODE_ELEMENT && p->name &&
+           (strcmp(p->name, "iframe") == 0 || strcmp(p->name, "frame") == 0);
+}
+
 static GHashTable *g_contains_block_media_cache;
 
 static gboolean
@@ -2254,6 +2263,7 @@ static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
+    if (node_is_frame_fallback(n)) return;
     if (n->kind == NS_NODE_TEXT) {
         if (!n->text) return;
         gsize start = ctx->out->len;
@@ -4152,6 +4162,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return root;
     }
     if (n->kind != NS_NODE_ELEMENT) return NULL;
+    if (node_is_frame_fallback(n)) return NULL;
     if (node_has_hidden_utility(n)) return NULL;
     if (ns_element_get_attr(n, NS_SHADOW_ATTR)) return NULL;
 
