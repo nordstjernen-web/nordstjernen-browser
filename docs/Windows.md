@@ -1,5 +1,7 @@
 # Nordstjernen on Windows — build, run, package
 
+https://apps.microsoft.com/detail/9nw8t7w5z4pl
+
 This document records the working setup for building and packaging
 Nordstjernen on Windows. The Windows CI workflow
 (`.github/workflows/windows.yml`) is the authoritative spec; what
