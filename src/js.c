@@ -27526,7 +27526,33 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     return JS_GetGlobalObject(ctx);
 }
 
+static JSValue
+ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || (!ns_node_is_element_named(n, "iframe") &&
+               !ns_node_is_element_named(n, "object") &&
+               !ns_node_is_element_named(n, "embed")))
+        return JS_NULL;
+    JSValue doc = ns_element_get_contentDocument(ctx, this_val);
+    if (!JS_IsObject(doc)) return doc;
+    JSValue root = JS_GetPropertyStr(ctx, doc, "documentElement");
+    JSValue name = JS_IsObject(root) ? JS_GetPropertyStr(ctx, root, "localName")
+                                     : JS_NULL;
+    const char *nm = JS_ToCString(ctx, name);
+    gboolean is_svg = nm && g_ascii_strcasecmp(nm, "svg") == 0;
+    if (nm) JS_FreeCString(ctx, nm);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, root);
+    if (is_svg) return doc;
+    JS_FreeValue(ctx, doc);
+    return JS_NULL;
+}
+
 static const JSCFunctionListEntry ns_element_proto_funcs[] = {
+    JS_CFUNC_DEF("getSVGDocument",           0, ns_element_getSVGDocument),
     JS_CGETSET_DEF("contentDocument",        ns_element_get_contentDocument,        ns_element_noop_set),
     JS_CGETSET_DEF("contentWindow",          ns_element_get_contentWindow,          ns_element_noop_set),
     JS_CGETSET_DEF("tagName",                ns_element_get_tagName,                ns_element_noop_set),
