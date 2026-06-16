@@ -37,18 +37,33 @@ jobs:
             # OpenBSD base libcrypto is LibreSSL, which lacks the OpenSSL 3
             # provider/OSSL_PARAM APIs (openssl/core_names.h) src/webcrypto.c is
             # written against, so pull in the security/openssl port too. Its
-            # package stem is "openssl" (openssl-3.5.x); the "eopenssl3x" label
-            # is only the install path / .pc name inside the package, NOT a
-            # package name -- pkg_add eopenssl3x just prints "Can't find ...".
-            # pkg_add does not accept a dewey version spec as a fetch argument
-            # ("Can't find openssl->=3"), and a bare "openssl" stem is ambiguous
-            # with the coexisting 4.0 port, so match the single 3.x build with a
-            # package-name glob (pkg_add expands it against /etc/installurl).
+            # package stem is "openssl"; the "eopenssl3x" label is only the
+            # install path / .pc name inside the package, never a package name.
+            # pkg_add wants a concrete name -- it rejects both a dewey spec
+            # ("Can't find openssl->=3") and a glob ("Can't find openssl-3.*") --
+            # and a bare "openssl" stem is ambiguous with the coexisting 4.0
+            # port. So enumerate candidates with a dry run, pick the newest 3.x,
+            # and install that exact name. Keep it non-fatal so the .pc check
+            # below always reports the real state on failure.
             pkg_add -I \
               meson ninja bash zip ccache \
               gtk+4 curl uchardet librsvg sqlite3 libwebp libpsl
-            pkg_add -I 'openssl-3.*'
-            # The eopenssl3x port moves its pkg-config files into the standard
+            echo "===== openssl candidates (pkg_add -n) ====="
+            cand=$(pkg_add -I -n openssl 2>&1 || true)
+            printf '%s\n' "$cand"
+            pick=$(printf '%s\n' "$cand" | grep -oE 'openssl-3\.[0-9][0-9.]*' \
+              | sort -V | tail -1)
+            echo "===== selected: [$pick] ====="
+            if [ -n "$pick" ]; then
+              pkg_add -I "$pick" 2>&1 || true
+            else
+              pkg_add -I openssl 2>&1 || true
+            fi
+            echo "===== installed ssl/crypto packages ====="
+            pkg_info 2>/dev/null | grep -iE 'ssl|crypto|eopenssl' || true
+            echo "===== crypto/ssl .pc files under /usr/local ====="
+            find /usr/local -name '*crypto*.pc' -o -name '*ssl*.pc' 2>/dev/null || true
+            # The openssl 3 port moves its pkg-config files into the standard
             # /usr/local/lib/pkgconfig and renames them so they don't collide
             # with base LibreSSL (libcrypto.pc -> libecrypto3x.pc). meson asks
             # for dependency('libcrypto'), so alias the renamed crypto module
@@ -59,12 +74,7 @@ jobs:
               cpc=$(ls /usr/local/lib/eopenssl*/pkgconfig/libcrypto.pc 2>/dev/null | sort -V | tail -1)
             fi
             if [ -z "$cpc" ]; then
-              echo "error: eopenssl libcrypto .pc not found" >&2
-              echo "-- available openssl packages --" >&2
-              pkg_add -I -n openssl 2>&1 | head >&2 || true
-              echo "-- installed ssl-ish packages --" >&2
-              pkg_info -A 2>/dev/null | grep -i ssl >&2 || true
-              ls -lR /usr/local/lib/pkgconfig /usr/local/lib/eopenssl* 2>/dev/null >&2 || true
+              echo "error: openssl 3 libcrypto .pc not found" >&2
               exit 1
             fi
             ln -sf "$cpc" /usr/local/lib/pkgconfig/libcrypto.pc
