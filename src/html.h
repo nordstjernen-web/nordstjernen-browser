@@ -36,6 +36,9 @@ char *ns_html_decode_body_full(const char *body, gsize len,
 
 char *ns_html_image_document(const char *url);
 
+char *ns_html_json_document(const char *url, const char *json, gsize len);
+char *ns_html_xml_document(const char *url, const char *xml, gsize len);
+
 const char *ns_html_engine_name(void);
 
 const char *ns_html_engine_version(void);

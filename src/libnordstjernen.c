@@ -509,6 +509,25 @@ browser_content_type_is_html(const char *content_type)
            browser_content_type_starts(content_type, "application/xhtml");
 }
 
+static gboolean
+browser_content_type_is_json(const char *content_type)
+{
+    return browser_content_type_starts(content_type, "application/json") ||
+           browser_content_type_starts(content_type, "text/json") ||
+           (content_type && strstr(content_type, "+json") != NULL);
+}
+
+static gboolean
+browser_content_type_is_xml(const char *content_type)
+{
+    if (!content_type) return FALSE;
+    if (strstr(content_type, "xhtml") || strstr(content_type, "svg"))
+        return FALSE;
+    return browser_content_type_starts(content_type, "text/xml") ||
+           browser_content_type_starts(content_type, "application/xml") ||
+           strstr(content_type, "+xml") != NULL;
+}
+
 static char *
 browser_text_document(const char *url, const char *text)
 {
@@ -540,6 +559,22 @@ browser_prepare_document_response(ns_response *resp)
     char *html = NULL;
     if (browser_content_type_starts(resp->content_type, "image/")) {
         html = ns_html_image_document(final_url);
+    } else if (browser_content_type_is_json(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = ns_html_json_document(final_url, decoded,
+                                     decoded ? strlen(decoded) : 0);
+        if (!html) html = browser_text_document(final_url, decoded);
+        g_free(decoded);
+    } else if (browser_content_type_is_xml(resp->content_type)) {
+        char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
+                                                 resp->body->len,
+                                                 resp->content_type, NULL);
+        html = ns_html_xml_document(final_url, decoded,
+                                    decoded ? strlen(decoded) : 0);
+        if (!html) html = browser_text_document(final_url, decoded);
+        g_free(decoded);
     } else if (browser_content_type_starts(resp->content_type, "text/") &&
                !browser_content_type_is_html(resp->content_type)) {
         char *decoded = ns_html_decode_body_full((const char *)resp->body->data,

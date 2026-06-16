@@ -111,6 +111,247 @@ ns_html_image_document(const char *url)
     return html;
 }
 
+static const char NS_DOC_VIEWER_STYLE[] =
+    "<style>"
+    "body{margin:0;background:#fbfbfd;color:#1a1a1a;"
+    "font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}"
+    "pre{margin:0;padding:14px;white-space:pre;tab-size:2}"
+    ".k{color:#9b2393}.s{color:#1a7f37}.n{color:#0b69c7}.b{color:#b35900}"
+    ".p{color:#6e7781}.tag{color:#116329}.at{color:#6f42c1}.av{color:#1a7f37}"
+    ".cm{color:#6a737d;font-style:italic}.pi{color:#6e7781}"
+    "</style>";
+
+static void
+doc_append_escaped(GString *o, const char *s, const char *e)
+{
+    for (const char *p = s; p < e; p++) {
+        switch (*p) {
+        case '<': g_string_append(o, "&lt;"); break;
+        case '>': g_string_append(o, "&gt;"); break;
+        case '&': g_string_append(o, "&amp;"); break;
+        default:  g_string_append_c(o, *p);
+        }
+    }
+}
+
+static void
+doc_indent(GString *o, int depth)
+{
+    for (int i = 0; i < depth && i < 64; i++) g_string_append(o, "  ");
+}
+
+typedef struct {
+    const char *p;
+    const char *end;
+    GString    *o;
+    gboolean    ok;
+} json_ctx;
+
+static void
+json_ws(json_ctx *c)
+{
+    while (c->p < c->end &&
+           (*c->p == ' ' || *c->p == '\t' || *c->p == '\n' || *c->p == '\r'))
+        c->p++;
+}
+
+static void
+json_string(json_ctx *c, const char *cls)
+{
+    const char *s = c->p;
+    c->p++;
+    while (c->p < c->end && *c->p != '"') {
+        if (*c->p == '\\' && c->p + 1 < c->end) c->p++;
+        c->p++;
+    }
+    if (c->p >= c->end) { c->ok = FALSE; return; }
+    c->p++;
+    g_string_append_printf(c->o, "<span class=%s>", cls);
+    doc_append_escaped(c->o, s, c->p);
+    g_string_append(c->o, "</span>");
+}
+
+static gboolean
+json_literal(json_ctx *c, const char *lit)
+{
+    size_t n = strlen(lit);
+    if ((size_t)(c->end - c->p) >= n && strncmp(c->p, lit, n) == 0) {
+        g_string_append_printf(c->o, "<span class=b>%s</span>", lit);
+        c->p += n;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void json_value(json_ctx *c, int depth);
+
+static void
+json_value(json_ctx *c, int depth)
+{
+    json_ws(c);
+    if (c->p >= c->end) { c->ok = FALSE; return; }
+    char ch = *c->p;
+    if (ch == '{' || ch == '[') {
+        char close = ch == '{' ? '}' : ']';
+        gboolean obj = ch == '{';
+        g_string_append_printf(c->o, "<span class=p>%c</span>", ch);
+        c->p++;
+        json_ws(c);
+        if (c->p < c->end && *c->p == close) {
+            c->p++;
+            g_string_append_printf(c->o, "<span class=p>%c</span>", close);
+            return;
+        }
+        for (;;) {
+            g_string_append_c(c->o, '\n');
+            doc_indent(c->o, depth + 1);
+            json_ws(c);
+            if (obj) {
+                if (c->p >= c->end || *c->p != '"') { c->ok = FALSE; return; }
+                json_string(c, "k");
+                json_ws(c);
+                if (c->p >= c->end || *c->p != ':') { c->ok = FALSE; return; }
+                c->p++;
+                g_string_append(c->o, "<span class=p>: </span>");
+            }
+            json_value(c, depth + 1);
+            if (!c->ok) return;
+            json_ws(c);
+            if (c->p < c->end && *c->p == ',') {
+                c->p++;
+                g_string_append(c->o, "<span class=p>,</span>");
+                continue;
+            }
+            break;
+        }
+        g_string_append_c(c->o, '\n');
+        doc_indent(c->o, depth);
+        if (c->p >= c->end || *c->p != close) { c->ok = FALSE; return; }
+        c->p++;
+        g_string_append_printf(c->o, "<span class=p>%c</span>", close);
+        return;
+    }
+    if (ch == '"') { json_string(c, "s"); return; }
+    if (ch == '-' || (ch >= '0' && ch <= '9')) {
+        const char *s = c->p;
+        if (*c->p == '-') c->p++;
+        while (c->p < c->end &&
+               ((*c->p >= '0' && *c->p <= '9') || *c->p == '.' ||
+                *c->p == 'e' || *c->p == 'E' || *c->p == '+' || *c->p == '-'))
+            c->p++;
+        if (c->p == s) { c->ok = FALSE; return; }
+        g_string_append(c->o, "<span class=n>");
+        doc_append_escaped(c->o, s, c->p);
+        g_string_append(c->o, "</span>");
+        return;
+    }
+    if (json_literal(c, "true") || json_literal(c, "false") ||
+        json_literal(c, "null"))
+        return;
+    c->ok = FALSE;
+}
+
+char *
+ns_html_json_document(const char *url, const char *json, gsize len)
+{
+    if (!json) return NULL;
+    GString *o = g_string_new(NULL);
+    json_ctx c = { json, json + len, o, TRUE };
+    json_ws(&c);
+    json_value(&c, 0);
+    if (!c.ok) { g_string_free(o, TRUE); return NULL; }
+    char *esc_url = ns_html_escape_text(url && *url ? url : "");
+    char *html = g_strconcat(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>",
+        esc_url, "</title>", NS_DOC_VIEWER_STYLE,
+        "</head><body><pre>", o->str, "</pre></body></html>", NULL);
+    g_free(esc_url);
+    g_string_free(o, TRUE);
+    return html;
+}
+
+static const char *
+xml_tag_end(const char *p, const char *end)
+{
+    char quote = 0;
+    while (p < end) {
+        char c = *p;
+        if (quote) { if (c == quote) quote = 0; }
+        else if (c == '"' || c == '\'') quote = c;
+        else if (c == '>') return p;
+        p++;
+    }
+    return NULL;
+}
+
+static void
+xml_emit_line(GString *o, int depth, const char *cls,
+              const char *s, const char *e)
+{
+    if (o->len) g_string_append_c(o, '\n');
+    doc_indent(o, depth);
+    if (cls) g_string_append_printf(o, "<span class=%s>", cls);
+    doc_append_escaped(o, s, e);
+    if (cls) g_string_append(o, "</span>");
+}
+
+char *
+ns_html_xml_document(const char *url, const char *xml, gsize len)
+{
+    if (!xml) return NULL;
+    GString *o = g_string_new(NULL);
+    const char *p = xml, *end = xml + len;
+    int depth = 0;
+    while (p < end) {
+        if (*p != '<') {
+            const char *t = p;
+            while (p < end && *p != '<') p++;
+            const char *ts = t, *te = p;
+            while (ts < te && g_ascii_isspace(*ts)) ts++;
+            while (te > ts && g_ascii_isspace(*(te - 1))) te--;
+            if (te > ts) xml_emit_line(o, depth, NULL, ts, te);
+            continue;
+        }
+        if (end - p >= 4 && strncmp(p, "<!--", 4) == 0) {
+            const char *e = g_strstr_len(p, end - p, "-->");
+            const char *te = e ? e + 3 : end;
+            xml_emit_line(o, depth, "cm", p, te);
+            p = te;
+            continue;
+        }
+        if (end - p >= 9 && strncmp(p, "<![CDATA[", 9) == 0) {
+            const char *e = g_strstr_len(p, end - p, "]]>");
+            const char *te = e ? e + 3 : end;
+            xml_emit_line(o, depth, "s", p, te);
+            p = te;
+            continue;
+        }
+        if (p + 1 < end && (p[1] == '!' || p[1] == '?')) {
+            const char *e = xml_tag_end(p, end);
+            const char *te = e ? e + 1 : end;
+            xml_emit_line(o, depth, "pi", p, te);
+            p = te;
+            continue;
+        }
+        const char *e = xml_tag_end(p, end);
+        if (!e) { xml_emit_line(o, depth, "tag", p, end); break; }
+        gboolean is_end = (p + 1 < end && p[1] == '/');
+        gboolean self_close = (e > p && *(e - 1) == '/');
+        if (is_end && depth > 0) depth--;
+        xml_emit_line(o, depth, "tag", p, e + 1);
+        if (!is_end && !self_close) depth++;
+        p = e + 1;
+    }
+    char *esc_url = ns_html_escape_text(url && *url ? url : "");
+    char *html = g_strconcat(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>",
+        esc_url, "</title>", NS_DOC_VIEWER_STYLE,
+        "</head><body><pre>", o->str, "</pre></body></html>", NULL);
+    g_free(esc_url);
+    g_string_free(o, TRUE);
+    return html;
+}
+
 static char *
 charset_normalize(const char *name)
 {
