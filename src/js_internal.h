@@ -46,6 +46,8 @@ typedef struct ns_image_bitmap {
 struct ns_js {
     JSRuntime    *rt;
     JSContext    *ctx;
+    GPtrArray    *frame_ctxs;
+    GHashTable   *frame_windows;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
     ns_js_mutated_cb mut_cb;

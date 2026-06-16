@@ -27550,6 +27550,167 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     return scope;
 }
 
+static const char ns_iframe_global_bootstrap[] =
+    "(function(G, realWin, iframeDoc, initialURL, sandbox){"
+    "  var url = initialURL || 'about:blank';"
+    "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
+    "  var win = G;"
+    "  function mk(u, b){ try { return new realWin.URL(u, b || url); } catch(e){ return null; } }"
+    "  function fire(list, on, ev){"
+    "    var c = list.slice();"
+    "    for (var i=0;i<c.length;i++){ try { c[i].call(win, ev); } catch(e){} }"
+    "    if (on) { try { on.call(win, ev); } catch(e){} }"
+    "  }"
+    "  function evt(type, props){"
+    "    var e = null;"
+    "    try { if (realWin.Event) { e = new realWin.Event(type); } } catch(x){}"
+    "    if (!e) e = { type: type };"
+    "    if (props) for (var k in props) { try { e[k] = props[k]; } catch(x){} }"
+    "    return e;"
+    "  }"
+    "  function fireHash(o, n){ fire(hashL, onhash, evt('hashchange', {oldURL:o, newURL:n})); }"
+    "  function firePop(){ fire(popL, onpop, evt('popstate', {state:state})); }"
+    "  function sameDoc(a, b){ var ua=mk(a), ub=mk(b);"
+    "    return !!ua && !!ub && ua.origin===ub.origin && ua.pathname===ub.pathname && ua.search===ub.search; }"
+    "  var loc = {};"
+    "  ['protocol','host','hostname','port','pathname','search','origin'].forEach(function(p){"
+    "    Object.defineProperty(loc, p, { configurable:true, enumerable:true,"
+    "      get: function(){ var u=mk(url); return u ? u[p] : ''; } }); });"
+    "  Object.defineProperty(loc, 'href', { configurable:true, enumerable:true,"
+    "    get: function(){ return url; },"
+    "    set: function(v){ var u=mk(v); if(!u) return; var o=url; url=u.href;"
+    "      if (o!==url && sameDoc(o,url)) fireHash(o,url); } });"
+    "  Object.defineProperty(loc, 'hash', { configurable:true, enumerable:true,"
+    "    get: function(){ var u=mk(url); return u ? u.hash : ''; },"
+    "    set: function(v){ var u=mk(url); if(!u) return; u.hash=v; var o=url; url=u.href;"
+    "      if (o!==url) fireHash(o,url); } });"
+    "  loc.assign = function(v){ this.href = v; };"
+    "  loc.replace = function(v){ this.href = v; };"
+    "  loc.reload = function(){};"
+    "  loc.toString = function(){ return url; };"
+    "  var hist = {"
+    "    get state(){ return state; }, get length(){ return 1; }, scrollRestoration:'auto',"
+    "    pushState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    replaceState: function(s,t,u){ state=s; if(u!=null){ var n=mk(u); if(n) url=n.href; } },"
+    "    back: function(){ firePop(); }, forward: function(){ firePop(); }, go: function(){ firePop(); }"
+    "  };"
+    "  function def(name, d){ d.configurable = true; try { Object.defineProperty(G, name, d); } catch(e){} }"
+    "  def('window',     { value: win, writable: true });"
+    "  def('self',       { value: win, writable: true });"
+    "  def('top',        { value: win, writable: true });"
+    "  def('parent',     { value: win, writable: true });"
+    "  def('frames',     { value: win, writable: true });"
+    "  def('document',   { value: iframeDoc, writable: true, enumerable: true });"
+    "  def('history',    { value: hist, writable: true, enumerable: true });"
+    "  def('location',   { enumerable: true, get: function(){ return loc; },"
+    "                      set: function(v){ loc.href = v; } });"
+    "  def('fetch', { writable: true, value: function(input, init){"
+    "      var req = input;"
+    "      try { if (typeof input === 'string') { var u = mk(input); if (u) req = u.href; } } catch(e){}"
+    "      return realWin.fetch.call(win, req, init); } });"
+    "  def('onhashchange', { get: function(){ return onhash; }, set: function(v){ onhash=v; } });"
+    "  def('onpopstate',   { get: function(){ return onpop; }, set: function(v){ onpop=v; } });"
+    "  def('addEventListener', { writable: true, value: function(type, fn, o){"
+    "      if (type==='hashchange'){ hashL.push(fn); return; }"
+    "      if (type==='popstate'){ popL.push(fn); return; }"
+    "      return realWin.addEventListener(type, fn, o); } });"
+    "  def('removeEventListener', { writable: true, value: function(type, fn, o){"
+    "      var i; if (type==='hashchange'){ i=hashL.indexOf(fn); if(i>=0) hashL.splice(i,1); return; }"
+    "      if (type==='popstate'){ i=popL.indexOf(fn); if(i>=0) popL.splice(i,1); return; }"
+    "      return realWin.removeEventListener(type, fn, o); } });"
+    "  def('dispatchEvent', { writable: true, value: function(ev){"
+    "      if (ev && ev.type==='hashchange'){ fire(hashL, onhash, ev); return true; }"
+    "      if (ev && ev.type==='popstate'){ fire(popL, onpop, ev); return true; }"
+    "      return realWin.dispatchEvent(ev); } });"
+    "  if (sandbox & 1) {"
+    "    if (!(sandbox & 32)) {"
+    "      def('alert',   { writable: true, value: function(){} });"
+    "      def('confirm', { writable: true, value: function(){ return false; } });"
+    "      def('prompt',  { writable: true, value: function(){ return null; } });"
+    "      def('print',   { writable: true, value: function(){} });"
+    "    }"
+    "    if (!(sandbox & 16)) { def('open', { writable: true, value: function(){ return null; } }); }"
+    "  }"
+    "  if ((sandbox & 8192) || ((sandbox & 1) && !(sandbox & 8))) {"
+    "    var denyStore = function(){"
+    "      try { return new realWin.DOMException('The operation is insecure.', 'SecurityError'); }"
+    "      catch(e){ return new Error('SecurityError'); } };"
+    "    def('localStorage',   { get: function(){ throw denyStore(); } });"
+    "    def('sessionStorage', { get: function(){ throw denyStore(); } });"
+    "  }"
+    "  return { location: loc, history: hist };"
+    "})";
+
+static JSContext *
+ns_iframe_make_realm_context(ns_js *js, JSValueConst iframe_doc,
+                             const char *initial_url, unsigned sandbox,
+                             JSValue *out_window, JSValue *out_location,
+                             JSValue *out_history)
+{
+    *out_window = JS_NULL;
+    *out_location = JS_NULL;
+    *out_history = JS_NULL;
+    JSContext *fctx = JS_NewContext(js->rt);
+    if (!fctx) return NULL;
+    JS_SetContextOpaque(fctx, js);
+    g_ptr_array_add(js->frame_ctxs, fctx);
+
+    JSValue fg = JS_GetGlobalObject(fctx);
+    JSValue parent_global = JS_GetGlobalObject(js->ctx);
+    JS_SetPrototype(fctx, fg, parent_global);
+
+    JSValue maker = JS_Eval(fctx, ns_iframe_global_bootstrap,
+                            strlen(ns_iframe_global_bootstrap),
+                            "<iframe-global>", JS_EVAL_TYPE_GLOBAL);
+    gboolean ok = FALSE;
+    if (!JS_IsException(maker) && JS_IsFunction(fctx, maker)) {
+        JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
+        JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
+        JSValueConst args[5] = { fg, parent_global, iframe_doc, urlv, sbv };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 5, args);
+        if (!JS_IsException(res) && JS_IsObject(res)) {
+            *out_location = JS_GetPropertyStr(fctx, res, "location");
+            *out_history  = JS_GetPropertyStr(fctx, res, "history");
+            ok = TRUE;
+        } else if (JS_IsException(res)) {
+            JS_FreeValue(fctx, JS_GetException(fctx));
+        }
+        JS_FreeValue(fctx, res);
+        JS_FreeValue(fctx, urlv);
+    } else if (JS_IsException(maker)) {
+        JS_FreeValue(fctx, JS_GetException(fctx));
+    }
+    JS_FreeValue(fctx, maker);
+    JS_FreeValue(fctx, parent_global);
+
+    if (!ok) {
+        JS_FreeValue(fctx, fg);
+        return NULL;
+    }
+    *out_window = fg;
+    return fctx;
+}
+
+static void
+ns_iframe_store_realm_window(ns_js *js, ns_node *iframe, JSValueConst window)
+{
+    if (!js || !js->frame_windows || !iframe || !JS_IsObject(window)) return;
+    gpointer old = g_hash_table_lookup(js->frame_windows, iframe);
+    if (old)
+        JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, old));
+    JSValue held = JS_DupValue(js->ctx, window);
+    g_hash_table_insert(js->frame_windows, iframe, JS_VALUE_GET_PTR(held));
+}
+
+static JSValue
+ns_iframe_lookup_realm_window(ns_js *js, ns_node *iframe)
+{
+    if (!js || !js->frame_windows || !iframe) return JS_NULL;
+    gpointer p = g_hash_table_lookup(js->frame_windows, iframe);
+    if (!p) return JS_NULL;
+    return JS_DupValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, p));
+}
+
 static JSValue ns_document_createElement(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
 static JSValue ns_document_createTextNode(JSContext *ctx, JSValueConst this_val,
@@ -27646,6 +27807,10 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     JSValue realm = JS_GetPropertyStr(ctx, this_val, "__ndRealmWindow");
     if (JS_IsObject(realm)) return realm;
     JS_FreeValue(ctx, realm);
+    ns_js *js = js_from_ctx(ctx);
+    JSValue stored = ns_iframe_lookup_realm_window(js, n);
+    if (JS_IsObject(stored)) return stored;
+    JS_FreeValue(ctx, stored);
     return JS_GetGlobalObject(ctx);
 }
 
@@ -30348,6 +30513,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                                        NULL, ns_timer_free);
     js->main_context = g_main_context_default();
     js->workers = g_ptr_array_new();
+    js->frame_ctxs = g_ptr_array_new();
+    js->frame_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
     js->pinned_wrappers_set = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -33431,6 +33598,20 @@ ns_js_reset_runtime_state(ns_js *js)
         g_list_free(list);
     }
 
+    if (js->frame_windows) {
+        GHashTableIter it;
+        gpointer k, val;
+        g_hash_table_iter_init(&it, js->frame_windows);
+        while (g_hash_table_iter_next(&it, &k, &val))
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, val));
+        g_hash_table_remove_all(js->frame_windows);
+    }
+    if (js->frame_ctxs) {
+        for (guint i = 0; i < js->frame_ctxs->len; i++)
+            JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
+        g_ptr_array_set_size(js->frame_ctxs, 0);
+    }
+
     ns_drain_microtasks(js);
     JS_RunGC(js->rt);
 }
@@ -34029,6 +34210,21 @@ ns_js_free(ns_js *js)
         js->box_lookup_cache = NULL;
     }
     if (ns_active_js() == js) ns_set_active_js(NULL);
+    if (js->frame_windows) {
+        GHashTableIter it;
+        gpointer k, val;
+        g_hash_table_iter_init(&it, js->frame_windows);
+        while (g_hash_table_iter_next(&it, &k, &val))
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, val));
+        g_hash_table_destroy(js->frame_windows);
+        js->frame_windows = NULL;
+    }
+    if (js->frame_ctxs) {
+        for (guint i = 0; i < js->frame_ctxs->len; i++)
+            JS_FreeContext(g_ptr_array_index(js->frame_ctxs, i));
+        g_ptr_array_free(js->frame_ctxs, TRUE);
+        js->frame_ctxs = NULL;
+    }
     JS_FreeContext(js->ctx);
     JS_FreeRuntime(js->rt);
     g_free(js);
@@ -35652,7 +35848,8 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
 static void
 ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                          const char *origin, JSValue iframe_doc,
-                         JSValueConst iframe_scope, unsigned sandbox)
+                         JSValueConst iframe_scope, unsigned sandbox,
+                         ns_node *iframe)
 {
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_collect_script_tasks(content_root, tasks);
@@ -35710,7 +35907,51 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         }
     }
 
-    if (concat->len > 0) {
+    JSContext *fctx = NULL;
+    JSValue fwin = JS_NULL, floc = JS_NULL, fhist = JS_NULL;
+    if (concat->len > 0)
+        fctx = ns_iframe_make_realm_context(js, iframe_doc, origin, sandbox,
+                                            &fwin, &floc, &fhist);
+
+    if (concat->len > 0 && fctx && JS_IsObject(fwin)) {
+        if (JS_IsObject(iframe_doc))
+            JS_SetPropertyStr(js->ctx, iframe_doc, "defaultView",
+                              JS_DupValue(js->ctx, fwin));
+        ns_iframe_store_realm_window(js, iframe, fwin);
+        if (iframe && iframe->js_wrapper) {
+            JSValue iw = JS_MKPTR(JS_TAG_OBJECT, iframe->js_wrapper);
+            JS_SetPropertyStr(js->ctx, iw, "__ndRealmWindow",
+                              JS_DupValue(js->ctx, fwin));
+        }
+        js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
+        js->eval_depth++;
+        JSValue v = JS_Eval(fctx, concat->str, concat->len,
+                            origin ? origin : "inline", JS_EVAL_TYPE_GLOBAL);
+        js->eval_depth--;
+        js->eval_deadline_us = 0;
+        if (js->eval_depth == 0) {
+            ns_js_flush_document_write(js);
+            ns_js_drain_deferred_scripts(js);
+        }
+        if (JS_IsException(v)) {
+            JSValue ex = JS_GetException(fctx);
+            const char *m = JS_ToCString(fctx, ex);
+            if (m && js->log_cb) {
+                JSValue stk = JS_GetPropertyStr(fctx, ex, "stack");
+                const char *s = JS_ToCString(fctx, stk);
+                char *line = g_strdup_printf("JS error in %s: %s%s%s",
+                                             origin ? origin : "inline", m,
+                                             s ? "\n" : "", s ? s : "");
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+                if (s) JS_FreeCString(fctx, s);
+                JS_FreeValue(fctx, stk);
+            }
+            if (m) JS_FreeCString(fctx, m);
+            JS_FreeValue(fctx, ex);
+        }
+        JS_FreeValue(fctx, v);
+    } else if (concat->len > 0) {
         GString *w = g_string_new(
             "(function(window,self,globalThis,top,parent,document,location,history){\nwith(window){\n");
         g_string_append_len(w, concat->str, (gssize)concat->len);
@@ -35774,14 +36015,28 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         JS_FreeValue(js->ctx, fn);
     }
 
-    ns_js_run_iframe_modules(js, modules, origin, iframe_doc, iframe_scope,
-                             sandbox);
+    if (modules->len > 0 && JS_IsObject(fwin)) {
+        JSValue mscope = JS_NewObject(js->ctx);
+        JS_SetPropertyStr(js->ctx, mscope, "window", JS_DupValue(js->ctx, fwin));
+        JS_SetPropertyStr(js->ctx, mscope, "location", JS_DupValue(js->ctx, floc));
+        JS_SetPropertyStr(js->ctx, mscope, "history", JS_DupValue(js->ctx, fhist));
+        ns_js_run_iframe_modules(js, modules, origin, iframe_doc, mscope, sandbox);
+        JS_FreeValue(js->ctx, mscope);
+    } else {
+        ns_js_run_iframe_modules(js, modules, origin, iframe_doc, iframe_scope,
+                                 sandbox);
+    }
     ns_js_iframe_proto_cleanup(js->ctx, proto_snapshot);
     ns_js_iframe_restore_custom_elements(js->ctx);
     ns_js_iframe_restore_event_targets(js->ctx);
     ns_js_iframe_restore_scheduling(js->ctx);
     JS_FreeValue(js->ctx, proto_snapshot);
 
+    if (fctx) {
+        JS_FreeValue(fctx, fwin);
+        JS_FreeValue(fctx, floc);
+        JS_FreeValue(fctx, fhist);
+    }
     g_string_free(concat, TRUE);
     g_ptr_array_free(modules, TRUE);
     g_hash_table_destroy(exposed_seen);
@@ -36030,7 +36285,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             }
         } else if (JS_IsObject(realm_doc)) {
             ns_js_run_iframe_scripts(js, content_root, iorigin, realm_doc,
-                                     realm_scope, sandbox);
+                                     realm_scope, sandbox, iframe);
         } else {
             GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
             ns_js_collect_script_tasks(content_root, tasks);
