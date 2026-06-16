@@ -26772,9 +26772,20 @@ ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
     ns_node *new_tr = ns_node_new_element(g_strdup("tr"));
     ns_js *_j = js_from_ctx(ctx);
     if (idx < 0 || idx == (int32_t)rows->len) {
-        ns_node *parent = rows->len > 0
-            ? ((ns_node *)g_ptr_array_index(rows, rows->len - 1))->parent
-            : ns_first_descendant_named(tbl, "tbody");
+        ns_node *parent;
+        if (rows->len > 0) {
+            parent = ((ns_node *)g_ptr_array_index(rows, rows->len - 1))->parent;
+        } else if (ns_node_is_element_named(tbl, "table")) {
+            parent = NULL;
+            for (ns_node *c = tbl->first_child; c; c = c->next_sibling)
+                if (ns_node_is_element_named(c, "tbody")) parent = c;
+            if (!parent) {
+                parent = ns_node_new_element(g_strdup("tbody"));
+                ns_node_append_child(tbl, parent);
+            }
+        } else {
+            parent = tbl;
+        }
         if (!parent) parent = tbl;
         ns_node_append_child(parent, new_tr);
     } else {
