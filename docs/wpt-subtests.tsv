@@ -52555,25 +52555,100 @@ test	subtest	status
 /url/historical.any.html	URLSearchParams: no structured serialize/deserialize support	FAIL
 /url/historical.any.html	searchParams on location object	PASS
 /url/idlharness.any.html	<harness>	OK
-/url/idlharness.any.html	idl_test setup	FAIL
+/url/idlharness.any.html	Stringification of new URL("http://foo")	FAIL
+/url/idlharness.any.html	Stringification of new URLSearchParams("hi=there&thank=you")	FAIL
+/url/idlharness.any.html	URL interface object length	FAIL
+/url/idlharness.any.html	URL interface object name	PASS
+/url/idlharness.any.html	URL interface: attribute hash	FAIL
+/url/idlharness.any.html	URL interface: attribute host	FAIL
+/url/idlharness.any.html	URL interface: attribute hostname	FAIL
+/url/idlharness.any.html	URL interface: attribute href	FAIL
+/url/idlharness.any.html	URL interface: attribute origin	FAIL
+/url/idlharness.any.html	URL interface: attribute password	FAIL
+/url/idlharness.any.html	URL interface: attribute pathname	FAIL
+/url/idlharness.any.html	URL interface: attribute port	FAIL
+/url/idlharness.any.html	URL interface: attribute protocol	FAIL
+/url/idlharness.any.html	URL interface: attribute search	FAIL
+/url/idlharness.any.html	URL interface: attribute searchParams	FAIL
+/url/idlharness.any.html	URL interface: attribute username	FAIL
+/url/idlharness.any.html	URL interface: calling canParse(USVString, optional USVString) on new URL("http://foo") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URL interface: calling parse(USVString, optional USVString) on new URL("http://foo") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URL interface: existence and properties of interface object	FAIL
+/url/idlharness.any.html	URL interface: existence and properties of interface prototype object	FAIL
+/url/idlharness.any.html	URL interface: existence and properties of interface prototype object's "constructor" property	PASS
+/url/idlharness.any.html	URL interface: existence and properties of interface prototype object's @@unscopables property	PASS
+/url/idlharness.any.html	URL interface: legacy window alias	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "canParse(USVString, optional USVString)" with the proper type	PASS
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "hash" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "host" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "hostname" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "href" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "origin" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "parse(USVString, optional USVString)" with the proper type	PASS
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "password" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "pathname" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "port" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "protocol" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "search" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "searchParams" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "toJSON()" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "username" with the proper type	FAIL
+/url/idlharness.any.html	URL interface: operation canParse(USVString, optional USVString)	FAIL
+/url/idlharness.any.html	URL interface: operation parse(USVString, optional USVString)	FAIL
+/url/idlharness.any.html	URL interface: operation toJSON()	FAIL
+/url/idlharness.any.html	URL interface: stringifier	FAIL
+/url/idlharness.any.html	URL interface: toJSON operation on new URL("http://foo")	PASS
+/url/idlharness.any.html	URL must be primary interface of new URL("http://foo")	FAIL
+/url/idlharness.any.html	URLSearchParams interface object length	FAIL
+/url/idlharness.any.html	URLSearchParams interface object name	PASS
+/url/idlharness.any.html	URLSearchParams interface: attribute size	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling append(USVString, USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling delete(USVString, optional USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling get(USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling getAll(USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling has(USVString, optional USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: calling set(USVString, USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	FAIL
+/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface object	FAIL
+/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object	FAIL
+/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object's "constructor" property	PASS
+/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object's @@unscopables property	PASS
+/url/idlharness.any.html	URLSearchParams interface: iterable<USVString, USVString>	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "append(USVString, USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "delete(USVString, optional USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "get(USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "getAll(USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "has(USVString, optional USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "set(USVString, USVString)" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "size" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "sort()" with the proper type	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation append(USVString, USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation delete(USVString, optional USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation get(USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation getAll(USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation has(USVString, optional USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation set(USVString, USVString)	FAIL
+/url/idlharness.any.html	URLSearchParams interface: operation sort()	FAIL
+/url/idlharness.any.html	URLSearchParams interface: stringifier	FAIL
+/url/idlharness.any.html	idl_test setup	PASS
+/url/idlharness.any.html	idl_test validation	PASS
 /url/javascript-urls.window.html	<harness>	NONE
 /url/percent-encoding.window.html	<harness>	OK
-/url/percent-encoding.window.html	Input A with encoding big5	FAIL
+/url/percent-encoding.window.html	Input A with encoding big5	PASS
 /url/percent-encoding.window.html	Input A with encoding iso-2022-jp	FAIL
-/url/percent-encoding.window.html	Input A with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input A with encoding utf-8	PASS
 /url/percent-encoding.window.html	Input ¢ with encoding iso-8859-2	FAIL
-/url/percent-encoding.window.html	Input ¢ with encoding utf-8	FAIL
-/url/percent-encoding.window.html	Input á| with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input ¢ with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input á| with encoding utf-8	PASS
 /url/percent-encoding.window.html	Input † with encoding big5	FAIL
 /url/percent-encoding.window.html	Input † with encoding euc-kr	FAIL
-/url/percent-encoding.window.html	Input † with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input † with encoding utf-8	PASS
 /url/percent-encoding.window.html	Input † with encoding windows-1252	FAIL
 /url/percent-encoding.window.html	Input ‾\ with encoding iso-2022-jp	FAIL
-/url/percent-encoding.window.html	Input ‾\ with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input ‾\ with encoding utf-8	PASS
 /url/percent-encoding.window.html	Input − with encoding shift_jis	FAIL
-/url/percent-encoding.window.html	Input − with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input − with encoding utf-8	PASS
 /url/percent-encoding.window.html	Input  with encoding gb18030	FAIL
-/url/percent-encoding.window.html	Input  with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input  with encoding utf-8	PASS
 /url/percent-encoding.window.html	Loading data…	PASS
 /url/toascii.window.html	lookout.net (using <a>)	PASS
 /url/toascii.window.html	lookout.net (using <a>.host)	PASS
@@ -53372,7 +53447,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <#> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <#> against <test:test>	PASS
 /url/url-constructor.any.html	Parsing: <#> against <test:test?test>	PASS
-/url/url-constructor.any.html	Parsing: <#> without base	FAIL
+/url/url-constructor.any.html	Parsing: <#> without base	PASS
 /url/url-constructor.any.html	Parsing: <#\> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <#i> against <sc:///pa/pa>	PASS
 /url/url-constructor.any.html	Parsing: <#i> against <sc://ho/pa>	PASS
@@ -53480,9 +53555,9 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <> against <http://user:pass@example.org:21/smth>	PASS
 /url/url-constructor.any.html	Parsing: <> against <non-spec:/..//p>	PASS
-/url/url-constructor.any.html	Parsing: <> without base	FAIL
+/url/url-constructor.any.html	Parsing: <> without base	PASS
 /url/url-constructor.any.html	Parsing: <?> against <http://example.org/foo/bar>	PASS
-/url/url-constructor.any.html	Parsing: <?> without base	FAIL
+/url/url-constructor.any.html	Parsing: <?> without base	PASS
 /url/url-constructor.any.html	Parsing: <??a=b&c=d> against <http://example.org/foo/bar>	FAIL
 /url/url-constructor.any.html	Parsing: <?a=b&c=d> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <?i> against <sc:///pa/pa>	PASS
@@ -53507,8 +53582,8 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <\//pig> against <file://lion/>	PASS
 /url/url-constructor.any.html	Parsing: <\/a> against <foo://foo/a>	PASS
 /url/url-constructor.any.html	Parsing: <\/localhost//pig> against <file://lion/>	PASS
-/url/url-constructor.any.html	Parsing: <\\\.\Y:> without base	FAIL
-/url/url-constructor.any.html	Parsing: <\\\.\y:> without base	FAIL
+/url/url-constructor.any.html	Parsing: <\\\.\Y:> without base	PASS
+/url/url-constructor.any.html	Parsing: <\\\.\y:> without base	PASS
 /url/url-constructor.any.html	Parsing: <\\a> against <foo://foo/a>	PASS
 /url/url-constructor.any.html	Parsing: <\\server\file> against <file:///tmp/mock/path>	PASS
 /url/url-constructor.any.html	Parsing: <\\x\hello> against <http://example.org/foo/bar>	PASS
@@ -53516,11 +53591,11 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <\x> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <a!@$*=/foo.html> against <file:///some/dir/bar.html>	PASS
 /url/url-constructor.any.html	Parsing: <a/..//path> against <non-spec:/p>	PASS
-/url/url-constructor.any.html	Parsing: <a//> without base	FAIL
-/url/url-constructor.any.html	Parsing: <a/> without base	FAIL
+/url/url-constructor.any.html	Parsing: <a//> without base	PASS
+/url/url-constructor.any.html	Parsing: <a/> without base	PASS
 /url/url-constructor.any.html	Parsing: <a1234567890-+.:foo/bar> against <http://example.com/dir/file>	PASS
 /url/url-constructor.any.html	Parsing: <a:  foo.com> against <http://example.org/foo/bar>	PASS
-/url/url-constructor.any.html	Parsing: <a> without base	FAIL
+/url/url-constructor.any.html	Parsing: <a> without base	PASS
 /url/url-constructor.any.html	Parsing: <abc:/rooted> against <abc://host/path>	PASS
 /url/url-constructor.any.html	Parsing: <abc:rootless> against <abc://host/path>	PASS
 /url/url-constructor.any.html	Parsing: <abc:rootless> against <abc:/path>	PASS
@@ -54669,12 +54744,12 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <a://example.net>.protocol = 'bC0+-.'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
-/url/url-setters-a-area.window.html	<a>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <about:blank>.hash = '#<foo> <bar>' Fragment with <> on about:blank	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <data:/nospace>.pathname = 'space ' Non-special URLs with non-opaque paths percent-encode U+0020	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <data:original>.pathname = 'new value'	PASS
@@ -54685,7 +54760,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <data:text/html,<p>Test>.protocol = 'view-source+data:foo : bar' Stuff after the first ':' is ignored	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <data:text/plain,Stuff>.host = 'example.net' Cannot-be-a-base means no host	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <data:text/plain,Stuff>.hostname = 'example.net' Cannot-be-a-base means no host	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <data:text/plain,test>.hash = '#<foo> <bar>' Fragment with <> on data: URI	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <file:///home/me/index.html>.password = 'secret' No host means no password	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <file:///home/you/index.html>.username = 'me' No host means no username	PASS
@@ -54768,7 +54843,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net:8080>.hostname = 'example.com'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net:8080>.port = '' Port number is removed if empty is the new value	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net:8080>.port = '80' Default port number is removed	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = '#foo bar'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = '#foo"bar'	PASS
@@ -54776,7 +54851,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = '#foo>bar'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = '#foo`bar'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.host = '' The empty host is not valid for special schemes	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.host = '0x7F000001:8080' IPv4 address syntax is normalized	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.host = '[2001:db8::2]:4002' IPv6 literal address with port, crbug.com/1012416	PASS
@@ -54785,10 +54860,10 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.host = 'example.com:8080'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hostname = '' The empty host is not valid for special schemes	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.hostname = '[::0:01]' IPv6 address syntax is normalized	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.password = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.password = 'secret'	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.pathname = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.pathname = '#' # needs to be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.pathname = '%2e%2E%c3%89té' Bytes already percent-encoded are left as-is, including %2E outside dotted segments.	PASS
@@ -54798,10 +54873,10 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.port = '8080'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.protocol = 'b' Can’t switch from special scheme to non-special	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.protocol = 'https:foo : bar' Stuff after the first ':' is ignored	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.search = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.search = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.username = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://example.net>.username = 'me'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://foo.com:443/>.protocol = 'https' Port is set to null if it is the default for new scheme.	PASS
@@ -54810,7 +54885,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <http://me@example.net>.password = 'secret'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://me@example.net>.username = ''	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'h  tt ps' Tab and newline are stripped	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <http://test/>.protocol = 'https '	PASS
@@ -54879,7 +54954,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/.//>.pathname = 'p' Drop /. from path	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/.//p>.hostname = ''	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/.//p>.hostname = 'h' Drop /. from path	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/>.pathname = '/..//p'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/>.pathname = '/.//p' Serialize /. in path	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <non-spec:/>.pathname = '//p'	PASS
@@ -54896,7 +54971,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <sc://test:12/>.hostname = ''	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://test@test/>.host = ''	FAIL
 /url/url-setters-a-area.window.html	<a>: Setting <sc://test@test/>.hostname = ''	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = ' ' Non-special scheme	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = ' ' Non-special scheme	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = ' '	PASS
@@ -54906,7 +54981,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = '?'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = '@'	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.host = 'ß'	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.hostname = ' ' Non-special scheme	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.hostname = ' ' Non-special scheme	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <sc://x/>.hostname = ' '	PASS
@@ -54947,12 +55022,12 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <a://example.net>.protocol = 'bC0+-.'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
-/url/url-setters-a-area.window.html	<area>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <about:blank>.hash = '#<foo> <bar>' Fragment with <> on about:blank	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <data:/nospace>.pathname = 'space ' Non-special URLs with non-opaque paths percent-encode U+0020	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <data:original>.pathname = 'new value'	PASS
@@ -54963,7 +55038,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <data:text/html,<p>Test>.protocol = 'view-source+data:foo : bar' Stuff after the first ':' is ignored	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <data:text/plain,Stuff>.host = 'example.net' Cannot-be-a-base means no host	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <data:text/plain,Stuff>.hostname = 'example.net' Cannot-be-a-base means no host	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <data:text/plain,test>.hash = '#<foo> <bar>' Fragment with <> on data: URI	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <file:///home/me/index.html>.password = 'secret' No host means no password	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <file:///home/you/index.html>.username = 'me' No host means no username	PASS
@@ -55046,7 +55121,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net:8080>.hostname = 'example.com'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net:8080>.port = '' Port number is removed if empty is the new value	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net:8080>.port = '80' Default port number is removed	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = '#foo bar'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = '#foo"bar'	PASS
@@ -55054,7 +55129,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = '#foo>bar'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = '#foo`bar'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.host = '' The empty host is not valid for special schemes	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.host = '0x7F000001:8080' IPv4 address syntax is normalized	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.host = '[2001:db8::2]:4002' IPv6 literal address with port, crbug.com/1012416	PASS
@@ -55063,10 +55138,10 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.host = 'example.com:8080'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hostname = '' The empty host is not valid for special schemes	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.hostname = '[::0:01]' IPv6 address syntax is normalized	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.password = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.password = 'secret'	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.pathname = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.pathname = '#' # needs to be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.pathname = '%2e%2E%c3%89té' Bytes already percent-encoded are left as-is, including %2E outside dotted segments.	PASS
@@ -55076,10 +55151,10 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.port = '8080'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.protocol = 'b' Can’t switch from special scheme to non-special	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.protocol = 'https:foo : bar' Stuff after the first ':' is ignored	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.search = ' ' Trailing space should be encoded	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.search = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.username = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://example.net>.username = 'me'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://foo.com:443/>.protocol = 'https' Port is set to null if it is the default for new scheme.	PASS
@@ -55088,7 +55163,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <http://me@example.net>.password = 'secret'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://me@example.net>.username = ''	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'h  tt ps' Tab and newline are stripped	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <http://test/>.protocol = 'https '	PASS
@@ -55157,7 +55232,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/.//>.pathname = 'p' Drop /. from path	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/.//p>.hostname = ''	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/.//p>.hostname = 'h' Drop /. from path	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/>.pathname = '/..//p'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/>.pathname = '/.//p' Serialize /. in path	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <non-spec:/>.pathname = '//p'	PASS
@@ -55174,7 +55249,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <sc://test:12/>.hostname = ''	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://test@test/>.host = ''	FAIL
 /url/url-setters-a-area.window.html	<area>: Setting <sc://test@test/>.hostname = ''	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = ' ' Non-special scheme	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = ' ' Non-special scheme	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = ' '	PASS
@@ -55184,7 +55259,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = '?'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = '@'	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.host = 'ß'	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.hostname = ' ' Non-special scheme	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.hostname = ' ' Non-special scheme	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <sc://x/>.hostname = ' '	PASS
@@ -55219,8 +55294,8 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<harness>	OK
 /url/url-setters-a-area.window.html	Loading data…	PASS
 /url/url-setters-stripping.any.html	<harness>	OK
-/url/url-setters-stripping.any.html	Setting hash with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting hash with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting hash with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting hash with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with leading U+000A (https:)	PASS
@@ -55229,8 +55304,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hash with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting hash with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting hash with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting hash with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting hash with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with middle U+000A (https:)	PASS
@@ -55239,8 +55314,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hash with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting hash with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting hash with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting hash with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting hash with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with trailing U+000A (https:)	PASS
@@ -55250,7 +55325,7 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hash with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hash with trailing U+001F (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+0000 (https:)	PASS
-/url/url-setters-stripping.any.html	Setting host with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting host with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+000A (https:)	PASS
@@ -55259,8 +55334,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting host with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting host with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting host with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting host with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting host with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting host with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting host with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with middle U+000A (https:)	PASS
@@ -55269,8 +55344,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting host with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting host with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting host with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting host with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting host with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting host with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting host with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting host with trailing U+000A (https:)	PASS
@@ -55289,8 +55364,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hostname with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting hostname with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting hostname with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting hostname with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting hostname with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with middle U+000A (https:)	PASS
@@ -55299,8 +55374,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hostname with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting hostname with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting hostname with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting hostname with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting hostname with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+000A (https:)	PASS
@@ -55309,8 +55384,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting hostname with trailing U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting password with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting password with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting password with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting password with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with leading U+000A (https:)	PASS
@@ -55319,8 +55394,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting password with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting password with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting password with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting password with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting password with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with middle U+000A (https:)	PASS
@@ -55329,8 +55404,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting password with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting password with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting password with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting password with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting password with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with trailing U+000A (https:)	PASS
@@ -55339,8 +55414,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting password with trailing U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting password with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting password with trailing U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting pathname with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting pathname with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting pathname with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting pathname with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with leading U+000A (https:)	PASS
@@ -55349,8 +55424,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting pathname with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting pathname with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting pathname with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting pathname with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting pathname with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with middle U+000A (https:)	PASS
@@ -55359,8 +55434,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting pathname with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting pathname with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting pathname with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting pathname with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting pathname with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+000A (https:)	PASS
@@ -55369,8 +55444,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting pathname with trailing U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting port with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting port with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting port with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting port with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting port with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting port with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting port with leading U+000A (https:)	PASS
@@ -55399,8 +55474,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting port with trailing U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting port with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting port with trailing U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting protocol with U+0000 before inserted colon (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting protocol with U+0000 before inserted colon (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting protocol with U+0000 before inserted colon (https:)	PASS
+/url/url-setters-stripping.any.html	Setting protocol with U+0000 before inserted colon (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting protocol with U+0009 before inserted colon (https:)	PASS
 /url/url-setters-stripping.any.html	Setting protocol with U+0009 before inserted colon (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting protocol with U+000A before inserted colon (https:)	PASS
@@ -55419,8 +55494,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting protocol with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting protocol with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting protocol with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting search with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting search with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting search with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting search with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with leading U+000A (https:)	PASS
@@ -55429,8 +55504,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting search with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting search with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting search with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting search with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting search with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with middle U+000A (https:)	PASS
@@ -55439,8 +55514,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting search with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting search with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting search with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting search with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting search with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with trailing U+000A (https:)	PASS
@@ -55449,8 +55524,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting search with trailing U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting search with trailing U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting search with trailing U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting username with leading U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting username with leading U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting username with leading U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting username with leading U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with leading U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting username with leading U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with leading U+000A (https:)	PASS
@@ -55459,8 +55534,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting username with leading U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with leading U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting username with leading U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting username with middle U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting username with middle U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting username with middle U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting username with middle U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with middle U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting username with middle U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with middle U+000A (https:)	PASS
@@ -55469,8 +55544,8 @@ test	subtest	status
 /url/url-setters-stripping.any.html	Setting username with middle U+000D (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with middle U+001F (https:)	PASS
 /url/url-setters-stripping.any.html	Setting username with middle U+001F (wpt++:)	PASS
-/url/url-setters-stripping.any.html	Setting username with trailing U+0000 (https:)	FAIL
-/url/url-setters-stripping.any.html	Setting username with trailing U+0000 (wpt++:)	FAIL
+/url/url-setters-stripping.any.html	Setting username with trailing U+0000 (https:)	PASS
+/url/url-setters-stripping.any.html	Setting username with trailing U+0000 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with trailing U+0009 (https:)	PASS
 /url/url-setters-stripping.any.html	Setting username with trailing U+0009 (wpt++:)	PASS
 /url/url-setters-stripping.any.html	Setting username with trailing U+000A (https:)	PASS
@@ -55490,12 +55565,12 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <a://example.net>.protocol = 'bC0+-.'	PASS
 /url/url-setters.any.html	URL: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters.any.html	URL: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
-/url/url-setters.any.html	URL: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	FAIL
+/url/url-setters.any.html	URL: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
 /url/url-setters.any.html	URL: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
-/url/url-setters.any.html	URL: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters.any.html	URL: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters.any.html	URL: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters.any.html	URL: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
-/url/url-setters.any.html	URL: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	FAIL
+/url/url-setters.any.html	URL: Setting <about:blank>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on about:blank; tabs and newlines are removed	PASS
 /url/url-setters.any.html	URL: Setting <about:blank>.hash = '#<foo> <bar>' Fragment with <> on about:blank	PASS
 /url/url-setters.any.html	URL: Setting <data:/nospace>.pathname = 'space ' Non-special URLs with non-opaque paths percent-encode U+0020	PASS
 /url/url-setters.any.html	URL: Setting <data:original>.pathname = 'new value'	PASS
@@ -55506,7 +55581,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <data:text/html,<p>Test>.protocol = 'view-source+data:foo : bar' Stuff after the first ':' is ignored	PASS
 /url/url-setters.any.html	URL: Setting <data:text/plain,Stuff>.host = 'example.net' Cannot-be-a-base means no host	PASS
 /url/url-setters.any.html	URL: Setting <data:text/plain,Stuff>.hostname = 'example.net' Cannot-be-a-base means no host	PASS
-/url/url-setters.any.html	URL: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	FAIL
+/url/url-setters.any.html	URL: Setting <data:text/plain,test>.hash = '#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Fragment percent-encode set on data: URI; tabs and newlines are removed	PASS
 /url/url-setters.any.html	URL: Setting <data:text/plain,test>.hash = '#<foo> <bar>' Fragment with <> on data: URI	PASS
 /url/url-setters.any.html	URL: Setting <file:///home/me/index.html>.password = 'secret' No host means no password	PASS
 /url/url-setters.any.html	URL: Setting <file:///home/you/index.html>.username = 'me' No host means no username	PASS
@@ -55589,7 +55664,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <http://example.net:8080>.hostname = 'example.com'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net:8080>.port = '' Port number is removed if empty is the new value	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net:8080>.port = '80' Default port number is removed	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.hash = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = ' ' Trailing space should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = '#foo bar'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = '#foo"bar'	PASS
@@ -55597,7 +55672,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = '#foo>bar'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = '#foo`bar'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hash = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.host = '' The empty host is not valid for special schemes	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.host = '0x7F000001:8080' IPv4 address syntax is normalized	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.host = '[2001:db8::2]:4002' IPv6 literal address with port, crbug.com/1012416	PASS
@@ -55606,10 +55681,10 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <http://example.net>.host = 'example.com:8080'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hostname = '' The empty host is not valid for special schemes	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.hostname = '[::0:01]' IPv6 address syntax is normalized	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.password = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.password = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.password = 'secret'	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.pathname = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.pathname = ' ' Trailing space should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.pathname = '#' # needs to be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.pathname = '%2e%2E%c3%89té' Bytes already percent-encoded are left as-is, including %2E outside dotted segments.	PASS
@@ -55619,10 +55694,10 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <http://example.net>.port = '8080'	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.protocol = 'b' Can’t switch from special scheme to non-special	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.protocol = 'https:foo : bar' Stuff after the first ':' is ignored	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.search = ' ' Trailing C0 control should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.search = ' ' Trailing space should be encoded	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.search = '%c3%89té' Bytes already percent-encoded are left as-is	PASS
-/url/url-setters.any.html	URL: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	FAIL
+/url/url-setters.any.html	URL: Setting <http://example.net>.username = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the userinfo encode set.	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.username = '%c3%89té' Bytes already percent-encoded are left as-is.	PASS
 /url/url-setters.any.html	URL: Setting <http://example.net>.username = 'me'	PASS
 /url/url-setters.any.html	URL: Setting <http://foo.com:443/>.protocol = 'https' Port is set to null if it is the default for new scheme.	PASS
@@ -55631,7 +55706,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <http://me@example.net>.password = 'secret'	PASS
 /url/url-setters.any.html	URL: Setting <http://me@example.net>.username = ''	PASS
 /url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'h  tt ps' Tab and newline are stripped	PASS
-/url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	FAIL
+/url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'https ' Non-tab/newline C0 controls result in no-op	PASS
 /url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'https'	PASS
 /url/url-setters.any.html	URL: Setting <http://test/>.protocol = 'https '	PASS
@@ -55700,7 +55775,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <non-spec:/.//>.pathname = 'p' Drop /. from path	PASS
 /url/url-setters.any.html	URL: Setting <non-spec:/.//p>.hostname = ''	PASS
 /url/url-setters.any.html	URL: Setting <non-spec:/.//p>.hostname = 'h' Drop /. from path	PASS
-/url/url-setters.any.html	URL: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	FAIL
+/url/url-setters.any.html	URL: Setting <non-spec:/>.hash = 'a b' Percent-encode NULLs in fragment	PASS
 /url/url-setters.any.html	URL: Setting <non-spec:/>.pathname = '/..//p'	PASS
 /url/url-setters.any.html	URL: Setting <non-spec:/>.pathname = '/.//p' Serialize /. in path	PASS
 /url/url-setters.any.html	URL: Setting <non-spec:/>.pathname = '//p'	PASS
@@ -55717,7 +55792,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <sc://test:12/>.hostname = ''	PASS
 /url/url-setters.any.html	URL: Setting <sc://test@test/>.host = ''	FAIL
 /url/url-setters.any.html	URL: Setting <sc://test@test/>.hostname = ''	PASS
-/url/url-setters.any.html	URL: Setting <sc://x/>.host = ' ' Non-special scheme	FAIL
+/url/url-setters.any.html	URL: Setting <sc://x/>.host = ' ' Non-special scheme	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = ' '	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = ' '	PASS
@@ -55727,7 +55802,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = '?'	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = '@'	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.host = 'ß'	PASS
-/url/url-setters.any.html	URL: Setting <sc://x/>.hostname = ' ' Non-special scheme	FAIL
+/url/url-setters.any.html	URL: Setting <sc://x/>.hostname = ' ' Non-special scheme	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.hostname = ' '	PASS
 /url/url-setters.any.html	URL: Setting <sc://x/>.hostname = ' '	PASS
@@ -55767,7 +55842,7 @@ test	subtest	status
 /url/url-statics-canparse.any.html	URL.canParse(undefined, aaa:/b)	PASS
 /url/url-statics-canparse.any.html	URL.canParse(undefined, aaa:b)	PASS
 /url/url-statics-canparse.any.html	URL.canParse(undefined, https://test:test/)	PASS
-/url/url-statics-canparse.any.html	URL.canParse(undefined, undefined)	FAIL
+/url/url-statics-canparse.any.html	URL.canParse(undefined, undefined)	PASS
 /url/url-statics-parse.any.html	<harness>	OK
 /url/url-statics-parse.any.html	URL.parse() should return a unique object	PASS
 /url/url-statics-parse.any.html	URL.parse(a, https://b/)	PASS
@@ -55776,7 +55851,7 @@ test	subtest	status
 /url/url-statics-parse.any.html	URL.parse(https://test:test, undefined)	PASS
 /url/url-statics-parse.any.html	URL.parse(undefined, aaa:/b)	PASS
 /url/url-statics-parse.any.html	URL.parse(undefined, aaa:b)	PASS
-/url/url-statics-parse.any.html	URL.parse(undefined, undefined)	FAIL
+/url/url-statics-parse.any.html	URL.parse(undefined, undefined)	PASS
 /url/url-tojson.any.html	<harness>	OK
 /url/url-tojson.any.html	url-tojson	PASS
 /url/urlencoded-parser.any.html	<harness>	OK
@@ -55784,19 +55859,19 @@ test	subtest	status
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %61+%4d%4D=	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %61=a	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %=a	PASS
-/url/urlencoded-parser.any.html	URLSearchParams constructed with: %C2	FAIL
-/url/urlencoded-parser.any.html	URLSearchParams constructed with: %C2x	FAIL
+/url/urlencoded-parser.any.html	URLSearchParams constructed with: %C2	PASS
+/url/urlencoded-parser.any.html	URLSearchParams constructed with: %C2x	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %EF%BB%BFtest=%EF%BB%BF	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %EF%BF%BF=%EF%BF%BF	PASS
-/url/urlencoded-parser.any.html	URLSearchParams constructed with: %FE%FF	FAIL
-/url/urlencoded-parser.any.html	URLSearchParams constructed with: %FF%FE	FAIL
+/url/urlencoded-parser.any.html	URLSearchParams constructed with: %FE%FF	PASS
+/url/urlencoded-parser.any.html	URLSearchParams constructed with: %FF%FE	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %a=a	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: %a_=a	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: &	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: &&&a=b&&&&c=d&	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: &a	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: =b	PASS
-/url/urlencoded-parser.any.html	URLSearchParams constructed with: _charset_=windows-1252&test=%C2x	FAIL
+/url/urlencoded-parser.any.html	URLSearchParams constructed with: _charset_=windows-1252&test=%C2x	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: a	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: a&	PASS
 /url/urlencoded-parser.any.html	URLSearchParams constructed with: a&a	PASS
@@ -55818,22 +55893,22 @@ test	subtest	status
 /url/urlencoded-parser.any.html	request.formData() with input: 	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: %61+%4d%4D=	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: %61=a	PASS
-/url/urlencoded-parser.any.html	request.formData() with input: %=a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: %C2	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: %C2x	FAIL
+/url/urlencoded-parser.any.html	request.formData() with input: %=a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: %C2	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: %C2x	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: %EF%BB%BFtest=%EF%BB%BF	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: %EF%BF%BF=%EF%BF%BF	PASS
-/url/urlencoded-parser.any.html	request.formData() with input: %FE%FF	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: %FF%FE	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: %a=a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: %a_=a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: &	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: &&&a=b&&&&c=d&	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: &a	FAIL
+/url/urlencoded-parser.any.html	request.formData() with input: %FE%FF	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: %FF%FE	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: %a=a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: %a_=a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: &	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: &&&a=b&&&&c=d&	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: &a	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: =b	PASS
-/url/urlencoded-parser.any.html	request.formData() with input: _charset_=windows-1252&test=%C2x	FAIL
+/url/urlencoded-parser.any.html	request.formData() with input: _charset_=windows-1252&test=%C2x	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a	PASS
-/url/urlencoded-parser.any.html	request.formData() with input: a&	FAIL
+/url/urlencoded-parser.any.html	request.formData() with input: a&	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a&a	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a&b&c	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a=	PASS
@@ -55842,33 +55917,33 @@ test	subtest	status
 /url/urlencoded-parser.any.html	request.formData() with input: a=a+b+c+d	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a=b	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: a=b&c=d	PASS
-/url/urlencoded-parser.any.html	request.formData() with input: a=b&c=d&	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: b=%%2a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: b=%2%2af%2a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: b=%2sf%2a	FAIL
-/url/urlencoded-parser.any.html	request.formData() with input: id=0&value=%	FAIL
+/url/urlencoded-parser.any.html	request.formData() with input: a=b&c=d&	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: b=%%2a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: b=%2%2af%2a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: b=%2sf%2a	PASS
+/url/urlencoded-parser.any.html	request.formData() with input: id=0&value=%	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: test	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: †&†=x	PASS
 /url/urlencoded-parser.any.html	request.formData() with input: ﻿test=﻿	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: 	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: %61+%4d%4D=	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: %61=a	PASS
-/url/urlencoded-parser.any.html	response.formData() with input: %=a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: %C2	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: %C2x	FAIL
+/url/urlencoded-parser.any.html	response.formData() with input: %=a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: %C2	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: %C2x	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: %EF%BB%BFtest=%EF%BB%BF	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: %EF%BF%BF=%EF%BF%BF	PASS
-/url/urlencoded-parser.any.html	response.formData() with input: %FE%FF	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: %FF%FE	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: %a=a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: %a_=a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: &	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: &&&a=b&&&&c=d&	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: &a	FAIL
+/url/urlencoded-parser.any.html	response.formData() with input: %FE%FF	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: %FF%FE	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: %a=a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: %a_=a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: &	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: &&&a=b&&&&c=d&	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: &a	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: =b	PASS
-/url/urlencoded-parser.any.html	response.formData() with input: _charset_=windows-1252&test=%C2x	FAIL
+/url/urlencoded-parser.any.html	response.formData() with input: _charset_=windows-1252&test=%C2x	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a	PASS
-/url/urlencoded-parser.any.html	response.formData() with input: a&	FAIL
+/url/urlencoded-parser.any.html	response.formData() with input: a&	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a&a	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a&b&c	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a=	PASS
@@ -55877,11 +55952,11 @@ test	subtest	status
 /url/urlencoded-parser.any.html	response.formData() with input: a=a+b+c+d	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a=b	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: a=b&c=d	PASS
-/url/urlencoded-parser.any.html	response.formData() with input: a=b&c=d&	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: b=%%2a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: b=%2%2af%2a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: b=%2sf%2a	FAIL
-/url/urlencoded-parser.any.html	response.formData() with input: id=0&value=%	FAIL
+/url/urlencoded-parser.any.html	response.formData() with input: a=b&c=d&	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: b=%%2a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: b=%2%2af%2a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: b=%2sf%2a	PASS
+/url/urlencoded-parser.any.html	response.formData() with input: id=0&value=%	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: test	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: †&†=x	PASS
 /url/urlencoded-parser.any.html	response.formData() with input: ﻿test=﻿	PASS

@@ -411,6 +411,14 @@ char *
 ns_url_set_component(const char *href, const char *component,
                      const char *value)
 {
+    if (!value) return NULL;
+    return ns_url_set_component_len(href, component, value, strlen(value));
+}
+
+char *
+ns_url_set_component_len(const char *href, const char *component,
+                         const char *value, size_t value_len)
+{
     if (!href || !component || !value) return NULL;
 
     lxb_url_parser_t *parser = ns_url_parser_open();
@@ -424,7 +432,7 @@ ns_url_set_component(const char *href, const char *component,
     }
 
     const lxb_char_t *v = (const lxb_char_t *)value;
-    size_t vlen = strlen(value);
+    size_t vlen = value_len;
 
     if (strcmp(component, "protocol") == 0)
         (void) lxb_url_api_protocol_set(u, parser, v, vlen);

@@ -10554,10 +10554,11 @@ ns_window_url_set_internal(JSContext *ctx, JSValueConst this_val,
     if (argc < 3) return JS_NULL;
     const char *href = JS_ToCString(ctx, argv[0]);
     const char *comp = JS_ToCString(ctx, argv[1]);
-    const char *val  = JS_ToCString(ctx, argv[2]);
+    size_t val_len = 0;
+    const char *val  = JS_ToCStringLen(ctx, &val_len, argv[2]);
     JSValue o = JS_NULL;
     if (href && comp && val) {
-        char *next = ns_url_set_component(href, comp, val);
+        char *next = ns_url_set_component_len(href, comp, val, val_len);
         if (next) {
             o = ns_url_parts_to_js(ctx, next);
             g_free(next);
@@ -24633,9 +24634,10 @@ ns_element_url_part_set(JSContext *ctx, JSValueConst this_val,
     if (!name || !n) return JS_UNDEFINED;
     g_autofree char *href = ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
     if (!href) return JS_UNDEFINED;
-    const char *v = JS_ToCString(ctx, val);
+    size_t vlen = 0;
+    const char *v = JS_ToCStringLen(ctx, &vlen, val);
     if (!v) return JS_UNDEFINED;
-    char *next = ns_url_set_component(href, name, v);
+    char *next = ns_url_set_component_len(href, name, v, vlen);
     if (next) {
         ns_js_set_attr_recorded(js_from_ctx(ctx), n, "href", next);
         g_free(next);

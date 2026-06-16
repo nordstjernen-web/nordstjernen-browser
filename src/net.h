@@ -111,6 +111,8 @@ gboolean ns_url_is_valid_absolute(const char *url);
 char    *ns_url_resolve(const char *base, const char *href);
 char    *ns_url_set_component(const char *href, const char *component,
                               const char *value);
+char    *ns_url_set_component_len(const char *href, const char *component,
+                                  const char *value, size_t value_len);
 
 char    *ns_url_to_display(const char *url);
 

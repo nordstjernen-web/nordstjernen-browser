@@ -41,6 +41,7 @@ they regenerate.
 | 2026-06-15 | d52628c | d8a8414e5 | 283/696 (40%) | 60603/66800 (90%) | partial: dom/traversal |
 | 2026-06-15 | 3a754e8 | d8a8414e5 | 284/696 (40%) | 50415/55389 (91%) | full |
 | 2026-06-16 | 5442142 | a72c94d4a | 286/696 (41%) | 50493/55389 (91%) | partial: html/dom/elements |
+| 2026-06-16 | fec36c7 | a72c94d4a | 290/696 (41%) | 50646/55464 (91%) | partial: url |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -50,7 +51,7 @@ touch.
 
 ## Per-area results — 2026-06-16
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-16-5442142.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-16-fec36c7.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
@@ -60,7 +61,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-16-5442142.tsv`.
 | `dom/ranges` | 23/55 | 31446/33384 | 1938 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 2/10 | 30/53 | 23 | 0 | 0 | 0 |
-| `url` | 11/32 | 7052/7399 | 346 | 1 | 0 | 0 |
+| `url` | 15/32 | 7205/7474 | 268 | 1 | 0 | 0 |
 | `console` | 5/12 | 23/29 | 6 | 0 | 0 | 0 |
 | `hr-time` | 4/13 | 14/23 | 8 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
@@ -69,7 +70,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-16-5442142.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 94/118 | 24 | 0 | 0 | 0 |
-| **Total** | **286/696** | **50493/55389** | **4791** | **69** | **36** | **0** |
+| **Total** | **290/696** | **50646/55464** | **4713** | **69** | **36** | **0** |
 
 ## ROI by area — 2026-06-16
 
@@ -88,7 +89,7 @@ file.
 | `dom/nodes` | 1508 | 163 | 9.3 | 25 | 89 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 379 | 119 | 3.2 | 72 | 29 |
-| `url` | 347 | 21 | 16.5 | 3 | 6 |
+| `url` | 269 | 17 | 15.8 | 3 | 3 |
 | `html/dom/elements` | 195 | 22 | 8.9 | 2 | 14 |
 | `dom/traversal` | 36 | 5 | 7.2 | 0 | 2 |
 | `html/semantics/forms/the-form-element` | 24 | 12 | 2.0 | 2 | 8 |
@@ -119,7 +120,7 @@ grep `polyfills.js` first.
 | 2 | XML/XHTML **document variants + namespaced node model** — `Document-createElementNS` (281) and `Document-createElement` (88) fail only their "in XML/XHTML document" cases; `Node-lookupNamespaceURI` (48), `lookupPrefix`, `isDefaultNamespace` are stubs; per-element/attr namespace not tracked | `Document-createElementNS.html`, `Node-lookupNamespaceURI.html` | ~450 |
 | 3 | Unblock the harness-broken `dom/events` files (pages hang waiting on `test_driver`). **Partly landed:** a testdriver bridge in the WPT hook (`data/js/wpt-hook.js`) now implements `test_driver.click`, `send_keys`, and a pointer/key `action_sequence`, synthesising real mouse/pointer/keyboard events through the engine. Files that only needed a click/keypress flipped from TIMEOUT to passing (`pointer-event-document-move`, `focus-event-document-move`, `handler-count`, `label-default-action`, `legacy-pre-activation-behavior`, `preventDefault-during-activation-behavior`). **Remaining** is two larger engine features, each its own root cause: (a) the ~40-file `non-cancelable-when-passive/` cluster needs passive-listener tracking (today `addEventListener` parses `passive` then discards it) plus `TouchEvent`/`WheelEvent` synthesis with cancelability derived from passivity; (b) the `scrolling/*` cluster needs real scroll + `scrollend` infrastructure | `non-cancelable-when-passive/*` (40 files), `scrolling/scrollend-*` | ~379 |
 | 4 | ~~**`innerText`/`outerText` rendered-text algorithm**~~ — **largely landed.** The getter now flushes layout before reading (so dynamically-set `white-space`/`visibility`/`text-transform` are seen — `dynamic-getter.html` went 4/7→7/7), collects rendered text with a spec-style *required-line-break-count* model (`<p>` yields blank lines, `<br>` at end of block is kept, leading/trailing block breaks are dropped without eating preserved `white-space:pre` spaces), honours `visibility:hidden`/`collapse`, treats `display:contents` as boxless and flex/grid items as blockified, skips replaced/non-rendered subtrees (`textarea`/`iframe`/`audio`/`video`/`canvas`/`img`/`object`/`embed`/SVG/MathML), renders `<option>` and (label-less) `<optgroup>` as blocks, and applies `text-transform`. `getter.html` 159→232. **Remaining** is layout-geometry-dependent: tab-separated table cells, `::first-line`/`::first-letter` pseudo styling, shadow-DOM exclusion, whitespace at inline-block boundaries, and the `?white-space=` variant files the local runner cannot expand | `getter.html` (159→232), `dynamic-getter.html` (4/7→7/7) | landed (~80) |
-| 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA | `url-setters-a-area.window.html` 64, `url-constructor.any.html` 55, `IdnaTestV2.any.html` 50 | ~250 |
+| 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA. **Partly landed:** the JS→C marshalling for URL/`<a>`/`<area>` component setters used `JS_ToCString`+`strlen`, which truncated the value at the first embedded U+0000; setters now pass the real byte length (`JS_ToCStringLen` → `ns_url_set_component_len`) so NULs are percent-encoded (`%00`) per the WHATWG percent-encode sets instead of cutting the value short. `url-setters-stripping` 217→260, `urlencoded-parser` 66→105, `url-setters-a-area` +28, `url-setters`/`url-constructor`/`percent-encoding` smaller gains (~153 total). **Remaining**, each its own root cause: lexbor host-setter port parsing (`host='example.com:invalid'` should set hostname and stop the port parser), opaque-path erasure for non-special schemes, trailing-space handling when clearing `search`/`hash` on opaque paths, legacy query-encoding (`big5`/`euc-kr`/…) percent-encoding, and `IdnaTestV2` | `url-setters-stripping.any.html` (217→260), `urlencoded-parser.any.html` (66→105) | landed (~153) |
 | 6 | **Exotic platform objects** — `querySelectorAll` returns a real `Array` (should be a `NodeList`: `[object NodeList]`, no tamperable `length`); `HTMLCollection` wrongly has `values`/`entries`/`forEach` and an own `length`. Make both proper WebIDL legacy-platform objects | `dom/collections/*` (23), `dom/nodes/NodeList-static-length-getter-tampered-*` ×6 | ~30 |
 
 Not listed: `WebCryptoAPI/digest` — 419 of its failures are
