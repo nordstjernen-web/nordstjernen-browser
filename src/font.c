@@ -15,6 +15,7 @@
 
 #ifdef NS_HAVE_FONTCONFIG
 #include <fontconfig/fontconfig.h>
+#include <fontconfig/fcfreetype.h>
 #endif
 #ifdef NS_HAVE_PANGOFT2
 #include <pango/pangofc-fontmap.h>
@@ -115,6 +116,14 @@ ns_font_set_loaded_cb(ns_font_loaded_cb cb, gpointer user_data)
 {
     g_loaded_cb = cb;
     g_loaded_ud = user_data;
+}
+
+gboolean
+ns_font_family_loaded(const char *family)
+{
+    if (!family || !g_entries) return FALSE;
+    ns_font_entry *e = g_hash_table_lookup(g_entries, family);
+    return e && e->loaded;
 }
 
 static const char *
@@ -288,10 +297,35 @@ typedef struct ns_font_fetch_ctx {
 
 #ifdef NS_HAVE_FONTCONFIG
 static void
-ns_font_install_file(const char *path)
+ns_font_install_file(const char *path, const char *css_family)
 {
     if (!path) return;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
+    if (css_family && *css_family) {
+        int count = 0;
+        FcPattern *pat = FcFreeTypeQuery((const FcChar8 *)path, 0, NULL, &count);
+        if (pat) {
+            FcChar8 *internal = NULL;
+            if (FcPatternGetString(pat, FC_FAMILY, 0, &internal) == FcResultMatch &&
+                internal &&
+                g_ascii_strcasecmp((const char *)internal, css_family) != 0) {
+                char *fam = g_markup_escape_text(css_family, -1);
+                char *intl = g_markup_escape_text((const char *)internal, -1);
+                char *xml = g_strdup_printf(
+                    "<?xml version=\"1.0\"?>\n"
+                    "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
+                    "<fontconfig><alias binding=\"strong\"><family>%s</family>"
+                    "<prefer><family>%s</family></prefer></alias></fontconfig>",
+                    fam, intl);
+                FcConfigParseAndLoadFromMemory(FcConfigGetCurrent(),
+                                               (const FcChar8 *)xml, FcTrue);
+                g_free(xml);
+                g_free(fam);
+                g_free(intl);
+            }
+            FcPatternDestroy(pat);
+        }
+    }
 #ifdef NS_HAVE_PANGOFC
     PangoFontMap *fm = pango_cairo_font_map_get_default();
     if (fm && PANGO_IS_FC_FONT_MAP(fm))
@@ -355,7 +389,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
                 if (g_file_set_contents(path, (const char *)write_data,
                                         (gssize)write_len, &werr)) {
 #ifdef NS_HAVE_FONTCONFIG
-                    ns_font_install_file(path);
+                    ns_font_install_file(path, family);
 #endif
                     if (e) e->loaded = TRUE;
                     if (g_loaded_cb) g_loaded_cb(family, g_loaded_ud);

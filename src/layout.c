@@ -3951,7 +3951,8 @@ append_display_contents_children(ns_box *block, const ns_node *n,
     if (g_contents_depth >= NS_LAYOUT_MAX_DEPTH) return;
     g_contents_depth++;
     const ns_style *s = g_hash_table_lookup(styles, n);
-    ns_box *contents_before = (s && s->before)
+    ns_box *contents_before = (s && s->before &&
+                               !style_is_absolute_or_fixed(s->before))
         ? build_pseudo_inline_for(s->before, n) : NULL;
     if (pending_before && *pending_before) {
         contents_before = inline_merge_prefix(*pending_before, contents_before);
@@ -4044,7 +4045,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
         }
     }
 
-    if (s && s->after) {
+    if (s && s->after && !style_is_absolute_or_fixed(s->after)) {
         ns_box *contents_after = build_pseudo_inline_for(s->after, n);
         if (contents_after) box_append_child(block, contents_after);
     }
@@ -4081,12 +4082,6 @@ register_abs_pseudo(const ns_node *host, const ns_style *ps)
     if (!style_is_absolute_or_fixed(ps)) return;
     const ns_css_value *cv = ps->values[NS_CSS_CONTENT];
     if (!cv || cv->kind != NS_CSS_V_KEYWORD || !cv->u.keyword) return;
-    if (*cv->u.keyword) {
-        char *resolved = resolve_pseudo_content(cv->u.keyword, host);
-        gboolean empty = resolved && !*resolved;
-        g_free(resolved);
-        if (!empty) return;
-    }
     ns_abs_entry e;
     e.dom = host;
     e.pseudo = ps;
@@ -4326,7 +4321,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         ? build_pseudo_block_for(s->before, n) : NULL;
     if (before_block) box_append_child(block, before_block);
 
-    ns_box *pending_before = (s && s->before && !before_block)
+    ns_box *pending_before = (s && s->before && !before_block &&
+                              !style_is_absolute_or_fixed(s->before))
         ? build_pseudo_inline_for(s->before, n) : NULL;
 
     gboolean blockify_children = style_is_flex_container(s) ||
@@ -4462,7 +4458,8 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         ? build_pseudo_block_for(s->after, n) : NULL;
     if (after_block) box_append_child(block, after_block);
 
-    if (s && s->after && !after_block) {
+    if (s && s->after && !after_block &&
+        !style_is_absolute_or_fixed(s->after)) {
         ns_box *gen = build_pseudo_inline_for(s->after, n);
         if (gen) {
             ns_box *last = block->first_child;
@@ -6817,7 +6814,8 @@ estimate_natural_width(const ns_box *b, double cap)
         w = b->content_width > 0 ? b->content_width : 0;
     } else {
         for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
-            if (c->style && style_is_absolute_or_fixed(c->style)) continue;
+            if (c->style && c->style != b->style &&
+                style_is_absolute_or_fixed(c->style)) continue;
             double cw_child = estimate_natural_width(c, cap);
             int fside = float_side_of(c->style);
             if (fside >= 0 && cw_child < 60) cw_child = 60;
@@ -9786,6 +9784,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             abox = box_new(NS_BOX_BLOCK);
             abox->style = e.pseudo;
             collect_box_bg_image(abox, e.pseudo);
+            ns_box *gen = build_pseudo_inline_for(e.pseudo, e.dom);
+            if (gen) box_append_child(abox, gen);
         } else {
             g_abs_force_build = TRUE;
             abox = build_block(e.dom, styles);

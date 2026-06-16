@@ -1482,6 +1482,7 @@ ns_paint_font_available(const char *family)
     char *lo = g_ascii_strdown(family, -1);
     gboolean has = g_hash_table_contains(avail, lo);
     g_free(lo);
+    if (!has) has = ns_font_family_loaded(family);
     return has;
 }
 
