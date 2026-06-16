@@ -13419,6 +13419,20 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
     return parent_px;
 }
 
+static ns_css_value *
+ns_css_value_cow(ns_style *out, int prop)
+{
+    ns_css_value *v = out->values[prop];
+    if (!v || v->ref == 0) return v;
+    ns_css_value *copy = g_new0(ns_css_value, 1);
+    *copy = *v;
+    copy->ref = 0;
+    if (copy->next_layer) copy->next_layer->ref++;
+    v->ref--;
+    out->values[prop] = copy;
+    return copy;
+}
+
 static void
 resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
@@ -13430,8 +13444,9 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
     }
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH) {
-        out->values[NS_CSS_FONT_SIZE]->u.length.v = my_font_px;
-        out->values[NS_CSS_FONT_SIZE]->u.length.unit = NS_CSS_UNIT_PX;
+        ns_css_value *fs = ns_css_value_cow(out, NS_CSS_FONT_SIZE);
+        fs->u.length.v = my_font_px;
+        fs->u.length.unit = NS_CSS_UNIT_PX;
     } else {
         ns_css_value *fs = g_new0(ns_css_value, 1);
         fs->kind = NS_CSS_V_LENGTH;
@@ -13444,6 +13459,8 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         ns_css_value *v = out->values[i];
         if (!v) continue;
         if (v->kind == NS_CSS_V_CALC) {
+            if (v->u.calc.em != 0 || v->u.calc.rem != 0)
+                v = ns_css_value_cow(out, i);
             v->u.calc.px += v->u.calc.em * my_font_px +
                             v->u.calc.rem * root_px;
             v->u.calc.em = 0;
@@ -13453,10 +13470,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         if (v->kind != NS_CSS_V_LENGTH) continue;
         switch (v->u.length.unit) {
         case NS_CSS_UNIT_EM:
+            v = ns_css_value_cow(out, i);
             v->u.length.v *= my_font_px;
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
         case NS_CSS_UNIT_REM:
+            v = ns_css_value_cow(out, i);
             v->u.length.v *= root_px;
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
@@ -13464,6 +13483,7 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         case NS_CSS_UNIT_VH:
         case NS_CSS_UNIT_VMIN:
         case NS_CSS_UNIT_VMAX:
+            v = ns_css_value_cow(out, i);
             v->u.length.v = viewport_resolve(v->u.length.v, v->u.length.unit);
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
