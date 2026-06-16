@@ -13,6 +13,7 @@
 #include "anim.h"
 #include "css.h"
 #include "dom.h"
+#include "font.h"
 #include "image.h"
 #include "selection.h"
 #include "video.h"
