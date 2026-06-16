@@ -52,7 +52,7 @@ variable.
 
 ### Dependencies
 
-Qt 6 Core, Gui, Widgets, and Concurrent. The engine and its dependencies are
+Qt 6 Core, Gui, Widgets, Concurrent, and Svg. The engine and its dependencies are
 **not** linked into the Qt binary — they live in `nordstjernen-renderer`.
 
 ```sh

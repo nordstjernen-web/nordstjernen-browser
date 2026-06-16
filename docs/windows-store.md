@@ -56,7 +56,7 @@ versioned installer is hosted at a stable URL, submission is one
 command (it generates the manifest trio and opens the PR):
 
 ```powershell
-wingetcreate new https://nordstjernen.org/dl/nordstjernen-1.0.7-win64-setup.exe
+wingetcreate new https://nordstjernen.org/dl/nordstjernen-1.0.9-win64-setup.exe
 ```
 
 ## Packaging: MSIX

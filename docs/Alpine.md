@@ -39,11 +39,11 @@ abuild-keygen -a -i
 
 # From a checkout of this repo:
 cd data/packaging
-abuild -r              # fetches the 1.0.5 tarball, builds, packages
+abuild -r              # fetches the pkgver source tarball, builds, packages
 
 # Install the result:
 sudo apk add --allow-untrusted \
-    ~/packages/*/$(uname -m)/nordstjernen-1.0.5-r0.apk
+    ~/packages/*/$(uname -m)/nordstjernen-<pkgver>-r0.apk
 ```
 
 `abuild -r` installs `makedepends`, downloads the source during the
