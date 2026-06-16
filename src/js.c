@@ -35790,6 +35790,25 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         && strstr(resp->content_type, "xml") != NULL
         && strstr(resp->content_type, "html") == NULL;
 
+    gboolean is_xhtml = resp && resp->content_type
+        && strstr(resp->content_type, "xhtml") != NULL;
+    gboolean xhtml_suppress_scripts = FALSE;
+    if (is_xhtml && decoded) {
+        char *root_ns = NULL;
+        if (!ns_xml_well_formed(decoded, -1, &root_ns)) {
+            char *errdoc = g_strdup(
+                "<html><head><title>Parse Error</title></head><body>"
+                "<p>This XML document is not well-formed.</p></body></html>");
+            g_free(decoded);
+            decoded = errdoc;
+            xhtml_suppress_scripts = TRUE;
+        } else if (!root_ns ||
+                   strcmp(root_ns, "http://www.w3.org/1999/xhtml") != 0) {
+            xhtml_suppress_scripts = TRUE;
+        }
+        g_free(root_ns);
+    }
+
     ns_node *content_root = NULL;
     ns_node *content_doc = NULL;
     if (decoded) {
@@ -35882,6 +35901,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         js->raf_frame_ctx = iframe;
         GHashTable *globals_before = ns_js_snapshot_globals(js);
         js->iframe_load_depth++;
+        if (xhtml_suppress_scripts)
+            ns_js_mark_scripts_already_started(content_root);
         if (!scripts_ok) {
             ns_js_mark_scripts_already_started(content_root);
             if (js->log_cb) {
