@@ -1,0 +1,81 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Nordstjernen
+Upstream-Contact: Andreas Røsdal <andreas.rosdal@gmail.com>
+Source: https://github.com/nordstjernen-web/nordstjernen
+Comment:
+ The Nordstjernen source code is distributed under the Nordstjernen Source
+ License v1.0 (NSL-1.0), a source-available license that is NOT DFSG-free:
+ it forbids "Competing Use" and restricts some purposes to non-commercial
+ use. It converts to the MIT license ten years after each release. Because
+ of this restriction the package belongs in Debian's non-free component.
+ .
+ The in-tree third-party engines (lexbor, QuickJS, WAMR) and vendored
+ single-file libraries (Wuffs, pl_mpeg, miniaudio) carry their own free
+ licenses, reproduced from THIRD-PARTY-LICENSES.md below.
+
+Files: *
+Copyright: 2026 Andreas Røsdal
+License: NSL-1.0
+
+Files: src/lexbor/*
+Copyright: 2018-2025 Alexander Borisov
+License: Apache-2.0
+
+Files: subprojects/wuffs/*
+Copyright: 2019 The Wuffs Authors
+License: Apache-2.0
+
+Files: src/quickjs/*
+Copyright: 2017-2024 Fabrice Bellard
+           2017-2024 Charlie Gordon
+           2023-2025 quickjs-ng contributors
+License: Expat
+
+Files: src/wamr/*
+Copyright: 2019 Intel Corporation
+License: Apache-2.0
+
+Files: subprojects/plmpeg/*
+Copyright: 2019 Dominic Szablewski
+License: Expat
+
+License: NSL-1.0
+ Nordstjernen Source License v1.0. The full text is shipped as
+ /usr/share/doc/nordstjernen/copyright and in License.md in the source.
+ .
+ Subject to compliance, the licensor grants the right to use, copy, modify,
+ create derivative works, publish, and distribute the software for any
+ Permitted Purpose, which is any purpose other than a Competing Use. A
+ Competing Use means making the software available to others in a commercial
+ product or service that substitutes for, or offers substantially similar
+ functionality to, the software. The license includes a patent grant, a
+ redistribution clause requiring these terms to travel with copies, a
+ trademark reservation, and an "AS IS" warranty disclaimer.
+ .
+ Grant of Future License: on the tenth anniversary of each release the
+ software additionally becomes available under the MIT (Expat) license.
+ .
+ THIS IS NOT A DFSG-FREE LICENSE. THE PACKAGE MUST STAY IN non-free.
+
+License: Apache-2.0
+ On Debian systems the full text of the Apache License version 2.0 can be
+ found in /usr/share/common-licenses/Apache-2.0.
+
+License: Expat
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of this software and associated documentation files (the "Software"),
+ to deal in the Software without restriction, including without limitation
+ the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ and/or sell copies of the Software, and to permit persons to whom the
+ Software is furnished to do so, subject to the following conditions:
+ .
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+ .
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ DEALINGS IN THE SOFTWARE.

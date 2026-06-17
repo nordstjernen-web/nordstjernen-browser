@@ -1,0 +1,50 @@
+Source: nordstjernen
+Section: non-free/web
+Priority: optional
+Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ meson (>= 1.0),
+ ninja-build,
+ pkg-config,
+ libgtk-4-dev,
+ libepoxy-dev,
+ libcurl4-openssl-dev,
+ libssl-dev,
+ libuchardet-dev,
+ librsvg2-dev,
+ libpsl-dev,
+ libsqlite3-dev,
+ libseccomp-dev [linux-any],
+ libwebp-dev,
+ libenchant-2-dev,
+Standards-Version: 4.7.0
+Homepage: https://nordstjernen.org
+Vcs-Browser: https://github.com/nordstjernen-web/nordstjernen
+Vcs-Git: https://github.com/nordstjernen-web/nordstjernen.git
+Rules-Requires-Root: no
+
+Package: nordstjernen
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+Recommends:
+ mpv | ffmpeg,
+ hunspell-en-us,
+Description: small, hand-written web browser
+ Nordstjernen is a clean-room web browser written from scratch in C, with a
+ GTK 4 user interface and a libcurl network stack. It is built to be small,
+ secure, and readable by a single person end to end.
+ .
+  * A from-scratch HTML5, CSS, and JavaScript engine — no forked browser engine.
+  * Each tab's engine runs in its own sandboxed process (seccomp + Landlock on
+    Linux) behind an IPC and shared-memory framebuffer boundary.
+  * No JIT, which keeps the JavaScript attack surface small.
+  * Opt-in WebGL, gated by a per-site trust prompt.
+  * No telemetry: it does not phone home and does not track the user.
+ .
+ This package is in the non-free component because the Nordstjernen Source
+ License (NSL-1.0) restricts competing commercial use and is therefore not
+ DFSG-free. The license converts to the MIT license ten years after each
+ release.

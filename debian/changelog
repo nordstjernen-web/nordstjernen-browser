@@ -1,0 +1,8 @@
+nordstjernen (1.0.9-1) unstable; urgency=medium
+
+  * Initial Debian packaging (Closes: #NNNNNN).
+  * Targets the non-free component: the NSL-1.0 license is not DFSG-free.
+  * Built with -Dai=disabled (drops the llama.cpp CMake subproject, the only
+    build-time network dependency) and -Dqt=disabled.
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Tue, 17 Jun 2026 00:00:00 +0000
