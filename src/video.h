@@ -28,11 +28,16 @@ typedef struct ns_video {
     gboolean     autoplay;
     gboolean     loop;
     gboolean     controls;
+    gboolean     muted;
+    gboolean     has_audio;
+    gboolean     audio_opened;
+    char        *token;
     gboolean     playing;
     gboolean     ended;
     gboolean     meta_sent;
     gint64       base_us;
     double       cur_time;
+    double       prev_tick_time;
     double       last_emit_time;
     double       duration;
 } ns_video;
@@ -41,6 +46,7 @@ typedef struct ns_video_cache ns_video_cache;
 typedef struct ns_tab_worker  ns_tab_worker;
 typedef void (*ns_video_js_cb)(const void *dom_node, const char *kind,
                                double value, gpointer user_data);
+typedef void (*ns_video_audio_cb)(const char *command, gpointer user_data);
 
 ns_video_cache *ns_video_cache_new(void);
 void            ns_video_cache_free(ns_video_cache *cache);
@@ -50,6 +56,9 @@ void            ns_video_cache_set_base(ns_video_cache *cache,
                                         const char *base_url);
 void            ns_video_cache_set_js_cb(ns_video_cache *cache,
                                          ns_video_js_cb cb, gpointer user_data);
+void            ns_video_cache_set_audio_cb(ns_video_cache *cache,
+                                            ns_video_audio_cb cb,
+                                            gpointer user_data);
 
 void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
                                  gint64 now_us);

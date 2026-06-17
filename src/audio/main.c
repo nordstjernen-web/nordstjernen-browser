@@ -1,4 +1,4 @@
-/* nordstjernen-audio: isolated MP3 playback helper driven over stdin/stdout. */
+/* nordstjernen-audio: isolated MP3 / MPEG-1 audio playback helper driven over stdin/stdout. */
 #include "miniaudio.h"
 
 #include <stdio.h>
@@ -10,15 +10,19 @@
 
 #include <curl/curl.h>
 
+#include "pl_mpeg.h"
+
 #define NS_AUDIO_MAX_PLAYERS 16
 
 typedef struct {
-    char     token[64];
-    int      used;
-    int      loaded;
-    int      playing;
-    ma_sound sound;
-    char    *tmp_path;
+    char            token[64];
+    int             used;
+    int             loaded;
+    int             playing;
+    ma_sound        sound;
+    ma_audio_buffer abuf;
+    int             has_abuf;
+    char           *tmp_path;
 } ns_audio_player;
 
 static ma_engine       g_engine;
@@ -66,11 +70,95 @@ player_release(ns_audio_player *p)
 {
     if (!p || !p->used) return;
     if (p->loaded) ma_sound_uninit(&p->sound);
+    if (p->has_abuf) ma_audio_buffer_uninit(&p->abuf);
     if (p->tmp_path) {
         remove(p->tmp_path);
         free(p->tmp_path);
     }
     memset(p, 0, sizeof *p);
+}
+
+#define NS_AUDIO_MAX_SECONDS 1800
+
+static int
+file_is_mpeg1(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    unsigned char h[4] = { 0 };
+    size_t n = fread(h, 1, 4, f);
+    fclose(f);
+    return n == 4 && h[0] == 0x00 && h[1] == 0x00 && h[2] == 0x01 &&
+           (h[3] == 0xBA || h[3] == 0xB3);
+}
+
+static int
+load_mpeg_audio(ns_audio_player *p, const char *path)
+{
+    if (!file_is_mpeg1(path)) return 0;
+
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n <= 0) { fclose(f); return 0; }
+    unsigned char *bytes = malloc((size_t)n);
+    if (!bytes) { fclose(f); return 0; }
+    if (fread(bytes, 1, (size_t)n, f) != (size_t)n) {
+        free(bytes); fclose(f); return 0;
+    }
+    fclose(f);
+
+    plm_t *plm = plm_create_with_memory(bytes, (size_t)n, 1);
+    if (!plm) return 0;
+    plm_set_video_enabled(plm, 0);
+    plm_set_audio_enabled(plm, 1);
+    int rate = plm_get_samplerate(plm);
+    if (plm_get_num_audio_streams(plm) < 1 || rate <= 0) {
+        plm_destroy(plm);
+        return 0;
+    }
+
+    size_t cap = (size_t)rate * 2u * 8u;
+    size_t len = 0;
+    float *pcm = malloc(cap * sizeof(float));
+    if (!pcm) { plm_destroy(plm); return 0; }
+    size_t max_floats = (size_t)rate * 2u * NS_AUDIO_MAX_SECONDS;
+    plm_samples_t *s;
+    while ((s = plm_decode_audio(plm)) != NULL) {
+        size_t add = (size_t)s->count * 2u;
+        if (len + add > cap) {
+            while (len + add > cap) cap *= 2;
+            float *grown = realloc(pcm, cap * sizeof(float));
+            if (!grown) { free(pcm); plm_destroy(plm); return 0; }
+            pcm = grown;
+        }
+        memcpy(pcm + len, s->interleaved, add * sizeof(float));
+        len += add;
+        if (len >= max_floats) break;
+    }
+    plm_destroy(plm);
+    if (len == 0) { free(pcm); return 0; }
+
+    ma_uint64 frames = len / 2;
+    ma_audio_buffer_config cfg =
+        ma_audio_buffer_config_init(ma_format_f32, 2, frames, pcm, NULL);
+    cfg.sampleRate = (ma_uint32)rate;
+    ma_result r = ma_audio_buffer_init_copy(&cfg, &p->abuf);
+    free(pcm);
+    if (r != MA_SUCCESS) return 0;
+    p->has_abuf = 1;
+
+    r = ma_sound_init_from_data_source(&g_engine, &p->abuf,
+        MA_SOUND_FLAG_NO_SPATIALIZATION, NULL, &p->sound);
+    if (r != MA_SUCCESS) {
+        ma_audio_buffer_uninit(&p->abuf);
+        p->has_abuf = 0;
+        return 0;
+    }
+    p->loaded = 1;
+    return 1;
 }
 
 static size_t
@@ -141,11 +229,13 @@ cmd_open(const char *token, const char *url)
     if (!path) { emit("error %s fetch-failed", token); return; }
     p->tmp_path = tmp;
 
-    ma_result r = ma_sound_init_from_file(&g_engine, path,
-        MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION,
-        NULL, NULL, &p->sound);
-    if (r != MA_SUCCESS) { emit("error %s decode-failed", token); player_release(p); return; }
-    p->loaded = 1;
+    if (!load_mpeg_audio(p, path)) {
+        ma_result r = ma_sound_init_from_file(&g_engine, path,
+            MA_SOUND_FLAG_DECODE | MA_SOUND_FLAG_NO_SPATIALIZATION,
+            NULL, NULL, &p->sound);
+        if (r != MA_SUCCESS) { emit("error %s decode-failed", token); player_release(p); return; }
+        p->loaded = 1;
+    }
 
     float len = 0.0f;
     ma_sound_get_length_in_seconds(&p->sound, &len);

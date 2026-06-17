@@ -27,11 +27,16 @@ nothing imported.
   `src/video_decode.c`). A `<video>` whose source is an `.mpg`/`.mpeg`/`.m1v`
   stream plays **inline** — frames are decoded in the sandboxed renderer
   and advanced off the animation tick (`src/video.c`), honouring
-  `autoplay`/`loop`/`poster` and click-to-play/pause. No embedded audio
-  codecs, and don't add a second video codec. `<audio>` and non-MPEG-1
-  `<video>` render a poster and play overlay; clicking resolves the media
-  URL in the renderer (`ns_browser_media_at`) and the shell hands it to an
-  external player (`src/media.c::ns_media_try_launch`).
+  `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. The MP2
+  audio track plays via the unsandboxed `nordstjernen-audio` helper
+  (`src/audio/main.c`, pl_mpeg decode + miniaudio output): the renderer
+  emits `open`/`play`/`pause`/`seek`/`stop` commands that ride the
+  render-response `X-Audio` side-channel to the shell, which spawns and
+  pumps the helper (`src/gtk/procview.c`). Don't add a second video codec
+  or a standalone audio codec — MP2 rides on MPEG-1. `<audio>` and
+  non-MPEG-1 `<video>` render a poster and play overlay; clicking resolves
+  the media URL in the renderer (`ns_browser_media_at`) and the shell hands
+  it to an external player (`src/media.c::ns_media_try_launch`).
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue

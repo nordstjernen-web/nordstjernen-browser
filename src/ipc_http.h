@@ -29,6 +29,7 @@ typedef struct {
     char  x_nav[2048];
     char  x_webgl[2048];
     char  x_download[3072];
+    char  x_audio[3072];
 } http_head;
 
 void http_conn_init(http_conn *c, int fd);

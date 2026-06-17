@@ -14,6 +14,7 @@ struct ns_video_player {
     plm_t      *plm;
     int         width;
     int         height;
+    int         has_audio;
     double      duration;
     ns_texture *cur_tex;
     double      cur_time;
@@ -53,6 +54,7 @@ ns_video_player_new(const guint8 *bytes, gsize len)
     player->plm = plm;
     player->width = w;
     player->height = h;
+    player->has_audio = plm_get_num_audio_streams(plm) > 0;
     player->duration = plm_get_duration(plm);
     player->cur_time = -1.0;
     player->pending_time = -1.0;
@@ -67,6 +69,12 @@ ns_video_player_free(ns_video_player *player)
     ns_texture_unref(player->pending_tex);
     if (player->plm) plm_destroy(player->plm);
     g_free(player);
+}
+
+gboolean
+ns_video_player_has_audio(const ns_video_player *player)
+{
+    return player ? player->has_audio != 0 : FALSE;
 }
 
 int

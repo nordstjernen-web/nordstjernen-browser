@@ -292,6 +292,13 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_download, val, vlen);
             out->x_download[vlen] = '\0';
         }
+        else if (strcasecmp(line, "X-Audio") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_audio)
+                vlen = sizeof out->x_audio - 1;
+            memcpy(out->x_audio, val, vlen);
+            out->x_audio[vlen] = '\0';
+        }
     }
     if (out->content_length < 0 || out->content_length > NS_HTTP_MAX_BODY)
         return -1;

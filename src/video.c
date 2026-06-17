@@ -7,6 +7,7 @@
 
 #include <gio/gio.h>
 #include <math.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include "dom.h"
@@ -19,13 +20,16 @@
 #define NS_VIDEO_MAX_BYTES (256u * 1024u * 1024u)
 
 struct ns_video_cache {
-    GHashTable    *by_url;
-    GHashTable    *requested;
-    GPtrArray     *pending;
-    ns_tab_worker *worker;
-    char          *base_url;
-    ns_video_js_cb js_cb;
-    gpointer       js_user;
+    GHashTable       *by_url;
+    GHashTable       *requested;
+    GPtrArray        *pending;
+    ns_tab_worker    *worker;
+    char             *base_url;
+    ns_video_js_cb    js_cb;
+    gpointer          js_user;
+    ns_video_audio_cb audio_cb;
+    gpointer          audio_user;
+    guint             next_token;
 };
 
 typedef struct ns_pending {
@@ -40,6 +44,7 @@ ns_video_free(gpointer p)
     ns_video *v = p;
     if (!v) return;
     g_free(v->url);
+    g_free(v->token);
     ns_texture_unref(v->poster_texture);
     ns_texture_unref(v->frame_texture);
     ns_video_player_free(v->player);
@@ -79,9 +84,77 @@ ns_video_cache_set_js_cb(ns_video_cache *cache, ns_video_js_cb cb, gpointer user
 }
 
 void
+ns_video_cache_set_audio_cb(ns_video_cache *cache, ns_video_audio_cb cb,
+                            gpointer user_data)
+{
+    if (!cache) return;
+    cache->audio_cb = cb;
+    cache->audio_user = user_data;
+}
+
+static void
+ns_video_emit_audio(ns_video_cache *cache, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
+
+static void
+ns_video_emit_audio(ns_video_cache *cache, const char *fmt, ...)
+{
+    if (!cache || !cache->audio_cb) return;
+    va_list ap;
+    va_start(ap, fmt);
+    char *cmd = g_strdup_vprintf(fmt, ap);
+    va_end(ap);
+    cache->audio_cb(cmd, cache->audio_user);
+    g_free(cmd);
+}
+
+static void
+ns_video_audio_start(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v || v->muted || !v->has_audio) return;
+    if (!v->token)
+        v->token = g_strdup_printf("nv%u", ++cache->next_token);
+    if (!v->audio_opened) {
+        ns_video_emit_audio(cache, "open %s %s", v->token, v->url);
+        if (v->loop)
+            ns_video_emit_audio(cache, "loop %s 1", v->token);
+        v->audio_opened = TRUE;
+    }
+    ns_video_emit_audio(cache, "play %s", v->token);
+}
+
+static void
+ns_video_audio_pause(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v || !v->audio_opened) return;
+    ns_video_emit_audio(cache, "pause %s", v->token);
+}
+
+static void
+ns_video_audio_stop(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v || !v->audio_opened) return;
+    ns_video_emit_audio(cache, "stop %s", v->token);
+    v->audio_opened = FALSE;
+}
+
+static void
+ns_video_audio_resync(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v || !v->audio_opened) return;
+    ns_video_emit_audio(cache, "seek %s 0", v->token);
+}
+
+void
 ns_video_cache_free(ns_video_cache *cache)
 {
     if (!cache) return;
+    if (cache->audio_cb) {
+        GHashTableIter it;
+        gpointer key, val;
+        g_hash_table_iter_init(&it, cache->by_url);
+        while (g_hash_table_iter_next(&it, &key, &val))
+            ns_video_audio_stop(cache, val);
+    }
     for (guint i = 0; i < cache->pending->len; i++) {
         ns_pending *p = g_ptr_array_index(cache->pending, i);
         p->dead = TRUE;
@@ -134,6 +207,8 @@ ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
     gboolean was_playing = v->playing;
     ns_video_toggle(v, now_us);
     ns_video_emit_js(cache, v, was_playing ? "pause" : "play", v->cur_time);
+    if (was_playing) ns_video_audio_pause(cache, v);
+    else ns_video_audio_start(cache, v);
     return TRUE;
 }
 
@@ -151,6 +226,7 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
 
     v->player = player;
     v->duration = ns_video_player_duration(player);
+    v->has_audio = ns_video_player_has_audio(player);
     if (v->natural_width <= 0)  v->natural_width  = ns_video_player_width(player);
     if (v->natural_height <= 0) v->natural_height = ns_video_player_height(player);
 
@@ -158,7 +234,10 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
     ns_texture *frame = ns_video_player_frame_at(player, 0.0, v->loop, &ended);
     if (frame) v->frame_texture = ns_texture_ref(frame);
 
-    if (v->autoplay) ns_video_play(v, g_get_monotonic_time());
+    if (v->autoplay) {
+        ns_video_play(v, g_get_monotonic_time());
+        ns_video_audio_start(pending->cache, v);
+    }
 }
 
 static void
@@ -292,6 +371,7 @@ ns_video_cache_start(ns_video_cache *cache, ns_box *box,
     v->autoplay = attr_present(box->dom, "autoplay");
     v->loop = attr_present(box->dom, "loop");
     v->controls = attr_present(box->dom, "controls");
+    v->muted = attr_present(box->dom, "muted");
     v->cur_time = 0.0;
     g_hash_table_insert(cache->by_url, g_strdup(abs_url), v);
     box->media->video = v;
@@ -373,6 +453,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (v->loop && v->duration > 0.0)
             t = fmod(elapsed, v->duration);
 
+        if (v->loop && t + 1e-3 < v->prev_tick_time)
+            ns_video_audio_resync(cache, v);
+        v->prev_tick_time = t;
+
         gboolean ended = FALSE;
         ns_texture *frame = ns_video_player_frame_at(v->player, t, v->loop, &ended);
         if (frame) {
@@ -389,6 +473,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->playing = FALSE;
             v->ended = TRUE;
             v->cur_time = v->duration;
+            ns_video_audio_stop(cache, v);
             ns_video_emit_js(cache, v, "ended", v->duration);
         }
     }

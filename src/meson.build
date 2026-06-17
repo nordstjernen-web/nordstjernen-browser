@@ -293,7 +293,7 @@ if not is_android
     )
   endif
 
-  audio_deps = [dependency('libcurl')]
+  audio_deps = [dependency('libcurl'), libplmpeg]
   audio_lib_deps = []
   if host_machine.system() == 'linux'
     audio_lib_deps += [cc.find_library('dl', required: false),

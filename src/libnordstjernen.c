@@ -712,6 +712,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     }
     if (b->videos) {
         ns_video_cache_set_js_cb(b->videos, browser_js_video, b);
+        ns_video_cache_set_audio_cb(b->videos, browser_js_audio, b);
     }
 
     browser_arm_declarative_refresh(b, refresh_hdr);

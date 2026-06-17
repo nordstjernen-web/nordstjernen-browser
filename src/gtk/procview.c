@@ -76,6 +76,7 @@ typedef struct {
     char            *nav;
     char            *webgl;
     char            *download;
+    char            *audio;
     cairo_surface_t *surface;
     gboolean         surface_borrowed;
     char            *href;
@@ -112,6 +113,9 @@ struct NsProcView {
     ns_rproc_http *proc;
     GMutex      proc_lock;
     char       *renderer_path;
+
+    GSubprocess  *audio_proc;
+    GOutputStream *audio_in;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -390,9 +394,12 @@ set_busy_cursor(NsProcView *v)
         gtk_widget_set_cursor_from_name(v->area, "wait");
 }
 
+static void pv_audio_shutdown(NsProcView *v);
+
 static void
 pv_free(NsProcView *v)
 {
+    pv_audio_shutdown(v);
     if (v->queue) {
         Req *r;
         while ((r = g_async_queue_try_pop(v->queue))) {
@@ -473,6 +480,79 @@ ns_proc_renderer_path(void)
         g_free(dir);
     }
     return g_strdup(name);
+}
+
+static char *
+ns_proc_audio_helper_path(void)
+{
+#ifdef G_OS_WIN32
+    const char *name = "nordstjernen-audio.exe";
+#else
+    const char *name = "nordstjernen-audio";
+#endif
+    const char *exe = ns_app_self_exe();
+    if (exe) {
+        char *dir = g_path_get_dirname(exe);
+        char *parent = g_build_filename("..", name, NULL);
+        const char *rel[] = { name, parent, NULL };
+        for (int i = 0; rel[i]; i++) {
+            char *cand = g_build_filename(dir, rel[i], NULL);
+            if (g_file_test(cand, G_FILE_TEST_IS_EXECUTABLE)) {
+                g_free(parent);
+                g_free(dir);
+                return cand;
+            }
+            g_free(cand);
+        }
+        g_free(parent);
+        g_free(dir);
+    }
+    return g_strdup(name);
+}
+
+static void
+pv_audio_pump(NsProcView *v, const char *commands)
+{
+    if (!commands || !*commands) return;
+    if (!v->audio_proc) {
+        char *path = ns_proc_audio_helper_path();
+        GError *err = NULL;
+        v->audio_proc = g_subprocess_new(
+            G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_SILENCE |
+            G_SUBPROCESS_FLAGS_STDERR_SILENCE,
+            &err, path, NULL);
+        g_free(path);
+        if (!v->audio_proc) {
+            g_clear_error(&err);
+            return;
+        }
+        v->audio_in = g_subprocess_get_stdin_pipe(v->audio_proc);
+    }
+    if (!v->audio_in) return;
+
+    char **lines = g_strsplit(commands, "\x1f", -1);
+    for (int i = 0; lines[i]; i++) {
+        if (!*lines[i]) continue;
+        char *line = g_strconcat(lines[i], "\n", NULL);
+        g_output_stream_write_all(v->audio_in, line, strlen(line),
+                                  NULL, NULL, NULL);
+        g_free(line);
+    }
+    g_output_stream_flush(v->audio_in, NULL, NULL);
+    g_strfreev(lines);
+}
+
+static void
+pv_audio_shutdown(NsProcView *v)
+{
+    if (!v->audio_proc) return;
+    if (v->audio_in) {
+        g_output_stream_write_all(v->audio_in, "quit\n", 5, NULL, NULL, NULL);
+        g_output_stream_flush(v->audio_in, NULL, NULL);
+    }
+    g_subprocess_force_exit(v->audio_proc);
+    g_clear_object(&v->audio_proc);
+    v->audio_in = NULL;
 }
 
 static cairo_surface_t *
@@ -605,6 +685,10 @@ worker_main(gpointer data)
                 if (fr.download) {
                     res->download = g_strdup(fr.download);
                     free(fr.download);
+                }
+                if (fr.audio) {
+                    res->audio = g_strdup(fr.audio);
+                    free(fr.audio);
                 }
             } else if (v->proc) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
@@ -1250,6 +1334,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
 {
     if (!url || !*url)
         return;
+    pv_audio_shutdown(v);
     if (ns_media_is_video_page(url)) {
         char *app = NULL, *app_url = NULL;
         ns_media_status st = ns_media_try_launch(url, TRUE, &app, &app_url);
@@ -1585,6 +1670,8 @@ on_result(gpointer data)
             pv_webgl_prompt(v, res->webgl);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
+        if (res->ok && res->audio && *res->audio)
+            pv_audio_pump(v, res->audio);
         v->render_inflight = FALSE;
         if (v->render_pending) {
             v->render_pending = FALSE;
@@ -1816,6 +1903,7 @@ done:
     g_free(res->nav);
     g_free(res->webgl);
     g_free(res->download);
+    g_free(res->audio);
     free(res->href);
     free(res->cursor);
     free(res->media_url);

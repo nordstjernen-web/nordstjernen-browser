@@ -207,12 +207,21 @@ single-file, MIT-licensed MPEG-1 video decoder — inside the sandboxed
 renderer process; no external library, no GPU API, and no syscalls
 beyond memory are needed, so it runs comfortably under the seccomp
 filter. Decoded BGRA frames are advanced off the renderer's existing
-animation tick, honouring the `autoplay`, `loop`, `width`/`height`,
-and `poster` attributes; a click toggles play/pause; and the
-`HTMLMediaElement` events (`loadedmetadata`, `durationchange`,
+animation tick, honouring the `autoplay`, `loop`, `muted`,
+`width`/`height`, and `poster` attributes; a click toggles play/pause;
+and the `HTMLMediaElement` events (`loadedmetadata`, `durationchange`,
 `canplay`, `timeupdate`, `play`, `pause`, `ended`) fire on the element
 as it plays. Only one video codec is built in, by design — MPEG-1 is
 small, patent-free, and decodes in pure portable C.
+
+The MPEG-1 stream's **MP2 audio track** plays too (unless the element
+is `muted`). The seccomp-sandboxed renderer can't open a sound device,
+so audio is handed to the unsandboxed `nordstjernen-audio` helper:
+pl_mpeg decodes the MP2 track to PCM and
+[miniaudio](https://github.com/mackron/miniaudio) (MIT / public-domain,
+vendored in-tree) plays it. The inline player drives the helper —
+`open`/`play`/`pause`/`seek`/`stop` ride the renderer→shell render
+channel, and looping re-syncs the audio at each wrap.
 
 **Other media.** Nordstjernen ships no other media codecs. `<audio>`
 and non-MPEG-1 `<video>` render a poster and a play overlay; clicking
