@@ -24,11 +24,13 @@ jobs:
       NDK_VERSION: '27.3.13750724'
       CMAKE_VERSION: '3.22.1'
       ANDROID_API: '35'
-      NORDSTJERNEN_ANDROID_SYSROOT: ${{ runner.temp }}/nordstjernen-android-sysroot
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Configure sysroot path
+        run: echo "NORDSTJERNEN_ANDROID_SYSROOT=${RUNNER_TEMP}/nordstjernen-android-sysroot" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
