@@ -530,6 +530,7 @@ ns_box_free(ns_box *box)
             g_ptr_array_add(stack, c);
             c = next;
         }
+        if (cur->paint_layout) ns_paint_drop_box_cache(cur);
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
         if (cur->table_col_hints) g_array_free(cur->table_col_hints, TRUE);

@@ -145,6 +145,8 @@ typedef struct ns_box {
     double inline_min_cache_width;
     gboolean inline_min_cache_valid;
 
+    void *paint_layout;
+
     GArray *links;
     GArray *attrs;
     GArray *inline_atomics;
@@ -167,6 +169,8 @@ void ns_inline_apply_atomic_shapes(struct _PangoAttrList *list, const ns_box *bo
 double ns_text_indent_px(const ns_style *s, double basis);
 
 void ns_box_free(ns_box *box);
+
+void ns_paint_drop_box_cache(ns_box *box);
 
 struct ns_image_cache;
 ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,

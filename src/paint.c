@@ -1967,15 +1967,19 @@ paint_spell_underlines(PangoAttrList *attrs, const ns_box *b)
         spell_underline_range(attrs, b->text, 0, tlen);
 }
 
-static void
-paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
+void
+ns_paint_drop_box_cache(ns_box *box)
 {
-    if (!b->text || !*b->text) return;
-    const ns_style *s = inherited_style(b);
-    rgba color = rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
-                           s ? s->values[NS_CSS_COLOR] : NULL,
-                           0.07, 0.07, 0.07, 1);
+    if (box && box->paint_layout) {
+        g_object_unref(box->paint_layout);
+        box->paint_layout = NULL;
+    }
+}
 
+static PangoLayout *
+paint_inline_make_layout(const ns_box *b, const ns_style *s,
+                         const char *highlight)
+{
     PangoLayout *layout = paint_create_layout();
     ns_paint_apply_inline_font(layout, s);
 
@@ -1986,13 +1990,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
         pango_layout_set_width(layout, (int)(b->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
     ns_paint_apply_css_line_spacing(layout, s);
-    double text_x = b->x;
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0)
             pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
-        else if (ti < 0)
-            text_x += ti;
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
@@ -2219,13 +2220,35 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     pango_layout_set_attributes(layout, attrs);
     pango_attr_list_unref(attrs);
 
-    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
-    double y_origin = b->y + y_offset;
-
     apply_text_align(layout, s);
     const ns_css_value *ta = s ? s->values[NS_CSS_TEXT_ALIGN] : NULL;
     if (keyword_is(ta, "justify"))
         pango_layout_set_justify(layout, TRUE);
+    return layout;
+}
+
+static void
+paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
+{
+    if (!b->text || !*b->text) return;
+    const ns_style *s = inherited_style(b);
+    rgba color = rgba_anim(b, NS_CSS_ANIM_TARGET_COLOR,
+                           s ? s->values[NS_CSS_COLOR] : NULL,
+                           0.07, 0.07, 0.07, 1);
+
+    double text_x = b->x;
+    {
+        double ti = ns_text_indent_px(s, b->content_width);
+        if (ti < 0) text_x += ti;
+    }
+    gboolean layout_cacheable = !(highlight && *highlight);
+    PangoLayout *layout = (layout_cacheable && b->paint_layout)
+        ? (PangoLayout *)g_object_ref(b->paint_layout)
+        : paint_inline_make_layout(b, s, highlight);
+    if (layout_cacheable && !b->paint_layout)
+        ((ns_box *)b)->paint_layout = (PangoLayout *)g_object_ref(layout);
+    double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
+    double y_origin = b->y + y_offset;
 
     if (b->attrs) {
         for (guint i = 0; i < b->attrs->len; i++) {
