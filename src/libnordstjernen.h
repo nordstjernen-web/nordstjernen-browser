@@ -142,6 +142,13 @@ int   ns_browser_set_focused_editable_selection(ns_browser *browser,
  * should re-render, 0 if nothing visible changed, -1 if no page is open. */
 int ns_browser_hover(ns_browser *browser, int x, int y);
 
+/* Deliver a native OS file drop at page coordinates (CSS px). paths is an array
+ * of n_paths absolute filesystem paths. Builds a DataTransfer carrying the files
+ * and dispatches the HTML dragenter -> dragover -> drop (or dragleave) sequence
+ * at the hit-tested target. Returns 1 if the page changed and should re-render. */
+int ns_browser_drop_files(ns_browser *browser, int x, int y,
+                          const char *const *paths, int n_paths);
+
 /* DevTools console: drain accumulated console.log/warn/error/info/debug output
  * produced since the last drain, one message per line, or NULL if there is
  * none. The internal buffer is bounded; the result is newly allocated (free

@@ -18904,6 +18904,73 @@ ns_js_drag_session_set_data(ns_js_drag_session *session,
     JS_FreeValue(ctx, fn);
 }
 
+static JSValue
+ns_js_file_from_path(JSContext *ctx, const char *path)
+{
+    if (!path || !*path) return JS_NULL;
+    char *contents = NULL;
+    gsize len = 0;
+    if (!g_file_get_contents(path, &contents, &len, NULL))
+        return JS_NULL;
+    const char *base = strrchr(path, '/');
+#ifdef G_OS_WIN32
+    const char *base_w = strrchr(path, '\\');
+    if (!base || (base_w && base_w > base)) base = base_w;
+#endif
+    const char *bname = base ? base + 1 : path;
+    g_autofree char *mime = g_content_type_guess(path, (const guchar *)contents,
+                                                 len < 4096 ? len : 4096, NULL);
+    g_autofree char *mime_type = mime ? g_content_type_get_mime_type(mime) : NULL;
+    JSValue file = JS_NULL;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue file_ctor = JS_GetPropertyStr(ctx, global, "File");
+    JS_FreeValue(ctx, global);
+    if (JS_IsConstructor(ctx, file_ctor)) {
+        JSValue ab = JS_NewArrayBufferCopy(ctx, (const uint8_t *)contents, len);
+        JSValue parts = JS_NewArray(ctx);
+        JS_SetPropertyUint32(ctx, parts, 0, ab);
+        JSValue opts = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, opts, "type",
+            JS_NewString(ctx, mime_type && *mime_type
+                                ? mime_type : "application/octet-stream"));
+        JSValue name_str = JS_NewString(ctx, bname);
+        JSValueConst args[3] = { parts, name_str, opts };
+        JSValue made = JS_CallConstructor(ctx, file_ctor, 3, args);
+        if (!JS_IsException(made)) file = made;
+        else JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, parts);
+        JS_FreeValue(ctx, name_str);
+        JS_FreeValue(ctx, opts);
+    }
+    JS_FreeValue(ctx, file_ctor);
+    g_free(contents);
+    return file;
+}
+
+void
+ns_js_drag_session_add_file(ns_js_drag_session *session, const char *path)
+{
+    if (!session || !session->js || !session->js->ctx || !path) return;
+    JSContext *ctx = session->js->ctx;
+    JSValue file = ns_js_file_from_path(ctx, path);
+    if (JS_IsNull(file) || JS_IsUndefined(file)) {
+        JS_FreeValue(ctx, file);
+        return;
+    }
+    JSValue items = JS_GetPropertyStr(ctx, session->data_transfer, "items");
+    JSValue add = JS_IsObject(items)
+        ? JS_GetPropertyStr(ctx, items, "add") : JS_UNDEFINED;
+    if (JS_IsFunction(ctx, add)) {
+        JSValueConst args[1] = { file };
+        JSValue ret = JS_Call(ctx, add, items, 1, args);
+        if (JS_IsException(ret)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, ret);
+    }
+    JS_FreeValue(ctx, add);
+    JS_FreeValue(ctx, items);
+    JS_FreeValue(ctx, file);
+}
+
 gboolean
 ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
                           const ns_node *target, const char *type,

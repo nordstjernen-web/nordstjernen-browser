@@ -147,6 +147,8 @@ void                ns_js_drag_session_free(ns_js_drag_session *session);
 void                ns_js_drag_session_set_data(ns_js_drag_session *session,
                                                 const char *type,
                                                 const char *data);
+void                ns_js_drag_session_add_file(ns_js_drag_session *session,
+                                                const char *path);
 gboolean            ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
                                               const ns_node *target,
                                               const char *type,

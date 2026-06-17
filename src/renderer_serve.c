@@ -430,6 +430,32 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/dropfiles") == 0) {
+        long x = 0, y = 0;
+        json_get_long(body, "x", &x);
+        json_get_long(body, "y", &y);
+        char *paths = json_get_str(body, "paths");
+        int changed = 0;
+        if (s->cur && paths && *paths) {
+            char **list = g_strsplit(paths, "\n", -1);
+            guint count = list ? g_strv_length(list) : 0;
+            if (count > 0)
+                changed = ns_browser_drop_files(s->cur, (int)x, (int)y,
+                                                (const char *const *)list,
+                                                (int)count);
+            g_strfreev(list);
+        }
+        if (changed > 0) s->frame_valid = 0;
+        char *json = NULL;
+        int n = asprintf(&json, "{\"changed\":%d}", changed > 0 ? 1 : 0);
+        if (n > 0)
+            http_write_response(ctrl_w, 200, "application/json", NULL,
+                                json, (size_t)n);
+        free(json);
+        free(paths);
+        return 0;
+    }
+
     if (strcmp(head->path, "/hover") == 0) {
         long x = 0, y = 0;
         json_get_long(body, "x", &x);

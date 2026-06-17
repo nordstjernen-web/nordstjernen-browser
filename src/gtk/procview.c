@@ -28,7 +28,7 @@ pv_settle_ms(void)
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
-    REQ_EVAL,
+    REQ_EVAL, REQ_DROPFILES,
     REQ_WEBGL, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
@@ -56,12 +56,13 @@ typedef struct {
     int     find_from_y;
     int     find_case;
     char   *export_dest;
+    char   *paths;
 } Req;
 
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL, RES_FAVICON
+    RES_CONSOLE, RES_EVAL, RES_FAVICON, RES_DROPFILES
 } ResType;
 
 typedef struct {
@@ -678,6 +679,21 @@ worker_main(gpointer data)
                                                    &res->href,
                                                    &res->cursor) == 1;
             post(res);
+        } else if (req->type == REQ_DROPFILES) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_DROPFILES;
+            res->seq = req->seq;
+            if (v->proc && req->paths && *req->paths) {
+                char **list = g_strsplit(req->paths, "\n", -1);
+                guint count = list ? g_strv_length(list) : 0;
+                if (count > 0)
+                    res->ok = ns_rproc_http_drop_files(
+                        v->proc, req->x, req->y,
+                        (const char *const *)list, (int)count) == 1;
+                g_strfreev(list);
+            }
+            post(res);
         } else if (req->type == REQ_RELEASE) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -755,6 +771,7 @@ worker_main(gpointer data)
         g_free(req->code);
         g_free(req->query);
         g_free(req->export_dest);
+        g_free(req->paths);
         g_free(req);
     }
     if (v->proc)
@@ -1165,6 +1182,21 @@ start_click(NsProcView *v, int x, int y, int mods)
     req->x = x;
     req->y = y;
     req->mods = mods;
+    push_req(v, req);
+}
+
+static void
+start_dropfiles(NsProcView *v, int x, int y, char *paths)
+{
+    if (!v->opened) {
+        g_free(paths);
+        return;
+    }
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_DROPFILES;
+    req->x = x;
+    req->y = y;
+    req->paths = paths;
     push_req(v, req);
 }
 
@@ -1664,6 +1696,9 @@ on_result(gpointer data)
             v->hover_pending = FALSE;
             start_hover(v, v->hover_pending_x, v->hover_pending_y);
         }
+    } else if (res->type == RES_DROPFILES) {
+        if (res->ok)
+            request_render(v);
     } else if (res->type == RES_RELEASE) {
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
@@ -2543,6 +2578,40 @@ build_search_bar(NsProcView *v)
     gtk_overlay_add_overlay(GTK_OVERLAY(v->root), v->search_revealer);
 }
 
+static gboolean
+on_file_drop(GtkDropTarget *target, const GValue *value, double x, double y,
+             gpointer data)
+{
+    (void)target;
+    NsProcView *v = data;
+    if (!v->opened || !G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
+        return FALSE;
+    GdkFileList *fl = g_value_get_boxed(value);
+    if (!fl)
+        return FALSE;
+    GSList *files = gdk_file_list_get_files(fl);
+    GString *paths = g_string_new(NULL);
+    for (GSList *l = files; l; l = l->next) {
+        char *p = g_file_get_path(G_FILE(l->data));
+        if (!p)
+            continue;
+        if (paths->len)
+            g_string_append_c(paths, '\n');
+        g_string_append(paths, p);
+        g_free(p);
+    }
+    g_slist_free(files);
+    if (paths->len == 0) {
+        g_string_free(paths, TRUE);
+        return FALSE;
+    }
+    double s = cur_scale(v);
+    int px = v->scroll_x + (int)(x / s);
+    int py = v->scroll_y + (int)(y / s);
+    start_dropfiles(v, px, py, g_string_free(paths, FALSE));
+    return TRUE;
+}
+
 NsProcView *
 ns_proc_view_new(void)
 {
@@ -2596,6 +2665,11 @@ ns_proc_view_new(void)
     g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), v);
     g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), v);
     gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(drag));
+
+    GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,
+                                              GDK_ACTION_COPY);
+    g_signal_connect(drop, "drop", G_CALLBACK(on_file_drop), v);
+    gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(drop));
 
     GtkGesture *middle = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(middle), GDK_BUTTON_MIDDLE);

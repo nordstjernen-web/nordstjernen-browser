@@ -828,6 +828,42 @@ ns_rproc_http_find(ns_rproc_http *r, const char *query, int case_sensitive,
 }
 
 int
+ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
+                         const char *const *paths, int n_paths)
+{
+    if (!r || !paths || n_paths <= 0)
+        return 0;
+    size_t total = 1;
+    for (int i = 0; i < n_paths; i++)
+        total += (paths[i] ? strlen(paths[i]) : 0) + 1;
+    char *joined = malloc(total);
+    if (!joined)
+        return 0;
+    joined[0] = '\0';
+    for (int i = 0; i < n_paths; i++) {
+        if (i)
+            strcat(joined, "\n");
+        if (paths[i])
+            strcat(joined, paths[i]);
+    }
+    char *pe = json_escape(joined);
+    free(joined);
+    char *json = NULL;
+    if (asprintf(&json, "{\"x\":%d,\"y\":%d,\"paths\":\"%s\"}", x, y,
+                 pe ? pe : "") < 0)
+        json = NULL;
+    free(pe);
+    char *body = json ? request(r, "/dropfiles", json) : NULL;
+    free(json);
+    if (!body)
+        return 0;
+    long changed = 0;
+    json_get_long(body, "changed", &changed);
+    free(body);
+    return (int)changed;
+}
+
+int
 ns_rproc_http_set_viewport(ns_rproc_http *r, int width, int height,
                            ns_rproc_http_page *out)
 {

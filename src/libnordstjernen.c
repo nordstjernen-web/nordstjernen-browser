@@ -1179,6 +1179,54 @@ ns_browser_hover(ns_browser *browser, int x, int y)
     return 0;
 }
 
+int
+ns_browser_drop_files(ns_browser *browser, int x, int y,
+                      const char *const *paths, int n_paths)
+{
+    if (!browser || !browser->js || !browser->layout || !paths || n_paths <= 0)
+        return 0;
+
+    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
+    const ns_node *target = hit ? hit->dom : NULL;
+    if (!target && browser->doc)
+        target = ns_node_find_first_element(browser->doc, "body");
+    if (!target) target = browser->doc;
+    if (!target) return 0;
+
+    ns_js_drag_session *session = ns_js_drag_session_new(browser->js);
+    if (!session) return 0;
+    for (int i = 0; i < n_paths; i++)
+        if (paths[i]) ns_js_drag_session_add_file(session, paths[i]);
+
+    gboolean accept = FALSE;
+    gboolean prevented = FALSE;
+    ns_js_dispatch_drag_event(browser->js, session, target, "dragenter",
+                              x, y, x, y, 0, 0, FALSE, FALSE, FALSE, FALSE,
+                              NULL, &prevented);
+    if (prevented) accept = TRUE;
+    prevented = FALSE;
+    ns_js_dispatch_drag_event(browser->js, session, target, "dragover",
+                              x, y, x, y, 0, 0, FALSE, FALSE, FALSE, FALSE,
+                              NULL, &prevented);
+    if (prevented) accept = TRUE;
+    if (accept)
+        ns_js_dispatch_drag_event(browser->js, session, target, "drop",
+                                  x, y, x, y, 0, 0, FALSE, FALSE, FALSE, FALSE,
+                                  NULL, &prevented);
+    else
+        ns_js_dispatch_drag_event(browser->js, session, target, "dragleave",
+                                  x, y, x, y, 0, 0, FALSE, FALSE, FALSE, FALSE,
+                                  NULL, &prevented);
+    ns_js_drag_session_free(session);
+
+    if (ns_js_consume_mutated(browser->js)) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+        return 1;
+    }
+    return 0;
+}
+
 char *
 ns_browser_console_drain(ns_browser *browser)
 {
