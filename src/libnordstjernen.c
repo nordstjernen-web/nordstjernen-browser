@@ -1549,6 +1549,13 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     if (!prevented && !browser->pending_nav && node &&
         ns_form_is_submit_trigger(node)) {
         browser_submit_form(browser, node);
+    } else if (!prevented && node && browser->js && browser->doc &&
+               ns_form_is_reset_trigger(node)) {
+        ns_node *form = (ns_node *)ns_form_owner(node, browser->doc);
+        if (form) {
+            ns_js_form_reset(browser->js, form);
+            if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+        }
     } else if (!prevented && !browser->pending_nav) {
         const char *href = NULL;
         for (const ns_node *a = node; a && !href; a = a->parent) {

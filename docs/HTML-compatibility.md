@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.9**, 2026-06-16.
+Snapshot: **1.0.10**, 2026-06-17.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -225,7 +225,7 @@ validation.
 | `select` / `option` / `optgroup` | 🟡 (rendered; DOM options/selectedOptions collections, add/remove, spec-compliant `option.text` — descendant text minus script subtrees, ASCII-whitespace-stripped + collapsed — `option.label` (label attr, falling back to `option.text`), `optgroup.label` reflected, `option.value` (value attr, falling back to `option.text`), single/multiple `value`; the select popup and form submission both consult `option.label` / `option.value` so legacy markup with extra whitespace or inline children now submits the same string a browser would; a `multiple` or `size>1` select renders as a multi-line listbox (selected options marked), a plain select as a popup-style field; no native popup picker) |
 | `datalist` | 🟡 (parsed; no suggestion UI) |
 | `button` (submit/reset/button) | ✅ |
-| `output` | 🟡 (`value` maps to text content) |
+| `output` | ✅ (full HTMLOutputElement: `value` and `defaultValue` track the value-mode flag — setting `value` switches to value mode while `defaultValue` preserves/serves the markup default, and a form reset restores the default value; `type` returns `"output"`, `htmlFor` is a live `DOMTokenList`, `labels`/`form`/`name` reflect, and the element is correctly barred from constraint validation so `willValidate` is `false` and `checkValidity()` stays `true` even with `setCustomValidity` set, in `src/js.c`; native reset-button activation routes through `ns_js_form_reset` in `src/libnordstjernen.c`) |
 | `progress` | ✅ (determinate + indeterminate rendered bars; numeric `value`, `max`, `position` IDL getters) |
 | `meter` | ✅ (spec min/max/value/low/high/optimum gauge algorithm; optimum/suboptimal/less-good regions reflected in rendering and numeric IDL getters) |
 | `fieldset` / `legend` | 🟡 (UA-styled) |

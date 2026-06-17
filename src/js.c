@@ -3306,6 +3306,8 @@ ns_element_get_type(JSContext *ctx, JSValueConst this_val)
                                      ? "select-multiple" : "select-one");
     if (strcmp(n->name, "textarea") == 0)
         return JS_NewString(ctx, "textarea");
+    if (strcmp(n->name, "output") == 0)
+        return JS_NewString(ctx, "output");
     const char *v = ns_element_get_attr(n, "type");
     return JS_NewString(ctx, v ? v : "");
 }
@@ -22417,7 +22419,8 @@ ns_element_check_validity(JSContext *ctx, JSValueConst this_val,
     gboolean vm = FALSE, tm = FALSE, pm = FALSE;
     gboolean tl = FALSE, ts = FALSE, ru = FALSE, ro = FALSE, sm = FALSE;
     ns_js_compute_validity(n, &vm, &tm, &pm, &tl, &ts, &ru, &ro, &sm);
-    gboolean valid = !(vm || tm || pm || tl || ts || ru || ro || sm || ce);
+    gboolean valid = !ns_node_will_validate(n) ||
+                     !(vm || tm || pm || tl || ts || ru || ro || sm || ce);
     if (!valid && js_from_ctx(ctx)) ns_js_dispatch_event(js_from_ctx(ctx),
                                                          n, "invalid", NULL);
     return JS_NewBool(ctx, valid);
@@ -22427,9 +22430,9 @@ static JSValue
 ns_element_get_validation_message(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
+    if (!ns_node_will_validate(n)) return JS_NewString(ctx, "");
     const char *msg = ns_element_get_attr(n, NS_CUSTOM_VALIDITY_ATTR);
     if (msg && *msg) return JS_NewString(ctx, msg);
-    if (!ns_node_will_validate(n)) return JS_NewString(ctx, "");
     gboolean vm = FALSE, tm = FALSE, pm = FALSE;
     gboolean tl = FALSE, ts = FALSE, ru = FALSE, ro = FALSE, sm = FALSE;
     ns_js_compute_validity(n, &vm, &tm, &pm, &tl, &ts, &ru, &ro, &sm);
@@ -22577,6 +22580,17 @@ ns_element_get_selection_dir(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_default_value(JSContext *ctx, JSValueConst this_val)
 {
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (ns_node_is_element_named(n, "output")) {
+        if (ns_element_get_attr(n, "data-nd-output-dirty")) {
+            const char *d = ns_element_get_attr(n, "data-nd-output-default");
+            return JS_NewString(ctx, d ? d : "");
+        }
+        char *t = ns_node_collect_text(n);
+        JSValue v = JS_NewString(ctx, t ? t : "");
+        g_free(t);
+        return v;
+    }
     return ns_element_reflect_str_get(ctx, this_val, "value", FALSE);
 }
 
@@ -22586,6 +22600,18 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
     const char *s = JS_ToCString(ctx, val);
+    if (ns_node_is_element_named(el, "output")) {
+        ns_js *_j = js_from_ctx(ctx);
+        ns_element_set_attr(el, "data-nd-output-default", s ? s : "");
+        if (!ns_element_get_attr(el, "data-nd-output-dirty")) {
+            ns_js_clear_children(_j, el);
+            if (s && *s)
+                ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
+        }
+        if (s) JS_FreeCString(ctx, s);
+        if (_j) _j->mutated = TRUE;
+        return JS_UNDEFINED;
+    }
     ns_element_set_attr(el, "value", s ? s : "");
     if (s) JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
@@ -24089,8 +24115,22 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
         return JS_UNDEFINED;
     }
-    if (el->name && (strcmp(el->name, "textarea") == 0 ||
-                     strcmp(el->name, "output") == 0)) {
+    if (el->name && strcmp(el->name, "output") == 0) {
+        ns_js *_j = js_from_ctx(ctx);
+        if (!ns_element_get_attr(el, "data-nd-output-dirty")) {
+            char *cur = ns_node_collect_text(el);
+            ns_element_set_attr(el, "data-nd-output-default", cur ? cur : "");
+            g_free(cur);
+            ns_element_set_attr(el, "data-nd-output-dirty", "");
+        }
+        ns_js_clear_children(_j, el);
+        if (s && *s)
+            ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
+        JS_FreeCString(ctx, s);
+        if (_j) _j->mutated = TRUE;
+        return JS_UNDEFINED;
+    }
+    if (el->name && strcmp(el->name, "textarea") == 0) {
         ns_js *_j = js_from_ctx(ctx);
         ns_js_clear_children(_j, el);
         if (s && *s)
@@ -25894,6 +25934,27 @@ ns_node_is_reset_trigger(const ns_node *el)
            g_ascii_strcasecmp(el->name, "input")  == 0;
 }
 
+static void
+ns_js_reset_owned_outputs(ns_js *js, ns_node *form, ns_node *scan,
+                          const ns_node *doc, int depth)
+{
+    if (!form || !scan || depth >= 512) return;
+    if (ns_node_is_element_named(scan, "output") &&
+        ns_form_owner(scan, doc) == form &&
+        ns_element_get_attr(scan, "data-nd-output-dirty")) {
+        const char *d = ns_element_get_attr(scan, "data-nd-output-default");
+        char *def = g_strdup(d ? d : "");
+        ns_js_clear_children(js, scan);
+        if (*def)
+            ns_node_append_child(scan, ns_node_new_text(g_strdup(def)));
+        g_free(def);
+        ns_element_remove_attr(scan, "data-nd-output-dirty");
+        ns_element_remove_attr(scan, "data-nd-output-default");
+    }
+    for (ns_node *c = scan->first_child; c; c = c->next_sibling)
+        ns_js_reset_owned_outputs(js, form, c, doc, depth + 1);
+}
+
 static JSValue
 ns_js_reset_form(JSContext *ctx, ns_node *form)
 {
@@ -25908,8 +25969,17 @@ ns_js_reset_form(JSContext *ctx, ns_node *form)
                                                 : ns_node_root(form);
     ns_form_reset_owned_controls(form, (ns_node *)(doc ? doc : form),
                                  doc ? doc : form);
+    ns_js_reset_owned_outputs(_j, form, (ns_node *)(doc ? doc : form),
+                              doc ? doc : form, 0);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
+}
+
+void
+ns_js_form_reset(ns_js *js, ns_node *form)
+{
+    if (!js || !js->ctx || !form) return;
+    ns_js_reset_form(js->ctx, form);
 }
 
 static const ns_node *
