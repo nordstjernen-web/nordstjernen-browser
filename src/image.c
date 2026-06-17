@@ -1034,6 +1034,7 @@ ns_image_cache_tick(ns_image_cache *cache, gint64 now_us)
         if (!img->anim_frames || img->anim_frames->len < 2) continue;
         if (img->anim_total_ms <= 0) continue;
         gint64 elapsed_ms = (now_us - img->anim_start_us) / 1000;
+        if (elapsed_ms < 0) elapsed_ms = 0;
         int phase = (int)(elapsed_ms % img->anim_total_ms);
         int idx = 0, acc = 0;
         for (guint i = 0; i < img->anim_frames->len; i++) {

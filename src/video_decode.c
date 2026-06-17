@@ -107,7 +107,9 @@ ns_video_frame_to_texture(ns_video_player *player, plm_frame_t *frame)
     int w = player->width, h = player->height;
     gsize stride = (gsize)w * 4;
     gsize buf_len = stride * (gsize)h;
-    guint8 *bgra = g_malloc(buf_len);
+    guint8 *bgra = g_try_malloc(buf_len);
+    if (!bgra)
+        return NULL;
     memset(bgra, 0xFF, buf_len);
     plm_frame_to_bgra(frame, bgra, (int)stride);
 

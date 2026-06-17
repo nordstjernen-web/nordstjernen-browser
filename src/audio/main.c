@@ -129,7 +129,12 @@ load_mpeg_audio(ns_audio_player *p, const char *path)
     while ((s = plm_decode_audio(plm)) != NULL) {
         size_t add = (size_t)s->count * 2u;
         if (len + add > cap) {
-            while (len + add > cap) cap *= 2;
+            while (len + add > cap) {
+                if (cap > SIZE_MAX / (2u * sizeof(float))) {
+                    free(pcm); plm_destroy(plm); return 0;
+                }
+                cap *= 2;
+            }
             float *grown = realloc(pcm, cap * sizeof(float));
             if (!grown) { free(pcm); plm_destroy(plm); return 0; }
             pcm = grown;

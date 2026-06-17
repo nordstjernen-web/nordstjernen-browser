@@ -408,6 +408,7 @@ pv_free(NsProcView *v)
             g_free(r->code);
             g_free(r->query);
             g_free(r->export_dest);
+            g_free(r->paths);
             g_free(r);
         }
         g_async_queue_unref(v->queue);

@@ -188,6 +188,7 @@ static void json_value(json_ctx *c, int depth);
 static void
 json_value(json_ctx *c, int depth)
 {
+    if (depth > 256) { c->ok = FALSE; return; }
     json_ws(c);
     if (c->p >= c->end) { c->ok = FALSE; return; }
     char ch = *c->p;
@@ -392,7 +393,7 @@ charset_normalize(const char *name)
 static char *
 charset_value_in(const char *s, gsize len)
 {
-    for (gsize i = 0; i + 7 < len; i++) {
+    for (gsize i = 0; i + 7 <= len; i++) {
         if (g_ascii_strncasecmp(s + i, "charset", 7) != 0) continue;
         gsize p = i + 7;
         while (p < len && g_ascii_isspace(s[p])) p++;

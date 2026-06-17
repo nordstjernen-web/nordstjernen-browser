@@ -172,6 +172,8 @@ http_read_body(http_conn *c, long n, void *dst)
 {
     if (n < 0)
         return -1;
+    if (n > 0 && !dst)
+        return -1;
     unsigned char *p = dst;
     long got = 0;
     while (got < n) {
@@ -448,7 +450,11 @@ json_get_double(const char *body, const char *key, double *out)
         if (*v == '-') { esign = -1; v++; }
         else if (*v == '+') { v++; }
         int e = 0;
-        while (*v >= '0' && *v <= '9') { e = e * 10 + (*v - '0'); v++; }
+        while (*v >= '0' && *v <= '9') {
+            if (e < 1000) e = e * 10 + (*v - '0');
+            v++;
+        }
+        if (e > 308) e = 308;
         double p = 1.0;
         while (e-- > 0) p *= 10.0;
         val = esign > 0 ? val * p : val / p;

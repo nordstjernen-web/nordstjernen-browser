@@ -701,7 +701,8 @@ intl_nf_ctor(JSContext *ctx, JSValueConst this_val,
     if (intl_opt_num(ctx, o, "minimumIntegerDigits", &d)) minid = (int)d;
     intl_hide(ctx, obj, "_minfd", JS_NewInt32(ctx, minfd));
     intl_hide(ctx, obj, "_maxfd", JS_NewInt32(ctx, maxfd));
-    intl_hide(ctx, obj, "_minid", JS_NewInt32(ctx, minid < 1 ? 1 : minid));
+    intl_hide(ctx, obj, "_minid",
+              JS_NewInt32(ctx, minid < 1 ? 1 : minid > 21 ? 21 : minid));
     intl_hide(ctx, obj, "_grouping",
               JS_NewBool(ctx, intl_opt_bool(ctx, o, "useGrouping", 1)));
     intl_bind_bound(ctx, obj, "format", intl_nf_format_b, 1, obj);
@@ -771,9 +772,9 @@ intl_nf_parts(JSContext *ctx, JSValueConst this_val, double num)
     char buf[64];
     g_snprintf(buf, sizeof buf, "%.*f", maxfd, a);
     char *dot = strchr(buf, '.');
-    char intpart[48], fracpart[32];
+    char intpart[80], fracpart[32];
     if (dot) {
-        g_strlcpy(intpart, buf, (gsize)(dot - buf) + 1);
+        g_strlcpy(intpart, buf, MIN((gsize)(dot - buf) + 1, sizeof intpart));
         g_strlcpy(fracpart, dot + 1, sizeof fracpart);
     } else {
         g_strlcpy(intpart, buf, sizeof intpart);
@@ -783,7 +784,7 @@ intl_nf_parts(JSContext *ctx, JSValueConst this_val, double num)
     while (fraclen > minfd && fracpart[fraclen - 1] == '0')
         fracpart[--fraclen] = '\0';
 
-    while ((int)strlen(intpart) < minid) {
+    while ((int)strlen(intpart) < minid && strlen(intpart) + 1 < sizeof intpart) {
         memmove(intpart + 1, intpart, strlen(intpart) + 1);
         intpart[0] = '0';
     }

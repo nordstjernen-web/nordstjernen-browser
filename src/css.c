@@ -14278,7 +14278,7 @@ share_key_put_pending(GByteArray *b, const GArray *arr)
     g_byte_array_append(b, (const guint8 *)&n, sizeof n);
     for (guint i = 0; i < n; i++) {
         const pending_match *e = &g_array_index((GArray *)arr, pending_match, i);
-        g_byte_array_append(b, (const guint8 *)&e->origin, sizeof(int) * 10);
+        g_byte_array_append(b, (const guint8 *)&e->origin, sizeof(int) * 9);
         g_byte_array_append(b, (const guint8 *)&e->pd, sizeof e->pd);
     }
 }
