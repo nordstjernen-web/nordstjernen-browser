@@ -15291,6 +15291,27 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_fn(ctx, global, "fetch",    ns_js_fetch,             1);
     ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 2);
     ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  2);
+    {
+        JSValue crypto = JS_NewObject(ctx);
+        ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);
+        ns_bind_fn(ctx, crypto, "randomUUID",      ns_window_randomUUID,      0);
+        if (!ns_cryptokey_class_id)
+            JS_NewClassID(js->rt, &ns_cryptokey_class_id);
+        JS_NewClass(js->rt, ns_cryptokey_class_id, &ns_cryptokey_class);
+        JSValue subtle = JS_NewObject(ctx);
+        ns_bind_fn(ctx, subtle, "digest",      ns_subtle_digest,      2);
+        ns_bind_fn(ctx, subtle, "encrypt",     ns_subtle_encrypt,     3);
+        ns_bind_fn(ctx, subtle, "decrypt",     ns_subtle_decrypt,     3);
+        ns_bind_fn(ctx, subtle, "sign",        ns_subtle_sign,        3);
+        ns_bind_fn(ctx, subtle, "verify",      ns_subtle_verify,      4);
+        ns_bind_fn(ctx, subtle, "generateKey", ns_subtle_generateKey, 3);
+        ns_bind_fn(ctx, subtle, "importKey",   ns_subtle_importKey,   5);
+        ns_bind_fn(ctx, subtle, "exportKey",   ns_subtle_exportKey,   2);
+        ns_bind_fn(ctx, subtle, "deriveBits",  ns_subtle_deriveBits,  3);
+        ns_bind_fn(ctx, subtle, "deriveKey",   ns_subtle_deriveKey,   5);
+        JS_SetPropertyStr(ctx, crypto, "subtle", subtle);
+        JS_SetPropertyStr(ctx, global, "crypto", crypto);
+    }
     ns_bind_ctor(ctx, global, "WebGLRenderingContext",
                  ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WebGL2RenderingContext",

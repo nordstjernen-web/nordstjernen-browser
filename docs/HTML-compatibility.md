@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 23).
+Snapshot: **1.0.10**, 2026-06-17 (rev 24).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -375,9 +375,11 @@ loading, `worker.postMessage()`, worker-global `postMessage()`,
 worker `location`, `navigator`, `performance.now()`, `URL`,
 `URLSearchParams`, `TextEncoder` / `TextDecoder`, `atob` / `btoa`,
 `structuredClone`, synchronous classic `importScripts()`, `XMLHttpRequest`,
-and `fetch()` with `Request` / `Response` (the worker runs the async fetch
+`fetch()` with `Request` / `Response` (the worker runs the async fetch
 on its own event loop and reads the body back through the standard
-consumers — verified with a `data:` round-trip inside a worker).
+consumers — verified with a `data:` round-trip inside a worker), and
+`crypto` (`getRandomValues`, `randomUUID`, and the full `crypto.subtle`
+SubtleCrypto surface — verified by computing `SHA-256` inside a worker).
 
 Worker script creation is guarded by mixed-content checks and CSP
 `worker-src` with the expected fallback through `child-src`,
