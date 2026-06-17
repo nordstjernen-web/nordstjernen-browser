@@ -1436,7 +1436,15 @@
 
         function NSCache() { this._entries = new Map(); }
 
+        function requestMethod(request) {
+            if (request && typeof request === 'object' && request.method)
+                return String(request.method).toUpperCase();
+            return 'GET';
+        }
+
         NSCache.prototype.put = function (request, response) {
+            if (requestMethod(request) !== 'GET')
+                return Promise.reject(new TypeError('Cache.put: only GET requests can be cached'));
             if (response && response.bodyUsed)
                 return Promise.reject(new TypeError('Response body is already used'));
             if (response && (response.status === 206))

@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 21).
+Snapshot: **1.0.10**, 2026-06-17 (rev 22).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -401,13 +401,17 @@ events are never dispatched, so a worker cannot serve requests by
 intercepting navigations/subresources, and registrations live for the
 session rather than persisting across loads.
 
-The **Cache API** surface (`caches` / `CacheStorage` / `Cache`) is exposed
-for feature detection but is a no-op stub: `caches.open` returns a `Cache`
-object whose `put` / `add` / `addAll` store nothing and whose `match` /
-`matchAll` / `keys` always resolve empty, and the top-level
-`caches.has` / `delete` / `keys` / `match` are likewise stubs. Nothing is
-stored or retrievable, and nothing is shared into the Service Worker
-thread (which keeps the inert stub, since it cannot intercept anyway).
+The **Cache API** (`caches` / `CacheStorage` / `Cache`) is a working
+in-memory store (`NSCache` in `data/js/polyfills.js`). `caches.open(name)`
+returns a real `Cache`; `put(request, response)` reads the response body to
+an `ArrayBuffer` and stores it with status/headers/url (rejecting a used
+body, a `206` response, or a non-`GET` request per spec), and `match` /
+`matchAll` reconstruct a fresh `Response` (honouring `ignoreSearch`).
+`add` / `addAll` fetch then store, `delete` / `keys` work, and the
+top-level `caches.has` / `delete` / `keys` / `match` operate across the
+named stores. The cache lives for the session and is per-runtime — the
+Service Worker thread has its own, and entries are not yet shared into it
+(it cannot intercept requests anyway).
 
 🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
 transferable `ArrayBuffer`s, worker `fetch`, and nested workers are not
