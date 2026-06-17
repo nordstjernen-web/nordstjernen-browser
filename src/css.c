@@ -11402,15 +11402,68 @@ ns_css_lang_matches(const ns_node *el, const char *arg)
     return FALSE;
 }
 
+static gboolean
+ns_dir_is_rtl_script(GUnicodeScript s)
+{
+    switch (s) {
+    case G_UNICODE_SCRIPT_HEBREW:
+    case G_UNICODE_SCRIPT_ARABIC:
+    case G_UNICODE_SCRIPT_SYRIAC:
+    case G_UNICODE_SCRIPT_THAANA:
+    case G_UNICODE_SCRIPT_NKO:
+    case G_UNICODE_SCRIPT_SAMARITAN:
+    case G_UNICODE_SCRIPT_MANDAIC:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static const char *
+ns_dir_first_strong(const ns_node *n, int depth)
+{
+    if (!n || depth > 256) return NULL;
+    if (n->kind == NS_NODE_TEXT && n->text) {
+        for (const char *p = n->text; *p; p = g_utf8_next_char(p)) {
+            gunichar c = g_utf8_get_char(p);
+            if (ns_dir_is_rtl_script(g_unichar_get_script(c))) return "rtl";
+            if (g_unichar_isalpha(c)) return "ltr";
+        }
+        return NULL;
+    }
+    if (n->kind != NS_NODE_ELEMENT) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (g_ascii_strcasecmp(c->name, "script") == 0 ||
+             g_ascii_strcasecmp(c->name, "style") == 0 ||
+             g_ascii_strcasecmp(c->name, "textarea") == 0 ||
+             g_ascii_strcasecmp(c->name, "bdi") == 0 ||
+             ns_element_get_attr(c, "dir")))
+            continue;
+        const char *d = ns_dir_first_strong(c, depth + 1);
+        if (d) return d;
+    }
+    return NULL;
+}
+
 static const char *
 ns_css_node_dir(const ns_node *el)
 {
     for (const ns_node *n = el; n; n = n->parent) {
         if (n->kind != NS_NODE_ELEMENT) continue;
         const char *dir = ns_element_get_attr(n, "dir");
-        if (!dir) continue;
-        if (g_ascii_strcasecmp(dir, "ltr") == 0) return "ltr";
-        if (g_ascii_strcasecmp(dir, "rtl") == 0) return "rtl";
+        gboolean is_bdi = n->name && g_ascii_strcasecmp(n->name, "bdi") == 0;
+        if (dir) {
+            if (g_ascii_strcasecmp(dir, "ltr") == 0) return "ltr";
+            if (g_ascii_strcasecmp(dir, "rtl") == 0) return "rtl";
+            if (g_ascii_strcasecmp(dir, "auto") == 0) {
+                const char *d = ns_dir_first_strong(n, 0);
+                return d ? d : "ltr";
+            }
+        } else if (is_bdi) {
+            const char *d = ns_dir_first_strong(n, 0);
+            return d ? d : "ltr";
+        }
     }
     return "ltr";
 }

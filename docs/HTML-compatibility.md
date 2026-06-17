@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 9).
+Snapshot: **1.0.10**, 2026-06-17 (rev 10).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -113,7 +113,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | `document.compatMode` | ✅ | reflects the parser's quirks state (`BackCompat` in quirks mode, else `CSS1Compat`); plumbed from lexbor's `compat_mode` via the document node flags |
 | Void / raw-text / escapable element classes | ✅ | void set in `src/html.c` (`area base br col embed hr img input link meta param source track wbr`) |
 | Quirks / limited-quirks / no-quirks | 🟡 | DOCTYPE consumed; `document.compatMode` now reflects the mode, but quirks-specific layout deltas are still not applied |
-| `dir` global attribute (`Element.dir`, `document.dir`) | 🟡 | reflected as an enumerated IDL attribute (canonicalised to `ltr`/`rtl`/`auto`/`""`); drives Pango base direction and the start/end resolution of `text-align` (an unset `text-align` in an RTL context resolves to right). The CSS `direction` (inherited) and `unicode-bidi` properties are now parsed and honoured, so author `direction: rtl` reaches base-direction parity with the `dir` attribute and `unicode-bidi: bidi-override`/`isolate`/`isolate-override`/`plaintext` are honoured via Unicode bidi controls (see §4.5). The remaining approximation is the computed *used* direction for `dir=auto` on arbitrary elements (the first-strong scan feeding `:dir()`), beyond the isolate-control layout effect |
+| `dir` global attribute (`Element.dir`, `document.dir`) | ✅ | reflected as an enumerated IDL attribute (canonicalised to `ltr`/`rtl`/`auto`/`""`); drives Pango base direction and the start/end resolution of `text-align` (an unset `text-align` in an RTL context resolves to right). The CSS `direction` (inherited) and `unicode-bidi` properties are parsed and honoured, so author `direction: rtl` reaches base-direction parity with the `dir` attribute and `unicode-bidi: bidi-override`/`isolate`/`isolate-override`/`plaintext` use real Unicode bidi controls (see §4.5). `dir=auto` (and the `bdi` default) computes its directionality from the first strong character of the element's content — feeding both the laid-out base direction (a `dir=auto` block of Hebrew/Arabic lays out RTL) and the `:dir()` selector (`ns_css_node_dir` in `src/css.c`), ignoring digits/punctuation and descendant subtrees that carry their own `dir` |
 | `lang`, `translate`, `accessKey` global attributes | ✅ | reflected (`translate` resolves the inherited yes/no translation mode); the nearest-ancestor `lang` (falling back to `xml:lang`) feeds Pango text shaping and hyphenation |
 
 ### §4.2 Document metadata
