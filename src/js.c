@@ -14461,24 +14461,37 @@ ns_worker_message_free(ns_worker_message *msg)
 }
 
 static gboolean
-ns_worker_transfer_list_empty(JSContext *ctx, int argc, JSValueConst *argv)
+ns_worker_walk_transfers(JSContext *ctx, int argc, JSValueConst *argv,
+                         gboolean detach, gboolean *has_nontransferable)
 {
+    if (has_nontransferable) *has_nontransferable = FALSE;
     if (argc < 2 || JS_IsUndefined(argv[1]) || JS_IsNull(argv[1])) return TRUE;
     JSValue transfer = JS_UNDEFINED;
     if (JS_IsArray(argv[1])) {
         transfer = JS_DupValue(ctx, argv[1]);
     } else if (JS_IsObject(argv[1])) {
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
-        if (JS_IsUndefined(transfer) || JS_IsNull(transfer)) {
+        if (!JS_IsArray(transfer)) {
             JS_FreeValue(ctx, transfer);
             return TRUE;
         }
     } else {
         return TRUE;
     }
-    uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 1;
+    uint32_t len = ns_js_array_length(ctx, transfer);
+    gboolean all_ok = TRUE;
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        if (JS_IsArrayBuffer(item)) {
+            if (detach) JS_DetachArrayBuffer(ctx, item);
+        } else {
+            all_ok = FALSE;
+            if (has_nontransferable) *has_nontransferable = TRUE;
+        }
+        JS_FreeValue(ctx, item);
+    }
     JS_FreeValue(ctx, transfer);
-    return len == 0;
+    return all_ok;
 }
 
 static ns_worker_message *
@@ -14868,11 +14881,15 @@ ns_worker_post_message(JSContext *ctx, JSValueConst this_val,
 {
     ns_worker_host *host = JS_GetOpaque(this_val, ns_worker_class_id);
     if (!host || argc < 1 || g_atomic_int_get(&host->closing)) return JS_UNDEFINED;
-    if (!ns_worker_transfer_list_empty(ctx, argc, argv))
-        return JS_ThrowTypeError(ctx, "Worker.postMessage: transfer lists are not supported");
+    gboolean bad_transfer = FALSE;
+    ns_worker_walk_transfers(ctx, argc, argv, FALSE, &bad_transfer);
+    if (bad_transfer)
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "Worker.postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
         return JS_ThrowTypeError(ctx, "Worker.postMessage: value could not be cloned");
+    ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
                                ns_worker_deliver_worker, msg, NULL);
     return JS_UNDEFINED;
@@ -14896,11 +14913,15 @@ ns_worker_global_post_message(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_worker_host *host = js ? js->worker_host : NULL;
     if (!host || argc < 1 || g_atomic_int_get(&host->closing)) return JS_UNDEFINED;
-    if (!ns_worker_transfer_list_empty(ctx, argc, argv))
-        return JS_ThrowTypeError(ctx, "postMessage: transfer lists are not supported");
+    gboolean bad_transfer = FALSE;
+    ns_worker_walk_transfers(ctx, argc, argv, FALSE, &bad_transfer);
+    if (bad_transfer)
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
         return JS_ThrowTypeError(ctx, "postMessage: value could not be cloned");
+    ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     ns_worker_post_owner_message(host, msg);
     return JS_UNDEFINED;
 }

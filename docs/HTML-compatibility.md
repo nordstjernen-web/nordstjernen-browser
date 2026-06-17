@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 24).
+Snapshot: **1.0.10**, 2026-06-17 (rev 25).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -342,7 +342,7 @@ surface).
 | `atob` / `btoa` | ✅ | |
 | `crypto.getRandomValues` / `crypto.randomUUID` | ✅ | CSPRNG-backed |
 | `crypto.subtle` (Web Cryptography) | ✅ | full SubtleCrypto over OpenSSL libcrypto (`src/webcrypto.c`): `digest`, `generateKey`, `importKey`, `exportKey`, `sign`, `verify`, `encrypt`, `decrypt`, `deriveBits`, `deriveKey`. Algorithms: HMAC; AES-GCM/CBC/CTR; RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP; ECDSA and ECDH on P-256/384/521; PBKDF2; HKDF. Key formats `raw`/`jwk`/`spki`/`pkcs8`; ECDSA uses the raw r‖s signature encoding. Verified against NIST AES-GCM, RFC 6070 PBKDF2 and RFC 5869 HKDF vectors |
-| `structuredClone` (§2.7) | ✅ | true serialize/deserialize in `src/js.c`: cycles & shared references, `Map`/`Set`/`Date`/`RegExp`, `ArrayBuffer`/typed arrays/`DataView`, `Blob`/`File`, `Error` subtypes (name/message/stack), `undefined`; `DataCloneError` for functions/symbols. Transfer lists remain unsupported; `Worker.postMessage` rejects non-empty transfer lists. |
+| `structuredClone` (§2.7) | ✅ | true serialize/deserialize in `src/js.c`: cycles & shared references, `Map`/`Set`/`Date`/`RegExp`, `ArrayBuffer`/typed arrays/`DataView`, `Blob`/`File`, `Error` subtypes (name/message/stack), `undefined`; `DataCloneError` for functions/symbols. `structuredClone` itself does not honour a transfer list, but `Worker.postMessage(value, [buffers])` **does** transfer `ArrayBuffer`s — the bytes are serialized to the receiver and the source buffers are detached (a non-transferable entry throws `DataCloneError`). |
 | `document.implementation.createHTMLDocument(title?)` | ✅ | builds a real inert HTML document (`<html><head><title></head><body>`) via the HTML parser and exposes the document factory methods (`createElement`/`createElementNS`/`createTextNode`/`createComment`/`createDocumentFragment`/`importNode`/`adoptNode`) plus `documentElement`/`head`/`body`/`title` (`ns_impl_create_html_document` in `src/js.c`). Nodes it creates are real and adoptable into the main document, which is what jQuery's `$.parseHTML` / `buildFragment` use to parse markup off-document |
 | `DOMParser` / `XMLSerializer` | ✅ | The returned `Document` carries the live spec accessors — `documentElement`, `body`, `head`, `title`, `nodeType` (`= 9`) — populated by `ns_attach_document_view` (`src/js.c`); `text/html` parses through the full HTML document parser (auto-wraps `<html><head><body>`); MIME types with `xml` or `svg` parse through the fragment parser so the supplied root (e.g. `<svg>`) becomes `documentElement` rather than being wrapped |
 | `fetch` / `Response` body | ✅ | binary-safe: response bytes are attached as an `ArrayBuffer` on `_bodyBuffer` and the body consumers (`text` / `json` / `blob` / `arrayBuffer` / `bytes` / `formData`) read from it through `TextDecoder` / `Uint8Array`, so non-UTF-8 bytes survive round-tripping (PNG, MP4, etc.) instead of being mangled by JS-string conversion |
@@ -385,8 +385,10 @@ Worker script creation is guarded by mixed-content checks and CSP
 `worker-src` with the expected fallback through `child-src`,
 `script-src`, and `default-src`. Message payloads cross runtimes through
 QuickJS object serialization without bytecode or SharedArrayBuffer
-flags; functions, SharedArrayBuffer, and non-empty transfer lists are
-rejected.
+flags; functions and SharedArrayBuffer are rejected. A `postMessage`
+transfer list transfers its `ArrayBuffer`s — they are serialized to the
+receiver and then detached in the sender (`JS_DetachArrayBuffer`), and a
+non-transferable entry throws `DataCloneError`.
 
 **Service Workers** are supported at a minimalist level.
 `navigator.serviceWorker` exposes `register()` / `getRegistration()` /
@@ -419,7 +421,7 @@ Service Worker thread has its own, and entries are not yet shared into it
 (it cannot intercept requests anyway).
 
 🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
-transferable `ArrayBuffer`s, and nested workers are not implemented yet.
+and nested workers are not implemented yet.
 
 ## §12 Web storage
 
