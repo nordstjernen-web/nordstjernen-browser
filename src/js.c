@@ -3229,10 +3229,13 @@ static const char *const kw_referrer[]  = {
     "strict-origin", "origin-when-cross-origin",
     "strict-origin-when-cross-origin", "unsafe-url",
 };
+static const char *const kw_enterkeyhint[] = {
+    "enter", "done", "go", "next", "previous", "search", "send",
+};
 
 enum {
     NS_ENUM_LOADING, NS_ENUM_DECODING, NS_ENUM_METHOD,
-    NS_ENUM_CROSSORIGIN, NS_ENUM_REFERRERPOLICY,
+    NS_ENUM_CROSSORIGIN, NS_ENUM_REFERRERPOLICY, NS_ENUM_ENTERKEYHINT,
 };
 
 static const ns_enum_attr_def g_enum_attrs[] = {
@@ -3241,6 +3244,7 @@ static const ns_enum_attr_def g_enum_attrs[] = {
     [NS_ENUM_METHOD]         = { "method",         kw_method,    3, "get",   "get"   },
     [NS_ENUM_CROSSORIGIN]    = { "crossorigin",    kw_crossorig, 2, NULL,    "anonymous" },
     [NS_ENUM_REFERRERPOLICY] = { "referrerpolicy", kw_referrer,  8, "",      ""      },
+    [NS_ENUM_ENTERKEYHINT]   = { "enterkeyhint",   kw_enterkeyhint, 7, "",   ""      },
 };
 
 static JSValue
@@ -3319,6 +3323,62 @@ static JSValue
 ns_element_set_type(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
     return ns_element_reflect_str_set(ctx, this_val, val, "type");
+}
+
+static const char *
+ns_autocapitalize_canon(const char *raw)
+{
+    if (!raw) return NULL;
+    if (!g_ascii_strcasecmp(raw, "off") || !g_ascii_strcasecmp(raw, "none"))
+        return "none";
+    if (!g_ascii_strcasecmp(raw, "on") || !g_ascii_strcasecmp(raw, "sentences"))
+        return "sentences";
+    if (!g_ascii_strcasecmp(raw, "words"))      return "words";
+    if (!g_ascii_strcasecmp(raw, "characters")) return "characters";
+    return NULL;
+}
+
+static gboolean
+ns_element_autocapitalize_inherits(const ns_node *n)
+{
+    static const char *const tags[] = {
+        "button", "fieldset", "input", "output", "select", "textarea", NULL,
+    };
+    return ns_node_name_is_any_of(n, tags);
+}
+
+static JSValue
+ns_element_get_autocapitalize(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NewString(ctx, "");
+    const char *own = ns_autocapitalize_canon(
+        ns_element_get_attr(n, "autocapitalize"));
+    if (own) return JS_NewString(ctx, own);
+    if (ns_element_autocapitalize_inherits(n)) {
+        ns_js *js = js_from_ctx(ctx);
+        const ns_node *form = ns_form_owner(n, js ? js->current_doc : NULL);
+        if (form) {
+            const char *fown = ns_autocapitalize_canon(
+                ns_element_get_attr(form, "autocapitalize"));
+            if (fown) return JS_NewString(ctx, fown);
+        }
+    }
+    return JS_NewString(ctx, "");
+}
+
+static JSValue
+ns_element_set_autocapitalize(JSContext *ctx, JSValueConst this_val,
+                              JSValueConst val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n) return JS_UNDEFINED;
+    const char *s = JS_ToCString(ctx, val);
+    if (s) {
+        ns_js_set_attr_recorded(js_from_ctx(ctx), n, "autocapitalize", s);
+        JS_FreeCString(ctx, s);
+    }
+    return JS_UNDEFINED;
 }
 
 static gboolean
@@ -28320,8 +28380,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("dateTime",       ns_element_attr_getter, ns_element_attr_setter, 74),
     JS_CGETSET_MAGIC_DEF("srcdoc",         ns_element_attr_getter, ns_element_attr_setter, 75),
     JS_CGETSET_MAGIC_DEF("popoverTargetAction", ns_element_attr_getter, ns_element_attr_setter, 77),
-    JS_CGETSET_MAGIC_DEF("autocapitalize", ns_element_attr_getter, ns_element_attr_setter, 78),
-    JS_CGETSET_MAGIC_DEF("enterKeyHint",   ns_element_attr_getter, ns_element_attr_setter, 79),
+    JS_CGETSET_DEF("autocapitalize", ns_element_get_autocapitalize, ns_element_set_autocapitalize),
+    JS_CGETSET_MAGIC_DEF("enterKeyHint",   ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_ENTERKEYHINT),
     JS_CGETSET_MAGIC_DEF("charSet",        ns_element_attr_getter, ns_element_attr_setter, 47),
     JS_CGETSET_MAGIC_DEF("poster",         ns_element_attr_getter, ns_element_attr_setter, 83),
     JS_CGETSET_MAGIC_DEF("preload",        ns_element_attr_getter, ns_element_attr_setter, 84),

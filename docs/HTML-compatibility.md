@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 4).
+Snapshot: **1.0.10**, 2026-06-17 (rev 5).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -310,7 +310,7 @@ surface).
 | `tabindex` / focus order | ✅ | sequential focus navigation (`ns_js_sequential_focus_target` in `src/js.c`) honours `tabindex` ordering — positive values first in ascending order, then `0`/auto in tree order, negative excluded — skipping disabled/inert/hidden controls; Tab / Shift+Tab walk it (`src/libnordstjernen.c`), and `focus()`/`blur()` route through the canonical `ns_js_set_focus`, keeping `document.activeElement` and `:focus` in sync |
 | `accesskey` | 🟡 | parsed; no key binding |
 | `spellcheck` | 🟡 | parsed; no spell-check UI |
-| `autocapitalize` / `enterkeyhint` | 🟡 | reflected in IDL; advisory only |
+| `autocapitalize` / `enterkeyhint` | ✅ | proper **enumerated** IDL reflection (`src/js.c`): `enterKeyHint` canonicalises to its known keywords (`enter`/`done`/`go`/`next`/`previous`/`search`/`send`) case-insensitively with missing/invalid → `""`; `autocapitalize` maps the `off`/`none` and `on`/`sentences` aliases to their canonical state, returns `""` for the default/invalid state, and — for the form-associated controls (`input`/`textarea`/`select`/`button`/`output`/`fieldset`) — inherits the form owner's own value per spec; `getAttribute` still returns the literal. Behaviourally advisory (hints for an on-screen keyboard), which is the complete behaviour on a desktop UA with a physical keyboard |
 | Drag and drop (`DataTransfer`, drag events) | 🟡 | script-created `DataTransfer`, `DataTransferItemList`, `DataTransferItem` (`kind`/`type`, `getAsString`, `getAsFile`), and `DragEvent.dataTransfer` are exposed for feature detection and synthetic events; native GTK drag gestures now dispatch the HTML `dragstart` → `dragenter`/`dragover`/`dragleave` → `drop` → `dragend` sequence for `draggable=true` elements, links, and images, with shared `dataTransfer` state and default URL data for links/images. Drop follows the browser rule that the target must accept the drag by cancelling `dragenter` or `dragover`; external/native OS file drags are not yet bridged into the page |
 
 ## §7 Loading web pages
