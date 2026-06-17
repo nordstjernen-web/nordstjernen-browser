@@ -33581,12 +33581,60 @@ ns_js_flush_document_write(ns_js *js)
     g_ptr_array_free(inserted, TRUE);
 }
 
+static void
+ns_document_open_impl(ns_js *js)
+{
+    if (!js || !js->current_doc) return;
+    ns_js_clear_children(js, js->current_doc);
+    ns_node *html = ns_node_new_element(g_strdup("html"));
+    ns_node *head = ns_node_new_element(g_strdup("head"));
+    ns_node *body = ns_node_new_element(g_strdup("body"));
+    ns_node_append_child(html, head);
+    ns_node_append_child(html, body);
+    ns_node_append_child(js->current_doc, html);
+    ns_doc_tag_index_build(js->current_doc);
+    ns_doc_id_index_build(js->current_doc);
+    ns_doc_class_index_build(js->current_doc);
+    if (js->document_write_buffer)
+        g_string_truncate(js->document_write_buffer, 0);
+    js->document_write_script = NULL;
+    js->document_write_parser_open = TRUE;
+    js->mutated = TRUE;
+    ns_node_arm_js_invalidate(js->current_doc);
+}
+
+static JSValue
+ns_document_open(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) ns_document_open_impl(js);
+    return JS_DupValue(ctx, this_val);
+}
+
+static JSValue
+ns_document_close(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) {
+        ns_js_flush_document_write(js);
+        js->document_write_parser_open = FALSE;
+    }
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
                          gboolean newline)
 {
     ns_js *js = js_from_ctx(ctx);
     if (!js || !js->current_doc) return JS_UNDEFINED;
+    if (!js->current_script && js->ready_state >= 2 &&
+        !js->document_write_parser_open)
+        ns_document_open_impl(js);
     if (js->document_write_buffer &&
         js->document_write_script != js->current_script)
         ns_js_flush_document_write(js);
@@ -33695,8 +33743,8 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CGETSET_DEF("implementation",  ns_document_implementation,      NULL),
     JS_CFUNC_DEF("write",      1, ns_document_write),
     JS_CFUNC_DEF("writeln",    1, ns_document_writeln),
-    JS_CFUNC_DEF("open",       0, ns_event_noop),
-    JS_CFUNC_DEF("close",      0, ns_event_noop),
+    JS_CFUNC_DEF("open",       0, ns_document_open),
+    JS_CFUNC_DEF("close",      0, ns_document_close),
     JS_CFUNC_DEF("execCommand", 3, ns_event_false),
     JS_CFUNC_DEF("hasFocus",          0, ns_document_has_focus),
     JS_CFUNC_DEF("elementFromPoint",  2, ns_document_element_from_point),

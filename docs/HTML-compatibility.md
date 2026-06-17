@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 18).
+Snapshot: **1.0.10**, 2026-06-17 (rev 19).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -441,7 +441,7 @@ document are in *rendering and behaviour*, not parsing.
 | Named & numeric character references | ✅ |
 | Fragment parsing (`innerHTML`) | ✅ |
 | Serialisation (`outerHTML`) | ✅ |
-| `document.write` | 🟡 (limited) |
+| `document.write` | ✅ (`document.write`/`writeln` insert parsed markup at the script's position during parsing; `document.open()` blanks the document — clearing all nodes and rebuilding a fresh `<html><head><body>` (with the tag/id/class indices rebuilt) — and returns the document; `document.close()` flushes any pending write. A `write` after the document has finished loading (`readyState` `complete`) triggers an implicit `open()` first, exactly as the spec requires, so a late `document.write` replaces the page rather than appending — `ns_document_open_impl`/`ns_document_write_common` in `src/js.c`) |
 
 ## §14 The XML syntax
 

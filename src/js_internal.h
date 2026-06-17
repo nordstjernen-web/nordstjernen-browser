@@ -137,6 +137,7 @@ struct ns_js {
     int           eval_depth;
     GString      *document_write_buffer;
     ns_node      *document_write_script;
+    gboolean      document_write_parser_open;
     GPtrArray    *deferred_script_roots;
     GPtrArray    *async_script_roots;
     guint         async_script_source;
