@@ -8086,6 +8086,77 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 }
 
 static JSValue
+ns_structured_clone_value(JSContext *ctx, JSValueConst v)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue clone = JS_GetPropertyStr(ctx, global, "structuredClone");
+    JS_FreeValue(ctx, global);
+    JSValue out;
+    if (JS_IsFunction(ctx, clone)) {
+        JSValueConst cargs[1] = { v };
+        out = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
+        if (JS_IsException(out)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            out = JS_DupValue(ctx, v);
+        }
+    } else {
+        out = JS_DupValue(ctx, v);
+    }
+    JS_FreeValue(ctx, clone);
+    return out;
+}
+
+static void
+ns_port_enable(JSContext *ctx, JSValueConst port)
+{
+    JSValue started = JS_GetPropertyStr(ctx, port, "_started");
+    gboolean was = JS_ToBool(ctx, started);
+    JS_FreeValue(ctx, started);
+    JS_SetPropertyStr(ctx, port, "_started", JS_TRUE);
+    if (was) return;
+    JSValue queue = JS_GetPropertyStr(ctx, port, "_queue");
+    if (JS_IsArray(queue)) {
+        uint32_t len = ns_js_array_length(ctx, queue);
+        for (uint32_t i = 0; i < len; i++) {
+            JSValue item = JS_GetPropertyUint32(ctx, queue, i);
+            JSValueConst job_args[2] = { port, item };
+            JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+            JS_FreeValue(ctx, item);
+        }
+        JS_SetPropertyStr(ctx, port, "_queue", JS_NewArray(ctx));
+    }
+    JS_FreeValue(ctx, queue);
+}
+
+static JSValue
+ns_port_start(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_port_enable(ctx, this_val);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_port_onmessage_get(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_onmessage");
+    if (JS_IsUndefined(v)) { JS_FreeValue(ctx, v); return JS_NULL; }
+    return v;
+}
+
+static JSValue
+ns_port_onmessage_set(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    JSValueConst val = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JS_SetPropertyStr(ctx, this_val, "_onmessage", JS_DupValue(ctx, val));
+    ns_port_enable(ctx, this_val);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_port_post_message(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
@@ -8100,8 +8171,26 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
         return JS_UNDEFINED;
     }
     JSValueConst data = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    JSValueConst job_args[2] = { pair, data };
-    JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+    JSValue cloned = ns_structured_clone_value(ctx, data);
+
+    JSValue started = JS_GetPropertyStr(ctx, pair, "_started");
+    gboolean pair_started = JS_ToBool(ctx, started);
+    JS_FreeValue(ctx, started);
+    if (pair_started) {
+        JSValueConst job_args[2] = { pair, cloned };
+        JS_EnqueueJob(ctx, ns_port_deliver_job, 2, job_args);
+    } else {
+        JSValue queue = JS_GetPropertyStr(ctx, pair, "_queue");
+        if (!JS_IsArray(queue)) {
+            JS_FreeValue(ctx, queue);
+            queue = JS_NewArray(ctx);
+            JS_SetPropertyStr(ctx, pair, "_queue", JS_DupValue(ctx, queue));
+        }
+        JS_SetPropertyUint32(ctx, queue, ns_js_array_length(ctx, queue),
+                             JS_DupValue(ctx, cloned));
+        JS_FreeValue(ctx, queue);
+    }
+    JS_FreeValue(ctx, cloned);
     JS_FreeValue(ctx, pair);
     return JS_UNDEFINED;
 }
@@ -8241,17 +8330,39 @@ ns_window_message_channel(JSContext *ctx, JSValueConst this_val,
     JSValue port1 = JS_NewObject(ctx);
     JSValue port2 = JS_NewObject(ctx);
 
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue mc_ctor = JS_GetPropertyStr(ctx, global, "MessageChannel");
+    JSValue mc_proto = JS_GetPropertyStr(ctx, mc_ctor, "prototype");
+    if (JS_IsObject(mc_proto)) JS_SetPrototype(ctx, mc, mc_proto);
+    JS_FreeValue(ctx, mc_proto);
+    JS_FreeValue(ctx, mc_ctor);
+    JSValue port_ctor = JS_GetPropertyStr(ctx, global, "MessagePort");
+    JSValue port_proto = JS_GetPropertyStr(ctx, port_ctor, "prototype");
+    JS_FreeValue(ctx, port_ctor);
+    JS_FreeValue(ctx, global);
+
+    JSAtom onmessage_atom = JS_NewAtom(ctx, "onmessage");
     for (int i = 0; i < 2; i++) {
         JSValue p = i == 0 ? port1 : port2;
+        if (JS_IsObject(port_proto)) JS_SetPrototype(ctx, p, port_proto);
         ns_bind_fn(ctx, p, "postMessage",         ns_port_post_message,          1);
-        ns_bind_fn(ctx, p, "start",               ns_event_noop,                 0);
+        ns_bind_fn(ctx, p, "start",               ns_port_start,                 0);
         ns_bind_fn(ctx, p, "close",               ns_port_close,                 0);
         ns_bind_fn(ctx, p, "addEventListener",    ns_port_add_event_listener,    2);
         ns_bind_fn(ctx, p, "removeEventListener", ns_port_remove_event_listener, 2);
-        JS_SetPropertyStr(ctx, p, "onmessage",      JS_NULL);
+        JS_DefinePropertyGetSet(ctx, p, onmessage_atom,
+            JS_NewCFunction2(ctx, ns_port_onmessage_get, "get onmessage", 0,
+                             JS_CFUNC_generic, 0),
+            JS_NewCFunction2(ctx, ns_port_onmessage_set, "set onmessage", 1,
+                             JS_CFUNC_generic, 0),
+            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
         JS_SetPropertyStr(ctx, p, "onmessageerror", JS_NULL);
         JS_SetPropertyStr(ctx, p, "_closed",        JS_FALSE);
+        JS_SetPropertyStr(ctx, p, "_started",       JS_FALSE);
+        JS_SetPropertyStr(ctx, p, "_queue",         JS_NewArray(ctx));
     }
+    JS_FreeAtom(ctx, onmessage_atom);
+    JS_FreeValue(ctx, port_proto);
     JS_SetPropertyStr(ctx, port1, "_pair", JS_DupValue(ctx, port2));
     JS_SetPropertyStr(ctx, port2, "_pair", JS_DupValue(ctx, port1));
 

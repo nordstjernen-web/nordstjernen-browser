@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 13).
+Snapshot: **1.0.10**, 2026-06-17 (rev 14).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -361,7 +361,7 @@ surface).
 | `MessageEvent` | ✅ | |
 | `WebSocket` (`ws://`/`wss://`) | ✅ | uses libcurl's native WebSocket when the linked libcurl provides it, otherwise a built-in RFC 6455 client (handshake + masked framing, text/binary, fragmentation, ping/pong, close) over a `CONNECT_ONLY` (TLS) socket — so it works regardless of how libcurl was compiled; subprotocol negotiation |
 | Cross-document `postMessage` | 🟡 | delivers asynchronously as a `MessageEvent` (with `data`/`origin`/`source`) to `onmessage` and `addEventListener('message')`; the payload is `structuredClone`d so post-call mutation does not leak. Window targeting is approximate — all frames share one runtime and one listener list, so a message is not isolated to a single target frame |
-| `MessageChannel` / `MessagePort` | 🟡 | constructs two ports; same-context delivery |
+| `MessageChannel` / `MessagePort` | ✅ | `new MessageChannel()` entangles `port1`/`port2` (both chain to the real `MessageChannel`/`MessagePort` prototypes, so `instanceof` works). `postMessage` `structuredClone`s the payload and delivers it asynchronously (microtask) to the entangled port as a `MessageEvent`; the port message queue starts disabled, so messages are buffered until the receiving port is enabled — assigning `onmessage` enables it (and flushes the backlog) and `start()` enables it explicitly, matching the spec rule that `addEventListener('message')` without `start()` receives nothing. `close()` detaches the port. Cross-agent port *transfer* is out of scope under the shared single-runtime model |
 | Server-sent events (`EventSource`) | ✅ | libcurl-backed streaming client (`src/eventsource.c`): `onopen`/`onmessage`/`onerror`, named events via `addEventListener`, multi-line `data`, `id` → `lastEventId`, `retry`, automatic reconnection with `Last-Event-ID`, and `close()`; HTTPS pages refuse `http:` streams and `connect-src` CSP is enforced |
 
 ## §10 Web workers · §11 Worklets
