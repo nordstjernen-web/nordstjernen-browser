@@ -22997,6 +22997,26 @@ ns_element_img_natural_width(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n) return JS_NewString(ctx, "");
+    const ns_node *sel = n;
+    if (n->parent && n->parent->name &&
+        strcmp(n->parent->name, "picture") == 0)
+        sel = n->parent;
+    char *chosen = ns_img_chosen_url(sel);
+    if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
+    ns_js *js = js_from_ctx(ctx);
+    char *abs = (js && js->current_url)
+        ? ns_url_resolve(js->current_url, chosen) : NULL;
+    JSValue r = JS_NewString(ctx, abs ? abs : chosen);
+    g_free(abs);
+    g_free(chosen);
+    return r;
+}
+
+static JSValue
 ns_element_img_natural_height(JSContext *ctx, JSValueConst this_val)
 {
     const ns_image *im = ns_image_for_element(ctx, this_val);
@@ -29026,6 +29046,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("naturalWidth",  ns_element_img_natural_width, ns_element_noop_set),
     JS_CGETSET_DEF("naturalHeight", ns_element_img_natural_height, ns_element_noop_set),
     JS_CGETSET_DEF("complete",      ns_element_img_complete, ns_element_noop_set),
+    JS_CGETSET_DEF("currentSrc",    ns_element_img_current_src, ns_element_noop_set),
     JS_CGETSET_DEF("content",       ns_element_template_content, ns_element_noop_set),
     JS_CGETSET_DEF("hidden",        ns_element_get_hidden,     ns_element_set_hidden),
     JS_CGETSET_MAGIC_DEF("title",       ns_element_attr_getter, ns_element_attr_setter, 0),

@@ -200,6 +200,8 @@ const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
 
 const ns_node *ns_box_hit_inline_dom(const ns_box *root, double x, double y);
 
+char *ns_img_chosen_url(const ns_node *n);
+
 guint ns_box_count_matches(const ns_box *root, const char *needle,
                            gboolean case_sensitive);
 

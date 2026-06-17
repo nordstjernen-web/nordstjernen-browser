@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 26).
+Snapshot: **1.0.10**, 2026-06-17 (rev 27).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -173,7 +173,7 @@ elements (`head title meta link style script noscript template`) to
 | Element | Status | Notes |
 |---------|:--:|------|
 | `img` | ✅ | layout + decode pipeline |
-| `img srcset` / `sizes` | 🟡→✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density (recent layout work) |
+| `img srcset` / `sizes` | ✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density. `HTMLImageElement.currentSrc` reflects the actually-selected source (resolved to an absolute URL via the shared `ns_img_chosen_url` so it always matches the image the engine renders, including `<picture>` selection) |
 | `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
 | `img loading="lazy"` | ✅ | fetch deferred |
 | Decode pipeline | ✅/🟡 | ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG) → WebP via libwebp (lossy VP8 + lossless VP8L, `src/image_webp.c`) → AVIF via libavif (`src/image_avif.c`, if built) → GDK-Pixbuf fallback (TIFF and other loader formats) → librsvg (static SVG) |

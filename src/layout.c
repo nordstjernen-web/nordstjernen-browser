@@ -3731,6 +3731,36 @@ decode_data_image_for_layout(const char *url, const char *key)
     return img;
 }
 
+char *
+ns_img_chosen_url(const ns_node *n)
+{
+    if (!n) return NULL;
+    const ns_node *img = n;
+    char *url = NULL;
+    if (n->name && strcmp(n->name, "picture") == 0) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+            if (ns_node_is_element_named(c, "img")) {
+                img = c;
+                break;
+            }
+        }
+        char *source_url = pick_picture_source_url(n);
+        if (source_url && !g_str_has_prefix(source_url, "data:")) {
+            url = source_url;
+        } else {
+            if (img != n) url = pick_img_url(img);
+            if (!url && source_url) {
+                url = source_url;
+            } else {
+                g_free(source_url);
+            }
+        }
+    } else {
+        url = pick_img_url(n);
+    }
+    return url;
+}
+
 static ns_box *
 build_image_box(const ns_node *n)
 {
