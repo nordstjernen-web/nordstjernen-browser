@@ -575,6 +575,33 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
 }
 
 static void
+conic_color_at(const ns_css_gradient *gr, double frac,
+               double *r, double *g, double *b, double *a)
+{
+    double pos = frac + gr->from_deg / 360.0;
+    while (pos < 0) pos += 1.0;
+    while (pos >= 1.0) pos -= 1.0;
+    if (gr->repeating) {
+        double cper = gr->stops[gr->n_stops - 1].pos;
+        if (cper > 0) pos = fmod(pos, cper);
+    }
+    int lo = 0;
+    while (lo + 1 < gr->n_stops && gr->stops[lo + 1].pos < pos) lo++;
+    int hi = lo + 1;
+    if (hi >= gr->n_stops) hi = gr->n_stops - 1;
+    double t = 0.0;
+    if (gr->stops[hi].pos > gr->stops[lo].pos)
+        t = (pos - gr->stops[lo].pos) /
+            (gr->stops[hi].pos - gr->stops[lo].pos);
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    *r = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
+    *g = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
+    *b = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
+    *a = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
+}
+
+static void
 paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
                        double border_x, double border_y,
                        double border_w, double border_h,
@@ -585,43 +612,56 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
     double cx = border_x + gr->center_x * border_w;
     double cy = border_y + gr->center_y * border_h;
     if (gr->conic && gr->n_stops > 0) {
-        double r_outer = sqrt(border_w * border_w + border_h * border_h);
-        int slices = 360;
+        enum { CONIC_BASE = 24, CONIC_CAP = 96 };
+        double bnd[CONIC_CAP];
+        int nb = 0;
+        for (int k = 0; k <= CONIC_BASE; k++)
+            bnd[nb++] = k / (double)CONIC_BASE;
+        double off = gr->from_deg / 360.0;
+        for (int s = 0; s < gr->n_stops && nb < CONIC_CAP; s++) {
+            double g = gr->stops[s].pos - off;
+            g -= floor(g);
+            bnd[nb++] = g;
+            if (nb < CONIC_CAP) bnd[nb++] = g;
+        }
+        for (int i = 1; i < nb; i++) {
+            double key = bnd[i];
+            int j = i - 1;
+            while (j >= 0 && bnd[j] > key) { bnd[j + 1] = bnd[j]; j--; }
+            bnd[j + 1] = key;
+        }
+        double r_outer = sqrt(border_w * border_w + border_h * border_h) /
+                         cos(G_PI / CONIC_BASE);
         cairo_save(cr);
         rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
         cairo_clip(cr);
-        for (int i = 0; i < slices; i++) {
-            double frac = (i + 0.5) / slices;
-            double pos = frac + gr->from_deg / 360.0;
-            while (pos < 0) pos += 1.0;
-            while (pos >= 1.0) pos -= 1.0;
-            if (gr->repeating) {
-                double cper = gr->stops[gr->n_stops - 1].pos;
-                if (cper > 0) pos = fmod(pos, cper);
-            }
-            int lo = 0;
-            while (lo + 1 < gr->n_stops &&
-                   gr->stops[lo + 1].pos < pos) lo++;
-            int hi = lo + 1;
-            if (hi >= gr->n_stops) hi = gr->n_stops - 1;
-            double t = 0.0;
-            if (gr->stops[hi].pos > gr->stops[lo].pos)
-                t = (pos - gr->stops[lo].pos) /
-                    (gr->stops[hi].pos - gr->stops[lo].pos);
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-            double sr = (gr->stops[lo].r * (1 - t) + gr->stops[hi].r * t) / 255.0;
-            double sg = (gr->stops[lo].g * (1 - t) + gr->stops[hi].g * t) / 255.0;
-            double sb = (gr->stops[lo].b * (1 - t) + gr->stops[hi].b * t) / 255.0;
-            double sa = (gr->stops[lo].a * (1 - t) + gr->stops[hi].a * t) / 255.0;
-            double a1 = (i / (double)slices) * 2 * G_PI - G_PI / 2;
-            double a2 = ((i + 1) / (double)slices) * 2 * G_PI - G_PI / 2;
-            cairo_set_source_rgba(cr, sr, sg, sb, sa);
-            cairo_move_to(cr, cx, cy);
-            cairo_arc(cr, cx, cy, r_outer, a1, a2);
-            cairo_close_path(cr);
-            cairo_fill(cr);
+        cairo_pattern_t *mesh = cairo_pattern_create_mesh();
+        for (int i = 0; i + 1 < nb; i++) {
+            double f1 = bnd[i], f2 = bnd[i + 1];
+            double span = f2 - f1;
+            if (span < 1e-6) continue;
+            double eps = span * 1e-3;
+            double a1 = f1 * 2 * G_PI - G_PI / 2;
+            double a2 = f2 * 2 * G_PI - G_PI / 2;
+            double r1, g1, b1, al1, r2, g2, b2, al2;
+            conic_color_at(gr, f1 + eps, &r1, &g1, &b1, &al1);
+            conic_color_at(gr, f2 - eps, &r2, &g2, &b2, &al2);
+            cairo_mesh_pattern_begin_patch(mesh);
+            cairo_mesh_pattern_move_to(mesh, cx, cy);
+            cairo_mesh_pattern_line_to(mesh, cx + r_outer * cos(a1),
+                                       cy + r_outer * sin(a1));
+            cairo_mesh_pattern_line_to(mesh, cx + r_outer * cos(a2),
+                                       cy + r_outer * sin(a2));
+            cairo_mesh_pattern_line_to(mesh, cx, cy);
+            cairo_mesh_pattern_set_corner_color_rgba(mesh, 0, r1, g1, b1, al1);
+            cairo_mesh_pattern_set_corner_color_rgba(mesh, 1, r1, g1, b1, al1);
+            cairo_mesh_pattern_set_corner_color_rgba(mesh, 2, r2, g2, b2, al2);
+            cairo_mesh_pattern_set_corner_color_rgba(mesh, 3, r2, g2, b2, al2);
+            cairo_mesh_pattern_end_patch(mesh);
         }
+        cairo_set_source(cr, mesh);
+        cairo_paint(cr);
+        cairo_pattern_destroy(mesh);
         cairo_restore(cr);
     } else {
         cairo_pattern_t *pat;
