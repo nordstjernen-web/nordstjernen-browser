@@ -2788,7 +2788,8 @@ ns_element_attr_getter(JSContext *ctx, JSValueConst this_val, int magic)
         ns_js *js = js_from_ctx(ctx);
         return JS_NewString(ctx, js && js->current_url ? js->current_url : "");
     }
-    gboolean is_url_attr = (magic == 3 || magic == 9 || magic == 39);
+    gboolean is_url_attr = (magic == 3 || magic == 9 || magic == 39 ||
+                            magic == 87);
     if (is_url_attr) {
         if (!v || !*v) return JS_NewString(ctx, "");
         ns_js *js = js_from_ctx(ctx);

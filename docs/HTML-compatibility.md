@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 2).
+Snapshot: **1.0.10**, 2026-06-17 (rev 3).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -166,7 +166,7 @@ elements (`head title meta link style script noscript template`) to
 | `download` | 🟡 | recognised; save flow limited |
 | `HTMLHyperlinkElementUtils` (`href`/`protocol`/`host`/`hostname`/`port`/`pathname`/`search`/`hash`/`origin`) | ✅ | typed URL decomposition via `ns_element_anchor_part_get` / `ns_element_anchor_href_set` (`src/js.c`); `href` resolves to absolute on read, parses on write |
 | `a.text` (descendant text content) | ✅ | per-spec dispatch in `ns_element_get_text` |
-| `ins` / `del` | 🟡 | styled by UA CSS (ins green, del dark red); no edit semantics |
+| `ins` / `del` | ✅ | full HTMLModElement: styled by UA CSS (`ins` green underline, `del` red strike-through), and the element's only two IDL attributes are reflected per spec — `cite` as a **URL** (resolved to an absolute URL on read via the shared URL-reflection path in `ns_element_attr_getter`, `src/js.c`; `getAttribute` still returns the literal) and `dateTime` as a plain string. `ins`/`del` define no further behaviour in the spec |
 
 ## §4.8 Embedded content
 
