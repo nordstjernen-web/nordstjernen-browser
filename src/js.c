@@ -15288,6 +15288,9 @@ ns_worker_js_new(ns_worker_host *host)
 
     ns_wasm_install(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequest", ns_window_xhr_ctor, 0);
+    ns_bind_fn(ctx, global, "fetch",    ns_js_fetch,             1);
+    ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 2);
+    ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  2);
     ns_bind_ctor(ctx, global, "WebGLRenderingContext",
                  ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "WebGL2RenderingContext",
