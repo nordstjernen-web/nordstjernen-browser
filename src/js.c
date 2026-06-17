@@ -28004,8 +28004,13 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
     const char *t = JS_ToCString(ctx, argv[0]);
     if (!t) return JS_NewString(ctx, "");
     const char *out = "";
-    if (strstr(t, "audio/mpeg") || strstr(t, "audio/mp3"))
+    if (strstr(t, "audio/mpeg") || strstr(t, "audio/mp3")) {
         out = "maybe";
+    } else if (g_str_has_prefix(t, "video/") ||
+               strstr(t, "mp4") || strstr(t, "webm") || strstr(t, "ogg") ||
+               strstr(t, "aac") || strstr(t, "wav")) {
+        out = "maybe";
+    }
     JS_FreeCString(ctx, t);
     return JS_NewString(ctx, out);
 }
