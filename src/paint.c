@@ -13,6 +13,7 @@
 #include "anim.h"
 #include "css.h"
 #include "dom.h"
+#include "spellcheck.h"
 #include "font.h"
 #include "image.h"
 #include "mathml.h"
@@ -1861,6 +1862,72 @@ paint_text_shadow_layer(cairo_t *cr, PangoLayout *layout, double x, double y,
 }
 
 static void
+spell_underline_range(PangoAttrList *attrs, const char *t,
+                      gsize rstart, gsize rend)
+{
+    const char *p = t + rstart;
+    const char *end = t + rend;
+    while (p < end) {
+        if (!g_unichar_isalpha(g_utf8_get_char(p))) {
+            p = g_utf8_next_char(p);
+            continue;
+        }
+        const char *start = p;
+        const char *q = p;
+        int alpha = 0;
+        while (q < end) {
+            gunichar c = g_utf8_get_char(q);
+            const char *nx = g_utf8_next_char(q);
+            if (g_unichar_isalpha(c)) { alpha++; q = nx; continue; }
+            if ((c == '\'' || c == 0x2019) && nx < end &&
+                g_unichar_isalpha(g_utf8_get_char(nx))) { q = nx; continue; }
+            break;
+        }
+        gsize bstart = (gsize)(start - t);
+        gsize blen = (gsize)(q - start);
+        if (alpha >= 2 && !ns_spell_word_ok(start, (gssize)blen, NULL)) {
+            PangoAttribute *u = pango_attr_underline_new(PANGO_UNDERLINE_ERROR);
+            u->start_index = (guint)bstart;
+            u->end_index = (guint)(bstart + blen);
+            pango_attr_list_insert(attrs, u);
+            PangoAttribute *col = pango_attr_underline_color_new(0xffff, 0x1000, 0x1000);
+            col->start_index = (guint)bstart;
+            col->end_index = (guint)(bstart + blen);
+            pango_attr_list_insert(attrs, col);
+        }
+        p = q;
+    }
+}
+
+static void
+paint_spell_underlines(PangoAttrList *attrs, const ns_box *b)
+{
+    if (!attrs || !b || !b->text) return;
+    if (!ns_spell_available()) return;
+    gsize tlen = strlen(b->text);
+    gboolean had_range = FALSE;
+    if (b->attrs) {
+        for (guint i = 0; i < b->attrs->len; i++) {
+            const ns_inline_attr *a =
+                &g_array_index(b->attrs, ns_inline_attr, i);
+            if (a->kind != NS_INLINE_SPELLCHECK) continue;
+            gsize s = a->start, e = a->start + a->len;
+            if (e > tlen) e = tlen;
+            if (s < e) {
+                spell_underline_range(attrs, b->text, s, e);
+                had_range = TRUE;
+            }
+        }
+    }
+    if (had_range) return;
+    const ns_node *owner = NULL;
+    for (const ns_box *bx = b; bx && !owner; bx = bx->parent)
+        owner = bx->dom;
+    if (owner && ns_node_spellcheck_host(owner))
+        spell_underline_range(attrs, b->text, 0, tlen);
+}
+
+static void
 paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b->text || !*b->text) return;
@@ -2079,6 +2146,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 break;
             case NS_INLINE_CARET:
             case NS_INLINE_ELEMENT:
+            case NS_INLINE_SPELLCHECK:
                 break;
             }
             attr_insert_range(attrs, a, r->start, r->len);
@@ -2107,6 +2175,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                                    (guint)line0->start_index,
                                    (guint)(line0->start_index + line0->length));
     }
+    paint_spell_underlines(attrs, b);
     pango_layout_set_attributes(layout, attrs);
     pango_attr_list_unref(attrs);
 

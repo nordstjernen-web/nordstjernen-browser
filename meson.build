@@ -222,6 +222,12 @@ if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
+libenchant = dependency('enchant-2', required: false)
+have_enchant = libenchant.found() and not is_android
+if have_enchant
+  add_project_arguments('-DNS_HAVE_ENCHANT=1', language: 'c')
+endif
+
 libseccomp = dependency(
   'libseccomp',
   required: host_machine.system() == 'linux',

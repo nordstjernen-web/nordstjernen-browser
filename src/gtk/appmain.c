@@ -28,6 +28,7 @@
 #include "debuglog.h"
 #include "font.h"
 #include "headless.h"
+#include "spellcheck.h"
 #include "history.h"
 #include "i18n.h"
 #include "net.h"
@@ -398,6 +399,7 @@ ns_run_headless(ns_headless_opts *hopts)
     ns_bcache_init();
     ns_history_init();
     ns_font_init();
+    ns_spell_init();
     char *file_url = NULL;
     if (hopts->url && !strstr(hopts->url, "://") &&
         !g_str_has_prefix(hopts->url, "about:") &&

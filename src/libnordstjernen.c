@@ -26,6 +26,7 @@
 #include "js.h"
 #include "layout.h"
 #include "net.h"
+#include "spellcheck.h"
 #include "paint.h"
 #include "render.h"
 #include "security.h"
@@ -420,6 +421,7 @@ ns_browser_init(void)
     ns_bcache_init();
     ns_history_init();
     ns_font_init();
+    ns_spell_init();
     return 0;
 }
 

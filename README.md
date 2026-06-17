@@ -63,6 +63,11 @@ The full section-by-section walk-through lives in
   `mfrac`, `msqrt`/`mroot`, `munder`/`mover`/`munderover`, `mtable`,
   `mfenced`, and `mphantom`, laid out over Pango/Cairo and embedded
   inline on the text baseline.
+- **Spell checking** — optional, via the Enchant library (`src/spellcheck.c`):
+  misspelled words in editable text (text inputs, `textarea`,
+  `contenteditable`) get a red wavy underline, honouring the `spellcheck`
+  attribute. Dictionaries load before the renderer seals its sandbox; with
+  Enchant absent it degrades cleanly to no checking.
 - **WebGL** — opt-in, per-site WebGL 1 / 2 mapped onto OpenGL ES;
   off by default and gated behind a trust prompt. See
   [`docs/webgl.md`](docs/webgl.md).

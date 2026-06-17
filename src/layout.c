@@ -2525,6 +2525,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
             emit_control_text_style(ctx->attrs, s, start, ctx->out->len,
                                     val_start, disp_end, is_placeholder,
                                     ns_element_get_attr(n, "disabled") != NULL);
+            if (!is_placeholder && disp_end > val_start &&
+                ns_element_get_attr(n, "disabled") == NULL &&
+                ns_node_spellcheck_used(n)) {
+                ns_inline_attr sc = { .kind = NS_INLINE_SPELLCHECK,
+                                      .start = val_start,
+                                      .len = disp_end - val_start, .dom = n };
+                g_array_append_val(ctx->attrs, sc);
+            }
             if (focused) {
                 if (anchor_pos != caret_pos) {
                     gsize s0 = anchor_pos < caret_pos ? anchor_pos : caret_pos;
@@ -2806,6 +2814,14 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         emit_control_text_style(ctx->attrs, s, start, ctx->out->len,
                                 val_start, disp_end, is_placeholder,
                                 ns_element_get_attr(n, "disabled") != NULL);
+        if (!is_placeholder && disp_end > val_start &&
+            ns_element_get_attr(n, "disabled") == NULL &&
+            ns_node_spellcheck_used(n)) {
+            ns_inline_attr sc = { .kind = NS_INLINE_SPELLCHECK,
+                                  .start = val_start,
+                                  .len = disp_end - val_start, .dom = n };
+            g_array_append_val(ctx->attrs, sc);
+        }
         if (focused) {
             if (anchor_pos != caret_pos) {
                 gsize s0 = anchor_pos < caret_pos ? anchor_pos : caret_pos;

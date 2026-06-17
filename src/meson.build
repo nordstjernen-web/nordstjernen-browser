@@ -76,6 +76,7 @@ nordstjernen_engine_sources = files(
   'render.c',
   'security.c',
   'selection.c',
+  'spellcheck.c',
   'tab_worker.c',
   'texture.c',
   'video.c',
@@ -164,6 +165,10 @@ else
 
   if have_avif
     nordstjernen_deps += [libavif]
+  endif
+
+  if have_enchant
+    nordstjernen_deps += [libenchant]
   endif
 endif
 

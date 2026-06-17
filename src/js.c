@@ -3381,19 +3381,6 @@ ns_element_set_autocapitalize(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static gboolean
-ns_node_spellcheck_used(const ns_node *n)
-{
-    for (const ns_node *cur = n; cur; cur = cur->parent) {
-        if (cur->kind != NS_NODE_ELEMENT) continue;
-        const char *v = ns_element_get_attr(cur, "spellcheck");
-        if (!v) continue;
-        if (!g_ascii_strcasecmp(v, "false")) return FALSE;
-        if (!*v || !g_ascii_strcasecmp(v, "true")) return TRUE;
-    }
-    return TRUE;
-}
-
 static JSValue
 ns_element_get_spellcheck(JSContext *ctx, JSValueConst this_val)
 {

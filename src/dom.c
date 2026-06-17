@@ -412,6 +412,28 @@ ns_node_is_editable(const ns_node *n)
 }
 
 gboolean
+ns_node_spellcheck_used(const ns_node *n)
+{
+    for (const ns_node *cur = n; cur; cur = cur->parent) {
+        if (cur->kind != NS_NODE_ELEMENT) continue;
+        const char *v = ns_element_get_attr(cur, "spellcheck");
+        if (!v) continue;
+        if (!g_ascii_strcasecmp(v, "false")) return FALSE;
+        if (!*v || !g_ascii_strcasecmp(v, "true")) return TRUE;
+    }
+    return TRUE;
+}
+
+const ns_node *
+ns_node_spellcheck_host(const ns_node *n)
+{
+    for (const ns_node *cur = n; cur; cur = cur->parent)
+        if (ns_node_is_editable(cur))
+            return ns_node_spellcheck_used(cur) ? cur : NULL;
+    return NULL;
+}
+
+gboolean
 ns_input_value_is_dirty_mode(const ns_node *n)
 {
     if (!n || !n->name || strcmp(n->name, "input") != 0) return FALSE;

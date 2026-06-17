@@ -172,6 +172,10 @@ sudo apt install build-essential pkg-config meson ninja-build \
     libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev
 ```
 
+Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
+enables on-screen spell-checking of editable text. It is auto-detected —
+the build works without it and simply does no spell-checking.
+
 On Fedora/RHEL:
 
 ```sh

@@ -199,6 +199,8 @@ gboolean    ns_ce_attr_enables(const char *contenteditable);
 gboolean    ns_node_is_text_input(const ns_node *n);
 gboolean    ns_node_is_contenteditable_host(const ns_node *n);
 gboolean    ns_node_is_editable(const ns_node *n);
+gboolean    ns_node_spellcheck_used(const ns_node *n);
+const ns_node *ns_node_spellcheck_host(const ns_node *n);
 const char *ns_node_editable_value(const ns_node *n);
 const char *ns_input_used_value(const ns_node *n);
 gboolean    ns_input_is_checked(const ns_node *n);
