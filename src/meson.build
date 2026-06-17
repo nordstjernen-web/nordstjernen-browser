@@ -289,6 +289,22 @@ if not is_android
       install: false,
     )
   endif
+
+  audio_deps = [dependency('libcurl')]
+  audio_lib_deps = []
+  if host_machine.system() == 'linux'
+    audio_lib_deps += [cc.find_library('dl', required: false),
+                       cc.find_library('pthread', required: false),
+                       cc.find_library('m', required: false)]
+  endif
+  executable(
+    'nordstjernen-audio',
+    files('audio/miniaudio_impl.c', 'audio/main.c'),
+    include_directories: include_directories('audio'),
+    c_args: ['-w'],
+    dependencies: audio_deps + audio_lib_deps,
+    install: true,
+  )
 endif
 
 if not is_android and have_gtk
