@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 12).
+Snapshot: **1.0.10**, 2026-06-17 (rev 13).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -326,7 +326,7 @@ surface).
 | History API (`pushState`/`replaceState`/`popstate`) | ✅ | same-origin checked, `popstate` dispatched |
 | `location` (all members) | ✅ | `href`/`protocol`/`host`/`hostname`/`port`/`pathname`/`search`/`hash` |
 | `Navigation` API (`navigation.navigate`) | ❌ | not implemented |
-| `BroadcastChannel` | 🟡 | stub |
+| `BroadcastChannel` | ✅ | `new BroadcastChannel(name)` (name required, else `TypeError`; `name` read-only; `instanceof` via the real prototype), `postMessage`, `close`, `onmessage`/`addEventListener`. A posted message is `structuredClone`d and delivered asynchronously (microtask) as a `MessageEvent` (`data`, page `origin`, `source:null`, empty `ports`) to every *other* open channel with the same name, excluding the sender and closed channels (`ns_broadcast_post_message` in `src/js.c`). Cross-document reach is bounded by the shared single-runtime model — channels in one runtime see each other, matching the per-origin contract within a page |
 | Application cache / offline | 🚫 | obsolete; not implemented |
 
 ## §8 Web application APIs

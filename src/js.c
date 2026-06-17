@@ -7969,10 +7969,15 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_FreeValue(ctx, closed);
     if (is_closed) return JS_UNDEFINED;
 
+    JSValue port_origin = JS_GetPropertyStr(ctx, port, "_origin");
+    const char *po = JS_IsString(port_origin) ? JS_ToCString(ctx, port_origin)
+                                              : NULL;
     JSValue ev = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, ev, "type",             JS_NewString(ctx, "message"));
     JS_SetPropertyStr(ctx, ev, "data",             JS_DupValue(ctx, data));
-    JS_SetPropertyStr(ctx, ev, "origin",           JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, ev, "origin",           JS_NewString(ctx, po ? po : ""));
+    if (po) JS_FreeCString(ctx, po);
+    JS_FreeValue(ctx, port_origin);
     JS_SetPropertyStr(ctx, ev, "lastEventId",      JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, ev, "source",           JS_NULL);
     JS_SetPropertyStr(ctx, ev, "ports",            JS_NewArray(ctx));
@@ -8362,14 +8367,32 @@ ns_window_broadcast_channel(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
     (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx,
+            "BroadcastChannel constructor requires a name argument");
+    const char *name = JS_ToCString(ctx, argv[0]);
+    if (!name) return JS_EXCEPTION;
+
     JSValue bc = JS_NewObject(ctx);
-    if (argc >= 1) {
-        const char *name = JS_ToCString(ctx, argv[0]);
-        JS_SetPropertyStr(ctx, bc, "name", JS_NewString(ctx, name ? name : ""));
-        if (name) JS_FreeCString(ctx, name);
-    } else {
-        JS_SetPropertyStr(ctx, bc, "name", JS_NewString(ctx, ""));
-    }
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "BroadcastChannel");
+    JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, bc, proto);
+    JS_FreeValue(ctx, proto);
+    JS_FreeValue(ctx, ctor);
+
+    JSValue loc = JS_GetPropertyStr(ctx, global, "location");
+    JSValue origin = JS_GetPropertyStr(ctx, loc, "origin");
+    const char *os = JS_ToCString(ctx, origin);
+    JS_SetPropertyStr(ctx, bc, "_origin", JS_NewString(ctx, os ? os : "null"));
+    if (os) JS_FreeCString(ctx, os);
+    JS_FreeValue(ctx, origin);
+    JS_FreeValue(ctx, loc);
+    JS_FreeValue(ctx, global);
+
+    JS_DefinePropertyValueStr(ctx, bc, "name", JS_NewString(ctx, name),
+                              JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
+    JS_FreeCString(ctx, name);
     JS_SetPropertyStr(ctx, bc, "_listeners", JS_NewArray(ctx));
     JS_SetPropertyStr(ctx, bc, "_closed",    JS_FALSE);
     ns_bind_fn(ctx, bc, "postMessage",        ns_broadcast_post_message,     1);
