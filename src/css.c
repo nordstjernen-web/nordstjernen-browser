@@ -13298,6 +13298,7 @@ static const char *kUa =
     "button, label { display: inline; }\n"
     "var { font-style: italic; }\n"
     "bdo { unicode-bidi: bidi-override; }\n"
+    "bdi { unicode-bidi: isolate; }\n"
     "rt { font-size: 0.7em; }\n"
     "abbr[title], acronym[title] { text-decoration: underline dotted; cursor: help; }\n"
     "rp, datalist { display: none; }\n"

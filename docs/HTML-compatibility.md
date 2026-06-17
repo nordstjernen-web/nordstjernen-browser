@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 8).
+Snapshot: **1.0.10**, 2026-06-17 (rev 9).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -113,7 +113,7 @@ standards mode (see [§13](#13-the-html-syntax)).
 | `document.compatMode` | ✅ | reflects the parser's quirks state (`BackCompat` in quirks mode, else `CSS1Compat`); plumbed from lexbor's `compat_mode` via the document node flags |
 | Void / raw-text / escapable element classes | ✅ | void set in `src/html.c` (`area base br col embed hr img input link meta param source track wbr`) |
 | Quirks / limited-quirks / no-quirks | 🟡 | DOCTYPE consumed; `document.compatMode` now reflects the mode, but quirks-specific layout deltas are still not applied |
-| `dir` global attribute (`Element.dir`, `document.dir`) | 🟡 | reflected as an enumerated IDL attribute (canonicalised to `ltr`/`rtl`/`auto`/`""`); drives Pango base direction and the start/end resolution of `text-align` (an unset `text-align` in an RTL context resolves to right). The CSS `direction` (inherited) and `unicode-bidi` properties are now parsed and honoured, so author `direction: rtl` reaches base-direction parity with the `dir` attribute and `unicode-bidi: bidi-override` reverses a run (see §4.5). Full bidi *isolation* (`isolate`/`plaintext`) is still approximated |
+| `dir` global attribute (`Element.dir`, `document.dir`) | 🟡 | reflected as an enumerated IDL attribute (canonicalised to `ltr`/`rtl`/`auto`/`""`); drives Pango base direction and the start/end resolution of `text-align` (an unset `text-align` in an RTL context resolves to right). The CSS `direction` (inherited) and `unicode-bidi` properties are now parsed and honoured, so author `direction: rtl` reaches base-direction parity with the `dir` attribute and `unicode-bidi: bidi-override`/`isolate`/`isolate-override`/`plaintext` are honoured via Unicode bidi controls (see §4.5). The remaining approximation is the computed *used* direction for `dir=auto` on arbitrary elements (the first-strong scan feeding `:dir()`), beyond the isolate-control layout effect |
 | `lang`, `translate`, `accessKey` global attributes | ✅ | reflected (`translate` resolves the inherited yes/no translation mode); the nearest-ancestor `lang` (falling back to `xml:lang`) feeds Pango text shaping and hyphenation |
 
 ### §4.2 Document metadata
@@ -149,7 +149,7 @@ elements are defined in terms of [§15 Rendering](#15-rendering) UA CSS.
 | Dedicated inline handling | `q` `sub` `sup` `br` `wbr` | ✅ explicit in `src/layout.c` |
 | Ruby annotations | `ruby rt rp` | 🟡 parsed; rendered inline without ruby positioning |
 | `data` / `time` | | ✅ reflected `data.value` and `time.dateTime` |
-| `bdi` / `bdo` | | 🟡→✅ `bdo` applies `unicode-bidi: bidi-override` (UA rule) — its text is wrapped in Unicode override controls (RLO/LRO … PDF) keyed on the resolved direction, so the run lays out in the forced direction; `bdi` parsed, its isolation approximated |
+| `bdi` / `bdo` | | ✅ both wrap their content in Unicode bidi formatting controls at layout time (`src/layout.c`), so fribidi/Pango lay them out per UAX#9. `bdo` (UA rule `unicode-bidi: bidi-override`) emits the override pair (LRO/RLO … PDF) keyed on the resolved direction, forcing the run's direction. `bdi` (UA rule `unicode-bidi: isolate`, defaulting to `dir=auto`) emits an isolate (LRI/RLI, or **FSI** for the auto/plaintext case … PDI), so its content's directionality cannot reorder the surrounding text and vice-versa. The general `unicode-bidi` values `isolate`, `isolate-override`, and `plaintext` are honoured the same way |
 
 The UA stylesheet defines the heading scale, list markers, default
 margins/padding, form-control baselines, and sets non-rendered
@@ -601,11 +601,14 @@ CSS support (abridged):
   `grid-auto-rows`) and the parent row gap; fully auto-sized parent
   rows still fall back to the regular auto-row path.
 - 🟡 Bidirectional text: `direction` (inherited, `ltr`/`rtl`) feeds the
-  Pango base direction and the start/end resolution of `text-align`;
-  `unicode-bidi: bidi-override` / `isolate-override` (and the UA
-  `bdo` rule) force a run's direction via Unicode override controls.
-  Bidi *isolation* (`isolate`/`plaintext`) is approximated, not full
-  UAX#9 isolation.
+  Pango base direction and the start/end resolution of `text-align`. All
+  `unicode-bidi` values are honoured by emitting the matching Unicode bidi
+  formatting controls around the element's content (override LRO/RLO…PDF
+  for `bidi-override`; isolates LRI/RLI/FSI…PDI for `isolate`/`plaintext`,
+  combined for `isolate-override`; UA rules give `bdo` override and `bdi`
+  isolate) so fribidi performs real UAX#9 isolation/override. The residual
+  gap is exposing the computed *used* direction of `dir=auto` elements to
+  `:dir()`.
 - ❌ Writing modes (vertical `writing-mode`).
 
 Replaced elements (`img`/`video`/`canvas`) are sized via the media-box

@@ -2909,19 +2909,36 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     }
 
     gboolean bidi_override = FALSE;
+    gboolean bidi_isolate = FALSE;
+    gboolean bidi_plaintext = FALSE;
     if (s) {
         const char *ub = ns_style_keyword(s, NS_CSS_UNICODE_BIDI);
-        if (ub && (strcmp(ub, "bidi-override") == 0 ||
-                   strcmp(ub, "isolate-override") == 0))
-            bidi_override = TRUE;
+        if (ub) {
+            if (strcmp(ub, "bidi-override") == 0)
+                bidi_override = TRUE;
+            else if (strcmp(ub, "isolate-override") == 0)
+                bidi_override = bidi_isolate = TRUE;
+            else if (strcmp(ub, "isolate") == 0)
+                bidi_isolate = TRUE;
+            else if (strcmp(ub, "plaintext") == 0)
+                bidi_plaintext = TRUE;
+        }
     }
-    if (bidi_override) {
+    if (bidi_override || bidi_isolate || bidi_plaintext) {
         const char *bd_dir = ns_element_get_attr(n, "dir");
         if (!bd_dir || !*bd_dir) bd_dir = ns_style_keyword(s, NS_CSS_DIRECTION);
-        g_string_append(ctx->out,
-            (bd_dir && g_ascii_strcasecmp(bd_dir, "rtl") == 0)
-                ? "\xe2\x80\xae"
-                : "\xe2\x80\xad");
+        gboolean rtl = bd_dir && g_ascii_strcasecmp(bd_dir, "rtl") == 0;
+        gboolean dir_auto = (bd_dir && g_ascii_strcasecmp(bd_dir, "auto") == 0) ||
+                            (strcmp(n->name, "bdi") == 0 &&
+                             !ns_element_get_attr(n, "dir"));
+        if (bidi_isolate || bidi_plaintext)
+            g_string_append(ctx->out,
+                (bidi_plaintext || dir_auto) ? "\xe2\x81\xa8"   /* FSI */
+                : rtl                        ? "\xe2\x81\xa7"   /* RLI */
+                                             : "\xe2\x81\xa6"); /* LRI */
+        if (bidi_override)
+            g_string_append(ctx->out, rtl ? "\xe2\x80\xae"   /* RLO */
+                                           : "\xe2\x80\xad"); /* LRO */
     }
 
     gboolean sup = strcmp(n->name, "sup") == 0;
@@ -3042,7 +3059,9 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     if (small_caps && ctx->out->len > sc_start)
         emit_attr(ctx->attrs, NS_INLINE_SMALL_CAPS, sc_start, ctx->out->len);
     if (bidi_override)
-        g_string_append(ctx->out, "\xe2\x80\xac");
+        g_string_append(ctx->out, "\xe2\x80\xac");   /* PDF */
+    if (bidi_isolate || bidi_plaintext)
+        g_string_append(ctx->out, "\xe2\x81\xa9");   /* PDI */
     if (is_q) {
         ctx->q_depth--;
         char *close_q = quotes_string_for(s, ctx->q_depth, TRUE);
