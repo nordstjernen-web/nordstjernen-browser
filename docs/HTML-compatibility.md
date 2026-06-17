@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 16).
+Snapshot: **1.0.10**, 2026-06-17 (rev 17).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -419,7 +419,7 @@ implemented yet.
 |-----|:--:|------|
 | `localStorage` | ✅ | persistent, origin-partitioned, **no quota enforced** |
 | `sessionStorage` | ✅ | per-session |
-| `storage` event | 🟡 | limited (single context) |
+| `storage` event | ✅ | the `StorageEvent` interface is complete — the constructor reflects every dictionary member (`key`/`oldValue`/`newValue`/`url`/`storageArea`) with spec defaults (`key`/`oldValue`/`newValue` `null`, `url` `""`, `storageArea` `null`), the legacy `initStorageEvent(type, bubbles, cancelable, key, oldValue, newValue, url, storageArea)` is provided (`ns_storage_event_ctor` in `src/js.c`), and `onstorage`/`addEventListener('storage')` deliver dispatched events with intact fields. A storage area mutation does **not** fire a `storage` event on the window that made the change (per spec), and with one browsing context per tab there is no other same-origin context to notify — so same-tab mutations correctly fire nothing |
 | IndexedDB | 🟡 | SQLite-backed, origin-partitioned; supports databases, version upgrades, object stores, indexes, key ranges, cursors, requests/events, and structured-clone persistence through QuickJS serialization. Transaction rollback/blocking semantics and cross-context versionchange coordination are simplified |
 
 ## §13 The HTML syntax

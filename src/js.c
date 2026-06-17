@@ -17527,6 +17527,56 @@ ns_message_event_ctor(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_storage_event_init(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    if (argc >= 1)
+        JS_SetPropertyStr(ctx, this_val, "type", JS_DupValue(ctx, argv[0]));
+    JS_SetPropertyStr(ctx, this_val, "bubbles",
+                      JS_NewBool(ctx, argc >= 2 && JS_ToBool(ctx, argv[1])));
+    JS_SetPropertyStr(ctx, this_val, "cancelable",
+                      JS_NewBool(ctx, argc >= 3 && JS_ToBool(ctx, argv[2])));
+    JS_SetPropertyStr(ctx, this_val, "key",
+                      argc >= 4 ? JS_DupValue(ctx, argv[3]) : JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "oldValue",
+                      argc >= 5 ? JS_DupValue(ctx, argv[4]) : JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "newValue",
+                      argc >= 6 ? JS_DupValue(ctx, argv[5]) : JS_NULL);
+    JS_SetPropertyStr(ctx, this_val, "url",
+                      argc >= 7 ? JS_DupValue(ctx, argv[6]) : JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, this_val, "storageArea",
+                      argc >= 8 ? JS_DupValue(ctx, argv[7]) : JS_NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_storage_event_ctor(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        static const char *const members[] = {
+            "key", "oldValue", "newValue", "url", "storageArea",
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(members); i++) {
+            JSValue v = JS_GetPropertyStr(ctx, argv[1], members[i]);
+            if (!JS_IsUndefined(v))
+                JS_SetPropertyStr(ctx, ev, members[i], v);
+            else
+                JS_FreeValue(ctx, v);
+        }
+    }
+    ns_event_default_if_absent(ctx, ev, "key", JS_NULL);
+    ns_event_default_if_absent(ctx, ev, "oldValue", JS_NULL);
+    ns_event_default_if_absent(ctx, ev, "newValue", JS_NULL);
+    ns_event_default_if_absent(ctx, ev, "url", JS_NewString(ctx, ""));
+    ns_event_default_if_absent(ctx, ev, "storageArea", JS_NULL);
+    ns_bind_fn(ctx, ev, "initStorageEvent", ns_storage_event_init, 8);
+    return ev;
+}
+
+static JSValue
 ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -31498,7 +31548,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "SubmitEvent",   ns_submit_event_ctor,   2);
     static const char *event_subclasses[] = {
         "ProgressEvent","ErrorEvent","HashChangeEvent","PopStateEvent",
-        "StorageEvent","PageTransitionEvent","BeforeUnloadEvent",
+        "PageTransitionEvent","BeforeUnloadEvent",
         "InputEvent","DragEvent",
         "FocusEvent","AnimationEvent","TransitionEvent","ClipboardEvent",
         "CompositionEvent","CloseEvent",
@@ -31514,6 +31564,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
     ns_bind_ctor(ctx, global, "MessageEvent", ns_message_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_message_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "StorageEvent", ns_storage_event_ctor, 2);
     ns_install_drag_event_support(ctx);
 
     static const ns_fn_def event_base_ctors[] = {
