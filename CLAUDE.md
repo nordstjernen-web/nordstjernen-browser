@@ -21,10 +21,17 @@ nothing imported.
   site is trusted. The `WebGLRenderingContext` / `WebGL2RenderingContext`
   interface objects also carry the GL enum constants so feature code
   resolves them without a live context.
-- No embedded audio/video codecs. `<audio>`/`<video>` render a poster
-  and play overlay; clicking resolves the media URL in the renderer
-  (`ns_browser_media_at`) and the shell hands it to an external player
-  (`src/media.c::ns_media_try_launch`).
+- Exactly **one** embedded video codec: MPEG-1, decoded in-tree by the
+  vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
+  single-file decoder (`subprojects/plmpeg/`, wrapped by
+  `src/video_decode.c`). A `<video>` whose source is an `.mpg`/`.mpeg`/`.m1v`
+  stream plays **inline** — frames are decoded in the sandboxed renderer
+  and advanced off the animation tick (`src/video.c`), honouring
+  `autoplay`/`loop`/`poster` and click-to-play/pause. No embedded audio
+  codecs, and don't add a second video codec. `<audio>` and non-MPEG-1
+  `<video>` render a poster and play overlay; clicking resolves the media
+  URL in the renderer (`ns_browser_media_at`) and the shell hands it to an
+  external player (`src/media.c::ns_media_try_launch`).
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue

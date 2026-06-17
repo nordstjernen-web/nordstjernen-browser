@@ -1,4 +1,4 @@
-/* Nordstjernen — video poster cache for the external-player handoff.
+/* Nordstjernen — inline video playback and poster cache.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
@@ -6,24 +6,32 @@
 #include "video.h"
 
 #include <gio/gio.h>
+#include <math.h>
 #include <string.h>
 
+#include "dom.h"
 #include "image.h"
+#include "layout.h"
 #include "net.h"
 #include "tab_worker.h"
+#include "video_decode.h"
+
+#define NS_VIDEO_MAX_BYTES (256u * 1024u * 1024u)
 
 struct ns_video_cache {
-    GHashTable *by_url;
-    GPtrArray  *pending;
+    GHashTable    *by_url;
+    GHashTable    *requested;
+    GPtrArray     *pending;
     ns_tab_worker *worker;
+    char          *base_url;
+    ns_video_js_cb js_cb;
+    gpointer       js_user;
 };
 
 typedef struct ns_pending {
-    ns_video          *video;
-    ns_video_cache    *cache;
-    ns_video_ready_cb  cb;
-    gpointer           user_data;
-    gboolean           dead;
+    ns_video       *video;
+    ns_video_cache *cache;
+    gboolean        dead;
 } ns_pending;
 
 static void
@@ -33,6 +41,8 @@ ns_video_free(gpointer p)
     if (!v) return;
     g_free(v->url);
     ns_texture_unref(v->poster_texture);
+    ns_texture_unref(v->frame_texture);
+    ns_video_player_free(v->player);
     g_free(v);
 }
 
@@ -41,6 +51,7 @@ ns_video_cache_new(void)
 {
     ns_video_cache *c = g_new0(ns_video_cache, 1);
     c->by_url = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, ns_video_free);
+    c->requested = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     c->pending = g_ptr_array_new();
     return c;
 }
@@ -52,6 +63,22 @@ ns_video_cache_set_worker(ns_video_cache *cache, ns_tab_worker *worker)
 }
 
 void
+ns_video_cache_set_base(ns_video_cache *cache, const char *base_url)
+{
+    if (!cache) return;
+    g_free(cache->base_url);
+    cache->base_url = g_strdup(base_url);
+}
+
+void
+ns_video_cache_set_js_cb(ns_video_cache *cache, ns_video_js_cb cb, gpointer user_data)
+{
+    if (!cache) return;
+    cache->js_cb = cb;
+    cache->js_user = user_data;
+}
+
+void
 ns_video_cache_free(ns_video_cache *cache)
 {
     if (!cache) return;
@@ -60,8 +87,99 @@ ns_video_cache_free(ns_video_cache *cache)
         p->dead = TRUE;
     }
     g_hash_table_destroy(cache->by_url);
+    g_hash_table_destroy(cache->requested);
     g_ptr_array_free(cache->pending, TRUE);
+    g_free(cache->base_url);
     g_free(cache);
+}
+
+static void
+ns_video_emit_js(ns_video_cache *cache, ns_video *v, const char *kind, double value)
+{
+    if (cache && cache->js_cb && v && v->dom_node)
+        cache->js_cb(v->dom_node, kind, value, cache->js_user);
+}
+
+void
+ns_video_play(ns_video *v, gint64 now_us)
+{
+    if (!v || !v->player) return;
+    if (v->playing) return;
+    if (v->ended) { v->cur_time = 0.0; v->ended = FALSE; }
+    v->base_us = now_us - (gint64)(v->cur_time * 1e6);
+    v->playing = TRUE;
+}
+
+void
+ns_video_pause(ns_video *v, gint64 now_us)
+{
+    if (!v || !v->player || !v->playing) return;
+    v->cur_time = (double)(now_us - v->base_us) / 1e6;
+    v->playing = FALSE;
+}
+
+gboolean
+ns_video_toggle(ns_video *v, gint64 now_us)
+{
+    if (!v || !v->player) return FALSE;
+    if (v->playing) ns_video_pause(v, now_us);
+    else ns_video_play(v, now_us);
+    return TRUE;
+}
+
+gboolean
+ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
+{
+    if (!v || !v->player) return FALSE;
+    gboolean was_playing = v->playing;
+    ns_video_toggle(v, now_us);
+    ns_video_emit_js(cache, v, was_playing ? "pause" : "play", v->cur_time);
+    return TRUE;
+}
+
+static void
+ns_video_build_player(ns_pending *pending, ns_response *resp)
+{
+    ns_video *v = pending->video;
+    if (!resp || resp->error || !resp->body || resp->body->len == 0 ||
+        resp->body->len > NS_VIDEO_MAX_BYTES)
+        return;
+
+    ns_video_player *player = ns_video_player_new(resp->body->data,
+                                                  resp->body->len);
+    if (!player) return;
+
+    v->player = player;
+    v->duration = ns_video_player_duration(player);
+    if (v->natural_width <= 0)  v->natural_width  = ns_video_player_width(player);
+    if (v->natural_height <= 0) v->natural_height = ns_video_player_height(player);
+
+    gboolean ended = FALSE;
+    ns_texture *frame = ns_video_player_frame_at(player, 0.0, v->loop, &ended);
+    if (frame) v->frame_texture = ns_texture_ref(frame);
+
+    if (v->autoplay) ns_video_play(v, g_get_monotonic_time());
+}
+
+static void
+on_video_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
+{
+    (void)src;
+    ns_pending *pending = user_data;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (pending->dead) {
+        ns_response_free(resp);
+        g_clear_error(&err);
+        g_free(pending);
+        return;
+    }
+    ns_video_build_player(pending, resp);
+    g_clear_error(&err);
+    ns_response_free(resp);
+    pending->video->loaded = TRUE;
+    g_ptr_array_remove_fast(pending->cache->pending, pending);
+    g_free(pending);
 }
 
 static void
@@ -74,12 +192,10 @@ on_poster_decoded(ns_tab_image_result *decoded, gpointer user_data)
         return;
     }
     if (decoded && decoded->pixels) {
-        GBytes *bytes = g_bytes_new_take(decoded->pixels,
-                                         decoded->pixels_len);
+        GBytes *bytes = g_bytes_new_take(decoded->pixels, decoded->pixels_len);
         decoded->pixels = NULL;
         ns_texture *tex = ns_texture_new(decoded->width, decoded->height,
-                                         decoded->format, bytes,
-                                         decoded->stride);
+                                         decoded->format, bytes, decoded->stride);
         g_bytes_unref(bytes);
         if (tex) pending->video->poster_texture = tex;
     }
@@ -87,11 +203,10 @@ on_poster_decoded(ns_tab_image_result *decoded, gpointer user_data)
         decoded->resp->body && decoded->resp->body->len > 0) {
         int w = 0, h = 0;
         ns_texture *tex = ns_image_decode_bytes(decoded->resp->body->data,
-                                                decoded->resp->body->len,
-                                                &w, &h);
+                                                decoded->resp->body->len, &w, &h);
         if (tex) {
             pending->video->poster_texture = tex;
-            if (decoded->width <= 0) decoded->width = w;
+            if (decoded->width <= 0)  decoded->width = w;
             if (decoded->height <= 0) decoded->height = h;
         }
     }
@@ -102,7 +217,6 @@ on_poster_decoded(ns_tab_image_result *decoded, gpointer user_data)
             pending->video->natural_height = decoded->height;
     }
     ns_tab_image_result_free(decoded);
-    if (pending->cb) pending->cb(pending->video, pending->user_data);
     g_ptr_array_remove_fast(pending->cache->pending, pending);
     g_free(pending);
 }
@@ -122,8 +236,7 @@ on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     }
     if (pending->cache->worker && resp &&
         ns_tab_worker_decode_image_response(pending->cache->worker, resp,
-                                            on_poster_decoded, pending,
-                                            g_free)) {
+                                            on_poster_decoded, pending, NULL)) {
         g_clear_error(&err);
         return;
     }
@@ -139,36 +252,160 @@ on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     }
     g_clear_error(&err);
     ns_response_free(resp);
-    if (pending->cb) pending->cb(pending->video, pending->user_data);
     g_ptr_array_remove_fast(pending->cache->pending, pending);
     g_free(pending);
 }
 
-ns_video *
-ns_video_cache_get(ns_video_cache *cache,
-                   const char *url,
-                   const char *poster_url,
-                   const char *top_url,
-                   ns_video_ready_cb cb,
-                   gpointer user_data)
+static gboolean
+attr_present(const ns_node *n, const char *name)
 {
-    if (!cache || !url) return NULL;
-    ns_video *cached = g_hash_table_lookup(cache->by_url, url);
-    if (cached) return cached;
+    const char *v = n ? ns_element_get_attr(n, name) : NULL;
+    return v != NULL;
+}
 
-    ns_video *v = g_new0(ns_video, 1);
-    v->url = g_strdup(url);
-    v->loaded = TRUE;
-    g_hash_table_insert(cache->by_url, g_strdup(url), v);
+static gboolean
+url_looks_mpeg1(const char *url)
+{
+    if (!url) return FALSE;
+    gsize n = strcspn(url, "?#");
+    static const char *const exts[] = {
+        ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1", NULL,
+    };
+    for (int i = 0; exts[i]; i++) {
+        gsize el = strlen(exts[i]);
+        if (n >= el && g_ascii_strncasecmp(url + n - el, exts[i], el) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
 
-    if (poster_url && *poster_url) {
+static void
+ns_video_cache_start(ns_video_cache *cache, ns_box *box,
+                     const char *abs_url, const char *poster_abs)
+{
+    ns_video *v = g_hash_table_lookup(cache->by_url, abs_url);
+    if (v) { box->media->video = v; return; }
+
+    v = g_new0(ns_video, 1);
+    v->url = g_strdup(abs_url);
+    v->dom_node = box->dom;
+    v->autoplay = attr_present(box->dom, "autoplay");
+    v->loop = attr_present(box->dom, "loop");
+    v->controls = attr_present(box->dom, "controls");
+    v->cur_time = 0.0;
+    g_hash_table_insert(cache->by_url, g_strdup(abs_url), v);
+    box->media->video = v;
+
+    ns_pending *pv = g_new0(ns_pending, 1);
+    pv->video = v;
+    pv->cache = cache;
+    g_ptr_array_add(cache->pending, pv);
+    ns_net_fetch_async(abs_url, cache->base_url, NULL, on_video_fetched, pv);
+
+    if (poster_abs && *poster_abs) {
         ns_pending *pp = g_new0(ns_pending, 1);
         pp->video = v;
         pp->cache = cache;
-        pp->cb = cb;
-        pp->user_data = user_data;
         g_ptr_array_add(cache->pending, pp);
-        ns_net_fetch_async(poster_url, top_url, NULL, on_poster_fetched, pp);
+        ns_net_fetch_async(poster_abs, cache->base_url, NULL, on_poster_fetched, pp);
     }
-    return v;
+}
+
+void
+ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us)
+{
+    (void)now_us;
+    if (!cache || !root) return;
+
+    GPtrArray *vids = g_ptr_array_new();
+    ns_layout_collect_videos(root, vids);
+    for (guint i = 0; i < vids->len; i++) {
+        ns_box *box = g_ptr_array_index(vids, i);
+        if (!box->media || !box->dom) continue;
+        if (box->media->video) continue;
+        const char *src = box->media->video_src;
+        if (!src || !*src) continue;
+        char *abs = ns_url_resolve(cache->base_url, src);
+        if (!abs) continue;
+        if ((!g_str_has_prefix(abs, "http://") && !g_str_has_prefix(abs, "https://") &&
+             !g_str_has_prefix(abs, "file://")) ||
+            !url_looks_mpeg1(abs)) {
+            g_free(abs);
+            continue;
+        }
+        char *poster = NULL;
+        if (box->media->video_poster)
+            poster = ns_url_resolve(cache->base_url, box->media->video_poster);
+
+        ns_video *existing = g_hash_table_lookup(cache->by_url, abs);
+        if (existing) {
+            box->media->video = existing;
+        } else if (!g_hash_table_contains(cache->requested, abs)) {
+            g_hash_table_add(cache->requested, g_strdup(abs));
+            ns_video_cache_start(cache, box, abs, poster);
+        }
+        g_free(poster);
+        g_free(abs);
+    }
+    g_ptr_array_free(vids, TRUE);
+}
+
+gboolean
+ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
+{
+    if (!cache) return FALSE;
+    gboolean changed = FALSE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (!v->player) continue;
+
+        if (!v->meta_sent && v->duration > 0.0) {
+            v->meta_sent = TRUE;
+            ns_video_emit_js(cache, v, "meta", v->duration);
+        }
+        if (!v->playing) continue;
+
+        double elapsed = (double)(now_us - v->base_us) / 1e6;
+        double t = elapsed;
+        if (v->loop && v->duration > 0.0)
+            t = fmod(elapsed, v->duration);
+
+        gboolean ended = FALSE;
+        ns_texture *frame = ns_video_player_frame_at(v->player, t, v->loop, &ended);
+        if (frame) {
+            ns_texture_unref(v->frame_texture);
+            v->frame_texture = ns_texture_ref(frame);
+            changed = TRUE;
+        }
+        v->cur_time = t;
+        if (t - v->last_emit_time >= 0.20 || ended) {
+            v->last_emit_time = t;
+            ns_video_emit_js(cache, v, "pos", v->cur_time);
+        }
+        if (ended) {
+            v->playing = FALSE;
+            v->ended = TRUE;
+            v->cur_time = v->duration;
+            ns_video_emit_js(cache, v, "ended", v->duration);
+        }
+    }
+    return changed;
+}
+
+gboolean
+ns_video_cache_animating(const ns_video_cache *cache)
+{
+    if (!cache) return FALSE;
+    if (cache->pending->len > 0) return TRUE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (v->player && v->playing) return TRUE;
+    }
+    return FALSE;
 }

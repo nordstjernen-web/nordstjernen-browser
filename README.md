@@ -33,7 +33,7 @@ in-process media codecs. Highlights:
 |-----------|:------:|
 | §2 Common infrastructure — WHATWG URL, IDN, origins, encodings | ✅ |
 | §3–§4 Semantics, document structure & tabular content | ✅ |
-| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; audio/video hand off to an external player by design | 🟡 |
+| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1); other codecs and `<audio>` hand off to an external player | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
 | §4.12–§4.13 Scripting, custom elements | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
@@ -56,8 +56,12 @@ The full section-by-section walk-through lives in
   (`crypto.subtle` over OpenSSL).
 - **Networking** over HTTP/2 with libcurl — HSTS, CSP, partitioned
   cookies.
-- **Media** — images, optional inline PDF; audio and video are handed
-  off to an external player; any script the host has fonts for.
+- **Media** — images, optional inline PDF; `<video>` plays **inline**
+  for the built-in MPEG-1 codec (decoded in-tree by
+  [pl_mpeg](https://github.com/phoboslab/pl_mpeg), MIT-licensed), with
+  `autoplay`, `loop`, and click-to-play/pause; other video codecs and
+  `<audio>` are handed off to an external player; any script the host
+  has fonts for.
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
   `mfrac`, `msqrt`/`mroot`, `munder`/`mover`/`munderover`, `mtable`,
@@ -148,8 +152,8 @@ meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-lexbor, QuickJS, WAMR and Wuffs are vendored in-tree — no submodules, no
-downloads. The one exception is the optional local-AI feature: `meson
+lexbor, QuickJS, WAMR, Wuffs and pl_mpeg are vendored in-tree — no
+submodules, no downloads. The one exception is the optional local-AI feature: `meson
 setup` fetches and builds llama.cpp as a pinned subproject; pass
 `-Dai=disabled` for a fully offline build. Windows, Fedora, openSUSE and
 macOS instructions are in
@@ -169,6 +173,7 @@ moving parts:
 | [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng fork) | JavaScript engine — no JIT, browser-side hooks added in-tree |
 | [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (subset) | WebAssembly interpreter behind the `WebAssembly` JS API (`src/wasm.c`) |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG, GIF, BMP, JPEG (WebP is decoded separately by libwebp) |
+| [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | Single-file MPEG-1 video decoder — inline `<video>` playback (`src/video_decode.c`) |
 
 **Required system libraries:**
 
@@ -195,19 +200,33 @@ moving parts:
 | libavif | AVIF images |
 | fontconfig / pangoft2 | extra font discovery backends |
 
-**Audio / video.** Nordstjernen ships no media codecs. `<audio>` and
-`<video>` render a poster and a play overlay; clicking it resolves the
-source URL inside the sandboxed renderer process and the UI shell hands
-it to an external player — `mpv`, `VLC`, `celluloid`, `totem`,
-`mplayer` or `ffplay` on Linux, otherwise the desktop's default handler
-for the media type (found via `GAppInfo`, so Flatpak players work too),
-the default app via `open` on macOS, and the registered handler on
-Windows. If none is found, a status-bar hint suggests installing
-[mpv](https://mpv.io). A media player is therefore a *recommended
-runtime dependency*, not a build dependency: the `.deb` and `.rpm`
-packages `Recommend` one (defaulting to `mpv`) so playback works out of
-the box, while source builds need none. The player is launched from the
-UI shell, never from the page's untrusted renderer.
+**Video.** `<video>` plays **inline** when the source is MPEG-1 (an
+`.mpg` / `.mpeg` / `.m1v` stream). The bytes are decoded entirely
+in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg) — a
+single-file, MIT-licensed MPEG-1 video decoder — inside the sandboxed
+renderer process; no external library, no GPU API, and no syscalls
+beyond memory are needed, so it runs comfortably under the seccomp
+filter. Decoded BGRA frames are advanced off the renderer's existing
+animation tick, honouring the `autoplay`, `loop`, `width`/`height`,
+and `poster` attributes; a click toggles play/pause; and the
+`HTMLMediaElement` events (`loadedmetadata`, `durationchange`,
+`canplay`, `timeupdate`, `play`, `pause`, `ended`) fire on the element
+as it plays. Only one video codec is built in, by design — MPEG-1 is
+small, patent-free, and decodes in pure portable C.
+
+**Other media.** Nordstjernen ships no other media codecs. `<audio>`
+and non-MPEG-1 `<video>` render a poster and a play overlay; clicking
+it resolves the source URL inside the sandboxed renderer process and
+the UI shell hands it to an external player — `mpv`, `VLC`,
+`celluloid`, `totem`, `mplayer` or `ffplay` on Linux, otherwise the
+desktop's default handler for the media type (found via `GAppInfo`, so
+Flatpak players work too), the default app via `open` on macOS, and the
+registered handler on Windows. If none is found, a status-bar hint
+suggests installing [mpv](https://mpv.io). A media player is therefore a
+*recommended runtime dependency*, not a build dependency: the `.deb` and
+`.rpm` packages `Recommend` one (defaulting to `mpv`) so playback works
+out of the box, while source builds need none. The player is launched
+from the UI shell, never from the page's untrusted renderer.
 
 Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
 with no plain file URL. For those, clicking hands the **page URL** to the

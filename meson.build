@@ -238,6 +238,7 @@ if have_seccomp
 endif
 
 libwuffs = dependency('wuffs', fallback: ['wuffs', 'wuffs_dep'])
+libplmpeg = dependency('plmpeg', fallback: ['plmpeg', 'plmpeg_dep'])
 zlib = dependency('zlib')
 
 fs = import('fs')

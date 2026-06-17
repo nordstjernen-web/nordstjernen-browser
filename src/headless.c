@@ -31,6 +31,7 @@
 #include "rproc_http.h"
 #include "rproc_inproc.h"
 #include "video.h"
+#include "video_decode.h"
 #include "wpt_hook.h"
 
 static char *g_headless_doc_charset;
@@ -79,6 +80,37 @@ fetch_videos_into_layout(ns_box *root, const char *base_url)
     for (guint i = 0; i < vids->len; i++) {
         ns_box *box = g_ptr_array_index(vids, i);
         if (!box->media || box->media->video) continue;
+        if (box->media->video_src) {
+            char *src = ns_url_resolve(base_url, box->media->video_src);
+            gsize sn = src ? strcspn(src, "?#") : 0;
+            gboolean mpeg1 = src &&
+                ((sn >= 4 && g_ascii_strncasecmp(src + sn - 4, ".mpg", 4) == 0) ||
+                 (sn >= 4 && g_ascii_strncasecmp(src + sn - 4, ".m1v", 4) == 0) ||
+                 (sn >= 5 && g_ascii_strncasecmp(src + sn - 5, ".mpeg", 5) == 0));
+            if (src && mpeg1) {
+                ns_response *resp = ns_engine_fetch_blocking(src, base_url, NULL);
+                if (resp && !resp->error && resp->body && resp->body->len > 0) {
+                    ns_video_player *player =
+                        ns_video_player_new(resp->body->data, resp->body->len);
+                    if (player) {
+                        gboolean ended = FALSE;
+                        ns_texture *frame =
+                            ns_video_player_frame_at(player, 0.0, FALSE, &ended);
+                        ns_video *v = g_new0(ns_video, 1);
+                        v->url = g_strdup(src);
+                        v->player = player;
+                        v->natural_width = ns_video_player_width(player);
+                        v->natural_height = ns_video_player_height(player);
+                        v->duration = ns_video_player_duration(player);
+                        if (frame) v->frame_texture = ns_texture_ref(frame);
+                        box->media->video = v;
+                    }
+                }
+                if (resp) ns_response_free(resp);
+            }
+            g_free(src);
+        }
+        if (box->media->video) continue;
         if (box->media->video_poster) {
             char *poster = ns_url_resolve(base_url, box->media->video_poster);
             if (poster) {

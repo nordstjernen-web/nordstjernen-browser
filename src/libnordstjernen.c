@@ -31,6 +31,7 @@
 #include "render.h"
 #include "security.h"
 #include "selection.h"
+#include "video.h"
 #include "webgl.h"
 
 struct ns_browser {
@@ -40,6 +41,7 @@ struct ns_browser {
     ns_js          *js;
     ns_anim        *anim;
     ns_image_cache *images;
+    ns_video_cache *videos;
     GHashTable     *css_cache;
     char           *base_url;
     char           *doc_charset;
@@ -422,6 +424,14 @@ browser_js_audio(const char *command, gpointer ud)
     g_string_append_c(b->pending_audio, '\n');
 }
 
+static void
+browser_js_video(const void *node, const char *kind, double value, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->js) return;
+    ns_js_video_event(b->js, node, kind, value);
+}
+
 char *
 ns_browser_take_pending_audio(ns_browser *browser)
 {
@@ -681,6 +691,8 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                          (GDestroyNotify)g_bytes_unref);
     b->images = ns_image_cache_new();
+    b->videos = ns_video_cache_new();
+    ns_video_cache_set_base(b->videos, base);
     b->styles = ns_engine_compute_cascade(doc, base, b->css_cache);
 
     b->anim = ns_anim_new();
@@ -697,6 +709,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_run_scripts_in_doc(b->js, doc, base);
+    }
+    if (b->videos) {
+        ns_video_cache_set_js_cb(b->videos, browser_js_video, b);
     }
 
     browser_arm_declarative_refresh(b, refresh_hdr);
@@ -828,6 +843,11 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         gint64 now = g_get_monotonic_time();
         if (browser->images && ns_image_cache_tick(browser->images, now))
             changed = TRUE;
+        if (browser->videos && browser->layout) {
+            ns_video_cache_discover(browser->videos, browser->layout, now);
+            if (ns_video_cache_tick(browser->videos, now))
+                changed = TRUE;
+        }
         if (browser->anim && ns_anim_tick(browser->anim, now))
             changed = TRUE;
         if (browser->anim && browser->js)
@@ -873,6 +893,8 @@ ns_browser_animating(ns_browser *browser)
     if (browser->anim && ns_anim_has_active(browser->anim))
         return 1;
     if (browser->images && ns_image_cache_animating(browser->images))
+        return 1;
+    if (browser->videos && ns_video_cache_animating(browser->videos))
         return 1;
     return 0;
 }
@@ -1310,6 +1332,14 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
         }
     }
     if (!media || !media->dom) return NULL;
+
+    if (media->media && media->media->video) {
+        ns_video *iv = media->media->video;
+        if (iv->player) {
+            ns_video_cache_toggle(browser->videos, iv, g_get_monotonic_time());
+            return NULL;
+        }
+    }
 
     gboolean is_video =
         ns_node_is_element_named(media->dom, "video") ||
@@ -2228,6 +2258,7 @@ ns_browser_close(ns_browser *browser)
     if (browser->css_cache) g_hash_table_destroy(browser->css_cache);
     if (browser->js) ns_js_free(browser->js);
     if (browser->doc) ns_node_free(browser->doc);
+    if (browser->videos) ns_video_cache_free(browser->videos);
     if (browser->images) ns_image_cache_free(browser->images);
     g_free(browser->base_url);
     g_free(browser->doc_charset);

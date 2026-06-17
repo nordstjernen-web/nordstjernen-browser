@@ -3468,7 +3468,10 @@ paint_video(cairo_t *cr, const ns_box *b)
         return;
     }
     ns_video *v = b->media ? b->media->video : NULL;
-    ns_texture *tex = v ? v->poster_texture : NULL;
+    ns_texture *tex = v ? (v->frame_texture ? v->frame_texture
+                                            : v->poster_texture)
+                        : NULL;
+    gboolean playing = v && v->playing;
     ns_image *bgimg = b->media ? b->media->bg_image : NULL;
     gboolean bg_painted = bgimg && bgimg->loaded && bgimg->texture;
     if (!bg_painted && b->media && b->media->bg_layer_images) {
@@ -3491,7 +3494,7 @@ paint_video(cairo_t *cr, const ns_box *b)
     double cx = b->x + b->content_width  / 2;
     double cy = b->y + b->content_height / 2;
     double r  = b->content_height / 6;
-    if (r > 4) {
+    if (r > 4 && !playing) {
         cairo_arc(cr, cx, cy, r * 1.6, 0, 2 * G_PI);
         cairo_set_source_rgba(cr, 0, 0, 0, 0.55);
         cairo_fill(cr);
