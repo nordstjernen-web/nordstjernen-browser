@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 17).
+Snapshot: **1.0.10**, 2026-06-17 (rev 18).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -229,7 +229,7 @@ validation.
 | `progress` | ✅ (determinate + indeterminate rendered bars; numeric `value`, `max`, `position` IDL getters) |
 | `meter` | ✅ (spec min/max/value/low/high/optimum gauge algorithm; optimum/suboptimal/less-good regions reflected in rendering and numeric IDL getters) |
 | `fieldset` / `legend` | ✅ (full HTMLFieldSetElement: UA-styled bordered group with rendered `<legend>`; `type` returns `"fieldset"`, `name`/`disabled`/`form` reflect, and `elements` is a live `HTMLFormControlsCollection` of the listed elements (`input`/`select`/`textarea`/`button`/`output`/nested `fieldset`) rooted at the fieldset with indexed and `namedItem` access (`ns_fieldset_collect_listed` in `src/js.c`); a `disabled` fieldset disables and greys its descendant controls and excludes them from submission, and the element is barred from constraint validation — `willValidate` is `false`, `checkValidity()`/`reportValidity()` return `true`, and `validationMessage` is empty even when `setCustomValidity` set `validity.customError`) |
-| Constraint validation (`required` `readonly` `pattern` `min` `max` `step` `minlength` `maxlength`) | 🟡 (JS bindings incl. form-wide `checkValidity()`, custom validity, built-in validation messages, non-bubbling `invalid`, and spec-scoped required/read-only/pattern/length handling; native submit checks required text/select/checkbox/radio controls, email lists with `multiple`, URL-parser-backed `type=url`, pattern/type/length, numeric and temporal `min`/`max`/`step`, and custom validity) |
+| Constraint validation (`required` `readonly` `pattern` `min` `max` `step` `minlength` `maxlength`) | ✅ (the full barrier API: `willValidate`, a live `validity` `ValidityState` with every flag — `valueMissing`/`typeMismatch`/`patternMismatch`/`rangeUnderflow`/`rangeOverflow`/`stepMismatch`/`tooShort`/`tooLong`/`badInput`/`customError`/`valid` — `validationMessage`, `setCustomValidity`, element and form-wide `checkValidity()`/`reportValidity()`, the non-bubbling cancelable `invalid` event, and the `:valid`/`:invalid`/`:required`/`:optional` pseudo-classes. Native submission (and `requestSubmit()`) blocks on an invalid control and fires `invalid`; `novalidate`/`formnovalidate` suppress interactive submission validation without affecting the scripting API. Validity is computed for required text/select/checkbox/radio, email lists with `multiple`, URL-parser-backed `type=url`, pattern/type/length, numeric and temporal `min`/`max`/`step`, and custom validity) |
 | `FormData` (`append`/`set`/`entries`/…) | ✅ | `append(name, blob, filename)` honours the third-argument filename per spec |
 | Form ownership / successful controls | ✅ (`form="id"` owners, disabled fieldsets, default checkbox/radio `"on"` values, multi-select values, form.elements named lookup/RadioNodeList, associated submit/reset activation with cancelable reset events) |
 | Submission, `application/x-www-form-urlencoded` | ✅ (HTML `+` space encoding; `requestSubmit()` validates/fires `SubmitEvent` with `submitter`, while `submit()` bypasses both) |
