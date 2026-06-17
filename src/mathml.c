@@ -408,6 +408,55 @@ render_mtable(cairo_t *cr, const ns_node *n, double fpx, int depth,
 }
 
 static double
+render_mfenced(cairo_t *cr, const ns_node *n, double fpx, int depth,
+               double x, double by, double *asc, double *desc)
+{
+    const char *open = ns_element_get_attr(n, "open");
+    const char *close = ns_element_get_attr(n, "close");
+    const char *seps = ns_element_get_attr(n, "separators");
+    if (!open)  open  = "(";
+    if (!close) close = ")";
+    if (!seps)  seps  = ",";
+    const ns_node *kids[64];
+    int nk = collect_args(n, kids, 64);
+    if (nk > 64) nk = 64;
+    double cx = x, maxa = fpx * 0.7, maxd = fpx * 0.2;
+    double a = 0, d = 0, sp;
+    if (*open) {
+        sp = mo_spacing(open, fpx);
+        cx += render_token(cr, open, fpx, FALSE, cx + sp, by, &a, &d) + 2 * sp;
+        if (a > maxa) maxa = a;
+        if (d > maxd) maxd = d;
+    }
+    gsize nsep = strlen(seps);
+    for (int i = 0; i < nk; i++) {
+        if (i > 0 && nsep > 0) {
+            gsize si = (gsize)(i - 1) < nsep ? (gsize)(i - 1) : nsep - 1;
+            char sepbuf[2] = { seps[si], 0 };
+            if (!g_ascii_isspace((guchar)sepbuf[0])) {
+                sp = mo_spacing(sepbuf, fpx);
+                cx += render_token(cr, sepbuf, fpx, FALSE, cx + sp, by, &a, &d)
+                      + 2 * sp;
+                if (a > maxa) maxa = a;
+                if (d > maxd) maxd = d;
+            }
+        }
+        cx += mrender(cr, kids[i], fpx, depth + 1, cx, by, &a, &d);
+        if (a > maxa) maxa = a;
+        if (d > maxd) maxd = d;
+    }
+    if (*close) {
+        sp = mo_spacing(close, fpx);
+        cx += render_token(cr, close, fpx, FALSE, cx + sp, by, &a, &d) + 2 * sp;
+        if (a > maxa) maxa = a;
+        if (d > maxd) maxd = d;
+    }
+    if (asc) *asc = maxa;
+    if (desc) *desc = maxd;
+    return cx - x;
+}
+
+static double
 mrender(cairo_t *cr, const ns_node *n, double fpx, int depth,
         double x, double by, double *asc, double *desc)
 {
@@ -445,7 +494,14 @@ mrender(cairo_t *cr, const ns_node *n, double fpx, int depth,
         g_free(t);
         return w + 2 * sp;
     }
-    if (tag_is(n, "mspace") || tag_is(n, "mphantom")) {
+    if (tag_is(n, "mphantom")) {
+        double a = 0, d = 0;
+        double w = render_seq(NULL, n, fpx, depth, 0, 0, &a, &d);
+        if (asc) *asc = a;
+        if (desc) *desc = d;
+        return w;
+    }
+    if (tag_is(n, "mspace")) {
         if (asc) *asc = 0;
         if (desc) *desc = 0;
         return fpx * 0.4;
@@ -470,6 +526,8 @@ mrender(cairo_t *cr, const ns_node *n, double fpx, int depth,
         return render_under_over(cr, n, fpx, depth, x, by, asc, desc, TRUE, TRUE);
     if (tag_is(n, "mtable"))
         return render_mtable(cr, n, fpx, depth, x, by, asc, desc);
+    if (tag_is(n, "mfenced"))
+        return render_mfenced(cr, n, fpx, depth, x, by, asc, desc);
     if (tag_is(n, "semantics")) {
         const ns_node *first = NULL;
         if (collect_args(n, &first, 1) >= 1)

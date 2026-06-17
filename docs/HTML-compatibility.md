@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 5).
+Snapshot: **1.0.10**, 2026-06-17 (rev 6).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -185,7 +185,7 @@ elements (`head title meta link style script noscript template`) to
 | `track` (captions) | ❌ | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path; not rendered |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
 | `img ismap` (server-side image maps) | ✅ | clicking an `<img ismap>` nested in an `<a href>` appends the click position relative to the image's top-left corner as a `?x,y` suffix to the link URL before navigating (GUI path in `src/libnordstjernen.c`, headless click path in `src/headless.c`); coordinates are clamped to non-negative |
-| MathML | ❌ | parsed into DOM; not laid out |
+| MathML | ✅ | presentation MathML is laid out and painted over Pango/Cairo (`src/mathml.c`), embedded inline on the surrounding text baseline through the replaced-element media-box path (`src/layout.c`, `src/paint.c`): `mrow`, the token elements `mi`/`mn`/`mo`/`ms`/`mtext` (with `mi` auto-italicising single letters and `mo` operator spacing), `msup`/`msub`/`msubsup`, `mfrac` (with rule), `msqrt`/`mroot` (drawn radical), `munder`/`mover`/`munderover`, `mtable`/`mtr`/`mtd`, `mspace`, `mphantom` (reserves its contents' metrics without painting), `mfenced` (synthesises the `open`/`close` fences and `separators`), and `semantics` (renders its first presentation child). Content MathML and `annotation`/`annotation-xml` payloads are not rendered |
 
 ## §4.9 Tabular data
 
@@ -436,7 +436,7 @@ document are in *rendering and behaviour*, not parsing.
 |-------|:--:|
 | Tokenizer state machine (§13.2.5) | ✅ |
 | Tree construction / insertion modes (§13.2.6) | ✅ |
-| Foreign content (SVG/MathML namespaces) | 🟡 (SVG to DOM; MathML to DOM, not laid out) |
+| Foreign content (SVG/MathML namespaces) | 🟡 (SVG parsed to DOM; MathML parsed to DOM **and laid out** — see §4.8; per-element foreign-namespace tracking is still approximated) |
 | Adoption agency / error recovery | ✅ |
 | Named & numeric character references | ✅ |
 | Fragment parsing (`innerHTML`) | ✅ |
