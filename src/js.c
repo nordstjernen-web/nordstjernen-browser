@@ -13594,6 +13594,19 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static void
+ns_event_default_if_absent(JSContext *ctx, JSValueConst obj, const char *key,
+                           JSValue fallback)
+{
+    JSValue cur = JS_GetPropertyStr(ctx, obj, key);
+    gboolean absent = JS_IsUndefined(cur);
+    JS_FreeValue(ctx, cur);
+    if (absent)
+        JS_SetPropertyStr(ctx, obj, key, fallback);
+    else
+        JS_FreeValue(ctx, fallback);
+}
+
 static JSValue
 ns_window_event_ctor(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -17484,6 +17497,32 @@ ns_submit_event_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     JS_SetPropertyStr(ctx, ev, "submitter", submitter);
+    return ev;
+}
+
+static JSValue
+ns_message_event_ctor(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        static const char *const members[] = {
+            "data", "origin", "lastEventId", "source", "ports",
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(members); i++) {
+            JSValue v = JS_GetPropertyStr(ctx, argv[1], members[i]);
+            if (!JS_IsUndefined(v))
+                JS_SetPropertyStr(ctx, ev, members[i], v);
+            else
+                JS_FreeValue(ctx, v);
+        }
+    }
+    ns_event_default_if_absent(ctx, ev, "data", JS_NULL);
+    ns_event_default_if_absent(ctx, ev, "origin", JS_NewString(ctx, ""));
+    ns_event_default_if_absent(ctx, ev, "lastEventId", JS_NewString(ctx, ""));
+    ns_event_default_if_absent(ctx, ev, "source", JS_NULL);
+    ns_event_default_if_absent(ctx, ev, "ports", JS_NewArray(ctx));
     return ev;
 }
 
@@ -31459,7 +31498,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "SubmitEvent",   ns_submit_event_ctor,   2);
     static const char *event_subclasses[] = {
         "ProgressEvent","ErrorEvent","HashChangeEvent","PopStateEvent",
-        "MessageEvent","StorageEvent","PageTransitionEvent","BeforeUnloadEvent",
+        "StorageEvent","PageTransitionEvent","BeforeUnloadEvent",
         "InputEvent","DragEvent",
         "FocusEvent","AnimationEvent","TransitionEvent","ClipboardEvent",
         "CompositionEvent","CloseEvent",
@@ -31473,6 +31512,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "MessageEvent", ns_message_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_message_event_ctor, 2);
     ns_install_drag_event_support(ctx);
 
     static const ns_fn_def event_base_ctors[] = {
@@ -31667,6 +31708,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "  var canceled = Object.create(null);"
             "  function later(cb){ return setTimeout(cb, 0); }"
             "  w.postMessage = function(message, targetOrigin, transfer){"
+            "    var to = (targetOrigin === undefined || targetOrigin === null) ? '/' : String(targetOrigin);"
+            "    var myOrigin = (typeof location !== 'undefined' && location.origin) || '';"
+            "    if (to !== '*' && to !== '/' && to !== myOrigin) return;"
             "    var cloned = message;"
             "    try { if (typeof structuredClone === 'function') cloned = structuredClone(message); } catch(e){}"
             "    var ev = new MessageEvent('message', {"
