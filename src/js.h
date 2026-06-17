@@ -24,6 +24,7 @@ typedef void (*ns_js_log_cb)(const char *line, gpointer user_data);
 typedef void (*ns_js_mutated_cb)(gpointer user_data);
 typedef void (*ns_js_navigate_cb)(const char *url, gboolean reload, gpointer user_data);
 typedef void (*ns_js_download_cb)(const char *url, const char *filename, gpointer user_data);
+typedef void (*ns_js_audio_cb)(const char *command, gpointer user_data);
 typedef void (*ns_js_scroll_to_cb)(const ns_node *target, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
                                      gpointer user_data);
@@ -45,6 +46,8 @@ void   ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb, gpointer user_da
 void   ns_js_set_form_submit_cb(ns_js *js, ns_js_form_submit_cb cb, gpointer user_data);
 void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data);
 void   ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data);
+void   ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data);
+void   ns_js_audio_event(ns_js *js, const char *token, const char *kind, double value);
 void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
