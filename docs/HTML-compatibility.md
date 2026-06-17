@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 25).
+Snapshot: **1.0.10**, 2026-06-17 (rev 26).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -366,7 +366,7 @@ surface).
 
 ## §10 Web workers · §11 Worklets
 
-🟡 **Dedicated workers are partially implemented.** `new Worker(url,
+✅ **Dedicated workers are implemented** (classic only). `new Worker(url,
 options)` creates a classic dedicated worker in its own QuickJS runtime
 on its own thread. Supported surface: same-origin classic worker script
 loading, `worker.postMessage()`, worker-global `postMessage()`,
@@ -390,7 +390,7 @@ transfer list transfers its `ArrayBuffer`s — they are serialized to the
 receiver and then detached in the sender (`JS_DetachArrayBuffer`), and a
 non-transferable entry throws `DataCloneError`.
 
-**Service Workers** are supported at a minimalist level.
+✅ **Service Workers** are supported, including `FetchEvent` interception.
 `navigator.serviceWorker` exposes `register()` / `getRegistration()` /
 `getRegistrations()` / `ready` / `controller` plus the `controllerchange`
 and `message` events. `register()` fetches and runs the worker script in a
@@ -403,10 +403,18 @@ activating → activated` (each firing `statechange`), and on activation
 `self.registration`, `self.clients` (`claim` / `matchAll` / `get`),
 `self.skipWaiting()`, `caches`, and the `FetchEvent` /
 `ExtendableMessageEvent` interfaces, and `postMessage` works in both
-directions (SW↔page). **Network interception is not wired** — `fetch`
-events are never dispatched, so a worker cannot serve requests by
-intercepting navigations/subresources, and registrations live for the
-session rather than persisting across loads.
+directions (SW↔page). **Network interception works** for `fetch()` from a
+controlled page: when an activated worker's scope covers the request URL,
+the request is dispatched to the worker as a `FetchEvent` (with a real
+`request` and `respondWith`); if the handler calls `respondWith(r)` the
+page's `fetch` resolves with that response (the `Response` is read to bytes
+on the worker thread and reconstructed on the page — `ns_sw_*` in
+`src/js.c`), and `respondWith` accepts a `Response`, a `Promise<Response>`,
+or `caches.match(...)`. If the handler does not respond, the request falls
+through to the normal network path. Registrations live for the session
+rather than persisting across loads, and navigations/subresources fetched
+by the C engine are not yet routed through the worker (only page `fetch()`
+is intercepted).
 
 The **Cache API** (`caches` / `CacheStorage` / `Cache`) is a working
 in-memory store (`NSCache` in `data/js/polyfills.js`). `caches.open(name)`
@@ -417,8 +425,8 @@ body, a `206` response, or a non-`GET` request per spec), and `match` /
 `add` / `addAll` fetch then store, `delete` / `keys` work, and the
 top-level `caches.has` / `delete` / `keys` / `match` operate across the
 named stores. The cache lives for the session and is per-runtime — the
-Service Worker thread has its own, and entries are not yet shared into it
-(it cannot intercept requests anyway).
+Service Worker thread has its own, which it can populate and serve from in
+its `FetchEvent` handler (`event.respondWith(caches.match(event.request))`).
 
 🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
 and nested workers are not implemented yet.
@@ -643,9 +651,9 @@ defects, and will not be added:
 
 - **WebGPU** and AI-style web APIs. (WebGL is the exception — supported
   opt-in per site; see §4.12 and [`docs/webgl.md`](webgl.md).)
-- Shared Workers, Worklets, and Service Worker **network interception**
-  (the fetch-event request-serving path — see §11 for the supported
-  registration/lifecycle subset).
+- Shared Workers and Worklets. (Service Worker `FetchEvent` interception
+  of page `fetch()` **is** supported — see §10/§11; what remains is routing
+  the C engine's navigations/subresources through the worker.)
 - **WebRTC**, **MSE/EME** (DRM media).
 - Plugin content (`embed`/`object` via NPAPI/PPAPI).
 - **In-process audio/video codecs** — playback is handed off to an

@@ -65,6 +65,7 @@ struct ns_worker_host {
     char         *inline_script;
     gsize         inline_script_len;
     gboolean      is_service_worker;
+    gint          sw_active;
     char         *scope;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;
@@ -144,6 +145,11 @@ static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
 static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
+static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *abs_url);
+static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
+                                     const char *url, const char *method,
+                                     const char *const *headers,
+                                     const guint8 *body, gsize body_len);
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_flush_layout(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
@@ -5501,6 +5507,13 @@ typedef struct ns_js_fetch_state {
     JSValue        abort_handler;
     gboolean       aborted;
     gboolean       settled;
+    char          *fb_send_url;
+    char          *fb_top;
+    char          *fb_method;
+    char          *fb_content_type;
+    guint8        *fb_body;
+    gsize          fb_body_len;
+    char         **fb_headers;
 } ns_js_fetch_state;
 
 static void
@@ -5535,6 +5548,12 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
     if (st->cancellable) g_object_unref(st->cancellable);
     g_free(st->requested_url);
     g_free(st->origin_url);
+    g_free(st->fb_send_url);
+    g_free(st->fb_top);
+    g_free(st->fb_method);
+    g_free(st->fb_content_type);
+    g_free(st->fb_body);
+    g_strfreev(st->fb_headers);
     g_free(st);
 }
 
@@ -6119,6 +6138,33 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         d->st = st;
         d->resp = resp;
         ns_js_attach_idle(st->js, ns_on_js_fetch_deliver_idle, d);
+        g_ptr_array_free(extras, TRUE);
+        g_free(abs_url);
+        JS_FreeCString(ctx, url);
+        return promise;
+    }
+
+    ns_worker_host *sw = (st->js && !st->js->worker_host)
+        ? ns_sw_controller_for(st->js, send_url) : NULL;
+    if (sw) {
+        if (!st->id) {
+            st->id = ++st->js->next_fetch_id;
+            g_hash_table_insert(st->js->fetch_states_by_id,
+                                GUINT_TO_POINTER(st->id), st);
+        }
+        st->fb_send_url = g_strdup(send_url);
+        st->fb_top = g_strdup(top ? top : "");
+        st->fb_method = g_strdup(use_method);
+        st->fb_content_type = content_type ? g_strdup(content_type) : NULL;
+        if (body && body_len) {
+            st->fb_body = g_malloc(body_len);
+            memcpy(st->fb_body, body, body_len);
+            st->fb_body_len = body_len;
+        }
+        st->fb_headers = g_strdupv((char **)extras->pdata);
+        ns_sw_post_fetch_request(sw, st->id, send_url, use_method,
+                                 (const char *const *)extras->pdata,
+                                 (const guint8 *)body, body_len);
         g_ptr_array_free(extras, TRUE);
         g_free(abs_url);
         JS_FreeCString(ctx, url);
@@ -14433,6 +14479,7 @@ ns_worker_host_stop(ns_worker_host *host, gboolean join)
 {
     if (!host) return;
     g_atomic_int_set(&host->closing, 1);
+    g_atomic_int_set(&host->sw_active, 0);
     ns_worker_host_request_quit(host);
     if (!join) return;
 
@@ -14589,6 +14636,7 @@ ns_sw_apply_state(JSContext *ctx, ns_worker_host *host, const char *state)
         if (JS_IsObject(reg))
             JS_SetPropertyStr(ctx, reg, "waiting", JS_NULL);
     } else if (strcmp(state, "activated") == 0) {
+        g_atomic_int_set(&host->sw_active, 1);
         if (JS_IsObject(reg)) {
             JS_SetPropertyStr(ctx, reg, "waiting", JS_NULL);
             JS_SetPropertyStr(ctx, reg, "active", JS_DupValue(ctx, sw));
@@ -15116,6 +15164,257 @@ ns_sw_returns_resolved_true(JSContext *ctx, JSValueConst this_val,
     return ns_promise_resolve_take(ctx, JS_TRUE);
 }
 
+static ns_worker_host *
+ns_sw_controller_for(ns_js *js, const char *abs_url)
+{
+    if (!js || !js->workers || !abs_url) return NULL;
+    for (guint i = 0; i < js->workers->len; i++) {
+        ns_worker_host *h = g_ptr_array_index(js->workers, i);
+        if (!h || !h->is_service_worker) continue;
+        if (g_atomic_int_get(&h->closing)) continue;
+        if (!g_atomic_int_get(&h->sw_active)) continue;
+        if (h->scope && *h->scope && g_str_has_prefix(abs_url, h->scope))
+            return h;
+    }
+    return NULL;
+}
+
+typedef struct {
+    ns_worker_host *host;
+    guint   id;
+    int     outcome;
+    long    status;
+    char   *raw_headers;
+    char   *content_type;
+    guint8 *body;
+    gsize   body_len;
+    char   *error;
+} ns_sw_fres;
+
+static gboolean
+ns_sw_fetch_result_on_owner(gpointer data)
+{
+    ns_sw_fres *res = data;
+    ns_worker_host *host = res->host;
+    ns_js *js = host ? host->owner : NULL;
+    if (!host || !g_atomic_int_get(&host->owner_alive) || !js ||
+        !js->fetch_states_by_id) {
+        g_free(res->raw_headers); g_free(res->content_type);
+        g_free(res->body); g_free(res->error);
+        if (host) ns_worker_host_unref(host);
+        g_free(res);
+        return G_SOURCE_REMOVE;
+    }
+    ns_js_fetch_state *st = g_hash_table_lookup(js->fetch_states_by_id,
+                                                GUINT_TO_POINTER(res->id));
+    if (st) {
+        if (res->outcome == 1) {
+            ns_response *resp = g_new0(ns_response, 1);
+            resp->status = res->status > 0 ? res->status : 200;
+            resp->final_url = g_strdup(st->fb_send_url ? st->fb_send_url : "");
+            resp->content_type = res->content_type
+                ? g_strdup(res->content_type) : g_strdup("text/plain;charset=UTF-8");
+            resp->cors_allow_origin = g_strdup("*");
+            resp->raw_headers = res->raw_headers ? g_strdup(res->raw_headers) : NULL;
+            resp->body = g_byte_array_sized_new(res->body_len);
+            if (res->body && res->body_len)
+                g_byte_array_append(resp->body, res->body, res->body_len);
+            ns_js_fetch_delivery *d = g_new0(ns_js_fetch_delivery, 1);
+            d->st = st;
+            d->resp = resp;
+            ns_js_attach_idle(js, ns_on_js_fetch_deliver_idle, d);
+        } else if (res->outcome == 2) {
+            ns_response *resp = g_new0(ns_response, 1);
+            resp->error = g_strdup(res->error ? res->error
+                                   : "ServiceWorker fetch handler failed");
+            ns_js_fetch_delivery *d = g_new0(ns_js_fetch_delivery, 1);
+            d->st = st;
+            d->resp = resp;
+            ns_js_attach_idle(js, ns_on_js_fetch_deliver_idle, d);
+        } else {
+            ns_net_request_async(st->fb_send_url, st->fb_top, st->fb_method,
+                                 st->fb_body, st->fb_body_len, st->fb_content_type,
+                                 (const char *const *)st->fb_headers,
+                                 st->cancellable, ns_on_js_fetch_done, st);
+        }
+    }
+    g_free(res->raw_headers); g_free(res->content_type);
+    g_free(res->body); g_free(res->error);
+    ns_worker_host_unref(host);
+    g_free(res);
+    return G_SOURCE_REMOVE;
+}
+
+static JSValue
+ns_sw_fetch_result(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *swjs = js_from_ctx(ctx);
+    ns_worker_host *host = swjs ? swjs->worker_host : NULL;
+    if (!host || argc < 2) return JS_UNDEFINED;
+    ns_sw_fres *res = g_new0(ns_sw_fres, 1);
+    res->host = ns_worker_host_ref(host);
+    int64_t id = 0; JS_ToInt64(ctx, &id, argv[0]); res->id = (guint)id;
+    JS_ToInt32(ctx, &res->outcome, argv[1]);
+    if (res->outcome == 1) {
+        int status = 200;
+        if (argc > 2) JS_ToInt32(ctx, &status, argv[2]);
+        res->status = status;
+        if (argc > 4 && JS_IsArray(argv[4])) {
+            uint32_t n = ns_js_array_length(ctx, argv[4]);
+            GString *raw = g_string_new(NULL);
+            for (uint32_t i = 0; i + 1 < n; i += 2) {
+                JSValue kv = JS_GetPropertyUint32(ctx, argv[4], i);
+                JSValue vv = JS_GetPropertyUint32(ctx, argv[4], i + 1);
+                const char *k = JS_ToCString(ctx, kv);
+                const char *v = JS_ToCString(ctx, vv);
+                if (k && v) {
+                    g_string_append_printf(raw, "%s: %s\r\n", k, v);
+                    if (!res->content_type && g_ascii_strcasecmp(k, "content-type") == 0)
+                        res->content_type = g_strdup(v);
+                }
+                if (k) JS_FreeCString(ctx, k);
+                if (v) JS_FreeCString(ctx, v);
+                JS_FreeValue(ctx, kv);
+                JS_FreeValue(ctx, vv);
+            }
+            res->raw_headers = g_string_free(raw, FALSE);
+        }
+        if (argc > 5 && JS_IsObject(argv[5])) {
+            size_t off = 0, len = 0, bpe = 0;
+            JSValue buf = JS_GetTypedArrayBuffer(ctx, argv[5], &off, &len, &bpe);
+            if (!JS_IsException(buf)) {
+                size_t total = 0;
+                uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
+                if (base && off + len <= total && len > 0) {
+                    res->body = g_malloc(len);
+                    memcpy(res->body, base + off, len);
+                    res->body_len = len;
+                }
+                JS_FreeValue(ctx, buf);
+            } else {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            }
+        }
+    } else if (res->outcome == 2) {
+        if (argc > 2 && JS_IsString(argv[2])) {
+            const char *e = JS_ToCString(ctx, argv[2]);
+            if (e) { res->error = g_strdup(e); JS_FreeCString(ctx, e); }
+        }
+    }
+    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+                               ns_sw_fetch_result_on_owner, res, NULL);
+    return JS_UNDEFINED;
+}
+
+typedef struct {
+    ns_worker_host *host;
+    guint   id;
+    char   *url;
+    char   *method;
+    char  **headers;
+    guint8 *body;
+    gsize   body_len;
+} ns_sw_freq;
+
+static void
+ns_sw_freq_free(ns_sw_freq *r)
+{
+    if (!r) return;
+    if (r->host) ns_worker_host_unref(r->host);
+    g_free(r->url);
+    g_free(r->method);
+    g_strfreev(r->headers);
+    g_free(r->body);
+    g_free(r);
+}
+
+static void
+ns_sw_report_unhandled(ns_worker_host *host, guint id)
+{
+    ns_sw_fres *res = g_new0(ns_sw_fres, 1);
+    res->host = ns_worker_host_ref(host);
+    res->id = id;
+    res->outcome = 0;
+    g_main_context_invoke_full(NULL, G_PRIORITY_DEFAULT,
+                               ns_sw_fetch_result_on_owner, res, NULL);
+}
+
+static gboolean
+ns_sw_dispatch_fetch_on_worker(gpointer data)
+{
+    ns_sw_freq *r = data;
+    ns_worker_host *host = r->host;
+    if (g_atomic_int_get(&host->closing) || !host->worker_js ||
+        !host->worker_js->ctx) {
+        ns_sw_report_unhandled(host, r->id);
+        ns_sw_freq_free(r);
+        return G_SOURCE_REMOVE;
+    }
+    ns_js *swjs = host->worker_js;
+    JSContext *ctx = swjs->ctx;
+    ns_budget_guard bg = {0};
+    ns_js_budget_push(swjs, &bg);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue fn = JS_GetPropertyStr(ctx, global, "__nd_sw_dispatch_fetch");
+    gboolean dispatched = FALSE;
+    if (JS_IsFunction(ctx, fn)) {
+        JSValue harr = JS_NewArray(ctx);
+        uint32_t hi = 0;
+        if (r->headers)
+            for (char **p = r->headers; *p; p++)
+                JS_SetPropertyUint32(ctx, harr, hi++, JS_NewString(ctx, *p));
+        JSValue bodyv = (r->body && r->body_len)
+            ? JS_NewArrayBufferCopy(ctx, r->body, r->body_len) : JS_NULL;
+        JSValue args[5] = {
+            JS_NewInt64(ctx, r->id),
+            JS_NewString(ctx, r->url ? r->url : ""),
+            JS_NewString(ctx, r->method ? r->method : "GET"),
+            harr,
+            bodyv,
+        };
+        JSValue ret = JS_Call(ctx, fn, JS_UNDEFINED, 5, args);
+        if (JS_IsException(ret)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        } else {
+            dispatched = TRUE;
+        }
+        JS_FreeValue(ctx, ret);
+        for (int i = 0; i < 5; i++) JS_FreeValue(ctx, args[i]);
+    }
+    JS_FreeValue(ctx, fn);
+    JS_FreeValue(ctx, global);
+    ns_drain_microtasks(swjs);
+    ns_js_budget_pop(swjs, &bg);
+    if (!dispatched)
+        ns_sw_report_unhandled(host, r->id);
+    ns_sw_freq_free(r);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+ns_sw_post_fetch_request(ns_worker_host *host, guint id,
+                         const char *url, const char *method,
+                         const char *const *headers,
+                         const guint8 *body, gsize body_len)
+{
+    if (!host) return;
+    ns_sw_freq *r = g_new0(ns_sw_freq, 1);
+    r->host = ns_worker_host_ref(host);
+    r->id = id;
+    r->url = g_strdup(url);
+    r->method = g_strdup(method);
+    r->headers = headers ? g_strdupv((char **)headers) : NULL;
+    if (body && body_len) {
+        r->body = g_malloc(body_len);
+        memcpy(r->body, body, body_len);
+        r->body_len = body_len;
+    }
+    g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
+                               ns_sw_dispatch_fetch_on_worker, r, NULL);
+}
+
 static void
 ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
 {
@@ -15169,6 +15468,32 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_window_event_ctor, 2);
     ns_bind_ctor(ctx, global, "Response", ns_window_response_ctor, 2);
     ns_bind_ctor(ctx, global, "Request",  ns_window_request_ctor,  2);
+
+    ns_bind_fn(ctx, global, "__nd_sw_fetch_result", ns_sw_fetch_result, 6);
+    static const char *fetch_dispatch_src =
+        "globalThis.__nd_sw_dispatch_fetch=function(id,url,method,headers,body){"
+        "var hobj={};try{for(var i=0;i<headers.length;i++){var s=headers[i];var c=s.indexOf(':');"
+        "if(c>0)hobj[s.slice(0,c).trim()]=s.slice(c+1).trim();}}catch(e){}"
+        "var init={method:method,headers:hobj};"
+        "if(body&&method!=='GET'&&method!=='HEAD')init.body=body;"
+        "var req;try{req=new Request(url,init);}catch(e){req={url:url,method:method,headers:hobj};}"
+        "var responded=false,captured=null;"
+        "var ev;try{ev=new Event('fetch');}catch(e){ev={type:'fetch'};}"
+        "ev.request=req;ev.clientId='';ev.resultingClientId='';"
+        "ev.respondWith=function(r){responded=true;captured=r;};"
+        "ev.waitUntil=function(){};"
+        "try{self.dispatchEvent(ev);}catch(e){}"
+        "if(!responded){__nd_sw_fetch_result(id,0);return;}"
+        "Promise.resolve(captured).then(function(resp){"
+        "if(!resp){__nd_sw_fetch_result(id,0);return;}"
+        "return Promise.resolve(resp.arrayBuffer?resp.arrayBuffer():new ArrayBuffer(0)).then(function(ab){"
+        "var hdrs=[];try{if(resp.headers&&resp.headers.forEach)resp.headers.forEach(function(v,k){hdrs.push(k);hdrs.push(v);});}catch(e){}"
+        "__nd_sw_fetch_result(id,1,resp.status||200,resp.statusText||'',hdrs,new Uint8Array(ab));});"
+        "}).catch(function(err){__nd_sw_fetch_result(id,2,String(err&&err.message||err));});"
+        "};";
+    JSValue fd_ret = JS_Eval(ctx, fetch_dispatch_src, strlen(fetch_dispatch_src),
+                             "<sw-fetch-dispatch>", JS_EVAL_TYPE_GLOBAL);
+    JS_FreeValue(ctx, fd_ret);
 }
 
 static JSValue

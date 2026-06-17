@@ -39,7 +39,7 @@ in-process media codecs. Highlights:
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
 | §7–§8 Loading pages, web application APIs — `fetch`, `XHR`, timers, observers | ✅ |
 | §9 Communication — `WebSocket`, `EventSource`, `postMessage` | ✅ |
-| §10 Web workers — dedicated workers (incl. `fetch`/`Request`/`Response`, `crypto.subtle`, transferable `ArrayBuffer`s), minimalist Service Workers, working Cache API; SW network interception pending | 🟡 |
+| §10 Web workers — dedicated workers (`fetch`, `crypto.subtle`, transferable `ArrayBuffer`s), Service Workers with `FetchEvent` interception, Cache API (Shared/module workers & worklets aside) | ✅ |
 | §12 Web storage — `localStorage` / `sessionStorage` | ✅ |
 | §13 HTML syntax (lexbor parser); §14 XML partial | ✅ |
 | §15 Rendering — CSS cascade, flex, grid, transforms | ✅ |
