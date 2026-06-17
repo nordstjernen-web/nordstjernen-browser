@@ -76,6 +76,7 @@ gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,
                                      gboolean *default_prevented);
 void     ns_js_form_reset(ns_js *js, ns_node *form);
+gboolean ns_js_activate_summary(ns_js *js, const ns_node *el);
 
 void ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value);
 gboolean ns_js_close_topmost_modal_dialog(ns_js *js);

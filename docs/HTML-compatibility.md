@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 3).
+Snapshot: **1.0.10**, 2026-06-17 (rev 4).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -240,7 +240,7 @@ validation.
 
 | Element | Status | Notes |
 |---------|:--:|------|
-| `details` / `summary` | 🟡 | open/close transitions dispatch the spec's `ToggleEvent` pair — a (non-cancelable) `beforetoggle` then a `toggle`, each carrying `oldState` and `newState` ∈ `"open"`/`"closed"`; opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule (`ns_js_details_toggle_open` in `src/js.c`, hooked from the click path, the `open` IDL setter, and `setAttribute`/`removeAttribute`); fragment/hash navigation into skipped details content sets `open` before scrolling; UA-styled disclosure; no animation |
+| `details` / `summary` | ✅ | UA-styled disclosure widget with a marker; the `<summary>`'s **activation behavior** toggles its parent `<details>` across every click path — scripted `summary.click()` (the activation behavior in `ns_element_click_default_action`), the renderer/GUI pointer-click path (`ns_js_activate_summary` in `ns_browser_release_click`, honouring `preventDefault()`), and the `open` IDL/attribute setters. Each toggle dispatches the spec's `ToggleEvent` pair — a `beforetoggle` then a `toggle`, carrying `oldState`/`newState` ∈ `"open"`/`"closed"` (`ns_js_details_toggle_open`); opening one `<details name="X">` closes the rest of the group per the exclusive-accordion rule; fragment/hash navigation into skipped details content sets `open` before scrolling. CSS open/close *animation* (`::details-content`/`interpolate-size`) is not supported — a rendering nicety, not part of the element's behaviour |
 | `dialog` | ✅ | `open`/`show()`/`showModal()`/`close(result)` and `returnValue` implemented (`src/js.c`); `method="dialog"` forms close the dialog with the submitter's value; `requestClose(returnValue?)` (and an Escape press on the topmost open modal) fires a cancelable `cancel` event and, if not prevented, closes the dialog and fires `close` — matching the spec's close-watcher semantics. `showModal()` now puts the dialog in the top layer (painted on top of an author `::backdrop` fill, `src/paint.c`), moves focus to its `autofocus`/first focusable descendant, traps focus by making the rest of the document inert, and restores focus to the opener on close |
 | `popover` attribute | 🟡 | open/closed state, `showPopover`/`hidePopover`/`togglePopover`, `popovertarget` activation, and target/action reflection; open/close transitions dispatch the spec `ToggleEvent` pair — a `beforetoggle` (cancelable on open, so `preventDefault()` keeps the popover closed) then a `toggle`, each with `oldState`/`newState`; limited top-layer behaviour |
 

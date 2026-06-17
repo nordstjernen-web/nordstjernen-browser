@@ -25778,6 +25778,34 @@ ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open)
                                 old_state, new_state, FALSE, NULL);
 }
 
+static ns_node *
+ns_summary_toggle_target(const ns_node *el)
+{
+    for (const ns_node *cur = el; cur; cur = cur->parent) {
+        if (!ns_node_is_element_named(cur, "summary")) continue;
+        ns_node *details = cur->parent;
+        if (!ns_node_is_element_named(details, "details")) return NULL;
+        for (const ns_node *c = details->first_child; c; c = c->next_sibling)
+            if (ns_node_is_element_named(c, "summary"))
+                return c == cur ? details : NULL;
+        return NULL;
+    }
+    return NULL;
+}
+
+gboolean
+ns_js_activate_summary(ns_js *js, const ns_node *el)
+{
+    if (!js) return FALSE;
+    ns_node *details = ns_summary_toggle_target(el);
+    if (!details) return FALSE;
+    gboolean open = ns_element_get_attr(details, "open") != NULL;
+    if (open) ns_js_remove_attr_recorded(js, details, "open");
+    else      ns_js_set_attr_recorded(js, details, "open", "");
+    ns_js_details_toggle_open(js, details, !open);
+    return TRUE;
+}
+
 static gboolean
 ns_dialog_is_modal(JSContext *ctx, ns_node *dialog)
 {
@@ -26121,6 +26149,8 @@ ns_element_click_default_action(JSContext *ctx, const ns_node *el)
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
     if (ns_element_activate_popover_target(ctx, el))
+        return JS_UNDEFINED;
+    if (ns_js_activate_summary(js, el))
         return JS_UNDEFINED;
     if (ns_node_is_element_named(el, "a")) {
         const char *href = ns_element_get_attr(el, "href");

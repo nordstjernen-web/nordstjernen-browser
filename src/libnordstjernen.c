@@ -1546,7 +1546,10 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         ns_js_click_activate(browser->js, node))
         browser->dirty = TRUE;
 
-    if (!prevented && !browser->pending_nav && node &&
+    if (!prevented && node && browser->js &&
+        ns_js_activate_summary(browser->js, node)) {
+        if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    } else if (!prevented && !browser->pending_nav && node &&
         ns_form_is_submit_trigger(node)) {
         browser_submit_form(browser, node);
     } else if (!prevented && node && browser->js && browser->doc &&
