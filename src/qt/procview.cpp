@@ -642,6 +642,29 @@ void ProcView::doLoad(const QString &url, bool record) {
     if (url.isEmpty() || !m_worker)
         return;
 
+    {
+        QByteArray u = url.toUtf8();
+        if (ns_media_is_video_page(u.constData())) {
+            char *app = nullptr, *appUrl = nullptr;
+            ns_media_status st =
+                ns_media_try_launch(u.constData(), TRUE, &app, &appUrl);
+            g_free(app);
+            g_free(appUrl);
+            if (st == NS_MEDIA_LAUNCHED) {
+                emit statusMessage(
+                    QStringLiteral("Opening video in external player…"));
+                setLoading(false);
+                return;
+            }
+            if (st == NS_MEDIA_NEED_YTDLP)
+                emit statusMessage(QStringLiteral(
+                    "Install yt-dlp to play this video externally"));
+            else if (st == NS_MEDIA_NO_PLAYER)
+                emit statusMessage(QStringLiteral(
+                    "No external media player found (install mpv or vlc)"));
+        }
+    }
+
     if (record)
         m_jsRedirects = 0;
     m_pendingRecord = record;

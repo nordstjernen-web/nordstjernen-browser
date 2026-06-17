@@ -22,6 +22,11 @@ void ns_media_broker_start(void);
 
 gboolean ns_media_url_is_safe(const char *url, gboolean allow_local);
 
+/* TRUE for a streaming video *page* URL (a YouTube watch/shorts/embed/live
+ * link or youtu.be) that should be handed to an external player + yt-dlp
+ * directly on navigation rather than rendered in-page. */
+gboolean ns_media_is_video_page(const char *url);
+
 ns_media_status ns_media_try_launch(const char *url, gboolean stream,
                                     char **suggest_app, char **suggest_url);
 

@@ -1250,6 +1250,29 @@ do_load(NsProcView *v, const char *url, gboolean record)
 {
     if (!url || !*url)
         return;
+    if (ns_media_is_video_page(url)) {
+        char *app = NULL, *app_url = NULL;
+        ns_media_status st = ns_media_try_launch(url, TRUE, &app, &app_url);
+        g_free(app);
+        g_free(app_url);
+        if (st == NS_MEDIA_LAUNCHED) {
+            post_emit(v, NS_PROC_EVT_STATUS,
+                      ns_i18n("Opening video in external player…"));
+            if (v->loading) {
+                v->loading = FALSE;
+                post_emit(v, NS_PROC_EVT_LOADING, "0");
+            }
+            return;
+        }
+        if (st == NS_MEDIA_NEED_YTDLP)
+            post_emit(v, NS_PROC_EVT_STATUS,
+                      ns_i18n("Install yt-dlp to play this video externally"));
+        else if (st == NS_MEDIA_NO_PLAYER)
+            post_emit(v, NS_PROC_EVT_STATUS,
+                      ns_i18n("No external media player found "
+                              "(install mpv or vlc)"));
+        /* No player available — fall through and load the page normally. */
+    }
     v->pending_record = record;
     int seq = ++v->load_seq;
     ++v->render_seq;

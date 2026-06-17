@@ -34,6 +34,42 @@ ns_media_url_is_safe(const char *u, gboolean allow_local)
     return g_str_has_prefix(u, "file://") || u[0] == '/';
 }
 
+gboolean
+ns_media_is_video_page(const char *url)
+{
+    if (!url) return FALSE;
+    const char *p = NULL;
+    if (g_str_has_prefix(url, "https://")) p = url + 8;
+    else if (g_str_has_prefix(url, "http://")) p = url + 7;
+    else return FALSE;
+
+    gsize hlen = strcspn(p, "/?#");
+    char *raw = g_strndup(p, hlen);
+    char *host = g_ascii_strdown(raw, -1);
+    g_free(raw);
+    const char *h = host;
+    if (g_str_has_prefix(h, "www.")) h += 4;
+    else if (g_str_has_prefix(h, "m.")) h += 2;
+    const char *path = p + hlen;
+
+    gboolean match = FALSE;
+    if (strcmp(h, "youtu.be") == 0) {
+        match = path[0] == '/' && path[1] && path[1] != '?' && path[1] != '#';
+    } else if (strcmp(h, "youtube.com") == 0 ||
+               strcmp(h, "music.youtube.com") == 0) {
+        if (g_str_has_prefix(path, "/watch") && strstr(url, "v="))
+            match = TRUE;
+        else if (g_str_has_prefix(path, "/shorts/"))
+            match = TRUE;
+        else if (g_str_has_prefix(path, "/embed/"))
+            match = TRUE;
+        else if (g_str_has_prefix(path, "/live/"))
+            match = TRUE;
+    }
+    g_free(host);
+    return match;
+}
+
 static gboolean
 ns_media_spawnv(char **argv)
 {
