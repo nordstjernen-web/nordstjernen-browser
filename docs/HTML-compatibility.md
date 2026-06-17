@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 15).
+Snapshot: **1.0.10**, 2026-06-17 (rev 16).
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -276,7 +276,7 @@ validation.
 | Topic | Status | Notes |
 |-------|:--:|------|
 | Common idioms (`rel` keywords, etc.) | 🟡 | as above |
-| `disabled` / inert disabling | 🟡 | HTML disabled-capable controls, disabled `fieldset`, and disabled `optgroup` inheritance feed selectors/form submission; `inert` blocks basic focus/click activation |
+| `disabled` / inert disabling | ✅ | the §4.16 "actually disabled" concept is fully applied to every disabled-capable control (`button`/`input`/`select`/`textarea`/`optgroup`/`option`/`fieldset`), with `fieldset` and `optgroup` propagating disabledness to descendants: a disabled element matches `:disabled` (not `:enabled`), is barred from focus (`focus()` leaves `document.activeElement` unchanged) and from click activation (a synthetic `.click()` fires no `click` event), is omitted from `FormData`/form submission, and is barred from constraint validation (`willValidate` is `false`). `inert` is the orthogonal subtree-disabling mechanism — see its own row above |
 | Matching elements via Selectors/CSS | ✅ | rich selector engine (`src/css.c`) with broad structural, state, and functional selector coverage, including the HTML-connected state pseudo-classes `:default`, `:indeterminate`, `:in-range`, `:out-of-range`, `:blank`, `:target-within`, and `:modal`. The Selectors API (`querySelector`/`querySelectorAll`/`matches`/`closest`) throws a `SyntaxError` for an unparseable or non-standard selector — a dangling combinator (`div >`), an unknown pseudo-class (jQuery's `:radio`/`:first`/`:eq`/`:contains`, etc.), or an empty list — via `ns_css_parse_selector_list_checked` (`src/css.c`). Standard-but-still-unimplemented pseudo-classes (`:fullscreen`, `:autofill`, …) and the forgiving `:is()`/`:where()` interiors do **not** throw. This is the contract jQuery/Sizzle rely on to fall back to their own engine, so their non-CSS pseudos now resolve correctly |
 
 ## §5 Microdata
