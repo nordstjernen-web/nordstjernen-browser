@@ -3308,6 +3308,8 @@ ns_element_get_type(JSContext *ctx, JSValueConst this_val)
         return JS_NewString(ctx, "textarea");
     if (strcmp(n->name, "output") == 0)
         return JS_NewString(ctx, "output");
+    if (strcmp(n->name, "fieldset") == 0)
+        return JS_NewString(ctx, "fieldset");
     const char *v = ns_element_get_attr(n, "type");
     return JS_NewString(ctx, v ? v : "");
 }
@@ -24232,6 +24234,21 @@ ns_form_collect_controls(const ns_node *form, const ns_node *scan,
     }
 }
 
+static void
+ns_fieldset_collect_listed(const ns_node *scan, JSContext *ctx, JSValue arr,
+                           uint32_t *idx, int depth)
+{
+    static const char *const controls[] = {
+        "input", "select", "textarea", "button", "fieldset", "output", NULL,
+    };
+    if (!scan || depth >= 512) return;
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
+        if (ns_node_name_is_any_of(c, controls))
+            JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
+        ns_fieldset_collect_listed(c, ctx, arr, idx, depth + 1);
+    }
+}
+
 typedef struct {
     JSValue      owner;
     ns_live_kind kind;
@@ -24303,6 +24320,8 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
             const ns_node *doc = ns_node_root(root);
             ns_form_collect_controls(root, doc ? doc : root, doc ? doc : root,
                                      ctx, arr, &i, 0);
+        } else if (root->name && strcmp(root->name, "fieldset") == 0) {
+            ns_fieldset_collect_listed(root, ctx, arr, &i, 0);
         }
         break;
     case NS_LIVE_LINKS:
