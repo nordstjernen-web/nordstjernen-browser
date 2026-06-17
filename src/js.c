@@ -145,7 +145,7 @@ static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
 static void ns_ce_disconnect_subtree(ns_js *js, ns_node *root);
 static gboolean ns_ce_constructor_registered(ns_js *js, JSValueConst ctor);
-static void ns_js_emit_audio(ns_js *js, const char *fmt, ...);
+static void ns_js_emit_audio(ns_js *js, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 static ns_worker_host *ns_sw_controller_for(ns_js *js, const char *abs_url);
 static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const char *url, const char *method,
@@ -37516,7 +37516,7 @@ ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
 static void
 ns_js_emit_audio(ns_js *js, const char *fmt, ...)
 {
-    if (!js || !js->audio_cb) return;
+    if (!js || !js->audio_cb || !fmt) return;
     va_list ap;
     va_start(ap, fmt);
     char *cmd = g_strdup_vprintf(fmt, ap);

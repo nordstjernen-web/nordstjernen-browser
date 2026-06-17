@@ -52,6 +52,7 @@ struct ns_browser {
     gboolean        relaying;
     char           *pending_nav;
     char           *pending_download;
+    GString        *pending_audio;
     char           *refresh_url;
     gint64          refresh_due_us;
     char           *pending_post_body;
@@ -411,6 +412,37 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
     g_free(abs);
 }
 
+static void
+browser_js_audio(const char *command, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !command || !*command) return;
+    if (!b->pending_audio) b->pending_audio = g_string_new(NULL);
+    g_string_append(b->pending_audio, command);
+    g_string_append_c(b->pending_audio, '\n');
+}
+
+char *
+ns_browser_take_pending_audio(ns_browser *browser)
+{
+    if (!browser || !browser->pending_audio ||
+        browser->pending_audio->len == 0)
+        return NULL;
+    char *out = g_strdup(browser->pending_audio->str);
+    g_string_truncate(browser->pending_audio, 0);
+    return out;
+}
+
+void
+ns_browser_audio_event(ns_browser *browser, const char *kind,
+                       const char *token, double value)
+{
+    if (!browser || !browser->js || !kind || !token) return;
+    ns_js_audio_event(browser->js, token, kind, value);
+    browser_relayout(browser);
+    browser->dirty = FALSE;
+}
+
 int
 ns_browser_init(void)
 {
@@ -663,6 +695,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_js_set_image_cache(b->js, b->images);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
+        ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_run_scripts_in_doc(b->js, doc, base);
     }
 
@@ -2200,6 +2233,7 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->doc_charset);
     g_free(browser->pending_nav);
     g_free(browser->pending_download);
+    if (browser->pending_audio) g_string_free(browser->pending_audio, TRUE);
     g_free(browser->refresh_url);
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);

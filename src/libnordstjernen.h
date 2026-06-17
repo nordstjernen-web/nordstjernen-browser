@@ -149,6 +149,15 @@ int ns_browser_hover(ns_browser *browser, int x, int y);
 int ns_browser_drop_files(ns_browser *browser, int x, int y,
                           const char *const *paths, int n_paths);
 
+/* Audio playback bridge to the nordstjernen-audio helper. The renderer queues
+ * commands (open/play/pause/seek/volume/stop, one per line) when page script
+ * drives <audio>/<video>; the shell drains them with take_pending_audio and
+ * relays them to the helper. Helper events come back via audio_event
+ * (kind: meta/pos/ended/error/playing; token identifies the element). */
+char *ns_browser_take_pending_audio(ns_browser *browser);
+void  ns_browser_audio_event(ns_browser *browser, const char *kind,
+                             const char *token, double value);
+
 /* DevTools console: drain accumulated console.log/warn/error/info/debug output
  * produced since the last drain, one message per line, or NULL if there is
  * none. The internal buffer is bounded; the result is newly allocated (free
