@@ -65,9 +65,10 @@ jobs:
           echo "NDK: ${ANDROID_NDK_HOME}"
 
       - name: Fetch prebuilt dependency sysroots
+        continue-on-error: true
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File android/scripts/fetch-prebuilt-deps.ps1 \
-            -Abi arm64-v8a x86_64 \
+            -Abi arm64-v8a,x86_64 \
             -Sysroot "${NORDSTJERNEN_ANDROID_SYSROOT}"
 
       - name: Cross-compile engine
