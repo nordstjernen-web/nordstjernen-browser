@@ -3999,9 +3999,13 @@ box_is_hidden(const ns_box *b)
     const ns_style *s = b ? b->style : NULL;
     if (!s) return FALSE;
     const ns_css_value *v = s->values[NS_CSS_VISIBILITY];
-    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
-           (strcmp(v->u.keyword, "hidden") == 0 ||
-            strcmp(v->u.keyword, "collapse") == 0);
+    if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+        (strcmp(v->u.keyword, "hidden") == 0 ||
+         strcmp(v->u.keyword, "collapse") == 0))
+        return TRUE;
+    const ns_css_value *cv = s->values[NS_CSS_CONTENT_VISIBILITY];
+    return cv && cv->kind == NS_CSS_V_KEYWORD && cv->u.keyword &&
+           strcmp(cv->u.keyword, "hidden") == 0;
 }
 
 static double

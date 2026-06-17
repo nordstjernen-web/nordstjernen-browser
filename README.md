@@ -7,7 +7,7 @@ Nordstjernen is built in Norway.
 
 Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , Mac and Linux, Android, Java, FreeBSD and NetBSD.  
 
-**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 133 spec rows fully implemented, 30 partial, 4 absent as of June 2026. 
+**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 134 spec rows fully implemented, 29 partial, 4 absent as of June 2026. 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
@@ -25,7 +25,7 @@ Nordstjernen is measured against the **spec text**, section by section,
 not against any other browser. The section-by-section walk-through of
 the in-scope WHATWG HTML standard (§1–§16) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) currently
-records **133 spec rows fully implemented, 30 partial, and 4 absent**
+records **134 spec rows fully implemented, 29 partial, and 4 absent**
 (June 2026), besides a handful that are non-goals by design, such as
 in-process media codecs. Highlights:
 

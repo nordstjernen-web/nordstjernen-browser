@@ -180,6 +180,7 @@ typedef enum ns_css_prop {
     NS_CSS_BACKFACE_VISIBILITY,
     NS_CSS_ANIMATION_PLAY_STATE,
     NS_CSS_CLIP,
+    NS_CSS_CONTENT_VISIBILITY,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 

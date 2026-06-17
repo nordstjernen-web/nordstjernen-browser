@@ -228,6 +228,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_IMAGE_RENDERING]      = "image-rendering",
     [NS_CSS_CONTENT]              = "content",
     [NS_CSS_CLIP]                 = "clip",
+    [NS_CSS_CONTENT_VISIBILITY]   = "content-visibility",
     [NS_CSS_GRID_TEMPLATE_COLUMNS]= "grid-template-columns",
     [NS_CSS_GRID_TEMPLATE_ROWS]   = "grid-template-rows",
     [NS_CSS_GRID_TEMPLATE_AREAS]  = "grid-template-areas",
@@ -13454,7 +13455,8 @@ static const char *kUa =
     "border: 1px solid #888; }\n"
     "summary { font-weight: bold; cursor: pointer; }\n"
     "picture { display: inline; }\n"
-    "[hidden] { display: none; }\n"
+    "[hidden]:not([hidden=\"until-found\" i]) { display: none; }\n"
+    "[hidden=\"until-found\" i] { content-visibility: hidden; }\n"
     "[popover]:not([data-nd-popover-open]) { display: none; }\n"
     "template { display: none; }\n";
 

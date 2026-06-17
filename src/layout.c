@@ -307,6 +307,13 @@ style_is_contents(const ns_style *s)
 }
 
 static gboolean
+style_content_visibility_hidden(const ns_style *s)
+{
+    return s && s->values[NS_CSS_CONTENT_VISIBILITY] &&
+           is_keyword(s->values[NS_CSS_CONTENT_VISIBILITY], "hidden");
+}
+
+static gboolean
 text_is_ws_only(const char *text)
 {
     if (!text) return TRUE;
@@ -9303,6 +9310,11 @@ flex_done: ;
             box->scrolls = TRUE;
             box->scroll_max_x = measured_w - box->content_width;
         }
+    }
+    if (style_content_visibility_hidden(box->style)) {
+        box->content_height = 0;
+        box->scrolls = FALSE;
+        box->scroll_max_y = 0;
     }
 }
 
