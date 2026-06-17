@@ -2264,6 +2264,14 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         default: return FALSE;
         }
     }
+    if ((state & GDK_ALT_MASK) && !(state & GDK_CONTROL_MASK) &&
+        !(state & GDK_META_MASK)) {
+        gunichar a = gdk_keyval_to_unicode(keyval);
+        if (a && !g_unichar_iscntrl(a)) {
+            start_key(v, 0, keyval, state);
+            return TRUE;
+        }
+    }
     double line = 60.0;
     double page = viewport_h(v) / cur_scale(v) - line;
     if (page < line) page = line;

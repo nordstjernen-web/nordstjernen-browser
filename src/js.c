@@ -26278,6 +26278,26 @@ ns_element_click(JSContext *ctx, JSValueConst this_val,
     return ns_element_click_default_action(ctx, el);
 }
 
+void
+ns_js_activate_element(ns_js *js, const ns_node *el)
+{
+    if (!js || !js->ctx || !el) return;
+    if (ns_element_effectively_inert(el)) return;
+    if (ns_node_is_disabled_form_control(el)) return;
+    int kind = ns_checkable_input_kind(el);
+    if (kind) {
+        gboolean was = ns_checkable_pre_click(js, (ns_node *)el, kind);
+        gboolean prevented = FALSE;
+        ns_js_dispatch_event(js, el, "click", &prevented);
+        ns_checkable_post_click(js, (ns_node *)el, kind, was, prevented);
+        return;
+    }
+    gboolean prevented = FALSE;
+    ns_js_dispatch_event(js, el, "click", &prevented);
+    if (prevented) return;
+    ns_element_click_default_action(js->ctx, el);
+}
+
 gboolean
 ns_js_click_activate(ns_js *js, const ns_node *node)
 {

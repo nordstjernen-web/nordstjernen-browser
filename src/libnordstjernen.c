@@ -1750,6 +1750,40 @@ browser_key_char_code(const char *key)
     return g_unichar_iscntrl(ch) ? 0 : (int)ch;
 }
 
+static gboolean
+browser_accesskey_matches(const ns_node *el, const char *key)
+{
+    const char *ak = ns_element_get_attr(el, "accesskey");
+    if (!ak || !*ak || !key || !*key) return FALSE;
+    gsize klen = strlen(key);
+    for (const char *p = ak; *p;) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+        const char *s = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
+        gsize len = (gsize)(p - s);
+        if (len == klen && g_ascii_strncasecmp(s, key, len) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static const ns_node *
+browser_find_accesskey(const ns_node *n, const char *key, int depth)
+{
+    if (!n || depth > 1024) return NULL;
+    if (n->kind == NS_NODE_ELEMENT && n->name &&
+        g_ascii_strcasecmp(n->name, "template") == 0)
+        return NULL;
+    if (n->kind == NS_NODE_ELEMENT && browser_accesskey_matches(n, key) &&
+        !ns_element_effectively_inert(n))
+        return n;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        const ns_node *m = browser_find_accesskey(c, key, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
 char *
 ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                     const char *code, int keycode, int mods,
@@ -1794,6 +1828,18 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
         if (out_prevented && prevented)
             *out_prevented = 1;
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+
+        if (kind == 0 && !prevented && (mods & 4) && !(mods & (2 | 8)) &&
+            key && g_utf8_validate(key, -1, NULL) &&
+            g_utf8_strlen(key, -1) == 1 && browser->doc) {
+            const ns_node *ak = browser_find_accesskey(browser->doc, key, 0);
+            if (ak) {
+                ns_js_set_focus(browser->js, ak);
+                ns_js_activate_element(browser->js, ak);
+                if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            }
+        }
 
         int char_code = browser_key_char_code(key);
         if (kind == 3 && !prevented && char_code > 0 &&
