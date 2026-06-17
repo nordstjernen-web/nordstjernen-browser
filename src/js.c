@@ -443,6 +443,7 @@ typedef struct ns_listener {
     JSValue        signal;
     gboolean       capture;
     gboolean       once;
+    gboolean       passive;
     gboolean       window_level;
 } ns_listener;
 
@@ -5283,10 +5284,12 @@ ns_get_bool_atom(JSContext *ctx, JSValueConst obj, JSAtom atom, gboolean *was_se
 static gboolean
 ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
                           gboolean *capture, gboolean *once,
-                          JSValue *signal_out, gboolean strict_signal)
+                          gboolean *passive, JSValue *signal_out,
+                          gboolean strict_signal)
 {
     *capture = FALSE;
     *once = FALSE;
+    if (passive) *passive = FALSE;
     if (signal_out) *signal_out = JS_NULL;
     if (JS_IsBool(opts)) {
         *capture = JS_ToBool(ctx, opts) ? TRUE : FALSE;
@@ -5303,16 +5306,16 @@ ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
             if (set) *capture = v;
             v = ns_get_bool_atom(ctx, opts, js->atom_once, &set);
             if (set) *once = v;
-            JSValue pas = JS_GetProperty(ctx, opts, js->atom_passive);
-            JS_FreeValue(ctx, pas);
+            v = ns_get_bool_atom(ctx, opts, js->atom_passive, &set);
+            if (set && passive) *passive = v;
             sig = JS_GetProperty(ctx, opts, js->atom_signal);
         } else {
             v = ns_js_get_bool_prop(ctx, opts, "capture", &set);
             if (set) *capture = v;
             v = ns_js_get_bool_prop(ctx, opts, "once", &set);
             if (set) *once = v;
-            JSValue pas = JS_GetPropertyStr(ctx, opts, "passive");
-            JS_FreeValue(ctx, pas);
+            v = ns_js_get_bool_prop(ctx, opts, "passive", &set);
+            if (set && passive) *passive = v;
             sig = JS_GetPropertyStr(ctx, opts, "signal");
         }
         if (JS_IsObject(sig)) {
@@ -5340,11 +5343,11 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
         JS_FreeCString(ctx, type); return JS_UNDEFINED;
     }
-    gboolean capture = FALSE, once = FALSE;
+    gboolean capture = FALSE, once = FALSE, passive = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
-                                   TRUE)) {
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &passive,
+                                   &signal, TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
     }
@@ -5382,6 +5385,7 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     l->signal = signal;
     l->capture = capture;
     l->once    = once;
+    l->passive = passive;
     g_ptr_array_add(_js->listeners, l);
     ns_node_arm_js_invalidate((ns_node *)n);
     JS_FreeCString(ctx, type);
@@ -5399,7 +5403,7 @@ ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3)
-        ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
+        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
                                   FALSE);
     JS_FreeValue(ctx, signal);
     ns_js *js = js_from_ctx(ctx);
@@ -6271,6 +6275,29 @@ ns_event_empty_array(JSContext *ctx, JSValueConst this_val, int argc, JSValueCon
 {
     (void)this_val; (void)argc; (void)argv;
     return JS_NewArray(ctx);
+}
+
+static JSValue
+ns_event_composed_path(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue arr = JS_NewArray(ctx);
+    JSValue dispatching = JS_GetPropertyStr(ctx, this_val, "_dispatching");
+    gboolean active = JS_ToBool(ctx, dispatching) ? TRUE : FALSE;
+    JS_FreeValue(ctx, dispatching);
+    if (!active) return arr;
+    JSValue target = JS_GetPropertyStr(ctx, this_val, "target");
+    const ns_node *n = ns_unwrap_element(target);
+    JS_FreeValue(ctx, target);
+    uint32_t idx = 0;
+    gboolean saw_document = FALSE;
+    for (const ns_node *cur = n; cur; cur = cur->parent) {
+        JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, cur));
+        if (cur->kind == NS_NODE_DOCUMENT) saw_document = TRUE;
+    }
+    if (saw_document)
+        JS_SetPropertyUint32(ctx, arr, idx++, JS_GetGlobalObject(ctx));
+    return arr;
 }
 
 static void ns_js_emit(ns_js *js, const char *prefix, JSContext *ctx,
@@ -8099,7 +8126,7 @@ ns_port_add_event_listener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
@@ -11413,7 +11440,7 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
@@ -13498,7 +13525,7 @@ ns_window_event_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "stopPropagation",           ns_event_stop_propagation, 0);
     ns_event_define_cancel_bubble(ctx, obj);
     ns_bind_fn(ctx, obj, "stopImmediatePropagation",  ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, obj, "composedPath",              ns_event_empty_array,    0);
+    ns_bind_fn(ctx, obj, "composedPath",              ns_event_composed_path,    0);
     return obj;
 }
 
@@ -13615,7 +13642,7 @@ ns_js_ws_event(JSContext *ctx, const char *type)
     ns_event_define_cancel_bubble(ctx, ev);
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_TRUE);
     ns_bind_fn(ctx, ev, "stopImmediatePropagation", ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, ev, "composedPath",             ns_event_empty_array,    0);
+    ns_bind_fn(ctx, ev, "composedPath",             ns_event_composed_path,    0);
     return ev;
 }
 
@@ -14367,7 +14394,7 @@ ns_worker_event(JSContext *ctx, const char *type, JSValueConst data,
     ns_event_define_cancel_bubble(ctx, ev);
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_TRUE);
     ns_bind_fn(ctx, ev, "stopImmediatePropagation", ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, ev, "composedPath",             ns_event_empty_array, 0);
+    ns_bind_fn(ctx, ev, "composedPath",             ns_event_composed_path, 0);
     return ev;
 }
 
@@ -14991,7 +15018,7 @@ ns_sw_make_extendable_event(JSContext *ctx, const char *type)
     ns_event_define_cancel_bubble(ctx, ev);
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_TRUE);
     ns_bind_fn(ctx, ev, "stopImmediatePropagation",  ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, ev, "composedPath",              ns_event_empty_array, 0);
+    ns_bind_fn(ctx, ev, "composedPath",              ns_event_composed_path, 0);
     return ev;
 }
 
@@ -17044,6 +17071,11 @@ static JSValue
 ns_event_prevent_default(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)argc; (void)argv;
+    JSValue passive = JS_GetPropertyStr(ctx, this_val, "_passive_active");
+    gboolean is_passive = JS_ToBool(ctx, passive) ? TRUE : FALSE;
+    JS_FreeValue(ctx, passive);
+    if (is_passive)
+        return JS_UNDEFINED;
     JSValue cancelable = JS_GetPropertyStr(ctx, this_val, "cancelable");
     gboolean can_cancel = JS_ToBool(ctx, cancelable) ? TRUE : FALSE;
     JS_FreeValue(ctx, cancelable);
@@ -17226,7 +17258,7 @@ ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
     ns_event_define_cancel_bubble(ctx, event);
     JS_SetPropertyStr(ctx, event, "_is_trusted", JS_TRUE);
     ns_bind_fn(ctx, event, "stopImmediatePropagation", ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, event, "composedPath",             ns_event_empty_array,    0);
+    ns_bind_fn(ctx, event, "composedPath",             ns_event_composed_path,    0);
     ns_bind_fn(ctx, event, "getModifierState",         ns_event_get_modifier_state, 1);
     return event;
 }
@@ -17268,7 +17300,7 @@ ns_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     ns_bind_fn(ctx, ev, "stopPropagation",          ns_event_stop_propagation, 0);
     ns_event_define_cancel_bubble(ctx, ev);
     ns_bind_fn(ctx, ev, "stopImmediatePropagation", ns_event_stop_immediate, 0);
-    ns_bind_fn(ctx, ev, "composedPath",             ns_event_empty_array,    0);
+    ns_bind_fn(ctx, ev, "composedPath",             ns_event_composed_path,    0);
     return ev;
 }
 
@@ -17829,9 +17861,13 @@ ns_run_listener_array(ns_js *js, GPtrArray *to_call, JSValue current_target,
             this_for_call = current_target;
         }
         if (l->once) ns_listener_tombstone(js->ctx, l);
+        if (l->passive)
+            JS_SetPropertyStr(js->ctx, event, "_passive_active", JS_TRUE);
         JSValue ret = JS_IsFunction(js->ctx, fn)
             ? JS_Call(js->ctx, fn, this_for_call, 1, &event)
             : JS_UNDEFINED;
+        if (l->passive)
+            JS_SetPropertyStr(js->ctx, event, "_passive_active", JS_FALSE);
         if (fn_is_owned) JS_FreeValue(js->ctx, fn);
         if (JS_IsException(ret)) {
             JSValue ex = JS_GetException(js->ctx);
@@ -32735,7 +32771,7 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
@@ -32809,7 +32845,7 @@ ns_document_remove_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3)
-        ns_listener_parse_options(ctx, argv[2], &capture, &once, &signal,
+        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
                                   FALSE);
     JS_FreeValue(ctx, signal);
     for (guint i = 0; i < js->listeners->len; i++) {
