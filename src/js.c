@@ -3382,6 +3382,36 @@ ns_element_set_autocapitalize(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
+ns_node_spellcheck_used(const ns_node *n)
+{
+    for (const ns_node *cur = n; cur; cur = cur->parent) {
+        if (cur->kind != NS_NODE_ELEMENT) continue;
+        const char *v = ns_element_get_attr(cur, "spellcheck");
+        if (!v) continue;
+        if (!g_ascii_strcasecmp(v, "false")) return FALSE;
+        if (!*v || !g_ascii_strcasecmp(v, "true")) return TRUE;
+    }
+    return TRUE;
+}
+
+static JSValue
+ns_element_get_spellcheck(JSContext *ctx, JSValueConst this_val)
+{
+    return JS_NewBool(ctx, ns_node_spellcheck_used(ns_unwrap_element(this_val)));
+}
+
+static JSValue
+ns_element_set_spellcheck(JSContext *ctx, JSValueConst this_val,
+                          JSValueConst val)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n) return JS_UNDEFINED;
+    ns_js_set_attr_recorded(js_from_ctx(ctx), n, "spellcheck",
+                            JS_ToBool(ctx, val) ? "true" : "false");
+    return JS_UNDEFINED;
+}
+
+static gboolean
 ns_node_in_template_content(const ns_node *n)
 {
     for (const ns_node *p = n; p; p = p->parent)
@@ -28330,7 +28360,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("optimum",     ns_element_range_number_getter, ns_element_range_number_setter, NS_RANGE_OPTIMUM),
     JS_CGETSET_MAGIC_DEF("step",        ns_element_attr_getter, ns_element_attr_setter, 20),
     JS_CGETSET_MAGIC_DEF("pattern",     ns_element_attr_getter, ns_element_attr_setter, 21),
-    JS_CGETSET_MAGIC_DEF("spellcheck",  ns_element_attr_getter, ns_element_attr_setter, 22),
+    JS_CGETSET_DEF("spellcheck",    ns_element_get_spellcheck, ns_element_set_spellcheck),
     JS_CGETSET_MAGIC_DEF("crossOrigin",    ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_CROSSORIGIN),
     JS_CGETSET_MAGIC_DEF("referrerPolicy", ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_REFERRERPOLICY),
     JS_CGETSET_MAGIC_DEF("decoding",       ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_DECODING),
