@@ -63,7 +63,7 @@ Snapshot: **1.0.10**, 2026-06-18.
 |-------|:--:|------|
 | `display` block/inline/inline-block/flex/grid/table*/list-item/flow-root/none | ✅ | |
 | `box-sizing` | ✅ | `content-box`/`border-box` |
-| margins / padding / borders / `border-radius` | ✅ | incl. per-corner radii; margin collapsing for adjacent block margins; a side whose `border-style` is `none`/`hidden` contributes zero used border width per Backgrounds 3 |
+| margins / padding / borders / `border-radius` | ✅ | incl. per-corner radii; margin collapsing for adjacent block margins; a side whose `border-style` is `none`/`hidden` contributes zero used border width per Backgrounds 3. `getComputedStyle` returns the CSSOM **resolved (used) value** in px for `margin-*`/`padding-*`/`border-*-width` and for `top`/`right`/`bottom`/`left` on positioned boxes (percentages resolved against the containing block), and `line-height`/`font-weight` resolve to used px / the numeric weight (`ns_computed_lookup` in `src/js.c`) |
 | `min/max-width`, `min/max-height` | ✅ | |
 | Intrinsic `min-content` / `max-content` / `fit-content` | ✅ | shrink-to-fit via content measurement |
 | `aspect-ratio` | ✅ | verified: width-driven height from ratio |
@@ -204,7 +204,7 @@ Snapshot: **1.0.10**, 2026-06-18.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| 2D/3D `transform` (translate/scale/rotate/skew/matrix), `transform-origin` | ✅ | |
+| 2D/3D `transform` (translate/scale/rotate/skew/matrix), `transform-origin` | ✅ | `getComputedStyle().transform` returns the CSSOM **resolved value** — the function list is composed into a single `matrix(...)` (2D) or `matrix3d(...)` (3D, column-order) via `ns_css_transform_to_mat4`, with translate percentages resolved against the border box (`ns_computed_transform_matrix` in `src/js.c`); `none` when no transform |
 | `transition` (`opacity`/`transform`/`color`/`background-color`) | ✅ | `src/anim.c`; respects `prefers-reduced-motion` |
 | `@keyframes` + `animation` | 🟡 | opacity/transform/color/bg-color targets; `animation-direction` (normal/reverse/alternate/alternate-reverse) and `animation-fill-mode` (none/forwards/backwards/both) honoured |
 | Easing (`linear`/`ease`/`ease-in`/`-out`/`-in-out`, `steps()`, `step-start`/`step-end`, `cubic-bezier()`) | ✅ | steps() jump terms and a Newton-Raphson cubic-bezier solver in `src/anim.c` |

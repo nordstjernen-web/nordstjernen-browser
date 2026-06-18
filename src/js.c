@@ -9607,6 +9607,147 @@ ns_computed_box_shorthand(JSContext *ctx, const ns_node *n,
     return out;
 }
 
+static char *
+ns_computed_box_edge_px(const ns_box *b, const char *name)
+{
+    if (!b) return NULL;
+    const ns_edges *e = NULL;
+    const char *side = NULL;
+    if (g_str_has_prefix(name, "margin-")) { e = &b->margin; side = name + 7; }
+    else if (g_str_has_prefix(name, "padding-")) { e = &b->padding; side = name + 8; }
+    else if (g_str_has_prefix(name, "border-") &&
+             g_str_has_suffix(name, "-width")) {
+        e = &b->border;
+        if (g_str_has_prefix(name, "border-top-")) side = "top";
+        else if (g_str_has_prefix(name, "border-right-")) side = "right";
+        else if (g_str_has_prefix(name, "border-bottom-")) side = "bottom";
+        else if (g_str_has_prefix(name, "border-left-")) side = "left";
+    }
+    if (!e || !side) return NULL;
+    double v;
+    if (strcmp(side, "top") == 0) v = e->top;
+    else if (strcmp(side, "right") == 0) v = e->right;
+    else if (strcmp(side, "bottom") == 0) v = e->bottom;
+    else if (strcmp(side, "left") == 0) v = e->left;
+    else return NULL;
+    return g_strdup_printf("%gpx", v);
+}
+
+static char *
+ns_computed_transform_matrix(const ns_style *s, const ns_box *b)
+{
+    ns_css_transform eff;
+    eff.n_ops = 0;
+    if (s && (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
+              s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]))
+        ns_css_style_effective_transform(s, NULL, &eff);
+    if (eff.n_ops == 0) return g_strdup("none");
+    double bw = 0, bh = 0;
+    if (b) {
+        bw = b->content_width + b->padding.left + b->padding.right +
+             b->border.left + b->border.right;
+        bh = b->content_height + b->padding.top + b->padding.bottom +
+             b->border.top + b->border.bottom;
+    }
+    ns_mat4 m;
+    ns_css_transform_to_mat4(&eff, bw, bh, &m);
+    GString *out = g_string_new(NULL);
+    if (ns_mat4_is_affine2d(&m)) {
+        g_string_append_printf(out, "matrix(%g, %g, %g, %g, %g, %g)",
+                               m.m[0], m.m[4], m.m[1], m.m[5], m.m[3], m.m[7]);
+    } else {
+        static const int ord[16] =
+            { 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 };
+        g_string_append(out, "matrix3d(");
+        for (int k = 0; k < 16; k++)
+            g_string_append_printf(out, "%s%g", k ? ", " : "", m.m[ord[k]]);
+        g_string_append_c(out, ')');
+    }
+    return g_string_free(out, FALSE);
+}
+
+static double
+ns_computed_font_px(JSContext *ctx, const ns_node *n)
+{
+    char *fs = ns_computed_lookup(ctx, n, "font-size");
+    double v = fs ? g_ascii_strtod(fs, NULL) : 16.0;
+    g_free(fs);
+    if (!(v > 0)) v = 16.0;
+    return v;
+}
+
+static const char *
+ns_box_position_keyword(const ns_box *b)
+{
+    const ns_css_value *pos = b && b->style ? b->style->values[NS_CSS_POSITION]
+                                            : NULL;
+    if (pos && pos->kind == NS_CSS_V_KEYWORD && pos->u.keyword)
+        return pos->u.keyword;
+    return "static";
+}
+
+static char *
+ns_computed_inset_px(JSContext *ctx, const ns_node *n, const ns_box *b,
+                     const char *name)
+{
+    if (!b || !b->style) return NULL;
+    const char *pos = ns_box_position_keyword(b);
+    gboolean positioned = strcmp(pos, "relative") == 0 ||
+                          strcmp(pos, "absolute") == 0 ||
+                          strcmp(pos, "fixed") == 0 ||
+                          strcmp(pos, "sticky") == 0;
+    if (!positioned) return NULL;
+    int pid = ns_css_prop_id(name);
+    const ns_css_value *v = pid >= 0 ? b->style->values[pid] : NULL;
+    if (!v || v->kind != NS_CSS_V_LENGTH) return NULL;
+    ns_css_unit u = v->u.length.unit;
+    if (u == NS_CSS_UNIT_PX)
+        return g_strdup_printf("%gpx", v->u.length.v);
+    if (u == NS_CSS_UNIT_EM)
+        return g_strdup_printf("%gpx", v->u.length.v * ns_computed_font_px(ctx, n));
+    if (u == NS_CSS_UNIT_REM)
+        return g_strdup_printf("%gpx", v->u.length.v * 16.0);
+    if (u != NS_CSS_UNIT_PERCENT) return NULL;
+    gboolean abs_pos = strcmp(pos, "absolute") == 0 || strcmp(pos, "fixed") == 0;
+    const ns_box *cb = NULL;
+    if (abs_pos) {
+        for (const ns_box *a = b->parent; a; a = a->parent) {
+            if (strcmp(pos, "fixed") != 0) {
+                const char *ap = ns_box_position_keyword(a);
+                if (strcmp(ap, "static") != 0) { cb = a; break; }
+            }
+            if (!a->parent) { cb = a; break; }
+        }
+    } else {
+        cb = b->parent;
+    }
+    if (!cb) return NULL;
+    gboolean vertical = strcmp(name, "top") == 0 || strcmp(name, "bottom") == 0;
+    double basis = vertical ? cb->content_height : cb->content_width;
+    if (abs_pos)
+        basis += vertical ? cb->padding.top + cb->padding.bottom
+                          : cb->padding.left + cb->padding.right;
+    return g_strdup_printf("%gpx", v->u.length.v / 100.0 * basis);
+}
+
+static char *
+ns_computed_line_height_px(JSContext *ctx, const ns_node *n, const ns_style *s)
+{
+    const ns_css_value *lv = s ? s->values[NS_CSS_LINE_HEIGHT] : NULL;
+    if (!lv || lv->kind != NS_CSS_V_LENGTH) return NULL;
+    ns_css_unit u = lv->u.length.unit;
+    double fs = ns_computed_font_px(ctx, n);
+    if (u == NS_CSS_UNIT_NUMBER)
+        return g_strdup_printf("%gpx", lv->u.length.v * fs);
+    if (u == NS_CSS_UNIT_PERCENT)
+        return g_strdup_printf("%gpx", lv->u.length.v / 100.0 * fs);
+    if (u == NS_CSS_UNIT_EM)
+        return g_strdup_printf("%gpx", lv->u.length.v * fs);
+    if (u == NS_CSS_UNIT_REM)
+        return g_strdup_printf("%gpx", lv->u.length.v * 16.0);
+    return NULL;
+}
+
 static const char *
 ns_anim_target_property_name(ns_css_anim_target t)
 {
@@ -9746,18 +9887,45 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
     const char *style = ns_element_get_attr(n, "style");
+    const struct ns_box *lbox = (js && js->layout_root)
+        ? ns_box_find_by_dom(js->layout_root, n) : NULL;
+    const ns_style *computed = (js && js->style_table)
+        ? g_hash_table_lookup(js->style_table, n) : NULL;
+    if (!computed && lbox) computed = lbox->style;
 
     if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0) {
-        if (js) {
-            if (js->layout_root) {
-                const struct ns_box *b = ns_box_find_by_dom(js->layout_root, n);
-                if (b) {
-                    double v = (name[0] == 'w') ? b->content_width : b->content_height;
-                    if (v < 0) v = 0;
-                    return g_strdup_printf("%gpx", v);
-                }
-            }
+        if (lbox) {
+            double v = (name[0] == 'w') ? lbox->content_width
+                                        : lbox->content_height;
+            if (v < 0) v = 0;
+            return g_strdup_printf("%gpx", v);
         }
+    }
+
+    if (lbox) {
+        char *edge = ns_computed_box_edge_px(lbox, name);
+        if (edge) return edge;
+    }
+
+    if (strcmp(name, "transform") == 0)
+        return ns_computed_transform_matrix(computed, lbox);
+
+    if (lbox && (strcmp(name, "top") == 0 || strcmp(name, "right") == 0 ||
+                 strcmp(name, "bottom") == 0 || strcmp(name, "left") == 0)) {
+        char *inset = ns_computed_inset_px(ctx, n, lbox, name);
+        if (inset) return inset;
+    }
+
+    if (strcmp(name, "line-height") == 0) {
+        char *lh = ns_computed_line_height_px(ctx, n, computed);
+        if (lh) return lh;
+    }
+
+    if (strcmp(name, "font-weight") == 0 && computed &&
+        computed->values[NS_CSS_FONT_WEIGHT]) {
+        int w = ns_css_font_weight_number(computed->values[NS_CSS_FONT_WEIGHT],
+                                          400);
+        return g_strdup_printf("%d", w);
     }
 
     if (name[0] == '-' && name[1] == '-' && name[2]) {
