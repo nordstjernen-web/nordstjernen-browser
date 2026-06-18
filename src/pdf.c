@@ -1,128 +1,175 @@
-/* Nordstjernen — embedded PDF rendering via poppler-glib.
+/* Nordstjernen — PDF documents rendered to an inline HTML page via poppler-glib.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
 #include "pdf.h"
+#include "html.h"
+
+#include <string.h>
 
 #ifdef NS_HAVE_POPPLER
+#include <cairo.h>
 #include <poppler.h>
 #endif
 
-struct ns_pdf {
-#ifdef NS_HAVE_POPPLER
-    PopplerDocument *doc;
-#else
-    int unused;
-#endif
-};
+#define NS_PDF_TARGET_W   1240.0
+#define NS_PDF_MIN_SCALE  0.5
+#define NS_PDF_MAX_SCALE  4.0
+#define NS_PDF_MAX_DIM    4000
+#define NS_PDF_MAX_PAGES  300
 
-gboolean
-ns_pdf_available(void)
+static const char ns_pdf_style[] =
+    "<style>"
+    "html,body{margin:0;background:#1c1d1e}"
+    ".doc{max-width:900px;margin:0 auto;padding:24px 16px}"
+    ".page{background:#fff;margin:0 auto 24px;"
+    "box-shadow:0 4px 12px rgba(0,0,0,.45);border:1px solid #444}"
+    ".page:last-child{margin-bottom:0}"
+    ".page img{display:block;width:100%;height:auto}"
+    ".note{color:#bbb;font:14px/1.6 system-ui,sans-serif;"
+    "text-align:center;padding:48px 16px}"
+    ".note a{color:#6ab7ff}"
+    "</style>";
+
+static char *
+ns_pdf_notice_html(const char *url, const char *message)
 {
-#ifdef NS_HAVE_POPPLER
-    return TRUE;
-#else
-    return FALSE;
-#endif
+    char *esc_url = ns_html_escape_text(url ? url : "");
+    char *esc_msg = ns_html_escape_text(message ? message : "");
+    char *html = g_strdup_printf(
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<title>PDF</title>%s</head><body><div class=\"doc\">"
+        "<p class=\"note\">%s<br><a href=\"%s\">%s</a></p>"
+        "</div></body></html>",
+        ns_pdf_style, esc_msg, esc_url, esc_url);
+    g_free(esc_url);
+    g_free(esc_msg);
+    return html;
 }
 
-ns_pdf *
-ns_pdf_new_from_bytes(const guint8 *data, gsize len)
+#ifdef NS_HAVE_POPPLER
+static cairo_status_t
+ns_pdf_png_write(void *closure, const unsigned char *data, unsigned int length)
+{
+    g_byte_array_append((GByteArray *)closure, data, length);
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static char *
+ns_pdf_page_data_uri(PopplerPage *page)
+{
+    double pw = 0, ph = 0;
+    poppler_page_get_size(page, &pw, &ph);
+    if (pw <= 0 || ph <= 0)
+        return NULL;
+    double scale = NS_PDF_TARGET_W / pw;
+    scale = CLAMP(scale, NS_PDF_MIN_SCALE, NS_PDF_MAX_SCALE);
+    int w = (int)(pw * scale + 0.5);
+    int h = (int)(ph * scale + 0.5);
+    if (w < 1) w = 1;
+    if (h < 1) h = 1;
+    if (w > NS_PDF_MAX_DIM) w = NS_PDF_MAX_DIM;
+    if (h > NS_PDF_MAX_DIM) h = NS_PDF_MAX_DIM;
+
+    cairo_surface_t *surf =
+        cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        return NULL;
+    }
+    cairo_t *cr = cairo_create(surf);
+    cairo_set_source_rgb(cr, 1, 1, 1);
+    cairo_paint(cr);
+    cairo_scale(cr, scale, scale);
+    poppler_page_render(page, cr);
+    cairo_destroy(cr);
+    cairo_surface_flush(surf);
+
+    GByteArray *png = g_byte_array_new();
+    cairo_status_t st =
+        cairo_surface_write_to_png_stream(surf, ns_pdf_png_write, png);
+    cairo_surface_destroy(surf);
+    if (st != CAIRO_STATUS_SUCCESS) {
+        g_byte_array_free(png, TRUE);
+        return NULL;
+    }
+    char *b64 = g_base64_encode(png->data, png->len);
+    g_byte_array_free(png, TRUE);
+    char *uri = g_strconcat("data:image/png;base64,", b64, NULL);
+    g_free(b64);
+    return uri;
+}
+#endif
+
+char *
+ns_pdf_document_html(const guint8 *data, gsize len, const char *url)
 {
 #ifdef NS_HAVE_POPPLER
-    if (!data || len == 0) return NULL;
+    if (!data || len == 0)
+        return ns_pdf_notice_html(url, "This document could not be opened.");
+
     GBytes *bytes = g_bytes_new(data, len);
     GError *err = NULL;
     PopplerDocument *doc = poppler_document_new_from_bytes(bytes, NULL, &err);
     g_bytes_unref(bytes);
     if (!doc) {
-        if (err) g_warning("ns_pdf: %s", err->message);
+        char *msg = g_strdup_printf("This PDF could not be displayed%s%s.",
+                                    err ? ": " : "",
+                                    err ? err->message : "");
         g_clear_error(&err);
-        return NULL;
+        char *html = ns_pdf_notice_html(url, msg);
+        g_free(msg);
+        return html;
     }
     g_clear_error(&err);
-    ns_pdf *pdf = g_new0(ns_pdf, 1);
-    pdf->doc = doc;
-    return pdf;
+
+    int n = poppler_document_get_n_pages(doc);
+    if (n <= 0) {
+        g_object_unref(doc);
+        return ns_pdf_notice_html(url, "This PDF has no pages.");
+    }
+
+    char *name = url ? g_path_get_basename(url) : NULL;
+    if (name) {
+        char *query = strchr(name, '?');
+        if (query) *query = '\0';
+    }
+    char *esc_name = ns_html_escape_text(name && *name ? name : "PDF");
+    g_free(name);
+
+    GString *out = g_string_new(NULL);
+    g_string_append_printf(out,
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<title>%s</title>%s</head><body><div class=\"doc\">",
+        esc_name, ns_pdf_style);
+    g_free(esc_name);
+
+    int limit = n < NS_PDF_MAX_PAGES ? n : NS_PDF_MAX_PAGES;
+    for (int i = 0; i < limit; i++) {
+        PopplerPage *page = poppler_document_get_page(doc, i);
+        if (!page)
+            continue;
+        char *uri = ns_pdf_page_data_uri(page);
+        g_object_unref(page);
+        if (!uri)
+            continue;
+        g_string_append_printf(out,
+            "<div class=\"page\"><img src=\"%s\" alt=\"Page %d\"></div>",
+            uri, i + 1);
+        g_free(uri);
+    }
+    if (limit < n)
+        g_string_append_printf(out,
+            "<p class=\"note\">Showing the first %d of %d pages.</p>",
+            limit, n);
+
+    g_string_append(out, "</div></body></html>");
+    g_object_unref(doc);
+    return g_string_free(out, FALSE);
 #else
     (void)data; (void)len;
-    return NULL;
-#endif
-}
-
-void
-ns_pdf_free(ns_pdf *pdf)
-{
-    if (!pdf) return;
-#ifdef NS_HAVE_POPPLER
-    if (pdf->doc) g_object_unref(pdf->doc);
-#endif
-    g_free(pdf);
-}
-
-int
-ns_pdf_n_pages(const ns_pdf *pdf)
-{
-#ifdef NS_HAVE_POPPLER
-    if (!pdf || !pdf->doc) return 0;
-    return poppler_document_get_n_pages(pdf->doc);
-#else
-    (void)pdf;
-    return 0;
-#endif
-}
-
-#define NS_PDF_MARGIN     16.0
-#define NS_PDF_PAGE_GAP   24.0
-#define NS_PDF_SHADOW_OFF 4.0
-
-void
-ns_pdf_paint(ns_pdf *pdf, cairo_t *cr, double viewport_w,
-             double *out_total_height)
-{
-    if (out_total_height) *out_total_height = 0;
-    if (!cr) return;
-#ifdef NS_HAVE_POPPLER
-    if (!pdf || !pdf->doc) return;
-    int n = poppler_document_get_n_pages(pdf->doc);
-    if (n <= 0) return;
-    double content_w = viewport_w - NS_PDF_MARGIN * 2;
-    if (content_w < 100) content_w = 100;
-    double y = NS_PDF_MARGIN;
-    for (int i = 0; i < n; i++) {
-        PopplerPage *page = poppler_document_get_page(pdf->doc, i);
-        if (!page) continue;
-        double pw, ph;
-        poppler_page_get_size(page, &pw, &ph);
-        double scale = pw > 0 ? content_w / pw : 1.0;
-        double rendered_h = ph * scale;
-        double x = NS_PDF_MARGIN;
-        cairo_save(cr);
-        cairo_set_source_rgba(cr, 0, 0, 0, 0.18);
-        cairo_rectangle(cr, x + NS_PDF_SHADOW_OFF, y + NS_PDF_SHADOW_OFF,
-                        content_w, rendered_h);
-        cairo_fill(cr);
-        cairo_set_source_rgb(cr, 1, 1, 1);
-        cairo_rectangle(cr, x, y, content_w, rendered_h);
-        cairo_fill(cr);
-        cairo_translate(cr, x, y);
-        cairo_scale(cr, scale, scale);
-        poppler_page_render(page, cr);
-        cairo_restore(cr);
-        cairo_save(cr);
-        cairo_set_source_rgba(cr, 0.6, 0.6, 0.6, 1.0);
-        cairo_set_line_width(cr, 0.5);
-        cairo_rectangle(cr, x, y, content_w, rendered_h);
-        cairo_stroke(cr);
-        cairo_restore(cr);
-        y += rendered_h + NS_PDF_PAGE_GAP;
-        g_object_unref(page);
-    }
-    y -= NS_PDF_PAGE_GAP;
-    y += NS_PDF_MARGIN;
-    if (out_total_height) *out_total_height = y;
-#else
-    (void)pdf; (void)viewport_w;
+    return ns_pdf_notice_html(
+        url, "Inline PDF viewing is not available in this build.");
 #endif
 }

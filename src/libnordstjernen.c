@@ -28,6 +28,7 @@
 #include "net.h"
 #include "spellcheck.h"
 #include "paint.h"
+#include "pdf.h"
 #include "render.h"
 #include "security.h"
 #include "selection.h"
@@ -572,6 +573,13 @@ browser_content_type_is_xml(const char *content_type)
            strstr(content_type, "+xml") != NULL;
 }
 
+static gboolean
+browser_content_type_is_pdf(const char *content_type)
+{
+    return browser_content_type_starts(content_type, "application/pdf") ||
+           browser_content_type_starts(content_type, "application/x-pdf");
+}
+
 static char *
 browser_text_document(const char *url, const char *text)
 {
@@ -603,6 +611,9 @@ browser_prepare_document_response(ns_response *resp)
     char *html = NULL;
     if (browser_content_type_starts(resp->content_type, "image/")) {
         html = ns_html_image_document(final_url);
+    } else if (browser_content_type_is_pdf(resp->content_type)) {
+        html = ns_pdf_document_html(resp->body->data, resp->body->len,
+                                    final_url);
     } else if (browser_content_type_is_json(resp->content_type)) {
         char *decoded = ns_html_decode_body_full((const char *)resp->body->data,
                                                  resp->body->len,
