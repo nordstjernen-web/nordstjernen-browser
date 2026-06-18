@@ -302,10 +302,10 @@ if not is_android
   )
 
   audio_deps = [dependency('libcurl'), dependency('sdl2'), libplmpeg]
-  audio_lib_deps = []
-  if host_machine.system() == 'linux'
-    audio_lib_deps += [cc.find_library('m', required: false)]
-  endif
+  # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
+  # the C runtime on macOS and Windows, where find_library('m') is a harmless
+  # no-op.
+  audio_lib_deps = [cc.find_library('m', required: false)]
   executable(
     'nordstjernen-audio',
     files('audio/main.c'),

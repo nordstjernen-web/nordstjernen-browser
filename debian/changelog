@@ -1,3 +1,12 @@
+nordstjernen (1.0.10-1) unstable; urgency=medium
+
+  * Replace the vendored miniaudio audio backend with SDL2 output plus the
+    minimp3 MP3 decoder, removing ~93k lines of vendored source.
+  * Link libm into the nordstjernen-audio helper on all platforms (fixes the
+    BSD link failure).
+
+ -- Andreas Røsdal <andreas.rosdal@gmail.com>  Wed, 18 Jun 2026 00:00:00 +0000
+
 nordstjernen (1.0.9-1) unstable; urgency=medium
 
   * Initial Debian packaging (Closes: #NNNNNN).
