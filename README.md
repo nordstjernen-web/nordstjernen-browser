@@ -147,13 +147,13 @@ browser, and the same jar is the embedding library. See
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
 meson setup builddir && meson compile -C builddir
 ./builddir/src/gtk/nordstjernen
 ```
 
-lexbor, QuickJS, WAMR, Wuffs and pl_mpeg are vendored in-tree — no
-submodules, no downloads. The one exception is the optional local-AI feature: `meson
+lexbor, QuickJS, WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree
+— no submodules, no downloads. The one exception is the optional local-AI feature: `meson
 setup` fetches and builds llama.cpp as a pinned subproject; pass
 `-Dai=disabled` for a fully offline build. Windows, Fedora, openSUSE and
 macOS instructions are in
@@ -173,7 +173,8 @@ moving parts:
 | [QuickJS](https://github.com/quickjs-ng/quickjs) (quickjs-ng fork) | JavaScript engine — no JIT, browser-side hooks added in-tree |
 | [WAMR](https://github.com/bytecodealliance/wasm-micro-runtime) (subset) | WebAssembly interpreter behind the `WebAssembly` JS API (`src/wasm.c`) |
 | [Wuffs](https://github.com/google/wuffs) v0.4 | Memory-safe image decoding — PNG, GIF, BMP, JPEG (WebP is decoded separately by libwebp) |
-| [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | Single-file MPEG-1 video decoder — inline `<video>` playback (`src/video_decode.c`) |
+| [pl_mpeg](https://github.com/phoboslab/pl_mpeg) (MIT) | Single-file MPEG-1 video decoder — inline `<video>` playback and the MP2 audio track (`src/video_decode.c`, `src/audio/main.c`) |
+| [minimp3](https://github.com/lieff/minimp3) (CC0) | Single-file MP3 decoder for the `nordstjernen-audio` helper (`src/audio/main.c`) |
 
 **Required system libraries:**
 
@@ -190,6 +191,7 @@ moving parts:
 | SQLite | — | IndexedDB persistent storage |
 | librsvg | ≥ 2.46 | SVG rendering / icons |
 | libwebp | — | WebP decoding (lossy VP8 + lossless VP8L) |
+| SDL2 | — | audio output device for the `nordstjernen-audio` helper (WASAPI / CoreAudio / ALSA-PulseAudio) |
 | libseccomp | — (Linux only) | syscall sandbox; no-op on macOS/Windows |
 
 **Optional** (auto-detected; feature compiled in when present):
@@ -216,16 +218,20 @@ small, patent-free, and decodes in pure portable C.
 
 The MPEG-1 stream's **MP2 audio track** plays too (unless the element
 is `muted`). The seccomp-sandboxed renderer can't open a sound device,
-so audio is handed to the unsandboxed `nordstjernen-audio` helper:
-pl_mpeg decodes the MP2 track to PCM and
-[miniaudio](https://github.com/mackron/miniaudio) (MIT / public-domain,
-vendored in-tree) plays it. The inline player drives the helper —
+so audio is handed to the unsandboxed `nordstjernen-audio` helper. The
+helper decodes to PCM in-tree — pl_mpeg for the MPEG-1/MP2 track and
+[minimp3](https://github.com/lieff/minimp3) (CC0, vendored) for
+standalone `.mp3` files — and plays it through
+[SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
+CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling
+the streams itself. The inline player drives the helper —
 `open`/`play`/`pause`/`seek`/`stop` ride the renderer→shell render
 channel, and looping re-syncs the audio at each wrap.
 
-**Other media.** Nordstjernen ships no other media codecs. `<audio>`
-and non-MPEG-1 `<video>` render a poster and a play overlay; clicking
-it resolves the source URL inside the sandboxed renderer process and
+**Other media.** Beyond MPEG-1/MP2 and MP3, Nordstjernen ships no media
+codecs. Other `<audio>` and non-MPEG-1 `<video>` render a poster and a
+play overlay; clicking it resolves the source URL inside the sandboxed
+renderer process and
 the UI shell hands it to an external player — `mpv`, `VLC`,
 `celluloid`, `totem`, `mplayer` or `ffplay` on Linux, otherwise the
 desktop's default handler for the media type (found via `GAppInfo`, so

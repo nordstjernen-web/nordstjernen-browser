@@ -293,18 +293,24 @@ if not is_android
     )
   endif
 
-  audio_deps = [dependency('libcurl'), libplmpeg]
+  libminimp3 = static_library(
+    'minimp3',
+    files('audio/minimp3_impl.c'),
+    include_directories: include_directories('audio'),
+    c_args: cc.get_supported_arguments(['-w']),
+    install: false,
+  )
+
+  audio_deps = [dependency('libcurl'), dependency('sdl2'), libplmpeg]
   audio_lib_deps = []
   if host_machine.system() == 'linux'
-    audio_lib_deps += [cc.find_library('dl', required: false),
-                       cc.find_library('pthread', required: false),
-                       cc.find_library('m', required: false)]
+    audio_lib_deps += [cc.find_library('m', required: false)]
   endif
   executable(
     'nordstjernen-audio',
-    files('audio/miniaudio_impl.c', 'audio/main.c'),
+    files('audio/main.c'),
     include_directories: include_directories('audio'),
-    c_args: ['-w'],
+    link_with: libminimp3,
     dependencies: audio_deps + audio_lib_deps,
     install: true,
   )

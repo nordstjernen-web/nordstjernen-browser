@@ -42,7 +42,8 @@ pacman -Sy --noconfirm --needed \
     mingw-w64-x86_64-librsvg \
     mingw-w64-x86_64-libpsl \
     mingw-w64-x86_64-sqlite3 \
-    mingw-w64-x86_64-libwebp
+    mingw-w64-x86_64-libwebp \
+    mingw-w64-x86_64-SDL2
 ```
 
 This pulls in roughly 600 MB of runtime + headers. `pacman -Syu`

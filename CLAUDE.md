@@ -27,16 +27,20 @@ nothing imported.
   `src/video_decode.c`). A `<video>` whose source is an `.mpg`/`.mpeg`/`.m1v`
   stream plays **inline** — frames are decoded in the sandboxed renderer
   and advanced off the animation tick (`src/video.c`), honouring
-  `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. The MP2
-  audio track plays via the unsandboxed `nordstjernen-audio` helper
-  (`src/audio/main.c`, pl_mpeg decode + miniaudio output): the renderer
-  emits `open`/`play`/`pause`/`seek`/`stop` commands that ride the
-  render-response `X-Audio` side-channel to the shell, which spawns and
-  pumps the helper (`src/gtk/procview.c`). Don't add a second video codec
-  or a standalone audio codec — MP2 rides on MPEG-1. `<audio>` and
-  non-MPEG-1 `<video>` render a poster and play overlay; clicking resolves
-  the media URL in the renderer (`ns_browser_media_at`) and the shell hands
-  it to an external player (`src/media.c::ns_media_try_launch`).
+  `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. Audio plays
+  via the unsandboxed `nordstjernen-audio` helper (`src/audio/main.c`),
+  which decodes in-tree — pl_mpeg for the MPEG-1/MP2 track, the vendored
+  CC0 [minimp3](https://github.com/lieff/minimp3) (`src/audio/minimp3.h`)
+  for standalone `.mp3` files — and outputs through SDL2's audio device
+  (WASAPI/CoreAudio/ALSA), mixing and resampling the streams itself. The
+  renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
+  commands that ride the render-response `X-Audio` side-channel to the
+  shell, which spawns and pumps the helper (`src/gtk/procview.c`). The
+  video codec stays MPEG-1 only and the audio decoders stay pl_mpeg (MP2)
+  + minimp3 (MP3) — don't add further codecs. Other `<audio>` and
+  non-MPEG-1/non-MP3 `<video>` render a poster and play overlay; clicking
+  resolves the media URL in the renderer (`ns_browser_media_at`) and the
+  shell hands it to an external player (`src/media.c::ns_media_try_launch`).
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
@@ -181,7 +185,7 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
 ```
 
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
@@ -193,7 +197,7 @@ On Fedora/RHEL:
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel
+    libseccomp-devel libwebp-devel SDL2-devel
 ```
 
 On openSUSE:
@@ -201,7 +205,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel
+    libseccomp-devel libwebp-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.

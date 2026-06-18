@@ -48,6 +48,7 @@ jobs:
             libpsl-dev
             libsqlite3-dev
             libwebp-dev
+            libsdl2-dev
             libseccomp-dev
             qt6-base-dev
             libqt6svg6-dev

@@ -17,7 +17,7 @@ Snaps give Nordstjernen a single, distro-agnostic binary that runs on
 any Ubuntu release (and most other Linux distributions) with automatic
 updates from the store and no dependency hunting. The snap ships its own
 copies of the non-platform libraries (libcurl, OpenSSL, uchardet, libpsl,
-SQLite, libseccomp, libwebp, Enchant) and pulls GTK 4, Pango, Cairo, and
+SQLite, libseccomp, libwebp, SDL2, Enchant) and pulls GTK 4, Pango, Cairo, and
 librsvg from the shared **GNOME platform snap** via the `gnome`
 extension, so the package stays small.
 

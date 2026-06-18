@@ -12,25 +12,25 @@ System packages required on Debian / Ubuntu:
 
     sudo apt install build-essential pkg-config meson ninja-build \
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
-        libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev
+        libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
 
 On Fedora / RHEL:
 
     sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
         openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel libseccomp-devel \
-        libwebp-devel
+        libwebp-devel SDL2-devel
 
 On openSUSE:
 
     sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
         libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel libseccomp-devel \
-        libwebp-devel
+        libwebp-devel libSDL2-devel
 
 On Alpine (musl libc):
 
     sudo apk add build-base linux-headers pkgconf meson ninja gtk4.0-dev \
         libepoxy-dev curl-dev openssl-dev uchardet-dev librsvg-dev libpsl-dev sqlite-dev \
-        libseccomp-dev libwebp-dev
+        libseccomp-dev libwebp-dev sdl2-dev
 
 Alpine builds against musl rather than glibc, so the resulting binary
 is not interchangeable with the glibc portable zip — run a musl build

@@ -79,6 +79,7 @@ parts:
       - libsqlite3-dev
       - libseccomp-dev
       - libwebp-dev
+      - libsdl2-dev
       - libenchant-2-dev
     stage-packages:
       - libcurl4t64
@@ -88,6 +89,7 @@ parts:
       - libseccomp2
       - libwebp7
       - libwebpdemux2
+      - libsdl2-2.0-0
       - libenchant-2-2
     prime:
       - -usr/include

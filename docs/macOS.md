@@ -23,7 +23,7 @@ then:
 
 ```sh
 brew install meson ninja pkg-config cmake gtk4 libepoxy curl \
-    uchardet librsvg libpsl sqlite webp
+    uchardet librsvg libpsl sqlite webp sdl2
 brew install ccache    # optional, speeds up rebuilds
 ```
 

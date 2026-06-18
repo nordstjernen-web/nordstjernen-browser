@@ -57,6 +57,7 @@ jobs:
             mingw-w64-x86_64-libpsl
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libwebp
+            mingw-w64-x86_64-SDL2
             zip
 
       - name: Restore ccache

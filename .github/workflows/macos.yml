@@ -38,7 +38,7 @@ jobs:
       - name: Install build dependencies (Homebrew)
         run: |
           brew install meson ninja pkg-config cmake gtk4 libepoxy curl ccache \
-              uchardet librsvg libpsl sqlite webp dylibbundler
+              uchardet librsvg libpsl sqlite webp sdl2 dylibbundler
 
       - name: Restore ccache
         uses: actions/cache@v5

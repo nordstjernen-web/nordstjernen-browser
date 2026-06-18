@@ -34,7 +34,7 @@ jobs:
           prepare: |
             pkg install -y \
               meson ninja pkgconf bash zip ccache \
-              gtk4 libepoxy curl uchardet librsvg2 webp \
+              gtk4 libepoxy curl uchardet librsvg2 webp sdl2 \
               sqlite3 libpsl
           run: |
             set -e
