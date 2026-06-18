@@ -582,10 +582,13 @@ static JSValue
 intl_collator_compare(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    const char *a = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
-    const char *b = argc >= 2 ? JS_ToCString(ctx, argv[1]) : NULL;
-    if (!a) a = JS_ToCString(ctx, JS_UNDEFINED);
-    if (!b) b = JS_ToCString(ctx, JS_UNDEFINED);
+    const char *a = JS_ToCString(ctx, argc >= 1 ? argv[0] : JS_UNDEFINED);
+    const char *b = JS_ToCString(ctx, argc >= 2 ? argv[1] : JS_UNDEFINED);
+    if (!a || !b) {
+        JS_FreeCString(ctx, a);
+        JS_FreeCString(ctx, b);
+        return JS_EXCEPTION;
+    }
     char *sens = intl_hget_str(ctx, this_val, "_sensitivity");
     int numeric = intl_hget_int(ctx, this_val, "_numeric", 0);
     int r;
@@ -1148,7 +1151,7 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
     for (guint j = 0; j < ordered->len; j++) {
         char *entry = g_ptr_array_index(ordered, j);
         char *sep = strchr(entry, '\x01');
-        if (!sep) continue;
+        if (!sep) { g_free(entry); continue; }
         *sep = '\0';
         JS_SetPropertyUint32(ctx, arr, n++, intl_part(ctx, entry, sep + 1));
         g_free(entry);
@@ -1830,8 +1833,8 @@ static JSValue
 intl_seg_segment(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
-    const char *input = argc >= 1 ? JS_ToCString(ctx, argv[0]) : NULL;
-    if (!input) input = JS_ToCString(ctx, JS_UNDEFINED);
+    const char *input = JS_ToCString(ctx, argc >= 1 ? argv[0] : JS_UNDEFINED);
+    if (!input) return JS_EXCEPTION;
     char *gran = intl_hget_str(ctx, this_val, "_granularity");
     gboolean words = gran && !strcmp(gran, "word");
     gboolean sentences = gran && !strcmp(gran, "sentence");

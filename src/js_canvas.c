@@ -2082,6 +2082,7 @@ ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
     JSValue data = JS_CallConstructor(ctx, u8c, 1, args);
     JS_FreeValue(ctx, u8c);
     JS_FreeValue(ctx, ab);
+    if (JS_IsException(data)) return data;
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "width",  JS_NewInt32(ctx, w));
     JS_SetPropertyStr(ctx, obj, "height", JS_NewInt32(ctx, h));
