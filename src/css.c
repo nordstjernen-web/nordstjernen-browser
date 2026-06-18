@@ -7540,7 +7540,9 @@ parse_declaration_block(const char **pp, const char *end,
                 char *t = tokens[i];
                 double num; ns_css_unit u;
                 if (g_ascii_strcasecmp(t, "none") == 0) {
-                    grow = 0; shrink = 0; basis = g_strdup("auto"); basis_set = TRUE;
+                    grow = 0; shrink = 0;
+                    g_free(basis);
+                    basis = g_strdup("auto"); basis_set = TRUE;
                     break;
                 }
                 if (g_ascii_strcasecmp(t, "auto") == 0) {
@@ -7552,7 +7554,9 @@ parse_declaration_block(const char **pp, const char *end,
                     continue;
                 }
                 if (g_ascii_strcasecmp(t, "initial") == 0) {
-                    grow = 0; shrink = 1; basis = g_strdup("auto"); basis_set = TRUE;
+                    grow = 0; shrink = 1;
+                    g_free(basis);
+                    basis = g_strdup("auto"); basis_set = TRUE;
                     continue;
                 }
                 if (g_ascii_strncasecmp(t, "calc(", 5) == 0 ||
@@ -14235,8 +14239,6 @@ ns_css_cached_decl_sheet(const char *decls)
             (GDestroyNotify)ns_css_stylesheet_free);
     ns_css_stylesheet *s = g_hash_table_lookup(g_decl_sheet_cache, decls);
     if (s) return s;
-    if (g_hash_table_size(g_decl_sheet_cache) >= 8192)
-        g_hash_table_remove_all(g_decl_sheet_cache);
     char *wrapped = g_strconcat("* { ", decls, " }", NULL);
     s = ns_css_stylesheet_parse(wrapped, -1);
     g_free(wrapped);
@@ -15083,6 +15085,8 @@ ns_css_compute(ns_node *doc,
         css_collect_property_rules(g_registered_props, author_sheets[i]);
 
     double root_px = 0;
+    if (g_decl_sheet_cache && g_hash_table_size(g_decl_sheet_cache) >= 8192)
+        g_hash_table_remove_all(g_decl_sheet_cache);
     if (!g_cq_stack)
         g_cq_stack = g_array_new(FALSE, FALSE, sizeof(ns_cq_container));
     g_array_set_size(g_cq_stack, 0);
