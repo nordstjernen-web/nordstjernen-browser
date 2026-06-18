@@ -11,7 +11,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 122,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack.
+**Minimalism:** The whole engine is about 127,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
