@@ -60,6 +60,15 @@
   </branding>
 
   <releases>
+    <release version="1.0.10" date="2026-06-18">
+      <description>
+        <p>Audio overhaul and hardening release.</p>
+        <ul>
+          <li>New audio path: SDL2 output with in-tree pl_mpeg (MP2) and minimp3 (MP3) decoding, replacing the vendored miniaudio backend.</li>
+          <li>Security hardening: bounded EventSource reconnect delay, a fixed image-source memory leak, and a tightened renderer IPC reply limit.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.9" date="2026-06-16">
       <description>
         <p>Engine and documentation maintenance release.</p>
