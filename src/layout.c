@@ -4422,7 +4422,9 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     gboolean blockify_children = style_is_flex_container(s) ||
                                  style_is_grid_container(s);
 
-    const ns_node *c = n->first_child;
+    const ns_node *shadow_host_root = layout_shadow_root(n);
+    const ns_node *c = shadow_host_root ? shadow_host_root->first_child
+                                        : n->first_child;
     while (c) {
         if (details_collapsed) {
             if (c->kind != NS_NODE_ELEMENT || !c->name ||
