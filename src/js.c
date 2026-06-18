@@ -34430,6 +34430,12 @@ ns_location_log_blocked(ns_js *js, const char *s)
     g_free(line);
 }
 
+static gboolean
+ns_location_nav_in_iframe(ns_js *js)
+{
+    return js && js->iframe_load_depth > 0;
+}
+
 static JSValue
 ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -34448,7 +34454,8 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         JS_FreeCString(ctx, s);
         return JS_UNDEFINED;
     }
-    js->nav_cb(s, FALSE, js->nav_user_data);
+    if (!ns_location_nav_in_iframe(js))
+        js->nav_cb(s, FALSE, js->nav_user_data);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -34466,7 +34473,8 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
         JS_FreeCString(ctx, s);
         return JS_UNDEFINED;
     }
-    js->nav_cb(s, FALSE, js->nav_user_data);
+    if (!ns_location_nav_in_iframe(js))
+        js->nav_cb(s, FALSE, js->nav_user_data);
     JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
@@ -34475,8 +34483,9 @@ static JSValue
 ns_location_reload(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
-    if (js_from_ctx(ctx) && js_from_ctx(ctx)->nav_cb)
-        js_from_ctx(ctx)->nav_cb(js_from_ctx(ctx)->current_url, TRUE, js_from_ctx(ctx)->nav_user_data);
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->nav_cb && !ns_location_nav_in_iframe(js))
+        js->nav_cb(js->current_url, TRUE, js->nav_user_data);
     return JS_UNDEFINED;
 }
 
