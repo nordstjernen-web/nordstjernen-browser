@@ -12,3 +12,5 @@ option('ai', type: 'feature', value: 'enabled',
        description: 'Build the local AI chat start page (llama.cpp via CMake subproject).')
 option('ai_gpu', type: 'feature', value: 'auto',
        description: 'Build a llama.cpp GPU backend for partial offload when the platform toolchain is present (Metal on macOS; Vulkan elsewhere). Falls back to CPU at runtime when no GPU is found.')
+option('audio', type: 'feature', value: 'auto',
+       description: 'Build the nordstjernen-audio playback helper (SDL2 output + minimp3/pl_mpeg decode). Auto-detects SDL2; disable for engine-only or JNI builds without SDL2.')

@@ -293,27 +293,32 @@ if not is_android
     )
   endif
 
-  libminimp3 = static_library(
-    'minimp3',
-    files('audio/minimp3_impl.c'),
-    include_directories: include_directories('audio'),
-    c_args: cc.get_supported_arguments(['-w']),
-    install: false,
-  )
+  sdl2_dep = dependency('sdl2', required: get_option('audio'))
+  if sdl2_dep.found()
+    libminimp3 = static_library(
+      'minimp3',
+      files('audio/minimp3_impl.c'),
+      include_directories: include_directories('audio'),
+      c_args: cc.get_supported_arguments(['-w']),
+      install: false,
+    )
 
-  audio_deps = [dependency('libcurl'), dependency('sdl2'), libplmpeg]
-  # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
-  # the C runtime on macOS and Windows, where find_library('m') is a harmless
-  # no-op.
-  audio_lib_deps = [cc.find_library('m', required: false)]
-  executable(
-    'nordstjernen-audio',
-    files('audio/main.c'),
-    include_directories: include_directories('audio'),
-    link_with: libminimp3,
-    dependencies: audio_deps + audio_lib_deps,
-    install: true,
-  )
+    audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
+    # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
+    # the C runtime on macOS and Windows, where find_library('m') is a harmless
+    # no-op.
+    audio_lib_deps = [cc.find_library('m', required: false)]
+    executable(
+      'nordstjernen-audio',
+      files('audio/main.c'),
+      include_directories: include_directories('audio'),
+      link_with: libminimp3,
+      dependencies: audio_deps + audio_lib_deps,
+      install: true,
+    )
+  else
+    message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
+  endif
 endif
 
 if not is_android and have_gtk
