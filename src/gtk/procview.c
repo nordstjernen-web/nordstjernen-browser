@@ -1920,9 +1920,14 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 {
     (void)area;
     NsProcView *v = data;
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_rectangle(cr, 0, 0, width, height);
-    cairo_fill(cr);
+    gboolean covers = v->frame &&
+        cairo_image_surface_get_width(v->frame) >= width &&
+        cairo_image_surface_get_height(v->frame) >= height;
+    if (!covers) {
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_rectangle(cr, 0, 0, width, height);
+        cairo_fill(cr);
+    }
     if (v->frame) {
         cairo_set_source_surface(cr, v->frame, 0, 0);
         cairo_paint(cr);

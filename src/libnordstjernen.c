@@ -965,8 +965,6 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     cairo_t *cr = cairo_create(surf);
     cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_clip(cr);
     cairo_scale(cr, scale, scale);
@@ -1027,8 +1025,6 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     cairo_t *cr = cairo_create(surf);
     cairo_set_tolerance(cr, scale > 0 ? 0.5 / scale : 0.5);
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_FAST);
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
     cairo_rectangle(cr, 0, 0, width, height);
     cairo_clip(cr);
     cairo_scale(cr, scale, scale);
