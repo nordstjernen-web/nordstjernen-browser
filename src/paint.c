@@ -2279,7 +2279,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 continue;
             PangoRectangle r0, r1;
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
-            pango_layout_index_to_pos(layout, (int)(r->start + r->len - 1), &r1);
+            pango_layout_index_to_pos(layout,
+                (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
             double x0 = text_x + (double)r0.x / PANGO_SCALE - 10;
             double y0 = y_origin + (double)r0.y / PANGO_SCALE - 5;
             double x1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE + 10;
@@ -2453,7 +2454,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 continue;
             PangoRectangle r0, r1;
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
-            pango_layout_index_to_pos(layout, (int)(r->start + r->len - 1), &r1);
+            pango_layout_index_to_pos(layout,
+                (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
             double gx0 = text_x + (double)r0.x / PANGO_SCALE;
             double gy0 = y_origin + (double)r0.y / PANGO_SCALE;
             double gx1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE;
@@ -2519,7 +2521,8 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 r->kind != NS_INLINE_METER) continue;
             PangoRectangle r0, r1;
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
-            pango_layout_index_to_pos(layout, (int)(r->start + r->len - 1), &r1);
+            pango_layout_index_to_pos(layout,
+                (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
             double gx0 = text_x + (double)r0.x / PANGO_SCALE;
             double gy0 = y_origin + (double)r0.y / PANGO_SCALE;
             double gx1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE;
@@ -2980,6 +2983,7 @@ drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
 {
     if (cw <= 0 || ch <= 0 || sx <= 0 || sy <= 0) return NULL;
     int radius = shadow.blur > 0 ? (int)(shadow.blur + 0.5) : 0;
+    if (radius > 512) radius = 512;
     int pad = radius * 2 + 2;
     int sw = cw + pad * 2;
     int sh = ch + pad * 2;

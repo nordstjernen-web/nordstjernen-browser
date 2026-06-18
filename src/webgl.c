@@ -2846,7 +2846,7 @@ wgl_texSubImage3D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     if (argc >= 11 && JS_IsObject(argv[10]))
         px = view_bytes(ctx, argv[10], &len, &hold);
     size_t need = wgl_transfer_bytes(g, w, h, d, format, type, FALSE);
-    if (px && len >= need)
+    if (px && need > 0 && need <= NS_WEBGL_MAX_ALLOC && len >= need)
         glTexSubImage3D(target, level, xoff, yoff, zoff, w, h, d, format, type, px);
     if (px && !JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
     return JS_UNDEFINED;

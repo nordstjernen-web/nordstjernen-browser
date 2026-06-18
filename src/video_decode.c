@@ -35,7 +35,8 @@ ns_video_player_new(const guint8 *bytes, gsize len)
 {
     if (!ns_video_decode_probe(bytes, len)) return NULL;
 
-    guint8 *copy = g_malloc(len);
+    guint8 *copy = g_try_malloc(len);
+    if (!copy) return NULL;
     memcpy(copy, bytes, len);
     plm_t *plm = plm_create_with_memory(copy, len, TRUE);
     if (!plm) { g_free(copy); return NULL; }
