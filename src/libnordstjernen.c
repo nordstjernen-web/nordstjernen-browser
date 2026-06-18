@@ -1078,8 +1078,6 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
 {
     if (!browser || !browser->layout) return NULL;
 
-    /* Touch taps are imprecise, so probe the exact point first and then a
-     * small ring around it (CSS px) before giving up. */
     static const int kR = 6;
     static const int probe[][2] = {
         { 0, 0 },

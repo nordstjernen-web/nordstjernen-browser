@@ -7159,7 +7159,7 @@ ns_subtle_importKey(JSContext *ctx, JSValueConst this_val,
         return promise;
     }
     const char *format = JS_ToCString(ctx, argv[0]);
-    ns_wc_alg a;
+    ns_wc_alg a = {0};
     if (!format || !ns_wc_parse_alg(ctx, argv[2], &a)) {
         if (format) JS_FreeCString(ctx, format);
         ns_wc_alg_free(&a);
