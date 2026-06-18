@@ -41,6 +41,14 @@ static SDL_AudioDeviceID g_dev;
 static int               g_dev_ok;
 static ns_audio_player   g_players[NS_AUDIO_MAX_PLAYERS];
 
+#if defined(__GNUC__)
+#define NS_AUDIO_PRINTF(a, b) __attribute__((format(printf, a, b)))
+#else
+#define NS_AUDIO_PRINTF(a, b)
+#endif
+
+static void emit(const char *fmt, ...) NS_AUDIO_PRINTF(1, 2);
+
 static void
 emit(const char *fmt, ...)
 {
@@ -107,7 +115,7 @@ static void
 audio_cb(void *userdata, Uint8 *stream, int len)
 {
     (void)userdata;
-    float *out = (float *)stream;
+    float *out = (float *)(void *)stream;
     int frame_bytes = (int)(2 * sizeof(float));
     int nframes = len / frame_bytes;
     SDL_memset(stream, 0, (size_t)len);
