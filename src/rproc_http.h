@@ -64,7 +64,6 @@ char *ns_rproc_http_key(ns_rproc_http *r, int kind, const char *key,
 char *ns_rproc_http_key_full(ns_rproc_http *r, int kind, const char *key,
                              const char *code, int keycode, int mods,
                              int *out_prevented);
-int   ns_rproc_http_hover(ns_rproc_http *r, int x, int y);
 int   ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y,
                                char **out_href, char **out_cursor);
 int   ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,

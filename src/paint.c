@@ -84,12 +84,6 @@ ns_paint_set_search(gboolean case_sensitive, const ns_box *active)
 }
 
 void
-ns_paint_set_caret_visible(gboolean visible)
-{
-    g_caret_visible = visible;
-}
-
-void
 ns_paint_set_js(ns_js *js)
 {
     g_paint_js = js;
@@ -4246,22 +4240,6 @@ sticky_length(const ns_css_value *v, double *out)
 static gboolean g_paint_have_viewport;
 static double g_paint_vp_x0, g_paint_vp_y0, g_paint_vp_x1, g_paint_vp_y1;
 
-void
-ns_paint_set_viewport(double x0, double y0, double x1, double y1)
-{
-    g_paint_have_viewport = (x1 > x0 && y1 > y0);
-    g_paint_vp_x0 = x0;
-    g_paint_vp_y0 = y0;
-    g_paint_vp_x1 = x1;
-    g_paint_vp_y1 = y1;
-}
-
-void
-ns_paint_clear_viewport(void)
-{
-    g_paint_have_viewport = FALSE;
-}
-
 static void
 compute_sticky_offset(const ns_box *b, cairo_t *cr,
                       double *out_dx, double *out_dy)
@@ -4431,28 +4409,6 @@ mask_gradient_pattern(const ns_css_gradient *gr,
     return pat;
 }
 
-
-void
-ns_paint_stats_reset(void)
-{
-    memset(&g_paint_stats, 0, sizeof g_paint_stats);
-    g_paint_collect_stats = TRUE;
-}
-
-void
-ns_paint_stats_get(ns_paint_stats *out)
-{
-    if (out) *out = g_paint_stats;
-    g_paint_collect_stats = FALSE;
-}
-
-void
-ns_paint_set_cull_margin(double margin)
-{
-    if (margin < 0) margin = 0;
-    if (margin > 8000) margin = 8000;
-    g_paint_cull_margin = margin;
-}
 
 static void
 paint_cache_clip(cairo_t *cr)

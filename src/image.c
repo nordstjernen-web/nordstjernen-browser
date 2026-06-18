@@ -17,7 +17,6 @@
 
 #include "config.h"
 #include "net.h"
-#include "tab_worker.h"
 
 #ifdef G_OS_WIN32
 static gboolean
@@ -55,7 +54,6 @@ enum { NS_IMAGE_CACHE_BUDGET_BYTES = 256 * 1024 * 1024 };
 struct ns_image_cache {
     GHashTable *by_url;
     GPtrArray  *pending;
-    ns_tab_worker *worker;
     guint64     gen;
     gint64      total_bytes;
 };
@@ -168,12 +166,6 @@ ns_image_cache_new(void)
     c->by_url = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, ns_image_free);
     c->pending = g_ptr_array_new();
     return c;
-}
-
-void
-ns_image_cache_set_worker(ns_image_cache *cache, ns_tab_worker *worker)
-{
-    if (cache) cache->worker = worker;
 }
 
 void
@@ -675,126 +667,6 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
 }
 
 static void
-on_image_decoded(ns_tab_image_result *decoded, gpointer user_data)
-{
-    ns_pending *pending = user_data;
-    if (pending->dead) {
-        ns_tab_image_result_free(decoded);
-        g_free(pending);
-        return;
-    }
-    ns_response *resp = decoded ? decoded->resp : NULL;
-    if (!resp) {
-        pending->img->failed = TRUE;
-        pending->img->failed_at_us = g_get_monotonic_time();
-        pending->img->error = g_strdup("decode failed");
-    } else {
-        pending->img->http_status = resp->status;
-        if (resp->error) {
-            pending->img->failed = TRUE;
-            pending->img->failed_at_us = g_get_monotonic_time();
-            pending->img->error = g_strdup(resp->error);
-        } else if (resp->status >= 400) {
-            pending->img->failed = TRUE;
-            pending->img->failed_at_us = g_get_monotonic_time();
-            pending->img->error = g_strdup_printf("HTTP %ld", resp->status);
-        } else if (!resp->body || resp->body->len == 0) {
-            pending->img->failed = TRUE;
-            pending->img->failed_at_us = g_get_monotonic_time();
-            pending->img->error = g_strdup("empty response");
-        } else if (decoded->anim_frames && decoded->anim_frames->len > 1) {
-            int w = 0, h = 0, total = 0;
-            GArray *frames = ns_image_anim_frames_from_pixels(
-                decoded->anim_frames, &w, &h, &total);
-            g_array_free(decoded->anim_frames, TRUE);
-            decoded->anim_frames = NULL;
-            if (frames && frames->len > 1) {
-                pending->img->anim_frames = frames;
-                ns_image_anim_frame *f0 =
-                    &g_array_index(frames, ns_image_anim_frame, 0);
-                pending->img->texture = f0->texture;
-                pending->img->natural_width = w;
-                pending->img->natural_height = h;
-                pending->img->anim_total_ms = total;
-                pending->img->anim_start_us = g_get_monotonic_time();
-                pending->img->loaded = TRUE;
-            } else if (frames) {
-                g_array_free(frames, TRUE);
-            }
-        } else if (decoded->pixels) {
-            GBytes *bytes = g_bytes_new_take(decoded->pixels,
-                                             decoded->pixels_len);
-            decoded->pixels = NULL;
-            ns_texture *tex = ns_texture_new(decoded->width,
-                                             decoded->height,
-                                             decoded->format,
-                                             bytes, decoded->stride);
-            g_bytes_unref(bytes);
-            if (tex) {
-                pending->img->texture = tex;
-                pending->img->natural_width  = decoded->width;
-                pending->img->natural_height = decoded->height;
-                pending->img->loaded = TRUE;
-            }
-        }
-        if (!pending->img->loaded && !pending->img->failed) {
-            int w = 0, h = 0;
-            GArray *frames = NULL;
-            if (resp->body->len >= 6 &&
-                resp->body->data[0] == 'G' &&
-                resp->body->data[1] == 'I' &&
-                resp->body->data[2] == 'F') {
-                frames = ns_image_decode_wuffs_anim(resp->body->data,
-                                                    resp->body->len, &w, &h);
-            }
-            if (frames && frames->len > 1) {
-                g_array_set_clear_func(frames, ns_image_anim_frame_clear);
-                pending->img->anim_frames = frames;
-                ns_image_anim_frame *f0 =
-                    &g_array_index(frames, ns_image_anim_frame, 0);
-                pending->img->texture = f0->texture;
-                pending->img->natural_width  = w;
-                pending->img->natural_height = h;
-                int total = 0;
-                for (guint i = 0; i < frames->len; i++) {
-                    ns_image_anim_frame *f =
-                        &g_array_index(frames, ns_image_anim_frame, i);
-                    total += f->delay_ms;
-                }
-                pending->img->anim_total_ms = total > 0 ? total : 1;
-                pending->img->anim_start_us = g_get_monotonic_time();
-                pending->img->loaded = TRUE;
-            } else {
-                if (frames) {
-                    g_array_set_clear_func(frames, ns_image_anim_frame_clear);
-                    g_array_free(frames, TRUE);
-                }
-                ns_texture *tex = ns_image_decode_bytes(resp->body->data,
-                                                       resp->body->len, &w, &h);
-                if (tex) {
-                    pending->img->texture = tex;
-                    pending->img->natural_width  = w;
-                    pending->img->natural_height = h;
-                    pending->img->loaded = TRUE;
-                }
-            }
-        }
-        if (!pending->img->loaded && !pending->img->failed) {
-            pending->img->failed = TRUE;
-            pending->img->failed_at_us = g_get_monotonic_time();
-            pending->img->error = g_strdup_printf(
-                "could not decode image (%s, %u bytes)",
-                resp->content_type && *resp->content_type
-                    ? resp->content_type : "unknown type",
-                (unsigned)resp->body->len);
-        }
-    }
-    ns_tab_image_result_free(decoded);
-    ns_image_cache_account(pending->cache, pending->img);
-    ns_image_fire_pending(pending);
-}
-
-static void
 on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
@@ -818,11 +690,6 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
         g_free(pending);
         return;
     }
-    if (pending->cache->worker &&
-        ns_tab_worker_decode_image_response(pending->cache->worker, resp,
-                                            on_image_decoded, pending,
-                                            g_free))
-        return;
     pending->img->http_status = resp->status;
     if (resp->error) {
         pending->img->failed = TRUE;
@@ -1169,8 +1036,3 @@ ns_image_cache_collect(ns_image_cache *cache)
     }
 }
 
-gint64
-ns_image_cache_bytes(const ns_image_cache *cache)
-{
-    return cache ? cache->total_bytes : 0;
-}

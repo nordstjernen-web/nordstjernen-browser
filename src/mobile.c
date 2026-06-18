@@ -57,16 +57,6 @@ youtube_media_host(const char *host)
            g_str_has_suffix(host, ".ggpht.com");
 }
 
-static gboolean
-reddit_site_host(const char *host)
-{
-    return host_eq(host, "reddit.com")     ||
-           host_eq(host, "www.reddit.com") ||
-           host_eq(host, "m.reddit.com")   ||
-           host_eq(host, "new.reddit.com") ||
-           host_eq(host, "old.reddit.com");
-}
-
 #if defined(__ANDROID__)
 static gboolean
 host_suffix(const char *host, const char *suffix)
@@ -101,45 +91,3 @@ ns_mobile_force_host(const char *host)
     return FALSE;
 }
 
-static const char *
-mobile_host_for(const char *host)
-{
-    if (facebook_host(host) && !host_eq(host, "m.facebook.com"))
-        return "m.facebook.com";
-    if (host_eq(host, "youtube.com") || host_eq(host, "www.youtube.com") ||
-        host_eq(host, "music.youtube.com"))
-        return "m.youtube.com";
-    if (reddit_site_host(host) && !host_eq(host, "old.reddit.com"))
-        return "old.reddit.com";
-    return NULL;
-}
-
-char *
-ns_mobile_rewrite_url(const char *url)
-{
-    if (!url) return NULL;
-    g_autoptr(ns_url_parts) p = ns_url_parts_new(url);
-    if (!p || !p->hostname) return NULL;
-    const char *newhost = mobile_host_for(p->hostname);
-    if (!newhost) return NULL;
-
-    GString *s = g_string_new(p->protocol && *p->protocol ? p->protocol : "https:");
-    g_string_append(s, "//");
-    if (p->username && *p->username) {
-        g_string_append(s, p->username);
-        if (p->password && *p->password) {
-            g_string_append_c(s, ':');
-            g_string_append(s, p->password);
-        }
-        g_string_append_c(s, '@');
-    }
-    g_string_append(s, newhost);
-    if (p->port && *p->port) {
-        g_string_append_c(s, ':');
-        g_string_append(s, p->port);
-    }
-    g_string_append(s, p->pathname && *p->pathname ? p->pathname : "/");
-    if (p->search && *p->search) g_string_append(s, p->search);
-    if (p->hash && *p->hash) g_string_append(s, p->hash);
-    return g_string_free(s, FALSE);
-}

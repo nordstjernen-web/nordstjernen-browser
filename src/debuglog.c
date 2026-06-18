@@ -190,25 +190,3 @@ ns_debug_log_unsubscribe(guint id)
     g_mutex_unlock(&g_dlog_mutex);
 }
 
-void
-ns_debug_log_snapshot(GFunc visit, gpointer user_data)
-{
-    if (!visit || !g_dlog_inited) return;
-    GPtrArray *copy = g_ptr_array_new();
-    g_mutex_lock(&g_dlog_mutex);
-    for (GList *l = g_dlog_entries->head; l; l = l->next) {
-        ns_dlog_entry *src = l->data;
-        ns_dlog_entry *e = g_new0(ns_dlog_entry, 1);
-        e->monotonic_us = src->monotonic_us;
-        e->level        = src->level;
-        e->category     = g_strdup(src->category ? src->category : "");
-        e->message      = g_strdup(src->message  ? src->message  : "");
-        g_ptr_array_add(copy, e);
-    }
-    g_mutex_unlock(&g_dlog_mutex);
-    for (guint i = 0; i < copy->len; i++)
-        visit(copy->pdata[i], user_data);
-    for (guint i = 0; i < copy->len; i++)
-        ns_dlog_entry_free(copy->pdata[i]);
-    g_ptr_array_free(copy, TRUE);
-}

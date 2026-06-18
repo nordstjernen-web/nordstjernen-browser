@@ -70,7 +70,6 @@ void             ns_config_shutdown(void);
 const ns_config *ns_config_get(void);
 ns_config       *ns_config_mut(void);
 char            *ns_config_dump(void);
-const char      *ns_config_path(void);
 gboolean         ns_config_save(GError **error);
 
 #define NS_APP_DIR_NAME "nordstjernen"

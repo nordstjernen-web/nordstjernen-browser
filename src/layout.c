@@ -10165,58 +10165,6 @@ ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes)
     collect_images_walk(root, out_boxes);
 }
 
-static void
-dump_box(GString *out, const ns_box *b, int depth)
-{
-    for (int i = 0; i < depth; i++) g_string_append(out, "  ");
-    const char *tag = (b->dom && b->dom->kind == NS_NODE_ELEMENT) ? b->dom->name : "(anon)";
-    g_string_append_printf(out,
-        "[%s %s] x=%.0f y=%.0f w=%.0f h=%.0f m=%.0f/%.0f/%.0f/%.0f p=%.0f/%.0f/%.0f/%.0f",
-        ns_box_kind_name(b->kind), tag,
-        b->x, b->y, b->content_width, b->content_height,
-        b->margin.top, b->margin.right, b->margin.bottom, b->margin.left,
-        b->padding.top, b->padding.right, b->padding.bottom, b->padding.left);
-    if (b->kind == NS_BOX_INLINE && b->text) {
-        gsize plen = strlen(b->text);
-        gsize show = plen > 60 ? 60 : plen;
-        g_string_append(out, " text=\"");
-        for (gsize i = 0; i < show; i++) {
-            char c = b->text[i];
-            g_string_append_c(out, (c == '\n' || c == '\t') ? ' ' : c);
-        }
-        if (plen > show) g_string_append(out, "…");
-        g_string_append_c(out, '"');
-    }
-    g_string_append_c(out, '\n');
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        dump_box(out, c, depth + 1);
-}
-
-static void
-extent_walk(const ns_box *b, double *out_w, double *out_h)
-{
-    if (!b) return;
-    double right = b->x + b->margin.left + b->border.left + b->padding.left +
-                   b->content_width + b->padding.right + b->border.right +
-                   b->margin.right;
-    double bottom = b->y + b->margin.top + b->border.top + b->padding.top +
-                    b->content_height + b->padding.bottom + b->border.bottom +
-                    b->margin.bottom;
-    if (right  > *out_w) *out_w = right;
-    if (bottom > *out_h) *out_h = bottom;
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        extent_walk(c, out_w, out_h);
-}
-
-void
-ns_box_content_extent(const ns_box *root, double *out_w, double *out_h)
-{
-    double w = 0, h = 0;
-    extent_walk(root, &w, &h);
-    if (out_w) *out_w = w;
-    if (out_h) *out_h = h;
-}
-
 gboolean
 ns_box_tree_has_sticky(const ns_box *root)
 {
@@ -10230,14 +10178,6 @@ ns_box_tree_has_sticky(const ns_box *root)
     for (const ns_box *c = root->first_child; c; c = c->next_sibling)
         if (ns_box_tree_has_sticky(c)) return TRUE;
     return FALSE;
-}
-
-GString *
-ns_box_dump(const ns_box *root)
-{
-    GString *out = g_string_new(NULL);
-    if (root) dump_box(out, root, 0);
-    return out;
 }
 
 static guint

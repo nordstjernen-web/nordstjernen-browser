@@ -1117,14 +1117,6 @@ ns_element_find_attr_ns(const ns_node *el, const char *namespace_uri,
     return NULL;
 }
 
-const char *
-ns_element_get_attr_ns(const ns_node *el, const char *namespace_uri,
-                       const char *local_name)
-{
-    const ns_attr *a = ns_element_find_attr_ns(el, namespace_uri, local_name);
-    return a ? a->value : NULL;
-}
-
 gboolean
 ns_node_is_element_named(const ns_node *n, const char *tag)
 {

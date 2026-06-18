@@ -27,7 +27,6 @@ void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);
 
 char *ns_html_escape_text(const char *s);
 
-char *ns_html_decode_body(const char *body, gsize len);
 char *ns_html_declared_charset(const char *body, gsize len,
                                const char *content_type);
 
@@ -38,10 +37,6 @@ char *ns_html_image_document(const char *url);
 
 char *ns_html_json_document(const char *url, const char *json, gsize len);
 char *ns_html_xml_document(const char *url, const char *xml, gsize len);
-
-const char *ns_html_engine_name(void);
-
-const char *ns_html_engine_version(void);
 
 G_END_DECLS
 

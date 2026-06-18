@@ -792,12 +792,6 @@ ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
 }
 
 int
-ns_rproc_http_hover(ns_rproc_http *r, int x, int y)
-{
-    return ns_rproc_http_hover_full(r, x, y, NULL, NULL);
-}
-
-int
 ns_rproc_http_find(ns_rproc_http *r, const char *query, int case_sensitive,
                    int direction, int from_y, int *out_total, int *out_current,
                    int *out_scroll_y)

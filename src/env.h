@@ -15,7 +15,6 @@ G_BEGIN_DECLS
 typedef void (*ns_env_emit_fn)(const char *label, const char *value,
                                gpointer user_data);
 
-void ns_env_each(ns_env_emit_fn emit, gpointer user_data);
 
 G_END_DECLS
 

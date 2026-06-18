@@ -413,8 +413,6 @@ typedef enum ns_css_reduced_motion {
     NS_CSS_REDUCED_MOTION_REDUCE,
 } ns_css_reduced_motion;
 
-void                 ns_css_set_color_scheme(ns_css_color_scheme s);
-void                 ns_css_set_reduced_motion(ns_css_reduced_motion m);
 ns_css_reduced_motion ns_css_get_reduced_motion(void);
 
 typedef struct ns_css_value {
@@ -579,9 +577,6 @@ GPtrArray *ns_css_parse_selector_list_checked(const char *text,
 
 const ns_node *ns_css_set_match_scope(const ns_node *scope);
 
-void ns_collect_inline_stylesheets(ns_node *doc, GPtrArray *out);
-char *ns_css_assign_iframe_scope(ns_node *node);
-char *ns_css_scope_css(const char *css, gssize len, const char *scope_id);
 gboolean   ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el);
 
 gboolean   ns_css_media_query_matches(const char *query);
@@ -681,7 +676,6 @@ gboolean ns_css_stylesheet_has_active_rules(const ns_css_stylesheet *sh);
 #define NS_CSS_IMPORT_MAX_DEPTH 8
 
 ns_css_stylesheet *ns_css_stylesheet_parse(const char *text, gssize len);
-ns_css_stylesheet *ns_css_stylesheet_from_style_element(ns_node *style);
 ns_css_stylesheet *ns_css_stylesheet_from_style_element_cached(ns_node *style);
 char              *ns_css_style_element_text(ns_node *style);
 ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len);

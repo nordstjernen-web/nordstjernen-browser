@@ -116,36 +116,6 @@ ns_spell_word_ok(const char *word, gssize len, const char *lang)
     return enchant_dict_check(d, word, len) <= 0;
 }
 
-char **
-ns_spell_suggest(const char *word, gssize len, const char *lang, gsize *n_out)
-{
-    if (n_out) *n_out = 0;
-    EnchantDict *d = pick_dict(lang);
-    if (!d || !word) return NULL;
-    if (len < 0) len = (gssize)strlen(word);
-    size_t n = 0;
-    char **raw = enchant_dict_suggest(d, word, len, &n);
-    if (!raw) return NULL;
-    char **out = NULL;
-    if (n > 0) {
-        out = g_new0(char *, n);
-        for (size_t i = 0; i < n; i++)
-            out[i] = g_strdup(raw[i]);
-    }
-    enchant_dict_free_string_list(d, raw);
-    if (n_out) *n_out = n;
-    return out;
-}
-
-void
-ns_spell_free_suggestions(char **list, gsize n)
-{
-    if (!list) return;
-    for (gsize i = 0; i < n; i++)
-        g_free(list[i]);
-    g_free(list);
-}
-
 #else /* !NS_HAVE_ENCHANT */
 
 void ns_spell_init(void) {}
@@ -157,20 +127,6 @@ ns_spell_word_ok(const char *word, gssize len, const char *lang)
 {
     (void)word; (void)len; (void)lang;
     return TRUE;
-}
-
-char **
-ns_spell_suggest(const char *word, gssize len, const char *lang, gsize *n_out)
-{
-    (void)word; (void)len; (void)lang;
-    if (n_out) *n_out = 0;
-    return NULL;
-}
-
-void
-ns_spell_free_suggestions(char **list, gsize n)
-{
-    (void)list; (void)n;
 }
 
 #endif

@@ -37,9 +37,6 @@ void ns_selection_paint(cairo_t *cr, const ns_box *root,
 
 char *ns_selection_collect_text(const ns_box *root, const ns_selection *sel);
 
-gboolean ns_selection_bounds(const ns_box *root, const ns_selection *sel,
-                             double *out_x, double *out_y,
-                             double *out_w, double *out_h);
 
 G_END_DECLS
 

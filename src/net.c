@@ -257,12 +257,6 @@ ns_url_is_ftp(const char *url)
     return url && g_str_has_prefix(url, "ftp://");
 }
 
-const char *
-ns_net_supported_encodings(void)
-{
-    return g_accept_encoding ? g_accept_encoding : "";
-}
-
 static gboolean
 refresh_is_space(char c)
 {
@@ -408,14 +402,6 @@ ns_url_resolve(const char *base, const char *href)
 }
 
 char *
-ns_url_set_component(const char *href, const char *component,
-                     const char *value)
-{
-    if (!value) return NULL;
-    return ns_url_set_component_len(href, component, value, strlen(value));
-}
-
-char *
 ns_url_set_component_len(const char *href, const char *component,
                          const char *value, size_t value_len)
 {
@@ -472,118 +458,6 @@ ns_url_to_ascii(const char *url)
         g_str_has_prefix(url, "file:"))
         return g_strdup(url);
     return ns_url_resolve(NULL, url);
-}
-
-static gboolean
-ns_idn_label_is_safe(const char *label, gsize len)
-{
-    gboolean has_latin = FALSE, has_han = FALSE;
-    gboolean has_hira = FALSE, has_kata = FALSE;
-    gboolean has_bopo = FALSE, has_hangul = FALSE;
-    GUnicodeScript other_script = G_UNICODE_SCRIPT_INVALID_CODE;
-    gboolean has_other = FALSE, mixed_other = FALSE;
-
-    const char *p = label;
-    const char *end = label + len;
-    while (p < end) {
-        gunichar c = g_utf8_get_char(p);
-        p = g_utf8_next_char(p);
-        if (c < 0x80) { has_latin = TRUE; continue; }
-        GUnicodeScript s = g_unichar_get_script(c);
-        if (s == G_UNICODE_SCRIPT_COMMON || s == G_UNICODE_SCRIPT_INHERITED)
-            continue;
-        switch (s) {
-        case G_UNICODE_SCRIPT_LATIN:    has_latin = TRUE;  break;
-        case G_UNICODE_SCRIPT_HAN:      has_han = TRUE;    break;
-        case G_UNICODE_SCRIPT_HIRAGANA: has_hira = TRUE;   break;
-        case G_UNICODE_SCRIPT_KATAKANA: has_kata = TRUE;   break;
-        case G_UNICODE_SCRIPT_BOPOMOFO: has_bopo = TRUE;   break;
-        case G_UNICODE_SCRIPT_HANGUL:   has_hangul = TRUE; break;
-        default:
-            if (!has_other) { other_script = s; has_other = TRUE; }
-            else if (s != other_script) mixed_other = TRUE;
-            break;
-        }
-    }
-    if (mixed_other) return FALSE;
-    if (has_other) {
-        return !has_latin && !has_han && !has_hira && !has_kata &&
-               !has_bopo && !has_hangul;
-    }
-    int cjk_groups = ((has_hira || has_kata) ? 1 : 0) +
-                     (has_bopo ? 1 : 0) +
-                     (has_hangul ? 1 : 0);
-    return cjk_groups <= 1;
-}
-
-static gboolean
-ns_idn_label_check_range(const char *host, gsize host_len)
-{
-    if (host_len == 0) return TRUE;
-    const char *p = host;
-    const char *host_end = host + host_len;
-    while (p < host_end) {
-        const char *dot = memchr(p, '.', (gsize)(host_end - p));
-        gsize n = dot ? (gsize)(dot - p) : (gsize)(host_end - p);
-        if (!ns_idn_label_is_safe(p, n)) return FALSE;
-        if (!dot) break;
-        p = dot + 1;
-    }
-    return TRUE;
-}
-
-char *
-ns_url_to_display(const char *url)
-{
-    if (!url || !*url) return NULL;
-    if (!ns_url_is_http_or_https(url))
-        return g_strdup(url);
-
-    lxb_url_parser_t *parser = ns_url_parser_open();
-    if (!parser) return g_strdup(url);
-
-    lxb_url_t *u = lxb_url_parse(parser, NULL,
-                                 (const lxb_char_t *)url, strlen(url));
-    if (!u || u->host.type == LXB_URL_HOST_TYPE__UNDEF ||
-        u->host.type == LXB_URL_HOST_TYPE_EMPTY) {
-        ns_url_parser_close(parser);
-        return g_strdup(url);
-    }
-
-    if (!parser->idna) {
-        parser->idna = lxb_unicode_idna_create();
-        if (parser->idna && lxb_unicode_idna_init(parser->idna) != LXB_STATUS_OK)
-            parser->idna = lxb_unicode_idna_destroy(parser->idna, true);
-    }
-
-    char *out = NULL;
-    if (parser->idna) {
-        GString *full = g_string_new(NULL);
-        if (lxb_url_serialize_idna(parser->idna, u, ns_url_str_append_cb,
-                                   full, false) == LXB_STATUS_OK &&
-            full->len > 0) {
-            const char *p = strstr(full->str, "://");
-            if (p) {
-                p += 3;
-                const char *at = strchr(p, '@');
-                const char *slash = strchr(p, '/');
-                if (at && (!slash || at < slash)) p = at + 1;
-                const char *end = p;
-                while (*end && *end != ':' && *end != '/' &&
-                       *end != '?' && *end != '#')
-                    end++;
-                if (ns_idn_label_check_range(p, (gsize)(end - p))) {
-                    out = g_string_free(full, FALSE);
-                    full = NULL;
-                }
-            }
-        }
-        if (full) g_string_free(full, TRUE);
-    }
-    ns_url_parser_close(parser);
-    if (out) return out;
-    char *ascii = ns_url_to_ascii(url);
-    return ascii ? ascii : g_strdup(url);
 }
 
 static lxb_url_t *
@@ -1508,26 +1382,6 @@ ns_net_apply_curl_tls(void *curl_handle)
 #ifdef G_OS_WIN32
     curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
 #endif
-}
-
-char *
-ns_net_effective_proxy_for(const char *url)
-{
-    const char *p = ns_net_pick_configured_proxy(url);
-    if (p && *p) return ns_net_proxy_mask(p);
-    static const char *const env_keys[] = {
-        "NS_HTTPS_PROXY", "NS_HTTP_PROXY",
-        "https_proxy", "HTTPS_PROXY",
-        "http_proxy",  "HTTP_PROXY",
-        "all_proxy",   "ALL_PROXY",
-    };
-    gboolean https = url && g_str_has_prefix(url, "https://");
-    gsize start = https ? 0 : 2;
-    for (gsize i = start; i < G_N_ELEMENTS(env_keys); i++) {
-        const char *v = g_getenv(env_keys[i]);
-        if (v && *v) return ns_net_proxy_mask(v);
-    }
-    return g_strdup("");
 }
 
 void

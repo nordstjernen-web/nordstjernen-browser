@@ -14,7 +14,6 @@ G_BEGIN_DECLS
 
 typedef struct ns_image_cache ns_image_cache;
 typedef struct ns_image       ns_image;
-typedef struct ns_tab_worker  ns_tab_worker;
 
 typedef struct ns_image_anim_frame {
     ns_texture *texture;
@@ -56,8 +55,6 @@ typedef void (*ns_image_ready_cb)(ns_image *img, gpointer user_data);
 
 ns_image_cache *ns_image_cache_new(void);
 void            ns_image_cache_free(ns_image_cache *cache);
-void            ns_image_cache_set_worker(ns_image_cache *cache,
-                                          ns_tab_worker  *worker);
 
 ns_image       *ns_image_cache_get(ns_image_cache *cache,
                                    const char     *url,
@@ -125,7 +122,6 @@ gboolean ns_image_cache_has_pending(const ns_image_cache *cache);
 
 void     ns_image_cache_begin_generation(ns_image_cache *cache);
 void     ns_image_cache_collect(ns_image_cache *cache);
-gint64   ns_image_cache_bytes(const ns_image_cache *cache);
 
 gboolean ns_image_should_retry(const ns_image *img, gint64 now_us);
 

@@ -45,7 +45,6 @@ gboolean ns_csp_inline_script_allowed(const ns_csp *csp,
 
 gboolean ns_csp_inline_event_handler_allowed(const ns_csp *csp);
 
-gboolean ns_csp_javascript_url_allowed(const ns_csp *csp);
 
 G_END_DECLS
 

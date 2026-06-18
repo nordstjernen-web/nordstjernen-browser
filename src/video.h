@@ -43,15 +43,12 @@ typedef struct ns_video {
 } ns_video;
 
 typedef struct ns_video_cache ns_video_cache;
-typedef struct ns_tab_worker  ns_tab_worker;
 typedef void (*ns_video_js_cb)(const void *dom_node, const char *kind,
                                double value, gpointer user_data);
 typedef void (*ns_video_audio_cb)(const char *command, gpointer user_data);
 
 ns_video_cache *ns_video_cache_new(void);
 void            ns_video_cache_free(ns_video_cache *cache);
-void            ns_video_cache_set_worker(ns_video_cache *cache,
-                                          ns_tab_worker *worker);
 void            ns_video_cache_set_base(ns_video_cache *cache,
                                         const char *base_url);
 void            ns_video_cache_set_js_cb(ns_video_cache *cache,

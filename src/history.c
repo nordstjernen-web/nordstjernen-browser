@@ -36,17 +36,6 @@ history_harden(sqlite3 *db)
 }
 
 static gboolean
-history_is_recordable(const char *url)
-{
-    if (!url || !*url) return FALSE;
-    if (!g_str_has_prefix(url, "http://") && !g_str_has_prefix(url, "https://"))
-        return FALSE;
-    for (const unsigned char *p = (const unsigned char *)url; *p; p++)
-        if (*p < 0x20 || *p == 0x7F) return FALSE;
-    return TRUE;
-}
-
-static gboolean
 history_exec(const char *sql)
 {
     if (!g_history_db) return FALSE;
@@ -139,109 +128,6 @@ ns_history_shutdown(void)
         g_history_db = NULL;
     }
     g_mutex_unlock(&g_history_mutex);
-}
-
-void
-ns_history_record(const char *url, const char *title)
-{
-    if (!history_is_recordable(url)) return;
-    g_mutex_lock(&g_history_mutex);
-    if (!g_history_db) {
-        g_mutex_unlock(&g_history_mutex);
-        return;
-    }
-    sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(g_history_db,
-            "INSERT INTO visits(url,title,visit_count,last_visit) "
-            "VALUES(?,?,1,?) "
-            "ON CONFLICT(url) DO UPDATE SET "
-            "visit_count=visit_count+1,last_visit=excluded.last_visit,"
-            "title=COALESCE(NULLIF(excluded.title,''),title)",
-            -1, &st, NULL) != SQLITE_OK) {
-        g_mutex_unlock(&g_history_mutex);
-        return;
-    }
-    sqlite3_bind_text (st, 1, url, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text (st, 2, (title && *title) ? title : NULL, -1,
-                       SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 3, g_get_real_time() / G_USEC_PER_SEC);
-    sqlite3_step(st);
-    sqlite3_finalize(st);
-    g_mutex_unlock(&g_history_mutex);
-}
-
-void
-ns_history_clear(void)
-{
-    g_mutex_lock(&g_history_mutex);
-    history_exec("DELETE FROM visits");
-    g_mutex_unlock(&g_history_mutex);
-}
-
-static char *
-history_like_escape(const char *s)
-{
-    GString *out = g_string_new(NULL);
-    for (const char *p = s; *p; p++) {
-        if (*p == '\\' || *p == '%' || *p == '_')
-            g_string_append_c(out, '\\');
-        g_string_append_c(out, *p);
-    }
-    return g_string_free(out, FALSE);
-}
-
-void
-ns_history_suggestion_free(gpointer s)
-{
-    ns_history_suggestion *item = s;
-    if (!item) return;
-    g_free(item->url);
-    g_free(item->title);
-    g_free(item);
-}
-
-GPtrArray *
-ns_history_suggest(const char *prefix, int limit)
-{
-    if (!prefix || !*prefix) return NULL;
-    if (limit <= 0) limit = 8;
-    g_mutex_lock(&g_history_mutex);
-    if (!g_history_db) {
-        g_mutex_unlock(&g_history_mutex);
-        return NULL;
-    }
-    sqlite3_stmt *st = NULL;
-    if (sqlite3_prepare_v2(g_history_db,
-            "SELECT url,title FROM visits WHERE url LIKE ? ESCAPE '\\' "
-            "ORDER BY visit_count DESC, last_visit DESC LIMIT ?",
-            -1, &st, NULL) != SQLITE_OK) {
-        g_mutex_unlock(&g_history_mutex);
-        return NULL;
-    }
-    char *esc = history_like_escape(prefix);
-    char *pat = g_strconcat("%", esc, "%", NULL);
-    g_free(esc);
-    sqlite3_bind_text(st, 1, pat, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int (st, 2, limit);
-
-    GPtrArray *out = g_ptr_array_new_with_free_func(ns_history_suggestion_free);
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        const unsigned char *u = sqlite3_column_text(st, 0);
-        const unsigned char *t = sqlite3_column_text(st, 1);
-        if (!u) continue;
-        ns_history_suggestion *item = g_new0(ns_history_suggestion, 1);
-        item->url   = g_strdup((const char *)u);
-        item->title = t ? g_strdup((const char *)t) : NULL;
-        g_ptr_array_add(out, item);
-    }
-    sqlite3_finalize(st);
-    g_free(pat);
-    g_mutex_unlock(&g_history_mutex);
-    if (out->len == 0) {
-        g_ptr_array_free(out, TRUE);
-        return NULL;
-    }
-    return out;
 }
 
 static const char k_history_style[] =

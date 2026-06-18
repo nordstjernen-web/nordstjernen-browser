@@ -184,11 +184,9 @@ ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
 void ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes);
 void ns_layout_collect_videos(const ns_box *root, GPtrArray *out_boxes);
 
-void ns_box_content_extent(const ns_box *root, double *out_w, double *out_h);
 
 gboolean ns_box_tree_has_sticky(const ns_box *root);
 
-GString *ns_box_dump(const ns_box *root);
 
 const char *ns_box_hit_link(const ns_box *root, double x, double y);
 const ns_link_range *ns_box_hit_link_range(const ns_box *root, double x, double y);

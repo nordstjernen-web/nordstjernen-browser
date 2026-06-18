@@ -37,13 +37,6 @@ ns_crypto_err(char **err, const char *prefix)
     return NULL;
 }
 
-ns_crypto_key *
-ns_crypto_key_ref(ns_crypto_key *k)
-{
-    if (k) k->refcount++;
-    return k;
-}
-
 void
 ns_crypto_key_unref(ns_crypto_key *k)
 {

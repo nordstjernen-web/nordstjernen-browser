@@ -14,7 +14,6 @@
 #include "image.h"
 #include "layout.h"
 #include "net.h"
-#include "tab_worker.h"
 #include "video_decode.h"
 
 #define NS_VIDEO_MAX_BYTES (256u * 1024u * 1024u)
@@ -23,7 +22,6 @@ struct ns_video_cache {
     GHashTable       *by_url;
     GHashTable       *requested;
     GPtrArray        *pending;
-    ns_tab_worker    *worker;
     char             *base_url;
     ns_video_js_cb    js_cb;
     gpointer          js_user;
@@ -59,12 +57,6 @@ ns_video_cache_new(void)
     c->requested = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     c->pending = g_ptr_array_new();
     return c;
-}
-
-void
-ns_video_cache_set_worker(ns_video_cache *cache, ns_tab_worker *worker)
-{
-    if (cache) cache->worker = worker;
 }
 
 void
@@ -262,45 +254,6 @@ on_video_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 }
 
 static void
-on_poster_decoded(ns_tab_image_result *decoded, gpointer user_data)
-{
-    ns_pending *pending = user_data;
-    if (pending->dead) {
-        ns_tab_image_result_free(decoded);
-        g_free(pending);
-        return;
-    }
-    if (decoded && decoded->pixels) {
-        GBytes *bytes = g_bytes_new_take(decoded->pixels, decoded->pixels_len);
-        decoded->pixels = NULL;
-        ns_texture *tex = ns_texture_new(decoded->width, decoded->height,
-                                         decoded->format, bytes, decoded->stride);
-        g_bytes_unref(bytes);
-        if (tex) pending->video->poster_texture = tex;
-    }
-    if (!pending->video->poster_texture && decoded && decoded->resp &&
-        decoded->resp->body && decoded->resp->body->len > 0) {
-        int w = 0, h = 0;
-        ns_texture *tex = ns_image_decode_bytes(decoded->resp->body->data,
-                                                decoded->resp->body->len, &w, &h);
-        if (tex) {
-            pending->video->poster_texture = tex;
-            if (decoded->width <= 0)  decoded->width = w;
-            if (decoded->height <= 0) decoded->height = h;
-        }
-    }
-    if (decoded && pending->video->poster_texture) {
-        if (pending->video->natural_width <= 0)
-            pending->video->natural_width = decoded->width;
-        if (pending->video->natural_height <= 0)
-            pending->video->natural_height = decoded->height;
-    }
-    ns_tab_image_result_free(decoded);
-    g_ptr_array_remove_fast(pending->cache->pending, pending);
-    g_free(pending);
-}
-
-static void
 on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
@@ -311,12 +264,6 @@ on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
         ns_response_free(resp);
         g_clear_error(&err);
         g_free(pending);
-        return;
-    }
-    if (pending->cache->worker && resp &&
-        ns_tab_worker_decode_image_response(pending->cache->worker, resp,
-                                            on_poster_decoded, pending, NULL)) {
-        g_clear_error(&err);
         return;
     }
     if (resp && !resp->error && resp->body && resp->body->len > 0) {

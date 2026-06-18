@@ -104,13 +104,6 @@ ns_i18n_init(const char *self_exe)
     }
 }
 
-void
-ns_i18n_shutdown(void)
-{
-    g_clear_pointer(&g_catalogue, g_hash_table_destroy);
-    g_clear_pointer(&g_language, g_free);
-}
-
 const char *
 ns_i18n(const char *text)
 {

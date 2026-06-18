@@ -8399,18 +8399,6 @@ skip_at_rule(const char **pp, const char *end)
 static ns_css_color_scheme g_color_scheme = NS_CSS_COLOR_SCHEME_LIGHT;
 static ns_css_reduced_motion g_reduced_motion = NS_CSS_REDUCED_MOTION_NO_PREFERENCE;
 
-void
-ns_css_set_color_scheme(ns_css_color_scheme s)
-{
-    g_color_scheme = s;
-}
-
-void
-ns_css_set_reduced_motion(ns_css_reduced_motion m)
-{
-    g_reduced_motion = m;
-}
-
 ns_css_reduced_motion
 ns_css_get_reduced_motion(void)
 {
@@ -14931,22 +14919,6 @@ scope_shadow_css(const char *flat_css, const char *host_id)
     return g_string_free(out, FALSE);
 }
 
-char *
-ns_css_assign_iframe_scope(ns_node *node)
-{
-    return style_iframe_scope_id(node);
-}
-
-char *
-ns_css_scope_css(const char *css, gssize len, const char *scope_id)
-{
-    if (!css || !scope_id || !*scope_id) return NULL;
-    char *flat = css_flatten_nesting(css, len);
-    char *scoped = scope_shadow_css(flat, scope_id);
-    g_free(flat);
-    return scoped;
-}
-
 static char *
 style_element_final_css(ns_node *style)
 {
@@ -14970,16 +14942,6 @@ style_element_final_css(ns_node *style)
         return rewritten;
     }
     return g_string_free(buf, FALSE);
-}
-
-ns_css_stylesheet *
-ns_css_stylesheet_from_style_element(ns_node *style)
-{
-    char *css = style_element_final_css(style);
-    if (!css) return NULL;
-    ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, -1);
-    g_free(css);
-    return sh;
 }
 
 char *
@@ -15090,24 +15052,6 @@ ns_css_stylesheet_from_style_element_cached(ns_node *style)
     ne->sheet = sh;
     g_hash_table_replace(g_style_el_cache, style, ne);
     return sh;
-}
-
-static void
-collect_inline_stylesheets_walk(ns_node *n, GPtrArray *out)
-{
-    if (!n || !out || ns_node_is_element_named(n, "noscript")) return;
-    if (ns_node_is_element_named(n, "style")) {
-        ns_css_stylesheet *sh = ns_css_stylesheet_from_style_element(n);
-        if (sh) g_ptr_array_add(out, sh);
-    }
-    for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_inline_stylesheets_walk(c, out);
-}
-
-void
-ns_collect_inline_stylesheets(ns_node *doc, GPtrArray *out)
-{
-    collect_inline_stylesheets_walk(doc, out);
 }
 
 GHashTable *

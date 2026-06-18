@@ -13,9 +13,6 @@ G_BEGIN_DECLS
 void      ns_spell_init(void);
 gboolean  ns_spell_available(void);
 gboolean  ns_spell_word_ok(const char *word, gssize len, const char *lang);
-char    **ns_spell_suggest(const char *word, gssize len, const char *lang,
-                           gsize *n_out);
-void      ns_spell_free_suggestions(char **list, gsize n);
 
 G_END_DECLS
 

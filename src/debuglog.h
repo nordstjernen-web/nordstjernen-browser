@@ -36,7 +36,6 @@ void ns_debug_log_emit(ns_dlog_level level, const char *category,
 guint ns_debug_log_subscribe(ns_dlog_listener cb, gpointer user_data);
 void  ns_debug_log_unsubscribe(guint id);
 
-void  ns_debug_log_snapshot(GFunc visit, gpointer user_data);
 
 const char *ns_dlog_level_name(ns_dlog_level lvl);
 

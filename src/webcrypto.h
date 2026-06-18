@@ -61,7 +61,6 @@ typedef struct {
     int           pss_salt_len;
 } ns_crypto_params;
 
-ns_crypto_key *ns_crypto_key_ref(ns_crypto_key *k);
 void           ns_crypto_key_unref(ns_crypto_key *k);
 
 ns_crypto_key *ns_crypto_generate_secret(const char *algo, const char *hash,

@@ -432,12 +432,6 @@ ns_csp_inline_event_handler_allowed(const ns_csp *csp)
     return TRUE;
 }
 
-gboolean
-ns_csp_javascript_url_allowed(const ns_csp *csp)
-{
-    return ns_csp_inline_event_handler_allowed(csp);
-}
-
 static gboolean
 policy_frame_ancestors_allows(const ns_csp_policy *p,
                               const char *parent_url,

@@ -38,23 +38,14 @@ ns_js *ns_js_new(ns_js_log_cb      log_cb,  gpointer log_user_data,
                  ns_js_mutated_cb  mut_cb,  gpointer mut_user_data,
                  ns_js_navigate_cb nav_cb,  gpointer nav_user_data);
 
-void   ns_js_set_csp(ns_js *js, const ns_csp *csp);
 
-const char *ns_js_engine_name(void);
 
-void   ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb, gpointer user_data);
 void   ns_js_set_form_submit_cb(ns_js *js, ns_js_form_submit_cb cb, gpointer user_data);
-void   ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data);
 void   ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data);
 void   ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data);
 void   ns_js_audio_event(ns_js *js, const char *token, const char *kind, double value);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
-void   ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
-void   ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
-                                    gpointer user_data);
-void   ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
-                                  gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);
 const char *ns_js_current_url(const ns_js *js);
 const char *ns_js_storage_partition(const ns_js *js);
@@ -62,8 +53,6 @@ void   ns_js_dispatch_hashchange(ns_js *js,
                                  const char *old_url, const char *new_url);
 void   ns_js_free(ns_js *js);
 
-void     ns_js_halt(ns_js *js);
-gboolean ns_js_is_halted(const ns_js *js);
 gboolean ns_js_in_pump(const ns_js *js);
 
 void     ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url);
@@ -76,7 +65,6 @@ gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type
                               gboolean *default_prevented);
 gboolean ns_js_click_activate(ns_js *js, const ns_node *node);
 void     ns_js_activate_element(ns_js *js, const ns_node *el);
-gboolean ns_js_dispatch_beforematch(ns_js *js, const ns_node *target);
 gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,
                                      gboolean *default_prevented);
@@ -84,7 +72,6 @@ void     ns_js_form_reset(ns_js *js, ns_node *form);
 gboolean ns_js_activate_summary(ns_js *js, const ns_node *el);
 
 void ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value);
-gboolean ns_js_close_topmost_modal_dialog(ns_js *js);
 
 void           ns_js_set_focus(ns_js *js, const ns_node *el);
 void           ns_js_set_focused_node(ns_js *js, const ns_node *el);
@@ -110,8 +97,6 @@ void     ns_js_dispatch_resize(ns_js *js);
 struct ns_box;
 void     ns_js_set_layout_root(ns_js *js, const struct ns_box *root);
 void     ns_js_fire_media_load_events(ns_js *js, const struct ns_box *layout);
-void     ns_js_set_selection(ns_js *js, const char *text, gboolean has_range,
-                             double x, double y, double w, double h);
 
 cairo_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
 
@@ -164,15 +149,6 @@ gboolean            ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *ses
                                               const ns_node *related,
                                               gboolean *default_prevented);
 
-gboolean ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
-                                    double client_x, double client_y,
-                                    double page_x, double page_y,
-                                    double delta_x, double delta_y,
-                                    gboolean shift, gboolean ctrl,
-                                    gboolean alt,   gboolean meta,
-                                    gboolean *default_prevented);
-gboolean ns_js_has_event_handler(ns_js *js, const ns_node *target,
-                                 const char *type);
 
 G_END_DECLS
 

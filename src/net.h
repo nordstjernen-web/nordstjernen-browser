@@ -46,7 +46,6 @@ void ns_net_init(void);
 void ns_net_shutdown(void);
 
 const char *ns_net_default_accept_language(void);
-const char *ns_net_supported_encodings(void);
 
 typedef GBytes *(*ns_net_blob_resolver)(const char *url, char **out_type,
                                         gpointer user_data);
@@ -109,12 +108,9 @@ gboolean ns_data_url_decode(const char *url, GByteArray *out, guint64 budget,
                             char **out_content_type, gboolean *too_large);
 gboolean ns_url_is_valid_absolute(const char *url);
 char    *ns_url_resolve(const char *base, const char *href);
-char    *ns_url_set_component(const char *href, const char *component,
-                              const char *value);
 char    *ns_url_set_component_len(const char *href, const char *component,
                                   const char *value, size_t value_len);
 
-char    *ns_url_to_display(const char *url);
 
 typedef struct ns_url_parts {
     char *href;
@@ -141,7 +137,6 @@ void  ns_net_set_proxy_override(const char *proxy_url);
 void  ns_net_set_allow_file_urls(gboolean allow);
 void  ns_net_set_log_fetches(gboolean on);
 char *ns_net_proxy_mask(const char *proxy_url);
-char *ns_net_effective_proxy_for(const char *url);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
 

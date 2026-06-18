@@ -299,12 +299,6 @@ ns_config_mut(void)
     return &g_cfg;
 }
 
-const char *
-ns_config_path(void)
-{
-    return g_cfg_path;
-}
-
 static const char *const referer_policy_names[] = {
     [NS_REFERER_NO_REFERRER]              = "none",
     [NS_REFERER_SAME_ORIGIN]              = "same-origin",

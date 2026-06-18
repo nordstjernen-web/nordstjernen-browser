@@ -356,19 +356,6 @@ ns_js_interrupt_cb(JSRuntime *rt, void *opaque)
     return now > js->eval_deadline_us ? 1 : 0;
 }
 
-void
-ns_js_halt(ns_js *js)
-{
-    if (!js) return;
-    js->halted = TRUE;
-}
-
-gboolean
-ns_js_is_halted(const ns_js *js)
-{
-    return js && js->halted;
-}
-
 gboolean
 ns_js_in_pump(const ns_js *js)
 {
@@ -18498,93 +18485,6 @@ ns_fire_window_level_handlers(ns_js *js, const ns_node *doc_node,
 }
 
 static gboolean
-ns_node_has_inline_handler(const ns_node *target, const char *type)
-{
-    if (!target || target->kind != NS_NODE_ELEMENT || !type) return FALSE;
-    char attr_name[48];
-    g_snprintf(attr_name, sizeof attr_name, "on%s", type);
-    const char *body = ns_element_get_attr(target, attr_name);
-    return body && *body;
-}
-
-static gboolean
-ns_js_node_has_property_handler(ns_js *js, const ns_node *target,
-                                const char *type)
-{
-    if (!js || !target || target->kind != NS_NODE_ELEMENT ||
-        !target->js_wrapper || !type)
-        return FALSE;
-    char prop_name[48];
-    g_snprintf(prop_name, sizeof prop_name, "on%s", type);
-    JSValue wrapper = JS_MKPTR(JS_TAG_OBJECT, target->js_wrapper);
-    JSValue handler = JS_GetPropertyStr(js->ctx, wrapper, prop_name);
-    gboolean has = JS_IsFunction(js->ctx, handler);
-    JS_FreeValue(js->ctx, handler);
-    return has;
-}
-
-static gboolean
-ns_js_window_has_property_handler(ns_js *js, const char *type)
-{
-    if (!js || !type) return FALSE;
-    JSContext *ctx = js->ctx;
-    char prop_name[48];
-    g_snprintf(prop_name, sizeof prop_name, "on%s", type);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue doc_obj = JS_GetPropertyStr(ctx, global, "document");
-    JSValue holders[2] = { doc_obj, global };
-    gboolean has = FALSE;
-    for (int i = 0; i < 2 && !has; i++) {
-        if (!JS_IsObject(holders[i])) continue;
-        JSValue handler = JS_GetPropertyStr(ctx, holders[i], prop_name);
-        has = JS_IsFunction(ctx, handler);
-        JS_FreeValue(ctx, handler);
-    }
-    JS_FreeValue(ctx, doc_obj);
-    JS_FreeValue(ctx, global);
-    return has;
-}
-
-static gboolean
-ns_node_is_on_path(const ns_node *target, const ns_node *candidate)
-{
-    for (const ns_node *cur = target; cur; cur = cur->parent)
-        if (cur == candidate) return TRUE;
-    return FALSE;
-}
-
-gboolean
-ns_js_has_event_handler(ns_js *js, const ns_node *target, const char *type)
-{
-    if (!js || !target || !type || !*type || js->halted || js->in_pump)
-        return FALSE;
-    for (const ns_node *cur = target; cur; cur = cur->parent) {
-        if (ns_node_has_inline_handler(cur, type))
-            return TRUE;
-        if (ns_js_node_has_property_handler(js, cur, type))
-            return TRUE;
-        if (cur->kind == NS_NODE_DOCUMENT &&
-            ns_js_window_has_property_handler(js, type))
-            return TRUE;
-        if (cur->kind == NS_NODE_DOCUMENT &&
-            ns_event_type_is_window_reflected(type)) {
-            ns_node *body = ns_node_find_first_element((ns_node *)cur, "body");
-            if (body && ns_node_has_inline_handler(body, type))
-                return TRUE;
-        }
-    }
-    for (guint i = 0; i < js->listeners->len; i++) {
-        ns_listener *l = g_ptr_array_index(js->listeners, i);
-        if (ns_listener_is_tombstoned(l)) continue;
-        if (strcmp(l->type, type) != 0) continue;
-        if (ns_listener_signal_aborted(js, l)) continue;
-        if (ns_node_is_on_path(target, l->target))
-            return TRUE;
-    }
-    return FALSE;
-}
-
-static gboolean
 ns_event_propagation_is_stopped(ns_js *js, JSValue event)
 {
     JSValue sp = js->listener_atoms_set
@@ -19139,17 +19039,6 @@ ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type,
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
 }
 
-gboolean
-ns_js_dispatch_beforematch(ns_js *js, const ns_node *target)
-{
-    if (!js || !target) return FALSE;
-    if (js->halted || js->in_pump) return FALSE;
-    JSValue event = ns_make_event(js->ctx, "beforematch", target);
-    JS_SetPropertyStr(js->ctx, event, "bubbles", JS_TRUE);
-    JS_SetPropertyStr(js->ctx, event, "cancelable", JS_FALSE);
-    return ns_js_dispatch_built_event(js, target, "beforematch", event, NULL);
-}
-
 static void
 ns_js_anim_event_cb(const ns_node *node, const char *type,
                     const char *name, double elapsed_ms, gpointer user)
@@ -19556,34 +19445,6 @@ ns_js_dispatch_drag_event(ns_js *js, ns_js_drag_session *session,
     JS_SetPropertyStr(ctx, event, "dataTransfer",
                       session ? JS_DupValue(ctx, session->data_transfer) : JS_NULL);
     return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
-}
-
-gboolean
-ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
-                           double client_x, double client_y,
-                           double page_x, double page_y,
-                           double delta_x, double delta_y,
-                           gboolean shift, gboolean ctrl, gboolean alt, gboolean meta,
-                           gboolean *default_prevented)
-{
-    if (default_prevented) *default_prevented = FALSE;
-    if (!js || !target) return FALSE;
-    if (js->halted || js->in_pump) return FALSE;
-    JSContext *ctx = js->ctx;
-    JSValue event = ns_make_event(ctx, "wheel", target);
-    JS_SetPropertyStr(ctx, event, "clientX", JS_NewFloat64(ctx, client_x));
-    JS_SetPropertyStr(ctx, event, "clientY", JS_NewFloat64(ctx, client_y));
-    JS_SetPropertyStr(ctx, event, "pageX",   JS_NewFloat64(ctx, page_x));
-    JS_SetPropertyStr(ctx, event, "pageY",   JS_NewFloat64(ctx, page_y));
-    JS_SetPropertyStr(ctx, event, "deltaX",  JS_NewFloat64(ctx, delta_x));
-    JS_SetPropertyStr(ctx, event, "deltaY",  JS_NewFloat64(ctx, delta_y));
-    JS_SetPropertyStr(ctx, event, "deltaZ",  JS_NewFloat64(ctx, 0));
-    JS_SetPropertyStr(ctx, event, "deltaMode", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, event, "shiftKey", shift ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(ctx, event, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(ctx, event, "altKey",   alt   ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(ctx, event, "metaKey",  meta  ? JS_TRUE : JS_FALSE);
-    return ns_js_dispatch_built_event(js, target, "wheel", event, default_prevented);
 }
 
 static JSValue
@@ -23087,24 +22948,6 @@ ns_js_set_image_cache(ns_js *js, struct ns_image_cache *cache)
     js->image_cache = (ns_image_cache *)cache;
     if (cache) ns_js_blob_registry_add(js);
     else ns_js_blob_registry_remove(js);
-}
-
-void
-ns_js_set_selection(ns_js *js, const char *text, gboolean has_range,
-                    double x, double y, double w, double h)
-{
-    if (!js) return;
-    const char *old = js->selection_text ? js->selection_text : "";
-    const char *neu = text ? text : "";
-    gboolean changed = (js->selection_has_range != has_range) ||
-                       strcmp(old, neu) != 0;
-    g_free(js->selection_text);
-    js->selection_text = g_strdup(neu);
-    js->selection_has_range = has_range;
-    js->selection_x = x; js->selection_y = y;
-    js->selection_w = w; js->selection_h = h;
-    if (changed && js->ctx && js->current_doc)
-        ns_js_dispatch_event(js, js->current_doc, "selectionchange", NULL);
 }
 
 static JSValue
@@ -26799,20 +26642,6 @@ ns_dialog_find_topmost_open_modal(JSContext *ctx, ns_node *root)
         }
     }
     return match;
-}
-
-gboolean
-ns_js_close_topmost_modal_dialog(ns_js *js)
-{
-    if (!js || !js->ctx || !js->current_doc) return FALSE;
-    ns_node *dialog =
-        ns_dialog_find_topmost_open_modal(js->ctx, js->current_doc);
-    if (!dialog) return FALSE;
-    gboolean prevented = FALSE;
-    ns_js_dispatch_event(js, dialog, "cancel", &prevented);
-    if (prevented) return TRUE;
-    ns_js_dialog_close(js, dialog, NULL);
-    return TRUE;
 }
 
 void
@@ -35495,12 +35324,6 @@ ns_js_profile_enabled(void)
     return cached == 1;
 }
 
-const char *
-ns_js_engine_name(void)
-{
-    return "QuickJS (bytecode)";
-}
-
 static void
 ns_js_apply_site_quirks(ns_js *js)
 {
@@ -37669,34 +37492,11 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
 }
 
 void
-ns_js_set_csp(ns_js *js, const ns_csp *csp)
-{
-    if (!js) return;
-    js->csp = csp;
-}
-
-void
-ns_js_set_scroll_to_cb(ns_js *js, ns_js_scroll_to_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->scroll_to_cb = cb;
-    js->scroll_to_user_data = user_data;
-}
-
-void
 ns_js_set_form_submit_cb(ns_js *js, ns_js_form_submit_cb cb, gpointer user_data)
 {
     if (!js) return;
     js->form_submit_cb = cb;
     js->form_submit_user_data = user_data;
-}
-
-void
-ns_js_set_soft_nav_cb(ns_js *js, ns_js_soft_nav_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->soft_nav_cb = cb;
-    js->soft_nav_user_data = user_data;
 }
 
 void
@@ -37804,32 +37604,6 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         ns_js_dispatch_event(js, n, "ended", NULL);
     }
     JS_FreeValue(ctx, el);
-}
-
-void
-ns_js_set_repaint_cb(ns_js *js, ns_js_repaint_cb cb, gpointer user_data)
-{
-    if (!js) return;
-    js->repaint_cb = cb;
-    js->repaint_user_data = user_data;
-}
-
-void
-ns_js_set_clipboard_write_cb(ns_js *js, ns_js_clipboard_write_cb cb,
-                             gpointer user_data)
-{
-    if (!js) return;
-    js->clipboard_write_cb = cb;
-    js->clipboard_write_user_data = user_data;
-}
-
-void
-ns_js_set_window_action_cb(ns_js *js, ns_js_window_action_cb cb,
-                           gpointer user_data)
-{
-    if (!js) return;
-    js->window_action_cb = cb;
-    js->window_action_user_data = user_data;
 }
 
 void

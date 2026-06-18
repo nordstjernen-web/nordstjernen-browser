@@ -14,7 +14,6 @@ const char *ns_mobile_user_agent(void);
 
 gboolean ns_mobile_force_host(const char *host);
 
-char *ns_mobile_rewrite_url(const char *url);
 
 G_END_DECLS
 

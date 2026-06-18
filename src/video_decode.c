@@ -96,12 +96,6 @@ ns_video_player_duration(const ns_video_player *player)
     return player ? player->duration : 0.0;
 }
 
-ns_texture *
-ns_video_player_current(ns_video_player *player)
-{
-    return player ? player->cur_tex : NULL;
-}
-
 static ns_texture *
 ns_video_frame_to_texture(ns_video_player *player, plm_frame_t *frame)
 {

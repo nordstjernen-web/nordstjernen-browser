@@ -73,22 +73,6 @@ ns_html_escape_text(const char *s)
     return g_string_free(g, FALSE);
 }
 
-const char *
-ns_html_engine_name(void)
-{
-    return "lexbor";
-}
-
-const char *
-ns_html_engine_version(void)
-{
-#ifdef NS_LEXBOR_VERSION
-    return NS_LEXBOR_VERSION;
-#else
-    return LEXBOR_VERSION_STRING;
-#endif
-}
-
 char *
 ns_html_image_document(const char *url)
 {
@@ -770,8 +754,3 @@ ns_html_decode_body_full(const char *body, gsize len,
     return g_utf8_make_valid(body, (gssize)len);
 }
 
-char *
-ns_html_decode_body(const char *body, gsize len)
-{
-    return ns_html_decode_body_full(body, len, NULL, NULL);
-}

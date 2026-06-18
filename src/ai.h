@@ -10,7 +10,6 @@
 
 G_BEGIN_DECLS
 
-gboolean ns_ai_available(void);
 
 void ns_ai_select_download(const char *model_id);
 

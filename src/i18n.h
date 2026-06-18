@@ -12,7 +12,6 @@
 G_BEGIN_DECLS
 
 void        ns_i18n_init(const char *self_exe);
-void        ns_i18n_shutdown(void);
 const char *ns_i18n(const char *text);
 const char *ns_i18n_language(void);
 

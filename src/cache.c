@@ -599,14 +599,6 @@ evict_by_select(const char *sql, gboolean has_bind, gint64 bind_value)
     g_ptr_array_free(keys, TRUE);
 }
 
-void
-ns_cache_clear(void)
-{
-    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker = g_mutex_locker_new(&g_cache_mutex);
-    if (!ns_cache_enabled()) return;
-    evict_by_select("SELECT key FROM entries", FALSE, 0);
-}
-
 static void
 evict_aged_out(void)
 {

@@ -13,17 +13,6 @@ G_BEGIN_DECLS
 void   ns_history_init(void);
 void   ns_history_shutdown(void);
 
-void   ns_history_record(const char *url, const char *title);
-void   ns_history_clear(void);
-
-typedef struct ns_history_suggestion {
-    char *url;
-    char *title;
-} ns_history_suggestion;
-
-void   ns_history_suggestion_free(gpointer s);
-GPtrArray *ns_history_suggest(const char *prefix, int limit);
-
 char  *ns_history_html_page(void);
 
 G_END_DECLS

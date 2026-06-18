@@ -13,12 +13,6 @@
 
 #ifndef NS_HAVE_AI
 
-gboolean
-ns_ai_available(void)
-{
-    return FALSE;
-}
-
 void
 ns_ai_select_download(const char *model_id)
 {
@@ -286,15 +280,6 @@ ns_ai_active_path(void)
     char *path = m ? ns_ai_model_path(m) : NULL;
     g_mutex_unlock(&g_dl_lock);
     return path;
-}
-
-gboolean
-ns_ai_available(void)
-{
-    char *path = ns_ai_active_path();
-    gboolean ok = path != NULL;
-    g_free(path);
-    return ok;
 }
 
 static int

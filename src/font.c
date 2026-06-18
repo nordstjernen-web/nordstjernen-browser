@@ -111,13 +111,6 @@ ns_font_available(void)
 #endif
 }
 
-void
-ns_font_set_loaded_cb(ns_font_loaded_cb cb, gpointer user_data)
-{
-    g_loaded_cb = cb;
-    g_loaded_ud = user_data;
-}
-
 gboolean
 ns_font_family_loaded(const char *family)
 {
