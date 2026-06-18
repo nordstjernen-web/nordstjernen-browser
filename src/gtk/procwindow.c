@@ -7,6 +7,7 @@
 #include "rproc_inproc.h"
 #include "bookmarks.h"
 #include "config.h"
+#include "history.h"
 #include "net.h"
 #include "version.h"
 #include "image.h"
@@ -558,6 +559,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
 
     switch (evt) {
     case NS_PROC_EVT_TITLE: {
+        ns_history_record(ns_proc_view_url(v), text);
         if (idx >= 0) {
             GtkWidget *p =
                 gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
@@ -1721,6 +1723,15 @@ on_settings_close(GtkButton *button, gpointer user_data)
     gtk_window_destroy(GTK_WINDOW(s->window));
 }
 
+static void
+on_settings_clear_history(GtkButton *button, gpointer user_data)
+{
+    (void)user_data;
+    ns_history_clear();
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    gtk_button_set_label(button, ns_i18n("History cleared"));
+}
+
 static GtkWidget *
 settings_add_switch(GtkGrid *grid, int row, const char *label, gboolean on)
 {
@@ -1824,12 +1835,17 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_box_append(GTK_BOX(box), note);
 
     GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_widget_set_halign(buttons, GTK_ALIGN_END);
+    GtkWidget *clear_hist = gtk_button_new_with_label(ns_i18n("Clear history"));
+    gtk_widget_set_halign(clear_hist, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(clear_hist, TRUE);
     GtkWidget *cancel = gtk_button_new_with_label(ns_i18n("Cancel"));
     GtkWidget *save = gtk_button_new_with_label(ns_i18n("Save"));
     gtk_widget_add_css_class(save, "suggested-action");
+    g_signal_connect(clear_hist, "clicked",
+                     G_CALLBACK(on_settings_clear_history), s);
     g_signal_connect(cancel, "clicked", G_CALLBACK(on_settings_close), s);
     g_signal_connect(save, "clicked", G_CALLBACK(on_settings_save), s);
+    gtk_box_append(GTK_BOX(buttons), clear_hist);
     gtk_box_append(GTK_BOX(buttons), cancel);
     gtk_box_append(GTK_BOX(buttons), save);
     gtk_box_append(GTK_BOX(box), buttons);
