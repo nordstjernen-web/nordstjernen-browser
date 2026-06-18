@@ -453,11 +453,3 @@ ns_selection_select_all(ns_selection *sel, const ns_box *root)
     return TRUE;
 }
 
-typedef struct bounds_ctx {
-    const ns_box *first;
-    const ns_box *last;
-    int           state;
-    double        x0, y0, x1, y1;
-    gboolean      any;
-} bounds_ctx;
-
