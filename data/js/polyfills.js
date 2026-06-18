@@ -727,8 +727,7 @@
                         "'NodeFilter': The provided value is not callable.");
                 r = isFn ? cb(n) : cb.call(filterArg, n);
             } finally { active = false; }
-            r = r >>> 0;
-            return r === 1 ? 1 : (r === 2 ? 2 : 3);
+            return r >>> 0;
         }
         return { what: what, filter: filter, raw: filterArg || null };
     }
@@ -925,30 +924,26 @@
                 : removed.parentNode;
         }
         function traverse(forward) {
-            var savedRef = referenceNode, savedBefore = beforeReference;
+            var node = referenceNode, before = beforeReference;
             for (;;) {
                 if (forward) {
-                    if (!beforeReference) {
-                        var c = following(referenceNode);
+                    if (!before) {
+                        var c = following(node);
                         if (!c) return null;
-                        referenceNode = c;
-                    } else beforeReference = false;
+                        node = c;
+                    } else before = false;
                 } else {
-                    if (beforeReference) {
-                        var c2 = preceding(referenceNode);
+                    if (before) {
+                        var c2 = preceding(node);
                         if (!c2) return null;
-                        referenceNode = c2;
-                    } else beforeReference = true;
+                        node = c2;
+                    } else before = true;
                 }
-                var candidate = referenceNode;
-                var result;
-                try { result = filter(candidate); }
-                catch (e) {
-                    referenceNode = savedRef;
-                    beforeReference = savedBefore;
-                    throw e;
+                if (filter(node) === 1) {
+                    referenceNode = node;
+                    beforeReference = before;
+                    return node;
                 }
-                if (result === 1) return candidate;
             }
         }
 
