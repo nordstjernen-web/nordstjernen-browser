@@ -206,7 +206,7 @@ ns_es_process_line(ns_es_parse *p, const char *line)
             if (*c < '0' || *c > '9') { digits = FALSE; break; }
         if (digits) {
             gint64 ms = g_ascii_strtoll(value, NULL, 10);
-            if (ms > 0) p->es->reconnect_ms = ms;
+            if (ms > 0) p->es->reconnect_ms = MIN(ms, 86400000);
         }
     }
     g_free(field);
