@@ -587,6 +587,16 @@ post_emit(NsProcView *v, NsProcEvent evt, const char *text)
 }
 
 static void
+post_media_help(NsProcView *v, const char *app, const char *app_url)
+{
+    if (!app || !*app || !app_url || !*app_url)
+        return;
+    char *payload = g_strdup_printf("%s\t%s", app, app_url);
+    post_emit(v, NS_PROC_EVT_MEDIA_HELP, payload);
+    g_free(payload);
+}
+
+static void
 clear_busy_cursor(NsProcView *v)
 {
     if (!v->busy_cursor)
@@ -1339,8 +1349,6 @@ do_load(NsProcView *v, const char *url, gboolean record)
     if (ns_media_is_video_page(url)) {
         char *app = NULL, *app_url = NULL;
         ns_media_status st = ns_media_try_launch(url, TRUE, &app, &app_url);
-        g_free(app);
-        g_free(app_url);
         if (st == NS_MEDIA_LAUNCHED) {
             post_emit(v, NS_PROC_EVT_STATUS,
                       ns_i18n("Opening video in external player…"));
@@ -1348,18 +1356,25 @@ do_load(NsProcView *v, const char *url, gboolean record)
                 v->loading = FALSE;
                 post_emit(v, NS_PROC_EVT_LOADING, "0");
             }
+            g_free(app);
+            g_free(app_url);
             return;
         }
-        if (st == NS_MEDIA_NEED_YTDLP)
+        if (st == NS_MEDIA_NEED_YTDLP) {
             post_emit(v, NS_PROC_EVT_STATUS,
                       ns_i18n("Install yt-dlp to play this video externally"));
-        else if (st == NS_MEDIA_NO_PLAYER)
+            post_media_help(v, app, app_url);
+        } else if (st == NS_MEDIA_NO_PLAYER) {
             post_emit(v, NS_PROC_EVT_STATUS,
                       ns_i18n("No external media player found "
                               "(install mpv or vlc)"));
-        else if (st == NS_MEDIA_FAILED)
+            post_media_help(v, app, app_url);
+        } else if (st == NS_MEDIA_FAILED) {
             post_emit(v, NS_PROC_EVT_STATUS,
                       ns_i18n("Could not start the external media player"));
+        }
+        g_free(app);
+        g_free(app_url);
         /* Handoff did not happen — fall through and load the page normally. */
     }
     v->pending_record = record;
@@ -1745,10 +1760,12 @@ on_result(gpointer data)
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("Install yt-dlp to play this stream "
                                   "externally"));
+                post_media_help(v, app, app_url);
             } else if (st == NS_MEDIA_NO_PLAYER) {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("No external media player found "
                                   "(install mpv or vlc)"));
+                post_media_help(v, app, app_url);
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("Cannot play this media externally"));
@@ -1832,10 +1849,12 @@ on_result(gpointer data)
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("Install yt-dlp to play this stream "
                                   "externally"));
+                post_media_help(v, app, app_url);
             } else if (st == NS_MEDIA_NO_PLAYER) {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("No external media player found "
                                   "(install mpv or vlc)"));
+                post_media_help(v, app, app_url);
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("Cannot play this media externally"));
