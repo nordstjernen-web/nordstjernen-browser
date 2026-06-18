@@ -710,6 +710,51 @@ ns_css_set_font_available_cb(gboolean (*cb)(const char *family))
     g_font_available_cb = cb;
 }
 
+static void (*g_font_metrics_cb)(const char *family, double size_px,
+                                 int weight, gboolean italic,
+                                 ns_css_font_metrics *out);
+
+void
+ns_css_set_font_metrics_cb(
+    void (*cb)(const char *family, double size_px, int weight,
+               gboolean italic, ns_css_font_metrics *out))
+{
+    g_font_metrics_cb = cb;
+}
+
+static double
+font_relative_unit_px(ns_css_unit unit, double font_px,
+                      const char *family, int weight, gboolean italic)
+{
+    ns_css_font_metrics m = {
+        .ex_px  = font_px * 0.5,
+        .ch_px  = font_px * 0.5,
+        .cap_px = font_px * 0.7,
+        .ic_px  = font_px,
+    };
+    if (g_font_metrics_cb && font_px > 0)
+        g_font_metrics_cb(family, font_px, weight, italic, &m);
+    switch (unit) {
+    case NS_CSS_UNIT_EX:  return m.ex_px;
+    case NS_CSS_UNIT_CH:  return m.ch_px;
+    case NS_CSS_UNIT_CAP: return m.cap_px;
+    case NS_CSS_UNIT_IC:  return m.ic_px;
+    default:              return font_px;
+    }
+}
+
+static void
+legacy_em_normalize(double *val, ns_css_unit *unit)
+{
+    switch (*unit) {
+    case NS_CSS_UNIT_EX:  *val *= 0.5; *unit = NS_CSS_UNIT_EM; break;
+    case NS_CSS_UNIT_CH:  *val *= 0.5; *unit = NS_CSS_UNIT_EM; break;
+    case NS_CSS_UNIT_CAP: *val *= 0.7; *unit = NS_CSS_UNIT_EM; break;
+    case NS_CSS_UNIT_IC:  *unit = NS_CSS_UNIT_EM; break;
+    default: break;
+    }
+}
+
 char *
 ns_css_font_family_for_pango(const char *css_family)
 {
@@ -2508,23 +2553,12 @@ parse_length(const char *text, double *out_v, ns_css_unit *out_unit)
         *out_unit = NS_CSS_UNIT_PX;
         return TRUE;
     }
-    if (g_ascii_strcasecmp(end, "ex")  == 0 ||
-        g_ascii_strcasecmp(end, "ch")  == 0) {
-        *out_unit = NS_CSS_UNIT_EM;
-        *out_v = v * 0.5;
-        return TRUE;
-    }
+    if (g_ascii_strcasecmp(end, "ex")  == 0) { *out_unit = NS_CSS_UNIT_EX;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "ch")  == 0) { *out_unit = NS_CSS_UNIT_CH;  return TRUE; }
+    if (g_ascii_strcasecmp(end, "cap") == 0) { *out_unit = NS_CSS_UNIT_CAP; return TRUE; }
+    if (g_ascii_strcasecmp(end, "ic")  == 0) { *out_unit = NS_CSS_UNIT_IC;  return TRUE; }
     if (g_ascii_strcasecmp(end, "lh") == 0) {
         *out_unit = NS_CSS_UNIT_EM;
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(end, "ic") == 0) {
-        *out_unit = NS_CSS_UNIT_EM;
-        return TRUE;
-    }
-    if (g_ascii_strcasecmp(end, "cap") == 0) {
-        *out_unit = NS_CSS_UNIT_EM;
-        *out_v = v * 0.7;
         return TRUE;
     }
     if (g_ascii_strcasecmp(end, "rlh") == 0) {
@@ -2733,6 +2767,16 @@ calc_unit_value(const char *unit, double num, ns_calc_term *out)
     case NS_CSS_UNIT_EM:
         out->em = v;
         break;
+    case NS_CSS_UNIT_EX:
+    case NS_CSS_UNIT_CH:
+        out->em = v * 0.5;
+        break;
+    case NS_CSS_UNIT_CAP:
+        out->em = v * 0.7;
+        break;
+    case NS_CSS_UNIT_IC:
+        out->em = v;
+        break;
     case NS_CSS_UNIT_REM:
         out->rem = v;
         break;
@@ -2832,6 +2876,10 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             switch (v->u.length.unit) {
             case NS_CSS_UNIT_PERCENT: out->pct = num; break;
             case NS_CSS_UNIT_EM:      out->em = num; break;
+            case NS_CSS_UNIT_EX:      out->em = num * 0.5; break;
+            case NS_CSS_UNIT_CH:      out->em = num * 0.5; break;
+            case NS_CSS_UNIT_CAP:     out->em = num * 0.7; break;
+            case NS_CSS_UNIT_IC:      out->em = num; break;
             case NS_CSS_UNIT_REM:     out->rem = num; break;
             case NS_CSS_UNIT_VW:      out->px = num * g_viewport_w / 100.0; break;
             case NS_CSS_UNIT_VH:      out->px = num * g_viewport_h / 100.0; break;
@@ -3631,6 +3679,9 @@ parse_one_shadow(const char *text, ns_css_shadow *out)
         } else if (parse_length(tok, &num, &u) && n_lens < 4) {
             if (u == NS_CSS_UNIT_EM)   num *= 16;
             if (u == NS_CSS_UNIT_REM)  num *= 16;
+            if (u == NS_CSS_UNIT_EX || u == NS_CSS_UNIT_CH) num *= 8;
+            if (u == NS_CSS_UNIT_CAP)  num *= 11.2;
+            if (u == NS_CSS_UNIT_IC)   num *= 16;
             lens[n_lens++] = num;
         } else if (g_ascii_strcasecmp(tok, "inset") == 0) {
             inset = TRUE;
@@ -5262,6 +5313,8 @@ parse_value_for(ns_css_prop prop, const char *text)
                 }
             }
             if (ok) {
+                legacy_em_normalize(&w, &wu);
+                legacy_em_normalize(&h, &hu);
                 v = g_new0(ns_css_value, 1);
                 v->kind = NS_CSS_V_SIZE;
                 v->u.size.w = w;
@@ -5577,6 +5630,8 @@ parse_value_for(ns_css_prop prop, const char *text)
             }
         }
         if (ok && w >= 0 && h >= 0) {
+            legacy_em_normalize(&w, &wu);
+            legacy_em_normalize(&h, &hu);
             v = g_new0(ns_css_value, 1);
             v->kind = NS_CSS_V_SIZE;
             v->u.size.w = w;
@@ -12527,6 +12582,10 @@ ns_css_value_serialize(const ns_css_value *v)
         case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
         case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
         case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
+        case NS_CSS_UNIT_EX:      unit = "ex";  break;
+        case NS_CSS_UNIT_CH:      unit = "ch";  break;
+        case NS_CSS_UNIT_CAP:     unit = "cap"; break;
+        case NS_CSS_UNIT_IC:      unit = "ic";  break;
         }
         return g_strdup_printf("%g%s", v->u.length.v, unit);
     }
@@ -12550,6 +12609,10 @@ ns_css_value_serialize(const ns_css_value *v)
             case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
             case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
             case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
+            case NS_CSS_UNIT_EX:      unit = "ex";  break;
+            case NS_CSS_UNIT_CH:      unit = "ch";  break;
+            case NS_CSS_UNIT_CAP:     unit = "cap"; break;
+            case NS_CSS_UNIT_IC:      unit = "ic";  break;
             }
             g_string_append_printf(s, "%g%s", v->u.size.w, unit);
         }
@@ -12572,6 +12635,10 @@ ns_css_value_serialize(const ns_css_value *v)
             case NS_CSS_UNIT_CQH:     unit = "cqh"; break;
             case NS_CSS_UNIT_CQMIN:   unit = "cqmin"; break;
             case NS_CSS_UNIT_CQMAX:   unit = "cqmax"; break;
+            case NS_CSS_UNIT_EX:      unit = "ex";  break;
+            case NS_CSS_UNIT_CH:      unit = "ch";  break;
+            case NS_CSS_UNIT_CAP:     unit = "cap"; break;
+            case NS_CSS_UNIT_IC:      unit = "ic";  break;
             }
             g_string_append_printf(s, "%g%s", v->u.size.h, unit);
         }
@@ -13476,6 +13543,23 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
     case NS_CSS_UNIT_EM:      return fs->u.length.v * parent_px;
     case NS_CSS_UNIT_REM:     return fs->u.length.v * parent_px;
     case NS_CSS_UNIT_PERCENT: return fs->u.length.v * parent_px / 100.0;
+    case NS_CSS_UNIT_EX:
+    case NS_CSS_UNIT_CH:
+    case NS_CSS_UNIT_CAP:
+    case NS_CSS_UNIT_IC: {
+        const char *pf =
+            parent_style && parent_style->values[NS_CSS_FONT_FAMILY] &&
+            parent_style->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD
+            ? parent_style->values[NS_CSS_FONT_FAMILY]->u.keyword : NULL;
+        int pw = parent_style
+            ? ns_css_font_weight_number(parent_style->values[NS_CSS_FONT_WEIGHT], 400)
+            : 400;
+        gboolean pi = parent_style &&
+            (ns_css_keyword_is(parent_style->values[NS_CSS_FONT_STYLE], "italic") ||
+             ns_css_keyword_is(parent_style->values[NS_CSS_FONT_STYLE], "oblique"));
+        return fs->u.length.v *
+               font_relative_unit_px(fs->u.length.unit, parent_px, pf, pw, pi);
+    }
     case NS_CSS_UNIT_VW:
     case NS_CSS_UNIT_VH:
     case NS_CSS_UNIT_VMIN:
@@ -13527,6 +13611,14 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         fs->u.length.unit = NS_CSS_UNIT_PX;
         out->values[NS_CSS_FONT_SIZE] = fs;
     }
+    const char *fr_family =
+        out->values[NS_CSS_FONT_FAMILY] &&
+        out->values[NS_CSS_FONT_FAMILY]->kind == NS_CSS_V_KEYWORD
+        ? out->values[NS_CSS_FONT_FAMILY]->u.keyword : NULL;
+    int fr_weight = ns_css_font_weight_number(out->values[NS_CSS_FONT_WEIGHT], 400);
+    gboolean fr_italic =
+        ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "italic") ||
+        ns_css_keyword_is(out->values[NS_CSS_FONT_STYLE], "oblique");
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
         if (i == NS_CSS_FONT_SIZE) continue;
         ns_css_value *v = out->values[i];
@@ -13558,6 +13650,16 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         case NS_CSS_UNIT_VMAX:
             v = ns_css_value_cow(out, i);
             v->u.length.v = viewport_resolve(v->u.length.v, v->u.length.unit);
+            v->u.length.unit = NS_CSS_UNIT_PX;
+            break;
+        case NS_CSS_UNIT_EX:
+        case NS_CSS_UNIT_CH:
+        case NS_CSS_UNIT_CAP:
+        case NS_CSS_UNIT_IC:
+            v = ns_css_value_cow(out, i);
+            v->u.length.v *= font_relative_unit_px(v->u.length.unit, my_font_px,
+                                                   fr_family, fr_weight,
+                                                   fr_italic);
             v->u.length.unit = NS_CSS_UNIT_PX;
             break;
         default:

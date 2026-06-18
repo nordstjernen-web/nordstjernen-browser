@@ -1464,6 +1464,13 @@ control_dim_px_basis(const ns_css_value *v, double font_size, double basis)
         double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
         return v->u.length.v * MAX(cw, ch) / 100.0;
     }
+    case NS_CSS_UNIT_EX:
+    case NS_CSS_UNIT_CH:
+        return v->u.length.v * font_size * 0.5;
+    case NS_CSS_UNIT_CAP:
+        return v->u.length.v * font_size * 0.7;
+    case NS_CSS_UNIT_IC:
+        return v->u.length.v * font_size;
     }
     return 0;
 }

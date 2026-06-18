@@ -391,6 +391,10 @@ typedef enum ns_css_unit {
     NS_CSS_UNIT_CQH,
     NS_CSS_UNIT_CQMIN,
     NS_CSS_UNIT_CQMAX,
+    NS_CSS_UNIT_EX,
+    NS_CSS_UNIT_CH,
+    NS_CSS_UNIT_CAP,
+    NS_CSS_UNIT_IC,
 } ns_css_unit;
 
 void     ns_css_set_viewport(double vw_px, double vh_px);
@@ -443,6 +447,17 @@ gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 char    *ns_css_font_family_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
 int      ns_css_font_weight_number(const ns_css_value *v, int fallback);
+
+typedef struct ns_css_font_metrics {
+    double ex_px;
+    double ch_px;
+    double cap_px;
+    double ic_px;
+} ns_css_font_metrics;
+
+void ns_css_set_font_metrics_cb(
+    void (*cb)(const char *family, double size_px, int weight,
+               gboolean italic, ns_css_font_metrics *out));
 
 typedef enum ns_css_attr_op {
     NS_CSS_ATTR_PRESENT,

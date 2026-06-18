@@ -52,7 +52,7 @@ Snapshot: **1.0.10**, 2026-06-18.
 | `px`, `%`, `em`, `rem` | ✅ | `em`/`rem` resolved against a 16px root in the layout fast path |
 | Viewport units `vw`/`vh`/`vmin`/`vmax`, `sv*`/`lv*`/`dv*`, `vi`/`vb` | ✅ | |
 | Container units `cqw`/`cqh`/`cqi`/`cqb`/`cqmin`/`cqmax` | ✅ | resolved against the nearest container (`container-type`/`container-name`) |
-| Font-relative `cap`, `ic`, `ch`, `ex` | 🟡 | fixed-factor approximations of `em`, not font-measured (`ex`/`ch` ≈ 0.5em, `cap` ≈ 0.7em, `ic` ≈ 1.0em in `src/css.c`) |
+| Font-relative `cap`, `ic`, `ch`, `ex` | ✅ | font-measured at cascade time (`resolve_em_units` in `src/css.c` via a Pango metrics callback in `src/paint.c`): `ch` is the advance of `0`, `ex` the x-height of `x`, `cap` the cap-height of `H`, `ic` the advance of `水`, all measured for the element's computed family/size/weight/style; they respond to the actual font (e.g. `1ch` differs between monospace, serif, and bold). Falls back to the old `0.5/0.7/1.0em` factors if no metrics provider is registered, and `calc()`/`background-size`/box-shadow keep the factor-based approximation |
 | Absolute `Q`, `pt`, `cm`, `mm`, `in`, `pc` | ✅ | exact CSS ratios from `1in = 96px = 2.54cm` (`pt = 96/72`, `cm = 96/2.54`, `mm = 96/25.4`, `Q = 96/101.6`) |
 | `calc()` | ✅ | percentage + px mix; nested |
 | Math `round()` / `mod()` / `rem()` / `abs()` / `min()` / `max()` / `clamp()` | ✅ | the Values 4 length-math subset |

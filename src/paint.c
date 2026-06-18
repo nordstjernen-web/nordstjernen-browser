@@ -390,6 +390,13 @@ inline_control_dim_px(const ns_css_value *v, double font_size, double basis)
         double ch = ns_css_container_h() > 0 ? ns_css_container_h() : ns_css_viewport_h();
         return v->u.length.v * MAX(cw, ch) / 100.0;
     }
+    case NS_CSS_UNIT_EX:
+    case NS_CSS_UNIT_CH:
+        return v->u.length.v * font_size * 0.5;
+    case NS_CSS_UNIT_CAP:
+        return v->u.length.v * font_size * 0.7;
+    case NS_CSS_UNIT_IC:
+        return v->u.length.v * font_size;
     }
     return 0;
 }
@@ -1529,10 +1536,54 @@ ns_paint_font_available(const char *family)
     return has;
 }
 
+static void
+ns_paint_font_metrics(const char *family, double size_px, int weight,
+                      gboolean italic, ns_css_font_metrics *out)
+{
+    if (size_px <= 0) return;
+    PangoFontMap *fm = pango_cairo_font_map_get_default();
+    if (!fm) return;
+    PangoContext *pctx = pango_font_map_create_context(fm);
+    PangoLayout *l = pango_layout_new(pctx);
+    PangoFontDescription *fd = pango_font_description_new();
+    char *pango_family = family ? ns_css_font_family_for_pango(family) : NULL;
+    if (pango_family && *pango_family)
+        pango_font_description_set_family(fd, pango_family);
+    g_free(pango_family);
+    if (weight > 0) pango_font_description_set_weight(fd, (PangoWeight)weight);
+    if (italic) pango_font_description_set_style(fd, PANGO_STYLE_ITALIC);
+    pango_font_description_set_absolute_size(fd, size_px * PANGO_SCALE);
+    pango_layout_set_font_description(l, fd);
+
+    PangoRectangle ink;
+    pango_layout_set_text(l, "x", -1);
+    pango_layout_get_pixel_extents(l, &ink, NULL);
+    if (ink.height > 0) out->ex_px = ink.height;
+
+    pango_layout_set_text(l, "H", -1);
+    pango_layout_get_pixel_extents(l, &ink, NULL);
+    if (ink.height > 0) out->cap_px = ink.height;
+
+    int w = 0;
+    pango_layout_set_text(l, "0", -1);
+    pango_layout_get_pixel_size(l, &w, NULL);
+    if (w > 0) out->ch_px = w;
+
+    w = 0;
+    pango_layout_set_text(l, "\xe6\xb0\xb4", -1);
+    pango_layout_get_pixel_size(l, &w, NULL);
+    if (w > 0) out->ic_px = w;
+
+    pango_font_description_free(fd);
+    g_object_unref(l);
+    g_object_unref(pctx);
+}
+
 void
 ns_paint_register_font_oracle(void)
 {
     ns_css_set_font_available_cb(ns_paint_font_available);
+    ns_css_set_font_metrics_cb(ns_paint_font_metrics);
 }
 
 void
