@@ -324,6 +324,10 @@ download_finish_idle(gpointer ud)
         gtk_label_set_text(GTK_LABEL(d->status), msg);
         g_free(msg);
     }
+    g_free(d->url);
+    g_free(d->path);
+    g_free(d->name);
+    g_free(d);
     return G_SOURCE_REMOVE;
 }
 

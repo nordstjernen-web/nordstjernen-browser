@@ -469,7 +469,18 @@ ns_crypto_export_rsa_jwk(const ns_crypto_key *k, guint8 **n, gsize *n_len,
         *dq = ns_crypto_bn_export(k->pkey, OSSL_PKEY_PARAM_RSA_EXPONENT2, dq_len);
         *qi = ns_crypto_bn_export(k->pkey, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, qi_len);
     }
-    return *n && *e;
+    if (*n && *e)
+        return TRUE;
+    g_clear_pointer(n, g_free);
+    g_clear_pointer(e, g_free);
+    g_clear_pointer(d, g_free);
+    g_clear_pointer(p, g_free);
+    g_clear_pointer(q, g_free);
+    g_clear_pointer(dp, g_free);
+    g_clear_pointer(dq, g_free);
+    g_clear_pointer(qi, g_free);
+    if (err) *err = g_strdup("export");
+    return FALSE;
 }
 
 gboolean
