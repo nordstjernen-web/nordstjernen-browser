@@ -3564,17 +3564,17 @@ pick_picture_source_url(const ns_node *picture)
         const char *sizes = ns_element_get_attr(c, "sizes");
         const char *dsset = ns_element_get_attr(c, "data-srcset");
         char *u = first_url_from_srcset_sized(dsset, sizes);
-        if (u && !g_str_has_prefix(u, "data:")) return u;
+        if (u && !g_str_has_prefix(u, "data:")) { g_free(data_fallback); return u; }
         if (u && !data_fallback) data_fallback = u;
         else g_free(u);
         const char *ss = ns_element_get_attr(c, "srcset");
         u = first_url_from_srcset_sized(ss, sizes);
-        if (u && !g_str_has_prefix(u, "data:")) return u;
+        if (u && !g_str_has_prefix(u, "data:")) { g_free(data_fallback); return u; }
         if (u && !data_fallback) data_fallback = u;
         else g_free(u);
         const char *s = ns_element_get_attr(c, "src");
         if (s && *s) {
-            if (!g_str_has_prefix(s, "data:")) return g_strdup(s);
+            if (!g_str_has_prefix(s, "data:")) { g_free(data_fallback); return g_strdup(s); }
             if (!data_fallback) data_fallback = g_strdup(s);
         }
     }
