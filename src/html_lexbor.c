@@ -51,6 +51,15 @@ lxb_node_convert(lxb_dom_node_t *src)
         ns_node *out = ns_node_new_element(NULL);
         ns_node_set_name_borrow(out, name ? (const char *)name : "unknown");
         lxb_borrow_attributes(el, out);
+        if (src->ns == LXB_NS_SVG) {
+            out->flags |= NS_NODE_SVG_NS;
+            ns_element_set_attr(out, "data-nd-ns-uri",
+                                "http://www.w3.org/2000/svg");
+        } else if (src->ns == LXB_NS_MATH) {
+            out->flags |= NS_NODE_FOREIGN_NS;
+            ns_element_set_attr(out, "data-nd-ns-uri",
+                                "http://www.w3.org/1998/Math/MathML");
+        }
         return out;
     }
     case LXB_DOM_NODE_TYPE_TEXT:

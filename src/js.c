@@ -32478,12 +32478,39 @@ ns_document_getElementsByTagName(JSContext *ctx, JSValueConst this_val,
     return result;
 }
 
-static gboolean
-ns_namespace_matches_xhtml(const char *ns)
+static const char *
+ns_node_local_name_ptr(const ns_node *n)
 {
-    if (!ns) return FALSE;
-    if (strcmp(ns, "*") == 0) return TRUE;
-    return strcmp(ns, "http://www.w3.org/1999/xhtml") == 0;
+    if (!n || !n->name) return NULL;
+    const char *colon = strchr(n->name, ':');
+    return colon ? colon + 1 : n->name;
+}
+
+static void
+ns_collect_by_tag_ns(const ns_node *n, const char *ns, gboolean ns_wild,
+                     const char *local, gboolean local_wild,
+                     JSContext *ctx, JSValue arr, uint32_t *idx)
+{
+    if (!n) return;
+    if (n->kind == NS_NODE_ELEMENT && n->name) {
+        gboolean ns_ok;
+        if (ns_wild) {
+            ns_ok = TRUE;
+        } else {
+            const char *en = ns_node_element_namespace(n);
+            ns_ok = ns ? (en && strcmp(en, ns) == 0) : (en == NULL);
+        }
+        if (ns_ok) {
+            const char *ln = ns_node_local_name_ptr(n);
+            if (local_wild || (ln && strcmp(ln, local) == 0))
+                JS_SetPropertyUint32(ctx, arr, (*idx)++,
+                                     ns_make_element(ctx, n));
+        }
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild,
+                             ctx, arr, idx);
 }
 
 static JSValue
@@ -32507,15 +32534,8 @@ ns_getElementsByTagNameNS_in(JSContext *ctx, const ns_node *root,
 
     JSValue nl = ns_nodelist_new(ctx);
     uint32_t i = 0;
-    if (ns_wild || ns_namespace_matches_xhtml(ns)) {
-        if (local_wild) {
-            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                ns_collect_by_tag(c, "*", ctx, nl, &i);
-        } else {
-            for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                ns_collect_by_tag(c, local, ctx, nl, &i);
-        }
-    }
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+        ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild, ctx, nl, &i);
     JSValue result = ns_nodelist_finalize(ctx, nl, i);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
