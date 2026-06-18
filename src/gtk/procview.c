@@ -1357,7 +1357,10 @@ do_load(NsProcView *v, const char *url, gboolean record)
             post_emit(v, NS_PROC_EVT_STATUS,
                       ns_i18n("No external media player found "
                               "(install mpv or vlc)"));
-        /* No player available — fall through and load the page normally. */
+        else if (st == NS_MEDIA_FAILED)
+            post_emit(v, NS_PROC_EVT_STATUS,
+                      ns_i18n("Could not start the external media player"));
+        /* Handoff did not happen — fall through and load the page normally. */
     }
     v->pending_record = record;
     int seq = ++v->load_seq;
@@ -1821,7 +1824,7 @@ on_result(gpointer data)
                                                      &app, &app_url);
             const char *kind = res->media_is_video ? "video" : "audio";
             if (st == NS_MEDIA_LAUNCHED) {
-                char *msg = g_strdup_printf("Opening %s in external playerâ€¦",
+                char *msg = g_strdup_printf("Opening %s in external player…",
                                             kind);
                 post_emit(v, NS_PROC_EVT_STATUS, msg);
                 g_free(msg);

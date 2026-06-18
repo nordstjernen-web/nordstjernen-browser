@@ -183,6 +183,19 @@ read_all(int fd, void *buf, size_t n)
     return TRUE;
 }
 
+static gboolean
+write_all(int fd, const void *buf, size_t n)
+{
+    const guint8 *p = buf;
+    while (n) {
+        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
+        if (w > 0) { p += w; n -= (size_t)w; continue; }
+        if (w < 0 && errno == EINTR) continue;
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static G_GNUC_NORETURN void
 ns_media_broker_loop(int fd)
 {
@@ -195,9 +208,11 @@ ns_media_broker_loop(int fd)
         char *buf = g_malloc(len + 1);
         if (!read_all(fd, buf, len)) { g_free(buf); _exit(0); }
         buf[len] = '\0';
-        if (ns_media_url_is_safe(buf, TRUE))
-            ns_media_run_player(buf);
+        guint8 ok = (ns_media_url_is_safe(buf, TRUE) &&
+                     ns_media_run_player(buf)) ? 1 : 0;
         g_free(buf);
+        if (!write_all(fd, &ok, 1))
+            _exit(0);
     }
 }
 
@@ -219,26 +234,24 @@ ns_media_broker_start(void)
 }
 
 static gboolean
-write_all(int fd, const void *buf, size_t n)
-{
-    const guint8 *p = buf;
-    while (n) {
-        ssize_t w = send(fd, p, n, MSG_NOSIGNAL);
-        if (w > 0) { p += w; n -= (size_t)w; continue; }
-        if (w < 0 && errno == EINTR) continue;
-        return FALSE;
-    }
-    return TRUE;
-}
-
-static gboolean
 ns_media_broker_send(const char *url)
 {
     if (ns_media_broker_fd < 0) return FALSE;
     guint32 len = (guint32)strlen(url);
     if (len == 0) return FALSE;
-    return write_all(ns_media_broker_fd, &len, sizeof len) &&
-           write_all(ns_media_broker_fd, url, len);
+    if (!write_all(ns_media_broker_fd, &len, sizeof len) ||
+        !write_all(ns_media_broker_fd, url, len)) {
+        close(ns_media_broker_fd);
+        ns_media_broker_fd = -1;
+        return FALSE;
+    }
+    guint8 ok = 0;
+    if (!read_all(ns_media_broker_fd, &ok, 1)) {
+        close(ns_media_broker_fd);
+        ns_media_broker_fd = -1;
+        return FALSE;
+    }
+    return ok != 0;
 }
 #else
 void
@@ -348,7 +361,8 @@ ns_media_try_launch(const char *url, gboolean stream,
         return NS_MEDIA_NEED_YTDLP;
     }
 #if defined(__linux__)
-    if (ns_media_broker_send(url)) return NS_MEDIA_LAUNCHED;
+    if (ns_media_broker_fd >= 0)
+        return ns_media_broker_send(url) ? NS_MEDIA_LAUNCHED : NS_MEDIA_FAILED;
 #endif
     return ns_media_run_player(url) ? NS_MEDIA_LAUNCHED : NS_MEDIA_FAILED;
 #endif
