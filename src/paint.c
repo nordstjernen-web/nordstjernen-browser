@@ -1861,10 +1861,17 @@ paint_text_shadow_layer(cairo_t *cr, PangoLayout *layout, double x, double y,
 
     int blur = (int)(sh->blur + 0.5);
     if (blur < 0) blur = 0;
-    int pad = blur * 3 + 2;
-    int sw = lw + 2 * pad, sht = lh + 2 * pad;
 
-    if (sw > 4096 || sht > 4096) {
+    double ds = blur / 3.0;
+    if (ds < 1.0) ds = 1.0;
+    if (ds > 4.0) ds = 4.0;
+    int blur_s = (int)(blur / ds + 0.5);
+    if (blur > 0 && blur_s < 1) blur_s = 1;
+    int pad = blur_s * 3 + 2;
+    int mw = (int)ceil(lw / ds) + 2 * pad;
+    int mh = (int)ceil(lh / ds) + 2 * pad;
+
+    if (mw > 4096 || mh > 4096) {
         cairo_save(cr);
         cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
                               sh->b / 255.0, sh->a / 255.0);
@@ -1874,13 +1881,14 @@ paint_text_shadow_layer(cairo_t *cr, PangoLayout *layout, double x, double y,
         return;
     }
 
-    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, sw, sht);
+    cairo_surface_t *mask = cairo_image_surface_create(CAIRO_FORMAT_A8, mw, mh);
     if (cairo_surface_status(mask) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(mask);
         return;
     }
     cairo_t *mcr = cairo_create(mask);
-    cairo_move_to(mcr, pad, pad);
+    cairo_scale(mcr, 1.0 / ds, 1.0 / ds);
+    cairo_move_to(mcr, pad * ds, pad * ds);
     pango_cairo_show_layout(mcr, layout);
     cairo_destroy(mcr);
     cairo_surface_flush(mask);
@@ -1888,15 +1896,27 @@ paint_text_shadow_layer(cairo_t *cr, PangoLayout *layout, double x, double y,
     if (blur > 0) {
         unsigned char *data = cairo_image_surface_get_data(mask);
         int stride = cairo_image_surface_get_stride(mask);
-        ns_box_blur_a8(data, sw, sht, stride, blur);
-        ns_box_blur_a8(data, sw, sht, stride, blur);
+        ns_box_blur_a8(data, mw, mh, stride, blur_s);
+        ns_box_blur_a8(data, mw, mh, stride, blur_s);
         cairo_surface_mark_dirty(mask);
     }
 
+    double ox = x + sh->x - pad * ds;
+    double oy = y + sh->y - pad * ds;
     cairo_save(cr);
     cairo_set_source_rgba(cr, sh->r / 255.0, sh->g / 255.0,
                           sh->b / 255.0, sh->a / 255.0);
-    cairo_mask_surface(cr, mask, x + sh->x - pad, y + sh->y - pad);
+    if (ds == 1.0) {
+        cairo_mask_surface(cr, mask, ox, oy);
+    } else {
+        cairo_pattern_t *mp = cairo_pattern_create_for_surface(mask);
+        cairo_matrix_t m;
+        cairo_matrix_init_scale(&m, 1.0 / ds, 1.0 / ds);
+        cairo_matrix_translate(&m, -ox, -oy);
+        cairo_pattern_set_matrix(mp, &m);
+        cairo_mask(cr, mp);
+        cairo_pattern_destroy(mp);
+    }
     cairo_restore(cr);
     cairo_surface_destroy(mask);
 }
