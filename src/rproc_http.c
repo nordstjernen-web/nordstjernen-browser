@@ -446,7 +446,8 @@ ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
         return -1;
 
     http_head head;
-    if (http_read_head(&r->conn, &head) != 0 || head.content_length < 0)
+    if (http_read_head(&r->conn, &head) != 0 || head.content_length < 0 ||
+        head.content_length > NS_HTTP_MAX_REPLY)
         return -1;
     char *body = malloc((size_t)head.content_length + 1);
     if (!body)
