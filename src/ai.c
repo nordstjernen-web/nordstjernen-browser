@@ -47,12 +47,19 @@ ns_ai_chat_reset(void)
 {
 }
 
+void
+ns_ai_shutdown(void)
+{
+}
+
 #else
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <curl/curl.h>
 #include <gio/gio.h>
+#include <lexbor/dom/dom.h>
+#include <lexbor/html/html.h>
 
 #include "llama.h"
 #include "ggml-backend.h"
@@ -134,7 +141,9 @@ static char    *g_dl_id;
 static char    *g_dl_error;
 static gint64   g_dl_now;
 static gint64   g_dl_total;
+static GThread *g_dl_thread;
 static GMutex   g_dl_lock;
+static volatile gboolean g_ai_quit;
 
 typedef struct {
     char *role;
@@ -151,6 +160,7 @@ static char      *g_job_error;
 static GPtrArray *g_history;
 static gint64     g_last_use_us;
 static guint      g_idle_timer;
+static GThread   *g_chat_thread;
 
 static void
 ns_ai_turn_free(gpointer data)
@@ -289,6 +299,8 @@ ns_ai_xfer_cb(void *ud, curl_off_t dltotal, curl_off_t dlnow,
               curl_off_t ultotal, curl_off_t ulnow)
 {
     (void)ultotal; (void)ulnow;
+    if (g_ai_quit)
+        return 1;
     gint64 resumed = ud ? *(const gint64 *)ud : 0;
     g_mutex_lock(&g_dl_lock);
     g_dl_now = resumed + (gint64)dlnow;
@@ -497,11 +509,18 @@ ns_ai_select_download(const char *model_id)
         g_dl_now = 0;
         g_dl_total = 0;
     }
+    GThread *old_dl = job ? g_dl_thread : NULL;
+    if (job)
+        g_dl_thread = NULL;
     g_mutex_unlock(&g_dl_lock);
 
+    if (old_dl)
+        g_thread_join(old_dl);
     if (job) {
         GThread *t = g_thread_new("ns-ai-download", ns_ai_download_thread, job);
-        if (t) g_thread_unref(t);
+        g_mutex_lock(&g_dl_lock);
+        g_dl_thread = t;
+        g_mutex_unlock(&g_dl_lock);
     }
 }
 
@@ -573,24 +592,29 @@ ns_ai_http_get(const char *url)
     return b.data;
 }
 
-static char *
-ns_ai_json_first_string(const char *json, const char *key)
+static const char *
+ns_ai_json_skip_ws(const char *p)
 {
-    if (!json) return NULL;
-    char *needle = g_strdup_printf("\"%s\":\"", key);
-    const char *p = strstr(json, needle);
-    size_t nl = strlen(needle);
-    g_free(needle);
-    if (!p) return NULL;
-    p += nl;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+    return p;
+}
+
+static char *
+ns_ai_json_string(const char *p, const char **endp)
+{
+    if (*p != '"') return NULL;
+    p++;
     GString *o = g_string_new(NULL);
     while (*p && *p != '"') {
         if (*p == '\\' && p[1]) {
             p++;
             switch (*p) {
-            case '/':  g_string_append_c(o, '/'); break;
             case 'n':  g_string_append_c(o, '\n'); break;
             case 't':  g_string_append_c(o, '\t'); break;
+            case 'r':  g_string_append_c(o, '\r'); break;
+            case 'b':  g_string_append_c(o, '\b'); break;
+            case 'f':  g_string_append_c(o, '\f'); break;
             case 'u':
                 if (p[1] && p[2] && p[3] && p[4]) {
                     char hex[5] = { p[1], p[2], p[3], p[4], 0 };
@@ -618,37 +642,38 @@ ns_ai_json_first_string(const char *json, const char *key)
             g_string_append_c(o, *p++);
         }
     }
+    if (*p != '"') {
+        g_string_free(o, TRUE);
+        return NULL;
+    }
+    *endp = p + 1;
     return g_string_free(o, FALSE);
-}
-
-static gboolean
-ns_ai_entity_at(const char *p, const char *end, const char *ent)
-{
-    gsize n = strlen(ent);
-    return (gsize)(end - p) >= n && memcmp(p, ent, n) == 0;
 }
 
 static char *
-ns_ai_html_text(const char *start, const char *end)
+ns_ai_json_first_string(const char *json, const char *key)
 {
-    GString *o = g_string_new(NULL);
-    for (const char *p = start; p < end; p++) {
-        if (*p == '<') {
-            while (p < end && *p != '>') p++;
+    for (const char *p = json; p && *p; ) {
+        if (*p != '"') { p++; continue; }
+        const char *end = NULL;
+        char *tok = ns_ai_json_string(p, &end);
+        if (!tok) { p++; continue; }
+        const char *q = ns_ai_json_skip_ws(end);
+        if (*q != ':') {
+            g_free(tok);
+            p = end;
             continue;
         }
-        if (*p == '&') {
-            if (ns_ai_entity_at(p, end, "&amp;"))  { g_string_append_c(o, '&'); p += 4; continue; }
-            if (ns_ai_entity_at(p, end, "&lt;"))   { g_string_append_c(o, '<'); p += 3; continue; }
-            if (ns_ai_entity_at(p, end, "&gt;"))   { g_string_append_c(o, '>'); p += 3; continue; }
-            if (ns_ai_entity_at(p, end, "&quot;")) { g_string_append_c(o, '"'); p += 5; continue; }
-            if (ns_ai_entity_at(p, end, "&#x27;")) { g_string_append_c(o, '\''); p += 5; continue; }
-            if (ns_ai_entity_at(p, end, "&#39;"))  { g_string_append_c(o, '\''); p += 4; continue; }
-            if (ns_ai_entity_at(p, end, "&nbsp;")) { g_string_append_c(o, ' '); p += 5; continue; }
+        gboolean want = g_strcmp0(tok, key) == 0;
+        g_free(tok);
+        const char *v = ns_ai_json_skip_ws(q + 1);
+        if (want && *v == '"') {
+            char *val = ns_ai_json_string(v, &end);
+            if (val) return val;
         }
-        g_string_append_c(o, *p);
+        p = q + 1;
     }
-    return g_string_free(o, FALSE);
+    return NULL;
 }
 
 static char *
@@ -836,6 +861,53 @@ ns_ai_search_region(void)
     return cached;
 }
 
+static gboolean
+ns_ai_el_class_has(lxb_dom_element_t *el, const char *cls)
+{
+    size_t vlen = 0;
+    const lxb_char_t *v = lxb_dom_element_get_attribute(
+        el, (const lxb_char_t *)"class", 5, &vlen);
+    if (!v) return FALSE;
+    char *s = g_strndup((const char *)v, vlen);
+    gboolean has = strstr(s, cls) != NULL;
+    g_free(s);
+    return has;
+}
+
+static char *
+ns_ai_el_text(lxb_dom_node_t *node)
+{
+    size_t tlen = 0;
+    lxb_char_t *t = lxb_dom_node_text_content(node, &tlen);
+    if (!t) return NULL;
+    return g_strstrip(g_strndup((const char *)t, tlen));
+}
+
+static char *
+ns_ai_el_href_url(lxb_dom_element_t *el)
+{
+    size_t hlen = 0;
+    const lxb_char_t *href = lxb_dom_element_get_attribute(
+        el, (const lxb_char_t *)"href", 4, &hlen);
+    if (!href) return NULL;
+    char *raw = g_strndup((const char *)href, hlen);
+    char *url = ns_ai_ddg_decode_url(raw);
+    g_free(raw);
+    return url;
+}
+
+static void
+ns_ai_search_emit(GString *ctx, GString *src, GString *disp, int n,
+                  const char *title, const char *url, const char *snippet)
+{
+    const char *tt = (title && *title) ? title : (url ? url : "");
+    g_string_append_printf(ctx, "[%d] %s\n%s\n%.280s\n\n",
+        n, title ? title : "", url ? url : "", snippet ? snippet : "");
+    g_string_append_printf(src, "[%d] [%s](%s)\n", n, tt, url ? url : "");
+    g_string_append_printf(disp, "[%s](%s)\n%.240s\n\n",
+        tt, url ? url : "", snippet ? snippet : "");
+}
+
 static char *
 ns_ai_web_search(const char *query, char **sources_out, char **display_out)
 {
@@ -852,54 +924,65 @@ ns_ai_web_search(const char *query, char **sources_out, char **display_out)
     g_free(u);
     if (!html) return NULL;
 
+    lxb_html_parser_t *parser = lxb_html_parser_create();
+    if (!parser || lxb_html_parser_init(parser) != LXB_STATUS_OK) {
+        if (parser) lxb_html_parser_destroy(parser);
+        g_free(html);
+        return NULL;
+    }
+    lxb_html_parser_dom_opt_set(parser, LXB_DOM_DOCUMENT_OPT_WO_EVENTS);
+    lxb_html_document_t *doc = lxb_html_parse(parser,
+        (const lxb_char_t *)html, strlen(html));
+    lxb_html_parser_destroy(parser);
+    g_free(html);
+    if (!doc) return NULL;
+
     GString *ctx = g_string_new(NULL);
     GString *src = g_string_new(NULL);
     GString *disp = g_string_new(NULL);
-    const char *p = html;
     int n = 0;
-    while (n < 4) {
-        p = strstr(p, "result__a");
-        if (!p) break;
-        const char *href = strstr(p, "href=\"");
-        if (!href) break;
-        href += 6;
-        const char *hend = strchr(href, '"');
-        if (!hend) break;
-        char *raw = g_strndup(href, (gsize)(hend - href));
-        char *url = ns_ai_ddg_decode_url(raw);
-        g_free(raw);
+    char *pending_url = NULL, *pending_title = NULL;
 
-        char *title = NULL;
-        const char *gt = strchr(hend, '>');
-        if (gt) {
-            const char *lt = strstr(gt + 1, "</a>");
-            if (lt) title = g_strstrip(ns_ai_html_text(gt + 1, lt));
-        }
-
-        char *snippet = NULL;
-        const char *sn = strstr(hend, "result__snippet");
-        const char *nextres = strstr(hend, "result__a");
-        if (sn && (!nextres || sn < nextres)) {
-            const char *sgt = strchr(sn, '>');
-            if (sgt) {
-                const char *slt = strstr(sgt + 1, "</a>");
-                if (slt) snippet = g_strstrip(ns_ai_html_text(sgt + 1, slt));
+    lxb_dom_node_t *root = lxb_dom_interface_node(doc);
+    lxb_dom_node_t *node = root->first_child;
+    while (node && n < 4) {
+        if (node->type == LXB_DOM_NODE_TYPE_ELEMENT &&
+            node->local_name == LXB_TAG_A) {
+            lxb_dom_element_t *el = lxb_dom_interface_element(node);
+            if (ns_ai_el_class_has(el, "result__a")) {
+                if (pending_url)
+                    ns_ai_search_emit(ctx, src, disp, ++n,
+                                      pending_title, pending_url, NULL);
+                g_free(pending_url);
+                g_free(pending_title);
+                pending_url = ns_ai_el_href_url(el);
+                pending_title = ns_ai_el_text(node);
+            } else if (pending_url &&
+                       ns_ai_el_class_has(el, "result__snippet")) {
+                char *snippet = ns_ai_el_text(node);
+                ns_ai_search_emit(ctx, src, disp, ++n,
+                                  pending_title, pending_url, snippet);
+                g_free(snippet);
+                g_free(pending_url);
+                g_free(pending_title);
+                pending_url = NULL;
+                pending_title = NULL;
             }
         }
-
-        n++;
-        const char *tt = (title && *title) ? title : (url ? url : "");
-        g_string_append_printf(ctx, "[%d] %s\n%s\n%.280s\n\n",
-            n, title ? title : "", url ? url : "", snippet ? snippet : "");
-        g_string_append_printf(src, "[%d] [%s](%s)\n", n, tt, url ? url : "");
-        g_string_append_printf(disp, "[%s](%s)\n%.240s\n\n",
-            tt, url ? url : "", snippet ? snippet : "");
-        g_free(title);
-        g_free(snippet);
-        g_free(url);
-        p = hend;
+        if (node->first_child) {
+            node = node->first_child;
+        } else {
+            while (node && node != root && !node->next)
+                node = node->parent;
+            if (!node || node == root) break;
+            node = node->next;
+        }
     }
-    g_free(html);
+    if (pending_url && n < 4)
+        ns_ai_search_emit(ctx, src, disp, ++n, pending_title, pending_url, NULL);
+    g_free(pending_url);
+    g_free(pending_title);
+    lxb_html_document_destroy(doc);
 
     if (n == 0) {
         g_string_free(ctx, TRUE);
@@ -1692,13 +1775,20 @@ ns_ai_chat_start(const char *user_msg)
     g_free(g_job_error);
     g_job_error = NULL;
     if (g_job_text) g_string_truncate(g_job_text, 0);
+    GThread *old_chat = g_chat_thread;
+    g_chat_thread = NULL;
     g_mutex_unlock(&g_job_lock);
+
+    if (old_chat)
+        g_thread_join(old_chat);
 
     ns_ai_chat_job *cj = g_new0(ns_ai_chat_job, 1);
     cj->job = job;
     cj->msg = g_strdup(user_msg);
     GThread *t = g_thread_new("ns-ai-chat", ns_ai_chat_thread, cj);
-    if (t) g_thread_unref(t);
+    g_mutex_lock(&g_job_lock);
+    g_chat_thread = t;
+    g_mutex_unlock(&g_job_lock);
 
     return g_strdup_printf("{\"job\":%d}", job);
 }
@@ -1753,6 +1843,33 @@ ns_ai_chat_reset(void)
     g_free(g_job_error);
     g_job_error = NULL;
     g_mutex_unlock(&g_job_lock);
+}
+
+void
+ns_ai_shutdown(void)
+{
+    g_mutex_lock(&g_job_lock);
+    g_job_cancel = TRUE;
+    GThread *chat = g_chat_thread;
+    g_chat_thread = NULL;
+    g_mutex_unlock(&g_job_lock);
+
+    g_mutex_lock(&g_dl_lock);
+    g_ai_quit = TRUE;
+    GThread *dl = g_dl_thread;
+    g_dl_thread = NULL;
+    g_mutex_unlock(&g_dl_lock);
+
+    if (chat) g_thread_join(chat);
+    if (dl) g_thread_join(dl);
+
+    g_mutex_lock(&g_model_lock);
+    if (g_idle_timer) {
+        g_source_remove(g_idle_timer);
+        g_idle_timer = 0;
+    }
+    ns_ai_unload_locked();
+    g_mutex_unlock(&g_model_lock);
 }
 
 #endif

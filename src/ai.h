@@ -21,6 +21,8 @@ char *ns_ai_chat_poll(void);
 
 void ns_ai_chat_reset(void);
 
+void ns_ai_shutdown(void);
+
 G_END_DECLS
 
 #endif
