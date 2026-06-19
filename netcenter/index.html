@@ -60,8 +60,9 @@
   .box .bh { background: #1a2a6c; color: #fff; font-weight: bold; font-size: 11px; padding: 3px 7px; }
   .box .bb { padding: 7px; font-size: 11px; }
   .box .bb label { display: block; color: #444; margin: 5px 0 2px; line-height: 1.2; }
-  .box .bb input.f { width: 100%; height: 19px; border: 2px inset #ccc; font-size: 11px; box-sizing: border-box; margin-bottom: 2px; }
-  .box .bb .signin { display: inline-block; background: #d4d0c8; border: 2px outset #f0f0f0; font-weight: bold; font-size: 10px; padding: 1px 9px; margin: 9px 8px 3px 0; }
+  .box .bb input.f { display: block; width: 100%; height: 19px; border: 2px inset #ccc; font-size: 11px; box-sizing: border-box; }
+  .box .bb .signin-row { margin-top: 14px; }
+  .box .bb .signin { display: inline-block; vertical-align: middle; background: #d4d0c8; border: 2px outset #f0f0f0; font-weight: bold; font-size: 9px; padding: 1px 7px; margin-right: 8px; }
   .stocks td { font-size: 11px; padding: 1px 5px; }
   .up { color: #007a00; font-weight: bold; }
   .down { color: #c00; font-weight: bold; }
@@ -104,7 +105,7 @@
     </svg>
     <div class="brandtext">
       <div class="net">Nordstjernen <em>Netcenter</em></div>
-      <div class="tag">Your starting point for the World Wide Web &mdash; since 1997</div>
+      <div class="tag">Your starting point for the World Wide Web</div>
     </div>
     <div class="right">
       Welcome, Guest!<br>
@@ -198,8 +199,10 @@
             <input class="f" type="text">
             <label>Password:</label>
             <input class="f" type="password">
-            <input class="signin" type="button" value="Sign In">
-            <a href="#" style="font-size:10px; vertical-align:middle">Join Free</a>
+            <div class="signin-row">
+              <input class="signin" type="button" value="Sign In">
+              <a href="#" style="font-size:10px; vertical-align:middle">Join Free</a>
+            </div>
           </div>
         </div>
 
