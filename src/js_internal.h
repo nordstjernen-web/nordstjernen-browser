@@ -167,6 +167,7 @@ struct ns_js {
     gsize         module_load_bytes;
     gint64        module_load_deadline_us;
     gboolean      module_load_capped;
+    GPtrArray    *import_map;
     gint64        time_origin_us;
     double        time_origin_real_ms;
     GPtrArray    *perf_entries;

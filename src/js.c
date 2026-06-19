@@ -35730,6 +35730,7 @@ ns_js_free(ns_js *js)
     if (!js) return;
     ns_js_blob_registry_remove(js);
     ns_storage_flush(js);
+    if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
@@ -36270,12 +36271,132 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 #define NS_MODULE_LOAD_MAX_COUNT 1024
 #define NS_MODULE_LOAD_MAX_BYTES ((gsize)128u * 1024u * 1024u)
 
+typedef struct ns_import_map_entry {
+    char *key;
+    char *value;
+} ns_import_map_entry;
+
+static void
+ns_import_map_entry_free(gpointer p)
+{
+    ns_import_map_entry *e = p;
+    if (!e) return;
+    g_free(e->key);
+    g_free(e->value);
+    g_free(e);
+}
+
+static void
+ns_js_import_map_add(ns_js *js, const char *key, const char *value,
+                     const char *base)
+{
+    if (!js || !key || !*key || !value || !*value) return;
+    char *resolved = ns_url_resolve(base && *base ? base : NULL, value);
+    if (!resolved) resolved = g_strdup(value);
+    if (!js->import_map)
+        js->import_map = g_ptr_array_new_with_free_func(ns_import_map_entry_free);
+    for (guint i = 0; i < js->import_map->len; i++) {
+        ns_import_map_entry *e = g_ptr_array_index(js->import_map, i);
+        if (strcmp(e->key, key) == 0) {
+            g_free(e->value);
+            e->value = resolved;
+            return;
+        }
+    }
+    ns_import_map_entry *e = g_new0(ns_import_map_entry, 1);
+    e->key = g_strdup(key);
+    e->value = resolved;
+    g_ptr_array_add(js->import_map, e);
+}
+
+static void
+ns_js_register_import_map_json(ns_js *js, const char *text, gsize len,
+                               const char *base)
+{
+    if (!js || !text) return;
+    JSValue root = JS_ParseJSON(js->ctx, text, len, "importmap");
+    if (JS_IsException(root)) { JS_FreeValue(js->ctx, root); return; }
+    JSValue imports = JS_GetPropertyStr(js->ctx, root, "imports");
+    if (JS_IsObject(imports)) {
+        JSPropertyEnum *tab = NULL;
+        uint32_t n = 0;
+        if (JS_GetOwnPropertyNames(js->ctx, &tab, &n, imports,
+                                   JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+            for (uint32_t i = 0; i < n; i++) {
+                const char *key = JS_AtomToCString(js->ctx, tab[i].atom);
+                JSValue v = JS_GetProperty(js->ctx, imports, tab[i].atom);
+                const char *val = JS_IsString(v) ? JS_ToCString(js->ctx, v) : NULL;
+                if (key && val) ns_js_import_map_add(js, key, val, base);
+                if (key) JS_FreeCString(js->ctx, key);
+                if (val) JS_FreeCString(js->ctx, val);
+                JS_FreeValue(js->ctx, v);
+                JS_FreeAtom(js->ctx, tab[i].atom);
+            }
+            js_free(js->ctx, tab);
+        }
+    }
+    JS_FreeValue(js->ctx, imports);
+    JS_FreeValue(js->ctx, root);
+}
+
+static void
+ns_js_register_import_maps(ns_js *js, ns_node *root)
+{
+    if (!js || !root) return;
+    if (ns_node_is_element_named(root, "script")) {
+        const char *type = ns_element_get_attr(root, "type");
+        if (type && g_ascii_strcasecmp(type, "importmap") == 0 &&
+            !ns_element_get_attr(root, NS_SCRIPT_ALREADY_STARTED)) {
+            ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
+            char *base = ns_js_doc_base_url(js);
+            for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+                if (c->kind == NS_NODE_TEXT && c->text)
+                    ns_js_register_import_map_json(js, c->text,
+                                                   strlen(c->text), base);
+            }
+            g_free(base);
+        }
+        return;
+    }
+    if (ns_node_is_element_named(root, "template")) return;
+    for (ns_node *c = root->first_child; c; c = c->next_sibling)
+        ns_js_register_import_maps(js, c);
+}
+
+static char *
+ns_js_import_map_resolve(ns_js *js, const char *name)
+{
+    if (!js || !js->import_map || !name) return NULL;
+    ns_import_map_entry *best = NULL;
+    size_t best_len = 0;
+    for (guint i = 0; i < js->import_map->len; i++) {
+        ns_import_map_entry *e = g_ptr_array_index(js->import_map, i);
+        size_t klen = strlen(e->key);
+        if (strcmp(e->key, name) == 0)
+            return g_strdup(e->value);
+        if (klen > 0 && e->key[klen - 1] == '/' &&
+            strncmp(e->key, name, klen) == 0 && klen > best_len) {
+            best = e;
+            best_len = klen;
+        }
+    }
+    if (best)
+        return g_strconcat(best->value, name + best_len, NULL);
+    return NULL;
+}
+
 static char *
 ns_js_module_normalize(JSContext *ctx, const char *base_name,
                        const char *name, void *opaque)
 {
-    (void)opaque;
+    ns_js *js = opaque;
     if (!name) return NULL;
+    char *mapped = ns_js_import_map_resolve(js, name);
+    if (mapped) {
+        char *out = js_strdup(ctx, mapped);
+        g_free(mapped);
+        return out;
+    }
     char *abs = ns_url_resolve(base_name && *base_name ? base_name : NULL, name);
     if (!abs) abs = g_strdup(name);
     char *out = js_strdup(ctx, abs);
@@ -36972,6 +37093,7 @@ ns_js_drain_async_script_roots(ns_js *js)
             g_strdup((js->current_url && *js->current_url)
                      ? js->current_url : "inline");
         GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+        ns_js_register_import_maps(js, root);
         ns_js_collect_script_tasks(root, tasks);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, origin);
         g_array_free(tasks, TRUE);
@@ -37000,6 +37122,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+    ns_js_register_import_maps(js, root);
     ns_js_collect_script_tasks(root, tasks);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
@@ -37030,6 +37153,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
             g_strdup((js->current_url && *js->current_url)
                      ? js->current_url : "inline");
         GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+        ns_js_register_import_maps(js, root);
         ns_js_collect_script_tasks(root, tasks);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
         ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, origin);
@@ -38211,6 +38335,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     gint64 t_prefetch = profile ? g_get_monotonic_time() : 0;
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
+    ns_js_register_import_maps(js, doc);
     ns_js_collect_script_tasks(doc, tasks);
     ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
     gint64 t_blocking = profile ? g_get_monotonic_time() : 0;

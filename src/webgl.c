@@ -1450,6 +1450,23 @@ static JSValue wgl_getActiveUniform(JSContext *c, JSValueConst t, int a, JSValue
 { return wgl_active_var(c, t, a, v, glGetActiveUniform); }
 
 static JSValue
+wgl_getShaderPrecisionFormat(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    WGL_GET(0);
+    GLenum shader_type = (GLenum)argi(ctx, argc, argv, 0);
+    GLenum precision_type = (GLenum)argi(ctx, argc, argv, 1);
+    GLint range[2] = { 0, 0 };
+    GLint precision = 0;
+    glGetShaderPrecisionFormat(shader_type, precision_type, range, &precision);
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "rangeMin", JS_NewInt32(ctx, range[0]));
+    JS_SetPropertyStr(ctx, o, "rangeMax", JS_NewInt32(ctx, range[1]));
+    JS_SetPropertyStr(ctx, o, "precision", JS_NewInt32(ctx, precision));
+    return o;
+}
+
+static JSValue
 wgl_gen_obj(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv,
             const char *kind, void (*gen)(GLsizei, GLuint *))
 {
@@ -3415,6 +3432,7 @@ wgl_bind_methods(JSContext *ctx, JSValueConst obj)
     bindf(ctx, obj, "getAttribLocation", wgl_getAttribLocation, 2);
     bindf(ctx, obj, "getUniformLocation", wgl_getUniformLocation, 2);
     bindf(ctx, obj, "getActiveAttrib", wgl_getActiveAttrib, 2);
+    bindf(ctx, obj, "getShaderPrecisionFormat", wgl_getShaderPrecisionFormat, 2);
     bindf(ctx, obj, "getActiveUniform", wgl_getActiveUniform, 2);
 
     bindf(ctx, obj, "createBuffer", wgl_createBuffer, 0);
