@@ -19785,6 +19785,41 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
     if (newc == oldc) return JS_DupValue(ctx, argv[1]);
     ns_js *_j = js_from_ctx(ctx);
     gboolean inert_parent = ns_node_in_template_content(parent);
+
+    if (newc->kind == NS_NODE_DOCUMENT && !newc->parent) {
+        ns_node *reference = oldc->next_sibling;
+        ns_node *o_prev = oldc->prev_sibling, *o_next = oldc->next_sibling;
+        ns_node_remove(oldc);
+        if (_j) {
+            ns_ce_disconnect_subtree(_j, oldc);
+            g_hash_table_add(_j->orphan_nodes, oldc);
+            ns_js_record_child_change(_j, parent, NULL, oldc, o_prev, o_next);
+        }
+        ns_node *c = newc->first_child;
+        while (c) {
+            ns_node *next = c->next_sibling;
+            if (_j) ns_ce_disconnect_subtree(_j, c);
+            ns_node_remove(c);
+            if (!reference || reference->parent != parent) {
+                if (_j) g_hash_table_remove(_j->orphan_nodes, c);
+                ns_node_append_child(parent, c);
+            } else {
+                ns_element_insert_before_single(_j, parent, c, reference);
+            }
+            if (_j) ns_js_record_child_change(_j, parent, c, NULL,
+                                              c->prev_sibling, c->next_sibling);
+            c = next;
+        }
+        if (_j) {
+            _j->mutated = TRUE;
+            if (!inert_parent) {
+                ns_ce_upgrade_subtree_all(_j, parent);
+                ns_js_run_inserted_scripts(_j, parent);
+            }
+        }
+        return JS_DupValue(ctx, argv[1]);
+    }
+
     if (_j) ns_ce_disconnect_subtree(_j, newc);
     if (newc->parent) ns_node_remove(newc);
     if (_j) g_hash_table_remove(_j->orphan_nodes, newc);
@@ -30266,7 +30301,16 @@ ns_document_import_node(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1) return JS_NULL;
     ns_node *src = ns_unwrap_element_mut(argv[0]);
-    if (!src) return JS_NULL;
+    if (!src) {
+        if (JS_IsObject(argv[0])) {
+            JSValue nt = JS_GetPropertyStr(ctx, argv[0], "nodeType");
+            int32_t t = 0;
+            JS_ToInt32(ctx, &t, nt);
+            JS_FreeValue(ctx, nt);
+            if (t == 2) return ns_attr_cloneNode(ctx, argv[0], 0, NULL);
+        }
+        return JS_NULL;
+    }
     gboolean deep = (argc >= 2) ? (JS_ToBool(ctx, argv[1]) ? TRUE : FALSE) : FALSE;
     ns_node *copy = ns_node_clone(src, deep);
     if (!copy) return JS_NULL;
