@@ -11391,17 +11391,51 @@ ns_css_sibling_counts_for_nth(const ns_node *el, const ns_css_pseudo_pred *pc,
     return TRUE;
 }
 
+static void
+ns_css_pragma_language_scan(const ns_node *n, const char **found)
+{
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            g_ascii_strcasecmp(c->name, "meta") == 0) {
+            const char *he = ns_element_get_attr(c, "http-equiv");
+            const char *content = he &&
+                g_ascii_strcasecmp(he, "content-language") == 0
+                ? ns_element_get_attr(c, "content") : NULL;
+            if (content && !strchr(content, ',')) {
+                const char *s = content;
+                while (*s && g_ascii_isspace((guchar)*s)) s++;
+                const char *e = s;
+                while (*e && !g_ascii_isspace((guchar)*e)) e++;
+                if (e > s) {
+                    static char buf[128];
+                    gsize len = (gsize)(e - s);
+                    if (len >= sizeof buf) len = sizeof buf - 1;
+                    memcpy(buf, s, len);
+                    buf[len] = '\0';
+                    *found = buf;
+                }
+            }
+        }
+        ns_css_pragma_language_scan(c, found);
+    }
+}
+
 static const char *
 ns_css_node_language(const ns_node *el)
 {
+    static const char xml_ns[] = "http://www.w3.org/XML/1998/namespace";
     for (const ns_node *n = el; n; n = n->parent) {
         if (n->kind != NS_NODE_ELEMENT) continue;
-        const char *lang = ns_element_get_attr(n, "lang");
-        if (lang && *lang) return lang;
-        lang = ns_element_get_attr(n, "xml:lang");
-        if (lang && *lang) return lang;
+        const ns_attr *xa = ns_element_find_attr_ns(n, xml_ns, "lang");
+        if (xa) return xa->value ? xa->value : "";
+        const ns_attr *la = ns_element_find_attr_ns(n, NULL, "lang");
+        if (la) return la->value ? la->value : "";
     }
-    return NULL;
+    const ns_node *root = el;
+    while (root && root->parent) root = root->parent;
+    const char *found = NULL;
+    if (root) ns_css_pragma_language_scan(root, &found);
+    return found;
 }
 
 static gboolean
