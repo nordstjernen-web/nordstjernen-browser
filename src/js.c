@@ -20431,6 +20431,22 @@ static const ns_attr *ns_element_attr_by_namespace(const ns_node *n,
                                                    const char *namespace_uri,
                                                    const char *local);
 
+static JSValue ns_attr_cloneNode(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv);
+
+static void
+ns_attr_apply_proto(JSContext *ctx, JSValueConst obj)
+{
+    JSValue gobj = JS_GetGlobalObject(ctx);
+    JSValue attr_ctor = JS_GetPropertyStr(ctx, gobj, "Attr");
+    JSValue attr_proto = JS_GetPropertyStr(ctx, attr_ctor, "prototype");
+    if (JS_IsObject(attr_proto)) JS_SetPrototype(ctx, obj, attr_proto);
+    JS_FreeValue(ctx, attr_proto);
+    JS_FreeValue(ctx, attr_ctor);
+    JS_FreeValue(ctx, gobj);
+    ns_bind_fn(ctx, obj, "cloneNode", ns_attr_cloneNode, 0);
+}
+
 static JSValue
 ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
               gboolean include_base)
@@ -20438,6 +20454,7 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
     const char *name = a && a->name ? a->name : "";
     const char *local = ns_attr_local_name(a);
     JSValue entry = JS_NewObject(ctx);
+    ns_attr_apply_proto(ctx, entry);
     JS_SetPropertyStr(ctx, entry, "name", JS_NewString(ctx, name));
     JS_SetPropertyStr(ctx, entry, "nodeName", JS_NewString(ctx, name));
     JS_SetPropertyStr(ctx, entry, "localName", JS_NewString(ctx, local));
@@ -33002,9 +33019,48 @@ ns_attr_isDefaultNamespace(JSContext *ctx, JSValueConst this_val,
 
 static JSValue
 ns_make_attr_node(JSContext *ctx, const char *ns_uri, const char *prefix,
+                  const char *local, const char *qname);
+
+static JSValue
+ns_attr_cloneNode(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue jns = JS_GetPropertyStr(ctx, this_val, "namespaceURI");
+    JSValue jprefix = JS_GetPropertyStr(ctx, this_val, "prefix");
+    JSValue jlocal = JS_GetPropertyStr(ctx, this_val, "localName");
+    JSValue jname = JS_GetPropertyStr(ctx, this_val, "name");
+    JSValue jvalue = JS_GetPropertyStr(ctx, this_val, "value");
+    const char *ns_uri = (JS_IsNull(jns) || JS_IsUndefined(jns))
+        ? NULL : JS_ToCString(ctx, jns);
+    const char *prefix = (JS_IsNull(jprefix) || JS_IsUndefined(jprefix))
+        ? NULL : JS_ToCString(ctx, jprefix);
+    const char *local = JS_ToCString(ctx, jlocal);
+    const char *name = JS_ToCString(ctx, jname);
+    JSValue copy = ns_make_attr_node(ctx, ns_uri, prefix,
+                                     local ? local : "",
+                                     name ? name : (local ? local : ""));
+    JS_SetPropertyStr(ctx, copy, "value",       JS_DupValue(ctx, jvalue));
+    JS_SetPropertyStr(ctx, copy, "nodeValue",   JS_DupValue(ctx, jvalue));
+    JS_SetPropertyStr(ctx, copy, "textContent", JS_DupValue(ctx, jvalue));
+    if (ns_uri) JS_FreeCString(ctx, ns_uri);
+    if (prefix) JS_FreeCString(ctx, prefix);
+    if (local) JS_FreeCString(ctx, local);
+    if (name) JS_FreeCString(ctx, name);
+    JS_FreeValue(ctx, jns);
+    JS_FreeValue(ctx, jprefix);
+    JS_FreeValue(ctx, jlocal);
+    JS_FreeValue(ctx, jname);
+    JS_FreeValue(ctx, jvalue);
+    return copy;
+}
+
+static JSValue
+ns_make_attr_node(JSContext *ctx, const char *ns_uri, const char *prefix,
                   const char *local, const char *qname)
 {
     JSValue out = JS_NewObject(ctx);
+    ns_attr_apply_proto(ctx, out);
     ns_bind_fn(ctx, out, "lookupNamespaceURI", ns_attr_lookupNamespaceURI, 1);
     ns_bind_fn(ctx, out, "lookupPrefix",       ns_attr_lookupPrefix,       1);
     ns_bind_fn(ctx, out, "isDefaultNamespace", ns_attr_isDefaultNamespace, 1);
