@@ -645,6 +645,7 @@ ns_element_append_attr_borrow(ns_node *el, const char *name, const char *value)
     if (!el || el->kind != NS_NODE_ELEMENT || !name) return;
     if (el->class_set) ns_class_set_clear(el);
     el->attr_bloom = 0;
+    el->attr_gen++;
     ns_attr *a = g_new0(ns_attr, 1);
     a->name  = (char *)name;
     a->value = (char *)(value ? value : "");
@@ -889,6 +890,7 @@ ns_element_set_attr(ns_node *el, const char *name, const char *value)
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
+    el->attr_gen++;
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
@@ -926,6 +928,7 @@ ns_element_set_attr_ns(ns_node *el, const char *namespace_uri,
     if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
+    el->attr_gen++;
 
     ns_attr *tail = NULL;
     for (ns_attr *a = el->attrs; a; a = a->next) {
@@ -957,6 +960,7 @@ ns_element_remove_attr(ns_node *el, const char *name)
     if (el->class_set && g_ascii_strcasecmp(name, "class") == 0)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
+    el->attr_gen++;
     ns_attr **link = &el->attrs;
     while (*link) {
         if (g_ascii_strcasecmp((*link)->name, name) == 0) {
@@ -978,6 +982,7 @@ ns_element_remove_attr_ns(ns_node *el, const char *namespace_uri,
     if (el->class_set && !ns && g_ascii_strcasecmp(local_name, "class") == 0)
         ns_class_set_clear(el);
     el->attr_bloom = 0;
+    el->attr_gen++;
     ns_attr **link = &el->attrs;
     while (*link) {
         if (ns_attr_matches_ns(*link, ns, local_name)) {

@@ -86,6 +86,8 @@ struct ns_node {
 
     guint64 attr_bloom;
 
+    guint32 attr_gen;
+
     guint16 flags;
 };
 

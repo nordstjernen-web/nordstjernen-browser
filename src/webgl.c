@@ -37,6 +37,8 @@ typedef struct ns_webgl {
     GLuint         bound_array_buffer, bound_element_array_buffer;
     int            samples;
     int            w, h;
+    guint32        size_attr_gen;
+    gboolean       size_synced;
     cairo_surface_t *surf;
     uint8_t       *readback;
     size_t         readback_len;
@@ -284,6 +286,11 @@ ns_webgl_alloc_storage(ns_webgl *g, int w, int h)
 static void
 ns_webgl_sync_size(ns_webgl *g)
 {
+    guint32 gen = g->canvas ? g->canvas->attr_gen : 0;
+    if (g->size_synced && gen == g->size_attr_gen) return;
+    g->size_attr_gen = gen;
+    g->size_synced = TRUE;
+
     int w = ns_webgl_dim(g->canvas, "width", 300);
     int h = ns_webgl_dim(g->canvas, "height", 150);
     if (w == g->w && h == g->h) return;
