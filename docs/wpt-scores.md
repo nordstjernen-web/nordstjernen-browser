@@ -163,6 +163,20 @@ interval. Treat the trend, not the point value, as the signal.
 |------|--------------|-----|--------|--------------------------------|-------------------|
 | 2026-06-12 | 9526465 | 3be6ba111 | 250 of 29259 | ~44,000 (22,000 – 72,000) | ~0.7% |
 | 2026-06-13 | fcfeaf1 | d8a8414e5 | 250 of 29259 | ~255,256 (21,184 – 706,429) | ~4.3% |
+| 2026-06-19 | 85e29df | 1df6b93 | 369 of 29346 (area-stratified) | ~292,700 (50,800 – 733,000) | ~4.9% |
+
+The 2026-06-19 row uses an **area-stratified** sample (proportional
+allocation across the 20 largest top-level areas with a floor of 8
+files each, extrapolated per area and summed) rather than the flat
+random sample of the earlier rows, so the css/html majority is
+weighted correctly. The estimate is dominated by `html`
+(~206k of the total; ~31 passing subtests per file over n=69) with
+smaller high-leverage contributions from `wasm` (~73/file, n=8) and
+`svg` (~50/file, n=8) — those tiny n drive most of the wide interval.
+`css` is 25% of the suite but only ~2.5 passes/file (parsing passes,
+layout assertions mostly fail), and `referrer-policy`/`navigation-api`/
+`webrtc`/`websockets` contribute ~0. The wide CI means the trend, not
+the point value, is the signal.
 
 Runtime estimate: a 696-file tracked-slice run on this Windows/MSYS2
 machine took 36m25s, or about 3.1 seconds per file with the 15000 ms
