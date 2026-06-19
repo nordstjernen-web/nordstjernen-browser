@@ -13,7 +13,7 @@
 
   /* ---- masthead ---- */
   .masthead { background: linear-gradient(#1a2a6c, #0a1430); display: flex; align-items: center; padding: 8px 12px; }
-  .logo { width: 96px; height: 78px; border: 2px ridge #6f7fbf; margin-right: 14px; flex: none; }
+  .logo { width: 84px; height: 84px; border-radius: 12px; margin-right: 14px; flex: none; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
   .brandtext { color: #fff; }
   .brandtext .net { font-family: Arial, sans-serif; font-weight: bold; font-size: 30px; letter-spacing: -1px; }
   .brandtext .net em { color: #39d27a; font-style: normal; }
@@ -81,28 +81,57 @@
 <div class="page">
 
   <div class="masthead">
-    <svg class="logo" viewBox="0 0 100 80" xmlns="http://www.w3.org/2000/svg">
+    <svg class="logo" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#0a1746"/><stop offset="1" stop-color="#020615"/>
-        </linearGradient>
-        <linearGradient id="comet" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0" stop-color="#0a1746" stop-opacity="0"/><stop offset="1" stop-color="#46e58a"/>
-        </linearGradient>
-        <radialGradient id="horizon" cx="50%" cy="120%" r="80%">
-          <stop offset="0" stop-color="#2a57c8"/><stop offset="1" stop-color="#0a1746" stop-opacity="0"/>
+        <radialGradient id="nc-sky" cx="50%" cy="42%" r="78%">
+          <stop offset="0%" stop-color="#1a2b6b"/><stop offset="55%" stop-color="#070d3a"/><stop offset="100%" stop-color="#01030f"/>
         </radialGradient>
+        <linearGradient id="nc-nfill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff"/><stop offset="55%" stop-color="#eef2fb"/><stop offset="100%" stop-color="#aab5cc"/>
+        </linearGradient>
+        <radialGradient id="nc-halo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#fff7c2" stop-opacity="0.85"/><stop offset="35%" stop-color="#fff2a0" stop-opacity="0.35"/>
+          <stop offset="70%" stop-color="#fff2a0" stop-opacity="0.05"/><stop offset="100%" stop-color="#fff2a0" stop-opacity="0"/>
+        </radialGradient>
+        <radialGradient id="nc-starGrad" cx="50%" cy="40%" r="65%">
+          <stop offset="0%" stop-color="#ffffff"/><stop offset="60%" stop-color="#f0f4ff"/><stop offset="100%" stop-color="#b9c4e8"/>
+        </radialGradient>
+        <radialGradient id="nc-core" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffffff"/><stop offset="40%" stop-color="#fff4b8"/><stop offset="100%" stop-color="#ffba2f"/>
+        </radialGradient>
+        <clipPath id="nc-card"><rect x="0" y="0" width="256" height="256" rx="36" ry="36"/></clipPath>
       </defs>
-      <rect width="100" height="80" fill="url(#sky)"/>
-      <rect width="100" height="80" fill="url(#horizon)"/>
-      <circle cx="14" cy="14" r="1" fill="#fff"/><circle cx="32" cy="9" r="1.2" fill="#fff"/>
-      <circle cx="70" cy="12" r="1" fill="#cfe"/><circle cx="86" cy="22" r="1.3" fill="#fff"/>
-      <circle cx="22" cy="30" r="1" fill="#fff"/><circle cx="60" cy="6" r="1" fill="#fff"/>
-      <path d="M8 74 Q40 50 84 16" stroke="url(#comet)" stroke-width="6" fill="none" stroke-linecap="round"/>
-      <circle cx="84" cy="16" r="6" fill="#aff5cd"/>
-      <circle cx="84" cy="16" r="3" fill="#fff"/>
-      <text x="50" y="60" text-anchor="middle" font-family="Arial Black, Arial, sans-serif"
-            font-size="52" font-weight="900" fill="#eef2ff" stroke="#2a57c8" stroke-width="1.2">N</text>
+      <g clip-path="url(#nc-card)">
+        <rect width="256" height="256" fill="url(#nc-sky)"/>
+        <g fill="#ffffff">
+          <circle cx="22" cy="34" r="1.2" opacity="0.85"/><circle cx="44" cy="18" r="0.8" opacity="0.65"/>
+          <circle cx="62" cy="58" r="1.5" opacity="0.9"/><circle cx="86" cy="26" r="0.9" opacity="0.7"/>
+          <circle cx="14" cy="92" r="1.0" opacity="0.8"/><circle cx="36" cy="118" r="0.7" opacity="0.6"/>
+          <circle cx="18" cy="156" r="1.3" opacity="0.9"/><circle cx="42" cy="200" r="0.9" opacity="0.75"/>
+          <circle cx="70" cy="232" r="1.1" opacity="0.85"/><circle cx="106" cy="222" r="0.8" opacity="0.7"/>
+          <circle cx="148" cy="238" r="1.4" opacity="0.9"/><circle cx="188" cy="218" r="0.9" opacity="0.75"/>
+          <circle cx="216" cy="240" r="1.0" opacity="0.8"/><circle cx="234" cy="196" r="1.3" opacity="0.85"/>
+          <circle cx="242" cy="148" r="0.9" opacity="0.7"/><circle cx="222" cy="112" r="1.1" opacity="0.8"/>
+          <circle cx="238" cy="74" r="0.8" opacity="0.65"/><circle cx="212" cy="40" r="1.4" opacity="0.9"/>
+          <circle cx="176" cy="22" r="0.9" opacity="0.7"/><circle cx="148" cy="42" r="1.0" opacity="0.8"/>
+          <circle cx="120" cy="18" r="0.7" opacity="0.6"/><circle cx="92" cy="200" r="0.8" opacity="0.7"/>
+          <circle cx="200" cy="170" r="0.9" opacity="0.75"/><circle cx="60" cy="170" r="0.7" opacity="0.6"/>
+        </g>
+        <g fill="#ffffff" opacity="0.85">
+          <polygon points="38,72 40,78 46,80 40,82 38,88 36,82 30,80 36,78"/>
+          <polygon points="210,90 212,96 218,98 212,100 210,106 208,100 202,98 208,96"/>
+          <polygon points="56,206 58,212 64,214 58,216 56,222 54,216 48,214 54,212"/>
+          <polygon points="196,196 198,202 204,204 198,206 196,212 194,206 188,204 194,202"/>
+        </g>
+        <text x="128" y="196" text-anchor="middle"
+              font-family="Georgia, 'Times New Roman', 'DejaVu Serif', serif"
+              font-size="184" font-weight="bold" fill="url(#nc-nfill)" opacity="0.92">N</text>
+        <circle cx="128" cy="128" r="86" fill="url(#nc-halo)"/>
+        <polygon points="128,18 138,118 238,128 138,138 128,238 118,138 18,128 118,118" fill="url(#nc-starGrad)" opacity="0.55"/>
+        <polygon points="128,62 132,124 194,128 132,132 128,194 124,132 62,128 124,124" fill="#ffffff" opacity="0.30"/>
+        <circle cx="128" cy="128" r="9" fill="url(#nc-core)"/>
+        <circle cx="125" cy="125" r="2.6" fill="#ffffff" opacity="0.9"/>
+      </g>
     </svg>
     <div class="brandtext">
       <div class="net">Nordstjernen <em>Netcenter</em></div>
