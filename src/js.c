@@ -28834,6 +28834,48 @@ ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
     return JS_GetGlobalObject(ctx);
 }
 
+static void
+ns_collect_frames_walk(JSContext *ctx, const ns_node *n, JSValue arr,
+                       uint32_t *i, int depth)
+{
+    if (!n || depth >= 256) return;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            (g_ascii_strcasecmp(c->name, "iframe") == 0 ||
+             g_ascii_strcasecmp(c->name, "frame") == 0)) {
+            JSValue el = ns_make_element(ctx, c);
+            JS_SetPropertyUint32(ctx, arr, (*i)++,
+                                 ns_element_get_contentWindow(ctx, el));
+            JS_FreeValue(ctx, el);
+            continue;
+        }
+        ns_collect_frames_walk(ctx, c, arr, i, depth + 1);
+    }
+}
+
+static JSValue
+ns_window_get_frames(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue arr = JS_NewArray(ctx);
+    uint32_t i = 0;
+    if (js && js->current_doc)
+        ns_collect_frames_walk(ctx, js->current_doc, arr, &i, 0);
+    return arr;
+}
+
+static JSValue
+ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    JSValue frames = ns_window_get_frames(ctx, this_val, argc, argv);
+    JSValue len = JS_GetPropertyStr(ctx, frames, "length");
+    JS_FreeValue(ctx, frames);
+    return len;
+}
+
 static JSValue
 ns_element_getSVGDocument(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
@@ -32368,8 +32410,20 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "top",    JS_DupValue(ctx, global));
     JS_SetPropertyStr(ctx, global, "parent", JS_DupValue(ctx, global));
     JS_SetPropertyStr(ctx, global, "globalThis", JS_DupValue(ctx, global));
-    JS_SetPropertyStr(ctx, global, "frames", JS_NewArray(ctx));
-    JS_SetPropertyStr(ctx, global, "length", JS_NewInt32(ctx, 0));
+    {
+        JSAtom frames_atom = JS_NewAtom(ctx, "frames");
+        JS_DefinePropertyGetSet(ctx, global, frames_atom,
+            JS_NewCFunction2(ctx, ns_window_get_frames, "get frames", 0,
+                             JS_CFUNC_generic, 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, frames_atom);
+        JSAtom length_atom = JS_NewAtom(ctx, "length");
+        JS_DefinePropertyGetSet(ctx, global, length_atom,
+            JS_NewCFunction2(ctx, ns_window_get_length, "get length", 0,
+                             JS_CFUNC_generic, 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, length_atom);
+    }
 
     static const char *const window_event_handlers[] = {
         "onload", "onunload", "onbeforeunload", "onhashchange", "onpopstate",
