@@ -11078,6 +11078,8 @@ static JSValue
 ns_window_url_can_parse(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "URL.canParse: 1 argument required");
     JSValue tmp = ns_window_url_ctor(ctx, this_val, argc, argv);
     if (JS_IsException(tmp)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -11091,12 +11093,28 @@ static JSValue
 ns_window_url_parse_static(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "URL.parse: 1 argument required");
     JSValue tmp = ns_window_url_ctor(ctx, this_val, argc, argv);
     if (JS_IsException(tmp)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_NULL;
     }
     return tmp;
+}
+
+static void
+ns_url_install_interface(JSContext *ctx)
+{
+    static const char *src =
+        "(function(){"
+        " try { new URL('http://e/'); } catch(e) {}"
+        " try { Object.defineProperty(globalThis, 'URL', { enumerable: false }); } catch(e) {}"
+        " try { Object.defineProperty(URL, 'prototype', { writable: false }); } catch(e) {}"
+        "})()";
+    JSValue r = JS_Eval(ctx, src, strlen(src), "<url-iface>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
 }
 
 static JSValue
@@ -11173,45 +11191,60 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
     if (jsx && !jsx->url_helper_set) {
         static const char *helper_src =
             "(function(u){"
-            " var raw = {"
+            " var URLp = URL.prototype;"
+            " if (!URLp.__ndReady) {"
+            "   function nm(fn, n){ try { Object.defineProperty(fn, 'name',"
+            "     { value: n, configurable: true }); } catch(e) {} return fn; }"
+            "   function gettr(name){ return function(){ return this.__nd[name]; }; }"
+            "   function setComp(comp){ return function(v){"
+            "       var p = __ndUrlSet(this.__nd.href, comp, String(v));"
+            "       if (p) { this.__nd = p; this.__ndSync(); } }; }"
+            "   function accessor(name, setter){"
+            "     Object.defineProperty(URLp, name, { configurable: true,"
+            "       enumerable: true, get: nm(gettr(name), 'get ' + name),"
+            "       set: setter ? nm(setter, 'set ' + name) : undefined }); }"
+            "   accessor('href', function(v){"
+            "     var p = __ndUrlParts(String(v));"
+            "     if (!p) throw new TypeError('Invalid URL');"
+            "     this.__nd = p; this.__ndSync(); });"
+            "   accessor('origin', undefined);"
+            "   ['protocol','username','password','host','hostname','port',"
+            "    'pathname','search','hash'].forEach(function(n){"
+            "       accessor(n, setComp(n)); });"
+            "   Object.defineProperty(URLp, 'searchParams', { configurable: true,"
+            "     enumerable: true, get: nm(function(){"
+            "       if (!this.__nd) throw new TypeError('Illegal invocation');"
+            "       return this.__ndSP; }, 'get searchParams') });"
+            "   function method(name, fn){ Object.defineProperty(URLp, name,"
+            "     { configurable: true, enumerable: true, writable: true,"
+            "       value: nm(fn, name) }); }"
+            "   method('toString', function(){ return this.__nd.href; });"
+            "   method('toJSON',   function(){ return this.__nd.href; });"
+            "   Object.defineProperty(URLp, '__ndSync', { configurable: true,"
+            "     writable: true, value: function(){"
+            "       try { var sp = new URLSearchParams(this.__nd.search.replace(/^\\?/, ''));"
+            "             sp._owner = this;"
+            "             Object.defineProperty(this, '__ndSP', { value: sp,"
+            "               configurable: true, writable: true }); } catch(e) {} } });"
+            "   Object.defineProperty(URLp, '_setSearchRaw', { configurable: true,"
+            "     writable: true, value: function(v){"
+            "       var p = __ndUrlSet(this.__nd.href, 'search', String(v));"
+            "       if (p) { this.__nd = p; this.__ndSync(); } } });"
+            "   try { Object.defineProperty(URLp, Symbol.toStringTag,"
+            "     { value: 'URL', configurable: true }); } catch(e) {}"
+            "   Object.defineProperty(URLp, '__ndReady', { value: true });"
+            " }"
+            " var nd = {"
             "   href: u.href, origin: u.origin,"
             "   protocol: u.protocol, username: u.username, password: u.password,"
             "   host: u.host, hostname: u.hostname, port: u.port,"
             "   pathname: u.pathname || '/', search: u.search || '', hash: u.hash || ''"
             " };"
-            " function refreshSP(){"
-            "   try { var sp = new URLSearchParams(raw.search.replace(/^\\?/, '')); sp._owner = u;"
-            "         Object.defineProperty(u, 'searchParams', { value: sp, configurable: true, enumerable: true, writable: false }); } catch(e) {}"
-            " }"
-            " function apply(p){ if (p) { raw = p; refreshSP(); } }"
-            " function def(name, setter){"
-            "   Object.defineProperty(u, name, { configurable: true, enumerable: true,"
-            "     get: function(){ return raw[name]; },"
-            "     set: setter || function(){} });"
-            " }"
-            " function setComp(comp){"
-            "   return function(v){ apply(__ndUrlSet(raw.href, comp, String(v))); };"
-            " }"
-            " def('href', function(v){"
-            "   var p = __ndUrlParts(String(v));"
-            "   if (!p) throw new TypeError('Invalid URL');"
-            "   apply(p);"
-            " });"
-            " def('origin');"
-            " def('protocol', setComp('protocol'));"
-            " def('username', setComp('username'));"
-            " def('password', setComp('password'));"
-            " def('host',     setComp('host'));"
-            " def('hostname', setComp('hostname'));"
-            " def('port',     setComp('port'));"
-            " def('pathname', setComp('pathname'));"
-            " def('search',   setComp('search'));"
-            " def('hash',     setComp('hash'));"
-            " u._setSearchRaw = function(v){ apply(__ndUrlSet(raw.href, 'search', String(v))); };"
-            " refreshSP();"
-            " u.toString = function(){ return raw.href; };"
-            " u.toJSON   = function(){ return raw.href; };"
-            " return u;"
+            " var inst = Object.create(URLp);"
+            " Object.defineProperty(inst, '__nd', { value: nd, configurable: true,"
+            "   writable: true });"
+            " inst.__ndSync();"
+            " return inst;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
                             "<url-helper>", JS_EVAL_TYPE_GLOBAL);
@@ -11226,8 +11259,13 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
     if (jsx && jsx->url_helper_set) {
         JSValueConst args[1] = { obj };
         JSValue r = JS_Call(ctx, jsx->url_helper, JS_UNDEFINED, 1, args);
-        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-        JS_FreeValue(ctx, r);
+        if (JS_IsException(r)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, r);
+        } else {
+            JS_FreeValue(ctx, obj);
+            return r;
+        }
     }
     return obj;
 }
@@ -15842,10 +15880,11 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
     ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 1);
-    JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 2);
-    ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 2);
-    ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 2);
+    JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
+    ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 1);
+    ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 1);
     JS_SetPropertyStr(ctx, global, "URL", url_ctor);
+    ns_url_install_interface(ctx);
 
     ns_wasm_install(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequest", ns_window_xhr_ctor, 0);
@@ -31746,7 +31785,8 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, navigator);
 
     JSValue url_ctor = JS_GetPropertyStr(ctx, global, "URL");
-    ns_set_if_missing(ctx, global, "webkitURL", JS_DupValue(ctx, url_ctor));
+    JS_DefinePropertyValueStr(ctx, global, "webkitURL", JS_DupValue(ctx, url_ctor),
+                              JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_FreeValue(ctx, url_ctor);
 
     JSValue speech = JS_NewObject(ctx);
@@ -32492,12 +32532,13 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     ns_bind_fn(ctx, global, "btoa", ns_window_btoa, 1);
     ns_bind_fn(ctx, global, "atob", ns_window_atob, 1);
-    JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 2);
-    ns_bind_fn(ctx, url_ctor, "canParse",        ns_window_url_can_parse, 2);
-    ns_bind_fn(ctx, url_ctor, "parse",           ns_window_url_parse_static, 2);
+    JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
+    ns_bind_fn(ctx, url_ctor, "canParse",        ns_window_url_can_parse, 1);
+    ns_bind_fn(ctx, url_ctor, "parse",           ns_window_url_parse_static, 1);
     ns_bind_fn(ctx, url_ctor, "createObjectURL", ns_window_url_create_object, 1);
     ns_bind_fn(ctx, url_ctor, "revokeObjectURL", ns_window_url_revoke_object, 1);
     JS_SetPropertyStr(ctx, global, "URL", url_ctor);
+    ns_url_install_interface(ctx);
     JSValue custom_elements = JS_NewObject(ctx);
     ns_bind_fn(ctx, custom_elements, "define",      ns_ce_define,      3);
     ns_bind_fn(ctx, custom_elements, "get",         ns_ce_get,         1);
