@@ -5298,6 +5298,28 @@
             this._ec = newNode; this._eo = newOffset;
         };
 
+        function countElementChildren(p) {
+            var n = 0;
+            for (var c = p.firstChild; c; c = c.nextSibling)
+                if (c.nodeType === 1) n++;
+            return n;
+        }
+        function hasChildOfType(p, t) {
+            for (var c = p.firstChild; c; c = c.nextSibling)
+                if (c.nodeType === t) return true;
+            return false;
+        }
+        function doctypeFollowing(child) {
+            for (var c = child.nextSibling; c; c = c.nextSibling)
+                if (c.nodeType === 10) return true;
+            return false;
+        }
+        function elementPreceding(child) {
+            for (var c = child.previousSibling; c; c = c.previousSibling)
+                if (c.nodeType === 1) return true;
+            return false;
+        }
+
         function ensurePreInsertion(node, parent, child) {
             var pt = parent.nodeType;
             if (pt !== 1 && pt !== 9 && pt !== 11)
@@ -5314,6 +5336,26 @@
                 throw domEx('HierarchyRequestError');
             if (nt === 10 && pt !== 9)
                 throw domEx('HierarchyRequestError');
+            if (pt !== 9) return;
+            if (nt === 11) {
+                var elems = countElementChildren(node);
+                if (elems > 1 || hasChildOfType(node, 3))
+                    throw domEx('HierarchyRequestError');
+                if (elems === 1 && (countElementChildren(parent) > 0 ||
+                    (child && child.nodeType === 10) ||
+                    (child && doctypeFollowing(child))))
+                    throw domEx('HierarchyRequestError');
+            } else if (nt === 1) {
+                if (countElementChildren(parent) > 0 ||
+                    (child && child.nodeType === 10) ||
+                    (child && doctypeFollowing(child)))
+                    throw domEx('HierarchyRequestError');
+            } else if (nt === 10) {
+                if (hasChildOfType(parent, 10) ||
+                    (child && elementPreceding(child)) ||
+                    (!child && countElementChildren(parent) > 0))
+                    throw domEx('HierarchyRequestError');
+            }
         }
 
         NdRange.prototype.insertNode = function (node) {
