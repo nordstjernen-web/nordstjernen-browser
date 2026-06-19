@@ -182,6 +182,9 @@ struct ns_js {
     int           ce_defer_upgrades;
     JSValue       nodelist_decorator;
     int           nodelist_decorator_set;
+    JSValue       live_html_proto;
+    JSValue       live_node_proto;
+    int           live_protos_set;
     JSValue       computed_style_proxy;
     int           computed_style_proxy_set;
     JSValue       url_helper;

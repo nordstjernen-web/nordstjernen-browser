@@ -25435,6 +25435,9 @@ ns_live_named(JSContext *ctx, ns_live_back *b, JSValueConst snap, uint32_t len,
     return JS_UNDEFINED;
 }
 
+static gboolean ns_live_is_supported_index(const char *name, uint32_t len);
+static gboolean ns_live_is_array_index(const char *name);
+
 static int
 ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
                 JSValueConst obj, JSAtom prop)
@@ -25446,32 +25449,22 @@ ns_live_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
     int ret = 0;
-    if (strcmp(name, "length") == 0) {
+    gboolean numeric = ns_live_is_array_index(name);
+    if (ns_live_is_supported_index(name, len)) {
+        char *end = NULL;
+        long idx = strtol(name, &end, 10);
         if (desc) {
-            desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
-            desc->value  = JS_NewInt64(ctx, len);
+            desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+            desc->value  = JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
             desc->getter = JS_UNDEFINED;
             desc->setter = JS_UNDEFINED;
         }
         ret = 1;
-    } else if (name[0] >= '0' && name[0] <= '9') {
-        char *end = NULL;
-        long idx = strtol(name, &end, 10);
-        if (end && *end == '\0' && idx >= 0 && (uint32_t)idx < len) {
-            if (desc) {
-                desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE |
-                               JS_PROP_WRITABLE;
-                desc->value  = JS_GetPropertyUint32(ctx, snap, (uint32_t)idx);
-                desc->getter = JS_UNDEFINED;
-                desc->setter = JS_UNDEFINED;
-            }
-            ret = 1;
-        }
-    } else if (b->html_collection) {
+    } else if (!numeric && b->html_collection) {
         JSValue found = ns_live_named(ctx, b, snap, len, name);
         if (!JS_IsUndefined(found)) {
             if (desc) {
-                desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE;
+                desc->flags  = JS_PROP_CONFIGURABLE;
                 desc->value  = found;
                 desc->getter = JS_UNDEFINED;
                 desc->setter = JS_UNDEFINED;
@@ -25493,15 +25486,50 @@ ns_live_get_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen,
     if (!b) { *ptab = NULL; *plen = 0; return 0; }
     JSValue snap = ns_live_snapshot(ctx, b);
     uint32_t len = ns_js_array_length(ctx, snap);
-    uint32_t total = len + 1;
-    JSPropertyEnum *tab = js_malloc(ctx, sizeof(JSPropertyEnum) * total);
-    if (!tab) return -1;
+    GPtrArray *named = NULL;
+    if (b->html_collection) {
+        named = g_ptr_array_new_with_free_func(g_free);
+        for (uint32_t i = 0; i < len; i++) {
+            JSValue el = JS_GetPropertyUint32(ctx, snap, i);
+            const ns_node *n = ns_unwrap_element(el);
+            if (n) {
+                gboolean html_ns = !(n->flags &
+                    (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+                const char *cand[2] = {
+                    ns_element_get_attr(n, "id"),
+                    html_ns ? ns_element_get_attr(n, "name") : NULL,
+                };
+                for (int k = 0; k < 2; k++) {
+                    const char *v = cand[k];
+                    if (!v || !*v) continue;
+                    gboolean dup = FALSE;
+                    for (guint j = 0; j < named->len; j++)
+                        if (strcmp(g_ptr_array_index(named, j), v) == 0) {
+                            dup = TRUE;
+                            break;
+                        }
+                    if (!dup) g_ptr_array_add(named, g_strdup(v));
+                }
+            }
+            JS_FreeValue(ctx, el);
+        }
+    }
+    uint32_t nnamed = named ? named->len : 0;
+    uint32_t total = len + nnamed;
+    JSPropertyEnum *tab = js_malloc(ctx, sizeof(JSPropertyEnum) * (total ? total : 1));
+    if (!tab) {
+        if (named) g_ptr_array_free(named, TRUE);
+        return -1;
+    }
     for (uint32_t i = 0; i < len; i++) {
         tab[i].atom = JS_NewAtomUInt32(ctx, i);
         tab[i].is_enumerable = 1;
     }
-    tab[len].atom = JS_NewAtom(ctx, "length");
-    tab[len].is_enumerable = 0;
+    for (uint32_t i = 0; i < nnamed; i++) {
+        tab[len + i].atom = JS_NewAtom(ctx, g_ptr_array_index(named, i));
+        tab[len + i].is_enumerable = 1;
+    }
+    if (named) g_ptr_array_free(named, TRUE);
     *ptab = tab;
     *plen = total;
     return 0;
@@ -25535,6 +25563,80 @@ ns_live_namedItem(JSContext *ctx, JSValueConst this_val, int argc,
     return JS_IsUndefined(r) ? JS_NULL : r;
 }
 
+static gboolean
+ns_live_is_supported_index(const char *name, uint32_t len)
+{
+    if (name[0] < '0' || name[0] > '9') return FALSE;
+    char *end = NULL;
+    long long idx = strtoll(name, &end, 10);
+    return end && *end == '\0' && idx >= 0 && idx <= 4294967294LL &&
+           (unsigned long long)idx < len;
+}
+
+static gboolean
+ns_live_is_array_index(const char *name)
+{
+    if (name[0] < '0' || name[0] > '9') return FALSE;
+    char *end = NULL;
+    long long idx = strtoll(name, &end, 10);
+    return end && *end == '\0' && idx >= 0 && idx <= 4294967294LL;
+}
+
+static int
+ns_live_delete_property(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    ns_live_back *b = JS_GetOpaque(obj, ns_live_class_id);
+    if (!b) return 1;
+    const char *name = JS_AtomToCString(ctx, prop);
+    if (!name) return 1;
+    JSValue snap = ns_live_snapshot(ctx, b);
+    uint32_t len = ns_js_array_length(ctx, snap);
+    int ret = 1;
+    if (ns_live_is_supported_index(name, len)) {
+        ret = 0;
+    } else if (b->html_collection) {
+        JSValue found = ns_live_named(ctx, b, snap, len, name);
+        if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); ret = 0; }
+    }
+    JS_FreeCString(ctx, name);
+    return ret;
+}
+
+static int
+ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
+                            JSValueConst val, JSValueConst getter,
+                            JSValueConst setter, int flags)
+{
+    ns_live_back *b = JS_GetOpaque(this_obj, ns_live_class_id);
+    if (b) {
+        const char *name = JS_AtomToCString(ctx, prop);
+        if (name) {
+            int reject = 0;
+            if (ns_live_is_array_index(name)) {
+                reject = 1;
+            } else if (b->html_collection) {
+                JSValue snap = ns_live_snapshot(ctx, b);
+                uint32_t len = ns_js_array_length(ctx, snap);
+                JSValue found = ns_live_named(ctx, b, snap, len, name);
+                if (!JS_IsUndefined(found)) { JS_FreeValue(ctx, found); reject = 1; }
+            }
+            JS_FreeCString(ctx, name);
+            if (reject) return 0;
+        }
+    }
+    return JS_DefineProperty(ctx, this_obj, prop, val, getter, setter,
+                             flags | JS_PROP_NO_EXOTIC);
+}
+
+static JSValue
+ns_live_length_get(JSContext *ctx, JSValueConst this_val)
+{
+    ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
+    if (!b) return JS_NewInt32(ctx, 0);
+    JSValue snap = ns_live_snapshot(ctx, b);
+    return JS_NewInt64(ctx, ns_js_array_length(ctx, snap));
+}
+
 static void
 ns_live_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -25558,6 +25660,8 @@ ns_live_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
 static JSClassExoticMethods ns_live_exotic = {
     .get_own_property       = ns_live_get_own,
     .get_own_property_names = ns_live_get_own_names,
+    .delete_property        = ns_live_delete_property,
+    .define_own_property    = ns_live_define_own_property,
 };
 
 static JSClassDef ns_live_class = {
@@ -25580,6 +25684,10 @@ static const JSCFunctionListEntry ns_live_proto_funcs[] = {
     JS_CFUNC_DEF("namedItem", 1, ns_live_namedItem),
 };
 
+static const JSCFunctionListEntry ns_nodelist_proto_funcs[] = {
+    JS_CFUNC_DEF("item",      1, ns_live_item),
+};
+
 static JSValue
 ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
              const char *param)
@@ -25594,6 +25702,12 @@ ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
     b->cache           = JS_UNDEFINED;
     b->has_cache       = FALSE;
     JS_SetOpaque(obj, b);
+    ns_js *jsx = js_from_ctx(ctx);
+    if (jsx && jsx->live_protos_set) {
+        JSValue proto = b->html_collection ? jsx->live_html_proto
+                                           : jsx->live_node_proto;
+        JS_SetPrototype(ctx, obj, proto);
+    }
     return obj;
 }
 
@@ -31945,19 +32059,58 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     if (!ns_live_class_id)
         JS_NewClassID(js->rt, &ns_live_class_id);
     JS_NewClass(js->rt, ns_live_class_id, &ns_live_class);
-    JSValue live_proto = JS_NewObject(ctx);
-    JS_SetPropertyFunctionList(ctx, live_proto, ns_live_proto_funcs,
+    JSValue hc_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, hc_proto, ns_live_proto_funcs,
                                G_N_ELEMENTS(ns_live_proto_funcs));
+    JSValue nl_proto = JS_NewObject(ctx);
+    JS_SetPropertyFunctionList(ctx, nl_proto, ns_nodelist_proto_funcs,
+                               G_N_ELEMENTS(ns_nodelist_proto_funcs));
     {
-        JSValue garr  = JS_GetGlobalObject(ctx);
-        JSValue actor = JS_GetPropertyStr(ctx, garr, "Array");
-        JSValue aproto = JS_GetPropertyStr(ctx, actor, "prototype");
-        if (JS_IsObject(aproto)) JS_SetPrototype(ctx, live_proto, aproto);
-        JS_FreeValue(ctx, aproto);
-        JS_FreeValue(ctx, actor);
-        JS_FreeValue(ctx, garr);
+        JSAtom len_atom = JS_NewAtom(ctx, "length");
+        JS_DefinePropertyGetSet(ctx, hc_proto, len_atom,
+            JS_NewCFunction(ctx, ns_live_length_get, "get length", 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JS_DefinePropertyGetSet(ctx, nl_proto, len_atom,
+            JS_NewCFunction(ctx, ns_live_length_get, "get length", 0),
+            JS_UNDEFINED, JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, len_atom);
     }
-    JS_SetClassProto(ctx, ns_live_class_id, live_proto);
+    {
+        static const char *deco_src =
+            "(function(hc, nl){"
+            " var A = Array.prototype;"
+            " function def(o,k,v){"
+            "   Object.defineProperty(o,k,{value:v,writable:true,configurable:true});"
+            " }"
+            " def(hc, Symbol.toStringTag, 'HTMLCollection');"
+            " Object.defineProperty(hc, Symbol.iterator,"
+            "   {value:A.values, writable:true, configurable:true});"
+            " def(nl, Symbol.toStringTag, 'NodeList');"
+            " def(nl, 'entries', A.entries);"
+            " def(nl, 'keys',    A.keys);"
+            " def(nl, 'values',  A.values);"
+            " def(nl, 'forEach', A.forEach);"
+            " Object.defineProperty(nl, Symbol.iterator,"
+            "   {value:A.values, writable:true, configurable:true});"
+            "})";
+        JSValue deco = JS_Eval(ctx, deco_src, strlen(deco_src),
+                               "<live-proto>", JS_EVAL_TYPE_GLOBAL);
+        if (!JS_IsException(deco)) {
+            JSValueConst args[2] = { hc_proto, nl_proto };
+            JSValue r = JS_Call(ctx, deco, JS_UNDEFINED, 2, args);
+            if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, r);
+        } else {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+        }
+        JS_FreeValue(ctx, deco);
+    }
+    js->live_html_proto = JS_DupValue(ctx, hc_proto);
+    js->live_node_proto = JS_DupValue(ctx, nl_proto);
+    js->live_protos_set  = 1;
+    JS_SetClassProto(ctx, ns_live_class_id, JS_DupValue(ctx, hc_proto));
+    JS_FreeValue(ctx, hc_proto);
+    JS_FreeValue(ctx, nl_proto);
 
     if (!ns_dataset_class_id)
         JS_NewClassID(js->rt, &ns_dataset_class_id);
@@ -35676,6 +35829,11 @@ ns_js_free(ns_js *js)
     if (js->nodelist_decorator_set) {
         JS_FreeValue(js->ctx, js->nodelist_decorator);
         js->nodelist_decorator_set = 0;
+    }
+    if (js->live_protos_set) {
+        JS_FreeValue(js->ctx, js->live_html_proto);
+        JS_FreeValue(js->ctx, js->live_node_proto);
+        js->live_protos_set = 0;
     }
     if (js->computed_style_proxy_set) {
         JS_FreeValue(js->ctx, js->computed_style_proxy);
