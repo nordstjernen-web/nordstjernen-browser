@@ -1222,6 +1222,7 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
     const char *style = ns_element_get_attr(n, "style");
     char *val = ns_inline_style_get(style, css);
     g_free(css);
+    if (val) ns_inline_value_strip_important(val);
     if (desc) {
         desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE | JS_PROP_WRITABLE;
         desc->value  = JS_NewString(ctx, val ? val : "");
@@ -2233,6 +2234,7 @@ ns_style_getPropertyValue(JSContext *ctx, JSValueConst this_val,
     const char *style = ns_element_get_attr(n, "style");
     char *val = ns_inline_style_get(style, name);
     JS_FreeCString(ctx, name);
+    if (val) ns_inline_value_strip_important(val);
     JSValue ret = JS_NewString(ctx, val ? val : "");
     g_free(val);
     return ret;
@@ -2246,14 +2248,22 @@ ns_style_setProperty(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 2) return JS_UNDEFINED;
     const char *name = JS_ToCString(ctx, argv[0]);
     const char *value = JS_ToCString(ctx, argv[1]);
+    const char *priority = argc >= 3 ? JS_ToCString(ctx, argv[2]) : NULL;
+    gboolean important = priority &&
+                         g_ascii_strcasecmp(priority, "important") == 0;
     if (name) {
         const char *old = ns_element_get_attr(n, "style");
-        char *new_style = ns_inline_style_set(old, name, value ? value : "");
+        char *stored = (value && *value && important)
+                       ? g_strconcat(value, " !important", NULL)
+                       : g_strdup(value ? value : "");
+        char *new_style = ns_inline_style_set(old, name, stored);
+        g_free(stored);
         ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
         g_free(new_style);
     }
     if (name) JS_FreeCString(ctx, name);
     if (value) JS_FreeCString(ctx, value);
+    if (priority) JS_FreeCString(ctx, priority);
     return JS_UNDEFINED;
 }
 
@@ -2300,8 +2310,16 @@ static JSValue
 ns_style_getPropertyPriority(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    return JS_NewString(ctx, "");
+    ns_node *n = ns_style_node(this_val);
+    if (!n || argc < 1) return JS_NewString(ctx, "");
+    const char *name = JS_ToCString(ctx, argv[0]);
+    if (!name) return JS_NewString(ctx, "");
+    const char *style = ns_element_get_attr(n, "style");
+    char *val = ns_inline_style_get(style, name);
+    JS_FreeCString(ctx, name);
+    gboolean important = val ? ns_inline_value_strip_important(val) : FALSE;
+    g_free(val);
+    return JS_NewString(ctx, important ? "important" : "");
 }
 
 static JSValue

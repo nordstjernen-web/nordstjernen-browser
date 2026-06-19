@@ -12280,6 +12280,14 @@ ns_inline_style_get(const char *style, const char *prop)
     return NULL;
 }
 
+gboolean
+ns_inline_value_strip_important(char *value)
+{
+    gboolean important = FALSE;
+    css_strip_important(value, &important);
+    return important;
+}
+
 char *
 ns_inline_style_set(const char *style, const char *prop, const char *value)
 {
