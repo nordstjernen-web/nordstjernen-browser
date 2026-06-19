@@ -20091,36 +20091,60 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean ns_args_contain_node(JSValueConst *argv, int argc,
+                                     const ns_node *n);
+
 static JSValue
 ns_element_after(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
+    ns_node *parent = self->parent;
     ns_js *_j = js_from_ctx(ctx);
-    for (int i = argc - 1; i >= 0; i--) {
-        ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *to_insert = NULL;
-        if (child) {
-            if (child == self || ns_node_ancestor_or_self(self->parent, child)) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            to_insert = child;
+
+    ns_node *viable_next = self->next_sibling;
+    while (viable_next && ns_args_contain_node(argv, argc, viable_next))
+        viable_next = viable_next->next_sibling;
+
+    GPtrArray *seq = g_ptr_array_new();
+    for (int i = 0; i < argc; i++) {
+        ns_node *node = ns_unwrap_element_mut(argv[i]);
+        if (node) {
+            if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
+            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
+            ns_node_remove(node);
+            g_ptr_array_add(seq, node);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                to_insert = ns_node_new_text(g_strdup(txt));
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (!to_insert) continue;
-        ns_insert_sibling_after(self, to_insert);
-        if (_j)
-            ns_js_record_child_change(_j, self->parent, to_insert, NULL,
-                                      to_insert->prev_sibling,
-                                      to_insert->next_sibling);
     }
+
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *node = g_ptr_array_index(seq, k);
+        if (viable_next && viable_next->parent == parent)
+            ns_insert_sibling_before(viable_next, node);
+        else
+            ns_node_append_child(parent, node);
+        if (_j)
+            ns_js_record_child_change(_j, parent, node, NULL,
+                                      node->prev_sibling, node->next_sibling);
+    }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
+}
+
+static gboolean
+ns_args_contain_node(JSValueConst *argv, int argc, const ns_node *n)
+{
+    for (int i = 0; i < argc; i++)
+        if (ns_unwrap_element_mut(argv[i]) == n) return TRUE;
+    return FALSE;
 }
 
 static JSValue
@@ -20129,19 +20153,58 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
-    ns_node *old_parent = self->parent;
-    JSValue before_args[1] = { this_val };
-    ns_element_before(ctx, before_args[0], argc, argv);
-    ns_node *saved_prev = self->prev_sibling;
-    ns_node *saved_next = self->next_sibling;
-    ns_node_remove(self);
+    ns_node *parent = self->parent;
     ns_js *_j = js_from_ctx(ctx);
-    if (_j) {
-        g_hash_table_add(_j->orphan_nodes, self);
-        ns_js_record_child_change(_j, old_parent, NULL, self,
-                                  saved_prev, saved_next);
-        _j->mutated = TRUE;
+
+    gboolean self_in_args = ns_args_contain_node(argv, argc, self);
+    ns_node *viable_prev = self->prev_sibling;
+    while (viable_prev && ns_args_contain_node(argv, argc, viable_prev))
+        viable_prev = viable_prev->prev_sibling;
+
+    GPtrArray *seq = g_ptr_array_new();
+    for (int i = 0; i < argc; i++) {
+        ns_node *node = ns_unwrap_element_mut(argv[i]);
+        if (node) {
+            if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
+            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
+            ns_node_remove(node);
+            g_ptr_array_add(seq, node);
+        } else {
+            const char *txt = JS_ToCString(ctx, argv[i]);
+            if (txt) {
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
+                JS_FreeCString(ctx, txt);
+            }
+        }
     }
+
+    ns_node *anchor = self_in_args
+        ? (viable_prev ? viable_prev->next_sibling : parent->first_child)
+        : self;
+
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *node = g_ptr_array_index(seq, k);
+        if (anchor && anchor->parent == parent)
+            ns_insert_sibling_before(anchor, node);
+        else
+            ns_node_append_child(parent, node);
+        if (_j)
+            ns_js_record_child_change(_j, parent, node, NULL,
+                                      node->prev_sibling, node->next_sibling);
+    }
+    g_ptr_array_free(seq, TRUE);
+
+    if (!self_in_args) {
+        ns_node *saved_prev = self->prev_sibling;
+        ns_node *saved_next = self->next_sibling;
+        ns_node_remove(self);
+        if (_j) {
+            g_hash_table_add(_j->orphan_nodes, self);
+            ns_js_record_child_change(_j, parent, NULL, self,
+                                      saved_prev, saved_next);
+        }
+    }
+    if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
 
