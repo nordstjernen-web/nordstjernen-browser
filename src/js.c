@@ -9956,6 +9956,12 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "transform") == 0)
         return ns_computed_transform_matrix(computed, lbox);
 
+    if (strcmp(name, "direction") == 0) {
+        if (computed && computed->values[NS_CSS_DIRECTION])
+            return ns_css_value_serialize(computed->values[NS_CSS_DIRECTION]);
+        return g_strdup(ns_css_node_dir(n));
+    }
+
     if (lbox && (strcmp(name, "top") == 0 || strcmp(name, "right") == 0 ||
                  strcmp(name, "bottom") == 0 || strcmp(name, "left") == 0)) {
         char *inset = ns_computed_inset_px(ctx, n, lbox, name);

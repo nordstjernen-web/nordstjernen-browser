@@ -11537,6 +11537,49 @@ ns_dir_first_strong(const ns_node *n, int depth)
 }
 
 static const char *
+ns_dir_first_strong_str(const char *s)
+{
+    if (!s) return NULL;
+    for (const char *p = s; *p; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (ns_dir_is_rtl_script(g_unichar_get_script(c))) return "rtl";
+        if (g_unichar_isalpha(c)) return "ltr";
+    }
+    return NULL;
+}
+
+static const char *
+ns_dir_form_control_value(const ns_node *n)
+{
+    if (!n->name) return NULL;
+    if (g_ascii_strcasecmp(n->name, "textarea") == 0)
+        return ns_node_editable_value(n);
+    if (g_ascii_strcasecmp(n->name, "input") != 0) return NULL;
+    const char *type = ns_element_get_attr(n, "type");
+    if (type) {
+        static const char *const uses[] = { "hidden", "text", "search", "tel",
+            "url", "email", "password", "submit", "reset", "button", NULL };
+        gboolean ok = FALSE;
+        for (int i = 0; uses[i]; i++)
+            if (g_ascii_strcasecmp(type, uses[i]) == 0) { ok = TRUE; break; }
+        if (!ok) return NULL;
+    }
+    return ns_node_editable_value(n);
+}
+
+static const char *
+ns_dir_auto_resolve(const ns_node *n)
+{
+    const char *val = ns_dir_form_control_value(n);
+    if (val) {
+        const char *d = ns_dir_first_strong_str(val);
+        return d ? d : "ltr";
+    }
+    const char *d = ns_dir_first_strong(n, 0);
+    return d ? d : "ltr";
+}
+
+const char *
 ns_css_node_dir(const ns_node *el)
 {
     for (const ns_node *n = el; n; n = n->parent) {
@@ -11546,10 +11589,8 @@ ns_css_node_dir(const ns_node *el)
         if (dir) {
             if (g_ascii_strcasecmp(dir, "ltr") == 0) return "ltr";
             if (g_ascii_strcasecmp(dir, "rtl") == 0) return "rtl";
-            if (g_ascii_strcasecmp(dir, "auto") == 0) {
-                const char *d = ns_dir_first_strong(n, 0);
-                return d ? d : "ltr";
-            }
+            if (g_ascii_strcasecmp(dir, "auto") == 0)
+                return ns_dir_auto_resolve(n);
         } else if (is_bdi) {
             const char *d = ns_dir_first_strong(n, 0);
             return d ? d : "ltr";

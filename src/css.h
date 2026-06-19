@@ -578,6 +578,7 @@ GPtrArray *ns_css_parse_selector_list_checked(const char *text,
 const ns_node *ns_css_set_match_scope(const ns_node *scope);
 
 gboolean   ns_css_selector_matches(const ns_css_selector *sel, const ns_node *el);
+const char *ns_css_node_dir(const ns_node *el);
 
 gboolean   ns_css_media_query_matches(const char *query);
 
