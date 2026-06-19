@@ -25629,8 +25629,11 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
 }
 
 static JSValue
-ns_live_length_get(JSContext *ctx, JSValueConst this_val)
+ns_live_length_get(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
 {
+    (void)argc;
+    (void)argv;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
     if (!b) return JS_NewInt32(ctx, 0);
     JSValue snap = ns_live_snapshot(ctx, b);
@@ -32068,10 +32071,12 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     {
         JSAtom len_atom = JS_NewAtom(ctx, "length");
         JS_DefinePropertyGetSet(ctx, hc_proto, len_atom,
-            JS_NewCFunction(ctx, ns_live_length_get, "get length", 0),
+            JS_NewCFunction2(ctx, ns_live_length_get, "get length", 0,
+                             JS_CFUNC_generic, 0),
             JS_UNDEFINED, JS_PROP_CONFIGURABLE);
         JS_DefinePropertyGetSet(ctx, nl_proto, len_atom,
-            JS_NewCFunction(ctx, ns_live_length_get, "get length", 0),
+            JS_NewCFunction2(ctx, ns_live_length_get, "get length", 0,
+                             JS_CFUNC_generic, 0),
             JS_UNDEFINED, JS_PROP_CONFIGURABLE);
         JS_FreeAtom(ctx, len_atom);
     }
