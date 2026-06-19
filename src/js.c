@@ -11117,6 +11117,20 @@ ns_url_install_interface(JSContext *ctx)
     JS_FreeValue(ctx, r);
 }
 
+static void
+ns_usp_install_interface(JSContext *ctx)
+{
+    static const char *src =
+        "(function(){"
+        " try { new URLSearchParams(''); } catch(e) {}"
+        " try { Object.defineProperty(globalThis, 'URLSearchParams', { enumerable: false }); } catch(e) {}"
+        " try { Object.defineProperty(URLSearchParams, 'prototype', { writable: false }); } catch(e) {}"
+        "})()";
+    JSValue r = JS_Eval(ctx, src, strlen(src), "<usp-iface>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
 static JSValue
 ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
@@ -11277,6 +11291,36 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
     if (jsx && !jsx->search_params_helper_set) {
         static const char *helper_src =
             "(function(init){"
+            " var USPp = URLSearchParams.prototype;"
+            " if (!USPp.__ndReady) {"
+            "   function nm(fn,n){ try { Object.defineProperty(fn,'name',"
+            "     { value:n, configurable:true }); } catch(e){} return fn; }"
+            "   function fenc(s){ return encodeURIComponent(String(s))"
+            "     .replace(/[!~'()]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();})"
+            "     .replace(/%20/g,'+'); }"
+            "   function meth(name, fn){ Object.defineProperty(USPp, name,"
+            "     { configurable:true, enumerable:true, writable:true, value:nm(fn,name) }); }"
+            "   function req(n,c){ if (c < n) throw new TypeError(n+' arguments required'); }"
+            "   Object.defineProperty(USPp,'__notify',{configurable:true,writable:true,"
+            "     value:function(){ if (this._owner && this._owner._setSearchRaw) {"
+            "       var s=this.toString(); this._owner._setSearchRaw(s?'?'+s:''); } }});"
+            "   meth('toString', function(){ return this._p.map(function(p){return fenc(p[0])+'='+fenc(p[1]);}).join('&'); });"
+            "   meth('get', function(k){ req(1,arguments.length); k=String(k); for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k) return this._p[i][1]; return null; });"
+            "   meth('getAll', function(k){ req(1,arguments.length); k=String(k); var r=[]; for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k) r.push(this._p[i][1]); return r; });"
+            "   meth('has', function(k){ req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; for (var i=0;i<this._p.length;i++) if(this._p[i][0]===k&&(!hv||this._p[i][1]===vv)) return true; return false; });"
+            "   meth('set', function(k,v){ req(2,arguments.length); k=String(k); v=String(v); var found=false; var out=[]; for (var i=0;i<this._p.length;i++){ if(this._p[i][0]===k){ if(!found){out.push([k,v]);found=true;} } else out.push(this._p[i]); } if(!found) out.push([k,v]); this._p=out; this.__notify(); });"
+            "   meth('append', function(k,v){ req(2,arguments.length); this._p.push([String(k),String(v)]); this.__notify(); });"
+            "   meth('delete', function(k){ req(1,arguments.length); k=String(k); var hv=arguments.length>1&&arguments[1]!==undefined; var vv=hv?String(arguments[1]):null; this._p=this._p.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));}); this.__notify(); });"
+            "   meth('sort', function(){ this._p.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;}); this.__notify(); });"
+            "   meth('forEach', function(cb){ req(1,arguments.length); var th=arguments[1]; for (var i=0;i<this._p.length;i++) cb.call(th,this._p[i][1],this._p[i][0],this); });"
+            "   meth('keys', function*(){ for (var i=0;i<this._p.length;i++) yield this._p[i][0]; });"
+            "   meth('values', function*(){ for (var i=0;i<this._p.length;i++) yield this._p[i][1]; });"
+            "   meth('entries', function*(){ for (var i=0;i<this._p.length;i++) yield [this._p[i][0],this._p[i][1]]; });"
+            "   Object.defineProperty(USPp, Symbol.iterator, { configurable:true, writable:true, value:USPp.entries });"
+            "   Object.defineProperty(USPp,'size',{ configurable:true, enumerable:true, get:nm(function(){ return this._p.length; },'get size') });"
+            "   try { Object.defineProperty(USPp,Symbol.toStringTag,{ value:'URLSearchParams', configurable:true }); } catch(e){}"
+            "   Object.defineProperty(USPp,'__ndReady',{ value:true });"
+            " }"
             " var pairs=[];"
             " function add(k,v){pairs.push([String(k),String(v)]);}"
             " function pdecode(s){"
@@ -11326,25 +11370,9 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             " } else {"
             "   parse(String(init));"
             " }"
-            " var o = Object.create(null);"
-            " o._p = pairs;"
-            " o._owner = null;"
-            " function fenc(s){return encodeURIComponent(String(s)).replace(/[!~'()]/g,function(c){return '%'+c.charCodeAt(0).toString(16).toUpperCase();}).replace(/%20/g,'+');}"
-            " o.toString = function(){return this._p.map(function(p){return fenc(p[0])+'='+fenc(p[1]);}).join('&');};"
-            " function notify(){ if (o._owner && o._owner._setSearchRaw) { var s = o.toString(); o._owner._setSearchRaw(s ? '?' + s : ''); } }"
-            " o.get = function(k){k=String(k);for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k)return this._p[i][1];return null;};"
-            " o.getAll = function(k){k=String(k);var r=[];for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k)r.push(this._p[i][1]);return r;};"
-            " o.has = function(k){k=String(k);var hv=arguments.length>1&&arguments[1]!==undefined;var vv=hv?String(arguments[1]):null;for (var i=0;i<this._p.length;i++)if(this._p[i][0]===k&&(!hv||this._p[i][1]===vv))return true;return false;};"
-            " o.set = function(k,v){k=String(k);v=String(v);var found=false;var out=[];for (var i=0;i<this._p.length;i++){if(this._p[i][0]===k){if(!found){out.push([k,v]);found=true;}}else out.push(this._p[i]);}if(!found)out.push([k,v]);this._p=out;notify();};"
-            " o.append = function(k,v){this._p.push([String(k),String(v)]);notify();};"
-            " o.delete = function(k){k=String(k);var hv=arguments.length>1&&arguments[1]!==undefined;var vv=hv?String(arguments[1]):null;this._p=this._p.filter(function(p){return !(p[0]===k&&(!hv||p[1]===vv));});notify();};"
-            " o.sort = function(){this._p.sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;});notify();};"
-            " o.forEach = function(cb,th){for (var i=0;i<this._p.length;i++)cb.call(th,this._p[i][1],this._p[i][0],this);};"
-            " o.keys = function*(){for (var i=0;i<this._p.length;i++)yield this._p[i][0];};"
-            " o.values = function*(){for (var i=0;i<this._p.length;i++)yield this._p[i][1];};"
-            " o.entries = function*(){for (var i=0;i<this._p.length;i++)yield [this._p[i][0],this._p[i][1]];};"
-            " o[Symbol.iterator] = o.entries;"
-            " Object.defineProperty(o,'size',{get:function(){return this._p.length;}});"
+            " var o = Object.create(URLSearchParams.prototype);"
+            " Object.defineProperty(o,'_p',{value:pairs,configurable:true,writable:true});"
+            " Object.defineProperty(o,'_owner',{value:null,configurable:true,writable:true});"
             " return o;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
@@ -15879,7 +15907,8 @@ ns_worker_js_new(ns_worker_host *host)
     ns_bind_ctor(ctx, global, "EventTarget", ns_window_event_ctor, 0);
     ns_bind_ctor(ctx, global, "TextEncoder", ns_window_text_encoder_ctor, 0);
     ns_bind_ctor(ctx, global, "TextDecoder", ns_window_text_decoder_ctor, 0);
-    ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 1);
+    ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
+    ns_usp_install_interface(ctx);
     JSValue url_ctor = ns_make_ctor(ctx, ns_window_url_ctor, "URL", 1);
     ns_bind_fn(ctx, url_ctor, "canParse", ns_window_url_can_parse, 1);
     ns_bind_fn(ctx, url_ctor, "parse", ns_window_url_parse_static, 1);
@@ -32593,7 +32622,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "Text",            ns_window_text_ctor,            1);
     ns_bind_ctor(ctx, global, "Comment",         ns_window_comment_ctor,         1);
     ns_bind_ctor(ctx, global, "Option",          ns_window_option_ctor,          4);
-    ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor,             1);
+    ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
+    ns_usp_install_interface(ctx);
     ns_bind_ctor(ctx, global, "XMLHttpRequest",  ns_window_xhr_ctor,             0);
     ns_bind_ctor(ctx, global, "DOMParser",       ns_window_dom_parser_ctor,      0);
     ns_bind_ctor(ctx, global, "FormData",        ns_window_form_data_ctor,       1);
