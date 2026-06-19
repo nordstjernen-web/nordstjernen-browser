@@ -61099,7 +61099,7 @@ test	subtest	status
 /html/dom/elements/elements-in-the-dom/historical.html	HTMLElement member must be nuked: commandType	PASS
 /html/dom/elements/elements-in-the-dom/historical.html	HTMLElement member must be nuked: dropzone	PASS
 /html/dom/elements/global-attributes/cdata-dir_auto.html	<harness>	TIMEOUT
-/html/dom/elements/global-attributes/cdata-dir_auto.html	Content of CDATA is ignored for dir=auto in html document	FAIL
+/html/dom/elements/global-attributes/cdata-dir_auto.html	Content of CDATA is ignored for dir=auto in html document	PASS
 /html/dom/elements/global-attributes/cdata-dir_auto.html	Directionality is updated when changing text of CDATASection	NOTRUN
 /html/dom/elements/global-attributes/cdata-dir_auto.html	Directionality is updated when removing CDATASection	NOTRUN
 /html/dom/elements/global-attributes/cdata-dir_auto.html	Text in CDATASection is considered when determining auto directionality	TIMEOUT
@@ -61173,17 +61173,17 @@ test	subtest	status
 /html/dom/elements/global-attributes/dir-assorted.window.html	Element outside the document tree has a direction	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	Element without direction has parent element direction	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	Non-HTML element outside the document tree has a direction	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	Non-HTML element text contents influence dir=auto	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	Non-HTML element text contents influence dir=auto	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	Non-HTML element without direction has parent element direction	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	Root element has a direction	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	dir inheritance is correct after insertion and removal from document	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto empty in ltr parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto empty in rtl parent	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto empty in rtl parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto numbers in ltr parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto numbers in rtl parent	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto numbers in rtl parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with LTR contents in ltr parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with LTR contents in rtl parent	FAIL
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with RTL contents in ltr parent	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with LTR contents in rtl parent	PASS
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with RTL contents in ltr parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=auto with RTL contents in rtl parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=ltr empty in ltr parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=ltr empty in rtl parent	PASS
@@ -61198,77 +61198,77 @@ test	subtest	status
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=rtl with RTL contents in ltr parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: dir=rtl with RTL contents in rtl parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute empty in ltr parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute empty in rtl parent	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute empty in rtl parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with LTR contents in ltr parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with LTR contents in rtl parent	FAIL
-/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with RTL contents in ltr parent	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with LTR contents in rtl parent	PASS
+/html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with RTL contents in ltr parent	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	directionality of bdi elements: no dir attribute with RTL contents in rtl parent	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	non-html input element text contents influence dir=auto	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	non-html input element text contents influence dir=auto	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	non-html script element text contents influence dir=auto	FAIL
 /html/dom/elements/global-attributes/dir-assorted.window.html	non-html style element text contents influence dir=auto	FAIL
 /html/dom/elements/global-attributes/dir-assorted.window.html	non-html textarea element text contents influence dir=auto	FAIL
 /html/dom/elements/global-attributes/dir-assorted.window.html	script element text contents do not influence dir=auto	PASS
 /html/dom/elements/global-attributes/dir-assorted.window.html	style element text contents do not influence dir=auto	PASS
-/html/dom/elements/global-attributes/dir-assorted.window.html	text changes apply to dir=auto on further ancestor after removing dir=auto from closer ancestor	FAIL
-/html/dom/elements/global-attributes/dir-assorted.window.html	text changes apply to dir=auto on further ancestor after removing dir=ltr from closer ancestor	FAIL
+/html/dom/elements/global-attributes/dir-assorted.window.html	text changes apply to dir=auto on further ancestor after removing dir=auto from closer ancestor	PASS
+/html/dom/elements/global-attributes/dir-assorted.window.html	text changes apply to dir=auto on further ancestor after removing dir=ltr from closer ancestor	PASS
 /html/dom/elements/global-attributes/dir-auto-div-append-child.html	<harness>	OK
 /html/dom/elements/global-attributes/dir-auto-div-append-child.html	dir auto: updates on appendChild	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	<harness>	OK
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	Child directionality gets updated when dir=auto is set on parent	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	Child directionality gets updated when dir=auto is set on parent	PASS
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	Removing child of slotted content changes direction on dir=auto slot	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	Removing slotted content resets direction on dir=auto slot	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	Slotted content affects multiple dir=auto slots	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto ancestor considers text in subtree after removing dir=ltr from it	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto changes for content insertion and removal, in and out of document	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto ancestor considers text in subtree after removing dir=ltr from it	PASS
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto changes for content insertion and removal, in and out of document	PASS
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto changes for slot reassignment	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dir=auto slot is not affected by text in value of input element children	PASS
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dynamic changes inside of non-HTML elements	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dynamic changes inside of non-HTML elements	PASS
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dynamic changes to subtrees excluded as a result of the dir attribute	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	dynamic insertion of RTL text in a child element	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	input direction changes if it stops being auto-directionality form-associated	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	input direction changes if it stops being auto-directionality form-associated	PASS
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slot insertion makes parent dependent on host directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slot provides updated directionality from host to a dir=auto container	PASS
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slot provides updated directionality from host to a dir=auto container	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slot removal can impact multiple dir=auto nodes	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slot removal resets parent's dependency on host directionality	FAIL
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slotted non-HTML elements	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slotted non-HTML elements after dynamically assigning dir=auto, and dir attribute ignored on non-HTML elements	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	slotted non-HTML elements after dynamically assigning dir=auto, and dir attribute ignored on non-HTML elements	PASS
 /html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	text changes affecting both slot and ancestor with dir=auto	FAIL
-/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	text input and textarea value changes should only be reflected in :dir() when dir=auto (value changes)	FAIL
+/html/dom/elements/global-attributes/dir-auto-dynamic-changes.window.html	text input and textarea value changes should only be reflected in :dir() when dir=auto (value changes)	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<harness>	OK
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=button> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=button> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=checkbox> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=color> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=date> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=datetime-local> directionality	PASS
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=email> directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=hidden> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=email> directionality	PASS
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=hidden> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=image> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=month> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=number> directionality	PASS
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=password> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=password> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=radio> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=range> directionality	PASS
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=reset> directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=search> directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=submit> directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=tel> directionality	FAIL
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=text> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=reset> directionality	PASS
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=search> directionality	PASS
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=submit> directionality	PASS
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=tel> directionality	PASS
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=text> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=time> directionality	PASS
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=url> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=url> directionality	PASS
 /html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<input dir=auto type=week> directionality	PASS
-/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<textarea dir=auto> directionality	FAIL
+/html/dom/elements/global-attributes/dir-auto-form-associated.window.html	<textarea dir=auto> directionality	PASS
 /html/dom/elements/global-attributes/dir-bdi-script.html	<harness>	OK
 /html/dom/elements/global-attributes/dir-bdi-script.html	BDI test: Directionality	FAIL
 /html/dom/elements/global-attributes/dir-not-changed-text-input-typing.html	<harness>	OK
 /html/dom/elements/global-attributes/dir-not-changed-text-input-typing.html	entering LTR text doesn't change directionality of a text input without dir=auto	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	<harness>	OK
-/html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=auto in shadow tree with Arabic light tree content	FAIL
+/html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=auto in shadow tree with Arabic light tree content	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=auto in shadow tree with Arabic shadow tree content	FAIL
 /html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=auto on host with Arabic shadow tree content	FAIL
 /html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=auto on slot with Arabic light tree content	FAIL
-/html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=rtl on host	FAIL
+/html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=rtl on host	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	Slots: Directionality: dir=rtl on slot	FAIL
-/html/dom/elements/global-attributes/dir-slots-directionality.html	children with dir attribute are skipped by dir=auto	FAIL
+/html/dom/elements/global-attributes/dir-slots-directionality.html	children with dir attribute are skipped by dir=auto	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	dir=auto slot ignores assigned nodes with dir attribute	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	dir=auto slot ignores text in bdi assigned nodes	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	dir=auto slot ignores text in value of input element children	FAIL
@@ -61277,7 +61277,7 @@ test	subtest	status
 /html/dom/elements/global-attributes/dir-slots-directionality.html	dir=auto slot is not affected by value of auto-directionality form associated elements	PASS
 /html/dom/elements/global-attributes/dir-slots-directionality.html	inner slot is given directionality from slotted content	FAIL
 /html/dom/elements/global-attributes/dir-slots-directionality.html	slot provides its directionality (from host) to a dir=auto container	FAIL
-/html/dom/elements/global-attributes/dir-slots-directionality.html	slot with dir attribute is skipped by dir=auto	FAIL
+/html/dom/elements/global-attributes/dir-slots-directionality.html	slot with dir attribute is skipped by dir=auto	PASS
 /html/dom/elements/global-attributes/document-dir.html	<harness>	OK
 /html/dom/elements/global-attributes/document-dir.html	Markup attribute	PASS
 /html/dom/elements/global-attributes/document-dir.html	Setting the idl attribute to a garbage value	PASS
@@ -61324,19 +61324,19 @@ test	subtest	status
 /html/dom/elements/global-attributes/the-lang-attribute-001.html	<harness>	OK
 /html/dom/elements/global-attributes/the-lang-attribute-001.html	The browser will recognize a language declared in a lang attribute on the html tag.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-002.html	<harness>	OK
-/html/dom/elements/global-attributes/the-lang-attribute-002.html	The browser will NOT recognize a language declared in an xml:lang attribute on the html tag.	FAIL
+/html/dom/elements/global-attributes/the-lang-attribute-002.html	The browser will NOT recognize a language declared in an xml:lang attribute on the html tag.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-003.html	<harness>	OK
-/html/dom/elements/global-attributes/the-lang-attribute-003.html	The browser will recognize a language declared in the HTTP header, when there is no internal language declaration.	FAIL
+/html/dom/elements/global-attributes/the-lang-attribute-003.html	The browser will recognize a language declared in the HTTP header, when there is no internal language declaration.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-004.html	<harness>	OK
-/html/dom/elements/global-attributes/the-lang-attribute-004.html	The browser will recognize a language declared in a meta element in the head using http-equiv='Content-Language' content='..' (with a single language tag value), when there is no other language declaration inside the document.	FAIL
+/html/dom/elements/global-attributes/the-lang-attribute-004.html	The browser will recognize a language declared in a meta element in the head using http-equiv='Content-Language' content='..' (with a single language tag value), when there is no other language declaration inside the document.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-005.html	<harness>	OK
 /html/dom/elements/global-attributes/the-lang-attribute-005.html	If there is a conflict between the language declarations in the HTTP header and the html element using lang, the browser will recognize the language declared in the html element.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-006.html	<harness>	OK
-/html/dom/elements/global-attributes/the-lang-attribute-006.html	If there is a conflict between the language declarations in the HTTP header and the Content-Language meta element, the UA will recognize the language declared in the meta element.	FAIL
+/html/dom/elements/global-attributes/the-lang-attribute-006.html	If there is a conflict between the language declarations in the HTTP header and the Content-Language meta element, the UA will recognize the language declared in the meta element.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-007.html	<harness>	OK
 /html/dom/elements/global-attributes/the-lang-attribute-007.html	If there is a conflict between the language declared using lang in the html element and that in the meta element, the UA will recognize the language declared in the html element.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-008.html	<harness>	OK
-/html/dom/elements/global-attributes/the-lang-attribute-008.html	If an element contains a lang attribute with an empty value, the value of a lang attribute higher up the document tree will no longer be applied to the content of that element.	FAIL
+/html/dom/elements/global-attributes/the-lang-attribute-008.html	If an element contains a lang attribute with an empty value, the value of a lang attribute higher up the document tree will no longer be applied to the content of that element.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-009.html	<harness>	OK
 /html/dom/elements/global-attributes/the-lang-attribute-009.html	If the HTTP header contains a language declaration but the html element uses an empty lang value, the UA will not recognize the language declared in the HTTP header.	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-010.html	<harness>	OK
@@ -61796,7 +61796,133 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:hidden child not rendered ("<div>123<span style='visibility:hidden'>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:hidden container ("<div style='visibility:hidden'>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	visibility:visible child rendered ("<div style='visibility:hidden'>123<span style='visibility:visible'>abc")	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	<harness>	NONE
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	" preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	" preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	& preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	& preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	' preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	' preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	< preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	< preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	<harness>	OK
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	> preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	> preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning null	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning null, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning the empty string	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning the empty string, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning undefined	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Assigning undefined, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CR/CR pair converts to two <br>s in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in <pre> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in non-white-space:pre elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	CRs convert to <br> in white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CR, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with CRLF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with LF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	End with LF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing <br> deleted	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing <br> deleted, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing text deleted	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Existing text deleted, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Leading whitespace preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Leading whitespace preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/CR pair converts to <br> in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newline/newline pair converts to two <br>s in non-white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <pre> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <pre> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <textarea> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in <textarea> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in non-white-space:pre elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in non-white-space:pre elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in white-space:pre element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Newlines convert to <br> in white-space:pre element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Null characters preserved	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Null characters preserved, detached	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Simplest possible test	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Simplest possible test, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CR	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CR, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CRLF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with CRLF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with LF	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Start with LF, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Tabs preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Tabs preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Trailing whitespace preserved	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Trailing whitespace preserved, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Whitespace not compressed	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	Whitespace not compressed, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on MathML elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on MathML elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on SVG elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText not supported on SVG elements, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <area> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <area> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <base> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <base> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <basefont> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <basefont> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <bgsound> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <bgsound> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <br> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <br> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <col> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <col> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <colgroup> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <colgroup> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <embed> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <embed> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frame> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frame> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frameset> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <frameset> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <head> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <head> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <hr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <hr> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <html> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <html> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <image> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <image> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <img> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <img> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <input> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <input> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <keygen> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <keygen> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <link> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <link> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <menuitem> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <menuitem> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <meta> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <meta> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <param> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <param> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <source> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <source> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <table> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <table> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tbody> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tbody> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tfoot> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tfoot> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <thead> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <thead> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <tr> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <track> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <track> element, detached	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <wbr> element	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	innerText on <wbr> element, detached	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	<harness>	OK
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	innerText has collapsed whitespace but preserved newlines with pre-line	FAIL
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	innerText should be the same for the pre-line and pre examples	FAIL
@@ -61924,8 +62050,8 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Tabs preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Trailing whitespace preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Whitespace not compressed	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	FAIL
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	<harness>	OK
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	A missing action content attribute should cause the IDL attribute to return the document's URL (not the document's base URL)	PASS
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	An action URL should be resolved relative to the document's base URL (not the document's URL)	FAIL
