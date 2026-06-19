@@ -43,6 +43,7 @@ they regenerate.
 | 2026-06-16 | 5442142 | a72c94d4a | 286/696 (41%) | 50493/55389 (91%) | partial: html/dom/elements |
 | 2026-06-16 | fec36c7 | a72c94d4a | 290/696 (41%) | 50646/55464 (91%) | partial: url |
 | 2026-06-16 | 9531924 | a72c94d4a | 292/696 (41%) | 61026/66617 (91%) | partial: dom/ranges |
+| 2026-06-19 | 129a7ce | 1df6b93 | 325/696 (46%) | 64620/69378 (93%) | partial: dom/nodes dom/collections |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -50,18 +51,18 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-16
+## Per-area results — 2026-06-19
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-16-9531924.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-19-129a7ce.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 112/275 | 8552/10060 | 1453 | 44 | 11 | 0 |
+| `dom/nodes` | 142/275 | 12133/12821 | 646 | 31 | 11 | 0 |
 | `dom/events` | 48/167 | 363/742 | 334 | 22 | 23 | 0 |
 | `dom/traversal` | 12/17 | 1566/1602 | 36 | 0 | 0 | 0 |
 | `dom/ranges` | 25/55 | 41826/44537 | 2711 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
-| `dom/collections` | 2/10 | 30/53 | 23 | 0 | 0 | 0 |
+| `dom/collections` | 5/10 | 43/53 | 10 | 0 | 0 | 0 |
 | `url` | 15/32 | 7205/7474 | 268 | 1 | 0 | 0 |
 | `console` | 5/12 | 23/29 | 6 | 0 | 0 | 0 |
 | `hr-time` | 4/13 | 14/23 | 8 | 1 | 0 | 0 |
@@ -71,9 +72,9 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-16-9531924.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 94/118 | 24 | 0 | 0 | 0 |
-| **Total** | **292/696** | **61026/66617** | **5486** | **69** | **36** | **0** |
+| **Total** | **325/696** | **64620/69378** | **4666** | **56** | **36** | **0** |
 
-## ROI by area — 2026-06-16
+## ROI by area — 2026-06-19
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -87,14 +88,14 @@ file.
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
 | `dom/ranges` | 2711 | 30 | 90.4 | 0 | 6 |
-| `dom/nodes` | 1508 | 163 | 9.3 | 25 | 89 |
+| `dom/nodes` | 688 | 133 | 5.2 | 21 | 76 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 379 | 119 | 3.2 | 72 | 29 |
 | `url` | 269 | 17 | 15.8 | 3 | 3 |
 | `html/dom/elements` | 195 | 22 | 8.9 | 2 | 14 |
 | `dom/traversal` | 36 | 5 | 7.2 | 0 | 2 |
 | `html/semantics/forms/the-form-element` | 24 | 12 | 2.0 | 2 | 8 |
-| `dom/collections` | 23 | 8 | 2.9 | 0 | 3 |
+| `dom/collections` | 10 | 5 | 2.0 | 0 | 4 |
 | `xhr/formdata` | 10 | 4 | 2.5 | 0 | 3 |
 | `hr-time` | 9 | 9 | 1.0 | 2 | 7 |
 | `console` | 6 | 7 | 0.9 | 1 | 6 |
@@ -122,7 +123,7 @@ grep `polyfills.js` first.
 | 3 | Unblock the harness-broken `dom/events` files (pages hang waiting on `test_driver`). **Partly landed:** a testdriver bridge in the WPT hook (`data/js/wpt-hook.js`) now implements `test_driver.click`, `send_keys`, and a pointer/key `action_sequence`, synthesising real mouse/pointer/keyboard events through the engine. Files that only needed a click/keypress flipped from TIMEOUT to passing (`pointer-event-document-move`, `focus-event-document-move`, `handler-count`, `label-default-action`, `legacy-pre-activation-behavior`, `preventDefault-during-activation-behavior`). **Remaining** is two larger engine features, each its own root cause: (a) the ~40-file `non-cancelable-when-passive/` cluster needs passive-listener tracking (today `addEventListener` parses `passive` then discards it) plus `TouchEvent`/`WheelEvent` synthesis with cancelability derived from passivity; (b) the `scrolling/*` cluster needs real scroll + `scrollend` infrastructure | `non-cancelable-when-passive/*` (40 files), `scrolling/scrollend-*` | ~379 |
 | 4 | ~~**`innerText`/`outerText` rendered-text algorithm**~~ — **largely landed.** The getter now flushes layout before reading (so dynamically-set `white-space`/`visibility`/`text-transform` are seen — `dynamic-getter.html` went 4/7→7/7), collects rendered text with a spec-style *required-line-break-count* model (`<p>` yields blank lines, `<br>` at end of block is kept, leading/trailing block breaks are dropped without eating preserved `white-space:pre` spaces), honours `visibility:hidden`/`collapse`, treats `display:contents` as boxless and flex/grid items as blockified, skips replaced/non-rendered subtrees (`textarea`/`iframe`/`audio`/`video`/`canvas`/`img`/`object`/`embed`/SVG/MathML), renders `<option>` and (label-less) `<optgroup>` as blocks, and applies `text-transform`. `getter.html` 159→232. **Remaining** is layout-geometry-dependent: tab-separated table cells, `::first-line`/`::first-letter` pseudo styling, shadow-DOM exclusion, whitespace at inline-block boundaries, and the `?white-space=` variant files the local runner cannot expand | `getter.html` (159→232), `dynamic-getter.html` (4/7→7/7) | landed (~80) |
 | 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA. **Partly landed:** the JS→C marshalling for URL/`<a>`/`<area>` component setters used `JS_ToCString`+`strlen`, which truncated the value at the first embedded U+0000; setters now pass the real byte length (`JS_ToCStringLen` → `ns_url_set_component_len`) so NULs are percent-encoded (`%00`) per the WHATWG percent-encode sets instead of cutting the value short. `url-setters-stripping` 217→260, `urlencoded-parser` 66→105, `url-setters-a-area` +28, `url-setters`/`url-constructor`/`percent-encoding` smaller gains (~153 total). **Remaining**, each its own root cause: lexbor host-setter port parsing (`host='example.com:invalid'` should set hostname and stop the port parser), opaque-path erasure for non-special schemes, trailing-space handling when clearing `search`/`hash` on opaque paths, legacy query-encoding (`big5`/`euc-kr`/…) percent-encoding, and `IdnaTestV2` | `url-setters-stripping.any.html` (217→260), `urlencoded-parser.any.html` (66→105) | landed (~153) |
-| 6 | **Exotic platform objects** — `querySelectorAll` returns a real `Array` (should be a `NodeList`: `[object NodeList]`, no tamperable `length`); `HTMLCollection` wrongly has `values`/`entries`/`forEach` and an own `length`. Make both proper WebIDL legacy-platform objects | `dom/collections/*` (23), `dom/nodes/NodeList-static-length-getter-tampered-*` ×6 | ~30 |
+| 6 | **Exotic platform objects** — `HTMLCollection`/`NodeList`. **Largely landed.** The live collections (`children`, `childNodes`, `getElementsByTagName`/`ClassName`/`Name`, `links`, `forms`/`images`, `form.elements`) were plain `Array`s decorated with a few methods and chained to `Array.prototype`, so they reported `[object Array]`/`[object Object]`, carried an own writable `length`, and exposed Array's `values`/`entries`/`keys`/`forEach`. The `ns_live` exotic class now has two real prototypes — `HTMLCollection` (only `Symbol.iterator`, `item`, `namedItem`) and `NodeList` (the full `values`/`entries`/`keys`/`forEach`/`Symbol.iterator`, `item`) — each `Object`-rooted with the right `Symbol.toStringTag` and a `length` **prototype getter** (so `length` is no longer an own property and `getOwnPropertyNames` lists only the indices, plus the supported named properties for an `HTMLCollection`, `name` counted only for HTML-namespace elements). Indexed and named entries are read-only and configurable, and the legacy `[[DefineOwnProperty]]`/`[[Delete]]` rules reject overwriting or deleting them (strict mode throws); array-index-shaped names past `2^32−2` resolve as named properties. `dom/collections` 30→**43**, plus the `getElementsByTagName`/`NodeList` ownProperty subtests in `dom/nodes`. **Remaining**, each its own root cause: `querySelectorAll` still returns a static `Array` (a `NodeList` exotic would break the common non-conformant `.map`/`.filter`/`.slice` usage that the Array form supports), so `NodeList-static-length-getter-tampered-*` ×6 stay; `NamedNodeMap` (`el.attributes`) is a separate decorated-array class; and `Object.defineProperty` over an existing configurable indexed/named entry does not yet throw (QuickJS validates the redefine before consulting the exotic `define_own_property`) | `dom/collections/*` (30→43), `dom/nodes/{Document,Element}-getElementsByTagName`, `NodeList-live-mutations` | landed (~16) |
 | 7 | **`document.createRange()` bound to the wrong document** — `NdRange`'s constructor hard-coded the main-realm `document` as the initial start/end container, so `foreignDoc.createRange()`/`xmlDoc.createRange()` (and the ranges cloned from them) reported the *main* document as their container instead of the document the method was called on. `createRange` now passes its receiver document through `__ndCreateRange(ownerDoc)` to the constructor. `Range-cloneRange` 40→62 (all pass). | `Range-cloneRange.html` (40→62) | landed (~22) |
 | 8 | ~~**iframe realm emulation: per-frame globals are leaky**~~ — **landed (true per-frame realms).** Each iframe now runs its classic scripts in its **own QuickJS context** (a child `JSContext` sharing the runtime, so DOM class IDs and parent constructors are shared), whose **global object *is* the frame `window`**. `ns_iframe_make_realm_context` (`src/js.c`) creates the child context, chains its global's prototype to the parent global (so `Element`/`Node`/`fetch`/`setTimeout`/… resolve) and decorates it in place with the frame's own `window`/`self`/`top`/`parent`/`frames`/`document`/`location`/`history`/event overrides (`ns_iframe_global_bootstrap`). `ns_js_run_iframe_scripts` evaluates the concatenated classic scripts as **global code** in that context, so top-level `var`/`function` bind to the frame `window` natively and consistently across every script and every re-`setupRangeTests` pass — retiring the old concat+`with`+exposed-`eval`-accessor emulation (kept only as a fallback if child-context creation fails). The frame window is keyed by iframe node (`js->frame_windows`) so `iframe.contentWindow` resolves it even before the element is wrapped; child contexts (`js->frame_ctxs`) are freed on navigation reset and teardown. Verified in-tree (`--headless --eval`): the minimal repro now reports `x=123 hasOwn=true` (was `undefined`/`false`); vars no longer leak between sibling frames; `window===self===globalThis` per frame. **Measured `dom/ranges` (baseline `a661425` vs HEAD, tests served statically and driven through `--wpt`):** `Range-cloneContents` 146→**187**, `Range-extractContents` 146→**187**, `Range-deleteContents` 103→**125** (all the reused-`common.js`-harness siblings now fully pass, **+104**); the rest of the area was already passing and is unchanged. **Caveat that needed a companion fix (see #9):** with the harness now proceeding into testharness `make_dom`, the two largest files first hit a pre-existing O(n·live-ranges) Range-polyfill wall and exceeded the 60 s page-JS watchdog (`Range-surroundContents` 690→timeout, `Range-insertNode` →timeout). After fixing that wall, `Range-surroundContents` is **1840/1840** (from 690) and `Range-insertNode` **1792/1840** (from timeout; the 48 residual fails are separate `insertNode`-algorithm bugs). | `Range-surroundContents.html` (690→**1840**), `Range-insertNode.html` (timeout→**1792**), `Range-{clone,extract,delete}Contents` (**+104**) | landed (~3000) |
 | 9 | ~~**Range live-range fixup was O(n·ranges) on every `appendChild`**~~ — **landed.** The `Range` polyfill's `applyInsert` ran `indexOfNode` (an O(siblings) `previousSibling` walk) and `forEachLiveRange` (O(all live ranges)) on every `appendChild`/`insertBefore`. testharness `make_dom` builds fixtures by appending thousands of fresh nodes, so this was O(n²)/O(n·ranges) and tripped the 60 s page-JS watchdog on the biggest `dom/ranges` fixtures (`Range-surroundContents`, `Range-insertNode`) once #8 let their harness run the fixture build at all. Fix: when a node is inserted as the **last child** (`nextSibling === null`, i.e. every `appendChild`), its index equals the parent's old child count, so no pre-existing range-boundary offset can exceed it and the fixup is provably a no-op — bail out before `indexOfNode`/`forEachLiveRange`. `make_dom` returns to O(n); `Range-mutations-*` unchanged (`appendChild` 70/70 etc.). | unblocks #8's two largest files | landed |
