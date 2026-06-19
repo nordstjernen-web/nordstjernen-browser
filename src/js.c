@@ -21260,7 +21260,13 @@ static JSValue
 ns_element_get_childNodes(JSContext *ctx, JSValueConst this_val)
 {
     if (!ns_unwrap_element(this_val)) return JS_NewArray(ctx);
-    return ns_make_live(ctx, this_val, NS_LIVE_CHILDNODES, NULL);
+    JSValue cached = JS_GetPropertyStr(ctx, this_val, "__ndChildNodes");
+    if (JS_IsObject(cached)) return cached;
+    JS_FreeValue(ctx, cached);
+    JSValue list = ns_make_live(ctx, this_val, NS_LIVE_CHILDNODES, NULL);
+    JS_DefinePropertyValueStr(ctx, this_val, "__ndChildNodes",
+                              JS_DupValue(ctx, list), 0);
+    return list;
 }
 
 static JSValue
