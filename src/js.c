@@ -31485,6 +31485,30 @@ ns_zlib_finish(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     return ns_zlib_run(ctx, c, (const uint8_t *)"", 0, TRUE);
 }
 
+static void
+ns_define_element_unscopables(JSContext *ctx, JSValue proto)
+{
+    JSValue gobj = JS_GetGlobalObject(ctx);
+    JSValue sym = JS_GetPropertyStr(ctx, gobj, "Symbol");
+    JSValue us_sym = JS_GetPropertyStr(ctx, sym, "unscopables");
+    JSAtom us_atom = JS_ValueToAtom(ctx, us_sym);
+    if (us_atom != JS_ATOM_NULL) {
+        static const char *const names[] = {
+            "before", "after", "replaceWith", "remove",
+            "prepend", "append", "replaceChildren",
+        };
+        JSValue us = JS_NewObjectProto(ctx, JS_NULL);
+        for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+            JS_DefinePropertyValueStr(ctx, us, names[i], JS_TRUE,
+                                      JS_PROP_C_W_E);
+        JS_DefinePropertyValue(ctx, proto, us_atom, us, JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, us_atom);
+    }
+    JS_FreeValue(ctx, us_sym);
+    JS_FreeValue(ctx, sym);
+    JS_FreeValue(ctx, gobj);
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -31561,6 +31585,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JSValue element_proto = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, element_proto, ns_element_proto_funcs,
                                G_N_ELEMENTS(ns_element_proto_funcs));
+    ns_define_element_unscopables(ctx, element_proto);
     JS_SetClassProto(ctx, ns_element_class_id, JS_DupValue(ctx, element_proto));
 
     if (!ns_style_class_id)
