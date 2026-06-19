@@ -53,30 +53,49 @@ unless explicitly requested.
 
 ## Implemented surface
 
-The current implementation (`src/webgpu.c`) is a foundation focused on
-device acquisition and resources:
+The implementation (`src/webgpu.c`) covers device acquisition, buffers, and
+a working **render-to-canvas** path:
 
 - `navigator.gpu` — `requestAdapter()`, `getPreferredCanvasFormat()`,
   `wgslLanguageFeatures`.
 - `GPUAdapter` — `requestDevice()`, `info` (`vendor`/`architecture`/
   `device`/`description`), `features`, `limits`, `isFallbackAdapter`.
 - `GPUDevice` — `queue`, `features`, `limits`, `createBuffer()`,
-  `getQueue()`, `destroy()`.
+  `createCommandEncoder()`, `getQueue()`, `destroy()`.
 - `GPUQueue` — `writeBuffer()`, `submit()`.
 - `GPUBuffer` — `size`, `usage`, `destroy()`.
+- `GPUCanvasContext` (`canvas.getContext('webgpu')`) — `configure()`
+  (`device`, `format`, `alphaMode`), `unconfigure()`, `getConfiguration()`,
+  `getCurrentTexture()`.
+- `GPUTexture` — `createView()`, `width`/`height`/`format`, `destroy()`;
+  `GPUTextureView`.
+- `GPUCommandEncoder` — `beginRenderPass()` (color attachment `view`,
+  `loadOp`/`storeOp`, `clearValue`), `finish()`.
+- `GPURenderPassEncoder` — `end()`. `setPipeline`/`setBindGroup`/
+  `setVertexBuffer`/`draw`/… are accepted as no-ops (see below).
+- `GPUCommandBuffer`.
 
-The promise-returning calls are resolved by polling wgpu-native's event
-loop synchronously, so `await navigator.gpu.requestAdapter()` works without
-integrating with the page event loop.
+A configured canvas owns an offscreen target texture
+(`RENDER_ATTACHMENT | COPY_SRC`); each paint, the renderer copies it back
+(`copyTextureToBuffer` → map → cairo `ARGB32`, BGRA/RGBA aware,
+opaque/premultiplied alpha aware) exactly like the WebGL compositor. So a
+page that clears its canvas via a render pass shows the GPU-produced result.
+
+Promise-returning calls (`requestAdapter`, `requestDevice`, buffer mapping)
+are resolved by polling wgpu-native's event loop synchronously, so
+`await navigator.gpu.requestAdapter()` works without integrating with the
+page event loop.
 
 ### Not yet implemented
 
-The render-to-canvas path is the next phase and is **not** wired up yet:
-`canvas.getContext('webgpu')` returns `null`, and shader modules, render /
-compute pipelines, bind groups, textures, samplers, and command/render-pass
-encoders are not bound. WGSL is provided by wgpu-native's `naga` compiler
-and becomes available once those objects are bound. This document and
-`navigator.gpu` feature-detection reflect exactly what is present.
+Geometry rendering is not wired up: shader modules (WGSL), render / compute
+**pipelines**, bind groups / bind-group layouts, vertex/index buffers as
+draw sources, samplers, and non-color (depth/stencil) attachments are not
+bound. The render-pass draw calls (`setPipeline`, `draw`, …) are accepted
+but do nothing, so a page that sets up a full pipeline renders only its
+clear color rather than its geometry. WGSL is available from wgpu-native's
+`naga` compiler and becomes useful once pipelines are bound — that is the
+next phase. This document and feature-detection reflect exactly what runs.
 
 ## Architecture & security notes
 

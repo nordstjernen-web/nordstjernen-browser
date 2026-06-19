@@ -15,6 +15,9 @@
 #include "video.h"
 #include "texture.h"
 #include "webgl.h"
+#ifdef ND_HAVE_WEBGPU
+#include "webgpu.h"
+#endif
 
 static JSClassID ns_path2d_class_id;
 
@@ -585,6 +588,10 @@ ns_js_canvas_surface(ns_js *js, const ns_node *n)
     if (!n) return NULL;
     cairo_surface_t *gl = ns_webgl_canvas_surface(n);
     if (gl) return gl;
+#ifdef ND_HAVE_WEBGPU
+    cairo_surface_t *gpu = ns_webgpu_canvas_surface(n);
+    if (gpu) return gpu;
+#endif
     if (!js || !js->canvas_states) return NULL;
     ns_canvas_state *st = g_hash_table_lookup(js->canvas_states, n);
     return st ? st->surf : NULL;
@@ -2976,12 +2983,20 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
             webgl_version = 1;
         else if (t && strcmp(t, "webgl2") == 0)
             webgl_version = 2;
+        gboolean is_webgpu = t && strcmp(t, "webgpu") == 0;
         gboolean is_2d = !t || strcmp(t, "2d") == 0;
         if (t) JS_FreeCString(ctx, t);
         if (webgl_version)
             return ns_webgl_get_context(ctx, js_from_ctx(ctx), this_val, el,
                                         webgl_version,
                                         argc >= 2 ? argv[1] : JS_UNDEFINED);
+        if (is_webgpu) {
+#ifdef ND_HAVE_WEBGPU
+            return ns_webgpu_get_context(ctx, js_from_ctx(ctx), this_val, el);
+#else
+            return JS_NULL;
+#endif
+        }
         if (!is_2d) return JS_NULL;
     }
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
