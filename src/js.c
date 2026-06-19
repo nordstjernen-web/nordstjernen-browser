@@ -2725,7 +2725,8 @@ ns_element_get_localName(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || !n->name) return JS_NULL;
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
+    if ((n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
+        ns_element_get_attr(n, "data-nd-ns-uri")) {
         const char *colon = strchr(n->name, ':');
         if (colon) return JS_NewString(ctx, colon + 1);
     }
@@ -2741,7 +2742,8 @@ ns_element_get_prefix(JSContext *ctx, JSValueConst this_val)
         const char *stored = ns_element_get_attr(n, "data-nd-ns-prefix");
         if (stored) return JS_NewString(ctx, stored);
     }
-    if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
+    if ((n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) &&
+        ns_element_get_attr(n, "data-nd-ns-uri")) {
         const char *colon = strchr(n->name, ':');
         if (colon)
             return JS_NewStringLen(ctx, n->name, (size_t)(colon - n->name));
