@@ -10056,6 +10056,58 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     return NULL;
 }
 
+static const ns_style *
+ns_pseudo_substyle(const ns_style *s, const char *pseudo)
+{
+    if (!s || !pseudo) return NULL;
+    if (strcmp(pseudo, "before") == 0)       return s->before;
+    if (strcmp(pseudo, "after") == 0)        return s->after;
+    if (strcmp(pseudo, "marker") == 0)       return s->marker;
+    if (strcmp(pseudo, "first-line") == 0)   return s->first_line;
+    if (strcmp(pseudo, "first-letter") == 0) return s->first_letter;
+    if (strcmp(pseudo, "placeholder") == 0)  return s->placeholder;
+    if (strcmp(pseudo, "selection") == 0)    return s->selection;
+    if (strcmp(pseudo, "backdrop") == 0)     return s->backdrop;
+    return NULL;
+}
+
+static char *
+ns_computed_lookup_pseudo(JSContext *ctx, const ns_node *n,
+                          const char *pseudo, const char *name)
+{
+    if (!n || !name || !pseudo) return NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (js) ns_js_flush_layout(js);
+    const ns_style *base = (js && js->style_table)
+        ? g_hash_table_lookup(js->style_table, n) : NULL;
+    const ns_style *ps = ns_pseudo_substyle(base, pseudo);
+    if (!ps) return NULL;
+
+    if (strcmp(name, "css-float") == 0 || strcmp(name, "cssFloat") == 0)
+        name = "float";
+
+    if (name[0] == '-' && name[1] == '-' && name[2]) {
+        if (ps->vars) {
+            const char *v = ns_var_map_lookup(ps->vars, name);
+            if (v) return g_strdup(v);
+        }
+        return NULL;
+    }
+
+    if (strcmp(name, "font-weight") == 0 && ps->values[NS_CSS_FONT_WEIGHT]) {
+        int w = ns_css_font_weight_number(ps->values[NS_CSS_FONT_WEIGHT], 400);
+        return g_strdup_printf("%d", w);
+    }
+
+    int pid = ns_css_prop_id(name);
+    if (pid >= 0 && ps->values[pid])
+        return ns_css_value_serialize(ps->values[pid]);
+
+    const char *initial = ns_computed_initial_value(name);
+    if (initial) return g_strdup(initial);
+    return NULL;
+}
+
 static JSValue
 ns_computed_getPropertyValue(JSContext *ctx, JSValueConst this_val,
                              int argc, JSValueConst *argv)
@@ -10067,7 +10119,13 @@ ns_computed_getPropertyValue(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(node_v);
     JS_FreeValue(ctx, node_v);
     if (!n) { JS_FreeCString(ctx, name); return JS_NewString(ctx, ""); }
-    char *val = ns_computed_lookup(ctx, n, name);
+    JSValue pseudo_v = JS_GetPropertyStr(ctx, this_val, "_pseudo");
+    const char *pseudo = JS_IsString(pseudo_v) ? JS_ToCString(ctx, pseudo_v) : NULL;
+    char *val = (pseudo && *pseudo)
+        ? ns_computed_lookup_pseudo(ctx, n, pseudo, name)
+        : ns_computed_lookup(ctx, n, name);
+    if (pseudo) JS_FreeCString(ctx, pseudo);
+    JS_FreeValue(ctx, pseudo_v);
     JS_FreeCString(ctx, name);
     JSValue r = JS_NewString(ctx, val ? val : "");
     g_free(val);
@@ -10081,6 +10139,19 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     JSValue cs = JS_NewObject(ctx);
     if (argc >= 1) JS_SetPropertyStr(ctx, cs, "_node", JS_DupValue(ctx, argv[0]));
+    if (argc >= 2 && JS_IsString(argv[1])) {
+        const char *praw = JS_ToCString(ctx, argv[1]);
+        if (praw && *praw) {
+            const char *p = praw;
+            while (*p == ':') p++;
+            if (*p) {
+                char *plow = g_ascii_strdown(p, -1);
+                JS_SetPropertyStr(ctx, cs, "_pseudo", JS_NewString(ctx, plow));
+                g_free(plow);
+            }
+        }
+        if (praw) JS_FreeCString(ctx, praw);
+    }
     ns_bind_fn(ctx, cs, "getPropertyValue", ns_computed_getPropertyValue, 1);
 
     ns_js *jsx = js_from_ctx(ctx);
@@ -10090,7 +10161,7 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
             " return new Proxy(t, {"
             "  get: function(o, k) {"
             "   if (typeof k !== 'string') return Reflect.get(o, k);"
-            "   if (k === '_node' || k === 'getPropertyValue' || k in Object.prototype)"
+            "   if (k === '_node' || k === '_pseudo' || k === 'getPropertyValue' || k in Object.prototype)"
             "    return Reflect.get(o, k);"
             "   var kebab = (k.indexOf('-') >= 0)"
             "    ? k"
