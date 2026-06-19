@@ -11981,7 +11981,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                 if (!ns_el_is_empty(el)) return FALSE;
                 break;
             case NS_CSS_PC_ROOT:
-                if (el->parent && el->parent->kind == NS_NODE_ELEMENT) return FALSE;
+                if (!el->parent || el->parent->kind != NS_NODE_DOCUMENT ||
+                    (el->parent->flags & NS_NODE_FRAGMENT))
+                    return FALSE;
                 break;
             case NS_CSS_PC_SCOPE:
                 if (g_css_match_scope) {

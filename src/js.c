@@ -21638,6 +21638,25 @@ ns_find_first_by_tag(const ns_node *n, const char *tag, int depth)
     return NULL;
 }
 
+static gboolean
+ns_element_id_is(const ns_node *n, const char *id)
+{
+    if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
+    const char *nid = ns_element_get_attr(n, "id");
+    return nid && strcmp(nid, id) == 0;
+}
+
+static void
+ns_collect_by_id_walk(const ns_node *n, const char *id, JSContext *ctx,
+                      JSValue arr, uint32_t *i, int depth)
+{
+    if (!n || depth >= 512) return;
+    if (ns_element_id_is(n, id))
+        JS_SetPropertyUint32(ctx, arr, (*i)++, ns_make_element(ctx, n));
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_collect_by_id_walk(c, id, ctx, arr, i, depth + 1);
+}
+
 static JSValue
 ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
                          gboolean want_all, gboolean include_self)
@@ -21659,7 +21678,11 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
             return hit ? ns_make_element(ctx, hit) : JS_NULL;
         }
         JSValue arr = JS_NewArray(ctx);
-        if (hit) JS_SetPropertyUint32(ctx, arr, 0, ns_make_element(ctx, hit));
+        uint32_t i = 0;
+        if (include_self && ns_element_id_is(root, sel + 1))
+            JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, root));
+        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+            ns_collect_by_id_walk(c, sel + 1, ctx, arr, &i, 0);
         return ns_nodelist_from_array(ctx, arr);
     }
     if (sel[0] == '.' && ns_simple_ident_only(sel + 1)) {
