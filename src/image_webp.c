@@ -217,7 +217,7 @@ ns_image_webp_decode_animation_first_frame(const guchar *data, gsize len,
                                            int *out_w, int *out_h,
                                            gsize *out_stride)
 {
-    if (!ns_image_webp_supports_bytes(data, len) || len > NS_WEBP_MAX_INPUT)
+    if (!ns_image_webp_supports_bytes(data, len) || len < 12 || len > NS_WEBP_MAX_INPUT)
         return NULL;
     guint32 riff_size = ns_webp_read_u32(data + 4);
     if ((gsize)riff_size > len - 8 || riff_size < 4) return NULL;

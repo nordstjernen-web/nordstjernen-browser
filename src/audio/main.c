@@ -184,7 +184,7 @@ decode_mpeg(const unsigned char *bytes, size_t n,
     plm_set_video_enabled(plm, 0);
     plm_set_audio_enabled(plm, 1);
     int rate = plm_get_samplerate(plm);
-    if (plm_get_num_audio_streams(plm) < 1 || rate <= 0) {
+    if (plm_get_num_audio_streams(plm) < 1 || rate <= 0 || rate > 48000) {
         plm_destroy(plm);
         return 0;
     }
