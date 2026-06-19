@@ -20546,8 +20546,9 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                 ns_node *old_parent = target->parent;
                 ns_node *saved_prev = target->prev_sibling;
                 ns_node *saved_next = target->next_sibling;
-                ns_node_remove(target);
                 ns_js *_j = js_from_ctx(ctx);
+                if (_j) ns_ce_disconnect_subtree(_j, target);
+                ns_node_remove(target);
                 if (_j) {
                     g_hash_table_add(_j->orphan_nodes, target);
                     ns_js_record_child_change(_j, old_parent, NULL, target,
@@ -20562,8 +20563,9 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
     ns_node *old_parent = n->parent;
     ns_node *saved_prev = n->prev_sibling;
     ns_node *saved_next = n->next_sibling;
-    ns_node_remove(n);
     ns_js *_j = js_from_ctx(ctx);
+    if (_j) ns_ce_disconnect_subtree(_j, n);
+    ns_node_remove(n);
     if (_j) {
         g_hash_table_add(_j->orphan_nodes, n);
         ns_js_record_child_change(_j, old_parent, NULL, n,
@@ -21241,6 +21243,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
             if (img_src_paint_only && _j->repaint_cb)
                 _j->repaint_cb(_j->repaint_user_data);
         }
+        if (_j) ns_ce_attr_changed(_j, n, name, old_copy, val);
         if (g_ascii_strcasecmp(name, "open") == 0 && !old_copy &&
             ns_node_is_element_named(n, "details"))
             ns_js_details_toggle_open(_j, n, TRUE);
@@ -21288,6 +21291,7 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
             if (_j) {
                 _j->mutated = TRUE;
                 ns_js_record_attr_change(_j, n, name, old_copy);
+                ns_ce_attr_changed(_j, n, name, old_copy, NULL);
             }
             g_free(old_copy);
             if (g_ascii_strcasecmp(name, "open") == 0 &&
