@@ -163,6 +163,13 @@ static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
 static void ns_js_record_move_removal(ns_js *js, ns_node *node);
+static void ns_js_index_child_change(ns_js *js, ns_node *parent,
+                                     ns_node *added, ns_node *removed);
+static void ns_mut_record_emit_child_list_arrays(ns_js *js, ns_node *target,
+                                                 GPtrArray *added_nodes,
+                                                 GPtrArray *removed_nodes,
+                                                 ns_node *previous_sibling,
+                                                 ns_node *next_sibling);
 static void ns_js_record_attr_change(ns_js *js, ns_node *target,
                                      const char *name, const char *old_value);
 static void ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value);
@@ -4810,6 +4817,39 @@ ns_element_clear_children_recorded(ns_js *js, ns_node *n)
     n->last_child  = NULL;
 }
 
+static void
+ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
+{
+    if (!js) {
+        ns_element_clear_children(n);
+        if (added) ns_node_append_child(n, added);
+        return;
+    }
+    GPtrArray *removed = g_ptr_array_new();
+    ns_node *c = n->first_child;
+    while (c) {
+        ns_node *next = c->next_sibling;
+        ns_ce_disconnect_subtree(js, c);
+        ns_node_remove(c);
+        g_hash_table_add(js->orphan_nodes, c);
+        ns_js_index_child_change(js, n, NULL, c);
+        g_ptr_array_add(removed, c);
+        c = next;
+    }
+    n->first_child = NULL;
+    n->last_child  = NULL;
+    GPtrArray *add_arr = NULL;
+    if (added) {
+        ns_node_append_child(n, added);
+        ns_js_index_child_change(js, n, added, NULL);
+        add_arr = g_ptr_array_new();
+        g_ptr_array_add(add_arr, added);
+    }
+    ns_mut_record_emit_child_list_arrays(js, n, add_arr, removed, NULL, NULL);
+    if (add_arr) g_ptr_array_free(add_arr, FALSE);
+    g_ptr_array_free(removed, FALSE);
+}
+
 static GPtrArray *
 ns_element_clear_children_collect(ns_js *js, ns_node *n)
 {
@@ -4845,13 +4885,8 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    ns_element_clear_children_recorded(_j, n);
-    if (*s) {
-        ns_node *added = ns_node_new_text(g_strdup(s));
-        ns_node_append_child(n, added);
-        if (_j) ns_js_record_child_change(_j, n, added, NULL,
-                                          added->prev_sibling, added->next_sibling);
-    }
+    ns_node *added = *s ? ns_node_new_text(g_strdup(s)) : NULL;
+    ns_element_replace_all_recorded(_j, n, added);
     if (free_s) JS_FreeCString(ctx, s);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
@@ -16708,6 +16743,18 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
 }
 
 static void
+ns_js_record_fragment_emptied(ns_js *js, ns_node *fragment)
+{
+    if (!js || !fragment) return;
+    GPtrArray *kids = g_ptr_array_new();
+    for (ns_node *c = fragment->first_child; c; c = c->next_sibling)
+        g_ptr_array_add(kids, c);
+    if (kids->len > 0)
+        ns_mut_record_emit_child_list_arrays(js, fragment, NULL, kids, NULL, NULL);
+    g_ptr_array_free(kids, FALSE);
+}
+
+static void
 ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
                                  GPtrArray *added, GPtrArray *removed,
                                  ns_node *previous_sibling,
@@ -19472,6 +19519,7 @@ ns_element_appendChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_js *_j = js_from_ctx(ctx);
     gboolean inert_parent = ns_node_in_template_content(parent);
     if (child->kind == NS_NODE_DOCUMENT && !child->parent) {
+        if (_j) ns_js_record_fragment_emptied(_j, child);
         GPtrArray *moved = g_ptr_array_new();
         ns_node *batch_prev = parent->last_child;
         ns_node *c = child->first_child;
@@ -19677,6 +19725,7 @@ ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
     ns_js *_j = js_from_ctx(ctx);
     gboolean inert_parent = ns_node_in_template_content(parent);
     if (newc->kind == NS_NODE_DOCUMENT && !newc->parent) {
+        if (_j) ns_js_record_fragment_emptied(_j, newc);
         gboolean has_ref = ref && ref->parent == parent;
         ns_node *batch_prev = has_ref ? ref->prev_sibling : parent->last_child;
         ns_node *batch_next = has_ref ? ref : NULL;
@@ -19813,11 +19862,20 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         JSValue verr = ns_pre_replace_validity(ctx, parent, newc, oldc);
         if (JS_IsException(verr)) return verr;
     }
-    if (newc == oldc) return JS_DupValue(ctx, argv[1]);
     ns_js *_j = js_from_ctx(ctx);
+    if (newc == oldc) {
+        if (_j) {
+            ns_node *p = oldc->prev_sibling, *nx = oldc->next_sibling;
+            ns_js_record_child_change(_j, parent, NULL, oldc, p, nx);
+            ns_js_record_child_change(_j, parent, oldc, NULL, p, nx);
+            _j->mutated = TRUE;
+        }
+        return JS_DupValue(ctx, argv[1]);
+    }
     gboolean inert_parent = ns_node_in_template_content(parent);
 
     if (newc->kind == NS_NODE_DOCUMENT && !newc->parent) {
+        if (_j) ns_js_record_fragment_emptied(_j, newc);
         ns_node *reference = oldc->next_sibling;
         ns_node *o_prev = oldc->prev_sibling, *o_next = oldc->next_sibling;
         ns_node_remove(oldc);
@@ -20293,8 +20351,10 @@ ns_node_normalize_walk(ns_js *js, ns_node *n)
             if (lb) memcpy(merged + la, next->text, lb);
             merged[la + lb] = '\0';
             ns_node_replace_text_owned(c, merged);
+            ns_node *rm_prev = next->prev_sibling, *rm_next = next->next_sibling;
             ns_node_remove(next);
             ns_js_orphan_node(js, next);
+            if (js) ns_js_record_child_change(js, n, NULL, next, rm_prev, rm_next);
             continue;
         }
         if (c->kind == NS_NODE_ELEMENT) ns_node_normalize_walk(js, c);
