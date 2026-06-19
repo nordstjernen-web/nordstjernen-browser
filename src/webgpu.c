@@ -25,6 +25,8 @@ static JSClassID g_view_class;
 static JSClassID g_encoder_class;
 static JSClassID g_pass_class;
 static JSClassID g_cmdbuf_class;
+static JSClassID g_shader_class;
+static JSClassID g_pipeline_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
@@ -37,6 +39,8 @@ typedef struct { WGPUTextureView view; } ns_wg_view;
 typedef struct { WGPUCommandEncoder enc; } ns_wg_encoder;
 typedef struct { WGPURenderPassEncoder pass; } ns_wg_pass;
 typedef struct { WGPUCommandBuffer cmd; } ns_wg_cmdbuf;
+typedef struct { WGPUShaderModule mod; } ns_wg_shader;
+typedef struct { WGPURenderPipeline pipe; } ns_wg_pipeline;
 
 typedef struct {
     const ns_node *canvas;
@@ -51,6 +55,12 @@ typedef struct {
 } ns_wg_context;
 
 static JSValue wg_device_createCommandEncoder(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv);
+static JSValue wg_device_createShaderModule(JSContext *ctx,
+                                            JSValueConst this_val,
+                                            int argc, JSValueConst *argv);
+static JSValue wg_device_createRenderPipeline(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
 
@@ -361,6 +371,8 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
     wg_bind(ctx, obj, "createBuffer", wg_device_createBuffer, 1);
     wg_bind(ctx, obj, "createCommandEncoder", wg_device_createCommandEncoder, 1);
+    wg_bind(ctx, obj, "createShaderModule", wg_device_createShaderModule, 1);
+    wg_bind(ctx, obj, "createRenderPipeline", wg_device_createRenderPipeline, 1);
     wg_bind(ctx, obj, "getQueue", wg_device_getQueue, 0);
     wg_bind(ctx, obj, "destroy", wg_device_destroy, 0);
     return obj;
@@ -611,6 +623,95 @@ wg_pass_noop(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
 }
 
 static JSValue
+wg_pass_setPipeline(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)ctx;
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 1) return JS_UNDEFINED;
+    ns_wg_pipeline *pl = JS_GetOpaque(argv[0], g_pipeline_class);
+    if (pl && pl->pipe) wgpuRenderPassEncoderSetPipeline(p->pass, pl->pipe);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_setVertexBuffer(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 2) return JS_UNDEFINED;
+    int32_t slot = 0;
+    JS_ToInt32(ctx, &slot, argv[0]);
+    ns_wg_buffer *b = JS_GetOpaque(argv[1], g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    int64_t offset = 0;
+    if (argc >= 3) JS_ToInt64(ctx, &offset, argv[2]);
+    uint64_t size = b->size > (uint64_t)offset ? b->size - (uint64_t)offset : 0;
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) {
+        int64_t s = 0; JS_ToInt64(ctx, &s, argv[3]);
+        if (s > 0) size = (uint64_t)s;
+    }
+    wgpuRenderPassEncoderSetVertexBuffer(p->pass, (uint32_t)slot, b->buffer,
+                                         (uint64_t)offset, size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_setIndexBuffer(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 2) return JS_UNDEFINED;
+    ns_wg_buffer *b = JS_GetOpaque(argv[0], g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    WGPUIndexFormat fmt = WGPUIndexFormat_Uint32;
+    const char *fs = JS_IsString(argv[1]) ? JS_ToCString(ctx, argv[1]) : NULL;
+    if (fs && strcmp(fs, "uint16") == 0) fmt = WGPUIndexFormat_Uint16;
+    if (fs) JS_FreeCString(ctx, fs);
+    int64_t offset = 0;
+    if (argc >= 3) JS_ToInt64(ctx, &offset, argv[2]);
+    uint64_t size = b->size > (uint64_t)offset ? b->size - (uint64_t)offset : 0;
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) {
+        int64_t s = 0; JS_ToInt64(ctx, &s, argv[3]);
+        if (s > 0) size = (uint64_t)s;
+    }
+    wgpuRenderPassEncoderSetIndexBuffer(p->pass, b->buffer, fmt,
+                                        (uint64_t)offset, size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_draw(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass) return JS_UNDEFINED;
+    uint32_t vc = 0, ic = 1, fv = 0, fi = 0;
+    if (argc >= 1) JS_ToUint32(ctx, &vc, argv[0]);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToUint32(ctx, &ic, argv[1]);
+    if (argc >= 3) JS_ToUint32(ctx, &fv, argv[2]);
+    if (argc >= 4) JS_ToUint32(ctx, &fi, argv[3]);
+    wgpuRenderPassEncoderDraw(p->pass, vc, ic, fv, fi);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_pass_drawIndexed(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass) return JS_UNDEFINED;
+    uint32_t icnt = 0, inst = 1, fi = 0, ff = 0;
+    int32_t bv = 0;
+    if (argc >= 1) JS_ToUint32(ctx, &icnt, argv[0]);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToUint32(ctx, &inst, argv[1]);
+    if (argc >= 3) JS_ToUint32(ctx, &fi, argv[2]);
+    if (argc >= 4) JS_ToInt32(ctx, &bv, argv[3]);
+    if (argc >= 5) JS_ToUint32(ctx, &ff, argv[4]);
+    wgpuRenderPassEncoderDrawIndexed(p->pass, icnt, inst, fi, bv, ff);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 wg_make_pass(JSContext *ctx, WGPURenderPassEncoder pass)
 {
     JSValue obj = JS_NewObjectClass(ctx, g_pass_class);
@@ -619,14 +720,14 @@ wg_make_pass(JSContext *ctx, WGPURenderPassEncoder pass)
     p->pass = pass;
     JS_SetOpaque(obj, p);
     wg_bind(ctx, obj, "end", wg_pass_end, 0);
-    wg_bind(ctx, obj, "setPipeline", wg_pass_noop, 1);
+    wg_bind(ctx, obj, "setPipeline", wg_pass_setPipeline, 1);
     wg_bind(ctx, obj, "setBindGroup", wg_pass_noop, 2);
-    wg_bind(ctx, obj, "setVertexBuffer", wg_pass_noop, 2);
-    wg_bind(ctx, obj, "setIndexBuffer", wg_pass_noop, 2);
+    wg_bind(ctx, obj, "setVertexBuffer", wg_pass_setVertexBuffer, 2);
+    wg_bind(ctx, obj, "setIndexBuffer", wg_pass_setIndexBuffer, 2);
     wg_bind(ctx, obj, "setViewport", wg_pass_noop, 6);
     wg_bind(ctx, obj, "setScissorRect", wg_pass_noop, 4);
-    wg_bind(ctx, obj, "draw", wg_pass_noop, 4);
-    wg_bind(ctx, obj, "drawIndexed", wg_pass_noop, 5);
+    wg_bind(ctx, obj, "draw", wg_pass_draw, 4);
+    wg_bind(ctx, obj, "drawIndexed", wg_pass_drawIndexed, 5);
     return obj;
 }
 
@@ -893,6 +994,254 @@ wg_context_finalizer(JSRuntime *rt, JSValue val)
     g_free(c);
 }
 
+static WGPUStringView
+wg_sv(const char *s)
+{
+    WGPUStringView v;
+    v.data = s;
+    v.length = s ? strlen(s) : 0;
+    return v;
+}
+
+static WGPUVertexFormat
+wg_vertex_format(const char *s)
+{
+    if (!s) return WGPUVertexFormat_Float32x3;
+    if (strcmp(s, "float32x2") == 0) return WGPUVertexFormat_Float32x2;
+    if (strcmp(s, "float32x4") == 0) return WGPUVertexFormat_Float32x4;
+    if (strcmp(s, "float32") == 0)   return WGPUVertexFormat_Float32;
+    if (strcmp(s, "uint32") == 0)    return WGPUVertexFormat_Uint32;
+    return WGPUVertexFormat_Float32x3;
+}
+
+static WGPUPrimitiveTopology
+wg_topology(const char *s)
+{
+    if (!s) return WGPUPrimitiveTopology_TriangleList;
+    if (strcmp(s, "triangle-strip") == 0) return WGPUPrimitiveTopology_TriangleStrip;
+    if (strcmp(s, "line-list") == 0)  return WGPUPrimitiveTopology_LineList;
+    if (strcmp(s, "line-strip") == 0) return WGPUPrimitiveTopology_LineStrip;
+    if (strcmp(s, "point-list") == 0) return WGPUPrimitiveTopology_PointList;
+    return WGPUPrimitiveTopology_TriangleList;
+}
+
+static void
+wg_shader_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_shader *s = JS_GetOpaque(val, g_shader_class);
+    if (!s) return;
+    if (s->mod) wgpuShaderModuleRelease(s->mod);
+    g_free(s);
+}
+
+static JSValue
+wg_shader_compilationInfo(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue info = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, info, "messages", JS_NewArray(ctx));
+    return wg_promise_resolved(ctx, info);
+}
+
+static JSValue
+wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createShaderModule: descriptor required");
+    JSValue jcode = JS_GetPropertyStr(ctx, argv[0], "code");
+    const char *code = JS_IsString(jcode) ? JS_ToCString(ctx, jcode) : NULL;
+    JS_FreeValue(ctx, jcode);
+    if (!code) return JS_ThrowTypeError(ctx, "createShaderModule: code required");
+
+    WGPUShaderSourceWGSL src;
+    memset(&src, 0, sizeof src);
+    src.chain.sType = WGPUSType_ShaderSourceWGSL;
+    src.code = wg_sv(code);
+    WGPUShaderModuleDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.nextInChain = (WGPUChainedStruct *)&src;
+    WGPUShaderModule mod = wgpuDeviceCreateShaderModule(d->device, &desc);
+    JS_FreeCString(ctx, code);
+    if (!mod) return JS_ThrowInternalError(ctx, "createShaderModule failed");
+
+    JSValue obj = JS_NewObjectClass(ctx, g_shader_class);
+    ns_wg_shader *s = g_new0(ns_wg_shader, 1);
+    s->mod = mod;
+    JS_SetOpaque(obj, s);
+    wg_bind(ctx, obj, "getCompilationInfo", wg_shader_compilationInfo, 0);
+    return obj;
+}
+
+static void
+wg_pipeline_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_pipeline *p = JS_GetOpaque(val, g_pipeline_class);
+    if (!p) return;
+    if (p->pipe) wgpuRenderPipelineRelease(p->pipe);
+    g_free(p);
+}
+
+#define NS_WG_MAX_VBUF 16
+#define NS_WG_MAX_ATTR 16
+#define NS_WG_MAX_TARGET 8
+
+static JSValue
+wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createRenderPipeline: descriptor required");
+
+    WGPURenderPipelineDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+    desc.multisample.count = 1;
+    desc.multisample.mask = 0xFFFFFFFFu;
+
+    char *vs_entry = NULL, *fs_entry = NULL;
+    WGPUVertexBufferLayout vbl[NS_WG_MAX_VBUF];
+    WGPUVertexAttribute attrs[NS_WG_MAX_VBUF][NS_WG_MAX_ATTR];
+    WGPUColorTargetState targets[NS_WG_MAX_TARGET];
+    WGPUFragmentState frag;
+    memset(vbl, 0, sizeof vbl);
+    memset(attrs, 0, sizeof attrs);
+    memset(targets, 0, sizeof targets);
+    memset(&frag, 0, sizeof frag);
+
+    JSValue jvertex = JS_GetPropertyStr(ctx, argv[0], "vertex");
+    if (JS_IsObject(jvertex)) {
+        JSValue jmod = JS_GetPropertyStr(ctx, jvertex, "module");
+        ns_wg_shader *vm = JS_GetOpaque(jmod, g_shader_class);
+        if (vm) desc.vertex.module = vm->mod;
+        JS_FreeValue(ctx, jmod);
+        JSValue jentry = JS_GetPropertyStr(ctx, jvertex, "entryPoint");
+        if (JS_IsString(jentry)) vs_entry = (char *)JS_ToCString(ctx, jentry);
+        JS_FreeValue(ctx, jentry);
+        desc.vertex.entryPoint = wg_sv(vs_entry);
+
+        JSValue jbufs = JS_GetPropertyStr(ctx, jvertex, "buffers");
+        if (JS_IsArray(jbufs)) {
+            uint32_t nb = 0;
+            JSValue jbl = JS_GetPropertyStr(ctx, jbufs, "length");
+            JS_ToUint32(ctx, &nb, jbl);
+            JS_FreeValue(ctx, jbl);
+            if (nb > NS_WG_MAX_VBUF) nb = NS_WG_MAX_VBUF;
+            for (uint32_t i = 0; i < nb; i++) {
+                JSValue jb = JS_GetPropertyUint32(ctx, jbufs, i);
+                if (!JS_IsObject(jb)) { JS_FreeValue(ctx, jb); continue; }
+                int64_t stride = 0;
+                JSValue jstride = JS_GetPropertyStr(ctx, jb, "arrayStride");
+                JS_ToInt64(ctx, &stride, jstride);
+                JS_FreeValue(ctx, jstride);
+                vbl[i].arrayStride = (uint64_t)stride;
+                vbl[i].stepMode = WGPUVertexStepMode_Vertex;
+                JSValue jsm = JS_GetPropertyStr(ctx, jb, "stepMode");
+                const char *sm = JS_IsString(jsm) ? JS_ToCString(ctx, jsm) : NULL;
+                if (sm && strcmp(sm, "instance") == 0)
+                    vbl[i].stepMode = WGPUVertexStepMode_Instance;
+                if (sm) JS_FreeCString(ctx, sm);
+                JS_FreeValue(ctx, jsm);
+
+                JSValue jattrs = JS_GetPropertyStr(ctx, jb, "attributes");
+                uint32_t na = 0;
+                if (JS_IsArray(jattrs)) {
+                    JSValue jal = JS_GetPropertyStr(ctx, jattrs, "length");
+                    JS_ToUint32(ctx, &na, jal);
+                    JS_FreeValue(ctx, jal);
+                    if (na > NS_WG_MAX_ATTR) na = NS_WG_MAX_ATTR;
+                    for (uint32_t k = 0; k < na; k++) {
+                        JSValue ja = JS_GetPropertyUint32(ctx, jattrs, k);
+                        JSValue jf = JS_GetPropertyStr(ctx, ja, "format");
+                        const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
+                        attrs[i][k].format = wg_vertex_format(fs);
+                        if (fs) JS_FreeCString(ctx, fs);
+                        JS_FreeValue(ctx, jf);
+                        int64_t off = 0; uint32_t loc = 0;
+                        JSValue jo = JS_GetPropertyStr(ctx, ja, "offset");
+                        JS_ToInt64(ctx, &off, jo); JS_FreeValue(ctx, jo);
+                        JSValue jl = JS_GetPropertyStr(ctx, ja, "shaderLocation");
+                        JS_ToUint32(ctx, &loc, jl); JS_FreeValue(ctx, jl);
+                        attrs[i][k].offset = (uint64_t)off;
+                        attrs[i][k].shaderLocation = loc;
+                        JS_FreeValue(ctx, ja);
+                    }
+                }
+                JS_FreeValue(ctx, jattrs);
+                vbl[i].attributeCount = na;
+                vbl[i].attributes = attrs[i];
+                JS_FreeValue(ctx, jb);
+            }
+            desc.vertex.bufferCount = nb;
+            desc.vertex.buffers = vbl;
+        }
+        JS_FreeValue(ctx, jbufs);
+    }
+    JS_FreeValue(ctx, jvertex);
+
+    JSValue jprim = JS_GetPropertyStr(ctx, argv[0], "primitive");
+    if (JS_IsObject(jprim)) {
+        JSValue jt = JS_GetPropertyStr(ctx, jprim, "topology");
+        const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
+        desc.primitive.topology = wg_topology(ts);
+        if (ts) JS_FreeCString(ctx, ts);
+        JS_FreeValue(ctx, jt);
+    }
+    JS_FreeValue(ctx, jprim);
+
+    JSValue jfrag = JS_GetPropertyStr(ctx, argv[0], "fragment");
+    if (JS_IsObject(jfrag)) {
+        JSValue jmod = JS_GetPropertyStr(ctx, jfrag, "module");
+        ns_wg_shader *fm = JS_GetOpaque(jmod, g_shader_class);
+        if (fm) frag.module = fm->mod;
+        JS_FreeValue(ctx, jmod);
+        JSValue jentry = JS_GetPropertyStr(ctx, jfrag, "entryPoint");
+        if (JS_IsString(jentry)) fs_entry = (char *)JS_ToCString(ctx, jentry);
+        JS_FreeValue(ctx, jentry);
+        frag.entryPoint = wg_sv(fs_entry);
+
+        JSValue jtargets = JS_GetPropertyStr(ctx, jfrag, "targets");
+        uint32_t nt = 0;
+        if (JS_IsArray(jtargets)) {
+            JSValue jtl = JS_GetPropertyStr(ctx, jtargets, "length");
+            JS_ToUint32(ctx, &nt, jtl);
+            JS_FreeValue(ctx, jtl);
+            if (nt > NS_WG_MAX_TARGET) nt = NS_WG_MAX_TARGET;
+            for (uint32_t i = 0; i < nt; i++) {
+                JSValue jtg = JS_GetPropertyUint32(ctx, jtargets, i);
+                JSValue jf = JS_GetPropertyStr(ctx, jtg, "format");
+                const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
+                targets[i].format = wg_format_from_str(fs);
+                if (fs) JS_FreeCString(ctx, fs);
+                JS_FreeValue(ctx, jf);
+                targets[i].writeMask = WGPUColorWriteMask_All;
+                JS_FreeValue(ctx, jtg);
+            }
+        }
+        JS_FreeValue(ctx, jtargets);
+        frag.targetCount = nt;
+        frag.targets = targets;
+        desc.fragment = &frag;
+    }
+    JS_FreeValue(ctx, jfrag);
+
+    WGPURenderPipeline pipe = wgpuDeviceCreateRenderPipeline(d->device, &desc);
+    if (vs_entry) JS_FreeCString(ctx, vs_entry);
+    if (fs_entry) JS_FreeCString(ctx, fs_entry);
+    if (!pipe) return JS_ThrowInternalError(ctx, "createRenderPipeline failed");
+
+    JSValue obj = JS_NewObjectClass(ctx, g_pipeline_class);
+    ns_wg_pipeline *p = g_new0(ns_wg_pipeline, 1);
+    p->pipe = pipe;
+    JS_SetOpaque(obj, p);
+    return obj;
+}
+
 static void
 wg_register_class(JSContext *ctx, JSClassID *id, const char *name,
                   JSClassFinalizer *finalizer)
@@ -930,6 +1279,10 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
                           wg_pass_finalizer);
         wg_register_class(ctx, &g_cmdbuf_class, "GPUCommandBuffer",
                           wg_cmdbuf_finalizer);
+        wg_register_class(ctx, &g_shader_class, "GPUShaderModule",
+                          wg_shader_finalizer);
+        wg_register_class(ctx, &g_pipeline_class, "GPURenderPipeline",
+                          wg_pipeline_finalizer);
     }
 
     JSValue gpu = JS_NewObject(ctx);

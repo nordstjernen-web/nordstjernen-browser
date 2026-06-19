@@ -71,9 +71,22 @@ a working **render-to-canvas** path:
   `GPUTextureView`.
 - `GPUCommandEncoder` — `beginRenderPass()` (color attachment `view`,
   `loadOp`/`storeOp`, `clearValue`), `finish()`.
-- `GPURenderPassEncoder` — `end()`. `setPipeline`/`setBindGroup`/
-  `setVertexBuffer`/`draw`/… are accepted as no-ops (see below).
+- `GPURenderPassEncoder` — `end()`, `setPipeline()`, `setVertexBuffer()`,
+  `setIndexBuffer()`, `draw()`, `drawIndexed()`. (`setBindGroup`,
+  `setViewport`, `setScissorRect` are accepted as no-ops for now.)
 - `GPUCommandBuffer`.
+- `GPUShaderModule` — `device.createShaderModule({ code })` compiles WGSL
+  via wgpu-native's `naga`; `getCompilationInfo()`.
+- `GPURenderPipeline` — `device.createRenderPipeline()` with `layout: 'auto'`,
+  a `vertex` stage (`module`, `entryPoint`, and `buffers[]` —
+  `arrayStride`/`stepMode`/`attributes[{format, offset, shaderLocation}]`),
+  a `fragment` stage (`module`, `entryPoint`, `targets[{format}]`), and
+  `primitive.topology`.
+
+So the full draw path works: WGSL shader modules → render pipeline → render
+pass → `setPipeline`/`setVertexBuffer`/`draw` → submit → composited to the
+canvas. A hardcoded-vertex triangle and an interleaved vertex-buffer
+(position + per-vertex colour) triangle both render correctly.
 
 A configured canvas owns an offscreen target texture
 (`RENDER_ATTACHMENT | COPY_SRC`); each paint, the renderer copies it back
@@ -88,14 +101,16 @@ page event loop.
 
 ### Not yet implemented
 
-Geometry rendering is not wired up: shader modules (WGSL), render / compute
-**pipelines**, bind groups / bind-group layouts, vertex/index buffers as
-draw sources, samplers, and non-color (depth/stencil) attachments are not
-bound. The render-pass draw calls (`setPipeline`, `draw`, …) are accepted
-but do nothing, so a page that sets up a full pipeline renders only its
-clear color rather than its geometry. WGSL is available from wgpu-native's
-`naga` compiler and becomes useful once pipelines are bound — that is the
-next phase. This document and feature-detection reflect exactly what runs.
+What remains for richer content: **bind groups** / bind-group layouts and
+**uniform/storage buffer bindings** (so shaders can read uniforms and
+textures), **samplers** and texture binding, **depth/stencil** attachments,
+blend state, and **compute pipelines** (`createComputePipeline` /
+`dispatchWorkgroups`). Without bind groups a pipeline cannot read uniforms,
+so MVP-style transforms and textured/lit materials are not possible yet —
+the working surface covers vertex-coloured / procedural geometry. Large
+engines such as three.js's `WebGPURenderer` probe for these and fall back to
+WebGL2 until they are present. This document and feature-detection reflect
+exactly what runs.
 
 ## Architecture & security notes
 
