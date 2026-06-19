@@ -5228,8 +5228,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (!a->box) continue;
             PangoRectangle pos;
             pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
-            double nx = text_x0 + (double)pos.x / PANGO_SCALE;
-            double ny = box->y + (double)pos.y / PANGO_SCALE;
+            double nx = text_x0 + (double)pos.x / PANGO_SCALE + a->box->margin.left;
+            double ny = box->y + (double)pos.y / PANGO_SCALE + a->box->margin.top;
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
     }
