@@ -163,6 +163,7 @@ static void ns_js_record_child_change(ns_js *js, ns_node *parent,
                                       ns_node *added, ns_node *removed,
                                       ns_node *previous_sibling, ns_node *next_sibling);
 static void ns_js_record_move_removal(ns_js *js, ns_node *node);
+static void ns_js_record_fragment_emptied(ns_js *js, ns_node *fragment);
 static void ns_js_index_child_change(ns_js *js, ns_node *parent,
                                      ns_node *added, ns_node *removed);
 static void ns_mut_record_emit_child_list_arrays(ns_js *js, ns_node *target,
@@ -4796,28 +4797,6 @@ ns_js_clear_children(ns_js *js, ns_node *n)
 }
 
 static void
-ns_element_clear_children_recorded(ns_js *js, ns_node *n)
-{
-    if (!js) {
-        ns_element_clear_children(n);
-        return;
-    }
-    ns_node *c = n->first_child;
-    while (c) {
-        ns_node *next = c->next_sibling;
-        ns_node *saved_prev = c->prev_sibling;
-        ns_node *saved_next = c->next_sibling;
-        ns_ce_disconnect_subtree(js, c);
-        ns_node_remove(c);
-        g_hash_table_add(js->orphan_nodes, c);
-        ns_js_record_child_change(js, n, NULL, c, saved_prev, saved_next);
-        c = next;
-    }
-    n->first_child = NULL;
-    n->last_child  = NULL;
-}
-
-static void
 ns_element_replace_all_recorded(ns_js *js, ns_node *n, ns_node *added)
 {
     if (!js) {
@@ -5213,28 +5192,70 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(verr)) return verr;
         }
     }
-    ns_element_clear_children_recorded(_j, self);
+    GPtrArray *added = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
         if (child) {
             if (ns_node_ancestor_or_self(self, child)) continue;
-            if (_j)
-                g_hash_table_remove(_j->orphan_nodes, child);
-            ns_node_append_child(self, child);
-            if (_j) ns_js_record_child_change(_j, self, child, NULL,
-                                              child->prev_sibling, child->next_sibling);
+            if (child->kind == NS_NODE_DOCUMENT && !child->parent) {
+                if (_j) ns_js_record_fragment_emptied(_j, child);
+                ns_node *c = child->first_child;
+                while (c) {
+                    ns_node *next = c->next_sibling;
+                    if (_j) ns_ce_disconnect_subtree(_j, c);
+                    ns_node_remove(c);
+                    if (_j) g_hash_table_remove(_j->orphan_nodes, c);
+                    g_ptr_array_add(added, c);
+                    c = next;
+                }
+            } else {
+                if (_j) {
+                    ns_ce_disconnect_subtree(_j, child);
+                    ns_js_record_move_removal(_j, child);
+                    g_hash_table_remove(_j->orphan_nodes, child);
+                }
+                ns_node_remove(child);
+                g_ptr_array_add(added, child);
+            }
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                ns_node *added = ns_node_new_text(g_strdup(txt));
-                ns_node_append_child(self, added);
+                g_ptr_array_add(added, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
-                if (_j) ns_js_record_child_change(_j, self, added, NULL,
-                                                  added->prev_sibling, added->next_sibling);
             }
         }
     }
-    if (_j) _j->mutated = TRUE;
+    GPtrArray *removed = g_ptr_array_new();
+    ns_node *oc = self->first_child;
+    while (oc) {
+        ns_node *next = oc->next_sibling;
+        if (_j) {
+            ns_ce_disconnect_subtree(_j, oc);
+            ns_node_remove(oc);
+            g_hash_table_add(_j->orphan_nodes, oc);
+            ns_js_index_child_change(_j, self, NULL, oc);
+        } else {
+            ns_node_remove(oc);
+        }
+        g_ptr_array_add(removed, oc);
+        oc = next;
+    }
+    self->first_child = NULL;
+    self->last_child  = NULL;
+    for (guint k = 0; k < added->len; k++) {
+        ns_node *a = g_ptr_array_index(added, k);
+        ns_node_append_child(self, a);
+        if (_j) ns_js_index_child_change(_j, self, a, NULL);
+    }
+    if (_j) {
+        if (added->len > 0 || removed->len > 0)
+            ns_mut_record_emit_child_list_arrays(_j, self,
+                added->len ? added : NULL, removed->len ? removed : NULL,
+                NULL, NULL);
+        _j->mutated = TRUE;
+    }
+    g_ptr_array_free(added, FALSE);
+    g_ptr_array_free(removed, FALSE);
     return JS_UNDEFINED;
 }
 
