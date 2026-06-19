@@ -124,6 +124,8 @@ static gboolean                  g_model_thinks;
 static char                     *g_loaded_path;
 static int                       g_gpu_layers_used;
 static char                     *g_gpu_device;
+static llama_token              *g_cached_toks;
+static int                       g_cached_n;
 static GMutex                    g_model_lock;
 
 static char    *g_active_id;
@@ -975,33 +977,6 @@ ns_ai_normalize_url(const char *raw)
 }
 
 static char *
-ns_ai_try_image_query(const char *msg)
-{
-    static const char *const cues[] = {
-        "image of ", "images of ", "picture of ", "pictures of ",
-        "photo of ", "photos of ", "pic of ", "pics of ",
-        "image for ", "picture for ", "photo for ",
-    };
-    char *low = g_ascii_strdown(msg, -1);
-    char *subject = NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
-        char *hit = strstr(low, cues[i]);
-        if (hit) {
-            subject = g_strdup(msg + (hit - low) + strlen(cues[i]));
-            break;
-        }
-    }
-    g_free(low);
-    if (subject) {
-        subject = g_strstrip(subject);
-        size_t n = strlen(subject);
-        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
-        if (!*subject) { g_free(subject); subject = NULL; }
-    }
-    return subject;
-}
-
-static char *
 ns_ai_image_reply(const char *query)
 {
     char *page = NULL;
@@ -1023,197 +998,6 @@ ns_ai_image_reply(const char *query)
     g_free(img);
     g_free(page);
     return ns_ai_strip_nav_markers(reply);
-}
-
-static char *
-ns_ai_strip_lead_article(char *s)
-{
-    static const char *const arts[] = { "the ", "a ", "an " };
-    for (gsize i = 0; i < G_N_ELEMENTS(arts); i++) {
-        if (g_ascii_strncasecmp(s, arts[i], strlen(arts[i])) == 0) {
-            memmove(s, s + strlen(arts[i]), strlen(s + strlen(arts[i])) + 1);
-            break;
-        }
-    }
-    return s;
-}
-
-static char *
-ns_ai_try_factual_query(const char *msg)
-{
-    static const char *const cues[] = {
-        "who is ", "who was ", "who are ", "who were ",
-        "what is ", "what was ", "what are ", "what were ",
-        "tell me about ", "tell me more about ",
-    };
-    char *low = g_ascii_strdown(msg, -1);
-    char *subject = NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
-        if (g_str_has_prefix(low, cues[i])) {
-            subject = g_strdup(msg + strlen(cues[i]));
-            break;
-        }
-    }
-    g_free(low);
-    if (subject) {
-        subject = g_strstrip(subject);
-        size_t n = strlen(subject);
-        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
-        subject = g_strstrip(ns_ai_strip_lead_article(subject));
-        if (strlen(subject) < 2) { g_free(subject); subject = NULL; }
-    }
-    return subject;
-}
-
-static gboolean
-ns_ai_text_contains_ci(const char *haystack, const char *needle)
-{
-    if (!haystack || !needle || !*needle) return FALSE;
-    char *h = g_utf8_strdown(haystack, -1);
-    char *n = g_utf8_strdown(needle, -1);
-    gboolean found = h && n && strstr(h, n) != NULL;
-    g_free(h);
-    g_free(n);
-    return found;
-}
-
-static gboolean
-ns_ai_wiki_relevant(const char *query, const char *title, const char *extract)
-{
-    char **words = g_strsplit_set(query, " \t\n\r", -1);
-    char *key = NULL;
-    glong keylen = 0;
-    for (char **w = words; *w; w++) {
-        char *s = g_strstrip(*w);
-        glong l = g_utf8_strlen(s, -1);
-        if (l > keylen) { keylen = l; key = s; }
-    }
-    gboolean relevant = TRUE;
-    if (key && keylen >= 5)
-        relevant = ns_ai_text_contains_ci(title, key) ||
-                   ns_ai_text_contains_ci(extract, key);
-    g_strfreev(words);
-    return relevant;
-}
-
-static char *
-ns_ai_wiki_summary_lang(const char *query, const char *lang)
-{
-    char *eq = g_uri_escape_string(query, NULL, TRUE);
-    char *url = g_strdup_printf(
-        "https://%s.wikipedia.org/w/api.php?action=query&format=json"
-        "&generator=search&gsrsearch=%s&gsrlimit=1&prop=extracts%%7Cinfo"
-        "&inprop=url&exintro&explaintext&exchars=700", lang, eq);
-    char *json = ns_ai_http_get(url);
-    g_free(url);
-    g_free(eq);
-    if (!json) return NULL;
-
-    char *extract = ns_ai_json_first_string(json, "extract");
-    char *title = ns_ai_json_first_string(json, "title");
-    char *page = ns_ai_json_first_string(json, "fullurl");
-    g_free(json);
-
-    char *reply = NULL;
-    if (extract && *g_strstrip(extract) &&
-        ns_ai_wiki_relevant(query, title, extract)) {
-        reply = g_strdup_printf("%s\n\n[Read more on Wikipedia](%s)",
-            extract, page ? page : "https://www.wikipedia.org");
-    }
-    g_free(extract);
-    g_free(title);
-    g_free(page);
-    return reply ? ns_ai_strip_nav_markers(reply) : NULL;
-}
-
-static char *
-ns_ai_wiki_summary(const char *query)
-{
-    const char *lang = ns_ai_wiki_lang();
-    char *reply = ns_ai_wiki_summary_lang(query, lang);
-    if (!reply && !g_str_equal(lang, "en"))
-        reply = ns_ai_wiki_summary_lang(query, "en");
-    return reply;
-}
-
-static char *
-ns_ai_try_search_query(const char *msg)
-{
-    static const char *const cues[] = {
-        "search the web for ", "search the web ", "search for ", "search ",
-        "look up ", "google ", "web search for ", "web search ",
-        "find information about ", "find info about ",
-    };
-    char *low = g_ascii_strdown(msg, -1);
-    char *subject = NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(cues); i++) {
-        if (g_str_has_prefix(low, cues[i])) {
-            subject = g_strdup(msg + strlen(cues[i]));
-            break;
-        }
-    }
-    g_free(low);
-    if (subject) {
-        subject = g_strstrip(subject);
-        size_t n = strlen(subject);
-        while (n && strchr(".!?,;\"'", subject[n - 1])) subject[--n] = '\0';
-        if (strlen(subject) < 2) { g_free(subject); subject = NULL; }
-    }
-    return subject;
-}
-
-static char *
-ns_ai_search_reply(const char *query)
-{
-    char *display = NULL;
-    char *ctx = ns_ai_web_search(query, NULL, &display);
-    char *reply;
-    if (display && *display) {
-        reply = g_strdup_printf("Here's what I found for \"%s\":\n\n%s",
-                                query, display);
-    } else {
-        reply = g_strdup_printf(
-            "I couldn't search the web for \"%s\" right now.", query);
-    }
-    g_free(ctx);
-    g_free(display);
-    return ns_ai_strip_nav_markers(reply);
-}
-
-static char *
-ns_ai_try_navigate(const char *msg)
-{
-    static const char *const verbs[] = {
-        "go to ", "goto ", "open ", "navigate to ", "visit ",
-        "take me to ", "browse to ", "bring up ",
-    };
-    char *trimmed = g_strstrip(g_strdup(msg));
-    char *low = g_ascii_strdown(trimmed, -1);
-    const char *rest = NULL;
-    for (gsize i = 0; i < G_N_ELEMENTS(verbs); i++) {
-        if (g_str_has_prefix(low, verbs[i])) {
-            rest = trimmed + strlen(verbs[i]);
-            break;
-        }
-    }
-
-    char *result = NULL;
-    if (rest) {
-        char *r = g_strstrip(g_strdup(rest));
-        size_t n = strlen(r);
-        while (n && strchr(".!?,; ", r[n - 1])) r[--n] = '\0';
-        if (*r && !strchr(r, ' ') && (strstr(r, "://") || strchr(r, '.'))) {
-            char *url = ns_ai_normalize_url(r);
-            if (url) {
-                result = g_strdup_printf("@@NAVIGATE@@%s", url);
-                g_free(url);
-            }
-        }
-        g_free(r);
-    }
-    g_free(low);
-    g_free(trimmed);
-    return result;
 }
 
 char *
@@ -1300,6 +1084,9 @@ ns_ai_unload_locked(void)
     g_gpu_layers_used = 0;
     g_free(g_gpu_device);
     g_gpu_device = NULL;
+    g_free(g_cached_toks);
+    g_cached_toks = NULL;
+    g_cached_n = 0;
 }
 
 static gboolean
@@ -1619,7 +1406,15 @@ ns_ai_run_locked(const char *system_prompt, const GPtrArray *history,
         return NULL;
     }
 
-    llama_memory_clear(llama_get_memory(g_ctx), true);
+    llama_memory_t mem = llama_get_memory(g_ctx);
+    int n_match = 0;
+    while (n_match < g_cached_n && n_match < n_prompt &&
+           g_cached_toks[n_match] == toks[n_match])
+        n_match++;
+    if (n_match >= n_prompt)
+        n_match = n_prompt - 1;
+    if (n_match < g_cached_n)
+        llama_memory_seq_rm(mem, 0, n_match, -1);
 
     struct llama_sampler_chain_params sp = llama_sampler_chain_default_params();
     struct llama_sampler *smpl = llama_sampler_chain_init(sp);
@@ -1628,25 +1423,27 @@ ns_ai_run_locked(const char *system_prompt, const GPtrArray *history,
     llama_sampler_chain_add(smpl, llama_sampler_init_temp(0.7f));
     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
+    int cap = n_prompt + NS_AI_MAX_REPLY;
+    llama_token *kept = g_malloc(sizeof(llama_token) * (gsize)cap);
+    memcpy(kept, toks, sizeof(llama_token) * (gsize)n_prompt);
+    int n_in_kv = n_prompt;
+
     GString *out = g_string_new(NULL);
-    struct llama_batch batch = llama_batch_get_one(toks, n_prompt);
-    int n_decoded = 0;
     gboolean failed = FALSE;
     gboolean cancelled = FALSE;
-    llama_token id = 0;
     gsize streamed = 0;
     gboolean stream_decided = FALSE, stream_suppressed = FALSE;
 
-    while (n_decoded < NS_AI_MAX_REPLY) {
+    if (llama_decode(g_ctx, llama_batch_get_one(toks + n_match,
+                                                n_prompt - n_match)) != 0)
+        failed = TRUE;
+
+    for (int step = 0; !failed && step < NS_AI_MAX_REPLY; step++) {
         if (ns_ai_job_cancelled()) {
             cancelled = TRUE;
             break;
         }
-        if (llama_decode(g_ctx, batch) != 0) {
-            failed = out->len == 0;
-            break;
-        }
-        id = llama_sampler_sample(smpl, g_ctx, -1);
+        llama_token id = llama_sampler_sample(smpl, g_ctx, -1);
         if (llama_vocab_is_eog(g_vocab, id))
             break;
 
@@ -1672,13 +1469,27 @@ ns_ai_run_locked(const char *system_prompt, const GPtrArray *history,
             g_free(stripped);
         }
 
-        batch = llama_batch_get_one(&id, 1);
-        n_decoded++;
+        if (llama_decode(g_ctx, llama_batch_get_one(&id, 1)) != 0)
+            break;
+        if (n_in_kv < cap)
+            kept[n_in_kv++] = id;
     }
 
     llama_sampler_free(smpl);
     g_free(toks);
     g_last_use_us = g_get_monotonic_time();
+
+    if (failed) {
+        llama_memory_clear(mem, true);
+        g_free(g_cached_toks);
+        g_cached_toks = NULL;
+        g_cached_n = 0;
+        g_free(kept);
+    } else {
+        g_free(g_cached_toks);
+        g_cached_toks = kept;
+        g_cached_n = n_in_kv;
+    }
 
     if (failed || cancelled) {
         g_string_free(out, TRUE);
@@ -1780,37 +1591,6 @@ ns_ai_idle_unload_cb(gpointer ud)
     return loaded ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
 }
 
-static char *
-ns_ai_quick_reply(const char *user_msg)
-{
-    char *nav = ns_ai_try_navigate(user_msg);
-    if (nav)
-        return nav;
-
-    char *imgq = ns_ai_try_image_query(user_msg);
-    if (imgq) {
-        char *reply = ns_ai_image_reply(imgq);
-        g_free(imgq);
-        return reply;
-    }
-
-    char *searchq = ns_ai_try_search_query(user_msg);
-    if (searchq) {
-        char *reply = ns_ai_search_reply(searchq);
-        g_free(searchq);
-        return reply;
-    }
-
-    char *factq = ns_ai_try_factual_query(user_msg);
-    if (factq) {
-        char *reply = ns_ai_wiki_summary(factq);
-        g_free(factq);
-        if (reply)
-            return reply;
-    }
-    return NULL;
-}
-
 static void
 ns_ai_job_finish(int job, const char *user_msg, char *reply, char *error)
 {
@@ -1848,9 +1628,9 @@ ns_ai_chat_thread(gpointer data)
 {
     ns_ai_chat_job *cj = data;
 
-    char *reply = ns_ai_quick_reply(cj->msg);
-    if (reply || ns_ai_job_cancelled()) {
-        ns_ai_job_finish(cj->job, cj->msg, reply, NULL);
+    char *reply = NULL;
+    if (ns_ai_job_cancelled()) {
+        ns_ai_job_finish(cj->job, cj->msg, NULL, NULL);
         g_free(cj->msg);
         g_free(cj);
         return NULL;
