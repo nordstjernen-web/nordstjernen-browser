@@ -60,6 +60,15 @@
   </branding>
 
   <releases>
+    <release version="1.0.11" date="2026-06-19">
+      <description>
+        <p>Maintenance release.</p>
+        <ul>
+          <li>Net Center masthead refresh and sign-in button layout fixes.</li>
+          <li>Inline atomic box layout positioning correction.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.10" date="2026-06-18">
       <description>
         <p>Audio overhaul and hardening release.</p>

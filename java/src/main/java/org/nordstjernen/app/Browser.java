@@ -1345,7 +1345,7 @@ public final class Browser {
 
     private static String resolveVersion() {
         String v = Browser.class.getPackage().getImplementationVersion();
-        return (v == null || v.isBlank()) ? "1.0.11-dev" : v;
+        return (v == null || v.isBlank()) ? "1.0.11" : v;
     }
 
     private static Image loadLogo() {
