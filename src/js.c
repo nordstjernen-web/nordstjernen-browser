@@ -30221,12 +30221,42 @@ ns_document_implementation(JSContext *ctx, JSValueConst this_val)
     return ns_make_dom_implementation(ctx, this_val);
 }
 
+static void ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
+                                  JSValueConst node_val);
+
+static void
+ns_adopt_owner_walk(JSContext *ctx, JSValueConst doc_val, ns_node *n)
+{
+    if (!n) return;
+    JSValue w = ns_make_element(ctx, n);
+    if (JS_IsObject(w)) ns_tag_owner_document(ctx, doc_val, w);
+    JS_FreeValue(ctx, w);
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_adopt_owner_walk(ctx, doc_val, c);
+}
+
 static JSValue
 ns_document_adopt_node(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
-    (void)this_val;
     if (argc < 1) return JS_NULL;
+    ns_node *node = ns_unwrap_element_mut(argv[0]);
+    if (!node) return JS_DupValue(ctx, argv[0]);
+    if (node->kind == NS_NODE_DOCUMENT && !(node->flags & NS_NODE_FRAGMENT))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "adoptNode: a document cannot be adopted");
+    ns_js *_j = js_from_ctx(ctx);
+    if (node->parent) {
+        ns_node *p = node->parent;
+        ns_node *sp = node->prev_sibling, *sn = node->next_sibling;
+        ns_node_remove(node);
+        if (_j) {
+            g_hash_table_add(_j->orphan_nodes, node);
+            ns_js_record_child_change(_j, p, NULL, node, sp, sn);
+        }
+    }
+    ns_adopt_owner_walk(ctx, this_val, node);
+    if (_j) _j->mutated = TRUE;
     return JS_DupValue(ctx, argv[0]);
 }
 
