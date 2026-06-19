@@ -27,6 +27,9 @@ static JSClassID g_pass_class;
 static JSClassID g_cmdbuf_class;
 static JSClassID g_shader_class;
 static JSClassID g_pipeline_class;
+static JSClassID g_bgl_class;
+static JSClassID g_pllayout_class;
+static JSClassID g_bindgroup_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
@@ -41,6 +44,9 @@ typedef struct { WGPURenderPassEncoder pass; } ns_wg_pass;
 typedef struct { WGPUCommandBuffer cmd; } ns_wg_cmdbuf;
 typedef struct { WGPUShaderModule mod; } ns_wg_shader;
 typedef struct { WGPURenderPipeline pipe; } ns_wg_pipeline;
+typedef struct { WGPUBindGroupLayout layout; } ns_wg_bgl;
+typedef struct { WGPUPipelineLayout layout; } ns_wg_pllayout;
+typedef struct { WGPUBindGroup group; } ns_wg_bindgroup;
 
 typedef struct {
     const ns_node *canvas;
@@ -61,6 +67,18 @@ static JSValue wg_device_createShaderModule(JSContext *ctx,
                                             JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static JSValue wg_device_createRenderPipeline(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv);
+static JSValue wg_device_createBindGroupLayout(JSContext *ctx,
+                                               JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+static JSValue wg_device_createPipelineLayout(JSContext *ctx,
+                                              JSValueConst this_val,
+                                              int argc, JSValueConst *argv);
+static JSValue wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv);
+static JSValue wg_make_bgl(JSContext *ctx, WGPUBindGroupLayout layout);
+static JSValue wg_pipeline_getBindGroupLayout(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
 
@@ -365,6 +383,13 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
 
     wgpuQueueAddRef(d->queue);
     JS_SetPropertyStr(ctx, obj, "queue", wg_make_queue(ctx, d->queue));
+    {
+        JSValue lost_funcs[2];
+        JSValue lost = JS_NewPromiseCapability(ctx, lost_funcs);
+        JS_FreeValue(ctx, lost_funcs[0]);
+        JS_FreeValue(ctx, lost_funcs[1]);
+        JS_SetPropertyStr(ctx, obj, "lost", lost);
+    }
     JS_SetPropertyStr(ctx, obj, "features", wg_new_feature_set(ctx));
     WGPULimits limits; memset(&limits, 0, sizeof limits);
     JS_SetPropertyStr(ctx, obj, "limits", wg_limits_object(ctx, &limits));
@@ -373,6 +398,9 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
     wg_bind(ctx, obj, "createCommandEncoder", wg_device_createCommandEncoder, 1);
     wg_bind(ctx, obj, "createShaderModule", wg_device_createShaderModule, 1);
     wg_bind(ctx, obj, "createRenderPipeline", wg_device_createRenderPipeline, 1);
+    wg_bind(ctx, obj, "createBindGroupLayout", wg_device_createBindGroupLayout, 1);
+    wg_bind(ctx, obj, "createPipelineLayout", wg_device_createPipelineLayout, 1);
+    wg_bind(ctx, obj, "createBindGroup", wg_device_createBindGroup, 1);
     wg_bind(ctx, obj, "getQueue", wg_device_getQueue, 0);
     wg_bind(ctx, obj, "destroy", wg_device_destroy, 0);
     return obj;
@@ -681,6 +709,20 @@ wg_pass_setIndexBuffer(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+wg_pass_setBindGroup(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
+    if (!p || !p->pass || argc < 2) return JS_UNDEFINED;
+    uint32_t index = 0;
+    JS_ToUint32(ctx, &index, argv[0]);
+    ns_wg_bindgroup *bg = JS_GetOpaque(argv[1], g_bindgroup_class);
+    wgpuRenderPassEncoderSetBindGroup(p->pass, index,
+                                      bg ? bg->group : NULL, 0, NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 wg_pass_draw(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     ns_wg_pass *p = JS_GetOpaque(this_val, g_pass_class);
@@ -721,7 +763,7 @@ wg_make_pass(JSContext *ctx, WGPURenderPassEncoder pass)
     JS_SetOpaque(obj, p);
     wg_bind(ctx, obj, "end", wg_pass_end, 0);
     wg_bind(ctx, obj, "setPipeline", wg_pass_setPipeline, 1);
-    wg_bind(ctx, obj, "setBindGroup", wg_pass_noop, 2);
+    wg_bind(ctx, obj, "setBindGroup", wg_pass_setBindGroup, 2);
     wg_bind(ctx, obj, "setVertexBuffer", wg_pass_setVertexBuffer, 2);
     wg_bind(ctx, obj, "setIndexBuffer", wg_pass_setIndexBuffer, 2);
     wg_bind(ctx, obj, "setViewport", wg_pass_noop, 6);
@@ -1104,6 +1146,11 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     desc.multisample.count = 1;
     desc.multisample.mask = 0xFFFFFFFFu;
 
+    JSValue jlayout = JS_GetPropertyStr(ctx, argv[0], "layout");
+    ns_wg_pllayout *pll = JS_GetOpaque(jlayout, g_pllayout_class);
+    if (pll) desc.layout = pll->layout;
+    JS_FreeValue(ctx, jlayout);
+
     char *vs_entry = NULL, *fs_entry = NULL;
     WGPUVertexBufferLayout vbl[NS_WG_MAX_VBUF];
     WGPUVertexAttribute attrs[NS_WG_MAX_VBUF][NS_WG_MAX_ATTR];
@@ -1239,6 +1286,233 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     ns_wg_pipeline *p = g_new0(ns_wg_pipeline, 1);
     p->pipe = pipe;
     JS_SetOpaque(obj, p);
+    wg_bind(ctx, obj, "getBindGroupLayout", wg_pipeline_getBindGroupLayout, 1);
+    return obj;
+}
+
+static JSValue
+wg_pipeline_getBindGroupLayout(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    ns_wg_pipeline *p = JS_GetOpaque(this_val, g_pipeline_class);
+    if (!p || !p->pipe || argc < 1) return JS_UNDEFINED;
+    uint32_t index = 0;
+    JS_ToUint32(ctx, &index, argv[0]);
+    WGPUBindGroupLayout l = wgpuRenderPipelineGetBindGroupLayout(p->pipe, index);
+    if (!l) return JS_UNDEFINED;
+    return wg_make_bgl(ctx, l);
+}
+
+static void
+wg_bgl_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_bgl *b = JS_GetOpaque(val, g_bgl_class);
+    if (!b) return;
+    if (b->layout) wgpuBindGroupLayoutRelease(b->layout);
+    g_free(b);
+}
+
+static JSValue
+wg_make_bgl(JSContext *ctx, WGPUBindGroupLayout layout)
+{
+    JSValue obj = JS_NewObjectClass(ctx, g_bgl_class);
+    if (JS_IsException(obj)) return obj;
+    ns_wg_bgl *b = g_new0(ns_wg_bgl, 1);
+    b->layout = layout;
+    JS_SetOpaque(obj, b);
+    return obj;
+}
+
+static WGPUBufferBindingType
+wg_buffer_binding_type(const char *s)
+{
+    if (s && strcmp(s, "storage") == 0) return WGPUBufferBindingType_Storage;
+    if (s && strcmp(s, "read-only-storage") == 0)
+        return WGPUBufferBindingType_ReadOnlyStorage;
+    return WGPUBufferBindingType_Uniform;
+}
+
+#define NS_WG_MAX_BGL_ENTRY 32
+
+static JSValue
+wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createBindGroupLayout: descriptor");
+
+    WGPUBindGroupLayoutEntry entries[NS_WG_MAX_BGL_ENTRY];
+    memset(entries, 0, sizeof entries);
+    uint32_t n = 0;
+    JSValue jentries = JS_GetPropertyStr(ctx, argv[0], "entries");
+    if (JS_IsArray(jentries)) {
+        JSValue jl = JS_GetPropertyStr(ctx, jentries, "length");
+        JS_ToUint32(ctx, &n, jl);
+        JS_FreeValue(ctx, jl);
+        if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, jentries, i);
+            uint32_t binding = 0, vis = 0;
+            JSValue jb = JS_GetPropertyStr(ctx, e, "binding");
+            JS_ToUint32(ctx, &binding, jb); JS_FreeValue(ctx, jb);
+            JSValue jv = JS_GetPropertyStr(ctx, e, "visibility");
+            JS_ToUint32(ctx, &vis, jv); JS_FreeValue(ctx, jv);
+            entries[i].binding = binding;
+            entries[i].visibility = vis;
+            JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
+            if (JS_IsObject(jbuf)) {
+                JSValue jt = JS_GetPropertyStr(ctx, jbuf, "type");
+                const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
+                entries[i].buffer.type = wg_buffer_binding_type(ts);
+                if (ts) JS_FreeCString(ctx, ts);
+                JS_FreeValue(ctx, jt);
+            }
+            JS_FreeValue(ctx, jbuf);
+            JS_FreeValue(ctx, e);
+        }
+    }
+    JS_FreeValue(ctx, jentries);
+
+    WGPUBindGroupLayoutDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.entryCount = n;
+    desc.entries = entries;
+    WGPUBindGroupLayout layout = wgpuDeviceCreateBindGroupLayout(d->device, &desc);
+    if (!layout)
+        return JS_ThrowInternalError(ctx, "createBindGroupLayout failed");
+    return wg_make_bgl(ctx, layout);
+}
+
+static void
+wg_pllayout_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_pllayout *p = JS_GetOpaque(val, g_pllayout_class);
+    if (!p) return;
+    if (p->layout) wgpuPipelineLayoutRelease(p->layout);
+    g_free(p);
+}
+
+static JSValue
+wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createPipelineLayout: descriptor");
+
+    WGPUBindGroupLayout layouts[NS_WG_MAX_BGL_ENTRY];
+    memset(layouts, 0, sizeof layouts);
+    uint32_t n = 0;
+    JSValue jbgls = JS_GetPropertyStr(ctx, argv[0], "bindGroupLayouts");
+    if (JS_IsArray(jbgls)) {
+        JSValue jl = JS_GetPropertyStr(ctx, jbgls, "length");
+        JS_ToUint32(ctx, &n, jl);
+        JS_FreeValue(ctx, jl);
+        if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, jbgls, i);
+            ns_wg_bgl *b = JS_GetOpaque(e, g_bgl_class);
+            if (b) layouts[i] = b->layout;
+            JS_FreeValue(ctx, e);
+        }
+    }
+    JS_FreeValue(ctx, jbgls);
+
+    WGPUPipelineLayoutDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.bindGroupLayoutCount = n;
+    desc.bindGroupLayouts = layouts;
+    WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(d->device, &desc);
+    if (!layout)
+        return JS_ThrowInternalError(ctx, "createPipelineLayout failed");
+
+    JSValue obj = JS_NewObjectClass(ctx, g_pllayout_class);
+    ns_wg_pllayout *p = g_new0(ns_wg_pllayout, 1);
+    p->layout = layout;
+    JS_SetOpaque(obj, p);
+    return obj;
+}
+
+static void
+wg_bindgroup_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_bindgroup *b = JS_GetOpaque(val, g_bindgroup_class);
+    if (!b) return;
+    if (b->group) wgpuBindGroupRelease(b->group);
+    g_free(b);
+}
+
+static JSValue
+wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createBindGroup: descriptor");
+
+    JSValue jlayout = JS_GetPropertyStr(ctx, argv[0], "layout");
+    ns_wg_bgl *bgl = JS_GetOpaque(jlayout, g_bgl_class);
+    JS_FreeValue(ctx, jlayout);
+    if (!bgl) return JS_ThrowTypeError(ctx, "createBindGroup: layout");
+
+    WGPUBindGroupEntry entries[NS_WG_MAX_BGL_ENTRY];
+    memset(entries, 0, sizeof entries);
+    uint32_t n = 0;
+    JSValue jentries = JS_GetPropertyStr(ctx, argv[0], "entries");
+    if (JS_IsArray(jentries)) {
+        JSValue jl = JS_GetPropertyStr(ctx, jentries, "length");
+        JS_ToUint32(ctx, &n, jl);
+        JS_FreeValue(ctx, jl);
+        if (n > NS_WG_MAX_BGL_ENTRY) n = NS_WG_MAX_BGL_ENTRY;
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, jentries, i);
+            uint32_t binding = 0;
+            JSValue jb = JS_GetPropertyStr(ctx, e, "binding");
+            JS_ToUint32(ctx, &binding, jb); JS_FreeValue(ctx, jb);
+            entries[i].binding = binding;
+            JSValue jres = JS_GetPropertyStr(ctx, e, "resource");
+            ns_wg_view *vw = JS_GetOpaque(jres, g_view_class);
+            if (vw) {
+                entries[i].textureView = vw->view;
+            } else if (JS_IsObject(jres)) {
+                JSValue jbuf = JS_GetPropertyStr(ctx, jres, "buffer");
+                ns_wg_buffer *buf = JS_GetOpaque(jbuf, g_buffer_class);
+                if (buf) {
+                    entries[i].buffer = buf->buffer;
+                    int64_t off = 0, sz = (int64_t)buf->size;
+                    JSValue jo = JS_GetPropertyStr(ctx, jres, "offset");
+                    if (!JS_IsUndefined(jo)) JS_ToInt64(ctx, &off, jo);
+                    JS_FreeValue(ctx, jo);
+                    JSValue js = JS_GetPropertyStr(ctx, jres, "size");
+                    if (!JS_IsUndefined(js)) JS_ToInt64(ctx, &sz, js);
+                    JS_FreeValue(ctx, js);
+                    entries[i].offset = (uint64_t)off;
+                    entries[i].size = (uint64_t)sz;
+                }
+                JS_FreeValue(ctx, jbuf);
+            }
+            JS_FreeValue(ctx, jres);
+            JS_FreeValue(ctx, e);
+        }
+    }
+    JS_FreeValue(ctx, jentries);
+
+    WGPUBindGroupDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.layout = bgl->layout;
+    desc.entryCount = n;
+    desc.entries = entries;
+    WGPUBindGroup group = wgpuDeviceCreateBindGroup(d->device, &desc);
+    if (!group) return JS_ThrowInternalError(ctx, "createBindGroup failed");
+
+    JSValue obj = JS_NewObjectClass(ctx, g_bindgroup_class);
+    ns_wg_bindgroup *b = g_new0(ns_wg_bindgroup, 1);
+    b->group = group;
+    JS_SetOpaque(obj, b);
     return obj;
 }
 
@@ -1283,6 +1557,12 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
                           wg_shader_finalizer);
         wg_register_class(ctx, &g_pipeline_class, "GPURenderPipeline",
                           wg_pipeline_finalizer);
+        wg_register_class(ctx, &g_bgl_class, "GPUBindGroupLayout",
+                          wg_bgl_finalizer);
+        wg_register_class(ctx, &g_pllayout_class, "GPUPipelineLayout",
+                          wg_pllayout_finalizer);
+        wg_register_class(ctx, &g_bindgroup_class, "GPUBindGroup",
+                          wg_bindgroup_finalizer);
     }
 
     JSValue gpu = JS_NewObject(ctx);
@@ -1291,6 +1571,50 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
             wg_gpu_getPreferredCanvasFormat, 0);
     JS_SetPropertyStr(ctx, gpu, "wgslLanguageFeatures", wg_new_feature_set(ctx));
     JS_SetPropertyStr(ctx, (JSValueConst)navigator, "gpu", gpu);
+
+    JSValue global = JS_GetGlobalObject(ctx);
+
+    JSValue buf_usage = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, buf_usage, "MAP_READ", JS_NewInt32(ctx, 0x0001));
+    JS_SetPropertyStr(ctx, buf_usage, "MAP_WRITE", JS_NewInt32(ctx, 0x0002));
+    JS_SetPropertyStr(ctx, buf_usage, "COPY_SRC", JS_NewInt32(ctx, 0x0004));
+    JS_SetPropertyStr(ctx, buf_usage, "COPY_DST", JS_NewInt32(ctx, 0x0008));
+    JS_SetPropertyStr(ctx, buf_usage, "INDEX", JS_NewInt32(ctx, 0x0010));
+    JS_SetPropertyStr(ctx, buf_usage, "VERTEX", JS_NewInt32(ctx, 0x0020));
+    JS_SetPropertyStr(ctx, buf_usage, "UNIFORM", JS_NewInt32(ctx, 0x0040));
+    JS_SetPropertyStr(ctx, buf_usage, "STORAGE", JS_NewInt32(ctx, 0x0080));
+    JS_SetPropertyStr(ctx, buf_usage, "INDIRECT", JS_NewInt32(ctx, 0x0100));
+    JS_SetPropertyStr(ctx, buf_usage, "QUERY_RESOLVE", JS_NewInt32(ctx, 0x0200));
+    JS_SetPropertyStr(ctx, global, "GPUBufferUsage", buf_usage);
+
+    JSValue tex_usage = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, tex_usage, "COPY_SRC", JS_NewInt32(ctx, 0x01));
+    JS_SetPropertyStr(ctx, tex_usage, "COPY_DST", JS_NewInt32(ctx, 0x02));
+    JS_SetPropertyStr(ctx, tex_usage, "TEXTURE_BINDING", JS_NewInt32(ctx, 0x04));
+    JS_SetPropertyStr(ctx, tex_usage, "STORAGE_BINDING", JS_NewInt32(ctx, 0x08));
+    JS_SetPropertyStr(ctx, tex_usage, "RENDER_ATTACHMENT", JS_NewInt32(ctx, 0x10));
+    JS_SetPropertyStr(ctx, global, "GPUTextureUsage", tex_usage);
+
+    JSValue shader_stage = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, shader_stage, "VERTEX", JS_NewInt32(ctx, 0x1));
+    JS_SetPropertyStr(ctx, shader_stage, "FRAGMENT", JS_NewInt32(ctx, 0x2));
+    JS_SetPropertyStr(ctx, shader_stage, "COMPUTE", JS_NewInt32(ctx, 0x4));
+    JS_SetPropertyStr(ctx, global, "GPUShaderStage", shader_stage);
+
+    JSValue color_write = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, color_write, "RED", JS_NewInt32(ctx, 0x1));
+    JS_SetPropertyStr(ctx, color_write, "GREEN", JS_NewInt32(ctx, 0x2));
+    JS_SetPropertyStr(ctx, color_write, "BLUE", JS_NewInt32(ctx, 0x4));
+    JS_SetPropertyStr(ctx, color_write, "ALPHA", JS_NewInt32(ctx, 0x8));
+    JS_SetPropertyStr(ctx, color_write, "ALL", JS_NewInt32(ctx, 0xF));
+    JS_SetPropertyStr(ctx, global, "GPUColorWrite", color_write);
+
+    JSValue map_mode = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, map_mode, "READ", JS_NewInt32(ctx, 0x1));
+    JS_SetPropertyStr(ctx, map_mode, "WRITE", JS_NewInt32(ctx, 0x2));
+    JS_SetPropertyStr(ctx, global, "GPUMapMode", map_mode);
+
+    JS_FreeValue(ctx, global);
 }
 
 JSValue
