@@ -23,7 +23,7 @@ See `README.md` for the product vision and `CLAUDE.md` for working rules.
 
 ## Non-goals (won't change)
 
-WebGPU / WebRTC / WebUSB / WebBluetooth / WebMIDI / WebHID;
+WebRTC / WebUSB / WebBluetooth / WebMIDI / WebHID;
 service-worker network interception, push, background sync (the
 registration + lifecycle subset of Service Workers *is* supported);
 DRM / EME; **JIT** (QuickJS
@@ -31,10 +31,17 @@ interpreter only — W^X holds process-wide); plugins (NPAPI / PPAPI /
 WebExtensions); sync / accounts / telemetry /
 "studies".
 
-WebGL is the one exception to the no-GPU-APIs stance: a minimalist,
+WebGL is the standard exception to the no-GPU-APIs stance: a minimalist,
 opt-in WebGL 1 / 2 implementation mapped directly onto OpenGL ES, off by
 default and gated by a per-site trust prompt (see `docs/webgl.md`).
-WebGPU remains a non-goal.
+
+WebGPU (`navigator.gpu`) is an **experimental, off-by-default** feature
+layered on the external [wgpu-native](https://github.com/gfx-rs/wgpu-native)
+library, built only with `-Dwebgpu=enabled` and gated at runtime by
+`NS_WEBGPU_ALLOW` (see `docs/webgpu.md`). It is deliberately kept out of the
+standard build: wgpu-native is a large dependency that does not fit the
+minimalism the rest of the engine is built around, so it stays strictly
+opt-in.
 
 ## Current state
 

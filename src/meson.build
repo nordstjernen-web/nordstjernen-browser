@@ -100,6 +100,10 @@ if have_avif
   nordstjernen_engine_sources += files('image_avif.c')
 endif
 
+if have_webgpu
+  nordstjernen_engine_sources += files('webgpu.c')
+endif
+
 nordstjernen_win_resources = []
 if host_machine.system() == 'windows'
   windows = import('windows')
@@ -187,6 +191,10 @@ if have_freetype
 endif
 
 nordstjernen_deps += [libpsl]
+
+if have_webgpu
+  nordstjernen_deps += [webgpu_dep]
+endif
 
 if have_ai
   cpp_stdlib_name = host_machine.system() == 'darwin' ? 'c++' : 'stdc++'

@@ -39,6 +39,9 @@
 #include "wasm.h"
 #include "webcrypto.h"
 #include "webgl.h"
+#ifdef ND_HAVE_WEBGPU
+#include "webgpu.h"
+#endif
 #include "ws.h"
 
 #include "js_internal.h"
@@ -32483,6 +32486,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                ns_returns_resolved_undefined, 0);
 
     ns_sw_install_container(ctx, navigator);
+
+#ifdef ND_HAVE_WEBGPU
+    ns_webgpu_install(ctx, js, navigator);
+#endif
 
     JS_SetPropertyStr(ctx, global, "navigator", navigator);
 

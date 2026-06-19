@@ -31,6 +31,7 @@
 # Meson / Ninja (likely build system for a GTK4/C project)
 /builddir/
 /builddir-release/
+/builddir-wgpu/
 /release-build/
 /build-*/
 .ninja_deps

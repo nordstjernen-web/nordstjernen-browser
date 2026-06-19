@@ -14,13 +14,21 @@ nothing imported.
   maintainable by a single human.
 - HTML5 + modern CSS + modern JavaScript, supported pragmatically as
   far as is feasible without bloat.
-- **No** WebGPU or AI-style web APIs. WebGL **is** supported — the lone
-  GPU-API exception: a working, minimalist WebGL 1 / 2 over OpenGL ES
-  (`src/webgl.c`, see `docs/webgl.md`). It is opt-in — off by default
-  and gated by a per-site trust prompt — but fully functional once a
-  site is trusted. The `WebGLRenderingContext` / `WebGL2RenderingContext`
-  interface objects also carry the GL enum constants so feature code
-  resolves them without a live context.
+- **No** AI-style web APIs. WebGL **is** supported: a working, minimalist
+  WebGL 1 / 2 over OpenGL ES (`src/webgl.c`, see `docs/webgl.md`). It is
+  opt-in — off by default and gated by a per-site trust prompt — but fully
+  functional once a site is trusted. The `WebGLRenderingContext` /
+  `WebGL2RenderingContext` interface objects also carry the GL enum
+  constants so feature code resolves them without a live context.
+- **WebGPU** (`navigator.gpu`) is an **experimental, opt-in, off-by-default**
+  feature, not part of the standard build. It layers `src/webgpu.c` over the
+  external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library, built
+  only with `-Dwebgpu=enabled` (which requires the wgpu-native library; the
+  `webgpu.h`/`wgpu.h` headers are vendored in-tree under
+  `third_party/wgpu-native/`). With the feature disabled — the default —
+  the engine carries **no** WebGPU symbol or dependency. At runtime it is
+  additionally gated off unless `NS_WEBGPU_ALLOW=1`. wgpu-native is a large
+  dependency and deliberately stays behind the flag. See `docs/webgpu.md`.
 - Exactly **one** embedded video codec: MPEG-1, decoded in-tree by the
   vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
   single-file decoder (`subprojects/plmpeg/`, wrapped by
@@ -262,9 +270,14 @@ don't add `meson test` targets.
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
   upstream browser engine source. Nordstjernen is a clean-room
   implementation, not a fork.
-- Don't add WebGPU/AI surface area, even as stubs. (WebGL already
-  exists as a deliberate, opt-in exception — extend `src/webgl.c`, don't
-  re-architect it.)
+- Don't add AI-style web-API surface area, even as stubs. WebGL is a
+  deliberate opt-in exception — extend `src/webgl.c`, don't re-architect it.
+- WebGPU is an experimental, off-by-default exception built only with
+  `-Dwebgpu=enabled` over external wgpu-native (`src/webgpu.c`,
+  `docs/webgpu.md`). Keep it strictly behind the build flag and the
+  `NS_WEBGPU_ALLOW` runtime gate — the default build must carry no WebGPU
+  surface or dependency. Don't vendor the wgpu-native library into the
+  tree (headers only); don't let it become a default dependency.
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`

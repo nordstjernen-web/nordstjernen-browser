@@ -258,7 +258,7 @@ validation.
 | `slot` / shadow projection | 🟡 | `attachShadow` + slot assignment (bounded) |
 | `canvas` 2D context | ✅ | full Cairo-backed `CanvasRenderingContext2D` (paths, text, `drawImage`, gradients/patterns, `get/putImageData`, compositing, shadows) |
 | `canvas` WebGL / WebGL2 context | 🟡 | opt-in, per-site: `getContext("webgl"/"webgl2")` maps a pragmatic WebGL 1 / 2 core directly onto OpenGL ES via GTK's `GdkGLContext` + libepoxy (`src/webgl.c`). Off by default; the first use on an origin prompts the user to enable WebGL and trust the site. No extensions; data-transfer entry points are bounds-checked and zero-initialised. See [`docs/webgl.md`](webgl.md) |
-| `canvas` WebGPU context | 🚫 | by design |
+| `canvas` WebGPU context | 🚫 | not yet — `getContext("webgpu")` returns null. `navigator.gpu` (adapter/device/queue/buffers) exists only in the experimental, off-by-default `-Dwebgpu=enabled` build over wgpu-native, gated by `NS_WEBGPU_ALLOW`. See [`docs/webgpu.md`](webgpu.md) |
 | `OffscreenCanvas` | 🟡 | constructs; no worker thread |
 
 ## §4.13 Custom elements
@@ -650,8 +650,10 @@ path in `src/layout.h`.
 These are project non-goals (see `CLAUDE.md` / `README.md`), not
 defects, and will not be added:
 
-- **WebGPU** and AI-style web APIs. (WebGL is the exception — supported
-  opt-in per site; see §4.12 and [`docs/webgl.md`](webgl.md).)
+- AI-style web APIs. (WebGL is supported opt-in per site; see §4.12 and
+  [`docs/webgl.md`](webgl.md). **WebGPU** is an experimental, off-by-default
+  build option over wgpu-native — `navigator.gpu` only, no canvas context
+  yet; see [`docs/webgpu.md`](webgpu.md).)
 - Shared Workers and Worklets. (Service Worker `FetchEvent` interception
   of page `fetch()` **is** supported — see §10/§11; what remains is routing
   the C engine's navigations/subresources through the worker.)
