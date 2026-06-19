@@ -219,7 +219,7 @@ static void ns_js_purge_subtree_rafs(ns_js *js, ns_node *root);
 static JSValue ns_make_realm_document(JSContext *ctx, ns_node *doc_node,
                                       const char *url, const char *charset,
                                       const char *content_type,
-                                      gboolean is_xml);
+                                      gboolean is_xml, gboolean inert);
 
 #define NS_SANDBOX_ACTIVE              (1u << 0)
 #define NS_SANDBOX_ALLOW_SCRIPTS       (1u << 1)
@@ -29154,7 +29154,7 @@ ns_iframe_build_content_document(JSContext *ctx, ns_node *iframe)
         ? ns_element_get_attr(iframe, "data-nd-frame-charset") : NULL;
     const char *url = iframe
         ? ns_element_get_attr(iframe, "data-nd-frame-url") : NULL;
-    JSValue cd = ns_make_realm_document(ctx, doc, url, cs, "text/html", FALSE);
+    JSValue cd = ns_make_realm_document(ctx, doc, url, cs, "text/html", FALSE, FALSE);
     if (JS_IsObject(cd))
         JS_SetPropertyStr(ctx, cd, "defaultView", JS_GetGlobalObject(ctx));
     return cd;
@@ -33716,7 +33716,7 @@ ns_impl_create_html_document(JSContext *ctx, JSValueConst this_val,
     ns_node_append_child(html, body);
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
-                                             "text/html", FALSE);
+                                             "text/html", FALSE, TRUE);
     if (JS_IsObject(wrapper))
         JS_DefinePropertyValueStr(ctx, wrapper, "defaultView", JS_NULL,
                                   JS_PROP_C_W_E);
@@ -33854,7 +33854,7 @@ ns_realmdoc_getElementById(JSContext *ctx, JSValueConst this_val,
 static JSValue
 ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                        const char *charset, const char *content_type,
-                       gboolean is_xml)
+                       gboolean is_xml, gboolean inert)
 {
     if (!doc_node) return JS_NULL;
     JSValue w = ns_make_element(ctx, doc_node);
@@ -33889,6 +33889,8 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     JS_DefinePropertyValueStr(ctx, w, "nodeName",
         JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, w, "ownerDocument", JS_NULL, JS_PROP_C_W_E);
+    if (inert)
+        JS_DefinePropertyValueStr(ctx, w, "location", JS_NULL, JS_PROP_C_W_E);
     ns_synthdoc_define_getter(ctx, w, "documentElement",
                               ns_synthdoc_get_documentElement);
     ns_synthdoc_define_getter(ctx, w, "doctype", ns_synthdoc_get_doctype);
@@ -33953,7 +33955,7 @@ ns_make_synth_xml_document(JSContext *ctx)
     ns_node *doc = ns_node_new_document();
     g_hash_table_add(js->orphan_nodes, doc);
     JSValue wrapper = ns_make_realm_document(ctx, doc, "about:blank", "UTF-8",
-                                             "application/xml", TRUE);
+                                             "application/xml", TRUE, TRUE);
     if (JS_IsObject(wrapper))
         JS_DefinePropertyValueStr(ctx, wrapper, "defaultView", JS_NULL,
                                   JS_PROP_C_W_E);
@@ -37890,7 +37892,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         if (!cs || !*cs) cs = "UTF-8";
         JSValue realm_doc = ns_make_realm_document(
             js->ctx, content_doc, iorigin, cs,
-            resp ? resp->content_type : NULL, is_plain_xml);
+            resp ? resp->content_type : NULL, is_plain_xml, FALSE);
         if ((sandbox & NS_FRAME_CROSS_ORIGIN) ||
             ((sandbox & NS_SANDBOX_ACTIVE) &&
              !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)))
