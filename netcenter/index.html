@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Nordstjernen Netcenter - Welcome</title>
+<style>
+  body { margin: 0; background: #c0c0c0; color: #000;
+         font-family: Helvetica, Arial, sans-serif; font-size: 12px; }
+  a { color: #0000cc; }
+  a:visited { color: #551a8b; }
+  table { border-collapse: collapse; }
+  .page { width: 980px; margin: 0 auto; background: #ffffff; border-left: 1px solid #808080; border-right: 1px solid #808080; }
+
+  /* ---- masthead ---- */
+  .masthead { background: linear-gradient(#1a2a6c, #0a1430); display: flex; align-items: center; padding: 8px 12px; }
+  .logo { width: 96px; height: 78px; border: 2px ridge #6f7fbf; margin-right: 14px; flex: none; }
+  .brandtext { color: #fff; }
+  .brandtext .net { font-family: Arial, sans-serif; font-weight: bold; font-size: 30px; letter-spacing: -1px; }
+  .brandtext .net em { color: #39d27a; font-style: normal; }
+  .brandtext .tag { font-size: 11px; color: #b8c4ff; margin-top: 2px; font-family: Georgia, "Times New Roman", serif; font-style: italic; }
+  .masthead .right { margin-left: auto; text-align: right; color: #cdd6ff; font-size: 11px; }
+  .masthead .right a { color: #ffd24d; }
+
+  .greenbar { background: #2e8b57; height: 6px; }
+
+  /* ---- toolbar ---- */
+  .toolbar { background: #c0c0c0; padding: 4px 8px; border-top: 1px solid #fff; border-bottom: 2px solid #808080; }
+  .btn { display: inline-block; font-size: 11px; font-weight: bold; color: #000; text-decoration: none;
+         background: #d4d0c8; border: 2px outset #f0f0f0; padding: 2px 9px; margin-right: 3px; }
+
+  /* ---- search ---- */
+  .searchrow { background: #eceae4; border-bottom: 1px solid #999; padding: 7px 10px; font-size: 12px; }
+  .searchrow b { color: #c33; }
+  .searchrow input.q { width: 320px; border: 2px inset #d8d8d8; padding: 2px; font-size: 12px; }
+  .gobtn { background: #2e8b57; color: #fff; font-weight: bold; border: 2px outset #5cb585; padding: 2px 12px; font-size: 11px; }
+
+  /* ---- 3 columns ---- */
+  td.col { vertical-align: top; padding: 10px; }
+  td.left { width: 168px; background: #f4f4ee; border-right: 1px solid #c8c8c8; }
+  td.right { width: 196px; background: #f4f4ee; border-left: 1px solid #c8c8c8; }
+  td.center { width: 392px; }
+
+  .secthead { background: #2e8b57; color: #fff; font-weight: bold; font-size: 11px; text-transform: uppercase;
+              padding: 3px 7px; letter-spacing: 0.5px; }
+  .navy { background: #1a2a6c; }
+  ul.chan { list-style: none; margin: 6px 0 0; padding: 0; }
+  ul.chan li { padding: 2px 0; border-bottom: 1px dotted #cfcfcf; }
+  ul.chan li a { font-weight: bold; font-size: 12px; }
+  ul.chan li span { color: #777; font-weight: normal; }
+
+  .news { margin-top: 4px; }
+  .news .item { margin-bottom: 11px; }
+  .news .item a { font-weight: bold; font-size: 13px; }
+  .news .item .meta { color: #2e8b57; font-size: 10px; font-weight: bold; text-transform: uppercase; }
+  .news .item p { margin: 2px 0 0; color: #333; font-size: 11.5px; line-height: 1.4; }
+  .promo { border: 1px solid #2e8b57; background: #eaf6ef; padding: 8px; margin-top: 8px; font-size: 11.5px; }
+  .promo b { color: #1a6b3e; }
+
+  .box { border: 2px inset #d8d8d8; background: #fff; margin-bottom: 12px; }
+  .box .bh { background: #1a2a6c; color: #fff; font-weight: bold; font-size: 11px; padding: 3px 7px; }
+  .box .bb { padding: 7px; font-size: 11px; }
+  .box .bb label { display: block; color: #444; margin: 5px 0 2px; line-height: 1.2; }
+  .box .bb input.f { width: 100%; height: 19px; border: 2px inset #ccc; font-size: 11px; box-sizing: border-box; margin-bottom: 2px; }
+  .box .bb .signin { background: #d4d0c8; border: 2px outset #f0f0f0; font-weight: bold; font-size: 11px; padding: 2px 10px; margin-top: 6px; }
+  .stocks td { font-size: 11px; padding: 1px 5px; }
+  .up { color: #007a00; font-weight: bold; }
+  .down { color: #c00; font-weight: bold; }
+  .wx { text-align: center; }
+  .wx .temp { font-size: 26px; font-weight: bold; color: #1a2a6c; }
+  .wx .sun { font-size: 26px; }
+
+  .footer { background: #c0c0c0; border-top: 2px solid #808080; padding: 8px; text-align: center; font-size: 10.5px; color: #333; }
+  .footer a { color: #00a; }
+  .footer .copy { margin-top: 5px; color: #555; }
+  .blink { color: #c00; font-weight: bold; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="masthead">
+    <svg class="logo" viewBox="0 0 100 80" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0a1746"/><stop offset="1" stop-color="#020615"/>
+        </linearGradient>
+        <linearGradient id="comet" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0" stop-color="#0a1746" stop-opacity="0"/><stop offset="1" stop-color="#46e58a"/>
+        </linearGradient>
+        <radialGradient id="horizon" cx="50%" cy="120%" r="80%">
+          <stop offset="0" stop-color="#2a57c8"/><stop offset="1" stop-color="#0a1746" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+      <rect width="100" height="80" fill="url(#sky)"/>
+      <rect width="100" height="80" fill="url(#horizon)"/>
+      <circle cx="14" cy="14" r="1" fill="#fff"/><circle cx="32" cy="9" r="1.2" fill="#fff"/>
+      <circle cx="70" cy="12" r="1" fill="#cfe"/><circle cx="86" cy="22" r="1.3" fill="#fff"/>
+      <circle cx="22" cy="30" r="1" fill="#fff"/><circle cx="60" cy="6" r="1" fill="#fff"/>
+      <path d="M8 74 Q40 50 84 16" stroke="url(#comet)" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <circle cx="84" cy="16" r="6" fill="#aff5cd"/>
+      <circle cx="84" cy="16" r="3" fill="#fff"/>
+      <text x="50" y="60" text-anchor="middle" font-family="Arial Black, Arial, sans-serif"
+            font-size="52" font-weight="900" fill="#eef2ff" stroke="#2a57c8" stroke-width="1.2">N</text>
+    </svg>
+    <div class="brandtext">
+      <div class="net">Nordstjernen <em>Netcenter</em></div>
+      <div class="tag">Your starting point for the World Wide Web &mdash; since 1997</div>
+    </div>
+    <div class="right">
+      Welcome, Guest!<br>
+      <a href="#">Sign&nbsp;In</a> &nbsp;|&nbsp; <a href="#">New&nbsp;Member</a> &nbsp;|&nbsp; <a href="#">Help</a>
+    </div>
+  </div>
+  <div class="greenbar"></div>
+
+  <div class="toolbar">
+    <a class="btn" href="#">Net Search</a>
+    <a class="btn" href="#">What's New</a>
+    <a class="btn" href="#">What's Cool</a>
+    <a class="btn" href="#">Destinations</a>
+    <a class="btn" href="#">People</a>
+    <a class="btn" href="#">Download</a>
+    <a class="btn" href="#">Channels</a>
+    <a class="btn" href="#">Help</a>
+  </div>
+
+  <div class="searchrow">
+    <b>Search the Web:</b>
+    <input class="q" type="text" value="">
+    <input class="gobtn" type="button" value="Search">
+    &nbsp; <input type="radio" checked> the Web
+    <input type="radio"> Nordstjernen
+    &nbsp;&nbsp; <a href="#">Advanced&nbsp;Search</a> &nbsp;|&nbsp; <a href="#">Power&nbsp;Search</a>
+  </div>
+
+  <table width="980">
+    <tr>
+      <!-- LEFT: channel directory -->
+      <td class="col left">
+        <div class="secthead">Explore Channels</div>
+        <ul class="chan">
+          <li><a href="#">Autos</a></li>
+          <li><a href="#">Business</a></li>
+          <li><a href="#">Computing &amp; Internet</a></li>
+          <li><a href="#">Entertainment</a></li>
+          <li><a href="#">Games</a> <span class="blink">hot!</span></li>
+          <li><a href="#">Health</a></li>
+          <li><a href="#">Lifestyles</a></li>
+          <li><a href="#">Local &amp; Maps</a></li>
+          <li><a href="#">News</a></li>
+          <li><a href="#">Shopping</a></li>
+          <li><a href="#">Sports</a></li>
+          <li><a href="#">Travel</a></li>
+        </ul>
+        <div class="secthead navy" style="margin-top:10px">Net Services</div>
+        <ul class="chan">
+          <li><a href="#">Free Web Mail</a></li>
+          <li><a href="#">Home Pages</a></li>
+          <li><a href="#">Member Directory</a></li>
+          <li><a href="#">Download Software</a></li>
+        </ul>
+      </td>
+
+      <!-- CENTER: headlines -->
+      <td class="col center">
+        <div class="secthead">Today on Nordstjernen</div>
+        <div class="news">
+          <div class="item">
+            <span class="meta">Top Story &middot; June 19, 1997</span><br>
+            <a href="#">Nordstjernen 1.0 Charts a Course for the Open Web</a>
+            <p>The clean-room Web Navigator ships with a from-scratch JavaScript engine and runs today's
+            most popular frameworks &mdash; React, Vue, Angular, jQuery and more &mdash; unmodified.</p>
+          </div>
+          <div class="item">
+            <span class="meta">Technology</span><br>
+            <a href="#">Modern CSS, Tables &amp; Frames Render Pixel-Perfect</a>
+            <p>Gradients, grid, flexbox and the classic table layouts of the early Web all draw crisply
+            in the same lightweight engine.</p>
+          </div>
+          <div class="item">
+            <span class="meta">Net Buzz</span><br>
+            <a href="#">"Best Viewed in Nordstjernen" &mdash; Webmasters Agree</a>
+            <p>Privacy-respecting, secure by design, and small enough to be read by a single human.</p>
+          </div>
+        </div>
+        <div class="promo">
+          <b>&#9733; New!</b> &nbsp;Make Nordstjernen Netcenter your home page and get the Net's best
+          directory, search, and free email &mdash; all in one place. <a href="#">Set as Home&nbsp;&raquo;</a>
+        </div>
+      </td>
+
+      <!-- RIGHT: member box, weather, stocks -->
+      <td class="col right">
+        <div class="box">
+          <div class="bh">Netcenter Members</div>
+          <div class="bb">
+            <label>Member Name:</label>
+            <input class="f" type="text">
+            <label>Password:</label>
+            <input class="f" type="password">
+            <input class="signin" type="button" value="Sign In">
+            &nbsp;<a href="#" style="font-size:10px">Join Free</a>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="bh">Your Weather</div>
+          <div class="bb wx">
+            <div class="sun">&#9728;</div>
+            <div class="temp">72&deg;F</div>
+            <div>Oslo &mdash; Clear</div>
+            <div style="color:#777">Hi 75&deg; / Lo 58&deg;</div>
+          </div>
+        </div>
+
+        <div class="box">
+          <div class="bh">Stock Quotes</div>
+          <div class="bb">
+            <table class="stocks" width="100%">
+              <tr><td><b>NSCP</b></td><td>41&frac12;</td><td class="up">+2&frac14;</td></tr>
+              <tr><td><b>NORD</b></td><td>33&frac34;</td><td class="up">+1&frac18;</td></tr>
+              <tr><td><b>WEB</b></td><td>18&frac38;</td><td class="down">&minus;&frac58;</td></tr>
+              <tr><td><b>HTML</b></td><td>97&frac14;</td><td class="up">+3</td></tr>
+            </table>
+            <div style="text-align:center;margin-top:4px"><a href="#" style="font-size:10px">Get Quotes&nbsp;&raquo;</a></div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <div class="footer">
+    <a href="#">Net Search</a> | <a href="#">Add to Bookmarks</a> | <a href="#">Make This My Home Page</a> |
+    <a href="#">Advertise</a> | <a href="#">Member Services</a> | <a href="#">Feedback</a>
+    <div class="copy">Copyright &copy; 1997 Nordstjernen Communications Corporation. All Rights Reserved.<br>
+    Nordstjernen, Netcenter, and the Comet&nbsp;N Logo are trademarks of Nordstjernen Communications.</div>
+  </div>
+
+</div>
+</body>
+</html>
