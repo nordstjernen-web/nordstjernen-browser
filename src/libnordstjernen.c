@@ -46,6 +46,7 @@ struct ns_browser {
     GHashTable     *css_cache;
     char           *base_url;
     char           *doc_charset;
+    char           *doc_language;
     int             vw;
     double          vh;
     gboolean        images_fetched;
@@ -132,6 +133,7 @@ browser_relayout(ns_browser *b)
     if (b->relaying) { b->dirty = TRUE; return; }
     b->relaying = TRUE;
     ns_css_set_viewport((double)b->vw, b->vh);
+    ns_css_set_doc_language(b->doc_language);
     if (b->js) ns_js_sync_window_metrics(b->js);
     b->search_active = NULL;
     ns_selection_clear(&b->selection);
@@ -672,6 +674,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
 
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
     char *refresh_hdr = g_strdup(resp->refresh);
+    char *doc_language = g_strdup(resp->content_language);
     g_free(file_url);
     browser_prepare_document_response(resp);
 
@@ -696,7 +699,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     ns_browser *b = g_new0(ns_browser, 1);
     b->doc = doc;
     b->doc_charset = doc_charset;
+    b->doc_language = doc_language;
     b->base_url = base;
+    ns_css_set_doc_language(b->doc_language);
     b->vw = vw;
     b->vh = vh;
     b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
@@ -2272,6 +2277,7 @@ ns_browser_close(ns_browser *browser)
     if (browser->images) ns_image_cache_free(browser->images);
     g_free(browser->base_url);
     g_free(browser->doc_charset);
+    g_free(browser->doc_language);
     g_free(browser->pending_nav);
     g_free(browser->pending_download);
     if (browser->pending_audio) g_string_free(browser->pending_audio, TRUE);

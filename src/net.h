@@ -29,6 +29,7 @@ typedef struct ns_response {
     char *xframe_options;
     char *cors_allow_origin;
     char *refresh;
+    char *content_language;
     char *raw_headers;
     GByteArray *body;
     char *error;

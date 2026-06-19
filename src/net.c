@@ -1396,6 +1396,7 @@ ns_response_free(ns_response *resp)
     g_free(resp->xframe_options);
     g_free(resp->cors_allow_origin);
     g_free(resp->refresh);
+    g_free(resp->content_language);
     g_free(resp->raw_headers);
     if (resp->body)
         g_byte_array_unref(resp->body);
@@ -1491,6 +1492,7 @@ typedef struct ns_header_ctx {
     char **xframe_options_out;
     char **cors_allow_origin_out;
     char **refresh_out;
+    char **content_language_out;
     char  *etag;
     char  *last_modified;
     char  *cache_control;
@@ -1585,6 +1587,7 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
                             hc->cors_allow_origin_out))                                       {}
     else if (header_capture(buffer, bytes, "Content-Disposition:",
                             hc->content_disposition_out))                                     {}
+    else if (header_capture(buffer, bytes, "Content-Language:", hc->content_language_out))      {}
     else if (header_capture(buffer, bytes, "Refresh:", hc->refresh_out))                       {}
     else if (header_capture(buffer, bytes, "Location:", &hc->location))                        {}
     else if (header_capture(buffer, bytes, "Set-Cookie:", NULL))
@@ -3851,6 +3854,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     header_ctx.xframe_options_out = &resp->xframe_options;
     header_ctx.cors_allow_origin_out = &resp->cors_allow_origin;
     header_ctx.refresh_out = &resp->refresh;
+    header_ctx.content_language_out = &resp->content_language;
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, ns_header_cb);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &header_ctx);
 

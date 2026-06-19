@@ -1641,6 +1641,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     const char *frag = opts->url ? strchr(opts->url, '#') : NULL;
     const char *target_frag = frag && *(frag + 1) ? frag + 1 : NULL;
     ns_css_set_target_fragment(target_frag);
+    ns_css_set_doc_language(resp->content_language);
     if (target_frag) headless_reveal_fragment(doc, target_frag);
     GHashTable *css_cache =
         g_hash_table_new_full(g_str_hash, g_str_equal, g_free,

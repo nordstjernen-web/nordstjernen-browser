@@ -11326,6 +11326,7 @@ ns_el_is_link(const ns_node *el)
 
 static GHashTable *g_visited_urls = NULL;
 static char       *g_css_doc_base = NULL;
+static char       *g_css_doc_language = NULL;
 
 void
 ns_css_mark_visited(const char *abs_url)
@@ -11343,6 +11344,13 @@ ns_css_set_doc_base(const char *base_url)
 {
     g_free(g_css_doc_base);
     g_css_doc_base = (base_url && *base_url) ? g_strdup(base_url) : NULL;
+}
+
+void
+ns_css_set_doc_language(const char *lang)
+{
+    g_free(g_css_doc_language);
+    g_css_doc_language = (lang && *lang) ? g_strdup(lang) : NULL;
 }
 
 static gboolean
@@ -11435,7 +11443,7 @@ ns_css_node_language(const ns_node *el)
     while (root && root->parent) root = root->parent;
     const char *found = NULL;
     if (root) ns_css_pragma_language_scan(root, &found);
-    return found;
+    return found ? found : g_css_doc_language;
 }
 
 static gboolean

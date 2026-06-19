@@ -734,6 +734,7 @@ const ns_node *ns_css_set_active_node(const ns_node *node);
 
 void ns_css_mark_visited(const char *abs_url);
 void ns_css_set_doc_base(const char *base_url);
+void ns_css_set_doc_language(const char *lang);
 
 const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
 
