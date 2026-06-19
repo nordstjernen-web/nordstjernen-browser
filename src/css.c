@@ -3691,8 +3691,8 @@ parse_one_shadow(const char *text, ns_css_shadow *out)
     if (n_lens < 2) return FALSE;
     out->x = lens[0];
     out->y = lens[1];
-    out->blur   = n_lens >= 3 ? lens[2] : 0;
-    out->spread = n_lens >= 4 ? lens[3] : 0;
+    out->blur   = n_lens >= 3 ? CLAMP(lens[2], 0.0, 1000.0) : 0;
+    out->spread = n_lens >= 4 ? CLAMP(lens[3], -1000.0, 1000.0) : 0;
     out->r = cr; out->g = cg; out->b = cb;
     out->a = has_color ? ca : 128;
     out->inset = inset;

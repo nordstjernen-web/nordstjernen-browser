@@ -957,6 +957,10 @@ guint8 *
 ns_crypto_derive_bits(const ns_crypto_key *k, const ns_crypto_params *p,
                       int length_bits, gsize *out_len, char **err)
 {
+    if (length_bits > (1 << 20)) {
+        if (err) *err = g_strdup("OperationError: deriveBits length too large");
+        return NULL;
+    }
     if (!g_strcmp0(k->algo, "ECDH"))
         return ns_crypto_ecdh(k, p, length_bits, out_len, err);
     if (!g_strcmp0(k->algo, "PBKDF2"))
