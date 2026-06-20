@@ -659,29 +659,6 @@ typedef JSValue JSClassCall(JSContext *ctx, JSValueConst func_obj,
                             JSValueConst this_val, int argc,
                             JSValueConst *argv, int flags);
 
-#ifdef NS_AOT_DISPATCH
-/* Ahead-of-time native code for a numeric JS function. `fn` takes the call's
-   arguments coerced to doubles (the caller guarantees there are at least
-   `arg_count` of them and that every one is a number) and returns the result
-   as a double. Registered against a function's bytecode with
-   JS_SetFunctionAOT; the engine then runs it instead of interpreting, but
-   only when every argument is numeric — any other argument falls back to the
-   bytecode interpreter, so the result is always identical. The entry is
-   borrowed: the caller owns it and must outlive the function.
-
-   Experimental and off by default: nothing is built unless NS_AOT_DISPATCH is
-   defined for the whole engine, exactly like the other opt-in features, so a
-   stock build carries no AOT-dispatch code at all. */
-#define JS_AOT_MAX_ARGS 8
-typedef double (*JSAOTFn)(const double *args);
-typedef struct JSAOTEntry {
-    JSAOTFn fn;
-    int arg_count;
-} JSAOTEntry;
-JS_EXTERN void JS_SetFunctionAOT(JSContext *ctx, JSValueConst func_obj,
-                                 const JSAOTEntry *entry);
-#endif
-
 typedef struct JSClassDef {
     const char *class_name; /* pure ASCII only! */
     JSClassFinalizer *finalizer;

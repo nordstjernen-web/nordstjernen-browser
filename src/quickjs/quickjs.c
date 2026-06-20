@@ -812,9 +812,6 @@ typedef struct JSFunctionBytecode {
     int pc2line_len;
     uint8_t *pc2line_buf;
     char *source;
-#ifdef NS_AOT_DISPATCH
-    const JSAOTEntry *aot;
-#endif
 } JSFunctionBytecode;
 
 typedef struct JSBoundFunction {
@@ -6082,20 +6079,6 @@ static JSFunctionBytecode *JS_GetFunctionBytecode(JSValueConst val)
         return NULL;
     return p->u.func.function_bytecode;
 }
-
-#ifdef NS_AOT_DISPATCH
-void JS_SetFunctionAOT(JSContext *ctx, JSValueConst func_obj,
-                       const JSAOTEntry *entry)
-{
-    JSFunctionBytecode *b;
-    (void)ctx;
-    if (entry != NULL && (entry->arg_count < 0 || entry->arg_count > JS_AOT_MAX_ARGS))
-        return;
-    b = JS_GetFunctionBytecode(func_obj);
-    if (b != NULL && b->func_kind == JS_FUNC_NORMAL)
-        b->aot = entry;
-}
-#endif
 
 static void js_method_set_home_object(JSContext *ctx, JSValue func_obj,
                                       JSValue home_obj)
@@ -17703,26 +17686,6 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                          argv, flags);
     }
     b = p->u.func.function_bytecode;
-
-#ifdef NS_AOT_DISPATCH
-    if (b->aot != NULL && argc >= b->aot->arg_count &&
-        b->aot->arg_count <= JS_AOT_MAX_ARGS &&
-        !(flags & (JS_CALL_FLAG_CONSTRUCTOR | JS_CALL_FLAG_GENERATOR))) {
-        double aot_args[JS_AOT_MAX_ARGS];
-        int aot_ok = 1, aot_i;
-        for (aot_i = 0; aot_i < b->aot->arg_count; aot_i++) {
-            JSValueConst av = argv[aot_i];
-            int atag = JS_VALUE_GET_TAG(av);
-            if (atag == JS_TAG_INT)
-                aot_args[aot_i] = JS_VALUE_GET_INT(av);
-            else if (JS_TAG_IS_FLOAT64(atag))
-                aot_args[aot_i] = JS_VALUE_GET_FLOAT64(av);
-            else { aot_ok = 0; break; }
-        }
-        if (aot_ok)
-            return JS_NewFloat64(caller_ctx, b->aot->fn(aot_args));
-    }
-#endif
 
     if (unlikely(argc < b->arg_count || (flags & JS_CALL_FLAG_COPY_ARGV))) {
         arg_allocated_size = b->arg_count;
