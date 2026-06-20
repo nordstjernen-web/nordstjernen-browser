@@ -1,4 +1,4 @@
-# Innovations in web technology in the Nordstjernen web browser
+# Innovations in the Nordstjernen web browser
 
 Nordstjernen ("the North Star") is a web browser written from scratch in
 C, built in Norway. It is a clean-room implementation — no Gecko, no
