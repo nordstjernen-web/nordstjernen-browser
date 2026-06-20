@@ -45,7 +45,8 @@ cordic:cordic:native:1|1000|50000
 higherorder:square:native:3|7|-4
 higherorder:applyloop:native:5|100|1000
 strings:strings:interpreter:0|3|10
-mathlib:mathlib:interpreter:4|9|16|2
+mathlib:mathlib:native:4|9|16|2
+mathfns:mathfns:native:0|1|7|-3|42|2.5|-8.25
 array:array:interpreter:0|5|50
 "
 

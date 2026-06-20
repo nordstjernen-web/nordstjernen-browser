@@ -70,6 +70,61 @@ static const char *resolve_atom_fn(JSAtom atom) {
     return r;
 }
 
+static int atom_is_math(JSAtom atom) {
+    const char *nm = JS_AtomToCString(g_ctx, atom);
+    int r = nm && strcmp(nm, "Math") == 0;
+    JS_FreeCString(g_ctx, nm);
+    return r;
+}
+
+/* A direct-to-libm unary Math method maps to exactly the C function QuickJS
+   itself calls (js_math_sqrt(d){return sqrt(d);} etc.), so the result is
+   bit-identical to the interpreter. */
+static const char *math_unary_cfn(const char *m) {
+    static const char *map[][2] = {
+        {"abs","fabs"},{"sqrt","sqrt"},{"cbrt","cbrt"},{"floor","floor"},
+        {"ceil","ceil"},{"trunc","trunc"},{"sin","sin"},{"cos","cos"},
+        {"tan","tan"},{"asin","asin"},{"acos","acos"},{"atan","atan"},
+        {"sinh","sinh"},{"cosh","cosh"},{"tanh","tanh"},{"asinh","asinh"},
+        {"acosh","acosh"},{"atanh","atanh"},{"exp","exp"},{"expm1","expm1"},
+        {"log","log"},{"log1p","log1p"},{"log2","log2"},{"log10","log10"},
+        {NULL,NULL}
+    };
+    for (int i = 0; map[i][0]; i++)
+        if (strcmp(map[i][0], m) == 0) return map[i][1];
+    return NULL;
+}
+
+/* Classify a Math method: 0 unsupported, 'u' unary direct-libm, 's' sign,
+   'r' round, '2' atan2, 'p' pow, 'm' min, 'M' max. */
+static int math_method_kind(const char *m) {
+    if (math_unary_cfn(m)) return 'u';
+    if (strcmp(m, "sign") == 0) return 's';
+    if (strcmp(m, "round") == 0) return 'r';
+    if (strcmp(m, "atan2") == 0) return '2';
+    if (strcmp(m, "pow") == 0) return 'p';
+    if (strcmp(m, "min") == 0) return 'm';
+    if (strcmp(m, "max") == 0) return 'M';
+    return 0;
+}
+
+static JSValue g_math_obj;
+
+/* Read a numeric Math constant (PI, E, …) straight from the live Math object,
+   so the emitted literal is the exact double the interpreter would use. */
+static int math_const_value(const char *name, double *out) {
+    JSValue v = JS_GetPropertyStr(g_ctx, g_math_obj, name);
+    int tag = JS_VALUE_GET_TAG(v), ok = 0;
+    if (tag == JS_TAG_INT) { *out = JS_VALUE_GET_INT(v); ok = 1; }
+    else if (JS_TAG_IS_FLOAT64(tag)) { *out = JS_VALUE_GET_FLOAT64(v); ok = 1; }
+    JS_FreeValue(g_ctx, v);
+    return ok;
+}
+
+static const char *atom_str(JSAtom atom) {
+    return JS_AtomToCString(g_ctx, atom);
+}
+
 /* The single source of truth for the supported opcode set and its stack
    effect. Returns 1 and fills pop/push for a supported opcode, 0 for an
    unsupported one (which makes the whole function ineligible). */
@@ -121,6 +176,10 @@ static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
     case OP_call3: np = 1 + 3; ns = 1; break;
     case OP_call:  np = 1 + get_u16(code + p); ns = 1; break;
     case OP_tail_call: np = 1 + get_u16(code + p); ns = 0; break;
+    case OP_get_field2: np = 1; ns = 2; break;
+    case OP_get_field:  np = 1; ns = 1; break;
+    case OP_call_method:      np = 2 + get_u16(code + p); ns = 1; break;
+    case OP_tail_call_method: np = 2 + get_u16(code + p); ns = 0; break;
     default:
         return 0;
     }
@@ -142,7 +201,8 @@ static int branch_target(const uint8_t *code, int pos, int *is_uncond) {
 }
 
 static int terminates(int op) {
-    return op == OP_return || op == OP_return_undef || op == OP_tail_call;
+    return op == OP_return || op == OP_return_undef ||
+           op == OP_tail_call || op == OP_tail_call_method;
 }
 
 /* Abstract-interpret the operand-stack depth at each pc. Returns 1 with
@@ -187,52 +247,150 @@ static int compute_sp(JSFunctionBytecode *b, int *sp_before) {
     return 1;
 }
 
-/* Every call must target a statically-known top-level function. The only
-   ops that put a function value on the stack are get_var / get_var_ref* (and
-   dup propagating one); a call whose function slot was produced any other
-   way — e.g. a function-valued argument or local (higher-order code) — is
-   not in the numeric subset and is rejected here, before it can reach the
-   emitter. Markers are produced and consumed within a basic block, so they
-   are cleared conservatively at every branch target. */
-static int validate_calls(JSFunctionBytecode *b, int *sp_before) {
+/* Slot kinds tracked by the validator/emitter. Only K_NUM values may flow
+   into arithmetic; the others are intermediate forms that must be consumed
+   exactly by a call (K_USERFN), a method call (K_MATHFN), or a property
+   access (K_MATHOBJ). */
+enum { K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN };
+
+/* Abstract-interpret slot kinds and prove the program never uses a
+   non-numeric value (function reference, Math object, Math method) in a
+   numeric context, and that every call/method-call/property-access targets a
+   statically-known function, the Math object, or a whitelisted Math member.
+   Anything outside the numeric+Math subset is rejected here, before the
+   emitter runs. Kinds are produced and consumed within a basic block, so they
+   are cleared at every branch target. */
+static int validate_kinds(JSFunctionBytecode *b, int *sp_before) {
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len, maxstack = b->stack_size + 4;
-    char *isfn = calloc(maxstack > 0 ? maxstack : 1, 1);
+    signed char *k = calloc(maxstack > 0 ? maxstack : 1, 1);
     char *islabel = calloc(len + 1, 1);
-    for (int pos = 0; pos < len; )  {
+    for (int pos = 0; pos < len; ) {
         int u, t = branch_target(code, pos, &u);
         if (t >= 0 && t <= len) islabel[t] = 1;
         pos += short_opcode_info(code[pos]).size;
     }
     int ok = 1, pos = 0;
     while (pos < len && ok) {
-        if (islabel[pos]) for (int i = 0; i < maxstack; i++) isfn[i] = 0;
+        if (islabel[pos]) for (int i = 0; i < maxstack; i++) k[i] = K_NUM;
         int op = code[pos], p = pos + 1, sp = sp_before[pos];
         int pop, push;
         op_delta(code, pos, &pop, &push);
-        if (sp < 0) { pos += short_opcode_info(op).size; continue; }
-        if (op == OP_get_var) {
-            if (sp < maxstack) isfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p)) != NULL;
-        } else if (op == OP_get_var_ref || op == OP_get_var_ref_check) {
-            if (sp < maxstack) isfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name) != NULL;
-        } else if (op >= OP_get_var_ref0 && op <= OP_get_var_ref3) {
-            if (sp < maxstack) isfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name) != NULL;
-        } else if (op == OP_dup) {
-            if (sp < maxstack && sp - 1 >= 0) isfn[sp] = isfn[sp - 1];
-        } else if (op == OP_call0 || op == OP_call1 || op == OP_call2 ||
-                   op == OP_call3 || op == OP_call || op == OP_tail_call) {
+        int sz = short_opcode_info(op).size;
+        if (sp < 0) { pos += sz; continue; }
+        #define NEED_NUM(slot) do { int _s=(slot); if (_s<0||_s>=maxstack||k[_s]!=K_NUM) {ok=0;goto next;} } while(0)
+        #define SETK(slot,val) do { int _s=(slot); if (_s>=0&&_s<maxstack) k[_s]=(val); } while(0)
+        switch (op) {
+        case OP_get_var: {
+            const char *fn = resolve_atom_fn((JSAtom)get_u32(code + p));
+            if (fn) SETK(sp, K_USERFN);
+            else if (atom_is_math((JSAtom)get_u32(code + p))) SETK(sp, K_MATHOBJ);
+            else { ok = 0; }
+            break;
+        }
+        case OP_get_var_ref: case OP_get_var_ref_check:
+            if (!resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name)) ok = 0;
+            else SETK(sp, K_USERFN);
+            break;
+        case OP_get_var_ref0: case OP_get_var_ref1:
+        case OP_get_var_ref2: case OP_get_var_ref3:
+            if (!resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name)) ok = 0;
+            else SETK(sp, K_USERFN);
+            break;
+        case OP_get_field2: {
+            if (sp - 1 < 0 || sp - 1 >= maxstack || k[sp - 1] != K_MATHOBJ) { ok = 0; break; }
+            const char *m = atom_str((JSAtom)get_u32(code + p));
+            int mk = m ? math_method_kind(m) : 0;
+            JS_FreeCString(g_ctx, m);
+            if (!mk) { ok = 0; break; }
+            SETK(sp, K_MATHFN);          /* method func on top */
+            SETK(sp - 1, K_MATHOBJ);     /* 'this' (Math) underneath */
+            break;
+        }
+        case OP_get_field: {
+            if (sp - 1 < 0 || sp - 1 >= maxstack || k[sp - 1] != K_MATHOBJ) { ok = 0; break; }
+            const char *m = atom_str((JSAtom)get_u32(code + p));
+            double dummy;
+            int good = m && math_const_value(m, &dummy);
+            JS_FreeCString(g_ctx, m);
+            if (!good) { ok = 0; break; }
+            SETK(sp - 1, K_NUM);
+            break;
+        }
+        case OP_call0: case OP_call1: case OP_call2: case OP_call3:
+        case OP_call: case OP_tail_call: {
             int argc = (op == OP_call || op == OP_tail_call) ? get_u16(code + p) : (op - OP_call0);
             int fnslot = sp - 1 - argc;
-            if (fnslot < 0 || fnslot >= maxstack || !isfn[fnslot]) ok = 0;
-            else isfn[fnslot] = 0;
-        } else {
-            int base = sp - pop;
-            for (int i = base; i < base + push && i < maxstack; i++)
-                if (i >= 0) isfn[i] = 0;
+            if (fnslot < 0 || fnslot >= maxstack || k[fnslot] != K_USERFN) { ok = 0; break; }
+            for (int i = 0; i < argc; i++) NEED_NUM(fnslot + 1 + i);
+            SETK(fnslot, K_NUM);
+            break;
         }
-        pos += short_opcode_info(op).size;
+        case OP_call_method: case OP_tail_call_method: {
+            int argc = get_u16(code + p);
+            int fnslot = sp - 1 - argc, thisslot = fnslot - 1;
+            if (fnslot < 0 || fnslot >= maxstack || k[fnslot] != K_MATHFN) { ok = 0; break; }
+            if (thisslot < 0 || thisslot >= maxstack || k[thisslot] != K_MATHOBJ) { ok = 0; break; }
+            for (int i = 0; i < argc; i++) NEED_NUM(fnslot + 1 + i);
+            SETK(thisslot, K_NUM);
+            break;
+        }
+        case OP_dup:
+            if (sp - 1 >= 0 && sp - 1 < maxstack) SETK(sp, k[sp - 1]);
+            break;
+        case OP_drop:
+            break;
+        case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
+        case OP_get_loc8: case OP_get_loc: case OP_get_loc_check:
+        case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3:
+        case OP_get_arg:
+        case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
+        case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
+        case OP_push_minus1: case OP_push_i8: case OP_push_i16: case OP_push_i32:
+        case OP_push_const8: case OP_push_const:
+            SETK(sp, K_NUM);
+            break;
+        case OP_post_inc: case OP_post_dec:
+            NEED_NUM(sp - 1); SETK(sp, K_NUM);
+            break;
+        case OP_inc: case OP_dec: case OP_neg: case OP_plus:
+        case OP_lnot: case OP_not:
+            NEED_NUM(sp - 1);
+            break;
+        case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod:
+        case OP_pow: case OP_lt: case OP_lte: case OP_gt: case OP_gte:
+        case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq:
+        case OP_and: case OP_or: case OP_xor:
+        case OP_shl: case OP_shr: case OP_sar:
+            NEED_NUM(sp - 1); NEED_NUM(sp - 2); SETK(sp - 2, K_NUM);
+            break;
+        case OP_if_false: case OP_if_false8:
+        case OP_if_true: case OP_if_true8:
+        case OP_return:
+            NEED_NUM(sp - 1);
+            break;
+        case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3:
+        case OP_put_loc8: case OP_put_loc: case OP_put_loc_check:
+        case OP_put_loc_check_init:
+        case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
+        case OP_set_loc8: case OP_set_loc:
+        case OP_add_loc:
+            NEED_NUM(sp - 1);
+            break;
+        case OP_inc_loc: case OP_dec_loc:
+        case OP_goto: case OP_goto8: case OP_goto16:
+        case OP_nop: case OP_set_loc_uninitialized:
+        case OP_return_undef:
+            break;
+        default:
+            ok = 0;
+        }
+        #undef NEED_NUM
+        #undef SETK
+    next:
+        pos += sz;
     }
-    free(isfn);
+    free(k);
     free(islabel);
     return ok;
 }
@@ -268,20 +426,23 @@ static int local_check(Fn *fn, int *sp_scratch) {
             int tag = JS_VALUE_GET_TAG(v);
             if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64(tag)) return 0;
         } else if (op == OP_get_var) {
-            if (!add_callee(fn, resolve_atom_fn((JSAtom)get_u32(code + p)))) return 0;
+            const char *cn = resolve_atom_fn((JSAtom)get_u32(code + p));
+            if (cn && !add_callee(fn, cn)) return 0;
         } else if (op == OP_get_var_ref || op == OP_get_var_ref_check) {
             int idx = get_u16(code + p);
             if (idx < 0 || idx >= b->closure_var_count) return 0;
-            if (!add_callee(fn, resolve_atom_fn(b->closure_var[idx].var_name))) return 0;
+            const char *cn = resolve_atom_fn(b->closure_var[idx].var_name);
+            if (cn && !add_callee(fn, cn)) return 0;
         } else if (op >= OP_get_var_ref0 && op <= OP_get_var_ref3) {
             int idx = op - OP_get_var_ref0;
             if (idx >= b->closure_var_count) return 0;
-            if (!add_callee(fn, resolve_atom_fn(b->closure_var[idx].var_name))) return 0;
+            const char *cn = resolve_atom_fn(b->closure_var[idx].var_name);
+            if (cn && !add_callee(fn, cn)) return 0;
         }
         pos += short_opcode_info(op).size;
     }
     if (!compute_sp(b, sp_scratch)) return 0;
-    return validate_calls(b, sp_scratch);
+    return validate_kinds(b, sp_scratch);
 }
 
 /* Greatest fixpoint: assume every locally-OK function is eligible, then
@@ -311,6 +472,33 @@ static void compute_eligible_all(void) {
 /* ---- emission --------------------------------------------------------- */
 
 static const char **g_slotfn;
+static const char **g_slotmeth;
+
+static void emit_math_expr(FILE *o, int dst, const char *m, int argc, int arg0) {
+    int mk = math_method_kind(m);
+    if (mk == 'u') {
+        fprintf(o, "  s%d = %s(s%d);\n", dst, math_unary_cfn(m), arg0);
+    } else if (mk == 's') {
+        fprintf(o, "  s%d = js_sign(s%d);\n", dst, arg0);
+    } else if (mk == 'r') {
+        fprintf(o, "  s%d = js_round(s%d);\n", dst, arg0);
+    } else if (mk == '2') {
+        fprintf(o, "  s%d = atan2(s%d, s%d);\n", dst, arg0, arg0 + 1);
+    } else if (mk == 'p') {
+        fprintf(o, "  s%d = js_pow(s%d, s%d);\n", dst, arg0, arg0 + 1);
+    } else if (mk == 'm' || mk == 'M') {
+        const char *fold = (mk == 'm') ? "js_min2" : "js_max2";
+        if (argc == 0) {
+            fprintf(o, "  s%d = %s;\n", dst, (mk == 'm') ? "INFINITY" : "-INFINITY");
+        } else if (argc == 1) {
+            fprintf(o, "  s%d = s%d;\n", dst, arg0);
+        } else {
+            fprintf(o, "  s%d = %s(s%d, s%d);\n", dst, fold, arg0, arg0 + 1);
+            for (int i = 2; i < argc; i++)
+                fprintf(o, "  s%d = %s(s%d, s%d);\n", dst, fold, dst, arg0 + i);
+        }
+    }
+}
 
 static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     JSFunctionBytecode *b = fn->b;
@@ -318,6 +506,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     int len = b->byte_code_len;
     int maxstack = b->stack_size + 4;
     g_slotfn = calloc(maxstack, sizeof(*g_slotfn));
+    g_slotmeth = calloc(maxstack, sizeof(*g_slotmeth));
 
     fprintf(o, "static double %s(", fn->mangled);
     for (int i = 0; i < b->arg_count; i++)
@@ -404,7 +593,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         case OP_mul: fprintf(o, "  s%d = s%d * s%d;\n", sp - 2, sp - 2, sp - 1); break;
         case OP_div: fprintf(o, "  s%d = s%d / s%d;\n", sp - 2, sp - 2, sp - 1); break;
         case OP_mod: fprintf(o, "  s%d = fmod(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_pow: fprintf(o, "  s%d = pow(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_pow: fprintf(o, "  s%d = js_pow(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
         case OP_lt:  fprintf(o, "  s%d = (s%d <  s%d);\n", sp - 2, sp - 2, sp - 1); break;
         case OP_lte: fprintf(o, "  s%d = (s%d <= s%d);\n", sp - 2, sp - 2, sp - 1); break;
         case OP_gt:  fprintf(o, "  s%d = (s%d >  s%d);\n", sp - 2, sp - 2, sp - 1); break;
@@ -465,24 +654,53 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             free(rhs);
             break;
         }
-        case OP_get_var: {
-            g_slotfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p)); break;
-        }
+        case OP_get_var:
+            g_slotfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p));
+            g_slotmeth[sp] = NULL;
+            break;
         case OP_get_var_ref0: case OP_get_var_ref1:
         case OP_get_var_ref2: case OP_get_var_ref3:
             g_slotfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name); break;
         case OP_get_var_ref: case OP_get_var_ref_check:
             g_slotfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name); break;
+        case OP_get_field2: {
+            const char *m = atom_str((JSAtom)get_u32(code + p));
+            g_slotmeth[sp] = strdup(m);
+            g_slotfn[sp] = NULL;
+            JS_FreeCString(g_ctx, m);
+            break;
+        }
+        case OP_get_field: {
+            const char *m = atom_str((JSAtom)get_u32(code + p));
+            double v = 0; math_const_value(m, &v);
+            JS_FreeCString(g_ctx, m);
+            fprintf(o, "  s%d = %.17g;\n", sp - 1, v);
+            g_slotfn[sp - 1] = NULL;
+            break;
+        }
+        case OP_call_method: case OP_tail_call_method: {
+            int margc = get_u16(code + p);
+            int fnslot = sp - 1 - margc, thisslot = fnslot - 1;
+            const char *m = (fnslot >= 0) ? g_slotmeth[fnslot] : NULL;
+            if (!m) { fprintf(stderr, "aotc: lost method target\n"); free(islabel); free(g_slotfn); free(g_slotmeth); exit(DECLINE); }
+            emit_math_expr(o, thisslot, m, margc, fnslot + 1);
+            if (op == OP_tail_call_method)
+                fprintf(o, "  return s%d;\n", thisslot);
+            g_slotfn[thisslot] = NULL;
+            g_slotmeth[thisslot] = NULL;
+            break;
+        }
         case OP_return: fprintf(o, "  return s%d;\n", sp - 1); break;
         case OP_return_undef: fprintf(o, "  return 0;\n"); break;
         case OP_nop: case OP_set_loc_uninitialized: break;
-        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); exit(DECLINE);
+        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); free(g_slotmeth); exit(DECLINE);
         }
         pos += short_opcode_info(op).size;
     }
     fprintf(o, "  return 0;\n}\n\n");
     free(islabel);
     free(g_slotfn);
+    free(g_slotmeth);
 }
 
 int main(int argc, char **argv) {
@@ -505,6 +723,11 @@ int main(int argc, char **argv) {
 
     JSRuntime *rt = JS_NewRuntime();
     g_ctx = JS_NewContext(rt);
+    {
+        JSValue glob = JS_GetGlobalObject(g_ctx);
+        g_math_obj = JS_GetPropertyStr(g_ctx, glob, "Math");
+        JS_FreeValue(g_ctx, glob);
+    }
 
     JSValue top = JS_Eval(g_ctx, src, n, in,
                           JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
@@ -564,7 +787,39 @@ int main(int argc, char **argv) {
         "static uint32_t js_to_uint32(double d) {\n"
         "  if (d >= 0.0 && d < 4294967296.0) return (uint32_t)d;\n"
         "  return (uint32_t)js_to_int32(d);\n"
-        "}\n\n");
+        "}\n"
+        "typedef union { double d; uint64_t u; } js_f64u;\n"
+        "static double js_pow(double a, double b) {\n"
+        "  if (!isfinite(b) && (a == 1.0 || a == -1.0)) return NAN;\n"
+        "  return pow(a, b);\n"
+        "}\n"
+        "static double js_sign(double a) {\n"
+        "  if (isnan(a) || a == 0.0) return a;\n"
+        "  return a < 0 ? -1.0 : 1.0;\n"
+        "}\n"
+        "static double js_round(double a) {\n"
+        "  js_f64u u; u.d = a; unsigned e = (u.u >> 52) & 0x7ff;\n"
+        "  uint64_t frac_mask, one; unsigned s;\n"
+        "  if (e < 1023) {\n"
+        "    if (e == 1022 && u.u != 0xbfe0000000000000ULL)\n"
+        "      u.u = (u.u & ((uint64_t)1 << 63)) | ((uint64_t)1023 << 52);\n"
+        "    else u.u &= (uint64_t)1 << 63;\n"
+        "  } else if (e < 1075) {\n"
+        "    s = u.u >> 63; one = (uint64_t)1 << (52 - (e - 1023));\n"
+        "    frac_mask = one - 1; u.u += (one >> 1) - s; u.u &= ~frac_mask;\n"
+        "  }\n"
+        "  return u.d;\n"
+        "}\n"
+        "static double js_fmin(double a, double b) {\n"
+        "  if (a == 0 && b == 0) { js_f64u x, y; x.d = a; y.d = b; x.u |= y.u; return x.d; }\n"
+        "  return a < b ? a : b;\n"
+        "}\n"
+        "static double js_fmax(double a, double b) {\n"
+        "  if (a == 0 && b == 0) { js_f64u x, y; x.d = a; y.d = b; x.u &= y.u; return x.d; }\n"
+        "  return a < b ? b : a;\n"
+        "}\n"
+        "static double js_min2(double a, double b) { if (!isnan(a)) { if (isnan(b)) return b; return js_fmin(a, b); } return a; }\n"
+        "static double js_max2(double a, double b) { if (!isnan(a)) { if (isnan(b)) return b; return js_fmax(a, b); } return a; }\n\n");
     for (int i = 0; i < g_nfns; i++) {
         if (!g_fns[i].eligible) continue;
         fprintf(o, "static double %s(", g_fns[i].mangled);

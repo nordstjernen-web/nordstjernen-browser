@@ -30,22 +30,26 @@ JavaScript; everything else runs interpreted, exactly as before.
 - The subset covers arithmetic, comparisons, `if`/`while`/`for`/`do…while`,
   `?:`, short-circuit `&&`/`||`, `++`/`--`, logical/bitwise-not, the full
   **bitwise and shift operators** (`& | ^ << >> >>>`) with spec-exact
-  `ToInt32`/`ToUint32`, and direct/mutual/tail recursion plus calls (with
-  correct under/over-application) among eligible functions.
-- An 82-case self-check (`selfcheck.sh`) compares AOT against the
+  `ToInt32`/`ToUint32`, **`Math.*`** (sqrt, floor, sin, pow, min/max, …, and
+  constants like `Math.PI`) lowered to the exact libm calls QuickJS itself
+  uses, and direct/mutual/tail recursion plus calls (with correct
+  under/over-application) among eligible functions.
+- An 89-case self-check (`selfcheck.sh`) compares AOT against the
   interpreter across all of the above — including bit hashing (FNV),
-  xorshift PRNG, popcount, division-by-zero, negative modulo, fractional
-  powers, and `ToInt32` edge cases — **all identical**; out-of-subset
-  programs (strings, `Math.*`, arrays, higher-order calls) correctly fall
-  back.
-- It is exercised on **real third-party code** (`frameworktest.sh`, the
-  SunSpider numeric kernels): 9 functions AOT-compile and match the
-  interpreter exactly, 17 fall back, **0 mismatches**. This testing found
-  and fixed a real crash (see *Security review*).
-- It runs **1.8×–36×** faster than the interpreter on numeric workloads;
-  for `fib(28)` it retires **9.2M** instructions versus the interpreter's
-  **1.06 billion**. Callgrind attributes **93%** of interpreter
-  instructions to the bytecode dispatch loop alone.
+  xorshift PRNG, popcount, `Math.*` kernels, division-by-zero, negative
+  modulo, fractional powers, `(±1) ** ±Infinity`, and `ToInt32` edge cases
+  — **all identical**; out-of-subset programs (strings, arrays, objects,
+  higher-order calls) correctly fall back.
+- It is exercised on **real third-party code**: the SunSpider numeric
+  kernels (`frameworktest.sh`, 9 native / 17 fallback / **0 mismatches**)
+  and the **entire Speedometer 3.1 JavaScript corpus** (`speedometer.sh`,
+  424 files / 14 MB) — **0 compiler crashes**. This testing found and fixed
+  a real crash and the `pow` soundness bug (see *Security review*).
+- It runs **1.8×–36×** faster than the interpreter on numeric workloads
+  (6.3× on a `Math.*` kernel); for `fib(28)` it retires **9.2M**
+  instructions versus the interpreter's **1.06 billion**. Callgrind
+  attributes **93%** of interpreter instructions to the bytecode dispatch
+  loop alone.
 - The compiler is checked under **ASan + UBSan** across the whole corpus
   (including real-world code and a 2000-local stress program): **0
   memory-safety errors**.
@@ -139,15 +143,20 @@ the `OP_*` enum, and the `opcode_info[]` size table. Its flow:
 
 2. **Eligibility analysis (soundness gate).** A function is *locally OK*
    only if **every** opcode is on the supported whitelist (`op_delta` is
-   the single source of truth), every pushed constant is numeric, and every
-   variable/closure reference names a known top-level function (the only
-   non-number the subset permits, and only as a call target). A separate
-   abstract interpretation (`compute_sp`) computes the operand-stack depth
-   at every program point and rejects the function if any opcode is
-   unsupported or the depth is inconsistent across a control-flow join. A
-   function is finally **eligible** only if it is locally OK *and every
-   function it calls is eligible* — a fixpoint over the call graph that
-   handles direct and mutual recursion. Anything that fails is declined.
+   the single source of truth) and every pushed constant is numeric. Two
+   abstract interpretations then run over the bytecode: `compute_sp`
+   computes the operand-stack depth at every program point (rejecting any
+   inconsistency across a control-flow join), and `validate_kinds` tracks a
+   *kind* for every stack slot — number, user-function reference, the `Math`
+   object, or a `Math` method — and proves that **no non-number ever flows
+   into a numeric context**, that every call targets a statically-known
+   function, and that every method call / property access targets a
+   whitelisted `Math` member. (This is what makes `Math + 1`, calling a
+   function-valued argument, or storing `Math` in a local all decline rather
+   than miscompile.) A function is finally **eligible** only if it is locally
+   OK *and every function it calls is eligible* — a monotone greatest
+   fixpoint over the call graph that handles direct and mutual recursion.
+   Anything that fails is declined.
 
 3. **Lowering.** For each eligible function the operand stack is modelled
    as a set of fixed `double` slot variables `s0..sN` indexed by the
@@ -166,16 +175,34 @@ the `OP_*` enum, and the `opcode_info[]` size table. Its flow:
 
 ### Why "everything is a `double`" is correct here
 
-JavaScript numbers *are* IEEE-754 doubles, and the whitelisted operators
-(`+ - * / % ** < <= > >= == != !`) are defined on them with exactly the
-semantics C gives `double`: `%` is `fmod`, `**` is `pow`, division by zero
-yields `±Inf`/`NaN`, comparisons yield `0`/`1`. The eligibility gate
-guarantees the only values flowing through a compiled function are numbers
-(numeric constants, numeric args, and results of numeric ops) — so the
-`double` model is not an approximation, it is the spec. Operators that
-would require integer coercion with non-`double` semantics (`& | ^ << >>
->>>`, which apply `ToInt32`) are deliberately **not** whitelisted; a
-program using them is declined and interpreted.
+JavaScript numbers *are* IEEE-754 doubles, and the whitelisted operators are
+defined on them with exactly the semantics C gives `double`: `%` is `fmod`,
+division by zero yields `±Inf`/`NaN`, comparisons yield `0`/`1`. The
+eligibility gate (see *kind tracking* below) guarantees the only values
+flowing through a compiled function are numbers — so the `double` model is
+not an approximation, it is the spec.
+
+The bar for adding an operator is **bit-for-bit agreement with the QuickJS
+interpreter**, not merely with the ECMAScript spec — soundness means
+"identical to interpreting it in *this* engine." That principle drove two
+non-obvious choices:
+
+- **Bitwise/shift** (`& | ^ ~ << >> >>>`) apply `ToInt32`/`ToUint32`, which
+  the emitter implements exactly (with an in-range fast path), so they match
+  the interpreter's integer results.
+- **`**` and `Math.pow`** do *not* map to C `pow`. QuickJS returns `NaN` for
+  `(±1) ** ±Infinity` where C `pow` returns `1`; the emitter therefore uses a
+  `js_pow` helper that reproduces QuickJS's own `js_math_pow`. (Catching this
+  fixed a latent unsoundness in the original `**` lowering.)
+
+`Math.*` is sound for the same reason: QuickJS implements `Math.sqrt`,
+`Math.floor`, `Math.sin`, … as one-line calls to the C library
+(`js_math_sqrt(d){return sqrt(d);}`), so emitting the identical libm call is
+bit-identical. The handful of non-libm methods (`min`/`max`/`sign`/`round`)
+are reproduced from QuickJS's exact implementations (`js_fmin`/`js_fmax` ±0
+handling, the bit-twiddling `js_round`), and `Math.PI` and friends are read
+straight off the live `Math` object so the emitted literal is the exact
+double the interpreter holds.
 
 ### Worked example
 
@@ -235,13 +262,13 @@ asserts the numeric results are identical *and* that the expected path was
 taken (numeric programs go native; out-of-subset programs fall back). It
 covers arithmetic, short-circuit `&&`/`||`, ternaries, `for`/`while`/
 `do…while`, mutual recursion (`tail_call`), float kernels, logical `!`,
-bitwise/shift kernels (FNV hash, xorshift PRNG, popcount), division by zero
-(`±Inf`/`NaN`), negative modulo, fractional powers, and JS-name/C-keyword
-collisions (functions called `main`, `pow`, `int`), plus programs that must
-fall back (strings, `Math.*`, arrays, higher-order calls).
+bitwise/shift kernels (FNV hash, xorshift PRNG, popcount), `Math.*` kernels,
+division by zero (`±Inf`/`NaN`), negative modulo, fractional powers, and
+JS-name/C-keyword collisions (functions called `main`, `pow`, `int`), plus
+programs that must fall back (strings, arrays, higher-order calls).
 
 ```
-passed: 82   failed: 0
+passed: 89   failed: 0
 ```
 
 Every eligible case matches the interpreter bit-for-bit; every ineligible
@@ -268,6 +295,39 @@ arrays, globals, `Date`, or function-valued arguments falls back. This is
 the eligibility analysis and fallback validated on real programs rather than
 hand-written tests — and it is how the crash and arity bugs in *Security
 review* were found.
+
+### The Speedometer 3.1 corpus
+
+`experiments/aot-js/speedometer.sh` pushes this much harder:
+it runs the compiler over **every JavaScript file Speedometer 3.1 ships** —
+**424 files, 14 MB**, including minified React/Vue/Angular bundles,
+CodeMirror, TipTap, chart.js, and the news-site apps:
+
+```
+files processed:        424
+compiler crashes:       0
+top-level functions:    2154
+AOT-eligible (numeric): 0
+```
+
+Two findings, both expected and both important:
+
+1. **Robustness:** the compiler survives 14 MB of adversarial, minified,
+   real-world code with **zero crashes** — a strong fuzz-like signal on top
+   of the sanitizer runs.
+2. **Applicability:** **none** of the 2154 top-level functions are
+   numeric-eligible. Web-application code is objects, strings, DOM, and
+   closures — not numbers — so AOT correctly declines all of it and the
+   interpreter runs everything, exactly as it does today.
+
+This is also the honest answer to "will this speed up the Speedometer
+score?" — **no**, and it cannot. Speedometer's code is web content loaded at
+*runtime*; compiling it would require runtime codegen (a JIT), which needs
+the writable-executable memory this whole approach exists to avoid. And
+Speedometer is DOM/layout/GC-bound, not JS-compute-bound, so even a perfect
+JS compiler would barely move it. AOT's leverage is numeric *hotspots*
+(crypto, codecs, image/audio, physics), where it delivers the speedups
+above — a workload orthogonal to Speedometer.
 
 ## Security review
 
@@ -301,9 +361,9 @@ it; the issues found and fixed:
 - **NULL dereference on higher-order calls.** A function calling a
   function-valued argument or local (e.g. SunSpider's `TimeFunc(func)`)
   passed eligibility but dereferenced a NULL call-target slot at emission —
-  a crash on real input. A new `validate_calls` pass proves every call
-  targets a statically-known top-level function during analysis, so
-  higher-order code is declined cleanly; `find_fn` is also NULL-hardened.
+  a crash on real input. The `validate_kinds` pass proves every call targets
+  a statically-known top-level function during analysis, so higher-order
+  code is declined cleanly; `find_fn` is also NULL-hardened.
 - **One-byte out-of-bounds read.** `JS_AtomToCString` on an anonymous nested
   function's null name atom returns a pointer one past a heap buffer;
   reading the first byte was a 1-byte OOB read, triggered by real-world code
@@ -314,11 +374,19 @@ it; the issues found and fixed:
   (compile error) instead of JavaScript's `undefined`→`NaN`. Call emission
   is now arity-aware: missing args are passed as `NaN`, extra args dropped,
   matching the interpreter.
+- **Unsound `**` lowering.** The original exponentiation lowered to C `pow`,
+  which returns `1` for `(±1) ** ±Infinity` where QuickJS returns `NaN` — a
+  silent wrong result. `**` and `Math.pow` now use a `js_pow` helper that
+  reproduces QuickJS's `js_math_pow`. The kind-tracking validator
+  (`validate_kinds`) additionally closes the soundness holes where a
+  function reference or the `Math` object could flow into arithmetic, a
+  comparison, a branch condition, or a stored local.
 
-The whole corpus — the self-check programs, the SunSpider sources, and a
-generated 2000-local stress program — was then run through an
-**AddressSanitizer + UndefinedBehaviorSanitizer** build of `aotc` with
-**zero** memory-safety or UB findings.
+The whole corpus — the self-check programs, the SunSpider sources, a
+generated 2000-local stress program, **and all 424 Speedometer 3.1 files
+(14 MB)** — was then run through an **AddressSanitizer +
+UndefinedBehaviorSanitizer** build of `aotc` with **zero** memory-safety or
+UB findings.
 
 The structural security property is unchanged and was re-verified: the
 emitted binaries import no `mmap`/`mprotect`/`memfd`, all codegen is
@@ -342,6 +410,7 @@ loop, timed with a monotonic clock). Reproduce with
 | `popcount` | bit-twiddling, masks/shifts   | 2000000 | 5    | 1043.1      | 392.6    | **2.7×**  |
 | `hash`     | FNV hash (`*`, `^`, `>>>`)    | 2000000 | 3    | 431.6       | 173.1    | **2.5×**  |
 | `prng`     | xorshift (`<<`, `>>>`, `^`)   | 2000000 | 3    | 406.9       | 223.7    | **1.8×**  |
+| `mathkernel` | `Math.{sqrt,sin,cos,pow,…}` | 2000000 | 3    | 2102.0      | 331.4    | **6.3×**  |
 
 Loop/recursion/float kernels win big (24–37×) because every opcode on the
 hot path was pure boxing+dispatch overhead that AOT deletes. `collatz` wins
@@ -405,14 +474,14 @@ small function is ~5 ms, all paid offline.
 The compiler accelerates the **numeric subset**: functions over `double`,
 the arithmetic/comparison/logical-not operators, the bitwise and shift
 operators (`& | ^ ~ << >> >>>`, with spec-exact `ToInt32`/`ToUint32`),
-`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`,
-direct/mutual/tail recursion, and calls (including under/over-application)
-among eligible top-level functions. Everything else — strings, objects,
-arrays, property access, `this`, closures with captured mutable state,
-`Math.*` and other built-ins, function-valued arguments / higher-order code,
-exceptions, generators, `async`/`await`, `eval`/`Function` — is **declined
-and interpreted**. This is a *capability* boundary, not a correctness one:
-declining is always safe.
+`Math.*` methods and constants, `if`/`while`/`for`/`do…while`, `++`/`--`,
+`?:`, short-circuit `&&`/`||`, direct/mutual/tail recursion, and calls
+(including under/over-application) among eligible top-level functions.
+Everything else — strings, objects, arrays, property access, `this`,
+closures with captured mutable state, non-`Math` built-ins, function-valued
+arguments / higher-order code, exceptions, generators, `async`/`await`,
+`eval`/`Function` — is **declined and interpreted**. This is a *capability*
+boundary, not a correctness one: declining is always safe.
 
 Wiring the AOT path into the live renderer (so eligible functions run
 native inside the browser, not just via the standalone tool) is the natural
@@ -434,6 +503,7 @@ cd experiments/aot-js
 ./selfcheck.sh      # soundness: AOT vs interpreter over the whole corpus
 ./run.sh            # performance: the benchmark table above
 ./frameworktest.sh  # real third-party code (SunSpider); needs network
+./speedometer.sh    # robustness over the whole Speedometer 3.1 corpus; needs network
 ./aot-run.sh tests/arith.js arith 6 7   # run one entry, AOT-by-default
 ```
 
@@ -448,6 +518,7 @@ re-run the sanitizer check, build `aotc.c` with
 - `experiments/aot-js/aot-run.sh` — AOT-by-default runner with interpreter fallback.
 - `experiments/aot-js/selfcheck.sh` — soundness harness (AOT vs interpreter).
 - `experiments/aot-js/frameworktest.sh` — real-world test (SunSpider numeric kernels).
+- `experiments/aot-js/speedometer.sh` — robustness/eligibility test over the Speedometer 3.1 corpus.
 - `experiments/aot-js/run.sh` — performance benchmark driver.
 - `experiments/aot-js/tests/*.js`, `bench/*.js` — corpus and benchmarks.
 

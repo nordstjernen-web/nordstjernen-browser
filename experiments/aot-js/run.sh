@@ -21,7 +21,8 @@ echo ">> building aotc"
 
 # name  arg  reps
 BENCHES="fib:32:1 sumloop:1000000:50 collatz:20000:5 mandel:300:3 \
-         popcount:2000000:5 cordic:200000:3 hash:2000000:3 prng:2000000:3"
+         popcount:2000000:5 cordic:200000:3 hash:2000000:3 prng:2000000:3 \
+         mathkernel:2000000:3"
 
 printf "\n%-10s %-9s %-7s %14s %14s %9s %12s\n" \
   bench arg reps "interp(ms)" "aot(ms)" "speedup" "result"

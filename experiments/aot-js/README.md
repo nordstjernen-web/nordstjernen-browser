@@ -17,28 +17,33 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ## Run
 
 ```sh
-./selfcheck.sh                       # soundness: AOT vs interpreter, 82 cases
+./selfcheck.sh                       # soundness: AOT vs interpreter, 89 cases
 ./run.sh                             # performance benchmark table
 ./frameworktest.sh                   # real third-party code (SunSpider); needs network
+./speedometer.sh                     # robustness over the Speedometer 3.1 corpus; needs network
 ./aot-run.sh tests/arith.js arith 6 7   # run one entry, AOT-by-default
 ```
 
 `selfcheck.sh` runs every program both through the pure interpreter and
 through AOT-by-default and asserts identical results (and that the expected
 path — native vs fallback — was taken). `run.sh` reports speedups.
-`frameworktest.sh` exercises the compiler on real SunSpider numeric kernels.
+`frameworktest.sh` exercises the compiler on real SunSpider numeric kernels;
+`speedometer.sh` runs it over the entire Speedometer 3.1 JavaScript corpus
+(424 files / 14 MB) as a robustness check.
 
 The subset covers arithmetic, comparisons, bitwise/shift (`& | ^ ~ << >>
->>>`, spec-exact `ToInt32`/`ToUint32`), all loop forms, `?:`, `&&`/`||`, and
-direct/mutual/tail recursion. Anything else (strings, objects, arrays,
-`Math.*`, higher-order calls) falls back to the interpreter.
+>>>`, spec-exact `ToInt32`/`ToUint32`), `Math.*` methods and constants, all
+loop forms, `?:`, `&&`/`||`, and direct/mutual/tail recursion. Anything else
+(strings, objects, arrays, non-`Math` built-ins, higher-order calls) falls
+back to the interpreter.
 
 ## Contents
 
-- `aotc.c` — eligibility analysis, call validation + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
+- `aotc.c` — eligibility analysis, kind-tracking validator + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
 - `aot-run.sh` — AOT-by-default runner with automatic interpreter fallback.
 - `selfcheck.sh` — soundness harness.
 - `frameworktest.sh` — real-world test (SunSpider numeric kernels).
+- `speedometer.sh` — robustness/eligibility test over the Speedometer 3.1 corpus.
 - `run.sh` — performance benchmark driver.
 - `tests/*.js` — correctness corpus (numeric + must-fall-back programs).
 - `bench/*.js` — performance benchmarks.
