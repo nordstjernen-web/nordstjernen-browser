@@ -171,6 +171,10 @@ static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
         np = 1; ns = 1; break;
     case OP_dup: case OP_post_inc: case OP_post_dec:
         np = 1; ns = 2; break;
+    case OP_swap:
+        np = 2; ns = 2; break;
+    case OP_is_undefined_or_null: case OP_to_propkey:
+        np = 1; ns = 1; break;
     case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod:
     case OP_pow: case OP_lt: case OP_lte: case OP_gt: case OP_gte:
     case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq:
@@ -268,8 +272,102 @@ static int compute_sp(JSFunctionBytecode *b, int *sp_before) {
    into arithmetic; the others are intermediate forms that must be consumed
    exactly by a call (K_USERFN), a method call (K_MATHFN), or a property
    access (K_MATHOBJ); K_ARRAY is a Float64Array parameter, consumed only by
-   element access and `.length`. */
-enum { K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN, K_ARRAY };
+   element access and `.length`. K_UNINIT/K_CONFLICT are the top/bottom of the
+   dataflow lattice used to meet kinds at control-flow joins. */
+enum { K_CONFLICT = -2, K_UNINIT = -1,
+       K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN, K_ARRAY };
+
+static signed char kind_meet(signed char a, signed char b) {
+    if (a == K_UNINIT) return b;
+    if (b == K_UNINIT) return a;
+    if (a == b) return a;
+    return K_CONFLICT;
+}
+
+/* Kind-production (transfer) for one opcode: updates the stack-kind state to
+   reflect the slots an opcode leaves behind. This is the SETK half of the
+   analysis, factored out so the cross-block fixpoint can run it; validity
+   checks are enforced separately by the checking pass below. */
+static void transfer_kinds(Fn *fn, const uint8_t *code, int pos, int sp,
+                           signed char *k, int maxstack) {
+    int op = code[pos], p = pos + 1;
+    #define PUT(slot, val) do { int _s=(slot); if (_s>=0 && _s<maxstack) k[_s]=(val); } while(0)
+    switch (op) {
+    case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
+    case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
+    case OP_push_minus1: case OP_push_i8: case OP_push_i16: case OP_push_i32:
+    case OP_push_const8: case OP_push_const:
+    case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
+    case OP_get_loc8: case OP_get_loc: case OP_get_loc_check:
+        PUT(sp, K_NUM); break;
+    case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3: {
+        int n = op - OP_get_arg0;
+        PUT(sp, (n < MAX_ARGS && fn->arg_is_array[n]) ? K_ARRAY : K_NUM); break;
+    }
+    case OP_get_arg: {
+        int n = get_u16(code + p);
+        PUT(sp, (n < MAX_ARGS && fn->arg_is_array[n]) ? K_ARRAY : K_NUM); break;
+    }
+    case OP_get_var: {
+        const char *nm = resolve_atom_fn((JSAtom)get_u32(code + p));
+        PUT(sp, nm ? K_USERFN : K_MATHOBJ); break;
+    }
+    case OP_get_var_ref0: case OP_get_var_ref1: case OP_get_var_ref2:
+    case OP_get_var_ref3: case OP_get_var_ref: case OP_get_var_ref_check:
+        PUT(sp, K_USERFN); break;
+    case OP_get_field2: PUT(sp - 1, K_MATHOBJ); PUT(sp, K_MATHFN); break;
+    case OP_get_field:  PUT(sp - 1, K_NUM); break;
+    case OP_call0: case OP_call1: case OP_call2: case OP_call3: case OP_call:
+        PUT(sp - 1 - ((op==OP_call)?get_u16(code+p):(op-OP_call0)), K_NUM); break;
+    case OP_call_method:
+        PUT(sp - 2 - get_u16(code + p), K_NUM); break;
+    case OP_dup: PUT(sp, (sp-1>=0 && sp-1<maxstack) ? k[sp-1] : K_NUM); break;
+    case OP_swap: {
+        if (sp-1>=0 && sp-2>=0 && sp-1<maxstack && sp-2<maxstack) {
+            signed char t = k[sp-1]; k[sp-1] = k[sp-2]; k[sp-2] = t;
+        }
+        break;
+    }
+    case OP_is_undefined_or_null: PUT(sp - 1, K_NUM); break;
+    case OP_to_propkey: break;   /* keeps the (numeric) key in place */
+    case OP_get_length:    PUT(sp - 1, K_NUM); break;
+    case OP_get_array_el:  PUT(sp - 2, K_NUM); break;
+    case OP_get_array_el2: PUT(sp - 1, K_NUM); break;
+    case OP_post_inc: case OP_post_dec: PUT(sp - 1, K_NUM); PUT(sp, K_NUM); break;
+    case OP_inc: case OP_dec: case OP_neg: case OP_plus: case OP_lnot:
+    case OP_not:
+        PUT(sp - 1, K_NUM); break;
+    case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod:
+    case OP_pow: case OP_lt: case OP_lte: case OP_gt: case OP_gte:
+    case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq:
+    case OP_and: case OP_or: case OP_xor: case OP_shl: case OP_shr: case OP_sar:
+        PUT(sp - 2, K_NUM); break;
+    default: break;   /* stores / drops / branches leave no new typed slot */
+    }
+    #undef PUT
+}
+
+/* Successor positions of an opcode, for the dataflow fixpoint. Returns the
+   count and fills up to two targets. */
+static int kind_succs(const uint8_t *code, int pos, int len, int *s0, int *s1) {
+    int op = code[pos], sz = short_opcode_info(op).size, fall = pos + sz;
+    if (op == OP_return || op == OP_return_undef ||
+        op == OP_tail_call || op == OP_tail_call_method)
+        return 0;
+    if (op == OP_goto || op == OP_goto8 || op == OP_goto16) {
+        int u; *s0 = branch_target(code, pos, &u); return (*s0 >= 0 && *s0 < len) ? 1 : 0;
+    }
+    if (op == OP_if_true || op == OP_if_true8 ||
+        op == OP_if_false || op == OP_if_false8) {
+        int u, t = branch_target(code, pos, &u), n = 0;
+        if (fall < len) { *s0 = fall; n = 1; }
+        if (t >= 0 && t < len) { if (n) *s1 = t; else *s0 = t; n++; }
+        return n;
+    }
+    if (fall < len) { *s0 = fall; return 1; }
+    return 0;
+}
+
 
 /* Decide which parameters are arrays: a parameter is an array iff it is ever
    the object of an element access (`a[i]`, `a[i]=v`) or `.length`. The object
@@ -286,15 +384,12 @@ static void classify_args(Fn *fn, int *sp_before) {
     if (b->arg_count > MAX_ARGS) return;
 
     int *origin = malloc(sizeof(int) * (maxstack > 0 ? maxstack : 1));
-    char *islabel = calloc(len + 1, 1);
-    for (int pos = 0; pos < len; ) {
-        int u, t = branch_target(code, pos, &u);
-        if (t >= 0 && t <= len) islabel[t] = 1;
-        pos += short_opcode_info(code[pos]).size;
-    }
+    /* Origins are not cleared at labels: an arg flowing into an array op may
+       cross a branch (the `a[i]=v` store sequence does), and a misattributed
+       origin only ever causes a (safe) decline in validate_kinds, never a
+       miscompile. */
     int pos = 0;
     while (pos < len) {
-        if (islabel[pos]) for (int i = 0; i < maxstack; i++) origin[i] = -1;
         int op = code[pos], sp = sp_before[pos], sz = short_opcode_info(op).size;
         if (sp < 0) { pos += sz; continue; }
         int objslot = -1;
@@ -312,6 +407,12 @@ static void classify_args(Fn *fn, int *sp_before) {
             if (sp < maxstack) origin[sp] = get_u16(code + pos + 1);
         } else if (op == OP_dup) {
             if (sp < maxstack && sp - 1 >= 0) origin[sp] = origin[sp - 1];
+        } else if (op == OP_swap) {
+            if (sp - 1 >= 0 && sp - 1 < maxstack && sp - 2 >= 0) {
+                int t = origin[sp - 1]; origin[sp - 1] = origin[sp - 2]; origin[sp - 2] = t;
+            }
+        } else if (op == OP_to_propkey) {
+            /* keeps the value (and its origin) in place */
         } else {
             int pop, push;
             op_delta(code, pos, &pop, &push);
@@ -321,7 +422,6 @@ static void classify_args(Fn *fn, int *sp_before) {
         pos += sz;
     }
     free(origin);
-    free(islabel);
 }
 
 /* Abstract-interpret slot kinds and prove the program never uses a
@@ -329,27 +429,64 @@ static void classify_args(Fn *fn, int *sp_before) {
    numeric context, and that every call/method-call/property-access targets a
    statically-known function, the Math object, or a whitelisted Math member.
    Anything outside the numeric+Math subset is rejected here, before the
-   emitter runs. Kinds are produced and consumed within a basic block, so they
-   are cleared at every branch target. */
+   emitter runs. Slot kinds are propagated across the whole control-flow graph
+   by a meet-based dataflow fixpoint (`in`), so a value's kind survives forward
+   and backward branches as long as every predecessor agrees on it; a
+   disagreement becomes K_CONFLICT and fails every typed use. */
 static int validate_kinds(Fn *fn, int *sp_before) {
     JSFunctionBytecode *b = fn->b;
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len, maxstack = b->stack_size + 4;
-    signed char *k = calloc(maxstack > 0 ? maxstack : 1, 1);
+    if (maxstack < 1) maxstack = 1;
+    signed char *k = calloc(maxstack, 1);
     char *islabel = calloc(len + 1, 1);
     for (int pos = 0; pos < len; ) {
         int u, t = branch_target(code, pos, &u);
         if (t >= 0 && t <= len) islabel[t] = 1;
         pos += short_opcode_info(code[pos]).size;
     }
+
+    /* Forward dataflow: in[pos] is the meet of every predecessor's out-state.
+       Slots are indexed in[pos*maxstack + slot]; unreached slots stay
+       K_UNINIT. */
+    signed char *in = malloc((size_t)len * maxstack);
+    char *reached = calloc(len + 1, 1);
+    for (size_t i = 0; i < (size_t)len * maxstack; i++) in[i] = K_UNINIT;
+    int *work = malloc(sizeof(int) * (len + 1));
+    char *queued = calloc(len + 1, 1);
+    int wn = 0;
+    if (len > 0) { work[wn++] = 0; reached[0] = 1; queued[0] = 1; }
+    signed char *out = malloc(maxstack);
+    while (wn > 0) {
+        int pos = work[--wn]; queued[pos] = 0;
+        int sp = sp_before[pos];
+        if (sp < 0) continue;
+        for (int i = 0; i < maxstack; i++) out[i] = in[(size_t)pos * maxstack + i];
+        transfer_kinds(fn, code, pos, sp, out, maxstack);
+        int s0 = -1, s1 = -1, ns = kind_succs(code, pos, len, &s0, &s1);
+        for (int e = 0; e < ns; e++) {
+            int succ = (e == 0) ? s0 : s1, ssp = sp_before[succ];
+            if (ssp < 0) continue;
+            int changed = 0;
+            for (int slot = 0; slot < ssp && slot < maxstack; slot++) {
+                signed char m = kind_meet(in[(size_t)succ * maxstack + slot], out[slot]);
+                if (m != in[(size_t)succ * maxstack + slot]) {
+                    in[(size_t)succ * maxstack + slot] = m; changed = 1;
+                }
+            }
+            if (!reached[succ]) { reached[succ] = 1; changed = 1; }
+            if (changed && !queued[succ]) { work[wn++] = succ; queued[succ] = 1; }
+        }
+    }
+    free(out); free(work); free(queued);
     int ok = 1, pos = 0;
     while (pos < len && ok) {
-        if (islabel[pos]) for (int i = 0; i < maxstack; i++) k[i] = K_NUM;
         int op = code[pos], p = pos + 1, sp = sp_before[pos];
         int pop, push;
         op_delta(code, pos, &pop, &push);
         int sz = short_opcode_info(op).size;
-        if (sp < 0) { pos += sz; continue; }
+        if (sp < 0 || !reached[pos]) { pos += sz; continue; }
+        for (int i = 0; i < maxstack; i++) k[i] = in[(size_t)pos * maxstack + i];
         #define NEED_NUM(slot) do { int _s=(slot); if (_s<0||_s>=maxstack||k[_s]!=K_NUM) {ok=0;goto next;} } while(0)
         #define SETK(slot,val) do { int _s=(slot); if (_s>=0&&_s<maxstack) k[_s]=(val); } while(0)
         switch (op) {
@@ -411,6 +548,18 @@ static int validate_kinds(Fn *fn, int *sp_before) {
             if (sp - 1 >= 0 && sp - 1 < maxstack) SETK(sp, k[sp - 1]);
             break;
         case OP_drop:
+            break;
+        case OP_swap:
+            if (sp - 1 < 0 || sp - 2 < 0 || sp - 1 >= maxstack) { ok = 0; break; }
+            break;
+        case OP_is_undefined_or_null:
+            /* every value in the supported subset is non-null, so the result
+               is the constant false; only require a live operand. */
+            if (sp - 1 < 0 || sp - 1 >= maxstack || k[sp - 1] < K_NUM) { ok = 0; break; }
+            SETK(sp - 1, K_NUM);
+            break;
+        case OP_to_propkey:
+            NEED_NUM(sp - 1);
             break;
         case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3: {
             int n = op - OP_get_arg0;
@@ -507,6 +656,8 @@ static int validate_kinds(Fn *fn, int *sp_before) {
     }
     free(k);
     free(islabel);
+    free(in);
+    free(reached);
     return ok;
 }
 
@@ -818,6 +969,21 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             g_slotarr[sp] = g_slotarr[sp - 1];
             g_slotint[sp] = g_slotint[sp - 1];
             break;
+        case OP_swap: {
+            int x = sp - 2, y = sp - 1;
+            fprintf(o, "  { double _t = s%d; s%d = s%d; s%d = _t; }\n", x, x, y, y);
+            #define SWAPM(arr) do { __typeof__((arr)[0]) _m = (arr)[x]; (arr)[x] = (arr)[y]; (arr)[y] = _m; } while (0)
+            SWAPM(g_slotfn); SWAPM(g_slotmeth); SWAPM(g_slotarr); SWAPM(g_slotint);
+            #undef SWAPM
+            break;
+        }
+        case OP_is_undefined_or_null:
+            fprintf(o, "  s%d = 0;\n", sp - 1);
+            g_slotfn[sp - 1] = NULL; g_slotmeth[sp - 1] = NULL;
+            g_slotarr[sp - 1] = -1; g_slotint[sp - 1] = 1;
+            break;
+        case OP_to_propkey:
+            break;   /* numeric key stays in its slot; array op bounds-checks it */
         case OP_drop: g_slotfn[sp - 1] = NULL; break;
         case OP_post_inc:
             fprintf(o, "  s%d = s%d + 1;\n", sp, sp - 1); g_slotfn[sp] = NULL;

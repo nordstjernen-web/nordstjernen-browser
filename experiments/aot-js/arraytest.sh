@@ -35,6 +35,18 @@ blur:200
 blur:5000
 variance:333
 variance:4096
+scale:100 3.5
+scale:4096 1.0001
+axpy:80 80 2.5
+axpy:1000 1000 -1
+setall:64 7.25
+setall:512 -3.5
+clampall:200 -1 1
+clampall:999 -5 5
+negate:256
+negate:4096
+cumsum:128
+cumsum:4096
 "
 
 norm_nan() { printf '%s' "$1" | sed 's/-nan/nan/g'; }

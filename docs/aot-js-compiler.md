@@ -67,19 +67,27 @@ JavaScript; everything else runs interpreted, exactly as before.
   imul, clz32, fround, …, and constants like `Math.PI`) lowered to the exact
   libm / integer operations QuickJS itself uses, **int32 range inference**
   that removes redundant `ToInt32`/`ToUint32` on chained bitwise code,
-  **read-only `Float64Array` parameters** (`a[i]`, `a.length`) with
-  bounds-and-integer-checked element access matching the interpreter, the
-  comma operator, **scalar parameter reassignment** (`x = x | 0`), and
-  direct/mutual/tail recursion plus calls (with correct
+  **`Float64Array` parameters read *and written*** (`a[i]`, `a[i] = …`,
+  `a.length`) with bounds-and-integer-checked element access matching the
+  interpreter, the comma operator, **scalar parameter reassignment** (`x = x
+  | 0`), and direct/mutual/tail recursion plus calls (with correct
   under/over-application) among eligible functions.
-- A 127-case self-check (`selfcheck.sh`) plus a 14-case array check
-  (`arraytest.sh`) compare AOT against the interpreter across all of the
-  above — including bit hashing (FNV), xorshift PRNG, popcount, a MurmurHash
-  finalizer (`Math.imul`/`Math.clz32`), `Math.fround` accumulation, `Math.*`
-  kernels, division-by-zero, negative modulo, fractional powers, `(±1) **
-  ±Infinity`, `ToInt32` edge cases, and out-of-bounds / non-integer array
-  indices — **all identical**; out-of-subset programs (strings, objects,
-  written arrays, higher-order calls) correctly fall back.
+- Slot kinds are tracked by a **whole-CFG meet-based dataflow fixpoint**, so a
+  value's kind (number, array, function reference, Math object) survives
+  branches and loops as long as every predecessor agrees; disagreement
+  becomes a conflict that fails every typed use. This is what lets an array
+  reference flow through the `a[i] = v` store sequence (which branches) and
+  still be proven an array at the store.
+- A 127-case self-check (`selfcheck.sh`) plus a 26-case array check
+  (`arraytest.sh`, reads *and* in-place writes) compare AOT against the
+  interpreter across all of the above — including bit hashing (FNV), xorshift
+  PRNG, popcount, a MurmurHash finalizer (`Math.imul`/`Math.clz32`),
+  `Math.fround` accumulation, `Math.*` kernels, division-by-zero, negative
+  modulo, fractional powers, `(±1) ** ±Infinity`, `ToInt32` edge cases,
+  in-place kernels (scale, axpy, clamp, cumsum), and out-of-bounds /
+  non-integer array indices — **all identical**; out-of-subset programs
+  (strings, objects, non-`Float64Array` arrays, higher-order calls) correctly
+  fall back.
 - It is exercised on **real third-party code**: the SunSpider numeric
   kernels (`frameworktest.sh`, 9 native / 17 fallback / **0 mismatches**)
   and the **entire Speedometer 3.1 JavaScript corpus** (`speedometer.sh`,
@@ -288,9 +296,9 @@ statistics, physics — work over **arrays**. The compiler therefore handles
 `Float64Array` parameters:
 
 - A parameter is classified as an array if it is ever the object of an element
-  read (`a[i]`) or `.length`; the object operand is traced back to its
-  originating argument through the slot model (`classify_args`). A parameter
-  used both as an array and as a scalar declines.
+  access (`a[i]`, `a[i] = …`) or `.length`; the object operand is traced back
+  to its originating argument through the slot model (`classify_args`). A
+  parameter used both as an array and as a scalar declines.
 - Array parameters change the C ABI from `double a` to `double *p, int64_t
   plen`. `a.length` becomes `plen`; `a[i]` becomes a **bounds-and-integer
   checked** load — `(i >= 0 && i < plen && i == floor(i)) ? p[(int64_t)i] :
@@ -298,18 +306,24 @@ statistics, physics — work over **arrays**. The compiler therefore handles
   for a `Float64Array` (out-of-range or non-integer index → `undefined` → NaN
   in a numeric context). The kind tracker proves an array reference only ever
   reaches element access or `.length`, never arithmetic.
-- **Reads only.** Element *writes* (`a[i] = v`) compile in QuickJS to a
-  property-key-coercion sequence (`to_propkey`, `is_undefined_or_null`, …)
-  that is outside the numeric subset, so array-mutating functions cleanly
-  decline. Read-only kernels — reductions, dot products, norms, convolutions,
-  search, statistics — are the common and high-value case and are supported.
+- **Writes too.** `a[i] = v` compiles in QuickJS to a property-key-coercion
+  sequence (`swap`, `dup`, `is_undefined_or_null`, `to_propkey`,
+  `put_array_el`) whose object — the array — flows across a branch. The
+  meet-based kind dataflow proves it is still an array at the store, and the
+  store lowers to a bounds-and-integer-checked `p[(int64_t)i] = v` that
+  matches the interpreter for a `Float64Array` (out-of-range / non-integer
+  index ignored). This unlocks in-place kernels — `scale`, `axpy`, clamp,
+  `cumsum`, normalize, map — alongside the read-only reductions, dot products,
+  norms, and convolutions.
 
 `arraytest.sh` verifies this path: aotc emits both the native C *and* a
 matching JS reference harness (`<out>.ref.js`) that builds identical
 `Float64Array`s from the same command line, so the AOT result (return value
-plus a checksum of each array) is compared against the interpreter bit-for-bit
-across sums, max, dot, L2 norm, stencil blur, and two-pass variance — 14/14
-identical, including out-of-bounds and non-integer indices.
+plus a checksum of each array, capturing in-place mutation) is compared
+against the interpreter bit-for-bit across sums, max, dot, L2 norm, stencil
+blur, two-pass variance, and the in-place kernels (`scale`, `axpy`, `setall`,
+clamp, negate, `cumsum`) — 26/26 identical, including out-of-bounds and
+non-integer indices.
 
 ## Enabled by default, with automatic fallback
 
@@ -573,12 +587,13 @@ small function is ~5 ms, all paid offline.
 The compiler accelerates the **numeric subset**: functions over `double`,
 the arithmetic/comparison/logical-not operators, the bitwise and shift
 operators (`& | ^ ~ << >> >>>`, with spec-exact `ToInt32`/`ToUint32`),
-`Math.*` methods and constants, **read-only `Float64Array` parameters**,
-`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`, the
-comma operator, scalar parameter reassignment, direct/mutual/tail recursion,
+`Math.*` methods and constants, **`Float64Array` parameters (read and
+written)**, `if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit
+`&&`/`||`, the comma operator, scalar parameter reassignment,
+direct/mutual/tail recursion,
 and calls (including under/over-application) among eligible top-level
 functions. Everything else — strings, objects,
-non-`Float64Array` / written arrays, general property access, `this`,
+non-`Float64Array` arrays, general property access, `this`,
 closures with captured mutable state, non-`Math` built-ins, function-valued
 arguments / higher-order code, exceptions, generators, `async`/`await`,
 `eval`/`Function` — is **declined and interpreted**. This is a *capability*

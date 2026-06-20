@@ -31,3 +31,32 @@ function variance(a) {
   for (let i = 0; i < n; i++) { let d = a[i] - mean; v += d * d; }
   return v / n;
 }
+function scale(a, k) {
+  for (let i = 0; i < a.length; i++) a[i] = a[i] * k + 1;
+  return a.length;
+}
+function axpy(a, b, k) {
+  let n = a.length < b.length ? a.length : b.length;
+  for (let i = 0; i < n; i++) a[i] = a[i] + b[i] * k;
+  return 0;
+}
+function setall(a, v) {
+  for (let i = 0; i < a.length; i++) a[i] = v;
+  return a.length;
+}
+function clampall(a, lo, hi) {
+  for (let i = 0; i < a.length; i++) {
+    let x = a[i];
+    a[i] = x < lo ? lo : (x > hi ? hi : x);
+  }
+  return 0;
+}
+function negate(a) {
+  for (let i = 0; i < a.length; i++) a[i] = -a[i];
+  return 0;
+}
+function cumsum(a) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) { s += a[i]; a[i] = s; }
+  return s;
+}
