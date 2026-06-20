@@ -15,9 +15,37 @@ going.
 Nordstjernen is a real browser, not a toy. It targets the HTML and CSS
 standards directly — behaviour is measured against the WHATWG/W3C spec
 text, section by section, rather than against another browser's quirks.
+The reference standards are the
+[WHATWG HTML Living Standard](https://html.spec.whatwg.org/),
+the [WHATWG DOM Standard](https://dom.spec.whatwg.org/),
+the [WHATWG URL Standard](https://url.spec.whatwg.org/),
+and the [W3C CSS specifications](https://www.w3.org/TR/CSS/) (the current
+[CSS Snapshot](https://www.w3.org/TR/css-2023/) plus the individual
+modules — [Cascade](https://www.w3.org/TR/css-cascade-5/),
+[Flexbox](https://www.w3.org/TR/css-flexbox-1/),
+[Grid](https://www.w3.org/TR/css-grid-2/),
+[Transforms](https://www.w3.org/TR/css-transforms-2/)).
 As of mid-2026 the section-by-section walk-through of the in-scope HTML
 standard records 136 spec rows fully implemented, 27 partial, and 4
 absent.
+
+### Small by design
+
+The single most important number in this whole document is the size of the
+source. Nordstjernen's engine is **about 120,000 lines of clean-room C**
+(roughly 127,000 counting the thin C++/Qt shell). For comparison, the
+engines it competes with are cited at **tens of millions** of lines:
+Chromium is commonly estimated at around 35 million lines of code, and
+Firefox/Gecko at well over 20 million. Nordstjernen is therefore on the
+order of **200–300× smaller** than either.
+
+That is not a vanity metric. A codebase one person can read end to end in a
+few weeks is a codebase that can actually be *audited*, reasoned about, and
+kept honest. Tens of millions of lines cannot be — not by any individual,
+and arguably not by any single team. Small is the security property, the
+maintainability property, and the independence property all at once: it is
+the reason a browser like this can exist outside a giant corporation at
+all.
 
 **Engine stack.** The pieces are deliberately small and vendored in-tree
 so there are no submodules and no surprise downloads:
@@ -75,6 +103,62 @@ AI-style web APIs exposed to pages, by design.
 
 Nordstjernen ships no telemetry of any kind, does not phone home, and does
 not run "studies" infrastructure.
+
+## Why C
+
+Writing a new browser in C in 2026 looks contrarian, and it is a deliberate
+choice. The benefits the language buys here are concrete:
+
+- **Ubiquity and portability.** A C99/C23 toolchain exists for every
+  platform that matters — and several that don't. The same source builds
+  with GCC and Clang on Windows, macOS, Linux, Android, FreeBSD, and
+  NetBSD. That is a large part of how a tiny project reaches so many
+  targets.
+- **No runtime, no GC, no hidden machinery.** There is no language runtime
+  to ship, no garbage collector pausing the renderer, and no framework
+  between the code and the system call. What you read is what runs —
+  which is exactly what makes a security audit tractable.
+- **Predictable performance and memory.** Layout and paint are
+  memory-bandwidth-bound work; C's direct control over allocation, data
+  layout, and cache behaviour matters, and there are no surprises from a
+  JIT warming up or a GC kicking in.
+- **A stable ABI and clean embedding.** The C ABI is the lingua franca of
+  software. It is why the engine drops cleanly behind a C embedding API, a
+  JNI bridge to the JVM, and a C++/Qt shell without glue layers or
+  marshalling runtimes.
+- **Longevity and small dependencies.** C code written carefully today will
+  still compile in twenty years. The toolchain is everywhere, mature, and
+  not going anywhere — no churning ecosystem, no package-manager supply
+  chain to vet on every build.
+- **Auditability.** Combined with the comment-free, self-explaining house
+  style and the ~120,000-line ceiling, plain C keeps the whole engine
+  within reach of a single reader.
+
+### Modern C: the language kept evolving
+
+C is not the language it was in 1999. The current standard, **C23**
+(ISO/IEC 9899:2024), modernised it considerably, and Nordstjernen builds
+against contemporary GCC and Clang that implement it. The improvements that
+matter for safe, readable systems code include:
+
+- **`nullptr`** and a real `bool` / `true` / `false` as keywords, removing
+  a layer of macro hackery and null-pointer ambiguity.
+- **`constexpr`** objects and **`typeof`** / `typeof_unqual`, bringing
+  compile-time constants and type introspection into standard C.
+- **`_BitInt(N)`** for exact-width integers, and **`<stdckdint.h>`** checked
+  integer arithmetic (`ckd_add`/`ckd_sub`/`ckd_mul`) — overflow-safe math
+  without hand-rolled guards, which is a real security win for a parser.
+- **`[[nodiscard]]`, `[[maybe_unused]]`, `[[fallthrough]]`** and friends:
+  standard attributes that let the compiler catch whole classes of mistakes
+  the way other languages do.
+- **`#embed`** for pulling binary assets straight into the build, binary
+  integer literals, `auto` type inference, `enum`s with a fixed underlying
+  type, and UTF-8 (`u8`) string improvements.
+
+The takeaway: "written in C" no longer means "written in K&R C." A modern C
+codebase gets static-analysis-friendly attributes, checked arithmetic, and
+stronger typing while keeping everything that makes C portable, fast, and
+auditable.
 
 ## Development methodology
 
