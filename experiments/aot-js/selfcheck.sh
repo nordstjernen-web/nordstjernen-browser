@@ -38,6 +38,11 @@ bitint:clzof:native:0|1|1024|-1|65536
 bitint:hypot2:native:3 4|5 12|0 0|-3 -4
 bitint:murmur:native:1|123456789|-42|999999
 bitint:rotl:native:1 4|-1 1|305419896 8|7 31
+argmut:normarg:native:3|10|-7|2.9
+argmut:comma:native:3 4|10 20|-1 -1
+argmut:froundx:native:3.14159|2.5|0.1|-42.42
+argmut:froundacc:native:0|10|1000
+argmut:accumulate:native:5 10|0 100|-3 50
 hash:hash:native:1|100|10000|100000
 prng:prng:native:1|1000|100000
 collide:main:native:3|7|10

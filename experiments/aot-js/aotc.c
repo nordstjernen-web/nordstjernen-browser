@@ -113,6 +113,7 @@ static int math_method_kind(const char *m) {
     if (strcmp(m, "hypot") == 0) return 'h';
     if (strcmp(m, "imul") == 0) return 'I';
     if (strcmp(m, "clz32") == 0) return 'C';
+    if (strcmp(m, "fround") == 0) return 'F';
     return 0;
 }
 
@@ -155,12 +156,16 @@ static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
     case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3:
     case OP_put_loc8: case OP_put_loc: case OP_put_loc_check:
     case OP_put_loc_check_init:
+    case OP_put_arg0: case OP_put_arg1: case OP_put_arg2: case OP_put_arg3:
+    case OP_put_arg:
     case OP_drop: case OP_if_false: case OP_if_false8:
     case OP_if_true: case OP_if_true8: case OP_return:
     case OP_add_loc:
         np = 1; ns = 0; break;
     case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
     case OP_set_loc8: case OP_set_loc:
+    case OP_set_arg0: case OP_set_arg1: case OP_set_arg2: case OP_set_arg3:
+    case OP_set_arg:
     case OP_inc: case OP_dec: case OP_neg: case OP_plus: case OP_lnot:
     case OP_not:
         np = 1; ns = 1; break;
@@ -474,6 +479,19 @@ static int validate_kinds(Fn *fn, int *sp_before) {
         case OP_add_loc:
             NEED_NUM(sp - 1);
             break;
+        case OP_put_arg0: case OP_put_arg1: case OP_put_arg2: case OP_put_arg3:
+        case OP_set_arg0: case OP_set_arg1: case OP_set_arg2: case OP_set_arg3: {
+            int n = (op <= OP_put_arg3) ? op - OP_put_arg0 : op - OP_set_arg0;
+            if (n < MAX_ARGS && fn->arg_is_array[n]) { ok = 0; break; }
+            NEED_NUM(sp - 1);
+            break;
+        }
+        case OP_put_arg: case OP_set_arg: {
+            int n = get_u16(code + p);
+            if (n < MAX_ARGS && fn->arg_is_array[n]) { ok = 0; break; }
+            NEED_NUM(sp - 1);
+            break;
+        }
         case OP_inc_loc: case OP_dec_loc:
         case OP_goto: case OP_goto8: case OP_goto16:
         case OP_nop: case OP_set_loc_uninitialized:
@@ -641,6 +659,8 @@ static void emit_math_expr(FILE *o, int dst, const char *m, int argc, int arg0) 
                 dst, arg0, arg0 + 1);
     } else if (mk == 'C') {
         fprintf(o, "  s%d = js_clz32(s%d);\n", dst, arg0);
+    } else if (mk == 'F') {
+        fprintf(o, "  s%d = (double)(float)s%d;\n", dst, arg0);
     } else if (mk == 'h') {
         if (argc == 0) {
             fprintf(o, "  s%d = 0;\n", dst);
@@ -780,6 +800,14 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             int l = get_u16(code + p);
             fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
         }
+        case OP_put_arg0: case OP_put_arg1: case OP_put_arg2: case OP_put_arg3:
+            fprintf(o, "  a%d = s%d;\n", op - OP_put_arg0, sp - 1); break;
+        case OP_put_arg:
+            fprintf(o, "  a%d = s%d;\n", get_u16(code + p), sp - 1); break;
+        case OP_set_arg0: case OP_set_arg1: case OP_set_arg2: case OP_set_arg3:
+            fprintf(o, "  a%d = s%d;\n", op - OP_set_arg0, sp - 1); break;
+        case OP_set_arg:
+            fprintf(o, "  a%d = s%d;\n", get_u16(code + p), sp - 1); break;
         case OP_inc_loc: fprintf(o, "  loc%d += 1;\n", get_u8(code + p)); g_locint[get_u8(code + p)] = 0; break;
         case OP_dec_loc: fprintf(o, "  loc%d -= 1;\n", get_u8(code + p)); g_locint[get_u8(code + p)] = 0; break;
         case OP_add_loc: fprintf(o, "  loc%d += s%d;\n", get_u8(code + p), sp - 1); g_locint[get_u8(code + p)] = 0; break;

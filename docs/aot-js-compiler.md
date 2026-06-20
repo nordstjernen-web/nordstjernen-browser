@@ -64,21 +64,22 @@ JavaScript; everything else runs interpreted, exactly as before.
   `?:`, short-circuit `&&`/`||`, `++`/`--`, logical/bitwise-not, the full
   **bitwise and shift operators** (`& | ^ << >> >>>`) with spec-exact
   `ToInt32`/`ToUint32`, **`Math.*`** (sqrt, floor, sin, pow, min/max, hypot,
-  imul, clz32, …, and constants like `Math.PI`) lowered to the exact libm /
-  integer operations QuickJS itself uses, **int32 range inference** that
-  removes redundant `ToInt32`/`ToUint32` on chained bitwise code,
+  imul, clz32, fround, …, and constants like `Math.PI`) lowered to the exact
+  libm / integer operations QuickJS itself uses, **int32 range inference**
+  that removes redundant `ToInt32`/`ToUint32` on chained bitwise code,
   **read-only `Float64Array` parameters** (`a[i]`, `a.length`) with
-  bounds-and-integer-checked element access matching the interpreter, and
+  bounds-and-integer-checked element access matching the interpreter, the
+  comma operator, **scalar parameter reassignment** (`x = x | 0`), and
   direct/mutual/tail recursion plus calls (with correct
   under/over-application) among eligible functions.
-- A 110-case self-check (`selfcheck.sh`) plus a 14-case array check
+- A 127-case self-check (`selfcheck.sh`) plus a 14-case array check
   (`arraytest.sh`) compare AOT against the interpreter across all of the
   above — including bit hashing (FNV), xorshift PRNG, popcount, a MurmurHash
-  finalizer (`Math.imul`/`Math.clz32`), `Math.*` kernels, division-by-zero,
-  negative modulo, fractional powers, `(±1) ** ±Infinity`, `ToInt32` edge
-  cases, and out-of-bounds / non-integer array indices — **all identical**;
-  out-of-subset programs (strings, objects, written arrays, higher-order
-  calls) correctly fall back.
+  finalizer (`Math.imul`/`Math.clz32`), `Math.fround` accumulation, `Math.*`
+  kernels, division-by-zero, negative modulo, fractional powers, `(±1) **
+  ±Infinity`, `ToInt32` edge cases, and out-of-bounds / non-integer array
+  indices — **all identical**; out-of-subset programs (strings, objects,
+  written arrays, higher-order calls) correctly fall back.
 - It is exercised on **real third-party code**: the SunSpider numeric
   kernels (`frameworktest.sh`, 9 native / 17 fallback / **0 mismatches**)
   and the **entire Speedometer 3.1 JavaScript corpus** (`speedometer.sh`,
@@ -573,9 +574,10 @@ The compiler accelerates the **numeric subset**: functions over `double`,
 the arithmetic/comparison/logical-not operators, the bitwise and shift
 operators (`& | ^ ~ << >> >>>`, with spec-exact `ToInt32`/`ToUint32`),
 `Math.*` methods and constants, **read-only `Float64Array` parameters**,
-`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`,
-direct/mutual/tail recursion, and calls (including under/over-application)
-among eligible top-level functions. Everything else — strings, objects,
+`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`, the
+comma operator, scalar parameter reassignment, direct/mutual/tail recursion,
+and calls (including under/over-application) among eligible top-level
+functions. Everything else — strings, objects,
 non-`Float64Array` / written arrays, general property access, `this`,
 closures with captured mutable state, non-`Math` built-ins, function-valued
 arguments / higher-order code, exceptions, generators, `async`/`await`,
