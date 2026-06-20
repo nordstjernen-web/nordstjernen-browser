@@ -33,6 +33,8 @@ static JSClassID g_pllayout_class;
 static JSClassID g_bindgroup_class;
 static JSClassID g_sampler_class;
 static JSClassID g_queryset_class;
+static JSClassID g_compute_pipe_class;
+static JSClassID g_compute_pass_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
@@ -41,6 +43,8 @@ typedef struct { WGPUDevice device; WGPUQueue queue; } ns_wg_device;
 typedef struct { WGPUQueue queue; } ns_wg_queue;
 typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
+typedef struct { WGPUComputePipeline pipe; } ns_wg_compute_pipe;
+typedef struct { WGPUComputePassEncoder pass; } ns_wg_compute_pass;
 typedef struct { WGPUTexture texture; uint32_t w, h; WGPUTextureFormat format; } ns_wg_texture;
 typedef struct { WGPUTextureView view; } ns_wg_view;
 typedef struct { WGPUCommandEncoder enc; } ns_wg_encoder;
@@ -101,6 +105,11 @@ static JSValue wg_device_createQuerySet(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static JSValue wg_encoder_resolveQuerySet(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
+static JSValue wg_device_createComputePipeline(JSContext *ctx,
+                                               JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+static JSValue wg_encoder_beginComputePass(JSContext *ctx, JSValueConst this_val,
+                                           int argc, JSValueConst *argv);
 static JSValue wg_encoder_copyTextureToTexture(JSContext *ctx,
                                                JSValueConst this_val,
                                                int argc, JSValueConst *argv);
@@ -510,6 +519,7 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
     wg_bind(ctx, obj, "createCommandEncoder", wg_device_createCommandEncoder, 1);
     wg_bind(ctx, obj, "createShaderModule", wg_device_createShaderModule, 1);
     wg_bind(ctx, obj, "createRenderPipeline", wg_device_createRenderPipeline, 1);
+    wg_bind(ctx, obj, "createComputePipeline", wg_device_createComputePipeline, 1);
     wg_bind(ctx, obj, "createBindGroupLayout", wg_device_createBindGroupLayout, 1);
     wg_bind(ctx, obj, "createPipelineLayout", wg_device_createPipelineLayout, 1);
     wg_bind(ctx, obj, "createBindGroup", wg_device_createBindGroup, 1);
@@ -1110,6 +1120,7 @@ wg_make_encoder(JSContext *ctx, WGPUCommandEncoder enc)
     e->enc = enc;
     JS_SetOpaque(obj, e);
     wg_bind(ctx, obj, "beginRenderPass", wg_encoder_beginRenderPass, 1);
+    wg_bind(ctx, obj, "beginComputePass", wg_encoder_beginComputePass, 1);
     wg_bind(ctx, obj, "copyTextureToTexture", wg_encoder_copyTextureToTexture, 3);
     wg_bind(ctx, obj, "copyBufferToBuffer", wg_encoder_copyBufferToBuffer, 5);
     wg_bind(ctx, obj, "resolveQuerySet", wg_encoder_resolveQuerySet, 5);
@@ -2200,6 +2211,150 @@ wg_encoder_resolveQuerySet(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
+wg_compute_pipe_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_compute_pipe *p = JS_GetOpaque(val, g_compute_pipe_class);
+    if (!p) return;
+    if (p->pipe) wgpuComputePipelineRelease(p->pipe);
+    g_free(p);
+}
+
+static JSValue
+wg_compute_pipe_getBindGroupLayout(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv)
+{
+    ns_wg_compute_pipe *p = JS_GetOpaque(this_val, g_compute_pipe_class);
+    if (!p || !p->pipe || argc < 1) return JS_UNDEFINED;
+    uint32_t index = 0;
+    JS_ToUint32(ctx, &index, argv[0]);
+    WGPUBindGroupLayout l = wgpuComputePipelineGetBindGroupLayout(p->pipe, index);
+    if (!l) return JS_UNDEFINED;
+    return wg_make_bgl(ctx, l);
+}
+
+static JSValue
+wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createComputePipeline: descriptor");
+
+    WGPUComputePipelineDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    JSValue jlayout = JS_GetPropertyStr(ctx, argv[0], "layout");
+    ns_wg_pllayout *pll = JS_GetOpaque(jlayout, g_pllayout_class);
+    if (pll) desc.layout = pll->layout;
+    JS_FreeValue(ctx, jlayout);
+
+    char *entry = NULL;
+    JSValue jcompute = JS_GetPropertyStr(ctx, argv[0], "compute");
+    if (JS_IsObject(jcompute)) {
+        JSValue jmod = JS_GetPropertyStr(ctx, jcompute, "module");
+        ns_wg_shader *m = JS_GetOpaque(jmod, g_shader_class);
+        if (m) desc.compute.module = m->mod;
+        JS_FreeValue(ctx, jmod);
+        JSValue jentry = JS_GetPropertyStr(ctx, jcompute, "entryPoint");
+        if (JS_IsString(jentry)) entry = (char *)JS_ToCString(ctx, jentry);
+        JS_FreeValue(ctx, jentry);
+        desc.compute.entryPoint = wg_sv(entry);
+    }
+    JS_FreeValue(ctx, jcompute);
+
+    WGPUComputePipeline pipe = wgpuDeviceCreateComputePipeline(d->device, &desc);
+    if (entry) JS_FreeCString(ctx, entry);
+    if (!pipe) return JS_ThrowInternalError(ctx, "createComputePipeline failed");
+
+    JSValue obj = JS_NewObjectClass(ctx, g_compute_pipe_class);
+    ns_wg_compute_pipe *p = g_new0(ns_wg_compute_pipe, 1);
+    p->pipe = pipe;
+    JS_SetOpaque(obj, p);
+    wg_bind(ctx, obj, "getBindGroupLayout", wg_compute_pipe_getBindGroupLayout, 1);
+    return obj;
+}
+
+static void
+wg_compute_pass_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_compute_pass *p = JS_GetOpaque(val, g_compute_pass_class);
+    if (!p) return;
+    if (p->pass) wgpuComputePassEncoderRelease(p->pass);
+    g_free(p);
+}
+
+static JSValue
+wg_compute_pass_setPipeline(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)ctx;
+    ns_wg_compute_pass *p = JS_GetOpaque(this_val, g_compute_pass_class);
+    if (!p || !p->pass || argc < 1) return JS_UNDEFINED;
+    ns_wg_compute_pipe *pl = JS_GetOpaque(argv[0], g_compute_pipe_class);
+    if (pl && pl->pipe) wgpuComputePassEncoderSetPipeline(p->pass, pl->pipe);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_compute_pass_setBindGroup(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    ns_wg_compute_pass *p = JS_GetOpaque(this_val, g_compute_pass_class);
+    if (!p || !p->pass || argc < 2) return JS_UNDEFINED;
+    uint32_t index = 0;
+    JS_ToUint32(ctx, &index, argv[0]);
+    ns_wg_bindgroup *bg = JS_GetOpaque(argv[1], g_bindgroup_class);
+    wgpuComputePassEncoderSetBindGroup(p->pass, index,
+                                       bg ? bg->group : NULL, 0, NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_compute_pass_dispatch(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    ns_wg_compute_pass *p = JS_GetOpaque(this_val, g_compute_pass_class);
+    if (!p || !p->pass) return JS_UNDEFINED;
+    uint32_t x = 1, y = 1, z = 1;
+    if (argc >= 1) JS_ToUint32(ctx, &x, argv[0]);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToUint32(ctx, &y, argv[1]);
+    if (argc >= 3 && !JS_IsUndefined(argv[2])) JS_ToUint32(ctx, &z, argv[2]);
+    wgpuComputePassEncoderDispatchWorkgroups(p->pass, x, y, z);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_compute_pass_end(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)argc; (void)argv;
+    ns_wg_compute_pass *p = JS_GetOpaque(this_val, g_compute_pass_class);
+    if (p && p->pass) wgpuComputePassEncoderEnd(p->pass);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_encoder_beginComputePass(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc) return JS_UNDEFINED;
+    WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(e->enc, NULL);
+    if (!pass) return JS_UNDEFINED;
+    JSValue obj = JS_NewObjectClass(ctx, g_compute_pass_class);
+    ns_wg_compute_pass *p = g_new0(ns_wg_compute_pass, 1);
+    p->pass = pass;
+    JS_SetOpaque(obj, p);
+    wg_bind(ctx, obj, "setPipeline", wg_compute_pass_setPipeline, 1);
+    wg_bind(ctx, obj, "setBindGroup", wg_compute_pass_setBindGroup, 2);
+    wg_bind(ctx, obj, "dispatchWorkgroups", wg_compute_pass_dispatch, 3);
+    wg_bind(ctx, obj, "end", wg_compute_pass_end, 0);
+    return obj;
+}
+
+static void
 wg_register_class(JSContext *ctx, JSClassID *id, const char *name,
                   JSClassFinalizer *finalizer)
 {
@@ -2250,6 +2405,10 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
                           wg_sampler_finalizer);
         wg_register_class(ctx, &g_queryset_class, "GPUQuerySet",
                           wg_queryset_finalizer);
+        wg_register_class(ctx, &g_compute_pipe_class, "GPUComputePipeline",
+                          wg_compute_pipe_finalizer);
+        wg_register_class(ctx, &g_compute_pass_class, "GPUComputePassEncoder",
+                          wg_compute_pass_finalizer);
     }
 
     JSValue gpu = JS_NewObject(ctx);

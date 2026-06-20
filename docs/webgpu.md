@@ -96,6 +96,11 @@ a working **render-to-canvas** path:
   (`device.createQuerySet`, `commandEncoder.resolveQuerySet` — occlusion is
   real, timestamps are accepted as no-ops so timing-instrumented apps don't
   crash).
+- **Compute**: `device.createComputePipeline`, `commandEncoder.beginComputePass`,
+  `setPipeline`/`setBindGroup`/`dispatchWorkgroups`/`end`, and
+  `pipeline.getBindGroupLayout` — storage buffers in, results read back via
+  `copyBufferToBuffer` + `mapAsync`. three.js GPU-compute examples
+  (`webgpu_compute_birds`, `webgpu_compute_particles`) run on it.
 - `GPUBuffer.getMappedRange()` / `unmap()` (for `mappedAtCreation`),
   `commandEncoder.copyTextureToTexture` / `copyBufferToBuffer`,
   `device.pushErrorScope`/`popErrorScope`, a non-fatal device
@@ -124,14 +129,13 @@ page event loop.
 
 ### Not yet implemented
 
-What remains: **compute pipelines** (`createComputePipeline` /
-`dispatchWorkgroups`), real timestamp queries, render bundles, explicit
-blend state, storage textures, and 3D/cube/array texture-view descriptors
-(views default to 2D). Texture-mapped geometry works (see the textured-quad
-check below), but heavier three.js material examples (PBR clearcoat,
-environment maps) drive the software backend into feature paths that
-`wgpu-native` itself panics on — those need the missing pieces above. This
-document and feature-detection reflect exactly what runs.
+What remains: real timestamp queries, render bundles, explicit blend state,
+storage textures, and 3D/cube/array texture-view descriptors (views default
+to 2D). Geometry, vertex colours, uniforms/transforms, texture-mapped
+geometry, and GPU compute all work; heavier three.js material examples (PBR
+clearcoat, environment maps) still drive the software backend into feature
+paths that `wgpu-native` itself panics on, which need the missing pieces
+above. This document and feature-detection reflect exactly what runs.
 
 ## Architecture & security notes
 
