@@ -101,6 +101,10 @@ a working **render-to-canvas** path:
   `pipeline.getBindGroupLayout` — storage buffers in, results read back via
   `copyBufferToBuffer` + `mapAsync`. three.js GPU-compute examples
   (`webgpu_compute_birds`, `webgpu_compute_particles`) run on it.
+- Colour-target **blend state** (`blend.color`/`blend.alpha` factors and
+  operations) and `writeMask`, so transparent materials composite correctly;
+  `texture.createView` **descriptors** (`format`, `dimension` incl. cube /
+  2d-array / 3d, `aspect`, base/count mip + array layers).
 - `GPUBuffer.getMappedRange()` / `unmap()` (for `mappedAtCreation`),
   `commandEncoder.copyTextureToTexture` / `copyBufferToBuffer`,
   `device.pushErrorScope`/`popErrorScope`, a non-fatal device

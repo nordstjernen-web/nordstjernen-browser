@@ -731,6 +731,78 @@ wg_address_mode(const char *s)
     return WGPUAddressMode_ClampToEdge;
 }
 
+static WGPUBlendFactor
+wg_blend_factor(const char *s)
+{
+    if (!s) return WGPUBlendFactor_One;
+    static const struct { const char *n; WGPUBlendFactor f; } m[] = {
+        { "zero", WGPUBlendFactor_Zero },
+        { "one", WGPUBlendFactor_One },
+        { "src", WGPUBlendFactor_Src },
+        { "one-minus-src", WGPUBlendFactor_OneMinusSrc },
+        { "src-alpha", WGPUBlendFactor_SrcAlpha },
+        { "one-minus-src-alpha", WGPUBlendFactor_OneMinusSrcAlpha },
+        { "dst", WGPUBlendFactor_Dst },
+        { "one-minus-dst", WGPUBlendFactor_OneMinusDst },
+        { "dst-alpha", WGPUBlendFactor_DstAlpha },
+        { "one-minus-dst-alpha", WGPUBlendFactor_OneMinusDstAlpha },
+        { "src-alpha-saturated", WGPUBlendFactor_SrcAlphaSaturated },
+        { "constant", WGPUBlendFactor_Constant },
+        { "one-minus-constant", WGPUBlendFactor_OneMinusConstant },
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(m); i++)
+        if (strcmp(s, m[i].n) == 0) return m[i].f;
+    return WGPUBlendFactor_One;
+}
+
+static WGPUBlendOperation
+wg_blend_op(const char *s)
+{
+    if (!s) return WGPUBlendOperation_Add;
+    if (strcmp(s, "subtract") == 0) return WGPUBlendOperation_Subtract;
+    if (strcmp(s, "reverse-subtract") == 0) return WGPUBlendOperation_ReverseSubtract;
+    if (strcmp(s, "min") == 0) return WGPUBlendOperation_Min;
+    if (strcmp(s, "max") == 0) return WGPUBlendOperation_Max;
+    return WGPUBlendOperation_Add;
+}
+
+static void
+wg_read_blend_component(JSContext *ctx, JSValueConst v, WGPUBlendComponent *out)
+{
+    out->operation = WGPUBlendOperation_Add;
+    out->srcFactor = WGPUBlendFactor_One;
+    out->dstFactor = WGPUBlendFactor_Zero;
+    if (!JS_IsObject(v)) return;
+    JSValue jo = JS_GetPropertyStr(ctx, v, "operation");
+    const char *os = JS_IsString(jo) ? JS_ToCString(ctx, jo) : NULL;
+    out->operation = wg_blend_op(os);
+    if (os) JS_FreeCString(ctx, os);
+    JS_FreeValue(ctx, jo);
+    JSValue js = JS_GetPropertyStr(ctx, v, "srcFactor");
+    const char *ss = JS_IsString(js) ? JS_ToCString(ctx, js) : NULL;
+    out->srcFactor = wg_blend_factor(ss);
+    if (ss) JS_FreeCString(ctx, ss);
+    JS_FreeValue(ctx, js);
+    JSValue jd = JS_GetPropertyStr(ctx, v, "dstFactor");
+    const char *ds = JS_IsString(jd) ? JS_ToCString(ctx, jd) : NULL;
+    out->dstFactor = ds ? wg_blend_factor(ds) : WGPUBlendFactor_Zero;
+    if (ds) JS_FreeCString(ctx, ds);
+    JS_FreeValue(ctx, jd);
+}
+
+static WGPUTextureViewDimension
+wg_view_dimension(const char *s)
+{
+    if (!s) return WGPUTextureViewDimension_Undefined;
+    if (strcmp(s, "1d") == 0) return WGPUTextureViewDimension_1D;
+    if (strcmp(s, "2d") == 0) return WGPUTextureViewDimension_2D;
+    if (strcmp(s, "2d-array") == 0) return WGPUTextureViewDimension_2DArray;
+    if (strcmp(s, "cube") == 0) return WGPUTextureViewDimension_Cube;
+    if (strcmp(s, "cube-array") == 0) return WGPUTextureViewDimension_CubeArray;
+    if (strcmp(s, "3d") == 0) return WGPUTextureViewDimension_3D;
+    return WGPUTextureViewDimension_Undefined;
+}
+
 static void
 wg_view_finalizer(JSRuntime *rt, JSValue val)
 {
@@ -756,10 +828,47 @@ static JSValue
 wg_texture_createView(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    (void)argc; (void)argv;
     ns_wg_texture *t = JS_GetOpaque(this_val, g_texture_class);
     if (!t || !t->texture) return JS_UNDEFINED;
-    WGPUTextureView view = wgpuTextureCreateView(t->texture, NULL);
+
+    WGPUTextureView view;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        WGPUTextureViewDescriptor desc;
+        memset(&desc, 0, sizeof desc);
+        desc.mipLevelCount = WGPU_MIP_LEVEL_COUNT_UNDEFINED;
+        desc.arrayLayerCount = WGPU_ARRAY_LAYER_COUNT_UNDEFINED;
+        desc.aspect = WGPUTextureAspect_All;
+        JSValue v;
+        v = JS_GetPropertyStr(ctx, argv[0], "format");
+        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
+            desc.format = wg_format_from_str(s); JS_FreeCString(ctx, s); }
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "dimension");
+        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
+            desc.dimension = wg_view_dimension(s); JS_FreeCString(ctx, s); }
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "aspect");
+        if (JS_IsString(v)) { const char *s = JS_ToCString(ctx, v);
+            if (s && strcmp(s, "depth-only") == 0) desc.aspect = WGPUTextureAspect_DepthOnly;
+            else if (s && strcmp(s, "stencil-only") == 0) desc.aspect = WGPUTextureAspect_StencilOnly;
+            if (s) JS_FreeCString(ctx, s); }
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "baseMipLevel");
+        if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.baseMipLevel, v);
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "mipLevelCount");
+        if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.mipLevelCount, v);
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "baseArrayLayer");
+        if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.baseArrayLayer, v);
+        JS_FreeValue(ctx, v);
+        v = JS_GetPropertyStr(ctx, argv[0], "arrayLayerCount");
+        if (!JS_IsUndefined(v)) JS_ToUint32(ctx, &desc.arrayLayerCount, v);
+        JS_FreeValue(ctx, v);
+        view = wgpuTextureCreateView(t->texture, &desc);
+    } else {
+        view = wgpuTextureCreateView(t->texture, NULL);
+    }
     if (!view) return JS_UNDEFINED;
     return wg_make_view(ctx, view);
 }
@@ -1380,10 +1489,12 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     WGPUVertexBufferLayout vbl[NS_WG_MAX_VBUF];
     WGPUVertexAttribute attrs[NS_WG_MAX_VBUF][NS_WG_MAX_ATTR];
     WGPUColorTargetState targets[NS_WG_MAX_TARGET];
+    WGPUBlendState blends[NS_WG_MAX_TARGET];
     WGPUFragmentState frag;
     memset(vbl, 0, sizeof vbl);
     memset(attrs, 0, sizeof attrs);
     memset(targets, 0, sizeof targets);
+    memset(blends, 0, sizeof blends);
     memset(&frag, 0, sizeof frag);
 
     JSValue jvertex = JS_GetPropertyStr(ctx, argv[0], "vertex");
@@ -1535,6 +1646,23 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
                 if (fs) JS_FreeCString(ctx, fs);
                 JS_FreeValue(ctx, jf);
                 targets[i].writeMask = WGPUColorWriteMask_All;
+                JSValue jwm = JS_GetPropertyStr(ctx, jtg, "writeMask");
+                if (!JS_IsUndefined(jwm)) {
+                    uint32_t wm = 0xF; JS_ToUint32(ctx, &wm, jwm);
+                    targets[i].writeMask = wm;
+                }
+                JS_FreeValue(ctx, jwm);
+                JSValue jblend = JS_GetPropertyStr(ctx, jtg, "blend");
+                if (JS_IsObject(jblend)) {
+                    JSValue jc = JS_GetPropertyStr(ctx, jblend, "color");
+                    wg_read_blend_component(ctx, jc, &blends[i].color);
+                    JS_FreeValue(ctx, jc);
+                    JSValue ja = JS_GetPropertyStr(ctx, jblend, "alpha");
+                    wg_read_blend_component(ctx, ja, &blends[i].alpha);
+                    JS_FreeValue(ctx, ja);
+                    targets[i].blend = &blends[i];
+                }
+                JS_FreeValue(ctx, jblend);
                 JS_FreeValue(ctx, jtg);
             }
         }
