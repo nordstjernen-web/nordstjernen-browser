@@ -36478,6 +36478,48 @@ ns_js_make_json_module(JSContext *ctx, const char *module_name,
     return m;
 }
 
+static JSValue
+ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
+                            const char *module_name)
+{
+    gsize  name_len = module_name ? strlen(module_name) : 0;
+    gsize  key_len  = name_len + 1 + len;
+    char  *key      = g_malloc(key_len);
+    memcpy(key, module_name ? module_name : "", name_len);
+    key[name_len] = '\0';
+    memcpy(key + name_len + 1, src ? src : "", len);
+
+    if (len >= 1024) {
+        gsize bc_len = 0;
+        guint8 *bc = ns_bcache_get(key, key_len, &bc_len);
+        if (bc) {
+            JSValue m = JS_ReadObject(ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
+            g_free(bc);
+            if (!JS_IsException(m) && JS_VALUE_GET_TAG(m) == JS_TAG_MODULE) {
+                g_free(key);
+                return m;
+            }
+            if (JS_IsException(m)) JS_FreeValue(ctx, JS_GetException(ctx));
+            else JS_FreeValue(ctx, m);
+        }
+    }
+
+    JSValue func_val = JS_Eval(ctx, src, len, module_name,
+                               JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    if (!JS_IsException(func_val) && len >= 1024 &&
+        JS_VALUE_GET_TAG(func_val) == JS_TAG_MODULE) {
+        size_t bc_size = 0;
+        uint8_t *bc = JS_WriteObject(ctx, &bc_size, func_val,
+                                     JS_WRITE_OBJ_BYTECODE);
+        if (bc) {
+            if (bc_size > 0) ns_bcache_put(key, key_len, bc, bc_size);
+            js_free(ctx, bc);
+        }
+    }
+    g_free(key);
+    return func_val;
+}
+
 static JSModuleDef *
 ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
                     JSValueConst attributes)
@@ -36514,8 +36556,8 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
             if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
             return m;
         }
-        JSValue func_val = JS_Eval(ctx, body, body_len, module_name,
-                                   JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+        JSValue func_val =
+            ns_js_compile_module_cached(ctx, body, body_len, module_name);
         g_free(body);
         if (JS_IsException(func_val)) {
             ns_js_log_module_compile_error(js, ctx, module_name);
@@ -36558,8 +36600,8 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
         if (!m) ns_js_log_module_compile_error(js, ctx, module_name);
         return m;
     }
-    JSValue func_val = JS_Eval(ctx, copy, copy_len, module_name,
-                               JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+    JSValue func_val =
+        ns_js_compile_module_cached(ctx, copy, copy_len, module_name);
     g_free(copy);
     if (JS_IsException(func_val)) {
         ns_js_log_module_compile_error(js, ctx, module_name);
@@ -36578,9 +36620,9 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
     js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
     js->eval_depth++;
-    JSValue v = JS_Eval(js->ctx, copy, len,
-                        origin ? origin : "module",
-                        JS_EVAL_TYPE_MODULE);
+    JSValue fn = ns_js_compile_module_cached(js->ctx, copy, len,
+                                             origin ? origin : "module");
+    JSValue v = JS_IsException(fn) ? fn : JS_EvalFunction(js->ctx, fn);
     g_free(copy);
     js->eval_deadline_us = 0;
     js->eval_depth--;
