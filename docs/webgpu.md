@@ -83,10 +83,27 @@ a working **render-to-canvas** path:
   a `fragment` stage (`module`, `entryPoint`, `targets[{format}]`), and
   `primitive.topology`.
 
-So the full draw path works: WGSL shader modules → render pipeline → render
-pass → `setPipeline`/`setVertexBuffer`/`draw` → submit → composited to the
-canvas. A hardcoded-vertex triangle and an interleaved vertex-buffer
-(position + per-vertex colour) triangle both render correctly.
+- `GPUBindGroupLayout` / `GPUPipelineLayout` / `GPUBindGroup` — buffer
+  (uniform/storage), sampler, and texture-view bindings; `setBindGroup`;
+  `pipeline.getBindGroupLayout()`.
+- `GPUSampler` (`device.createSampler`), `GPUTexture` (`device.createTexture`,
+  `createView`, `destroy`), `queue.writeTexture`, depth/stencil and MSAA
+  resolve attachments in render passes, `depthStencil` + `multisample` +
+  `cullMode` pipeline state.
+- `GPUBuffer.getMappedRange()` / `unmap()` (for `mappedAtCreation`),
+  `commandEncoder.copyTextureToTexture` / `copyBufferToBuffer`,
+  `device.pushErrorScope`/`popErrorScope`, a non-fatal device
+  uncaptured-error handler, and the `GPUBufferUsage`/`GPUTextureUsage`/
+  `GPUShaderStage`/`GPUColorWrite`/`GPUMapMode` global flag namespaces.
+
+So the full draw path works: WGSL shader modules → bind groups → render
+pipeline (with depth) → render pass → `setPipeline`/`setBindGroup`/
+`setVertexBuffer`/`draw` → submit → composited to the canvas.
+
+**three.js's `WebGPURenderer` runs on this backend** (no WebGL2 fallback):
+the `webgpu_camera` example renders its scene — wireframe spheres, the
+camera-frustum helper, the axis gizmo, and the point-cloud starfield — on
+real WebGPU through wgpu-native.
 
 A configured canvas owns an offscreen target texture
 (`RENDER_ATTACHMENT | COPY_SRC`); each paint, the renderer copies it back
@@ -101,16 +118,14 @@ page event loop.
 
 ### Not yet implemented
 
-What remains for richer content: **bind groups** / bind-group layouts and
-**uniform/storage buffer bindings** (so shaders can read uniforms and
-textures), **samplers** and texture binding, **depth/stencil** attachments,
-blend state, and **compute pipelines** (`createComputePipeline` /
-`dispatchWorkgroups`). Without bind groups a pipeline cannot read uniforms,
-so MVP-style transforms and textured/lit materials are not possible yet —
-the working surface covers vertex-coloured / procedural geometry. Large
-engines such as three.js's `WebGPURenderer` probe for these and fall back to
-WebGL2 until they are present. This document and feature-detection reflect
-exactly what runs.
+What remains: **compute pipelines** (`createComputePipeline` /
+`dispatchWorkgroups`), `queue.copyExternalImageToTexture` (uploading images/
+`<canvas>`/`ImageBitmap` directly — for now image textures go through
+`writeTexture` with raw bytes), timestamp `GPUQuerySet`s, render bundles,
+explicit blend state, storage textures, and 3D/cube/array texture-view
+descriptors (views default to 2D). Examples that lean on these (compute
+demos, some post-processing) will still hit gaps. This document and
+feature-detection reflect exactly what runs.
 
 ## Architecture & security notes
 

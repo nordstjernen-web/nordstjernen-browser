@@ -30,6 +30,7 @@ static JSClassID g_pipeline_class;
 static JSClassID g_bgl_class;
 static JSClassID g_pllayout_class;
 static JSClassID g_bindgroup_class;
+static JSClassID g_sampler_class;
 
 static GHashTable *g_webgpu_ctx_by_node;
 
@@ -47,6 +48,7 @@ typedef struct { WGPURenderPipeline pipe; } ns_wg_pipeline;
 typedef struct { WGPUBindGroupLayout layout; } ns_wg_bgl;
 typedef struct { WGPUPipelineLayout layout; } ns_wg_pllayout;
 typedef struct { WGPUBindGroup group; } ns_wg_bindgroup;
+typedef struct { WGPUSampler sampler; } ns_wg_sampler;
 
 typedef struct {
     const ns_node *canvas;
@@ -81,6 +83,25 @@ static JSValue wg_make_bgl(JSContext *ctx, WGPUBindGroupLayout layout);
 static JSValue wg_pipeline_getBindGroupLayout(JSContext *ctx,
                                               JSValueConst this_val,
                                               int argc, JSValueConst *argv);
+static JSValue wg_device_createSampler(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv);
+static JSValue wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv);
+static JSValue wg_make_texture(JSContext *ctx, WGPUTexture texture, uint32_t w,
+                               uint32_t h, WGPUTextureFormat format);
+static JSValue wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
+static JSValue wg_encoder_copyTextureToTexture(JSContext *ctx,
+                                               JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+static JSValue wg_encoder_copyBufferToBuffer(JSContext *ctx,
+                                             JSValueConst this_val,
+                                             int argc, JSValueConst *argv);
+static JSValue wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv);
+static JSValue wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv);
+static void wg_read_extent(JSContext *ctx, JSValueConst v, WGPUExtent3D *out);
 
 static gboolean
 ns_webgpu_allowed(void)
@@ -218,15 +239,19 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     }
     if (!bytes) return JS_UNDEFINED;
 
-    int64_t data_offset = 0, size = (int64_t)byte_len;
-    if (argc >= 4) JS_ToInt64(ctx, &data_offset, argv[3]);
-    if (argc >= 5) JS_ToInt64(ctx, &size, argv[4]);
-    if (data_offset < 0 || (size_t)data_offset > byte_len) return JS_UNDEFINED;
-    if (size < 0 || (size_t)(data_offset + size) > byte_len)
-        size = (int64_t)(byte_len - data_offset);
+    size_t elem = bpe > 0 ? bpe : 1;
+    int64_t data_offset = 0, size = -1;
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) JS_ToInt64(ctx, &data_offset, argv[3]);
+    if (argc >= 5 && !JS_IsUndefined(argv[4])) JS_ToInt64(ctx, &size, argv[4]);
+    int64_t byte_off = data_offset * (int64_t)elem;
+    if (byte_off < 0 || (size_t)byte_off > byte_len) return JS_UNDEFINED;
+    size_t byte_size = size < 0 ? byte_len - (size_t)byte_off
+                                : (size_t)size * elem;
+    if ((size_t)byte_off + byte_size > byte_len)
+        byte_size = byte_len - (size_t)byte_off;
 
     wgpuQueueWriteBuffer(q->queue, buf->buffer, (uint64_t)buffer_offset,
-                         bytes + data_offset, (size_t)size);
+                         bytes + byte_off, byte_size);
     return JS_UNDEFINED;
 }
 
@@ -274,6 +299,7 @@ wg_make_queue(JSContext *ctx, WGPUQueue queue)
     q->queue = queue;
     JS_SetOpaque(obj, q);
     wg_bind(ctx, obj, "writeBuffer", wg_queue_writeBuffer, 5);
+    wg_bind(ctx, obj, "writeTexture", wg_queue_writeTexture, 4);
     wg_bind(ctx, obj, "submit", wg_queue_submit, 1);
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
     return obj;
@@ -296,6 +322,38 @@ wg_buffer_destroy(JSContext *ctx, JSValueConst this_val,
     (void)ctx; (void)argc; (void)argv;
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
     if (b && b->buffer) { wgpuBufferDestroy(b->buffer); }
+    return JS_UNDEFINED;
+}
+
+static void
+wg_ab_noop_free(JSRuntime *rt, void *opaque, void *ptr)
+{
+    (void)rt; (void)opaque; (void)ptr;
+}
+
+static JSValue
+wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
+    if (!b || !b->buffer) return JS_UNDEFINED;
+    int64_t offset = 0, size = -1;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) JS_ToInt64(ctx, &offset, argv[0]);
+    if (argc >= 2 && !JS_IsUndefined(argv[1])) JS_ToInt64(ctx, &size, argv[1]);
+    if (offset < 0 || (uint64_t)offset > b->size) return JS_UNDEFINED;
+    size_t sz = size < 0 ? (size_t)(b->size - (uint64_t)offset) : (size_t)size;
+    void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, sz);
+    if (!p) return JS_ThrowInternalError(ctx, "getMappedRange failed");
+    return JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, wg_ab_noop_free, NULL, false);
+}
+
+static JSValue
+wg_buffer_unmap(JSContext *ctx, JSValueConst this_val,
+                int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)argc; (void)argv;
+    ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
+    if (b && b->buffer) wgpuBufferUnmap(b->buffer);
     return JS_UNDEFINED;
 }
 
@@ -334,6 +392,8 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
     b->usage = usage;
     JS_SetOpaque(obj, b);
     wg_bind(ctx, obj, "destroy", wg_buffer_destroy, 0);
+    wg_bind(ctx, obj, "getMappedRange", wg_buffer_getMappedRange, 2);
+    wg_bind(ctx, obj, "unmap", wg_buffer_unmap, 0);
     JS_SetPropertyStr(ctx, obj, "size", JS_NewFloat64(ctx, (double)desc.size));
     JS_SetPropertyStr(ctx, obj, "usage", JS_NewUint32(ctx, usage));
     JS_SetPropertyStr(ctx, obj, "label", JS_NewString(ctx, ""));
@@ -401,6 +461,10 @@ wg_make_device(JSContext *ctx, WGPUDevice device)
     wg_bind(ctx, obj, "createBindGroupLayout", wg_device_createBindGroupLayout, 1);
     wg_bind(ctx, obj, "createPipelineLayout", wg_device_createPipelineLayout, 1);
     wg_bind(ctx, obj, "createBindGroup", wg_device_createBindGroup, 1);
+    wg_bind(ctx, obj, "createSampler", wg_device_createSampler, 1);
+    wg_bind(ctx, obj, "createTexture", wg_device_createTexture, 1);
+    wg_bind(ctx, obj, "pushErrorScope", wg_device_pushErrorScope, 1);
+    wg_bind(ctx, obj, "popErrorScope", wg_device_popErrorScope, 0);
     wg_bind(ctx, obj, "getQueue", wg_device_getQueue, 0);
     wg_bind(ctx, obj, "destroy", wg_device_destroy, 0);
     return obj;
@@ -418,6 +482,15 @@ wg_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
     w->done = 1;
 }
 
+static void
+wg_on_uncaptured_error(WGPUDevice const *device, WGPUErrorType type,
+                       WGPUStringView message, void *u1, void *u2)
+{
+    (void)device; (void)type; (void)u1; (void)u2;
+    g_warning("[webgpu] %.*s", (int)message.length,
+              message.data ? message.data : "uncaptured error");
+}
+
 static JSValue
 wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
                          int argc, JSValueConst *argv)
@@ -431,7 +504,9 @@ wg_adapter_requestDevice(JSContext *ctx, JSValueConst this_val,
     ci.mode = WGPUCallbackMode_AllowProcessEvents;
     ci.callback = wg_on_device;
     ci.userdata1 = &wait;
-    wgpuAdapterRequestDevice(a->adapter, NULL, ci);
+    WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof dd);
+    dd.uncapturedErrorCallbackInfo.callback = wg_on_uncaptured_error;
+    wgpuAdapterRequestDevice(a->adapter, &dd, ci);
     for (int i = 0; i < 2000 && !wait.done; i++)
         wgpuInstanceProcessEvents(ns_webgpu_instance());
     if (!wait.device)
@@ -546,8 +621,51 @@ wg_canvas_dim(const ns_node *canvas, const char *name, int defv)
 static WGPUTextureFormat
 wg_format_from_str(const char *s)
 {
-    if (s && strcmp(s, "rgba8unorm") == 0) return WGPUTextureFormat_RGBA8Unorm;
+    if (!s) return WGPUTextureFormat_BGRA8Unorm;
+    static const struct { const char *name; WGPUTextureFormat fmt; } map[] = {
+        { "bgra8unorm", WGPUTextureFormat_BGRA8Unorm },
+        { "bgra8unorm-srgb", WGPUTextureFormat_BGRA8UnormSrgb },
+        { "rgba8unorm", WGPUTextureFormat_RGBA8Unorm },
+        { "rgba8unorm-srgb", WGPUTextureFormat_RGBA8UnormSrgb },
+        { "rgba16float", WGPUTextureFormat_RGBA16Float },
+        { "rgba32float", WGPUTextureFormat_RGBA32Float },
+        { "r8unorm", WGPUTextureFormat_R8Unorm },
+        { "rg8unorm", WGPUTextureFormat_RG8Unorm },
+        { "r16float", WGPUTextureFormat_R16Float },
+        { "rg16float", WGPUTextureFormat_RG16Float },
+        { "r32float", WGPUTextureFormat_R32Float },
+        { "rg32float", WGPUTextureFormat_RG32Float },
+        { "rgb10a2unorm", WGPUTextureFormat_RGB10A2Unorm },
+        { "depth16unorm", WGPUTextureFormat_Depth16Unorm },
+        { "depth24plus", WGPUTextureFormat_Depth24Plus },
+        { "depth24plus-stencil8", WGPUTextureFormat_Depth24PlusStencil8 },
+        { "depth32float", WGPUTextureFormat_Depth32Float },
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(map); i++)
+        if (strcmp(s, map[i].name) == 0) return map[i].fmt;
     return WGPUTextureFormat_BGRA8Unorm;
+}
+
+static WGPUCompareFunction
+wg_compare_func(const char *s)
+{
+    if (!s) return WGPUCompareFunction_Undefined;
+    if (strcmp(s, "never") == 0) return WGPUCompareFunction_Never;
+    if (strcmp(s, "less") == 0) return WGPUCompareFunction_Less;
+    if (strcmp(s, "equal") == 0) return WGPUCompareFunction_Equal;
+    if (strcmp(s, "less-equal") == 0) return WGPUCompareFunction_LessEqual;
+    if (strcmp(s, "greater") == 0) return WGPUCompareFunction_Greater;
+    if (strcmp(s, "greater-equal") == 0) return WGPUCompareFunction_GreaterEqual;
+    if (strcmp(s, "always") == 0) return WGPUCompareFunction_Always;
+    return WGPUCompareFunction_Undefined;
+}
+
+static WGPUAddressMode
+wg_address_mode(const char *s)
+{
+    if (s && strcmp(s, "repeat") == 0) return WGPUAddressMode_Repeat;
+    if (s && strcmp(s, "mirror-repeat") == 0) return WGPUAddressMode_MirrorRepeat;
+    return WGPUAddressMode_ClampToEdge;
 }
 
 static void
@@ -852,6 +970,11 @@ wg_encoder_beginRenderPass(JSContext *ctx, JSValueConst this_val,
             color.clearValue.a = JS_IsUndefined(jclear)
                 ? 1.0 : wg_color_component(ctx, jclear, "a", 3);
             JS_FreeValue(ctx, jclear);
+
+            JSValue jresolve = JS_GetPropertyStr(ctx, a0, "resolveTarget");
+            ns_wg_view *rv = JS_GetOpaque(jresolve, g_view_class);
+            if (rv) color.resolveTarget = rv->view;
+            JS_FreeValue(ctx, jresolve);
         }
         JS_FreeValue(ctx, a0);
     }
@@ -859,10 +982,45 @@ wg_encoder_beginRenderPass(JSContext *ctx, JSValueConst this_val,
 
     if (!color.view) return JS_UNDEFINED;
 
+    WGPURenderPassDepthStencilAttachment depth;
+    memset(&depth, 0, sizeof depth);
+    gboolean have_depth = FALSE;
+    JSValue jds = JS_GetPropertyStr(ctx, argv[0], "depthStencilAttachment");
+    if (JS_IsObject(jds)) {
+        JSValue jview = JS_GetPropertyStr(ctx, jds, "view");
+        ns_wg_view *dv = JS_GetOpaque(jview, g_view_class);
+        JS_FreeValue(ctx, jview);
+        if (dv) {
+            depth.view = dv->view;
+            have_depth = TRUE;
+            depth.depthLoadOp = WGPULoadOp_Clear;
+            depth.depthStoreOp = WGPUStoreOp_Store;
+            depth.depthClearValue = 1.0f;
+            JSValue jdl = JS_GetPropertyStr(ctx, jds, "depthLoadOp");
+            const char *dls = JS_IsString(jdl) ? JS_ToCString(ctx, jdl) : NULL;
+            if (dls && strcmp(dls, "load") == 0) depth.depthLoadOp = WGPULoadOp_Load;
+            if (dls) JS_FreeCString(ctx, dls);
+            JS_FreeValue(ctx, jdl);
+            JSValue jdsr = JS_GetPropertyStr(ctx, jds, "depthStoreOp");
+            const char *dss = JS_IsString(jdsr) ? JS_ToCString(ctx, jdsr) : NULL;
+            if (dss && strcmp(dss, "discard") == 0) depth.depthStoreOp = WGPUStoreOp_Discard;
+            if (dss) JS_FreeCString(ctx, dss);
+            JS_FreeValue(ctx, jdsr);
+            JSValue jdc = JS_GetPropertyStr(ctx, jds, "depthClearValue");
+            if (!JS_IsUndefined(jdc)) {
+                double dc = 1.0; JS_ToFloat64(ctx, &dc, jdc);
+                depth.depthClearValue = (float)dc;
+            }
+            JS_FreeValue(ctx, jdc);
+        }
+    }
+    JS_FreeValue(ctx, jds);
+
     WGPURenderPassDescriptor desc;
     memset(&desc, 0, sizeof desc);
     desc.colorAttachmentCount = 1;
     desc.colorAttachments = &color;
+    if (have_depth) desc.depthStencilAttachment = &depth;
     WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(e->enc, &desc);
     if (!pass) return JS_UNDEFINED;
     return wg_make_pass(ctx, pass);
@@ -899,6 +1057,8 @@ wg_make_encoder(JSContext *ctx, WGPUCommandEncoder enc)
     e->enc = enc;
     JS_SetOpaque(obj, e);
     wg_bind(ctx, obj, "beginRenderPass", wg_encoder_beginRenderPass, 1);
+    wg_bind(ctx, obj, "copyTextureToTexture", wg_encoder_copyTextureToTexture, 3);
+    wg_bind(ctx, obj, "copyBufferToBuffer", wg_encoder_copyBufferToBuffer, 5);
     wg_bind(ctx, obj, "finish", wg_encoder_finish, 0);
     return obj;
 }
@@ -1238,8 +1398,51 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
         desc.primitive.topology = wg_topology(ts);
         if (ts) JS_FreeCString(ctx, ts);
         JS_FreeValue(ctx, jt);
+        JSValue jcull = JS_GetPropertyStr(ctx, jprim, "cullMode");
+        const char *cs = JS_IsString(jcull) ? JS_ToCString(ctx, jcull) : NULL;
+        if (cs && strcmp(cs, "back") == 0) desc.primitive.cullMode = WGPUCullMode_Back;
+        else if (cs && strcmp(cs, "front") == 0) desc.primitive.cullMode = WGPUCullMode_Front;
+        if (cs) JS_FreeCString(ctx, cs);
+        JS_FreeValue(ctx, jcull);
     }
     JS_FreeValue(ctx, jprim);
+
+    WGPUDepthStencilState ds;
+    memset(&ds, 0, sizeof ds);
+    JSValue jds = JS_GetPropertyStr(ctx, argv[0], "depthStencil");
+    if (JS_IsObject(jds)) {
+        JSValue jf = JS_GetPropertyStr(ctx, jds, "format");
+        const char *fs = JS_IsString(jf) ? JS_ToCString(ctx, jf) : NULL;
+        ds.format = wg_format_from_str(fs);
+        if (fs) JS_FreeCString(ctx, fs);
+        JS_FreeValue(ctx, jf);
+        JSValue jdw = JS_GetPropertyStr(ctx, jds, "depthWriteEnabled");
+        ds.depthWriteEnabled = JS_ToBool(ctx, jdw)
+            ? WGPUOptionalBool_True : WGPUOptionalBool_False;
+        JS_FreeValue(ctx, jdw);
+        JSValue jdc = JS_GetPropertyStr(ctx, jds, "depthCompare");
+        const char *dcs = JS_IsString(jdc) ? JS_ToCString(ctx, jdc) : NULL;
+        ds.depthCompare = wg_compare_func(dcs);
+        if (ds.depthCompare == WGPUCompareFunction_Undefined)
+            ds.depthCompare = WGPUCompareFunction_Always;
+        if (dcs) JS_FreeCString(ctx, dcs);
+        JS_FreeValue(ctx, jdc);
+        ds.stencilFront.compare = WGPUCompareFunction_Always;
+        ds.stencilBack.compare = WGPUCompareFunction_Always;
+        desc.depthStencil = &ds;
+    }
+    JS_FreeValue(ctx, jds);
+
+    JSValue jms = JS_GetPropertyStr(ctx, argv[0], "multisample");
+    if (JS_IsObject(jms)) {
+        JSValue jc = JS_GetPropertyStr(ctx, jms, "count");
+        if (!JS_IsUndefined(jc)) {
+            uint32_t c = 1; JS_ToUint32(ctx, &c, jc);
+            if (c >= 1) desc.multisample.count = c;
+        }
+        JS_FreeValue(ctx, jc);
+    }
+    JS_FreeValue(ctx, jms);
 
     JSValue jfrag = JS_GetPropertyStr(ctx, argv[0], "fragment");
     if (JS_IsObject(jfrag)) {
@@ -1362,14 +1565,42 @@ wg_device_createBindGroupLayout(JSContext *ctx, JSValueConst this_val,
             entries[i].binding = binding;
             entries[i].visibility = vis;
             JSValue jbuf = JS_GetPropertyStr(ctx, e, "buffer");
+            JSValue jsamp = JS_GetPropertyStr(ctx, e, "sampler");
+            JSValue jtex = JS_GetPropertyStr(ctx, e, "texture");
             if (JS_IsObject(jbuf)) {
                 JSValue jt = JS_GetPropertyStr(ctx, jbuf, "type");
                 const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
                 entries[i].buffer.type = wg_buffer_binding_type(ts);
                 if (ts) JS_FreeCString(ctx, ts);
                 JS_FreeValue(ctx, jt);
+            } else if (JS_IsObject(jsamp)) {
+                JSValue jt = JS_GetPropertyStr(ctx, jsamp, "type");
+                const char *ts = JS_IsString(jt) ? JS_ToCString(ctx, jt) : NULL;
+                entries[i].sampler.type = (ts && strcmp(ts, "non-filtering") == 0)
+                    ? WGPUSamplerBindingType_NonFiltering
+                    : (ts && strcmp(ts, "comparison") == 0)
+                    ? WGPUSamplerBindingType_Comparison
+                    : WGPUSamplerBindingType_Filtering;
+                if (ts) JS_FreeCString(ctx, ts);
+                JS_FreeValue(ctx, jt);
+            } else if (JS_IsObject(jtex)) {
+                JSValue jst = JS_GetPropertyStr(ctx, jtex, "sampleType");
+                const char *ss = JS_IsString(jst) ? JS_ToCString(ctx, jst) : NULL;
+                entries[i].texture.sampleType =
+                    (ss && strcmp(ss, "unfilterable-float") == 0)
+                        ? WGPUTextureSampleType_UnfilterableFloat
+                    : (ss && strcmp(ss, "depth") == 0)
+                        ? WGPUTextureSampleType_Depth
+                    : (ss && strcmp(ss, "uint") == 0)
+                        ? WGPUTextureSampleType_Uint
+                    : WGPUTextureSampleType_Float;
+                if (ss) JS_FreeCString(ctx, ss);
+                JS_FreeValue(ctx, jst);
+                entries[i].texture.viewDimension = WGPUTextureViewDimension_2D;
             }
             JS_FreeValue(ctx, jbuf);
+            JS_FreeValue(ctx, jsamp);
+            JS_FreeValue(ctx, jtex);
             JS_FreeValue(ctx, e);
         }
     }
@@ -1476,8 +1707,11 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
             entries[i].binding = binding;
             JSValue jres = JS_GetPropertyStr(ctx, e, "resource");
             ns_wg_view *vw = JS_GetOpaque(jres, g_view_class);
+            ns_wg_sampler *smp = JS_GetOpaque(jres, g_sampler_class);
             if (vw) {
                 entries[i].textureView = vw->view;
+            } else if (smp) {
+                entries[i].sampler = smp->sampler;
             } else if (JS_IsObject(jres)) {
                 JSValue jbuf = JS_GetPropertyStr(ctx, jres, "buffer");
                 ns_wg_buffer *buf = JS_GetOpaque(jbuf, g_buffer_class);
@@ -1514,6 +1748,263 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     b->group = group;
     JS_SetOpaque(obj, b);
     return obj;
+}
+
+static void
+wg_read_texcopy(JSContext *ctx, JSValueConst v, WGPUTexelCopyTextureInfo *out)
+{
+    memset(out, 0, sizeof *out);
+    out->aspect = WGPUTextureAspect_All;
+    if (!JS_IsObject(v)) return;
+    JSValue jtex = JS_GetPropertyStr(ctx, v, "texture");
+    ns_wg_texture *t = JS_GetOpaque(jtex, g_texture_class);
+    if (t) out->texture = t->texture;
+    JS_FreeValue(ctx, jtex);
+    JSValue jmip = JS_GetPropertyStr(ctx, v, "mipLevel");
+    if (!JS_IsUndefined(jmip)) JS_ToUint32(ctx, &out->mipLevel, jmip);
+    JS_FreeValue(ctx, jmip);
+    JSValue jorigin = JS_GetPropertyStr(ctx, v, "origin");
+    if (JS_IsObject(jorigin)) {
+        WGPUExtent3D e;
+        wg_read_extent(ctx, jorigin, &e);
+        out->origin.x = e.width; out->origin.y = e.height; out->origin.z = 0;
+        JSValue jz = JS_GetPropertyStr(ctx, jorigin, "z");
+        if (!JS_IsUndefined(jz)) JS_ToUint32(ctx, &out->origin.z, jz);
+        JS_FreeValue(ctx, jz);
+    }
+    JS_FreeValue(ctx, jorigin);
+}
+
+static JSValue
+wg_encoder_copyTextureToTexture(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc || argc < 3) return JS_UNDEFINED;
+    WGPUTexelCopyTextureInfo src, dst;
+    wg_read_texcopy(ctx, argv[0], &src);
+    wg_read_texcopy(ctx, argv[1], &dst);
+    if (!src.texture || !dst.texture) return JS_UNDEFINED;
+    WGPUExtent3D size;
+    wg_read_extent(ctx, argv[2], &size);
+    wgpuCommandEncoderCopyTextureToTexture(e->enc, &src, &dst, &size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_encoder_copyBufferToBuffer(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    ns_wg_encoder *e = JS_GetOpaque(this_val, g_encoder_class);
+    if (!e || !e->enc || argc < 5) return JS_UNDEFINED;
+    ns_wg_buffer *src = JS_GetOpaque(argv[0], g_buffer_class);
+    ns_wg_buffer *dst = JS_GetOpaque(argv[2], g_buffer_class);
+    if (!src || !dst) return JS_UNDEFINED;
+    int64_t soff = 0, doff = 0, size = 0;
+    JS_ToInt64(ctx, &soff, argv[1]);
+    JS_ToInt64(ctx, &doff, argv[3]);
+    JS_ToInt64(ctx, &size, argv[4]);
+    wgpuCommandEncoderCopyBufferToBuffer(e->enc, src->buffer, (uint64_t)soff,
+                                         dst->buffer, (uint64_t)doff,
+                                         (uint64_t)size);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_device_pushErrorScope(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
+wg_device_popErrorScope(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return wg_promise_resolved(ctx, JS_NULL);
+}
+
+static void
+wg_sampler_finalizer(JSRuntime *rt, JSValue val)
+{
+    (void)rt;
+    ns_wg_sampler *s = JS_GetOpaque(val, g_sampler_class);
+    if (!s) return;
+    if (s->sampler) wgpuSamplerRelease(s->sampler);
+    g_free(s);
+}
+
+static JSValue
+wg_device_createSampler(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d) return JS_UNDEFINED;
+
+    WGPUSamplerDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.addressModeU = WGPUAddressMode_ClampToEdge;
+    desc.addressModeV = WGPUAddressMode_ClampToEdge;
+    desc.addressModeW = WGPUAddressMode_ClampToEdge;
+    desc.magFilter = WGPUFilterMode_Nearest;
+    desc.minFilter = WGPUFilterMode_Nearest;
+    desc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
+    desc.lodMinClamp = 0.0f;
+    desc.lodMaxClamp = 32.0f;
+    desc.maxAnisotropy = 1;
+
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSValue v;
+        const char *s;
+#define WG_STR(field) (v = JS_GetPropertyStr(ctx, argv[0], field), \
+        s = JS_IsString(v) ? JS_ToCString(ctx, v) : NULL)
+#define WG_STR_END() do { if (s) JS_FreeCString(ctx, s); JS_FreeValue(ctx, v); } while (0)
+        WG_STR("addressModeU"); if (s) desc.addressModeU = wg_address_mode(s); WG_STR_END();
+        WG_STR("addressModeV"); if (s) desc.addressModeV = wg_address_mode(s); WG_STR_END();
+        WG_STR("addressModeW"); if (s) desc.addressModeW = wg_address_mode(s); WG_STR_END();
+        WG_STR("magFilter"); if (s && strcmp(s, "linear") == 0) desc.magFilter = WGPUFilterMode_Linear; WG_STR_END();
+        WG_STR("minFilter"); if (s && strcmp(s, "linear") == 0) desc.minFilter = WGPUFilterMode_Linear; WG_STR_END();
+        WG_STR("mipmapFilter"); if (s && strcmp(s, "linear") == 0) desc.mipmapFilter = WGPUMipmapFilterMode_Linear; WG_STR_END();
+        WG_STR("compare"); if (s) desc.compare = wg_compare_func(s); WG_STR_END();
+#undef WG_STR
+#undef WG_STR_END
+        v = JS_GetPropertyStr(ctx, argv[0], "maxAnisotropy");
+        if (!JS_IsUndefined(v)) {
+            uint32_t a = 1; JS_ToUint32(ctx, &a, v);
+            desc.maxAnisotropy = (uint16_t)(a < 1 ? 1 : a);
+        }
+        JS_FreeValue(ctx, v);
+    }
+
+    WGPUSampler sampler = wgpuDeviceCreateSampler(d->device, &desc);
+    if (!sampler) return JS_ThrowInternalError(ctx, "createSampler failed");
+    JSValue obj = JS_NewObjectClass(ctx, g_sampler_class);
+    ns_wg_sampler *s = g_new0(ns_wg_sampler, 1);
+    s->sampler = sampler;
+    JS_SetOpaque(obj, s);
+    return obj;
+}
+
+static void
+wg_read_extent(JSContext *ctx, JSValueConst v, WGPUExtent3D *out)
+{
+    out->width = 1; out->height = 1; out->depthOrArrayLayers = 1;
+    if (JS_IsArray(v)) {
+        uint32_t n = 0;
+        JSValue jl = JS_GetPropertyStr(ctx, v, "length");
+        JS_ToUint32(ctx, &n, jl); JS_FreeValue(ctx, jl);
+        uint32_t vals[3] = { 1, 1, 1 };
+        for (uint32_t i = 0; i < n && i < 3; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, v, i);
+            JS_ToUint32(ctx, &vals[i], e); JS_FreeValue(ctx, e);
+        }
+        out->width = vals[0]; out->height = vals[1];
+        out->depthOrArrayLayers = vals[2];
+    } else if (JS_IsObject(v)) {
+        JSValue jw = JS_GetPropertyStr(ctx, v, "width");
+        JSValue jh = JS_GetPropertyStr(ctx, v, "height");
+        JSValue jd = JS_GetPropertyStr(ctx, v, "depthOrArrayLayers");
+        JS_ToUint32(ctx, &out->width, jw);
+        if (!JS_IsUndefined(jh)) JS_ToUint32(ctx, &out->height, jh);
+        if (!JS_IsUndefined(jd)) JS_ToUint32(ctx, &out->depthOrArrayLayers, jd);
+        JS_FreeValue(ctx, jw); JS_FreeValue(ctx, jh); JS_FreeValue(ctx, jd);
+    }
+}
+
+static JSValue
+wg_device_createTexture(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    ns_wg_device *d = JS_GetOpaque(this_val, g_device_class);
+    if (!d || argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "createTexture: descriptor required");
+
+    WGPUTextureDescriptor desc;
+    memset(&desc, 0, sizeof desc);
+    desc.dimension = WGPUTextureDimension_2D;
+    desc.mipLevelCount = 1;
+    desc.sampleCount = 1;
+
+    JSValue jsize = JS_GetPropertyStr(ctx, argv[0], "size");
+    wg_read_extent(ctx, jsize, &desc.size);
+    JS_FreeValue(ctx, jsize);
+
+    JSValue jusage = JS_GetPropertyStr(ctx, argv[0], "usage");
+    uint32_t usage = 0; JS_ToUint32(ctx, &usage, jusage); JS_FreeValue(ctx, jusage);
+    desc.usage = (WGPUTextureUsage)usage;
+
+    JSValue jfmt = JS_GetPropertyStr(ctx, argv[0], "format");
+    const char *fmt = JS_IsString(jfmt) ? JS_ToCString(ctx, jfmt) : NULL;
+    desc.format = wg_format_from_str(fmt);
+    if (fmt) JS_FreeCString(ctx, fmt);
+    JS_FreeValue(ctx, jfmt);
+
+    JSValue jmip = JS_GetPropertyStr(ctx, argv[0], "mipLevelCount");
+    if (!JS_IsUndefined(jmip)) { uint32_t m = 1; JS_ToUint32(ctx, &m, jmip); desc.mipLevelCount = m ? m : 1; }
+    JS_FreeValue(ctx, jmip);
+    JSValue jsamp = JS_GetPropertyStr(ctx, argv[0], "sampleCount");
+    if (!JS_IsUndefined(jsamp)) { uint32_t m = 1; JS_ToUint32(ctx, &m, jsamp); desc.sampleCount = m ? m : 1; }
+    JS_FreeValue(ctx, jsamp);
+    JSValue jdim = JS_GetPropertyStr(ctx, argv[0], "dimension");
+    const char *dim = JS_IsString(jdim) ? JS_ToCString(ctx, jdim) : NULL;
+    if (dim && strcmp(dim, "3d") == 0) desc.dimension = WGPUTextureDimension_3D;
+    else if (dim && strcmp(dim, "1d") == 0) desc.dimension = WGPUTextureDimension_1D;
+    if (dim) JS_FreeCString(ctx, dim);
+    JS_FreeValue(ctx, jdim);
+
+    WGPUTexture tex = wgpuDeviceCreateTexture(d->device, &desc);
+    if (!tex) return JS_ThrowInternalError(ctx, "createTexture failed");
+    return wg_make_texture(ctx, tex, desc.size.width, desc.size.height, desc.format);
+}
+
+static JSValue
+wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    ns_wg_queue *q = wg_queue_unwrap(this_val);
+    if (!q || argc < 4 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
+    JSValue jtex = JS_GetPropertyStr(ctx, argv[0], "texture");
+    ns_wg_texture *tex = JS_GetOpaque(jtex, g_texture_class);
+    JS_FreeValue(ctx, jtex);
+    if (!tex || !tex->texture) return JS_UNDEFINED;
+
+    size_t byte_len = 0;
+    uint8_t *bytes = NULL;
+    size_t view_off = 0, view_len = 0, bpe = 0;
+    JSValue abuf = JS_GetTypedArrayBuffer(ctx, argv[1], &view_off, &view_len, &bpe);
+    if (!JS_IsException(abuf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
+        if (base) { bytes = base + view_off; byte_len = view_len; }
+        JS_FreeValue(ctx, abuf);
+    } else {
+        JS_FreeValue(ctx, abuf);
+        bytes = JS_GetArrayBuffer(ctx, &byte_len, argv[1]);
+    }
+    if (!bytes) return JS_UNDEFINED;
+
+    WGPUTexelCopyTextureInfo dst;
+    memset(&dst, 0, sizeof dst);
+    dst.texture = tex->texture;
+    dst.aspect = WGPUTextureAspect_All;
+
+    WGPUTexelCopyBufferLayout layout;
+    memset(&layout, 0, sizeof layout);
+    if (JS_IsObject(argv[2])) {
+        JSValue jbpr = JS_GetPropertyStr(ctx, argv[2], "bytesPerRow");
+        if (!JS_IsUndefined(jbpr)) { uint32_t b = 0; JS_ToUint32(ctx, &b, jbpr); layout.bytesPerRow = b; }
+        JS_FreeValue(ctx, jbpr);
+        JSValue jrpi = JS_GetPropertyStr(ctx, argv[2], "rowsPerImage");
+        if (!JS_IsUndefined(jrpi)) { uint32_t r = 0; JS_ToUint32(ctx, &r, jrpi); layout.rowsPerImage = r; }
+        JS_FreeValue(ctx, jrpi);
+    }
+    WGPUExtent3D ext;
+    wg_read_extent(ctx, argv[3], &ext);
+
+    wgpuQueueWriteTexture(q->queue, &dst, bytes, byte_len, &layout, &ext);
+    return JS_UNDEFINED;
 }
 
 static void
@@ -1563,6 +2054,8 @@ ns_webgpu_install(JSContext *ctx, ns_js *js, JSValueConst navigator)
                           wg_pllayout_finalizer);
         wg_register_class(ctx, &g_bindgroup_class, "GPUBindGroup",
                           wg_bindgroup_finalizer);
+        wg_register_class(ctx, &g_sampler_class, "GPUSampler",
+                          wg_sampler_finalizer);
     }
 
     JSValue gpu = JS_NewObject(ctx);
