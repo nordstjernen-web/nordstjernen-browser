@@ -31,6 +31,6 @@ executable(
   c_args: ['-DNS_HAVE_GTK=1'],
   include_directories: include_directories('..', '.'),
   win_subsystem: nordstjernen_win_subsystem,
-  link_args: nordstjernen_link_args,
+  link_args: nordstjernen_exe_link_args,
   install: true,
 )

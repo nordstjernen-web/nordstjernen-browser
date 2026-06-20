@@ -49,7 +49,7 @@ if qt6_dep.found()
     dependencies: qt_deps,
     link_with: libnordstjernen_static,
     include_directories: include_directories('..'),
-    link_args: nordstjernen_link_args,
+    link_args: nordstjernen_exe_link_args,
     win_subsystem: nordstjernen_win_subsystem,
     install: true,
   )

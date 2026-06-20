@@ -1,0 +1,10 @@
+/* Localise every defined symbol in the final executables. The
+   gmodule-2.0 dependency forces -Wl,--export-dynamic, which would otherwise
+   dump ~6000 internal engine symbols into .dynsym and slow the eager
+   (-z now) symbol resolution the dynamic linker performs on every cold
+   start of the forked renderer. The executables export nothing of their
+   own; the one runtime dlsym we rely on (RAND_bytes) resolves through a
+   dependency library, whose exports this does not touch. */
+{
+  local: *;
+};

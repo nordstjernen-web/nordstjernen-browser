@@ -229,6 +229,19 @@ if host_machine.system() == 'netbsd'
   )
 endif
 
+# The gmodule-2.0 dependency injects -Wl,--export-dynamic, which dumps every
+# internal engine symbol (~6000: ns_*, lexbor, quickjs) into the executables'
+# .dynsym. Combined with -Wl,-z,now that bloats the dynamic-linker symbol
+# resolution done on every process start — and the renderer is forked+exec'd
+# afresh, so it pays that cost on each cold start. A version script localises
+# the executables' own symbols (it overrides --export-dynamic regardless of
+# link order); the only runtime dlsym we need (RAND_bytes for RNG warmup)
+# resolves through a dependency library, whose exports this leaves untouched.
+# Applies to the executables only; the shared libnordstjernen keeps its API.
+nordstjernen_exe_link_args = nordstjernen_link_args + \
+  cc.get_supported_link_arguments(
+    ['-Wl,--version-script=' + meson.current_source_dir() / 'exe-local.map'])
+
 if host_machine.system() == 'windows'
   executable(
     'nordstjernen-launcher',
@@ -286,7 +299,7 @@ if not is_android
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
     dependencies: nordstjernen_deps + rproc_deps,
-    link_args: nordstjernen_link_args,
+    link_args: nordstjernen_exe_link_args,
     install: true,
   )
 
