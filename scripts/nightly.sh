@@ -71,8 +71,10 @@ orchestrator. A dirty or diverged working tree is left untouched.
 Environment overrides: NIGHTLY_ROOT, NIGHTLY_REF, NIGHTLY_PULL,
 NIGHTLY_PULL_BRANCH, NIGHTLY_PARALLEL, NIGHTLY_GHA_TIMEOUT,
 NIGHTLY_GHA_BRANCH, NIGHTLY_GHA_DISPATCH, NIGHTLY_DOCKER_PULL_RETRIES,
-NIGHTLY_GH_RETRIES, NS_DOCKER, and the
-NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags.
+NIGHTLY_GH_RETRIES, NS_DOCKER, the
+NIGHTLY_{DEBIAN,UBUNTU,OPENSUSE,ALPINE}_IMAGE image tags, and the WebGPU
+knobs NS_WEBGPU (0/1/auto) and WGPU_NATIVE_VERSION forwarded to the
+container builds.
 EOF
 }
 
@@ -215,6 +217,11 @@ stage_distro() {
     local -a dargs=( --rm -v "$tree:/build:z" -w /build
         -e "VERSION=$version" -e "NS_BUILD_DATE=$DATE" )
     [ -n "${DISTRO_JOBS:-}" ] && dargs+=( -e "NS_BUILD_JOBS=$DISTRO_JOBS" )
+    # WebGPU: pack-linux.sh fetches wgpu-native inside the container and builds
+    # it in (auto). Forward the operator's overrides so the whole nightly can
+    # force it on/off (NS_WEBGPU) or pin a different wgpu-native release.
+    [ -n "${NS_WEBGPU:-}" ] && dargs+=( -e "NS_WEBGPU=$NS_WEBGPU" )
+    [ -n "${WGPU_NATIVE_VERSION:-}" ] && dargs+=( -e "WGPU_NATIVE_VERSION=$WGPU_NATIVE_VERSION" )
     if $DOCKER run "${dargs[@]}" "$image" \
         sh -c 'command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true; exec bash scripts/nightly-distro-build.sh "$1"' sh "$distro" 2>&1 | tee "$dst/build.log"; then
         local n=0

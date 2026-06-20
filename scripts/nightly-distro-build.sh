@@ -16,7 +16,7 @@ trap 'rc=$?; echo "nightly-distro-build($DISTRO): FAILED (exit $rc) at line $LIN
 install_apt() {
     apt-get update -qq
     apt-get install -y --no-install-recommends \
-        build-essential clang pkg-config ninja-build cmake git zip \
+        build-essential clang pkg-config ninja-build cmake git zip unzip curl \
         python3-pip dpkg-dev patchelf ca-certificates \
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
         libsqlite3-dev librsvg2-dev libseccomp-dev libwebp-dev
@@ -43,8 +43,8 @@ install_zypper() {
         sleep $((i * 15))
     done
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip \
-        rpm-build ca-certificates \
+        gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip unzip curl \
+        rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
         sqlite3-devel librsvg-devel libseccomp-devel libwebp-devel
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \

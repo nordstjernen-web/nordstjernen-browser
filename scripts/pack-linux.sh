@@ -26,10 +26,36 @@ fi
 STAGE="$ROOT/dist/${SLUG}"
 ZIP="$ROOT/dist/${SLUG}.zip"
 
+# WebGPU (experimental): the meson feature is `auto`, so it is compiled in
+# whenever wgpu-native is reachable. For a redistributable build we fetch the
+# pinned wgpu-native release, point meson at it, and bundle the shared library
+# beside the binaries with an $ORIGIN rpath. NS_WEBGPU=0/disabled forces it off;
+# NS_WEBGPU=1/enabled makes a missing wgpu-native fatal; anything else (the
+# default) degrades to a WebGPU-free build when wgpu-native cannot be fetched.
+WEBGPU_MODE=${NS_WEBGPU:-auto}
+WGPU_ROOT=""
+WEBGPU_SETUP_ARGS=()
+case "$WEBGPU_MODE" in
+    0|off|disabled|no) log "WebGPU: disabled (NS_WEBGPU=$WEBGPU_MODE)" ;;
+    *)
+        if WGPU_ROOT=$("$ROOT/scripts/fetch-wgpu-native.sh"); then
+            WEBGPU_SETUP_ARGS=( -Dwebgpu=enabled -Dwgpu_native_root="$WGPU_ROOT" )
+            log "WebGPU: enabled (wgpu-native at $WGPU_ROOT)"
+        else
+            WGPU_ROOT=""
+            if [ "$WEBGPU_MODE" = 1 ] || [ "$WEBGPU_MODE" = enabled ] || [ "$WEBGPU_MODE" = on ]; then
+                log "ERROR: NS_WEBGPU=$WEBGPU_MODE but wgpu-native could not be fetched"
+                exit 1
+            fi
+            log "WebGPU: not bundled (wgpu-native unavailable for this platform); building without it"
+        fi ;;
+esac
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
         -Db_ndebug=true --strip -Dqt="${NS_PACK_QT:-auto}" \
-        ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"}
+        ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"} \
+        ${WEBGPU_SETUP_ARGS[@]+"${WEBGPU_SETUP_ARGS[@]}"}
 fi
 meson compile -C "$BUILDDIR" ${NS_BUILD_JOBS:+-j "$NS_BUILD_JOBS"}
 strip --strip-all "$BUILDDIR/src/gtk/nordstjernen"
@@ -85,6 +111,37 @@ cp "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \
    "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen.gif \
    "$STAGE/data/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/nordstjernen.desktop" "$STAGE/data/"
+
+# When WebGPU was built, ship libwgpu_native.so beside the binaries and point
+# their rpath at $ORIGIN so the renderer (and the GTK/Qt shells, which all link
+# the engine) load it from the bundle rather than a system path. WebGPU still
+# stays dormant at runtime until the browser is launched with --enable-webgpu.
+WEBGPU_BUNDLED=0
+if [ -n "$WGPU_ROOT" ] && [ -e "$WGPU_ROOT/lib/libwgpu_native.so" ]; then
+    if command -v patchelf >/dev/null 2>&1; then
+        cp -L "$WGPU_ROOT/lib/libwgpu_native.so" "$STAGE/libwgpu_native.so"
+        chmod 644 "$STAGE/libwgpu_native.so"
+        # wgpu-native ships the cdylib with no SONAME, so meson recorded the
+        # full build-tree path as the binaries' DT_NEEDED — an $ORIGIN rpath
+        # alone would be ignored. Give the bundled copy a plain soname and
+        # rewrite each binary's NEEDED to the bare name so $ORIGIN resolves it.
+        patchelf --set-soname libwgpu_native.so "$STAGE/libwgpu_native.so"
+        for bin in nordstjernen nordstjernen-renderer nordstjernen-qt; do
+            [ -e "$STAGE/$bin" ] || continue
+            cur=$(patchelf --print-needed "$STAGE/$bin" \
+                  | grep -E '(^|/)libwgpu_native\.so$' | head -1)
+            if [ -n "$cur" ] && [ "$cur" != libwgpu_native.so ]; then
+                patchelf --replace-needed "$cur" libwgpu_native.so "$STAGE/$bin"
+            fi
+            patchelf --set-rpath '$ORIGIN' "$STAGE/$bin"
+        done
+        WEBGPU_BUNDLED=1
+        log "WebGPU: bundled libwgpu_native.so (rpath \$ORIGIN)"
+    else
+        log "WebGPU: built but patchelf is missing; not bundling libwgpu_native.so"
+    fi
+fi
+
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/License.md" "$STAGE/"
@@ -110,6 +167,20 @@ needs the Qt 6 libraries:
 else
     QT_REQ_NOTE=''
     QT_RUN_NOTE=''
+fi
+
+if [ "$WEBGPU_BUNDLED" = 1 ]; then
+    WEBGPU_RUN_NOTE='
+### Experimental WebGPU
+
+This build includes experimental WebGPU (`navigator.gpu`) over the bundled
+`libwgpu_native.so` (loaded from beside the binary via an `$ORIGIN` rpath). It
+is **off by default**; start the browser with `--enable-webgpu` to turn it on:
+
+    ./nordstjernen --enable-webgpu https://example.com
+'
+else
+    WEBGPU_RUN_NOTE=''
 fi
 
 cat > "$STAGE/INSTALL.md" <<EOF
@@ -151,7 +222,7 @@ ${QT_REQ_NOTE}
 ## Run
 
     ./nordstjernen https://example.com
-${QT_RUN_NOTE}
+${QT_RUN_NOTE}${WEBGPU_RUN_NOTE}
 
 ## Install on user path
 

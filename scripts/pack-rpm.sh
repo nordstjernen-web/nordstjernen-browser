@@ -44,6 +44,26 @@ cp "$ROOT/data/nordstjernen.desktop" "$RPMTOP/SOURCES/"
 cp "$ROOT/README.md" "$RPMTOP/SOURCES/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$RPMTOP/SOURCES/"
 
+# WebGPU: when pack-linux staged libwgpu_native.so, the binaries link it by its
+# bare soname (DT_NEEDED=libwgpu_native.so), so the RPM must ship it under
+# %{_libdir}/nordstjernen with an $ORIGIN rpath, exclude the auto-Requires on it
+# (it is bundled, not a system package), and rely on rpm's auto-Provides from
+# the bundled copy to satisfy the in-package reference.
+WGPU_SOURCE=""
+WGPU_EXCLUDE=""
+WGPU_INSTALL=""
+WGPU_FILES=""
+if [ -e "$STAGE/libwgpu_native.so" ]; then
+    cp -L "$STAGE/libwgpu_native.so" "$RPMTOP/SOURCES/libwgpu_native.so"
+    WGPU_SOURCE="Source6:        libwgpu_native.so"
+    WGPU_EXCLUDE='%global __requires_exclude ^libwgpu_native\.so.*$'
+    WGPU_INSTALL='install -dm755 %{buildroot}%{_libdir}/nordstjernen
+install -m644 %{SOURCE6} %{buildroot}%{_libdir}/nordstjernen/libwgpu_native.so
+patchelf --set-rpath '\''$ORIGIN/../%{_lib}/nordstjernen'\'' %{buildroot}%{_bindir}/nordstjernen
+patchelf --set-rpath '\''$ORIGIN/../%{_lib}/nordstjernen'\'' %{buildroot}%{_bindir}/nordstjernen-renderer'
+    WGPU_FILES='%{_libdir}/nordstjernen/'
+fi
+
 SPEC="$RPMTOP/SPECS/nordstjernen.spec"
 cat > "$SPEC" <<SPEC_EOF
 Name:           nordstjernen
@@ -61,8 +81,10 @@ Source2:        nordstjernen.desktop
 Source3:        README.md
 Source4:        THIRD-PARTY-LICENSES.md
 Source5:        nordstjernen-renderer
+${WGPU_SOURCE}
 
 AutoReqProv:    yes
+${WGPU_EXCLUDE}
 
 %define debug_package %{nil}
 %global __strip /bin/true
@@ -96,6 +118,7 @@ chmod 644 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/nordstjernen*
 install -m644 %{SOURCE2} %{buildroot}%{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 install -m644 %{SOURCE3} %{buildroot}%{_docdir}/nordstjernen/
 install -m644 %{SOURCE4} %{buildroot}%{_docdir}/nordstjernen/
+${WGPU_INSTALL}
 
 %files
 %{_bindir}/nordstjernen
@@ -103,6 +126,7 @@ install -m644 %{SOURCE4} %{buildroot}%{_docdir}/nordstjernen/
 %{_datadir}/icons/hicolor/scalable/apps/nordstjernen*
 %{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 %{_docdir}/nordstjernen/
+${WGPU_FILES}
 
 %post
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then

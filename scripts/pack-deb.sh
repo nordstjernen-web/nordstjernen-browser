@@ -80,6 +80,15 @@ STRIP_RE='^lib(avif|aom|dav1d|gav1|yuv|sharpyuv|rav1e|svtav1)'
 bundled_any=0
 if command -v patchelf >/dev/null 2>&1; then
     install -dm755 "$BUNDLE_DIR"
+    # WebGPU: the engine links libwgpu_native.so directly (its DT_NEEDED was
+    # rewritten to the bare soname by pack-linux.sh), and it is not a system
+    # package, so a WebGPU-enabled build must carry the copy pack-linux staged
+    # or the binaries won't even start. Bundle it like the codec libs below.
+    if [ -e "$STAGE/libwgpu_native.so" ]; then
+        cp -L "$STAGE/libwgpu_native.so" "$BUNDLE_DIR/libwgpu_native.so"
+        chmod 644 "$BUNDLE_DIR/libwgpu_native.so"
+        patchelf --set-rpath '$ORIGIN' "$BUNDLE_DIR/libwgpu_native.so" 2>/dev/null
+    fi
     # BFS over the dependency closure of the seed codec libs, so every backend
     # libavif pulls in (gav1, aom, dav1d, rav1e, SvtAv1, yuv, sharpyuv, …)
     # is bundled too -- no per-name allow-list to keep in sync.

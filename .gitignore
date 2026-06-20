@@ -34,6 +34,8 @@
 /builddir-wgpu/
 /release-build/
 /build-*/
+# Downloaded wgpu-native release blobs (headers are vendored; the library is fetched)
+/third_party/wgpu-native/dl/
 .ninja_deps
 .ninja_log
 build.ninja

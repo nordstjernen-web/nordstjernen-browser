@@ -34,6 +34,18 @@ Qt 6 base package and `scripts/pack-linux.sh` configures with `-Dqt=auto`, so
 the Qt client is included where Qt 6 is available and silently skipped where it
 is not (set `NS_PACK_QT=disabled` to force it off).
 
+Each glibc Linux artifact (Debian/Ubuntu/openSUSE zip, `.deb`, `.rpm`) also
+ships **experimental WebGPU**: `scripts/pack-linux.sh` fetches the pinned
+wgpu-native release with `scripts/fetch-wgpu-native.sh`, builds the `webgpu`
+feature in, and bundles `libwgpu_native.so` beside the binaries (zip) or under
+`/usr/lib/nordstjernen` (deb/rpm) with an `$ORIGIN` rpath. WebGPU stays dormant
+until the browser is started with `--enable-webgpu`. The Alpine (musl) build
+skips it — wgpu-native ships no musl library — and the Windows/macOS/BSD builds
+are WebGPU-free for now (the `webgpu` feature is `auto`, so it is simply not
+built where wgpu-native is absent). Set `NS_WEBGPU=0` to force a WebGPU-free
+Linux nightly, or `NS_WEBGPU=1` to make a missing wgpu-native fail the build
+instead of degrading.
+
 The Ubuntu stage additionally repacks a dedicated **Qt-frontend** zip
 (`linux/ubuntu/nordstjernen-*-linux-qt-x86_64.zip`, published as the stable
 `nordstjernen-linux-qt-x86_64.zip`): `pack-linux.sh` is re-run with
@@ -270,6 +282,8 @@ to the command (keep the cron file `chmod 600`):
 | `NIGHTLY_UBUNTU_IMAGE` | `ubuntu:24.04` | Override the Ubuntu base image. |
 | `NIGHTLY_OPENSUSE_IMAGE` | `opensuse/tumbleweed` | Override the openSUSE base image. |
 | `NIGHTLY_ALPINE_IMAGE` | `alpine:edge` | Override the Alpine (musl) base image. |
+| `NS_WEBGPU` | `auto` | WebGPU in the Linux builds: `auto` builds it when wgpu-native is fetched, `0` forces it off, `1` makes a missing wgpu-native fatal. Forwarded into the distro containers. |
+| `WGPU_NATIVE_VERSION` | `v29.0.0.0` | wgpu-native release tag fetched for the WebGPU build. Forwarded into the distro containers. |
 
 ## Serving the artifacts
 
