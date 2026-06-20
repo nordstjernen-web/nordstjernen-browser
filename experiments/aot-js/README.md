@@ -17,20 +17,28 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ## Run
 
 ```sh
-./selfcheck.sh                       # soundness: AOT vs interpreter, 55 cases
+./selfcheck.sh                       # soundness: AOT vs interpreter, 82 cases
 ./run.sh                             # performance benchmark table
+./frameworktest.sh                   # real third-party code (SunSpider); needs network
 ./aot-run.sh tests/arith.js arith 6 7   # run one entry, AOT-by-default
 ```
 
 `selfcheck.sh` runs every program both through the pure interpreter and
 through AOT-by-default and asserts identical results (and that the expected
 path — native vs fallback — was taken). `run.sh` reports speedups.
+`frameworktest.sh` exercises the compiler on real SunSpider numeric kernels.
+
+The subset covers arithmetic, comparisons, bitwise/shift (`& | ^ ~ << >>
+>>>`, spec-exact `ToInt32`/`ToUint32`), all loop forms, `?:`, `&&`/`||`, and
+direct/mutual/tail recursion. Anything else (strings, objects, arrays,
+`Math.*`, higher-order calls) falls back to the interpreter.
 
 ## Contents
 
-- `aotc.c` — eligibility analysis + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
+- `aotc.c` — eligibility analysis, call validation + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
 - `aot-run.sh` — AOT-by-default runner with automatic interpreter fallback.
 - `selfcheck.sh` — soundness harness.
+- `frameworktest.sh` — real-world test (SunSpider numeric kernels).
 - `run.sh` — performance benchmark driver.
 - `tests/*.js` — correctness corpus (numeric + must-fall-back programs).
 - `bench/*.js` — performance benchmarks.

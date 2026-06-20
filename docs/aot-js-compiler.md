@@ -25,16 +25,30 @@ JavaScript; everything else runs interpreted, exactly as before.
   not miscompiled.
 - AOT is **enabled by default**: `aot-run` always tries AOT first and
   **falls back to the interpreter automatically** when a program is outside
-  the subset. Results are identical either way.
-- A 55-case self-check (`selfcheck.sh`) compares AOT against the
-  interpreter across arithmetic, short-circuit logic, ternaries, loops,
-  `do/while`, mutual recursion, float math, division-by-zero, negative
-  modulo and fractional powers — **all identical**, and out-of-subset
-  programs (strings, `Math.*`, arrays) correctly fall back.
-- It runs **3.8×–35×** faster than the interpreter on numeric workloads;
+  the subset (or if the generated C fails to compile). Results are identical
+  either way.
+- The subset covers arithmetic, comparisons, `if`/`while`/`for`/`do…while`,
+  `?:`, short-circuit `&&`/`||`, `++`/`--`, logical/bitwise-not, the full
+  **bitwise and shift operators** (`& | ^ << >> >>>`) with spec-exact
+  `ToInt32`/`ToUint32`, and direct/mutual/tail recursion plus calls (with
+  correct under/over-application) among eligible functions.
+- An 82-case self-check (`selfcheck.sh`) compares AOT against the
+  interpreter across all of the above — including bit hashing (FNV),
+  xorshift PRNG, popcount, division-by-zero, negative modulo, fractional
+  powers, and `ToInt32` edge cases — **all identical**; out-of-subset
+  programs (strings, `Math.*`, arrays, higher-order calls) correctly fall
+  back.
+- It is exercised on **real third-party code** (`frameworktest.sh`, the
+  SunSpider numeric kernels): 9 functions AOT-compile and match the
+  interpreter exactly, 17 fall back, **0 mismatches**. This testing found
+  and fixed a real crash (see *Security review*).
+- It runs **1.8×–36×** faster than the interpreter on numeric workloads;
   for `fib(28)` it retires **9.2M** instructions versus the interpreter's
   **1.06 billion**. Callgrind attributes **93%** of interpreter
   instructions to the bytecode dispatch loop alone.
+- The compiler is checked under **ASan + UBSan** across the whole corpus
+  (including real-world code and a 2000-local stress program): **0
+  memory-safety errors**.
 - Crucially, **all codegen happens ahead of time**. The runtime never
   needs writable-executable memory, so the renderer's `seccomp` sandbox can
   keep denying it — unlike every JIT.
@@ -221,16 +235,94 @@ asserts the numeric results are identical *and* that the expected path was
 taken (numeric programs go native; out-of-subset programs fall back). It
 covers arithmetic, short-circuit `&&`/`||`, ternaries, `for`/`while`/
 `do…while`, mutual recursion (`tail_call`), float kernels, logical `!`,
-division by zero (`±Inf`/`NaN`), negative modulo, and fractional powers,
-plus three programs (strings, `Math.*`, arrays) that must fall back.
+bitwise/shift kernels (FNV hash, xorshift PRNG, popcount), division by zero
+(`±Inf`/`NaN`), negative modulo, fractional powers, and JS-name/C-keyword
+collisions (functions called `main`, `pow`, `int`), plus programs that must
+fall back (strings, `Math.*`, arrays, higher-order calls).
 
 ```
-passed: 55   failed: 0
+passed: 82   failed: 0
 ```
 
 Every eligible case matches the interpreter bit-for-bit; every ineligible
 case falls back and still matches. That is the soundness guarantee made
 concrete.
+
+## Testing against real-world code
+
+`experiments/aot-js/frameworktest.sh` runs the compiler against code it did
+not author — the SunSpider numeric kernels (`math-cordic`,
+`math-spectral-norm`, `bitops-*`, `access-nbody`, `controlflow-recursive`,
+…) — which freely mix numeric kernels with arrays, globals, `Date`, and
+higher-order calls. For every top-level function it reports native vs
+fallback, and verifies each AOT-compiled function against the interpreter:
+
+```
+native: 9   fallback: 17   mismatches: 0
+```
+
+The pure-numeric kernels compile and match exactly — Ackermann (`ack`),
+Takeuchi (`tak`), `fib`, the cordic fixed-point helpers, the bit-counting
+loops, and the spectral-norm index function `A(i,j)`. Everything touching
+arrays, globals, `Date`, or function-valued arguments falls back. This is
+the eligibility analysis and fallback validated on real programs rather than
+hand-written tests — and it is how the crash and arity bugs in *Security
+review* were found.
+
+## Security review
+
+`aotc` is a compiler that ingests untrusted JavaScript and emits C that is
+then built, so its own memory safety and the soundness of its accept/decline
+decision are security-relevant. This pass reviewed the source and hardened
+it; the issues found and fixed:
+
+- **Heap buffer overflow.** The per-pc stack-depth scratch was a fixed
+  `malloc(65536)` but indexed by `byte_code_len`, which can exceed it for a
+  large function — an out-of-bounds write on attacker-sized input. Now sized
+  to the actual maximum bytecode length.
+- **Global buffer overflow.** The call-target shadow array was a fixed
+  `[8192]` indexed by operand-stack depth (up to `stack_size`, ~65535). Now
+  allocated per function to the exact depth.
+- **Unsound eligibility fixpoint.** The recursive memoized eligibility check
+  could mark one member of a recursion cycle eligible while it transitively
+  called an *ineligible* function, which would emit a call to an
+  uncompiled/undeclared symbol. Replaced with a monotone greatest-fixpoint
+  (assume all eligible, demote anyone calling an unknown/ineligible callee
+  until stable) — sound for mutual and cyclic recursion.
+- **Silent callee-cap unsoundness.** Callees past a fixed cap were dropped
+  without checking their eligibility. Now exceeding the cap declines the
+  function.
+- **C identifier collisions / injection surface.** JS function names were
+  emitted verbatim as C identifiers, so a function named `main`, `pow`,
+  `int`, … would collide with the harness, libm, or a C keyword and corrupt
+  the generated program. All emitted symbols are now prefixed (`jsfn_…`) and
+  the JS name is validated to be a plain C-identifier run, so no JS name can
+  influence anything but its own mangled symbol.
+- **NULL dereference on higher-order calls.** A function calling a
+  function-valued argument or local (e.g. SunSpider's `TimeFunc(func)`)
+  passed eligibility but dereferenced a NULL call-target slot at emission —
+  a crash on real input. A new `validate_calls` pass proves every call
+  targets a statically-known top-level function during analysis, so
+  higher-order code is declined cleanly; `find_fn` is also NULL-hardened.
+- **One-byte out-of-bounds read.** `JS_AtomToCString` on an anonymous nested
+  function's null name atom returns a pointer one past a heap buffer;
+  reading the first byte was a 1-byte OOB read, triggered by real-world code
+  with anonymous closures (`access-nbody`). Now null-name functions are
+  skipped before conversion.
+- **Arity mismatch → C compile error or wrong result.** Calls with fewer
+  args than the callee's arity could emit a C call with too few arguments
+  (compile error) instead of JavaScript's `undefined`→`NaN`. Call emission
+  is now arity-aware: missing args are passed as `NaN`, extra args dropped,
+  matching the interpreter.
+
+The whole corpus — the self-check programs, the SunSpider sources, and a
+generated 2000-local stress program — was then run through an
+**AddressSanitizer + UndefinedBehaviorSanitizer** build of `aotc` with
+**zero** memory-safety or UB findings.
+
+The structural security property is unchanged and was re-verified: the
+emitted binaries import no `mmap`/`mprotect`/`memfd`, all codegen is
+ahead-of-time, and the runtime never needs writable-executable memory.
 
 ## Performance
 
@@ -240,19 +332,34 @@ parsing on both sides (the hot function is called `reps` times in a warm
 loop, timed with a monotonic clock). Reproduce with
 `experiments/aot-js/run.sh`.
 
-| benchmark | what it stresses              | arg     | reps | interp (ms) | AOT (ms) | speedup |
-|-----------|-------------------------------|---------|------|-------------|----------|---------|
-| `fib`     | recursion, calls, compare     | 32      | 1    | 272.1       | 7.8      | **35.1×** |
-| `sumloop` | tight counted loop            | 1000000 | 50   | 1673.7      | 72.1     | **23.2×** |
-| `collatz` | nested loop, `%` (→ `fmod`)   | 20000   | 5    | 411.6       | 107.0    | **3.8×**  |
-| `mandel`  | float kernel, `&&`, nested    | 300     | 3    | 772.7       | 28.4     | **27.2×** |
+| benchmark  | what it stresses              | arg     | reps | interp (ms) | AOT (ms) | speedup |
+|------------|-------------------------------|---------|------|-------------|----------|---------|
+| `fib`      | recursion, calls, compare     | 32      | 1    | 284.0       | 7.8      | **36.6×** |
+| `sumloop`  | tight counted loop            | 1000000 | 50   | 1709.4      | 72.1     | **23.7×** |
+| `collatz`  | nested loop, `%` (→ `fmod`)   | 20000   | 5    | 406.7       | 105.4    | **3.9×**  |
+| `mandel`   | float kernel, `&&`, nested    | 300     | 3    | 777.6       | 28.4     | **27.4×** |
+| `cordic`   | fixed-point trig, shifts      | 200000  | 3    | 1052.2      | 35.8     | **29.4×** |
+| `popcount` | bit-twiddling, masks/shifts   | 2000000 | 5    | 1043.1      | 392.6    | **2.7×**  |
+| `hash`     | FNV hash (`*`, `^`, `>>>`)    | 2000000 | 3    | 431.6       | 173.1    | **2.5×**  |
+| `prng`     | xorshift (`<<`, `>>>`, `^`)   | 2000000 | 3    | 406.9       | 223.7    | **1.8×**  |
 
-Loop/recursion/float kernels win big (23–35×) because every opcode on the
+Loop/recursion/float kernels win big (24–37×) because every opcode on the
 hot path was pure boxing+dispatch overhead that AOT deletes. `collatz` wins
-least (3.8×) because its inner work is dominated by `%`, which JavaScript
-defines on doubles and which both engines execute as `fmod` — a cost AOT
-cannot remove. That is the honest shape of AOT speedups: they shrink the
-interpreter tax, not the intrinsic cost of the math.
+least of the float set (3.9×) because its inner work is dominated by `%`,
+which JavaScript defines on doubles and both engines execute as `fmod` — a
+cost AOT cannot remove.
+
+The bitwise benchmarks (`popcount`/`hash`/`prng`, 1.8–2.7×) win less because
+the interpreter's bitwise path is already a tight native-integer fast path,
+whereas AOT must apply `ToInt32`/`ToUint32` to a `double` on every operator.
+Profiling the first cut showed those benchmarks *slower* than the
+interpreter — the spec `ToInt32` (a `fmod`/`trunc` round-trip) dominated.
+Adding an in-range fast path (`if (d >= INT32_MIN && d < 2^31) return
+(int32_t)d`) turned `popcount` from 0.8× to 2.7×, `hash` from 0.9× to 2.5×,
+and `prng` from 0.5× to 1.8×. The residual gap is the one remaining
+`ToInt32` range branch per operator; eliminating it would need value-range
+inference (knowing a slot already holds an int32, e.g. after `|0`) — future
+work, not done here.
 
 ### Where the interpreter time goes
 
@@ -296,11 +403,13 @@ small function is ~5 ms, all paid offline.
 ## Scope and limitations
 
 The compiler accelerates the **numeric subset**: functions over `double`,
-the arithmetic/comparison/logical-not operators above, `if`/`while`/`for`/
-`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`, direct/mutual/tail
-recursion, and calls among eligible top-level functions. Everything else —
-strings, objects, arrays, property access, `this`, closures with captured
-mutable state, `Math.*` and other built-ins, bitwise/shift operators,
+the arithmetic/comparison/logical-not operators, the bitwise and shift
+operators (`& | ^ ~ << >> >>>`, with spec-exact `ToInt32`/`ToUint32`),
+`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`,
+direct/mutual/tail recursion, and calls (including under/over-application)
+among eligible top-level functions. Everything else — strings, objects,
+arrays, property access, `this`, closures with captured mutable state,
+`Math.*` and other built-ins, function-valued arguments / higher-order code,
 exceptions, generators, `async`/`await`, `eval`/`Function` — is **declined
 and interpreted**. This is a *capability* boundary, not a correctness one:
 declining is always safe.
@@ -324,27 +433,32 @@ compile code that does not exist until runtime.
 cd experiments/aot-js
 ./selfcheck.sh      # soundness: AOT vs interpreter over the whole corpus
 ./run.sh            # performance: the benchmark table above
+./frameworktest.sh  # real third-party code (SunSpider); needs network
 ./aot-run.sh tests/arith.js arith 6 7   # run one entry, AOT-by-default
 ```
 
 Requirements: a C compiler and `-lm` (plus `valgrind` for the
-instruction-count figures).
+instruction-count figures, and network access for `frameworktest.sh`). To
+re-run the sanitizer check, build `aotc.c` with
+`-fsanitize=address,undefined` and run it over the corpus.
 
 ## Files
 
-- `experiments/aot-js/aotc.c` — the eligibility analysis and bytecode→C lowering.
+- `experiments/aot-js/aotc.c` — eligibility analysis, call validation, and bytecode→C lowering.
 - `experiments/aot-js/aot-run.sh` — AOT-by-default runner with interpreter fallback.
 - `experiments/aot-js/selfcheck.sh` — soundness harness (AOT vs interpreter).
+- `experiments/aot-js/frameworktest.sh` — real-world test (SunSpider numeric kernels).
 - `experiments/aot-js/run.sh` — performance benchmark driver.
 - `experiments/aot-js/tests/*.js`, `bench/*.js` — corpus and benchmarks.
 
 ## Conclusion
 
 A few hundred lines, built on QuickJS's existing front end, turn hot
-numeric JavaScript into native code that runs 4–35× faster than the
-interpreter — soundly (proven-equivalent or declined), and with **all**
-codegen done ahead of time. For a browser whose renderer is locked down
-with `seccomp` and W^X, that last property is the point: AOT captures a
-large slice of JIT-class speedup without ever asking the sandbox for the
-executable-memory privilege that makes JITs such a rich source of
-exploitable bugs.
+numeric JavaScript into native code that runs 2–37× faster than the
+interpreter — soundly (proven-equivalent or declined), hardened against its
+own untrusted input (clean under ASan/UBSan, validated on real third-party
+code), and with **all** codegen done ahead of time. For a browser whose
+renderer is locked down with `seccomp` and W^X, that last property is the
+point: AOT captures a large slice of JIT-class speedup without ever asking
+the sandbox for the executable-memory privilege that makes JITs such a rich
+source of exploitable bugs.

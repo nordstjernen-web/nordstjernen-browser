@@ -32,10 +32,18 @@ dowhile:dowhile:native:1|5|20|100
 mutual:mutual:native:0|1|7|20|21
 floatmath:floatmath:native:5|50|200|1
 notop:notop:native:0|1|2|-3
+bitops:bitops:native:-5 19|0 0|255 3|-1 31|123456 7
+hash:hash:native:1|100|10000|100000
+prng:prng:native:1|1000|100000
+collide:main:native:3|7|10
 fib:fib:native:5|10|20|25
 sumloop:sumloop:native:10|1000|100000
 collatz:collatz:native:2|100|2000
 mandel:mandel:native:8|32|64
+popcount:popcount:native:1|256|100000
+cordic:cordic:native:1|1000|50000
+higherorder:square:native:3|7|-4
+higherorder:applyloop:native:5|100|1000
 strings:strings:interpreter:0|3|10
 mathlib:mathlib:interpreter:4|9|16|2
 array:array:interpreter:0|5|50
@@ -50,7 +58,7 @@ norm() { printf '%s' "$1" | sed 's/^-nan$/nan/'; }
 CASEFILE=$(mktemp)
 printf '%s\n' "$CASES" | grep . > "$CASEFILE"
 
-while IFS= read -r line; do
+while IFS= read -r line <&3; do
   name=${line%%:*}; rest=${line#*:}
   entry=${rest%%:*}; rest=${rest#*:}
   expect=${rest%%:*}; argsets=${rest#*:}
@@ -74,7 +82,7 @@ while IFS= read -r line; do
     printf "%-14s %-10s %-22s %-22s %-8s %s\n" "$name" "$args" "$ref" "$aot" "$path" "$ok"
   done
   IFS=$OLDIFS
-done < "$CASEFILE"
+done 3< "$CASEFILE"
 rm -f "$CASEFILE"
 
 echo

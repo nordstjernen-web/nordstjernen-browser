@@ -14,13 +14,15 @@
 #define MAX_FNS 256
 #define DECLINE 10
 
+#define MAX_CALLEES 256
+
 typedef struct {
     JSFunctionBytecode *b;
     const char *name;
+    char *mangled;
     int local_ok;
     int eligible;
-    int visiting;
-    const char *callees[64];
+    const char *callees[MAX_CALLEES];
     int n_callees;
 } Fn;
 
@@ -36,9 +38,28 @@ static JSFunctionBytecode *get_fb(JSValue v) {
 }
 
 static int find_fn(const char *name) {
+    if (!name) return -1;
     for (int i = 0; i < g_nfns; i++)
         if (strcmp(g_fns[i].name, name) == 0) return i;
     return -1;
+}
+
+static const char *mangled_of(const char *name) {
+    int i = find_fn(name);
+    return i >= 0 ? g_fns[i].mangled : NULL;
+}
+
+/* A JS name is usable only if it is a non-empty run of C-identifier
+   characters; anything else (Unicode, '$', empty) is declined. The emitted
+   symbol is always prefixed, so it can never collide with a C keyword, a
+   libc/libm symbol, or our own helpers regardless of the JS name. */
+static int valid_js_name(const char *name) {
+    if (!name || !name[0]) return 0;
+    for (const char *c = name; *c; c++)
+        if (!((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') ||
+              (*c >= '0' && *c <= '9') || *c == '_'))
+            return 0;
+    return 1;
 }
 
 static const char *resolve_atom_fn(JSAtom atom) {
@@ -78,12 +99,15 @@ static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
     case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
     case OP_set_loc8: case OP_set_loc:
     case OP_inc: case OP_dec: case OP_neg: case OP_plus: case OP_lnot:
+    case OP_not:
         np = 1; ns = 1; break;
     case OP_dup: case OP_post_inc: case OP_post_dec:
         np = 1; ns = 2; break;
     case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod:
     case OP_pow: case OP_lt: case OP_lte: case OP_gt: case OP_gte:
     case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq:
+    case OP_and: case OP_or: case OP_xor:
+    case OP_shl: case OP_shr: case OP_sar:
         np = 2; ns = 1; break;
     case OP_goto: case OP_goto8: case OP_goto16:
     case OP_nop: case OP_set_loc_uninitialized:
@@ -163,69 +187,139 @@ static int compute_sp(JSFunctionBytecode *b, int *sp_before) {
     return 1;
 }
 
+/* Every call must target a statically-known top-level function. The only
+   ops that put a function value on the stack are get_var / get_var_ref* (and
+   dup propagating one); a call whose function slot was produced any other
+   way — e.g. a function-valued argument or local (higher-order code) — is
+   not in the numeric subset and is rejected here, before it can reach the
+   emitter. Markers are produced and consumed within a basic block, so they
+   are cleared conservatively at every branch target. */
+static int validate_calls(JSFunctionBytecode *b, int *sp_before) {
+    const uint8_t *code = b->byte_code_buf;
+    int len = b->byte_code_len, maxstack = b->stack_size + 4;
+    char *isfn = calloc(maxstack > 0 ? maxstack : 1, 1);
+    char *islabel = calloc(len + 1, 1);
+    for (int pos = 0; pos < len; )  {
+        int u, t = branch_target(code, pos, &u);
+        if (t >= 0 && t <= len) islabel[t] = 1;
+        pos += short_opcode_info(code[pos]).size;
+    }
+    int ok = 1, pos = 0;
+    while (pos < len && ok) {
+        if (islabel[pos]) for (int i = 0; i < maxstack; i++) isfn[i] = 0;
+        int op = code[pos], p = pos + 1, sp = sp_before[pos];
+        int pop, push;
+        op_delta(code, pos, &pop, &push);
+        if (sp < 0) { pos += short_opcode_info(op).size; continue; }
+        if (op == OP_get_var) {
+            if (sp < maxstack) isfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p)) != NULL;
+        } else if (op == OP_get_var_ref || op == OP_get_var_ref_check) {
+            if (sp < maxstack) isfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name) != NULL;
+        } else if (op >= OP_get_var_ref0 && op <= OP_get_var_ref3) {
+            if (sp < maxstack) isfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name) != NULL;
+        } else if (op == OP_dup) {
+            if (sp < maxstack && sp - 1 >= 0) isfn[sp] = isfn[sp - 1];
+        } else if (op == OP_call0 || op == OP_call1 || op == OP_call2 ||
+                   op == OP_call3 || op == OP_call || op == OP_tail_call) {
+            int argc = (op == OP_call || op == OP_tail_call) ? get_u16(code + p) : (op - OP_call0);
+            int fnslot = sp - 1 - argc;
+            if (fnslot < 0 || fnslot >= maxstack || !isfn[fnslot]) ok = 0;
+            else isfn[fnslot] = 0;
+        } else {
+            int base = sp - pop;
+            for (int i = base; i < base + push && i < maxstack; i++)
+                if (i >= 0) isfn[i] = 0;
+        }
+        pos += short_opcode_info(op).size;
+    }
+    free(isfn);
+    free(islabel);
+    return ok;
+}
+
 /* A function passes the local check if every opcode is supported, every
    constant it pushes is numeric, every variable/closure reference it reads
    names a known top-level function (the only non-numeric value the subset
    allows, and only as a call target), and its stack depth is consistent. */
+static int add_callee(Fn *fn, const char *name) {
+    if (!name) return 0;
+    for (int i = 0; i < fn->n_callees; i++)
+        if (fn->callees[i] == name) return 1;
+    if (fn->n_callees >= MAX_CALLEES) return 0;
+    fn->callees[fn->n_callees++] = name;
+    return 1;
+}
+
 static int local_check(Fn *fn, int *sp_scratch) {
     JSFunctionBytecode *b = fn->b;
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len, pos = 0;
     fn->n_callees = 0;
 
+    if (!valid_js_name(fn->name)) return 0;
+
     while (pos < len) {
         int op = code[pos], p = pos + 1, pop, push;
         if (!op_delta(code, pos, &pop, &push)) return 0;
         if (op == OP_push_const8 || op == OP_push_const) {
             int idx = (op == OP_push_const8) ? get_u8(code + p) : get_u32(code + p);
+            if (idx < 0 || idx >= b->cpool_count) return 0;
             JSValue v = b->cpool[idx];
             int tag = JS_VALUE_GET_TAG(v);
             if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64(tag)) return 0;
         } else if (op == OP_get_var) {
-            const char *fnm = resolve_atom_fn((JSAtom)get_u32(code + p));
-            if (!fnm) return 0;
-            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
+            if (!add_callee(fn, resolve_atom_fn((JSAtom)get_u32(code + p)))) return 0;
         } else if (op == OP_get_var_ref || op == OP_get_var_ref_check) {
-            const char *fnm = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name);
-            if (!fnm) return 0;
-            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
+            int idx = get_u16(code + p);
+            if (idx < 0 || idx >= b->closure_var_count) return 0;
+            if (!add_callee(fn, resolve_atom_fn(b->closure_var[idx].var_name))) return 0;
         } else if (op >= OP_get_var_ref0 && op <= OP_get_var_ref3) {
-            const char *fnm = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name);
-            if (!fnm) return 0;
-            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
+            int idx = op - OP_get_var_ref0;
+            if (idx >= b->closure_var_count) return 0;
+            if (!add_callee(fn, resolve_atom_fn(b->closure_var[idx].var_name))) return 0;
         }
         pos += short_opcode_info(op).size;
     }
-    return compute_sp(b, sp_scratch);
+    if (!compute_sp(b, sp_scratch)) return 0;
+    return validate_calls(b, sp_scratch);
 }
 
-static int compute_eligible(int idx) {
-    Fn *fn = &g_fns[idx];
-    if (fn->eligible >= 0) return fn->eligible;
-    if (fn->visiting) return 1; /* recursion: assume ok, resolved by fixpoint */
-    if (!fn->local_ok) return (fn->eligible = 0);
-    fn->visiting = 1;
-    int ok = 1;
-    for (int i = 0; i < fn->n_callees; i++) {
-        int ci = find_fn(fn->callees[i]);
-        if (ci < 0) { ok = 0; break; }
-        if (!compute_eligible(ci)) { ok = 0; break; }
+/* Greatest fixpoint: assume every locally-OK function is eligible, then
+   repeatedly demote any function that calls an unknown or ineligible one
+   until nothing changes. This is sound for mutual/cyclic recursion — a
+   cycle survives only if every member and every external callee survives. */
+static void compute_eligible_all(void) {
+    for (int i = 0; i < g_nfns; i++)
+        g_fns[i].eligible = g_fns[i].local_ok ? 1 : 0;
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (int i = 0; i < g_nfns; i++) {
+            if (!g_fns[i].eligible) continue;
+            for (int j = 0; j < g_fns[i].n_callees; j++) {
+                int ci = find_fn(g_fns[i].callees[j]);
+                if (ci < 0 || !g_fns[ci].eligible) {
+                    g_fns[i].eligible = 0;
+                    changed = 1;
+                    break;
+                }
+            }
+        }
     }
-    fn->visiting = 0;
-    return (fn->eligible = ok);
 }
 
 /* ---- emission --------------------------------------------------------- */
 
-static const char *g_slotfn[8192];
+static const char **g_slotfn;
 
 static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     JSFunctionBytecode *b = fn->b;
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len;
     int maxstack = b->stack_size + 4;
+    g_slotfn = calloc(maxstack, sizeof(*g_slotfn));
 
-    fprintf(o, "static double %s(", fn->name);
+    fprintf(o, "static double %s(", fn->mangled);
     for (int i = 0; i < b->arg_count; i++)
         fprintf(o, "%sdouble a%d", i ? ", " : "", i);
     if (b->arg_count == 0) fprintf(o, "void");
@@ -234,7 +328,6 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         fprintf(o, "  double loc%d = 0;\n", i);
     for (int i = 0; i < maxstack; i++)
         fprintf(o, "  double s%d = 0; (void)s%d;\n", i, i);
-    for (int i = 0; i < maxstack; i++) g_slotfn[i] = NULL;
 
     /* mark branch targets */
     char *islabel = calloc(len + 1, 1);
@@ -305,6 +398,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         case OP_neg: fprintf(o, "  s%d = -s%d;\n", sp - 1, sp - 1); break;
         case OP_plus: break;
         case OP_lnot: fprintf(o, "  s%d = (s%d == 0);\n", sp - 1, sp - 1); break;
+        case OP_not: fprintf(o, "  s%d = (double)(~js_to_int32(s%d));\n", sp - 1, sp - 1); break;
         case OP_add: fprintf(o, "  s%d = s%d + s%d;\n", sp - 2, sp - 2, sp - 1); break;
         case OP_sub: fprintf(o, "  s%d = s%d - s%d;\n", sp - 2, sp - 2, sp - 1); break;
         case OP_mul: fprintf(o, "  s%d = s%d * s%d;\n", sp - 2, sp - 2, sp - 1); break;
@@ -319,6 +413,18 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             fprintf(o, "  s%d = (s%d == s%d);\n", sp - 2, sp - 2, sp - 1); break;
         case OP_neq: case OP_strict_neq:
             fprintf(o, "  s%d = (s%d != s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_and:
+            fprintf(o, "  s%d = (double)(js_to_int32(s%d) & js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_or:
+            fprintf(o, "  s%d = (double)(js_to_int32(s%d) | js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_xor:
+            fprintf(o, "  s%d = (double)(js_to_int32(s%d) ^ js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_shl:
+            fprintf(o, "  s%d = (double)(int32_t)(js_to_uint32(s%d) << (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_sar:
+            fprintf(o, "  s%d = (double)(js_to_int32(s%d) >> (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_shr:
+            fprintf(o, "  s%d = (double)(js_to_uint32(s%d) >> (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
         case OP_if_false: case OP_if_false8: {
             int u, t = branch_target(code, pos, &u);
             fprintf(o, "  if (!(s%d)) goto L%d;\n", sp - 1, t); break;
@@ -336,20 +442,27 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             int argc = (op == OP_call || op == OP_tail_call)
                        ? get_u16(code + p) : (op - OP_call0);
             int fnslot = sp - 1 - argc;
-            const char *callee = g_slotfn[fnslot];
-            if (!callee) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); exit(DECLINE); }
+            int ci = (fnslot >= 0) ? find_fn(g_slotfn[fnslot]) : -1;
+            if (ci < 0) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); free(g_slotfn); exit(DECLINE); }
+            const char *callee = g_fns[ci].mangled;
+            int arity = g_fns[ci].b->arg_count;
+            size_t cap = 64 + (size_t)arity * 24;
+            char *rhs = malloc(cap);
+            int off = snprintf(rhs, cap, "%s(", callee);
+            for (int i = 0; i < arity; i++) {
+                if (i < argc)
+                    off += snprintf(rhs + off, cap - off, "%ss%d", i ? ", " : "", fnslot + 1 + i);
+                else
+                    off += snprintf(rhs + off, cap - off, "%s(0.0/0.0)", i ? ", " : "");
+            }
+            snprintf(rhs + off, cap - off, ")");
             if (op == OP_tail_call) {
-                fprintf(o, "  return %s(", callee);
-                for (int i = 0; i < argc; i++)
-                    fprintf(o, "%ss%d", i ? ", " : "", fnslot + 1 + i);
-                fprintf(o, ");\n");
+                fprintf(o, "  return %s;\n", rhs);
             } else {
-                fprintf(o, "  s%d = %s(", fnslot, callee);
-                for (int i = 0; i < argc; i++)
-                    fprintf(o, "%ss%d", i ? ", " : "", fnslot + 1 + i);
-                fprintf(o, ");\n");
+                fprintf(o, "  s%d = %s;\n", fnslot, rhs);
                 g_slotfn[fnslot] = NULL;
             }
+            free(rhs);
             break;
         }
         case OP_get_var: {
@@ -363,12 +476,13 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         case OP_return: fprintf(o, "  return s%d;\n", sp - 1); break;
         case OP_return_undef: fprintf(o, "  return 0;\n"); break;
         case OP_nop: case OP_set_loc_uninitialized: break;
-        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); exit(DECLINE);
+        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); exit(DECLINE);
         }
         pos += short_opcode_info(op).size;
     }
     fprintf(o, "  return 0;\n}\n\n");
     free(islabel);
+    free(g_slotfn);
 }
 
 int main(int argc, char **argv) {
@@ -404,10 +518,15 @@ int main(int argc, char **argv) {
     for (int i = 0; i < bt->cpool_count && g_nfns < MAX_FNS; i++) {
         JSFunctionBytecode *fb = get_fb(bt->cpool[i]);
         if (!fb) continue;
+        if (fb->func_name == JS_ATOM_NULL) continue;
         const char *nm = JS_AtomToCString(g_ctx, fb->func_name);
-        if (!nm || !nm[0]) continue;
+        if (!nm) continue;
+        if (!nm[0]) { JS_FreeCString(g_ctx, nm); continue; }
+        char *mn = malloc(strlen(nm) + 8);
+        sprintf(mn, "jsfn_%s", nm);
         g_fns[g_nfns].b = fb;
         g_fns[g_nfns].name = strdup(nm);
+        g_fns[g_nfns].mangled = mn;
         g_fns[g_nfns].eligible = -1;
         g_nfns++;
         JS_FreeCString(g_ctx, nm);
@@ -415,11 +534,13 @@ int main(int argc, char **argv) {
     if (g_nfns == 0) { fprintf(stderr, "aotc: no functions\n"); return DECLINE; }
     if (!entry) entry = g_fns[0].name;
 
-    int *sp = malloc(sizeof(int) * (65536));
+    long maxlen = 1;
+    for (int i = 0; i < g_nfns; i++)
+        if (g_fns[i].b->byte_code_len > maxlen) maxlen = g_fns[i].b->byte_code_len;
+    int *sp = malloc(sizeof(int) * (maxlen + 1));
     for (int i = 0; i < g_nfns; i++)
         g_fns[i].local_ok = local_check(&g_fns[i], sp);
-    for (int i = 0; i < g_nfns; i++)
-        compute_eligible(i);
+    compute_eligible_all();
 
     int ei = find_fn(entry);
     if (ei < 0) { fprintf(stderr, "aotc: no entry '%s'\n", entry); return 1; }
@@ -430,10 +551,23 @@ int main(int argc, char **argv) {
 
     FILE *o = fopen(out, "w");
     fprintf(o, "/* generated by aotc — ahead-of-time JS->C (numeric) */\n");
-    fprintf(o, "#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n#include <time.h>\n\n");
+    fprintf(o, "#include <stdio.h>\n#include <stdlib.h>\n#include <stdint.h>\n"
+               "#include <math.h>\n#include <time.h>\n\n");
+    fprintf(o,
+        "static int32_t js_to_int32(double d) {\n"
+        "  if (d >= -2147483648.0 && d < 2147483648.0) return (int32_t)d;\n"
+        "  if (!isfinite(d)) return 0;\n"
+        "  double m = fmod(trunc(d), 4294967296.0);\n"
+        "  if (m < 0) m += 4294967296.0;\n"
+        "  return (int32_t)(uint32_t)m;\n"
+        "}\n"
+        "static uint32_t js_to_uint32(double d) {\n"
+        "  if (d >= 0.0 && d < 4294967296.0) return (uint32_t)d;\n"
+        "  return (uint32_t)js_to_int32(d);\n"
+        "}\n\n");
     for (int i = 0; i < g_nfns; i++) {
         if (!g_fns[i].eligible) continue;
-        fprintf(o, "static double %s(", g_fns[i].name);
+        fprintf(o, "static double %s(", g_fns[i].mangled);
         int ac = g_fns[i].b->arg_count;
         for (int j = 0; j < ac; j++) fprintf(o, "%sdouble", j ? ", " : "");
         if (ac == 0) fprintf(o, "void");
@@ -453,7 +587,7 @@ int main(int argc, char **argv) {
     fprintf(o, "  long reps = (argc > %d) ? atol(argv[%d]) : 1;\n", eac + 1, eac + 1);
     fprintf(o, "  struct timespec t0, t1;\n");
     fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t0);\n");
-    fprintf(o, "  for (long k = 0; k < reps; k++) r = %s(", entry);
+    fprintf(o, "  for (long k = 0; k < reps; k++) r = %s(", g_fns[ei].mangled);
     for (int i = 0; i < eac; i++) fprintf(o, "%sa%d", i ? ", " : "", i);
     fprintf(o, ");\n");
     fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t1);\n");

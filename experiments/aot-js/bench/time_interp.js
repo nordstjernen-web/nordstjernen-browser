@@ -14,5 +14,5 @@ const t0 = os.now();
 let r = 0;
 for (let k = 0; k < reps; k++) r = f(arg);
 const t1 = os.now();
-print(r);
+std.out.printf("%.17g\n", r);
 std.err.printf("ms=%.3f\n", (t1 - t0) / 1000);

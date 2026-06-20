@@ -20,7 +20,8 @@ echo ">> building aotc"
     -o "$OUT/aotc" -lm -lpthread -ldl )
 
 # name  arg  reps
-BENCHES="fib:32:1 sumloop:1000000:50 collatz:20000:5 mandel:300:3"
+BENCHES="fib:32:1 sumloop:1000000:50 collatz:20000:5 mandel:300:3 \
+         popcount:2000000:5 cordic:200000:3 hash:2000000:3 prng:2000000:3"
 
 printf "\n%-10s %-9s %-7s %14s %14s %9s %12s\n" \
   bench arg reps "interp(ms)" "aot(ms)" "speedup" "result"
@@ -29,6 +30,7 @@ printf -- "---------------------------------------------------------------------
 for spec in $BENCHES; do
   name=${spec%%:*}; rest=${spec#*:}; arg=${rest%%:*}; reps=${rest##*:}
   js="$HERE/bench/$name.js"
+  [ -f "$js" ] || js="$HERE/tests/$name.js"
 
   "$OUT/aotc" "$js" "$OUT/$name.c" "$name" >/dev/null 2>&1
   cc -O2 "$OUT/$name.c" -o "$OUT/$name" -lm
