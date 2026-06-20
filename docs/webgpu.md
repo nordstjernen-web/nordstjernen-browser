@@ -1,20 +1,25 @@
-# WebGPU (experimental, opt-in)
+# WebGPU (experimental)
 
-Nordstjernen has an **experimental, off-by-default** WebGPU
-(`navigator.gpu`) implementation. Unlike WebGL — which is in the standard
-build and mapped onto the in-tree GLES path — WebGPU is layered on the
-external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library and is
-**not part of the default build**. It exists for experimentation and is kept
-strictly behind a build flag and a runtime gate because wgpu-native is a
+Nordstjernen has an **experimental** WebGPU (`navigator.gpu`)
+implementation. Unlike WebGL — which is in the standard build and mapped
+onto the in-tree GLES path — WebGPU is layered on the external
+[wgpu-native](https://github.com/gfx-rs/wgpu-native) library. It exists for
+experimentation and is kept behind a runtime gate because wgpu-native is a
 large dependency that does not fit the minimalism of the rest of the engine.
 
-With the feature disabled (the default), the engine contains **no** WebGPU
-symbol, code, or dependency: `navigator.gpu` is simply `undefined`.
+The `webgpu` meson feature is `auto`: the binding is **compiled in whenever
+wgpu-native is present** and silently skipped when it is not. So a stock
+build on a machine without wgpu-native contains **no** WebGPU symbol, code,
+or dependency — `navigator.gpu` is simply `undefined`, exactly as before —
+while a machine that has wgpu-native gets a WebGPU-capable binary without
+needing to pass any extra build flag. Even then the API stays **off at
+runtime** until the browser is started with `--enable-webgpu`.
 
 ## Building with WebGPU
 
-WebGPU is gated by the `webgpu` meson feature, which is `disabled` by
-default. Enabling it requires the wgpu-native library and headers.
+WebGPU is gated by the `webgpu` meson feature (`auto` by default). Building
+it requires the wgpu-native library and headers; once those are reachable,
+the default `auto` setting picks them up automatically.
 
 1. Get a wgpu-native release for your platform from
    <https://github.com/gfx-rs/wgpu-native/releases> and extract it. A
@@ -24,15 +29,18 @@ default. Enabling it requires the wgpu-native library and headers.
    release — currently **v29.0.0.0**); only the library is fetched
    externally.
 
-2. Configure with the feature enabled, pointing at the extracted release:
+2. Configure pointing at the extracted release:
 
    ```sh
-   meson setup builddir -Dwebgpu=enabled -Dwgpu_native_root=/path/to/wgpu-native-release
+   meson setup builddir -Dwgpu_native_root=/path/to/wgpu-native-release
    meson compile -C builddir
    ```
 
-   If your distribution ships a `wgpu_native` pkg-config file, meson finds
-   the library automatically and `-Dwgpu_native_root` is unnecessary.
+   If your distribution ships a `wgpu_native` pkg-config file, `auto` finds
+   the library automatically and `-Dwgpu_native_root` is unnecessary. Pass
+   `-Dwebgpu=enabled` to make a missing wgpu-native a hard configure error
+   (useful in CI), or `-Dwebgpu=disabled` to force the binding out even when
+   the library is installed.
 
    At runtime the shared library must be on the loader path (e.g.
    `LD_LIBRARY_PATH=/path/to/release/lib`) unless it is installed
@@ -45,11 +53,20 @@ and rebuild.
 
 ## Runtime gating
 
-Even in a WebGPU-enabled build, the API is **denied by default**.
-`navigator.gpu.requestAdapter()` resolves to `null` unless the environment
-variable `NS_WEBGPU_ALLOW=1` is set. This mirrors the opt-in posture of
-WebGL (off until trusted) and keeps the large native GPU stack dormant
-unless explicitly requested.
+Even in a build that contains WebGPU, the API is **denied by default**.
+`navigator.gpu.requestAdapter()` resolves to `null` unless WebGPU is
+explicitly enabled, by either:
+
+- starting the browser with the **`--enable-webgpu`** command-line flag, or
+- setting the environment variable **`NS_WEBGPU_ALLOW=1`** (what the flag
+  does internally).
+
+The shell sets the variable before the sandboxed renderer is spawned, so the
+renderer — where the page's JS and `src/webgpu.c` actually run — inherits the
+permission. On a build without WebGPU, `--enable-webgpu` prints a one-line
+notice and is otherwise ignored. This mirrors the opt-in posture of WebGL
+(off until trusted) and keeps the large native GPU stack dormant unless
+explicitly requested.
 
 ## Implemented surface
 
@@ -160,7 +177,7 @@ above. This document and feature-detection reflect exactly what runs.
 ## Quick check
 
 ```sh
-LD_LIBRARY_PATH=/path/to/release/lib NS_WEBGPU_ALLOW=1 \
-  ./builddir/src/gtk/nordstjernen --headless --dump=none \
+LD_LIBRARY_PATH=/path/to/release/lib \
+  ./builddir/src/gtk/nordstjernen --headless --dump=none --enable-webgpu \
   --eval='navigator.gpu.requestAdapter().then(a=>a.info.device)' about:blank
 ```

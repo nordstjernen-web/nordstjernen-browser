@@ -35,13 +35,14 @@ WebGL is the standard exception to the no-GPU-APIs stance: a minimalist,
 opt-in WebGL 1 / 2 implementation mapped directly onto OpenGL ES, off by
 default and gated by a per-site trust prompt (see `docs/webgl.md`).
 
-WebGPU (`navigator.gpu`) is an **experimental, off-by-default** feature
-layered on the external [wgpu-native](https://github.com/gfx-rs/wgpu-native)
-library, built only with `-Dwebgpu=enabled` and gated at runtime by
-`NS_WEBGPU_ALLOW` (see `docs/webgpu.md`). It is deliberately kept out of the
-standard build: wgpu-native is a large dependency that does not fit the
-minimalism the rest of the engine is built around, so it stays strictly
-opt-in.
+WebGPU (`navigator.gpu`) is an **experimental** feature layered on the
+external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library. The
+`webgpu` build feature is `auto`: it is compiled in whenever wgpu-native is
+present and skipped otherwise, so a machine without the library still gets a
+WebGPU-free binary. At runtime it stays off until the browser is started with
+`--enable-webgpu` (equivalently `NS_WEBGPU_ALLOW=1`); see `docs/webgpu.md`.
+wgpu-native is a large dependency that does not fit the minimalism the rest of
+the engine is built around, so it is never made a hard or default dependency.
 
 ## Current state
 

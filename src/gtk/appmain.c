@@ -465,6 +465,17 @@ main(int argc, char **argv)
 
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
 
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0(argv[i], "--enable-webgpu") == 0) {
+#ifdef ND_HAVE_WEBGPU
+            g_setenv("NS_WEBGPU_ALLOW", "1", TRUE);
+#else
+            g_printerr("nordstjernen: --enable-webgpu ignored "
+                       "(built without WebGPU support)\n");
+#endif
+        }
+    }
+
     /* The GUI shell is supervised: a normal launch becomes a tiny watchdog
      * that spawns the real (thin, engine-free) shell as a child and restarts
      * it on crash or hang. The supervisor inits no network, sandbox, or UI;

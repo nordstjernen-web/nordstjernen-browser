@@ -258,7 +258,7 @@ validation.
 | `slot` / shadow projection | 🟡 | `attachShadow` + slot assignment (bounded) |
 | `canvas` 2D context | ✅ | full Cairo-backed `CanvasRenderingContext2D` (paths, text, `drawImage`, gradients/patterns, `get/putImageData`, compositing, shadows) |
 | `canvas` WebGL / WebGL2 context | 🟡 | opt-in, per-site: `getContext("webgl"/"webgl2")` maps a pragmatic WebGL 1 / 2 core directly onto OpenGL ES via GTK's `GdkGLContext` + libepoxy (`src/webgl.c`). Off by default; the first use on an origin prompts the user to enable WebGL and trust the site. No extensions; data-transfer entry points are bounds-checked and zero-initialised. See [`docs/webgl.md`](webgl.md) |
-| `canvas` WebGPU context | 🟡 | experimental, off by default. In the `-Dwebgpu=enabled` build over wgpu-native (gated by `NS_WEBGPU_ALLOW`), `navigator.gpu` + `getContext("webgpu")` cover most of the **render and compute** path: WGSL shaders (naga), bind groups / uniforms / samplers / textures (incl. `copyExternalImageToTexture`), render & depth pipelines, MSAA, **compute pipelines** + storage buffers, and texture-to-canvas output — enough that **three.js's `WebGPURenderer` renders on it**, including GPU-compute examples (`webgpu_compute_birds`). Real timestamp queries, storage textures, and some PBR feature paths remain. See [`docs/webgpu.md`](webgpu.md) |
+| `canvas` WebGPU context | 🟡 | experimental, off at runtime by default. Built whenever wgpu-native is present (the `webgpu` feature is `auto`) and enabled at runtime with `--enable-webgpu` (or `NS_WEBGPU_ALLOW=1`); `navigator.gpu` + `getContext("webgpu")` cover most of the **render and compute** path: WGSL shaders (naga), bind groups / uniforms / samplers / textures (incl. `copyExternalImageToTexture`), render & depth pipelines, MSAA, **compute pipelines** + storage buffers, and texture-to-canvas output — enough that **three.js's `WebGPURenderer` renders on it**, including GPU-compute examples (`webgpu_compute_birds`). Real timestamp queries, storage textures, and some PBR feature paths remain. See [`docs/webgpu.md`](webgpu.md) |
 | `OffscreenCanvas` | 🟡 | constructs; no worker thread |
 
 ## §4.13 Custom elements
@@ -651,9 +651,10 @@ These are project non-goals (see `CLAUDE.md` / `README.md`), not
 defects, and will not be added:
 
 - AI-style web APIs. (WebGL is supported opt-in per site; see §4.12 and
-  [`docs/webgl.md`](webgl.md). **WebGPU** is an experimental, off-by-default
-  build option over wgpu-native — `navigator.gpu` only, no canvas context
-  yet; see [`docs/webgpu.md`](webgpu.md).)
+  [`docs/webgl.md`](webgl.md). **WebGPU** is experimental: built over
+  wgpu-native whenever that library is present and enabled at runtime with
+  `--enable-webgpu`; `navigator.gpu` plus a working `getContext("webgpu")`
+  render/compute path — see [`docs/webgpu.md`](webgpu.md).)
 - Shared Workers and Worklets. (Service Worker `FetchEvent` interception
   of page `fetch()` **is** supported — see §10/§11; what remains is routing
   the C engine's navigations/subresources through the worker.)

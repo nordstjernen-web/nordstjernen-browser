@@ -20,15 +20,21 @@ nothing imported.
   functional once a site is trusted. The `WebGLRenderingContext` /
   `WebGL2RenderingContext` interface objects also carry the GL enum
   constants so feature code resolves them without a live context.
-- **WebGPU** (`navigator.gpu`) is an **experimental, opt-in, off-by-default**
-  feature, not part of the standard build. It layers `src/webgpu.c` over the
-  external [wgpu-native](https://github.com/gfx-rs/wgpu-native) library, built
-  only with `-Dwebgpu=enabled` (which requires the wgpu-native library; the
+- **WebGPU** (`navigator.gpu`) is an **experimental** feature that layers
+  `src/webgpu.c` over the external
+  [wgpu-native](https://github.com/gfx-rs/wgpu-native) library (the
   `webgpu.h`/`wgpu.h` headers are vendored in-tree under
-  `third_party/wgpu-native/`). With the feature disabled — the default —
-  the engine carries **no** WebGPU symbol or dependency. At runtime it is
-  additionally gated off unless `NS_WEBGPU_ALLOW=1`. wgpu-native is a large
-  dependency and deliberately stays behind the flag. See `docs/webgpu.md`.
+  `third_party/wgpu-native/`). The `webgpu` meson feature is `auto`: it is
+  built whenever wgpu-native is present (its pkg-config file, or
+  `-Dwgpu_native_root` pointing at an extracted release) and silently skipped
+  otherwise — so a stock build on a machine without wgpu-native still carries
+  **no** WebGPU symbol or dependency, exactly as before. `-Dwebgpu=enabled`
+  hard-requires it; `-Dwebgpu=disabled` never builds it. Even in a build that
+  contains it, WebGPU is **off at runtime** until the browser is started with
+  `--enable-webgpu` (which sets `NS_WEBGPU_ALLOW=1`, inherited by the
+  sandboxed renderer); without that flag `navigator.gpu.requestAdapter()`
+  resolves to `null`. wgpu-native is a large dependency and deliberately
+  stays an opt-in build input, never vendored. See `docs/webgpu.md`.
 - Exactly **one** embedded video codec: MPEG-1, decoded in-tree by the
   vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
   single-file decoder (`subprojects/plmpeg/`, wrapped by
@@ -272,12 +278,14 @@ don't add `meson test` targets.
   implementation, not a fork.
 - Don't add AI-style web-API surface area, even as stubs. WebGL is a
   deliberate opt-in exception — extend `src/webgl.c`, don't re-architect it.
-- WebGPU is an experimental, off-by-default exception built only with
-  `-Dwebgpu=enabled` over external wgpu-native (`src/webgpu.c`,
-  `docs/webgpu.md`). Keep it strictly behind the build flag and the
-  `NS_WEBGPU_ALLOW` runtime gate — the default build must carry no WebGPU
-  surface or dependency. Don't vendor the wgpu-native library into the
-  tree (headers only); don't let it become a default dependency.
+- WebGPU is an experimental exception layered over external wgpu-native
+  (`src/webgpu.c`, `docs/webgpu.md`). The `webgpu` feature is `auto`: built
+  only when wgpu-native is actually present, so a machine without it still
+  gets a build with no WebGPU surface or dependency. Keep it behind the
+  `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate, and don't make
+  wgpu-native a hard/default dependency or vendor its library into the tree
+  (headers only) — a stock `meson setup builddir` on a clean machine must
+  still produce a WebGPU-free binary.
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`

@@ -191,37 +191,43 @@ if not is_android
   endif
 endif
 
-# WebGPU (navigator.gpu) is opt-in and off by default. It layers src/webgpu.c
-# over the external wgpu-native library; the webgpu.h/wgpu.h headers are
-# vendored in-tree (pinned API) while the library is located via pkg-config
-# (wgpu_native) or an extracted release passed with -Dwgpu_native_root. With
-# the feature disabled the engine carries no WebGPU symbol or dependency.
+# WebGPU (navigator.gpu) layers src/webgpu.c over the external wgpu-native
+# library; the webgpu.h/wgpu.h headers are vendored in-tree (pinned API) while
+# the library is located via pkg-config (wgpu_native) or an extracted release
+# passed with -Dwgpu_native_root. The feature is 'auto': it is built whenever
+# wgpu-native is found and skipped otherwise, so the default build does not
+# hard-require the dependency. Even when built, WebGPU stays off at runtime
+# until the browser is launched with --enable-webgpu (or NS_WEBGPU_ALLOW=1).
 have_webgpu = false
 webgpu_dep = declare_dependency()
 webgpu_feature = get_option('webgpu')
-if webgpu_feature.enabled() and not is_android
+if not webgpu_feature.disabled() and not is_android
   wgpu_lib = dependency('wgpu_native', required: false)
-  if not wgpu_lib.found()
-    wgpu_root = get_option('wgpu_native_root')
-    if wgpu_root == ''
-      error('-Dwebgpu=enabled needs wgpu-native: install its pkg-config file ' +
-            '(wgpu_native) or pass -Dwgpu_native_root=/path/to/extracted/release')
-    endif
+  wgpu_root = get_option('wgpu_native_root')
+  if not wgpu_lib.found() and wgpu_root != ''
     wgpu_lib = cc.find_library('wgpu_native', dirs: [wgpu_root / 'lib'],
-                               required: true)
+                               required: false)
   endif
-  webgpu_dep = declare_dependency(
-    include_directories: include_directories('third_party/wgpu-native/include'),
-    dependencies: [
-      wgpu_lib,
-      cc.find_library('dl', required: false),
-      cc.find_library('m', required: false),
-      dependency('threads'),
-    ],
-  )
-  add_project_arguments('-DND_HAVE_WEBGPU=1', language: 'c')
-  have_webgpu = true
-  message('WebGPU: enabled (experimental, wgpu-native) — opt-in, off by default')
+  if wgpu_lib.found()
+    webgpu_dep = declare_dependency(
+      include_directories: include_directories('third_party/wgpu-native/include'),
+      dependencies: [
+        wgpu_lib,
+        cc.find_library('dl', required: false),
+        cc.find_library('m', required: false),
+        dependency('threads'),
+      ],
+    )
+    add_project_arguments('-DND_HAVE_WEBGPU=1', language: 'c')
+    have_webgpu = true
+    message('WebGPU: built (wgpu-native found) — experimental, runtime-gated by --enable-webgpu')
+  elif webgpu_feature.enabled()
+    error('-Dwebgpu=enabled needs wgpu-native: install its pkg-config file ' +
+          '(wgpu_native) or pass -Dwgpu_native_root=/path/to/extracted/release')
+  else
+    message('WebGPU: not built (wgpu-native not found; pass -Dwgpu_native_root ' +
+            'or install its pkg-config to enable)')
+  endif
 endif
 
 libpoppler = dependency('poppler-glib', required: false)
