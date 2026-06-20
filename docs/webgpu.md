@@ -87,9 +87,15 @@ a working **render-to-canvas** path:
   (uniform/storage), sampler, and texture-view bindings; `setBindGroup`;
   `pipeline.getBindGroupLayout()`.
 - `GPUSampler` (`device.createSampler`), `GPUTexture` (`device.createTexture`,
-  `createView`, `destroy`), `queue.writeTexture`, depth/stencil and MSAA
-  resolve attachments in render passes, `depthStencil` + `multisample` +
-  `cullMode` pipeline state.
+  `createView`, `destroy`), `queue.writeTexture`,
+  `queue.copyExternalImageToTexture` (uploads an image/`<canvas>`/
+  `ImageBitmap`/video frame into a texture), depth/stencil and MSAA resolve
+  attachments in render passes, `depthStencil` + `multisample` + `cullMode`
+  pipeline state.
+- `GPUBuffer.mapAsync()` (poll-driven), `GPUQuerySet` scaffolding
+  (`device.createQuerySet`, `commandEncoder.resolveQuerySet` — occlusion is
+  real, timestamps are accepted as no-ops so timing-instrumented apps don't
+  crash).
 - `GPUBuffer.getMappedRange()` / `unmap()` (for `mappedAtCreation`),
   `commandEncoder.copyTextureToTexture` / `copyBufferToBuffer`,
   `device.pushErrorScope`/`popErrorScope`, a non-fatal device
@@ -119,13 +125,13 @@ page event loop.
 ### Not yet implemented
 
 What remains: **compute pipelines** (`createComputePipeline` /
-`dispatchWorkgroups`), `queue.copyExternalImageToTexture` (uploading images/
-`<canvas>`/`ImageBitmap` directly — for now image textures go through
-`writeTexture` with raw bytes), timestamp `GPUQuerySet`s, render bundles,
-explicit blend state, storage textures, and 3D/cube/array texture-view
-descriptors (views default to 2D). Examples that lean on these (compute
-demos, some post-processing) will still hit gaps. This document and
-feature-detection reflect exactly what runs.
+`dispatchWorkgroups`), real timestamp queries, render bundles, explicit
+blend state, storage textures, and 3D/cube/array texture-view descriptors
+(views default to 2D). Texture-mapped geometry works (see the textured-quad
+check below), but heavier three.js material examples (PBR clearcoat,
+environment maps) drive the software backend into feature paths that
+`wgpu-native` itself panics on — those need the missing pieces above. This
+document and feature-detection reflect exactly what runs.
 
 ## Architecture & security notes
 
