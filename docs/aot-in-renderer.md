@@ -163,6 +163,12 @@ attractive. For a security-first clean-room browser that is a poor trade, and
 the recommendation is **not** to ship it by default — at most an
 opt-in/experimental flag, the way WebGPU is gated.
 
+A dedicated study of the broker — the IPC verb, the bytecode-vs-C trust
+boundary, and especially how the result is *loaded* (no `dlopen` post-sandbox;
+a `memfd` mapped `PROT_EXEC`, verified to work here; the libm-relocation
+problem and a vtable-ABI flat-blob fix; the Landlock caveat) — is in
+[`aot-broker.md`](aot-broker.md).
+
 ### Tier C — In-process template stitching (a JIT by another name)
 
 A third option avoids the external `cc`: keep a library of pre-built
