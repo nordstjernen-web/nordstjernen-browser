@@ -1,28 +1,41 @@
-# aot-js — proof-of-concept AOT JavaScript compiler
+# aot-js — ahead-of-time JavaScript compiler
 
-A proof of concept that compiles a numeric subset of JavaScript **ahead of
-time** to native code, by reusing the QuickJS front end to produce
-bytecode and then translating that bytecode to C.
+A **sound** ahead-of-time compiler that lowers the numeric subset of
+JavaScript to native code, by reusing the QuickJS front end to produce
+bytecode and translating that bytecode to C. It emits native code only when
+the result is provably identical to interpreting it, and otherwise declines
+so the caller falls back to the interpreter — so it can never change the
+meaning of a program.
 
-Full write-up, motivation (AOT vs JIT security), and benchmark results:
-[`docs/aot-js-compiler.md`](../../docs/aot-js-compiler.md).
+AOT is **enabled by default**: `aot-run.sh` always tries AOT first and falls
+back to the QuickJS interpreter automatically for anything outside the
+subset.
+
+Full write-up — design, the eligibility analysis, the AOT-vs-JIT security
+argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler.md).
 
 ## Run
 
 ```sh
-./run.sh
+./selfcheck.sh                       # soundness: AOT vs interpreter, 55 cases
+./run.sh                             # performance benchmark table
+./aot-run.sh tests/arith.js arith 6 7   # run one entry, AOT-by-default
 ```
 
-Builds the in-tree QuickJS interpreter and the `aotc` translator, compiles
-each `bench/*.js` both ways, verifies the AOT result matches the
-interpreter, and prints a timing table.
+`selfcheck.sh` runs every program both through the pure interpreter and
+through AOT-by-default and asserts identical results (and that the expected
+path — native vs fallback — was taken). `run.sh` reports speedups.
 
 ## Contents
 
-- `aotc.c` — the bytecode→C translator (`#include`s `src/quickjs/quickjs.c`).
-- `bench/*.js` — numeric benchmarks (`fib`, `sumloop`, `collatz`, `mandel`).
-- `bench/time_interp.js` — interpreter timing harness.
-- `run.sh` — build + verify + benchmark driver.
+- `aotc.c` — eligibility analysis + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
+- `aot-run.sh` — AOT-by-default runner with automatic interpreter fallback.
+- `selfcheck.sh` — soundness harness.
+- `run.sh` — performance benchmark driver.
+- `tests/*.js` — correctness corpus (numeric + must-fall-back programs).
+- `bench/*.js` — performance benchmarks.
 
 This is an experiment. It is not built by meson, nothing in `src/` depends
-on it, and a stock browser build is unchanged.
+on it, and a stock browser build is unchanged. See the doc for what
+wiring it into the live renderer would require (and why that step is not
+taken here).

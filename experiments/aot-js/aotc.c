@@ -1,6 +1,9 @@
-/* aotc.c — proof-of-concept ahead-of-time JavaScript compiler.
-   Reuses the real QuickJS front end to compile JS to bytecode, then
-   translates a numeric subset of that bytecode straight to C. */
+/* aotc.c — ahead-of-time JavaScript compiler (numeric domain).
+   Reuses the QuickJS front end to compile JS to bytecode, proves a
+   function is in the safe numeric subset, and lowers its bytecode to C.
+   It is sound: it emits native code only when the result is guaranteed
+   identical to the interpreter, and declines (exit code 10) otherwise so
+   the caller can fall back to interpretation. */
 
 #include "quickjs.c"
 
@@ -8,327 +11,364 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    char **items;
-    int len;
-    int cap;
-} ExprStack;
-
-static void es_push(ExprStack *s, const char *fmt, ...) {
-    if (s->len >= s->cap) {
-        s->cap = s->cap ? s->cap * 2 : 16;
-        s->items = realloc(s->items, s->cap * sizeof(char *));
-    }
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-    s->items[s->len++] = strdup(buf);
-}
-
-static char *es_pop(ExprStack *s) {
-    if (s->len <= 0) {
-        fprintf(stderr, "aotc: stack underflow\n");
-        exit(2);
-    }
-    return s->items[--s->len];
-}
-
-static char *es_peek(ExprStack *s) {
-    if (s->len <= 0) {
-        fprintf(stderr, "aotc: stack underflow on peek\n");
-        exit(2);
-    }
-    return s->items[s->len - 1];
-}
-
-static JSFunctionBytecode *get_fb(JSValue v) {
-    int tag = JS_VALUE_GET_TAG(v);
-    if (tag == JS_TAG_FUNCTION_BYTECODE)
-        return JS_VALUE_GET_PTR(v);
-    if (tag == JS_TAG_OBJECT)
-        return JS_GetFunctionBytecode(v);
-    return NULL;
-}
+#define MAX_FNS 256
+#define DECLINE 10
 
 typedef struct {
     JSFunctionBytecode *b;
     const char *name;
+    int local_ok;
+    int eligible;
+    int visiting;
+    const char *callees[64];
+    int n_callees;
 } Fn;
 
-static Fn g_fns[64];
+static Fn g_fns[MAX_FNS];
 static int g_nfns;
+static JSContext *g_ctx;
 
-static const char *fn_name_for(JSContext *ctx, JSAtom atom) {
-    const char *nm = JS_AtomToCString(ctx, atom);
-    for (int i = 0; i < g_nfns; i++) {
-        if (strcmp(g_fns[i].name, nm) == 0) {
-            JS_FreeCString(ctx, nm);
-            return g_fns[i].name;
-        }
-    }
-    JS_FreeCString(ctx, nm);
+static JSFunctionBytecode *get_fb(JSValue v) {
+    int tag = JS_VALUE_GET_TAG(v);
+    if (tag == JS_TAG_FUNCTION_BYTECODE) return JS_VALUE_GET_PTR(v);
+    if (tag == JS_TAG_OBJECT) return JS_GetFunctionBytecode(v);
     return NULL;
 }
 
-static int *collect_targets(JSFunctionBytecode *b, int *out_n) {
-    int cap = 16, n = 0;
-    int *t = malloc(cap * sizeof(int));
+static int find_fn(const char *name) {
+    for (int i = 0; i < g_nfns; i++)
+        if (strcmp(g_fns[i].name, name) == 0) return i;
+    return -1;
+}
+
+static const char *resolve_atom_fn(JSAtom atom) {
+    const char *nm = JS_AtomToCString(g_ctx, atom);
+    int i = nm ? find_fn(nm) : -1;
+    const char *r = (i >= 0) ? g_fns[i].name : NULL;
+    JS_FreeCString(g_ctx, nm);
+    return r;
+}
+
+/* The single source of truth for the supported opcode set and its stack
+   effect. Returns 1 and fills pop/push for a supported opcode, 0 for an
+   unsupported one (which makes the whole function ineligible). */
+static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
+    int op = code[pos], p = pos + 1;
+    int np = 0, ns = 0;
+    switch (op) {
+    case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
+    case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
+    case OP_push_minus1: case OP_push_i8: case OP_push_i16: case OP_push_i32:
+    case OP_push_const8: case OP_push_const:
+    case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3:
+    case OP_get_arg:
+    case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
+    case OP_get_loc8: case OP_get_loc: case OP_get_loc_check:
+    case OP_get_var_ref0: case OP_get_var_ref1: case OP_get_var_ref2:
+    case OP_get_var_ref3: case OP_get_var_ref: case OP_get_var_ref_check:
+    case OP_get_var:
+        np = 0; ns = 1; break;
+    case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3:
+    case OP_put_loc8: case OP_put_loc: case OP_put_loc_check:
+    case OP_put_loc_check_init:
+    case OP_drop: case OP_if_false: case OP_if_false8:
+    case OP_if_true: case OP_if_true8: case OP_return:
+    case OP_add_loc:
+        np = 1; ns = 0; break;
+    case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
+    case OP_set_loc8: case OP_set_loc:
+    case OP_inc: case OP_dec: case OP_neg: case OP_plus: case OP_lnot:
+        np = 1; ns = 1; break;
+    case OP_dup: case OP_post_inc: case OP_post_dec:
+        np = 1; ns = 2; break;
+    case OP_add: case OP_sub: case OP_mul: case OP_div: case OP_mod:
+    case OP_pow: case OP_lt: case OP_lte: case OP_gt: case OP_gte:
+    case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq:
+        np = 2; ns = 1; break;
+    case OP_goto: case OP_goto8: case OP_goto16:
+    case OP_nop: case OP_set_loc_uninitialized:
+    case OP_inc_loc: case OP_dec_loc:
+        np = 0; ns = 0; break;
+    case OP_return_undef:
+        np = 0; ns = 0; break;
+    case OP_call0: np = 1 + 0; ns = 1; break;
+    case OP_call1: np = 1 + 1; ns = 1; break;
+    case OP_call2: np = 1 + 2; ns = 1; break;
+    case OP_call3: np = 1 + 3; ns = 1; break;
+    case OP_call:  np = 1 + get_u16(code + p); ns = 1; break;
+    case OP_tail_call: np = 1 + get_u16(code + p); ns = 0; break;
+    default:
+        return 0;
+    }
+    *pop = np; *push = ns;
+    return 1;
+}
+
+static int branch_target(const uint8_t *code, int pos, int *is_uncond) {
+    int op = code[pos], p = pos + 1;
+    *is_uncond = 0;
+    switch (op) {
+    case OP_goto:   *is_uncond = 1; return p + get_i32(code + p);
+    case OP_goto16: *is_uncond = 1; return p + get_i16(code + p);
+    case OP_goto8:  *is_uncond = 1; return p + get_i8(code + p);
+    case OP_if_false: case OP_if_true: return p + get_i32(code + p);
+    case OP_if_false8: case OP_if_true8: return p + get_i8(code + p);
+    }
+    return -1;
+}
+
+static int terminates(int op) {
+    return op == OP_return || op == OP_return_undef || op == OP_tail_call;
+}
+
+/* Abstract-interpret the operand-stack depth at each pc. Returns 1 with
+   sp_before filled, or 0 if an unsupported opcode or an inconsistent
+   depth is found (either makes the function ineligible). */
+static int compute_sp(JSFunctionBytecode *b, int *sp_before) {
+    const uint8_t *code = b->byte_code_buf;
+    int len = b->byte_code_len;
+    for (int i = 0; i < len; i++) sp_before[i] = -1;
+
+    int stack[4096], depth[4096], top = 0;
+    stack[top] = 0; depth[top] = 0; top++;
+
+    while (top > 0) {
+        int pos = stack[--top], d = depth[top];
+        if (pos < 0 || pos >= len) return 0;
+        if (sp_before[pos] >= 0) {
+            if (sp_before[pos] != d) return 0;
+            continue;
+        }
+        sp_before[pos] = d;
+        int op = code[pos];
+        int pop, push;
+        if (!op_delta(code, pos, &pop, &push)) return 0;
+        int after = d - pop + push;
+        if (after < 0) return 0;
+        int sz = short_opcode_info(op).size;
+        int uncond;
+        int tgt = branch_target(code, pos, &uncond);
+        if (tgt >= 0) {
+            if (top >= 4090) return 0;
+            stack[top] = tgt; depth[top] = after; top++;
+        }
+        if (!terminates(op) && !uncond) {
+            int npos = pos + sz;
+            if (npos < len) {
+                if (top >= 4090) return 0;
+                stack[top] = npos; depth[top] = after; top++;
+            }
+        }
+    }
+    return 1;
+}
+
+/* A function passes the local check if every opcode is supported, every
+   constant it pushes is numeric, every variable/closure reference it reads
+   names a known top-level function (the only non-numeric value the subset
+   allows, and only as a call target), and its stack depth is consistent. */
+static int local_check(Fn *fn, int *sp_scratch) {
+    JSFunctionBytecode *b = fn->b;
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len, pos = 0;
+    fn->n_callees = 0;
+
     while (pos < len) {
-        int op = code[pos];
-        int sz = short_opcode_info(op).size;
-        int operand_pos = pos + 1;
-        int target = -1;
-        switch (op) {
-        case OP_goto: case OP_if_true: case OP_if_false:
-            target = operand_pos + get_i32(code + operand_pos); break;
-        case OP_goto16:
-            target = operand_pos + get_i16(code + operand_pos); break;
-        case OP_goto8: case OP_if_true8: case OP_if_false8:
-            target = operand_pos + get_i8(code + operand_pos); break;
+        int op = code[pos], p = pos + 1, pop, push;
+        if (!op_delta(code, pos, &pop, &push)) return 0;
+        if (op == OP_push_const8 || op == OP_push_const) {
+            int idx = (op == OP_push_const8) ? get_u8(code + p) : get_u32(code + p);
+            JSValue v = b->cpool[idx];
+            int tag = JS_VALUE_GET_TAG(v);
+            if (tag != JS_TAG_INT && !JS_TAG_IS_FLOAT64(tag)) return 0;
+        } else if (op == OP_get_var) {
+            const char *fnm = resolve_atom_fn((JSAtom)get_u32(code + p));
+            if (!fnm) return 0;
+            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
+        } else if (op == OP_get_var_ref || op == OP_get_var_ref_check) {
+            const char *fnm = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name);
+            if (!fnm) return 0;
+            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
+        } else if (op >= OP_get_var_ref0 && op <= OP_get_var_ref3) {
+            const char *fnm = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name);
+            if (!fnm) return 0;
+            if (fn->n_callees < 64) fn->callees[fn->n_callees++] = fnm;
         }
-        if (target >= 0) {
-            if (n >= cap) { cap *= 2; t = realloc(t, cap * sizeof(int)); }
-            t[n++] = target;
-        }
-        pos += sz;
+        pos += short_opcode_info(op).size;
     }
-    *out_n = n;
-    return t;
+    return compute_sp(b, sp_scratch);
 }
 
-static int is_target(int *t, int n, int pos) {
-    for (int i = 0; i < n; i++) if (t[i] == pos) return 1;
-    return 0;
-}
-
-static const char *marker_fn(const char *m) {
-    if (strncmp(m, "FUNC:", 5) == 0) return m + 5;
-    return NULL;
-}
-
-static void emit_call(FILE *o, ExprStack *st, int *tc, int argc) {
-    char *args[8];
-    for (int i = argc - 1; i >= 0; i--) args[i] = es_pop(st);
-    char *fn = es_pop(st);
-    const char *name = marker_fn(fn);
-    if (!name) {
-        fprintf(stderr, "aotc: call of non-static-function value '%s'\n", fn);
-        exit(3);
+static int compute_eligible(int idx) {
+    Fn *fn = &g_fns[idx];
+    if (fn->eligible >= 0) return fn->eligible;
+    if (fn->visiting) return 1; /* recursion: assume ok, resolved by fixpoint */
+    if (!fn->local_ok) return (fn->eligible = 0);
+    fn->visiting = 1;
+    int ok = 1;
+    for (int i = 0; i < fn->n_callees; i++) {
+        int ci = find_fn(fn->callees[i]);
+        if (ci < 0) { ok = 0; break; }
+        if (!compute_eligible(ci)) { ok = 0; break; }
     }
-    int t = (*tc)++;
-    fprintf(o, "  double t%d = %s(", t, name);
-    for (int i = 0; i < argc; i++) fprintf(o, "%s%s", i ? ", " : "", args[i]);
-    fprintf(o, ");\n");
-    es_push(st, "t%d", t);
+    fn->visiting = 0;
+    return (fn->eligible = ok);
 }
 
-static void translate(JSContext *ctx, FILE *o, JSFunctionBytecode *b, const char *name) {
-    int ntargets;
-    int *targets = collect_targets(b, &ntargets);
+/* ---- emission --------------------------------------------------------- */
 
-    fprintf(o, "static double %s(", name);
+static const char *g_slotfn[8192];
+
+static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
+    JSFunctionBytecode *b = fn->b;
+    const uint8_t *code = b->byte_code_buf;
+    int len = b->byte_code_len;
+    int maxstack = b->stack_size + 4;
+
+    fprintf(o, "static double %s(", fn->name);
     for (int i = 0; i < b->arg_count; i++)
         fprintf(o, "%sdouble a%d", i ? ", " : "", i);
     if (b->arg_count == 0) fprintf(o, "void");
     fprintf(o, ") {\n");
     for (int i = 0; i < b->var_count; i++)
         fprintf(o, "  double loc%d = 0;\n", i);
+    for (int i = 0; i < maxstack; i++)
+        fprintf(o, "  double s%d = 0; (void)s%d;\n", i, i);
+    for (int i = 0; i < maxstack; i++) g_slotfn[i] = NULL;
 
-    ExprStack st = {0};
-    int tc = 0;
-    const uint8_t *code = b->byte_code_buf;
-    int len = b->byte_code_len, pos = 0;
+    /* mark branch targets */
+    char *islabel = calloc(len + 1, 1);
+    for (int pos = 0; pos < len; ) {
+        int u, t = branch_target(code, pos, &u);
+        if (t >= 0 && t <= len) islabel[t] = 1;
+        pos += short_opcode_info(code[pos]).size;
+    }
 
+    int pos = 0;
     while (pos < len) {
-        if (is_target(targets, ntargets, pos))
-            fprintf(o, "L%d: ;\n", pos);
-        int op = code[pos];
-        int sz = short_opcode_info(op).size;
-        int p = pos + 1;
+        if (islabel[pos]) fprintf(o, "L%d: ;\n", pos);
+        int op = code[pos], p = pos + 1;
+        int sp = sp_before[pos];
+        if (sp < 0) { pos += short_opcode_info(op).size; continue; } /* dead */
 
         switch (op) {
         case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
         case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
-            es_push(&st, "%d", op - OP_push_0); break;
-        case OP_push_minus1: es_push(&st, "-1"); break;
-        case OP_push_i8:  es_push(&st, "%d", get_i8(code + p)); break;
-        case OP_push_i16: es_push(&st, "%d", get_i16(code + p)); break;
-        case OP_push_i32: es_push(&st, "%d", (int)get_i32(code + p)); break;
+            fprintf(o, "  s%d = %d;\n", sp, op - OP_push_0); g_slotfn[sp] = NULL; break;
+        case OP_push_minus1: fprintf(o, "  s%d = -1;\n", sp); g_slotfn[sp] = NULL; break;
+        case OP_push_i8:  fprintf(o, "  s%d = %d;\n", sp, get_i8(code + p)); g_slotfn[sp] = NULL; break;
+        case OP_push_i16: fprintf(o, "  s%d = %d;\n", sp, get_i16(code + p)); g_slotfn[sp] = NULL; break;
+        case OP_push_i32: fprintf(o, "  s%d = %d;\n", sp, (int)get_i32(code + p)); g_slotfn[sp] = NULL; break;
         case OP_push_const8: case OP_push_const: {
             int idx = (op == OP_push_const8) ? get_u8(code + p) : get_u32(code + p);
             JSValue v = b->cpool[idx];
-            int tag = JS_VALUE_GET_TAG(v);
-            if (tag == JS_TAG_INT) es_push(&st, "%d", JS_VALUE_GET_INT(v));
-            else if (JS_TAG_IS_FLOAT64(tag)) es_push(&st, "%.17g", JS_VALUE_GET_FLOAT64(v));
-            else { fprintf(stderr, "aotc: non-numeric const\n"); exit(3); }
-            break;
+            if (JS_VALUE_GET_TAG(v) == JS_TAG_INT)
+                fprintf(o, "  s%d = %d;\n", sp, JS_VALUE_GET_INT(v));
+            else
+                fprintf(o, "  s%d = %.17g;\n", sp, JS_VALUE_GET_FLOAT64(v));
+            g_slotfn[sp] = NULL; break;
         }
         case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3:
-            es_push(&st, "a%d", op - OP_get_arg0); break;
-        case OP_get_arg: es_push(&st, "a%d", get_u16(code + p)); break;
+            fprintf(o, "  s%d = a%d;\n", sp, op - OP_get_arg0); g_slotfn[sp] = NULL; break;
+        case OP_get_arg:
+            fprintf(o, "  s%d = a%d;\n", sp, get_u16(code + p)); g_slotfn[sp] = NULL; break;
         case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
-            es_push(&st, "loc%d", op - OP_get_loc0); break;
-        case OP_get_loc8: es_push(&st, "loc%d", get_u8(code + p)); break;
-        case OP_get_loc: case OP_get_loc_check: es_push(&st, "loc%d", get_u16(code + p)); break;
-        case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3: {
-            char *v = es_pop(&st);
-            fprintf(o, "  loc%d = %s;\n", op - OP_put_loc0, v);
-            break;
-        }
-        case OP_put_loc8: {
-            char *v = es_pop(&st);
-            fprintf(o, "  loc%d = %s;\n", get_u8(code + p), v);
-            break;
-        }
-        case OP_put_loc: case OP_put_loc_check: case OP_put_loc_check_init: {
-            char *v = es_pop(&st);
-            fprintf(o, "  loc%d = %s;\n", get_u16(code + p), v);
-            break;
-        }
-        case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3: {
-            char *v = es_peek(&st);
-            fprintf(o, "  loc%d = %s;\n", op - OP_set_loc0, v);
-            break;
-        }
-        case OP_set_loc8: {
-            char *v = es_peek(&st);
-            fprintf(o, "  loc%d = %s;\n", get_u8(code + p), v);
-            break;
-        }
-        case OP_set_loc: {
-            char *v = es_peek(&st);
-            fprintf(o, "  loc%d = %s;\n", get_u16(code + p), v);
-            break;
-        }
+            fprintf(o, "  s%d = loc%d;\n", sp, op - OP_get_loc0); g_slotfn[sp] = NULL; break;
+        case OP_get_loc8:
+            fprintf(o, "  s%d = loc%d;\n", sp, get_u8(code + p)); g_slotfn[sp] = NULL; break;
+        case OP_get_loc: case OP_get_loc_check:
+            fprintf(o, "  s%d = loc%d;\n", sp, get_u16(code + p)); g_slotfn[sp] = NULL; break;
+        case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3:
+            fprintf(o, "  loc%d = s%d;\n", op - OP_put_loc0, sp - 1); break;
+        case OP_put_loc8:
+            fprintf(o, "  loc%d = s%d;\n", get_u8(code + p), sp - 1); break;
+        case OP_put_loc: case OP_put_loc_check: case OP_put_loc_check_init:
+            fprintf(o, "  loc%d = s%d;\n", get_u16(code + p), sp - 1); break;
+        case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
+            fprintf(o, "  loc%d = s%d;\n", op - OP_set_loc0, sp - 1); break;
+        case OP_set_loc8:
+            fprintf(o, "  loc%d = s%d;\n", get_u8(code + p), sp - 1); break;
+        case OP_set_loc:
+            fprintf(o, "  loc%d = s%d;\n", get_u16(code + p), sp - 1); break;
         case OP_inc_loc: fprintf(o, "  loc%d += 1;\n", get_u8(code + p)); break;
         case OP_dec_loc: fprintf(o, "  loc%d -= 1;\n", get_u8(code + p)); break;
-        case OP_add_loc: {
-            char *v = es_pop(&st);
-            fprintf(o, "  loc%d += %s;\n", get_u8(code + p), v);
-            break;
-        }
-        case OP_post_inc: case OP_post_dec: {
-            char *v = es_pop(&st);
-            int told = tc++, tnew = tc++;
-            fprintf(o, "  double t%d = %s;\n", told, v);
-            fprintf(o, "  double t%d = %s %s 1;\n", tnew, v,
-                    op == OP_post_inc ? "+" : "-");
-            es_push(&st, "t%d", told);
-            es_push(&st, "t%d", tnew);
-            break;
-        }
-        case OP_inc: case OP_dec: case OP_neg: case OP_plus: {
-            char *v = es_pop(&st);
-            int t = tc++;
-            const char *e = op == OP_inc ? "+ 1" : op == OP_dec ? "- 1" :
-                            op == OP_neg ? "* -1" : "";
-            fprintf(o, "  double t%d = %s %s;\n", t, v, e);
-            es_push(&st, "t%d", t);
-            break;
-        }
-        case OP_add: case OP_sub: case OP_mul: case OP_div: {
-            char *r = es_pop(&st), *l = es_pop(&st);
-            char c = op == OP_add ? '+' : op == OP_sub ? '-' : op == OP_mul ? '*' : '/';
-            int t = tc++;
-            fprintf(o, "  double t%d = %s %c %s;\n", t, l, c, r);
-            es_push(&st, "t%d", t);
-            break;
-        }
-        case OP_mod: {
-            char *r = es_pop(&st), *l = es_pop(&st);
-            int t = tc++;
-            fprintf(o, "  double t%d = fmod(%s, %s);\n", t, l, r);
-            es_push(&st, "t%d", t);
-            break;
-        }
-        case OP_pow: {
-            char *r = es_pop(&st), *l = es_pop(&st);
-            int t = tc++;
-            fprintf(o, "  double t%d = pow(%s, %s);\n", t, l, r);
-            es_push(&st, "t%d", t);
-            break;
-        }
-        case OP_lt: case OP_lte: case OP_gt: case OP_gte:
-        case OP_eq: case OP_neq: case OP_strict_eq: case OP_strict_neq: {
-            char *r = es_pop(&st), *l = es_pop(&st);
-            const char *c = op == OP_lt ? "<" : op == OP_lte ? "<=" :
-                            op == OP_gt ? ">" : op == OP_gte ? ">=" :
-                            (op == OP_eq || op == OP_strict_eq) ? "==" : "!=";
-            int t = tc++;
-            fprintf(o, "  double t%d = (%s %s %s);\n", t, l, c, r);
-            es_push(&st, "t%d", t);
-            break;
-        }
+        case OP_add_loc: fprintf(o, "  loc%d += s%d;\n", get_u8(code + p), sp - 1); break;
+        case OP_dup:
+            fprintf(o, "  s%d = s%d;\n", sp, sp - 1); g_slotfn[sp] = g_slotfn[sp - 1]; break;
+        case OP_drop: g_slotfn[sp - 1] = NULL; break;
+        case OP_post_inc:
+            fprintf(o, "  s%d = s%d + 1;\n", sp, sp - 1); g_slotfn[sp] = NULL; break;
+        case OP_post_dec:
+            fprintf(o, "  s%d = s%d - 1;\n", sp, sp - 1); g_slotfn[sp] = NULL; break;
+        case OP_inc: fprintf(o, "  s%d = s%d + 1;\n", sp - 1, sp - 1); break;
+        case OP_dec: fprintf(o, "  s%d = s%d - 1;\n", sp - 1, sp - 1); break;
+        case OP_neg: fprintf(o, "  s%d = -s%d;\n", sp - 1, sp - 1); break;
+        case OP_plus: break;
+        case OP_lnot: fprintf(o, "  s%d = (s%d == 0);\n", sp - 1, sp - 1); break;
+        case OP_add: fprintf(o, "  s%d = s%d + s%d;\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_sub: fprintf(o, "  s%d = s%d - s%d;\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_mul: fprintf(o, "  s%d = s%d * s%d;\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_div: fprintf(o, "  s%d = s%d / s%d;\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_mod: fprintf(o, "  s%d = fmod(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_pow: fprintf(o, "  s%d = pow(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_lt:  fprintf(o, "  s%d = (s%d <  s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_lte: fprintf(o, "  s%d = (s%d <= s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_gt:  fprintf(o, "  s%d = (s%d >  s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_gte: fprintf(o, "  s%d = (s%d >= s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_eq: case OP_strict_eq:
+            fprintf(o, "  s%d = (s%d == s%d);\n", sp - 2, sp - 2, sp - 1); break;
+        case OP_neq: case OP_strict_neq:
+            fprintf(o, "  s%d = (s%d != s%d);\n", sp - 2, sp - 2, sp - 1); break;
         case OP_if_false: case OP_if_false8: {
-            int target = (op == OP_if_false) ? p + get_i32(code + p)
-                                             : p + get_i8(code + p);
-            char *c = es_pop(&st);
-            fprintf(o, "  if (!(%s)) goto L%d;\n", c, target);
-            break;
+            int u, t = branch_target(code, pos, &u);
+            fprintf(o, "  if (!(s%d)) goto L%d;\n", sp - 1, t); break;
         }
         case OP_if_true: case OP_if_true8: {
-            int target = (op == OP_if_true) ? p + get_i32(code + p)
-                                            : p + get_i8(code + p);
-            char *c = es_pop(&st);
-            fprintf(o, "  if (%s) goto L%d;\n", c, target);
+            int u, t = branch_target(code, pos, &u);
+            fprintf(o, "  if (s%d) goto L%d;\n", sp - 1, t); break;
+        }
+        case OP_goto: case OP_goto8: case OP_goto16: {
+            int u, t = branch_target(code, pos, &u);
+            fprintf(o, "  goto L%d;\n", t); break;
+        }
+        case OP_call0: case OP_call1: case OP_call2: case OP_call3:
+        case OP_call: case OP_tail_call: {
+            int argc = (op == OP_call || op == OP_tail_call)
+                       ? get_u16(code + p) : (op - OP_call0);
+            int fnslot = sp - 1 - argc;
+            const char *callee = g_slotfn[fnslot];
+            if (!callee) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); exit(DECLINE); }
+            if (op == OP_tail_call) {
+                fprintf(o, "  return %s(", callee);
+                for (int i = 0; i < argc; i++)
+                    fprintf(o, "%ss%d", i ? ", " : "", fnslot + 1 + i);
+                fprintf(o, ");\n");
+            } else {
+                fprintf(o, "  s%d = %s(", fnslot, callee);
+                for (int i = 0; i < argc; i++)
+                    fprintf(o, "%ss%d", i ? ", " : "", fnslot + 1 + i);
+                fprintf(o, ");\n");
+                g_slotfn[fnslot] = NULL;
+            }
             break;
         }
-        case OP_goto: { int target = p + get_i32(code + p); fprintf(o, "  goto L%d;\n", target); break; }
-        case OP_goto16: { int target = p + get_i16(code + p); fprintf(o, "  goto L%d;\n", target); break; }
-        case OP_goto8: { int target = p + get_i8(code + p); fprintf(o, "  goto L%d;\n", target); break; }
-        case OP_call0: case OP_call1: case OP_call2: case OP_call3:
-            emit_call(o, &st, &tc, op - OP_call0); break;
-        case OP_call: emit_call(o, &st, &tc, get_u16(code + p)); break;
         case OP_get_var: {
-            JSAtom atom = get_u32(code + p);
-            const char *fn = fn_name_for(ctx, atom);
-            if (!fn) {
-                const char *nm = JS_AtomToCString(ctx, atom);
-                fprintf(stderr, "aotc: unsupported get_var '%s'\n", nm);
-                exit(3);
-            }
-            es_push(&st, "FUNC:%s", fn);
-            break;
+            g_slotfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p)); break;
         }
         case OP_get_var_ref0: case OP_get_var_ref1:
-        case OP_get_var_ref2: case OP_get_var_ref3: {
-            int idx = op - OP_get_var_ref0;
-            const char *fn = fn_name_for(ctx, b->closure_var[idx].var_name);
-            if (!fn) { fprintf(stderr, "aotc: unsupported var_ref\n"); exit(3); }
-            es_push(&st, "FUNC:%s", fn);
-            break;
-        }
-        case OP_get_var_ref: case OP_get_var_ref_check: {
-            int idx = get_u16(code + p);
-            const char *fn = fn_name_for(ctx, b->closure_var[idx].var_name);
-            if (!fn) { fprintf(stderr, "aotc: unsupported var_ref\n"); exit(3); }
-            es_push(&st, "FUNC:%s", fn);
-            break;
-        }
-        case OP_dup: es_push(&st, "%s", es_peek(&st)); break;
-        case OP_drop: es_pop(&st); break;
-        case OP_nop: case OP_set_loc_uninitialized: break;
-        case OP_return: { char *v = es_pop(&st); fprintf(o, "  return %s;\n", v); break; }
+        case OP_get_var_ref2: case OP_get_var_ref3:
+            g_slotfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name); break;
+        case OP_get_var_ref: case OP_get_var_ref_check:
+            g_slotfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name); break;
+        case OP_return: fprintf(o, "  return s%d;\n", sp - 1); break;
         case OP_return_undef: fprintf(o, "  return 0;\n"); break;
-        default:
-            fprintf(stderr, "aotc: unsupported opcode %d (%s) at pc %d in %s\n",
-                    op,
-#ifdef ENABLE_DUMPS
-                    short_opcode_info(op).name,
-#else
-                    "?",
-#endif
-                    pos, name);
-            exit(3);
+        case OP_nop: case OP_set_loc_uninitialized: break;
+        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); exit(DECLINE);
         }
-        pos += sz;
+        pos += short_opcode_info(op).size;
     }
     fprintf(o, "  return 0;\n}\n\n");
-    free(targets);
+    free(islabel);
 }
 
 int main(int argc, char **argv) {
@@ -350,38 +390,49 @@ int main(int argc, char **argv) {
     fclose(f);
 
     JSRuntime *rt = JS_NewRuntime();
-    JSContext *ctx = JS_NewContext(rt);
+    g_ctx = JS_NewContext(rt);
 
-    JSValue top = JS_Eval(ctx, src, n, in,
+    JSValue top = JS_Eval(g_ctx, src, n, in,
                           JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
     if (JS_IsException(top)) {
-        JSValue e = JS_GetException(ctx);
-        const char *s = JS_ToCString(ctx, e);
-        fprintf(stderr, "aotc: compile error: %s\n", s);
+        JSValue e = JS_GetException(g_ctx);
+        fprintf(stderr, "aotc: compile error: %s\n", JS_ToCString(g_ctx, e));
         return 1;
     }
     JSFunctionBytecode *bt = get_fb(top);
 
-    for (int i = 0; i < bt->cpool_count && g_nfns < 64; i++) {
+    for (int i = 0; i < bt->cpool_count && g_nfns < MAX_FNS; i++) {
         JSFunctionBytecode *fb = get_fb(bt->cpool[i]);
         if (!fb) continue;
-        const char *nm = JS_AtomToCString(ctx, fb->func_name);
+        const char *nm = JS_AtomToCString(g_ctx, fb->func_name);
         if (!nm || !nm[0]) continue;
         g_fns[g_nfns].b = fb;
         g_fns[g_nfns].name = strdup(nm);
+        g_fns[g_nfns].eligible = -1;
         g_nfns++;
-        JS_FreeCString(ctx, nm);
+        JS_FreeCString(g_ctx, nm);
     }
-    if (g_nfns == 0) {
-        fprintf(stderr, "aotc: no top-level functions to compile\n");
-        return 1;
-    }
+    if (g_nfns == 0) { fprintf(stderr, "aotc: no functions\n"); return DECLINE; }
     if (!entry) entry = g_fns[0].name;
 
+    int *sp = malloc(sizeof(int) * (65536));
+    for (int i = 0; i < g_nfns; i++)
+        g_fns[i].local_ok = local_check(&g_fns[i], sp);
+    for (int i = 0; i < g_nfns; i++)
+        compute_eligible(i);
+
+    int ei = find_fn(entry);
+    if (ei < 0) { fprintf(stderr, "aotc: no entry '%s'\n", entry); return 1; }
+    if (!g_fns[ei].eligible) {
+        fprintf(stderr, "aotc: '%s' not AOT-eligible; fall back to interpreter\n", entry);
+        return DECLINE;
+    }
+
     FILE *o = fopen(out, "w");
-    fprintf(o, "/* generated by aotc — ahead-of-time JS->C */\n");
-    fprintf(o, "#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n\n");
+    fprintf(o, "/* generated by aotc — ahead-of-time JS->C (numeric) */\n");
+    fprintf(o, "#include <stdio.h>\n#include <stdlib.h>\n#include <math.h>\n#include <time.h>\n\n");
     for (int i = 0; i < g_nfns; i++) {
+        if (!g_fns[i].eligible) continue;
         fprintf(o, "static double %s(", g_fns[i].name);
         int ac = g_fns[i].b->arg_count;
         for (int j = 0; j < ac; j++) fprintf(o, "%sdouble", j ? ", " : "");
@@ -389,31 +440,31 @@ int main(int argc, char **argv) {
         fprintf(o, ");\n");
     }
     fprintf(o, "\n");
-    for (int i = 0; i < g_nfns; i++)
-        translate(ctx, o, g_fns[i].b, g_fns[i].name);
+    for (int i = 0; i < g_nfns; i++) {
+        if (!g_fns[i].eligible) continue;
+        compute_sp(g_fns[i].b, sp);
+        emit_fn(o, &g_fns[i], sp);
+    }
 
-    int eac = 0;
-    for (int i = 0; i < g_nfns; i++)
-        if (strcmp(g_fns[i].name, entry) == 0) eac = g_fns[i].b->arg_count;
-
-    fprintf(o, "#include <time.h>\n");
-    fprintf(o, "int main(int argc, char **argv) {\n");
-    fprintf(o, "  double r = 0;\n");
+    int eac = g_fns[ei].b->arg_count;
+    fprintf(o, "int main(int argc, char **argv) {\n  double r = 0;\n");
     for (int i = 0; i < eac; i++)
         fprintf(o, "  double a%d = (argc > %d) ? atof(argv[%d]) : 0;\n", i, i + 1, i + 1);
     fprintf(o, "  long reps = (argc > %d) ? atol(argv[%d]) : 1;\n", eac + 1, eac + 1);
-    fprintf(o, "  struct timespec ts0, ts1;\n");
-    fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &ts0);\n");
+    fprintf(o, "  struct timespec t0, t1;\n");
+    fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t0);\n");
     fprintf(o, "  for (long k = 0; k < reps; k++) r = %s(", entry);
     for (int i = 0; i < eac; i++) fprintf(o, "%sa%d", i ? ", " : "", i);
     fprintf(o, ");\n");
-    fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &ts1);\n");
-    fprintf(o, "  double ms = (ts1.tv_sec - ts0.tv_sec) * 1e3 + (ts1.tv_nsec - ts0.tv_nsec) / 1e6;\n");
+    fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t1);\n");
+    fprintf(o, "  double ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;\n");
     fprintf(o, "  printf(\"%%.17g\\n\", r);\n");
     fprintf(o, "  fprintf(stderr, \"ms=%%.3f\\n\", ms);\n  return 0;\n}\n");
     fclose(o);
 
-    fprintf(stderr, "aotc: compiled %d function(s), entry '%s' -> %s\n",
-            g_nfns, entry, out);
+    int nc = 0;
+    for (int i = 0; i < g_nfns; i++) nc += g_fns[i].eligible;
+    fprintf(stderr, "aotc: AOT-compiled %d/%d function(s), entry '%s' -> %s\n",
+            nc, g_nfns, entry, out);
     return 0;
 }
