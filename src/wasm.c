@@ -85,6 +85,7 @@ typedef struct {
     size_t size;
     guint8 *staging;
     size_t staging_size;
+    uint32_t max_pages;
 } ns_wasm_memory;
 
 typedef struct {
@@ -641,8 +642,10 @@ ns_wasm_memory_grow(JSContext *ctx, JSValueConst this_val, int argc,
     if (m->staging) {
         uint32_t old_pages = (uint32_t)(m->staging_size / NS_WASM_PAGE_SIZE);
         if (delta) {
-            guint64 new_size =
-                ((guint64)old_pages + delta) * NS_WASM_PAGE_SIZE;
+            guint64 new_pages = (guint64)old_pages + delta;
+            if (m->max_pages && new_pages > m->max_pages)
+                return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
+            guint64 new_size = new_pages * NS_WASM_PAGE_SIZE;
             if (new_size > NS_WASM_MEMORY_MAX_BYTES)
                 return JS_ThrowRangeError(ctx, "wasm memory.grow failed");
             m->staging = g_realloc(m->staging, new_size);
@@ -1884,6 +1887,15 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     JS_FreeValue(ctx, iv);
     if (rc)
         return JS_EXCEPTION;
+    JSValue maxv = JS_GetPropertyStr(ctx, desc, "maximum");
+    uint32_t maximum = 0;
+    if (!JS_IsUndefined(maxv))
+        rc = ns_wasm_to_u32_index(ctx, maxv, &maximum, "wasm memory maximum");
+    JS_FreeValue(ctx, maxv);
+    if (rc)
+        return JS_EXCEPTION;
+    if (maximum && maximum < initial)
+        return JS_ThrowRangeError(ctx, "wasm memory maximum is less than initial");
     JSValue sv = JS_GetPropertyStr(ctx, desc, "shared");
     int shared = JS_ToBool(ctx, sv);
     JS_FreeValue(ctx, sv);
@@ -1901,6 +1913,7 @@ ns_wasm_memory_ctor(JSContext *ctx, JSValueConst new_target, int argc,
     m->buffer = JS_UNDEFINED;
     m->staging = g_malloc0(bytes ? (size_t)bytes : 1);
     m->staging_size = (size_t)bytes;
+    m->max_pages = maximum;
     JS_SetOpaque(obj, m);
     return obj;
 }

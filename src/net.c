@@ -1480,6 +1480,10 @@ ns_write_cb(char *data, size_t size, size_t nmemb, void *userdata)
         ctx->exceeded = TRUE;
         return 0;
     }
+    if (ctx->total + bytes > G_MAXUINT) {
+        ctx->exceeded = TRUE;
+        return 0;
+    }
     g_byte_array_append(ctx->body, (const guint8 *)data, bytes);
     ctx->total += bytes;
     return bytes;

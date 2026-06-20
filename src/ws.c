@@ -776,6 +776,9 @@ ns_ws_raw_take_frame(GByteArray *in, gboolean *fin, int *opcode,
         pos = 10;
     }
     if (len > NS_WS_MAX_MESSAGE) return -1;
+    int frame_op = d[0] & 0x0f;
+    gboolean frame_fin = (d[0] & 0x80) != 0;
+    if (frame_op >= 0x8 && (len > 125 || !frame_fin)) return -1;
     gsize maskpos = pos;
     if (masked) {
         if (in->len < pos + 4) return 0;
