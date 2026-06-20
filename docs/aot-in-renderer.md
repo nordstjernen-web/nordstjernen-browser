@@ -220,3 +220,55 @@ code is possible through a compile broker but is a separate, weightier
 decision: it helps only compute-heavy pages and trades away much of the
 security margin that distinguishes this approach from a JIT — so it belongs
 behind an experimental flag, if anywhere, not in the default build.
+
+## 6. Implementation status — the dispatch mechanism is built
+
+The shared foundation both tiers need — the in-engine dispatch path — is now
+implemented and verified in the real engine (the same `quickjs.c` the renderer
+runs), gated behind the experimental compile switch `NS_AOT_DISPATCH` so the
+**stock build is byte-for-byte unchanged** (it carries no AOT code at all,
+exactly like the WebGPU pattern).
+
+What landed:
+
+- **Registration API** `JS_SetFunctionAOT(ctx, func, entry)`
+  (`src/quickjs/quickjs.c`, gated) stamps a borrowed `JSAOTEntry { JSAOTFn fn;
+  int arg_count; }` onto a normal function's `JSFunctionBytecode`.
+- **Dispatch hook** at the `JS_CallInternal` site (`quickjs.c`, the
+  `b = p->u.func.function_bytecode;` point): if an entry is registered and
+  every argument is a number, it marshals the args to `double`, calls the
+  native function, and boxes the result with `JS_NewFloat64`; **any
+  non-numeric argument, too few arguments, or a constructor/generator call
+  falls straight through to the interpreter** — so the result is always
+  identical to interpreting.
+- **`aotc --registry`** emits a linkable C file (numeric functions + a
+  `JSAOTEntry` table + an `ns_aot_register(ctx, obj)` that binds each entry to
+  the matching function by name) instead of a standalone `main`.
+
+How it is verified (`experiments/aot-js/dispatchtest.sh`):
+
+- `dispatch_test.c` proves, in the live engine, that the native path is
+  actually taken (a deliberately wrong "spy" native return is observed for
+  numeric args), that a string argument and an under-application both bail to
+  the interpreter, and that a real `easeInOutCubic` kernel matches the
+  interpreter bit-for-bit across 101 points.
+- `registry_test.c` runs `aotc --registry` over `tests/framework.js`, links
+  the output against the engine, registers all 13 kernels, and confirms native
+  results equal a second unregistered (interpreter) context across a 705-point
+  domain sweep.
+- The **full GTK browser builds** with these changes (`meson compile`, 601
+  targets) and **runs headless** end-to-end (`--headless --url=… --dump=…`,
+  exit 0), and the stock (`NS_AOT_DISPATCH` off) build is unchanged.
+- Standalone soundness is unaffected: `selfcheck` 160/160, `arraytest` 26/26.
+
+What is deliberately **not** wired yet, and why: activating Tier A against the
+browser's own JavaScript would mean a meson `custom_target` running
+`aotc --registry` over `data/js/polyfills.js` and an `ns_aot_register(ctx,
+global)` call after the polyfills are evaluated (`src/js.c:35729`). Measured
+first: `polyfills.js` is an IIFE of DOM/web shims with **zero numeric
+top-level functions** — registering it would bind nothing. So the honest state
+is that the *mechanism* is finished and proven in-engine, but there is no
+trusted numeric corpus shipping today to point it at; the remaining work is to
+either add such a module or take the Tier-B broker decision. Wiring an empty
+registration would be dead machinery, so it is left out until there is a real
+target.

@@ -19,6 +19,7 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ```sh
 ./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 160 cases
 ./arraytest.sh                       # typed-array soundness (reads+writes): AOT vs interpreter, 26 cases
+./dispatchtest.sh                    # in-engine AOT dispatch (JS_SetFunctionAOT) + aotc --registry pipeline
 ./run.sh                             # performance benchmark table
 ./frameworktest.sh                   # real third-party code (SunSpider); needs network
 ./speedometer.sh                     # robustness over the Speedometer 3.1 corpus; needs network
@@ -51,6 +52,8 @@ scale/axpy) 15×–29×.
 - `aot-run.sh` — AOT-by-default runner with automatic interpreter fallback.
 - `selfcheck.sh` — scalar soundness harness.
 - `arraytest.sh` — typed-array soundness harness.
+- `dispatchtest.sh` — in-engine dispatch + `--registry` pipeline harness (see `docs/aot-in-renderer.md`).
+- `dispatch_test.c`, `registry_test.c` — drivers linked against the real engine with `NS_AOT_DISPATCH`.
 - `frameworktest.sh` — real-world test (SunSpider numeric kernels).
 - `speedometer.sh` — robustness/eligibility test over the Speedometer 3.1 corpus.
 - `run.sh` — performance benchmark driver.
