@@ -134,8 +134,10 @@ The payoff: **3.8×–35× faster** than the interpreter on numeric
 workloads — `fib(28)` retires 9.2M instructions versus the interpreter's
 1.06 billion — **while the renderer never needs writable-executable
 memory at all**. The seccomp sandbox keeps denying it. This is a genuinely
-different point in the design space: most of the performance of a JIT,
-with none of its attack surface.
+different point in the design space: JIT-class speed on the workloads it
+can prove safe to accelerate, with none of a JIT's attack surface. The
+accelerated subset is numeric today and widening; everything outside it
+runs interpreted, exactly as before.
 
 ### Security: a landlocked renderer
 
@@ -188,6 +190,131 @@ This combination — open and modifiable for almost everyone, protected
 against extractive free-riding, monetizable by agreement, and guaranteed
 to become MIT over time — is itself one of the project's deliberate
 innovations.
+
+### And several quieter ones
+
+The headline items above are not the whole list. A few smaller innovations
+matter in aggregate:
+
+- **A two-layer crash architecture.** A renderer crash is contained to its
+  tab; a crash or hang of the thin UI shell itself is caught by an on-by-
+  default **watchdog supervisor** that respawns it transparently. The two
+  layers compose so neither a hostile page nor a shell bug takes the
+  browser down.
+- **A shared-memory framebuffer protocol.** The renderer paints into a
+  shared-memory buffer that the shell blits, with input forwarded over an
+  IPC control channel. The same protocol drives in-process
+  (`--single-process`), out-of-process, and even a remote
+  `nordstjernen-renderer` over HTTP/JSON — one boundary, many deployments.
+- **No-JNI JVM embedding.** On the JVM the engine can be driven either
+  through a thin JNI bridge or, for crash isolation, as a separate
+  renderer process over the HTTP/JSON protocol, so an engine crash cannot
+  take down the host JVM. A standalone Swing browser app rides the same
+  binding.
+- **Translation without gettext.** UI strings are English-source and
+  translated at startup through an in-tree catalogue (`src/i18n.c`,
+  `data/i18n/*.lang`) with English fallback — no `.po` tooling, no gettext
+  dependency, no build-time codegen.
+- **Memory-safe-by-default media paths.** Image bytes go through Wuffs
+  (transpiled, memory-safe), the lone video codec is pure-C MPEG-1 needing
+  no syscalls beyond memory, and audio is brokered to a separate helper —
+  so the most exploited surfaces in other browsers are either memory-safe
+  or out of the sandbox entirely.
+
+## David vs Goliath: why the web needs more engines
+
+It is worth stating plainly what Nordstjernen is up against. Essentially
+the entire web now renders on **three engines**: Blink (Google), WebKit
+(Apple), and Gecko (Mozilla, itself largely funded by Google). Blink and
+WebKit share a common ancestor, and Mozilla's market share keeps
+shrinking, so in practice the web is increasingly **one engine,
+controlled by one advertising company**. When a browser engine is also the
+de-facto specification, "standards compliance" quietly becomes "whatever
+Chrome does." A single vendor effectively decides what the web *is*.
+
+That monoculture is fragile in three ways:
+
+- **Security**, because a single class of bug — a V8 type confusion, say —
+  is simultaneously a flaw in Chrome, Edge, Brave, Opera, Electron, and
+  every other Chromium shell.
+- **Governance**, because web features that are inconvenient to an ad
+  business (or convenient to it) ship or don't ship at one company's
+  discretion.
+- **Viability**, because the engines are now so enormous — tens of millions
+  of lines — that no new entrant can realistically write one, which is
+  exactly why there have been no new ones for over a decade.
+
+Nordstjernen is the contrary bet: that a from-scratch engine *can* still be
+built by a tiny team, precisely **because** it refuses the bloat — ~127,000
+lines instead of tens of millions, no JIT, one video codec, no telemetry,
+auditable end to end by one person. The web does not need another Chromium
+skin; it needs a genuinely independent engine, and an independent engine is
+only credible if it is small enough to actually exist outside a
+trillion-dollar company. More alternatives are not a luxury here — they are
+the only thing that keeps the web a commons rather than a product.
+
+## Is it more secure than Chrome?
+
+Honestly: **in some structural ways yes, in overall battle-hardening not
+yet — and the two answers are not in tension.**
+
+Where Nordstjernen has the stronger *design*:
+
+- **No JIT, ever.** The renderer never needs writable-executable memory, so
+  the single most exploited capability in modern browsers — runtime code
+  generation — is simply absent. The seccomp filter can keep denying
+  `mprotect(PROT_EXEC)` for every code path.
+- **A far smaller attack surface.** ~127,000 auditable lines versus tens of
+  millions; one media codec instead of a full media stack; memory-safe
+  image decoding via Wuffs.
+- **Defence in depth on Linux.** seccomp *and* Landlock confine each
+  renderer; audio is brokered out; the page never launches subprocesses.
+- **No telemetry, no auto-update channel** to attack or to leak through.
+
+Where Chrome is, candidly, ahead today:
+
+- **Maturity and scale of review.** V8 and Blink are continuously fuzzed by
+  a large dedicated security team, with a multi-million-dollar bug-bounty
+  program and the fastest patch-and-ship pipeline in the industry.
+- **Site Isolation and the V8 sandbox.** Chrome's process-per-site-origin
+  model and V8's heap-isolation sandbox are mature mitigations refined over
+  years of real attacks.
+- **Exposure as proof.** Chrome is attacked constantly, so its defences are
+  tested constantly; Nordstjernen's simply have not faced the same fire.
+
+The fair conclusion: Nordstjernen's *threat model is smaller and easier to
+reason about*, and it structurally eliminates the exploit class that
+produces most in-the-wild browser zero-days. That is a real and durable
+advantage. But "smaller attack surface" is not the same as "more
+hardened," and the project does not claim to have out-engineered Google's
+security organisation. It claims something narrower and more defensible:
+**there is much less to attack, and the worst foothold — a JIT — is not
+there at all.**
+
+### The exploit class Nordstjernen designs away: JIT CVEs in 2026
+
+The argument is not abstract. Chrome shipped a string of V8 zero-days in
+2026, several of them exploited in the wild before a patch existed, and the
+JIT compiler is squarely in the firing line:
+
+- **CVE-2026-3910** — a **type confusion in V8's Maglev JIT compiler**,
+  specifically its Phi-untagging pass: once a JIT-compiled function runs,
+  the type confusion yields out-of-bounds read/write in the renderer.
+  Exploited in the wild before the fix in Chrome 146, and added to CISA's
+  Known Exploited Vulnerabilities catalog in March 2026. This is exactly
+  the bug shape AOT removes — there is no Maglev, no runtime-JITed
+  function, and no writable-executable page to confuse.
+- **CVE-2026-11645** — out-of-bounds memory access in V8 (CVSS 8.8), the
+  fifth Chrome zero-day of 2026, with an exploit acknowledged in the wild.
+- **CVE-2026-6363** — V8 type confusion allowing memory corruption and code
+  execution, fixed in Chrome 147.
+- **CVE-2026-2441, CVE-2026-3909, CVE-2026-5281** — the remaining 2026
+  Chrome zero-days exploited in the wild, several in V8.
+
+Every one of these lives in the JIT/optimising-compiler machinery or the
+V8 type system that the JIT exists to exploit. A browser with no JIT does
+not get to be *invulnerable* — but it does get to be **immune to this
+entire category**, which in 2026 was the category doing the most damage.
 
 ## Future work and the path to world dominance
 
