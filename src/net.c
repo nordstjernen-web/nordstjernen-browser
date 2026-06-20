@@ -170,6 +170,148 @@ ns_net_release_origin_slot(const char *origin)
     g_free(key);
 }
 
+typedef struct ns_multi_xfer {
+    CURL     *easy;
+    GCond     cond;
+    gboolean  done;
+    CURLcode  result;
+} ns_multi_xfer;
+
+static CURLM      *g_multi;
+static GThread    *g_multi_thread;
+static gboolean    g_multi_quit;
+static GMutex      g_multi_lock;
+static GQueue      g_multi_incoming = G_QUEUE_INIT;
+static GHashTable *g_multi_active;
+
+static void
+ns_net_multi_finish_locked(ns_multi_xfer *x, CURLcode result)
+{
+    x->result = result;
+    x->done = TRUE;
+    g_cond_signal(&x->cond);
+}
+
+static gpointer
+ns_net_multi_loop(gpointer data)
+{
+    (void)data;
+    for (;;) {
+        g_mutex_lock(&g_multi_lock);
+        if (g_multi_quit) {
+            GHashTableIter it;
+            gpointer key, val;
+            g_hash_table_iter_init(&it, g_multi_active);
+            while (g_hash_table_iter_next(&it, &key, &val)) {
+                ns_multi_xfer *x = val;
+                curl_multi_remove_handle(g_multi, x->easy);
+                ns_net_multi_finish_locked(x, CURLE_ABORTED_BY_CALLBACK);
+            }
+            g_hash_table_remove_all(g_multi_active);
+            for (ns_multi_xfer *x; (x = g_queue_pop_head(&g_multi_incoming)); )
+                ns_net_multi_finish_locked(x, CURLE_ABORTED_BY_CALLBACK);
+            g_mutex_unlock(&g_multi_lock);
+            break;
+        }
+        for (ns_multi_xfer *x; (x = g_queue_pop_head(&g_multi_incoming)); ) {
+            if (curl_multi_add_handle(g_multi, x->easy) == CURLM_OK)
+                g_hash_table_insert(g_multi_active, x->easy, x);
+            else
+                ns_net_multi_finish_locked(x, CURLE_FAILED_INIT);
+        }
+        g_mutex_unlock(&g_multi_lock);
+
+        int running = 0;
+        curl_multi_perform(g_multi, &running);
+
+        int nmsgs = 0;
+        CURLMsg *m;
+        while ((m = curl_multi_info_read(g_multi, &nmsgs))) {
+            if (m->msg != CURLMSG_DONE) continue;
+            CURL *easy = m->easy_handle;
+            CURLcode res = m->data.result;
+            curl_multi_remove_handle(g_multi, easy);
+            g_mutex_lock(&g_multi_lock);
+            ns_multi_xfer *x = g_hash_table_lookup(g_multi_active, easy);
+            if (x) {
+                g_hash_table_remove(g_multi_active, easy);
+                ns_net_multi_finish_locked(x, res);
+            }
+            g_mutex_unlock(&g_multi_lock);
+        }
+
+        curl_multi_poll(g_multi, NULL, 0, 1000, NULL);
+    }
+    return NULL;
+}
+
+static void
+ns_net_multi_start(void)
+{
+    g_mutex_lock(&g_multi_lock);
+    if (!g_multi_thread) {
+        g_multi = curl_multi_init();
+        if (g_multi) {
+            curl_multi_setopt(g_multi, CURLMOPT_PIPELINING,
+                              (long)CURLPIPE_MULTIPLEX);
+            g_multi_active = g_hash_table_new(g_direct_hash, g_direct_equal);
+            g_multi_thread = g_thread_new("ns-net-multi",
+                                          ns_net_multi_loop, NULL);
+        }
+    }
+    g_mutex_unlock(&g_multi_lock);
+}
+
+static CURLcode
+ns_net_multi_perform(CURL *easy, GCancellable *cancellable)
+{
+    (void)cancellable;
+    ns_net_multi_start();
+    if (!g_multi) return curl_easy_perform(easy);
+
+    ns_multi_xfer x = { .easy = easy, .done = FALSE, .result = CURLE_OK };
+    g_cond_init(&x.cond);
+
+    g_mutex_lock(&g_multi_lock);
+    if (g_multi_quit) {
+        g_mutex_unlock(&g_multi_lock);
+        g_cond_clear(&x.cond);
+        return curl_easy_perform(easy);
+    }
+    g_queue_push_tail(&g_multi_incoming, &x);
+    curl_multi_wakeup(g_multi);
+    while (!x.done) {
+        gint64 wakeup = g_get_monotonic_time() + 250 * G_TIME_SPAN_MILLISECOND;
+        g_cond_wait_until(&x.cond, &g_multi_lock, wakeup);
+    }
+    g_mutex_unlock(&g_multi_lock);
+
+    g_cond_clear(&x.cond);
+    return x.result;
+}
+
+static void
+ns_net_multi_shutdown(void)
+{
+    g_mutex_lock(&g_multi_lock);
+    GThread *t = g_multi_thread;
+    if (t) {
+        g_multi_quit = TRUE;
+        curl_multi_wakeup(g_multi);
+    }
+    g_mutex_unlock(&g_multi_lock);
+    if (t) {
+        g_thread_join(t);
+        g_multi_thread = NULL;
+    }
+    if (g_multi) { curl_multi_cleanup(g_multi); g_multi = NULL; }
+    if (g_multi_active) {
+        g_hash_table_destroy(g_multi_active);
+        g_multi_active = NULL;
+    }
+    g_multi_quit = FALSE;
+}
+
 static char *
 ns_net_data_path(char **slot, const char *basename)
 {
@@ -1292,6 +1434,7 @@ void
 ns_net_shutdown(void)
 {
     ns_net_join_rng();
+    ns_net_multi_shutdown();
     if (g_share) { curl_share_cleanup(g_share); g_share = NULL; }
     curl_global_cleanup();
     g_free(g_accept_encoding);
@@ -4024,7 +4167,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, cancellable);
 
     gint64 fetch_start_us = g_get_monotonic_time();
-    CURLcode rc = curl_easy_perform(curl);
+    CURLcode rc = ns_net_multi_perform(curl, cancellable);
 
     if ((rc == CURLE_PEER_FAILED_VERIFICATION ||
          rc == CURLE_SSL_CACERT_BADFILE) &&
@@ -4046,7 +4189,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
             curl_easy_setopt(curl, CURLOPT_COOKIEJAR,  NULL);
             curl_easy_setopt(curl, CURLOPT_COOKIELIST, "ALL");
-            rc = curl_easy_perform(curl);
+            rc = ns_net_multi_perform(curl, cancellable);
             if (rc == CURLE_OK)
                 resp->tls_warning = warn;
             else
@@ -4333,7 +4476,7 @@ ns_fetch_ctx_free(gpointer data)
     g_free(ctx);
 }
 
-#define NS_MAX_CONCURRENT_FETCHES 5
+#define NS_MAX_CONCURRENT_FETCHES 32
 static GMutex g_fetch_throttle_mutex;
 static int    g_fetch_active;
 static GQueue g_fetch_queue = G_QUEUE_INIT;

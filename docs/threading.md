@@ -29,7 +29,8 @@ that are transferred by ownership.
 | Thread | Created in | Lifetime | Touches DOM/JS? |
 |--------|-----------|----------|------------------|
 | **Main** | `renderer_http.c` | whole process | yes — owns the DOM, layout, paint, page JS |
-| **Fetch pool** (≤5) | `net.c`, GLib `GTask` thread pool | per request | no |
+| **Fetch pool** (≤32) | `net.c`, GLib `GTask` thread pool | per request | no |
+| **Network I/O** (1) | `net.c`, owns the shared `CURLM` | first fetch → shutdown | no |
 | **Web Worker** (1 per `Worker`) | `js.c` | until terminated | no (own `JSContext`) |
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |
 | **RNG warm-up** (transient) | `net.c` | one-shot at startup | no |
@@ -46,10 +47,11 @@ Two mechanisms keep the renderer's main loop pumping (so timers,
 fetch/XHR completions, and animation frames keep flowing, and the shell
 keeps getting fresh frames):
 
-1. **Blocking and heavy work is off-thread.** Network requests
-   (`curl_easy_perform`), HTML parsing, CSS parsing, and image
-   decoding never run on the main thread. They run on the fetch pool and
-   post their results back.
+1. **Blocking and heavy work is off-thread.** Network transfers, HTML
+   parsing, CSS parsing, and image decoding never run on the main thread.
+   Each request is owned by a fetch-pool thread that drives its transfer
+   on a single shared `CURLM` (the network I/O thread), then posts its
+   result back.
 
 2. **Long synchronous page JS cooperatively pumps the main loop.** Page
    JavaScript necessarily runs on the main thread (it manipulates the
@@ -105,7 +107,7 @@ Every blocking or unbounded operation has a bound:
 | JS heap (page runtime) | `js_memory_cap_mb` (config default 2048; 2048 no-config fallback, no clamp) | `JS_SetMemoryLimit`, `js.c` |
 | JS heap (worker runtime) | `js_memory_cap_mb` clamped to ≤512; 256 no-config fallback | `JS_SetMemoryLimit`, `js.c` |
 | Per-origin in-flight requests | 6 | `NS_NET_MAX_PER_ORIGIN`, `net.c` |
-| Total in-flight requests | 5 | `NS_MAX_CONCURRENT_FETCHES`, `net.c` |
+| Total in-flight requests | 32 | `NS_MAX_CONCURRENT_FETCHES`, `net.c` |
 
 The origin-slot wait (`ns_net_acquire_origin_slot`) uses
 `g_cond_wait_until` with a 250 ms re-check so a cancelled request never
@@ -119,11 +121,34 @@ blocks a pool thread indefinitely.
 duplicate every input into a heap `ns_fetch_ctx`, and enqueue it. A
 mutex-guarded throttle (`g_fetch_throttle_mutex`, `g_fetch_queue`,
 `g_fetch_active`) caps concurrency at `NS_MAX_CONCURRENT_FETCHES` and
-dispatches via `g_task_run_in_thread`. `ns_fetch_thread` runs the
-blocking `curl_easy_perform`, then `g_task_return_pointer` delivers the
+dispatches via `g_task_run_in_thread`. `ns_fetch_thread` builds a curl
+easy handle (redirects, TLS, cache, and FTP handling all stay inline,
+hop by hop) and drives the actual transfer through
+**`ns_net_multi_perform`**, then `g_task_return_pointer` delivers the
 `ns_response` to the `GTask` callback **on the main thread** (the task
 was created there). On completion the active count is decremented under
 the mutex and the queue is re-pumped.
+
+**Shared multi handle and multiplexing.** A pool thread does not call
+the blocking `curl_easy_perform`; it hands its easy handle to a single
+**network I/O thread** that owns one process-wide `CURLM`
+(`ns_net_multi_loop`) and blocks on a per-transfer `GCond` until that
+handle reports `CURLMSG_DONE`. Because every concurrent transfer rides
+the same multi handle — created with
+`CURLMOPT_PIPELINING = CURLPIPE_MULTIPLEX` — requests to the same
+HTTP/2 (or HTTP/3) origin share one connection and run as parallel
+streams instead of opening a separate TCP+TLS connection each. The easy
+interface multiplexes nothing; only the multi interface does, which is
+the entire reason for the I/O thread. Cancellation is unchanged: the
+`CURLOPT_XFERINFOFUNCTION` progress callback still fires under
+`curl_multi_perform` and aborts the transfer when its `GCancellable`
+trips, which surfaces as a normal `CURLMSG_DONE`. The driver state — the
+incoming queue, the `easy → ns_multi_xfer` active table, and the quit
+flag — is guarded by `g_multi_lock`; `curl_multi_wakeup` interrupts the
+poll the instant a new handle is queued. Shutdown
+(`ns_net_multi_shutdown`) sets the quit flag, wakes the loop, aborts any
+still-active transfers, and joins the thread before
+`curl_global_cleanup`.
 
 Shared state and its protection:
 
