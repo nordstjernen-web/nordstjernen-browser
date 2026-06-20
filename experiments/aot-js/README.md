@@ -17,7 +17,8 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ## Run
 
 ```sh
-./selfcheck.sh                       # soundness: AOT vs interpreter, 89 cases
+./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 89 cases
+./arraytest.sh                       # typed-array soundness: AOT vs interpreter, 14 cases
 ./run.sh                             # performance benchmark table
 ./frameworktest.sh                   # real third-party code (SunSpider); needs network
 ./speedometer.sh                     # robustness over the Speedometer 3.1 corpus; needs network
@@ -32,16 +33,19 @@ path — native vs fallback — was taken). `run.sh` reports speedups.
 (424 files / 14 MB) as a robustness check.
 
 The subset covers arithmetic, comparisons, bitwise/shift (`& | ^ ~ << >>
->>>`, spec-exact `ToInt32`/`ToUint32`), `Math.*` methods and constants, all
-loop forms, `?:`, `&&`/`||`, and direct/mutual/tail recursion. Anything else
-(strings, objects, arrays, non-`Math` built-ins, higher-order calls) falls
-back to the interpreter.
+>>>`, spec-exact `ToInt32`/`ToUint32`), `Math.*` methods and constants,
+read-only `Float64Array` parameters (`a[i]`, `a.length`), all loop forms,
+`?:`, `&&`/`||`, and direct/mutual/tail recursion. Anything else (strings,
+objects, written/non-`Float64Array` arrays, non-`Math` built-ins,
+higher-order calls) falls back to the interpreter. Array kernels (dot, norm,
+stencil, variance) run 15×–29× the interpreter.
 
 ## Contents
 
-- `aotc.c` — eligibility analysis, kind-tracking validator + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
+- `aotc.c` — eligibility analysis, kind-tracking validator, array classification + bytecode→C lowering (`#include`s `src/quickjs/quickjs.c`).
 - `aot-run.sh` — AOT-by-default runner with automatic interpreter fallback.
-- `selfcheck.sh` — soundness harness.
+- `selfcheck.sh` — scalar soundness harness.
+- `arraytest.sh` — typed-array soundness harness.
 - `frameworktest.sh` — real-world test (SunSpider numeric kernels).
 - `speedometer.sh` — robustness/eligibility test over the Speedometer 3.1 corpus.
 - `run.sh` — performance benchmark driver.

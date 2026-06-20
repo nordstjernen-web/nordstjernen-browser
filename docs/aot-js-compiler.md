@@ -32,7 +32,9 @@ JavaScript; everything else runs interpreted, exactly as before.
   **bitwise and shift operators** (`& | ^ << >> >>>`) with spec-exact
   `ToInt32`/`ToUint32`, **`Math.*`** (sqrt, floor, sin, pow, min/max, …, and
   constants like `Math.PI`) lowered to the exact libm calls QuickJS itself
-  uses, and direct/mutual/tail recursion plus calls (with correct
+  uses, **read-only `Float64Array` parameters** (`a[i]`, `a.length`) with
+  bounds-and-integer-checked element access matching the interpreter, and
+  direct/mutual/tail recursion plus calls (with correct
   under/over-application) among eligible functions.
 - An 89-case self-check (`selfcheck.sh`) compares AOT against the
   interpreter across all of the above — including bit hashing (FNV),
@@ -45,11 +47,12 @@ JavaScript; everything else runs interpreted, exactly as before.
   and the **entire Speedometer 3.1 JavaScript corpus** (`speedometer.sh`,
   424 files / 14 MB) — **0 compiler crashes**. This testing found and fixed
   a real crash and the `pow` soundness bug (see *Security review*).
-- It runs **1.8×–36×** faster than the interpreter on numeric workloads
-  (6.3× on a `Math.*` kernel); for `fib(28)` it retires **9.2M**
-  instructions versus the interpreter's **1.06 billion**. Callgrind
-  attributes **93%** of interpreter instructions to the bytecode dispatch
-  loop alone.
+- It runs **1.8×–36×** faster than the interpreter on scalar numeric
+  workloads (6.3× on a `Math.*` kernel) and **15×–29×** on array kernels
+  (dot product, L2 norm, stencil blur, variance over a million-element
+  `Float64Array`); for `fib(28)` it retires **9.2M** instructions versus the
+  interpreter's **1.06 billion**. Callgrind attributes **93%** of
+  interpreter instructions to the bytecode dispatch loop alone.
 - The compiler is checked under **ASan + UBSan** across the whole corpus
   (including real-world code and a 2000-local stress program): **0
   memory-safety errors**.
@@ -237,6 +240,37 @@ L7: ;
 
 The tagged stack machine collapses into plain `double` arithmetic and
 direct calls; `-O2` then register-allocates the slots away.
+
+### Typed numeric arrays
+
+Scalar arithmetic is where AOT *deletes* the most overhead, but the workloads
+that actually benefit from compilation — image/audio/DSP filters, vector math,
+statistics, physics — work over **arrays**. The compiler therefore handles
+`Float64Array` parameters:
+
+- A parameter is classified as an array if it is ever the object of an element
+  read (`a[i]`) or `.length`; the object operand is traced back to its
+  originating argument through the slot model (`classify_args`). A parameter
+  used both as an array and as a scalar declines.
+- Array parameters change the C ABI from `double a` to `double *p, int64_t
+  plen`. `a.length` becomes `plen`; `a[i]` becomes a **bounds-and-integer
+  checked** load — `(i >= 0 && i < plen && i == floor(i)) ? p[(int64_t)i] :
+  NaN` — which is exactly what the interpreter's `JS_GetPropertyValue` yields
+  for a `Float64Array` (out-of-range or non-integer index → `undefined` → NaN
+  in a numeric context). The kind tracker proves an array reference only ever
+  reaches element access or `.length`, never arithmetic.
+- **Reads only.** Element *writes* (`a[i] = v`) compile in QuickJS to a
+  property-key-coercion sequence (`to_propkey`, `is_undefined_or_null`, …)
+  that is outside the numeric subset, so array-mutating functions cleanly
+  decline. Read-only kernels — reductions, dot products, norms, convolutions,
+  search, statistics — are the common and high-value case and are supported.
+
+`arraytest.sh` verifies this path: aotc emits both the native C *and* a
+matching JS reference harness (`<out>.ref.js`) that builds identical
+`Float64Array`s from the same command line, so the AOT result (return value
+plus a checksum of each array) is compared against the interpreter bit-for-bit
+across sums, max, dot, L2 norm, stencil blur, and two-pass variance — 14/14
+identical, including out-of-bounds and non-integer indices.
 
 ## Enabled by default, with automatic fallback
 
@@ -430,6 +464,19 @@ and `prng` from 0.5× to 1.8×. The residual gap is the one remaining
 inference (knowing a slot already holds an int32, e.g. after `|0`) — future
 work, not done here.
 
+Array kernels over a million-element `Float64Array` (200 reps each) are
+where AOT's advantage is largest, because every element touch in the
+interpreter is a tagged property access through `JS_GetPropertyValue`,
+whereas AOT issues a bounds-checked `double` load the C optimizer then
+vectorizes:
+
+| kernel     | what it computes            | interp (ms) | AOT (ms) | speedup |
+|------------|-----------------------------|-------------|----------|---------|
+| `norm`     | √Σ a[i]²                    | 15551.8     | 535.4    | **29.0×** |
+| `dot`      | Σ a[i]·b[i] (two arrays)    | 11835.9     | 603.7    | **19.6×** |
+| `blur`     | 3-point stencil average     | 24750.2     | 1456.1   | **17.0×** |
+| `variance` | two-pass mean + variance    | 17672.5     | 1211.3   | **14.6×** |
+
 ### Where the interpreter time goes
 
 Callgrind on `fib(28)`:
@@ -474,14 +521,22 @@ small function is ~5 ms, all paid offline.
 The compiler accelerates the **numeric subset**: functions over `double`,
 the arithmetic/comparison/logical-not operators, the bitwise and shift
 operators (`& | ^ ~ << >> >>>`, with spec-exact `ToInt32`/`ToUint32`),
-`Math.*` methods and constants, `if`/`while`/`for`/`do…while`, `++`/`--`,
-`?:`, short-circuit `&&`/`||`, direct/mutual/tail recursion, and calls
-(including under/over-application) among eligible top-level functions.
-Everything else — strings, objects, arrays, property access, `this`,
+`Math.*` methods and constants, **read-only `Float64Array` parameters**,
+`if`/`while`/`for`/`do…while`, `++`/`--`, `?:`, short-circuit `&&`/`||`,
+direct/mutual/tail recursion, and calls (including under/over-application)
+among eligible top-level functions. Everything else — strings, objects,
+non-`Float64Array` / written arrays, general property access, `this`,
 closures with captured mutable state, non-`Math` built-ins, function-valued
 arguments / higher-order code, exceptions, generators, `async`/`await`,
 `eval`/`Function` — is **declined and interpreted**. This is a *capability*
 boundary, not a correctness one: declining is always safe.
+
+This widens the compiler from scalar math to the **array-crunching kernels**
+where AOT's large speedups are genuinely useful — DSP, image/audio filters,
+vector math, statistics, physics. It does **not** make it useful for general
+*websites*: that code is objects/strings/DOM loaded at runtime, which AOT
+cannot touch (see *The Speedometer 3.1 corpus*). The two are different
+workloads; AOT serves the compute-bound one.
 
 Wiring the AOT path into the live renderer (so eligible functions run
 native inside the browser, not just via the standalone tool) is the natural
@@ -500,7 +555,8 @@ compile code that does not exist until runtime.
 
 ```sh
 cd experiments/aot-js
-./selfcheck.sh      # soundness: AOT vs interpreter over the whole corpus
+./selfcheck.sh      # scalar soundness: AOT vs interpreter over the whole corpus
+./arraytest.sh      # typed-array soundness: AOT vs interpreter
 ./run.sh            # performance: the benchmark table above
 ./frameworktest.sh  # real third-party code (SunSpider); needs network
 ./speedometer.sh    # robustness over the whole Speedometer 3.1 corpus; needs network
@@ -514,9 +570,10 @@ re-run the sanitizer check, build `aotc.c` with
 
 ## Files
 
-- `experiments/aot-js/aotc.c` — eligibility analysis, call validation, and bytecode→C lowering.
+- `experiments/aot-js/aotc.c` — eligibility analysis, kind-tracking validator, array classification, and bytecode→C lowering.
 - `experiments/aot-js/aot-run.sh` — AOT-by-default runner with interpreter fallback.
-- `experiments/aot-js/selfcheck.sh` — soundness harness (AOT vs interpreter).
+- `experiments/aot-js/selfcheck.sh` — scalar soundness harness (AOT vs interpreter).
+- `experiments/aot-js/arraytest.sh` — typed-array soundness harness (AOT vs interpreter).
 - `experiments/aot-js/frameworktest.sh` — real-world test (SunSpider numeric kernels).
 - `experiments/aot-js/speedometer.sh` — robustness/eligibility test over the Speedometer 3.1 corpus.
 - `experiments/aot-js/run.sh` — performance benchmark driver.

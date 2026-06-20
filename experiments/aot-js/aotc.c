@@ -16,6 +16,8 @@
 
 #define MAX_CALLEES 256
 
+#define MAX_ARGS 64
+
 typedef struct {
     JSFunctionBytecode *b;
     const char *name;
@@ -24,6 +26,8 @@ typedef struct {
     int eligible;
     const char *callees[MAX_CALLEES];
     int n_callees;
+    char arg_is_array[MAX_ARGS]; /* a Float64Array parameter, not a scalar */
+    int has_array_args;
 } Fn;
 
 static Fn g_fns[MAX_FNS];
@@ -180,6 +184,10 @@ static int op_delta(const uint8_t *code, int pos, int *pop, int *push) {
     case OP_get_field:  np = 1; ns = 1; break;
     case OP_call_method:      np = 2 + get_u16(code + p); ns = 1; break;
     case OP_tail_call_method: np = 2 + get_u16(code + p); ns = 0; break;
+    case OP_get_length:   np = 1; ns = 1; break;
+    case OP_get_array_el: np = 2; ns = 1; break;
+    case OP_get_array_el2: np = 2; ns = 2; break;
+    case OP_put_array_el: np = 3; ns = 0; break;
     default:
         return 0;
     }
@@ -250,8 +258,62 @@ static int compute_sp(JSFunctionBytecode *b, int *sp_before) {
 /* Slot kinds tracked by the validator/emitter. Only K_NUM values may flow
    into arithmetic; the others are intermediate forms that must be consumed
    exactly by a call (K_USERFN), a method call (K_MATHFN), or a property
-   access (K_MATHOBJ). */
-enum { K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN };
+   access (K_MATHOBJ); K_ARRAY is a Float64Array parameter, consumed only by
+   element access and `.length`. */
+enum { K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN, K_ARRAY };
+
+/* Decide which parameters are arrays: a parameter is an array iff it is ever
+   the object of an element access (`a[i]`, `a[i]=v`) or `.length`. The object
+   operand is traced back to its originating argument through the slot model.
+   Fills fn->arg_is_array; returns 1 (a parameter used both as an array object
+   and produced by anything that isn't a plain get_arg is handled
+   conservatively — validate_kinds makes the final soundness decision). */
+static void classify_args(Fn *fn, int *sp_before) {
+    JSFunctionBytecode *b = fn->b;
+    const uint8_t *code = b->byte_code_buf;
+    int len = b->byte_code_len, maxstack = b->stack_size + 4;
+    for (int i = 0; i < MAX_ARGS; i++) fn->arg_is_array[i] = 0;
+    fn->has_array_args = 0;
+    if (b->arg_count > MAX_ARGS) return;
+
+    int *origin = malloc(sizeof(int) * (maxstack > 0 ? maxstack : 1));
+    char *islabel = calloc(len + 1, 1);
+    for (int pos = 0; pos < len; ) {
+        int u, t = branch_target(code, pos, &u);
+        if (t >= 0 && t <= len) islabel[t] = 1;
+        pos += short_opcode_info(code[pos]).size;
+    }
+    int pos = 0;
+    while (pos < len) {
+        if (islabel[pos]) for (int i = 0; i < maxstack; i++) origin[i] = -1;
+        int op = code[pos], sp = sp_before[pos], sz = short_opcode_info(op).size;
+        if (sp < 0) { pos += sz; continue; }
+        int objslot = -1;
+        if (op == OP_get_length) objslot = sp - 1;
+        else if (op == OP_get_array_el || op == OP_get_array_el2) objslot = sp - 2;
+        else if (op == OP_put_array_el) objslot = sp - 3;
+        if (objslot >= 0 && objslot < maxstack && origin[objslot] >= 0 &&
+            origin[objslot] < b->arg_count) {
+            fn->arg_is_array[origin[objslot]] = 1;
+            fn->has_array_args = 1;
+        }
+        if (op >= OP_get_arg0 && op <= OP_get_arg3) {
+            if (sp < maxstack) origin[sp] = op - OP_get_arg0;
+        } else if (op == OP_get_arg) {
+            if (sp < maxstack) origin[sp] = get_u16(code + pos + 1);
+        } else if (op == OP_dup) {
+            if (sp < maxstack && sp - 1 >= 0) origin[sp] = origin[sp - 1];
+        } else {
+            int pop, push;
+            op_delta(code, pos, &pop, &push);
+            for (int i = sp - pop; i < sp - pop + push && i < maxstack; i++)
+                if (i >= 0) origin[i] = -1;
+        }
+        pos += sz;
+    }
+    free(origin);
+    free(islabel);
+}
 
 /* Abstract-interpret slot kinds and prove the program never uses a
    non-numeric value (function reference, Math object, Math method) in a
@@ -260,7 +322,8 @@ enum { K_NUM = 0, K_USERFN, K_MATHOBJ, K_MATHFN };
    Anything outside the numeric+Math subset is rejected here, before the
    emitter runs. Kinds are produced and consumed within a basic block, so they
    are cleared at every branch target. */
-static int validate_kinds(JSFunctionBytecode *b, int *sp_before) {
+static int validate_kinds(Fn *fn, int *sp_before) {
+    JSFunctionBytecode *b = fn->b;
     const uint8_t *code = b->byte_code_buf;
     int len = b->byte_code_len, maxstack = b->stack_size + 4;
     signed char *k = calloc(maxstack > 0 ? maxstack : 1, 1);
@@ -340,10 +403,40 @@ static int validate_kinds(JSFunctionBytecode *b, int *sp_before) {
             break;
         case OP_drop:
             break;
+        case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3: {
+            int n = op - OP_get_arg0;
+            SETK(sp, (n < MAX_ARGS && fn->arg_is_array[n]) ? K_ARRAY : K_NUM);
+            break;
+        }
+        case OP_get_arg: {
+            int n = get_u16(code + p);
+            SETK(sp, (n < MAX_ARGS && fn->arg_is_array[n]) ? K_ARRAY : K_NUM);
+            break;
+        }
+        case OP_get_length: {
+            if (sp - 1 < 0 || sp - 1 >= maxstack || k[sp - 1] != K_ARRAY) { ok = 0; break; }
+            SETK(sp - 1, K_NUM);
+            break;
+        }
+        case OP_get_array_el: {
+            if (sp - 2 < 0 || sp - 2 >= maxstack || k[sp - 2] != K_ARRAY) { ok = 0; break; }
+            NEED_NUM(sp - 1);
+            SETK(sp - 2, K_NUM);
+            break;
+        }
+        case OP_get_array_el2: {
+            if (sp - 2 < 0 || sp - 2 >= maxstack || k[sp - 2] != K_ARRAY) { ok = 0; break; }
+            NEED_NUM(sp - 1);
+            SETK(sp - 1, K_NUM);   /* value on top; object kept at sp-2 */
+            break;
+        }
+        case OP_put_array_el: {
+            if (sp - 3 < 0 || sp - 3 >= maxstack || k[sp - 3] != K_ARRAY) { ok = 0; break; }
+            NEED_NUM(sp - 2); NEED_NUM(sp - 1);
+            break;
+        }
         case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
         case OP_get_loc8: case OP_get_loc: case OP_get_loc_check:
-        case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3:
-        case OP_get_arg:
         case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
         case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
         case OP_push_minus1: case OP_push_i8: case OP_push_i16: case OP_push_i32:
@@ -442,7 +535,8 @@ static int local_check(Fn *fn, int *sp_scratch) {
         pos += short_opcode_info(op).size;
     }
     if (!compute_sp(b, sp_scratch)) return 0;
-    return validate_kinds(b, sp_scratch);
+    classify_args(fn, sp_scratch);
+    return validate_kinds(fn, sp_scratch);
 }
 
 /* Greatest fixpoint: assume every locally-OK function is eligible, then
@@ -473,6 +567,32 @@ static void compute_eligible_all(void) {
 
 static const char **g_slotfn;
 static const char **g_slotmeth;
+static int *g_slotarr;
+
+/* signature of an eligible function: array params become a (double*, length)
+   pair, scalar params a double. */
+static void emit_signature(FILE *o, Fn *fn) {
+    JSFunctionBytecode *b = fn->b;
+    int first = 1;
+    for (int i = 0; i < b->arg_count; i++) {
+        const char *sep = first ? "" : ", ";
+        first = 0;
+        if (fn->arg_is_array[i])
+            fprintf(o, "%sdouble *p%d, int64_t plen%d", sep, i, i);
+        else
+            fprintf(o, "%sdouble a%d", sep, i);
+    }
+    if (b->arg_count == 0) fprintf(o, "void");
+}
+
+/* bounds-and-integer-checked typed-array element read, matching the
+   interpreter's `a[i]` for a Float64Array (out-of-range / non-integer index
+   yields undefined → NaN). */
+static void emit_arr_load(FILE *o, int dst, int n, int idxslot) {
+    fprintf(o, "  s%d = (s%d >= 0 && s%d < (double)plen%d && s%d == floor(s%d)) "
+               "? p%d[(int64_t)s%d] : (0.0/0.0);\n",
+            dst, idxslot, idxslot, n, idxslot, idxslot, n, idxslot);
+}
 
 static void emit_math_expr(FILE *o, int dst, const char *m, int argc, int arg0) {
     int mk = math_method_kind(m);
@@ -507,11 +627,11 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     int maxstack = b->stack_size + 4;
     g_slotfn = calloc(maxstack, sizeof(*g_slotfn));
     g_slotmeth = calloc(maxstack, sizeof(*g_slotmeth));
+    g_slotarr = malloc(sizeof(int) * maxstack);
+    for (int i = 0; i < maxstack; i++) g_slotarr[i] = -1;
 
     fprintf(o, "static double %s(", fn->mangled);
-    for (int i = 0; i < b->arg_count; i++)
-        fprintf(o, "%sdouble a%d", i ? ", " : "", i);
-    if (b->arg_count == 0) fprintf(o, "void");
+    emit_signature(o, fn);
     fprintf(o, ") {\n");
     for (int i = 0; i < b->var_count; i++)
         fprintf(o, "  double loc%d = 0;\n", i);
@@ -550,10 +670,35 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
                 fprintf(o, "  s%d = %.17g;\n", sp, JS_VALUE_GET_FLOAT64(v));
             g_slotfn[sp] = NULL; break;
         }
-        case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3:
-            fprintf(o, "  s%d = a%d;\n", sp, op - OP_get_arg0); g_slotfn[sp] = NULL; break;
-        case OP_get_arg:
-            fprintf(o, "  s%d = a%d;\n", sp, get_u16(code + p)); g_slotfn[sp] = NULL; break;
+        case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3: {
+            int n = op - OP_get_arg0;
+            if (fn->arg_is_array[n]) { g_slotarr[sp] = n; }
+            else { fprintf(o, "  s%d = a%d;\n", sp, n); g_slotfn[sp] = NULL; }
+            break;
+        }
+        case OP_get_arg: {
+            int n = get_u16(code + p);
+            if (n < MAX_ARGS && fn->arg_is_array[n]) { g_slotarr[sp] = n; }
+            else { fprintf(o, "  s%d = a%d;\n", sp, n); g_slotfn[sp] = NULL; }
+            break;
+        }
+        case OP_get_length:
+            fprintf(o, "  s%d = (double)plen%d;\n", sp - 1, g_slotarr[sp - 1]);
+            g_slotarr[sp - 1] = -1; break;
+        case OP_get_array_el:
+            emit_arr_load(o, sp - 2, g_slotarr[sp - 2], sp - 1);
+            g_slotarr[sp - 2] = -1; break;
+        case OP_get_array_el2:
+            emit_arr_load(o, sp - 1, g_slotarr[sp - 2], sp - 1);
+            /* object kept at sp-2 (its array marker stays) */
+            break;
+        case OP_put_array_el: {
+            int n = g_slotarr[sp - 3];
+            fprintf(o, "  if (s%d >= 0 && s%d < (double)plen%d && s%d == floor(s%d)) "
+                       "p%d[(int64_t)s%d] = s%d;\n",
+                    sp - 2, sp - 2, n, sp - 2, sp - 2, n, sp - 2, sp - 1);
+            g_slotarr[sp - 3] = -1; break;
+        }
         case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
             fprintf(o, "  s%d = loc%d;\n", sp, op - OP_get_loc0); g_slotfn[sp] = NULL; break;
         case OP_get_loc8:
@@ -576,7 +721,11 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         case OP_dec_loc: fprintf(o, "  loc%d -= 1;\n", get_u8(code + p)); break;
         case OP_add_loc: fprintf(o, "  loc%d += s%d;\n", get_u8(code + p), sp - 1); break;
         case OP_dup:
-            fprintf(o, "  s%d = s%d;\n", sp, sp - 1); g_slotfn[sp] = g_slotfn[sp - 1]; break;
+            fprintf(o, "  s%d = s%d;\n", sp, sp - 1);
+            g_slotfn[sp] = g_slotfn[sp - 1];
+            g_slotmeth[sp] = g_slotmeth[sp - 1];
+            g_slotarr[sp] = g_slotarr[sp - 1];
+            break;
         case OP_drop: g_slotfn[sp - 1] = NULL; break;
         case OP_post_inc:
             fprintf(o, "  s%d = s%d + 1;\n", sp, sp - 1); g_slotfn[sp] = NULL; break;
@@ -632,7 +781,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
                        ? get_u16(code + p) : (op - OP_call0);
             int fnslot = sp - 1 - argc;
             int ci = (fnslot >= 0) ? find_fn(g_slotfn[fnslot]) : -1;
-            if (ci < 0) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); free(g_slotfn); exit(DECLINE); }
+            if (ci < 0) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); free(g_slotfn); free(g_slotarr); exit(DECLINE); }
             const char *callee = g_fns[ci].mangled;
             int arity = g_fns[ci].b->arg_count;
             size_t cap = 64 + (size_t)arity * 24;
@@ -682,7 +831,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             int margc = get_u16(code + p);
             int fnslot = sp - 1 - margc, thisslot = fnslot - 1;
             const char *m = (fnslot >= 0) ? g_slotmeth[fnslot] : NULL;
-            if (!m) { fprintf(stderr, "aotc: lost method target\n"); free(islabel); free(g_slotfn); free(g_slotmeth); exit(DECLINE); }
+            if (!m) { fprintf(stderr, "aotc: lost method target\n"); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); exit(DECLINE); }
             emit_math_expr(o, thisslot, m, margc, fnslot + 1);
             if (op == OP_tail_call_method)
                 fprintf(o, "  return s%d;\n", thisslot);
@@ -693,7 +842,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         case OP_return: fprintf(o, "  return s%d;\n", sp - 1); break;
         case OP_return_undef: fprintf(o, "  return 0;\n"); break;
         case OP_nop: case OP_set_loc_uninitialized: break;
-        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); free(g_slotmeth); exit(DECLINE);
+        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); exit(DECLINE);
         }
         pos += short_opcode_info(op).size;
     }
@@ -701,6 +850,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     free(islabel);
     free(g_slotfn);
     free(g_slotmeth);
+    free(g_slotarr);
 }
 
 int main(int argc, char **argv) {
@@ -823,9 +973,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < g_nfns; i++) {
         if (!g_fns[i].eligible) continue;
         fprintf(o, "static double %s(", g_fns[i].mangled);
-        int ac = g_fns[i].b->arg_count;
-        for (int j = 0; j < ac; j++) fprintf(o, "%sdouble", j ? ", " : "");
-        if (ac == 0) fprintf(o, "void");
+        emit_signature(o, &g_fns[i]);
         fprintf(o, ");\n");
     }
     fprintf(o, "\n");
@@ -835,21 +983,59 @@ int main(int argc, char **argv) {
         emit_fn(o, &g_fns[i], sp);
     }
 
-    int eac = g_fns[ei].b->arg_count;
-    fprintf(o, "int main(int argc, char **argv) {\n  double r = 0;\n");
-    for (int i = 0; i < eac; i++)
-        fprintf(o, "  double a%d = (argc > %d) ? atof(argv[%d]) : 0;\n", i, i + 1, i + 1);
-    fprintf(o, "  long reps = (argc > %d) ? atol(argv[%d]) : 1;\n", eac + 1, eac + 1);
+    Fn *E = &g_fns[ei];
+    int eac = E->b->arg_count;
+    fprintf(o, "int main(int argc, char **argv) {\n  double r = 0; int ai = 1;\n");
+    for (int i = 0; i < eac; i++) {
+        if (E->arg_is_array[i]) {
+            fprintf(o, "  int64_t plen%d = (argc > ai) ? atoll(argv[ai++]) : 0;\n", i);
+            fprintf(o, "  double *p%d = malloc(sizeof(double) * (plen%d > 0 ? plen%d : 1));\n", i, i, i);
+            fprintf(o, "  for (int64_t j = 0; j < plen%d; j++) p%d[j] = (double)(j %% 97) * 0.5 - 13.0;\n", i, i);
+        } else {
+            fprintf(o, "  double a%d = (argc > ai) ? atof(argv[ai++]) : 0;\n", i);
+        }
+    }
+    fprintf(o, "  long reps = (argc > ai) ? atol(argv[ai]) : 1;\n");
     fprintf(o, "  struct timespec t0, t1;\n");
     fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t0);\n");
-    fprintf(o, "  for (long k = 0; k < reps; k++) r = %s(", g_fns[ei].mangled);
-    for (int i = 0; i < eac; i++) fprintf(o, "%sa%d", i ? ", " : "", i);
+    fprintf(o, "  for (long k = 0; k < reps; k++) r = %s(", E->mangled);
+    for (int i = 0; i < eac; i++) {
+        if (E->arg_is_array[i]) fprintf(o, "%sp%d, plen%d", i ? ", " : "", i, i);
+        else fprintf(o, "%sa%d", i ? ", " : "", i);
+    }
     fprintf(o, ");\n");
     fprintf(o, "  clock_gettime(CLOCK_MONOTONIC, &t1);\n");
     fprintf(o, "  double ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;\n");
     fprintf(o, "  printf(\"%%.17g\\n\", r);\n");
+    for (int i = 0; i < eac; i++)
+        if (E->arg_is_array[i])
+            fprintf(o, "  { double cs = 0; for (int64_t j = 0; j < plen%d; j++) cs += p%d[j]; printf(\"%%.17g\\n\", cs); }\n", i, i);
     fprintf(o, "  fprintf(stderr, \"ms=%%.3f\\n\", ms);\n  return 0;\n}\n");
     fclose(o);
+
+    /* Companion interpreter-reference harness: same CLI, same array fill,
+       prints the return value then a checksum of each array parameter. */
+    char refpath[4096];
+    snprintf(refpath, sizeof(refpath), "%s.ref.js", out);
+    char inabs[4096];
+    if (!realpath(in, inabs)) snprintf(inabs, sizeof(inabs), "%s", in);
+    FILE *rf = fopen(refpath, "w");
+    fprintf(rf, "import * as std from \"qjs:std\";\n");
+    fprintf(rf, "const f = std.evalScript(std.loadFile(\"%s\") + \"\\n;%s;\");\n",
+            inabs, entry);
+    fprintf(rf, "const fill = (j) => (j %% 97) * 0.5 - 13.0;\n");
+    fprintf(rf, "let ai = 1, args = [], arrays = [];\n");
+    for (int i = 0; i < eac; i++) {
+        if (E->arg_is_array[i])
+            fprintf(rf, "{ let n = parseInt(scriptArgs[ai++]); let a = new Float64Array(n>0?n:0); for (let j=0;j<n;j++) a[j]=fill(j); args.push(a); arrays.push(a); }\n");
+        else
+            fprintf(rf, "args.push(parseFloat(scriptArgs[ai++]));\n");
+    }
+    fprintf(rf, "let reps = (scriptArgs.length > ai) ? parseInt(scriptArgs[ai]) : 1;\n");
+    fprintf(rf, "let r = 0; for (let k=0;k<reps;k++) r = f.apply(null, args);\n");
+    fprintf(rf, "std.out.printf(\"%%.17g\\n\", +r);\n");
+    fprintf(rf, "for (const a of arrays) { let cs=0; for (let j=0;j<a.length;j++) cs+=a[j]; std.out.printf(\"%%.17g\\n\", cs); }\n");
+    fclose(rf);
 
     int nc = 0;
     for (int i = 0; i < g_nfns; i++) nc += g_fns[i].eligible;
