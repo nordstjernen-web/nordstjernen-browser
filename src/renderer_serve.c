@@ -223,6 +223,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
             s->cur = NULL;
         }
         s->frame_valid = 0;
+        ns_net_log_clear();
         if (url && s->post_body && s->post_url &&
             strcmp(url, s->post_url) == 0)
             s->cur = ns_browser_open_post_viewport(url, vw, vh, (int)settle,
@@ -604,7 +605,11 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 res = ns_browser_dump_layout(s->cur);
             else if (strcmp(kind, "text") == 0)
                 res = ns_browser_render_text(s->cur);
+            else if (strcmp(kind, "performance") == 0)
+                res = ns_browser_dump_performance(s->cur);
         }
+        if (!res && kind && strcmp(kind, "network") == 0)
+            res = ns_net_log_dump();
         reply_str(ctrl_w, "text", res);
         free(res);
         free(kind);

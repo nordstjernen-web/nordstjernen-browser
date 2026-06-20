@@ -19165,6 +19165,48 @@ ns_js_has_pending_work(const ns_js *js)
     return FALSE;
 }
 
+void
+ns_js_dump_stats(ns_js *js, GString *out)
+{
+    if (!js || !out)
+        return;
+    if (js->rt) {
+        JSMemoryUsage u;
+        memset(&u, 0, sizeof u);
+        JS_ComputeMemoryUsage(js->rt, &u);
+        g_string_append(out, "JavaScript heap\n");
+        g_string_append_printf(out, "  used        %lld bytes\n",
+                               (long long)u.memory_used_size);
+        g_string_append_printf(out, "  malloc      %lld bytes\n",
+                               (long long)u.malloc_size);
+        g_string_append_printf(out, "  malloc cap  %lld bytes\n",
+                               (long long)u.malloc_limit);
+        g_string_append_printf(out, "  objects     %lld\n",
+                               (long long)u.obj_count);
+        g_string_append_printf(out, "  properties  %lld\n",
+                               (long long)u.prop_count);
+        g_string_append_printf(out, "  atoms       %lld\n",
+                               (long long)u.atom_count);
+        g_string_append_printf(out, "  functions   %lld\n",
+                               (long long)u.c_func_count);
+    }
+    g_string_append(out, "\nEvent loop\n");
+    g_string_append_printf(out, "  timers          %u\n",
+                           js->timers ? g_hash_table_size(js->timers) : 0);
+    g_string_append_printf(out, "  anim frames     %u\n",
+                           js->raf_pending ? js->raf_pending->len : 0);
+    g_string_append_printf(out, "  pending fetch   %u\n",
+                           js->pending_fetches ? js->pending_fetches->len : 0);
+    g_string_append_printf(out, "  pending xhr     %u\n",
+                           js->pending_xhrs ? js->pending_xhrs->len : 0);
+    g_string_append_printf(out, "  websockets      %u\n",
+                           js->pending_ws ? js->pending_ws->len : 0);
+    g_string_append_printf(out, "  event listeners %u\n",
+                           js->listeners ? js->listeners->len : 0);
+    g_string_append_printf(out, "  frame contexts  %u\n",
+                           js->frame_ctxs ? js->frame_ctxs->len : 0);
+}
+
 static void
 ns_js_purge_frame_rafs(ns_js *js, const ns_node *frame)
 {

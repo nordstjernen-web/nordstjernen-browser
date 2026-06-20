@@ -28,10 +28,18 @@ pv_settle_ms(void)
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
-    REQ_EVAL, REQ_DROPFILES,
+    REQ_EVAL, REQ_DUMP, REQ_DROPFILES,
     REQ_WEBGL, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
+
+enum {
+    DEV_TAB_CONSOLE = 0,
+    DEV_TAB_NETWORK,
+    DEV_TAB_PERFORMANCE,
+    DEV_TAB_LAYOUT,
+    DEV_TAB_ELEMENTS
+};
 
 typedef struct {
     ReqType type;
@@ -57,12 +65,14 @@ typedef struct {
     int     find_case;
     char   *export_dest;
     char   *paths;
+    int     dump_tab;
+    gboolean inspect;
 } Req;
 
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL, RES_FAVICON, RES_DROPFILES
+    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES
 } ResType;
 
 typedef struct {
@@ -94,6 +104,8 @@ typedef struct {
     int              media_is_video, media_stream;
     unsigned char   *favicon_data;
     int              favicon_w, favicon_h, favicon_stride;
+    int              dump_tab;
+    gboolean         inspect;
 } Res;
 
 struct NsProcView {
@@ -158,9 +170,19 @@ struct NsProcView {
     gboolean    find_case;
 
     GtkWidget    *console_window;
+    GtkWidget    *console_notebook;
     GtkWidget    *console_entry;
     GtkWidget    *console_view;
     GtkTextBuffer *console_buffer;
+    GtkWidget    *net_view;
+    GtkTextBuffer *net_buffer;
+    GtkWidget    *perf_view;
+    GtkTextBuffer *perf_buffer;
+    GtkWidget    *layout_view;
+    GtkTextBuffer *layout_buffer;
+    GtkWidget    *elements_view;
+    GtkTextBuffer *elements_buffer;
+    GtkWidget    *inspect_entry;
     gboolean      console_open;
     guint         console_poll_id;
 
@@ -845,7 +867,17 @@ worker_main(gpointer data)
             res->view = pv_ref(v);
             res->type = RES_EVAL;
             res->seq = req->seq;
+            res->dump_tab = req->dump_tab;
+            res->inspect = req->inspect;
             res->href = v->proc ? ns_rproc_http_eval(v->proc, req->query) : NULL;
+            post(res);
+        } else if (req->type == REQ_DUMP) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_DUMP;
+            res->seq = req->seq;
+            res->dump_tab = req->dump_tab;
+            res->href = v->proc ? ns_rproc_http_dump(v->proc, req->query) : NULL;
             post(res);
         } else if (req->type == REQ_WEBGL) {
             if (v->proc)
@@ -1895,13 +1927,33 @@ on_result(gpointer data)
         if (res->href && *res->href)
             console_append(v, res->href);
     } else if (res->type == RES_EVAL) {
-        if (res->href && *res->href) {
+        if (res->inspect) {
+            if (v->elements_buffer)
+                gtk_text_buffer_set_text(
+                    v->elements_buffer,
+                    (res->href && *res->href) ? res->href
+                                              : ns_i18n("No matching element"),
+                    -1);
+        } else if (res->href && *res->href) {
             console_append(v, res->href);
             console_append(v, "\n");
         } else {
             console_append(v, "undefined\n");
         }
         request_render(v);
+    } else if (res->type == RES_DUMP) {
+        GtkTextBuffer *buf = NULL;
+        switch (res->dump_tab) {
+        case DEV_TAB_NETWORK:     buf = v->net_buffer;      break;
+        case DEV_TAB_PERFORMANCE: buf = v->perf_buffer;     break;
+        case DEV_TAB_LAYOUT:      buf = v->layout_buffer;   break;
+        case DEV_TAB_ELEMENTS:    buf = v->elements_buffer; break;
+        default: break;
+        }
+        if (buf)
+            gtk_text_buffer_set_text(
+                buf, (res->href && *res->href) ? res->href : ns_i18n("(empty)"),
+                -1);
     } else if (res->type == RES_FAVICON) {
         if (res->seq != v->load_seq)
             goto done;
@@ -2496,9 +2548,19 @@ on_area_destroy(GtkWidget *widget, gpointer data)
     if (v->console_window) {
         GtkWidget *win = v->console_window;
         v->console_window = NULL;
+        v->console_notebook = NULL;
         v->console_entry = NULL;
         v->console_view = NULL;
         v->console_buffer = NULL;
+        v->net_view = NULL;
+        v->net_buffer = NULL;
+        v->perf_view = NULL;
+        v->perf_buffer = NULL;
+        v->layout_view = NULL;
+        v->layout_buffer = NULL;
+        v->elements_view = NULL;
+        v->elements_buffer = NULL;
+        v->inspect_entry = NULL;
         gtk_window_destroy(GTK_WINDOW(win));
     }
     if (v->ctx_popover) {
@@ -2600,12 +2662,90 @@ console_set_open(NsProcView *v, gboolean open)
 }
 
 static void
+console_request_dump(NsProcView *v, int tab)
+{
+    const char *kind = NULL;
+    switch (tab) {
+    case DEV_TAB_NETWORK:     kind = "network";     break;
+    case DEV_TAB_PERFORMANCE: kind = "performance"; break;
+    case DEV_TAB_LAYOUT:      kind = "layout";      break;
+    case DEV_TAB_ELEMENTS:    kind = "dom";         break;
+    default: return;
+    }
+    if (!v->opened)
+        return;
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_DUMP;
+    req->dump_tab = tab;
+    req->query = g_strdup(kind);
+    push_req(v, req);
+}
+
+static int
+console_current_tab(NsProcView *v)
+{
+    if (!v->console_notebook)
+        return DEV_TAB_CONSOLE;
+    return gtk_notebook_get_current_page(GTK_NOTEBOOK(v->console_notebook));
+}
+
+static void
 on_console_clear(GtkButton *b, gpointer data)
 {
     (void)b;
     NsProcView *v = data;
-    if (v->console_buffer)
-        gtk_text_buffer_set_text(v->console_buffer, "", 0);
+    GtkTextBuffer *buf = NULL;
+    switch (console_current_tab(v)) {
+    case DEV_TAB_CONSOLE:     buf = v->console_buffer;  break;
+    case DEV_TAB_NETWORK:     buf = v->net_buffer;      break;
+    case DEV_TAB_PERFORMANCE: buf = v->perf_buffer;     break;
+    case DEV_TAB_LAYOUT:      buf = v->layout_buffer;   break;
+    case DEV_TAB_ELEMENTS:    buf = v->elements_buffer; break;
+    default: break;
+    }
+    if (buf)
+        gtk_text_buffer_set_text(buf, "", 0);
+}
+
+static void
+on_console_refresh(GtkButton *b, gpointer data)
+{
+    (void)b;
+    NsProcView *v = data;
+    console_request_dump(v, console_current_tab(v));
+}
+
+static void
+on_console_notebook_switch(GtkNotebook *nb, GtkWidget *page, guint num,
+                           gpointer data)
+{
+    (void)nb;
+    (void)page;
+    NsProcView *v = data;
+    console_request_dump(v, (int)num);
+}
+
+static void
+on_inspect_activate(GtkEntry *entry, gpointer data)
+{
+    NsProcView *v = data;
+    const char *sel = gtk_editable_get_text(GTK_EDITABLE(entry));
+    if (!sel || !*sel || !v->opened)
+        return;
+    char *esc = g_strescape(sel, NULL);
+    char *src = g_strdup_printf(
+        "(function(){try{var e=document.querySelector(\"%s\");"
+        "if(!e)return \"\";var s=e.outerHTML;"
+        "return s.length>20000?s.slice(0,20000)+\"\\n\\u2026(truncated)\":s;}"
+        "catch(err){return \"Error: \"+err;}})()",
+        esc);
+    g_free(esc);
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_EVAL;
+    req->inspect = TRUE;
+    req->dump_tab = DEV_TAB_ELEMENTS;
+    req->query = src;
+    push_req(v, req);
 }
 
 static gboolean
@@ -2616,6 +2756,31 @@ on_console_close_request(GtkWindow *win, gpointer data)
     return TRUE;
 }
 
+static GtkWidget *
+console_make_view(GtkWidget **out_view, GtkTextBuffer **out_buffer,
+                  gboolean wrap)
+{
+    GtkWidget *view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
+    gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view),
+                                wrap ? GTK_WRAP_WORD_CHAR : GTK_WRAP_NONE);
+    *out_view = view;
+    *out_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(view));
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), view);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    return scroll;
+}
+
+static void
+console_add_tab(NsProcView *v, GtkWidget *child, const char *title)
+{
+    gtk_notebook_append_page(GTK_NOTEBOOK(v->console_notebook), child,
+                             gtk_label_new(ns_i18n(title)));
+}
+
 static void
 build_console_window(NsProcView *v)
 {
@@ -2623,42 +2788,64 @@ build_console_window(NsProcView *v)
 
     GtkWidget *header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_add_css_class(header, "toolbar");
-    GtkWidget *clear = gtk_button_new_from_icon_name("edit-clear-symbolic");
-    gtk_widget_set_hexpand(clear, FALSE);
-    gtk_widget_set_halign(clear, GTK_ALIGN_END);
-    gtk_widget_set_tooltip_text(clear, ns_i18n("Clear console"));
-    g_signal_connect(clear, "clicked", G_CALLBACK(on_console_clear), v);
     GtkWidget *spacer = gtk_label_new("");
     gtk_widget_set_hexpand(spacer, TRUE);
+    GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+    gtk_widget_set_tooltip_text(refresh, ns_i18n("Refresh"));
+    g_signal_connect(refresh, "clicked", G_CALLBACK(on_console_refresh), v);
+    GtkWidget *clear = gtk_button_new_from_icon_name("edit-clear-symbolic");
+    gtk_widget_set_tooltip_text(clear, ns_i18n("Clear"));
+    g_signal_connect(clear, "clicked", G_CALLBACK(on_console_clear), v);
     gtk_box_append(GTK_BOX(header), spacer);
+    gtk_box_append(GTK_BOX(header), refresh);
     gtk_box_append(GTK_BOX(header), clear);
 
-    v->console_view = gtk_text_view_new();
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(v->console_view), FALSE);
-    gtk_text_view_set_monospace(GTK_TEXT_VIEW(v->console_view), TRUE);
-    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(v->console_view), FALSE);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(v->console_view),
-                                GTK_WRAP_WORD_CHAR);
-    v->console_buffer =
-        gtk_text_view_get_buffer(GTK_TEXT_VIEW(v->console_view));
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v->console_view);
-    gtk_widget_set_vexpand(scroll, TRUE);
+    v->console_notebook = gtk_notebook_new();
+    gtk_widget_set_vexpand(v->console_notebook, TRUE);
 
+    GtkWidget *console_page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *console_scroll =
+        console_make_view(&v->console_view, &v->console_buffer, TRUE);
     v->console_entry = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(v->console_entry),
                                    ns_i18n("Evaluate JavaScript and press Enter"));
     g_signal_connect(v->console_entry, "activate",
                      G_CALLBACK(on_console_eval), v);
+    gtk_box_append(GTK_BOX(console_page), console_scroll);
+    gtk_box_append(GTK_BOX(console_page), v->console_entry);
+    console_add_tab(v, console_page, "Console");
+
+    console_add_tab(v, console_make_view(&v->net_view, &v->net_buffer, FALSE),
+                    "Network");
+    console_add_tab(v, console_make_view(&v->perf_view, &v->perf_buffer, FALSE),
+                    "Performance");
+    console_add_tab(v,
+                    console_make_view(&v->layout_view, &v->layout_buffer, FALSE),
+                    "Layout");
+
+    GtkWidget *elements_page = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *elements_scroll =
+        console_make_view(&v->elements_view, &v->elements_buffer, FALSE);
+    v->inspect_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(
+        GTK_ENTRY(v->inspect_entry),
+        ns_i18n("Inspect: CSS selector, then Enter"));
+    g_signal_connect(v->inspect_entry, "activate",
+                     G_CALLBACK(on_inspect_activate), v);
+    gtk_box_append(GTK_BOX(elements_page), elements_scroll);
+    gtk_box_append(GTK_BOX(elements_page), v->inspect_entry);
+    console_add_tab(v, elements_page, "Elements");
+
+    g_signal_connect(v->console_notebook, "switch-page",
+                     G_CALLBACK(on_console_notebook_switch), v);
 
     gtk_box_append(GTK_BOX(box), header);
-    gtk_box_append(GTK_BOX(box), scroll);
-    gtk_box_append(GTK_BOX(box), v->console_entry);
+    gtk_box_append(GTK_BOX(box), v->console_notebook);
 
     v->console_window = gtk_window_new();
     gtk_window_set_title(GTK_WINDOW(v->console_window),
-                         ns_i18n("JavaScript Console"));
-    gtk_window_set_default_size(GTK_WINDOW(v->console_window), 640, 320);
+                         ns_i18n("Developer Tools"));
+    gtk_window_set_default_size(GTK_WINDOW(v->console_window), 720, 420);
     gtk_window_set_destroy_with_parent(GTK_WINDOW(v->console_window), TRUE);
     gtk_window_set_child(GTK_WINDOW(v->console_window), box);
     g_signal_connect(v->console_window, "close-request",

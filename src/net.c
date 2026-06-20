@@ -1405,6 +1405,145 @@ ns_response_free(ns_response *resp)
     g_free(resp);
 }
 
+typedef struct {
+    char   *method;
+    char   *url;
+    long    status;
+    char   *content_type;
+    guint64 body_len;
+    double  duration_ms;
+    char   *req_headers;
+    char   *resp_headers;
+    char   *error;
+} ns_net_log_entry;
+
+#define NS_NET_LOG_CAP 256
+
+static GMutex      ns_net_log_lock;
+static GPtrArray  *ns_net_log;
+
+static void
+ns_net_log_entry_free(gpointer data)
+{
+    ns_net_log_entry *e = data;
+    if (!e)
+        return;
+    g_free(e->method);
+    g_free(e->url);
+    g_free(e->content_type);
+    g_free(e->req_headers);
+    g_free(e->resp_headers);
+    g_free(e->error);
+    g_free(e);
+}
+
+static void
+ns_net_log_record(const char *method, const char *url, long status,
+                  const char *content_type, guint64 body_len,
+                  double duration_ms, const char *req_headers,
+                  const char *resp_headers, const char *error)
+{
+    if (!url || !*url)
+        return;
+    if (g_str_has_prefix(url, "data:") || g_str_has_prefix(url, "about:"))
+        return;
+    ns_net_log_entry *e = g_new0(ns_net_log_entry, 1);
+    e->method = g_strdup(method && *method ? method : "GET");
+    e->url = g_strdup(url);
+    e->status = status;
+    e->content_type = g_strdup(content_type ? content_type : "");
+    e->body_len = body_len;
+    e->duration_ms = duration_ms;
+    e->req_headers = g_strdup(req_headers ? req_headers : "");
+    e->resp_headers = g_strdup(resp_headers ? resp_headers : "");
+    e->error = error && *error ? g_strdup(error) : NULL;
+
+    g_mutex_lock(&ns_net_log_lock);
+    if (!ns_net_log)
+        ns_net_log = g_ptr_array_new_with_free_func(ns_net_log_entry_free);
+    if (ns_net_log->len >= NS_NET_LOG_CAP)
+        g_ptr_array_remove_index(ns_net_log, 0);
+    g_ptr_array_add(ns_net_log, e);
+    g_mutex_unlock(&ns_net_log_lock);
+}
+
+void
+ns_net_log_clear(void)
+{
+    g_mutex_lock(&ns_net_log_lock);
+    if (ns_net_log)
+        g_ptr_array_set_size(ns_net_log, 0);
+    g_mutex_unlock(&ns_net_log_lock);
+}
+
+static void
+ns_net_log_append_headers(GString *out, const char *headers)
+{
+    if (!headers || !*headers)
+        return;
+    char **lines = g_strsplit(headers, "\n", -1);
+    for (guint i = 0; lines && lines[i]; i++) {
+        char *line = g_strchomp(lines[i]);
+        if (*line)
+            g_string_append_printf(out, "    %s\n", line);
+    }
+    g_strfreev(lines);
+}
+
+char *
+ns_net_log_dump(void)
+{
+    GString *out = g_string_new(NULL);
+    g_mutex_lock(&ns_net_log_lock);
+    guint n = ns_net_log ? ns_net_log->len : 0;
+    g_string_append_printf(out, "%u network request%s\n\n", n,
+                           n == 1 ? "" : "s");
+    for (guint i = 0; i < n; i++) {
+        ns_net_log_entry *e = g_ptr_array_index(ns_net_log, i);
+        if (e->status > 0)
+            g_string_append_printf(out, "[%ld] %s %s\n", e->status,
+                                   e->method, e->url);
+        else
+            g_string_append_printf(out, "[---] %s %s\n", e->method, e->url);
+        g_string_append_printf(out, "    %.0f ms, %llu bytes",
+                               e->duration_ms,
+                               (unsigned long long)e->body_len);
+        if (e->content_type && *e->content_type)
+            g_string_append_printf(out, ", %s", e->content_type);
+        g_string_append_c(out, '\n');
+        if (e->error)
+            g_string_append_printf(out, "    error: %s\n", e->error);
+        if (e->req_headers && *e->req_headers) {
+            g_string_append(out, "  Request headers:\n");
+            ns_net_log_append_headers(out, e->req_headers);
+        }
+        if (e->resp_headers && *e->resp_headers) {
+            g_string_append(out, "  Response headers:\n");
+            ns_net_log_append_headers(out, e->resp_headers);
+        }
+        g_string_append_c(out, '\n');
+    }
+    g_mutex_unlock(&ns_net_log_lock);
+    return g_string_free(out, FALSE);
+}
+
+static char *
+ns_net_slist_serialize(struct curl_slist *list)
+{
+    if (!list)
+        return NULL;
+    GString *out = g_string_new(NULL);
+    for (struct curl_slist *n = list; n; n = n->next) {
+        if (!n->data)
+            continue;
+        if (g_str_has_prefix(n->data, "X-ND-"))
+            continue;
+        g_string_append(out, n->data);
+        g_string_append_c(out, '\n');
+    }
+    return g_string_free(out, FALSE);
+}
+
 #define NS_NET_RESPONSE_MIN_BUDGET (64ULL * 1024ULL * 1024ULL)
 #define NS_NET_RESPONSE_RECHECK_BYTES (16ULL * 1024ULL * 1024ULL)
 #define NS_NET_MAX_RAW_HEADER_BYTES   (1ULL * 1024ULL * 1024ULL)
@@ -3884,6 +4023,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ns_xferinfo_cb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, cancellable);
 
+    gint64 fetch_start_us = g_get_monotonic_time();
     CURLcode rc = curl_easy_perform(curl);
 
     if ((rc == CURLE_PEER_FAILED_VERIFICATION ||
@@ -4020,6 +4160,15 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         resp->raw_headers = g_string_free(header_ctx.raw, FALSE);
     }
     ns_cache_entry_free(cached);
+
+    {
+        char *req_hdrs = ns_net_slist_serialize(headers);
+        ns_net_log_record(method, url, resp->status, resp->content_type,
+                          resp->body ? (guint64)resp->body->len : 0,
+                          (g_get_monotonic_time() - fetch_start_us) / 1000.0,
+                          req_hdrs, resp->raw_headers, resp->error);
+        g_free(req_hdrs);
+    }
 
     curl_easy_cleanup(curl);
     if (headers) curl_slist_free_all(headers);

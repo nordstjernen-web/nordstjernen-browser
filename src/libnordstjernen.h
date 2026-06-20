@@ -46,6 +46,7 @@ char *ns_browser_render_text(ns_browser *browser);
  * IPC so they exercise the same engine state as the GUI. */
 char *ns_browser_dump_dom(ns_browser *browser);
 char *ns_browser_dump_layout(ns_browser *browser);
+char *ns_browser_dump_performance(ns_browser *browser);
 
 int ns_browser_render_image(ns_browser *browser, const char *path);
 

@@ -808,6 +808,94 @@ ns_browser_dump_layout(ns_browser *browser)
     return g_string_free(out, FALSE);
 }
 
+static int
+node_count_walk(const ns_node *n)
+{
+    int c = 0;
+    for (; n; n = n->next_sibling)
+        c += 1 + node_count_walk(n->first_child);
+    return c;
+}
+
+static int
+box_count_walk(const ns_box *b)
+{
+    int c = 0;
+    for (; b; b = b->next_sibling)
+        c += 1 + box_count_walk(b->first_child);
+    return c;
+}
+
+static void
+perf_dump_threads(GString *out)
+{
+    g_string_append(out, "Threads\n");
+#if defined(__linux__)
+    GError *err = NULL;
+    GDir *dir = g_dir_open("/proc/self/task", 0, &err);
+    if (!dir) {
+        g_string_append_printf(out, "  (unavailable: %s)\n",
+                               err ? err->message : "?");
+        g_clear_error(&err);
+        return;
+    }
+    const char *tid;
+    int n = 0;
+    while ((tid = g_dir_read_name(dir))) {
+        char *path = g_strdup_printf("/proc/self/task/%s/comm", tid);
+        char *comm = NULL;
+        if (g_file_get_contents(path, &comm, NULL, NULL) && comm) {
+            g_string_append_printf(out, "  [%s] %s", tid, g_strchomp(comm));
+            g_string_append_c(out, '\n');
+            n++;
+        }
+        g_free(comm);
+        g_free(path);
+    }
+    g_dir_close(dir);
+    g_string_append_printf(out, "  %d thread%s total\n", n, n == 1 ? "" : "s");
+#else
+    g_string_append(out, "  (thread enumeration is Linux-only)\n");
+#endif
+}
+
+char *
+ns_browser_dump_performance(ns_browser *browser)
+{
+    if (!browser) return NULL;
+    GString *out = g_string_new(NULL);
+
+    int pw = 0, ph = 0;
+    ns_browser_page_size(browser, &pw, &ph);
+
+    g_string_append(out, "Document\n");
+    g_string_append_printf(out, "  url         %s\n",
+                           browser->base_url ? browser->base_url : "");
+    g_string_append_printf(out, "  charset     %s\n",
+                           browser->doc_charset ? browser->doc_charset : "");
+    g_string_append_printf(out, "  DOM nodes   %d\n",
+                           node_count_walk(browser->doc));
+    g_string_append_printf(out, "  layout boxes %d\n",
+                           box_count_walk(browser->layout));
+    g_string_append_printf(out, "  page size   %d x %d px\n", pw, ph);
+
+    g_string_append(out, "\nLayout\n");
+    g_string_append_printf(out, "  viewport    %d x %.0f px\n",
+                           browser->vw, browser->vh);
+    g_string_append_printf(out, "  last reflow %.2f ms\n",
+                           browser->relayout_cost_us / 1000.0);
+    g_string_append_printf(out, "  oscillation %d\n", browser->layout_osc);
+
+    g_string_append_c(out, '\n');
+    if (browser->js)
+        ns_js_dump_stats(browser->js, out);
+
+    g_string_append_c(out, '\n');
+    perf_dump_threads(out);
+
+    return g_string_free(out, FALSE);
+}
+
 int
 ns_browser_render_image(ns_browser *browser, const char *path)
 {

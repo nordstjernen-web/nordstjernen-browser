@@ -97,6 +97,9 @@ ns_response *ns_net_request_blocking(const char        *url,
 char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 
+void  ns_net_log_clear(void);
+char *ns_net_log_dump(void);
+
 char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);

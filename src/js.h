@@ -87,6 +87,8 @@ gboolean ns_js_run_animation_frame(ns_js *js);
 gboolean ns_js_has_pending_animation_frame(const ns_js *js);
 gboolean ns_js_has_pending_work(const ns_js *js);
 
+void ns_js_dump_stats(ns_js *js, GString *out);
+
 typedef struct ns_anim ns_anim;
 void ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim);
 
