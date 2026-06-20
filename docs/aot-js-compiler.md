@@ -649,6 +649,18 @@ bytecode for non-numeric callers, and GC-aware handling — all of which
 whole point. `eval`/`Function` stay interpreted by construction: AOT cannot
 compile code that does not exist until runtime.
 
+A full design study of this step — the exact `JS_CallInternal` hook
+(`src/quickjs/quickjs.c:17688`), the registry on `JSFunctionBytecode`, the
+argument guard/marshalling, and crucially what the renderer's seccomp sandbox
+does and does not permit (it can `mmap` read-only native code from a
+descriptor but cannot `execve` a compiler) — is written up in
+[`aot-in-renderer.md`](aot-in-renderer.md). Its conclusion: a build-time tier
+that AOT-compiles the browser's own trusted JavaScript (`data/js/polyfills.js`)
+is a safe, finishable next step; accelerating untrusted *web* code is possible
+through a compile broker but trades away much of the security margin that
+distinguishes this approach from a JIT, so it belongs behind an experimental
+flag, if anywhere.
+
 ## Reproducing
 
 ```sh
