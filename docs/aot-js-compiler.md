@@ -14,6 +14,39 @@ never change the meaning of a program — at worst a function is not
 accelerated. It currently accelerates the **numeric subset** of
 JavaScript; everything else runs interpreted, exactly as before.
 
+## Why AOT — the benefits
+
+- **Speed where it counts.** Numeric hot paths run **2.4×–63×** faster than
+  the interpreter, and array kernels **15×–29×**, by deleting the per-opcode
+  boxing and dispatch that dominate a tree-walking/bytecode VM. The dispatch
+  loop alone is **93%** of interpreter instructions on `fib`; AOT removes it.
+- **Soundness, not heuristics.** The compiler emits native code only when it
+  can *prove* the output is bit-for-bit identical to the interpreter, and
+  declines otherwise. It can never miscompile or change a program's meaning —
+  the worst case is "not accelerated." Every accelerated path is checked
+  against the interpreter on 124 differential cases.
+- **No runtime W^X — fits the sandbox.** Unlike a JIT, AOT generates all
+  machine code *before* execution, so the sandboxed renderer never needs
+  writable-and-executable memory. The seccomp/W^X policy that hardens the
+  renderer stays intact; there is no JIT spray surface, no `mprotect`
+  hole, no executable-heap.
+- **Reuses the real front end.** Bytecode comes from the *actual* QuickJS
+  parser/compiler, so there is no second grammar to drift out of sync, and
+  numeric semantics (`ToInt32`, `fmod`, `Math.*` → libm, `pow` edge cases)
+  match the interpreter by mapping to the exact operations it uses.
+- **Transparent and automatic.** AOT is on by default and falls back
+  silently for anything outside the subset (or if the generated C fails to
+  build). Callers need no annotations; results are identical either way.
+- **Small, auditable, dependency-free.** The whole compiler is one C file
+  (`aotc.c`) that `#include`s QuickJS; it adds no third-party libraries and
+  emits plain C that any system compiler optimizes.
+- **Ahead-of-time cost model.** Compilation happens off the hot path, so the
+  optimizer can run at `-O2` without stealing execution time — no warm-up,
+  no tiering, no deopt, and steady-state performance from the first call.
+- **Portable output.** The result is ordinary C, so it benefits from the
+  host toolchain's autovectorizer and works anywhere the browser builds
+  (Linux/macOS/Windows) without per-architecture codegen backends.
+
 ## TL;DR
 
 - `aotc` reuses the **real QuickJS front end** to compile JS to bytecode,
@@ -30,29 +63,34 @@ JavaScript; everything else runs interpreted, exactly as before.
 - The subset covers arithmetic, comparisons, `if`/`while`/`for`/`do…while`,
   `?:`, short-circuit `&&`/`||`, `++`/`--`, logical/bitwise-not, the full
   **bitwise and shift operators** (`& | ^ << >> >>>`) with spec-exact
-  `ToInt32`/`ToUint32`, **`Math.*`** (sqrt, floor, sin, pow, min/max, …, and
-  constants like `Math.PI`) lowered to the exact libm calls QuickJS itself
-  uses, **read-only `Float64Array` parameters** (`a[i]`, `a.length`) with
+  `ToInt32`/`ToUint32`, **`Math.*`** (sqrt, floor, sin, pow, min/max, hypot,
+  imul, clz32, …, and constants like `Math.PI`) lowered to the exact libm /
+  integer operations QuickJS itself uses, **int32 range inference** that
+  removes redundant `ToInt32`/`ToUint32` on chained bitwise code,
+  **read-only `Float64Array` parameters** (`a[i]`, `a.length`) with
   bounds-and-integer-checked element access matching the interpreter, and
   direct/mutual/tail recursion plus calls (with correct
   under/over-application) among eligible functions.
-- An 89-case self-check (`selfcheck.sh`) compares AOT against the
-  interpreter across all of the above — including bit hashing (FNV),
-  xorshift PRNG, popcount, `Math.*` kernels, division-by-zero, negative
-  modulo, fractional powers, `(±1) ** ±Infinity`, and `ToInt32` edge cases
-  — **all identical**; out-of-subset programs (strings, arrays, objects,
-  higher-order calls) correctly fall back.
+- A 110-case self-check (`selfcheck.sh`) plus a 14-case array check
+  (`arraytest.sh`) compare AOT against the interpreter across all of the
+  above — including bit hashing (FNV), xorshift PRNG, popcount, a MurmurHash
+  finalizer (`Math.imul`/`Math.clz32`), `Math.*` kernels, division-by-zero,
+  negative modulo, fractional powers, `(±1) ** ±Infinity`, `ToInt32` edge
+  cases, and out-of-bounds / non-integer array indices — **all identical**;
+  out-of-subset programs (strings, objects, written arrays, higher-order
+  calls) correctly fall back.
 - It is exercised on **real third-party code**: the SunSpider numeric
   kernels (`frameworktest.sh`, 9 native / 17 fallback / **0 mismatches**)
   and the **entire Speedometer 3.1 JavaScript corpus** (`speedometer.sh`,
   424 files / 14 MB) — **0 compiler crashes**. This testing found and fixed
   a real crash and the `pow` soundness bug (see *Security review*).
-- It runs **1.8×–36×** faster than the interpreter on scalar numeric
-  workloads (6.3× on a `Math.*` kernel) and **15×–29×** on array kernels
-  (dot product, L2 norm, stencil blur, variance over a million-element
-  `Float64Array`); for `fib(28)` it retires **9.2M** instructions versus the
-  interpreter's **1.06 billion**. Callgrind attributes **93%** of
-  interpreter instructions to the bytecode dispatch loop alone.
+- It runs **2.4×–63×** faster than the interpreter on scalar numeric
+  workloads (6.9× on a `Math.*` kernel; int32 inference lifts bit-twiddling
+  kernels to 5–7×) and **15×–29×** on array kernels (dot product, L2 norm,
+  stencil blur, variance over a million-element `Float64Array`); for
+  `fib(28)` it retires **9.2M** instructions versus the interpreter's **1.06
+  billion**. Callgrind attributes **93%** of interpreter instructions to the
+  bytecode dispatch loop alone.
 - The compiler is checked under **ASan + UBSan** across the whole corpus
   (including real-world code and a 2000-local stress program): **0
   memory-safety errors**.
@@ -436,15 +474,15 @@ loop, timed with a monotonic clock). Reproduce with
 
 | benchmark  | what it stresses              | arg     | reps | interp (ms) | AOT (ms) | speedup |
 |------------|-------------------------------|---------|------|-------------|----------|---------|
-| `fib`      | recursion, calls, compare     | 32      | 1    | 284.0       | 7.8      | **36.6×** |
-| `sumloop`  | tight counted loop            | 1000000 | 50   | 1709.4      | 72.1     | **23.7×** |
-| `collatz`  | nested loop, `%` (→ `fmod`)   | 20000   | 5    | 406.7       | 105.4    | **3.9×**  |
-| `mandel`   | float kernel, `&&`, nested    | 300     | 3    | 777.6       | 28.4     | **27.4×** |
-| `cordic`   | fixed-point trig, shifts      | 200000  | 3    | 1052.2      | 35.8     | **29.4×** |
-| `popcount` | bit-twiddling, masks/shifts   | 2000000 | 5    | 1043.1      | 392.6    | **2.7×**  |
-| `hash`     | FNV hash (`*`, `^`, `>>>`)    | 2000000 | 3    | 431.6       | 173.1    | **2.5×**  |
-| `prng`     | xorshift (`<<`, `>>>`, `^`)   | 2000000 | 3    | 406.9       | 223.7    | **1.8×**  |
-| `mathkernel` | `Math.{sqrt,sin,cos,pow,…}` | 2000000 | 3    | 2102.0      | 331.4    | **6.3×**  |
+| `fib`      | recursion, calls, compare     | 32      | 1    | 241.1       | 9.3      | **26.0×** |
+| `sumloop`  | tight counted loop            | 1000000 | 50   | 1991.9      | 35.6     | **56.0×** |
+| `collatz`  | nested loop, `%` (→ `fmod`)   | 20000   | 5    | 456.4       | 125.6    | **3.6×**  |
+| `mandel`   | float kernel, `&&`, nested    | 300     | 3    | 886.3       | 22.8     | **38.9×** |
+| `cordic`   | fixed-point trig, shifts      | 200000  | 3    | 1131.9      | 17.9     | **63.1×** |
+| `popcount` | bit-twiddling, masks/shifts   | 2000000 | 5    | 1121.1      | 225.5    | **5.0×**  |
+| `hash`     | FNV hash (`*`, `^`, `>>>`)    | 2000000 | 3    | 451.5       | 192.0    | **2.4×**  |
+| `prng`     | xorshift (`<<`, `>>>`, `^`)   | 2000000 | 3    | 459.4       | 69.0     | **6.7×**  |
+| `mathkernel` | `Math.{sqrt,sin,cos,pow,…}` | 2000000 | 3    | 2590.1      | 376.0    | **6.9×**  |
 
 Loop/recursion/float kernels win big (24–37×) because every opcode on the
 hot path was pure boxing+dispatch overhead that AOT deletes. `collatz` wins
@@ -452,17 +490,30 @@ least of the float set (3.9×) because its inner work is dominated by `%`,
 which JavaScript defines on doubles and both engines execute as `fmod` — a
 cost AOT cannot remove.
 
-The bitwise benchmarks (`popcount`/`hash`/`prng`, 1.8–2.7×) win less because
-the interpreter's bitwise path is already a tight native-integer fast path,
+The bitwise benchmarks win less than the float kernels because the
+interpreter's bitwise path is already a tight native-integer fast path,
 whereas AOT must apply `ToInt32`/`ToUint32` to a `double` on every operator.
 Profiling the first cut showed those benchmarks *slower* than the
 interpreter — the spec `ToInt32` (a `fmod`/`trunc` round-trip) dominated.
-Adding an in-range fast path (`if (d >= INT32_MIN && d < 2^31) return
-(int32_t)d`) turned `popcount` from 0.8× to 2.7×, `hash` from 0.9× to 2.5×,
-and `prng` from 0.5× to 1.8×. The residual gap is the one remaining
-`ToInt32` range branch per operator; eliminating it would need value-range
-inference (knowing a slot already holds an int32, e.g. after `|0`) — future
-work, not done here.
+Two refinements closed most of the gap:
+
+1. An **in-range fast path** (`if (d >= INT32_MIN && d < 2^31) return
+   (int32_t)d`) turned `popcount` from 0.8× to 2.7×, `hash` from 0.9× to
+   2.5×, and `prng` from 0.5× to 1.8×.
+2. **Int32 range inference**: the emitter tracks, per stack slot and per
+   local, whether a value is provably a canonical int32 — the result of a
+   previous bitwise/shift op, a comparison, an integer literal, or a value
+   copied from an int32 local. When both operands of a bitwise op are known
+   int32, the coercion collapses to a plain `(int32_t)`/`(uint32_t)` cast and
+   the range branch disappears entirely. The flag is conservatively cleared
+   at every basic-block boundary and by any non-integer-producing op, so it
+   only ever asserts a fact the value is guaranteed to satisfy. This lifted
+   `popcount` to **5.0×** and `prng` to **6.7×**; only the genuinely
+   necessary conversions remain (parameter ingress, and a post-`*` re-narrow).
+
+`Math.imul`/`Math.clz32` lower to the same native int32 multiply / `clz`
+QuickJS uses, so integer-hash code (e.g. a MurmurHash finalizer) compiles
+end-to-end with no `double` round-trips in the hash chain.
 
 Array kernels over a million-element `Float64Array` (200 reps each) are
 where AOT's advantage is largest, because every element touch in the

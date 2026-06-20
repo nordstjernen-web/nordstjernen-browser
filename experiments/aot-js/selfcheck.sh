@@ -33,6 +33,11 @@ mutual:mutual:native:0|1|7|20|21
 floatmath:floatmath:native:5|50|200|1
 notop:notop:native:0|1|2|-3
 bitops:bitops:native:-5 19|0 0|255 3|-1 31|123456 7
+bitint:imulchain:native:65535 65537|-3 7|123456 789|0 0
+bitint:clzof:native:0|1|1024|-1|65536
+bitint:hypot2:native:3 4|5 12|0 0|-3 -4
+bitint:murmur:native:1|123456789|-42|999999
+bitint:rotl:native:1 4|-1 1|305419896 8|7 31
 hash:hash:native:1|100|10000|100000
 prng:prng:native:1|1000|100000
 collide:main:native:3|7|10

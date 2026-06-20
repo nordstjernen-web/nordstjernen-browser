@@ -100,7 +100,8 @@ static const char *math_unary_cfn(const char *m) {
 }
 
 /* Classify a Math method: 0 unsupported, 'u' unary direct-libm, 's' sign,
-   'r' round, '2' atan2, 'p' pow, 'm' min, 'M' max. */
+   'r' round, '2' atan2, 'p' pow, 'm' min, 'M' max, 'h' hypot, 'I' imul,
+   'C' clz32. */
 static int math_method_kind(const char *m) {
     if (math_unary_cfn(m)) return 'u';
     if (strcmp(m, "sign") == 0) return 's';
@@ -109,6 +110,9 @@ static int math_method_kind(const char *m) {
     if (strcmp(m, "pow") == 0) return 'p';
     if (strcmp(m, "min") == 0) return 'm';
     if (strcmp(m, "max") == 0) return 'M';
+    if (strcmp(m, "hypot") == 0) return 'h';
+    if (strcmp(m, "imul") == 0) return 'I';
+    if (strcmp(m, "clz32") == 0) return 'C';
     return 0;
 }
 
@@ -568,6 +572,21 @@ static void compute_eligible_all(void) {
 static const char **g_slotfn;
 static const char **g_slotmeth;
 static int *g_slotarr;
+static char *g_slotint;   /* slot provably holds a canonical int32 value */
+static char *g_locint;    /* local provably holds a canonical int32 value */
+
+/* ToInt32 / ToUint32 of a slot. When the slot is already known to be a
+   canonical int32 (e.g. the result of a previous bitwise op, or an integer
+   literal), the spec coercion is a no-op and collapses to a plain cast,
+   eliminating the per-operator range branch. */
+static const char *i32expr(int slot, char *buf) {
+    snprintf(buf, 32, g_slotint[slot] ? "(int32_t)s%d" : "js_to_int32(s%d)", slot);
+    return buf;
+}
+static const char *u32expr(int slot, char *buf) {
+    snprintf(buf, 40, g_slotint[slot] ? "(uint32_t)(int32_t)s%d" : "js_to_uint32(s%d)", slot);
+    return buf;
+}
 
 /* signature of an eligible function: array params become a (double*, length)
    pair, scalar params a double. */
@@ -617,6 +636,21 @@ static void emit_math_expr(FILE *o, int dst, const char *m, int argc, int arg0) 
             for (int i = 2; i < argc; i++)
                 fprintf(o, "  s%d = %s(s%d, s%d);\n", dst, fold, dst, arg0 + i);
         }
+    } else if (mk == 'I') {
+        fprintf(o, "  s%d = (double)(int32_t)(js_to_uint32(s%d) * js_to_uint32(s%d));\n",
+                dst, arg0, arg0 + 1);
+    } else if (mk == 'C') {
+        fprintf(o, "  s%d = js_clz32(s%d);\n", dst, arg0);
+    } else if (mk == 'h') {
+        if (argc == 0) {
+            fprintf(o, "  s%d = 0;\n", dst);
+        } else if (argc == 1) {
+            fprintf(o, "  s%d = fabs(s%d);\n", dst, arg0);
+        } else {
+            fprintf(o, "  s%d = hypot(s%d, s%d);\n", dst, arg0, arg0 + 1);
+            for (int i = 2; i < argc; i++)
+                fprintf(o, "  s%d = hypot(s%d, s%d);\n", dst, dst, arg0 + i);
+        }
     }
 }
 
@@ -629,6 +663,8 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     g_slotmeth = calloc(maxstack, sizeof(*g_slotmeth));
     g_slotarr = malloc(sizeof(int) * maxstack);
     for (int i = 0; i < maxstack; i++) g_slotarr[i] = -1;
+    g_slotint = calloc(maxstack, 1);
+    g_locint = calloc(b->var_count + 1, 1);
 
     fprintf(o, "static double %s(", fn->mangled);
     emit_signature(o, fn);
@@ -648,7 +684,11 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
 
     int pos = 0;
     while (pos < len) {
-        if (islabel[pos]) fprintf(o, "L%d: ;\n", pos);
+        if (islabel[pos]) {
+            fprintf(o, "L%d: ;\n", pos);
+            for (int i = 0; i < maxstack; i++) g_slotint[i] = 0;
+            for (int i = 0; i < b->var_count; i++) g_locint[i] = 0;
+        }
         int op = code[pos], p = pos + 1;
         int sp = sp_before[pos];
         if (sp < 0) { pos += short_opcode_info(op).size; continue; } /* dead */
@@ -656,40 +696,42 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
         switch (op) {
         case OP_push_0: case OP_push_1: case OP_push_2: case OP_push_3:
         case OP_push_4: case OP_push_5: case OP_push_6: case OP_push_7:
-            fprintf(o, "  s%d = %d;\n", sp, op - OP_push_0); g_slotfn[sp] = NULL; break;
-        case OP_push_minus1: fprintf(o, "  s%d = -1;\n", sp); g_slotfn[sp] = NULL; break;
-        case OP_push_i8:  fprintf(o, "  s%d = %d;\n", sp, get_i8(code + p)); g_slotfn[sp] = NULL; break;
-        case OP_push_i16: fprintf(o, "  s%d = %d;\n", sp, get_i16(code + p)); g_slotfn[sp] = NULL; break;
-        case OP_push_i32: fprintf(o, "  s%d = %d;\n", sp, (int)get_i32(code + p)); g_slotfn[sp] = NULL; break;
+            fprintf(o, "  s%d = %d;\n", sp, op - OP_push_0); g_slotfn[sp] = NULL; g_slotint[sp] = 1; break;
+        case OP_push_minus1: fprintf(o, "  s%d = -1;\n", sp); g_slotfn[sp] = NULL; g_slotint[sp] = 1; break;
+        case OP_push_i8:  fprintf(o, "  s%d = %d;\n", sp, get_i8(code + p)); g_slotfn[sp] = NULL; g_slotint[sp] = 1; break;
+        case OP_push_i16: fprintf(o, "  s%d = %d;\n", sp, get_i16(code + p)); g_slotfn[sp] = NULL; g_slotint[sp] = 1; break;
+        case OP_push_i32: fprintf(o, "  s%d = %d;\n", sp, (int)get_i32(code + p)); g_slotfn[sp] = NULL; g_slotint[sp] = 1; break;
         case OP_push_const8: case OP_push_const: {
             int idx = (op == OP_push_const8) ? get_u8(code + p) : get_u32(code + p);
             JSValue v = b->cpool[idx];
-            if (JS_VALUE_GET_TAG(v) == JS_TAG_INT)
-                fprintf(o, "  s%d = %d;\n", sp, JS_VALUE_GET_INT(v));
-            else
-                fprintf(o, "  s%d = %.17g;\n", sp, JS_VALUE_GET_FLOAT64(v));
+            if (JS_VALUE_GET_TAG(v) == JS_TAG_INT) {
+                fprintf(o, "  s%d = %d;\n", sp, JS_VALUE_GET_INT(v)); g_slotint[sp] = 1;
+            } else {
+                fprintf(o, "  s%d = %.17g;\n", sp, JS_VALUE_GET_FLOAT64(v)); g_slotint[sp] = 0;
+            }
             g_slotfn[sp] = NULL; break;
         }
         case OP_get_arg0: case OP_get_arg1: case OP_get_arg2: case OP_get_arg3: {
             int n = op - OP_get_arg0;
             if (fn->arg_is_array[n]) { g_slotarr[sp] = n; }
             else { fprintf(o, "  s%d = a%d;\n", sp, n); g_slotfn[sp] = NULL; }
-            break;
+            g_slotint[sp] = 0; break;
         }
         case OP_get_arg: {
             int n = get_u16(code + p);
             if (n < MAX_ARGS && fn->arg_is_array[n]) { g_slotarr[sp] = n; }
             else { fprintf(o, "  s%d = a%d;\n", sp, n); g_slotfn[sp] = NULL; }
-            break;
+            g_slotint[sp] = 0; break;
         }
         case OP_get_length:
             fprintf(o, "  s%d = (double)plen%d;\n", sp - 1, g_slotarr[sp - 1]);
-            g_slotarr[sp - 1] = -1; break;
+            g_slotarr[sp - 1] = -1; g_slotint[sp - 1] = 0; break;
         case OP_get_array_el:
             emit_arr_load(o, sp - 2, g_slotarr[sp - 2], sp - 1);
-            g_slotarr[sp - 2] = -1; break;
+            g_slotarr[sp - 2] = -1; g_slotint[sp - 2] = 0; break;
         case OP_get_array_el2:
             emit_arr_load(o, sp - 1, g_slotarr[sp - 2], sp - 1);
+            g_slotint[sp - 1] = 0;
             /* object kept at sp-2 (its array marker stays) */
             break;
         case OP_put_array_el: {
@@ -699,70 +741,116 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
                     sp - 2, sp - 2, n, sp - 2, sp - 2, n, sp - 2, sp - 1);
             g_slotarr[sp - 3] = -1; break;
         }
-        case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3:
-            fprintf(o, "  s%d = loc%d;\n", sp, op - OP_get_loc0); g_slotfn[sp] = NULL; break;
-        case OP_get_loc8:
-            fprintf(o, "  s%d = loc%d;\n", sp, get_u8(code + p)); g_slotfn[sp] = NULL; break;
-        case OP_get_loc: case OP_get_loc_check:
-            fprintf(o, "  s%d = loc%d;\n", sp, get_u16(code + p)); g_slotfn[sp] = NULL; break;
-        case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3:
-            fprintf(o, "  loc%d = s%d;\n", op - OP_put_loc0, sp - 1); break;
-        case OP_put_loc8:
-            fprintf(o, "  loc%d = s%d;\n", get_u8(code + p), sp - 1); break;
-        case OP_put_loc: case OP_put_loc_check: case OP_put_loc_check_init:
-            fprintf(o, "  loc%d = s%d;\n", get_u16(code + p), sp - 1); break;
-        case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3:
-            fprintf(o, "  loc%d = s%d;\n", op - OP_set_loc0, sp - 1); break;
-        case OP_set_loc8:
-            fprintf(o, "  loc%d = s%d;\n", get_u8(code + p), sp - 1); break;
-        case OP_set_loc:
-            fprintf(o, "  loc%d = s%d;\n", get_u16(code + p), sp - 1); break;
-        case OP_inc_loc: fprintf(o, "  loc%d += 1;\n", get_u8(code + p)); break;
-        case OP_dec_loc: fprintf(o, "  loc%d -= 1;\n", get_u8(code + p)); break;
-        case OP_add_loc: fprintf(o, "  loc%d += s%d;\n", get_u8(code + p), sp - 1); break;
+        case OP_get_loc0: case OP_get_loc1: case OP_get_loc2: case OP_get_loc3: {
+            int l = op - OP_get_loc0;
+            fprintf(o, "  s%d = loc%d;\n", sp, l); g_slotfn[sp] = NULL;
+            g_slotint[sp] = g_locint[l]; break;
+        }
+        case OP_get_loc8: {
+            int l = get_u8(code + p);
+            fprintf(o, "  s%d = loc%d;\n", sp, l); g_slotfn[sp] = NULL;
+            g_slotint[sp] = g_locint[l]; break;
+        }
+        case OP_get_loc: case OP_get_loc_check: {
+            int l = get_u16(code + p);
+            fprintf(o, "  s%d = loc%d;\n", sp, l); g_slotfn[sp] = NULL;
+            g_slotint[sp] = g_locint[l]; break;
+        }
+        case OP_put_loc0: case OP_put_loc1: case OP_put_loc2: case OP_put_loc3: {
+            int l = op - OP_put_loc0;
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_put_loc8: {
+            int l = get_u8(code + p);
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_put_loc: case OP_put_loc_check: case OP_put_loc_check_init: {
+            int l = get_u16(code + p);
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_set_loc0: case OP_set_loc1: case OP_set_loc2: case OP_set_loc3: {
+            int l = op - OP_set_loc0;
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_set_loc8: {
+            int l = get_u8(code + p);
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_set_loc: {
+            int l = get_u16(code + p);
+            fprintf(o, "  loc%d = s%d;\n", l, sp - 1); g_locint[l] = g_slotint[sp - 1]; break;
+        }
+        case OP_inc_loc: fprintf(o, "  loc%d += 1;\n", get_u8(code + p)); g_locint[get_u8(code + p)] = 0; break;
+        case OP_dec_loc: fprintf(o, "  loc%d -= 1;\n", get_u8(code + p)); g_locint[get_u8(code + p)] = 0; break;
+        case OP_add_loc: fprintf(o, "  loc%d += s%d;\n", get_u8(code + p), sp - 1); g_locint[get_u8(code + p)] = 0; break;
         case OP_dup:
             fprintf(o, "  s%d = s%d;\n", sp, sp - 1);
             g_slotfn[sp] = g_slotfn[sp - 1];
             g_slotmeth[sp] = g_slotmeth[sp - 1];
             g_slotarr[sp] = g_slotarr[sp - 1];
+            g_slotint[sp] = g_slotint[sp - 1];
             break;
         case OP_drop: g_slotfn[sp - 1] = NULL; break;
         case OP_post_inc:
-            fprintf(o, "  s%d = s%d + 1;\n", sp, sp - 1); g_slotfn[sp] = NULL; break;
+            fprintf(o, "  s%d = s%d + 1;\n", sp, sp - 1); g_slotfn[sp] = NULL;
+            g_slotint[sp - 1] = 0; g_slotint[sp] = 0; break;
         case OP_post_dec:
-            fprintf(o, "  s%d = s%d - 1;\n", sp, sp - 1); g_slotfn[sp] = NULL; break;
-        case OP_inc: fprintf(o, "  s%d = s%d + 1;\n", sp - 1, sp - 1); break;
-        case OP_dec: fprintf(o, "  s%d = s%d - 1;\n", sp - 1, sp - 1); break;
-        case OP_neg: fprintf(o, "  s%d = -s%d;\n", sp - 1, sp - 1); break;
-        case OP_plus: break;
-        case OP_lnot: fprintf(o, "  s%d = (s%d == 0);\n", sp - 1, sp - 1); break;
-        case OP_not: fprintf(o, "  s%d = (double)(~js_to_int32(s%d));\n", sp - 1, sp - 1); break;
-        case OP_add: fprintf(o, "  s%d = s%d + s%d;\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_sub: fprintf(o, "  s%d = s%d - s%d;\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_mul: fprintf(o, "  s%d = s%d * s%d;\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_div: fprintf(o, "  s%d = s%d / s%d;\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_mod: fprintf(o, "  s%d = fmod(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_pow: fprintf(o, "  s%d = js_pow(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_lt:  fprintf(o, "  s%d = (s%d <  s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_lte: fprintf(o, "  s%d = (s%d <= s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_gt:  fprintf(o, "  s%d = (s%d >  s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_gte: fprintf(o, "  s%d = (s%d >= s%d);\n", sp - 2, sp - 2, sp - 1); break;
+            fprintf(o, "  s%d = s%d - 1;\n", sp, sp - 1); g_slotfn[sp] = NULL;
+            g_slotint[sp - 1] = 0; g_slotint[sp] = 0; break;
+        case OP_inc: fprintf(o, "  s%d = s%d + 1;\n", sp - 1, sp - 1); g_slotint[sp - 1] = 0; break;
+        case OP_dec: fprintf(o, "  s%d = s%d - 1;\n", sp - 1, sp - 1); g_slotint[sp - 1] = 0; break;
+        case OP_neg: fprintf(o, "  s%d = -s%d;\n", sp - 1, sp - 1); g_slotint[sp - 1] = 0; break;
+        case OP_plus: g_slotint[sp - 1] = 0; break;
+        case OP_lnot: fprintf(o, "  s%d = (s%d == 0);\n", sp - 1, sp - 1); g_slotint[sp - 1] = 1; break;
+        case OP_not: {
+            char b1[40];
+            fprintf(o, "  s%d = (double)(~%s);\n", sp - 1, i32expr(sp - 1, b1));
+            g_slotint[sp - 1] = 1; break;
+        }
+        case OP_add: fprintf(o, "  s%d = s%d + s%d;\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_sub: fprintf(o, "  s%d = s%d - s%d;\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_mul: fprintf(o, "  s%d = s%d * s%d;\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_div: fprintf(o, "  s%d = s%d / s%d;\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_mod: fprintf(o, "  s%d = fmod(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_pow: fprintf(o, "  s%d = js_pow(s%d, s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 0; break;
+        case OP_lt:  fprintf(o, "  s%d = (s%d <  s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
+        case OP_lte: fprintf(o, "  s%d = (s%d <= s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
+        case OP_gt:  fprintf(o, "  s%d = (s%d >  s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
+        case OP_gte: fprintf(o, "  s%d = (s%d >= s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
         case OP_eq: case OP_strict_eq:
-            fprintf(o, "  s%d = (s%d == s%d);\n", sp - 2, sp - 2, sp - 1); break;
+            fprintf(o, "  s%d = (s%d == s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
         case OP_neq: case OP_strict_neq:
-            fprintf(o, "  s%d = (s%d != s%d);\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_and:
-            fprintf(o, "  s%d = (double)(js_to_int32(s%d) & js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_or:
-            fprintf(o, "  s%d = (double)(js_to_int32(s%d) | js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_xor:
-            fprintf(o, "  s%d = (double)(js_to_int32(s%d) ^ js_to_int32(s%d));\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_shl:
-            fprintf(o, "  s%d = (double)(int32_t)(js_to_uint32(s%d) << (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_sar:
-            fprintf(o, "  s%d = (double)(js_to_int32(s%d) >> (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
-        case OP_shr:
-            fprintf(o, "  s%d = (double)(js_to_uint32(s%d) >> (js_to_uint32(s%d) & 31));\n", sp - 2, sp - 2, sp - 1); break;
+            fprintf(o, "  s%d = (s%d != s%d);\n", sp - 2, sp - 2, sp - 1); g_slotint[sp - 2] = 1; break;
+        case OP_and: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(%s & %s);\n", sp - 2, i32expr(sp - 2, b1), i32expr(sp - 1, b2));
+            g_slotint[sp - 2] = 1; break;
+        }
+        case OP_or: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(%s | %s);\n", sp - 2, i32expr(sp - 2, b1), i32expr(sp - 1, b2));
+            g_slotint[sp - 2] = 1; break;
+        }
+        case OP_xor: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(%s ^ %s);\n", sp - 2, i32expr(sp - 2, b1), i32expr(sp - 1, b2));
+            g_slotint[sp - 2] = 1; break;
+        }
+        case OP_shl: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(int32_t)(%s << (%s & 31));\n", sp - 2, u32expr(sp - 2, b1), u32expr(sp - 1, b2));
+            g_slotint[sp - 2] = 1; break;
+        }
+        case OP_sar: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(%s >> (%s & 31));\n", sp - 2, i32expr(sp - 2, b1), u32expr(sp - 1, b2));
+            g_slotint[sp - 2] = 1; break;
+        }
+        case OP_shr: {
+            char b1[40], b2[40];
+            fprintf(o, "  s%d = (double)(%s >> (%s & 31));\n", sp - 2, u32expr(sp - 2, b1), u32expr(sp - 1, b2));
+            break;   /* result is uint32, not necessarily int32-range */
+        }
         case OP_if_false: case OP_if_false8: {
             int u, t = branch_target(code, pos, &u);
             fprintf(o, "  if (!(s%d)) goto L%d;\n", sp - 1, t); break;
@@ -781,7 +869,7 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
                        ? get_u16(code + p) : (op - OP_call0);
             int fnslot = sp - 1 - argc;
             int ci = (fnslot >= 0) ? find_fn(g_slotfn[fnslot]) : -1;
-            if (ci < 0) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); free(g_slotfn); free(g_slotarr); exit(DECLINE); }
+            if (ci < 0) { fprintf(stderr, "aotc: lost call target\n"); free(islabel); free(g_slotfn); free(g_slotarr); free(g_slotint); free(g_locint); exit(DECLINE); }
             const char *callee = g_fns[ci].mangled;
             int arity = g_fns[ci].b->arg_count;
             size_t cap = 64 + (size_t)arity * 24;
@@ -799,23 +887,24 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             } else {
                 fprintf(o, "  s%d = %s;\n", fnslot, rhs);
                 g_slotfn[fnslot] = NULL;
+                g_slotint[fnslot] = 0;
             }
             free(rhs);
             break;
         }
         case OP_get_var:
             g_slotfn[sp] = resolve_atom_fn((JSAtom)get_u32(code + p));
-            g_slotmeth[sp] = NULL;
+            g_slotmeth[sp] = NULL; g_slotint[sp] = 0;
             break;
         case OP_get_var_ref0: case OP_get_var_ref1:
         case OP_get_var_ref2: case OP_get_var_ref3:
-            g_slotfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name); break;
+            g_slotfn[sp] = resolve_atom_fn(b->closure_var[op - OP_get_var_ref0].var_name); g_slotint[sp] = 0; break;
         case OP_get_var_ref: case OP_get_var_ref_check:
-            g_slotfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name); break;
+            g_slotfn[sp] = resolve_atom_fn(b->closure_var[get_u16(code + p)].var_name); g_slotint[sp] = 0; break;
         case OP_get_field2: {
             const char *m = atom_str((JSAtom)get_u32(code + p));
             g_slotmeth[sp] = strdup(m);
-            g_slotfn[sp] = NULL;
+            g_slotfn[sp] = NULL; g_slotint[sp] = 0;
             JS_FreeCString(g_ctx, m);
             break;
         }
@@ -824,25 +913,25 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
             double v = 0; math_const_value(m, &v);
             JS_FreeCString(g_ctx, m);
             fprintf(o, "  s%d = %.17g;\n", sp - 1, v);
-            g_slotfn[sp - 1] = NULL;
+            g_slotfn[sp - 1] = NULL; g_slotint[sp - 1] = 0;
             break;
         }
         case OP_call_method: case OP_tail_call_method: {
             int margc = get_u16(code + p);
             int fnslot = sp - 1 - margc, thisslot = fnslot - 1;
             const char *m = (fnslot >= 0) ? g_slotmeth[fnslot] : NULL;
-            if (!m) { fprintf(stderr, "aotc: lost method target\n"); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); exit(DECLINE); }
+            if (!m) { fprintf(stderr, "aotc: lost method target\n"); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); free(g_slotint); free(g_locint); exit(DECLINE); }
             emit_math_expr(o, thisslot, m, margc, fnslot + 1);
             if (op == OP_tail_call_method)
                 fprintf(o, "  return s%d;\n", thisslot);
-            g_slotfn[thisslot] = NULL;
+            g_slotfn[thisslot] = NULL; g_slotint[thisslot] = 0;
             g_slotmeth[thisslot] = NULL;
             break;
         }
         case OP_return: fprintf(o, "  return s%d;\n", sp - 1); break;
         case OP_return_undef: fprintf(o, "  return 0;\n"); break;
         case OP_nop: case OP_set_loc_uninitialized: break;
-        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); exit(DECLINE);
+        default: fprintf(stderr, "aotc: internal: op %d\n", op); free(islabel); free(g_slotfn); free(g_slotmeth); free(g_slotarr); free(g_slotint); free(g_locint); exit(DECLINE);
         }
         pos += short_opcode_info(op).size;
     }
@@ -851,6 +940,8 @@ static void emit_fn(FILE *o, Fn *fn, int *sp_before) {
     free(g_slotfn);
     free(g_slotmeth);
     free(g_slotarr);
+    free(g_slotint);
+    free(g_locint);
 }
 
 int main(int argc, char **argv) {
@@ -946,6 +1037,10 @@ int main(int argc, char **argv) {
         "static double js_sign(double a) {\n"
         "  if (isnan(a) || a == 0.0) return a;\n"
         "  return a < 0 ? -1.0 : 1.0;\n"
+        "}\n"
+        "static double js_clz32(double d) {\n"
+        "  uint32_t a = js_to_uint32(d);\n"
+        "  return a == 0 ? 32.0 : (double)__builtin_clz(a);\n"
         "}\n"
         "static double js_round(double a) {\n"
         "  js_f64u u; u.d = a; unsigned e = (u.u >> 52) & 0x7ff;\n"

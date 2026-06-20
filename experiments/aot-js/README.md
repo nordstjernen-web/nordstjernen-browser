@@ -17,7 +17,7 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ## Run
 
 ```sh
-./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 89 cases
+./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 110 cases
 ./arraytest.sh                       # typed-array soundness: AOT vs interpreter, 14 cases
 ./run.sh                             # performance benchmark table
 ./frameworktest.sh                   # real third-party code (SunSpider); needs network
@@ -33,12 +33,14 @@ path — native vs fallback — was taken). `run.sh` reports speedups.
 (424 files / 14 MB) as a robustness check.
 
 The subset covers arithmetic, comparisons, bitwise/shift (`& | ^ ~ << >>
->>>`, spec-exact `ToInt32`/`ToUint32`), `Math.*` methods and constants,
-read-only `Float64Array` parameters (`a[i]`, `a.length`), all loop forms,
-`?:`, `&&`/`||`, and direct/mutual/tail recursion. Anything else (strings,
-objects, written/non-`Float64Array` arrays, non-`Math` built-ins,
-higher-order calls) falls back to the interpreter. Array kernels (dot, norm,
-stencil, variance) run 15×–29× the interpreter.
+>>>`, spec-exact `ToInt32`/`ToUint32`, with int32 range inference that drops
+redundant coercions on chained bitwise code), `Math.*` methods and constants
+(including `imul`, `clz32`, `hypot`), read-only `Float64Array` parameters
+(`a[i]`, `a.length`), all loop forms, `?:`, `&&`/`||`, and direct/mutual/tail
+recursion. Anything else (strings, objects, written/non-`Float64Array`
+arrays, non-`Math` built-ins, higher-order calls) falls back to the
+interpreter. Scalar numeric code runs 2.4×–63× the interpreter; array
+kernels (dot, norm, stencil, variance) 15×–29×.
 
 ## Contents
 
