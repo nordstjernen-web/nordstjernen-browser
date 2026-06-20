@@ -43,6 +43,14 @@ argmut:comma:native:3 4|10 20|-1 -1
 argmut:froundx:native:3.14159|2.5|0.1|-42.42
 argmut:froundacc:native:0|10|1000
 argmut:accumulate:native:5 10|0 100|-3 50
+framework:getHighestPriorityLane:native:1|12|1024|0|96
+framework:pickArbitraryLaneIndex:native:1|1024|96|65536
+framework:isSubsetOfLanes:native:7 3|4 2|15 8
+framework:swing:native:0|0.25|0.5|0.75|1
+framework:easeInOutCubic:native:0.2|0.5|0.8|0|1
+framework:lerp:native:0 10 0.5|5 25 0.3|-2 2 0.75
+framework:clamp01:native:-0.5|0.3|1.5|0|1
+framework:hue2rgb:native:0.2 0.8 0.1|0.2 0.8 0.6|0.2 0.8 0.9
 hash:hash:native:1|100|10000|100000
 prng:prng:native:1|1000|100000
 collide:main:native:3|7|10

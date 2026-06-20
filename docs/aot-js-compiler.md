@@ -78,13 +78,14 @@ JavaScript; everything else runs interpreted, exactly as before.
   becomes a conflict that fails every typed use. This is what lets an array
   reference flow through the `a[i] = v` store sequence (which branches) and
   still be proven an array at the store.
-- A 127-case self-check (`selfcheck.sh`) plus a 26-case array check
+- A 160-case self-check (`selfcheck.sh`) plus a 26-case array check
   (`arraytest.sh`, reads *and* in-place writes) compare AOT against the
   interpreter across all of the above — including bit hashing (FNV), xorshift
   PRNG, popcount, a MurmurHash finalizer (`Math.imul`/`Math.clz32`),
   `Math.fround` accumulation, `Math.*` kernels, division-by-zero, negative
   modulo, fractional powers, `(±1) ** ±Infinity`, `ToInt32` edge cases,
-  in-place kernels (scale, axpy, clamp, cumsum), and out-of-bounds /
+  in-place kernels (scale, axpy, clamp, cumsum), real framework kernels
+  (React lane math, easing curves, color math), and out-of-bounds /
   non-integer array indices — **all identical**; out-of-subset programs
   (strings, objects, non-`Float64Array` arrays, higher-order calls) correctly
   fall back.
@@ -415,6 +416,35 @@ Speedometer is DOM/layout/GC-bound, not JS-compute-bound, so even a perfect
 JS compiler would barely move it. AOT's leverage is numeric *hotspots*
 (crypto, codecs, image/audio, physics), where it delivers the speedups
 above — a workload orthogonal to Speedometer.
+
+### What about jQuery / React / framework code?
+
+The same boundary, stated for the question people actually ask. A
+framework's **core** — jQuery's selector engine and DOM wrappers, React's
+reconciler, vdom diffing, hooks, and reactivity — is objects, strings, DOM,
+and closures, so it is **declined and interpreted**; AOT cannot and does not
+speed it up. (And it is loaded at runtime, so a build-time compiler never
+sees it regardless.)
+
+But frameworks also embed **numeric kernels**, and those *are* eligible and
+run hot. `tests/framework.js` collects real ones, verbatim, and they compile
+and match the interpreter bit-for-bit:
+
+- **React's lane scheduler** (`ReactFiberLane.js`): `getHighestPriorityLane`
+  (`lanes & -lanes`), `pickArbitraryLaneIndex` (`31 - Math.clz32(lanes)`),
+  `mergeLanes`, `isSubsetOfLanes`, … — pure bitwise/`clz32` priority math
+  that runs throughout scheduling. **17×** in a tight loop.
+- **Animation easing** (jQuery `swing`, Robert Penner / Framer Motion
+  `easeInOutCubic`, …) — pure float curves evaluated *per frame, per animated
+  property*. **8×**.
+- **Interpolation and color math** (`lerp`, `clamp01`, `hue2rgb`) — the inner
+  arithmetic of every transition and theme computation.
+
+So the honest framework answer is two-sided: the parts that make jQuery
+"jQuery" and React "React" stay interpreted, but the compute-bound helpers
+they lean on for animation and scheduling are exactly AOT's wheelhouse. In
+the standalone tool these run native today; capturing the win inside the
+browser is the in-renderer wiring described under *Scope and limitations*.
 
 ## Security review
 

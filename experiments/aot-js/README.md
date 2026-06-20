@@ -17,7 +17,7 @@ argument, and benchmarks: [`docs/aot-js-compiler.md`](../../docs/aot-js-compiler
 ## Run
 
 ```sh
-./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 127 cases
+./selfcheck.sh                       # scalar soundness: AOT vs interpreter, 160 cases
 ./arraytest.sh                       # typed-array soundness (reads+writes): AOT vs interpreter, 26 cases
 ./run.sh                             # performance benchmark table
 ./frameworktest.sh                   # real third-party code (SunSpider); needs network
