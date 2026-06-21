@@ -508,6 +508,7 @@ link_stable() {
 stage_stable_links() {
     log "Stable download links (/nightly/)"
     link_stable nordstjernen-windows-x86_64.zip  'windows/*/*-windows-x86_64.zip'
+    link_stable nordstjernen-windows-x86_64.msix 'windows/*/*.msix'
     link_stable nordstjernen-windows-x86_64.exe  'windows/*/nordstjernen.exe'
     link_stable nordstjernen-macos.dmg           'macos/*/*.dmg'
     link_stable nordstjernen-macos-x86_64        'macos/*/nordstjernen'
