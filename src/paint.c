@@ -324,7 +324,8 @@ style_uniform_solid_border(const ns_style *s, double *out_w, rgba *out_color)
             strcmp(st->u.keyword, "solid") != 0)
             return FALSE;
         double w = length_or(s->values[widths[i]], 0);
-        rgba c = rgba_of(s->values[colors[i]], 0, 0, 0, 1);
+        rgba c = rgba_of(s->values[colors[i]] ? s->values[colors[i]]
+                                              : s->values[NS_CSS_COLOR], 0, 0, 0, 1);
         if (i == 0) {
             bw = w;
             bc = c;
@@ -788,7 +789,8 @@ paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y
         double bw = length_or(s->values[sides[i].width], 0);
         if (bw <= 0 || !style_side_visible(s, sides[i].width, sides[i].style))
             continue;
-        rgba c = rgba_of(s->values[sides[i].color], 0, 0, 0, 1);
+        rgba c = rgba_of(s->values[sides[i].color] ? s->values[sides[i].color]
+                                                   : s->values[NS_CSS_COLOR], 0, 0, 0, 1);
         set_source_rgba(cr, c);
         cairo_set_line_width(cr, bw);
         cairo_move_to(cr, sides[i].x1, sides[i].y1);

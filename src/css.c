@@ -335,6 +335,11 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_POINTER_EVENTS:
     case NS_CSS_SCROLLBAR_COLOR:
     case NS_CSS_IMAGE_RENDERING:
+    case NS_CSS_TAB_SIZE:
+    case NS_CSS_WORD_BREAK:
+    case NS_CSS_OVERFLOW_WRAP:
+    case NS_CSS_CARET_COLOR:
+    case NS_CSS_ACCENT_COLOR:
         return TRUE;
     default:
         return FALSE;
@@ -833,12 +838,7 @@ ns_css_font_weight_number(const ns_css_value *v, int fallback)
         return 700;
     }
     if (g_ascii_isdigit(kw[0])) {
-        int n = ns_parse_int(kw, fallback > 0 ? fallback : 400, 1, 1000);
-        if (n < 100) n = 100;
-        n = ((n + 50) / 100) * 100;
-        if (n < 100) return 100;
-        if (n > 1000) return 1000;
-        return n;
+        return ns_parse_int(kw, fallback > 0 ? fallback : 400, 1, 1000);
     }
     return fallback;
 }
@@ -13829,6 +13829,7 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             NS_CSS_TEXT_DECORATION_COLOR,
             NS_CSS_COLUMN_RULE_COLOR,
             NS_CSS_ACCENT_COLOR,
+            NS_CSS_CARET_COLOR,
         };
         for (gsize i = 0; i < G_N_ELEMENTS(color_props); i++) {
             ns_css_value *v = out->values[color_props[i]];
