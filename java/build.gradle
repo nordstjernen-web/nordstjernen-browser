@@ -13,6 +13,33 @@ application {
     mainClass = 'org.nordstjernen.app.Browser'
 }
 
+// Single-source the version: Browser.resolveVersion() reads this resource
+// when running outside a packaged jar (e.g. ./gradlew run), so the number
+// lives only in this file.
+def generateVersionProperties = tasks.register('generateVersionProperties') {
+    def outFile = layout.buildDirectory.file('generated/version/org/nordstjernen/app/version.properties')
+    def projectVersion = version
+    inputs.property('version', projectVersion)
+    outputs.file(outFile)
+    doLast {
+        def f = outFile.get().asFile
+        f.parentFile.mkdirs()
+        f.text = "version=${projectVersion}\n"
+    }
+}
+
+sourceSets {
+    main {
+        resources {
+            srcDir layout.buildDirectory.dir('generated/version')
+        }
+    }
+}
+
+tasks.named('processResources') {
+    dependsOn generateVersionProperties
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)

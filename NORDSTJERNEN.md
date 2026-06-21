@@ -71,8 +71,8 @@ llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
 tools, and digest-pinned model downloads, all on-device with no network
 at inference time (see `docs/ai.md`).
 
-Version 1.0.12 is the current release (the meson project definition
-carries `1.0.12`, surfaced through `src/version.h`).
+The release version lives in the meson project definition and is
+surfaced through `src/version.h`.
 
 ## Architecture & frontends
 

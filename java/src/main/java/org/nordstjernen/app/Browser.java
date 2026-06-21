@@ -1345,7 +1345,21 @@ public final class Browser {
 
     private static String resolveVersion() {
         String v = Browser.class.getPackage().getImplementationVersion();
-        return (v == null || v.isBlank()) ? "1.0.12" : v;
+        if (v != null && !v.isBlank()) {
+            return v;
+        }
+        try (java.io.InputStream in = Browser.class.getResourceAsStream("version.properties")) {
+            if (in != null) {
+                java.util.Properties props = new java.util.Properties();
+                props.load(in);
+                String pv = props.getProperty("version");
+                if (pv != null && !pv.isBlank()) {
+                    return pv;
+                }
+            }
+        } catch (java.io.IOException ignored) {
+        }
+        return "dev";
     }
 
     private static Image loadLogo() {
