@@ -677,7 +677,7 @@ ns_html_decode_body_full(const char *body, gsize len,
         return g_utf8_make_valid(body + 3, (gssize)(len - 3));
     }
     if (len >= 2 && memcmp(body, "\xff\xfe", 2) == 0) {
-        char *out = g_convert(body, (gssize)len, "UTF-8", "UTF-16LE",
+        char *out = g_convert(body + 2, (gssize)(len - 2), "UTF-8", "UTF-16LE",
                               NULL, NULL, NULL);
         if (out) {
             charset_report(charset_out, "UTF-16LE");
@@ -685,7 +685,7 @@ ns_html_decode_body_full(const char *body, gsize len,
         }
     }
     if (len >= 2 && memcmp(body, "\xfe\xff", 2) == 0) {
-        char *out = g_convert(body, (gssize)len, "UTF-8", "UTF-16BE",
+        char *out = g_convert(body + 2, (gssize)(len - 2), "UTF-8", "UTF-16BE",
                               NULL, NULL, NULL);
         if (out) {
             charset_report(charset_out, "UTF-16BE");

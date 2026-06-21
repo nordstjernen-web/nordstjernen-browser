@@ -504,7 +504,13 @@ ns_crypto_export_ec_jwk(const ns_crypto_key *k, guint8 **x, gsize *x_len,
     if (!*x) { if (err) *err = g_strdup("OperationError: EC export"); return FALSE; }
     if (k->type == NS_CK_PRIVATE) {
         guint8 *raw = ns_crypto_bn_export(k->pkey, OSSL_PKEY_PARAM_PRIV_KEY, d_len);
-        if (raw && *d_len < (gsize)order) {
+        if (!raw) {
+            g_free(*x); g_free(*y);
+            *x = *y = NULL; *x_len = *y_len = 0;
+            if (err) *err = g_strdup("OperationError: EC export");
+            return FALSE;
+        }
+        if (*d_len < (gsize)order) {
             guint8 *pad = g_malloc0(order);
             memcpy(pad + order - *d_len, raw, *d_len);
             g_free(raw);

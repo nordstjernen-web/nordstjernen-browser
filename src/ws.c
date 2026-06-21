@@ -762,7 +762,7 @@ ns_ws_raw_take_frame(GByteArray *in, gboolean *fin, int *opcode,
 {
     if (in->len < 2) return 0;
     const guint8 *d = in->data;
-    gboolean masked = (d[1] & 0x80) != 0;
+    if (d[1] & 0x80) return -1;
     guint64 len = d[1] & 0x7f;
     gsize pos = 2;
     if (len == 126) {
@@ -779,22 +779,12 @@ ns_ws_raw_take_frame(GByteArray *in, gboolean *fin, int *opcode,
     int frame_op = d[0] & 0x0f;
     gboolean frame_fin = (d[0] & 0x80) != 0;
     if (frame_op >= 0x8 && (len > 125 || !frame_fin)) return -1;
-    gsize maskpos = pos;
-    if (masked) {
-        if (in->len < pos + 4) return 0;
-        pos += 4;
-    }
     if (in->len < pos + len) return 0;
 
     guint8 *pl = len ? g_malloc(len) : NULL;
-    if (masked) {
-        const guint8 *mk = d + maskpos;
-        for (guint64 i = 0; i < len; i++) pl[i] = d[pos + i] ^ mk[i & 3];
-    } else if (len) {
-        memcpy(pl, d + pos, len);
-    }
-    *fin = (d[0] & 0x80) != 0;
-    *opcode = d[0] & 0x0f;
+    if (len) memcpy(pl, d + pos, len);
+    *fin = frame_fin;
+    *opcode = frame_op;
     *payload = pl;
     *plen = len;
     g_byte_array_remove_range(in, 0, pos + len);
