@@ -24,8 +24,9 @@ See `README.md` for the product vision and `CLAUDE.md` for working rules.
 ## Non-goals (won't change)
 
 WebRTC / WebUSB / WebBluetooth / WebMIDI / WebHID;
-service-worker network interception, push, background sync (the
-registration + lifecycle subset of Service Workers *is* supported);
+service-worker push and background sync (registration, lifecycle, and
+`FetchEvent` network interception via `respondWith` *are* supported —
+`ns_sw_post_fetch_request` routes `fetch()` through the worker);
 DRM / EME; **JIT** (QuickJS
 interpreter only — W^X holds process-wide); plugins (NPAPI / PPAPI /
 WebExtensions); sync / accounts / telemetry /
