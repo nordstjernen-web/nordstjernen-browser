@@ -14,6 +14,7 @@ APP=$OUT/app
 BIN_SRC=$BUILDDIR/src/gtk/nordstjernen.exe
 RENDERER_SRC=$BUILDDIR/src/nordstjernen-renderer.exe
 LAUNCHER_SRC=$BUILDDIR/src/nordstjernen-launcher.exe
+AUDIO_SRC=$BUILDDIR/src/nordstjernen-audio.exe
 BROWSER_EXE=nordstjernen-ui.exe
 EXTRA_MESON_SETUP_ARGS=()
 if [ -n "${NS_MESON_SETUP_ARGS:-}" ]; then
@@ -63,6 +64,15 @@ cp "$BIN_SRC" "$APP/$BROWSER_EXE"
 # The browser spawns one sandboxed renderer process per tab; ship it next to
 # the browser exe so it is discovered without NS_RENDERER.
 cp "$RENDERER_SRC" "$APP/nordstjernen-renderer.exe"
+# Audio playback helper (MP2/MP3 decode + SDL2 output). Built whenever SDL2
+# was present at configure time; ship it beside the browser exe so the shell
+# finds it (ns_proc_audio_helper_path) and seed the DLL chase below with it so
+# SDL2.dll and its transitive deps are bundled (nothing else links SDL2).
+if [ -x "$AUDIO_SRC" ]; then
+    cp "$AUDIO_SRC" "$APP/nordstjernen-audio.exe"
+else
+    echo "pack-windows: warning: $AUDIO_SRC missing; <video>/<audio> sound will not play" >&2
+fi
 
 validate_launcher_imports() {
     local dep src alt
@@ -109,6 +119,7 @@ fi
 # mingw bin dir and skip anything that resolves to a Windows system DLL.
 declare -A seen
 queue=("$APP/$BROWSER_EXE" "$APP/nordstjernen-renderer.exe")
+[ -f "$APP/nordstjernen-audio.exe" ] && queue+=("$APP/nordstjernen-audio.exe")
 for loader in "$APP"/lib/gdk-pixbuf-2.0/*/loaders/*.dll; do
     [ -f "$loader" ] && queue+=("$loader")
 done
