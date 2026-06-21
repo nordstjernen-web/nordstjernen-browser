@@ -240,7 +240,10 @@ ns_net_multi_loop(gpointer data)
             g_mutex_unlock(&g_multi_lock);
         }
 
-        curl_multi_poll(g_multi, NULL, 0, 1000, NULL);
+        long timeo = -1;
+        curl_multi_timeout(g_multi, &timeo);
+        int wait_ms = (timeo < 0 || timeo > 1000) ? 1000 : (int)timeo;
+        curl_multi_poll(g_multi, NULL, 0, wait_ms, NULL);
     }
     return NULL;
 }
