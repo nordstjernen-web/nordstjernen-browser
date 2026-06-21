@@ -60,6 +60,15 @@
   </branding>
 
   <releases>
+    <release version="1.0.12" date="2026-06-21">
+      <description>
+        <p>Networking and developer tooling release.</p>
+        <ul>
+          <li>Shared curl multi handle with HTTP/2 connection multiplexing and reuse.</li>
+          <li>Tabbed Developer Tools window expanding the JavaScript console.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.11" date="2026-06-19">
       <description>
         <p>Maintenance release.</p>
