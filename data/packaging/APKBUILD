@@ -26,6 +26,7 @@ makedepends="
 	poppler-dev
 	fontconfig-dev
 	pango-dev
+	sdl2-dev
 	"
 source="$pkgname-$pkgver.tar.gz::https://github.com/nordstjernen-web/nordstjernen/archive/refs/tags/$pkgver.tar.gz"
 # No test suite upstream — behaviour is verified by running the browser.

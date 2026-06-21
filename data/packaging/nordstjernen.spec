@@ -18,15 +18,19 @@ BuildRequires:  ninja
 BuildRequires:  pkgconfig
 BuildRequires:  cmake
 BuildRequires:  pkgconfig(gtk4) >= 4.6
+BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(libcurl) >= 7.85
+BuildRequires:  pkgconfig(libcrypto)
 BuildRequires:  pkgconfig(uchardet)
 BuildRequires:  pkgconfig(libpsl)
 BuildRequires:  pkgconfig(librsvg-2.0) >= 2.46
 BuildRequires:  pkgconfig(libseccomp)
+BuildRequires:  pkgconfig(sqlite3)
+BuildRequires:  pkgconfig(libwebp)
+BuildRequires:  pkgconfig(sdl2)
 BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(pangoft2)
 
-Recommends:     webp-pixbuf-loader
 Recommends:     mpv
 
 ExclusiveOS:    linux
