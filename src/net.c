@@ -2614,6 +2614,8 @@ synthesize_data_response(const char *url, ns_response *resp)
         g_byte_array_set_size(resp->body, body_start);
         if (too_large)
             resp->error = response_budget_error(budget);
+        else
+            resp->error = g_strdup("malformed data: URL");
     }
     resp->status = 200;
     resp->final_url = g_strdup(url);

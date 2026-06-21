@@ -10149,6 +10149,10 @@ parse_rules_until(const char **pp, const char *end,
                                 stops->len * sizeof(ns_css_keyframe_stop)),
                         };
                         g_array_append_val(sh->keyframes, kf);
+                    } else {
+                        for (guint i = 0; i < stops->len; i++)
+                            g_free(g_array_index(stops, ns_css_keyframe_stop,
+                                                 i).raw_props);
                     }
                     g_array_free(stops, TRUE);
                 } else if (term == ';') p++;

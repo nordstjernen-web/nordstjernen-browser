@@ -3667,6 +3667,7 @@ roman_numeral(int n, gboolean upper, char *out, gsize sz)
 static void
 alpha_label(int n, gboolean upper, char *out, gsize sz)
 {
+    if (sz == 0) return;
     if (n < 1) { g_strlcpy(out, "?", sz); return; }
     char buf[16];
     int p = 0;
