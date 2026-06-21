@@ -717,6 +717,8 @@ ns_css_keyframes *ns_css_keyframes_resolve(const ns_css_keyframes *kf,
                                            const struct ns_var_map *vars);
 void ns_css_keyframes_resolved_free(ns_css_keyframes *kf);
 
+void ns_css_append_unescaped(GString *out, const char **pp);
+
 GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            gsize                     n_sheets);

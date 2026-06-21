@@ -385,6 +385,31 @@ css_append_hex_escape(GString *out, const char **pp, const char *end)
     *pp = p;
 }
 
+void
+ns_css_append_unescaped(GString *out, const char **pp)
+{
+    const char *p = *pp;
+    if (*p == '\\' && p[1]) {
+        p++;
+        if (g_ascii_isxdigit(*p)) {
+            gunichar cp = 0;
+            int n = 0;
+            while (n < 6 && g_ascii_isxdigit(*p)) {
+                cp = cp * 16 + (gunichar)g_ascii_xdigit_value(*p);
+                p++;
+                n++;
+            }
+            if (is_ws(*p)) p++;
+            g_string_append_unichar(out, css_unescape_cp(cp));
+        } else {
+            g_string_append_c(out, *p++);
+        }
+    } else {
+        g_string_append_c(out, *p++);
+    }
+    *pp = p;
+}
+
 static char *
 read_css_ident(const char **pp, const char *end)
 {
@@ -5351,24 +5376,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         if (single_string) {
             char *raw = g_strndup(t + 1, tl - 2);
             GString *s = g_string_new(NULL);
-            for (const char *p = raw; *p; ) {
-                if (*p == '\\' && p[1]) {
-                    p++;
-                    if (g_ascii_isxdigit(*p)) {
-                        char hex[8] = {0};
-                        int hn = 0;
-                        while (hn < 6 && g_ascii_isxdigit(*p)) hex[hn++] = *p++;
-                        gunichar uc = (gunichar)g_ascii_strtoull(hex, NULL, 16);
-                        if (*p == ' ') p++;
-                        uc = css_unescape_cp(uc);
-                        g_string_append_unichar(s, uc);
-                    } else {
-                        g_string_append_c(s, *p++);
-                    }
-                } else {
-                    g_string_append_c(s, *p++);
-                }
-            }
+            for (const char *p = raw; *p; )
+                ns_css_append_unescaped(s, &p);
             g_free(raw);
             v = g_new0(ns_css_value, 1);
             v->kind = NS_CSS_V_KEYWORD;

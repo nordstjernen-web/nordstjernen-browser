@@ -2031,22 +2031,8 @@ resolve_pseudo_content(const char *raw, const ns_node *host)
                 p++;
             }
             char *raw_str = g_strndup(start, p - start);
-            for (const char *r = raw_str; *r; ) {
-                if (*r == '\\' && r[1]) {
-                    r++;
-                    if (g_ascii_isxdigit(*r)) {
-                        char hex[8] = {0}; int hn = 0;
-                        while (hn < 6 && g_ascii_isxdigit(*r)) hex[hn++] = *r++;
-                        gunichar uc = (gunichar)g_ascii_strtoull(hex, NULL, 16);
-                        if (*r == ' ') r++;
-                        if (uc) g_string_append_unichar(out, uc);
-                    } else {
-                        g_string_append_c(out, *r++);
-                    }
-                } else {
-                    g_string_append_c(out, *r++);
-                }
-            }
+            for (const char *r = raw_str; *r; )
+                ns_css_append_unescaped(out, &r);
             g_free(raw_str);
             if (*p == q) p++;
         } else if (g_str_has_prefix(p, "attr(")) {
@@ -2235,25 +2221,8 @@ quotes_string_for(const ns_style *s, int depth, gboolean closing)
             if (*p == '"' || *p == '\'') {
                 char term = *p++;
                 GString *part = g_string_new(NULL);
-                while (*p && *p != term) {
-                    if (*p == '\\' && p[1]) {
-                        p++;
-                        if (g_ascii_isxdigit(*p)) {
-                            char hex[8] = {0};
-                            int hn = 0;
-                            while (hn < 6 && g_ascii_isxdigit(*p))
-                                hex[hn++] = *p++;
-                            gunichar uc =
-                                (gunichar)g_ascii_strtoull(hex, NULL, 16);
-                            if (*p == ' ') p++;
-                            if (uc) g_string_append_unichar(part, uc);
-                        } else {
-                            g_string_append_c(part, *p++);
-                        }
-                    } else {
-                        g_string_append_c(part, *p++);
-                    }
-                }
+                while (*p && *p != term)
+                    ns_css_append_unescaped(part, &p);
                 g_ptr_array_add(parts, g_string_free(part, FALSE));
                 if (*p) p++;
             } else {

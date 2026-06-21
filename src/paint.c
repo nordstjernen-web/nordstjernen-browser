@@ -3762,23 +3762,8 @@ static void
 marker_append_escaped_string(GString *out, const char *start, gsize len)
 {
     char *raw = g_strndup(start, len);
-    for (const char *r = raw; *r; ) {
-        if (*r == '\\' && r[1]) {
-            r++;
-            if (g_ascii_isxdigit(*r)) {
-                char hex[8] = {0};
-                int hn = 0;
-                while (hn < 6 && g_ascii_isxdigit(*r)) hex[hn++] = *r++;
-                gunichar uc = (gunichar)g_ascii_strtoull(hex, NULL, 16);
-                if (*r == ' ') r++;
-                if (uc) g_string_append_unichar(out, uc);
-            } else {
-                g_string_append_c(out, *r++);
-            }
-        } else {
-            g_string_append_c(out, *r++);
-        }
-    }
+    for (const char *r = raw; *r; )
+        ns_css_append_unescaped(out, &r);
     g_free(raw);
 }
 
