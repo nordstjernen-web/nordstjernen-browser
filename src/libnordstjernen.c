@@ -191,16 +191,6 @@ browser_relayout_from_mutation(ns_browser *b)
     return TRUE;
 }
 
-static void
-walk_max_bottom(const ns_box *b, double *out)
-{
-    if (!b) return;
-    double bottom = b->y + b->content_height;
-    if (bottom > *out) *out = bottom;
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        walk_max_bottom(c, out);
-}
-
 static gboolean
 overflow_keyword_hidden(const char *kw)
 {
@@ -1043,7 +1033,7 @@ ns_browser_page_size(ns_browser *browser, int *out_width, int *out_height)
     if (!(w > 0)) w = browser->vw;
     double bottom = hide_y ? browser->vh : browser->layout->content_height;
     if (!hide_y)
-        walk_max_bottom(browser->layout, &bottom);
+        bottom = ns_box_max_bottom(browser->layout, bottom);
     if (!(bottom > 0)) bottom = 0;
     if (out_width)  *out_width  = (int)w;
     int ypad = (!hide_y && bottom > browser->vh + 0.5) ? 32 : 0;

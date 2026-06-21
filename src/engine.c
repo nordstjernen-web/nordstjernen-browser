@@ -629,16 +629,6 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
     g_hash_table_destroy(wanted);
 }
 
-static void
-walk_max_bottom(const ns_box *b, double *out)
-{
-    if (!b) return;
-    double bottom = b->y + b->content_height;
-    if (bottom > *out) *out = bottom;
-    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
-        walk_max_bottom(c, out);
-}
-
 int
 ns_engine_write_png(const ns_box *root, const char *path)
 {
@@ -648,8 +638,7 @@ ns_engine_write_png(const ns_box *root, const char *path)
     if (!(cw > 0)) cw = 1024;
     if (cw > kCairoMax) cw = kCairoMax;
     int w = (int)cw;
-    double max_bottom = root->content_height;
-    walk_max_bottom(root, &max_bottom);
+    double max_bottom = ns_box_max_bottom(root, root->content_height);
     if (!(max_bottom > 0)) max_bottom = 0;
     if (max_bottom > (double)kCairoMax) max_bottom = kCairoMax;
     int h = (int)max_bottom + 32;

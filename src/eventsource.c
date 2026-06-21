@@ -309,9 +309,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     curl_easy_setopt(curl, CURLOPT_URL, es->url);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
+    ns_net_apply_curl_tls(curl);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);

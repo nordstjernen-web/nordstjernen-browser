@@ -564,6 +564,24 @@ ns_box_free(ns_box *box)
     g_ptr_array_free(stack, TRUE);
 }
 
+static void
+box_walk_max_bottom(const ns_box *b, double *out)
+{
+    if (!b) return;
+    double bottom = b->y + b->content_height;
+    if (bottom > *out) *out = bottom;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling)
+        box_walk_max_bottom(c, out);
+}
+
+double
+ns_box_max_bottom(const ns_box *root, double seed)
+{
+    double out = seed;
+    box_walk_max_bottom(root, &out);
+    return out;
+}
+
 static gboolean
 is_replaced_block_tag(const char *name)
 {

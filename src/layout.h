@@ -170,6 +170,8 @@ double ns_text_indent_px(const ns_style *s, double basis);
 
 void ns_box_free(ns_box *box);
 
+double ns_box_max_bottom(const ns_box *root, double seed);
+
 void ns_paint_drop_box_cache(ns_box *box);
 
 struct ns_image_cache;
