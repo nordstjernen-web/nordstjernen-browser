@@ -150,6 +150,14 @@ poll the instant a new handle is queued. Shutdown
 still-active transfers, and joins the thread before
 `curl_global_cleanup`.
 
+To confirm the multiplexing empirically, `--debug=net` emits a per-origin
+`[net conn]` line on every completed transfer carrying the negotiated
+protocol, `CURLINFO_NUM_CONNECTS` for that transfer (`new=`), and the
+running per-origin `reqs`/`conns` tally. A healthy HTTP/2 origin shows
+many requests collapsing onto one connection (e.g. `reqs=166 conns=1`),
+which is the signal that same-origin subresources share a single
+connection as parallel streams rather than opening one apiece.
+
 Shared state and its protection:
 
 - **Per-origin slots** (`g_origin_slots`, `g_origin_slots_lock`,

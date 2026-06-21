@@ -53,6 +53,8 @@ static char *g_accept_encoding;
 static char *g_proxy_override;
 static CURLSH *g_share;
 static GMutex g_share_locks[CURL_LOCK_DATA_LAST];
+static GMutex      g_conn_stats_lock;
+static GHashTable *g_conn_stats;
 
 #define NS_DEAD_HOST_TTL_US ((gint64)120 * G_USEC_PER_SEC)
 static GHashTable *g_dead_hosts;
@@ -1438,6 +1440,10 @@ ns_net_shutdown(void)
 {
     ns_net_join_rng();
     ns_net_multi_shutdown();
+    if (g_conn_stats) {
+        g_hash_table_destroy(g_conn_stats);
+        g_conn_stats = NULL;
+    }
     if (g_share) { curl_share_cleanup(g_share); g_share = NULL; }
     curl_global_cleanup();
     g_free(g_accept_encoding);
@@ -1483,6 +1489,54 @@ void
 ns_net_set_log_fetches(gboolean on)
 {
     g_log_fetches = on;
+}
+
+typedef struct ns_conn_stat {
+    guint64 requests;
+    guint64 connections;
+} ns_conn_stat;
+
+static const char *
+ns_net_http_version_name(long v)
+{
+    switch (v) {
+    case CURL_HTTP_VERSION_1_0: return "http/1.0";
+    case CURL_HTTP_VERSION_1_1: return "http/1.1";
+    case CURL_HTTP_VERSION_2_0: return "h2";
+#ifdef CURL_HTTP_VERSION_3
+    case CURL_HTTP_VERSION_3:   return "h3";
+#endif
+    default:                    return "http/?";
+    }
+}
+
+static void
+ns_net_conn_stat_record(const char *url, long http_version, long new_connections)
+{
+    if (!g_log_fetches) return;
+    char *origin = ns_url_origin_from(url);
+    if (!origin) return;
+
+    g_mutex_lock(&g_conn_stats_lock);
+    if (!g_conn_stats)
+        g_conn_stats = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, g_free);
+    ns_conn_stat *s = g_hash_table_lookup(g_conn_stats, origin);
+    if (!s) {
+        s = g_new0(ns_conn_stat, 1);
+        g_hash_table_insert(g_conn_stats, g_strdup(origin), s);
+    }
+    s->requests++;
+    if (new_connections > 0)
+        s->connections += (guint64)new_connections;
+    guint64 reqs = s->requests, conns = s->connections;
+    g_mutex_unlock(&g_conn_stats_lock);
+
+    ns_debug_log_emit(NS_DLOG_NET, "conn", "%s new=%ld origin=%s reqs=%"
+                      G_GUINT64_FORMAT " conns=%" G_GUINT64_FORMAT,
+                      ns_net_http_version_name(http_version),
+                      new_connections, origin, reqs, conns);
+    g_free(origin);
 }
 
 static const char *
@@ -4210,6 +4264,12 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     resp->status = status;
     resp->final_url = g_strdup(eff_url ? eff_url : url);
     resp->redirect_count = (int)redirect_count;
+    if (g_log_fetches) {
+        long http_version = 0, num_connects = 0;
+        curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &http_version);
+        curl_easy_getinfo(curl, CURLINFO_NUM_CONNECTS, &num_connects);
+        ns_net_conn_stat_record(resp->final_url, http_version, num_connects);
+    }
     if (rc == CURLE_OK && request_ftp) {
         maybe_synthesize_ftp_listing(resp);
         maybe_guess_ftp_content_type(resp);
