@@ -30,6 +30,23 @@ ns_engine_in_blocking_fetch(void)
     return g_engine_blocking_depth > 0;
 }
 
+static guint64 g_engine_relayout_count;
+static gint64  g_engine_relayout_us;
+
+static void
+ns_engine_perf_add_relayout(gint64 elapsed_us)
+{
+    g_engine_relayout_count++;
+    g_engine_relayout_us += elapsed_us;
+}
+
+void
+ns_engine_layout_perf(guint64 *relayouts, double *total_ms)
+{
+    if (relayouts) *relayouts = g_engine_relayout_count;
+    if (total_ms)  *total_ms  = g_engine_relayout_us / 1000.0;
+}
+
 static void
 on_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -332,6 +349,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
     if (profile_env < 0)
         profile_env = g_getenv("NS_PROFILE") != NULL ? 1 : 0;
     GHashTable *styles;
+    gint64 relayout_t0 = g_get_monotonic_time();
     if (profile_env) {
         ns_render_profile prof;
         gint64 t0 = g_get_monotonic_time();
@@ -353,6 +371,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
     } else {
         styles = ns_render_relayout(&rc, out_layout);
     }
+    ns_engine_perf_add_relayout(g_get_monotonic_time() - relayout_t0);
     ns_debug_log_emit(NS_DLOG_RENDER, "relayout", "styles=%u vw=%d",
                       styles ? g_hash_table_size(styles) : 0u, viewport_width);
 

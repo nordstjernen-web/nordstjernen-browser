@@ -40,6 +40,8 @@ GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                gsize caret_byte,
                                gsize sel_anchor_byte, ns_box **out_layout);
 
+void ns_engine_layout_perf(guint64 *relayouts, double *total_ms);
+
 void ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
                               GHashTable *css_cache);
 

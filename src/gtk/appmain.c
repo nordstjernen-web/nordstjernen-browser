@@ -27,6 +27,7 @@
 #include "config.h"
 #include "debuglog.h"
 #include "font.h"
+#include "engine.h"
 #include "headless.h"
 #include "spellcheck.h"
 #include "history.h"
@@ -412,6 +413,16 @@ ns_run_headless(ns_headless_opts *hopts)
         if (file_url) hopts->url = file_url;
     }
     int rc = ns_headless_run(hopts);
+    if (hopts->debug_levels & (1u << NS_DLOG_NET)) {
+        guint64 fetches = 0, bytes = 0, relayouts = 0;
+        double sum_ms = 0, span_ms = 0, layout_ms = 0;
+        ns_net_perf_snapshot(&fetches, &bytes, &sum_ms, &span_ms);
+        ns_engine_layout_perf(&relayouts, &layout_ms);
+        g_printerr("[net perf] fetches=%" G_GUINT64_FORMAT " bytes=%"
+                   G_GUINT64_FORMAT " net_span=%.1fms net_sum=%.1fms | "
+                   "relayouts=%" G_GUINT64_FORMAT " layout=%.1fms\n",
+                   fetches, bytes, span_ms, sum_ms, relayouts, layout_ms);
+    }
     g_free(file_url);
     ns_bcache_shutdown();
     ns_history_shutdown();

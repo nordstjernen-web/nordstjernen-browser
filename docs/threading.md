@@ -158,6 +158,18 @@ many requests collapsing onto one connection (e.g. `reqs=166 conns=1`),
 which is the signal that same-origin subresources share a single
 connection as parallel streams rather than opening one apiece.
 
+A headless run with `--debug=net` also prints a one-line `[net perf]`
+summary at the end of the load comparing the network-active wall span to
+main-thread layout time, e.g.
+`fetches=167 net_span=794ms net_sum=1431ms | relayouts=1 layout=97ms`.
+`net_span` is the wall-clock window from the first fetch start to the
+last completion (so it accounts for fetch concurrency), `net_sum` is the
+overlapping per-fetch total, and `layout` is the accumulated time inside
+`ns_engine_relayout`. When `net_span` dominates `layout` the load is
+network-bound — the regime the shared multi handle is meant to speed up;
+when `layout` dominates, the main thread is the bottleneck and network
+concurrency is not the lever to pull.
+
 Shared state and its protection:
 
 - **Per-origin slots** (`g_origin_slots`, `g_origin_slots_lock`,

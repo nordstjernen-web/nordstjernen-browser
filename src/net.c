@@ -1510,6 +1510,42 @@ ns_net_http_version_name(long v)
     }
 }
 
+static GMutex   g_perf_lock;
+static guint64  g_perf_fetch_count;
+static guint64  g_perf_fetch_bytes;
+static gint64   g_perf_fetch_sum_us;
+static gint64   g_perf_fetch_first_us;
+static gint64   g_perf_fetch_last_us;
+
+static void
+ns_net_perf_record(gint64 start_us, gint64 end_us, guint64 bytes)
+{
+    if (!g_log_fetches) return;
+    g_mutex_lock(&g_perf_lock);
+    if (g_perf_fetch_count == 0 || start_us < g_perf_fetch_first_us)
+        g_perf_fetch_first_us = start_us;
+    if (end_us > g_perf_fetch_last_us)
+        g_perf_fetch_last_us = end_us;
+    g_perf_fetch_count++;
+    g_perf_fetch_bytes += bytes;
+    g_perf_fetch_sum_us += end_us - start_us;
+    g_mutex_unlock(&g_perf_lock);
+}
+
+void
+ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
+                     double *sum_ms, double *span_ms)
+{
+    g_mutex_lock(&g_perf_lock);
+    if (fetches) *fetches = g_perf_fetch_count;
+    if (bytes)   *bytes   = g_perf_fetch_bytes;
+    if (sum_ms)  *sum_ms  = g_perf_fetch_sum_us / 1000.0;
+    if (span_ms) *span_ms = g_perf_fetch_count
+                            ? (g_perf_fetch_last_us - g_perf_fetch_first_us) / 1000.0
+                            : 0.0;
+    g_mutex_unlock(&g_perf_lock);
+}
+
 static void
 ns_net_conn_stat_record(const char *url, long http_version, long new_connections)
 {
@@ -4368,10 +4404,13 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     ns_cache_entry_free(cached);
 
     {
+        gint64 fetch_end_us = g_get_monotonic_time();
+        ns_net_perf_record(fetch_start_us, fetch_end_us,
+                           resp->body ? (guint64)resp->body->len : 0);
         char *req_hdrs = ns_net_slist_serialize(headers);
         ns_net_log_record(method, url, resp->status, resp->content_type,
                           resp->body ? (guint64)resp->body->len : 0,
-                          (g_get_monotonic_time() - fetch_start_us) / 1000.0,
+                          (fetch_end_us - fetch_start_us) / 1000.0,
                           req_hdrs, resp->raw_headers, resp->error);
         g_free(req_hdrs);
     }

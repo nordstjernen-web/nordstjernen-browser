@@ -140,6 +140,8 @@ void  ns_net_cookie_store_from_js(const char *url, const char *cookie);
 void  ns_net_set_proxy_override(const char *proxy_url);
 void  ns_net_set_allow_file_urls(gboolean allow);
 void  ns_net_set_log_fetches(gboolean on);
+void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
+                           double *sum_ms, double *span_ms);
 char *ns_net_proxy_mask(const char *proxy_url);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
