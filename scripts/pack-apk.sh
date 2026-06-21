@@ -57,6 +57,11 @@ mkdir -p "$BUILDTOP"
 export REPODEST="$ROOT/dist/apkrepo"
 rm -rf "$REPODEST"
 
+# Audio playback helper, when SDL2 was available at build time. tracedeps is
+# off, so its sdl2 runtime dependency must be listed manually below.
+AUDIO_DEP=""
+[ -x "$STAGE/nordstjernen-audio" ] && AUDIO_DEP=" sdl2"
+
 cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
 # Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 pkgname=nordstjernen
@@ -66,7 +71,7 @@ pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
 license="custom"
-depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3"
+depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3${AUDIO_DEP}"
 options="!check !tracedeps !strip"
 source=""
 
@@ -77,6 +82,9 @@ build() {
 package() {
 	install -Dm755 "${STAGE}/nordstjernen" "\$pkgdir/usr/bin/nordstjernen"
 	install -Dm755 "${STAGE}/nordstjernen-renderer" "\$pkgdir/usr/bin/nordstjernen-renderer"
+	if [ -e "${STAGE}/nordstjernen-audio" ]; then
+		install -Dm755 "${STAGE}/nordstjernen-audio" "\$pkgdir/usr/bin/nordstjernen-audio"
+	fi
 	for icon in "${STAGE}"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \\
 	            "${STAGE}"/data/icons/hicolor/scalable/apps/nordstjernen.gif; do
 		[ -e "\$icon" ] && install -Dm644 "\$icon" \\

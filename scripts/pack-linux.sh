@@ -62,6 +62,13 @@ strip --strip-all "$BUILDDIR/src/gtk/nordstjernen"
 # The GUI is a thin shell that spawns one sandboxed nordstjernen-renderer
 # process per tab; it must ship alongside the main binary.
 strip --strip-all "$BUILDDIR/src/nordstjernen-renderer"
+# The audio playback helper (MP2/MP3 decode + SDL2 output). Built only when
+# SDL2 was present at configure time (meson 'audio' feature is auto); ship it
+# beside the main binary so the shell can spawn it for <video>/<audio> sound.
+AUDIO_BIN="$BUILDDIR/src/nordstjernen-audio"
+if [ -f "$AUDIO_BIN" ]; then
+    strip --strip-all "$AUDIO_BIN"
+fi
 QT_BIN="$BUILDDIR/src/qt/nordstjernen-qt"
 if [ -f "$QT_BIN" ]; then
     strip --strip-all "$QT_BIN"
@@ -83,7 +90,7 @@ fi
 if [ "$LIBC" = musl ]; then
     LIBC_REQ='- musl libc (Alpine 3.19+ era and later)'
     RUNTIME_INSTALL='    sudo apk add gtk4.0 libcurl uchardet librsvg poppler-glib libavif libwebp \
-        libseccomp libpsl sqlite-libs ca-certificates font-dejavu      # Alpine (musl)'
+        libseccomp libpsl sqlite-libs ca-certificates font-dejavu sdl2 # Alpine (musl)'
 else
     # Don't guess the glibc floor — read it from the binary we just built.
     GLIBC_MIN=$(objdump -T "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
@@ -91,17 +98,20 @@ else
         | tail -1 | cut -d_ -f2)
     LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (for 2.38: Ubuntu 24.04 / Debian 13 / Fedora 39 era and later)"
     RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 librsvg2-2 libwebp7 \
-        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0    # Debian/Ubuntu
+        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
     sudo dnf   install gtk4 libcurl libuchardet librsvg2 poppler-glib libwebp \
-        libavif libpsl libseccomp sqlite-libs                          # Fedora/RHEL
+        libavif libpsl libseccomp sqlite-libs SDL2                     # Fedora/RHEL
     sudo zypper install libgtk-4-1 libcurl4 libuchardet0 librsvg-2-2 libwebp7 \
-        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0    # openSUSE'
+        libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0 libSDL2-2_0-0   # openSUSE'
 fi
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/data/icons/hicolor/scalable/apps"
 cp "$BUILDDIR/src/gtk/nordstjernen" "$STAGE/"
 cp "$BUILDDIR/src/nordstjernen-renderer" "$STAGE/"
+if [ -f "$AUDIO_BIN" ]; then
+    cp "$AUDIO_BIN" "$STAGE/"
+fi
 # The experimental Qt 6 frontend, when Qt 6 was available at build time. It is
 # a second thin shell over the same nordstjernen-renderer process.
 if [ -f "$QT_BIN" ]; then

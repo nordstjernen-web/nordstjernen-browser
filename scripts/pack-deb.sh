@@ -38,6 +38,11 @@ install -dm755 "$PKGROOT/usr/share/doc/nordstjernen"
 
 install -m755 "$STAGE/nordstjernen" "$PKGROOT/usr/bin/nordstjernen"
 install -m755 "$STAGE/nordstjernen-renderer" "$PKGROOT/usr/bin/nordstjernen-renderer"
+# Audio playback helper, when SDL2 was available at build time. It is added to
+# the dpkg-shlibdeps scan below so its libSDL2 dependency lands in Depends.
+if [ -x "$STAGE/nordstjernen-audio" ]; then
+    install -m755 "$STAGE/nordstjernen-audio" "$PKGROOT/usr/bin/nordstjernen-audio"
+fi
 # All app + toolbar icons the UI and about: pages look up by name.
 for icon in "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \
             "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen.gif; do
@@ -152,8 +157,10 @@ Source: nordstjernen
 Package: nordstjernen
 Architecture: any
 CTL
+    scan_bins=(usr/bin/nordstjernen)
+    [ -x "$PKGROOT/usr/bin/nordstjernen-audio" ] && scan_bins+=(usr/bin/nordstjernen-audio)
     RUNTIME_DEPS=$(cd "$PKGROOT" \
-        && dpkg-shlibdeps -O --ignore-missing-info usr/bin/nordstjernen 2>/dev/null \
+        && dpkg-shlibdeps -O --ignore-missing-info "${scan_bins[@]}" 2>/dev/null \
         | sed -n 's/^shlibs:Depends=//p')
     rm -rf "$PKGROOT/debian"
 fi

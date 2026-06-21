@@ -64,6 +64,18 @@ patchelf --set-rpath '\''$ORIGIN/../%{_lib}/nordstjernen'\'' %{buildroot}%{_bind
     WGPU_FILES='%{_libdir}/nordstjernen/'
 fi
 
+# Audio playback helper, when SDL2 was available at build time. AutoReqProv
+# picks up its libSDL2 SONAME as a Requires automatically.
+AUDIO_SOURCE=""
+AUDIO_INSTALL=""
+AUDIO_FILES=""
+if [ -x "$STAGE/nordstjernen-audio" ]; then
+    cp "$STAGE/nordstjernen-audio" "$RPMTOP/SOURCES/"
+    AUDIO_SOURCE="Source7:        nordstjernen-audio"
+    AUDIO_INSTALL='install -m755 %{SOURCE7} %{buildroot}%{_bindir}/nordstjernen-audio'
+    AUDIO_FILES='%{_bindir}/nordstjernen-audio'
+fi
+
 SPEC="$RPMTOP/SPECS/nordstjernen.spec"
 cat > "$SPEC" <<SPEC_EOF
 Name:           nordstjernen
@@ -81,6 +93,7 @@ Source2:        nordstjernen.desktop
 Source3:        README.md
 Source4:        THIRD-PARTY-LICENSES.md
 Source5:        nordstjernen-renderer
+${AUDIO_SOURCE}
 ${WGPU_SOURCE}
 
 AutoReqProv:    yes
@@ -118,6 +131,7 @@ chmod 644 %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/nordstjernen*
 install -m644 %{SOURCE2} %{buildroot}%{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 install -m644 %{SOURCE3} %{buildroot}%{_docdir}/nordstjernen/
 install -m644 %{SOURCE4} %{buildroot}%{_docdir}/nordstjernen/
+${AUDIO_INSTALL}
 ${WGPU_INSTALL}
 
 %files
@@ -126,6 +140,7 @@ ${WGPU_INSTALL}
 %{_datadir}/icons/hicolor/scalable/apps/nordstjernen*
 %{_datadir}/applications/org.nordstjernen.WebBrowser.desktop
 %{_docdir}/nordstjernen/
+${AUDIO_FILES}
 ${WGPU_FILES}
 
 %post
