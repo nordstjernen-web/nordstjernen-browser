@@ -46,7 +46,14 @@ install_zypper() {
         gcc gcc-c++ clang pkgconf-pkg-config meson ninja cmake git zip unzip curl \
         rpm-build patchelf ca-certificates \
         gtk4-devel libepoxy-devel libcurl-devel libopenssl-devel libuchardet-devel libpsl-devel \
-        sqlite3-devel librsvg-devel libseccomp-devel libwebp-devel libSDL2-devel
+        sqlite3-devel librsvg-devel libseccomp-devel libwebp-devel
+    # SDL2 backs the auto-detected audio helper; keep it out of the required
+    # set so an unavailable/mid-sync package degrades to no audio, not a failed
+    # nightly. Its own line (not the optional group) so it is independent of
+    # poppler/qt6 availability.
+    zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
+        libSDL2-devel \
+        || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio helper skipped" >&2
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libpoppler-glib-devel \
         fontconfig-devel pango-devel libavif-devel qt6-base-devel qt6-svg-devel || true
