@@ -69,10 +69,14 @@ cp -a "$(dirname "$top")"/. .
 test -f meson.build
 
 %build
+%ifarch %{ix86}
+%global extra_meson -Dwasm=disabled
+%endif
 %meson \
     -Dai=disabled \
     -Dqt=disabled \
-    -Dwebgpu=disabled
+    -Dwebgpu=disabled \
+    %{?extra_meson}
 %meson_build
 
 %install
