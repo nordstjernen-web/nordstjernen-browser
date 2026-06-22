@@ -69,9 +69,10 @@ cp -a "$(dirname "$top")"/. .
 test -f meson.build
 
 %build
-%ifarch %{ix86}
+%ifarch i386 i486 i586 i686
 %global extra_meson -Dwasm=disabled
 %endif
+echo "DIAG: target=%{_target_cpu} extra_meson=[%{?extra_meson}]"
 %meson \
     -Dai=disabled \
     -Dqt=disabled \
