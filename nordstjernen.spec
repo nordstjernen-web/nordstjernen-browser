@@ -56,7 +56,17 @@ secure, and readable by a single person end to end.
 
 %prep
 %setup -q -c -T
-cp -a %{_sourcedir}/. .
+top=$(find "%{_sourcedir}" -name meson.build 2>/dev/null \
+      | awk '{ print length, $0 }' | sort -n | head -1 | cut -d' ' -f2-)
+echo "DIAG: top meson.build = ${top:-<none>}"
+echo "DIAG: %{_sourcedir} ="; ls -la "%{_sourcedir}"
+if [ -z "$top" ]; then
+    echo "DIAG: no meson.build under SOURCES; listing %{_builddir}:"
+    ls -laR "%{_builddir}" | head -80
+    exit 1
+fi
+cp -a "$(dirname "$top")"/. .
+test -f meson.build
 
 %build
 %meson \
