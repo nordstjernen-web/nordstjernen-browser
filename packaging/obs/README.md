@@ -1,11 +1,27 @@
 # openSUSE / OBS packaging
 
-Files to upload to the OBS package
+This directory is the OBS package container for
 `home:andreasrosdal/Nordstjernen`:
 
 - `nordstjernen.spec` — RPM build recipe (builds from source with meson).
-- `_service` — pulls the source tarball from the public GitHub repo and
-  compresses it to `nordstjernen-<version>.tar.zst`.
+- `_service` — pulls the source tarball from the public GitHub repo.
+
+## Git-backed package (scmsync) — recommended
+
+The package is bound to this git repo via `scmsync`, so OBS pulls everything
+from GitHub and stores no tarball of its own. The package container is this
+`packaging/obs/` subdirectory; the `_service` (`tar_scm`) fetches the full
+source tree from the same repo at build time.
+
+Set it once on the package meta (`osc meta pkg home:andreasrosdal Nordstjernen
+-e`), adding inside `<package>`:
+
+    <scmsync>https://github.com/nordstjernen-web/nordstjernen?trackingbranch=main&amp;subdir=packaging/obs</scmsync>
+
+(`&` must be written `&amp;` in the meta XML.) After this, sources are
+authoritative in git — edit here and push, do not edit files in OBS. OBS
+tracks `main` and rebuilds when it advances; for instant rebuilds add a git
+webhook with an `osc token --create --operation runservice` token.
 
 ## License caveat — read first
 
