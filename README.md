@@ -122,6 +122,23 @@ latest build — bleeding edge, expect rough edges.
 [Checksums](https://www.nordstjernen.org/nightly/SHA256SUMS) ·
 [all nightly files](https://www.nordstjernen.org/nightly/)
 
+### openSUSE (zypper)
+
+Nordstjernen is built for openSUSE in the [Open Build Service](https://build.opensuse.org/package/show/home:andreasrosdal/Nordstjernen).
+Add the repository and install — updates then arrive through `zypper`:
+
+```sh
+# openSUSE Tumbleweed
+sudo zypper addrepo https://download.opensuse.org/repositories/home:/andreasrosdal/openSUSE_Tumbleweed/home:andreasrosdal.repo
+sudo zypper refresh
+sudo zypper install nordstjernen
+```
+
+For Leap, swap `openSUSE_Tumbleweed` for your release (e.g. `16.0`). See
+[docs/opensuse.md](docs/opensuse.md) for the full packaging story, the
+licensing reality (it cannot enter openSUSE:Factory under NSL-1.0), and how
+the git-backed OBS build is wired up.
+
 **Windows 10 or later** is required: the GTK 4 frontend links
 DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
 (and GTK 4 targets Windows 10 anyway). The Qt frontend has the same
