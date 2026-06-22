@@ -34,13 +34,33 @@ the OBS sandbox:
 Everything else (GTK shell, sandboxed renderer, SDL2 audio helper, WebGL,
 spell-checking via enchant) builds from the declared `BuildRequires`.
 
-## Uploading via the web UI
+## "Excluded" status
 
-1. On the package page, **Trigger services** (runs `_service`) once the
-   `_service` file is uploaded, or upload a tarball manually.
-2. Add `nordstjernen.spec` and `_service`.
-3. OBS builds for the enabled repositories/arches; watch the build log and
-   iterate.
+A package shows **excluded** when OBS skips it before building:
+
+- **Only some arches excluded** (i586, ppc64, armv7…): expected — GTK 4 is
+  not built there. Keep x86_64 (and aarch64) enabled; ignore the rest.
+- **All arches excluded**: OBS has no usable source. Click the "Excluded"
+  link for the exact reason. The usual cause is a source service that never
+  ran (e.g. an `obs_scm` left in `mode="manual"`, which the web-UI "Trigger
+  Services" does not run). Fix by either removing `mode="manual"` so the
+  server runs it, or by dropping `_service` and uploading a plain source
+  tarball (simplest, deterministic).
+
+## Uploading via the web UI (plain tarball — simplest)
+
+1. Generate the source tarball locally:
+   `git archive --format=tar --prefix=nordstjernen-1.14/ HEAD | gzip -9 > nordstjernen-1.14.tar.gz`
+2. On the package page, **Add file** → upload `nordstjernen.spec` and
+   `nordstjernen-1.14.tar.gz`. Do **not** also keep a `_service`, or the
+   service output will fight the uploaded tarball.
+3. OBS builds for the enabled repositories/arches; watch the build log.
+
+## Uploading via the web UI (auto-pull from git)
+
+1. Upload `nordstjernen.spec` and `_service`, then **Trigger Services**.
+2. The `obs_scm` service clones `main` and produces
+   `nordstjernen-1.14.tar.gz` server-side.
 
 ## Uploading with osc (recommended)
 

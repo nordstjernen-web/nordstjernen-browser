@@ -1,5 +1,5 @@
 <services>
-  <service name="obs_scm" mode="manual">
+  <service name="obs_scm">
     <param name="scm">git</param>
     <param name="url">https://github.com/nordstjernen-web/nordstjernen.git</param>
     <param name="revision">main</param>
@@ -11,7 +11,7 @@
   <service name="tar" mode="buildtime"/>
   <service name="recompress" mode="buildtime">
     <param name="file">*.tar</param>
-    <param name="compression">zst</param>
+    <param name="compression">gz</param>
   </service>
   <service name="set_version" mode="buildtime"/>
 </services>
