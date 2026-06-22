@@ -19,7 +19,6 @@ Summary:        Small, hand-written GTK web browser
 License:        SUSE-NonFree
 Group:          Productivity/Networking/Web/Browsers
 URL:            https://nordstjernen.org
-Source0:        nordstjernen-%{version}.tar.gz
 
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
@@ -56,7 +55,8 @@ secure, and readable by a single person end to end.
   * No telemetry: it does not phone home and does not track the user.
 
 %prep
-%autosetup -n nordstjernen-%{version}
+%setup -q -c -T
+cp -a %{_sourcedir}/. .
 
 %build
 %meson \
