@@ -1,0 +1,10 @@
+-------------------------------------------------------------------
+Mon Jun 22 10:00:00 UTC 2026 - Andreas Røsdal <andreas.rosdal@gmail.com>
+
+- Initial openSUSE package of Nordstjernen 1.14, a small, hand-written
+  web browser written from scratch in C with a GTK 4 UI and a libcurl
+  network stack.
+- Built from git via the OBS scm bridge (scmsync); ai/qt/webgpu features
+  disabled, wasm disabled on 32-bit x86 (WAMR does not build there).
+- Licensed under the Nordstjernen Source License v1.0 (NSL-1.0), a
+  source-available, non-free license; packaged for the non-OSS area.
