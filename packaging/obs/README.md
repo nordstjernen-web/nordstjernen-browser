@@ -56,11 +56,23 @@ A package shows **excluded** when OBS skips it before building:
    service output will fight the uploaded tarball.
 3. OBS builds for the enabled repositories/arches; watch the build log.
 
-## Uploading via the web UI (auto-pull from git)
+## Uploading via the web UI (auto-pull from git — recommended)
 
-1. Upload `nordstjernen.spec` and `_service`, then **Trigger Services**.
-2. The `obs_scm` service clones `main` and produces
-   `nordstjernen-1.14.tar.gz` server-side.
+The `_service` here uses `tar_scm` + `recompress` + `set_version` with **no
+`mode="buildtime"`**, so the whole chain runs on the OBS source server and
+commits a finished `nordstjernen-1.14.tar.gz` directly. Avoid the
+`obs_scm` + buildtime-`tar` split: it produces a `.obscpio`/`.obsinfo`
+archive that the build VM must reconstruct, and if the git fetch did not
+commit that archive the build dies with
+`ERROR: no .obsinfo file found in directory` / `service run failed for
+service 'tar'`.
+
+1. Upload (or paste) `nordstjernen.spec` and `_service`, then **Trigger
+   Services**.
+2. `tar_scm` clones `main`, `recompress` gzips it, `set_version` syncs the
+   spec — the committed `nordstjernen-1.14.tar.gz` matches `Source0`.
+3. If your OBS instance does not run scm services server-side, run them
+   once locally instead: `osc service manualrun` then `osc ci`.
 
 ## Uploading with osc (recommended)
 
