@@ -1,9 +1,12 @@
 name: i586
 
-# 32-bit x86 (i586) Linux build. Runs in an i386 Debian container nested on the
-# amd64 runner, targeting the Pentium baseline via -march=i586. WAMR (wasm) and
-# llama.cpp (ai) do not build on 32-bit x86, so both are disabled — matching the
-# openSUSE i586 package recipe in nordstjernen.spec.
+# 32-bit x86 (i586) Linux build. The job runs on the amd64 host so the
+# JavaScript actions (checkout, cache, upload) use the runner's own Node; only
+# the compile runs inside an i386 Debian container via `docker run` (an i386
+# container cannot execute the runner-injected x86_64 Node, so it must not be
+# used as a `container:`). Targets the Pentium baseline via -march=i586. WAMR
+# (wasm) and llama.cpp (ai) do not build on 32-bit x86, so both are disabled,
+# matching the openSUSE i586 recipe in nordstjernen.spec.
 
 on:
   push:
@@ -23,67 +26,52 @@ jobs:
   build:
     name: gcc on i386 Debian (i586 target)
     runs-on: ubuntu-latest
-    container: i386/debian:trixie
     timeout-minutes: 40
 
-    env:
-      DEBIAN_FRONTEND: noninteractive
-
     steps:
-      - name: Install build dependencies (32-bit x86)
-        run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends \
-            build-essential clang ccache pkg-config meson ninja-build cmake git file \
-            libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
-            librsvg2-dev libpsl-dev libsqlite3-dev libwebp-dev libsdl2-dev libseccomp-dev \
-            ca-certificates fonts-dejavu-core
-
       - uses: actions/checkout@v6
 
       - name: Restore ccache
         uses: actions/cache@v5
         with:
-          path: /root/.cache/ccache
+          path: ~/.cache/ccache
           key: ccache-i586-${{ github.sha }}
           restore-keys: |
             ccache-i586-
 
-      - name: Configure ccache
+      - name: Build and smoke in an i386 Debian container
         run: |
-          ccache --max-size=200M
-          ccache --zero-stats
-
-      - name: Show toolchain versions
-        run: |
-          gcc -dumpmachine
-          gcc --version | head -1
-          meson --version
-          pkg-config --modversion gtk4
-
-      - name: Build (i586 target, no wasm/ai)
-        run: |
-          export CC="ccache gcc"
-          export CXX="ccache g++"
-          meson setup builddir \
-            --buildtype=release -Db_ndebug=true \
-            -Dwasm=disabled -Dai=disabled \
-            -Dc_args=-march=i586 -Dcpp_args=-march=i586
-          meson compile -C builddir
-          file builddir/src/gtk/nordstjernen
-
-      - name: ccache stats
-        if: always()
-        run: ccache --show-stats
-
-      - name: Headless smoke (32-bit binary, no X server needed)
-        env:
-          NS_ALLOW_ROOT: '1'
-        run: |
-          file builddir/src/gtk/nordstjernen | grep -qi '80386\|Intel 80386\|32-bit'
-          ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt
-          head -3 about.txt
-          grep -q Nordstjernen about.txt
+          mkdir -p ~/.cache/ccache
+          docker run --rm --platform linux/386 \
+            -v "$PWD":/work -w /work \
+            -v "$HOME/.cache/ccache":/ccache \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e CCACHE_DIR=/ccache \
+            -e CCACHE_MAXSIZE=200M \
+            -e NS_ALLOW_ROOT=1 \
+            i386/debian:trixie bash -e -c '
+              apt-get update -qq
+              apt-get install -y --no-install-recommends \
+                build-essential clang ccache pkg-config meson ninja-build cmake git file \
+                libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev \
+                librsvg2-dev libpsl-dev libsqlite3-dev libwebp-dev libsdl2-dev libseccomp-dev \
+                ca-certificates fonts-dejavu-core
+              gcc -dumpmachine
+              git config --global --add safe.directory /work
+              export CC="ccache gcc" CXX="ccache g++"
+              ccache --zero-stats
+              meson setup builddir \
+                --buildtype=release -Db_ndebug=true \
+                -Dwasm=disabled -Dai=disabled \
+                -Dc_args=-march=i586 -Dcpp_args=-march=i586
+              meson compile -C builddir
+              file builddir/src/gtk/nordstjernen
+              file builddir/src/gtk/nordstjernen | grep -qi "80386\|32-bit"
+              ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt
+              head -3 about.txt
+              grep -q Nordstjernen about.txt
+              ccache --show-stats
+            '
 
       - name: Upload nordstjernen i586 binary
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''

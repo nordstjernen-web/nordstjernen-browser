@@ -302,7 +302,11 @@ add_project_arguments('-DNS_VERSION="' + meson.project_version() + '"', language
 subdir('src/lexbor')
 subdir('src/quickjs')
 
-wasm_feature = get_option('wasm')
+wasm_unsupported_cpu = host_machine.cpu_family() == 'x86'
+if get_option('wasm').enabled() and wasm_unsupported_cpu
+  error('wasm (WAMR) is not supported on 32-bit x86; build with -Dwasm=disabled')
+endif
+wasm_feature = get_option('wasm').disable_auto_if(wasm_unsupported_cpu)
 have_wasm = false
 if wasm_feature.allowed()
   subdir('src/wamr')
