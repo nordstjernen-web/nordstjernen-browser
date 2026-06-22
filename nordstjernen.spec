@@ -72,7 +72,6 @@ test -f meson.build
 %ifarch i386 i486 i586 i686
 %global extra_meson -Dwasm=disabled
 %endif
-echo "DIAG: target=%{_target_cpu} extra_meson=[%{?extra_meson}]"
 %meson \
     -Dai=disabled \
     -Dqt=disabled \
