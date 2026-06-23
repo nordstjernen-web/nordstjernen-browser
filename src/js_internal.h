@@ -43,6 +43,15 @@ typedef struct ns_image_bitmap {
     int w, h;
 } ns_image_bitmap;
 
+typedef struct ns_perf_observer {
+    JSValue   cb;
+    JSValue   wrapper;
+    gboolean  disconnected;
+    gboolean  pinned;
+    GPtrArray *entry_types;
+    GPtrArray *records;
+} ns_perf_observer;
+
 struct ns_js {
     JSRuntime    *rt;
     JSContext    *ctx;
@@ -573,5 +582,41 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
 
 void ns_canvas_register_image_bitmap_class(JSRuntime *rt);
 void ns_canvas_register_path2d_class(JSRuntime *rt);
+
+/* Performance API (js_perf.c) and the js.c helpers it shares. */
+void ns_bind_fn_if_not_callable(JSContext *ctx, JSValueConst obj, const char *name,
+                                JSCFunction *fn, int argc);
+gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
+                             gboolean *was_set);
+
+double ns_perf_now_ms(const ns_js *js);
+void ns_perf_entry_free(gpointer p);
+JSValue ns_perf_supported_entry_types(JSContext *ctx);
+JSValue ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv);
+JSValue ns_perf_observer_observe(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv);
+JSValue ns_perf_observer_disconnect(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv);
+JSValue ns_perf_observer_takeRecords(JSContext *ctx, JSValueConst this_val,
+                                     int argc, JSValueConst *argv);
+JSValue ns_window_performance_now(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv);
+JSValue ns_window_performance_mark(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv);
+JSValue ns_window_performance_measure(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv);
+JSValue ns_window_performance_clearMarks(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv);
+JSValue ns_window_performance_clearMeasures(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv);
+JSValue ns_window_performance_getEntries(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv);
+JSValue ns_window_performance_getEntriesByName(JSContext *ctx, JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+JSValue ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this_val,
+                                               int argc, JSValueConst *argv);
+JSValue ns_window_performance_memory_get(JSContext *ctx, JSValueConst this_val,
+                                         int argc, JSValueConst *argv);
 
 #endif
