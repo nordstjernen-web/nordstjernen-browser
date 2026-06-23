@@ -4182,71 +4182,492 @@
         }
     })();
 
-    /* document.styleSheets + HTMLStyleElement.sheet with a working insertRule.
-     * The native bindings exposed an empty styleSheets list and a null .sheet,
-     * so CSS-in-JS libraries that create a <style>, read .sheet and call
-     * insertRule() had no way to inject rules. Back each sheet by its owner
-     * <style> node: insert/delete/replace rebuild the node's text content,
-     * which the engine re-cascades. */
+    /* CSSOM rule model: document.styleSheets, HTMLStyleElement/LinkElement
+     * .sheet, and a real CSSRule / CSSStyleRule / CSSGroupingRule tree backed
+     * by the owner <style> node. The native bindings exposed an empty
+     * styleSheets list and a null .sheet; the rules are parsed from the node's
+     * text once, then insertRule/deleteRule/replace mutate the tree in place
+     * and rebuild the node's text content, which the engine re-cascades.
+     * Each CSSStyleRule's .style is a live native CSSStyleDeclaration. */
     (function () {
         if (typeof document === 'undefined') return;
 
-        function splitRules(css) {
-            var rules = [], depth = 0, start = 0, inStr = 0;
-            for (var i = 0; i < css.length; i++) {
-                var ch = css.charAt(i);
-                if (inStr) { if (ch === inStr && css.charAt(i - 1) !== '\\') inStr = 0; continue; }
-                if (ch === '"' || ch === "'") { inStr = ch; continue; }
-                if (ch === '{') depth++;
-                else if (ch === '}') {
-                    depth--;
-                    if (depth === 0) {
-                        var r = css.slice(start, i + 1).replace(/^\s+|\s+$/g, '');
-                        if (r) rules.push(r);
-                        start = i + 1;
+        if (typeof global.CSSStyleDeclaration === 'function' &&
+            global.CSSStyleDeclaration.prototype &&
+            !(Symbol.iterator in global.CSSStyleDeclaration.prototype)) {
+            try {
+                Object.defineProperty(global.CSSStyleDeclaration.prototype,
+                                      Symbol.iterator, {
+                    configurable: true, writable: true,
+                    value: function () {
+                        var self = this, i = 0;
+                        return {
+                            next: function () {
+                                if (i < (self.length >>> 0))
+                                    return { value: self[i++], done: false };
+                                return { value: undefined, done: true };
+                            },
+                            'return': function () { return { done: true }; }
+                        };
                     }
-                }
+                });
+            } catch (e) {}
+        }
+
+        function ctorFor(name, parentProto) {
+            var ctor = global[name];
+            if (typeof ctor !== 'function') {
+                ctor = function () {
+                    throw new TypeError('Illegal constructor');
+                };
+                try {
+                    Object.defineProperty(global, name, {
+                        value: ctor, writable: true,
+                        configurable: true, enumerable: false
+                    });
+                } catch (e) {}
             }
-            var tail = css.slice(start).replace(/^\s+|\s+$/g, '');
-            if (tail) rules.push(tail);
+            if (parentProto && ctor.prototype &&
+                Object.getPrototypeOf(ctor.prototype) !== parentProto) {
+                try { Object.setPrototypeOf(ctor.prototype, parentProto); }
+                catch (e) {}
+            }
+            try {
+                Object.defineProperty(ctor.prototype, Symbol.toStringTag, {
+                    value: name, configurable: true
+                });
+            } catch (e) {}
+            return ctor;
+        }
+
+        function getter(proto, name, fn) {
+            try {
+                Object.defineProperty(proto, name, {
+                    configurable: true, enumerable: true, get: fn
+                });
+            } catch (e) {}
+        }
+        function accessor(proto, name, get, set) {
+            try {
+                Object.defineProperty(proto, name, {
+                    configurable: true, enumerable: true, get: get, set: set
+                });
+            } catch (e) {}
+        }
+        function method(proto, name, fn) {
+            try {
+                Object.defineProperty(proto, name, {
+                    configurable: true, writable: true,
+                    enumerable: true, value: fn
+                });
+            } catch (e) {}
+        }
+
+        var CSSRule = ctorFor('CSSRule', Object.prototype);
+        var CSSStyleRule = ctorFor('CSSStyleRule', CSSRule.prototype);
+        var CSSGroupingRule = ctorFor('CSSGroupingRule', CSSRule.prototype);
+        var CSSConditionRule = ctorFor('CSSConditionRule', CSSGroupingRule.prototype);
+        var CSSMediaRule = ctorFor('CSSMediaRule', CSSConditionRule.prototype);
+        var CSSSupportsRule = ctorFor('CSSSupportsRule', CSSConditionRule.prototype);
+
+        var CONSTANTS = {
+            STYLE_RULE: 1, CHARSET_RULE: 2, IMPORT_RULE: 3, MEDIA_RULE: 4,
+            FONT_FACE_RULE: 5, PAGE_RULE: 6, KEYFRAMES_RULE: 7,
+            KEYFRAME_RULE: 8, MARGIN_RULE: 9, NAMESPACE_RULE: 10,
+            COUNTER_STYLE_RULE: 11, SUPPORTS_RULE: 12,
+            FONT_FEATURE_VALUES_RULE: 14
+        };
+        Object.keys(CONSTANTS).forEach(function (k) {
+            var v = CONSTANTS[k];
+            try {
+                Object.defineProperty(CSSRule.prototype, k, {
+                    value: v, enumerable: true, configurable: true
+                });
+                Object.defineProperty(CSSRule, k, {
+                    value: v, enumerable: true, configurable: true
+                });
+            } catch (e) {}
+        });
+
+        getter(CSSRule.prototype, 'type', function () {
+            return this.__type | 0;
+        });
+        getter(CSSRule.prototype, 'parentRule', function () {
+            return this.__parentRule || null;
+        });
+        getter(CSSRule.prototype, 'parentStyleSheet', function () {
+            return this.__parentStyleSheet || null;
+        });
+        accessor(CSSRule.prototype, 'cssText',
+            function () {
+                return typeof this.__cssText === 'function'
+                    ? this.__cssText() : '';
+            },
+            function () {});
+
+        function notify(owner) {
+            var s = owner;
+            while (s && typeof s.__notify !== 'function') s = s.__parentStyleSheet;
+            if (s && typeof s.__notify === 'function') s.__notify();
+        }
+
+        accessor(CSSStyleRule.prototype, 'selectorText',
+            function () { return this.__selector || ''; },
+            function (v) {
+                v = String(v);
+                try { document.querySelectorAll(v); }
+                catch (e) { return; }
+                this.__selector = v.replace(/^\s+|\s+$/g, '');
+                notify(this);
+            });
+        accessor(CSSStyleRule.prototype, 'style',
+            function () { return this.__style; },
+            function (v) {
+                try { this.__style.cssText = (v == null) ? '' : String(v); }
+                catch (e) {}
+                notify(this);
+            });
+
+        function declText(rule) {
+            var style = rule.__style, out = [];
+            try {
+                for (var i = 0; i < (style.length >>> 0); i++) {
+                    var name = style.item(i);
+                    if (!name) continue;
+                    var val = style.getPropertyValue(name);
+                    var pri = style.getPropertyPriority(name);
+                    out.push(name + ': ' + val + (pri ? ' !' + pri : '') + ';');
+                }
+            } catch (e) { return ''; }
+            return out.join(' ');
+        }
+        method(CSSStyleRule.prototype, '__cssText', function () {
+            var d = declText(this);
+            return this.__selector + (d ? ' { ' + d + ' }' : ' { }');
+        });
+
+        getter(CSSGroupingRule.prototype, 'cssRules', function () {
+            return this.__ruleList;
+        });
+        getter(CSSGroupingRule.prototype, 'rules', function () {
+            return this.__ruleList;
+        });
+        method(CSSGroupingRule.prototype, 'insertRule', function (text, index) {
+            return insertInto(this, this.__rules, this.__ruleList,
+                              text, index, false);
+        });
+        method(CSSGroupingRule.prototype, 'deleteRule', function (index) {
+            return deleteFrom(this, this.__rules, this.__ruleList, index);
+        });
+        method(CSSGroupingRule.prototype, '__cssText', function () {
+            var inner = this.__rules.map(function (r) {
+                return r.cssText;
+            }).join(' ');
+            return this.__prelude + ' {' + (inner ? ' ' + inner + ' ' : ' ') + '}';
+        });
+
+        accessor(CSSConditionRule.prototype, 'conditionText',
+            function () { return this.__condition || ''; },
+            function () {});
+        accessor(CSSMediaRule.prototype, 'media',
+            function () { return this.__condition || ''; },
+            function () {});
+
+        function makeList() {
+            var list = [];
+            list.item = function (i) {
+                i = i >>> 0;
+                return (i < this.length) ? this[i] : null;
+            };
+            try {
+                Object.defineProperty(list, Symbol.toStringTag, {
+                    value: 'CSSRuleList', configurable: true
+                });
+            } catch (e) {}
+            return list;
+        }
+        function syncList(list, rules) {
+            for (var i = 0; i < rules.length; i++) list[i] = rules[i];
+            list.length = rules.length;
+        }
+
+        function atKeyword(prelude) {
+            var m = /^@([\w-]+)/.exec(prelude);
+            return m ? m[1].toLowerCase() : null;
+        }
+        var GROUPING_AT = {
+            media: 'CSSMediaRule', supports: 'CSSSupportsRule',
+            container: 'CSSGroupingRule', layer: 'CSSGroupingRule',
+            scope: 'CSSGroupingRule', document: 'CSSGroupingRule'
+        };
+
+        function parseRuleList(text, sheet, parentRule) {
+            var rules = [], i = 0, n = text.length;
+            while (i < n) {
+                while (i < n && /\s/.test(text.charAt(i))) i++;
+                if (i < n && text.charAt(i) === '/' && text.charAt(i + 1) === '*') {
+                    i += 2;
+                    while (i + 1 < n && !(text.charAt(i) === '*' &&
+                                          text.charAt(i + 1) === '/')) i++;
+                    i += 2; continue;
+                }
+                if (i >= n) break;
+                if (text.charAt(i) === '}') { i++; continue; }
+                var start = i, quote = 0, depth = 0;
+                while (i < n) {
+                    var c = text.charAt(i);
+                    if (quote) {
+                        if (c === '\\') i++;
+                        else if (c === quote) quote = 0;
+                        i++; continue;
+                    }
+                    if (c === '"' || c === "'") { quote = c; i++; continue; }
+                    if (c === '/' && text.charAt(i + 1) === '*') {
+                        i += 2;
+                        while (i + 1 < n && !(text.charAt(i) === '*' &&
+                                              text.charAt(i + 1) === '/')) i++;
+                        i += 2; continue;
+                    }
+                    if (c === '(') { depth++; i++; continue; }
+                    if (c === ')') { if (depth) depth--; i++; continue; }
+                    if (!depth && (c === '{' || c === ';')) break;
+                    i++;
+                }
+                var prelude = text.slice(start, i).replace(/^\s+|\s+$/g, '');
+                if (i < n && text.charAt(i) === ';') {
+                    i++;
+                    if (prelude) {
+                        var sr = makeAtStatement(prelude, sheet, parentRule);
+                        if (sr) rules.push(sr);
+                    }
+                    continue;
+                }
+                if (i >= n || text.charAt(i) !== '{') {
+                    break;
+                }
+                var bstart = ++i; depth = 1; quote = 0;
+                while (i < n && depth > 0) {
+                    var c2 = text.charAt(i);
+                    if (quote) {
+                        if (c2 === '\\') i++;
+                        else if (c2 === quote) quote = 0;
+                        i++; continue;
+                    }
+                    if (c2 === '"' || c2 === "'") { quote = c2; i++; continue; }
+                    if (c2 === '/' && text.charAt(i + 1) === '*') {
+                        i += 2;
+                        while (i + 1 < n && !(text.charAt(i) === '*' &&
+                                              text.charAt(i + 1) === '/')) i++;
+                        i += 2; continue;
+                    }
+                    if (c2 === '{') depth++;
+                    else if (c2 === '}') depth--;
+                    i++;
+                }
+                var block = text.slice(bstart, (depth === 0) ? i - 1 : i);
+                rules.push(makeBlockRule(prelude, block, sheet, parentRule));
+            }
             return rules;
         }
-        function makeRule(text) {
-            var b = text.indexOf('{');
-            return { cssText: text, selectorText: b >= 0 ? text.slice(0, b).replace(/^\s+|\s+$/g, '') : text,
-                     type: 1, parentStyleSheet: null, parentRule: null };
+
+        function makeAtStatement(prelude, sheet, parentRule) {
+            var kw = atKeyword(prelude), rule = Object.create(CSSRule.prototype);
+            rule.__parentStyleSheet = sheet || null;
+            rule.__parentRule = parentRule || null;
+            rule.__at = kw;
+            rule.__type = kw === 'import' ? 3 :
+                          kw === 'namespace' ? 10 :
+                          kw === 'charset' ? 2 : 0;
+            var text = prelude + ';';
+            rule.__cssText = function () { return text; };
+            return rule;
         }
+
+        function makeBlockRule(prelude, block, sheet, parentRule) {
+            var kw = atKeyword(prelude);
+            if (kw && GROUPING_AT[kw]) {
+                var Ctor = global[GROUPING_AT[kw]] || CSSGroupingRule;
+                var g = Object.create(Ctor.prototype);
+                g.__parentStyleSheet = sheet || null;
+                g.__parentRule = parentRule || null;
+                g.__at = kw;
+                g.__prelude = prelude;
+                g.__type = kw === 'media' ? 4 : kw === 'supports' ? 12 : 0;
+                var cond = prelude.replace(/^@[\w-]+\s*/, '')
+                                  .replace(/^\s+|\s+$/g, '');
+                g.__condition = cond;
+                g.__rules = parseRuleList(block, sheet, g);
+                g.__ruleList = makeList();
+                syncList(g.__ruleList, g.__rules);
+                return g;
+            }
+            if (kw) {
+                var ar = Object.create(CSSRule.prototype);
+                ar.__parentStyleSheet = sheet || null;
+                ar.__parentRule = parentRule || null;
+                ar.__at = kw;
+                ar.__type = kw === 'font-face' ? 5 : kw === 'page' ? 6 :
+                            kw === 'keyframes' || kw === '-webkit-keyframes' ? 7 :
+                            kw === 'counter-style' ? 11 : 0;
+                var raw = prelude + ' { ' + block.replace(/^\s+|\s+$/g, '') + ' }';
+                ar.__cssText = function () { return raw; };
+                return ar;
+            }
+            var r = Object.create(CSSStyleRule.prototype);
+            r.__parentStyleSheet = sheet || null;
+            r.__parentRule = parentRule || null;
+            r.__type = 1;
+            r.__selector = prelude;
+            var holder = document.createElement('span');
+            try { holder.style.cssText = block; } catch (e) {}
+            r.__holder = holder;
+            r.__style = holder.style;
+            return r;
+        }
+
+        function parseOne(text, sheet, parentRule) {
+            var rules = parseRuleList(String(text), sheet, parentRule);
+            if (rules.length !== 1) return null;
+            return rules[0];
+        }
+
+        function domError(name, msg) {
+            try { return new DOMException(msg || name, name); }
+            catch (e) {
+                var err = new Error(msg || name);
+                err.name = name;
+                return err;
+            }
+        }
+
+        function insertInto(owner, rules, list, text, index, topLevel) {
+            var len = rules.length;
+            if (index === undefined) index = 0;
+            index = Number(index);
+            if (isNaN(index)) index = 0;
+            if (index < 0 || index > len)
+                throw domError('IndexSizeError',
+                    'insertRule index ' + index + ' out of range');
+            var rule = parseOne(text, owner.__parentStyleSheet || owner, owner);
+            if (!rule)
+                throw domError('SyntaxError', 'failed to parse rule');
+            if (!topLevel && (rule.__at === 'import' || rule.__at === 'namespace'))
+                throw domError('HierarchyRequestError',
+                    '@' + rule.__at + ' not allowed here');
+            rules.splice(index, 0, rule);
+            syncList(list, rules);
+            notify(owner);
+            return index;
+        }
+        function deleteFrom(owner, rules, list, index) {
+            index = Number(index) || 0;
+            if (index < 0 || index >= rules.length)
+                throw domError('IndexSizeError',
+                    'deleteRule index ' + index + ' out of range');
+            rules.splice(index, 1);
+            syncList(list, rules);
+            notify(owner);
+        }
+
+        var SheetProto = (typeof global.CSSStyleSheet === 'function' &&
+                          global.CSSStyleSheet.prototype) || Object.prototype;
+
         function sheetFor(node) {
             if (node.__ndSheet) return node.__ndSheet;
-            var rules = null;
+            var sheet = Object.create(SheetProto);
+            var rules = null, list = makeList();
+
             function ensure() {
                 if (rules) return;
-                var txt = ''; try { txt = node.textContent || ''; } catch (e) {}
-                rules = splitRules(txt).map(makeRule);
+                var txt = '';
+                try { txt = node.textContent || ''; } catch (e) {}
+                rules = parseRuleList(txt, sheet, null);
+                syncList(list, rules);
             }
             function rebuild() {
-                try { node.textContent = rules.map(function (r) { return r.cssText; }).join('\n'); } catch (e) {}
+                try {
+                    node.textContent = rules.map(function (r) {
+                        return r.cssText;
+                    }).join('\n');
+                } catch (e) {}
             }
-            var sheet = {
-                ownerNode: node, type: 'text/css', title: null, parentStyleSheet: null, href: null,
-                get disabled() { return false; }, set disabled(v) {},
-                get cssRules() { ensure(); var l = rules.slice(); l.item = function (i) { return l[i] || null; }; return l; },
-                get rules() { return this.cssRules; },
-                insertRule: function (rule, index) {
-                    ensure();
-                    if (typeof index !== 'number' || index < 0 || index > rules.length) index = rules.length;
-                    rules.splice(index, 0, makeRule(String(rule)));
-                    rebuild();
-                    return index;
+
+            Object.defineProperties(sheet, {
+                ownerNode: { value: node, enumerable: true },
+                ownerRule: { value: null, enumerable: true },
+                parentStyleSheet: { value: null, enumerable: true },
+                type: { value: 'text/css', enumerable: true },
+                href: { value: null, enumerable: true },
+                title: {
+                    value: (node.getAttribute &&
+                            node.getAttribute('title')) || null,
+                    enumerable: true
                 },
-                deleteRule: function (index) { ensure(); if (index >= 0 && index < rules.length) { rules.splice(index, 1); rebuild(); } },
-                replaceSync: function (text) { rules = splitRules(String(text == null ? '' : text)).map(makeRule); rebuild(); },
-                replace: function (text) { try { this.replaceSync(text); return Promise.resolve(this); } catch (e) { return Promise.reject(e); } }
-            };
-            try { Object.defineProperty(node, '__ndSheet', { value: sheet, writable: true, configurable: true, enumerable: false }); }
-            catch (e) { node.__ndSheet = sheet; }
+                media: {
+                    value: (node.getAttribute &&
+                            node.getAttribute('media')) || '',
+                    enumerable: true
+                },
+                disabled: {
+                    enumerable: true, configurable: true,
+                    get: function () { return false; },
+                    set: function () {}
+                },
+                cssRules: {
+                    enumerable: true, configurable: true,
+                    get: function () { ensure(); return list; }
+                },
+                rules: {
+                    enumerable: true, configurable: true,
+                    get: function () { ensure(); return list; }
+                },
+                insertRule: {
+                    enumerable: true, configurable: true, writable: true,
+                    value: function (text, index) {
+                        ensure();
+                        return insertInto(sheet, rules, list, text, index, true);
+                    }
+                },
+                deleteRule: {
+                    enumerable: true, configurable: true, writable: true,
+                    value: function (index) {
+                        ensure();
+                        return deleteFrom(sheet, rules, list, index);
+                    }
+                },
+                replaceSync: {
+                    enumerable: true, configurable: true, writable: true,
+                    value: function (text) {
+                        rules = parseRuleList(
+                            String(text == null ? '' : text), sheet, null);
+                        syncList(list, rules);
+                        rebuild();
+                    }
+                },
+                replace: {
+                    enumerable: true, configurable: true, writable: true,
+                    value: function (text) {
+                        try {
+                            this.replaceSync(text);
+                            return Promise.resolve(this);
+                        } catch (e) { return Promise.reject(e); }
+                    }
+                },
+                __notify: {
+                    configurable: true,
+                    value: function () { ensure(); rebuild(); }
+                }
+            });
+
+            try {
+                Object.defineProperty(node, '__ndSheet', {
+                    value: sheet, writable: true,
+                    configurable: true, enumerable: false
+                });
+            } catch (e) { node.__ndSheet = sheet; }
             return sheet;
         }
+
         function defSheet(proto) {
             if (!proto) return;
             try {
@@ -4256,7 +4677,8 @@
                         var nm = this.tagName ? this.tagName.toLowerCase() : '';
                         if (nm === 'style') return sheetFor(this);
                         if (nm === 'link') {
-                            var rel = (this.getAttribute && this.getAttribute('rel') || '').toLowerCase();
+                            var rel = (this.getAttribute &&
+                                       this.getAttribute('rel') || '').toLowerCase();
                             if (rel && rel.indexOf('stylesheet') < 0) return null;
                             return sheetFor(this);
                         }
@@ -4277,15 +4699,20 @@
                 configurable: true,
                 get: function () {
                     var nodes;
-                    try { nodes = document.querySelectorAll('style, link[rel~="stylesheet"]'); }
-                    catch (e) { try { nodes = document.getElementsByTagName('style'); } catch (e2) { nodes = []; } }
-                    var list = [];
+                    try {
+                        nodes = document.querySelectorAll(
+                            'style, link[rel~="stylesheet"]');
+                    } catch (e) {
+                        try { nodes = document.getElementsByTagName('style'); }
+                        catch (e2) { nodes = []; }
+                    }
+                    var slist = [];
                     for (var i = 0; i < nodes.length; i++) {
                         var s = sheetFor(nodes[i]);
-                        if (s) list.push(s);
+                        if (s) slist.push(s);
                     }
-                    list.item = function (i) { return list[i] || null; };
-                    return list;
+                    slist.item = function (i) { return this[i] || null; };
+                    return slist;
                 }
             });
         } catch (e) {}
