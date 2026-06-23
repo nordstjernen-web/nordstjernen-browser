@@ -108,7 +108,8 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
 static ns_rproc_http *
 spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
 {
-    if (!renderer_path || max_width <= 0 || max_height <= 0)
+    if (!renderer_path || max_width <= 0 || max_height <= 0 ||
+        max_width > 32768 || max_height > 32768)
         return NULL;
     signal(SIGPIPE, SIG_IGN);
 
@@ -222,7 +223,8 @@ win_dirname_dup(const char *path)
 static ns_rproc_http *
 spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
 {
-    if (!renderer_path || max_width <= 0 || max_height <= 0)
+    if (!renderer_path || max_width <= 0 || max_height <= 0 ||
+        max_width > 32768 || max_height > 32768)
         return NULL;
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
 
@@ -332,7 +334,8 @@ winfail_nomap:
 static ns_rproc_http *
 spawn_inproc(int max_width, int max_height)
 {
-    if (max_width <= 0 || max_height <= 0)
+    if (max_width <= 0 || max_height <= 0 ||
+        max_width > 32768 || max_height > 32768)
         return NULL;
     size_t size = (size_t)max_width * (size_t)max_height * 4u;
     unsigned char *fb = malloc(size);

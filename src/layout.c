@@ -6330,6 +6330,7 @@ table_collapse_borders(ns_box *box, guint max_cols)
     for (ns_box *row = box->first_child; row; row = row->next_sibling)
         if (row->kind == NS_BOX_TABLE_ROW) R++;
     if (R == 0) return;
+    if ((gsize)R > G_MAXSIZE / sizeof(ns_box *) / max_cols) return;
 
     ns_box **grid = g_new0(ns_box *, (gsize)R * max_cols);
     GArray *cells = g_array_new(FALSE, FALSE, sizeof(ns_cell_pos));

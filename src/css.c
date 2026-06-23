@@ -11428,7 +11428,7 @@ ns_css_pragma_language_scan(const ns_node *n, const char **found)
                 const char *e = s;
                 while (*e && !g_ascii_isspace((guchar)*e)) e++;
                 if (e > s) {
-                    static char buf[128];
+                    static __thread char buf[128];
                     gsize len = (gsize)(e - s);
                     if (len >= sizeof buf) len = sizeof buf - 1;
                     memcpy(buf, s, len);

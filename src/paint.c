@@ -3029,6 +3029,8 @@ drop_shadow_surface(cairo_surface_t *src, int iw, int ih, int cw, int ch,
                     image_drop_shadow shadow, int *pad_out)
 {
     if (cw <= 0 || ch <= 0 || sx <= 0 || sy <= 0) return NULL;
+    if (cw > 4096) cw = 4096;
+    if (ch > 4096) ch = 4096;
     int radius = shadow.blur > 0 ? (int)(shadow.blur + 0.5) : 0;
     if (radius > 512) radius = 512;
     int pad = radius * 2 + 2;

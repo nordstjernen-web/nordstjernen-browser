@@ -79,7 +79,7 @@ main(int argc, char **argv)
 #endif
     int max_w = atoi(argv[1]);
     int max_h = atoi(argv[2]);
-    if (max_w <= 0 || max_h <= 0)
+    if (max_w <= 0 || max_h <= 0 || max_w > 32768 || max_h > 32768)
         return 2;
 
 #ifdef __linux__

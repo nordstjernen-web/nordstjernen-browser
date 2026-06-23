@@ -206,7 +206,11 @@ ns_es_process_line(ns_es_parse *p, const char *line)
             if (*c < '0' || *c > '9') { digits = FALSE; break; }
         if (digits) {
             gint64 ms = g_ascii_strtoll(value, NULL, 10);
-            if (ms > 0) p->es->reconnect_ms = MIN(ms, 86400000);
+            if (ms > 0) {
+                g_mutex_lock(&p->es->lock);
+                p->es->reconnect_ms = MIN(ms, 86400000);
+                g_mutex_unlock(&p->es->lock);
+            }
         }
     }
     g_free(field);
@@ -364,7 +368,9 @@ ns_es_worker(gpointer data)
             break;
         }
         ns_es_emit_error(es, FALSE);
+        g_mutex_lock(&es->lock);
         gint64 wait_ms = es->reconnect_ms;
+        g_mutex_unlock(&es->lock);
         if (wait_ms <= 0) wait_ms = 3000;
         gint64 waited = 0;
         while (waited < wait_ms && !g_atomic_int_get(&es->exit_requested)) {
