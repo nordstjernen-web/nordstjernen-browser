@@ -4359,18 +4359,100 @@
         method(CSSGroupingRule.prototype, 'deleteRule', function (index) {
             return deleteFrom(this, this.__rules, this.__ruleList, index);
         });
+        function splitTopLevel(text, sep) {
+            var parts = [], depth = 0, start = 0;
+            for (var i = 0; i < text.length; i++) {
+                var c = text.charAt(i);
+                if (c === '(') depth++;
+                else if (c === ')') { if (depth) depth--; }
+                else if (c === sep && depth === 0) {
+                    parts.push(text.slice(start, i));
+                    start = i + 1;
+                }
+            }
+            parts.push(text.slice(start));
+            return parts;
+        }
+        function serializeMediaFeature(f) {
+            var inner = f.slice(1, -1).replace(/^\s+|\s+$/g, '');
+            var ci = inner.indexOf(':');
+            if (ci < 0) return '(' + inner.toLowerCase() + ')';
+            var name = inner.slice(0, ci).replace(/^\s+|\s+$/g, '').toLowerCase();
+            var val = inner.slice(ci + 1).replace(/^\s+|\s+$/g, '');
+            return '(' + name + ': ' + val + ')';
+        }
+        function serializeMediaQuery(q) {
+            q = q.replace(/^\s+|\s+$/g, '');
+            if (!q) return '';
+            var i = 0, n = q.length, features = [];
+            while (i < n && q.charAt(i) !== '(') i++;
+            var head = q.slice(0, i).replace(/\s+and\s*$/i, '')
+                                    .replace(/^\s+|\s+$/g, '');
+            while (i < n) {
+                if (q.charAt(i) === '(') {
+                    var d = 1, j = i + 1;
+                    while (j < n && d > 0) {
+                        var ch = q.charAt(j);
+                        if (ch === '(') d++;
+                        else if (ch === ')') d--;
+                        j++;
+                    }
+                    features.push(serializeMediaFeature(q.slice(i, j)));
+                    i = j;
+                } else i++;
+            }
+            var modifier = '', type = '';
+            if (head) {
+                var toks = head.split(/\s+/);
+                var first = toks[0].toLowerCase();
+                if (first === 'not' || first === 'only') {
+                    modifier = first;
+                    type = (toks[1] || '').toLowerCase();
+                } else {
+                    type = first;
+                }
+            }
+            if (modifier) {
+                var s = type ? modifier + ' ' + type : modifier;
+                if (features.length) s += ' and ' + features.join(' and ');
+                return s;
+            }
+            if (type && type !== 'all') {
+                var s2 = type;
+                if (features.length) s2 += ' and ' + features.join(' and ');
+                return s2;
+            }
+            if (type === 'all' && !features.length) return 'all';
+            return features.join(' and ');
+        }
+        function serializeMediaList(text) {
+            if (!text) return '';
+            return splitTopLevel(text, ',').map(serializeMediaQuery)
+                       .filter(function (q) { return q !== ''; })
+                       .join(', ');
+        }
+
+        method(CSSGroupingRule.prototype, '__header', function () {
+            if (this.__at === 'media')
+                return '@media ' + serializeMediaList(this.__condition);
+            return this.__prelude;
+        });
         method(CSSGroupingRule.prototype, '__cssText', function () {
             var inner = this.__rules.map(function (r) {
-                return r.cssText;
-            }).join(' ');
-            return this.__prelude + ' {' + (inner ? ' ' + inner + ' ' : ' ') + '}';
+                return '  ' + r.cssText + '\n';
+            }).join('');
+            return this.__header() + ' {\n' + inner + '}';
         });
 
         accessor(CSSConditionRule.prototype, 'conditionText',
-            function () { return this.__condition || ''; },
+            function () {
+                return this.__at === 'media'
+                    ? serializeMediaList(this.__condition)
+                    : (this.__condition || '');
+            },
             function () {});
         accessor(CSSMediaRule.prototype, 'media',
-            function () { return this.__condition || ''; },
+            function () { return serializeMediaList(this.__condition); },
             function () {});
 
         function makeList() {
