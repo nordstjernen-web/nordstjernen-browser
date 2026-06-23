@@ -290,6 +290,7 @@ decode_mp3(const unsigned char *bytes, size_t n,
     return 1;
 }
 
+#ifdef NS_HAVE_LIBAV
 static int
 bytes_are_container(const unsigned char *b, size_t n)
 {
@@ -302,7 +303,6 @@ bytes_are_container(const unsigned char *b, size_t n)
     return 0;
 }
 
-#ifdef NS_HAVE_LIBAV
 typedef struct { const unsigned char *data; size_t len; size_t pos; } ah_memsrc;
 
 static int

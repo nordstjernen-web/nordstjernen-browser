@@ -57,12 +57,14 @@ bytes_are_mpeg1(const guint8 *bytes, gsize len)
            bytes[2] == 0x01 && (bytes[3] == 0xBA || bytes[3] == 0xB3);
 }
 
+#ifdef NS_HAVE_LIBAV
 static gboolean
 bytes_are_matroska(const guint8 *bytes, gsize len)
 {
     return bytes && len >= 4 && bytes[0] == 0x1A && bytes[1] == 0x45 &&
            bytes[2] == 0xDF && bytes[3] == 0xA3;
 }
+#endif
 
 gboolean
 ns_video_decode_probe(const guint8 *bytes, gsize len)
