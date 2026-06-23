@@ -6162,4 +6162,65 @@
             return new NdRange(ownerDoc && ownerDoc.nodeType === 9 ? ownerDoc : doc);
         };
     })();
+
+    /* HTMLImageElement.decode(): the native binding always resolved. Per the
+     * HTML spec the promise rejects with an "EncodingError" when the image
+     * has no usable source, fails to load, or its document is not fully
+     * active, and resolves once a usable source has been decoded. The
+     * active-document check is deferred one microtask so a synchronous adopt
+     * into an inactive document after the call is observed. */
+    (function () {
+        if (typeof global.HTMLImageElement !== 'function' ||
+            !global.HTMLImageElement.prototype) return;
+
+        try {
+            if (typeof global.Image === 'function' &&
+                global.Image.prototype !== global.HTMLImageElement.prototype)
+                global.Image.prototype = global.HTMLImageElement.prototype;
+        } catch (e) {}
+
+        function encodingError() {
+            try { return new DOMException('The source image cannot be decoded.',
+                                          'EncodingError'); }
+            catch (e) {
+                var err = new Error('The source image cannot be decoded.');
+                err.name = 'EncodingError';
+                return err;
+            }
+        }
+
+        var decodeProto = global.HTMLImageElement.prototype;
+        try {
+            if (typeof document !== 'undefined' && document.createElement) {
+                var p = Object.getPrototypeOf(document.createElement('img'));
+                while (p && !Object.prototype.hasOwnProperty.call(p, 'decode'))
+                    p = Object.getPrototypeOf(p);
+                if (p) decodeProto = p;
+            }
+        } catch (e) {}
+
+        Object.defineProperty(decodeProto, 'decode', {
+            configurable: true, writable: true, enumerable: false,
+            value: function () {
+                var img = this;
+                return new Promise(function (resolve, reject) {
+                    function fail() { reject(encodingError()); }
+                    Promise.resolve().then(function () {
+                        var doc = img.ownerDocument;
+                        if (!doc || doc.defaultView == null) { fail(); return; }
+                        var src = (img.getAttribute && img.getAttribute('src')) || '';
+                        var srcset = (img.getAttribute && img.getAttribute('srcset')) || '';
+                        if (src === '' && srcset === '') { fail(); return; }
+                        if (img.complete && img.naturalWidth > 0) { resolve(); return; }
+                        var url = img.currentSrc || src;
+                        if (!url) { fail(); return; }
+                        var probe = new Image();
+                        probe.onload = function () { resolve(); };
+                        probe.onerror = fail;
+                        probe.src = url;
+                    });
+                });
+            }
+        });
+    })();
 })(typeof globalThis !== 'undefined' ? globalThis : this);
