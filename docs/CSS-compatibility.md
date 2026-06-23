@@ -248,6 +248,24 @@ Snapshot: **1.0.10**, 2026-06-18.
 | `@layer` | 🟡 | ordering simplified (named-layer rank tracking in `src/css.c`) |
 | `@page` | 🚫 | no paged/print path; the at-rule is not parsed |
 
+## CSSOM (object model — CSSOM 1)
+
+Scripted access to stylesheets and rules (`src/js.c`, `data/js/polyfills.js`).
+`getComputedStyle` resolved values are covered in the rows above.
+
+| Topic | Status | Notes |
+|-------|:--:|------|
+| `document.styleSheets` | ✅ | live `StyleSheetList` of `CSSStyleSheet` for `<style>` / `<link rel=stylesheet>`; the same object is returned across reads |
+| `sheet.cssRules` / `.rules` | ✅ | a stable `CSSRuleList` of real rule objects parsed from the owner node, with `.item()` and indexed access |
+| `CSSRule` / `CSSStyleRule` types | ✅ | proper prototype chain (`CSSStyleRule` → `CSSRule`) and `type` constants (`STYLE_RULE`=1, `MEDIA_RULE`=4, …); read-only `type` / `parentRule` / `parentStyleSheet` |
+| `CSSStyleRule.style` | ✅ | a live `CSSStyleDeclaration` (`[SameObject]`, `[PutForwards=cssText]`); `cssText` serializes the declaration block canonically |
+| `CSSStyleRule.selectorText` | 🟡 | getter + validating setter (invalid selectors rejected, re-cascades on change); the selector text is kept largely verbatim |
+| `insertRule` / `deleteRule` (sheet + grouping) | ✅ | index validation (`IndexSizeError`), parse errors (`SyntaxError`), `@import`/`@namespace` constraints; mutates the live `CSSRuleList` in place |
+| `CSSGroupingRule` / `CSSMediaRule` / `CSSSupportsRule` | ✅ | nested `cssRules`; `CSSMediaRule` serializes its media query list (lower-cased types/features, leading `all and` dropped) |
+| `CSSStyleDeclaration` (`el.style`) | ✅ | `getPropertyValue` / `setProperty` / `removeProperty` / `getPropertyPriority`, indexed `item()` + `length`, `Symbol.iterator`, `cssText` round-trip |
+| `new CSSStyleSheet()` + `adoptedStyleSheets` | 🟡 | `replace` / `replaceSync` apply styles and `adoptedStyleSheets` works on documents and shadow roots; rule introspection on a *constructed* sheet is limited |
+| Full selector serialization | ❌ | the CSSOM "serialize a group of selectors" canonicalisation (e.g. `*\|div` → `div`, `:after` → `::after`) is not implemented |
+
 ---
 
 ## Design constraints
