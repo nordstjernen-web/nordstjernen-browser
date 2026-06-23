@@ -19038,6 +19038,11 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     gboolean window_in_path = path->len > 0 &&
         path->pdata[path->len - 1] == (gpointer)js->current_doc;
 
+    gboolean resource_load = target != (const ns_node *)js->current_doc &&
+        (strcmp(type, "load") == 0 || strcmp(type, "error") == 0);
+    if (resource_load)
+        window_in_path = FALSE;
+
     gboolean stopped = ns_event_propagation_is_stopped(js, event);
     if (window_in_path && !stopped)
         stopped = ns_invoke_window_listeners(js, target, type, event, TRUE,
