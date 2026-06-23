@@ -38380,6 +38380,11 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             if (JS_IsObject(win))
                 JS_SetPropertyStr(js->ctx, realm_doc, "defaultView",
                                   JS_DupValue(js->ctx, win));
+            JSValue rloc = JS_GetPropertyStr(js->ctx, realm_scope, "location");
+            if (JS_IsObject(rloc))
+                JS_SetPropertyStr(js->ctx, realm_doc, "location", rloc);
+            else
+                JS_FreeValue(js->ctx, rloc);
             JS_FreeValue(js->ctx, win);
         }
         if (iframe->js_wrapper && JS_IsObject(realm_doc)) {
@@ -38429,6 +38434,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, iorigin);
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, iorigin);
             g_array_free(tasks, TRUE);
+        }
+        if (content_doc) {
+            ns_js_dispatch_event(js, content_doc, "readystatechange", NULL);
+            ns_js_dispatch_event(js, content_doc, "DOMContentLoaded", NULL);
         }
         js->iframe_load_depth--;
         ns_js_record_iframe_globals(js, iframe, globals_before);
