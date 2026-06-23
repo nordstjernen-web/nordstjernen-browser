@@ -462,6 +462,7 @@ typedef struct ns_timer {
     gboolean is_interval;
     gboolean is_idle;
     int      nesting_level;
+    int      interval_ms;
     int      extra_args_count;
     JSValue *extra_args;
 } ns_timer;
@@ -1019,6 +1020,11 @@ ns_timer_fire(gpointer data)
         g_hash_table_remove(js->timers, GINT_TO_POINTER(timer_id));
         return G_SOURCE_REMOVE;
     }
+    if (t->interval_ms < 4) {
+        t->interval_ms = 4;
+        t->glib_source = ns_js_attach_timeout(js, 4, ns_timer_fire, t);
+        return G_SOURCE_REMOVE;
+    }
     return G_SOURCE_CONTINUE;
 }
 
@@ -1043,7 +1049,6 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     ns_js *js = js_from_ctx(ctx);
     int nesting = js->timer_nesting_level + 1;
     if (nesting > 5 && ms < 4) ms = 4;
-    if (is_interval && ms < 4) ms = 4;
 
     ns_timer *t = g_new0(ns_timer, 1);
     t->js = js;
@@ -1051,6 +1056,7 @@ ns_js_setTimeout(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     t->code = code;
     t->is_interval = is_interval;
     t->nesting_level = nesting;
+    t->interval_ms = ms;
     if (is_function && argc > 2) {
         int n_extra = argc - 2;
         if (n_extra > 64) n_extra = 64;
