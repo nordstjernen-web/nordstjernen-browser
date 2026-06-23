@@ -157,7 +157,10 @@ Source: nordstjernen
 Package: nordstjernen
 Architecture: any
 CTL
-    scan_bins=(usr/bin/nordstjernen)
+    # Scan the renderer too: it is the binary that actually decodes video, so
+    # the FFmpeg libav* SONAMEs of an inline-WebM build land in Depends from
+    # here (the GTK shell links them via the shared engine as well).
+    scan_bins=(usr/bin/nordstjernen usr/bin/nordstjernen-renderer)
     [ -x "$PKGROOT/usr/bin/nordstjernen-audio" ] && scan_bins+=(usr/bin/nordstjernen-audio)
     RUNTIME_DEPS=$(cd "$PKGROOT" \
         && dpkg-shlibdeps -O --ignore-missing-info "${scan_bins[@]}" 2>/dev/null \

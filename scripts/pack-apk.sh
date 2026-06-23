@@ -62,6 +62,13 @@ rm -rf "$REPODEST"
 AUDIO_DEP=""
 [ -x "$STAGE/nordstjernen-audio" ] && AUDIO_DEP=" sdl2"
 
+# Inline WebM (VP9/Opus) links FFmpeg's libav* when present at build time; with
+# tracedeps off, its runtime package (ffmpeg-libs) must be listed manually.
+WEBM_DEP=""
+if ldd "$STAGE/nordstjernen-renderer" 2>/dev/null | grep -q 'libavformat'; then
+    WEBM_DEP=" ffmpeg-libs"
+fi
+
 cat > "$BUILDTOP/APKBUILD" <<APKBUILD_EOF
 # Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 pkgname=nordstjernen
@@ -71,7 +78,7 @@ pkgdesc="Nordstjernen Web Navigator — a small, hand-written web browser"
 url="https://nordstjernen.org"
 arch="${ARCH}"
 license="custom"
-depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3${AUDIO_DEP}"
+depends="gtk4.0 libepoxy libcurl uchardet librsvg sqlite-libs ca-certificates fontconfig font-dejavu poppler-glib libavif libwebp libseccomp libpsl libcrypto3${AUDIO_DEP}${WEBM_DEP}"
 options="!check !tracedeps !strip"
 source=""
 

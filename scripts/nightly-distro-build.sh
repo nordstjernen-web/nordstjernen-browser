@@ -23,6 +23,12 @@ install_apt() {
     apt-get install -y --no-install-recommends \
         libpoppler-glib-dev \
         libfontconfig-dev libpango1.0-dev libavif-dev qt6-base-dev libqt6svg6-dev || true
+    # FFmpeg libav* enables the auto-detected inline WebM path (VP9/VP8 video +
+    # Opus/Vorbis audio). Optional and on its own line so its absence skips
+    # WebM rather than dropping the other optional dev packages.
+    apt-get install -y --no-install-recommends \
+        libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+        || echo "nightly-distro-build($DISTRO): FFmpeg dev libs unavailable; WebM skipped" >&2
     pip3 install --break-system-packages --upgrade 'meson>=1.4' \
         || pip3 install --upgrade 'meson>=1.4'
 }
@@ -57,6 +63,11 @@ install_zypper() {
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libpoppler-glib-devel \
         fontconfig-devel pango-devel libavif-devel qt6-base-devel qt6-svg-devel || true
+    # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). openSUSE ships these
+    # via Packman, not the default repos, so this commonly degrades to no WebM.
+    zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
+        libavformat-devel libavcodec-devel libavutil-devel libswscale-devel libswresample-devel \
+        || echo "nightly-distro-build(opensuse): FFmpeg dev libs unavailable (Packman not enabled?); WebM skipped" >&2
 }
 
 install_apk() {
@@ -68,6 +79,10 @@ install_apk() {
     apk add --no-cache \
         poppler-dev \
         fontconfig-dev pango-dev libavif-dev qt6-qtbase-dev qt6-qtsvg-dev || true
+    # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). ffmpeg-dev provides
+    # all of libavformat/libavcodec/libavutil/libswscale/libswresample.
+    apk add --no-cache ffmpeg-dev \
+        || echo "nightly-distro-build(alpine): ffmpeg-dev unavailable; WebM skipped" >&2
 }
 
 case "$DISTRO" in

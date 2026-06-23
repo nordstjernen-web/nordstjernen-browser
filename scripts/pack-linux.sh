@@ -78,6 +78,18 @@ if [ "$FLAVOR" = qt ] && [ ! -f "$QT_BIN" ]; then
     exit 1
 fi
 
+# Inline WebM (VP9/VP8 + Opus/Vorbis) is compiled in only when FFmpeg's libav*
+# was present at configure time (meson auto-detect). When it is, the engine
+# links libavformat directly, so the FFmpeg runtime libraries become a hard
+# requirement documented below.
+WEBM=0
+if ldd "$BUILDDIR/src/nordstjernen-renderer" 2>/dev/null | grep -q 'libavformat'; then
+    WEBM=1
+    log "WebM: built (libav linked) — FFmpeg runtime libs required at install"
+else
+    log "WebM: not built (libav absent at configure time)"
+fi
+
 LOADER=$(ldd "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
     | grep -m1 -oE 'ld-(musl|linux)[^ ]*' || true)
 if printf '%s' "$LOADER" | grep -q 'ld-musl'; then
@@ -179,6 +191,21 @@ else
     QT_RUN_NOTE=''
 fi
 
+if [ "$WEBM" = 1 ]; then
+    WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /
+  libswresample) — **inline WebM playback** (VP9/VP8 video + Opus/Vorbis
+  audio). This build links them, so the binary will not start unless they
+  are installed:
+
+      sudo apt    install ffmpeg         # Debian/Ubuntu
+      sudo dnf    install ffmpeg-libs    # Fedora/RHEL (RPM Fusion)
+      sudo zypper install ffmpeg         # openSUSE (Packman)
+      sudo apk add ffmpeg-libs           # Alpine (musl)
+'
+else
+    WEBM_REQ_NOTE=''
+fi
+
 if [ "$WEBGPU_BUNDLED" = 1 ]; then
     WEBGPU_RUN_NOTE='
 ### Experimental WebGPU
@@ -217,7 +244,7 @@ ${LIBC_REQ}
 - libpoppler-glib (PDF rendering)
 - libavif 16 (AVIF images — only in recent distro releases)
 - libwebp (WebP images)
-- libpsl, libseccomp, libsqlite3
+${WEBM_REQ_NOTE}- libpsl, libseccomp, libsqlite3
 - fontconfig + a font set; harfbuzz; freetype; libstdc++
 - ca-certificates (TLS trust store)
 - An X11 or Wayland session
