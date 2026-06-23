@@ -11,7 +11,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 131,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra that reuses the system FFmpeg libraries when they are present.
+**Minimalism:** The whole engine is about 131,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -56,13 +56,12 @@ The full section-by-section walk-through lives in
   (`crypto.subtle` over OpenSSL).
 - **Networking** over HTTP/2 with libcurl — HSTS, CSP, partitioned
   cookies.
-- **Media** — images, optional inline PDF; `<video>` plays **inline**
-  for the built-in MPEG-1 codec (decoded in-tree by
-  [pl_mpeg](https://github.com/phoboslab/pl_mpeg), MIT-licensed) and, when
-  the FFmpeg libraries are present at build time, **WebM** (VP9/VP8 video +
-  Opus/Vorbis audio), all with `autoplay`, `loop`, and click-to-play/pause;
-  other video codecs and `<audio>` are handed off to an external player; any
-  script the host has fonts for.
+- **Media** — images, optional inline PDF; `<video>` plays **inline** for
+  MPEG-1 (decoded in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg),
+  MIT) and, when FFmpeg's libav is present at build time, **WebM** (VP9/VP8 +
+  Opus/Vorbis), with `autoplay`/`loop`/click-to-play; other codecs and
+  streaming sites hand off to an external player. See
+  [docs/media.md](docs/media.md).
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
   `mfrac`, `msqrt`/`mroot`, `munder`/`mover`/`munderover`, `mtable`,
@@ -222,63 +221,15 @@ moving parts:
 | Enchant (enchant-2) | on-screen spell-checking of editable text (`src/spellcheck.c`) |
 | fontconfig / pangoft2 | extra font discovery backends |
 
-**Video.** `<video>` plays **inline** when the source is MPEG-1 (an
-`.mpg` / `.mpeg` / `.m1v` stream). The bytes are decoded entirely
-in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg) — a
-single-file, MIT-licensed MPEG-1 video decoder — inside the sandboxed
-renderer process; no external library, no GPU API, and no syscalls
-beyond memory are needed, so it runs comfortably under the seccomp
-filter. Decoded BGRA frames are advanced off the renderer's existing
-animation tick, honouring the `autoplay`, `loop`, `muted`,
-`width`/`height`, and `poster` attributes; a click toggles play/pause;
-and the `HTMLMediaElement` events (`loadedmetadata`, `durationchange`,
-`canplay`, `timeupdate`, `play`, `pause`, `ended`) fire on the element
-as it plays. MPEG-1 is the one always-on codec, by design — small,
-patent-free, and decoded in pure portable C.
-
-**WebM** (`.webm`) plays inline too when the **FFmpeg libraries**
-(`libavformat` / `libavcodec` / `libswscale`) are present at build time
-(auto-detected; `-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
-and decodes **VP9/VP8** frames, which are scaled to BGRA and served through
-the same off-tick frame loop as the MPEG-1 path — both royalty-free codecs.
-A build on a machine without the FFmpeg libraries carries no libav symbol or
-dependency and falls back to the external-player path, exactly as before.
-
-The MPEG-1 stream's **MP2 audio track** plays too (unless the element
-is `muted`), as does a WebM's **Opus/Vorbis** track when libav is built
-in. The seccomp-sandboxed renderer can't open a sound device,
-so audio is handed to the unsandboxed `nordstjernen-audio` helper. The
-helper decodes to PCM — pl_mpeg for the MPEG-1/MP2 track,
-[minimp3](https://github.com/lieff/minimp3) (CC0, vendored) for
-standalone `.mp3` files, and libav for Opus/Vorbis (WebM/Ogg) — and plays it
-through
-[SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
-CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling
-the streams itself. The inline player drives the helper —
-`open`/`play`/`pause`/`seek`/`stop` ride the renderer→shell render
-channel, and looping re-syncs the audio at each wrap.
-
-**Other media.** Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 +
-Opus/Vorbis) path, Nordstjernen ships no media
-codecs. Other `<audio>` and other `<video>` codecs render a poster and a
-play overlay; clicking it resolves the source URL inside the sandboxed
-renderer process and
-the UI shell hands it to an external player — `mpv`, `VLC`,
-`celluloid`, `totem`, `mplayer` or `ffplay` on Linux, otherwise the
-desktop's default handler for the media type (found via `GAppInfo`, so
-Flatpak players work too), the default app via `open` on macOS, and the
-registered handler on Windows. If none is found, a status-bar hint
-suggests installing [mpv](https://mpv.io). A media player is therefore a
-*recommended runtime dependency*, not a build dependency: the `.deb` and
-`.rpm` packages `Recommend` one (defaulting to `mpv`) so playback works
-out of the box, while source builds need none. The player is launched
-from the UI shell, never from the page's untrusted renderer.
-
-Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
-with no plain file URL. For those, clicking hands the **page URL** to the
-player instead, so `mpv`/`VLC` resolve it with
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) — install yt-dlp alongside the
-player to watch them.
+**Media.** `<video>` plays **inline** for MPEG-1 (always, decoded in-tree
+by pl_mpeg) and for **VP9/VP8 WebM** when FFmpeg's libav\* is present at
+build time — system FFmpeg on Linux, a minimal LGPL FFmpeg bundled on macOS
+and Windows. Audio (MP2/MP3, and Opus/Vorbis for WebM) plays through the
+unsandboxed `nordstjernen-audio` helper over SDL2. Every other codec, and
+streaming sites that use MSE/`blob:`, are handed to an external player
+(`mpv`/`VLC`, with `yt-dlp` for streaming) — a *recommended* runtime
+dependency, never a build one. Full details, including the licensing split
+and the helper protocol, are in [docs/media.md](docs/media.md).
 
 ## License
 

@@ -61,7 +61,8 @@ and constraint validation; `overflow` boxes scroll. The full
 (`src/wasm.c`), and an opt-in, per-site-gated WebGL 1 / 2 maps onto
 OpenGL ES (`src/webgl.c`). Painting skips off-screen boxes (viewport
 culling). Runs on Linux, Windows (MSYS2) and macOS, with an Android
-port in progress; CI builds the desktop three plus musl on every push.
+port in progress; CI builds the desktop three plus musl, the Qt frontend,
+the Java binding and the BSDs on every push.
 Both the GTK reference frontend and the experimental Qt 6 frontend
 (`src/qt/`, off by default) are tabbed, **process-per-tab** browsers:
 each tab drives its own sandboxed renderer process over the engine and
@@ -112,64 +113,29 @@ toolkit-agnostic:
   (`MainActivity`, `PageView`, `NativeBrowser`) over the same engine via
   JNI; see `docs/Android.md`.
 
-**Process-per-tab renderer boundary — shipped.** Each tab now runs in
-its own sandboxed *process* running the engine and producing a rendered
-surface (see `docs/tab-isolation.md`), with the GUI process reduced to
-hosting a widget per tab, blitting the framebuffer, and forwarding input.
-This is the payoff that makes the whole design cohere:
+**Process-per-tab renderer boundary — shipped.** Each tab runs in its own
+sandboxed *process* that runs the engine and produces a rendered surface;
+the GUI process is reduced to hosting a widget per tab, blitting the
+shared-memory framebuffer, and forwarding input over the `rproc_http` IPC
+protocol (render/viewport, click/key/hover/select, find, export, media,
+console/eval). This is the payoff that makes the design cohere: both GTK and
+Qt are thin display-plus-input shells showing the *same* engine output (so
+fidelity is identical and Qt needs no separate renderer), and isolation is
+real — `nordstjernen-renderer` applies the same Landlock + seccomp
+confinement as the engine after the `HELLO` handshake and before opening any
+page, so a renderer crash is a per-tab failure and untrusted content always
+runs under a loaded syscall filter. There is no in-process renderer in either
+toolkit. The thin shells parse no untrusted bytes but must `fork`/`execv`
+renderers and create POSIX shm, so they run under a widened Landlock with
+seccomp skipped. The mechanics live in `docs/tab-isolation.md`.
 
-- **Very thin GUIs.** Both GTK and Qt become display-plus-input shells;
-  the toolkit — and its language — stops mattering to rendering.
-- **Both frontends equally good.** They show the *same* engine output, so
-  fidelity is identical and the Qt side needs no separate renderer to
-  reach parity.
-- **Real isolation.** Per-process seccomp/Landlock plus crash isolation —
-  security threads cannot provide. The pieces already exist:
-  `libnordstjernen` (`ns_browser_render_rgba`, `ns_browser_link_at`),
-  headless RGBA rendering, the per-process sandbox, and the fork-based
-  media broker as an IPC pattern.
+**The plan from here:**
 
-This work is now real in `src/`: shared-memory framebuffer, control-channel
-IPC, POSIX/Windows renderer spawn paths, dirty-rect rendering, async Qt
-dispatch, and bounded IPC replies. The renderer process sandboxes itself —
-`nordstjernen-renderer` applies the same Landlock + seccomp confinement as the
-main process (via `ns_browser_sandbox`) after the `HELLO` handshake and before
-opening any page, so untrusted content runs under a loaded syscall filter. And
-**both frontends are now process-per-tab, full stop**. `nordstjernen-qt`
-and `nordstjernen` (GTK) each run a tabbed shell (`procwindow`/`procview`)
-where every tab owns its own sandboxed renderer process, making a tab one
-engine process and a renderer crash a per-tab failure. There is no
-in-process renderer in either toolkit. The shells skip their own
-seccomp/Landlock (they must `fork`/`execv` renderers and create POSIX
-shm); the security boundary lives in the renderer processes, which sandbox
-themselves before opening any page.
-
-**The plan from here** (the explicit near-term direction):
-
-1. **The IPC renderer is the renderer.** The proc views load, render,
-   scroll (wheel + keyboard + scrollbars), reflow on resize, hit-test
-   links, open links in new process-tabs, and recover from renderer
-   crashes; JavaScript stays live (the renderer pumps the bundled QuickJS
-   each frame via `ns_browser_tick`, budget `tick_budget_ms`, default 16 ms),
-   and there is a continuous frame loop while a page animates. The GTK
-   shell carries the full chrome — toolbar, address bar, status bar,
-   tabs/history, zoom, text selection, `:hover` + pointer events,
-   find-in-page, a right-click context menu, the DevTools console,
-   save/export, media handoff, an app menu, settings, and bookmarks — and
-   the Qt shell matches the core browsing chrome. The IPC protocol
-   (`rproc_http`) has grown to carry all of this: render/viewport, click/key/
-   hover/select, find, export, media, console/eval.
-2. **Browser-process broker services** (networking, cookies, cache,
-   storage) so the renderer can be credential-less rather than fetching
-   and persisting on its own — the true security payoff.
-
-**Sandbox / watchdog in proc mode** (see `docs/tab-isolation.md`): the
-renderers carry the real Landlock + seccomp confinement; the thin shell, which
-parses no untrusted bytes but must spawn renderers and create POSIX shm, runs
-under a widened Landlock (writable `/dev/shm`, executable renderer dir) with
-seccomp skipped, and with watchdog supervision disabled (per-tab renderer
-crash-recovery replaces it). A shell-specific seccomp profile or a renderer
-zygote, and re-enabled shell supervision, are the follow-ups.
+1. **Browser-process broker services** (networking, cookies, cache,
+   storage) so the renderer can be credential-less rather than fetching and
+   persisting on its own — the true security payoff.
+2. A shell-specific seccomp profile (or a renderer zygote) and re-enabled
+   shell watchdog supervision.
 
 ## Priorities
 
@@ -254,30 +220,15 @@ from meson, see `docs/Embedding.md`; Java JNI binding and Swing app in
 15 Debian/Ubuntu `.deb` packaging (built nightly, see `docs/Nightly.md`).
 
 **Ongoing — security hardening passes.** Recurring source audits of the
-attacker-reachable surface (network parsing, cookie scoping, layout
-allocation, the renderer/IPC boundary). Landed so far: `document.cookie`
-`Domain` attributes that name a public suffix are now rejected via libpsl
-(matching the network jar and the WHATWG cookie rules); the auto/fixed
-table layout caps accumulated column counts (`NS_TABLE_MAX_COLS`) so a
-colspan-packed table can't overflow the `guint` column counter and
-under-size the collapse-borders grid; `http_read_body`/`http_skip_body`
-reject negative lengths before the copy loop; HTTP requests set
-`CURLOPT_UNRESTRICTED_AUTH = 0` so credentials are never replayed to a
-different host on a redirect; the renderer/IPC favicon reply now clamps
-the `X-W`/`X-H`/`X-Stride` dimensions before multiplying them, so a
-crafted reply can't integer-overflow the size check and have the shell
-read past a bounded buffer (the `/render` path already clamped against
-the session's `max_w`/`max_h`); and the CSS engine caps the recursive
-parsers reachable from untrusted stylesheets — `var()` fallbacks,
-`@supports`, `color-mix()`, and `@media … or …` all carry depth limits,
-`ns_css_value_free` frees the background-layer chain iteratively, and
-`filter: blur()` clamps its radius — so a deeply nested or absurdly
-large value can't exhaust the stack or overflow the blur window. The
-broader fundamentals stay strong:
-http/https-only scheme allow-listing with no HTTPS→HTTP redirect
-downgrade, CRLF-filtered request headers, percent-encoded multipart
-field names, and per-renderer Landlock + seccomp confinement applied
-before any page is opened.
+attacker-reachable surface — network parsing, cookie scoping, layout
+allocation, the renderer/IPC boundary — with each fix landed as its own
+commit (the running detail lives in the git history). The fundamentals stay
+strong: http/https-only scheme allow-listing with no HTTPS→HTTP redirect
+downgrade, public-suffix cookie scoping via libpsl, CRLF-filtered request
+headers, credentials never replayed across a redirect host
+(`CURLOPT_UNRESTRICTED_AUTH=0`), clamped/overflow-checked sizes on the
+untrusted IPC and layout paths, depth-limited recursive CSS parsers, and
+per-renderer Landlock + seccomp confinement applied before any page opens.
 
 **Mostly done / partial:** 12 downloads under Landlock (path 2),
 13 fragment navigation, 16 silent-stub honesty, 17 GTK renderer
