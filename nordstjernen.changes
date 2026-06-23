@@ -1,4 +1,27 @@
 -------------------------------------------------------------------
+Tue Jun 23 12:00:00 UTC 2026 - Andreas Røsdal <andreas.rosdal@gmail.com>
+
+- Release 1.0.14.
+- Media: inline WebM playback — VP9/VP8 video and Opus/Vorbis audio —
+  decoded in-tree through an optional FFmpeg libav* backend. On Linux the
+  system FFmpeg is used (a runtime dependency, never bundled); the macOS
+  and Windows builds vendor a minimal, LGPL-only FFmpeg carrying just those
+  decoders. Other codecs, and Android, keep the external-player fallback.
+- CSSOM: a real CSSRule / CSSStyleRule / CSSGroupingRule / CSSMediaRule
+  object model with document.styleSheets, insertRule/deleteRule, spec
+  serialization of style rules and media queries, and a CSSStyleDeclaration
+  iterator.
+- Images: HTMLImageElement.decode() is now spec-compliant (rejects with an
+  EncodingError for undecodable or missing sources); createImageBitmap()
+  accepts Blob sources and rejects undecodable ones with InvalidStateError;
+  canvas drawImage() validates its source type.
+- Text tracks: a working addTextTrack / textTracks (TextTrackList) /
+  <track>.track model with WebVTT loading, a start-time-ordered cue list,
+  and addtrack/removetrack events.
+- Media probing: canPlayType() now reports accurate per-codec support so
+  pages can select a playable <source>.
+
+-------------------------------------------------------------------
 Mon Jun 22 10:00:00 UTC 2026 - Andreas Røsdal <andreas.rosdal@gmail.com>
 
 - Initial openSUSE package of Nordstjernen 1.14, a small, hand-written
