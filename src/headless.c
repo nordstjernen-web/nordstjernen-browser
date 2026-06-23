@@ -83,11 +83,15 @@ fetch_videos_into_layout(ns_box *root, const char *base_url)
         if (box->media->video_src) {
             char *src = ns_url_resolve(base_url, box->media->video_src);
             gsize sn = src ? strcspn(src, "?#") : 0;
-            gboolean mpeg1 = src &&
+            gboolean inline_video = src &&
                 ((sn >= 4 && g_ascii_strncasecmp(src + sn - 4, ".mpg", 4) == 0) ||
                  (sn >= 4 && g_ascii_strncasecmp(src + sn - 4, ".m1v", 4) == 0) ||
-                 (sn >= 5 && g_ascii_strncasecmp(src + sn - 5, ".mpeg", 5) == 0));
-            if (src && mpeg1) {
+                 (sn >= 5 && g_ascii_strncasecmp(src + sn - 5, ".mpeg", 5) == 0)
+#ifdef NS_HAVE_LIBAV
+                 || (sn >= 5 && g_ascii_strncasecmp(src + sn - 5, ".webm", 5) == 0)
+#endif
+                 );
+            if (src && inline_video) {
                 ns_response *resp = ns_engine_fetch_blocking(src, base_url, NULL);
                 if (resp && !resp->error && resp->body && resp->body->len > 0) {
                     ns_video_player *player =

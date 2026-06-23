@@ -35,7 +35,7 @@ nothing imported.
   sandboxed renderer); without that flag `navigator.gpu.requestAdapter()`
   resolves to `null`. wgpu-native is a large dependency and deliberately
   stays an opt-in build input, never vendored. See `docs/webgpu.md`.
-- Exactly **one** embedded video codec: MPEG-1, decoded in-tree by the
+- The **one vendored, in-tree** video codec is MPEG-1, decoded by the
   vendored MIT-licensed [pl_mpeg](https://github.com/phoboslab/pl_mpeg)
   single-file decoder (`subprojects/plmpeg/`, wrapped by
   `src/video_decode.c`). A `<video>` whose source is an `.mpg`/`.mpeg`/`.m1v`
@@ -50,11 +50,19 @@ nothing imported.
   renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
   commands that ride the render-response `X-Audio` side-channel to the
   shell, which spawns and pumps the helper (`src/gtk/procview.c`). The
-  video codec stays MPEG-1 only and the audio decoders stay pl_mpeg (MP2)
-  + minimp3 (MP3) — don't add further codecs. Other `<audio>` and
-  non-MPEG-1/non-MP3 `<video>` render a poster and play overlay; clicking
-  resolves the media URL in the renderer (`ns_browser_media_at`) and the
-  shell hands it to an external player (`src/media.c::ns_media_try_launch`).
+  in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
+  vendor further single-file codecs. **WebM is the one optional extension:**
+  when FFmpeg's libav\* is present (`libavformat`/`libavcodec`/`libavutil`/
+  `libswscale`/`libswresample`, system packages — never vendored), the
+  `libav` build path is auto-enabled (`-DNS_HAVE_LIBAV`) and adds inline
+  **VP9/VP8 video** (libav demux+decode → swscale → texture, in
+  `src/video_decode.c`) and **Opus/Vorbis audio** (decoded in the helper,
+  `src/audio/main.c`) for `.webm`/`.opus`/`.ogg` sources; a stock build on a
+  machine without libav carries no libav symbol or dependency and behaves
+  exactly as before. Other `<audio>` and other `<video>` codecs render a
+  poster and play overlay; clicking resolves the media URL in the renderer
+  (`ns_browser_media_at`) and the shell hands it to an external player
+  (`src/media.c::ns_media_try_launch`).
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
@@ -205,6 +213,12 @@ sudo apt install build-essential pkg-config meson ninja-build \
 Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
 the build works without it and simply does no spell-checking.
+
+Optional: the FFmpeg libav\* dev packages (Debian/Ubuntu `libavformat-dev
+libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`) enable
+inline WebM playback (VP9/VP8 video + Opus/Vorbis audio). Auto-detected;
+without them the build carries no libav dependency and WebM falls back to
+the external-player path.
 
 On Fedora/RHEL:
 

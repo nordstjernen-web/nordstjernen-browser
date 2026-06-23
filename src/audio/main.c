@@ -22,6 +22,13 @@
 #endif
 #include "minimp3.h"
 
+#ifdef NS_HAVE_LIBAV
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/opt.h>
+#include <libswresample/swresample.h>
+#endif
+
 #define NS_AUDIO_MAX_PLAYERS 16
 #define NS_AUDIO_MAX_SECONDS 1800
 #define NS_AUDIO_DEVICE_RATE 44100
@@ -284,6 +291,172 @@ decode_mp3(const unsigned char *bytes, size_t n,
 }
 
 static int
+bytes_are_container(const unsigned char *b, size_t n)
+{
+    if (n >= 4 && b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3)
+        return 1;
+    if (n >= 4 && b[0] == 'O' && b[1] == 'g' && b[2] == 'g' && b[3] == 'S')
+        return 1;
+    if (n >= 8 && b[4] == 'f' && b[5] == 't' && b[6] == 'y' && b[7] == 'p')
+        return 1;
+    return 0;
+}
+
+#ifdef NS_HAVE_LIBAV
+typedef struct { const unsigned char *data; size_t len; size_t pos; } ah_memsrc;
+
+static int
+ah_read(void *opaque, uint8_t *buf, int sz)
+{
+    ah_memsrc *m = opaque;
+    size_t avail = m->len - m->pos;
+    if (avail == 0) return AVERROR_EOF;
+    if ((size_t)sz > avail) sz = (int)avail;
+    memcpy(buf, m->data + m->pos, (size_t)sz);
+    m->pos += (size_t)sz;
+    return sz;
+}
+
+static int64_t
+ah_seek(void *opaque, int64_t off, int whence)
+{
+    ah_memsrc *m = opaque;
+    whence &= ~AVSEEK_FORCE;
+    if (whence == AVSEEK_SIZE) return (int64_t)m->len;
+    int64_t base = (whence == SEEK_CUR) ? (int64_t)m->pos
+                 : (whence == SEEK_END) ? (int64_t)m->len : 0;
+    int64_t np = base + off;
+    if (np < 0 || (size_t)np > m->len) return -1;
+    m->pos = (size_t)np;
+    return np;
+}
+
+static int
+decode_libav(const unsigned char *bytes, size_t n,
+             float **out_pcm, size_t *out_frames, int *out_rate, int *out_ch)
+{
+    av_log_set_level(AV_LOG_QUIET);
+    ah_memsrc src = { bytes, n, 0 };
+    int ret = 0;
+    AVFormatContext *fmt = NULL;
+    AVIOContext *avio = NULL;
+    AVCodecContext *dec = NULL;
+    SwrContext *swr = NULL;
+    AVPacket *pkt = NULL;
+    AVFrame *frame = NULL;
+    const AVCodec *codec = NULL;
+    float *pcm = NULL;
+    size_t cap = 0, len = 0;
+    int sidx = -1, rate = 0, ch = 0;
+
+    unsigned char *iobuf = av_malloc(32768);
+    if (!iobuf) return 0;
+    avio = avio_alloc_context(iobuf, 32768, 0, &src, ah_read, NULL, ah_seek);
+    if (!avio) { av_free(iobuf); return 0; }
+
+    fmt = avformat_alloc_context();
+    if (!fmt) { av_freep(&avio->buffer); avio_context_free(&avio); return 0; }
+    fmt->pb = avio;
+    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
+        av_freep(&avio->buffer); avio_context_free(&avio); return 0;
+    }
+    if (avformat_find_stream_info(fmt, NULL) < 0) goto done;
+
+    sidx = av_find_best_stream(fmt, AVMEDIA_TYPE_AUDIO, -1, -1, &codec, 0);
+    if (sidx < 0 || !codec) goto done;
+
+    dec = avcodec_alloc_context3(codec);
+    if (!dec) goto done;
+    if (avcodec_parameters_to_context(dec, fmt->streams[sidx]->codecpar) < 0)
+        goto done;
+    if (avcodec_open2(dec, codec, NULL) < 0) goto done;
+
+    rate = dec->sample_rate;
+    ch = dec->ch_layout.nb_channels;
+    if (rate <= 0 || rate > 192000 || ch < 1 || ch > 8) goto done;
+
+    swr = swr_alloc();
+    if (!swr) goto done;
+    av_opt_set_chlayout(swr, "in_chlayout", &dec->ch_layout, 0);
+    av_opt_set_chlayout(swr, "out_chlayout", &dec->ch_layout, 0);
+    av_opt_set_int(swr, "in_sample_rate", rate, 0);
+    av_opt_set_int(swr, "out_sample_rate", rate, 0);
+    av_opt_set_sample_fmt(swr, "in_sample_fmt", dec->sample_fmt, 0);
+    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
+    if (swr_init(swr) < 0) goto done;
+
+    pkt = av_packet_alloc();
+    frame = av_frame_alloc();
+    if (!pkt || !frame) goto done;
+
+    *out_rate = rate;
+    *out_ch = ch;
+    size_t max_floats = (size_t)rate * (size_t)ch * NS_AUDIO_MAX_SECONDS;
+    int eof = 0, capped = 0;
+    while (!eof && !capped) {
+        int r = av_read_frame(fmt, pkt);
+        if (r < 0) {
+            avcodec_send_packet(dec, NULL);
+            eof = 1;
+        } else if (pkt->stream_index == sidx) {
+            avcodec_send_packet(dec, pkt);
+            av_packet_unref(pkt);
+        } else {
+            av_packet_unref(pkt);
+            continue;
+        }
+
+        for (;;) {
+            int rr = avcodec_receive_frame(dec, frame);
+            if (rr == AVERROR(EAGAIN) || rr == AVERROR_EOF) break;
+            if (rr < 0) goto done;
+
+            int out_samples = swr_get_out_samples(swr, frame->nb_samples);
+            if (out_samples < 0) { av_frame_unref(frame); goto done; }
+            size_t add = (size_t)out_samples * (size_t)ch;
+            if (len + add > cap) {
+                size_t want = cap ? cap : (size_t)rate * (size_t)ch;
+                while (len + add > want) {
+                    if (want > SIZE_MAX / (2u * sizeof(float))) {
+                        av_frame_unref(frame); goto done;
+                    }
+                    want *= 2;
+                }
+                float *grown = realloc(pcm, want * sizeof(float));
+                if (!grown) { av_frame_unref(frame); goto done; }
+                pcm = grown;
+                cap = want;
+            }
+            uint8_t *dstp = (uint8_t *)(pcm + len);
+            int got = swr_convert(swr, &dstp, out_samples,
+                                  (const uint8_t **)frame->extended_data,
+                                  frame->nb_samples);
+            av_frame_unref(frame);
+            if (got < 0) goto done;
+            len += (size_t)got * (size_t)ch;
+            if (len >= max_floats) { capped = 1; break; }
+        }
+    }
+
+done:
+    if (ret == 0 && pcm && len > 0) {
+        *out_pcm = pcm;
+        *out_frames = len / (size_t)ch;
+        ret = 1;
+    } else if (!ret) {
+        free(pcm);
+    }
+    if (frame) av_frame_free(&frame);
+    if (pkt) av_packet_free(&pkt);
+    if (swr) swr_free(&swr);
+    if (dec) avcodec_free_context(&dec);
+    if (fmt) avformat_close_input(&fmt);
+    if (avio) { av_freep(&avio->buffer); avio_context_free(&avio); }
+    return ret;
+}
+#endif /* NS_HAVE_LIBAV */
+
+static int
 resample_to_device(const float *src, size_t src_frames, int src_rate, int src_ch,
                    float **out_pcm, size_t *out_frames)
 {
@@ -322,9 +495,19 @@ load_audio(ns_audio_player *p, const char *path)
     float *src = NULL;
     size_t src_frames = 0;
     int src_rate = 0, src_ch = 0;
-    int ok = bytes_are_mpeg1(bytes, n)
-        ? decode_mpeg(bytes, n, &src, &src_frames, &src_rate, &src_ch)
-        : decode_mp3(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+    int ok = 0;
+    if (bytes_are_mpeg1(bytes, n))
+        ok = decode_mpeg(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#ifdef NS_HAVE_LIBAV
+    else if (bytes_are_container(bytes, n))
+        ok = decode_libav(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#endif
+    if (!ok)
+        ok = decode_mp3(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#ifdef NS_HAVE_LIBAV
+    if (!ok)
+        ok = decode_libav(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#endif
     free(bytes);
     if (!ok) return 0;
 

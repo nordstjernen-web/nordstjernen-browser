@@ -176,6 +176,10 @@ else
   if have_enchant
     nordstjernen_deps += [libenchant]
   endif
+
+  if have_libav
+    nordstjernen_deps += [libavformat, libavcodec, libavutil, libswscale]
+  endif
 endif
 
 if have_fontconfig
@@ -324,6 +328,9 @@ if not is_android
     )
 
     audio_deps = [dependency('libcurl'), sdl2_dep, libplmpeg]
+    if have_libav
+      audio_deps += [libavformat, libavcodec, libavutil, libswresample]
+    endif
     # libm is needed by pl_mpeg / minimp3 on Linux and the BSDs; it is part of
     # the C runtime on macOS and Windows, where find_library('m') is a harmless
     # no-op.

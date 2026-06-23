@@ -28657,7 +28657,19 @@ ns_media_src_is_mp3(const char *url)
     if (!url) return FALSE;
     const char *q = strchr(url, '?');
     size_t len = q ? (size_t)(q - url) : strlen(url);
-    return len >= 4 && g_ascii_strncasecmp(url + len - 4, ".mp3", 4) == 0;
+    static const char *const exts[] = {
+        ".mp3",
+#ifdef NS_HAVE_LIBAV
+        ".opus", ".weba", ".webm", ".ogg", ".oga",
+#endif
+        NULL,
+    };
+    for (int i = 0; exts[i]; i++) {
+        size_t el = strlen(exts[i]);
+        if (len >= el && g_ascii_strncasecmp(url + len - el, exts[i], el) == 0)
+            return TRUE;
+    }
+    return FALSE;
 }
 
 static char *

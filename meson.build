@@ -261,6 +261,17 @@ if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
+libavformat = dependency('libavformat', required: false)
+libavcodec = dependency('libavcodec', required: false)
+libavutil = dependency('libavutil', required: false)
+libswscale = dependency('libswscale', required: false)
+libswresample = dependency('libswresample', required: false)
+have_libav = libavformat.found() and libavcodec.found() and libavutil.found() \
+  and libswscale.found() and libswresample.found() and not is_android
+if have_libav
+  add_project_arguments('-DNS_HAVE_LIBAV=1', language: 'c')
+endif
+
 libenchant = dependency('enchant-2', required: false)
 have_enchant = libenchant.found() and not is_android
 if have_enchant

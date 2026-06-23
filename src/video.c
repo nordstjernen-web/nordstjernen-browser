@@ -290,12 +290,16 @@ attr_present(const ns_node *n, const char *name)
 }
 
 static gboolean
-url_looks_mpeg1(const char *url)
+url_is_inline_video(const char *url)
 {
     if (!url) return FALSE;
     gsize n = strcspn(url, "?#");
     static const char *const exts[] = {
-        ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1", NULL,
+        ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1",
+#ifdef NS_HAVE_LIBAV
+        ".webm",
+#endif
+        NULL,
     };
     for (int i = 0; exts[i]; i++) {
         gsize el = strlen(exts[i]);
@@ -356,7 +360,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us
         if (!abs) continue;
         if ((!g_str_has_prefix(abs, "http://") && !g_str_has_prefix(abs, "https://") &&
              !g_str_has_prefix(abs, "file://")) ||
-            !url_looks_mpeg1(abs)) {
+            !url_is_inline_video(abs)) {
             g_free(abs);
             continue;
         }
