@@ -14,6 +14,7 @@
 #include "net.h"
 #include "video.h"
 #include "texture.h"
+#include "image.h"
 #include "webgl.h"
 #ifdef ND_HAVE_WEBGPU
 #include "webgpu.h"
@@ -171,6 +172,92 @@ ns_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
     return out;
 }
 
+static guint8 *
+ns_blob_byte_array(JSContext *ctx, JSValueConst src, gsize *out_len)
+{
+    *out_len = 0;
+    JSValue b = JS_GetPropertyStr(ctx, src, "_b");
+    if (!JS_IsObject(b)) { JS_FreeValue(ctx, b); return NULL; }
+    JSValue lv = JS_GetPropertyStr(ctx, b, "length");
+    uint32_t len = 0;
+    JS_ToUint32(ctx, &len, lv);
+    JS_FreeValue(ctx, lv);
+    if (len == 0 || len > 256u * 1024u * 1024u) { JS_FreeValue(ctx, b); return NULL; }
+    guint8 *out = g_try_malloc(len);
+    if (!out) { JS_FreeValue(ctx, b); return NULL; }
+    for (uint32_t i = 0; i < len; i++) {
+        JSValue v = JS_GetPropertyUint32(ctx, b, i);
+        int32_t bv = 0;
+        JS_ToInt32(ctx, &bv, v);
+        JS_FreeValue(ctx, v);
+        out[i] = (guint8)(bv & 0xff);
+    }
+    JS_FreeValue(ctx, b);
+    *out_len = len;
+    return out;
+}
+
+static cairo_surface_t *
+ns_image_bitmap_from_blob(JSContext *ctx, JSValueConst src, int *out_w, int *out_h)
+{
+    gsize len = 0;
+    guint8 *bytes = ns_blob_byte_array(ctx, src, &len);
+    if (!bytes) return NULL;
+    int w = 0, h = 0;
+    gsize stride = 0, buf_len = 0;
+    ns_texture_format fmt;
+    guint8 *pix = ns_image_decode_bytes_to_pixels(bytes, len, &w, &h,
+                                                  &stride, &buf_len, &fmt);
+    g_free(bytes);
+    if (!pix || w <= 0 || h <= 0 || w > 32767 || h > 32767) {
+        g_free(pix);
+        return NULL;
+    }
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surf);
+        g_free(pix);
+        return NULL;
+    }
+    uint8_t *dst = cairo_image_surface_get_data(surf);
+    int dst_stride = cairo_image_surface_get_stride(surf);
+    for (int y = 0; y < h; y++)
+        memcpy(dst + (size_t)y * (size_t)dst_stride,
+               pix + (size_t)y * stride, (size_t)w * 4u);
+    cairo_surface_mark_dirty(surf);
+    g_free(pix);
+    *out_w = w;
+    *out_h = h;
+    return surf;
+}
+
+static void
+ns_reject_image_decode(JSContext *ctx, JSValue resolvers[2])
+{
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, g, "DOMException");
+    JSValue args[2] = {
+        JS_NewString(ctx, "The source image could not be decoded."),
+        JS_NewString(ctx, "InvalidStateError"),
+    };
+    JSValue exc = JS_CallConstructor(ctx, ctor, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    if (JS_IsException(exc) || !JS_IsObject(exc)) {
+        if (JS_IsException(exc)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, exc);
+        exc = JS_NewError(ctx);
+        JS_SetPropertyStr(ctx, exc, "name",
+                          JS_NewString(ctx, "InvalidStateError"));
+    }
+    JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &exc);
+    JS_FreeValue(ctx, exc);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, g);
+    JS_FreeValue(ctx, resolvers[0]);
+    JS_FreeValue(ctx, resolvers[1]);
+}
+
 JSValue
 ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
@@ -188,13 +275,20 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     JSValue dv = JS_GetPropertyStr(ctx, argv[0], "data");
     gboolean is_imagedata = JS_IsObject(dv);
     JS_FreeValue(ctx, dv);
+    gboolean is_blob = FALSE;
+    if (!is_imagedata) {
+        JSValue bv = JS_GetPropertyStr(ctx, argv[0], "_b");
+        is_blob = JS_IsObject(bv);
+        JS_FreeValue(ctx, bv);
+    }
     if (is_imagedata)
         surf = ns_image_bitmap_from_imagedata(ctx, argv[0], &sw, &sh);
+    else if (is_blob)
+        surf = ns_image_bitmap_from_blob(ctx, argv[0], &sw, &sh);
     else
         surf = ns_ctx_drawimage_source(ctx, argv[0], &sw, &sh);
     if (!surf) {
-        ns_js_promise_reject(ctx, resolvers,
-            "createImageBitmap: invalid source");
+        ns_reject_image_decode(ctx, resolvers);
         return promise;
     }
     int crop = 0;
@@ -1944,6 +2038,10 @@ JSValue
 ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "Failed to execute 'drawImage' on 'CanvasRenderingContext2D': "
+            "argument 1 is not a valid image source.");
     if (argc < 3) return JS_UNDEFINED;
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     if (!st) return JS_UNDEFINED;
