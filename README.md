@@ -11,7 +11,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 130,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack.
+**Minimalism:** The whole engine is about 131,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra that reuses the system FFmpeg libraries when they are present.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -33,7 +33,7 @@ in-process media codecs. Highlights:
 |-----------|:------:|
 | §2 Common infrastructure — WHATWG URL, IDN, origins, encodings | ✅ |
 | §3–§4 Semantics, document structure & tabular content | ✅ |
-| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1); other codecs and `<audio>` hand off to an external player | 🟡 |
+| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM when FFmpeg libav is present); other codecs and `<audio>` hand off to an external player | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
 | §4.12–§4.13 Scripting, custom elements | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
@@ -58,10 +58,11 @@ The full section-by-section walk-through lives in
   cookies.
 - **Media** — images, optional inline PDF; `<video>` plays **inline**
   for the built-in MPEG-1 codec (decoded in-tree by
-  [pl_mpeg](https://github.com/phoboslab/pl_mpeg), MIT-licensed), with
-  `autoplay`, `loop`, and click-to-play/pause; other video codecs and
-  `<audio>` are handed off to an external player; any script the host
-  has fonts for.
+  [pl_mpeg](https://github.com/phoboslab/pl_mpeg), MIT-licensed) and, when
+  the FFmpeg libraries are present at build time, **WebM** (VP9/VP8 video +
+  Opus/Vorbis audio), all with `autoplay`, `loop`, and click-to-play/pause;
+  other video codecs and `<audio>` are handed off to an external player; any
+  script the host has fonts for.
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
   `mfrac`, `msqrt`/`mroot`, `munder`/`mover`/`munderover`, `mtable`,
@@ -217,6 +218,7 @@ moving parts:
 |---------|---------|
 | poppler-glib | inline PDF viewing |
 | libavif | AVIF images |
+| FFmpeg libav\* (libavformat / libavcodec / libavutil / libswscale / libswresample) | inline WebM playback — VP9/VP8 video (`src/video_decode.c`) and Opus/Vorbis audio (`src/audio/main.c`) |
 | Enchant (enchant-2) | on-screen spell-checking of editable text (`src/spellcheck.c`) |
 | fontconfig / pangoft2 | extra font discovery backends |
 
@@ -231,23 +233,34 @@ animation tick, honouring the `autoplay`, `loop`, `muted`,
 `width`/`height`, and `poster` attributes; a click toggles play/pause;
 and the `HTMLMediaElement` events (`loadedmetadata`, `durationchange`,
 `canplay`, `timeupdate`, `play`, `pause`, `ended`) fire on the element
-as it plays. Only one video codec is built in, by design — MPEG-1 is
-small, patent-free, and decodes in pure portable C.
+as it plays. MPEG-1 is the one always-on codec, by design — small,
+patent-free, and decoded in pure portable C.
+
+**WebM** (`.webm`) plays inline too when the **FFmpeg libraries**
+(`libavformat` / `libavcodec` / `libswscale`) are present at build time
+(auto-detected; `-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
+and decodes **VP9/VP8** frames, which are scaled to BGRA and served through
+the same off-tick frame loop as the MPEG-1 path — both royalty-free codecs.
+A build on a machine without the FFmpeg libraries carries no libav symbol or
+dependency and falls back to the external-player path, exactly as before.
 
 The MPEG-1 stream's **MP2 audio track** plays too (unless the element
-is `muted`). The seccomp-sandboxed renderer can't open a sound device,
+is `muted`), as does a WebM's **Opus/Vorbis** track when libav is built
+in. The seccomp-sandboxed renderer can't open a sound device,
 so audio is handed to the unsandboxed `nordstjernen-audio` helper. The
-helper decodes to PCM in-tree — pl_mpeg for the MPEG-1/MP2 track and
+helper decodes to PCM — pl_mpeg for the MPEG-1/MP2 track,
 [minimp3](https://github.com/lieff/minimp3) (CC0, vendored) for
-standalone `.mp3` files — and plays it through
+standalone `.mp3` files, and libav for Opus/Vorbis (WebM/Ogg) — and plays it
+through
 [SDL2](https://www.libsdl.org/)'s audio device (WASAPI on Windows,
 CoreAudio on macOS, ALSA/PulseAudio on Linux), mixing and resampling
 the streams itself. The inline player drives the helper —
 `open`/`play`/`pause`/`seek`/`stop` ride the renderer→shell render
 channel, and looping re-syncs the audio at each wrap.
 
-**Other media.** Beyond MPEG-1/MP2 and MP3, Nordstjernen ships no media
-codecs. Other `<audio>` and non-MPEG-1 `<video>` render a poster and a
+**Other media.** Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 +
+Opus/Vorbis) path, Nordstjernen ships no media
+codecs. Other `<audio>` and other `<video>` codecs render a poster and a
 play overlay; clicking it resolves the source URL inside the sandboxed
 renderer process and
 the UI shell hands it to an external player — `mpv`, `VLC`,

@@ -37,6 +37,17 @@ is not interchangeable with the glibc portable zip — run a musl build
 on a musl system. Add `clang cmake git zip` if you are packaging with
 the nightly scripts.
 
+Optional, for inline **WebM** playback (VP9/VP8 video + Opus/Vorbis audio):
+install the FFmpeg `libav*` development packages. They are auto-detected —
+without them the build simply omits the WebM path and hands those files to an
+external player.
+
+    sudo apt install libavformat-dev libavcodec-dev libavutil-dev \
+        libswscale-dev libswresample-dev                       # Debian / Ubuntu
+    sudo dnf install ffmpeg-devel                               # Fedora / RHEL (RPM Fusion)
+    sudo zypper install ffmpeg-devel                            # openSUSE (Packman)
+    sudo apk add ffmpeg-dev                                     # Alpine
+
 `ccache` is the biggest build-time win — `meson` picks it up
 automatically. With ccache warm, a clean `meson setup builddir &&
 meson compile -C builddir` drops from ~35 s to ~1 s. Install once
