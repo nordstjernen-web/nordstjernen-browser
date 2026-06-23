@@ -18,6 +18,11 @@ apt-get install -y --no-install-recommends \
     libsqlite3-dev librsvg2-dev libseccomp-dev
 apt-get install -y --no-install-recommends \
     libpoppler-glib-dev libfontconfig-dev libpango1.0-dev libavif-dev || true
+# FFmpeg libav* enables inline WebM (VP9/VP8 + Opus/Vorbis); optional, like
+# libavif. The native lib then expects the FFmpeg runtime on the host.
+apt-get install -y --no-install-recommends \
+    libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+    || echo "nightly-java-native: FFmpeg dev libs unavailable; WebM skipped" >&2
 pip3 install --break-system-packages --upgrade 'meson>=1.4' \
     || pip3 install --upgrade 'meson>=1.4'
 

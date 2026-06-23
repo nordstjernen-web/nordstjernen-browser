@@ -40,6 +40,12 @@ jobs:
             ccache clang make cmake pkg-config meson ninja-build \
             libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
             libpsl-dev libsqlite3-dev libseccomp-dev ca-certificates
+          # FFmpeg libav* enables inline WebM (VP9/VP8 + Opus/Vorbis) in the
+          # native engine. Optional, like libavif: the resulting native lib then
+          # expects the FFmpeg runtime on the host (as it already does GTK/WebP).
+          sudo apt-get install -y -qq \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev \
+            || echo "java: FFmpeg dev libs unavailable; WebM skipped"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6

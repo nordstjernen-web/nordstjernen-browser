@@ -38,7 +38,16 @@ jobs:
       - name: Install build dependencies (Homebrew)
         run: |
           brew install meson ninja pkg-config cmake gtk4 libepoxy curl ccache \
-              uchardet librsvg libpsl sqlite webp sdl2 dylibbundler
+              uchardet librsvg libpsl sqlite webp sdl2 dylibbundler nasm
+
+      - name: Build LGPL FFmpeg (inline WebM)
+        run: |
+          # Stock Homebrew FFmpeg is GPL (x264/x265); build a minimal LGPL one
+          # (VP9/VP8 + Opus/Vorbis only) so it can be vendored into the .app
+          # without GPL obligations. dylibbundler then bundles its dylibs.
+          scripts/build-ffmpeg-lgpl.sh "$HOME/ffmpeg-lgpl" \
+            || { echo "macos: LGPL FFmpeg build failed; WebM skipped"; exit 0; }
+          echo "PKG_CONFIG_PATH=$HOME/ffmpeg-lgpl/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Restore ccache
         uses: actions/cache@v5

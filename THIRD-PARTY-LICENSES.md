@@ -261,6 +261,28 @@ are shipped alongside the executable as ordinary DLLs / dylibs that you
 can replace; on Linux distributions they are loaded from the system
 package manager.
 
+### FFmpeg — libavformat / libavcodec / libavutil / libswscale / libswresample — GNU LGPL 2.1 or later (optional, inline WebM)
+
+> Container demuxing and audio/video decoding for the inline WebM path
+> (VP9/VP8 video, Opus/Vorbis audio). <https://ffmpeg.org>
+>
+> Copyright the FFmpeg developers.
+
+Only present when Nordstjernen was built with WebM support. The copy
+bundled in the macOS / Windows releases is built **LGPL-only** — its
+`configure` uses `--disable-gpl --disable-nonfree --disable-version3
+--disable-autodetect`, so it contains no GPL components and no external
+codec libraries; the enabled VP8/VP9/Opus/Vorbis decoders are FFmpeg's
+own LGPL implementations (see `scripts/build-ffmpeg-lgpl.sh`). The full
+license text is available at:
+
+  <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>
+
+Per LGPL section 6, the libraries are linked dynamically: on the
+macOS / Windows bundles they ship beside the executable as ordinary
+dylibs / DLLs you can replace and re-link against; on Linux they are
+loaded from the distribution's FFmpeg packages.
+
 ### Qt 6 (Core, Gui, Widgets, Concurrent) — GNU LGPL v3 (optional Qt frontend)
 
 > Cross-platform application framework, used only by the optional Qt 6

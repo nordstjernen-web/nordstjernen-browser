@@ -58,6 +58,8 @@ jobs:
             mingw-w64-x86_64-sqlite3
             mingw-w64-x86_64-libwebp
             mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-nasm
+            make
             zip
 
       - name: Restore ccache
@@ -84,6 +86,14 @@ jobs:
           ninja --version
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
+
+      - name: Build LGPL FFmpeg (inline WebM)
+        run: |
+          # MSYS2's mingw FFmpeg is GPL; build a minimal LGPL one (VP9/VP8 +
+          # Opus/Vorbis only) into the mingw prefix so pack-windows.sh's DLL
+          # chase bundles its DLLs and meson auto-detects it via pkg-config.
+          scripts/build-ffmpeg-lgpl.sh /mingw64 \
+            || echo "windows: LGPL FFmpeg build failed; WebM skipped"
 
       - name: Build
         id: build

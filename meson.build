@@ -261,6 +261,10 @@ if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
+# Inline WebM (VP9/VP8 + Opus/Vorbis) over FFmpeg's libav*. Auto-detected on
+# the desktop targets (Linux/macOS/Windows); excluded on Android, whose
+# dependency sysroot (android/scripts/build-deps.sh) does not cross-build
+# FFmpeg, so WebM there stays on the external-player path.
 libavformat = dependency('libavformat', required: false)
 libavcodec = dependency('libavcodec', required: false)
 libavutil = dependency('libavutil', required: false)
