@@ -41,7 +41,7 @@ static GHashTable *g_webgpu_ctx_by_node;
 typedef struct { WGPUAdapter adapter; } ns_wg_adapter;
 typedef struct { WGPUDevice device; WGPUQueue queue; } ns_wg_device;
 typedef struct { WGPUQueue queue; } ns_wg_queue;
-typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; } ns_wg_buffer;
+typedef struct { WGPUBuffer buffer; uint64_t size; uint32_t usage; WGPUDevice device; GArray *mapped_ranges; } ns_wg_buffer;
 typedef struct { WGPUQuerySet qs; } ns_wg_queryset;
 typedef struct { WGPUComputePipeline pipe; } ns_wg_compute_pipe;
 typedef struct { WGPUComputePassEncoder pass; } ns_wg_compute_pass;
@@ -337,11 +337,27 @@ wg_make_queue(JSContext *ctx, WGPUQueue queue)
 }
 
 static void
+wg_buffer_detach_ranges(JSContext *ctx, ns_wg_buffer *b)
+{
+    if (!b || !b->mapped_ranges) return;
+    for (guint i = 0; i < b->mapped_ranges->len; i++) {
+        JSValue ab = g_array_index(b->mapped_ranges, JSValue, i);
+        JS_DetachArrayBuffer(ctx, ab);
+        JS_FreeValue(ctx, ab);
+    }
+    g_array_set_size(b->mapped_ranges, 0);
+}
+
+static void
 wg_buffer_finalizer(JSRuntime *rt, JSValue val)
 {
-    (void)rt;
     ns_wg_buffer *b = JS_GetOpaque(val, g_buffer_class);
     if (!b) return;
+    if (b->mapped_ranges) {
+        for (guint i = 0; i < b->mapped_ranges->len; i++)
+            JS_FreeValueRT(rt, g_array_index(b->mapped_ranges, JSValue, i));
+        g_array_free(b->mapped_ranges, TRUE);
+    }
     if (b->buffer) wgpuBufferRelease(b->buffer);
     g_free(b);
 }
@@ -350,9 +366,12 @@ static JSValue
 wg_buffer_destroy(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
-    if (b && b->buffer) { wgpuBufferDestroy(b->buffer); }
+    if (b) {
+        wg_buffer_detach_ranges(ctx, b);
+        if (b->buffer) wgpuBufferDestroy(b->buffer);
+    }
     return JS_UNDEFINED;
 }
 
@@ -375,16 +394,27 @@ wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
     size_t sz = size < 0 ? (size_t)(b->size - (uint64_t)offset) : (size_t)size;
     void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, sz);
     if (!p) return JS_ThrowInternalError(ctx, "getMappedRange failed");
-    return JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, wg_ab_noop_free, NULL, false);
+    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, wg_ab_noop_free,
+                                   NULL, false);
+    if (!JS_IsException(ab)) {
+        if (!b->mapped_ranges)
+            b->mapped_ranges = g_array_new(FALSE, FALSE, sizeof(JSValue));
+        JSValue keep = JS_DupValue(ctx, ab);
+        g_array_append_val(b->mapped_ranges, keep);
+    }
+    return ab;
 }
 
 static JSValue
 wg_buffer_unmap(JSContext *ctx, JSValueConst this_val,
                 int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     ns_wg_buffer *b = JS_GetOpaque(this_val, g_buffer_class);
-    if (b && b->buffer) wgpuBufferUnmap(b->buffer);
+    if (b) {
+        wg_buffer_detach_ranges(ctx, b);
+        if (b->buffer) wgpuBufferUnmap(b->buffer);
+    }
     return JS_UNDEFINED;
 }
 
