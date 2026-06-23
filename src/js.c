@@ -29332,6 +29332,18 @@ ns_iframe_make_realm_context(ns_js *js, JSValueConst iframe_doc,
     JS_SetContextOpaque(fctx, js);
     g_ptr_array_add(js->frame_ctxs, fctx);
 
+    JSClassID dom_ids[6] = {
+        ns_element_class_id, ns_style_class_id, ns_token_list_class_id,
+        ns_live_class_id, ns_dataset_class_id, ns_storage_class_id,
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(dom_ids); i++) {
+        if (!dom_ids[i]) continue;
+        JSValue proto = JS_GetClassProto(js->ctx, dom_ids[i]);
+        if (JS_IsObject(proto))
+            JS_SetClassProto(fctx, dom_ids[i], JS_DupValue(fctx, proto));
+        JS_FreeValue(js->ctx, proto);
+    }
+
     JSValue fg = JS_GetGlobalObject(fctx);
     JSValue parent_global = JS_GetGlobalObject(js->ctx);
     JS_SetPrototype(fctx, fg, parent_global);
