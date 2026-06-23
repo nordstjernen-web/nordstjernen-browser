@@ -28588,17 +28588,71 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     if (argc < 1 || !JS_IsString(argv[0])) return JS_NewString(ctx, "");
-    const char *t = JS_ToCString(ctx, argv[0]);
-    if (!t) return JS_NewString(ctx, "");
+    const char *raw = JS_ToCString(ctx, argv[0]);
+    if (!raw) return JS_NewString(ctx, "");
+    char *t = g_ascii_strdown(raw, -1);
+    JS_FreeCString(ctx, raw);
+
+    char *semi = strchr(t, ';');
+    char *container = semi ? g_strndup(t, (gsize)(semi - t)) : g_strdup(t);
+    g_strstrip(container);
+
+#ifdef NS_HAVE_LIBAV
+    gboolean libav = TRUE;
+#else
+    gboolean libav = FALSE;
+#endif
+
+    gboolean container_ok =
+        strcmp(container, "audio/mpeg") == 0 ||
+        strcmp(container, "audio/mp3") == 0 ||
+        strcmp(container, "video/mpeg") == 0 ||
+        (libav && (strcmp(container, "video/webm") == 0 ||
+                   strcmp(container, "audio/webm") == 0 ||
+                   strcmp(container, "audio/ogg") == 0 ||
+                   strcmp(container, "application/ogg") == 0 ||
+                   strcmp(container, "audio/opus") == 0));
+
     const char *out = "";
-    if (strstr(t, "audio/mpeg") || strstr(t, "audio/mp3")) {
-        out = "maybe";
-    } else if (g_str_has_prefix(t, "video/") ||
-               strstr(t, "mp4") || strstr(t, "webm") || strstr(t, "ogg") ||
-               strstr(t, "aac") || strstr(t, "wav")) {
-        out = "maybe";
+    if (container_ok) {
+        char *codecs = NULL;
+        if (semi) {
+            char *c = strstr(semi, "codecs");
+            if (c && (c = strchr(c, '=')) != NULL) {
+                c++;
+                while (*c == ' ' || *c == '"' || *c == '\'') c++;
+                codecs = g_strdup(c);
+                char *q = codecs;
+                while (*q && *q != '"' && *q != '\'') q++;
+                *q = '\0';
+            }
+        }
+        if (codecs && *codecs) {
+            gboolean all_ok = TRUE;
+            char **parts = g_strsplit(codecs, ",", -1);
+            for (int i = 0; parts[i] && all_ok; i++) {
+                char *cd = g_strstrip(parts[i]);
+                gboolean ok =
+                    strstr(cd, "mp3") != NULL ||
+                    g_str_has_prefix(cd, "mp4a.69") ||
+                    g_str_has_prefix(cd, "mp4a.6b") ||
+                    (libav && (g_str_has_prefix(cd, "vp8") ||
+                               g_str_has_prefix(cd, "vp9") ||
+                               g_str_has_prefix(cd, "vp08") ||
+                               g_str_has_prefix(cd, "vp09") ||
+                               strstr(cd, "opus") != NULL ||
+                               strstr(cd, "vorbis") != NULL));
+                if (!ok) all_ok = FALSE;
+            }
+            g_strfreev(parts);
+            out = all_ok ? "probably" : "";
+        } else {
+            out = "maybe";
+        }
+        g_free(codecs);
     }
-    JS_FreeCString(ctx, t);
+    g_free(container);
+    g_free(t);
     return JS_NewString(ctx, out);
 }
 

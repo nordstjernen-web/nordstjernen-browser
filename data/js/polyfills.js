@@ -6223,4 +6223,419 @@
             }
         });
     })();
+    /* Text tracks: addTextTrack() was a no-op and textTracks returned a fresh
+     * empty array. Provide a working TextTrack / TextTrackList / TextTrackCue
+     * model: addTextTrack, a media element's live textTracks list with an async
+     * 'addtrack' TrackEvent, a <track> element's .track and readyState, mode
+     * validation, cue add/remove, and WebVTT loading of a <track src> (fetch +
+     * a minimal cue parser, firing load/error). Cue timing/rendering is not
+     * implemented. */
+    (function () {
+        if (typeof document === 'undefined') return;
+
+        function eventTarget(obj) {
+            var listeners = {};
+            obj.addEventListener = function (type, cb) {
+                if (!cb) return;
+                (listeners[type] || (listeners[type] = [])).push(cb);
+            };
+            obj.removeEventListener = function (type, cb) {
+                var a = listeners[type];
+                if (a) { var i = a.indexOf(cb); if (i >= 0) a.splice(i, 1); }
+            };
+            obj.dispatchEvent = function (ev) {
+                try {
+                    if (ev && ev.target == null)
+                        Object.defineProperty(ev, 'target',
+                            { value: obj, configurable: true });
+                } catch (e) {}
+                var prev;
+                try { prev = global.event; global.event = ev; } catch (e) {}
+                var on = obj['on' + ev.type];
+                if (typeof on === 'function') { try { on.call(obj, ev); } catch (e) {} }
+                var a = listeners[ev.type];
+                if (a) a.slice().forEach(function (cb) {
+                    try { cb.call(obj, ev); } catch (e) {}
+                });
+                try { global.event = prev; } catch (e) {}
+                return true;
+            };
+            return obj;
+        }
+
+        function makeCueList() {
+            var list = [];
+            list.getCueById = function (id) {
+                for (var i = 0; i < this.length; i++)
+                    if (this[i].id === id) return this[i];
+                return null;
+            };
+            return list;
+        }
+
+        var MODES = { disabled: 1, hidden: 1, showing: 1 };
+
+        function TextTrack(el, kind, label, language, id, mode) {
+            var self = eventTarget({});
+            var _mode = MODES[mode] ? mode : 'disabled';
+            var cues = makeCueList();
+            var active = makeCueList();
+            self.oncuechange = null;
+            self.__el = el || null;
+            self.__cues = cues;
+            Object.defineProperties(self, {
+                kind:     { enumerable: true, value: kind || '' },
+                label:    { enumerable: true, value: label || '' },
+                language: { enumerable: true, value: language || '' },
+                id:       { enumerable: true, value: id || '' },
+                inBandMetadataTrackDispatchType: { enumerable: true, value: '' },
+                mode: {
+                    enumerable: true,
+                    get: function () { return _mode; },
+                    set: function (v) {
+                        var s = (typeof v === 'string') ? v : String(v);
+                        if (MODES[s]) {
+                            _mode = s;
+                            if (s !== 'disabled') {
+                                if (typeof queueMicrotask === 'function')
+                                    queueMicrotask(function () { maybeLoad(self); });
+                                else maybeLoad(self);
+                            }
+                        }
+                    }
+                },
+                cues:       { enumerable: true, get: function () {
+                    return _mode === 'disabled' ? null : cues; } },
+                activeCues: { enumerable: true, get: function () {
+                    return _mode === 'disabled' ? null : active; } },
+                addCue: { value: function (cue) {
+                    if (!cue) return;
+                    try { cue.track = self; } catch (e) {}
+                    if (cues.indexOf(cue) >= 0) return;
+                    var st = +cue.startTime, et = +cue.endTime;
+                    var i = 0;
+                    while (i < cues.length) {
+                        var cst = +cues[i].startTime, cet = +cues[i].endTime;
+                        if (cst > st || (cst === st && cet < et)) break;
+                        i++;
+                    }
+                    cues.splice(i, 0, cue);
+                } },
+                removeCue: { value: function (cue) {
+                    var i = cues.indexOf(cue);
+                    if (i < 0) throw new DOMException('Cue not found', 'NotFoundError');
+                    cues.splice(i, 1);
+                    try { cue.track = null; } catch (e) {}
+                } }
+            });
+            try {
+                Object.defineProperty(self, Symbol.toStringTag,
+                    { value: 'TextTrack', configurable: true });
+            } catch (e) {}
+            return self;
+        }
+
+        function parseTimestamp(s) {
+            var m = /^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3})$/.exec(s.trim());
+            if (!m) return NaN;
+            return (m[1] ? +m[1] * 3600 : 0) + (+m[2]) * 60 + (+m[3]) + (+m[4]) / 1000;
+        }
+
+        function parseVtt(text, track) {
+            var lines = String(text).replace(/\r\n|\r/g, '\n').split('\n');
+            if (!/^﻿?WEBVTT/.test(lines[0] || '')) return false;
+            var i = 1;
+            while (i < lines.length) {
+                while (i < lines.length && lines[i].trim() === '') i++;
+                if (i >= lines.length) break;
+                var id = '';
+                if (lines[i].indexOf('-->') < 0) { id = lines[i]; i++; }
+                if (i >= lines.length || lines[i].indexOf('-->') < 0) {
+                    while (i < lines.length && lines[i].trim() !== '') i++;
+                    continue;
+                }
+                var tm = lines[i].split('-->');
+                var start = parseTimestamp(tm[0]);
+                var end = parseTimestamp((tm[1] || '').trim().split(/\s+/)[0] || '');
+                i++;
+                var textLines = [];
+                while (i < lines.length && lines[i].trim() !== '') {
+                    textLines.push(lines[i]); i++;
+                }
+                if (!isNaN(start) && !isNaN(end) && typeof global.VTTCue === 'function') {
+                    try {
+                        var cue = new global.VTTCue(start, end, textLines.join('\n'));
+                        cue.id = id;
+                        track.addCue(cue);
+                    } catch (e) {}
+                }
+            }
+            return true;
+        }
+
+        var RS = { NONE: 0, LOADING: 1, LOADED: 2, ERROR: 3 };
+
+        function maybeLoad(track) {
+            var el = track.__el;
+            if (!el || track.__loading) return;
+            var parent = el.parentNode;
+            if (!parent || !isMedia(parent)) return;
+            var src = el.getAttribute ? (el.getAttribute('src') || '') : '';
+            if (track.__loadedSrc === src && (src || track.__triedEmpty)) return;
+            if (!src) {
+                track.__triedEmpty = true;
+                track.__loadedSrc = src;
+                el.__trackRS = RS.ERROR;
+                var fail = function () {
+                    try { el.dispatchEvent(new Event('error')); } catch (e) {}
+                };
+                if (typeof queueMicrotask === 'function') queueMicrotask(fail);
+                else setTimeout(fail, 0);
+                return;
+            }
+            track.__loading = true;
+            track.__loadedSrc = src;
+            el.__trackRS = RS.LOADING;
+            var resolved = src;
+            try { resolved = new URL(src, document.baseURI).href; } catch (e) {}
+            (typeof fetch === 'function'
+                ? fetch(resolved).then(function (r) {
+                    if (!r.ok) throw new Error('http ' + r.status);
+                    return r.text();
+                  })
+                : Promise.reject(new Error('no fetch'))
+            ).then(function (text) {
+                track.__loading = false;
+                var ok = parseVtt(text, track);
+                el.__trackRS = ok ? RS.LOADED : RS.ERROR;
+                try { el.dispatchEvent(new Event(ok ? 'load' : 'error')); } catch (e) {}
+            }).catch(function () {
+                track.__loading = false;
+                el.__trackRS = RS.ERROR;
+                try { el.dispatchEvent(new Event('error')); } catch (e) {}
+            });
+        }
+
+        function trackListFor(el) {
+            if (el.__ndTT) return el.__ndTT;
+            var list = eventTarget([]);
+            list.onaddtrack = null;
+            list.onremovetrack = null;
+            list.onchange = null;
+            list.getTrackById = function (id) {
+                for (var i = 0; i < this.length; i++)
+                    if (this[i].id === id) return this[i];
+                return null;
+            };
+            try {
+                Object.defineProperty(list, Symbol.toStringTag,
+                    { value: 'TextTrackList', configurable: true });
+            } catch (e) {}
+            try {
+                Object.defineProperty(el, '__ndTT',
+                    { value: list, configurable: true });
+            } catch (e) { el.__ndTT = list; }
+            return list;
+        }
+
+        function addTrack(list, track) {
+            if (list.indexOf(track) >= 0) return;
+            list.push(track);
+            var fire = function () {
+                var ev;
+                try { ev = new TrackEvent('addtrack'); }
+                catch (e) { ev = { type: 'addtrack' }; }
+                try { ev.track = track; } catch (e) {}
+                list.dispatchEvent(ev);
+            };
+            if (typeof queueMicrotask === 'function') queueMicrotask(fire);
+            else setTimeout(fire, 0);
+        }
+
+        var proto = Object.getPrototypeOf(document.createElement('video'));
+        var nativeReadyState = Object.getOwnPropertyDescriptor(proto, 'readyState');
+
+        function isMedia(el) {
+            var nm = el && el.tagName ? el.tagName.toLowerCase() : '';
+            return nm === 'video' || nm === 'audio';
+        }
+        function isTrack(el) {
+            return el && el.tagName && el.tagName.toLowerCase() === 'track';
+        }
+
+        Object.defineProperty(proto, 'textTracks', {
+            configurable: true, enumerable: true,
+            get: function () {
+                var list = trackListFor(this);
+                if (isMedia(this) && this.children) {
+                    for (var i = 0; i < this.children.length; i++)
+                        if (isTrack(this.children[i]))
+                            considerTrack(this.children[i]);
+                }
+                return list;
+            }
+        });
+
+        Object.defineProperty(proto, 'addTextTrack', {
+            configurable: true, writable: true, enumerable: true,
+            value: function (kind, label, language) {
+                var k = (kind == null) ? '' : String(kind);
+                var valid = { subtitles: 1, captions: 1, descriptions: 1,
+                              chapters: 1, metadata: 1 };
+                if (!valid[k])
+                    throw new TypeError("Failed to execute 'addTextTrack': " +
+                        "The provided value '" + k + "' is not a valid 'TextTrackKind'.");
+                var track = TextTrack(null, k, label, language, '', 'hidden');
+                addTrack(trackListFor(this), track);
+                return track;
+            }
+        });
+
+        Object.defineProperty(proto, 'track', {
+            configurable: true, enumerable: true,
+            get: function () {
+                if (!isTrack(this)) return null;
+                if (!this.__ndTrack) {
+                    var kind = (this.getAttribute('kind') || 'subtitles').toLowerCase();
+                    var valid = { subtitles: 1, captions: 1, descriptions: 1,
+                                  chapters: 1, metadata: 1 };
+                    if (!valid[kind]) kind = 'metadata';
+                    var t = TextTrack(this, kind, this.getAttribute('label') || '',
+                                      this.getAttribute('srclang') || '',
+                                      this.id || '', 'disabled');
+                    try { Object.defineProperty(this, '__ndTrack',
+                        { value: t, configurable: true }); }
+                    catch (e) { this.__ndTrack = t; }
+                }
+                var parent = this.parentNode;
+                if (parent && isMedia(parent)) {
+                    addTrack(trackListFor(parent), this.__ndTrack);
+                    var self = this;
+                    if (typeof queueMicrotask === 'function')
+                        queueMicrotask(function () { maybeLoad(self.__ndTrack); });
+                }
+                return this.__ndTrack;
+            }
+        });
+
+        Object.defineProperty(proto, 'readyState', {
+            configurable: true, enumerable: true,
+            get: function () {
+                if (isTrack(this)) return this.__trackRS || 0;
+                return nativeReadyState && nativeReadyState.get
+                    ? nativeReadyState.get.call(this) : 0;
+            }
+        });
+
+        if (typeof global.HTMLTrackElement === 'function') {
+            ['NONE', 'LOADING', 'LOADED', 'ERROR'].forEach(function (k) {
+                try {
+                    Object.defineProperty(global.HTMLTrackElement, k,
+                        { value: RS[k], enumerable: true });
+                    Object.defineProperty(global.HTMLTrackElement.prototype, k,
+                        { value: RS[k], enumerable: true, configurable: true });
+                } catch (e) {}
+            });
+        }
+
+        if (typeof global.VTTCue === 'function' && global.VTTCue.prototype) {
+            try {
+                var vp = global.VTTCue.prototype;
+                if (!Object.getOwnPropertyDescriptor(vp, 'id')) {
+                    Object.defineProperty(vp, 'id', {
+                        configurable: true, enumerable: true,
+                        get: function () {
+                            return this.__nd_id === undefined ? '' : this.__nd_id;
+                        },
+                        set: function (v) { this.__nd_id = String(v); }
+                    });
+                }
+            } catch (e) {}
+        }
+
+        /* The spec's track processing model runs on connection, not on JS
+         * access, so a <track> appended to a media element (without anyone
+         * touching .track) must still load. A document-wide observer would tax
+         * every page, so it is started lazily only once a track/audio/video
+         * element is created. */
+        var observing = false;
+        function considerTrack(el) {
+            if (!isTrack(el)) return;
+            var parent = el.parentNode;
+            if (!parent || !isMedia(parent)) return;
+            var track = el.track;
+            var isDefault = el.default === true ||
+                (el.hasAttribute && el.hasAttribute('default'));
+            if (track.mode === 'disabled' && isDefault)
+                track.mode = 'hidden';
+            if (track.mode !== 'disabled') {
+                if (typeof queueMicrotask === 'function')
+                    queueMicrotask(function () { maybeLoad(track); });
+                else maybeLoad(track);
+            }
+        }
+        function scanForTracks(node) {
+            if (!node || node.nodeType !== 1) return;
+            considerTrack(node);
+            if (node.querySelectorAll) {
+                var ts = node.querySelectorAll('track');
+                for (var i = 0; i < ts.length; i++) considerTrack(ts[i]);
+            }
+        }
+        function removeTrackNode(parent, node) {
+            if (!isTrack(node) || !node.__ndTrack || !parent || !parent.__ndTT)
+                return;
+            var list = parent.__ndTT;
+            var idx = list.indexOf(node.__ndTrack);
+            if (idx < 0) return;
+            var track = node.__ndTrack;
+            list.splice(idx, 1);
+            var fire = function () {
+                var ev;
+                try { ev = new TrackEvent('removetrack'); }
+                catch (e) { ev = { type: 'removetrack' }; }
+                try { ev.track = track; } catch (e) {}
+                list.dispatchEvent(ev);
+            };
+            if (typeof queueMicrotask === 'function') queueMicrotask(fire);
+            else setTimeout(fire, 0);
+        }
+        function onMutations(muts) {
+            for (var i = 0; i < muts.length; i++) {
+                var m = muts[i];
+                for (var j = 0; j < m.addedNodes.length; j++)
+                    scanForTracks(m.addedNodes[j]);
+                for (var k = 0; k < m.removedNodes.length; k++)
+                    removeTrackNode(m.target, m.removedNodes[k]);
+            }
+        }
+        function ensureObserver() {
+            if (observing || typeof MutationObserver !== 'function' ||
+                !document.documentElement) return;
+            observing = true;
+            new MutationObserver(onMutations).observe(document.documentElement,
+                       { childList: true, subtree: true });
+            scanForTracks(document.documentElement);
+        }
+        function observeMedia(el) {
+            if (typeof MutationObserver !== 'function') return;
+            try {
+                new MutationObserver(onMutations).observe(el,
+                    { childList: true, subtree: true });
+            } catch (e) {}
+        }
+        if (typeof document.createElement === 'function') {
+            var origCreate = document.createElement;
+            document.createElement = function (name) {
+                var el = origCreate.apply(this, arguments);
+                var n = ('' + name).toLowerCase();
+                if (n === 'track' || n === 'video' || n === 'audio')
+                    ensureObserver();
+                if (n === 'video' || n === 'audio')
+                    observeMedia(el);
+                return el;
+            };
+        }
+    })();
+
 })(typeof globalThis !== 'undefined' ? globalThis : this);
