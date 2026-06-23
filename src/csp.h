@@ -29,6 +29,7 @@ typedef struct ns_csp ns_csp;
 
 ns_csp *ns_csp_parse(const char *header_value);
 void    ns_csp_free(ns_csp *csp);
+void    ns_csp_merge(ns_csp *dst, ns_csp *src);
 
 gboolean ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,
                        const char *resource_url,
@@ -37,7 +38,8 @@ gboolean ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,
 gboolean ns_csp_allows_with_nonce(const ns_csp *csp, ns_csp_kind kind,
                                   const char *resource_url,
                                   const char *document_url,
-                                  const char *nonce);
+                                  const char *nonce,
+                                  gboolean parser_inserted);
 
 gboolean ns_csp_inline_script_allowed(const ns_csp *csp,
                                       const char *body, gsize body_len,

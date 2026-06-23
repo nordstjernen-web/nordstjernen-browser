@@ -108,6 +108,16 @@ ns_csp_free(ns_csp *csp)
     g_free(csp);
 }
 
+void
+ns_csp_merge(ns_csp *dst, ns_csp *src)
+{
+    if (!dst || !src || !dst->policies || !src->policies) return;
+    g_ptr_array_set_free_func(src->policies, NULL);
+    for (guint i = 0; i < src->policies->len; i++)
+        g_ptr_array_add(dst->policies, g_ptr_array_index(src->policies, i));
+    g_ptr_array_set_size(src->policies, 0);
+}
+
 
 static gboolean
 url_scheme_matches(const char *url, const char *scheme_with_colon)
@@ -254,10 +264,12 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
     return TRUE;
 }
 
+static gboolean list_has_token(const GPtrArray *list, const char *tok);
+
 static gboolean
 policy_allows_with_nonce(const ns_csp_policy *p, ns_csp_kind kind,
                          const char *resource_url, const char *document_url,
-                         const char *nonce)
+                         const char *nonce, gboolean parser_inserted)
 {
     if (kind == NS_CSP_FRAME_ANCESTORS)
         return policy_frame_ancestors_allows(p, resource_url, document_url);
@@ -277,10 +289,13 @@ policy_allows_with_nonce(const ns_csp_policy *p, ns_csp_kind kind,
     }
     GPtrArray *list = p->sources[eff];
     if (!list || list->len == 0) return FALSE;
-    gboolean strict_dynamic = FALSE;
+    gboolean script_like = (kind == NS_CSP_SCRIPT ||
+                            (kind == NS_CSP_DEFAULT && eff == NS_CSP_DEFAULT));
+    gboolean strict_dynamic = script_like &&
+                              list_has_token(list, "'strict-dynamic'");
     for (guint i = 0; i < list->len; i++) {
         const char *s = g_ptr_array_index(list, i);
-        if (strcmp(s, "'strict-dynamic'") == 0) { strict_dynamic = TRUE; continue; }
+        if (strcmp(s, "'strict-dynamic'") == 0) continue;
         if (nonce && g_str_has_prefix(s, "'nonce-")) {
             gsize slen = strlen(s);
             if (slen > 8 && s[slen - 1] == '\'') {
@@ -291,10 +306,10 @@ policy_allows_with_nonce(const ns_csp_policy *p, ns_csp_kind kind,
             }
             continue;
         }
+        if (strict_dynamic) continue;
         if (source_matches(s, resource_url, document_url)) return TRUE;
     }
-    if (strict_dynamic && (kind == NS_CSP_SCRIPT ||
-                           (kind == NS_CSP_DEFAULT && eff == NS_CSP_DEFAULT)))
+    if (strict_dynamic && !parser_inserted)
         return TRUE;
     return FALSE;
 }
@@ -303,19 +318,21 @@ gboolean
 ns_csp_allows(const ns_csp *csp, ns_csp_kind kind,
               const char *resource_url, const char *document_url)
 {
-    return ns_csp_allows_with_nonce(csp, kind, resource_url, document_url, NULL);
+    return ns_csp_allows_with_nonce(csp, kind, resource_url, document_url,
+                                    NULL, TRUE);
 }
 
 gboolean
 ns_csp_allows_with_nonce(const ns_csp *csp, ns_csp_kind kind,
                          const char *resource_url, const char *document_url,
-                         const char *nonce)
+                         const char *nonce, gboolean parser_inserted)
 {
     if (!csp || !resource_url) return TRUE;
     if (kind >= NS_CSP_KIND_COUNT) return TRUE;
     for (guint i = 0; i < csp->policies->len; i++) {
         const ns_csp_policy *p = g_ptr_array_index(csp->policies, i);
-        if (!policy_allows_with_nonce(p, kind, resource_url, document_url, nonce))
+        if (!policy_allows_with_nonce(p, kind, resource_url, document_url,
+                                      nonce, parser_inserted))
             return FALSE;
     }
     return TRUE;

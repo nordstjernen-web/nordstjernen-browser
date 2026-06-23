@@ -159,7 +159,7 @@ struct ns_js {
     GArray       *doc_stack;
     JSValue       iframe_doc;
     int           iframe_doc_set;
-    const ns_csp *csp;
+    ns_csp *csp;
     char         *selection_text;
     gboolean      selection_has_range;
     double        selection_x, selection_y, selection_w, selection_h;

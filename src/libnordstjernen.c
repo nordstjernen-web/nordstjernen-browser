@@ -641,6 +641,24 @@ browser_prepare_document_response(ns_response *resp)
     resp->content_type = g_strdup("text/html; charset=utf-8");
 }
 
+static void
+browser_apply_meta_csp(ns_js *js, const ns_node *node)
+{
+    for (const ns_node *c = node ? node->first_child : NULL; c;
+         c = c->next_sibling) {
+        if (c->kind == NS_NODE_ELEMENT && c->name &&
+            g_ascii_strcasecmp(c->name, "meta") == 0) {
+            const char *he = ns_element_get_attr(c, "http-equiv");
+            if (he && g_ascii_strcasecmp(he, "content-security-policy") == 0) {
+                const char *content = ns_element_get_attr(c, "content");
+                if (content && *content)
+                    ns_js_add_csp_header(js, content);
+            }
+        }
+        browser_apply_meta_csp(js, c);
+    }
+}
+
 static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
@@ -667,6 +685,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
     char *refresh_hdr = g_strdup(resp->refresh);
     char *doc_language = g_strdup(resp->content_language);
+    char *csp_header = g_strdup(resp->csp_header);
     g_free(file_url);
     browser_prepare_document_response(resp);
 
@@ -716,8 +735,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
+        ns_js_add_csp_header(b->js, csp_header);
+        browser_apply_meta_csp(b->js, doc);
         ns_js_run_scripts_in_doc(b->js, doc, base);
     }
+    g_free(csp_header);
     if (b->videos) {
         ns_video_cache_set_js_cb(b->videos, browser_js_video, b);
         ns_video_cache_set_audio_cb(b->videos, browser_js_audio, b);

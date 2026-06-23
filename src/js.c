@@ -33479,6 +33479,7 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
     char *stored = is_xml ? g_strdup(name) : g_ascii_strdown(name, -1);
     JS_FreeCString(ctx, name);
     ns_node *el = ns_node_new_element(stored);
+    el->flags |= NS_NODE_NOT_PARSER_INSERTED;
     if (is_xml) el->flags |= NS_NODE_KEEP_CASE | NS_NODE_FOREIGN_NS;
     ns_js *js = js_from_ctx(ctx);
     g_hash_table_add(js->orphan_nodes, el);
@@ -33571,6 +33572,7 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     gboolean is_html = ns && strcmp(ns, "http://www.w3.org/1999/xhtml") == 0;
     char *stored = is_html ? g_strdup(local) : g_strdup(name);
     ns_node *el = ns_node_new_element(stored);
+    el->flags |= NS_NODE_NOT_PARSER_INSERTED;
     if (is_svg)       el->flags |= NS_NODE_SVG_NS;
     else if (!is_html) el->flags |= NS_NODE_FOREIGN_NS;
     if (ns && !is_html)
@@ -35846,6 +35848,7 @@ ns_js_free(ns_js *js)
     ns_js_blob_registry_remove(js);
     ns_storage_flush(js);
     if (js->import_map) g_ptr_array_free(js->import_map, TRUE);
+    if (js->csp) { ns_csp_free(js->csp); js->csp = NULL; }
     g_free(js->early_inject_src);
     g_free(js->local_storage_origin);
     g_free(js->local_storage_path);
@@ -37003,8 +37006,10 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             ns_js_dispatch_resource_event(js, n, "error");
             return;
         }
+        gboolean parser_inserted = !(n->flags & NS_NODE_NOT_PARSER_INSERTED);
         if (js->csp &&
-            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs, origin, nonce)) {
+            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs, origin,
+                                      nonce, parser_inserted)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf("CSP blocked: script %s", abs);
                 js->log_cb(line, js->log_user_data);
@@ -38647,6 +38652,20 @@ ns_js_set_early_inject_src(ns_js *js, const char *src)
     if (!js) return;
     g_free(js->early_inject_src);
     js->early_inject_src = g_strdup(src);
+}
+
+void
+ns_js_add_csp_header(ns_js *js, const char *header_value)
+{
+    if (!js || !header_value || !*header_value) return;
+    ns_csp *parsed = ns_csp_parse(header_value);
+    if (!parsed) return;
+    if (js->csp) {
+        ns_csp_merge(js->csp, parsed);
+        ns_csp_free(parsed);
+    } else {
+        js->csp = parsed;
+    }
 }
 
 void
