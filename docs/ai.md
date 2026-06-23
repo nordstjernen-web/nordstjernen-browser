@@ -58,7 +58,10 @@ and builds it at configure time. The CPU backend is always built (no BLAS,
 OpenMP off); GPU offload is controlled by the `ai_gpu` Meson option (`auto`
 by default) — Metal on macOS, Vulkan on Linux/Windows when the Vulkan SDK
 and a GLSL compiler are found. `ns_ai_status_json` reports the active GPU
-device and offloaded layer count to the start page footer.
+device and offloaded layer count to the start page footer. The official
+portable / nightly packages pin `ai_gpu=disabled` (CPU-only) so a download
+never hard-requires a host GPU stack; GPU offload is a source-build option
+(or set `NS_PACK_AI_GPU=auto` when packaging).
 
 The feature is controlled by the `ai` Meson option (enabled by default):
 

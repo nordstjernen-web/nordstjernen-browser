@@ -174,8 +174,9 @@ lexbor, QuickJS, WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree
 setup` fetches and builds llama.cpp as a pinned subproject; pass
 `-Dai=disabled` for a fully offline build. Windows, Fedora, openSUSE and
 macOS instructions are in
-[docs/](docs/). Keyboard, mouse and touch controls are documented in
-[docs/Controls.md](docs/Controls.md).
+[docs/](docs/README.md). Keyboard, mouse and touch controls are documented in
+[docs/Controls.md](docs/Controls.md). The full documentation index is
+[docs/README.md](docs/README.md).
 
 ## Dependencies
 
