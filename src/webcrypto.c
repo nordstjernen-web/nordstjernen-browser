@@ -78,7 +78,31 @@ ns_crypto_md(const char *hash)
     if (!g_ascii_strcasecmp(hash, "SHA-256")) return EVP_sha256();
     if (!g_ascii_strcasecmp(hash, "SHA-384")) return EVP_sha384();
     if (!g_ascii_strcasecmp(hash, "SHA-512")) return EVP_sha512();
+    if (!g_ascii_strcasecmp(hash, "SHA3-256")) return EVP_sha3_256();
+    if (!g_ascii_strcasecmp(hash, "SHA3-384")) return EVP_sha3_384();
+    if (!g_ascii_strcasecmp(hash, "SHA3-512")) return EVP_sha3_512();
     return NULL;
+}
+
+guint8 *
+ns_crypto_digest(const char *hash, const guint8 *data, gsize len, gsize *out_len)
+{
+    const EVP_MD *md = ns_crypto_md(hash);
+    if (!md) return NULL;
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (!ctx) return NULL;
+    guint8 *out = g_malloc((gsize)EVP_MD_get_size(md));
+    unsigned int n = 0;
+    if (EVP_DigestInit_ex(ctx, md, NULL) != 1 ||
+        EVP_DigestUpdate(ctx, data ? data : (const guint8 *)"", len) != 1 ||
+        EVP_DigestFinal_ex(ctx, out, &n) != 1) {
+        EVP_MD_CTX_free(ctx);
+        g_free(out);
+        return NULL;
+    }
+    EVP_MD_CTX_free(ctx);
+    if (out_len) *out_len = n;
+    return out;
 }
 
 static const char *

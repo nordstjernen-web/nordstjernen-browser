@@ -62,6 +62,8 @@ typedef struct {
 } ns_crypto_params;
 
 void           ns_crypto_key_unref(ns_crypto_key *k);
+guint8        *ns_crypto_digest(const char *hash, const guint8 *data,
+                                gsize len, gsize *out_len);
 
 ns_crypto_key *ns_crypto_generate_secret(const char *algo, const char *hash,
                                          int length_bits, gboolean extractable,

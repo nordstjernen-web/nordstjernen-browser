@@ -7672,7 +7672,12 @@ ns_subtle_digest(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, nm);
     }
     GChecksumType type = ns_subtle_algorithm(algo_name);
-    if ((int)type < 0) {
+    gboolean is_sha3 = algo_name &&
+        (g_ascii_strcasecmp(algo_name, "SHA3-256") == 0 ||
+         g_ascii_strcasecmp(algo_name, "SHA3-384") == 0 ||
+         g_ascii_strcasecmp(algo_name, "SHA3-512") == 0);
+    char *sha3_name = is_sha3 ? g_strdup(algo_name) : NULL;
+    if ((int)type < 0 && !is_sha3) {
         if (algo_name) JS_FreeCString(ctx, algo_name);
         ns_js_promise_reject(ctx, resolvers,
             "NotSupportedError: unsupported digest algorithm");
@@ -7704,16 +7709,29 @@ ns_subtle_digest(JSContext *ctx, JSValueConst this_val,
         if (ab_base) { data = ab_base; data_len = ab_total; }
     }
     if (!data && !buffer_like) {
+        g_free(sha3_name);
         ns_js_promise_reject(ctx, resolvers,
             "digest: data must be ArrayBuffer or typed array");
         return promise;
     }
-    GChecksum *sum = g_checksum_new(type);
-    g_checksum_update(sum, data ? data : (const guint8 *)"", data_len);
-    gsize digest_len = g_checksum_type_get_length(type);
-    guint8 *digest = g_malloc(digest_len);
-    g_checksum_get_digest(sum, digest, &digest_len);
-    g_checksum_free(sum);
+    gsize digest_len = 0;
+    guint8 *digest = NULL;
+    if (sha3_name) {
+        digest = ns_crypto_digest(sha3_name, data, data_len, &digest_len);
+        g_free(sha3_name);
+        if (!digest) {
+            ns_js_promise_reject(ctx, resolvers,
+                "OperationError: digest failed");
+            return promise;
+        }
+    } else {
+        GChecksum *sum = g_checksum_new(type);
+        g_checksum_update(sum, data ? data : (const guint8 *)"", data_len);
+        digest_len = g_checksum_type_get_length(type);
+        digest = g_malloc(digest_len);
+        g_checksum_get_digest(sum, digest, &digest_len);
+        g_checksum_free(sum);
+    }
     JSValue out_ab = JS_NewArrayBufferCopy(ctx, digest, digest_len);
     g_free(digest);
     JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &out_ab);
