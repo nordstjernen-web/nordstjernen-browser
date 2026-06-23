@@ -12604,7 +12604,7 @@ ns_style_free(ns_style *s)
 {
     if (!s) return;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
-        ns_css_value_free(s->values[i]);
+        if (s->values[i]) ns_css_value_free(s->values[i]);
     ns_style_free(s->before);
     ns_style_free(s->after);
     ns_style_free(s->first_letter);
@@ -14423,10 +14423,6 @@ ns_style_clone_shared(const ns_style *s)
     ns_style *c = ns_style_alloc();
     c->share_id = s->share_id;
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++) {
-        if (i == NS_CSS_FONT_SIZE && s->values[i]) {
-            c->values[i] = ns_css_value_dup(s->values[i]);
-            continue;
-        }
         c->values[i] = s->values[i];
         if (c->values[i]) c->values[i]->ref++;
     }
