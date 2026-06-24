@@ -5643,11 +5643,29 @@ ns_js_fetch_state_free(ns_js_fetch_state *st)
 static JSValue
 ns_make_abort_error(JSContext *ctx)
 {
-    JSValue err = JS_NewError(ctx);
-    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "AbortError"));
-    JS_SetPropertyStr(ctx, err, "message",
-                      JS_NewString(ctx, "The operation was aborted."));
-    return err;
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, g, "DOMException");
+    JS_FreeValue(ctx, g);
+    JSValue exc = JS_UNDEFINED;
+    if (JS_IsObject(ctor)) {
+        JSValue args[2] = {
+            JS_NewString(ctx, "The operation was aborted."),
+            JS_NewString(ctx, "AbortError"),
+        };
+        exc = JS_CallConstructor(ctx, ctor, 2, args);
+        JS_FreeValue(ctx, args[0]);
+        JS_FreeValue(ctx, args[1]);
+    }
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(exc) || !JS_IsObject(exc)) {
+        if (JS_IsException(exc)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, exc);
+        exc = JS_NewError(ctx);
+        JS_SetPropertyStr(ctx, exc, "name", JS_NewString(ctx, "AbortError"));
+        JS_SetPropertyStr(ctx, exc, "message",
+                          JS_NewString(ctx, "The operation was aborted."));
+    }
+    return exc;
 }
 
 static void
@@ -12390,12 +12408,17 @@ ns_abort_controller_abort(JSContext *ctx, JSValueConst this_val,
 {
     JSValue sig = JS_GetPropertyStr(ctx, this_val, "signal");
     if (JS_IsObject(sig)) {
-        JS_SetPropertyStr(ctx, sig, "aborted", JS_TRUE);
-        JSValue reason = argc >= 1
-            ? JS_DupValue(ctx, argv[0])
-            : ns_make_abort_error(ctx);
-        JS_SetPropertyStr(ctx, sig, "reason", reason);
-        ns_target_fire_event(ctx, sig, "abort");
+        JSValue ab = JS_GetPropertyStr(ctx, sig, "aborted");
+        gboolean already = JS_ToBool(ctx, ab);
+        JS_FreeValue(ctx, ab);
+        if (!already) {
+            JS_SetPropertyStr(ctx, sig, "aborted", JS_TRUE);
+            JSValue reason = (argc >= 1 && !JS_IsUndefined(argv[0]))
+                ? JS_DupValue(ctx, argv[0])
+                : ns_make_abort_error(ctx);
+            JS_SetPropertyStr(ctx, sig, "reason", reason);
+            ns_target_fire_event(ctx, sig, "abort");
+        }
     }
     JS_FreeValue(ctx, sig);
     return JS_UNDEFINED;
@@ -12441,11 +12464,7 @@ ns_abort_signal_propagate(JSContext *ctx, JSValueConst combined,
         ? JS_GetPropertyStr(ctx, source, "reason") : JS_UNDEFINED;
     if (JS_IsUndefined(reason) || JS_IsNull(reason)) {
         JS_FreeValue(ctx, reason);
-        reason = JS_NewError(ctx);
-        JS_SetPropertyStr(ctx, reason, "name",
-                          JS_NewString(ctx, "AbortError"));
-        JS_SetPropertyStr(ctx, reason, "message",
-                          JS_NewString(ctx, "signal aborted"));
+        reason = ns_make_abort_error(ctx);
     }
     JS_SetPropertyStr(ctx, combined, "aborted", JS_TRUE);
     JS_SetPropertyStr(ctx, combined, "reason", reason);
