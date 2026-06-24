@@ -13544,6 +13544,13 @@ ns_fetch_normalize_method(const char *method)
     return g_strdup(method);
 }
 
+static void
+ns_def_ro(JSContext *ctx, JSValueConst obj, const char *name, JSValue val)
+{
+    JS_DefinePropertyValueStr(ctx, obj, name, val,
+                              JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+}
+
 static JSValue
 ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -13598,24 +13605,27 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
         resolved = ns_url_resolve(js->current_url, url_raw);
         if (resolved) final_url = resolved;
     }
-    JS_SetPropertyStr(ctx, obj, "url", JS_NewString(ctx, final_url));
+    ns_def_ro(ctx, obj, "url", JS_NewString(ctx, final_url));
     g_autofree char *norm_method = ns_fetch_normalize_method(method);
-    JS_SetPropertyStr(ctx, obj, "method",
+    ns_def_ro(ctx, obj, "method",
         JS_NewString(ctx, norm_method ? norm_method : "GET"));
-    JS_SetPropertyStr(ctx, obj, "headers",
+    ns_def_ro(ctx, obj, "headers",
         ns_make_headers_from_init(ctx, headers_init));
     ns_body_install(ctx, obj, body_v, TRUE);
     ns_body_apply_inferred_ct(ctx, obj);
-    JS_SetPropertyStr(ctx, obj, "bodyUsed",       JS_FALSE);
-    JS_SetPropertyStr(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
-    JS_SetPropertyStr(ctx, obj, "credentials",    JS_NewString(ctx, "same-origin"));
-    JS_SetPropertyStr(ctx, obj, "cache",          JS_NewString(ctx, "default"));
-    JS_SetPropertyStr(ctx, obj, "redirect",       JS_NewString(ctx, "follow"));
-    JS_SetPropertyStr(ctx, obj, "referrer",       JS_NewString(ctx, "about:client"));
-    JS_SetPropertyStr(ctx, obj, "referrerPolicy", JS_NewString(ctx, ""));
-    JS_SetPropertyStr(ctx, obj, "integrity",      JS_NewString(ctx, ""));
-    JS_SetPropertyStr(ctx, obj, "keepalive",      JS_FALSE);
-    JS_SetPropertyStr(ctx, obj, "destination",    JS_NewString(ctx, ""));
+    ns_def_ro(ctx, obj, "bodyUsed",       JS_FALSE);
+    ns_def_ro(ctx, obj, "mode",           JS_NewString(ctx, "cors"));
+    ns_def_ro(ctx, obj, "credentials",    JS_NewString(ctx, "same-origin"));
+    ns_def_ro(ctx, obj, "cache",          JS_NewString(ctx, "default"));
+    ns_def_ro(ctx, obj, "redirect",       JS_NewString(ctx, "follow"));
+    ns_def_ro(ctx, obj, "referrer",       JS_NewString(ctx, "about:client"));
+    ns_def_ro(ctx, obj, "referrerPolicy", JS_NewString(ctx, ""));
+    ns_def_ro(ctx, obj, "integrity",      JS_NewString(ctx, ""));
+    ns_def_ro(ctx, obj, "keepalive",      JS_FALSE);
+    ns_def_ro(ctx, obj, "destination",    JS_NewString(ctx, ""));
+    ns_def_ro(ctx, obj, "isReloadNavigation",  JS_FALSE);
+    ns_def_ro(ctx, obj, "isHistoryNavigation", JS_FALSE);
+    ns_def_ro(ctx, obj, "duplex",         JS_NewString(ctx, "half"));
     ns_attach_body_consumers(ctx, obj);
     if (url_raw) JS_FreeCString(ctx, url_raw);
     if (method)  JS_FreeCString(ctx, method);
