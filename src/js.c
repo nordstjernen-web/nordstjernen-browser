@@ -11433,6 +11433,7 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     if (kind)
         was_checked = ns_checkable_pre_click(_j, el, kind);
     ns_target_dispatch_with_event(ctx, this_val, type, argv[0]);
+    JS_SetPropertyStr(ctx, argv[0], "currentTarget", JS_NULL);
     JS_FreeCString(ctx, type);
     JSValue prevented = JS_GetPropertyStr(ctx, argv[0], "defaultPrevented");
     gboolean was_prevented = JS_ToBool(ctx, prevented);
@@ -32987,6 +32988,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "        }"
             "      }"
             "    }"
+            "    try { Object.defineProperty(ev,'currentTarget',{value:null,configurable:true,writable:true}); } catch(e){}"
             "    return !(ev && ev.defaultPrevented);"
             "  };"
             "  var W = typeof Window !== 'undefined' && Window.prototype;"
@@ -37779,7 +37781,9 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
         "var m=this[K];if(m){var list=m[String(ev.type)];if(list){var snap=list.slice();"
         "for(var i=0;i<snap.length;i++){var L=snap[i];if(L.once){var idx=list.indexOf(L);if(idx>=0)list.splice(idx,1);}"
         "try{if(typeof L.cb==='function')L.cb.call(this,ev);else if(L.cb&&typeof L.cb.handleEvent==='function')L.cb.handleEvent(ev);}"
-        "catch(e){console.log('[event listener error] '+(e&&e.stack?e.stack:e));}}}}return !(ev&&ev.defaultPrevented);}});"
+        "catch(e){console.log('[event listener error] '+(e&&e.stack?e.stack:e));}}}}"
+        "try{Object.defineProperty(ev,'currentTarget',{value:null,configurable:true});}catch(e){}"
+        "return !(ev&&ev.defaultPrevented);}});"
         "var W=typeof Window!=='undefined'&&Window.prototype;"
         "if(W){['addEventListener','removeEventListener','dispatchEvent'].forEach(function(k){"
         "Object.defineProperty(W,k,{value:ET[k],writable:true,configurable:true});});"
