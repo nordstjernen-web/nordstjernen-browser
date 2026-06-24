@@ -1079,6 +1079,16 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
                         g_ascii_strcasecmp(parts->protocol, "https:") == 0;
     if (secure && !is_https) { g_free(domain_attr); g_free(path_attr); return; }
 
+    if (name_len >= 9 && g_ascii_strncasecmp(name, "__Secure-", 9) == 0 &&
+        !(secure && is_https)) {
+        g_free(domain_attr); g_free(path_attr); return;
+    }
+    if (name_len >= 7 && g_ascii_strncasecmp(name, "__Host-", 7) == 0 &&
+        (!secure || !is_https || (domain_attr && *domain_attr) ||
+         (path_attr && *path_attr && strcmp(path_attr, "/") != 0))) {
+        g_free(domain_attr); g_free(path_attr); return;
+    }
+
     const char *host = parts->hostname;
     char *file_domain;
     const char *tail;
