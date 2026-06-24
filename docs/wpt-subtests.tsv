@@ -44354,9 +44354,9 @@ test	subtest	status
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with selected range on foreignDoc from 0 to 1	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with selected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 0)	PASS
-/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 1)	FAIL
-/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 1	FAIL
-/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 2	FAIL
+/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 1)	PASS
+/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 1	PASS
+/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with selected range collapsed at (foreignDoc, 0)	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with selected range collapsed at (foreignDoc, 1)	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with selected range on foreignDoc from 0 to 1	PASS
@@ -44364,7 +44364,7 @@ test	subtest	status
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with unselected range collapsed at (foreignDoc, 0)	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with unselected range collapsed at (foreignDoc, 1)	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 1	PASS
-/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 2	FAIL
+/dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, null), with selected range on foreignDoc from 0 to 1	PASS
 /dom/ranges/Range-mutations-insertBefore.html	foreignDoc.insertBefore(detachedComment, null), with unselected range on foreignDoc from 0 to 1	PASS
 /dom/ranges/Range-mutations-insertBefore.html	paras[0].insertBefore(document, paras[0].firstChild), with selected range on paras[0] from 0 to 1	PASS
@@ -44810,7 +44810,7 @@ test	subtest	status
 /dom/ranges/Range-mutations-insertData.html	xmlTextNode.insertData(xmlTextNode.length, "foo"), with unselected range collapsed at (xmlTextNode, xmlTextNode.length)	PASS
 /dom/ranges/Range-mutations-removeChild.html	<harness>	OK
 /dom/ranges/Range-mutations-removeChild.html	foreignDoc.documentElement.parentNode.removeChild(foreignDoc.documentElement), with selected range on foreignDoc from 0 to foreignDoc.childNodes.length	PASS
-/dom/ranges/Range-mutations-removeChild.html	foreignDoc.documentElement.parentNode.removeChild(foreignDoc.documentElement), with unselected range on foreignDoc from 0 to foreignDoc.childNodes.length	FAIL
+/dom/ranges/Range-mutations-removeChild.html	foreignDoc.documentElement.parentNode.removeChild(foreignDoc.documentElement), with unselected range on foreignDoc from 0 to foreignDoc.childNodes.length	PASS
 /dom/ranges/Range-mutations-removeChild.html	paras[0].parentNode.removeChild(paras[0]), with selected range collapsed at (paras[0], 0)	PASS
 /dom/ranges/Range-mutations-removeChild.html	paras[0].parentNode.removeChild(paras[0]), with selected range collapsed at (paras[0], 1)	PASS
 /dom/ranges/Range-mutations-removeChild.html	paras[0].parentNode.removeChild(paras[0]), with selected range collapsed at (testDiv, 0)	PASS
@@ -44835,8 +44835,8 @@ test	subtest	status
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with selected range on foreignDoc from 0 to 1	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with selected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 0)	PASS
-/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 1)	FAIL
-/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 1	FAIL
+/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range collapsed at (foreignDoc, 1)	PASS
+/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 1	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.doctype), with unselected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with selected range collapsed at (foreignDoc, 0)	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with selected range collapsed at (foreignDoc, 1)	PASS
@@ -44845,7 +44845,7 @@ test	subtest	status
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with unselected range collapsed at (foreignDoc, 0)	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with unselected range collapsed at (foreignDoc, 1)	PASS
 /dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 1	PASS
-/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 2	FAIL
+/dom/ranges/Range-mutations-replaceChild.html	foreignDoc.replaceChild(detachedComment, foreignDoc.documentElement), with unselected range on foreignDoc from 0 to 2	PASS
 /dom/ranges/Range-mutations-replaceChild.html	paras[0].replaceChild(document, paras[0].firstChild), with selected range on paras[0] from 0 to 1	PASS
 /dom/ranges/Range-mutations-replaceChild.html	paras[0].replaceChild(document, paras[0].firstChild), with unselected range on paras[0] from 0 to 1	PASS
 /dom/ranges/Range-mutations-replaceChild.html	paras[0].replaceChild(document.doctype, paras[0].firstChild), with selected range on paras[0] from 0 to 1	PASS

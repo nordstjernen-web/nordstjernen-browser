@@ -50,6 +50,7 @@ they regenerate.
 | 2026-06-19 | 5d428c4 | 1df6b936e | 338/696 (48%) | 67474/69505 (97%) | partial: html/dom/elements |
 | 2026-06-24 | e0a6389 | f6fd39b13 | 341/696 (48%) | 67545/69505 (97%) | partial: html/semantics/forms/the-form-element xhr/formdata dom/events/EventTarget-dispatchEvent.html dom/events/Event-subclasses-constructors.html dom/events/Event-dispatch-bubbles-false.html |
 | 2026-06-24 | b8e72fa | f6fd39b13 | 342/696 (49%) | 67568/69508 (97%) | partial: dom/traversal |
+| 2026-06-24 | c19759a | f6fd39b13 | 345/696 (49%) | 67576/69508 (97%) | partial: dom/ranges/Range-mutations-insertBefore.html dom/ranges/Range-mutations-replaceChild.html dom/ranges/Range-mutations-removeChild.html |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -59,14 +60,14 @@ touch.
 
 ## Per-area results — 2026-06-24
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-24-b8e72fa.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-24-c19759a.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 144/275 | 12243/12821 | 536 | 31 | 11 | 0 |
 | `dom/events` | 50/167 | 424/742 | 273 | 22 | 23 | 0 |
 | `dom/traversal` | 13/17 | 1589/1605 | 16 | 0 | 0 | 0 |
-| `dom/ranges` | 30/55 | 44344/44537 | 193 | 0 | 0 | 0 |
+| `dom/ranges` | 33/55 | 44352/44537 | 185 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 5/10 | 43/53 | 10 | 0 | 0 | 0 |
 | `url` | 15/32 | 7271/7475 | 203 | 1 | 0 | 0 |
@@ -78,7 +79,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-24-b8e72fa.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
-| **Total** | **342/696** | **67568/69508** | **1848** | **56** | **36** | **0** |
+| **Total** | **345/696** | **67576/69508** | **1840** | **56** | **36** | **0** |
 
 ## ROI by area — 2026-06-24
 
@@ -97,7 +98,7 @@ file.
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 318 | 117 | 2.7 | 72 | 30 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
-| `dom/ranges` | 193 | 25 | 7.7 | 0 | 6 |
+| `dom/ranges` | 185 | 22 | 8.4 | 0 | 5 |
 | `html/dom/elements` | 161 | 16 | 10.1 | 1 | 9 |
 | `html/semantics/forms/the-form-element` | 21 | 12 | 1.8 | 2 | 9 |
 | `dom/traversal` | 16 | 4 | 4.0 | 0 | 2 |
