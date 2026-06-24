@@ -5843,13 +5843,23 @@
             var el;
             try { el = doc.createElement('span'); } catch (e) { return; }
 
-            function nodeProtoWith(name) {
-                var p = el;
-                while (p) {
-                    if (Object.prototype.hasOwnProperty.call(p, name)) return p;
-                    p = Object.getPrototypeOf(p);
+            function nodeProtosWith(name) {
+                var out = [];
+                function scan(start) {
+                    var p = start;
+                    while (p) {
+                        if (Object.prototype.hasOwnProperty.call(p, name)) {
+                            if (out.indexOf(p) < 0) out.push(p);
+                            return;
+                        }
+                        p = Object.getPrototypeOf(p);
+                    }
                 }
-                return null;
+                scan(el);
+                scan(doc);
+                if (typeof global.Document === 'function' && global.Document.prototype)
+                    scan(global.Document.prototype);
+                return out;
             }
             function preState(node) {
                 var parent = node && node.parentNode;
@@ -5875,16 +5885,19 @@
                 });
             }
             function wrap(name, handler) {
-                var proto = nodeProtoWith(name);
-                if (!proto) return;
-                var orig = proto[name];
-                if (typeof orig !== 'function') return;
-                var fn = function () { return handler.call(this, orig, arguments); };
-                try { Object.defineProperty(fn, 'length', { value: orig.length, configurable: true }); } catch (e) {}
-                try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
-                Object.defineProperty(proto, name, {
-                    value: fn, writable: true, configurable: true, enumerable: false
-                });
+                var protos = nodeProtosWith(name);
+                for (var i = 0; i < protos.length; i++) {
+                    (function (proto) {
+                        var orig = proto[name];
+                        if (typeof orig !== 'function') return;
+                        var fn = function () { return handler.call(this, orig, arguments); };
+                        try { Object.defineProperty(fn, 'length', { value: orig.length, configurable: true }); } catch (e) {}
+                        try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
+                        Object.defineProperty(proto, name, {
+                            value: fn, writable: true, configurable: true, enumerable: false
+                        });
+                    })(protos[i]);
+                }
             }
 
             wrap('appendChild', function (orig, args) {
