@@ -2063,7 +2063,7 @@ about_splash_markup(void)
     char *markup = g_strdup_printf(
         "<img class=\"splash\" src=\"%s\" "
         "alt=\"Nordstjernen " NS_VERSION " splash\" "
-        "style=\"display:block;width:auto;max-width:88%%;height:auto;"
+        "style=\"display:block;width:auto;max-width:96%%;height:auto;"
         "margin:2px auto 16px;border-radius:14px;\">",
         uri);
     g_free(uri);
@@ -3371,10 +3371,6 @@ static const char k_about_start_template[] =
     "<body>"
     "<div class=\"wrap\">"
     "__ND_SPLASH__"
-    "<div class=\"head\">"
-    "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
-    "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
-    "</div>"
     "<p class=\"intro\">Nordstjernen is a legendary web browser, built "
     "from scratch in C \xe2\x80\x94 it doesn't track you and doesn't phone "
     "home. Search the web below, or chat with a small AI model that runs "
@@ -3638,10 +3634,6 @@ static const char k_about_start_template[] =
     "</style></head>"
     "<body><main class=\"wrap\">"
     "__ND_SPLASH__"
-    "<div class=\"head\">"
-    "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
-    "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
-    "</div>"
     "<form class=\"search\" id=\"dsearch\">"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
     " aria-label=\"Search the web\""

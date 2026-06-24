@@ -62,18 +62,39 @@ convert -size 200x200 xc:none -stroke white -fill white \
     -strokewidth 1 -draw "line 55,55 145,145" -strokewidth 1 -draw "line 145,55 55,145" -blur 0x0.6 "$w/spikes.png"
 convert "$w/glow.png" "$w/spikes.png" -compose screen -composite -resize 140x140 "$w/star.png"
 
-# Frontier: Elite 2 style flat-shaded ship (wedge, pointing right) with engine trail
-convert -size 250x140 xc:none -stroke '#2a2f3d' -strokewidth 1.4 \
-    -fill '#7e8aa6' -draw "polygon 214,70 150,46 96,34 52,14 82,52 34,58 28,70 34,82 82,88 52,126 96,106 150,94" \
-    -fill '#aeb8d0' -draw "polygon 214,70 150,52 98,48 62,70 98,92 150,88" \
-    -fill '#59617c' -draw "polygon 96,34 52,14 82,52 98,48" \
-    -fill '#59617c' -draw "polygon 96,106 52,126 82,88 98,92" \
-    -fill '#1f3650' -stroke none -draw "polygon 178,66 150,60 150,80 178,74" "$w/ship0.png"
-convert "$w/ship0.png" -fill 'rgba(130,235,255,0.95)' \
-    -draw "circle 31,64 31,67" -draw "circle 31,76 31,79" "$w/ship1.png"
-convert -size 250x140 xc:none -fill 'rgba(150,240,255,0.55)' \
-    -draw "polygon 30,66 30,74 -40,72 -40,68" -blur 0x6 "$w/trail.png"
-convert "$w/trail.png" "$w/ship1.png" -compose over -composite -resize 172x96 "$w/ship.png"
+# advanced Frontier-style ship with an engine plasma flare
+sc=470; sh=200
+convert -size ${sc}x${sh} xc:none -fill 'rgba(185,90,255,0.30)' \
+    -draw "polygon 134,82 134,118 14,134 -10,100 14,66" -blur 0x17 "$w/f_mag.png"
+convert -size ${sc}x${sh} xc:none -fill 'rgba(70,195,255,0.62)' \
+    -draw "polygon 134,80 134,120 24,140 -2,100 24,60" -blur 0x14 "$w/f_out.png"
+convert -size ${sc}x${sh} xc:none -fill 'rgba(135,228,255,0.88)' \
+    -draw "polygon 134,86 134,114 44,126 22,100 44,74" -blur 0x7 "$w/f_mid.png"
+convert -size ${sc}x${sh} xc:none -fill 'rgba(240,252,255,0.96)' \
+    -draw "polygon 134,90 134,110 72,116 52,100 72,84" -blur 0x3 "$w/f_core.png"
+convert "$w/f_mag.png" "$w/f_out.png" -compose screen -composite \
+    "$w/f_mid.png" -compose screen -composite "$w/f_core.png" -compose screen -composite "$w/flare.png"
+convert -size ${sc}x${sh} xc:none -stroke '#252a38' -strokewidth 1.5 \
+    -fill '#828ea9' -draw "polygon 410,100 340,83 278,71 210,51 156,33 196,77 150,79 134,87 130,100 134,113 150,121 196,123 156,167 210,149 278,129 340,117" \
+    -fill '#c4cee0' -draw "polygon 410,100 322,86 150,84 140,100 150,116 322,114" \
+    -fill '#565f79' -draw "polygon 210,51 156,33 196,77 150,79 210,51" \
+    -fill '#565f79' -draw "polygon 210,149 156,167 196,123 150,121 210,149" \
+    -fill '#3a4156' -draw "polygon 196,77 150,79 134,87 130,100 134,113 150,121 196,123 168,100" "$w/hull.png"
+convert "$w/hull.png" -stroke '#2b3142' -strokewidth 1 -fill none \
+    -draw "line 322,86 205,85" -draw "line 322,114 205,115" -draw "line 300,100 165,100" "$w/hull2.png"
+convert "$w/hull2.png" -stroke none \
+    -fill '#10131c' -draw "circle 131,90 131,92" -draw "circle 131,100 131,102" -draw "circle 131,110 131,112" \
+    -fill '#bdeeff' -draw "circle 131,90 131,90.8" -draw "circle 131,100 131,100.8" -draw "circle 131,110 131,110.8" "$w/hull3.png"
+convert -size ${sc}x${sh} xc:none -fill 'rgba(120,215,255,0.85)' \
+    -draw "polygon 352,100 320,89 296,100 320,111" -blur 0x1.4 "$w/canopy.png"
+convert "$w/canopy.png" -stroke none -fill 'rgba(238,251,255,0.95)' \
+    -draw "polygon 338,100 320,93 308,100 320,107" "$w/canopy2.png"
+convert -size ${sc}x${sh} xc:none \
+    -fill 'rgba(120,255,150,0.97)' -draw "circle 156,33 156,35.4" \
+    -fill 'rgba(255,95,95,0.97)' -draw "circle 156,167 156,169.4" -blur 0x0.7 "$w/lights.png"
+convert "$w/hull3.png" "$w/canopy2.png" -compose screen -composite \
+    "$w/lights.png" -compose screen -composite "$w/shiponly.png"
+convert "$w/flare.png" "$w/shiponly.png" -compose over -composite -resize 230x98 "$w/ship.png"
 
 # compose: sky + aurora + stars + star + ship + text
 convert "$w/sky.png" \
@@ -95,7 +116,7 @@ convert "$w/sky2.png" -draw "$stars" "$w/sky3.png"
 ty=86; cy=$((ty + h1 + 18)); gy=$((cy + 44))
 convert "$w/sky3.png" \
     \( "$w/star.png" \) -gravity NorthWest -geometry +35+78 -compose screen -composite \
-    \( "$w/ship.png" \) -gravity NorthEast -geometry +45+18 -compose over -composite \
+    \( "$w/ship.png" \) -gravity NorthEast -geometry +26+10 -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/tc.png" -gravity NorthWest -geometry +${textleft}+${cy} -compose over -composite \
