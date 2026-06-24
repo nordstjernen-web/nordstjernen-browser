@@ -11485,11 +11485,28 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_event_dispatch_guard(JSContext *ctx, JSValueConst event)
+{
+    JSValue dv = JS_GetPropertyStr(ctx, event, "_dispatching");
+    gboolean in_dispatch = JS_ToBool(ctx, dv);
+    JS_FreeValue(ctx, dv);
+    JSValue iv = JS_GetPropertyStr(ctx, event, "_initialized");
+    gboolean uninitialized = JS_IsBool(iv) && !JS_ToBool(ctx, iv);
+    JS_FreeValue(ctx, iv);
+    if (in_dispatch || uninitialized)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "Event is already being dispatched or was not initialized");
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
+    JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
+    if (JS_IsException(guard)) return guard;
     JSValue tv = JS_GetPropertyStr(ctx, argv[0], "type");
     const char *type = JS_ToCString(ctx, tv);
     JS_FreeValue(ctx, tv);
@@ -27768,6 +27785,8 @@ ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
+    JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
+    if (JS_IsException(guard)) return guard;
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !js_from_ctx(ctx)) return JS_FALSE;
     JSValue type_v = JS_GetPropertyStr(ctx, argv[0], "type");
@@ -33976,6 +33995,7 @@ ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, this_val, "_propagation_stopped", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_immediate_stopped", JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "defaultPrevented", JS_FALSE);
+    JS_SetPropertyStr(ctx, this_val, "_initialized", JS_TRUE);
     return JS_UNDEFINED;
 }
 
@@ -34057,6 +34077,7 @@ ns_document_createEvent(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ctor);
     if (JS_IsException(ev)) return ev;
     JS_SetPropertyStr(ctx, ev, "_is_trusted", JS_FALSE);
+    JS_SetPropertyStr(ctx, ev, "_initialized", JS_FALSE);
     ns_bind_fn(ctx, ev, "initEvent",       ns_event_initEvent, 3);
     ns_bind_fn(ctx, ev, "initCustomEvent", ns_event_initEvent, 4);
     ns_bind_fn(ctx, ev, "initUIEvent",     ns_event_initUIEvent, 5);
@@ -34623,6 +34644,8 @@ ns_window_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
+    JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
+    if (JS_IsException(guard)) return guard;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_FALSE;
     JSValue type_v = JS_GetPropertyStr(ctx, argv[0], "type");
@@ -34671,6 +34694,8 @@ ns_document_dispatchEvent(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
+    JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
+    if (JS_IsException(guard)) return guard;
     ns_js *js = js_from_ctx(ctx);
     if (!js || !js->current_doc) return JS_FALSE;
     JSValue type_v = JS_GetPropertyStr(ctx, argv[0], "type");
