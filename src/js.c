@@ -19778,6 +19778,69 @@ ns_pre_insert_validity(JSContext *ctx, ns_node *parent, ns_node *node,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_node_has_child_kind_other(const ns_node *p, ns_node_kind kind,
+                             const ns_node *except);
+
+static JSValue
+ns_element_moveBefore(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    ns_node *parent = ns_unwrap_element_mut(this_val);
+    if (!parent) return JS_NULL;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "2 arguments required, but fewer present");
+    ns_node *node = ns_unwrap_element_mut(argv[0]);
+    if (!node)
+        return JS_ThrowTypeError(ctx, "Argument 1 is not an object / Node");
+    gboolean child_is_null = JS_IsNull(argv[1]) || JS_IsUndefined(argv[1]);
+    ns_node *child = child_is_null ? NULL : ns_unwrap_element_mut(argv[1]);
+    if (!child_is_null && !child)
+        return JS_ThrowTypeError(ctx, "Argument 2 is not an object / Node");
+
+    if (ns_node_root(node) != ns_node_root(parent))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "node and parent are not in the same tree");
+    if (ns_node_ancestor_or_self(parent, node))
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "node is an inclusive ancestor of the parent");
+    if (node->kind != NS_NODE_ELEMENT && node->kind != NS_NODE_TEXT &&
+        node->kind != NS_NODE_COMMENT)
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "node is not an Element or CharacterData");
+    if (!child_is_null && child->parent != parent)
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "the reference child is not a child of this node");
+    {
+        gboolean parent_doc = parent->kind == NS_NODE_DOCUMENT &&
+                              !(parent->flags & NS_NODE_FRAGMENT);
+        if (parent_doc && node->kind == NS_NODE_ELEMENT &&
+            ns_node_has_child_kind_other(parent, NS_NODE_ELEMENT, node))
+            return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+                "document may have only one element child");
+    }
+    if (!node->parent)
+        return ns_throw_dom_exception(ctx, "HierarchyRequestError", 3,
+            "node has no parent");
+
+    ns_js *_j = js_from_ctx(ctx);
+    ns_node *ref = (child == node) ? node->next_sibling : child;
+    if (_j) ns_js_record_move_removal(_j, node);
+    if (ref && ref->parent == parent) {
+        ns_element_insert_before_single(_j, parent, node, ref);
+    } else {
+        ns_node_remove(node);
+        if (_j) g_hash_table_remove(_j->orphan_nodes, node);
+        ns_node_append_child(parent, node);
+    }
+    if (_j) {
+        _j->mutated = TRUE;
+        ns_js_record_child_change(_j, parent, node, NULL,
+                                  node->prev_sibling, node->next_sibling);
+    }
+    return JS_UNDEFINED;
+}
+
 static JSValue
 ns_element_insertBefore(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
@@ -29602,6 +29665,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("appendChild",             1, ns_element_appendChild),
     JS_CFUNC_DEF("removeChild",             1, ns_element_removeChild),
     JS_CFUNC_DEF("insertBefore",            2, ns_element_insertBefore),
+    JS_CFUNC_DEF("moveBefore",              2, ns_element_moveBefore),
     JS_CFUNC_DEF("replaceChild",            2, ns_element_replaceChild),
     JS_CFUNC_DEF("insertAdjacentHTML",      2, ns_element_insertAdjacentHTML),
     JS_CFUNC_DEF("insertAdjacentElement",   2, ns_element_insertAdjacentElement),
