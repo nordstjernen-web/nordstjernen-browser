@@ -8736,6 +8736,7 @@ typedef struct {
     int        depth;
     JSValue    date_ctor, regexp_ctor, map_ctor, set_ctor;
     JSValue    blob_ctor, file_ctor, dataview_ctor, error_ctor;
+    JSValue    number_ctor, string_ctor, boolean_ctor;
 } ns_sc;
 
 static JSValue ns_sc_clone(ns_sc *s, JSValueConst v);
@@ -8976,11 +8977,49 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
             JSValue stackV = JS_GetPropertyStr(ctx, v, "stack");
             if (JS_IsString(stackV)) JS_SetPropertyStr(ctx, clone, "stack", stackV);
             else                     JS_FreeValue(ctx, stackV);
+            JSValue causeV = JS_GetPropertyStr(ctx, v, "cause");
+            if (!JS_IsUndefined(causeV)) {
+                JSValue cclone = ns_sc_clone(s, causeV);
+                if (JS_IsException(cclone)) JS_FreeValue(ctx, cclone);
+                else JS_SetPropertyStr(ctx, clone, "cause", cclone);
+            }
+            JS_FreeValue(ctx, causeV);
             ns_sc_memo_put(s, ptr, clone);
         }
         JS_FreeCString(ctx, nm);
         JS_FreeValue(ctx, nameV);
         JS_FreeValue(ctx, msgV);
+        return clone;
+    }
+
+    if (ns_sc_isa(ctx, v, s->number_ctor)) {
+        double d = 0;
+        JS_ToFloat64(ctx, &d, v);
+        JSValue a = JS_NewFloat64(ctx, d);
+        JSValue clone = JS_CallConstructor(ctx, s->number_ctor, 1, &a);
+        JS_FreeValue(ctx, a);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
+    if (ns_sc_isa(ctx, v, s->string_ctor)) {
+        JSValue prim = JS_ToString(ctx, v);
+        JSValueConst a = prim;
+        JSValue clone = JS_CallConstructor(ctx, s->string_ctor, 1, &a);
+        JS_FreeValue(ctx, prim);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
+    if (ns_sc_isa(ctx, v, s->boolean_ctor)) {
+        JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
+        JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
+        JS_FreeValue(ctx, vo);
+        JSValue a = JS_NewBool(ctx, JS_ToBool(ctx, prim));
+        JS_FreeValue(ctx, prim);
+        JSValue clone = JS_CallConstructor(ctx, s->boolean_ctor, 1, &a);
+        JS_FreeValue(ctx, a);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
         return clone;
     }
 
@@ -9037,6 +9076,9 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     s.file_ctor     = JS_GetPropertyStr(ctx, g, "File");
     s.dataview_ctor = JS_GetPropertyStr(ctx, g, "DataView");
     s.error_ctor    = JS_GetPropertyStr(ctx, g, "Error");
+    s.number_ctor   = JS_GetPropertyStr(ctx, g, "Number");
+    s.string_ctor   = JS_GetPropertyStr(ctx, g, "String");
+    s.boolean_ctor  = JS_GetPropertyStr(ctx, g, "Boolean");
     JS_FreeValue(ctx, g);
 
     JSValue out = ns_sc_clone(&s, argv[0]);
@@ -9052,6 +9094,9 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, s.file_ctor);
     JS_FreeValue(ctx, s.dataview_ctor);
     JS_FreeValue(ctx, s.error_ctor);
+    JS_FreeValue(ctx, s.number_ctor);
+    JS_FreeValue(ctx, s.string_ctor);
+    JS_FreeValue(ctx, s.boolean_ctor);
     return out;
 }
 
