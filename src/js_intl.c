@@ -699,9 +699,19 @@ intl_nf_ctor(JSContext *ctx, JSValueConst this_val,
 
     double d;
     int minfd = -1, maxfd = -1, minid = 1;
-    if (intl_opt_num(ctx, o, "minimumFractionDigits", &d)) minfd = (int)d;
-    if (intl_opt_num(ctx, o, "maximumFractionDigits", &d)) maxfd = (int)d;
-    if (intl_opt_num(ctx, o, "minimumIntegerDigits", &d)) minid = (int)d;
+    gboolean range_err = FALSE;
+    if (intl_opt_num(ctx, o, "minimumFractionDigits", &d)) {
+        if (!(d >= 0 && d <= 100)) range_err = TRUE;
+        minfd = (int)d;
+    }
+    if (intl_opt_num(ctx, o, "maximumFractionDigits", &d)) {
+        if (!(d >= 0 && d <= 100)) range_err = TRUE;
+        maxfd = (int)d;
+    }
+    if (intl_opt_num(ctx, o, "minimumIntegerDigits", &d)) {
+        if (!(d >= 1 && d <= 21)) range_err = TRUE;
+        minid = (int)d;
+    }
     intl_hide(ctx, obj, "_minfd", JS_NewInt32(ctx, minfd));
     intl_hide(ctx, obj, "_maxfd", JS_NewInt32(ctx, maxfd));
     intl_hide(ctx, obj, "_minid",
@@ -712,6 +722,11 @@ intl_nf_ctor(JSContext *ctx, JSValueConst this_val,
 
     g_free(locale); g_free(style); g_free(currency); g_free(currencyDisplay);
     g_free(unit); g_free(unitDisplay); g_free(notation); g_free(signDisplay);
+    if (range_err) {
+        JS_FreeValue(ctx, obj);
+        return JS_ThrowRangeError(ctx,
+            "Intl.NumberFormat digit option is out of range");
+    }
     return obj;
 }
 
@@ -773,7 +788,12 @@ intl_nf_parts(JSContext *ctx, JSValueConst this_val, double num)
     if (maxfd < minfd) maxfd = minfd;
 
     char buf[64];
-    g_snprintf(buf, sizeof buf, "%.*f", maxfd, a);
+    double scale = pow(10.0, maxfd);
+    double scaled = a * scale;
+    if (isfinite(scaled) && scaled - floor(scaled) == 0.5)
+        g_snprintf(buf, sizeof buf, "%.*f", maxfd, (floor(scaled) + 1.0) / scale);
+    else
+        g_snprintf(buf, sizeof buf, "%.*f", maxfd, a);
     char *dot = strchr(buf, '.');
     char intpart[80], fracpart[32];
     if (dot) {
