@@ -27144,7 +27144,9 @@ ns_node_is_submit_trigger(const ns_node *el)
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
     if (g_ascii_strcasecmp(el->name, "button") == 0) {
         const char *t = ns_element_get_attr(el, "type");
-        return !t || g_ascii_strcasecmp(t, "submit") == 0;
+        return !t || (g_ascii_strcasecmp(t, "reset") != 0 &&
+                      g_ascii_strcasecmp(t, "button") != 0 &&
+                      g_ascii_strcasecmp(t, "menu") != 0);
     }
     if (g_ascii_strcasecmp(el->name, "input") == 0) {
         const char *t = ns_element_get_attr(el, "type");
