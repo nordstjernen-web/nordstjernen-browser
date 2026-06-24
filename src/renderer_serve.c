@@ -92,17 +92,18 @@ static void
 reply_str2(int fd, const char *key1, const char *val1,
            const char *key2, const char *val2)
 {
-    char *e1 = json_escape(val1 ? val1 : "");
-    char *e2 = json_escape(val2 ? val2 : "");
+    char *escaped1 = json_escape(val1 ? val1 : "");
+    char *escaped2 = json_escape(val2 ? val2 : "");
     char *json = NULL;
     int n = asprintf(&json, "{\"%s\":\"%s\",\"%s\":\"%s\"}",
-                     key1, e1 ? e1 : "", key2, e2 ? e2 : "");
+                     key1, escaped1 ? escaped1 : "",
+                     key2, escaped2 ? escaped2 : "");
     if (n > 0)
         http_write_response(fd, 200, "application/json", NULL, json,
                             (size_t)n);
     free(json);
-    free(e1);
-    free(e2);
+    free(escaped1);
+    free(escaped2);
 }
 
 static void
@@ -235,29 +236,31 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         session_clear_post(s);
         int pw = 0, ph = 0, ok = s->cur != NULL;
         char *title = NULL, *final_url = NULL, *nav = NULL;
-        char *te = NULL, *ue = NULL, *ne = NULL;
+        char *title_escaped = NULL, *url_escaped = NULL, *nav_escaped = NULL;
         if (s->cur) {
             ns_browser_page_size(s->cur, &pw, &ph);
             title = ns_browser_title(s->cur);
             final_url = ns_browser_url(s->cur);
             nav = ns_browser_take_pending_nav(s->cur);
         }
-        te = json_escape(title ? title : "");
-        ue = json_escape(final_url ? final_url : (url ? url : ""));
-        ne = json_escape(nav ? nav : "");
+        title_escaped = json_escape(title ? title : "");
+        url_escaped = json_escape(final_url ? final_url : (url ? url : ""));
+        nav_escaped = json_escape(nav ? nav : "");
         char *json = NULL;
         int n = asprintf(&json,
                          "{\"ok\":%d,\"page_width\":%d,\"page_height\":%d,"
                          "\"title\":\"%s\",\"url\":\"%s\",\"nav\":\"%s\"}",
-                         ok, pw, ph, te ? te : "", ue ? ue : "",
-                         ne ? ne : "");
+                         ok, pw, ph,
+                         title_escaped ? title_escaped : "",
+                         url_escaped ? url_escaped : "",
+                         nav_escaped ? nav_escaped : "");
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);
         free(json);
-        free(te);
-        free(ue);
-        free(ne);
+        free(title_escaped);
+        free(url_escaped);
+        free(nav_escaped);
         free(title);
         free(final_url);
         free(nav);
@@ -478,18 +481,20 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                             : NULL;
         char *cursor = s->cur ? ns_browser_cursor_at(s->cur, (int)x, (int)y)
                               : NULL;
-        char *he = json_escape(href ? href : "");
-        char *ce = json_escape(cursor ? cursor : "");
+        char *href_escaped = json_escape(href ? href : "");
+        char *cursor_escaped = json_escape(cursor ? cursor : "");
         char *json = NULL;
         int n = asprintf(&json,
                          "{\"changed\":%d,\"href\":\"%s\",\"cursor\":\"%s\"}",
-                         changed > 0 ? 1 : 0, he ? he : "", ce ? ce : "");
+                         changed > 0 ? 1 : 0,
+                         href_escaped ? href_escaped : "",
+                         cursor_escaped ? cursor_escaped : "");
         if (n > 0)
             http_write_response(ctrl_w, 200, "application/json", NULL,
                                 json, (size_t)n);
         free(json);
-        free(he);
-        free(ce);
+        free(href_escaped);
+        free(cursor_escaped);
         free(href);
         free(cursor);
         return 0;

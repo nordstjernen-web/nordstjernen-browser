@@ -1581,11 +1581,11 @@ ns_tlist_replace(JSContext *ctx, JSValueConst this_val,
     if (io >= 0) {
         int in = ns_tlist_set_index(set, new_token);
         if (in >= 0 && in != io) {
-            int left = MIN(io, in);
-            int right = MAX(io, in);
-            g_free(g_ptr_array_index(set, left));
-            set->pdata[left] = g_strdup(new_token);
-            g_ptr_array_remove_index(set, right);
+            int min_idx = MIN(io, in);
+            int max_idx = MAX(io, in);
+            g_free(g_ptr_array_index(set, min_idx));
+            set->pdata[min_idx] = g_strdup(new_token);
+            g_ptr_array_remove_index(set, max_idx);
         }
         else {
             g_free(g_ptr_array_index(set, io));
@@ -7061,15 +7061,15 @@ ns_wc_parse_alg(JSContext *ctx, JSValueConst v, ns_wc_alg *a)
     a->salt_len_pss = ns_wc_prop_int(ctx, v, "saltLength", -1);
     a->tag_bits = ns_wc_prop_int(ctx, v, "tagLength", 128);
 
-    gsize el = 0;
-    guint8 *e = ns_wc_prop_buf(ctx, v, "publicExponent", &el);
+    gsize exp_len = 0;
+    guint8 *exp_buf = ns_wc_prop_buf(ctx, v, "publicExponent", &exp_len);
     a->pubexp = 65537;
-    if (e && el) {
+    if (exp_buf && exp_len) {
         guint32 val = 0;
-        for (gsize i = 0; i < el; i++) val = (val << 8) | e[i];
+        for (gsize i = 0; i < exp_len; i++) val = (val << 8) | exp_buf[i];
         if (val) a->pubexp = val;
     }
-    g_free(e);
+    g_free(exp_buf);
 
     a->iv = ns_wc_prop_buf(ctx, v, "iv", &a->iv_len);
     a->aad = ns_wc_prop_buf(ctx, v, "additionalData", &a->aad_len);

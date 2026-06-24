@@ -1677,13 +1677,13 @@ color_calc_expr(const char **pp, const char *end, ns_color_calc_term *out,
 static char *
 color_resolve_calcs(const char *s)
 {
-    const char *send = s + strlen(s);
+    const char *s_end = s + strlen(s);
     GString *out = g_string_new(NULL);
     const char *p = s;
     while (*p) {
         if (g_ascii_strncasecmp(p, "calc(", 5) == 0) {
             const char *body = p + 5;
-            const char *close = match_close_paren(body, send);
+            const char *close = match_close_paren(body, s_end);
             if (!close) { g_string_free(out, TRUE); return NULL; }
             const char *q = body;
             ns_color_calc_term t = { 0, "" };

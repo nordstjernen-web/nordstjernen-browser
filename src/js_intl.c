@@ -1516,10 +1516,10 @@ intl_rtf_format(JSContext *ctx, JSValueConst this_val,
         const char *a = intl_rtf_auto(unit, (int)val);
         if (a) { g_free(unit); g_free(numeric); return intl_str(ctx, a); }
     }
-    double abs = fabs(val);
+    double abs_val = fabs(val);
     char *out = g_strdup_printf("%s%g %s%s%s",
-                                val >= 0 ? "in " : "", abs, unit,
-                                abs != 1 ? "s" : "", val < 0 ? " ago" : "");
+                                val >= 0 ? "in " : "", abs_val, unit,
+                                abs_val != 1 ? "s" : "", val < 0 ? " ago" : "");
     JSValue r = JS_NewString(ctx, out);
     g_free(out); g_free(unit); g_free(numeric);
     return r;
@@ -1543,14 +1543,14 @@ intl_rtf_formatToParts(JSContext *ctx, JSValueConst this_val,
             return arr;
         }
     }
-    double abs = fabs(val);
+    double abs_val = fabs(val);
     if (val >= 0) JS_SetPropertyUint32(ctx, arr, n++, intl_part(ctx, "literal", "in "));
-    char *iv = g_strdup_printf("%g", abs);
+    char *iv = g_strdup_printf("%g", abs_val);
     JSValue ip = intl_part(ctx, "integer", iv);
     JS_SetPropertyStr(ctx, ip, "unit", intl_str(ctx, unit));
     JS_SetPropertyUint32(ctx, arr, n++, ip);
     g_free(iv);
-    char *tail = g_strdup_printf(" %s%s%s", unit, abs != 1 ? "s" : "",
+    char *tail = g_strdup_printf(" %s%s%s", unit, abs_val != 1 ? "s" : "",
                                  val < 0 ? " ago" : "");
     JS_SetPropertyUint32(ctx, arr, n++, intl_part(ctx, "literal", tail));
     g_free(tail); g_free(unit); g_free(numeric);

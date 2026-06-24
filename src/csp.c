@@ -364,9 +364,9 @@ hash_token_matches(const char *src, const char *body, gsize body_len)
     else if (g_str_has_prefix(src, "'sha384-")) { type = G_CHECKSUM_SHA384; b64 = src + 8; }
     else if (g_str_has_prefix(src, "'sha512-")) { type = G_CHECKSUM_SHA512; b64 = src + 8; }
     else return FALSE;
-    gsize blen = strlen(b64);
-    if (blen < 2 || b64[blen - 1] != '\'') return FALSE;
-    char *want = g_strndup(b64, blen - 1);
+    gsize b64_len = strlen(b64);
+    if (b64_len < 2 || b64[b64_len - 1] != '\'') return FALSE;
+    char *want = g_strndup(b64, b64_len - 1);
     GChecksum *cs = g_checksum_new(type);
     g_checksum_update(cs, (const guchar *)body, (gssize)body_len);
     guint8 raw[64];

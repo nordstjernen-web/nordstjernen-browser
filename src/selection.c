@@ -104,15 +104,15 @@ static gboolean
 resolve_point(const ns_box *root, double x, double y,
               const ns_box **out_box, gsize *out_byte)
 {
-    double lx, ly;
-    const ns_box *b = find_inline_for_point(root, x, y, &lx, &ly);
+    double local_x, local_y;
+    const ns_box *b = find_inline_for_point(root, x, y, &local_x, &local_y);
     if (!b) return FALSE;
-    if (lx < 0) lx = 0;
-    if (ly < 0) ly = 0;
-    if (lx > b->content_width)  lx = b->content_width;
-    if (ly > b->content_height) ly = b->content_height;
+    if (local_x < 0) local_x = 0;
+    if (local_y < 0) local_y = 0;
+    if (local_x > b->content_width)  local_x = b->content_width;
+    if (local_y > b->content_height) local_y = b->content_height;
     gsize byte = 0;
-    ns_paint_inline_xy_to_byte(b, lx, ly, &byte);
+    ns_paint_inline_xy_to_byte(b, local_x, local_y, &byte);
     if (b->text) {
         gsize tlen = strlen(b->text);
         if (byte > tlen) byte = tlen;
@@ -349,10 +349,10 @@ void
 ns_selection_paint(cairo_t *cr, const ns_box *root, const ns_selection *sel)
 {
     if (!cr || !root || !ns_selection_has_range(sel)) return;
-    const ns_box *fb = NULL, *lb = NULL;
-    gsize fy = 0, ly = 0;
-    order_endpoints(root, *sel, &fb, &fy, &lb, &ly);
-    paint_ctx ctx = { cr, fb, lb, fy, ly, 0 };
+    const ns_box *first_box = NULL, *last_box = NULL;
+    gsize first_byte = 0, last_byte = 0;
+    order_endpoints(root, *sel, &first_box, &first_byte, &last_box, &last_byte);
+    paint_ctx ctx = { cr, first_box, last_box, first_byte, last_byte, 0 };
     walk_inline_pre(root, paint_walk_cb, &ctx);
 }
 
@@ -413,11 +413,11 @@ char *
 ns_selection_collect_text(const ns_box *root, const ns_selection *sel)
 {
     if (!root || !ns_selection_has_range(sel)) return NULL;
-    const ns_box *fb = NULL, *lb = NULL;
-    gsize fy = 0, ly = 0;
-    order_endpoints(root, *sel, &fb, &fy, &lb, &ly);
+    const ns_box *first_box = NULL, *last_box = NULL;
+    gsize first_byte = 0, last_byte = 0;
+    order_endpoints(root, *sel, &first_box, &first_byte, &last_box, &last_byte);
     GString *out = g_string_new(NULL);
-    collect_ctx ctx = { out, fb, lb, fy, ly, 0 };
+    collect_ctx ctx = { out, first_box, last_box, first_byte, last_byte, 0 };
     walk_inline_pre(root, collect_walk_cb, &ctx);
     return g_string_free(out, FALSE);
 }
