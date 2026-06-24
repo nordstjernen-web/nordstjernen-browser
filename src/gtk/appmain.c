@@ -407,9 +407,9 @@ ns_run_headless(ns_headless_opts *hopts)
         !g_str_has_prefix(hopts->url, "about:") &&
         !g_str_has_prefix(hopts->url, "data:") &&
         g_file_test(hopts->url, G_FILE_TEST_EXISTS)) {
-        char *abs = g_canonicalize_filename(hopts->url, NULL);
-        file_url = g_filename_to_uri(abs, NULL, NULL);
-        g_free(abs);
+        char *abs_path = g_canonicalize_filename(hopts->url, NULL);
+        file_url = g_filename_to_uri(abs_path, NULL, NULL);
+        g_free(abs_path);
         if (file_url) hopts->url = file_url;
     }
     int rc = ns_headless_run(hopts);
@@ -449,9 +449,9 @@ ns_run_proc_gui(int argc, char **argv, const char *url,
     if (!strstr(start, "://") && !g_str_has_prefix(start, "about:") &&
         !g_str_has_prefix(start, "data:") &&
         g_file_test(start, G_FILE_TEST_EXISTS)) {
-        char *abs = g_canonicalize_filename(start, NULL);
-        file_url = g_filename_to_uri(abs, NULL, NULL);
-        g_free(abs);
+        char *abs_path = g_canonicalize_filename(start, NULL);
+        file_url = g_filename_to_uri(abs_path, NULL, NULL);
+        g_free(abs_path);
         if (file_url) start = file_url;
     }
     int status = ns_procapp_run(start, session_path, recover);

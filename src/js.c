@@ -14776,13 +14776,13 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
     for (int i = 0; i < argc; i++) {
         const char *raw = JS_ToCString(ctx, argv[i]);
         if (!raw) return JS_EXCEPTION;
-        char *abs = ns_url_resolve(js->current_url ? js->current_url : host->url, raw);
+        char *abs_url = ns_url_resolve(js->current_url ? js->current_url : host->url, raw);
         JS_FreeCString(ctx, raw);
-        if (!abs) return JS_ThrowTypeError(ctx, "importScripts: invalid URL");
+        if (!abs_url) return JS_ThrowTypeError(ctx, "importScripts: invalid URL");
         char *final_url = NULL;
         char *error = NULL;
-        char *body = ns_worker_fetch_script(host, abs, &final_url, &error);
-        g_free(abs);
+        char *body = ns_worker_fetch_script(host, abs_url, &final_url, &error);
+        g_free(abs_url);
         if (!body) {
             JSValue ret = JS_ThrowTypeError(ctx, "importScripts: %s",
                                             error ? error : "load failed");
@@ -15613,7 +15613,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return JS_ThrowTypeError(ctx, "Worker is unavailable");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
-    char *abs = NULL;
+    char *abs_url = NULL;
     char *inline_script = NULL;
     gsize inline_script_len = 0;
     if (g_str_has_prefix(raw, "blob:")) {
@@ -15624,17 +15624,17 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         }
         const guint8 *blob_data = g_bytes_get_data(blob, &inline_script_len);
         inline_script = g_strndup((const char *)blob_data, inline_script_len);
-        abs = g_strdup(raw);
+        abs_url = g_strdup(raw);
     } else {
-        abs = js->current_url ? ns_url_resolve(js->current_url, raw)
+        abs_url = js->current_url ? ns_url_resolve(js->current_url, raw)
                               : ns_url_resolve(NULL, raw);
     }
     JS_FreeCString(ctx, raw);
-    if (!abs) return JS_ThrowTypeError(ctx, "Worker: invalid script URL");
+    if (!abs_url) return JS_ThrowTypeError(ctx, "Worker: invalid script URL");
 
     g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
     if (type && *type && g_ascii_strcasecmp(type, "classic") != 0) {
-        g_free(abs);
+        g_free(abs_url);
         g_free(inline_script);
         return JS_ThrowTypeError(ctx, "Worker: module workers are not supported");
     }
@@ -15644,16 +15644,16 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         char *policy_error = NULL;
         ns_worker_host tmp = {0};
         tmp.base_url = js->current_url;
-        if (!ns_worker_script_url_allowed(&tmp, abs, &policy_error)) {
+        if (!ns_worker_script_url_allowed(&tmp, abs_url, &policy_error)) {
             JSValue ret = JS_ThrowTypeError(ctx, "Worker: %s",
                                             policy_error ? policy_error : "blocked");
             g_free(policy_error);
-            g_free(abs);
+            g_free(abs_url);
             return ret;
         }
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs, js->current_url)) {
-        g_free(abs);
+    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
+        g_free(abs_url);
         g_free(inline_script);
         return JS_ThrowTypeError(ctx, "Worker: blocked by Content-Security-Policy worker-src");
     }
@@ -15677,8 +15677,8 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, obj);
     host->context = g_main_context_new();
-    host->url = abs;
-    host->base_url = g_strdup(js->current_url ? js->current_url : abs);
+    host->url = abs_url;
+    host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
     host->name = g_strdup(name ? name : "");
     host->inline_script = inline_script;
     host->inline_script_len = inline_script_len;
@@ -15741,12 +15741,12 @@ ns_sw_reject(JSContext *ctx, const char *name, const char *msg)
 }
 
 static char *
-ns_sw_default_scope(const char *abs)
+ns_sw_default_scope(const char *abs_url)
 {
-    if (!abs) return g_strdup("/");
-    const char *slash = strrchr(abs, '/');
-    if (!slash) return g_strdup(abs);
-    return g_strndup(abs, (gsize)(slash - abs) + 1);
+    if (!abs_url) return g_strdup("/");
+    const char *slash = strrchr(abs_url, '/');
+    if (!slash) return g_strdup(abs_url);
+    return g_strndup(abs_url, (gsize)(slash - abs_url) + 1);
 }
 
 static JSValue
@@ -15759,10 +15759,10 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         return ns_sw_reject(ctx, "TypeError", "register requires a script URL");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
-    char *abs = js->current_url ? ns_url_resolve(js->current_url, raw)
+    char *abs_url = js->current_url ? ns_url_resolve(js->current_url, raw)
                                 : ns_url_resolve(NULL, raw);
     JS_FreeCString(ctx, raw);
-    if (!abs)
+    if (!abs_url)
         return ns_sw_reject(ctx, "TypeError", "invalid script URL");
 
     char *scope = NULL;
@@ -15771,27 +15771,27 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         if (JS_IsString(sv)) {
             const char *s = JS_ToCString(ctx, sv);
             if (s) {
-                scope = ns_url_resolve(js->current_url ? js->current_url : abs, s);
+                scope = ns_url_resolve(js->current_url ? js->current_url : abs_url, s);
                 JS_FreeCString(ctx, s);
             }
         }
         JS_FreeValue(ctx, sv);
     }
-    if (!scope) scope = ns_sw_default_scope(abs);
+    if (!scope) scope = ns_sw_default_scope(abs_url);
 
     ns_worker_host policy = {0};
     policy.base_url = js->current_url;
     char *policy_error = NULL;
-    if (!ns_worker_script_url_allowed(&policy, abs, &policy_error)) {
+    if (!ns_worker_script_url_allowed(&policy, abs_url, &policy_error)) {
         JSValue ret = ns_sw_reject(ctx, "SecurityError",
                                    policy_error ? policy_error : "blocked");
         g_free(policy_error);
-        g_free(abs);
+        g_free(abs_url);
         g_free(scope);
         return ret;
     }
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs, js->current_url)) {
-        g_free(abs);
+    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_WORKER, abs_url, js->current_url)) {
+        g_free(abs_url);
         g_free(scope);
         return ns_sw_reject(ctx, "SecurityError",
                             "blocked by Content-Security-Policy worker-src");
@@ -15802,7 +15802,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     JS_NewClass(JS_GetRuntime(ctx), ns_worker_class_id, &ns_worker_class);
 
     JSValue sw = JS_NewObjectClass(ctx, ns_worker_class_id);
-    JS_SetPropertyStr(ctx, sw, "scriptURL",     JS_NewString(ctx, abs));
+    JS_SetPropertyStr(ctx, sw, "scriptURL",     JS_NewString(ctx, abs_url));
     JS_SetPropertyStr(ctx, sw, "state",         JS_NewString(ctx, "installing"));
     JS_SetPropertyStr(ctx, sw, "onstatechange", JS_NULL);
     JS_SetPropertyStr(ctx, sw, "onerror",       JS_NULL);
@@ -15840,8 +15840,8 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->owner_ctx = ctx;
     host->owner_obj = JS_DupValue(ctx, sw);
     host->context = g_main_context_new();
-    host->url = g_strdup(abs);
-    host->base_url = g_strdup(js->current_url ? js->current_url : abs);
+    host->url = g_strdup(abs_url);
+    host->base_url = g_strdup(js->current_url ? js->current_url : abs_url);
     host->name = g_strdup("");
     host->is_service_worker = TRUE;
     host->scope = g_strdup(scope);
@@ -15858,7 +15858,7 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 
     ns_target_fire_event(ctx, reg, "updatefound");
 
-    g_free(abs);
+    g_free(abs_url);
     g_free(scope);
     JSValue ret = ns_promise_resolve_take(ctx, JS_DupValue(ctx, reg));
     JS_FreeValue(ctx, reg);
@@ -22900,10 +22900,10 @@ ns_element_img_current_src(JSContext *ctx, JSValueConst this_val)
     char *chosen = ns_img_chosen_url(sel);
     if (!chosen || !*chosen) { g_free(chosen); return JS_NewString(ctx, ""); }
     ns_js *js = js_from_ctx(ctx);
-    char *abs = (js && js->current_url)
+    char *abs_url = (js && js->current_url)
         ? ns_url_resolve(js->current_url, chosen) : NULL;
-    JSValue r = JS_NewString(ctx, abs ? abs : chosen);
-    g_free(abs);
+    JSValue r = JS_NewString(ctx, abs_url ? abs_url : chosen);
+    g_free(abs_url);
     g_free(chosen);
     return r;
 }
@@ -26946,9 +26946,9 @@ ns_element_click_default_action(JSContext *ctx, const ns_node *el)
         if (ns_iframe_follow_href(ctx, el, href))
             return JS_UNDEFINED;
         if (href && *href && ns_element_get_attr(el, "download") && js->download_cb) {
-            g_autofree char *abs = ns_element_anchor_resolved_href(el, js);
+            g_autofree char *abs_url = ns_element_anchor_resolved_href(el, js);
             const char *dl = ns_element_get_attr(el, "download");
-            js->download_cb(abs ? abs : href, dl, js->download_user_data);
+            js->download_cb(abs_url ? abs_url : href, dl, js->download_user_data);
             return JS_UNDEFINED;
         }
         if (href && *href && js->nav_cb)
@@ -27178,16 +27178,16 @@ ns_js_image_ready_idle(gpointer data)
     if (g_hash_table_lookup(js->js_image_loads, r->el) != r)
         return G_SOURCE_REMOVE;
     const char *cur_src = ns_element_get_attr(r->el, "src");
-    char *abs = NULL;
+    char *abs_url = NULL;
     if (cur_src && *cur_src && js->current_url)
-        abs = ns_url_resolve(js->current_url, cur_src);
+        abs_url = ns_url_resolve(js->current_url, cur_src);
     else if (cur_src)
-        abs = g_strdup(cur_src);
-    if (!abs || !r->requested_url || strcmp(abs, r->requested_url) != 0) {
-        g_free(abs);
+        abs_url = g_strdup(cur_src);
+    if (!abs_url || !r->requested_url || strcmp(abs_url, r->requested_url) != 0) {
+        g_free(abs_url);
         return G_SOURCE_REMOVE;
     }
-    g_free(abs);
+    g_free(abs_url);
     ns_image *img = r->img;
     if (img && img->failed && js->log_cb) {
         char *line = g_strdup_printf("[image] error: %s — %s (HTTP %ld)",
@@ -27228,19 +27228,19 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         g_hash_table_remove(js->js_image_loads, el);
         return;
     }
-    char *abs = js->current_url ? ns_url_resolve(js->current_url, src)
+    char *abs_url = js->current_url ? ns_url_resolve(js->current_url, src)
                                  : g_strdup(src);
-    if (!abs) {
+    if (!abs_url) {
         g_hash_table_remove(js->js_image_loads, el);
         return;
     }
     ns_js_image_load *r = g_new0(ns_js_image_load, 1);
     r->js = js;
     r->el = el;
-    r->requested_url = abs;
+    r->requested_url = abs_url;
     g_hash_table_insert(js->js_image_loads, el, r);
-    r->img = ns_image_cache_get(js->image_cache, abs,
-                                js->current_url ? js->current_url : abs,
+    r->img = ns_image_cache_get(js->image_cache, abs_url,
+                                js->current_url ? js->current_url : abs_url,
                                 ns_js_on_image_ready, r);
     if (r->img && (r->img->loaded || r->img->failed) && !r->ready_idle)
         r->ready_idle = g_idle_add(ns_js_image_ready_idle, r);
@@ -27257,11 +27257,11 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     if (js->image_cache && el->name && strcmp(el->name, "img") == 0) {
         const char *src = ns_element_get_attr(el, "src");
         if (src && *src) {
-            char *abs = js->current_url ? ns_url_resolve(js->current_url, src)
+            char *abs_url = js->current_url ? ns_url_resolve(js->current_url, src)
                                          : g_strdup(src);
-            if (abs) {
-                ns_image *im = ns_image_cache_peek(js->image_cache, abs);
-                g_free(abs);
+            if (abs_url) {
+                ns_image *im = ns_image_cache_peek(js->image_cache, abs_url);
+                g_free(abs_url);
                 if (im) return im;
             }
         }
@@ -36261,10 +36261,10 @@ ns_js_module_normalize(JSContext *ctx, const char *base_name,
         g_free(mapped);
         return out;
     }
-    char *abs = ns_url_resolve(base_name && *base_name ? base_name : NULL, name);
-    if (!abs) abs = g_strdup(name);
-    char *out = js_strdup(ctx, abs);
-    g_free(abs);
+    char *abs_url = ns_url_resolve(base_name && *base_name ? base_name : NULL, name);
+    if (!abs_url) abs_url = g_strdup(name);
+    char *out = js_strdup(ctx, abs_url);
+    g_free(abs_url);
     return out;
 }
 
@@ -36541,14 +36541,14 @@ ns_js_collect_external_script_urls(const ns_node *n, const char *origin,
         if (ok_type && !nomodule_skip && !async_script) {
             const char *src = ns_element_get_attr(n, "src");
             if (src && *src && !g_str_has_prefix(src, "data:")) {
-                char *abs = ns_url_resolve(origin, src);
-                if (ns_url_is_http_or_https(abs) &&
-                    !g_hash_table_contains(seen, abs)) {
-                    g_hash_table_add(seen, g_strdup(abs));
-                    g_ptr_array_add(out, abs);
-                    abs = NULL;
+                char *abs_url = ns_url_resolve(origin, src);
+                if (ns_url_is_http_or_https(abs_url) &&
+                    !g_hash_table_contains(seen, abs_url)) {
+                    g_hash_table_add(seen, g_strdup(abs_url));
+                    g_ptr_array_add(out, abs_url);
+                    abs_url = NULL;
                 }
-                g_free(abs);
+                g_free(abs_url);
             }
         }
     }
@@ -36738,30 +36738,30 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             }
             return;
         }
-        char *abs = ns_url_resolve(origin, src);
-        if (!abs) return;
+        char *abs_url = ns_url_resolve(origin, src);
+        if (!abs_url) return;
         if (g_str_has_prefix(origin, "https://") &&
-            g_str_has_prefix(abs, "http://")) {
+            g_str_has_prefix(abs_url, "http://")) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
-                    "mixed-content blocked: script %s on https page", abs);
+                    "mixed-content blocked: script %s on https page", abs_url);
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
-            g_free(abs);
+            g_free(abs_url);
             ns_js_dispatch_resource_event(js, n, "error");
             return;
         }
         gboolean parser_inserted = !(n->flags & NS_NODE_NOT_PARSER_INSERTED);
         if (js->csp &&
-            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs, origin,
+            !ns_csp_allows_with_nonce(js->csp, NS_CSP_SCRIPT, abs_url, origin,
                                       nonce, parser_inserted)) {
             if (js->log_cb) {
-                char *line = g_strdup_printf("CSP blocked: script %s", abs);
+                char *line = g_strdup_printf("CSP blocked: script %s", abs_url);
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
-            g_free(abs);
+            g_free(abs_url);
             ns_js_dispatch_resource_event(js, n, "error");
             return;
         }
@@ -36771,7 +36771,7 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
             NULL
         };
-        ns_response *resp = ns_js_fetch_resource(js, abs, origin,
+        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
                                                  script_headers, &err);
         if (resp && resp->status == 200 && resp->body &&
             resp->body->len <= NS_MAX_SCRIPT_BYTES) {
@@ -36780,19 +36780,19 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
                 if (js->log_cb) {
                     char *line = g_strdup_printf(
                         "SRI mismatch: script %s (integrity=\"%s\")",
-                        abs, integrity);
+                        abs_url, integrity);
                     js->log_cb(line, js->log_user_data);
                     g_free(line);
                 }
             } else if (resp->body->len > 0 && is_module) {
                 ns_js_eval_module(js, (const char *)resp->body->data,
-                                  resp->body->len, abs);
+                                  resp->body->len, abs_url);
                 loaded = TRUE;
             } else if (resp->body->len > 0) {
                 ns_node *prev = js->current_script;
                 js->current_script = n;
                 ns_js_eval(js, (const char *)resp->body->data,
-                           resp->body->len, abs);
+                           resp->body->len, abs_url);
                 js->current_script = prev;
                 loaded = TRUE;
             } else {
@@ -36802,13 +36802,13 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
             const char *why = err ? err->message :
                 (resp && resp->error ? resp->error :
                  (resp ? "non-200 status" : "fetch failed"));
-            char *line = g_strdup_printf("script %s: %s", abs, why);
+            char *line = g_strdup_printf("script %s: %s", abs_url, why);
             js->log_cb(line, js->log_user_data);
             g_free(line);
         }
         ns_response_free(resp);
         g_clear_error(&err);
-        g_free(abs);
+        g_free(abs_url);
         ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
         return;
     }
@@ -36908,35 +36908,35 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
         ns_js_dispatch_resource_event(js, n, "load");
         return;
     }
-    char *abs = ns_url_resolve(origin, href);
-    if (!abs) {
+    char *abs_url = ns_url_resolve(origin, href);
+    if (!abs_url) {
         ns_js_dispatch_resource_event(js, n, "error");
         return;
     }
     gboolean loaded = FALSE;
-    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_STYLE, abs, origin)) {
+    if (js->csp && !ns_csp_allows(js->csp, NS_CSP_STYLE, abs_url, origin)) {
         if (js->log_cb) {
-            char *line = g_strdup_printf("CSP blocked: stylesheet %s", abs);
+            char *line = g_strdup_printf("CSP blocked: stylesheet %s", abs_url);
             js->log_cb(line, js->log_user_data);
             g_free(line);
         }
     } else {
         GError *err = NULL;
-        ns_response *resp = ns_js_fetch_resource(js, abs, origin, NULL, &err);
+        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
         if (resp && resp->status == 200)
             loaded = TRUE;
         else if (js->log_cb) {
             const char *why = err ? err->message :
                 (resp && resp->error ? resp->error :
                  (resp ? "non-200 status" : "fetch failed"));
-            char *line = g_strdup_printf("stylesheet %s: %s", abs, why);
+            char *line = g_strdup_printf("stylesheet %s: %s", abs_url, why);
             js->log_cb(line, js->log_user_data);
             g_free(line);
         }
         ns_response_free(resp);
         g_clear_error(&err);
     }
-    g_free(abs);
+    g_free(abs_url);
     ns_js_dispatch_resource_event(js, n, loaded ? "load" : "error");
 }
 
@@ -37076,7 +37076,7 @@ ns_js_drain_deferred_scripts(ns_js *js)
 }
 
 static void
-ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs)
+ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs_url)
 {
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
     if (srcdoc && *srcdoc) {
@@ -37086,8 +37086,8 @@ ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs)
     }
     ns_element_set_attr(iframe, "data-nd-frame-srcdoc", "");
     ns_element_set_attr(iframe, "data-nd-frame-url",
-                        abs && *abs ? abs : origin);
-    if (abs && *abs) ns_css_mark_visited(abs);
+                        abs_url && *abs_url ? abs_url : origin);
+    if (abs_url && *abs_url) ns_css_mark_visited(abs_url);
 }
 
 static const char *
@@ -37113,11 +37113,11 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
     if (!src || !*src || g_str_has_prefix(src, "about:")) return FALSE;
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
-    char *abs = ns_url_resolve(origin, src);
-    if (!abs) return FALSE;
+    char *abs_url = ns_url_resolve(origin, src);
+    if (!abs_url) return FALSE;
     const char *loaded_url = ns_element_get_attr(iframe, "data-nd-frame-url");
-    gboolean same = loaded_url && strcmp(loaded_url, abs) == 0;
-    g_free(abs);
+    gboolean same = loaded_url && strcmp(loaded_url, abs_url) == 0;
+    g_free(abs_url);
     return same;
 }
 
@@ -37739,10 +37739,10 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
         ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
         const char *src = ns_element_get_attr(n, "src");
         if (src && *src) {
-            char *abs = ns_url_resolve(origin, src);
-            if (abs) {
+            char *abs_url = ns_url_resolve(origin, src);
+            if (abs_url) {
                 GError *err = NULL;
-                ns_response *r = ns_js_fetch_resource(js, abs, origin, NULL, &err);
+                ns_response *r = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
                 if (r && r->body && r->body->len > 0 && !r->error &&
                     (r->status == 200 || r->status == 0)) {
                     if (r->body->len <= expose_scan_cap &&
@@ -37756,7 +37756,7 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
                 }
                 if (r) ns_response_free(r);
                 g_clear_error(&err);
-                g_free(abs);
+                g_free(abs_url);
             }
         } else {
             for (const ns_node *c = n->first_child; c; c = c->next_sibling)
@@ -37951,35 +37951,35 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     const char *src    = src_attr ? ns_element_get_attr(iframe, src_attr) : NULL;
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
 
-    char *abs = NULL;
+    char *abs_url = NULL;
     char *decoded = NULL;
     ns_response *resp = NULL;
 
     if (srcdoc && *srcdoc) {
         decoded = g_strdup(srcdoc);
-        abs = g_strdup(origin);
+        abs_url = g_strdup(origin);
     } else if (src && *src && !g_str_has_prefix(src, "about:")) {
-        abs = ns_url_resolve(origin, src);
-        if (abs && js->csp &&
-            !ns_csp_allows(js->csp, NS_CSP_FRAME, abs, origin)) {
+        abs_url = ns_url_resolve(origin, src);
+        if (abs_url && js->csp &&
+            !ns_csp_allows(js->csp, NS_CSP_FRAME, abs_url, origin)) {
             if (js->log_cb) {
                 char *line = g_strdup_printf(
                     "Blocked iframe %s by Content-Security-Policy "
-                    "frame-src", abs);
+                    "frame-src", abs_url);
                 js->log_cb(line, js->log_user_data);
                 g_free(line);
             }
-            g_free(abs);
-            abs = NULL;
+            g_free(abs_url);
+            abs_url = NULL;
         }
-        if (abs) {
+        if (abs_url) {
             GError *err = NULL;
-            resp = ns_js_fetch_resource(js, abs, origin, NULL, &err);
-            if (resp && ns_iframe_framing_blocked(origin, abs, resp)) {
+            resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+            if (resp && ns_iframe_framing_blocked(origin, abs_url, resp)) {
                 if (js->log_cb) {
                     char *line = g_strdup_printf(
                         "Blocked framing of %s (X-Frame-Options / "
-                        "frame-ancestors)", abs);
+                        "frame-ancestors)", abs_url);
                     js->log_cb(line, js->log_user_data);
                     g_free(line);
                 }
@@ -37996,7 +37996,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                 g_free(declared);
             }
             else if (js->log_cb) {
-                char *line = g_strdup_printf("iframe %s: %s", abs,
+                char *line = g_strdup_printf("iframe %s: %s", abs_url,
                     err ? err->message :
                     (resp && resp->error ? resp->error : "load failed"));
                 js->log_cb(line, js->log_user_data);
@@ -38013,7 +38013,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         if (!doc_type) {
             if (resp) ns_response_free(resp);
             g_free(decoded);
-            g_free(abs);
+            g_free(abs_url);
             return;
         }
     }
@@ -38085,8 +38085,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
         ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
 
-        const char *iorigin = abs && *abs ? abs : origin;
-        ns_js_mark_iframe_source(iframe, origin, abs);
+        const char *iorigin = abs_url && *abs_url ? abs_url : origin;
+        ns_js_mark_iframe_source(iframe, origin, abs_url);
         if (iorigin && js->current_url &&
             !ns_url_same_origin(iorigin, js->current_url))
             sandbox |= NS_FRAME_CROSS_ORIGIN;
@@ -38185,7 +38185,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     if (resp) ns_response_free(resp);
     g_free(decoded);
-    g_free(abs);
+    g_free(abs_url);
 }
 
 static void

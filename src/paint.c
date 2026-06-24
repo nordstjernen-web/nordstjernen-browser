@@ -621,10 +621,10 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
             bnd[nb++] = k / (double)CONIC_BASE;
         double off = gr->from_deg / 360.0;
         for (int s = 0; s < gr->n_stops && nb < CONIC_CAP; s++) {
-            double g = gr->stops[s].pos - off;
-            g -= floor(g);
-            bnd[nb++] = g;
-            if (nb < CONIC_CAP) bnd[nb++] = g;
+            double rel_pos = gr->stops[s].pos - off;
+            rel_pos -= floor(rel_pos);
+            bnd[nb++] = rel_pos;
+            if (nb < CONIC_CAP) bnd[nb++] = rel_pos;
         }
         for (int i = 1; i < nb; i++) {
             double key = bnd[i];
@@ -3111,7 +3111,7 @@ static void
 apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
 {
     if (!filter || !*filter) return;
-    typedef struct { int op; double a; } fop;
+    typedef struct { int op; double amount; } fop;
     fop ops[16];
     int n_ops = 0;
     double blur_radius = 0;
@@ -3136,7 +3136,7 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
         }
         if (op && amt >= 0) {
             ops[n_ops].op = op;
-            ops[n_ops].a  = amt;
+            ops[n_ops].amount = amt;
             n_ops++;
         }
     }
@@ -3151,7 +3151,7 @@ apply_image_filter(guchar *data, int stride, int w, int h, const char *filter)
             double r = px[2] / 255.0;
             if (a > 0.0001) { r /= a; g /= a; b /= a; }
             for (int oi = 0; oi < n_ops; oi++) {
-                double t = ops[oi].a;
+                double t = ops[oi].amount;
                 switch (ops[oi].op) {
                 case 1: {
                     double lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;

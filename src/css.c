@@ -10709,10 +10709,10 @@ css_value_resolve_url(ns_css_value *v, const char *base_url)
         return;
     if (!css_url_should_resolve(v->u.url))
         return;
-    char *abs = ns_url_resolve(base_url, v->u.url);
-    if (!abs) return;
+    char *abs_url = ns_url_resolve(base_url, v->u.url);
+    if (!abs_url) return;
     g_free(v->u.url);
-    v->u.url = abs;
+    v->u.url = abs_url;
 }
 
 void
@@ -10734,10 +10734,10 @@ ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s, const char *base_url)
             ns_css_font_face *ff =
                 &g_array_index(s->font_faces, ns_css_font_face, i);
             if (!css_url_should_resolve(ff->src_url)) continue;
-            char *abs = ns_url_resolve(base_url, ff->src_url);
-            if (!abs) continue;
+            char *abs_url = ns_url_resolve(base_url, ff->src_url);
+            if (!abs_url) continue;
             g_free(ff->src_url);
-            ff->src_url = abs;
+            ff->src_url = abs_url;
         }
     }
 }
@@ -11372,10 +11372,10 @@ ns_el_is_visited_link(const ns_node *el)
     if (!g_visited_urls || !g_css_doc_base || !ns_el_is_link(el)) return FALSE;
     const char *href = ns_element_get_attr(el, "href");
     if (!href || !*href) return FALSE;
-    char *abs = ns_url_resolve(g_css_doc_base, href);
-    if (!abs) return FALSE;
-    gboolean v = g_hash_table_contains(g_visited_urls, abs);
-    g_free(abs);
+    char *abs_url = ns_url_resolve(g_css_doc_base, href);
+    if (!abs_url) return FALSE;
+    gboolean v = g_hash_table_contains(g_visited_urls, abs_url);
+    g_free(abs_url);
     return v;
 }
 

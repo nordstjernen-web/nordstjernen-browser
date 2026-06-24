@@ -676,11 +676,11 @@ contains_block_media(const ns_node *n, GHashTable *styles)
         gpointer hit = g_hash_table_lookup(g_contains_block_media_cache, n);
         if (hit) return GPOINTER_TO_INT(hit) == 2;
     }
-    gboolean r = contains_block_media_depth(n, styles, 0);
+    gboolean has_media = contains_block_media_depth(n, styles, 0);
     if (g_contains_block_media_cache)
         g_hash_table_insert(g_contains_block_media_cache,
-                            (gpointer)n, GINT_TO_POINTER(r ? 2 : 1));
-    return r;
+                            (gpointer)n, GINT_TO_POINTER(has_media ? 2 : 1));
+    return has_media;
 }
 
 static gboolean
