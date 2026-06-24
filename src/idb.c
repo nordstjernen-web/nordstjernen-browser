@@ -677,6 +677,8 @@ ns_idb_insert_index_entries(JSContext *ctx, sqlite3 *db,
             sqlite3_bind_text(st, 3, key, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(st, 4, primary_key, -1, SQLITE_TRANSIENT);
             ok = sqlite3_step(st) == SQLITE_DONE;
+        } else {
+            ok = FALSE;
         }
         if (name) JS_FreeCString(ctx, name);
         if (key) JS_FreeCString(ctx, key);
