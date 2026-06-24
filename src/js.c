@@ -11789,6 +11789,13 @@ ns_xhr_open(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                       argc > 2 && !JS_ToBool(ctx, argv[2]) ? JS_TRUE
                                                            : JS_FALSE);
     JS_SetPropertyStr(ctx, this_val, "_headers", JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, this_val, "_aborted", JS_FALSE);
+    JS_SetPropertyStr(ctx, this_val, "status", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, this_val, "statusText", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, this_val, "responseText", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, this_val, "response", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, this_val, "responseURL", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, this_val, "_responseHeaders", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
     return JS_UNDEFINED;
 }
@@ -13478,9 +13485,29 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
             return JS_ThrowRangeError(ctx,
                 "Response: status %d is outside the range [200, 599]", status);
         }
+        if ((status == 204 || status == 205 || status == 304) && argc >= 1 &&
+            !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+            JS_FreeValue(ctx, obj);
+            JS_FreeValue(ctx, body_v);
+            return JS_ThrowTypeError(ctx,
+                "Response: a null body status cannot have a body");
+        }
         status_text_v = JS_GetPropertyStr(ctx, argv[1], "statusText");
         if (!JS_IsUndefined(status_text_v) && !JS_IsNull(status_text_v))
             status_text = JS_ToCString(ctx, status_text_v);
+        if (status_text) {
+            for (const char *p = status_text; *p; p++) {
+                guchar c = (guchar)*p;
+                if (c >= 0xC4 || (c != 0x09 && c < 0x20) || c == 0x7F) {
+                    JS_FreeCString(ctx, status_text);
+                    JS_FreeValue(ctx, status_text_v);
+                    JS_FreeValue(ctx, obj);
+                    JS_FreeValue(ctx, body_v);
+                    return JS_ThrowTypeError(ctx,
+                        "Response: invalid statusText");
+                }
+            }
+        }
         headers_init = JS_GetPropertyStr(ctx, argv[1], "headers");
     }
     ns_body_install(ctx, obj, body_v, FALSE);
