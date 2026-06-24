@@ -2483,7 +2483,7 @@ parse_one_selector(const char **pp, const char *end, int depth)
                 }
                 p = css_skip_ws_comments(p, end);
                 if (p < end && (*p == 'i' || *p == 'I')) {
-                    ap.ci = TRUE;
+                    ap.case_insensitive = TRUE;
                     p++;
                 } else if (p < end && (*p == 's' || *p == 'S')) {
                     p++;
@@ -11915,7 +11915,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
             } else {
                 if (!v || !a->value) return FALSE;
                 gsize vl = strlen(v), wl = strlen(a->value);
-                gboolean ci = a->ci;
+                gboolean ci = a->case_insensitive;
                 switch (a->op) {
                 case NS_CSS_ATTR_EQ:
                     if (ci ? g_ascii_strcasecmp(v, a->value)

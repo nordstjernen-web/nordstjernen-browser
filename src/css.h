@@ -471,7 +471,7 @@ typedef struct ns_css_attr_pred {
     char *name;
     ns_css_attr_op op;
     char *value;
-    gboolean ci;
+    gboolean case_insensitive;
     guint64 name_bit;
 } ns_css_attr_pred;
 

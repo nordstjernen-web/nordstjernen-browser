@@ -490,8 +490,8 @@ ns_ai_select_download(const char *model_id)
                 ? cfg->ai_model_mirror : NULL;
             const char *hf = "https://huggingface.co/";
             if (mirror && g_str_has_prefix(m->url, hf)) {
-                gsize ml = strlen(mirror);
-                gboolean slash = ml > 0 && mirror[ml - 1] == '/';
+                gsize mirror_len = strlen(mirror);
+                gboolean slash = mirror_len > 0 && mirror[mirror_len - 1] == '/';
                 job->url = g_strconcat(mirror, slash ? "" : "/",
                                        m->url + strlen(hf), NULL);
             } else {
@@ -629,8 +629,8 @@ ns_ai_json_string(const char *p, const char **endp)
                     }
                     if (cp && !(cp >= 0xD800 && cp <= 0xDFFF)) {
                         char utf8[8];
-                        int ln = g_unichar_to_utf8(cp, utf8);
-                        g_string_append_len(o, utf8, ln);
+                        int utf8_len = g_unichar_to_utf8(cp, utf8);
+                        g_string_append_len(o, utf8, utf8_len);
                     }
                     p += 4;
                 }
@@ -1388,8 +1388,8 @@ ns_ai_partial_tag_holdback(const char *s, gsize len)
     static const char *const tags[] = { "<think>", "</think>" };
     gsize best = 0;
     for (gsize t = 0; t < G_N_ELEMENTS(tags); t++) {
-        gsize tl = strlen(tags[t]) - 1;
-        for (gsize k = tl < len ? tl : len; k >= 1; k--) {
+        gsize max_partial = strlen(tags[t]) - 1;
+        for (gsize k = max_partial < len ? max_partial : len; k >= 1; k--) {
             if (memcmp(s + len - k, tags[t], k) == 0) {
                 if (k > best) best = k;
                 break;
@@ -1417,8 +1417,8 @@ ns_ai_strip_think(const char *s, gsize len, gboolean streaming)
         i++;
     }
     if (streaming) {
-        gsize hb = ns_ai_partial_tag_holdback(o->str, o->len);
-        g_string_truncate(o, o->len - hb);
+        gsize holdback_bytes = ns_ai_partial_tag_holdback(o->str, o->len);
+        g_string_truncate(o, o->len - holdback_bytes);
     }
     return g_string_free(o, FALSE);
 }
