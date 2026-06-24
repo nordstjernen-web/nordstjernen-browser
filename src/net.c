@@ -2063,9 +2063,8 @@ about_splash_markup(void)
     char *markup = g_strdup_printf(
         "<img class=\"splash\" src=\"%s\" "
         "alt=\"Nordstjernen " NS_VERSION " splash\" "
-        "style=\"display:block;width:100%%;max-width:100%%;height:auto;"
-        "border-radius:14px;margin:2px 0 22px;"
-        "box-shadow:0 6px 24px rgba(16,22,40,.18);\">",
+        "style=\"display:block;width:auto;max-width:88%%;height:auto;"
+        "margin:2px auto 16px;border-radius:14px;\">",
         uri);
     g_free(uri);
     return markup;
@@ -3373,7 +3372,6 @@ static const char k_about_start_template[] =
     "<div class=\"wrap\">"
     "__ND_SPLASH__"
     "<div class=\"head\">"
-    "__ND_LOGO_MARK__"
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
     "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
@@ -3641,11 +3639,9 @@ static const char k_about_start_template[] =
     "<body><main class=\"wrap\">"
     "__ND_SPLASH__"
     "<div class=\"head\">"
-    "__ND_LOGO_MARK__"
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
     "</div><div class=\"tagline\">__ND_TAGLINE__</div></div>"
     "</div>"
-    "<p class=\"intro\">A legendary web browser</p>"
     "<form class=\"search\" id=\"dsearch\">"
     "<input id=\"sq\" name=\"q\" autocomplete=\"off\" autofocus dir=\"auto\""
     " aria-label=\"Search the web\""
