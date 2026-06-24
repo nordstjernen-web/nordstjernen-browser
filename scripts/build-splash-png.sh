@@ -19,34 +19,34 @@ find_font() {
 }
 fb=$(find_font 'DejaVu Sans:bold' \
     /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
-    /usr/share/fonts/dejavu/DejaVuSans-Bold.ttf \
-    /usr/share/fonts/TTF/DejaVuSans-Bold.ttf)
+    /usr/share/fonts/dejavu/DejaVuSans-Bold.ttf /usr/share/fonts/TTF/DejaVuSans-Bold.ttf)
 fr=$(find_font 'DejaVu Sans' \
     /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf \
-    /usr/share/fonts/dejavu/DejaVuSans.ttf \
-    /usr/share/fonts/TTF/DejaVuSans.ttf)
+    /usr/share/fonts/dejavu/DejaVuSans.ttf /usr/share/fonts/TTF/DejaVuSans.ttf)
 
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
 
-# text labels (auto-sized)
+# text labels
 convert -background none -font "$fb" -pointsize 54 -fill '#ffffff' label:'Nordstjernen ' "$w/t1.png"
 convert -background none -font "$fb" -pointsize 54 -fill '#7fb0ff' label:"$ver" "$w/t2.png"
+convert -background none -font "$fb" -pointsize 27 -fill '#e6edff' label:'Nordstjernen Web Browser' "$w/ts.png"
 convert -background none -font "$fb" -pointsize 25 -kerning 3 -fill '#ffd27a' label:"$codename" "$w/tc.png"
 convert -background none -font "$fr" -pointsize 21 -fill '#cdd8ee' \
     label:'Étoile du Nord — the legendary web browser' "$w/t3.png"
 w1=$(identify -format '%w' "$w/t1.png"); h1=$(identify -format '%h' "$w/t1.png")
 w2=$(identify -format '%w' "$w/t2.png")
+hs=$(identify -format '%h' "$w/ts.png"); hc=$(identify -format '%h' "$w/tc.png"); h3=$(identify -format '%h' "$w/t3.png")
 textleft=210; rm=70
-titlew=$((textleft + w1 + w2)); cw=$((titlew + rm)); [ "$cw" -lt 940 ] && cw=940; ch=310
+titlew=$((textleft + w1 + w2)); cw=$((titlew + rm)); [ "$cw" -lt 940 ] && cw=940
+ty=84; sy=$((ty + h1 + 12)); cy=$((sy + hs + 12)); gy=$((cy + hc + 10)); ch=$((gy + h3 + 26))
 
 # night sky
 convert -size ${cw}x${ch} gradient:'#0a1430'-'#1b2c66' "$w/sky.png"
 
-# real aurora: green/cyan vertical-ray curtains, waved and blurred
+# real aurora
 ha=200
-convert -size ${cw}x1 xc: +noise Random -colorspace Gray -scale ${cw}x${ha}\! \
-    -level 42%,100% -gamma 1.5 "$w/rays.png"
+convert -size ${cw}x1 xc: +noise Random -colorspace Gray -scale ${cw}x${ha}\! -level 42%,100% -gamma 1.5 "$w/rays.png"
 convert -size ${cw}x${ha} gradient:black-'#8a8a8a' "$w/vfade.png"
 convert "$w/rays.png" "$w/vfade.png" -compose multiply -composite "$w/curtainA.png"
 convert -size ${cw}x${ha} gradient:'#5fe0ff'-'#27ff86' "$w/auroCol.png"
@@ -62,44 +62,46 @@ convert -size 200x200 xc:none -stroke white -fill white \
     -strokewidth 1 -draw "line 55,55 145,145" -strokewidth 1 -draw "line 145,55 55,145" -blur 0x0.6 "$w/spikes.png"
 convert "$w/glow.png" "$w/spikes.png" -compose screen -composite -resize 140x140 "$w/star.png"
 
-# advanced Frontier-style ship with an engine plasma flare
-sc=470; sh=200
-convert -size ${sc}x${sh} xc:none -fill 'rgba(185,90,255,0.30)' \
-    -draw "polygon 134,82 134,118 14,134 -10,100 14,66" -blur 0x17 "$w/f_mag.png"
-convert -size ${sc}x${sh} xc:none -fill 'rgba(70,195,255,0.62)' \
-    -draw "polygon 134,80 134,120 24,140 -2,100 24,60" -blur 0x14 "$w/f_out.png"
-convert -size ${sc}x${sh} xc:none -fill 'rgba(135,228,255,0.88)' \
-    -draw "polygon 134,86 134,114 44,126 22,100 44,74" -blur 0x7 "$w/f_mid.png"
-convert -size ${sc}x${sh} xc:none -fill 'rgba(240,252,255,0.96)' \
-    -draw "polygon 134,90 134,110 72,116 52,100 72,84" -blur 0x3 "$w/f_core.png"
-convert "$w/f_mag.png" "$w/f_out.png" -compose screen -composite \
-    "$w/f_mid.png" -compose screen -composite "$w/f_core.png" -compose screen -composite "$w/flare.png"
-convert -size ${sc}x${sh} xc:none -stroke '#252a38' -strokewidth 1.5 \
+# advanced ship: plasma flare + shock diamonds, energy edges, cannons, sensor, cockpit, lights
+sc=470; ssh=200
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(185,90,255,0.30)' -draw "polygon 134,82 134,118 14,134 -10,100 14,66" -blur 0x17 "$w/f_mag.png"
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(70,195,255,0.62)' -draw "polygon 134,80 134,120 24,140 -2,100 24,60" -blur 0x14 "$w/f_out.png"
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(135,228,255,0.88)' -draw "polygon 134,86 134,114 44,126 22,100 44,74" -blur 0x7 "$w/f_mid.png"
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(240,252,255,0.96)' -draw "polygon 134,90 134,110 72,116 52,100 72,84" -blur 0x3 "$w/f_core.png"
+convert "$w/f_mag.png" "$w/f_out.png" -compose screen -composite "$w/f_mid.png" -compose screen -composite "$w/f_core.png" -compose screen -composite "$w/f0.png"
+convert "$w/f0.png" -stroke none \
+    -fill 'rgba(248,253,255,0.95)' -draw "circle 116,100 116,103.4" \
+    -fill 'rgba(220,248,255,0.85)' -draw "circle 92,100 92,102.6" \
+    -fill 'rgba(190,240,255,0.7)' -draw "circle 70,100 70,101.9" \
+    -fill 'rgba(160,232,255,0.55)' -draw "circle 50,100 50,101.4" -blur 0x0.8 "$w/flare.png"
+convert -size ${sc}x${ssh} xc:none -stroke '#252a38' -strokewidth 1.5 \
     -fill '#828ea9' -draw "polygon 410,100 340,83 278,71 210,51 156,33 196,77 150,79 134,87 130,100 134,113 150,121 196,123 156,167 210,149 278,129 340,117" \
     -fill '#c4cee0' -draw "polygon 410,100 322,86 150,84 140,100 150,116 322,114" \
     -fill '#565f79' -draw "polygon 210,51 156,33 196,77 150,79 210,51" \
     -fill '#565f79' -draw "polygon 210,149 156,167 196,123 150,121 210,149" \
     -fill '#3a4156' -draw "polygon 196,77 150,79 134,87 130,100 134,113 150,121 196,123 168,100" "$w/hull.png"
 convert "$w/hull.png" -stroke '#2b3142' -strokewidth 1 -fill none \
-    -draw "line 322,86 205,85" -draw "line 322,114 205,115" -draw "line 300,100 165,100" "$w/hull2.png"
+    -draw "line 322,86 205,85" -draw "line 322,114 205,115" -draw "line 300,100 165,100" \
+    -draw "line 250,76 215,90" -draw "line 250,124 215,110" "$w/hull2.png"
 convert "$w/hull2.png" -stroke none \
     -fill '#10131c' -draw "circle 131,90 131,92" -draw "circle 131,100 131,102" -draw "circle 131,110 131,112" \
     -fill '#bdeeff' -draw "circle 131,90 131,90.8" -draw "circle 131,100 131,100.8" -draw "circle 131,110 131,110.8" "$w/hull3.png"
-convert -size ${sc}x${sh} xc:none -fill 'rgba(120,215,255,0.85)' \
-    -draw "polygon 352,100 320,89 296,100 320,111" -blur 0x1.4 "$w/canopy.png"
-convert "$w/canopy.png" -stroke none -fill 'rgba(238,251,255,0.95)' \
-    -draw "polygon 338,100 320,93 308,100 320,107" "$w/canopy2.png"
-convert -size ${sc}x${sh} xc:none \
-    -fill 'rgba(120,255,150,0.97)' -draw "circle 156,33 156,35.4" \
-    -fill 'rgba(255,95,95,0.97)' -draw "circle 156,167 156,169.4" -blur 0x0.7 "$w/lights.png"
-convert "$w/hull3.png" "$w/canopy2.png" -compose screen -composite \
-    "$w/lights.png" -compose screen -composite "$w/shiponly.png"
+convert -size ${sc}x${ssh} xc:none -stroke '#67e6ff' -strokewidth 2 -fill none \
+    -draw "polyline 338,85 278,73 210,54 161,37" -draw "polyline 338,115 278,127 210,146 161,163" "$w/edge0.png"
+convert "$w/edge0.png" \( +clone -blur 0x2.6 \) -compose screen -composite "$w/edges.png"
+convert -size ${sc}x${ssh} xc:none -stroke '#1b1f2c' -strokewidth 3 -fill none \
+    -draw "line 168,40 196,33" -draw "line 168,160 196,167" "$w/guns0.png"
+convert "$w/guns0.png" -stroke none -fill 'rgba(120,255,210,0.95)' -draw "circle 196,33 196,34.4" -draw "circle 196,167 196,168.4" "$w/guns.png"
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(120,215,255,0.85)' -draw "polygon 352,100 320,89 296,100 320,111" -blur 0x1.4 "$w/canopy0.png"
+convert "$w/canopy0.png" -stroke none -fill 'rgba(238,251,255,0.96)' -draw "polygon 338,100 320,93 308,100 320,107" -fill 'rgba(255,255,255,0.95)' -draw "circle 326,98 326,99.4" "$w/canopy.png"
+convert -size ${sc}x${ssh} xc:none -stroke '#aeb8d0' -strokewidth 1.4 -fill none -draw "line 410,100 436,100" -stroke none -fill 'rgba(150,230,255,0.95)' -draw "circle 436,100 436,101.6" "$w/nose.png"
+convert -size ${sc}x${ssh} xc:none -fill 'rgba(120,255,150,0.97)' -draw "circle 156,33 156,35.4" -fill 'rgba(255,95,95,0.97)' -draw "circle 156,167 156,169.4" -blur 0x0.7 "$w/lights.png"
+convert "$w/hull3.png" "$w/edges.png" -compose screen -composite "$w/guns.png" -compose over -composite \
+    "$w/nose.png" -compose over -composite "$w/canopy.png" -compose screen -composite "$w/lights.png" -compose screen -composite "$w/shiponly.png"
 convert "$w/flare.png" "$w/shiponly.png" -compose over -composite -resize 230x98 "$w/ship.png"
 
-# compose: sky + aurora + stars + star + ship + text
-convert "$w/sky.png" \
-    \( "$w/aurora.png" -channel A -evaluate multiply 0.82 +channel -gravity North -geometry +50+14 \) \
-    -compose screen -composite "$w/sky2.png"
+# compose
+convert "$w/sky.png" \( "$w/aurora.png" -channel A -evaluate multiply 0.82 +channel -gravity North -geometry +50+14 \) -compose screen -composite "$w/sky2.png"
 stars=$(python3 - "$cw" "$ch" <<'PY'
 import sys, random
 W, H = int(sys.argv[1]), int(sys.argv[2])
@@ -113,17 +115,16 @@ print(" ".join(o))
 PY
 )
 convert "$w/sky2.png" -draw "$stars" "$w/sky3.png"
-ty=86; cy=$((ty + h1 + 18)); gy=$((cy + 44))
 convert "$w/sky3.png" \
-    \( "$w/star.png" \) -gravity NorthWest -geometry +35+78 -compose screen -composite \
+    \( "$w/star.png" \) -gravity NorthWest -geometry +35+76 -compose screen -composite \
     \( "$w/ship.png" \) -gravity NorthEast -geometry +26+10 -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
+    "$w/ts.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
     "$w/tc.png" -gravity NorthWest -geometry +${textleft}+${cy} -compose over -composite \
     "$w/t3.png" -gravity NorthWest -geometry +${textleft}+${gy} -compose over -composite \
     "$w/full.png"
-convert "$w/full.png" -strip -dither FloydSteinberg -colors 220 \
-    -define png:compression-level=9 PNG8:"$w/splash.png"
+convert "$w/full.png" -strip -dither FloydSteinberg -colors 220 -define png:compression-level=9 PNG8:"$w/splash.png"
 echo "rendered splash ${cw}x${ch} for $ver $codename ($(stat -c%s "$w/splash.png") bytes)"
 
 header="src/about_splash_png.h"
