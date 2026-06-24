@@ -12654,11 +12654,14 @@ ns_utf8_append_cp(GByteArray *out, guint32 cp)
 }
 
 static gboolean
-ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal)
+ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
+               gboolean stream, gsize *pending_out)
 {
     guint32 codep = 0;
     guint bytes_needed = 0, bytes_seen = 0;
     guint32 lower = 0x80, upper = 0xBF;
+    gsize seq_start = 0;
+    if (pending_out) *pending_out = 0;
     for (gsize i = 0; i < len; ) {
         guint8 b = data[i];
         if (bytes_needed == 0) {
@@ -12666,12 +12669,14 @@ ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal)
                 ns_utf8_append_cp(out, b);
                 i++;
             } else if (b >= 0xC2 && b <= 0xDF) {
-                bytes_needed = 1; codep = b & 0x1F; i++;
+                seq_start = i; bytes_needed = 1; codep = b & 0x1F; i++;
             } else if (b >= 0xE0 && b <= 0xEF) {
+                seq_start = i;
                 if (b == 0xE0) lower = 0xA0;
                 if (b == 0xED) upper = 0x9F;
                 bytes_needed = 2; codep = b & 0x0F; i++;
             } else if (b >= 0xF0 && b <= 0xF4) {
+                seq_start = i;
                 if (b == 0xF0) lower = 0x90;
                 if (b == 0xF4) upper = 0x8F;
                 bytes_needed = 3; codep = b & 0x07; i++;
@@ -12696,6 +12701,10 @@ ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal)
         }
     }
     if (bytes_needed != 0) {
+        if (stream) {
+            if (pending_out) *pending_out = len - seq_start;
+            return TRUE;
+        }
         if (fatal) return FALSE;
         ns_utf8_append_cp(out, 0xFFFD);
     }
@@ -12703,12 +12712,14 @@ ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal)
 }
 
 static gboolean
-ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out,
-                gboolean fatal, gboolean big_endian)
+ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
+                gboolean big_endian, gboolean stream, gsize *pending_out)
 {
     guint32 hi = 0;
     gboolean have_hi = FALSE;
-    for (gsize i = 0; i + 2 <= len; i += 2) {
+    gsize i = 0;
+    if (pending_out) *pending_out = 0;
+    for (; i + 2 <= len; i += 2) {
         guint16 u = big_endian ? (guint16)((data[i] << 8) | data[i + 1])
                                : (guint16)((data[i + 1] << 8) | data[i]);
         if (have_hi) {
@@ -12730,11 +12741,16 @@ ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out,
             ns_utf8_append_cp(out, u);
         }
     }
+    gsize tail = len - i;
+    if (stream) {
+        if (pending_out) *pending_out = tail + (have_hi ? 2 : 0);
+        return TRUE;
+    }
     if (have_hi) {
         if (fatal) return FALSE;
         ns_utf8_append_cp(out, 0xFFFD);
     }
-    if (len & 1) {
+    if (tail) {
         if (fatal) return FALSE;
         ns_utf8_append_cp(out, 0xFFFD);
     }
@@ -12792,33 +12808,13 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     }
 
     guint n = buf->len;
-    guint hold = 0;
-    if (stream && n > 0) {
-        if (mode == 0) {
-            for (guint k = 1; k <= 3 && k <= n; k++) {
-                guint8 b = buf->data[n - k];
-                if ((b & 0xC0) == 0x80) continue;
-                int seqlen;
-                if ((b & 0x80) == 0)         seqlen = 1;
-                else if ((b & 0xE0) == 0xC0) seqlen = 2;
-                else if ((b & 0xF0) == 0xE0) seqlen = 3;
-                else if ((b & 0xF8) == 0xF0) seqlen = 4;
-                else                         seqlen = 1;
-                if ((guint)seqlen > k) hold = k;
-                break;
-            }
-        } else if (n & 1) {
-            hold = 1;
-        }
-    }
-
-    guint emit = n - hold;
-    GByteArray *out = g_byte_array_sized_new(emit + 1);
+    gsize pending = 0;
+    GByteArray *out = g_byte_array_sized_new(n + 1);
     gboolean ok = (mode == 1)
-        ? ns_decode_utf16(buf->data, emit, out, fatal, FALSE)
+        ? ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending)
         : (mode == 2)
-            ? ns_decode_utf16(buf->data, emit, out, fatal, TRUE)
-            : ns_decode_utf8(buf->data, emit, out, fatal);
+            ? ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending)
+            : ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
 
     if (!ok) {
         g_byte_array_free(out, TRUE);
@@ -12826,11 +12822,12 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
         if (stream) JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
         return JS_ThrowTypeError(ctx, "The encoded data was not valid");
     }
+    guint hold = (guint)pending;
 
     JSValue bom_checked_v = JS_GetPropertyStr(ctx, this_val, "_bomChecked");
     gboolean bom_checked = JS_ToBool(ctx, bom_checked_v);
     JS_FreeValue(ctx, bom_checked_v);
-    if (!bom_checked && emit > 0) {
+    if (!bom_checked && out->len > 0) {
         JSValue ib = JS_GetPropertyStr(ctx, this_val, "ignoreBOM");
         gboolean ignore_bom = JS_ToBool(ctx, ib);
         JS_FreeValue(ctx, ib);
@@ -12842,9 +12839,9 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
 
     JSValue r = JS_NewStringLen(ctx, (const char *)out->data, out->len);
 
-    if (stream && hold > 0)
+    if (stream && hold > 0 && hold <= n)
         JS_SetPropertyStr(ctx, this_val, "_tail",
-                          JS_NewArrayBufferCopy(ctx, buf->data + emit, hold));
+                          JS_NewArrayBufferCopy(ctx, buf->data + (n - hold), hold));
     else
         JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
     if (!stream)
