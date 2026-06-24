@@ -12245,7 +12245,8 @@ ns_form_data_has(JSContext *ctx, JSValueConst this_val,
 
 static void ns_form_collect_controls(const ns_node *form, const ns_node *scan,
                                      const ns_node *doc, JSContext *ctx,
-                                     JSValue arr, uint32_t *idx, int depth);
+                                     JSValue arr, uint32_t *idx, int depth,
+                                     gboolean include_image);
 
 static JSValue
 ns_form_data_delete(JSContext *ctx, JSValueConst this_val,
@@ -12370,7 +12371,7 @@ ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd,
     uint32_t i = 0;
     const ns_node *doc = ns_node_root(form);
     ns_form_collect_controls(form, doc ? doc : form, doc ? doc : form,
-                             ctx, controls, &i, 0);
+                             ctx, controls, &i, 0, TRUE);
     uint32_t len = ns_js_array_length(ctx, controls);
     for (uint32_t k = 0; k < len; k++) {
         JSValue elv = JS_GetPropertyUint32(ctx, controls, k);
@@ -25339,10 +25340,18 @@ ns_element_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static gboolean
+ns_node_is_image_input(const ns_node *el)
+{
+    if (!el || !el->name || g_ascii_strcasecmp(el->name, "input") != 0) return FALSE;
+    const char *t = ns_element_get_attr(el, "type");
+    return t && g_ascii_strcasecmp(t, "image") == 0;
+}
+
 static void
 ns_form_collect_controls(const ns_node *form, const ns_node *scan,
                          const ns_node *doc, JSContext *ctx, JSValue arr,
-                         uint32_t *idx, int depth)
+                         uint32_t *idx, int depth, gboolean include_image)
 {
     static const char *const controls[] = {
         "input", "select", "textarea", "button", "fieldset", "output", NULL,
@@ -25350,9 +25359,10 @@ ns_form_collect_controls(const ns_node *form, const ns_node *scan,
     if (!scan || depth >= 512) return;
     for (const ns_node *c = scan->first_child; c; c = c->next_sibling) {
         if (ns_node_name_is_any_of(c, controls) &&
-            ns_form_owner(c, doc) == form)
+            ns_form_owner(c, doc) == form &&
+            (include_image || !ns_node_is_image_input(c)))
             JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
-        ns_form_collect_controls(form, c, doc, ctx, arr, idx, depth + 1);
+        ns_form_collect_controls(form, c, doc, ctx, arr, idx, depth + 1, include_image);
     }
 }
 
@@ -25441,7 +25451,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         if (root->name && strcmp(root->name, "form") == 0) {
             const ns_node *doc = ns_node_root(root);
             ns_form_collect_controls(root, doc ? doc : root, doc ? doc : root,
-                                     ctx, arr, &i, 0);
+                                     ctx, arr, &i, 0, FALSE);
         } else if (root->name && strcmp(root->name, "fieldset") == 0) {
             ns_fieldset_collect_listed(root, ctx, arr, &i, 0);
         }
