@@ -62,43 +62,78 @@ convert -size 200x200 xc:none -stroke white -fill white \
     -strokewidth 1 -draw "line 55,55 145,145" -strokewidth 1 -draw "line 145,55 55,145" -blur 0x0.6 "$w/spikes.png"
 convert "$w/glow.png" "$w/spikes.png" -compose screen -composite -resize 140x140 "$w/star.png"
 
-# advanced ship: plasma flare + shock diamonds, energy edges, cannons, sensor, cockpit, lights
-sc=470; ssh=200
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(185,90,255,0.30)' -draw "polygon 134,82 134,118 14,134 -10,100 14,66" -blur 0x17 "$w/f_mag.png"
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(70,195,255,0.62)' -draw "polygon 134,80 134,120 24,140 -2,100 24,60" -blur 0x14 "$w/f_out.png"
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(135,228,255,0.88)' -draw "polygon 134,86 134,114 44,126 22,100 44,74" -blur 0x7 "$w/f_mid.png"
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(240,252,255,0.96)' -draw "polygon 134,90 134,110 72,116 52,100 72,84" -blur 0x3 "$w/f_core.png"
-convert "$w/f_mag.png" "$w/f_out.png" -compose screen -composite "$w/f_mid.png" -compose screen -composite "$w/f_core.png" -compose screen -composite "$w/f0.png"
-convert "$w/f0.png" -stroke none \
-    -fill 'rgba(248,253,255,0.95)' -draw "circle 116,100 116,103.4" \
-    -fill 'rgba(220,248,255,0.85)' -draw "circle 92,100 92,102.6" \
-    -fill 'rgba(190,240,255,0.7)' -draw "circle 70,100 70,101.9" \
-    -fill 'rgba(160,232,255,0.55)' -draw "circle 50,100 50,101.4" -blur 0x0.8 "$w/flare.png"
-convert -size ${sc}x${ssh} xc:none -stroke '#252a38' -strokewidth 1.5 \
-    -fill '#828ea9' -draw "polygon 410,100 340,83 278,71 210,51 156,33 196,77 150,79 134,87 130,100 134,113 150,121 196,123 156,167 210,149 278,129 340,117" \
-    -fill '#c4cee0' -draw "polygon 410,100 322,86 150,84 140,100 150,116 322,114" \
-    -fill '#565f79' -draw "polygon 210,51 156,33 196,77 150,79 210,51" \
-    -fill '#565f79' -draw "polygon 210,149 156,167 196,123 150,121 210,149" \
-    -fill '#3a4156' -draw "polygon 196,77 150,79 134,87 130,100 134,113 150,121 196,123 168,100" "$w/hull.png"
-convert "$w/hull.png" -stroke '#2b3142' -strokewidth 1 -fill none \
-    -draw "line 322,86 205,85" -draw "line 322,114 205,115" -draw "line 300,100 165,100" \
-    -draw "line 250,76 215,90" -draw "line 250,124 215,110" "$w/hull2.png"
-convert "$w/hull2.png" -stroke none \
-    -fill '#10131c' -draw "circle 131,90 131,92" -draw "circle 131,100 131,102" -draw "circle 131,110 131,112" \
-    -fill '#bdeeff' -draw "circle 131,90 131,90.8" -draw "circle 131,100 131,100.8" -draw "circle 131,110 131,110.8" "$w/hull3.png"
-convert -size ${sc}x${ssh} xc:none -stroke '#67e6ff' -strokewidth 2 -fill none \
-    -draw "polyline 338,85 278,73 210,54 161,37" -draw "polyline 338,115 278,127 210,146 161,163" "$w/edge0.png"
-convert "$w/edge0.png" \( +clone -blur 0x2.6 \) -compose screen -composite "$w/edges.png"
-convert -size ${sc}x${ssh} xc:none -stroke '#1b1f2c' -strokewidth 3 -fill none \
-    -draw "line 168,40 196,33" -draw "line 168,160 196,167" "$w/guns0.png"
-convert "$w/guns0.png" -stroke none -fill 'rgba(120,255,210,0.95)' -draw "circle 196,33 196,34.4" -draw "circle 196,167 196,168.4" "$w/guns.png"
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(120,215,255,0.85)' -draw "polygon 352,100 320,89 296,100 320,111" -blur 0x1.4 "$w/canopy0.png"
-convert "$w/canopy0.png" -stroke none -fill 'rgba(238,251,255,0.96)' -draw "polygon 338,100 320,93 308,100 320,107" -fill 'rgba(255,255,255,0.95)' -draw "circle 326,98 326,99.4" "$w/canopy.png"
-convert -size ${sc}x${ssh} xc:none -stroke '#aeb8d0' -strokewidth 1.4 -fill none -draw "line 410,100 436,100" -stroke none -fill 'rgba(150,230,255,0.95)' -draw "circle 436,100 436,101.6" "$w/nose.png"
-convert -size ${sc}x${ssh} xc:none -fill 'rgba(120,255,150,0.97)' -draw "circle 156,33 156,35.4" -fill 'rgba(255,95,95,0.97)' -draw "circle 156,167 156,169.4" -blur 0x0.7 "$w/lights.png"
-convert "$w/hull3.png" "$w/edges.png" -compose screen -composite "$w/guns.png" -compose over -composite \
-    "$w/nose.png" -compose over -composite "$w/canopy.png" -compose screen -composite "$w/lights.png" -compose screen -composite "$w/shiponly.png"
-convert "$w/flare.png" "$w/shiponly.png" -compose over -composite -resize 230x98 "$w/ship.png"
+# Frontier: Elite II ship — a low-poly mesh rotated to a banking 3/4 view and flat-shaded.
+draws=$(python3 - <<'PY'
+import math, sys
+YAW, PITCH, ROLL = math.radians(-34), math.radians(56), math.radians(20)
+CW, CH = 480, 240
+TARGET_W, TARGET_H = 446, 210
+L = (-0.35, 0.58, 0.74)
+V, F = [], []
+def add(v): V.append(v); return len(V) - 1
+def hexring(x, r, sq=0.60):
+    idx = []
+    for ang in (90, 30, 330, 270, 210, 150):
+        a = math.radians(ang)
+        idx.append(add((x, r * math.sin(a) * sq, r * math.cos(a))))
+    return idx
+nose = add((98, 0, 0))
+rA = hexring(60, 9); rB = hexring(8, 21); rC = hexring(-34, 17); rD = hexring(-47, 13)
+for i in range(6):
+    F.append(([nose, rA[i], rA[(i + 1) % 6]], 'hull'))
+for r0, r1 in ((rA, rB), (rB, rC), (rC, rD)):
+    for i in range(6):
+        F.append(([r0[i], r0[(i + 1) % 6], r1[(i + 1) % 6], r1[i]], 'hull'))
+F.append((list(reversed(rD)), 'eng'))
+def wing(s):
+    rf = add((16, -3, s * 13)); rb = add((-30, -3, s * 12))
+    tu = add((-14, 0, s * 54)); tl = add((-14, -6, s * 54))
+    rfl = add((16, -7, s * 13)); rbl = add((-30, -7, s * 12))
+    F.append(([rf, tu, rb], 'wing')); F.append(([rfl, rbl, tl], 'wing'))
+    F.append(([rf, rfl, tl, tu], 'wing')); F.append(([rb, tu, tl, rbl], 'wing'))
+wing(-1); wing(1)
+c1 = add((52, 11, 5)); c2 = add((52, 11, -5)); c3 = add((28, 14, 4)); c4 = add((28, 14, -4))
+F.append(([c1, c2, c4, c3], 'cock'))
+f1 = add((-20, 8, 0)); f2 = add((-44, 8, 0)); f3 = add((-30, 26, 0))
+F.append(([f1, f2, f3], 'fin'))
+BASE = {'hull': (118, 130, 66), 'wing': (98, 110, 56), 'eng': (96, 100, 86),
+        'cock': (30, 40, 44), 'fin': (86, 98, 50)}
+def rot(p):
+    x, y, z = p
+    x, z = x * math.cos(YAW) + z * math.sin(YAW), -x * math.sin(YAW) + z * math.cos(YAW)
+    y, z = y * math.cos(PITCH) - z * math.sin(PITCH), y * math.sin(PITCH) + z * math.cos(PITCH)
+    x, y = x * math.cos(ROLL) - y * math.sin(ROLL), x * math.sin(ROLL) + y * math.cos(ROLL)
+    return (x, y, z)
+RV = [rot(p) for p in V]
+def sub(a, b): return (a[0]-b[0], a[1]-b[1], a[2]-b[2])
+def cross(a, b): return (a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0])
+def nrm(a):
+    m = math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]) or 1.0
+    return (a[0]/m, a[1]/m, a[2]/m)
+Ln = nrm(L)
+faces = []
+for idx, mat in F:
+    pr = [RV[i] for i in idx]
+    n = nrm(cross(sub(pr[1], pr[0]), sub(pr[2], pr[0])))
+    if n[2] < 0: n = (-n[0], -n[1], -n[2])
+    bright = 0.34 + 0.78 * max(0.0, n[0]*Ln[0] + n[1]*Ln[1] + n[2]*Ln[2])
+    br, bg, bb = BASE[mat]
+    col = (min(255, int(br*bright)), min(255, int(bg*bright)), min(255, int(bb*bright)))
+    depth = sum(p[2] for p in pr) / len(pr)
+    faces.append((depth, col, [(p[0], -p[1]) for p in pr]))
+xs = [p[0] for _, _, ps in faces for p in ps]; ys = [p[1] for _, _, ps in faces for p in ps]
+minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+sc = min(TARGET_W/(maxx-minx), TARGET_H/(maxy-miny))
+ox = (CW - (maxx-minx)*sc)/2 - minx*sc; oy = (CH - (maxy-miny)*sc)/2 - miny*sc
+faces.sort(key=lambda f: f[0])
+out = []
+for _, col, ps in faces:
+    pts = " ".join("%.1f,%.1f" % (p[0]*sc+ox, p[1]*sc+oy) for p in ps)
+    out.append("fill #%02x%02x%02x polygon %s" % (col[0], col[1], col[2], pts))
+sys.stdout.write(" ".join(out))
+PY
+)
+convert -size 480x240 xc:none -stroke '#1c2110' -strokewidth 0.8 -draw "$draws" -trim +repage -resize 212x "$w/ship.png"
 
 # compose
 convert "$w/sky.png" \( "$w/aurora.png" -channel A -evaluate multiply 0.82 +channel -gravity North -geometry +50+14 \) -compose screen -composite "$w/sky2.png"
@@ -117,7 +152,7 @@ PY
 convert "$w/sky2.png" -draw "$stars" "$w/sky3.png"
 convert "$w/sky3.png" \
     \( "$w/star.png" \) -gravity NorthWest -geometry +35+76 -compose screen -composite \
-    \( "$w/ship.png" \) -gravity NorthEast -geometry +26+10 -compose over -composite \
+    \( "$w/ship.png" \) -gravity NorthEast -geometry +16+8 -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/ts.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
