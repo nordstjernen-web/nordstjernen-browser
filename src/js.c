@@ -10769,7 +10769,8 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             "   Object.defineProperty(USPp,'__ndReady',{ value:true });"
             " }"
             " var pairs=[];"
-            " function add(k,v){pairs.push([String(k),String(v)]);}"
+            " function usv(s){s=String(s);var o='',i;for(i=0;i<s.length;i++){var c=s.charCodeAt(i);if(c>=0xD800&&c<=0xDBFF){var d=i+1<s.length?s.charCodeAt(i+1):0;if(d>=0xDC00&&d<=0xDFFF){o+=s[i]+s[i+1];i++;}else o+='\\uFFFD';}else if(c>=0xDC00&&c<=0xDFFF){o+='\\uFFFD';}else{o+=s[i];}}return o;}"
+            " function add(k,v){pairs.push([usv(k),usv(v)]);}"
             " function pdecode(s){"
             "   s=String(s).replace(/\\+/g,' ');"
             "   var out=[];"
@@ -10813,7 +10814,9 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             "   }"
             " } else if (typeof init === 'object') {"
             "   var ks=Object.keys(init);"
-            "   for (var oi=0;oi<ks.length;oi++) add(ks[oi],init[ks[oi]]);"
+            "   var rec=new Map();"
+            "   for (var oi=0;oi<ks.length;oi++) rec.set(usv(ks[oi]),usv(init[ks[oi]]));"
+            "   rec.forEach(function(v,k){pairs.push([k,v]);});"
             " } else {"
             "   parse(String(init));"
             " }"
@@ -12587,7 +12590,7 @@ ns_text_encoder_encode(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     gsize len = 0;
     const char *s = NULL;
-    if (argc >= 1) {
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
         s = JS_ToCStringLen(ctx, &len, argv[0]);
         if (!s) len = 0;
     }
@@ -12624,6 +12627,119 @@ ns_window_text_encoder_ctor(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
+static void
+ns_utf8_append_cp(GByteArray *out, guint32 cp)
+{
+    guint8 b[4];
+    if (cp < 0x80) {
+        b[0] = (guint8)cp;
+        g_byte_array_append(out, b, 1);
+    } else if (cp < 0x800) {
+        b[0] = (guint8)(0xC0 | (cp >> 6));
+        b[1] = (guint8)(0x80 | (cp & 0x3F));
+        g_byte_array_append(out, b, 2);
+    } else if (cp < 0x10000) {
+        b[0] = (guint8)(0xE0 | (cp >> 12));
+        b[1] = (guint8)(0x80 | ((cp >> 6) & 0x3F));
+        b[2] = (guint8)(0x80 | (cp & 0x3F));
+        g_byte_array_append(out, b, 3);
+    } else {
+        b[0] = (guint8)(0xF0 | (cp >> 18));
+        b[1] = (guint8)(0x80 | ((cp >> 12) & 0x3F));
+        b[2] = (guint8)(0x80 | ((cp >> 6) & 0x3F));
+        b[3] = (guint8)(0x80 | (cp & 0x3F));
+        g_byte_array_append(out, b, 4);
+    }
+}
+
+static gboolean
+ns_decode_utf8(const guint8 *data, gsize len, GByteArray *out, gboolean fatal)
+{
+    guint32 codep = 0;
+    guint bytes_needed = 0, bytes_seen = 0;
+    guint32 lower = 0x80, upper = 0xBF;
+    for (gsize i = 0; i < len; ) {
+        guint8 b = data[i];
+        if (bytes_needed == 0) {
+            if (b <= 0x7F) {
+                ns_utf8_append_cp(out, b);
+                i++;
+            } else if (b >= 0xC2 && b <= 0xDF) {
+                bytes_needed = 1; codep = b & 0x1F; i++;
+            } else if (b >= 0xE0 && b <= 0xEF) {
+                if (b == 0xE0) lower = 0xA0;
+                if (b == 0xED) upper = 0x9F;
+                bytes_needed = 2; codep = b & 0x0F; i++;
+            } else if (b >= 0xF0 && b <= 0xF4) {
+                if (b == 0xF0) lower = 0x90;
+                if (b == 0xF4) upper = 0x8F;
+                bytes_needed = 3; codep = b & 0x07; i++;
+            } else {
+                if (fatal) return FALSE;
+                ns_utf8_append_cp(out, 0xFFFD);
+                i++;
+            }
+        } else if (b < lower || b > upper) {
+            codep = 0; bytes_needed = 0; bytes_seen = 0;
+            lower = 0x80; upper = 0xBF;
+            if (fatal) return FALSE;
+            ns_utf8_append_cp(out, 0xFFFD);
+        } else {
+            lower = 0x80; upper = 0xBF;
+            codep = (codep << 6) | (b & 0x3F);
+            bytes_seen++; i++;
+            if (bytes_seen == bytes_needed) {
+                ns_utf8_append_cp(out, codep);
+                codep = 0; bytes_needed = 0; bytes_seen = 0;
+            }
+        }
+    }
+    if (bytes_needed != 0) {
+        if (fatal) return FALSE;
+        ns_utf8_append_cp(out, 0xFFFD);
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out,
+                gboolean fatal, gboolean big_endian)
+{
+    guint32 hi = 0;
+    gboolean have_hi = FALSE;
+    for (gsize i = 0; i + 2 <= len; i += 2) {
+        guint16 u = big_endian ? (guint16)((data[i] << 8) | data[i + 1])
+                               : (guint16)((data[i + 1] << 8) | data[i]);
+        if (have_hi) {
+            have_hi = FALSE;
+            if (u >= 0xDC00 && u <= 0xDFFF) {
+                ns_utf8_append_cp(out, 0x10000 + ((hi - 0xD800) << 10) +
+                                       (u - 0xDC00));
+                continue;
+            }
+            if (fatal) return FALSE;
+            ns_utf8_append_cp(out, 0xFFFD);
+        }
+        if (u >= 0xD800 && u <= 0xDBFF) {
+            hi = u; have_hi = TRUE;
+        } else if (u >= 0xDC00 && u <= 0xDFFF) {
+            if (fatal) return FALSE;
+            ns_utf8_append_cp(out, 0xFFFD);
+        } else {
+            ns_utf8_append_cp(out, u);
+        }
+    }
+    if (have_hi) {
+        if (fatal) return FALSE;
+        ns_utf8_append_cp(out, 0xFFFD);
+    }
+    if (len & 1) {
+        if (fatal) return FALSE;
+        ns_utf8_append_cp(out, 0xFFFD);
+    }
+    return TRUE;
+}
+
 static JSValue
 ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -12634,6 +12750,14 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
         stream = JS_ToBool(ctx, s);
         JS_FreeValue(ctx, s);
     }
+
+    int mode = 0;
+    JSValue mv = JS_GetPropertyStr(ctx, this_val, "_mode");
+    if (JS_IsNumber(mv)) { int32_t m = 0; JS_ToInt32(ctx, &m, mv); mode = m; }
+    JS_FreeValue(ctx, mv);
+    JSValue fv = JS_GetPropertyStr(ctx, this_val, "fatal");
+    gboolean fatal = JS_ToBool(ctx, fv);
+    JS_FreeValue(ctx, fv);
 
     GByteArray *buf = g_byte_array_new();
 
@@ -12666,38 +12790,56 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
         }
     }
 
-    JSValue bom_checked_v = JS_GetPropertyStr(ctx, this_val, "_bomChecked");
-    gboolean bom_checked = JS_ToBool(ctx, bom_checked_v);
-    JS_FreeValue(ctx, bom_checked_v);
-    if (!bom_checked && buf->len >= 3) {
-        JSValue ib = JS_GetPropertyStr(ctx, this_val, "ignoreBOM");
-        gboolean ignore_bom = JS_ToBool(ctx, ib);
-        JS_FreeValue(ctx, ib);
-        if (!ignore_bom && buf->data[0] == 0xEF && buf->data[1] == 0xBB &&
-            buf->data[2] == 0xBF)
-            g_byte_array_remove_range(buf, 0, 3);
-        JS_SetPropertyStr(ctx, this_val, "_bomChecked", JS_TRUE);
-    }
-
     guint n = buf->len;
     guint hold = 0;
     if (stream && n > 0) {
-        for (guint k = 1; k <= 3 && k <= n; k++) {
-            guint8 b = buf->data[n - k];
-            if ((b & 0xC0) == 0x80) continue;
-            int seqlen;
-            if ((b & 0x80) == 0)         seqlen = 1;
-            else if ((b & 0xE0) == 0xC0) seqlen = 2;
-            else if ((b & 0xF0) == 0xE0) seqlen = 3;
-            else if ((b & 0xF8) == 0xF0) seqlen = 4;
-            else                         seqlen = 1;
-            if ((guint)seqlen > k) hold = k;
-            break;
+        if (mode == 0) {
+            for (guint k = 1; k <= 3 && k <= n; k++) {
+                guint8 b = buf->data[n - k];
+                if ((b & 0xC0) == 0x80) continue;
+                int seqlen;
+                if ((b & 0x80) == 0)         seqlen = 1;
+                else if ((b & 0xE0) == 0xC0) seqlen = 2;
+                else if ((b & 0xF0) == 0xE0) seqlen = 3;
+                else if ((b & 0xF8) == 0xF0) seqlen = 4;
+                else                         seqlen = 1;
+                if ((guint)seqlen > k) hold = k;
+                break;
+            }
+        } else if (n & 1) {
+            hold = 1;
         }
     }
 
     guint emit = n - hold;
-    JSValue r = JS_NewStringLen(ctx, (const char *)buf->data, emit);
+    GByteArray *out = g_byte_array_sized_new(emit + 1);
+    gboolean ok = (mode == 1)
+        ? ns_decode_utf16(buf->data, emit, out, fatal, FALSE)
+        : (mode == 2)
+            ? ns_decode_utf16(buf->data, emit, out, fatal, TRUE)
+            : ns_decode_utf8(buf->data, emit, out, fatal);
+
+    if (!ok) {
+        g_byte_array_free(out, TRUE);
+        g_byte_array_free(buf, TRUE);
+        if (stream) JS_SetPropertyStr(ctx, this_val, "_tail", JS_UNDEFINED);
+        return JS_ThrowTypeError(ctx, "The encoded data was not valid");
+    }
+
+    JSValue bom_checked_v = JS_GetPropertyStr(ctx, this_val, "_bomChecked");
+    gboolean bom_checked = JS_ToBool(ctx, bom_checked_v);
+    JS_FreeValue(ctx, bom_checked_v);
+    if (!bom_checked && emit > 0) {
+        JSValue ib = JS_GetPropertyStr(ctx, this_val, "ignoreBOM");
+        gboolean ignore_bom = JS_ToBool(ctx, ib);
+        JS_FreeValue(ctx, ib);
+        if (!ignore_bom && out->len >= 3 && out->data[0] == 0xEF &&
+            out->data[1] == 0xBB && out->data[2] == 0xBF)
+            g_byte_array_remove_range(out, 0, 3);
+        JS_SetPropertyStr(ctx, this_val, "_bomChecked", JS_TRUE);
+    }
+
+    JSValue r = JS_NewStringLen(ctx, (const char *)out->data, out->len);
 
     if (stream && hold > 0)
         JS_SetPropertyStr(ctx, this_val, "_tail",
@@ -12707,6 +12849,7 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     if (!stream)
         JS_SetPropertyStr(ctx, this_val, "_bomChecked", JS_FALSE);
 
+    g_byte_array_free(out, TRUE);
     g_byte_array_free(buf, TRUE);
     return r;
 }
@@ -12986,6 +13129,28 @@ ns_window_text_decoder_ctor(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     gboolean fatal = FALSE, ignore_bom = FALSE;
+    int mode = 0;
+    const char *encoding = "utf-8";
+    char *label = NULL;
+    if (argc >= 1 && !JS_IsUndefined(argv[0])) {
+        const char *l = JS_ToCString(ctx, argv[0]);
+        if (l) {
+            label = g_ascii_strdown(l, -1);
+            JS_FreeCString(ctx, l);
+            g_strstrip(label);
+        }
+    }
+    if (label) {
+        if (!strcmp(label, "utf-16le") || !strcmp(label, "utf-16") ||
+            !strcmp(label, "unicode") || !strcmp(label, "csunicode") ||
+            !strcmp(label, "iso-10646-ucs-2") || !strcmp(label, "ucs-2")) {
+            mode = 1; encoding = "utf-16le";
+        } else if (!strcmp(label, "utf-16be") ||
+                   !strcmp(label, "unicodefffe")) {
+            mode = 2; encoding = "utf-16be";
+        }
+    }
+    g_free(label);
     if (argc >= 2 && JS_IsObject(argv[1])) {
         JSValue f = JS_GetPropertyStr(ctx, argv[1], "fatal");
         fatal = JS_ToBool(ctx, f);
@@ -12995,7 +13160,8 @@ ns_window_text_decoder_ctor(JSContext *ctx, JSValueConst this_val,
         JS_FreeValue(ctx, ib);
     }
     JSValue obj = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, obj, "encoding", JS_NewString(ctx, "utf-8"));
+    JS_SetPropertyStr(ctx, obj, "encoding", JS_NewString(ctx, encoding));
+    JS_SetPropertyStr(ctx, obj, "_mode", JS_NewInt32(ctx, mode));
     JS_SetPropertyStr(ctx, obj, "fatal", JS_NewBool(ctx, fatal));
     JS_SetPropertyStr(ctx, obj, "ignoreBOM", JS_NewBool(ctx, ignore_bom));
     ns_bind_fn(ctx, obj, "decode", ns_text_decoder_decode, 1);
