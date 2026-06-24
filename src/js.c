@@ -14083,7 +14083,7 @@ ns_js_ws_close_method(JSContext *ctx, JSValueConst this_val,
         if (JS_ToInt32(ctx, &c, argv[0]) == 0) code = c;
         if (code != 1000 && (code < 3000 || code > 4999)) {
             if (reason) JS_FreeCString(ctx, reason);
-            return JS_ThrowRangeError(ctx,
+            return ns_throw_dom_exception(ctx, "InvalidAccessError", 15,
                 "WebSocket.close: code must be 1000 or in 3000..4999");
         }
     }
@@ -14091,7 +14091,7 @@ ns_js_ws_close_method(JSContext *ctx, JSValueConst this_val,
         reason = JS_ToCString(ctx, argv[1]);
     if (reason && strlen(reason) > 123) {
         JS_FreeCString(ctx, reason);
-        return JS_ThrowTypeError(ctx,
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
             "WebSocket.close: reason must be <= 123 UTF-8 bytes");
     }
     JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 2));
@@ -14120,7 +14120,13 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
     if (g_ascii_strncasecmp(target, "ws://",  5) != 0 &&
         g_ascii_strncasecmp(target, "wss://", 6) != 0) {
         g_free(target);
-        return JS_ThrowTypeError(ctx, "WebSocket URL must use ws: or wss:");
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+            "WebSocket URL must use ws: or wss:");
+    }
+    if (strchr(target, '#')) {
+        g_free(target);
+        return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+            "WebSocket URL must not contain a fragment");
     }
 
     if (g_ascii_strncasecmp(target, "ws://", 5) == 0) {
