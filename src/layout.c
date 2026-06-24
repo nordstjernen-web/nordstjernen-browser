@@ -8877,6 +8877,16 @@ layout_grid(ns_box *box, double cw,
     g_array_free(grid_rows, TRUE);
 }
 
+static gboolean
+box_is_block_level_replaced(const ns_box *c)
+{
+    if (!c || (c->kind != NS_BOX_IMAGE && c->kind != NS_BOX_VIDEO)) return FALSE;
+    const ns_css_value *d = c->style ? c->style->values[NS_CSS_DISPLAY] : NULL;
+    return keyword_is(d, "block") || keyword_is(d, "flex") ||
+           keyword_is(d, "grid") || keyword_is(d, "list-item") ||
+           keyword_is(d, "flow-root");
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -9149,7 +9159,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             g_array_append_val(floats, fr);
             continue;
         }
-        if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE) {
+        if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE ||
+            box_is_block_level_replaced(c)) {
             edges_from_style(c->style, cw,
                              &c->margin, &c->padding, &c->border);
             double mt = c->margin.top;
