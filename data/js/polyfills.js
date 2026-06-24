@@ -311,55 +311,106 @@
     defineCtor('URLSearchParams', USP);
 
     function normHeader(k) { return String(k).toLowerCase(); }
+    var HTTP_WS = /^[\t\n\r ]+|[\t\n\r ]+$/g;
+    var HDR_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+    var HDR_BADVAL = /[\0\n\r]/;
+    function checkHeaderName(k) {
+        var s = String(k);
+        if (!HDR_TOKEN.test(s))
+            throw new TypeError("Invalid header name: '" + s + "'");
+        return s.toLowerCase();
+    }
+    function checkHeaderValue(v) {
+        var s = String(v).replace(HTTP_WS, '');
+        if (HDR_BADVAL.test(s))
+            throw new TypeError("Invalid header value");
+        return s;
+    }
+    function hdrByteString(x) {
+        var s = String(x);
+        for (var i = 0; i < s.length; i++)
+            if (s.charCodeAt(i) > 0xFF)
+                throw new TypeError("Header contains a character outside the ByteString range");
+        return s;
+    }
+    var HDR_ITER_PROTO = Object.create(
+        Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
+    Object.defineProperty(HDR_ITER_PROTO, 'next', {
+        configurable: true, enumerable: true, writable: true,
+        value: function () {
+            var s = this._h, keys = Object.keys(s._m).sort();
+            if (this._i >= keys.length) return { value: undefined, done: true };
+            var k = keys[this._i++], v = s._m[k];
+            var out = this._k === 0 ? k : this._k === 1 ? v : [k, v];
+            return { value: out, done: false };
+        }
+    });
+    function headersIterator(h, kind) {
+        var it = Object.create(HDR_ITER_PROTO);
+        it._h = h; it._i = 0; it._k = kind;
+        return it;
+    }
 
     function Headers(init) {
-        if (!(this instanceof Headers)) return new Headers(init);
+        if (!(this instanceof Headers))
+            throw new TypeError("Constructor Headers requires 'new'");
         this._m = Object.create(null);
-        if (init == null) return;
+        if (init === undefined) return;
+        if (init === null || (typeof init !== 'object' && typeof init !== 'function'))
+            throw new TypeError("Failed to construct 'Headers': invalid init");
         var self = this;
-        if (init instanceof Headers) {
-            init.forEach(function (v, k) { self.append(k, v); });
-            return;
-        }
-        if (typeof init.length === 'number') {
-            for (var i = 0; i < init.length; i++) {
-                var p = init[i];
-                if (p && p.length >= 2) self.append(p[0], p[1]);
+        if (typeof init[Symbol.iterator] !== 'undefined') {
+            if (typeof init[Symbol.iterator] !== 'function')
+                throw new TypeError("Headers init is not iterable");
+            var it = init[Symbol.iterator](), step;
+            while (!(step = it.next()).done) {
+                var pair = step.value, arr = [];
+                if (pair == null || typeof pair[Symbol.iterator] !== 'function')
+                    throw new TypeError("Header pair is not iterable");
+                var pit = pair[Symbol.iterator](), ps;
+                while (!(ps = pit.next()).done) arr.push(ps.value);
+                if (arr.length !== 2)
+                    throw new TypeError("Header pair must contain exactly two items");
+                self.append(arr[0], arr[1]);
             }
             return;
         }
-        var keys = Object.keys(init);
-        for (var j = 0; j < keys.length; j++) self.append(keys[j], init[keys[j]]);
+        var keys = Reflect.ownKeys(init);
+        var rec = [];
+        for (var j = 0; j < keys.length; j++) {
+            var key = keys[j];
+            var d = Reflect.getOwnPropertyDescriptor(init, key);
+            if (d === undefined || !d.enumerable) continue;
+            if (typeof key === 'symbol')
+                throw new TypeError("Header name cannot be a Symbol");
+            var nm = hdrByteString(key);
+            rec.push([nm, hdrByteString(init[key])]);
+        }
+        for (var r = 0; r < rec.length; r++) self.append(rec[r][0], rec[r][1]);
     }
     Headers.prototype.append = function (k, v) {
-        var key = normHeader(k);
-        var val = String(v);
+        var key = checkHeaderName(k);
+        var val = checkHeaderValue(v);
         if (this._m[key] != null) this._m[key] += ', ' + val;
         else this._m[key] = val;
     };
-    Headers.prototype.set = function (k, v) { this._m[normHeader(k)] = String(v); };
+    Headers.prototype.set = function (k, v) {
+        this._m[checkHeaderName(k)] = checkHeaderValue(v);
+    };
     Headers.prototype.get = function (k) {
-        var v = this._m[normHeader(k)];
+        var v = this._m[checkHeaderName(k)];
         return v == null ? null : v;
     };
-    Headers.prototype.has = function (k) { return this._m[normHeader(k)] != null; };
-    Headers.prototype.delete = function (k) { delete this._m[normHeader(k)]; };
+    Headers.prototype.has = function (k) { return this._m[checkHeaderName(k)] != null; };
+    Headers.prototype.delete = function (k) { delete this._m[checkHeaderName(k)]; };
     Headers.prototype.forEach = function (fn, thisArg) {
-        var keys = Object.keys(this._m);
+        var keys = Object.keys(this._m).sort();
         for (var i = 0; i < keys.length; i++)
             fn.call(thisArg, this._m[keys[i]], keys[i], this);
     };
-    Headers.prototype.keys = function () {
-        return Object.keys(this._m)[Symbol.iterator]();
-    };
-    Headers.prototype.values = function () {
-        var self = this;
-        return Object.keys(this._m).map(function (k) { return self._m[k]; })[Symbol.iterator]();
-    };
-    Headers.prototype.entries = function () {
-        var self = this;
-        return Object.keys(this._m).map(function (k) { return [k, self._m[k]]; })[Symbol.iterator]();
-    };
+    Headers.prototype.keys = function () { return headersIterator(this, 0); };
+    Headers.prototype.values = function () { return headersIterator(this, 1); };
+    Headers.prototype.entries = function () { return headersIterator(this, 2); };
     if (typeof Symbol !== 'undefined' && Symbol.iterator) {
         Headers.prototype[Symbol.iterator] = Headers.prototype.entries;
     }
