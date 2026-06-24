@@ -7463,6 +7463,16 @@ ns_subtle_exportKey(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
+static const char *
+ns_wc_op_check(const ns_crypto_key *k, const char *alg_name, guint32 need)
+{
+    if (!(k->usages & need))
+        return "InvalidAccessError: key does not permit this operation";
+    if (alg_name && k->algo && g_ascii_strcasecmp(alg_name, k->algo) != 0)
+        return "InvalidAccessError: key algorithm does not match";
+    return NULL;
+}
+
 static JSValue
 ns_subtle_sign(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
@@ -7480,6 +7490,12 @@ ns_subtle_sign(JSContext *ctx, JSValueConst this_val,
     if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
         ns_wc_alg_free(&a);
         ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
+        return promise;
+    }
+    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_SIGN);
+    if (uerr) {
+        ns_wc_alg_free(&a);
+        ns_js_promise_reject(ctx, resolvers, uerr);
         return promise;
     }
     gsize dl = 0;
@@ -7517,6 +7533,12 @@ ns_subtle_verify(JSContext *ctx, JSValueConst this_val,
         ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
         return promise;
     }
+    const char *uerr = ns_wc_op_check(k, a.name, NS_USAGE_VERIFY);
+    if (uerr) {
+        ns_wc_alg_free(&a);
+        ns_js_promise_reject(ctx, resolvers, uerr);
+        return promise;
+    }
     gsize sl = 0, dl = 0;
     guint8 *sig = ns_wc_dup_buf(ctx, argv[2], &sl);
     guint8 *data = ns_wc_dup_buf(ctx, argv[3], &dl);
@@ -7549,6 +7571,13 @@ ns_subtle_cipher(JSContext *ctx, int argc, JSValueConst *argv, gboolean enc)
     if (!ns_wc_parse_alg(ctx, argv[0], &a) || !k) {
         ns_wc_alg_free(&a);
         ns_js_promise_reject(ctx, resolvers, "InvalidAccessError: key");
+        return promise;
+    }
+    const char *uerr = ns_wc_op_check(k, a.name,
+                                      enc ? NS_USAGE_ENCRYPT : NS_USAGE_DECRYPT);
+    if (uerr) {
+        ns_wc_alg_free(&a);
+        ns_js_promise_reject(ctx, resolvers, uerr);
         return promise;
     }
     gsize dl = 0;
