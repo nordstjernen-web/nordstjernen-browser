@@ -590,8 +590,12 @@ ns_crypto_ecdsa_der_to_raw(const guint8 *der, gsize der_len, int order,
     ECDSA_SIG_get0(sig, &r, &s);
     if (!r || !s) { ECDSA_SIG_free(sig); return NULL; }
     guint8 *out = g_malloc0((gsize)order * 2);
-    BN_bn2binpad(r, out, order);
-    BN_bn2binpad(s, out + order, order);
+    if (BN_bn2binpad(r, out, order) < 0 ||
+        BN_bn2binpad(s, out + order, order) < 0) {
+        g_free(out);
+        ECDSA_SIG_free(sig);
+        return NULL;
+    }
     ECDSA_SIG_free(sig);
     *out_len = (gsize)order * 2;
     return out;

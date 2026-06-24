@@ -227,6 +227,8 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
                 (g_ascii_strcasecmp(doc_scheme, "ws:") == 0 &&
                  g_ascii_strcasecmp(res_scheme, "wss:") == 0);
             if (!scheme_ok) return FALSE;
+        } else if (!is_network_scheme_url(resource_url)) {
+            return FALSE;
         }
     }
 
