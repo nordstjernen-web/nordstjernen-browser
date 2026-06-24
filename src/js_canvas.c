@@ -258,6 +258,27 @@ ns_reject_image_decode(JSContext *ctx, JSValue resolvers[2])
     JS_FreeValue(ctx, resolvers[1]);
 }
 
+static JSValue
+ns_canvas_throw_dom(JSContext *ctx, const char *name, const char *msg)
+{
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, g, "DOMException");
+    JS_FreeValue(ctx, g);
+    JSValue args[2] = { JS_NewString(ctx, msg), JS_NewString(ctx, name) };
+    JSValue exc = JS_CallConstructor(ctx, ctor, 2, args);
+    JS_FreeValue(ctx, args[0]);
+    JS_FreeValue(ctx, args[1]);
+    JS_FreeValue(ctx, ctor);
+    if (JS_IsException(exc) || !JS_IsObject(exc)) {
+        if (JS_IsException(exc)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, exc);
+        exc = JS_NewError(ctx);
+        JS_SetPropertyStr(ctx, exc, "name", JS_NewString(ctx, name));
+        JS_SetPropertyStr(ctx, exc, "message", JS_NewString(ctx, msg));
+    }
+    return JS_Throw(ctx, exc);
+}
+
 JSValue
 ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
@@ -1921,13 +1942,19 @@ ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 2) return JS_UNDEFINED;
     double pos = ns_arg_d(ctx, argv[0]);
-    if (!JS_IsString(argv[1])) return JS_UNDEFINED;
+    if (!(pos >= 0.0 && pos <= 1.0))
+        return ns_canvas_throw_dom(ctx, "IndexSizeError",
+            "addColorStop offset must be in the range [0, 1]");
     const char *col = JS_ToCString(ctx, argv[1]);
-    if (!col) return JS_UNDEFINED;
+    if (!col)
+        return ns_canvas_throw_dom(ctx, "SyntaxError",
+            "addColorStop color could not be parsed");
     double r, g, b, a;
     gboolean ok = ns_canvas_parse_color(col, &r, &g, &b, &a);
     JS_FreeCString(ctx, col);
-    if (!ok) return JS_UNDEFINED;
+    if (!ok)
+        return ns_canvas_throw_dom(ctx, "SyntaxError",
+            "addColorStop color could not be parsed");
     JSValue stops = JS_GetPropertyStr(ctx, this_val, "_stops");
     if (!JS_IsArray(stops)) {
         JS_FreeValue(ctx, stops);
@@ -2151,14 +2178,19 @@ ns_ctx_createRadialGradient(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     if (argc < 6) return JS_NULL;
+    double r0 = ns_arg_d(ctx, argv[2]);
+    double r1 = ns_arg_d(ctx, argv[5]);
+    if (r0 < 0.0 || r1 < 0.0)
+        return ns_canvas_throw_dom(ctx, "IndexSizeError",
+            "createRadialGradient radius must not be negative");
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "_type", JS_NewString(ctx, "radial"));
     JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[0])));
     JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[1])));
-    JS_SetPropertyStr(ctx, obj, "_r0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[2])));
+    JS_SetPropertyStr(ctx, obj, "_r0", JS_NewFloat64(ctx, r0));
     JS_SetPropertyStr(ctx, obj, "_x1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[3])));
     JS_SetPropertyStr(ctx, obj, "_y1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[4])));
-    JS_SetPropertyStr(ctx, obj, "_r1", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[5])));
+    JS_SetPropertyStr(ctx, obj, "_r1", JS_NewFloat64(ctx, r1));
     JS_SetPropertyStr(ctx, obj, "_stops", JS_NewArray(ctx));
     ns_bind_fn(ctx, obj, "addColorStop", ns_ctx_gradient_addColorStop, 2);
     return obj;
