@@ -168,6 +168,7 @@ static void ns_mut_record_emit_child_list_arrays(ns_js *js, ns_node *target,
 static void ns_js_record_attr_change(ns_js *js, ns_node *target,
                                      const char *name, const char *old_value);
 static void ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value);
+static void ns_node_iters_pre_remove(ns_js *js, ns_node *removed);
 static gboolean ns_mut_target_covers(const ns_mut_target *t, ns_node *node);
 static void ns_nodelist_decorate(JSContext *ctx, JSValueConst arr);
 static JSValue ns_nodelist_from_array(JSContext *ctx, JSValue arr);
@@ -19211,6 +19212,7 @@ ns_element_removeChild(JSContext *ctx, JSValueConst this_val, int argc, JSValueC
     ns_node *saved_prev = child->prev_sibling;
     ns_node *saved_next = child->next_sibling;
     ns_js *_j2 = js_from_ctx(ctx);
+    if (_j2) ns_node_iters_pre_remove(_j2, child);
     if (_j2) ns_ce_disconnect_subtree(_j2, child);
     ns_node_remove(child);
     if (_j2) {
@@ -19500,6 +19502,7 @@ ns_element_replaceChild(JSContext *ctx, JSValueConst this_val,
         }
         return JS_DupValue(ctx, argv[1]);
     }
+    if (_j) ns_node_iters_pre_remove(_j, oldc);
     gboolean inert_parent = ns_node_in_template_content(parent);
 
     if (newc->kind == NS_NODE_DOCUMENT && !newc->parent) {
@@ -29958,163 +29961,263 @@ ns_native_range(JSContext *ctx, JSValueConst this_val,
     return ns_make_range_object(ctx);
 }
 
-static int
-ns_tw_mask_for(const ns_node *n)
+static uint32_t
+ns_traversal_node_bit(const ns_node *n)
 {
-    if (!n) return 0;
     switch (n->kind) {
-        case NS_NODE_ELEMENT:  return 1;
-        case NS_NODE_TEXT:     return 4;
-        case NS_NODE_COMMENT:  return 128;
-        case NS_NODE_DOCTYPE:  return 0x200;
+        case NS_NODE_ELEMENT:  return 0x1;
+        case NS_NODE_TEXT:     return 0x4;
+        case NS_NODE_COMMENT:  return 0x80;
         case NS_NODE_DOCUMENT: return 0x100;
+        case NS_NODE_DOCTYPE:  return 0x200;
         default:               return 0;
     }
 }
 
-static gboolean
-ns_tw_accepts(JSContext *ctx, JSValueConst tw, const ns_node *n)
+static int
+ns_traversal_filter(JSContext *ctx, JSValueConst obj, const ns_node *n)
 {
-    if (!n) return FALSE;
-    JSValue mask_v = JS_GetPropertyStr(ctx, tw, "whatToShow");
-    int32_t mask = -1;
-    JS_ToInt32(ctx, &mask, mask_v);
-    JS_FreeValue(ctx, mask_v);
-    if ((mask & ns_tw_mask_for(n)) == 0) return FALSE;
-    JSValue filter = JS_GetPropertyStr(ctx, tw, "filter");
-    gboolean accept = TRUE;
-    if (JS_IsFunction(ctx, filter)) {
-        JSValue arg = ns_make_element(ctx, n);
-        JSValue r = JS_Call(ctx, filter, JS_UNDEFINED, 1, (JSValueConst[]){ arg });
-        JS_FreeValue(ctx, arg);
-        if (!JS_IsException(r)) {
-            int32_t v = 1;
-            JS_ToInt32(ctx, &v, r);
-            accept = (v == 1);
-        } else {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-        }
-        JS_FreeValue(ctx, r);
-    } else if (JS_IsObject(filter)) {
-        JSValue acc = JS_GetPropertyStr(ctx, filter, "acceptNode");
-        if (JS_IsFunction(ctx, acc)) {
-            JSValue arg = ns_make_element(ctx, n);
-            JSValue r = JS_Call(ctx, acc, filter, 1, (JSValueConst[]){ arg });
-            JS_FreeValue(ctx, arg);
-            if (!JS_IsException(r)) {
-                int32_t v = 1;
-                JS_ToInt32(ctx, &v, r);
-                accept = (v == 1);
-            } else {
-                JS_FreeValue(ctx, JS_GetException(ctx));
-            }
-            JS_FreeValue(ctx, r);
-        }
-        JS_FreeValue(ctx, acc);
+    JSValue what_v = JS_GetPropertyStr(ctx, obj, "whatToShow");
+    int64_t what = 0xFFFFFFFF;
+    JS_ToInt64(ctx, &what, what_v);
+    JS_FreeValue(ctx, what_v);
+    if (((uint32_t)what & ns_traversal_node_bit(n)) == 0)
+        return 3;
+    JSValue filter = JS_GetPropertyStr(ctx, obj, "filter");
+    gboolean is_fn = JS_IsFunction(ctx, filter);
+    if (!is_fn && !JS_IsObject(filter)) {
+        JS_FreeValue(ctx, filter);
+        return 1;
     }
+    JSValue active_v = JS_GetPropertyStr(ctx, obj, "_active");
+    gboolean active = JS_ToBool(ctx, active_v);
+    JS_FreeValue(ctx, active_v);
+    if (active) {
+        JS_FreeValue(ctx, filter);
+        ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+                               "A NodeFilter is already being run.");
+        return -1;
+    }
+    JSValue cb = is_fn ? JS_DupValue(ctx, filter)
+                       : JS_GetPropertyStr(ctx, filter, "acceptNode");
+    if (!JS_IsFunction(ctx, cb)) {
+        JS_FreeValue(ctx, cb);
+        JS_FreeValue(ctx, filter);
+        JS_ThrowTypeError(ctx,
+            "Failed to execute 'acceptNode' on 'NodeFilter': "
+            "The provided value is not callable.");
+        return -1;
+    }
+    JS_SetPropertyStr(ctx, obj, "_active", JS_TRUE);
+    JSValue arg = ns_make_element(ctx, n);
+    JSValue r = JS_Call(ctx, cb, is_fn ? JS_UNDEFINED : filter, 1,
+                        (JSValueConst[]){ arg });
+    JS_SetPropertyStr(ctx, obj, "_active", JS_FALSE);
+    JS_FreeValue(ctx, arg);
+    JS_FreeValue(ctx, cb);
     JS_FreeValue(ctx, filter);
-    return accept;
+    if (JS_IsException(r)) { JS_FreeValue(ctx, r); return -1; }
+    int32_t rv = 1;
+    JS_ToInt32(ctx, &rv, r);
+    JS_FreeValue(ctx, r);
+    return rv;
 }
 
 static ns_node *
-ns_tw_advance(ns_node *cur, const ns_node *root)
+ns_tw_node_prop(JSContext *ctx, JSValueConst w, const char *name)
 {
-    if (!cur) return NULL;
-    if (cur->first_child) return cur->first_child;
-    while (cur && cur != root) {
-        if (cur->next_sibling) return cur->next_sibling;
-        cur = cur->parent;
+    JSValue v = JS_GetPropertyStr(ctx, w, name);
+    ns_node *n = ns_unwrap_element_mut(v);
+    JS_FreeValue(ctx, v);
+    return n;
+}
+
+static JSValue
+ns_tw_set_current(JSContext *ctx, JSValueConst w, ns_node *n)
+{
+    JS_SetPropertyStr(ctx, w, "currentNode", ns_make_element(ctx, n));
+    return ns_make_element(ctx, n);
+}
+
+static ns_node *
+ns_tw_traverse_children(JSContext *ctx, JSValueConst w, ns_node *current,
+                        gboolean last, int *err)
+{
+    ns_node *node = last ? current->last_child : current->first_child;
+    while (node) {
+        int result = ns_traversal_filter(ctx, w, node);
+        if (result < 0) { *err = 1; return NULL; }
+        if (result == 1) return node;
+        if (result == 3) {
+            ns_node *child = last ? node->last_child : node->first_child;
+            if (child) { node = child; continue; }
+        }
+        for (;;) {
+            ns_node *sibling = last ? node->prev_sibling : node->next_sibling;
+            if (sibling) { node = sibling; break; }
+            ns_node *parent = node->parent;
+            if (!parent || parent == current) return NULL;
+            node = parent;
+        }
     }
     return NULL;
 }
 
-static JSValue
-ns_tw_nextNode(JSContext *ctx, JSValueConst this_val,
-               int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JSValue cur_v  = JS_GetPropertyStr(ctx, this_val, "currentNode");
-    JSValue root_v = JS_GetPropertyStr(ctx, this_val, "root");
-    ns_node *cur  = ns_unwrap_element_mut(cur_v);
-    ns_node *root = ns_unwrap_element_mut(root_v);
-    JS_FreeValue(ctx, cur_v);
-    JS_FreeValue(ctx, root_v);
-    if (!cur || !root) return JS_NULL;
-    ns_node *next = cur;
-    while ((next = ns_tw_advance(next, root)) != NULL) {
-        if (ns_tw_accepts(ctx, this_val, next)) {
-            JS_SetPropertyStr(ctx, this_val, "currentNode",
-                              ns_make_element(ctx, next));
-            return ns_make_element(ctx, next);
-        }
-    }
-    return JS_NULL;
-}
-
 static ns_node *
-ns_tw_firstchild_search(ns_node *parent)
+ns_tw_traverse_siblings(JSContext *ctx, JSValueConst w, ns_node *current,
+                        ns_node *root, gboolean prev, int *err)
 {
-    return parent ? parent->first_child : NULL;
-}
-
-static JSValue
-ns_tw_firstChild(JSContext *ctx, JSValueConst this_val,
-                 int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    JSValue cur_v = JS_GetPropertyStr(ctx, this_val, "currentNode");
-    ns_node *cur = ns_unwrap_element_mut(cur_v);
-    JS_FreeValue(ctx, cur_v);
-    if (!cur) return JS_NULL;
-    for (ns_node *c = cur->first_child; c; c = c->next_sibling) {
-        if (ns_tw_accepts(ctx, this_val, c)) {
-            JS_SetPropertyStr(ctx, this_val, "currentNode",
-                              ns_make_element(ctx, c));
-            return ns_make_element(ctx, c);
+    ns_node *node = current;
+    if (node == root) return NULL;
+    for (;;) {
+        ns_node *sibling = prev ? node->prev_sibling : node->next_sibling;
+        while (sibling) {
+            node = sibling;
+            int result = ns_traversal_filter(ctx, w, node);
+            if (result < 0) { *err = 1; return NULL; }
+            if (result == 1) return node;
+            sibling = prev ? node->last_child : node->first_child;
+            if (result == 2 || !sibling)
+                sibling = prev ? node->prev_sibling : node->next_sibling;
         }
+        node = node->parent;
+        if (!node || node == root) return NULL;
+        int result = ns_traversal_filter(ctx, w, node);
+        if (result < 0) { *err = 1; return NULL; }
+        if (result == 1) return NULL;
     }
-    return JS_NULL;
 }
 
 static JSValue
-ns_tw_nextSibling(JSContext *ctx, JSValueConst this_val,
-                  int argc, JSValueConst *argv)
+ns_tw_children_method(JSContext *ctx, JSValueConst w, gboolean last)
 {
-    (void)argc; (void)argv;
-    JSValue cur_v = JS_GetPropertyStr(ctx, this_val, "currentNode");
-    ns_node *cur = ns_unwrap_element_mut(cur_v);
-    JS_FreeValue(ctx, cur_v);
+    ns_node *cur = ns_tw_node_prop(ctx, w, "currentNode");
     if (!cur) return JS_NULL;
-    for (ns_node *s = cur->next_sibling; s; s = s->next_sibling) {
-        if (ns_tw_accepts(ctx, this_val, s)) {
-            JS_SetPropertyStr(ctx, this_val, "currentNode",
-                              ns_make_element(ctx, s));
-            return ns_make_element(ctx, s);
-        }
-    }
-    return JS_NULL;
+    int err = 0;
+    ns_node *n = ns_tw_traverse_children(ctx, w, cur, last, &err);
+    if (err) return JS_EXCEPTION;
+    return n ? ns_tw_set_current(ctx, w, n) : JS_NULL;
 }
 
 static JSValue
-ns_tw_parentNode(JSContext *ctx, JSValueConst this_val,
-                 int argc, JSValueConst *argv)
+ns_tw_firstChild(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_tw_children_method(ctx, w, FALSE); }
+
+static JSValue
+ns_tw_lastChild(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_tw_children_method(ctx, w, TRUE); }
+
+static JSValue
+ns_tw_siblings_method(JSContext *ctx, JSValueConst w, gboolean prev)
 {
-    (void)argc; (void)argv;
-    JSValue cur_v  = JS_GetPropertyStr(ctx, this_val, "currentNode");
-    JSValue root_v = JS_GetPropertyStr(ctx, this_val, "root");
-    ns_node *cur  = ns_unwrap_element_mut(cur_v);
-    ns_node *root = ns_unwrap_element_mut(root_v);
-    JS_FreeValue(ctx, cur_v);
-    JS_FreeValue(ctx, root_v);
+    ns_node *cur  = ns_tw_node_prop(ctx, w, "currentNode");
+    ns_node *root = ns_tw_node_prop(ctx, w, "root");
     if (!cur || !root) return JS_NULL;
-    for (ns_node *p = cur->parent; p && p != root->parent; p = p->parent) {
-        if (ns_tw_accepts(ctx, this_val, p)) {
-            JS_SetPropertyStr(ctx, this_val, "currentNode",
-                              ns_make_element(ctx, p));
-            return ns_make_element(ctx, p);
+    int err = 0;
+    ns_node *n = ns_tw_traverse_siblings(ctx, w, cur, root, prev, &err);
+    if (err) return JS_EXCEPTION;
+    return n ? ns_tw_set_current(ctx, w, n) : JS_NULL;
+}
+
+static JSValue
+ns_tw_nextSibling(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_tw_siblings_method(ctx, w, FALSE); }
+
+static JSValue
+ns_tw_previousSibling(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_tw_siblings_method(ctx, w, TRUE); }
+
+static JSValue
+ns_tw_parentNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *node = ns_tw_node_prop(ctx, w, "currentNode");
+    ns_node *root = ns_tw_node_prop(ctx, w, "root");
+    if (!node || !root) return JS_NULL;
+    while (node && node != root) {
+        node = node->parent;
+        if (node) {
+            int r = ns_traversal_filter(ctx, w, node);
+            if (r < 0) return JS_EXCEPTION;
+            if (r == 1) return ns_tw_set_current(ctx, w, node);
         }
     }
     return JS_NULL;
+}
+
+static JSValue
+ns_tw_nextNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *node = ns_tw_node_prop(ctx, w, "currentNode");
+    ns_node *root = ns_tw_node_prop(ctx, w, "root");
+    if (!node || !root) return JS_NULL;
+    int result = 1;
+    for (;;) {
+        while (result != 2 && node->first_child) {
+            node = node->first_child;
+            result = ns_traversal_filter(ctx, w, node);
+            if (result < 0) return JS_EXCEPTION;
+            if (result == 1) return ns_tw_set_current(ctx, w, node);
+        }
+        ns_node *following = NULL, *temp = node;
+        while (temp) {
+            if (temp == root) return JS_NULL;
+            if (temp->next_sibling) { following = temp->next_sibling; break; }
+            temp = temp->parent;
+        }
+        if (!following) return JS_NULL;
+        node = following;
+        result = ns_traversal_filter(ctx, w, node);
+        if (result < 0) return JS_EXCEPTION;
+        if (result == 1) return ns_tw_set_current(ctx, w, node);
+    }
+}
+
+static JSValue
+ns_tw_previousNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *node = ns_tw_node_prop(ctx, w, "currentNode");
+    ns_node *root = ns_tw_node_prop(ctx, w, "root");
+    if (!node || !root) return JS_NULL;
+    while (node != root) {
+        ns_node *sibling = node->prev_sibling;
+        while (sibling) {
+            node = sibling;
+            int result = ns_traversal_filter(ctx, w, node);
+            if (result < 0) return JS_EXCEPTION;
+            while (result != 2 && node->last_child) {
+                node = node->last_child;
+                result = ns_traversal_filter(ctx, w, node);
+                if (result < 0) return JS_EXCEPTION;
+            }
+            if (result == 1) return ns_tw_set_current(ctx, w, node);
+            sibling = node->prev_sibling;
+        }
+        if (node == root || !node->parent) return JS_NULL;
+        node = node->parent;
+        int r = ns_traversal_filter(ctx, w, node);
+        if (r < 0) return JS_EXCEPTION;
+        if (r == 1) return ns_tw_set_current(ctx, w, node);
+    }
+    return JS_NULL;
+}
+
+static void
+ns_traversal_init_common(JSContext *ctx, JSValueConst obj,
+                         int argc, JSValueConst *argv)
+{
+    int64_t mask = 0xFFFFFFFF;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]))
+        JS_ToInt64(ctx, &mask, argv[1]);
+    JS_SetPropertyStr(ctx, obj, "whatToShow",
+                      JS_NewInt64(ctx, (int64_t)(uint32_t)mask));
+    if (argc >= 3 && (JS_IsObject(argv[2]) || JS_IsFunction(ctx, argv[2])))
+        JS_SetPropertyStr(ctx, obj, "filter", JS_DupValue(ctx, argv[2]));
+    else
+        JS_SetPropertyStr(ctx, obj, "filter", JS_NULL);
+    JS_SetPropertyStr(ctx, obj, "_active", JS_FALSE);
 }
 
 static JSValue
@@ -30122,27 +30225,238 @@ ns_document_create_tree_walker(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
     (void)this_val;
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "Failed to execute 'createTreeWalker' on "
+            "'Document': parameter 1 is not of type 'Node'.");
     JSValue tw = JS_NewObject(ctx);
-    JSValue root = argc >= 1 ? JS_DupValue(ctx, argv[0]) : JS_NULL;
-    JS_SetPropertyStr(ctx, tw, "root", JS_DupValue(ctx, root));
-    JS_SetPropertyStr(ctx, tw, "currentNode", root);
-    int32_t mask = -1;
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]))
-        JS_ToInt32(ctx, &mask, argv[1]);
-    JS_SetPropertyStr(ctx, tw, "whatToShow", JS_NewInt32(ctx, mask));
-    if (argc >= 3 && (JS_IsObject(argv[2]) || JS_IsFunction(ctx, argv[2])))
-        JS_SetPropertyStr(ctx, tw, "filter", JS_DupValue(ctx, argv[2]));
-    else
-        JS_SetPropertyStr(ctx, tw, "filter", JS_NULL);
-    ns_bind_fn(ctx, tw, "nextNode",       ns_tw_nextNode,       0);
-    ns_bind_fn(ctx, tw, "firstChild",     ns_tw_firstChild,     0);
-    ns_bind_fn(ctx, tw, "nextSibling",    ns_tw_nextSibling,    0);
-    ns_bind_fn(ctx, tw, "parentNode",     ns_tw_parentNode,     0);
-    ns_bind_fn(ctx, tw, "previousNode",   ns_event_noop,        0);
-    ns_bind_fn(ctx, tw, "lastChild",      ns_event_noop,        0);
-    ns_bind_fn(ctx, tw, "previousSibling",ns_event_noop,        0);
-    (void)ns_tw_firstchild_search;
+    JS_SetPropertyStr(ctx, tw, "root",        JS_DupValue(ctx, argv[0]));
+    JS_SetPropertyStr(ctx, tw, "currentNode", JS_DupValue(ctx, argv[0]));
+    ns_traversal_init_common(ctx, tw, argc, argv);
+    ns_bind_fn(ctx, tw, "parentNode",      ns_tw_parentNode,      0);
+    ns_bind_fn(ctx, tw, "firstChild",      ns_tw_firstChild,      0);
+    ns_bind_fn(ctx, tw, "lastChild",       ns_tw_lastChild,       0);
+    ns_bind_fn(ctx, tw, "nextSibling",     ns_tw_nextSibling,     0);
+    ns_bind_fn(ctx, tw, "previousSibling", ns_tw_previousSibling, 0);
+    ns_bind_fn(ctx, tw, "nextNode",        ns_tw_nextNode,        0);
+    ns_bind_fn(ctx, tw, "previousNode",    ns_tw_previousNode,    0);
     return tw;
+}
+
+typedef struct ns_node_iter {
+    ns_js   *js;
+    JSValue  root;
+    JSValue  ref;
+    gboolean before;
+} ns_node_iter;
+
+static JSClassID ns_node_iter_class_id;
+
+static void
+ns_node_iter_finalizer(JSRuntime *rt, JSValue val)
+{
+    ns_node_iter *it = JS_GetOpaque(val, ns_node_iter_class_id);
+    if (!it) return;
+    if (it->js && it->js->node_iters)
+        g_ptr_array_remove_fast(it->js->node_iters, it);
+    JS_FreeValueRT(rt, it->root);
+    JS_FreeValueRT(rt, it->ref);
+    g_free(it);
+}
+
+static JSClassDef ns_node_iter_class = {
+    "NodeIterator",
+    .finalizer = ns_node_iter_finalizer,
+};
+
+static ns_node *
+ns_ni_following(ns_node *node, ns_node *root)
+{
+    if (node->first_child) return node->first_child;
+    for (ns_node *n = node; n && n != root; n = n->parent)
+        if (n->next_sibling) return n->next_sibling;
+    return NULL;
+}
+
+static ns_node *
+ns_ni_preceding(ns_node *node, ns_node *root)
+{
+    if (node == root) return NULL;
+    if (node->prev_sibling) {
+        ns_node *p = node->prev_sibling;
+        while (p->last_child) p = p->last_child;
+        return p;
+    }
+    return node->parent;
+}
+
+static JSValue
+ns_ni_traverse(JSContext *ctx, JSValueConst obj, gboolean forward)
+{
+    ns_node_iter *it = JS_GetOpaque(obj, ns_node_iter_class_id);
+    if (!it) return JS_NULL;
+    ns_node *root = ns_unwrap_element_mut(it->root);
+    ns_node *node = ns_unwrap_element_mut(it->ref);
+    gboolean before = it->before;
+    if (!root || !node) return JS_NULL;
+    for (;;) {
+        if (forward) {
+            if (!before) {
+                ns_node *c = ns_ni_following(node, root);
+                if (!c) return JS_NULL;
+                node = c;
+            } else before = FALSE;
+        } else {
+            if (before) {
+                ns_node *c = ns_ni_preceding(node, root);
+                if (!c) return JS_NULL;
+                node = c;
+            } else before = TRUE;
+        }
+        int r = ns_traversal_filter(ctx, obj, node);
+        if (r < 0) return JS_EXCEPTION;
+        if (r == 1) {
+            JS_FreeValue(ctx, it->ref);
+            it->ref = ns_make_element(ctx, node);
+            it->before = before;
+            return ns_make_element(ctx, node);
+        }
+    }
+}
+
+static JSValue
+ns_ni_nextNode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_ni_traverse(ctx, this_val, TRUE); }
+
+static JSValue
+ns_ni_previousNode(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ (void)argc; (void)argv; return ns_ni_traverse(ctx, this_val, FALSE); }
+
+static JSValue
+ns_ni_detach(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{ (void)ctx; (void)this_val; (void)argc; (void)argv; return JS_UNDEFINED; }
+
+static JSValue
+ns_ni_get_referenceNode(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node_iter *it = JS_GetOpaque(this_val, ns_node_iter_class_id);
+    return it ? JS_DupValue(ctx, it->ref) : JS_NULL;
+}
+
+static JSValue
+ns_ni_get_pointerBefore(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node_iter *it = JS_GetOpaque(this_val, ns_node_iter_class_id);
+    return JS_NewBool(ctx, it && it->before);
+}
+
+static JSValue
+ns_ni_get_root(JSContext *ctx, JSValueConst this_val,
+               int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node_iter *it = JS_GetOpaque(this_val, ns_node_iter_class_id);
+    return it ? JS_DupValue(ctx, it->root) : JS_NULL;
+}
+
+static void
+ns_ni_define_getter(JSContext *ctx, JSValueConst obj, const char *name,
+                    JSCFunction *getter)
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSValue fn = JS_NewCFunction2(ctx, getter, name, 0, JS_CFUNC_generic, 0);
+    JS_DefinePropertyGetSet(ctx, obj, atom, fn, JS_UNDEFINED,
+                            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static JSValue
+ns_document_create_node_iterator(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx, "Failed to execute 'createNodeIterator' on "
+            "'Document': parameter 1 is not of type 'Node'.");
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    if (!ns_node_iter_class_id) {
+        JS_NewClassID(rt, &ns_node_iter_class_id);
+        JS_NewClass(rt, ns_node_iter_class_id, &ns_node_iter_class);
+    }
+    JSValue obj = JS_NewObjectClass(ctx, ns_node_iter_class_id);
+    ns_node_iter *it = g_new0(ns_node_iter, 1);
+    it->js = js_from_ctx(ctx);
+    it->root = JS_DupValue(ctx, argv[0]);
+    it->ref = JS_DupValue(ctx, argv[0]);
+    it->before = TRUE;
+    JS_SetOpaque(obj, it);
+    if (it->js) {
+        if (!it->js->node_iters) it->js->node_iters = g_ptr_array_new();
+        g_ptr_array_add(it->js->node_iters, it);
+    }
+    ns_traversal_init_common(ctx, obj, argc, argv);
+    ns_bind_fn(ctx, obj, "nextNode",     ns_ni_nextNode,     0);
+    ns_bind_fn(ctx, obj, "previousNode", ns_ni_previousNode, 0);
+    ns_bind_fn(ctx, obj, "detach",       ns_ni_detach,       0);
+    ns_ni_define_getter(ctx, obj, "root", ns_ni_get_root);
+    ns_ni_define_getter(ctx, obj, "referenceNode", ns_ni_get_referenceNode);
+    ns_ni_define_getter(ctx, obj, "pointerBeforeReferenceNode",
+                        ns_ni_get_pointerBefore);
+    return obj;
+}
+
+static ns_node *
+ns_ni_last_inclusive(ns_node *n)
+{
+    while (n->last_child) n = n->last_child;
+    return n;
+}
+
+static gboolean
+ns_ni_is_inclusive_ancestor(const ns_node *anc, const ns_node *node)
+{
+    for (const ns_node *a = node; a; a = a->parent)
+        if (a == anc) return TRUE;
+    return FALSE;
+}
+
+static ns_node *
+ns_ni_following_outside(ns_node *node, ns_node *root)
+{
+    for (ns_node *n = node; n && n != root; n = n->parent)
+        if (n->next_sibling) return n->next_sibling;
+    return NULL;
+}
+
+static void
+ns_node_iters_pre_remove(ns_js *js, ns_node *removed)
+{
+    if (!js || !js->node_iters || !removed) return;
+    JSContext *ctx = js->ctx;
+    for (guint i = 0; i < js->node_iters->len; i++) {
+        ns_node_iter *it = g_ptr_array_index(js->node_iters, i);
+        ns_node *root = ns_unwrap_element_mut(it->root);
+        ns_node *ref  = ns_unwrap_element_mut(it->ref);
+        if (!ref || removed == root) continue;
+        if (!ns_ni_is_inclusive_ancestor(removed, ref)) continue;
+        if (it->before) {
+            ns_node *next = ns_ni_following_outside(removed, root);
+            if (next) {
+                JS_FreeValue(ctx, it->ref);
+                it->ref = ns_make_element(ctx, next);
+                continue;
+            }
+            it->before = FALSE;
+        }
+        ns_node *newref = removed->prev_sibling
+            ? ns_ni_last_inclusive(removed->prev_sibling)
+            : removed->parent;
+        JS_FreeValue(ctx, it->ref);
+        it->ref = newref ? ns_make_element(ctx, newref) : JS_NULL;
+    }
 }
 
 static JSValue ns_impl_create_html_document(JSContext *ctx,
@@ -33632,15 +33946,8 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                ns_element_getElementsByTagName, 1);
     ns_bind_fn(ctx, w, "getElementsByClassName",
                ns_element_getElementsByClassName, 1);
-    {
-        JSValue global = JS_GetGlobalObject(ctx);
-        JSValue install = JS_GetPropertyStr(ctx, global, "__ndInstallTraversal");
-        if (JS_IsFunction(ctx, install))
-            JS_FreeValue(ctx, JS_Call(ctx, install, JS_UNDEFINED, 1,
-                                      (JSValueConst[]){ w }));
-        JS_FreeValue(ctx, install);
-        JS_FreeValue(ctx, global);
-    }
+    ns_bind_fn(ctx, w, "createTreeWalker",   ns_document_create_tree_walker,   3);
+    ns_bind_fn(ctx, w, "createNodeIterator", ns_document_create_node_iterator, 3);
     return w;
 }
 
@@ -34581,7 +34888,7 @@ static const JSCFunctionListEntry ns_document_funcs[] = {
     JS_CFUNC_DEF("elementsFromPoint", 2, ns_document_elements_from_point),
     JS_CFUNC_DEF("createRange",       0, ns_document_create_range),
     JS_CFUNC_DEF("createTreeWalker",  3, ns_document_create_tree_walker),
-    JS_CFUNC_DEF("createNodeIterator",3, ns_document_create_tree_walker),
+    JS_CFUNC_DEF("createNodeIterator",3, ns_document_create_node_iterator),
     JS_CFUNC_DEF("getSelection",      0, ns_window_get_selection),
     JS_CFUNC_DEF("adoptNode",         1, ns_document_adopt_node),
     JS_CFUNC_DEF("importNode",        2, ns_document_import_node),
@@ -35335,6 +35642,10 @@ ns_js_free(ns_js *js)
         }
         g_ptr_array_free(js->perf_observers, TRUE);
         js->perf_observers = NULL;
+    }
+    if (js->node_iters) {
+        g_ptr_array_free(js->node_iters, TRUE);
+        js->node_iters = NULL;
     }
     if (js->console_counts) g_hash_table_destroy(js->console_counts);
     if (js->console_timers) g_hash_table_destroy(js->console_timers);

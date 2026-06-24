@@ -182,6 +182,7 @@ struct ns_js {
     GPtrArray    *perf_entries;
     GPtrArray    *perf_observers;
     gboolean      perf_drain_scheduled;
+    GPtrArray    *node_iters;
     GHashTable   *console_counts;
     GHashTable   *console_timers;
     GHashTable   *blob_urls;
