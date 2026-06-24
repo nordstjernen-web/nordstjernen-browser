@@ -14635,38 +14635,38 @@ test	subtest	status
 /dom/nodes/moveBefore/Node-moveBefore.html	<harness>	OK
 /dom/nodes/moveBefore/Node-moveBefore.html	Calling moveBefore with a non-Node first argument must throw TypeError.	PASS
 /dom/nodes/moveBefore/Node-moveBefore.html	Calling moveBefore with second argument missing, or other than Node, null, or undefined, must throw TypeError.	PASS
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a DocumentFragment with an element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a DocumentFragment with multiple elements and parent is a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a Text node and parent is a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is a document with another doctype, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is not a document, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is an Element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction, or Comment node, then throw a HierarchyRequestError DOMException.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Invalid node hierarchy with null old parent does not crash	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Move disconnected iframe does not crash	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node before itself should not move the node	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent in the same tree succeeds	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent in the same tree succeeds,also across shadow-roots	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent without a shared ancestor throws a HIERARCHY_REQUEST_ERR	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from connected->disconnected throws a HIERARCHY_REQUEST_ERR	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from disconnected->connected throws a HIERARCHY_REQUEST_ERR	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	No custom element callbacks are run during disconnected moveBefore()	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore on a paragraph's Text node child	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore with an Element or CharacterData succeeds	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore with reference child whose parent is NOT the destination parent (context node) throws a NotFoundError.	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() CharacterData into a Document	FAIL
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a DocumentFragment with an element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a DocumentFragment with multiple elements and parent is a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a Text node and parent is a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is a document with an element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is a document with another doctype, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a doctype and parent is not a document, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is a host-including inclusive ancestor of parent, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is an Element and parent is a document with another element, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	If node is not a DocumentFragment, DocumentType, Element, Text, ProcessingInstruction, or Comment node, then throw a HierarchyRequestError DOMException.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Invalid node hierarchy with null old parent does not crash	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Move disconnected iframe does not crash	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node before itself should not move the node	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent in the same tree succeeds	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent in the same tree succeeds,also across shadow-roots	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from a disconnected container to a disconnected new parent without a shared ancestor throws a HIERARCHY_REQUEST_ERR	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from connected->disconnected throws a HIERARCHY_REQUEST_ERR	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	Moving a node from disconnected->connected throws a HIERARCHY_REQUEST_ERR	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	No custom element callbacks are run during disconnected moveBefore()	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore on a paragraph's Text node child	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore with an Element or CharacterData succeeds	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore with reference child whose parent is NOT the destination parent (context node) throws a NotFoundError.	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() CharacterData into a Document	PASS
 /dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() into a Document throws a HierarchyRequestError	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() method does not exist on non-ParentNode Nodes	PASS
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() on a cross-document target node throws a HierarchyRequestError	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() on disconnected parent throws a HierarchyRequestError	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() returns undefined	FAIL
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() method does not exist on non-ParentNode Nodes	FAIL
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() on a cross-document target node throws a HierarchyRequestError	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() on disconnected parent throws a HierarchyRequestError	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() returns undefined	PASS
 /dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() with a non-{Element, CharacterData} throws a HierarchyRequestError	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() with disconnected target node throws a HierarchyRequestError	FAIL
-/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() with node being an inclusive ancestor of parent throws a HierarchyRequestError	FAIL
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() with disconnected target node throws a HierarchyRequestError	PASS
+/dom/nodes/moveBefore/Node-moveBefore.html	moveBefore() with node being an inclusive ancestor of parent throws a HierarchyRequestError	PASS
 /dom/nodes/moveBefore/child-style-preserve.html	<harness>	OK
-/dom/nodes/moveBefore/child-style-preserve.html	child-style-preserve	FAIL
+/dom/nodes/moveBefore/child-style-preserve.html	child-style-preserve	PASS
 /dom/nodes/moveBefore/continue-css-animation-left.html	<harness>	TIMEOUT
 /dom/nodes/moveBefore/continue-css-animation-left.html	Node.moveBefore should preserve CSS animation state (left)	TIMEOUT
 /dom/nodes/moveBefore/continue-css-animation-transform.html	<harness>	TIMEOUT
@@ -14687,8 +14687,8 @@ test	subtest	status
 /dom/nodes/moveBefore/css-transition-cross-shadow.html	Moving an element with a transition across shadow boundaries preserves the transition	TIMEOUT
 /dom/nodes/moveBefore/css-transition-to-disconnected-document.html	<harness>	TIMEOUT
 /dom/nodes/moveBefore/css-transition-to-disconnected-document.html	Moving an element with a transition to a disconnected document should reset the transitionm state	TIMEOUT
-/dom/nodes/moveBefore/css-transition-trigger.html	<harness>	OK
-/dom/nodes/moveBefore/css-transition-trigger.html	Node.moveBefore should trigger CSS transition state (left) if needed	FAIL
+/dom/nodes/moveBefore/css-transition-trigger.html	<harness>	TIMEOUT
+/dom/nodes/moveBefore/css-transition-trigger.html	Node.moveBefore should trigger CSS transition state (left) if needed	TIMEOUT
 /dom/nodes/moveBefore/custom-element-move-reactions.html	<harness>	OK
 /dom/nodes/moveBefore/custom-element-move-reactions.html	Reactions to atomic move are called in order of element, not in order of operation	FAIL
 /dom/nodes/moveBefore/custom-element-move-reactions.html	When connectedCallback is not defined, no crash	FAIL
@@ -14716,20 +14716,13 @@ test	subtest	status
 /dom/nodes/moveBefore/focus-within.html	<harness>	OK
 /dom/nodes/moveBefore/focus-within.html	focus-within should be updated when reparenting an element that has focus within	FAIL
 /dom/nodes/moveBefore/focus-within.html	focus-within should be updated when reparenting focused element directly	FAIL
-/dom/nodes/moveBefore/focus-within.html	focus-within should remain the same when moving to the same parent	FAIL
+/dom/nodes/moveBefore/focus-within.html	focus-within should remain the same when moving to the same parent	PASS
 /dom/nodes/moveBefore/fullscreen-preserve.html	<harness>	OK
 /dom/nodes/moveBefore/fullscreen-preserve.html	Document#fullscreenElement	FAIL
 /dom/nodes/moveBefore/hover-style-update.html	<harness>	OK
 /dom/nodes/moveBefore/hover-style-update.html	Element loses hover when moved to different position	FAIL
 /dom/nodes/moveBefore/hover-style-update.html	Hover works immediately after moved	FAIL
 /dom/nodes/moveBefore/iframe-document-preserve.window.html	<harness>	TIMEOUT
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): about:blank iframe's document is preserved	TIMEOUT
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove new parent	NOTRUN
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self	NOTRUN
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self via innerHTML	NOTRUN
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self via replaceChildren()	NOTRUN
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): simple same-origin document is preserved	NOTRUN
-/dom/nodes/moveBefore/iframe-document-preserve.window.html	window.frames ordering does not change due to moveBefore()	NOTRUN
 /dom/nodes/moveBefore/listed-form-element-reset.html	<harness>	OK
 /dom/nodes/moveBefore/listed-form-element-reset.html	Listed form element form owner is reset when a new form is moved closer before the listed element	FAIL
 /dom/nodes/moveBefore/live-range-updates.html	<harness>	OK
@@ -14737,7 +14730,7 @@ test	subtest	status
 /dom/nodes/moveBefore/live-range-updates.html	moveBefore still causes range startContainer to snap up to parent, when startContainer ancestor is moved	FAIL
 /dom/nodes/moveBefore/live-range-updates.html	moveBefore still results in range startContainer snapping up to parent when startContainer is moved	FAIL
 /dom/nodes/moveBefore/modal-dialog.html	<harness>	OK
-/dom/nodes/moveBefore/modal-dialog.html	when reparenting a modal dialog, the dialog should stay modal	FAIL
+/dom/nodes/moveBefore/modal-dialog.html	when reparenting a modal dialog, the dialog should stay modal	PASS
 /dom/nodes/moveBefore/moveBefore-dir.html	<harness>	OK
 /dom/nodes/moveBefore/moveBefore-dir.html	moveBefore() correctly updates the computed dir for moved nodes	FAIL
 /dom/nodes/moveBefore/moveBefore-from-light-to-shadow.html	<harness>	OK
@@ -14767,7 +14760,7 @@ test	subtest	status
 /dom/nodes/moveBefore/moveBefore-size-query.html	moveBefore() between different size containers invalidates target	FAIL
 /dom/nodes/moveBefore/mutation-observer.html	<harness>	OK
 /dom/nodes/moveBefore/mutation-observer.html	[Connected move] MutationObserver removal + insertion is tracked by moveBefore()	FAIL
-/dom/nodes/moveBefore/mutation-observer.html	[Disconnected move] MutationObserver removal + insertion is tracked by moveBefore()	FAIL
+/dom/nodes/moveBefore/mutation-observer.html	[Disconnected move] MutationObserver removal + insertion is tracked by moveBefore()	PASS
 /dom/nodes/moveBefore/nonce.html	<harness>	OK
 /dom/nodes/moveBefore/nonce.html	Element nonce content attribute is not cleared after move	FAIL
 /dom/nodes/moveBefore/object-crash-regression.html	<harness>	OK
@@ -14775,7 +14768,7 @@ test	subtest	status
 /dom/nodes/moveBefore/pointer-events.html	<harness>	OK
 /dom/nodes/moveBefore/pointer-events.html	Pointer capture should not be released when moving	FAIL
 /dom/nodes/moveBefore/popover-preserve.html	<harness>	OK
-/dom/nodes/moveBefore/popover-preserve.html	when reparenting an open popover, it shouldn't be closed automatically	FAIL
+/dom/nodes/moveBefore/popover-preserve.html	when reparenting an open popover, it shouldn't be closed automatically	PASS
 /dom/nodes/moveBefore/preserve-render-blocking-script.html	<harness>	OK
 /dom/nodes/moveBefore/preserve-render-blocking-script.html	A moved script should keep its render-blocking state	PASS
 /dom/nodes/moveBefore/preserve-render-blocking-style.html	<harness>	OK
@@ -14784,8 +14777,8 @@ test	subtest	status
 /dom/nodes/moveBefore/relevant-mutations.html	Moving <img> into a <picture> triggers a relevant mutation on the <img>, loading <source>	NOTRUN
 /dom/nodes/moveBefore/relevant-mutations.html	Moving <source> out of <picture> triggers a relevant mutation on sibling <img>	TIMEOUT
 /dom/nodes/moveBefore/script-move-before.html	<harness>	OK
-/dom/nodes/moveBefore/script-move-before.html	Synchronous script execution in HTMLScriptElement during moveBefore should be blocked	FAIL
-/dom/nodes/moveBefore/script-move-before.html	Synchronous script execution in SVGScriptElement during moveBefore should be blocked	FAIL
+/dom/nodes/moveBefore/script-move-before.html	Synchronous script execution in HTMLScriptElement during moveBefore should be blocked	PASS
+/dom/nodes/moveBefore/script-move-before.html	Synchronous script execution in SVGScriptElement during moveBefore should be blocked	PASS
 /dom/nodes/moveBefore/select-option-optgroup.html	<harness>	OK
 /dom/nodes/moveBefore/select-option-optgroup.html	Moving options between select elements.	FAIL
 /dom/nodes/moveBefore/select-option-optgroup.html	Option selectedness is updated on option and optgroup DOM moves	FAIL
@@ -14802,9 +14795,9 @@ test	subtest	status
 /dom/nodes/moveBefore/slotchange-events.html	Moving default content into a slot fires 'slotchange' event	FAIL
 /dom/nodes/moveBefore/slotchange-events.html	Moving default content out of a slot fires 'slotchange' event	FAIL
 /dom/nodes/moveBefore/style-applies.html	<harness>	OK
-/dom/nodes/moveBefore/style-applies.html	Moving a style inside the document should not affect whether it's applied	FAIL
+/dom/nodes/moveBefore/style-applies.html	Moving a style inside the document should not affect whether it's applied	PASS
 /dom/nodes/moveBefore/throws-exception.html	<harness>	OK
-/dom/nodes/moveBefore/throws-exception.html	moveBefore() on a cross-document target node	FAIL
+/dom/nodes/moveBefore/throws-exception.html	moveBefore() on a cross-document target node	PASS
 /dom/nodes/name-validation.html	<harness>	OK
 /dom/nodes/name-validation.html	Valid and invalid characters in createDocumentType.	PASS
 /dom/nodes/name-validation.html	Valid and invalid characters in createElement.	PASS

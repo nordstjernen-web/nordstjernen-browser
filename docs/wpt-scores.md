@@ -52,6 +52,7 @@ they regenerate.
 | 2026-06-24 | b8e72fa | f6fd39b13 | 342/696 (49%) | 67568/69508 (97%) | partial: dom/traversal |
 | 2026-06-24 | c19759a | f6fd39b13 | 345/696 (49%) | 67576/69508 (97%) | partial: dom/ranges/Range-mutations-insertBefore.html dom/ranges/Range-mutations-replaceChild.html dom/ranges/Range-mutations-removeChild.html |
 | 2026-06-24 | c9783fa | f6fd39b13 | 346/696 (49%) | 67593/69508 (97%) | partial: dom/nodes/MutationObserver-characterData.html dom/nodes/MutationObserver-attributes.html |
+| 2026-06-24 | e09e8b2 | f6fd39b13 | 352/696 (50%) | 67628/69501 (97%) | partial: dom/nodes/moveBefore |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -61,11 +62,11 @@ touch.
 
 ## Per-area results — 2026-06-24
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-24-c9783fa.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-24-e09e8b2.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 145/275 | 12260/12821 | 533 | 17 | 11 | 0 |
+| `dom/nodes` | 151/275 | 12295/12814 | 497 | 17 | 5 | 0 |
 | `dom/events` | 50/167 | 424/742 | 273 | 22 | 23 | 0 |
 | `dom/traversal` | 13/17 | 1589/1605 | 16 | 0 | 0 | 0 |
 | `dom/ranges` | 33/55 | 44352/44537 | 185 | 0 | 0 | 0 |
@@ -80,7 +81,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-24-c9783fa.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
-| **Total** | **346/696** | **67593/69508** | **1837** | **42** | **36** | **0** |
+| **Total** | **352/696** | **67628/69501** | **1801** | **42** | **30** | **0** |
 
 ## ROI by area — 2026-06-24
 
@@ -95,7 +96,7 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/nodes` | 561 | 130 | 4.3 | 20 | 75 |
+| `dom/nodes` | 519 | 124 | 4.2 | 21 | 68 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 318 | 117 | 2.7 | 72 | 30 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
