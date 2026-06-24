@@ -8103,6 +8103,27 @@ ns_audio_context_ctor(JSContext *ctx, JSValueConst this_val,
     return a;
 }
 
+static void
+ns_listeners_compact_dead(JSContext *ctx, JSValueConst owner)
+{
+    JSValue live = JS_GetPropertyStr(ctx, owner, "_listeners");
+    if (JS_IsArray(live)) {
+        uint32_t m = ns_js_array_length(ctx, live);
+        JSValue kept = JS_NewArray(ctx);
+        uint32_t k = 0;
+        for (uint32_t i = 0; i < m; i++) {
+            JSValue e = JS_GetPropertyUint32(ctx, live, i);
+            JSValue dv = JS_GetPropertyStr(ctx, e, "_dead");
+            gboolean dead = JS_ToBool(ctx, dv);
+            JS_FreeValue(ctx, dv);
+            if (dead) JS_FreeValue(ctx, e);
+            else      JS_SetPropertyUint32(ctx, kept, k++, e);
+        }
+        JS_SetPropertyStr(ctx, owner, "_listeners", kept);
+    }
+    JS_FreeValue(ctx, live);
+}
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -8204,24 +8225,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
             JS_FreeValue(ctx, type_v);
             JS_FreeValue(ctx, entry);
         }
-        if (any_dead) {
-            JSValue live = JS_GetPropertyStr(ctx, port, "_listeners");
-            if (JS_IsArray(live)) {
-                uint32_t m = ns_js_array_length(ctx, live);
-                JSValue kept = JS_NewArray(ctx);
-                uint32_t k = 0;
-                for (uint32_t i = 0; i < m; i++) {
-                    JSValue e = JS_GetPropertyUint32(ctx, live, i);
-                    JSValue dv = JS_GetPropertyStr(ctx, e, "_dead");
-                    gboolean dead = JS_ToBool(ctx, dv);
-                    JS_FreeValue(ctx, dv);
-                    if (dead) JS_FreeValue(ctx, e);
-                    else      JS_SetPropertyUint32(ctx, kept, k++, e);
-                }
-                JS_SetPropertyStr(ctx, port, "_listeners", kept);
-            }
-            JS_FreeValue(ctx, live);
-        }
+        if (any_dead) ns_listeners_compact_dead(ctx, port);
     }
     JS_FreeValue(ctx, listeners);
 
@@ -11300,25 +11304,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
             JS_FreeValue(ctx, immv);
             if (immediate) break;
         }
-        if (any_dead) {
-            JSValue live = JS_GetPropertyStr(ctx, obj, "_listeners");
-            if (JS_IsArray(live)) {
-                JSValue lv = JS_GetPropertyStr(ctx, live, "length");
-                uint32_t m = 0; JS_ToUint32(ctx, &m, lv); JS_FreeValue(ctx, lv);
-                JSValue kept = JS_NewArray(ctx);
-                uint32_t k = 0;
-                for (uint32_t i = 0; i < m; i++) {
-                    JSValue e = JS_GetPropertyUint32(ctx, live, i);
-                    JSValue dv = JS_GetPropertyStr(ctx, e, "_dead");
-                    gboolean dead = JS_ToBool(ctx, dv);
-                    JS_FreeValue(ctx, dv);
-                    if (dead) JS_FreeValue(ctx, e);
-                    else      JS_SetPropertyUint32(ctx, kept, k++, e);
-                }
-                JS_SetPropertyStr(ctx, obj, "_listeners", kept);
-            }
-            JS_FreeValue(ctx, live);
-        }
+        if (any_dead) ns_listeners_compact_dead(ctx, obj);
     }
     JS_FreeValue(ctx, listeners);
 }
@@ -24850,6 +24836,7 @@ ns_element_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !el->name || strcmp(el->name, "select") != 0)
         return JS_NewInt32(ctx, -1);
+    gboolean multiple = ns_element_get_attr(el, "multiple") != NULL;
     int idx = 0;
     int first_idx = -1;
     for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
@@ -24868,7 +24855,7 @@ ns_element_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
             }
         }
     }
-    return JS_NewInt32(ctx, first_idx);
+    return JS_NewInt32(ctx, multiple ? -1 : first_idx);
 }
 
 static JSValue
@@ -28272,9 +28259,9 @@ ns_window_stop(JSContext *ctx, JSValueConst this_val,
     return ns_window_invoke_action(ctx, "stop");
 }
 
-static JSValue
-ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
+static void
+ns_read_scroll_xy(JSContext *ctx, int argc, JSValueConst *argv,
+                  double *out_x, double *out_y)
 {
     double x = 0, y = 0;
     if (argc >= 1 && JS_IsObject(argv[0]) && !JS_IsNumber(argv[0])) {
@@ -28288,6 +28275,16 @@ ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
         if (argc >= 1) JS_ToFloat64(ctx, &x, argv[0]);
         if (argc >= 2) JS_ToFloat64(ctx, &y, argv[1]);
     }
+    *out_x = x;
+    *out_y = y;
+}
+
+static JSValue
+ns_window_scroll_to(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    double x = 0, y = 0;
+    ns_read_scroll_xy(ctx, argc, argv, &x, &y);
     JS_SetPropertyStr(ctx, this_val, "scrollX",  JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, this_val, "scrollY",  JS_NewFloat64(ctx, y));
     JS_SetPropertyStr(ctx, this_val, "pageXOffset", JS_NewFloat64(ctx, x));
@@ -28300,17 +28297,7 @@ ns_window_scroll_by(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     double dx = 0, dy = 0;
-    if (argc >= 1 && JS_IsObject(argv[0]) && !JS_IsNumber(argv[0])) {
-        JSValue lv = JS_GetPropertyStr(ctx, argv[0], "left");
-        JSValue tv = JS_GetPropertyStr(ctx, argv[0], "top");
-        JS_ToFloat64(ctx, &dx, lv);
-        JS_ToFloat64(ctx, &dy, tv);
-        JS_FreeValue(ctx, lv);
-        JS_FreeValue(ctx, tv);
-    } else {
-        if (argc >= 1) JS_ToFloat64(ctx, &dx, argv[0]);
-        if (argc >= 2) JS_ToFloat64(ctx, &dy, argv[1]);
-    }
+    ns_read_scroll_xy(ctx, argc, argv, &dx, &dy);
     JSValue cur_x = JS_GetPropertyStr(ctx, this_val, "scrollX");
     JSValue cur_y = JS_GetPropertyStr(ctx, this_val, "scrollY");
     double x = 0, y = 0;
@@ -29979,7 +29966,7 @@ ns_tw_mask_for(const ns_node *n)
         case NS_NODE_ELEMENT:  return 1;
         case NS_NODE_TEXT:     return 4;
         case NS_NODE_COMMENT:  return 128;
-        case NS_NODE_DOCTYPE:  return 0x100;
+        case NS_NODE_DOCTYPE:  return 0x200;
         case NS_NODE_DOCUMENT: return 0x100;
         default:               return 0;
     }
