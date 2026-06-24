@@ -48,6 +48,7 @@ they regenerate.
 | 2026-06-19 | 2eb8fe5 | 1df6b93 | 332/696 (47%) | 67248/69378 (96%) | partial: dom/nodes |
 | 2026-06-19 | 66d9b68 | 1df6b936e | 332/696 (47%) | 67314/69379 (97%) | partial: url |
 | 2026-06-19 | 5d428c4 | 1df6b936e | 338/696 (48%) | 67474/69505 (97%) | partial: html/dom/elements |
+| 2026-06-24 | e0a6389 | f6fd39b13 | 341/696 (48%) | 67545/69505 (97%) | partial: html/semantics/forms/the-form-element xhr/formdata dom/events/EventTarget-dispatchEvent.html dom/events/Event-subclasses-constructors.html dom/events/Event-dispatch-bubbles-false.html |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -55,14 +56,14 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-19
+## Per-area results — 2026-06-24
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-19-5d428c4.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-24-e0a6389.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 144/275 | 12243/12821 | 536 | 31 | 11 | 0 |
-| `dom/events` | 48/167 | 363/742 | 334 | 22 | 23 | 0 |
+| `dom/events` | 50/167 | 424/742 | 273 | 22 | 23 | 0 |
 | `dom/traversal` | 12/17 | 1566/1602 | 36 | 0 | 0 | 0 |
 | `dom/ranges` | 30/55 | 44344/44537 | 193 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
@@ -74,11 +75,11 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-19-5d428c4.tsv`.
 | `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
 | `html/dom/elements` | 40/56 | 746/907 | 158 | 1 | 2 | 0 |
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
-| `xhr/formdata` | 14/18 | 70/80 | 10 | 0 | 0 | 0 |
-| `html/semantics/forms/the-form-element` | 6/18 | 94/118 | 24 | 0 | 0 | 0 |
-| **Total** | **338/696** | **67474/69505** | **1939** | **56** | **36** | **0** |
+| `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
+| `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
+| **Total** | **341/696** | **67545/69505** | **1868** | **56** | **36** | **0** |
 
-## ROI by area — 2026-06-19
+## ROI by area — 2026-06-24
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -93,16 +94,16 @@ file.
 |------|----------------|----------------|-----------|----------------|---------|
 | `dom/nodes` | 578 | 131 | 4.4 | 21 | 75 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
-| `dom/events` | 379 | 119 | 3.2 | 72 | 29 |
+| `dom/events` | 318 | 117 | 2.7 | 72 | 30 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
 | `dom/ranges` | 193 | 25 | 7.7 | 0 | 6 |
 | `html/dom/elements` | 161 | 16 | 10.1 | 1 | 9 |
 | `dom/traversal` | 36 | 5 | 7.2 | 0 | 2 |
-| `html/semantics/forms/the-form-element` | 24 | 12 | 2.0 | 2 | 8 |
+| `html/semantics/forms/the-form-element` | 21 | 12 | 1.8 | 2 | 9 |
 | `dom/collections` | 10 | 5 | 2.0 | 0 | 4 |
-| `xhr/formdata` | 10 | 4 | 2.5 | 0 | 3 |
 | `hr-time` | 9 | 9 | 1.0 | 2 | 7 |
 | `console` | 6 | 7 | 0.9 | 1 | 6 |
+| `xhr/formdata` | 3 | 3 | 1.0 | 0 | 3 |
 | `html/webappapis/timers` | 2 | 4 | 0.5 | 2 | 2 |
 | `dom/lists` | 0 | 0 | - | 0 | 0 |
 | `html/webappapis/atob` | 0 | 0 | - | 0 | 0 |

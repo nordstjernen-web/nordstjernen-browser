@@ -763,8 +763,8 @@ test	subtest	status
 /dom/events/Event-dispatch-bubble-canceled.html	<harness>	OK
 /dom/events/Event-dispatch-bubble-canceled.html	Setting cancelBubble=true prior to dispatchEvent()	PASS
 /dom/events/Event-dispatch-bubbles-false.html	<harness>	OK
-/dom/events/Event-dispatch-bubbles-false.html	In DOMImplementation.createHTMLDocument()	FAIL
-/dom/events/Event-dispatch-bubbles-false.html	In new Document()	FAIL
+/dom/events/Event-dispatch-bubbles-false.html	In DOMImplementation.createHTMLDocument()	PASS
+/dom/events/Event-dispatch-bubbles-false.html	In new Document()	PASS
 /dom/events/Event-dispatch-bubbles-false.html	In window.document with click event	PASS
 /dom/events/Event-dispatch-bubbles-false.html	In window.document with load event	PASS
 /dom/events/Event-dispatch-bubbles-false.html	In window.document.cloneNode(true)	FAIL
@@ -1042,55 +1042,55 @@ test	subtest	status
 /dom/events/Event-stopPropagation-cancel-bubbling.html	<harness>	OK
 /dom/events/Event-stopPropagation-cancel-bubbling.html	Event-stopPropagation-cancel-bubbling	PASS
 /dom/events/Event-subclasses-constructors.html	<harness>	OK
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (undefined argument)	FAIL
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	CompositionEvent constructor (undefined argument)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (argument with default values)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (argument with non-default values)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (empty argument)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (no argument)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (null argument)	PASS
 /dom/events/Event-subclasses-constructors.html	Event constructor (undefined argument)	PASS
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (undefined argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (undefined argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (undefined argument)	FAIL
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	FocusEvent constructor (undefined argument)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	KeyboardEvent constructor (undefined argument)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	MouseEvent constructor (undefined argument)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (argument with default values)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (argument with non-default values)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (empty argument)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (no argument)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (null argument)	PASS
 /dom/events/Event-subclasses-constructors.html	SubclassedEvent constructor (undefined argument)	PASS
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (undefined argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	UIEvent constructor (view argument with wrong type)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (argument with default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (argument with non-default values)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (empty argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (no argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (null argument)	FAIL
-/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (undefined argument)	FAIL
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (undefined argument)	PASS
+/dom/events/Event-subclasses-constructors.html	UIEvent constructor (view argument with wrong type)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (argument with default values)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (argument with non-default values)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (empty argument)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (no argument)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (null argument)	PASS
+/dom/events/Event-subclasses-constructors.html	WheelEvent constructor (undefined argument)	PASS
 /dom/events/Event-timestamp-cross-realm-getter.html	<harness>	TIMEOUT
 /dom/events/Event-timestamp-cross-realm-getter.html	event.timeStamp is initialized using event's relevant global object	TIMEOUT
 /dom/events/Event-timestamp-high-resolution.html	<harness>	OK
@@ -1154,31 +1154,31 @@ test	subtest	status
 /dom/events/EventTarget-dispatchEvent-returnvalue.html	Return value of EventTarget.dispatchEvent() affected by preventDefault().	PASS
 /dom/events/EventTarget-dispatchEvent-returnvalue.html	Return value of EventTarget.dispatchEvent() affected by returnValue.	PASS
 /dom/events/EventTarget-dispatchEvent.html	<harness>	OK
-/dom/events/EventTarget-dispatchEvent.html	Calling dispatchEvent(null).	FAIL
+/dom/events/EventTarget-dispatchEvent.html	Calling dispatchEvent(null).	PASS
 /dom/events/EventTarget-dispatchEvent.html	Capturing event listeners should be called before non-capturing ones	PASS
 /dom/events/EventTarget-dispatchEvent.html	Event listeners added during dispatch should be called	PASS
 /dom/events/EventTarget-dispatchEvent.html	Exceptions from event listeners must not be propagated.	PASS
-/dom/events/EventTarget-dispatchEvent.html	If the event's dispatch flag is set, an InvalidStateError must be thrown.	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (BeforeUnloadEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (CompositionEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (CustomEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DeviceMotionEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DeviceOrientationEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DragEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (Event).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (Events).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (FocusEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (HTMLEvents).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (HashChangeEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (KeyboardEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MessageEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MouseEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MouseEvents).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (SVGEvents).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (StorageEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (TextEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (UIEvent).	FAIL
-/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (UIEvents).	FAIL
+/dom/events/EventTarget-dispatchEvent.html	If the event's dispatch flag is set, an InvalidStateError must be thrown.	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (BeforeUnloadEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (CompositionEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (CustomEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DeviceMotionEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DeviceOrientationEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (DragEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (Event).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (Events).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (FocusEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (HTMLEvents).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (HashChangeEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (KeyboardEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MessageEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MouseEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (MouseEvents).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (SVGEvents).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (StorageEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (TextEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (UIEvent).	PASS
+/dom/events/EventTarget-dispatchEvent.html	If the event's initialized flag is not set, an InvalidStateError must be thrown (UIEvents).	PASS
 /dom/events/EventTarget-removeEventListener.any.html	<harness>	OK
 /dom/events/EventTarget-removeEventListener.any.html	removing a null event listener should succeed	PASS
 /dom/events/EventTarget-this-of-listener.html	<harness>	OK
@@ -62143,7 +62143,7 @@ test	subtest	status
 /html/semantics/forms/the-form-element/form-elements-interfaces-01.html	form.elements: interfaces	PASS
 /html/semantics/forms/the-form-element/form-elements-matches.html	<harness>	OK
 /html/semantics/forms/the-form-element/form-elements-matches.html	form.elements should include elements whose name starts with a number	FAIL
-/html/semantics/forms/the-form-element/form-elements-matches.html	input type=image should not be present in the form.elements collection	FAIL
+/html/semantics/forms/the-form-element/form-elements-matches.html	input type=image should not be present in the form.elements collection	PASS
 /html/semantics/forms/the-form-element/form-elements-nameditem-01.html	<harness>	OK
 /html/semantics/forms/the-form-element/form-elements-nameditem-01.html	RadioNodeList should exist	PASS
 /html/semantics/forms/the-form-element/form-elements-nameditem-01.html	elements collection should include fieldsets	PASS
@@ -62178,7 +62178,7 @@ test	subtest	status
 /html/semantics/forms/the-form-element/form-nameditem.html	Trying to set an expando that shadows a named property that gets added later	FAIL
 /html/semantics/forms/the-form-element/form-nameditem.html	Trying to set an expando that would shadow an already-existing named property	FAIL
 /html/semantics/forms/the-form-element/form-requestsubmit.html	<harness>	OK
-/html/semantics/forms/the-form-element/form-requestsubmit.html	Passing a submit button not owned by the context object should throw	FAIL
+/html/semantics/forms/the-form-element/form-requestsubmit.html	Passing a submit button not owned by the context object should throw	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	Passing an element which is not a submit button should throw	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	The constructed FormData object should not contain an entry for the submit button that was used to submit the form.	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	The value of the submitter should be appended, and form* attributes of the submitter should be handled.	FAIL
@@ -62186,7 +62186,7 @@ test	subtest	status
 /html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() doesn't run form submission reentrantly	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() doesn't run interactive validation reentrantly	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() for a disconnected form should not submit the form	FAIL
-/html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() should accept button[type=submit], input[type=submit], and input[type=image]	FAIL
+/html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() should accept button[type=submit], input[type=submit], and input[type=image]	PASS
 /html/semantics/forms/the-form-element/form-requestsubmit.html	requestSubmit() should trigger interactive form validation	PASS
 /html/webappapis/atob/base64.any.html	<harness>	OK
 /html/webappapis/atob/base64.any.html	atob(" \t\n\f\r ab\t\n\f\r cd\t\n\f\r ")	PASS
@@ -70124,15 +70124,15 @@ test	subtest	status
 /xhr/formdata/constructor-submitter-coordinate.html	<harness>	OK
 /xhr/formdata/constructor-submitter-coordinate.html	The constructed FormData object should contain correct entries for Image Button submitter's dispatched coordinate	FAIL
 /xhr/formdata/constructor-submitter.html	<harness>	OK
-/xhr/formdata/constructor-submitter.html	FormData construction should allow a null submitter	FAIL
+/xhr/formdata/constructor-submitter.html	FormData construction should allow a null submitter	PASS
 /xhr/formdata/constructor-submitter.html	FormData construction should allow an undefined form and a null submitter	PASS
 /xhr/formdata/constructor-submitter.html	FormData construction should allow an undefined form and an undefined submitter	PASS
-/xhr/formdata/constructor-submitter.html	FormData construction should throw a 'NotFoundError' DOMException if a non-null submitter is not owned by the form	FAIL
-/xhr/formdata/constructor-submitter.html	FormData construction should throw a TypeError if a non-null submitter is not a submit button	FAIL
-/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain an in-tree-order entry for a named submit button submitter	FAIL
-/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain in-tree-order entries for an activated Image Button submitter	FAIL
-/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain in-tree-order entries for an unactivated Image Button submitter	FAIL
-/xhr/formdata/constructor-submitter.html	The constructed FormData object should not contain an entry for an unnamed submit button submitter	FAIL
+/xhr/formdata/constructor-submitter.html	FormData construction should throw a 'NotFoundError' DOMException if a non-null submitter is not owned by the form	PASS
+/xhr/formdata/constructor-submitter.html	FormData construction should throw a TypeError if a non-null submitter is not a submit button	PASS
+/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain an in-tree-order entry for a named submit button submitter	PASS
+/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain in-tree-order entries for an activated Image Button submitter	PASS
+/xhr/formdata/constructor-submitter.html	The constructed FormData object should contain in-tree-order entries for an unactivated Image Button submitter	PASS
+/xhr/formdata/constructor-submitter.html	The constructed FormData object should not contain an entry for an unnamed submit button submitter	PASS
 /xhr/formdata/constructor.any.html	<harness>	OK
 /xhr/formdata/constructor.any.html	Constructors should throw a type error	PASS
 /xhr/formdata/delete-formelement.html	<harness>	OK
