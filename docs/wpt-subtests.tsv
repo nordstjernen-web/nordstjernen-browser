@@ -59438,29 +59438,29 @@ test	subtest	status
 /dom/traversal/NodeFilter-constants.html	Constants for acceptNode on NodeFilter interface object.	PASS
 /dom/traversal/NodeFilter-constants.html	Constants for whatToShow on NodeFilter interface object.	PASS
 /dom/traversal/NodeIterator-removal.html	<harness>	OK
-/dom/traversal/NodeIterator-removal.html	Test removing node comment	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1.firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2.firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node doctype	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignComment	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignDoctype	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1.firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara2	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node foreignTextNode	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[0]	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[0].firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[1]	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[1].firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node paras[5].firstChild	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node processingInstruction	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node testDiv	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlComment	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlDoctype	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlElement	FAIL
-/dom/traversal/NodeIterator-removal.html	Test removing node xmlTextNode	FAIL
+/dom/traversal/NodeIterator-removal.html	Test removing node comment	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara1.firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node detachedPara2.firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node doctype	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignComment	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignDoctype	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara1.firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignPara2	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node foreignTextNode	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[0]	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[0].firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[1]	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[1].firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node paras[5].firstChild	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node processingInstruction	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node testDiv	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlComment	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlDoctype	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlElement	PASS
+/dom/traversal/NodeIterator-removal.html	Test removing node xmlTextNode	PASS
 /dom/traversal/NodeIterator.html	<harness>	OK
 /dom/traversal/NodeIterator.html	Propagate exception from filter function	PASS
 /dom/traversal/NodeIterator.html	Recursive filters need to throw	PASS
@@ -59761,9 +59761,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(docfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
@@ -59861,9 +59861,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(foreignDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
@@ -60161,9 +60161,9 @@ test	subtest	status
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return true }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ATTRIBUTE, null)	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return false }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	PASS
-/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	PASS
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, (function(node) { return true }))	FAIL
+/dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_DOCUMENT, null)	FAIL
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return false }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/NodeIterator.html	document.createNodeIterator(xmlDocfrag, NodeFilter.SHOW_ELEMENT, (function(node) { return true }))	PASS
@@ -60259,19 +60259,23 @@ test	subtest	status
 /dom/traversal/TreeWalker-currentNode.html	<harness>	OK
 /dom/traversal/TreeWalker-currentNode.html	Test how we handle the case when the traversed to node is within the root, but the currentElement is not.	PASS
 /dom/traversal/TreeWalker-currentNode.html	Test that TreeWalker.parent() doesn't set the currentNode to a node not under the root.	PASS
-/dom/traversal/TreeWalker-currentNode.html	Test that setting currentNode to non-Node values throws.	PASS
+/dom/traversal/TreeWalker-currentNode.html	Test that setting currentNode to non-Node values throws.	FAIL
 /dom/traversal/TreeWalker-currentNode.html	Test that we handle setting the currentNode to arbitrary nodes not under the root element.	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	<harness>	OK
+/dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	<harness>	OK
+/dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null after exhausting a detached subtree	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null after exhausting a detached subtree	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null when currentNode is a detached element with no descendants and whatToShow does not match it	PASS
+/dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() returns null when currentNode is a detached element with no descendants and whatToShow does not match it	PASS
+/dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() terminates when iterating over template.content not under the walker's root	PASS
 /dom/traversal/TreeWalker-nextNode-detached-currentNode.window.html	nextNode() terminates when iterating over template.content not under the walker's root	PASS
 /dom/traversal/TreeWalker-previousNodeLastChildReject.html	<harness>	OK
 /dom/traversal/TreeWalker-previousNodeLastChildReject.html	Test that previousNode properly respects the filter.	PASS
 /dom/traversal/TreeWalker-previousSiblingLastChildSkip.html	<harness>	OK
 /dom/traversal/TreeWalker-previousSiblingLastChildSkip.html	Test that previousSibling properly respects the filter.	PASS
 /dom/traversal/TreeWalker-realm.html	<harness>	OK
-/dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm	FAIL
-/dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm with acceptNode	FAIL
+/dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm	PASS
+/dom/traversal/TreeWalker-realm.html	Node returned by TreeWalker from different realm with acceptNode	PASS
 /dom/traversal/TreeWalker-traversal-reject.html	<harness>	OK
 /dom/traversal/TreeWalker-traversal-reject.html	Testing firstChild	PASS
 /dom/traversal/TreeWalker-traversal-reject.html	Testing nextNode	PASS
@@ -60338,7 +60342,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(detachedDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
@@ -60618,7 +60622,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(document, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
@@ -60658,7 +60662,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(foreignDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
@@ -60918,7 +60922,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(testDiv, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
@@ -60958,7 +60962,7 @@ test	subtest	status
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return false }))	PASS
-/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	FAIL
+/dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return node.nodeName[0] == '#' }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, (function(node) { return true }))	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, 0xFFFFFFFF, null)	PASS
 /dom/traversal/TreeWalker.html	document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ATTRIBUTE, (function(node) { return false }))	PASS
