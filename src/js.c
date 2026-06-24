@@ -30929,7 +30929,7 @@ ns_node_iters_pre_remove(ns_js *js, ns_node *removed)
         ns_node_iter *it = g_ptr_array_index(js->node_iters, i);
         ns_node *root = ns_unwrap_element_mut(it->root);
         ns_node *ref  = ns_unwrap_element_mut(it->ref);
-        if (!ref || removed == root) continue;
+        if (!ref || ns_ni_is_inclusive_ancestor(removed, root)) continue;
         if (!ns_ni_is_inclusive_ancestor(removed, ref)) continue;
         if (it->before) {
             ns_node *next = ns_ni_following_outside(removed, root);
