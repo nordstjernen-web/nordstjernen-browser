@@ -4015,10 +4015,13 @@ ns_element_append_data(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     const char *s = JS_ToCString(ctx, argv[0]);
     if (!s) return JS_EXCEPTION;
+    char *old_copy = g_strdup(n->text ? n->text : "");
     char *merged = g_strconcat(n->text ? n->text : "", s, NULL);
     ns_node_replace_text_owned(n, merged);
     JS_FreeCString(ctx, s);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx);
+      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+    g_free(old_copy);
     return JS_UNDEFINED;
 }
 
@@ -4038,8 +4041,11 @@ ns_element_delete_data(JSContext *ctx, JSValueConst this_val,
         return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
             "offset is greater than length");
     glong cnt_units = ((guint64)off + cnt > (guint64)total) ? total - (glong)off : (glong)cnt;
+    char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, cnt_units, NULL, 0);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx);
+      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+    g_free(old_copy);
     return JS_UNDEFINED;
 }
 
@@ -4061,9 +4067,12 @@ ns_element_insert_data(JSContext *ctx, JSValueConst this_val,
         return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
             "offset is greater than length");
     }
+    char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, 0, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx);
+      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+    g_free(old_copy);
     return JS_UNDEFINED;
 }
 
@@ -4087,9 +4096,12 @@ ns_element_replace_data(JSContext *ctx, JSValueConst this_val,
             "offset is greater than length");
     }
     glong cnt_units = ((guint64)off + cnt > (guint64)total) ? total - (glong)off : (glong)cnt;
+    char *old_copy = g_strdup(n->text ? n->text : "");
     ns_cdata_splice(n, (glong)off, cnt_units, ins, strlen(ins));
     JS_FreeCString(ctx, ins);
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    { ns_js *_j = js_from_ctx(ctx);
+      if (_j) { _j->mutated = TRUE; ns_js_record_character_data(_j, n, old_copy); } }
+    g_free(old_copy);
     return JS_UNDEFINED;
 }
 
@@ -21196,10 +21208,10 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
         }
         if (changed && _j) {
             if (!img_src_paint_only) _j->mutated = TRUE;
-            ns_js_record_attr_change(_j, n, name, old_copy);
             if (img_src_paint_only && _j->repaint_cb)
                 _j->repaint_cb(_j->repaint_user_data);
         }
+        if (_j) ns_js_record_attr_change(_j, n, name, old_copy);
         if (_j) ns_ce_attr_changed(_j, n, name, old_copy, val);
         if (g_ascii_strcasecmp(name, "open") == 0 && !old_copy &&
             ns_node_is_element_named(n, "details"))
