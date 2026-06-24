@@ -12360,8 +12360,11 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
     }
 }
 
+static gboolean ns_node_is_submit_trigger(const ns_node *el);
+
 static void
-ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd, const ns_node *form)
+ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd,
+                                const ns_node *form, const ns_node *submitter)
 {
     JSValue controls = JS_NewArray(ctx);
     uint32_t i = 0;
@@ -12375,13 +12378,37 @@ ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd, const ns_node *
         if (!el) { JS_FreeValue(ctx, elv); continue; }
         if (ns_element_effectively_disabled(el)) { JS_FreeValue(ctx, elv); continue; }
         const char *name = ns_element_get_attr(el, "name");
-        if (!name || !*name) { JS_FreeValue(ctx, elv); continue; }
         const char *type = ns_element_get_attr(el, "type");
-        if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
-                     g_ascii_strcasecmp(type, "button") == 0 ||
-                     g_ascii_strcasecmp(type, "reset") == 0 ||
-                     g_ascii_strcasecmp(type, "image") == 0 ||
-                     g_ascii_strcasecmp(type, "file") == 0)) {
+        gboolean is_button =
+            g_ascii_strcasecmp(el->name, "button") == 0 ||
+            (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
+                      g_ascii_strcasecmp(type, "button") == 0 ||
+                      g_ascii_strcasecmp(type, "reset") == 0 ||
+                      g_ascii_strcasecmp(type, "image") == 0));
+        if (is_button) {
+            if (el == submitter) {
+                gboolean is_image = g_ascii_strcasecmp(el->name, "input") == 0 &&
+                    type && g_ascii_strcasecmp(type, "image") == 0;
+                if (is_image) {
+                    if (name && *name) {
+                        char *nx = g_strconcat(name, ".x", NULL);
+                        char *ny = g_strconcat(name, ".y", NULL);
+                        ns_form_data_append_pair(ctx, fd, nx, "0");
+                        ns_form_data_append_pair(ctx, fd, ny, "0");
+                        g_free(nx); g_free(ny);
+                    } else {
+                        ns_form_data_append_pair(ctx, fd, "x", "0");
+                        ns_form_data_append_pair(ctx, fd, "y", "0");
+                    }
+                } else if (name && *name) {
+                    const char *v = ns_element_get_attr(el, "value");
+                    ns_form_data_append_pair(ctx, fd, name, v ? v : "");
+                }
+            }
+            JS_FreeValue(ctx, elv); continue;
+        }
+        if (!name || !*name) { JS_FreeValue(ctx, elv); continue; }
+        if (type && g_ascii_strcasecmp(type, "file") == 0) {
             JS_FreeValue(ctx, elv); continue;
         }
         if (type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
@@ -12431,7 +12458,24 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, obj);
             return JS_ThrowTypeError(ctx, "FormData constructor argument must be a form");
         }
-        ns_form_data_populate_from_form(ctx, obj, form);
+        const ns_node *submitter = NULL;
+        if (argc >= 2 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+            submitter = ns_unwrap_element(argv[1]);
+            if (!ns_node_is_submit_trigger(submitter)) {
+                JS_FreeValue(ctx, obj);
+                return JS_ThrowTypeError(ctx,
+                    "FormData: the submitter must be a submit button");
+            }
+            ns_js *jx = js_from_ctx(ctx);
+            const ns_node *fdoc = ns_node_root(form);
+            if (ns_form_owner(submitter,
+                              fdoc ? fdoc : (jx ? jx->current_doc : NULL)) != form) {
+                JS_FreeValue(ctx, obj);
+                return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+                    "FormData: the submitter is not owned by this form");
+            }
+        }
+        ns_form_data_populate_from_form(ctx, obj, form, submitter);
     }
     ns_js *jsx = js_from_ctx(ctx);
     if (jsx && !jsx->form_data_helper_set) {
@@ -27051,8 +27095,6 @@ ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value)
     if (was_open) ns_js_dispatch_event(js, dialog, "close", NULL);
     js->mutated = TRUE;
 }
-
-static gboolean ns_node_is_submit_trigger(const ns_node *el);
 
 static gboolean
 ns_node_is_disabled_form_control(const ns_node *el)
