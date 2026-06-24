@@ -340,11 +340,15 @@ tmp_instant_from(JSContext *ctx, JSValueConst this_val,
     if (JS_IsString(argv[0])) {
         const char *s = JS_ToCString(ctx, argv[0]);
         int y, mo, d, h, mi, se, ms, us, ns, off; gboolean ho, ht;
-        if (s && tmp_parse_datetime(s, &y, &mo, &d, &h, &mi, &se, &ms, &us, &ns, &off, &ho, &ht)) {
-            t->epoch_sec = tmp_epoch_of(y, mo, d, h, mi, se) - off * 60;
-            t->nanos = ms * 1000000 + us * 1000 + ns;
-        }
+        gboolean ok = s && tmp_parse_datetime(s, &y, &mo, &d, &h, &mi, &se,
+                                              &ms, &us, &ns, &off, &ho, &ht);
         if (s) JS_FreeCString(ctx, s);
+        if (!ok) {
+            JS_FreeValue(ctx, out);
+            return JS_ThrowRangeError(ctx, "invalid Instant string");
+        }
+        t->epoch_sec = tmp_epoch_of(y, mo, d, h, mi, se) - off * 60;
+        t->nanos = ms * 1000000 + us * 1000 + ns;
     } else {
         ns_temporal *src = JS_GetOpaque(argv[0], ns_temporal_class_id);
         if (src && (src->kind == TK_INSTANT || src->kind == TK_ZONEDDATETIME)) {
@@ -484,8 +488,12 @@ tmp_date_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     if (argc >= 1 && JS_IsString(argv[0])) {
         const char *s = JS_ToCString(ctx, argv[0]);
         int y = 1970, mo = 1, d = 1;
-        if (s) ns_dt_rd_date(s, &y, &mo, &d);
+        gboolean ok = s && ns_dt_rd_date(s, &y, &mo, &d) != NULL;
         if (s) JS_FreeCString(ctx, s);
+        if (!ok) {
+            JS_FreeValue(ctx, out);
+            return JS_ThrowRangeError(ctx, "invalid PlainDate string");
+        }
         tmp_set_date_fields(t, y, mo, d);
     } else if (argc >= 1 && JS_IsObject(argv[0])) {
         ns_temporal *src = JS_GetOpaque(argv[0], ns_temporal_class_id);
@@ -710,15 +718,15 @@ tmp_time_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     JSValue out; ns_temporal *t = tmp_alloc(ctx, this_val, TK_PLAINTIME, &out);
     if (argc >= 1 && JS_IsString(argv[0])) {
         const char *s = JS_ToCString(ctx, argv[0]);
-        if (s) {
-            int ms;
-            const char *p = ns_dt_rd_time(s, &ms);
-            if (p) {
-                t->hour = ms / 3600000; t->minute = (ms / 60000) % 60;
-                t->second = (ms / 1000) % 60; t->ms = ms % 1000;
-            }
-            JS_FreeCString(ctx, s);
+        int ms = 0;
+        gboolean ok = s && ns_dt_rd_time(s, &ms) != NULL;
+        if (s) JS_FreeCString(ctx, s);
+        if (!ok) {
+            JS_FreeValue(ctx, out);
+            return JS_ThrowRangeError(ctx, "invalid PlainTime string");
         }
+        t->hour = ms / 3600000; t->minute = (ms / 60000) % 60;
+        t->second = (ms / 1000) % 60; t->ms = ms % 1000;
     } else if (argc >= 1 && JS_IsObject(argv[0])) {
         ns_temporal *src = JS_GetOpaque(argv[0], ns_temporal_class_id);
         if (src && (src->kind == TK_PLAINTIME || src->kind == TK_PLAINDATETIME)) {
@@ -790,11 +798,15 @@ tmp_datetime_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     if (argc >= 1 && JS_IsString(argv[0])) {
         const char *s = JS_ToCString(ctx, argv[0]);
         int y, mo, d, h, mi, se, ms, us, ns, off; gboolean ho, ht;
-        if (s && tmp_parse_datetime(s, &y, &mo, &d, &h, &mi, &se, &ms, &us, &ns, &off, &ho, &ht)) {
-            tmp_set_date_fields(t, y, mo, d);
-            t->hour = h; t->minute = mi; t->second = se; t->ms = ms; t->us = us; t->ns = ns;
-        }
+        gboolean ok = s && tmp_parse_datetime(s, &y, &mo, &d, &h, &mi, &se,
+                                              &ms, &us, &ns, &off, &ho, &ht);
         if (s) JS_FreeCString(ctx, s);
+        if (!ok) {
+            JS_FreeValue(ctx, out);
+            return JS_ThrowRangeError(ctx, "invalid PlainDateTime string");
+        }
+        tmp_set_date_fields(t, y, mo, d);
+        t->hour = h; t->minute = mi; t->second = se; t->ms = ms; t->us = us; t->ns = ns;
     } else if (argc >= 1 && JS_IsObject(argv[0])) {
         tmp_set_date_fields(t,
             tmp_int_prop(ctx, argv[0], "year", 1970),
