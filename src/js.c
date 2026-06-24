@@ -17957,6 +17957,11 @@ ns_ui_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     if (argc >= 2 && JS_IsObject(argv[1])) {
         view = JS_GetPropertyStr(ctx, argv[1], "view");
         if (JS_IsUndefined(view)) { JS_FreeValue(ctx, view); view = JS_NULL; }
+        if (!JS_IsNull(view) && !JS_IsObject(view)) {
+            JS_FreeValue(ctx, view);
+            JS_FreeValue(ctx, ev);
+            return JS_ThrowTypeError(ctx, "UIEvent: view must be a Window or null");
+        }
         detail = ns_js_get_int32_prop(ctx, argv[1], "detail", 0);
     }
     JS_SetPropertyStr(ctx, ev, "view", view);
@@ -18113,7 +18118,7 @@ ns_event_apply_modifier_init(JSContext *ctx, JSValueConst ev, JSValueConst init)
 static JSValue
 ns_mouse_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    JSValue ev = ns_ui_event_ctor(ctx, this_val, argc, argv);
     if (JS_IsException(ev)) return ev;
     int32_t cx = 0, cy = 0, btn = 0, buttons = 0, detail = 0;
     JSValue related = JS_NULL;
@@ -18188,10 +18193,10 @@ static JSValue
 ns_keyboard_event_ctor(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
-    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    JSValue ev = ns_ui_event_ctor(ctx, this_val, argc, argv);
     if (JS_IsException(ev)) return ev;
     const char *key = NULL, *code = NULL;
-    int32_t key_code = 0, which = 0, location = 0;
+    int32_t key_code = 0, which = 0, location = 0, char_code = 0;
     gboolean repeat = FALSE, is_composing = FALSE;
     JSValue key_v = JS_UNDEFINED, code_v = JS_UNDEFINED;
     if (argc >= 2 && JS_IsObject(argv[1])) {
@@ -18204,6 +18209,7 @@ ns_keyboard_event_ctor(JSContext *ctx, JSValueConst this_val,
         key_code = ns_js_get_int32_prop(ctx, argv[1], "keyCode",  0);
         which    = ns_js_get_int32_prop(ctx, argv[1], "which",    key_code);
         location = ns_js_get_int32_prop(ctx, argv[1], "location", 0);
+        char_code = ns_js_get_int32_prop(ctx, argv[1], "charCode", 0);
         repeat       = ns_js_get_bool_prop(ctx, argv[1], "repeat",      NULL);
         is_composing = ns_js_get_bool_prop(ctx, argv[1], "isComposing", NULL);
     }
@@ -18211,7 +18217,7 @@ ns_keyboard_event_ctor(JSContext *ctx, JSValueConst this_val,
     JS_SetPropertyStr(ctx, ev, "code",     JS_NewString(ctx, code ? code : ""));
     JS_SetPropertyStr(ctx, ev, "keyCode",  JS_NewInt32(ctx, key_code));
     JS_SetPropertyStr(ctx, ev, "which",    JS_NewInt32(ctx, which));
-    JS_SetPropertyStr(ctx, ev, "charCode", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, ev, "charCode", JS_NewInt32(ctx, char_code));
     JS_SetPropertyStr(ctx, ev, "location", JS_NewInt32(ctx, location));
     JS_SetPropertyStr(ctx, ev, "repeat",       repeat       ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "isComposing",  is_composing ? JS_TRUE : JS_FALSE);
@@ -18221,6 +18227,58 @@ ns_keyboard_event_ctor(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, key_v);
     JS_FreeValue(ctx, code_v);
     return ev;
+}
+
+static JSValue
+ns_focus_event_ctor(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_ui_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    JSValue related = JS_NULL;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        related = JS_GetPropertyStr(ctx, argv[1], "relatedTarget");
+        if (JS_IsUndefined(related)) { JS_FreeValue(ctx, related); related = JS_NULL; }
+    }
+    JS_SetPropertyStr(ctx, ev, "relatedTarget", related);
+    return ev;
+}
+
+static JSValue
+ns_composition_event_ctor(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_ui_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    const char *data = NULL;
+    JSValue data_v = JS_UNDEFINED;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        data_v = JS_GetPropertyStr(ctx, argv[1], "data");
+        if (!JS_IsUndefined(data_v) && !JS_IsNull(data_v))
+            data = JS_ToCString(ctx, data_v);
+    }
+    JS_SetPropertyStr(ctx, ev, "data", JS_NewString(ctx, data ? data : ""));
+    if (data) JS_FreeCString(ctx, data);
+    JS_FreeValue(ctx, data_v);
+    return ev;
+}
+
+static void
+ns_event_link_proto(JSContext *ctx, JSValueConst global,
+                    const char *child, const char *parent)
+{
+    JSValue c = JS_GetPropertyStr(ctx, global, child);
+    JSValue p = JS_GetPropertyStr(ctx, global, parent);
+    if (JS_IsObject(c) && JS_IsObject(p)) {
+        JSValue cp = JS_GetPropertyStr(ctx, c, "prototype");
+        JSValue pp = JS_GetPropertyStr(ctx, p, "prototype");
+        if (JS_IsObject(cp) && JS_IsObject(pp))
+            JS_SetPrototype(ctx, cp, pp);
+        JS_FreeValue(ctx, cp);
+        JS_FreeValue(ctx, pp);
+    }
+    JS_FreeValue(ctx, c);
+    JS_FreeValue(ctx, p);
 }
 
 static void
@@ -33010,10 +33068,31 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     };
     for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "FocusEvent",       ns_focus_event_ctor,       2);
+    ns_bind_ctor(ctx, global, "CompositionEvent",  ns_composition_event_ctor, 2);
+    ns_bind_ctor(ctx, global, "TextEvent",         ns_ui_event_ctor,          2);
+    ns_bind_ctor(ctx, global, "InputEvent",        ns_ui_event_ctor,          2);
     ns_bind_ctor(ctx, global, "MessageEvent", ns_message_event_ctor, 2);
     ns_bind_ctor(ctx, global, "ExtendableMessageEvent", ns_message_event_ctor, 2);
     ns_bind_ctor(ctx, global, "StorageEvent", ns_storage_event_ctor, 2);
     ns_install_drag_event_support(ctx);
+    for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
+        ns_event_link_proto(ctx, global, event_subclasses[i], "Event");
+    ns_event_link_proto(ctx, global, "CustomEvent",      "Event");
+    ns_event_link_proto(ctx, global, "MessageEvent",     "Event");
+    ns_event_link_proto(ctx, global, "StorageEvent",     "Event");
+    ns_event_link_proto(ctx, global, "SubmitEvent",      "Event");
+    ns_event_link_proto(ctx, global, "UIEvent",          "Event");
+    ns_event_link_proto(ctx, global, "MouseEvent",       "UIEvent");
+    ns_event_link_proto(ctx, global, "PointerEvent",     "MouseEvent");
+    ns_event_link_proto(ctx, global, "WheelEvent",       "MouseEvent");
+    ns_event_link_proto(ctx, global, "DragEvent",        "MouseEvent");
+    ns_event_link_proto(ctx, global, "KeyboardEvent",    "UIEvent");
+    ns_event_link_proto(ctx, global, "FocusEvent",       "UIEvent");
+    ns_event_link_proto(ctx, global, "CompositionEvent", "UIEvent");
+    ns_event_link_proto(ctx, global, "TextEvent",        "UIEvent");
+    ns_event_link_proto(ctx, global, "InputEvent",       "UIEvent");
+    ns_event_link_proto(ctx, global, "TouchEvent",       "UIEvent");
 
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
