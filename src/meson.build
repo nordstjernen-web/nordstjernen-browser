@@ -38,7 +38,7 @@ wpt_hook_h = custom_target(
 nordstjernen_engine_sources = files(
   'ai.c',
   'anim.c',
-  'bcache.c',
+  'bytecode_cache.c',
   'bookmarks.c',
   'cache.c',
   'config.c',

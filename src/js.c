@@ -19,7 +19,7 @@
 #include <quickjs.h>
 
 #include "anim.h"
-#include "bcache.h"
+#include "bytecode_cache.h"
 #include "config.h"
 #include "css.h"
 #include "datetime.h"
@@ -35998,7 +35998,7 @@ ns_js_eval_bytecode_cached(ns_js *js, const char *src, gsize len,
     if (out_compiled) *out_compiled = FALSE;
     if (len < 1024) return FALSE;
     gsize bc_len = 0;
-    guint8 *bc = ns_bcache_get(src, len, &bc_len);
+    guint8 *bc = ns_bytecode_cache_get(src, len, &bc_len);
     if (!bc) return FALSE;
     JSValue fn = JS_ReadObject(js->ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
     g_free(bc);
@@ -36013,7 +36013,7 @@ ns_js_eval_bytecode_cached(ns_js *js, const char *src, gsize len,
 }
 
 static void
-ns_js_bcache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len)
+ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len)
 {
     if (len < 1024) return;
     size_t bc_size = 0;
@@ -36023,7 +36023,7 @@ ns_js_bcache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len)
         if (bc) js_free(js->ctx, bc);
         return;
     }
-    ns_bcache_put(src, len, bc, bc_size);
+    ns_bytecode_cache_put(src, len, bc, bc_size);
     js_free(js->ctx, bc);
 }
 
@@ -36088,7 +36088,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         JSValue fn = JS_Eval(js->ctx, copy, len, origin,
                              JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
         if (!JS_IsException(fn)) {
-            ns_js_bcache_store(js, fn, copy, len);
+            ns_js_bytecode_cache_store(js, fn, copy, len);
             v = JS_EvalFunction(js->ctx, fn);
         } else {
             v = fn;
@@ -36348,7 +36348,7 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
 
     if (len >= 1024) {
         gsize bc_len = 0;
-        guint8 *bc = ns_bcache_get(key, key_len, &bc_len);
+        guint8 *bc = ns_bytecode_cache_get(key, key_len, &bc_len);
         if (bc) {
             JSValue m = JS_ReadObject(ctx, bc, bc_len, JS_READ_OBJ_BYTECODE);
             g_free(bc);
@@ -36369,7 +36369,7 @@ ns_js_compile_module_cached(JSContext *ctx, const char *src, gsize len,
         uint8_t *bc = JS_WriteObject(ctx, &bc_size, func_val,
                                      JS_WRITE_OBJ_BYTECODE);
         if (bc) {
-            if (bc_size > 0) ns_bcache_put(key, key_len, bc, bc_size);
+            if (bc_size > 0) ns_bytecode_cache_put(key, key_len, bc, bc_size);
             js_free(ctx, bc);
         }
     }

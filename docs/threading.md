@@ -180,7 +180,7 @@ Shared state and its protection:
   connection sharing across easy handles, with per-data-class locks
   installed via `CURLOPT_SHARE`.
 - **Disk + memory response cache** (`cache.c`, `g_cache_mutex`;
-  `bcache.c`, `g_lock`) — fully locked; safe to call from pool threads.
+  `bytecode_cache.c`, `g_lock`) — fully locked; safe to call from pool threads.
 - **Config-derived globals** (`g_accept_encoding`, `g_ca_bundle`,
   `g_proxy_override`, `g_has_http3`, `g_allow_file_urls`) — written
   once at init / argument-parsing time, before any fetch is issued, and

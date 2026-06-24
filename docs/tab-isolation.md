@@ -46,11 +46,11 @@ where it is currently shared:
 
 | Subsystem | Global state | Lock / owner |
 | --- | --- | --- |
-| Disk byte cache | `bcache.c` `g_mem` | `g_lock` |
+| Disk byte cache | `bytecode_cache.c` `g_mem` | `g_lock` |
 | HTTP cache | `cache.c` SQLite handle | `g_cache_mutex` |
 | History | `history.c` SQLite handle | `g_history_mutex` |
 | Cookies / HSTS / curl share | `net.c` globals | `g_hsts_lock`, curl share locks |
-| Bytecode cache | `bcache.c` `g_mem` | `g_lock` |
+| Bytecode cache | `bytecode_cache.c` `g_mem` | `g_lock` |
 | Font cache | `font.c` entries | main thread / Pango |
 | Config | `config.c` `g_cfg` | browser process |
 

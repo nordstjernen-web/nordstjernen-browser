@@ -13,7 +13,7 @@
 
 #include "ai.h"
 #include "anim.h"
-#include "bcache.h"
+#include "bytecode_cache.h"
 #include "cache.h"
 #include "history.h"
 #include "config.h"
@@ -454,7 +454,7 @@ ns_browser_init(void)
     ns_net_init();
     ns_net_set_allow_file_urls(TRUE);
     ns_cache_init();
-    ns_bcache_init();
+    ns_bytecode_cache_init();
     ns_history_init();
     ns_font_init();
     ns_spell_init();
@@ -474,7 +474,7 @@ ns_browser_shutdown(void)
 {
     ns_ai_shutdown();
     ns_font_shutdown();
-    ns_bcache_shutdown();
+    ns_bytecode_cache_shutdown();
     ns_history_shutdown();
     ns_cache_shutdown();
     ns_net_shutdown();

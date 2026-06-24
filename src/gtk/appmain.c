@@ -22,7 +22,7 @@
 #include <fontconfig/fontconfig.h>
 #endif
 
-#include "bcache.h"
+#include "bytecode_cache.h"
 #include "cache.h"
 #include "config.h"
 #include "debuglog.h"
@@ -398,7 +398,7 @@ ns_run_headless(ns_headless_opts *hopts)
     if (hopts->debug_levels & (1u << NS_DLOG_NET))
         ns_net_set_log_fetches(TRUE);
     ns_cache_init();
-    ns_bcache_init();
+    ns_bytecode_cache_init();
     ns_history_init();
     ns_font_init();
     ns_spell_init();
@@ -424,7 +424,7 @@ ns_run_headless(ns_headless_opts *hopts)
                    fetches, bytes, span_ms, sum_ms, relayouts, layout_ms);
     }
     g_free(file_url);
-    ns_bcache_shutdown();
+    ns_bytecode_cache_shutdown();
     ns_history_shutdown();
     ns_cache_shutdown();
     ns_net_shutdown();
