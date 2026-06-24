@@ -197,6 +197,8 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
 
     if (g_ascii_strcasecmp(src, "https:") == 0 ||
         g_ascii_strcasecmp(src, "http:")  == 0 ||
+        g_ascii_strcasecmp(src, "wss:")   == 0 ||
+        g_ascii_strcasecmp(src, "ws:")    == 0 ||
         g_ascii_strcasecmp(src, "data:")  == 0 ||
         g_ascii_strcasecmp(src, "blob:")  == 0)
         return url_scheme_matches(resource_url, src);
