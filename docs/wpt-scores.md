@@ -166,6 +166,7 @@ interval. Treat the trend, not the point value, as the signal.
 | 2026-06-12 | 9526465 | 3be6ba111 | 250 of 29259 | ~44,000 (22,000 – 72,000) | ~0.7% |
 | 2026-06-13 | fcfeaf1 | d8a8414e5 | 250 of 29259 | ~255,256 (21,184 – 706,429) | ~4.3% |
 | 2026-06-19 | 85e29df | 1df6b93 | 369 of 29346 (area-stratified) | ~292,700 (50,800 – 733,000) | ~4.9% |
+| 2026-06-24 | db8b09e | f6fd39b13 | 200 of 29414 | ~76,182 (18,678 – 177,955) | ~1.3% |
 
 The 2026-06-19 row uses an **area-stratified** sample (proportional
 allocation across the 20 largest top-level areas with a floor of 8
