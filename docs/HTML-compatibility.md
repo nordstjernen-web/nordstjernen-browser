@@ -18,6 +18,9 @@ references them.
 
 Snapshot: **1.0.10**, 2026-06-17 (rev 27).
 
+§1–§16 row tally (counted across the section tables below): **139 ✅
+implemented · 29 🟡 partial · 3 ❌ absent · 7 🚫 absent by design**.
+
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
 [Design constraints](#design-constraints-the-spec-we-deliberately-do-not-implement)).

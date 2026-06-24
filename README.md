@@ -7,11 +7,11 @@ Nordstjernen is built in Norway.
 
 Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , Mac and Linux, Android, Java, FreeBSD and NetBSD.  
 
-**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 136 spec rows fully implemented, 27 partial, 4 absent as of June 2026. 
+**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 139 spec rows fully implemented, 29 partial, 3 absent as of June 2026. 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 131,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
+**Minimalism:** The whole engine is about 134,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -25,7 +25,7 @@ Nordstjernen is measured against the **spec text**, section by section,
 not against any other browser. The section-by-section walk-through of
 the in-scope WHATWG HTML standard (§1–§16) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) currently
-records **136 spec rows fully implemented, 27 partial, and 4 absent**
+records **139 spec rows fully implemented, 29 partial, and 3 absent**
 (June 2026), besides a handful that are non-goals by design, such as
 in-process media codecs. Highlights:
 
@@ -54,8 +54,8 @@ The full section-by-section walk-through lives in
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
-- **Networking** over HTTP/2 with libcurl — HSTS, CSP, partitioned
-  cookies.
+- **Networking** over HTTP/2 with libcurl — HSTS, CSP,
+  subresource-integrity (SRI) checks, partitioned cookies.
 - **Media** — images, optional inline PDF; `<video>` plays **inline** for
   MPEG-1 (decoded in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg),
   MIT) and, when FFmpeg's libav is present at build time, **WebM** (VP9/VP8 +

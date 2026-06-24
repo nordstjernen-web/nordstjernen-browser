@@ -67,7 +67,8 @@ Both the GTK reference frontend and the experimental Qt 6 frontend
 (`src/qt/`, off by default) are tabbed, **process-per-tab** browsers:
 each tab drives its own sandboxed renderer process over the engine and
 shows full-fidelity output. The shells are thin display/input clients —
-there is no in-process renderer in either toolkit anymore. The
+neither carries a bespoke in-process renderer anymore (the optional
+`--single-process` mode runs the same renderer on a thread). The
 `about:start` new-tab page hosts a local AI assistant (`src/ai.c`,
 llama.cpp over a pinned Meson subproject): chat, Wikipedia/DuckDuckGo
 tools, and digest-pinned model downloads, all on-device with no network
@@ -95,9 +96,11 @@ toolkit-agnostic:
   the DevTools console, save/export, media handoff, an app menu, settings,
   and bookmarks. The former in-process engine renderer has been removed.
 - **`src/qt/` — Qt 6 frontend (experimental, off by default).** A thin
-  C++ shell that links only Qt + `rproc_http.c` (no engine, no GTK), built with
-  `-Dqt=enabled`. It is a tabbed browser driving one sandboxed renderer
-  process per tab, so every tab shows full engine output; it matches the
+  C++ shell built with `-Dqt=enabled`: it links the engine statically
+  (`libnordstjernen_static`, so `--single-process` can serve the renderer
+  protocol on an in-process thread) plus the `rproc_http.c`/`renderer_serve.c`
+  IPC, but pulls in no GTK toolkit. By default it drives one sandboxed
+  renderer process per tab, so every tab shows full engine output; it matches the
   GTK shell on core browsing chrome (navigation, tabs, zoom, selection,
   hover, find, context menu) with the rest in progress. Qt is a C++-only
   toolkit, so the shell is C++; the logic underneath stays C in `src/`.
@@ -122,10 +125,12 @@ console/eval). This is the payoff that makes the design cohere: both GTK and
 Qt are thin display-plus-input shells showing the *same* engine output (so
 fidelity is identical and Qt needs no separate renderer), and isolation is
 real — `nordstjernen-renderer` applies the same Landlock + seccomp
-confinement as the engine after the `HELLO` handshake and before opening any
-page, so a renderer crash is a per-tab failure and untrusted content always
-runs under a loaded syscall filter. There is no in-process renderer in either
-toolkit. The thin shells parse no untrusted bytes but must `fork`/`execv`
+confinement as the engine at startup (in `ns_browser_init`, before any page
+is opened), so a renderer crash is a per-tab failure and untrusted content
+always runs under a loaded syscall filter. Neither toolkit carries a bespoke
+in-process renderer any more; the optional `--single-process` mode serves the
+same renderer over a thread instead of a child process. The thin shells parse
+no untrusted bytes but must `fork`/`execv`
 renderers and create POSIX shm, so they run under a widened Landlock with
 seccomp skipped. The mechanics live in `docs/tab-isolation.md`.
 
@@ -212,8 +217,8 @@ committed, listed to keep the long view in one place:
 
 **Done:** process-per-tab renderers behind the IPC +
 shared-memory-framebuffer boundary (both GTK and Qt are thin display
-clients now; in-process renderers removed — see *Architecture &
-frontends* and `docs/tab-isolation.md`),
+clients now; the legacy bespoke in-process renderer removed — see
+*Architecture & frontends* and `docs/tab-isolation.md`),
 10 embeddable `libnordstjernen` (built and header-installed
 from meson, see `docs/Embedding.md`; Java JNI binding and Swing app in
 `java/`, see `java/README.md`),
