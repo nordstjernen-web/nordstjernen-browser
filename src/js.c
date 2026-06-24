@@ -13607,6 +13607,18 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     }
     ns_def_ro(ctx, obj, "url", JS_NewString(ctx, final_url));
     g_autofree char *norm_method = ns_fetch_normalize_method(method);
+    if (norm_method && (!strcmp(norm_method, "GET") || !strcmp(norm_method, "HEAD")) &&
+        !JS_IsNull(body_v) && !JS_IsUndefined(body_v)) {
+        if (url_raw) JS_FreeCString(ctx, url_raw);
+        if (method)  JS_FreeCString(ctx, method);
+        JS_FreeValue(ctx, url_v);
+        JS_FreeValue(ctx, method_v);
+        JS_FreeValue(ctx, headers_init);
+        JS_FreeValue(ctx, body_v);
+        JS_FreeValue(ctx, obj);
+        return JS_ThrowTypeError(ctx,
+            "Request with GET/HEAD method cannot have a body");
+    }
     ns_def_ro(ctx, obj, "method",
         JS_NewString(ctx, norm_method ? norm_method : "GET"));
     ns_def_ro(ctx, obj, "headers",
