@@ -4477,8 +4477,8 @@ ns_element_set_itemValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || !n->name) return JS_UNDEFINED;
     if (microdata_has_itemscope(n))
-        return JS_ThrowTypeError(ctx,
-            "InvalidAccessError: cannot set itemValue on an item");
+        return ns_throw_dom_exception(ctx, "InvalidAccessError", 15,
+            "cannot set itemValue on an item");
     const char *attr = microdata_value_attr(n->name);
     if (!attr && strcmp(n->name, "time") == 0 &&
         ns_element_get_attr(n, "datetime"))
@@ -12861,17 +12861,8 @@ ns_filereader_complete(gpointer ud)
     JSContext *ctx = js->ctx;
     JSValue self = fr->self;
     JS_SetPropertyStr(ctx, self, "readyState", JS_NewInt32(ctx, 2));
-    JSValue onload = JS_GetPropertyStr(ctx, self, "onload");
-    if (JS_IsFunction(ctx, onload)) {
-        JSValue evt = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, evt, "type", JS_NewString(ctx, "load"));
-        JS_SetPropertyStr(ctx, evt, "target", JS_DupValue(ctx, self));
-        JSValueConst args[1] = { evt };
-        JSValue r = JS_Call(ctx, onload, self, 1, args);
-        JS_FreeValue(ctx, r);
-        JS_FreeValue(ctx, evt);
-    }
-    JS_FreeValue(ctx, onload);
+    ns_target_fire_event(ctx, self, "load");
+    ns_target_fire_event(ctx, self, "loadend");
     JS_FreeValue(ctx, self);
     if (js->filereader_idles)
         g_ptr_array_remove_fast(js->filereader_idles, fr);
@@ -16918,16 +16909,7 @@ ns_io_compute_entry(JSContext *ctx, ns_io_observer *o,
 static JSValue
 ns_io_make_rect(JSContext *ctx, double x, double y, double w, double h)
 {
-    JSValue r = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, r, "x",      JS_NewFloat64(ctx, x));
-    JS_SetPropertyStr(ctx, r, "y",      JS_NewFloat64(ctx, y));
-    JS_SetPropertyStr(ctx, r, "width",  JS_NewFloat64(ctx, w));
-    JS_SetPropertyStr(ctx, r, "height", JS_NewFloat64(ctx, h));
-    JS_SetPropertyStr(ctx, r, "top",    JS_NewFloat64(ctx, y));
-    JS_SetPropertyStr(ctx, r, "right",  JS_NewFloat64(ctx, x + w));
-    JS_SetPropertyStr(ctx, r, "bottom", JS_NewFloat64(ctx, y + h));
-    JS_SetPropertyStr(ctx, r, "left",   JS_NewFloat64(ctx, x));
-    return r;
+    return ns_make_dom_rect(ctx, x, y, w, h);
 }
 
 static JSValue
@@ -23633,8 +23615,8 @@ ns_element_set_value_as_number(JSContext *ctx, JSValueConst this_val, JSValueCon
     if (!n) return JS_UNDEFINED;
     ns_input_kind kind = ns_input_kind_of(n);
     if (kind == NDIN_OTHER)
-        return JS_ThrowTypeError(ctx,
-            "InvalidStateError: valueAsNumber is not applicable to this input type.");
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "valueAsNumber is not applicable to this input type.");
     double d;
     if (JS_ToFloat64(ctx, &d, val) < 0) return JS_EXCEPTION;
     if (isinf(d))
@@ -23682,8 +23664,8 @@ ns_element_set_value_as_date(JSContext *ctx, JSValueConst this_val, JSValueConst
     ns_input_kind kind = ns_input_kind_of(n);
     if (kind != NDIN_DATE && kind != NDIN_MONTH &&
         kind != NDIN_WEEK && kind != NDIN_TIME)
-        return JS_ThrowTypeError(ctx,
-            "InvalidStateError: valueAsDate is not applicable to this input type.");
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "valueAsDate is not applicable to this input type.");
     if (JS_IsNull(val)) {
         ns_js_set_input_used_value(js_from_ctx(ctx), n, "");
         return JS_UNDEFINED;
@@ -27091,7 +27073,8 @@ ns_element_form_requestSubmit(JSContext *ctx, JSValueConst this_val,
         if (!ns_node_is_submit_trigger(submitter))
             return JS_ThrowTypeError(ctx, "requestSubmit submitter must be a submit button");
         if (ns_js_form_owner_for(submitter, js) != form)
-            return JS_ThrowTypeError(ctx, "NotFoundError: submitter is not owned by this form");
+            return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+                "submitter is not owned by this form");
     }
     return ns_js_request_submit_form(ctx, form, submitter);
 }
