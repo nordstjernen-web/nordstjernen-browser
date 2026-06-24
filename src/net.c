@@ -16,6 +16,7 @@
 #include "image.h"
 #include "security.h"
 #include "about_logo_gif.h"
+#include "about_splash_png.h"
 
 #include <curl/curl.h>
 #include <errno.h>
@@ -2056,6 +2057,21 @@ about_logo_markup(void)
 }
 
 static char *
+about_splash_markup(void)
+{
+    char *uri = g_strconcat("data:image/png;base64,", about_splash_png_b64, NULL);
+    char *markup = g_strdup_printf(
+        "<img class=\"splash\" src=\"%s\" "
+        "alt=\"Nordstjernen " NS_VERSION " splash\" "
+        "style=\"display:block;width:100%%;max-width:100%%;height:auto;"
+        "border-radius:14px;margin:2px 0 22px;"
+        "box-shadow:0 6px 24px rgba(16,22,40,.18);\">",
+        uri);
+    g_free(uri);
+    return markup;
+}
+
+static char *
 about_substitute(const char *template_text,
                  const char *placeholder, const char *value)
 {
@@ -3355,6 +3371,7 @@ static const char k_about_start_template[] =
     "</style></head>"
     "<body>"
     "<div class=\"wrap\">"
+    "__ND_SPLASH__"
     "<div class=\"head\">"
     "__ND_LOGO_MARK__"
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
@@ -3622,6 +3639,7 @@ static const char k_about_start_template[] =
     " .links a { display:inline-block; margin:0 5px 4px; } }\n"
     "</style></head>"
     "<body><main class=\"wrap\">"
+    "__ND_SPLASH__"
     "<div class=\"head\">"
     "__ND_LOGO_MARK__"
     "<div class=\"hgroup\"><div class=\"title\">Nordstjernen " NS_VERSION
@@ -3749,9 +3767,14 @@ synthesize_about_response(const char *url, const char *top_url,
                                            logo_markup);
         g_free(logo_markup);
         g_free(with_name);
-        char *body = about_substitute(with_logo, "__ND_TAGLINE__",
-                                      about_start_tagline());
+        char *splash_markup = about_splash_markup();
+        char *with_splash = about_substitute(with_logo, "__ND_SPLASH__",
+                                             splash_markup);
+        g_free(splash_markup);
         g_free(with_logo);
+        char *body = about_substitute(with_splash, "__ND_TAGLINE__",
+                                      about_start_tagline());
+        g_free(with_splash);
         g_byte_array_append(resp->body, (const guint8 *)body,
                             (guint)strlen(body));
         g_free(body);
