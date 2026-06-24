@@ -192,6 +192,7 @@ static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_element_getElementsByTagNameNS(JSContext *ctx, JSValueConst this_val,
                                                  int argc, JSValueConst *argv);
 static gboolean ns_valid_element_local_name(const char *s);
+static gboolean ns_valid_attr_name(const char *s);
 static JSValue ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val);
 static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
@@ -20730,7 +20731,7 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     if (!n) return JS_FALSE;
     const char *raw_name = JS_ToCString(ctx, argv[0]);
     if (!raw_name) return JS_FALSE;
-    if (!ns_valid_element_local_name(raw_name)) {
+    if (!ns_valid_attr_name(raw_name)) {
         JS_FreeCString(ctx, raw_name);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
                                       "toggleAttribute: invalid attribute name");
@@ -20900,7 +20901,7 @@ ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValue
     if (argc < 2) return JS_UNDEFINED;
     {
         const char *check = JS_ToCString(ctx, argv[0]);
-        gboolean invalid = !check || !ns_valid_element_local_name(check);
+        gboolean invalid = !check || !ns_valid_attr_name(check);
         if (check) JS_FreeCString(ctx, check);
         if (invalid)
             return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
@@ -33328,6 +33329,19 @@ ns_valid_element_local_name(const char *s)
         guchar c = (guchar)*p;
         if (!g_ascii_isalnum(c) && c != '-' && c != '.' && c != ':' &&
             c != '_' && c < 0x80)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_valid_attr_name(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    for (const char *p = s; *p; p++) {
+        guchar c = (guchar)*p;
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\f' ||
+            c == '\r' || c == '/' || c == '>')
             return FALSE;
     }
     return TRUE;
