@@ -1145,10 +1145,12 @@ ns_style_node(JSValueConst this_val)
 static char *
 camel_to_kebab(const char *s)
 {
+    if (!strcmp(s, "cssFloat")) return g_strdup("float");
+    if (s[0] == '-' && s[1] == '-') return g_strdup(s);
     GString *out = g_string_new(NULL);
     for (const char *p = s; *p; p++) {
         if (*p >= 'A' && *p <= 'Z') {
-            if (p != s) g_string_append_c(out, '-');
+            g_string_append_c(out, '-');
             g_string_append_c(out, (char)(*p - 'A' + 'a'));
         } else {
             g_string_append_c(out, *p);
@@ -2287,6 +2289,7 @@ ns_style_removeProperty(JSContext *ctx, JSValueConst this_val,
     ns_js_set_attr_recorded(js_from_ctx(ctx), n, "style", new_style);
     g_free(new_style);
     JS_FreeCString(ctx, name);
+    if (old_val) ns_inline_value_strip_important(old_val);
     JSValue ret = JS_NewString(ctx, old_val ? old_val : "");
     g_free(old_val);
     return ret;
