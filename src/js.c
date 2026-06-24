@@ -20066,6 +20066,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
                 ns_node *saved_prev = target->prev_sibling;
                 ns_node *saved_next = target->next_sibling;
                 ns_js *_j = js_from_ctx(ctx);
+                if (_j) ns_node_iters_pre_remove(_j, target);
                 if (_j) ns_ce_disconnect_subtree(_j, target);
                 ns_node_remove(target);
                 if (_j) {
@@ -20083,6 +20084,7 @@ ns_element_remove_self(JSContext *ctx, JSValueConst this_val,
     ns_node *saved_prev = n->prev_sibling;
     ns_node *saved_next = n->next_sibling;
     ns_js *_j = js_from_ctx(ctx);
+    if (_j) ns_node_iters_pre_remove(_j, n);
     if (_j) ns_ce_disconnect_subtree(_j, n);
     ns_node_remove(n);
     if (_j) {
@@ -29961,15 +29963,25 @@ ns_native_range(JSContext *ctx, JSValueConst this_val,
     return ns_make_range_object(ctx);
 }
 
+#define NS_SHOW_ELEMENT        0x1u
+#define NS_SHOW_TEXT           0x4u
+#define NS_SHOW_COMMENT        0x80u
+#define NS_SHOW_DOCUMENT       0x100u
+#define NS_SHOW_DOCUMENT_TYPE  0x200u
+
+#define NS_FILTER_ACCEPT 1
+#define NS_FILTER_REJECT 2
+#define NS_FILTER_SKIP   3
+
 static uint32_t
 ns_traversal_node_bit(const ns_node *n)
 {
     switch (n->kind) {
-        case NS_NODE_ELEMENT:  return 0x1;
-        case NS_NODE_TEXT:     return 0x4;
-        case NS_NODE_COMMENT:  return 0x80;
-        case NS_NODE_DOCUMENT: return 0x100;
-        case NS_NODE_DOCTYPE:  return 0x200;
+        case NS_NODE_ELEMENT:  return NS_SHOW_ELEMENT;
+        case NS_NODE_TEXT:     return NS_SHOW_TEXT;
+        case NS_NODE_COMMENT:  return NS_SHOW_COMMENT;
+        case NS_NODE_DOCUMENT: return NS_SHOW_DOCUMENT;
+        case NS_NODE_DOCTYPE:  return NS_SHOW_DOCUMENT_TYPE;
         default:               return 0;
     }
 }
@@ -29982,12 +29994,12 @@ ns_traversal_filter(JSContext *ctx, JSValueConst obj, const ns_node *n)
     JS_ToInt64(ctx, &what, what_v);
     JS_FreeValue(ctx, what_v);
     if (((uint32_t)what & ns_traversal_node_bit(n)) == 0)
-        return 3;
+        return NS_FILTER_SKIP;
     JSValue filter = JS_GetPropertyStr(ctx, obj, "filter");
     gboolean is_fn = JS_IsFunction(ctx, filter);
     if (!is_fn && !JS_IsObject(filter)) {
         JS_FreeValue(ctx, filter);
-        return 1;
+        return NS_FILTER_ACCEPT;
     }
     JSValue active_v = JS_GetPropertyStr(ctx, obj, "_active");
     gboolean active = JS_ToBool(ctx, active_v);
@@ -30047,8 +30059,8 @@ ns_tw_traverse_children(JSContext *ctx, JSValueConst w, ns_node *current,
     while (node) {
         int result = ns_traversal_filter(ctx, w, node);
         if (result < 0) { *err = 1; return NULL; }
-        if (result == 1) return node;
-        if (result == 3) {
+        if (result == NS_FILTER_ACCEPT) return node;
+        if (result == NS_FILTER_SKIP) {
             ns_node *child = last ? node->last_child : node->first_child;
             if (child) { node = child; continue; }
         }
@@ -30075,16 +30087,16 @@ ns_tw_traverse_siblings(JSContext *ctx, JSValueConst w, ns_node *current,
             node = sibling;
             int result = ns_traversal_filter(ctx, w, node);
             if (result < 0) { *err = 1; return NULL; }
-            if (result == 1) return node;
+            if (result == NS_FILTER_ACCEPT) return node;
             sibling = prev ? node->last_child : node->first_child;
-            if (result == 2 || !sibling)
+            if (result == NS_FILTER_REJECT || !sibling)
                 sibling = prev ? node->prev_sibling : node->next_sibling;
         }
         node = node->parent;
         if (!node || node == root) return NULL;
         int result = ns_traversal_filter(ctx, w, node);
         if (result < 0) { *err = 1; return NULL; }
-        if (result == 1) return NULL;
+        if (result == NS_FILTER_ACCEPT) return NULL;
     }
 }
 
@@ -30139,7 +30151,7 @@ ns_tw_parentNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
         if (node) {
             int r = ns_traversal_filter(ctx, w, node);
             if (r < 0) return JS_EXCEPTION;
-            if (r == 1) return ns_tw_set_current(ctx, w, node);
+            if (r == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
         }
     }
     return JS_NULL;
@@ -30152,13 +30164,13 @@ ns_tw_nextNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
     ns_node *node = ns_tw_node_prop(ctx, w, "currentNode");
     ns_node *root = ns_tw_node_prop(ctx, w, "root");
     if (!node || !root) return JS_NULL;
-    int result = 1;
+    int result = NS_FILTER_ACCEPT;
     for (;;) {
-        while (result != 2 && node->first_child) {
+        while (result != NS_FILTER_REJECT && node->first_child) {
             node = node->first_child;
             result = ns_traversal_filter(ctx, w, node);
             if (result < 0) return JS_EXCEPTION;
-            if (result == 1) return ns_tw_set_current(ctx, w, node);
+            if (result == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
         }
         ns_node *following = NULL, *temp = node;
         while (temp) {
@@ -30170,7 +30182,7 @@ ns_tw_nextNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
         node = following;
         result = ns_traversal_filter(ctx, w, node);
         if (result < 0) return JS_EXCEPTION;
-        if (result == 1) return ns_tw_set_current(ctx, w, node);
+        if (result == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
     }
 }
 
@@ -30187,19 +30199,19 @@ ns_tw_previousNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
             node = sibling;
             int result = ns_traversal_filter(ctx, w, node);
             if (result < 0) return JS_EXCEPTION;
-            while (result != 2 && node->last_child) {
+            while (result != NS_FILTER_REJECT && node->last_child) {
                 node = node->last_child;
                 result = ns_traversal_filter(ctx, w, node);
                 if (result < 0) return JS_EXCEPTION;
             }
-            if (result == 1) return ns_tw_set_current(ctx, w, node);
+            if (result == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
             sibling = node->prev_sibling;
         }
         if (node == root || !node->parent) return JS_NULL;
         node = node->parent;
         int r = ns_traversal_filter(ctx, w, node);
         if (r < 0) return JS_EXCEPTION;
-        if (r == 1) return ns_tw_set_current(ctx, w, node);
+        if (r == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
     }
     return JS_NULL;
 }
@@ -30314,7 +30326,7 @@ ns_ni_traverse(JSContext *ctx, JSValueConst obj, gboolean forward)
         }
         int r = ns_traversal_filter(ctx, obj, node);
         if (r < 0) return JS_EXCEPTION;
-        if (r == 1) {
+        if (r == NS_FILTER_ACCEPT) {
             JS_FreeValue(ctx, it->ref);
             it->ref = ns_make_element(ctx, node);
             it->before = before;
