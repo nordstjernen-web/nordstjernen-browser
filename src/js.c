@@ -30290,6 +30290,10 @@ ns_traversal_filter(JSContext *ctx, JSValueConst obj, const ns_node *n)
     }
     JSValue cb = is_fn ? JS_DupValue(ctx, filter)
                        : JS_GetPropertyStr(ctx, filter, "acceptNode");
+    if (JS_IsException(cb)) {
+        JS_FreeValue(ctx, filter);
+        return -1;
+    }
     if (!JS_IsFunction(ctx, cb)) {
         JS_FreeValue(ctx, cb);
         JS_FreeValue(ctx, filter);
@@ -30499,15 +30503,31 @@ ns_traversal_init_common(JSContext *ctx, JSValueConst obj,
                          int argc, JSValueConst *argv)
 {
     int64_t mask = 0xFFFFFFFF;
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1]))
+    if (argc >= 2 && !JS_IsUndefined(argv[1]))
         JS_ToInt64(ctx, &mask, argv[1]);
-    JS_SetPropertyStr(ctx, obj, "whatToShow",
-                      JS_NewInt64(ctx, (int64_t)(uint32_t)mask));
-    if (argc >= 3 && (JS_IsObject(argv[2]) || JS_IsFunction(ctx, argv[2])))
-        JS_SetPropertyStr(ctx, obj, "filter", JS_DupValue(ctx, argv[2]));
-    else
-        JS_SetPropertyStr(ctx, obj, "filter", JS_NULL);
+    ns_def_ro(ctx, obj, "whatToShow",
+              JS_NewInt64(ctx, (int64_t)(uint32_t)mask));
+    ns_def_ro(ctx, obj, "filter",
+              (argc >= 3 && (JS_IsObject(argv[2]) || JS_IsFunction(ctx, argv[2])))
+                  ? JS_DupValue(ctx, argv[2]) : JS_NULL);
     JS_SetPropertyStr(ctx, obj, "_active", JS_FALSE);
+}
+
+static void
+ns_set_tostring_tag(JSContext *ctx, JSValueConst obj, const char *tag)
+{
+    JSValue g = JS_GetGlobalObject(ctx);
+    JSValue sym = JS_GetPropertyStr(ctx, g, "Symbol");
+    JSValue tag_sym = JS_GetPropertyStr(ctx, sym, "toStringTag");
+    JSAtom tag_atom = JS_ValueToAtom(ctx, tag_sym);
+    if (tag_atom != JS_ATOM_NULL) {
+        JS_DefinePropertyValue(ctx, obj, tag_atom, JS_NewString(ctx, tag),
+            JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, tag_atom);
+    }
+    JS_FreeValue(ctx, tag_sym);
+    JS_FreeValue(ctx, sym);
+    JS_FreeValue(ctx, g);
 }
 
 static JSValue
@@ -30515,13 +30535,14 @@ ns_document_create_tree_walker(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1 || !JS_IsObject(argv[0]))
+    if (argc < 1 || !JS_IsObject(argv[0]) || !ns_unwrap_element(argv[0]))
         return JS_ThrowTypeError(ctx, "Failed to execute 'createTreeWalker' on "
             "'Document': parameter 1 is not of type 'Node'.");
     JSValue tw = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, tw, "root",        JS_DupValue(ctx, argv[0]));
+    ns_def_ro(ctx, tw, "root",                JS_DupValue(ctx, argv[0]));
     JS_SetPropertyStr(ctx, tw, "currentNode", JS_DupValue(ctx, argv[0]));
     ns_traversal_init_common(ctx, tw, argc, argv);
+    ns_set_tostring_tag(ctx, tw, "TreeWalker");
     ns_bind_fn(ctx, tw, "parentNode",      ns_tw_parentNode,      0);
     ns_bind_fn(ctx, tw, "firstChild",      ns_tw_firstChild,      0);
     ns_bind_fn(ctx, tw, "lastChild",       ns_tw_lastChild,       0);
@@ -30668,7 +30689,7 @@ ns_document_create_node_iterator(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1 || !JS_IsObject(argv[0]))
+    if (argc < 1 || !JS_IsObject(argv[0]) || !ns_unwrap_element(argv[0]))
         return JS_ThrowTypeError(ctx, "Failed to execute 'createNodeIterator' on "
             "'Document': parameter 1 is not of type 'Node'.");
     JSRuntime *rt = JS_GetRuntime(ctx);
@@ -30677,6 +30698,15 @@ ns_document_create_node_iterator(JSContext *ctx, JSValueConst this_val,
         JS_NewClass(rt, ns_node_iter_class_id, &ns_node_iter_class);
     }
     JSValue obj = JS_NewObjectClass(ctx, ns_node_iter_class_id);
+    {
+        JSValue gp = JS_GetGlobalObject(ctx);
+        JSValue oc = JS_GetPropertyStr(ctx, gp, "Object");
+        JSValue op = JS_GetPropertyStr(ctx, oc, "prototype");
+        if (JS_IsObject(op)) JS_SetPrototype(ctx, obj, op);
+        JS_FreeValue(ctx, op);
+        JS_FreeValue(ctx, oc);
+        JS_FreeValue(ctx, gp);
+    }
     ns_node_iter *it = g_new0(ns_node_iter, 1);
     it->js = js_from_ctx(ctx);
     it->root = JS_DupValue(ctx, argv[0]);
@@ -30695,6 +30725,7 @@ ns_document_create_node_iterator(JSContext *ctx, JSValueConst this_val,
     ns_ni_define_getter(ctx, obj, "referenceNode", ns_ni_get_referenceNode);
     ns_ni_define_getter(ctx, obj, "pointerBeforeReferenceNode",
                         ns_ni_get_pointerBefore);
+    ns_set_tostring_tag(ctx, obj, "NodeIterator");
     return obj;
 }
 
