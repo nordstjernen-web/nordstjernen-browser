@@ -9,6 +9,7 @@
 #include "config.h"
 #include "history.h"
 #include "net.h"
+#include "security.h"
 #include "version.h"
 #include "image.h"
 #include "about_logo_gif.h"
@@ -345,6 +346,8 @@ download_worker(gpointer ud)
                             resp->body->len, NULL)) {
         d->ok = TRUE;
         d->size = resp->body->len;
+        ns_security_mark_download_origin(
+            d->path, resp->final_url ? resp->final_url : d->url);
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);

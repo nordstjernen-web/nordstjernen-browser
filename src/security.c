@@ -35,6 +35,10 @@
 #include <sys/random.h>
 #endif
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <sys/xattr.h>
+#endif
+
 #ifdef G_OS_WIN32
 #include <windows.h>
 #include <bcrypt.h>
@@ -788,3 +792,42 @@ ns_security_win32_mitigations_init(gboolean allow_child_processes)
 }
 
 #endif
+
+void
+ns_security_mark_download_origin(const char *path, const char *url)
+{
+    if (!path || !*path)
+        return;
+#if defined(__APPLE__)
+    (void)url;
+    char value[96];
+    g_snprintf(value, sizeof value, "0001;%08x;Nordstjernen;",
+               (unsigned)(g_get_real_time() / G_USEC_PER_SEC));
+    setxattr(path, "com.apple.quarantine", value, strlen(value), 0, 0);
+#elif defined(__linux__)
+    if (url && *url)
+        setxattr(path, "user.xdg.origin.url", url, strlen(url), 0);
+#elif defined(G_OS_WIN32)
+    char *stream = g_strconcat(path, ":Zone.Identifier", NULL);
+    wchar_t *wstream = (wchar_t *)g_utf8_to_utf16(stream, -1, NULL, NULL, NULL);
+    if (wstream) {
+        HANDLE h = CreateFileW(wstream, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) {
+            GString *zone = g_string_new("[ZoneTransfer]\r\nZoneId=3\r\n");
+            if (url && *url) {
+                g_string_append_printf(zone, "HostUrl=%s\r\n", url);
+                g_string_append_printf(zone, "ReferrerUrl=%s\r\n", url);
+            }
+            DWORD wrote = 0;
+            WriteFile(h, zone->str, (DWORD)zone->len, &wrote, NULL);
+            CloseHandle(h);
+            g_string_free(zone, TRUE);
+        }
+        g_free(wstream);
+    }
+    g_free(stream);
+#else
+    (void)url;
+#endif
+}

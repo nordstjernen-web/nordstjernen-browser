@@ -28,6 +28,8 @@ gboolean ns_security_sri_check(const char *integrity_attr,
                                const void *body,
                                gsize       body_len);
 
+void ns_security_mark_download_origin(const char *path, const char *url);
+
 G_END_DECLS
 
 #endif
