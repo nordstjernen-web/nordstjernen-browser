@@ -1097,6 +1097,7 @@ static JSClassID ns_token_list_class_id;
 static JSClassID ns_storage_class_id;
 static JSClassID ns_live_class_id;
 static JSClassID ns_dataset_class_id;
+static JSClassID ns_window_named_class_id;
 
 typedef enum {
     NS_LIVE_CHILDREN,
@@ -2522,6 +2523,47 @@ ns_unwrap_element(JSValueConst val)
 {
     return JS_GetOpaque(val, ns_element_class_id);
 }
+
+static ns_node *
+ns_window_named_lookup(ns_js *js, const char *name)
+{
+    if (!js || !js->current_doc || !name || !*name) return NULL;
+    return ns_node_find_by_id(js->current_doc, name);
+}
+
+static int
+ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
+                    JSValueConst obj, JSAtom prop)
+{
+    (void)obj;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->current_doc) return 0;
+    JSValue keyv = JS_AtomToValue(ctx, prop);
+    int is_str = JS_IsString(keyv);
+    JS_FreeValue(ctx, keyv);
+    if (!is_str) return 0;
+    const char *name = JS_AtomToCString(ctx, prop);
+    if (!name) return 0;
+    ns_node *el = ns_window_named_lookup(js, name);
+    JS_FreeCString(ctx, name);
+    if (!el) return 0;
+    if (desc) {
+        desc->flags  = JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE;
+        desc->value  = ns_make_element(ctx, el);
+        desc->getter = JS_UNDEFINED;
+        desc->setter = JS_UNDEFINED;
+    }
+    return 1;
+}
+
+static JSClassExoticMethods ns_window_named_exotic = {
+    .get_own_property = ns_window_named_get,
+};
+
+static JSClassDef ns_window_named_class = {
+    .class_name = "WindowProperties",
+    .exotic     = &ns_window_named_exotic,
+};
 
 static void ns_js_start_image_load(ns_js *js, ns_node *el, const char *src);
 static void ns_js_flush_ready_images(ns_js *js);
@@ -18924,6 +18966,7 @@ ns_js_dispatch_wheel_type(ns_js *js, const ns_node *target, const char *type,
     gboolean cancelable = ns_path_has_active_listener(js, target, type);
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "composed",   JS_TRUE);
     JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
     JS_SetPropertyStr(ctx, event, "clientX",    JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
@@ -32841,6 +32884,9 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetClassProto(ctx, ns_storage_class_id, storage_proto);
 
     JSValue global = JS_GetGlobalObject(ctx);
+    if (!ns_window_named_class_id)
+        JS_NewClassID(js->rt, &ns_window_named_class_id);
+    JS_NewClass(js->rt, ns_window_named_class_id, &ns_window_named_class);
     JSValue console = JS_NewObject(ctx);
     static const ns_fn_def console_log_methods[] = {
         { "log", 0 }, { "info", 0 }, { "debug", 0 }, { "trace", 0 },
@@ -33534,6 +33580,23 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JSValue et_ret = JS_Eval(ctx, et_src, strlen(et_src),
                                  "<event-target>", JS_EVAL_TYPE_GLOBAL);
         JS_FreeValue(ctx, et_ret);
+    }
+
+    {
+        JSValue g2 = JS_GetGlobalObject(ctx);
+        JSValue win_proto = JS_GetPrototype(ctx, g2);
+        if (JS_IsObject(win_proto)) {
+            JSValue base = JS_GetPrototype(ctx, win_proto);
+            JSValue wnamed = JS_NewObjectClass(ctx, ns_window_named_class_id);
+            if (!JS_IsException(wnamed)) {
+                JS_SetPrototype(ctx, wnamed, base);
+                JS_SetPrototype(ctx, win_proto, wnamed);
+                JS_FreeValue(ctx, wnamed);
+            }
+            JS_FreeValue(ctx, base);
+        }
+        JS_FreeValue(ctx, win_proto);
+        JS_FreeValue(ctx, g2);
     }
 
     {
