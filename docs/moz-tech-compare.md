@@ -25,10 +25,9 @@ values: minimal, clean-room, single-human-auditable, no-JIT, no telemetry.
 The first 20 are grouped Security → Privacy → Performance → Quality/Process,
 ordered by leverage within each group; a second pass adds ten more (21–30),
 leaning privacy-and-platform, and a third (31–40) digs into engine internals
-— memory-safety mitigation and main-thread responsiveness; two final addenda
-(#41, #42) close cross-platform and download security gaps. A single
-priority ranking of all remaining proposals (by ROI, then effort/risk) is
-at the end.
+— memory-safety mitigation and main-thread responsiveness; a final addendum
+(#41) closes a cross-platform security gap. A single priority ranking of all
+remaining proposals (by ROI, then effort/risk) is at the end.
 
 ---
 
@@ -573,7 +572,7 @@ against the current code.
   responsiveness lever.
 - **ROI: Med · Effort: L · Fit: medium (touches the JS runtime).**
 
-## Addenda — remaining security gaps (41–42)
+## Addenda — remaining security gap (41)
 
 ### 41. Sandbox the renderer on macOS and Windows, not only Linux ★ *(Security)*
 
@@ -601,30 +600,6 @@ against the current code.
 - **ROI: High · Effort: M (macOS) / M–L (Windows) · Fit: excellent — closes
   a whole-platform hole and reuses the existing IPC/sandbox seam.**
 
-### 42. Mark downloaded files with the OS "downloaded-from-internet" tag ★ *(Security)*
-
-- **Upstream:** every completed download is tagged with the platform
-  mark-of-the-web so the OS's own gatekeeper screens it before it runs, and
-  executables get an extra reputation check — the quarantine attribute is
-  applied in `toolkit/components/downloads/DownloadIntegration.sys.mjs`, with
-  `toolkit/components/reputationservice/ApplicationReputation.cpp` vetting
-  executables.
-- **Nordstjernen today:** the shell saves downloads (the
-  `NS_PROC_EVT_DOWNLOAD` path in `src/gtk/procview.c`) with **no OS
-  quarantine** — no `com.apple.quarantine` xattr on macOS, no
-  `Zone.Identifier` alternate data stream on Windows — so Gatekeeper and
-  SmartScreen never get the chance to warn before a downloaded
-  installer/script/binary is executed.
-- **The move:** on save, set the platform mark-of-the-web
-  (`com.apple.quarantine` xattr / a `Zone.Identifier:$DATA` stream carrying
-  the source URL), and optionally warn when the saved file is a directly
-  executable type. This needs **no network and no telemetry** — it simply
-  lets the OS's existing gatekeeper do its job, so it sidesteps the
-  reputation-service machinery (which would otherwise overlap SafeBrowsing,
-  #35).
-- **ROI: High (per effort) · Effort: S · Fit: excellent — pure local
-  security, delegates the warning to the OS.**
-
 ---
 
 ## Priority ranking
@@ -637,71 +612,70 @@ and lower risk rank higher, with security/privacy nudged up for a browser
 whose pitch is security and privacy. Two items (#41, #1) are pulled above
 pure effort order on strategic weight — see the notes below.
 
-The bands: **P1–P14** are the High-ROI set, **P15–P16** Med–High,
-**P17–P22** cheap Med wins, **P23–P33** Med/medium-effort, **P34–P40**
-Med/large-effort, **P41** the lone Low–Med housekeeping item.
+The bands: **P1–P13** are the High-ROI set, **P14–P15** Med–High,
+**P16–P21** cheap Med wins, **P22–P32** Med/medium-effort, **P33–P39**
+Med/large-effort, **P40** the lone Low–Med housekeeping item.
 
 | P | # | Proposal | Area | ROI | Effort |
 |---|---|----------|------|-----|--------|
-| 1 | 42 | Mark-of-the-web on downloads | Security | High | S |
-| 2 | 2 | Sandbox the audio helper | Security | High | S–M |
-| 3 | 8 | HTTPS-First upgrade | Privacy/Sec | High | S–M |
-| 4 | 31 | Hardened heap allocator | Security | High | M |
-| 5 | 1 | WASM-sandbox a C decoder (reuse WAMR) | Security | High | M |
-| 6 | 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
-| 7 | 37 | Private browsing mode | Privacy | High | M |
-| 8 | 9 | Partition the whole storage stack | Privacy | High | M |
-| 9 | 32 | Off-main-thread image decoding | Perf | High | M |
-| 10 | 13 | Speculative preload scanner | Perf | High | M |
-| 11 | 14 | Back/forward cache | Perf | High | M |
-| 12 | 22 | Tracking-protection blocklists | Privacy | High | M |
-| 13 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
-| 14 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
-| 15 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
-| 16 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
-| 17 | 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
-| 18 | 7 | Reduce/jitter timer precision | Security | Med | S |
-| 19 | 12 | DNS-over-HTTPS | Privacy | Med | S |
-| 20 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
-| 21 | 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
-| 22 | 27 | Lazy image loading | Perf | Med | S–M |
-| 23 | 38 | HTML Sanitizer API | Security | Med | M |
-| 24 | 5 | Opaque Response Blocking | Security | Med | M |
-| 25 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
-| 26 | 4 | Font sanitization before raster | Security | Med | M |
-| 27 | 34 | Background-tab unloading | Memory | Med | M |
-| 28 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
-| 29 | 16 | Image surface cache + downscale | Perf | Med | M |
-| 30 | 17 | Pre-spawned renderer | Perf | Med | M |
-| 31 | 30 | Session restore / crash recovery | UX | Med | M |
-| 32 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
-| 33 | 18 | Reader mode | UX | Med | M |
-| 34 | 3 | Site isolation (per-origin) | Security | Med | L |
-| 35 | 6 | Compact cert revocation | Security | Med | L |
-| 36 | 19 | Accessibility tree | Quality | Med | L |
-| 37 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
-| 38 | 29 | Password manager (local-only) | Security/UX | Med | L |
-| 39 | 28 | On-device page translation | UX | Med | L |
-| 40 | 40 | Incremental / low-pause GC | Perf | Med | L |
-| 41 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
+| 1 | 2 | Sandbox the audio helper | Security | High | S–M |
+| 2 | 8 | HTTPS-First upgrade | Privacy/Sec | High | S–M |
+| 3 | 31 | Hardened heap allocator | Security | High | M |
+| 4 | 1 | WASM-sandbox a C decoder (reuse WAMR) | Security | High | M |
+| 5 | 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
+| 6 | 37 | Private browsing mode | Privacy | High | M |
+| 7 | 9 | Partition the whole storage stack | Privacy | High | M |
+| 8 | 32 | Off-main-thread image decoding | Perf | High | M |
+| 9 | 13 | Speculative preload scanner | Perf | High | M |
+| 10 | 14 | Back/forward cache | Perf | High | M |
+| 11 | 22 | Tracking-protection blocklists | Privacy | High | M |
+| 12 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
+| 13 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
+| 14 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
+| 15 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
+| 16 | 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
+| 17 | 7 | Reduce/jitter timer precision | Security | Med | S |
+| 18 | 12 | DNS-over-HTTPS | Privacy | Med | S |
+| 19 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
+| 20 | 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
+| 21 | 27 | Lazy image loading | Perf | Med | S–M |
+| 22 | 38 | HTML Sanitizer API | Security | Med | M |
+| 23 | 5 | Opaque Response Blocking | Security | Med | M |
+| 24 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
+| 25 | 4 | Font sanitization before raster | Security | Med | M |
+| 26 | 34 | Background-tab unloading | Memory | Med | M |
+| 27 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
+| 28 | 16 | Image surface cache + downscale | Perf | Med | M |
+| 29 | 17 | Pre-spawned renderer | Perf | Med | M |
+| 30 | 30 | Session restore / crash recovery | UX | Med | M |
+| 31 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
+| 32 | 18 | Reader mode | UX | Med | M |
+| 33 | 3 | Site isolation (per-origin) | Security | Med | L |
+| 34 | 6 | Compact cert revocation | Security | Med | L |
+| 35 | 19 | Accessibility tree | Quality | Med | L |
+| 36 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 37 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 38 | 28 | On-device page translation | UX | Med | L |
+| 39 | 40 | Incremental / low-pause GC | Perf | Med | L |
+| 40 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Notes on the ranking:
 
-- **P1–P3 are the do-this-week set** — all small, low-risk, and either pure
-  security or pure privacy: mark-of-the-web on downloads (#42), sandbox the
-  audio helper (#2), HTTPS-First (#8). (Tracking-param stripping, formerly
-  P1, is now implemented and has been dropped from the list.)
-- **#41 (P6) and #1 (P5) are pulled up on strategic weight.** They carry
+- **P1–P2 are the do-this-week set** — both small and either pure security
+  or pure privacy: sandbox the audio helper (#2), HTTPS-First (#8).
+  (Tracking-param stripping and mark-of-the-web on downloads, the earlier
+  P1 items, are now implemented and dropped from the list.)
+- **#41 (P5) and #1 (P4) are pulled up on strategic weight.** They carry
   more effort than their neighbours but are the security work most worth
   scheduling: #41 because two of three desktops ship an *unconfined
   renderer* today (the biggest gap versus the project's own pitch), and #1
   because in-process WASM decoder sandboxing is the highest-leverage
   architectural mitigation — and uniquely cheap here, since the runtime is
   already in-tree.
-- **#21 (P14) and #37 (P7) are the biggest single privacy statements**;
+- **#21 (P13) and #37 (P6) are the biggest single privacy statements**;
   #37 ranks higher only because the cookie/storage-partitioning plumbing it
   needs largely exists.
-- **#20 (P41)** is cheap (S) but ranks last purely on leverage; it is
+- **#20 (P40)** is cheap (S) but ranks last purely on leverage; it is
   reasonable to fold in early as housekeeping rather than treat it as
   "last to do."
 
