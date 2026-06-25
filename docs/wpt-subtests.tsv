@@ -729,25 +729,25 @@ test	subtest	status
 /dom/events/Event-cancelBubble.html	stopImmediatePropagation() must set cancelBubble to true.	PASS
 /dom/events/Event-cancelBubble.html	stopPropagation() must set cancelBubble to true.	PASS
 /dom/events/Event-constants.html	<harness>	OK
-/dom/events/Event-constants.html	Constants for eventPhase on CustomEvent object.	FAIL
+/dom/events/Event-constants.html	Constants for eventPhase on CustomEvent object.	PASS
 /dom/events/Event-constants.html	Constants for eventPhase on Event interface object.	PASS
 /dom/events/Event-constants.html	Constants for eventPhase on Event object.	PASS
 /dom/events/Event-constants.html	Constants for eventPhase on Event prototype object.	PASS
 /dom/events/Event-constructors.any.html	<harness>	OK
-/dom/events/Event-constructors.any.html	Event-constructors	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 1	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 10	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 11	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 12	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 13	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 2	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 3	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 4	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 5	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 6	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 7	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 8	PASS
-/dom/events/Event-constructors.any.html	Event-constructors 9	PASS
+/dom/events/Event-constructors.any.html	Event constructors	PASS
+/dom/events/Event-constructors.any.html	Event constructors 1	PASS
+/dom/events/Event-constructors.any.html	Event constructors 10	PASS
+/dom/events/Event-constructors.any.html	Event constructors 11	PASS
+/dom/events/Event-constructors.any.html	Event constructors 12	PASS
+/dom/events/Event-constructors.any.html	Event constructors 13	PASS
+/dom/events/Event-constructors.any.html	Event constructors 2	PASS
+/dom/events/Event-constructors.any.html	Event constructors 3	PASS
+/dom/events/Event-constructors.any.html	Event constructors 4	PASS
+/dom/events/Event-constructors.any.html	Event constructors 5	PASS
+/dom/events/Event-constructors.any.html	Event constructors 6	PASS
+/dom/events/Event-constructors.any.html	Event constructors 7	PASS
+/dom/events/Event-constructors.any.html	Event constructors 8	PASS
+/dom/events/Event-constructors.any.html	Event constructors 9	PASS
 /dom/events/Event-defaultPrevented-after-dispatch.html	<harness>	OK
 /dom/events/Event-defaultPrevented-after-dispatch.html	Default prevention via preventDefault	PASS
 /dom/events/Event-defaultPrevented-after-dispatch.html	Default prevention via returnValue	PASS
@@ -769,8 +769,8 @@ test	subtest	status
 /dom/events/Event-dispatch-bubbles-false.html	In window.document with load event	PASS
 /dom/events/Event-dispatch-bubbles-false.html	In window.document.cloneNode(true)	FAIL
 /dom/events/Event-dispatch-bubbles-true.html	<harness>	OK
-/dom/events/Event-dispatch-bubbles-true.html	In DOMImplementation.createHTMLDocument()	FAIL
-/dom/events/Event-dispatch-bubbles-true.html	In new Document()	FAIL
+/dom/events/Event-dispatch-bubbles-true.html	In DOMImplementation.createHTMLDocument()	PASS
+/dom/events/Event-dispatch-bubbles-true.html	In new Document()	PASS
 /dom/events/Event-dispatch-bubbles-true.html	In window.document with click event	PASS
 /dom/events/Event-dispatch-bubbles-true.html	In window.document with load event	PASS
 /dom/events/Event-dispatch-bubbles-true.html	In window.document.cloneNode(true)	FAIL
@@ -851,8 +851,8 @@ test	subtest	status
 /dom/events/Event-dispatch-propagation-stopped.html	 Calling stopPropagation() prior to dispatchEvent() 	PASS
 /dom/events/Event-dispatch-propagation-stopped.html	<harness>	OK
 /dom/events/Event-dispatch-redispatch.html	<harness>	OK
-/dom/events/Event-dispatch-redispatch.html	Redispatching DOMContentLoaded event after being dispatched	FAIL
-/dom/events/Event-dispatch-redispatch.html	Redispatching event which is being dispatched	FAIL
+/dom/events/Event-dispatch-redispatch.html	Redispatching DOMContentLoaded event after being dispatched	PASS
+/dom/events/Event-dispatch-redispatch.html	Redispatching event which is being dispatched	PASS
 /dom/events/Event-dispatch-redispatch.html	Redispatching mouseup event whose default action dispatches a click event	FAIL
 /dom/events/Event-dispatch-redispatch.html	Synthesizing click on button...	PASS
 /dom/events/Event-dispatch-reenter.html	 Dispatch additional events inside an event listener 	PASS
@@ -880,20 +880,20 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <AREA></AREA> of parent <INPUT type=radio></INPUT>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <AREA></AREA> of parent <LABEL><BUTTON type=button></BUTTON></LABEL>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <AREA></AREA> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <A></A>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <AREA></AREA>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=submit></INPUT></FORM>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <INPUT type=checkbox></INPUT>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <INPUT type=radio></INPUT>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <LABEL><BUTTON type=button></BUTTON></LABEL>, only child should be activated.	FAIL
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	FAIL
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <A></A>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <AREA></AREA>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <FORM><INPUT type=submit></INPUT></FORM>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <INPUT type=checkbox></INPUT>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <INPUT type=radio></INPUT>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <LABEL><BUTTON type=button></BUTTON></LABEL>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <DETAILS><SUMMARY></SUMMARY></DETAILS> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.	FAIL
@@ -904,7 +904,7 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=reset></BUTTON></FORM> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.	PASS
@@ -915,7 +915,7 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><BUTTON type=submit></BUTTON></FORM> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <FORM><INPUT type=reset></INPUT></FORM>, only child should be activated.	PASS
@@ -926,7 +926,7 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=image></INPUT></FORM> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	PASS
@@ -937,7 +937,7 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=reset></INPUT></FORM> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <FORM><INPUT type=submit></INPUT></FORM> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	FAIL
@@ -970,7 +970,7 @@ test	subtest	status
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <INPUT type=radio></INPUT> of parent <LABEL><INPUT type=checkbox></INPUT><SPAN></SPAN></LABEL>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <A></A>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <AREA></AREA>, only child should be activated.	PASS
-/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	PASS
+/dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <DETAILS><SUMMARY></SUMMARY></DETAILS>, only child should be activated.	FAIL
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <FORM><BUTTON type=reset></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <FORM><BUTTON type=submit></BUTTON></FORM>, only child should be activated.	PASS
 /dom/events/Event-dispatch-single-activation-behavior.html	When clicking child <LABEL><BUTTON type=button></BUTTON></LABEL> of parent <FORM><INPUT type=image></INPUT></FORM>, only child should be activated.	PASS
@@ -1001,7 +1001,7 @@ test	subtest	status
 /dom/events/Event-dispatch-throwing.html	Throwing in event listener with a single listeners	FAIL
 /dom/events/Event-dispatch-throwing.html	Throwing in event listener with multiple listeners	FAIL
 /dom/events/Event-init-while-dispatching.html	<harness>	OK
-/dom/events/Event-init-while-dispatching.html	Calling initCustomEvent while dispatching.	FAIL
+/dom/events/Event-init-while-dispatching.html	Calling initCustomEvent while dispatching.	PASS
 /dom/events/Event-init-while-dispatching.html	Calling initEvent while dispatching.	PASS
 /dom/events/Event-init-while-dispatching.html	Calling initKeyboardEvent while dispatching.	FAIL
 /dom/events/Event-init-while-dispatching.html	Calling initMouseEvent while dispatching.	FAIL
@@ -1101,7 +1101,7 @@ test	subtest	status
 /dom/events/Event-timestamp-high-resolution.https.html	<harness>	OK
 /dom/events/Event-timestamp-high-resolution.https.html	Constructed GamepadEvent timestamp should be high resolution and have the same time origin as performance.now()	PASS
 /dom/events/Event-timestamp-safe-resolution.html	<harness>	OK
-/dom/events/Event-timestamp-safe-resolution.html	Event timestamp should not have a resolution better than 5 microseconds	FAIL
+/dom/events/Event-timestamp-safe-resolution.html	Event timestamp should not have a resolution better than 5 microseconds	PASS
 /dom/events/Event-type-empty.html	<harness>	OK
 /dom/events/Event-type-empty.html	Constructor	PASS
 /dom/events/Event-type-empty.html	initEvent	PASS
@@ -1124,10 +1124,10 @@ test	subtest	status
 /dom/events/EventListener-handleEvent.html	rethrows errors when getting `handleEvent`	FAIL
 /dom/events/EventListener-handleEvent.html	throws if `handleEvent` is falsy and not callable	FAIL
 /dom/events/EventListener-handleEvent.html	throws if `handleEvent` is thruthy and not callable	FAIL
-/dom/events/EventListener-incumbent-global-1.sub.html	<harness>	OK
-/dom/events/EventListener-incumbent-global-1.sub.html	Check the incumbent global EventListeners  are called with	FAIL
-/dom/events/EventListener-incumbent-global-2.sub.html	<harness>	OK
-/dom/events/EventListener-incumbent-global-2.sub.html	Check the incumbent global EventListeners  are called with	FAIL
+/dom/events/EventListener-incumbent-global-1.sub.html	<harness>	TIMEOUT
+/dom/events/EventListener-incumbent-global-1.sub.html	Check the incumbent global EventListeners  are called with	TIMEOUT
+/dom/events/EventListener-incumbent-global-2.sub.html	<harness>	TIMEOUT
+/dom/events/EventListener-incumbent-global-2.sub.html	Check the incumbent global EventListeners  are called with	TIMEOUT
 /dom/events/EventListener-invoke-legacy.html	<harness>	TIMEOUT
 /dom/events/EventListener-invoke-legacy.html	Legacy listener of animationend	TIMEOUT
 /dom/events/EventListener-invoke-legacy.html	Legacy listener of animationstart	TIMEOUT
@@ -1136,10 +1136,10 @@ test	subtest	status
 /dom/events/EventListener-invoke-legacy.html	Listener of animationstart	TIMEOUT
 /dom/events/EventListener-invoke-legacy.html	Listener of transitionend	TIMEOUT
 /dom/events/EventListenerOptions-capture.html	<harness>	OK
-/dom/events/EventListenerOptions-capture.html	Capture boolean should be honored correctly	FAIL
+/dom/events/EventListenerOptions-capture.html	Capture boolean should be honored correctly	PASS
 /dom/events/EventListenerOptions-capture.html	Capture option should be honored correctly	PASS
 /dom/events/EventListenerOptions-capture.html	Equivalence of option values	PASS
-/dom/events/EventListenerOptions-capture.html	Supports capture option	FAIL
+/dom/events/EventListenerOptions-capture.html	Supports capture option	PASS
 /dom/events/EventTarget-add-listener-platform-object.html	<harness>	TIMEOUT
 /dom/events/EventTarget-add-listener-platform-object.html	addEventListener with a platform object	NOTRUN
 /dom/events/EventTarget-add-remove-listener.any.html	<harness>	OK
@@ -1148,7 +1148,7 @@ test	subtest	status
 /dom/events/EventTarget-addEventListener.any.html	Adding a null event listener should succeed	PASS
 /dom/events/EventTarget-constructible.any.html	<harness>	OK
 /dom/events/EventTarget-constructible.any.html	A constructed EventTarget can be used as expected	PASS
-/dom/events/EventTarget-constructible.any.html	A constructed EventTarget implements dispatch correctly	FAIL
+/dom/events/EventTarget-constructible.any.html	A constructed EventTarget implements dispatch correctly	PASS
 /dom/events/EventTarget-constructible.any.html	EventTarget can be subclassed	PASS
 /dom/events/EventTarget-dispatchEvent-returnvalue.html	<harness>	OK
 /dom/events/EventTarget-dispatchEvent-returnvalue.html	Return value of EventTarget.dispatchEvent() affected by preventDefault().	PASS
@@ -1223,11 +1223,11 @@ test	subtest	status
 /dom/events/event-handler-attribute-replace-preserves-passive.html	Replacing a wheel event handler attribute on document element via setAttribute preserves its passive flag	PASS
 /dom/events/event-src-element-nullable.html	<harness>	OK
 /dom/events/event-src-element-nullable.html	Event srcElement should be nullable	PASS
-/dom/events/focus-event-document-move.html	<harness>	TIMEOUT
-/dom/events/focus-event-document-move.html	Moving a node during mousedown should not crash	TIMEOUT
-/dom/events/handler-count.html	<harness>	TIMEOUT
-/dom/events/handler-count.html	Test addEventListener/removeEventListener on the window.	TIMEOUT
-/dom/events/handler-count.html	Test setting onanimationstart handler on the window.	NOTRUN
+/dom/events/focus-event-document-move.html	<harness>	OK
+/dom/events/focus-event-document-move.html	Moving a node during mousedown should not crash	PASS
+/dom/events/handler-count.html	<harness>	OK
+/dom/events/handler-count.html	Test addEventListener/removeEventListener on the window.	PASS
+/dom/events/handler-count.html	Test setting onanimationstart handler on the window.	PASS
 /dom/events/label-default-action.html	<harness>	OK
 /dom/events/label-default-action.html	Label default action should not trigger when clicked button removes itself	PASS
 /dom/events/legacy-pre-activation-behavior.window.html	<harness>	OK
@@ -1305,9 +1305,9 @@ test	subtest	status
 /dom/events/passive-by-default.html	mousewheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive by default for Window	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Document	FAIL
-/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	FAIL
+/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Window	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1329,9 +1329,9 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchend listener is non-passive with {passive:undefined} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is non-passive with {passive:undefined} for Window	PASS
 /dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Document	FAIL
-/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	FAIL
+/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Window	FAIL
 /dom/events/passive-by-default.html	touchmove listener is non-passive by default for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchmove listener is non-passive with {passive:false} for Document	PASS
@@ -1345,9 +1345,9 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchmove listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive by default for Window	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Document	FAIL
-/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	FAIL
+/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Window	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1365,9 +1365,9 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchstart listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive by default for Window	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Document	FAIL
-/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	FAIL
+/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Window	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1385,16 +1385,16 @@ test	subtest	status
 /dom/events/passive-by-default.html	wheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive by default for Window	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Document	FAIL
-/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	FAIL
-/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	FAIL
+/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
+/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Window	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for Window	FAIL
-/dom/events/pointer-event-document-move.html	<harness>	TIMEOUT
-/dom/events/pointer-event-document-move.html	Moving a node to new document should move the registered event listeners together	TIMEOUT
+/dom/events/pointer-event-document-move.html	<harness>	OK
+/dom/events/pointer-event-document-move.html	Moving a node to new document should move the registered event listeners together	PASS
 /dom/events/preventDefault-during-activation-behavior.html	<harness>	OK
 /dom/events/preventDefault-during-activation-behavior.html	behavior of preventDefault during activation behavior	PASS
 /dom/events/relatedTarget.window.html	<harness>	OK
@@ -1409,7 +1409,7 @@ test	subtest	status
 /dom/events/remove-all-listeners.html	Removing all listeners and then adding a new one should work.	PASS
 /dom/events/scrolling/iframe-chains.html	<harness>	OK
 /dom/events/scrolling/iframe-chains.html	Wheel scroll in iframe chains to containing element.	FAIL
-/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	NONE
+/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	TIMEOUT
 /dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	<harness>	TIMEOUT
 /dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	Ensure that the scroll position is not lost when the local iframe is set to display:none and shown again.	TIMEOUT
 /dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	Ensure that the scroll position is not lost when the remote iframe is set to display:none and shown again.	NOTRUN
@@ -1431,9 +1431,9 @@ test	subtest	status
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	Move down, up and down again, receive scrollend event only once	FAIL
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	Move right, left and right again, receive scrollend event only once	FAIL
-/dom/events/scrolling/scrollend-event-fired-after-snap.html	<harness>	OK
-/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after fling snap animation completion.	FAIL
-/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after scroll snap animation completion.	FAIL
+/dom/events/scrolling/scrollend-event-fired-after-snap.html	<harness>	TIMEOUT
+/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after fling snap animation completion.	NOTRUN
+/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after scroll snap animation completion.	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html	scrollend event fired after load for mandatory snap point	FAIL
 /dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html	<harness>	TIMEOUT
@@ -1446,16 +1446,15 @@ test	subtest	status
 /dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html	Tests that the scroll is not propagated beyond div with non-auto overscroll-behavior.	FAIL
 /dom/events/scrolling/scrollend-event-fired-to-window.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-to-window.html	testing, vertical	TIMEOUT
-/dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html	<harness>	OK
-/dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html	scrollend event is fired after repeated Page Down key presses reach the end of the scroll region.	FAIL
+/dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fires-on-visual-viewport.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fires-to-iframe-window.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-for-user-scroll.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when clicking scrollbar.	PASS
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when dragging the scrollbar thumb.	PASS
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when mouse wheel scrolling.	FAIL
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when sending DOWN key to the target.	TIMEOUT
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when touch dragging.	FAIL
+/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when clicking scrollbar.	NOTRUN
+/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when dragging the scrollbar thumb.	NOTRUN
+/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when mouse wheel scrolling.	NOTRUN
+/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when sending DOWN key to the target.	NOTRUN
+/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when touch dragging.	TIMEOUT
 /dom/events/scrolling/scrollend-event-handler-content-attributes.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is fired to document event handler property	NOTRUN
 /dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is fired to element event handler property	NOTRUN
@@ -1552,6 +1551,8 @@ test	subtest	status
 /dom/events/webkit-transition-end-event.html	webkitTransitionEnd event listener should trigger for an animation	FAIL
 /dom/events/window-composed-path.html	<harness>	OK
 /dom/events/window-composed-path.html	window target has an empty path after dispatch	PASS
+/dom/events/window-event-restored-after-throwing-onerror.html	<harness>	OK
+/dom/events/window-event-restored-after-throwing-onerror.html	window.event is restored after a throwing window.onerror handler	PASS
 /dom/lists/DOMTokenList-Iterable.html	<harness>	OK
 /dom/lists/DOMTokenList-Iterable.html	DOMTokenList has Symbol.iterator.	PASS
 /dom/lists/DOMTokenList-Iterable.html	DOMTokenList has entries method.	PASS
@@ -61086,7 +61087,7 @@ test	subtest	status
 /hr-time/test_cross_frame_start.html	child performance.now() > 0	PASS
 /hr-time/test_cross_frame_start.html	parent performance.now() > 0	PASS
 /hr-time/timeOrigin.html	<harness>	OK
-/hr-time/timeOrigin.html	Window and worker timeOrigins are close when created one after another.	FAIL
+/hr-time/timeOrigin.html	Window and worker timeOrigins are close when created one after another.	PASS
 /hr-time/timeOrigin.html	Window and worker timeOrigins differ when worker is created after a delay.	PASS
 /hr-time/timeOrigin.html	Window timeOrigin is close to Date.now() when there is no system clock adjustment.	PASS
 /hr-time/timing-attack.html	<harness>	OK
