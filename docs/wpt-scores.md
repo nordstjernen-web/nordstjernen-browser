@@ -57,6 +57,7 @@ they regenerate.
 | 2026-06-25 | c34415a | 88deace8f | 360/696 (51%) | 67908/69508 (97%) | partial: dom/nodes |
 | 2026-06-25 | 0be73e3 | 88deace8f | 363/696 (52%) | 67913/69508 (97%) | partial: dom/nodes html/dom/elements |
 | 2026-06-25 | 7e49644 | 88deace8f | 372/697 (53%) | 67947/69508 (97%) | partial: dom/events hr-time |
+| 2026-06-25 | 003537a | 88deace8f | 392/697 (56%) | 67948/69423 (97%) | partial: dom/events |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -66,12 +67,12 @@ touch.
 
 ## Per-area results — 2026-06-25
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-25-7e49644.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-25-003537a.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 160/275 | 12576/12821 | 217 | 18 | 10 | 0 |
-| `dom/events` | 58/168 | 457/742 | 236 | 22 | 27 | 0 |
+| `dom/events` | 78/168 | 458/657 | 199 | 0 | 0 | 0 |
 | `dom/traversal` | 13/17 | 1589/1605 | 16 | 0 | 0 | 0 |
 | `dom/ranges` | 33/55 | 44352/44537 | 185 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
@@ -85,7 +86,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-25-7e49644.tsv`.
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
-| **Total** | **372/697** | **67947/69508** | **1479** | **43** | **39** | **0** |
+| **Total** | **392/697** | **67948/69423** | **1442** | **21** | **12** | **0** |
 
 ## ROI by area — 2026-06-25
 
@@ -101,9 +102,9 @@ file.
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
-| `dom/events` | 285 | 110 | 2.6 | 73 | 24 |
 | `dom/nodes` | 245 | 115 | 2.1 | 20 | 64 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
+| `dom/events` | 199 | 90 | 2.2 | 52 | 25 |
 | `dom/ranges` | 185 | 22 | 8.4 | 0 | 5 |
 | `html/dom/elements` | 157 | 14 | 11.2 | 1 | 8 |
 | `html/semantics/forms/the-form-element` | 21 | 12 | 1.8 | 2 | 9 |

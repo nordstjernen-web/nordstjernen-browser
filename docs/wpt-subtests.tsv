@@ -775,39 +775,6 @@ test	subtest	status
 /dom/events/Event-dispatch-bubbles-true.html	In window.document with load event	PASS
 /dom/events/Event-dispatch-bubbles-true.html	In window.document.cloneNode(true)	FAIL
 /dom/events/Event-dispatch-click.html	<harness>	TIMEOUT
-/dom/events/Event-dispatch-click.html	basic with click()	PASS
-/dom/events/Event-dispatch-click.html	basic with dispatchEvent()	PASS
-/dom/events/Event-dispatch-click.html	basic with wrong event class	PASS
-/dom/events/Event-dispatch-click.html	disabled checkbox should be checked from dispatchEvent(new MouseEvent("click"))	FAIL
-/dom/events/Event-dispatch-click.html	disabled checkbox should fire onclick	PASS
-/dom/events/Event-dispatch-click.html	disabled checkbox should get legacy-canceled-activation behavior	FAIL
-/dom/events/Event-dispatch-click.html	disabled checkbox should get legacy-canceled-activation behavior 2	PASS
-/dom/events/Event-dispatch-click.html	disabled checkbox still has activation behavior	PASS
-/dom/events/Event-dispatch-click.html	disabled checkbox still has activation behavior, part 2	PASS
-/dom/events/Event-dispatch-click.html	disabled radio should be checked from dispatchEvent(new MouseEvent("click"))	FAIL
-/dom/events/Event-dispatch-click.html	disabled radio should fire onclick	PASS
-/dom/events/Event-dispatch-click.html	disabled radio should get legacy-canceled-activation behavior	FAIL
-/dom/events/Event-dispatch-click.html	disabled radio should get legacy-canceled-activation behavior 2	PASS
-/dom/events/Event-dispatch-click.html	disabled radio still has activation behavior	PASS
-/dom/events/Event-dispatch-click.html	disabled submit button should not activate	PASS
-/dom/events/Event-dispatch-click.html	disabling checkbox in onclick listener shouldn't suppress onchange	PASS
-/dom/events/Event-dispatch-click.html	disabling checkbox in onclick listener shouldn't suppress oninput	PASS
-/dom/events/Event-dispatch-click.html	disabling radio in onclick listener shouldn't suppress onchange	PASS
-/dom/events/Event-dispatch-click.html	disabling radio in onclick listener shouldn't suppress oninput	PASS
-/dom/events/Event-dispatch-click.html	disconnected checkbox should be checked	PASS
-/dom/events/Event-dispatch-click.html	disconnected checkbox should be checked from dispatchEvent(new MouseEvent('click'))	PASS
-/dom/events/Event-dispatch-click.html	disconnected form should not submit	FAIL
-/dom/events/Event-dispatch-click.html	disconnected radio should be checked	PASS
-/dom/events/Event-dispatch-click.html	disconnected radio should be checked from dispatchEvent(new MouseEvent('click'))	PASS
-/dom/events/Event-dispatch-click.html	event state during post-click handling	PASS
-/dom/events/Event-dispatch-click.html	look at parents only when event bubbles	PASS
-/dom/events/Event-dispatch-click.html	look at parents when event bubbles	FAIL
-/dom/events/Event-dispatch-click.html	pick the first with activation behavior <a href>	TIMEOUT
-/dom/events/Event-dispatch-click.html	pick the first with activation behavior <input type=checkbox>	PASS
-/dom/events/Event-dispatch-click.html	pick the first with activation behavior <input type=radio>	PASS
-/dom/events/Event-dispatch-click.html	redispatch during post-click handling	PASS
-/dom/events/Event-dispatch-click.html	submit button should not activate if the event listener disables it	PASS
-/dom/events/Event-dispatch-click.html	submit button that morphed from checkbox should not activate	FAIL
 /dom/events/Event-dispatch-click.tentative.html	<harness>	OK
 /dom/events/Event-dispatch-click.tentative.html	checkbox morphed into another type should not mutate checked state	PASS
 /dom/events/Event-dispatch-click.tentative.html	disabled checkbox should not be checked from label click	PASS
@@ -995,8 +962,6 @@ test	subtest	status
 /dom/events/Event-dispatch-target-removed.html	<harness>	OK
 /dom/events/Event-dispatch-target-removed.html	Event propagation path when an element in it is removed from the DOM	PASS
 /dom/events/Event-dispatch-throwing-multiple-globals.html	<harness>	TIMEOUT
-/dom/events/Event-dispatch-throwing-multiple-globals.html	exception thrown in event listener function should result in error event on listener's global	TIMEOUT
-/dom/events/Event-dispatch-throwing-multiple-globals.html	exception thrown in event listener interface object should result in error event on listener's global	NOTRUN
 /dom/events/Event-dispatch-throwing.html	<harness>	OK
 /dom/events/Event-dispatch-throwing.html	Throwing in event listener with a single listeners	FAIL
 /dom/events/Event-dispatch-throwing.html	Throwing in event listener with multiple listeners	FAIL
@@ -1092,7 +1057,6 @@ test	subtest	status
 /dom/events/Event-subclasses-constructors.html	WheelEvent constructor (null argument)	PASS
 /dom/events/Event-subclasses-constructors.html	WheelEvent constructor (undefined argument)	PASS
 /dom/events/Event-timestamp-cross-realm-getter.html	<harness>	TIMEOUT
-/dom/events/Event-timestamp-cross-realm-getter.html	event.timeStamp is initialized using event's relevant global object	TIMEOUT
 /dom/events/Event-timestamp-high-resolution.html	<harness>	OK
 /dom/events/Event-timestamp-high-resolution.html	Constructed FocusEvent timestamp should be high resolution and have the same time origin as performance.now()	PASS
 /dom/events/Event-timestamp-high-resolution.html	Constructed KeyboardEvent timestamp should be high resolution and have the same time origin as performance.now()	PASS
@@ -1125,23 +1089,14 @@ test	subtest	status
 /dom/events/EventListener-handleEvent.html	throws if `handleEvent` is falsy and not callable	FAIL
 /dom/events/EventListener-handleEvent.html	throws if `handleEvent` is thruthy and not callable	FAIL
 /dom/events/EventListener-incumbent-global-1.sub.html	<harness>	TIMEOUT
-/dom/events/EventListener-incumbent-global-1.sub.html	Check the incumbent global EventListeners  are called with	TIMEOUT
 /dom/events/EventListener-incumbent-global-2.sub.html	<harness>	TIMEOUT
-/dom/events/EventListener-incumbent-global-2.sub.html	Check the incumbent global EventListeners  are called with	TIMEOUT
 /dom/events/EventListener-invoke-legacy.html	<harness>	TIMEOUT
-/dom/events/EventListener-invoke-legacy.html	Legacy listener of animationend	TIMEOUT
-/dom/events/EventListener-invoke-legacy.html	Legacy listener of animationstart	TIMEOUT
-/dom/events/EventListener-invoke-legacy.html	Legacy listener of transitionend	TIMEOUT
-/dom/events/EventListener-invoke-legacy.html	Listener of animationend	PASS
-/dom/events/EventListener-invoke-legacy.html	Listener of animationstart	TIMEOUT
-/dom/events/EventListener-invoke-legacy.html	Listener of transitionend	TIMEOUT
 /dom/events/EventListenerOptions-capture.html	<harness>	OK
 /dom/events/EventListenerOptions-capture.html	Capture boolean should be honored correctly	PASS
 /dom/events/EventListenerOptions-capture.html	Capture option should be honored correctly	PASS
 /dom/events/EventListenerOptions-capture.html	Equivalence of option values	PASS
 /dom/events/EventListenerOptions-capture.html	Supports capture option	PASS
 /dom/events/EventTarget-add-listener-platform-object.html	<harness>	TIMEOUT
-/dom/events/EventTarget-add-listener-platform-object.html	addEventListener with a platform object	NOTRUN
 /dom/events/EventTarget-add-remove-listener.any.html	<harness>	OK
 /dom/events/EventTarget-add-remove-listener.any.html	Removing an event listener without explicit capture arg should succeed	PASS
 /dom/events/EventTarget-addEventListener.any.html	<harness>	OK
@@ -1239,11 +1194,16 @@ test	subtest	status
 /dom/events/no-focus-events-at-clicking-editable-content-in-link.html	Click editable link	FAIL
 /dom/events/non-cancelable-when-passive/generic-events-stay-cancelable.html	<harness>	OK
 /dom/events/non-cancelable-when-passive/generic-events-stay-cancelable.html	A generic event with only passive listeners remains cancelable	PASS
-/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-body.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-div.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-document.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-root.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-window.html	<harness>	TIMEOUT
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-body.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-body.html	non-passive mousewheel event listener on body	PASS
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-div.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-div.html	non-passive mousewheel event listener on div	PASS
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-document.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-document.html	non-passive mousewheel event listener on document	PASS
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-root.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-root.html	non-passive mousewheel event listener on root	PASS
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-window.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-mousewheel-event-listener-on-window.html	non-passive mousewheel event listener on window	PASS
 /dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-body.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-div.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/non-passive-touchmove-event-listener-on-document.html	<harness>	TIMEOUT
@@ -1254,16 +1214,26 @@ test	subtest	status
 /dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-document.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-root.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/non-passive-touchstart-event-listener-on-window.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-body.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-div.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-document.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-root.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-window.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-body.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-div.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-document.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-root.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-window.html	<harness>	TIMEOUT
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-body.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-body.html	non-passive wheel event listener on body	PASS
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-div.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-div.html	non-passive wheel event listener on div	PASS
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-document.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-document.html	non-passive wheel event listener on document	PASS
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-root.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-root.html	non-passive wheel event listener on root	PASS
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-window.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/non-passive-wheel-event-listener-on-window.html	non-passive wheel event listener on window	PASS
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-body.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-body.html	passive mousewheel event listener on body	PASS
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-div.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-div.html	passive mousewheel event listener on div	PASS
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-document.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-document.html	passive mousewheel event listener on document	PASS
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-root.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-root.html	passive mousewheel event listener on root	PASS
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-window.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-mousewheel-event-listener-on-window.html	passive mousewheel event listener on window	PASS
 /dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-body.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-div.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/passive-touchmove-event-listener-on-document.html	<harness>	TIMEOUT
@@ -1274,11 +1244,16 @@ test	subtest	status
 /dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-document.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-root.html	<harness>	TIMEOUT
 /dom/events/non-cancelable-when-passive/passive-touchstart-event-listener-on-window.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-body.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-div.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-document.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-root.html	<harness>	TIMEOUT
-/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-window.html	<harness>	TIMEOUT
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-body.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-body.html	passive wheel event listener on body	PASS
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-div.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-div.html	passive wheel event listener on div	PASS
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-document.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-document.html	passive wheel event listener on document	PASS
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-root.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-root.html	passive wheel event listener on root	PASS
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-window.html	<harness>	OK
+/dom/events/non-cancelable-when-passive/passive-wheel-event-listener-on-window.html	passive wheel event listener on window	PASS
 /dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html	<harness>	OK
 /dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html	Synthetic mousewheel event with interface Event is not cancelable	PASS
 /dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html	Synthetic mousewheel event with interface WheelEvent is not cancelable	PASS
@@ -1304,11 +1279,11 @@ test	subtest	status
 /dom/events/passive-by-default.html	mousewheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive by default for Window	FAIL
-/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Document	FAIL
+/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Document	PASS
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for HTMLElement	PASS
-/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Window	FAIL
+/dom/events/passive-by-default.html	mousewheel listener is passive with {passive:true} for Window	PASS
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	mousewheel listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1328,11 +1303,11 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchend listener is non-passive with {passive:undefined} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is non-passive with {passive:undefined} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is non-passive with {passive:undefined} for Window	PASS
-/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Document	FAIL
+/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Document	PASS
 /dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for HTMLElement	PASS
-/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Window	FAIL
+/dom/events/passive-by-default.html	touchend listener is passive with {passive:true} for Window	PASS
 /dom/events/passive-by-default.html	touchmove listener is non-passive by default for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchmove listener is non-passive with {passive:false} for Document	PASS
 /dom/events/passive-by-default.html	touchmove listener is non-passive with {passive:false} for HTMLElement	PASS
@@ -1344,11 +1319,11 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchmove listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive by default for Window	FAIL
-/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Document	FAIL
+/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Document	PASS
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for HTMLElement	PASS
-/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Window	FAIL
+/dom/events/passive-by-default.html	touchmove listener is passive with {passive:true} for Window	PASS
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchmove listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1364,11 +1339,11 @@ test	subtest	status
 /dom/events/passive-by-default.html	touchstart listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive by default for Window	FAIL
-/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Document	FAIL
+/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Document	PASS
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for HTMLElement	PASS
-/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Window	FAIL
+/dom/events/passive-by-default.html	touchstart listener is passive with {passive:true} for Window	PASS
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	touchstart listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1384,11 +1359,11 @@ test	subtest	status
 /dom/events/passive-by-default.html	wheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive by default for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive by default for Window	FAIL
-/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Document	FAIL
+/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Document	PASS
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for HTMLElement	PASS
-/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Window	FAIL
+/dom/events/passive-by-default.html	wheel listener is passive with {passive:true} for Window	PASS
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for Document	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for HTMLElement	FAIL
 /dom/events/passive-by-default.html	wheel listener is passive with {passive:undefined} for HTMLElement	FAIL
@@ -1409,12 +1384,9 @@ test	subtest	status
 /dom/events/remove-all-listeners.html	Removing all listeners and then adding a new one should work.	PASS
 /dom/events/scrolling/iframe-chains.html	<harness>	OK
 /dom/events/scrolling/iframe-chains.html	Wheel scroll in iframe chains to containing element.	FAIL
-/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	TIMEOUT
+/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	NONE
 /dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	<harness>	TIMEOUT
-/dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	Ensure that the scroll position is not lost when the local iframe is set to display:none and shown again.	TIMEOUT
-/dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	Ensure that the scroll position is not lost when the remote iframe is set to display:none and shown again.	NOTRUN
 /dom/events/scrolling/scroll-cross-origin-iframes.html	<harness>	TIMEOUT
-/dom/events/scrolling/scroll-cross-origin-iframes.html	Verify sibling cross-origin iframes can wheel-scroll.	TIMEOUT
 /dom/events/scrolling/scroll-event-fired-to-element.html	<harness>	OK
 /dom/events/scrolling/scroll-event-fired-to-element.html	scrollTop and scrollLeft being set with invalid scroll offset.	PASS
 /dom/events/scrolling/scroll-event-fired-to-element.html	scrollTop and scrollLeft being set with the same value.	PASS
@@ -1427,13 +1399,10 @@ test	subtest	status
 /dom/events/scrolling/scroll-event-fired-to-iframe.html	scrollX and scrollY when scrolling above maximum Scroll.	FAIL
 /dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html	scrolling state is false at the end of the test	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	Move down, up and down again, receive scrollend event only once	FAIL
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	Move right, left and right again, receive scrollend event only once	FAIL
 /dom/events/scrolling/scrollend-event-fired-after-snap.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after fling snap animation completion.	NOTRUN
-/dom/events/scrolling/scrollend-event-fired-after-snap.html	Tests that scrollend is fired after scroll snap animation completion.	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-for-mandatory-snap-point-after-load.html	scrollend event fired after load for mandatory snap point	FAIL
 /dom/events/scrolling/scrollend-event-fired-for-programmatic-scroll.html	<harness>	TIMEOUT
@@ -1445,21 +1414,11 @@ test	subtest	status
 /dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-to-element-with-overscroll-behavior.html	Tests that the scroll is not propagated beyond div with non-auto overscroll-behavior.	FAIL
 /dom/events/scrolling/scrollend-event-fired-to-window.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-fired-to-window.html	testing, vertical	TIMEOUT
 /dom/events/scrolling/scrollend-event-fires-for-repeat-key-ending-after-scroll-container-end-is-reached.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fires-on-visual-viewport.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fires-to-iframe-window.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-for-user-scroll.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when clicking scrollbar.	NOTRUN
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when dragging the scrollbar thumb.	NOTRUN
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when mouse wheel scrolling.	NOTRUN
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when sending DOWN key to the target.	NOTRUN
-/dom/events/scrolling/scrollend-event-for-user-scroll.html	Tests that the target_div gets scrollend event when touch dragging.	TIMEOUT
 /dom/events/scrolling/scrollend-event-handler-content-attributes.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is fired to document event handler property	NOTRUN
-/dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is fired to element event handler property	NOTRUN
-/dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is handled by event handler content attribute.	TIMEOUT
-/dom/events/scrolling/scrollend-event-handler-content-attributes.html	Tests scrollend event is not fired to document body event handler content attribute.	NOTRUN
 /dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via keys on div shouldn't fire scrollend.	FAIL
@@ -1467,14 +1426,9 @@ test	subtest	status
 /dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on div shouldn't fire scrollend.	FAIL
 /dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on document shouldn't fire scrollend.	FAIL
 /dom/events/scrolling/scrollend-fires-to-text-input.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-fires-to-text-input.html	scrolled input field should receive scrollend when setting scrollLeft.	TIMEOUT
-/dom/events/scrolling/scrollend-fires-to-text-input.html	scrolled input field should receive scrollend with scrollBy({ behavior: 'instant' }).	NOTRUN
-/dom/events/scrolling/scrollend-fires-to-text-input.html	scrolled input field should receive scrollend with scrollBy({ behavior: 'smooth' }).	NOTRUN
-/dom/events/scrolling/scrollend-fires-to-text-input.html	scrolled input field should receive scrollend with scrollTo({ behavior: 'instant' }).	NOTRUN
-/dom/events/scrolling/scrollend-fires-to-text-input.html	scrolled input field should receive scrollend with scrollTo({ behavior: 'smooth' }).	NOTRUN
 /dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html	<harness>	TIMEOUT
-/dom/events/scrolling/wheel-event-composed.html	<harness>	TIMEOUT
-/dom/events/scrolling/wheel-event-composed.html	wheel event must be composed	TIMEOUT
+/dom/events/scrolling/wheel-event-composed.html	<harness>	OK
+/dom/events/scrolling/wheel-event-composed.html	wheel event must be composed	FAIL
 /dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html	<harness>	OK
 /dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html	When `preventDefault` is called on a WheelEvent, scrolling should be prevented.	FAIL
 /dom/events/scrolling/wheel-event-transactions-basic.html	<harness>	TIMEOUT
@@ -1494,47 +1448,8 @@ test	subtest	status
 /dom/events/scrolling/wheel-event-transactions-target-resize.html	Resize the initial target and use a passive:true listener	FAIL
 /dom/events/shadow-relatedTarget.html	<harness>	TIMEOUT
 /dom/events/webkit-animation-end-event.html	<harness>	TIMEOUT
-/dom/events/webkit-animation-end-event.html	dispatchEvent of a webkitAnimationEnd event does not trigger an unprefixed event handler or listener	PASS
-/dom/events/webkit-animation-end-event.html	dispatchEvent of a webkitAnimationEnd event does trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-end-event.html	dispatchEvent of an animationend event does not trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-end-event.html	event types for prefixed and unprefixed animationend event handlers should be named appropriately	FAIL
-/dom/events/webkit-animation-end-event.html	event types for prefixed and unprefixed animationend event listeners should be named appropriately	NOTRUN
-/dom/events/webkit-animation-end-event.html	onanimationend and onwebkitanimationend are not aliases	FAIL
-/dom/events/webkit-animation-end-event.html	onwebkitanimationend event handler should not trigger if an unprefixed event handler also exists	FAIL
-/dom/events/webkit-animation-end-event.html	onwebkitanimationend event handler should not trigger if an unprefixed listener also exists	FAIL
-/dom/events/webkit-animation-end-event.html	onwebkitanimationend event handler should trigger for an animation	FAIL
-/dom/events/webkit-animation-end-event.html	webkitAnimationEnd event listener is case sensitive	NOTRUN
-/dom/events/webkit-animation-end-event.html	webkitAnimationEnd event listener should not trigger if an unprefixed event handler also exists	NOTRUN
-/dom/events/webkit-animation-end-event.html	webkitAnimationEnd event listener should not trigger if an unprefixed listener also exists	NOTRUN
-/dom/events/webkit-animation-end-event.html	webkitAnimationEnd event listener should trigger for an animation	TIMEOUT
 /dom/events/webkit-animation-iteration-event.html	<harness>	TIMEOUT
-/dom/events/webkit-animation-iteration-event.html	dispatchEvent of a webkitAnimationIteration event does not trigger an unprefixed event handler or listener	PASS
-/dom/events/webkit-animation-iteration-event.html	dispatchEvent of a webkitAnimationIteration event does trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-iteration-event.html	dispatchEvent of an animationiteration event does not trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-iteration-event.html	event types for prefixed and unprefixed animationiteration event handlers should be named appropriately	FAIL
-/dom/events/webkit-animation-iteration-event.html	event types for prefixed and unprefixed animationiteration event listeners should be named appropriately	NOTRUN
-/dom/events/webkit-animation-iteration-event.html	onanimationiteration and onwebkitanimationiteration are not aliases	FAIL
-/dom/events/webkit-animation-iteration-event.html	onwebkitanimationiteration event handler should not trigger if an unprefixed event handler also exists	FAIL
-/dom/events/webkit-animation-iteration-event.html	onwebkitanimationiteration event handler should not trigger if an unprefixed listener also exists	FAIL
-/dom/events/webkit-animation-iteration-event.html	onwebkitanimationiteration event handler should trigger for an animation	FAIL
-/dom/events/webkit-animation-iteration-event.html	webkitAnimationIteration event listener is case sensitive	NOTRUN
-/dom/events/webkit-animation-iteration-event.html	webkitAnimationIteration event listener should not trigger if an unprefixed event handler also exists	NOTRUN
-/dom/events/webkit-animation-iteration-event.html	webkitAnimationIteration event listener should not trigger if an unprefixed listener also exists	NOTRUN
-/dom/events/webkit-animation-iteration-event.html	webkitAnimationIteration event listener should trigger for an animation	TIMEOUT
 /dom/events/webkit-animation-start-event.html	<harness>	TIMEOUT
-/dom/events/webkit-animation-start-event.html	dispatchEvent of a webkitAnimationStart event does not trigger an unprefixed event handler or listener	PASS
-/dom/events/webkit-animation-start-event.html	dispatchEvent of a webkitAnimationStart event does trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-start-event.html	dispatchEvent of an animationstart event does not trigger a prefixed event handler or listener	FAIL
-/dom/events/webkit-animation-start-event.html	event types for prefixed and unprefixed animationstart event handlers should be named appropriately	FAIL
-/dom/events/webkit-animation-start-event.html	event types for prefixed and unprefixed animationstart event listeners should be named appropriately	NOTRUN
-/dom/events/webkit-animation-start-event.html	onanimationstart and onwebkitanimationstart are not aliases	FAIL
-/dom/events/webkit-animation-start-event.html	onwebkitanimationstart event handler should not trigger if an unprefixed event handler also exists	FAIL
-/dom/events/webkit-animation-start-event.html	onwebkitanimationstart event handler should not trigger if an unprefixed listener also exists	FAIL
-/dom/events/webkit-animation-start-event.html	onwebkitanimationstart event handler should trigger for an animation	FAIL
-/dom/events/webkit-animation-start-event.html	webkitAnimationStart event listener is case sensitive	NOTRUN
-/dom/events/webkit-animation-start-event.html	webkitAnimationStart event listener should not trigger if an unprefixed event handler also exists	NOTRUN
-/dom/events/webkit-animation-start-event.html	webkitAnimationStart event listener should not trigger if an unprefixed listener also exists	NOTRUN
-/dom/events/webkit-animation-start-event.html	webkitAnimationStart event listener should trigger for an animation	TIMEOUT
 /dom/events/webkit-transition-end-event.html	<harness>	OK
 /dom/events/webkit-transition-end-event.html	dispatchEvent of a webkitTransitionEnd event does not trigger an unprefixed event handler or listener	PASS
 /dom/events/webkit-transition-end-event.html	dispatchEvent of a webkitTransitionEnd event does trigger a prefixed event handler or listener	FAIL
