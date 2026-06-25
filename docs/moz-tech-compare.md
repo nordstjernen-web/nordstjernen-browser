@@ -24,8 +24,9 @@ values: minimal, clean-room, single-human-auditable, no-JIT, no telemetry.
 
 The first 20 are grouped Security → Privacy → Performance → Quality/Process,
 ordered by leverage within each group; a second pass adds ten more (21–30),
-leaning privacy-and-platform. A ranked summary table covering all 30 is at
-the end.
+leaning privacy-and-platform, and a third (31–40) digs into engine internals
+— memory-safety mitigation and main-thread responsiveness. A ranked summary
+table covering all 40 is at the end.
 
 ---
 
@@ -448,6 +449,142 @@ process-architecture themes above.
   position and offer to restore them on next launch.
 - **ROI: Med · Effort: M · Fit: good.**
 
+## Third pass — engine internals (31–40)
+
+Ten more from a source-level read, weighted toward the engine internals
+where the leverage is highest: memory-safety mitigation, main-thread
+responsiveness, and a couple of remaining platform gaps. Each was checked
+against the current code.
+
+### 31. A hardened heap allocator ★ *(Security)*
+
+- **Upstream:** the in-tree allocator poisons freed memory, quarantines
+  and delays reuse, and a probabilistic guard-page checker (PHC) catches
+  use-after-free/overflows in the wild — `memory/build/mozjemalloc.cpp`
+  and the PHC replace-malloc layer.
+- **Nordstjernen today:** links the **system `malloc`** with no poisoning,
+  guard pages, or delayed reuse — so a use-after-free in 134k lines of C is
+  directly exploitable rather than a likely crash.
+- **The move:** adopt a hardened allocator (a poisoning/guard-page malloc,
+  or a thin wrapper that poisons on free and delays reuse for hot
+  allocation classes). One of the highest mitigation-per-effort wins
+  available to a C codebase, and complementary to the #1 sandboxing.
+- **ROI: High · Effort: M · Fit: excellent — pure mitigation, no API
+  surface.**
+
+### 32. Off-main-thread image decoding ★ *(Performance)*
+
+- **Upstream:** image decoding runs on a dedicated thread pool so a big or
+  slow image never stalls script/layout — `image/DecodePool.cpp`.
+- **Nordstjernen today:** image decode (`src/image.c`, Wuffs/libwebp) runs
+  **synchronously on the calling thread**, so a large JPEG/PNG blocks the
+  render path.
+- **The move:** move decode to a worker thread (the project already has a
+  threading model) and upload the surface when ready, showing layout
+  reflow on completion.
+- **ROI: High · Effort: M · Fit: good.**
+
+### 33. Retained paint tree / partial repaint ★ *(Performance)*
+
+- **Upstream:** the display list is *retained* and only the invalidated
+  subtrees are rebuilt between frames, instead of regenerating the whole
+  scene on every change — `layout/painting/RetainedDisplayListBuilder.h`.
+- **Nordstjernen today:** no damage-rect/partial-invalidation path is
+  visible in `src/paint.c`/`src/render.c`; the paint tree is rebuilt wholesale.
+- **The move:** track a dirty region and rebuild only the affected paint
+  subtrees, reusing cached render nodes elsewhere. Large win for
+  scroll/animation/hover on complex pages.
+- **ROI: High · Effort: M–L · Fit: good.**
+
+### 34. Unload background tabs under memory pressure *(Memory)*
+
+- **Upstream:** under memory pressure the least-recently-used background
+  tabs are discarded (and seamlessly reloaded on return), bounding total
+  footprint — the `TabUnloader` mechanism.
+- **Nordstjernen today:** every open tab keeps a live renderer process; no
+  memory-pressure-driven discard.
+- **The move:** on a memory-pressure signal, snapshot and tear down the
+  LRU background tab's renderer, restoring it (via the #14 bfcache state)
+  when reselected.
+- **ROI: Med · Effort: M · Fit: good (pairs with bfcache).**
+
+### 35. SafeBrowsing-style phishing & malware protection *(Safety)*
+
+- **Upstream:** navigations are checked against regularly-updated phishing
+  and malware lists, queried privately via hash prefixes —
+  `toolkit/components/url-classifier`.
+- **Nordstjernen today:** no phishing/malware interstitial; a user can be
+  navigated straight onto a known-malicious page.
+- **The move:** consult a compact, privately-queried (prefix-hash) blocklist
+  before committing a top-level navigation and show an interstitial. Distinct
+  from the *tracking* blocklist (#22): this protects the user, not their
+  privacy.
+- **ROI: Med–High · Effort: M · Fit: good (needs a list channel, no
+  telemetry).**
+
+### 36. Resource hints: speculative preconnect & prefetch *(Performance)*
+
+- **Upstream:** `dns-prefetch`/`preconnect` warm DNS+TLS before a resource
+  is requested and `prefetch`/speculation-rules pull likely next-navigation
+  resources early — `dom/html/HTMLDNSPrefetch.cpp`,
+  `dom/base/SpeculationRules.cpp`, `nsIOService::SpeculativeConnect`.
+- **Nordstjernen today:** `<link rel=preconnect/prefetch/dns-prefetch>` are
+  recognized as valid `rel` tokens but **not acted on**; only external
+  *scripts* are pre-fetched (`ns_js_prefetch_external_scripts`). No
+  connection warming, no next-navigation prefetch.
+- **The move:** honor `preconnect` (open the TLS connection early via
+  libcurl) and `prefetch` (fetch into the existing disk cache), hiding
+  latency on the next request/navigation.
+- **ROI: Med · Effort: S–M · Fit: good.**
+
+### 37. Private browsing mode ★ *(Privacy)*
+
+- **Upstream:** a private window keeps cookies/cache/history/storage in an
+  ephemeral, isolated container discarded on close (keyed by
+  `privateBrowsingId` in the origin attributes — `netwerk/base/LoadInfo.cpp`).
+- **Nordstjernen today:** no private/incognito mode; all state is persistent.
+- **The move:** an ephemeral profile — in-memory cookie jar/cache/storage,
+  no history writes, cleared on window close. The cookie/storage
+  partitioning machinery already present is most of the plumbing.
+- **ROI: High · Effort: M · Fit: excellent (core to a privacy browser).**
+
+### 38. HTML Sanitizer API (`Element.setHTML`) *(Security)*
+
+- **Upstream:** a built-in sanitizer drops scripts/event-handlers/unsafe
+  URLs from untrusted HTML at the DOM-injection sink —
+  `dom/security/sanitizer/`.
+- **Nordstjernen today:** no Sanitizer API; pages that want to inject
+  untrusted HTML safely have no built-in safe sink.
+- **The move:** implement `Element.setHTML()`/`Sanitizer` over the existing
+  lexbor parse + an allow-list filter — a standards-track XSS defense that
+  complements CSP and ORB (#5).
+- **ROI: Med · Effort: M · Fit: good.**
+
+### 39. Off-main-thread HTML parsing/tokenization *(Performance)*
+
+- **Upstream:** the HTML tokenizer runs on a separate stream-parser thread
+  so parsing overlaps network and never blocks the UI —
+  `parser/html/nsHtml5StreamParser.cpp`.
+- **Nordstjernen today:** `ns_html_parse` runs **synchronously** on the
+  caller; a large document parses in one main-thread burst.
+- **The move:** run tokenization on a worker as bytes arrive, handing the
+  built tree back for layout — overlapping parse with download and keeping
+  the shell responsive on big pages.
+- **ROI: Med · Effort: L · Fit: good (a threading model already exists).**
+
+### 40. Incremental / low-pause garbage collection *(Performance)*
+
+- **Upstream:** the JS engine collects incrementally and generationally to
+  keep GC pauses off the frame budget — `js/src/gc/`.
+- **Nordstjernen today:** QuickJS reclaims via reference counting plus a
+  stop-the-world mark-sweep for cycles; on a large heap that pause is fully
+  visible because there is no JIT headroom to absorb it.
+- **The move:** budget the cycle collector incrementally (time-sliced
+  marking) so collection interleaves with rendering instead of stalling it.
+  Higher risk (engine internals) — listed for completeness as the remaining
+  responsiveness lever.
+- **ROI: Med · Effort: L · Fit: medium (touches the JS runtime).**
+
 ---
 
 ## Ranked summary
@@ -465,13 +602,19 @@ browser whose pitch is security and privacy); effort is rough.
 | 13 | Speculative preload scanner | Perf | High | M |
 | 14 | Back/forward cache | Perf | High | M |
 | 22 | Tracking-protection blocklists | Privacy | High | M |
+| 31 | Hardened heap allocator | Security | High | M |
+| 32 | Off-main-thread image decoding | Perf | High | M |
+| 37 | Private browsing mode | Privacy | High | M |
+| 33 | Retained paint tree / partial repaint | Perf | High | M–L |
 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
+| 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
 | 7 | Reduce/jitter timer precision | Security | Med | S |
 | 12 | DNS-over-HTTPS | Privacy | Med | S |
 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
 | 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
 | 27 | Lazy image loading | Perf | Med | S–M |
+| 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
 | 5 | Opaque Response Blocking | Security | Med | M |
 | 4 | Font sanitization before raster | Security | Med | M |
 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
@@ -481,18 +624,23 @@ browser whose pitch is security and privacy); effort is rough.
 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
 | 30 | Session restore / crash recovery | UX | Med | M |
+| 34 | Background-tab unloading | Memory | Med | M |
+| 38 | HTML Sanitizer API | Security | Med | M |
 | 3 | Site isolation (per-origin) | Security | Med | L |
 | 19 | Accessibility tree | Quality | Med | L |
 | 6 | Compact cert revocation | Security | Med | L |
 | 28 | On-device page translation | UX | Med | L |
 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 40 | Incremental / low-pause GC | Perf | Med | L |
 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Suggested first picks: **#2** and **#8** are the lowest-risk, highest-certainty
 wins; **#11** and **#26** are tiny; **#1** is the highest-leverage and the most
 architecturally interesting (and uniquely cheap here because the WASM
-runtime is already in-tree); **#21** is the biggest single privacy statement
-if appetite allows.
+runtime is already in-tree); **#31** (a hardened allocator) is the cheapest
+broad exploit-mitigation for a C codebase; **#21** and **#37** are the biggest
+single privacy statements if appetite allows.
 
 ## Anti-lessons — what *not* to copy
 
