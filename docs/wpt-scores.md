@@ -53,6 +53,7 @@ they regenerate.
 | 2026-06-24 | c19759a | f6fd39b13 | 345/696 (49%) | 67576/69508 (97%) | partial: dom/ranges/Range-mutations-insertBefore.html dom/ranges/Range-mutations-replaceChild.html dom/ranges/Range-mutations-removeChild.html |
 | 2026-06-24 | c9783fa | f6fd39b13 | 346/696 (49%) | 67593/69508 (97%) | partial: dom/nodes/MutationObserver-characterData.html dom/nodes/MutationObserver-attributes.html |
 | 2026-06-24 | e09e8b2 | f6fd39b13 | 352/696 (50%) | 67628/69501 (97%) | partial: dom/nodes/moveBefore |
+| 2026-06-25 | 7041e0f | 88deace8f | 358/696 (51%) | 67884/69508 (97%) | partial: dom/nodes dom/collections html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -60,13 +61,13 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-24
+## Per-area results — 2026-06-25
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-24-e09e8b2.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-25-7041e0f.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 151/275 | 12295/12814 | 497 | 17 | 5 | 0 |
+| `dom/nodes` | 157/275 | 12549/12821 | 243 | 18 | 11 | 0 |
 | `dom/events` | 50/167 | 424/742 | 273 | 22 | 23 | 0 |
 | `dom/traversal` | 13/17 | 1589/1605 | 16 | 0 | 0 | 0 |
 | `dom/ranges` | 33/55 | 44352/44537 | 185 | 0 | 0 | 0 |
@@ -77,13 +78,13 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-24-e09e8b2.tsv`.
 | `hr-time` | 4/13 | 14/23 | 8 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
 | `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
-| `html/dom/elements` | 40/56 | 746/907 | 158 | 1 | 2 | 0 |
+| `html/dom/elements` | 40/56 | 748/907 | 156 | 1 | 2 | 0 |
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
-| **Total** | **352/696** | **67628/69501** | **1801** | **42** | **30** | **0** |
+| **Total** | **358/696** | **67884/69508** | **1545** | **43** | **36** | **0** |
 
-## ROI by area — 2026-06-24
+## ROI by area — 2026-06-25
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -96,12 +97,12 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `dom/nodes` | 519 | 124 | 4.2 | 21 | 68 |
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 318 | 117 | 2.7 | 72 | 30 |
+| `dom/nodes` | 272 | 118 | 2.3 | 21 | 65 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
 | `dom/ranges` | 185 | 22 | 8.4 | 0 | 5 |
-| `html/dom/elements` | 161 | 16 | 10.1 | 1 | 9 |
+| `html/dom/elements` | 159 | 16 | 9.9 | 1 | 10 |
 | `html/semantics/forms/the-form-element` | 21 | 12 | 1.8 | 2 | 9 |
 | `dom/traversal` | 16 | 4 | 4.0 | 0 | 2 |
 | `dom/collections` | 10 | 5 | 2.0 | 0 | 4 |
@@ -128,7 +129,7 @@ grep `polyfills.js` first.
 | # | Improvement | Evidence | Est. gain |
 |---|-------------|----------|-----------|
 | 1 | ~~**Real `iframe.contentDocument` realm documents**~~ — **landed.** `contentDocument` is now backed by a real `NS_NODE_DOCUMENT` node parented under the iframe (the old `Object.create(document)` facade silently routed `appendChild`/`removeChild`/`firstChild` to the *main* document and never terminated `parentNode` chains at a Document). `createHTMLDocument`/`createDocument` were unified onto the same live document-node machinery (no more stale snapshot getters). `Document-characterSet-normalization-1/2` now pass fully (315+339), and `Range-surroundContents`/`insertNode`/`extractContents`/`cloneContents`/`deleteContents` jumped from harness-broken to majority-passing. Residual `dom/ranges` failures are now a *separate* root cause — deeper Range-algorithm bugs (e.g. `surroundContents` setup throwing `TypeError` on text-node `newParent` cases), not the realm-document gate | `Document-characterSet-normalization-{1,2}.html` (now 315/339 pass), `Range-surroundContents.html` (0→690/1840) | landed |
-| 2 | XML/XHTML **document variants + namespaced node model** — `Document-createElementNS` (281) and `Document-createElement` (88) fail only their "in XML/XHTML document" cases; `Node-lookupNamespaceURI` (48), `lookupPrefix`, `isDefaultNamespace` are stubs; per-element/attr namespace not tracked | `Document-createElementNS.html`, `Node-lookupNamespaceURI.html` | ~450 |
+| 2 | ~~**XML/XHTML document variants + namespaced node model**~~ — **largely landed.** XHTML/XML/SVG resources now parse through a real namespace-aware parser (`src/xml.c::ns_xml_parse`) instead of the HTML parser, building the `ns_node` DOM with the same conventions as `createElementNS` (qualified name, `data-nd-ns-uri`/`data-nd-ns-prefix`, SVG/foreign/keep-case flags). It is wired into `DOMParser` and into iframe content loading, where the frame's `contentDocument` is now marked a real `XMLDocument`; `createElement` honours the spec namespace rule (HTML namespace for an HTML or `application/xhtml+xml` document, null otherwise). The old "didn't load" setup-assertion failure (an extra trailing newline from `<body/>` parsed as an HTML start tag) is gone. `Document-createElement` **98→147/147**, `Document-createElementNS` **400→595/596**, and 15 of the `dom/nodes/*-xhtml.xhtml` fixtures now pass. **Remaining**, each its own root cause: the top-level *navigation* path for an `application/xhtml+xml` page is still HTML-parsed; `Node-lookupNamespaceURI`/`lookupPrefix`/`isDefaultNamespace`; full Unicode XML `Name` validation; and DTD-declared entity sets beyond the predefined five | `Document-createElement.html` (98→147), `Document-createElementNS.html` (400→595) | landed (~250) |
 | 3 | Unblock the harness-broken `dom/events` files (pages hang waiting on `test_driver`). **Partly landed:** a testdriver bridge in the WPT hook (`data/js/wpt-hook.js`) now implements `test_driver.click`, `send_keys`, and a pointer/key `action_sequence`, synthesising real mouse/pointer/keyboard events through the engine. Files that only needed a click/keypress flipped from TIMEOUT to passing (`pointer-event-document-move`, `focus-event-document-move`, `handler-count`, `label-default-action`, `legacy-pre-activation-behavior`, `preventDefault-during-activation-behavior`). **Remaining** is two larger engine features, each its own root cause: (a) the ~40-file `non-cancelable-when-passive/` cluster needs passive-listener tracking (today `addEventListener` parses `passive` then discards it) plus `TouchEvent`/`WheelEvent` synthesis with cancelability derived from passivity; (b) the `scrolling/*` cluster needs real scroll + `scrollend` infrastructure | `non-cancelable-when-passive/*` (40 files), `scrolling/scrollend-*` | ~379 |
 | 4 | ~~**`innerText`/`outerText` rendered-text algorithm**~~ — **largely landed.** The getter now flushes layout before reading (so dynamically-set `white-space`/`visibility`/`text-transform` are seen — `dynamic-getter.html` went 4/7→7/7), collects rendered text with a spec-style *required-line-break-count* model (`<p>` yields blank lines, `<br>` at end of block is kept, leading/trailing block breaks are dropped without eating preserved `white-space:pre` spaces), honours `visibility:hidden`/`collapse`, treats `display:contents` as boxless and flex/grid items as blockified, skips replaced/non-rendered subtrees (`textarea`/`iframe`/`audio`/`video`/`canvas`/`img`/`object`/`embed`/SVG/MathML), renders `<option>` and (label-less) `<optgroup>` as blocks, and applies `text-transform`. `getter.html` 159→232. **Remaining** is layout-geometry-dependent: tab-separated table cells, `::first-line`/`::first-letter` pseudo styling, shadow-DOM exclusion, whitespace at inline-block boundaries, and the `?white-space=` variant files the local runner cannot expand | `getter.html` (159→232), `dynamic-getter.html` (4/7→7/7) | landed (~80) |
 | 5 | **URL long tail** — setter edge cases, constructor parsing, IDNA. **Partly landed:** the JS→C marshalling for URL/`<a>`/`<area>` component setters used `JS_ToCString`+`strlen`, which truncated the value at the first embedded U+0000; setters now pass the real byte length (`JS_ToCStringLen` → `ns_url_set_component_len`) so NULs are percent-encoded (`%00`) per the WHATWG percent-encode sets instead of cutting the value short. `url-setters-stripping` 217→260, `urlencoded-parser` 66→105, `url-setters-a-area` +28, `url-setters`/`url-constructor`/`percent-encoding` smaller gains (~153 total). **Remaining**, each its own root cause: lexbor host-setter port parsing (`host='example.com:invalid'` should set hostname and stop the port parser), opaque-path erasure for non-special schemes, trailing-space handling when clearing `search`/`hash` on opaque paths, legacy query-encoding (`big5`/`euc-kr`/…) percent-encoding, and `IdnaTestV2` | `url-setters-stripping.any.html` (217→260), `urlencoded-parser.any.html` (66→105) | landed (~153) |

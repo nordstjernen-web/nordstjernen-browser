@@ -3490,7 +3490,7 @@ test	subtest	status
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created MathML document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created SVG document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created SVG document by DOMParser ('image/svg+xml')	FAIL
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document by DOMParser ('application/xhtml+xml')	FAIL
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('application/xml')	FAIL
@@ -3526,151 +3526,151 @@ test	subtest	status
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in xhtml_ns_removed.xml	PASS
 /dom/nodes/Document-createElement.html	<harness>	OK
 /dom/nodes/Document-createElement.html	createElement("") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("-foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("-foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("-foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("-foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement(".foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement(".foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement(".foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement(".foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("1:foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("1:foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("1:foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("1:foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("1foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("1foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("1foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("1foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement(":") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement(":") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement(":") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement(":") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement(":foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement(":foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement(":foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement(":foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("<foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("<foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("<foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("<foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("<foo>") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("<foo>") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("<foo>") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("<foo>") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("FOO") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("FOO") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("FOO") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("FOO") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("\ufffffoo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("\ufffffoo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("\ufffffoo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("\ufffffoo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f1oo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f1oo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f1oo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f1oo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f::oo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f::oo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f::oo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f::oo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f::oo:") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f::oo:") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f::oo:") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f::oo:") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f:o:o") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f:o:o") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f:o:o") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f:o:o") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f:oo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f:oo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f:oo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f:oo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f<oo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f<oo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f<oo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f<oo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f\uffffoo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f\uffffoo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f\uffffoo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f\uffffoo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fo o") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("fo o") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("fo o") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fo o") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo1") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo1") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo1") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo1") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo:") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo:") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:0") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo:0") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo:0") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:0") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:_") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo:_") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo:_") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:_") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:fooெ") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo:fooெ") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo:fooெ") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:fooெ") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:ெ") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo:ெ") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo:ெ") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo:ெ") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo>") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo>") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo>") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo>") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo\uffff") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo\uffff") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo\uffff") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo\uffff") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo}") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("foo}") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("foo}") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("foo}") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fooெ") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("fooெ") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("fooெ") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fooெ") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fooெ:foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("fooெ:foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("fooெ:foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fooெ:foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f}oo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("f}oo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("f}oo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("f}oo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fெ") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("fெ") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("fெ") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("fெ") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("marK") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("marK") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("marK") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("marK") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("math") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("math") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("math") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("math") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("svg") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("svg") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("svg") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("svg") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xml") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xml") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xml") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xml") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xml:foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xml:foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xml:foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xml:foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlfoo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xmlfoo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xmlfoo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlfoo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlfoo:bar") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xmlfoo:bar") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xmlfoo:bar") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlfoo:bar") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlns") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xmlns") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xmlns") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlns") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlns:foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("xmlns:foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("xmlns:foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("xmlns:foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("}foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("}foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("}foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("}foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("İnput") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("İnput") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("İnput") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("İnput") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("ınput") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("ınput") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("ınput") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("ınput") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("̀") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("̀") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("̀") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("̀") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement("̀foo") in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement("̀foo") in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement("̀foo") in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement("̀foo") in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement(null) in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement(null) in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement(null) in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement(null) in XML document	PASS
 /dom/nodes/Document-createElement.html	createElement(undefined) in HTML document	PASS
-/dom/nodes/Document-createElement.html	createElement(undefined) in XHTML document	FAIL
+/dom/nodes/Document-createElement.html	createElement(undefined) in XHTML document	PASS
 /dom/nodes/Document-createElement.html	createElement(undefined) in XML document	PASS
 /dom/nodes/Document-createElementNS.html	<harness>	OK
 /dom/nodes/Document-createElementNS.html	Lower-case HTML element with a prefix	PASS
@@ -3876,201 +3876,201 @@ test	subtest	status
 /dom/nodes/Document-createElementNS.html	createElementNS test in HTML document: undefined,"xmlns:foo","NAMESPACE_ERR"	PASS
 /dom/nodes/Document-createElementNS.html	createElementNS test in HTML document: undefined,null,null	PASS
 /dom/nodes/Document-createElementNS.html	createElementNS test in HTML document: undefined,undefined,null	PASS
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","f:oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "",null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","f:oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlfoo:bar",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/",null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","f:oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlfoo:bar",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:",null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","-foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",".foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","0:a",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","<foo>","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XML:foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XMLNS",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XMLNS:foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:_",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:h0",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:test",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a-b:c",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a.b:c",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:0","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:_",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:aெ",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:̀",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:;",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:ெ",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","aெ:a",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f::oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f:o:o",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f:oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","fo<o",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","l_:_",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:!","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:#","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:$","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:%","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:&","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:'","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:(","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:)","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:*","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:+","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:,","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:/","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:;","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:<","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:=","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:>","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:@","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:[","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:\"","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:\\","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:]","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:^","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:`","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:a ","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:{","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:}","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:~","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns0:test",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns:_0",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns:a0",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","prefix::local",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","test:xmlns",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml:test","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlfoo:bar",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns:test","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","̀:a",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",";:a",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ெ:a",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","f1oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","f:oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo1","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo:xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xml","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlfoo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlfoo:bar","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlns",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlns:foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/",null,"NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace",":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","f:oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xml:foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlfoo:bar",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace",null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespaces","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/xml/1998/namespace","xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"-foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,".foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,":","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"<foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"<foo>","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"\ufffffoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"^^","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f:o:o","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f:oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f<oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f\uffffoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"fo o","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo>","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo\uffff",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo}",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f}oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"null:xml","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlfoo:bar","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"}foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,";foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"ெfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,undefined,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"1foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,":foo","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f1oo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f::oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f:oo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo1",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo:","INVALID_CHARACTER_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xml",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xml:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlfoo",null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlfoo:bar","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlns","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlns:foo","NAMESPACE_ERR"	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,null,null	FAIL
-/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,undefined,null	FAIL
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","f:oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "",null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","f:oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlfoo:bar",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/","xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "/",null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","f:oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlfoo:bar",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:","xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "foo:",null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","-foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",".foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","0:a",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","<foo>","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XML:foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XMLNS",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","XMLNS:foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:_",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:h0",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","_:test",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a-b:c",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a.b:c",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:0","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:_",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:aெ",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:̀",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:;",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","a:ெ",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","aெ:a",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f::oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f:o:o",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","f:oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","fo<o",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","l_:_",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:!","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:#","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:$","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:%","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:&","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:'","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:(","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:)","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:*","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:+","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:,","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:/","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:;","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:<","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:=","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:>","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:@","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:[","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:\"","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:\\","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:]","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:^","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:`","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:a ","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:{","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:}","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","namespaceURI:~","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns0:test",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns:_0",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ns:a0",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","prefix::local",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","test:xmlns",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xml:test","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlfoo:bar",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","xmlns:test","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","̀:a",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",";:a",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/","ெ:a",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://example.com/",null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","f1oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","f:oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo1","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","foo:xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xml","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlfoo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlfoo:bar","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlns",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/","xmlns:foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/2000/xmlns/",null,"NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace",":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","f:oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xml:foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlfoo:bar",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace","xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespace",null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/XML/1998/namespaces","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: "http://www.w3.org/xml/1998/namespace","xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"-foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,".foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,":","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"<foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"<foo>","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"\ufffffoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"^^","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f:o:o","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f:oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f<oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f\uffffoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"fo o","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo>","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo\uffff",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"foo}",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"f}oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"null:xml","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlfoo:bar","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"}foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,";foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,"ெfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: null,undefined,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"1foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,":foo","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f1oo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f::oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"f:oo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo1",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"foo:","INVALID_CHARACTER_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xml",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xml:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlfoo",null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlfoo:bar","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlns","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,"xmlns:foo","NAMESPACE_ERR"	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,null,null	PASS
+/dom/nodes/Document-createElementNS.html	createElementNS test in XHTML document: undefined,undefined,null	PASS
 /dom/nodes/Document-createElementNS.html	createElementNS test in XML document: "","","INVALID_CHARACTER_ERR"	PASS
 /dom/nodes/Document-createElementNS.html	createElementNS test in XML document: "",":foo","INVALID_CHARACTER_ERR"	PASS
 /dom/nodes/Document-createElementNS.html	createElementNS test in XML document: "","f:oo","NAMESPACE_ERR"	PASS
@@ -4627,7 +4627,7 @@ test	subtest	status
 /dom/nodes/Document-getElementsByTagNameNS.html	AÇ, case sensitivity	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	BODY element in test namespace, no prefix	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	BODY element in test namespace, prefix	PASS
-/dom/nodes/Document-getElementsByTagNameNS.html	Document.getElementsByTagNameNS	FAIL
+/dom/nodes/Document-getElementsByTagNameNS.html	Document.getElementsByTagNameNS	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	Empty lists	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	Empty string namespace	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	abc element in html namespace	PASS
@@ -4636,7 +4636,7 @@ test	subtest	status
 /dom/nodes/Document-getElementsByTagNameNS.html	getElementsByTagNameNS('*', '*')	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	getElementsByTagNameNS('*', 'body')	PASS
 /dom/nodes/Document-getElementsByTagNameNS.html	getElementsByTagNameNS('http://www.w3.org/1999/xhtml', '*')	PASS
-/dom/nodes/Document-getElementsByTagNameNS.html	getElementsByTagNameNS() should be a live collection	FAIL
+/dom/nodes/Document-getElementsByTagNameNS.html	getElementsByTagNameNS() should be a live collection	PASS
 /dom/nodes/Document-implementation.html	<harness>	OK
 /dom/nodes/Document-implementation.html	Getting implementation off different documents	PASS
 /dom/nodes/Document-implementation.html	Getting implementation off the same document	PASS
@@ -6163,7 +6163,7 @@ test	subtest	status
 /dom/nodes/Element-getElementsByTagNameNS.html	AÇ, case sensitivity	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	BODY element in test namespace, no prefix	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	BODY element in test namespace, prefix	PASS
-/dom/nodes/Element-getElementsByTagNameNS.html	Element.getElementsByTagNameNS	FAIL
+/dom/nodes/Element-getElementsByTagNameNS.html	Element.getElementsByTagNameNS	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	Empty lists	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	Empty string namespace	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	Matching the context object (specific namespace)	PASS
@@ -6174,7 +6174,7 @@ test	subtest	status
 /dom/nodes/Element-getElementsByTagNameNS.html	getElementsByTagNameNS('*', '*')	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	getElementsByTagNameNS('*', 'body')	PASS
 /dom/nodes/Element-getElementsByTagNameNS.html	getElementsByTagNameNS('http://www.w3.org/1999/xhtml', '*')	PASS
-/dom/nodes/Element-getElementsByTagNameNS.html	getElementsByTagNameNS() should be a live collection	FAIL
+/dom/nodes/Element-getElementsByTagNameNS.html	getElementsByTagNameNS() should be a live collection	PASS
 /dom/nodes/Element-hasAttribute.html	<harness>	OK
 /dom/nodes/Element-hasAttribute.html	hasAttribute should check for attribute presence, irrespective of namespace	PASS
 /dom/nodes/Element-hasAttribute.html	hasAttribute should work with all attribute casings	PASS
@@ -14494,7 +14494,7 @@ test	subtest	status
 /dom/nodes/getElementsByClassName-13.htm	element.getElementsByClassName(): adding an element	PASS
 /dom/nodes/getElementsByClassName-14.htm	<harness>	OK
 /dom/nodes/getElementsByClassName-14.htm	Unicode-case should be sensitive even in quirks mode.	PASS
-/dom/nodes/getElementsByClassName-14.htm	document.getElementsByClassName(): case-insensitive (quirks mode)	FAIL
+/dom/nodes/getElementsByClassName-14.htm	document.getElementsByClassName(): case-insensitive (quirks mode)	PASS
 /dom/nodes/getElementsByClassName-15.htm	<harness>	OK
 /dom/nodes/getElementsByClassName-15.htm	document.getElementsByClassName(array): "a\n"	PASS
 /dom/nodes/getElementsByClassName-16.htm	<harness>	OK
@@ -14508,7 +14508,7 @@ test	subtest	status
 /dom/nodes/getElementsByClassName-20.htm	<harness>	OK
 /dom/nodes/getElementsByClassName-20.htm	get elements in document then add element to collection	PASS
 /dom/nodes/getElementsByClassName-21.htm	<harness>	OK
-/dom/nodes/getElementsByClassName-21.htm	delete element from collection	FAIL
+/dom/nodes/getElementsByClassName-21.htm	delete element from collection	PASS
 /dom/nodes/getElementsByClassName-22.htm	<harness>	OK
 /dom/nodes/getElementsByClassName-22.htm	move item in collection order	PASS
 /dom/nodes/getElementsByClassName-23.htm	<harness>	OK
@@ -14535,9 +14535,9 @@ test	subtest	status
 /dom/nodes/getElementsByClassName-32.html	finds the class name	PASS
 /dom/nodes/getElementsByClassName-32.html	finds the same element with multiple class names	PASS
 /dom/nodes/getElementsByClassName-empty-set.html	<harness>	OK
-/dom/nodes/getElementsByClassName-empty-set.html	Passing a space to getElementsByClassName should return an empty HTMLCollection	FAIL
-/dom/nodes/getElementsByClassName-empty-set.html	Passing an empty string to getElementsByClassName should return an empty HTMLCollection	FAIL
-/dom/nodes/getElementsByClassName-empty-set.html	Passing three spaces to getElementsByClassName should return an empty HTMLCollection	FAIL
+/dom/nodes/getElementsByClassName-empty-set.html	Passing a space to getElementsByClassName should return an empty HTMLCollection	PASS
+/dom/nodes/getElementsByClassName-empty-set.html	Passing an empty string to getElementsByClassName should return an empty HTMLCollection	PASS
+/dom/nodes/getElementsByClassName-empty-set.html	Passing three spaces to getElementsByClassName should return an empty HTMLCollection	PASS
 /dom/nodes/getElementsByClassName-whitespace-class-names.html	<harness>	OK
 /dom/nodes/getElementsByClassName-whitespace-class-names.html	Passing a EM QUAD to getElementsByClassName still finds the span	PASS
 /dom/nodes/getElementsByClassName-whitespace-class-names.html	Passing a EM SPACE to getElementsByClassName still finds the span	PASS
@@ -14723,6 +14723,13 @@ test	subtest	status
 /dom/nodes/moveBefore/hover-style-update.html	Element loses hover when moved to different position	FAIL
 /dom/nodes/moveBefore/hover-style-update.html	Hover works immediately after moved	FAIL
 /dom/nodes/moveBefore/iframe-document-preserve.window.html	<harness>	TIMEOUT
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): about:blank iframe's document is preserved	TIMEOUT
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove new parent	NOTRUN
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self	NOTRUN
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self via innerHTML	NOTRUN
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): cross-origin iframe is preserved: remove self via replaceChildren()	NOTRUN
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	moveBefore(): simple same-origin document is preserved	NOTRUN
+/dom/nodes/moveBefore/iframe-document-preserve.window.html	window.frames ordering does not change due to moveBefore()	NOTRUN
 /dom/nodes/moveBefore/listed-form-element-reset.html	<harness>	OK
 /dom/nodes/moveBefore/listed-form-element-reset.html	Listed form element form owner is reset when a new form is moved closer before the listed element	FAIL
 /dom/nodes/moveBefore/live-range-updates.html	<harness>	OK
@@ -62047,8 +62054,8 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Tabs preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Trailing whitespace preserved	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	Whitespace not compressed	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	FAIL
-/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on MathML elements	PASS
+/html/dom/elements/the-innertext-and-outertext-properties/outertext-setter.html	outerText not supported on SVG elements	PASS
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	<harness>	OK
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	A missing action content attribute should cause the IDL attribute to return the document's URL (not the document's base URL)	PASS
 /html/semantics/forms/the-form-element/form-action-reflection-with-base-url.html	An action URL should be resolved relative to the document's base URL (not the document's URL)	FAIL
