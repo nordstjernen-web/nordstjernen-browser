@@ -11175,7 +11175,8 @@ ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
                                strstr(mime, "svg") != NULL);
     ns_node *doc;
     if (as_xml) {
-        doc = ns_html_parse_fragment_in(NULL, src, -1);
+        doc = ns_xml_parse(src, -1);
+        if (!doc) doc = ns_html_parse_fragment_in(NULL, src, -1);
     } else {
         doc = ns_html_parse(src, -1);
     }
@@ -11186,6 +11187,7 @@ ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
     if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, doc);
     JSValue wrapper = ns_make_element(ctx, doc);
     if (as_xml) {
+        JS_DefinePropertyValueStr(ctx, wrapper, "__ndXmlDoc", JS_TRUE, 0);
         ns_node *root = NULL;
         for (ns_node *c = doc->first_child; c; c = c->next_sibling)
             if (c->kind == NS_NODE_ELEMENT) { root = c; break; }
