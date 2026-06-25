@@ -792,3 +792,76 @@ the JIT, and lean on the OS sandbox and compiler hardening it already ships.
 Read that way, this whole document is an exercise in importing the first
 answer's cheap, bounded mitigations into the second answer's much smaller
 frame.
+
+## Software-architecture comparison
+
+The two engines share the *coarse* shape every modern browser converged on
+— a privileged UI process driving sandboxed content processes that each run
+a fetch → parse → style → layout → paint → script pipeline — but they
+diverge sharply in granularity, substrate, and how much runs in parallel.
+
+### Subsystem map
+
+| Subsystem | Nordstjernen | Mozilla (Gecko / Servo) |
+|---|---|---|
+| Process topology | Thin UI **shell** (GTK/Qt) + one **renderer process per tab**; optional `--single-process` (threads) | **Parent** (chrome) + many specialized processes: **Content** (per-site, Fission), **GPU**, **RDD** (media), **Socket** (network), **Utility** (audio/etc.), GMPlugin, ForkServer |
+| Isolation granularity | Per **tab** | Per **site/origin** (cross-origin iframes get their own process) + per **function** (media, GPU, net split out) |
+| IPC | Ad-hoc **HTTP/JSON control channel** + a **shared-memory framebuffer** (`memfd`/`shm`) blitted by the shell (`src/rproc_http.c`, `renderer_serve.c`) | **IPDL** — a typed, code-generated actor protocol — over message channels + shared memory (`ipc/`) |
+| UI / chrome | **Native** widgets (GTK 4 / Qt 6), C/C++ | **HTML/CSS/JS** chrome running as privileged content in the parent (`browser/`, `toolkit/`) |
+| Rendering / compositing | Build a paint scene per frame → **GSK / Cairo (software fallback)** → framebuffer → shell blits | **WebRender**: a Rust, **GPU-retained** display-list compositor in the GPU process |
+| HTML parsing | **lexbor**, synchronous on the renderer main thread (`ns_html_parse`) | **nsHtml5** tokenizer on a dedicated **stream-parser thread** |
+| CSS / style | `src/css.c`, **single-threaded** cascade | **Stylo** (Servo) — **parallel** style across a thread pool, in Rust |
+| Layout | `src/layout.c`, single-threaded frame/box layout | Gecko reflow (C++), frame tree |
+| Script + DOM | **QuickJS** interpreter (no JIT) + DOM in C (`src/dom.c`) with a **JS polyfill layer** (`data/js/polyfills.js`) | **SpiderMonkey** (JIT) + **WebIDL-generated C++ bindings** over a C++ DOM |
+| Networking | **libcurl** **inside the renderer** (`src/net.c`); SQLite-indexed disk cache | **Necko**, largely in the **Socket process**; `cache2` disk cache, predictor |
+| Media decode | In-renderer video (pl_mpeg/libav); **unsandboxed** audio helper (SDL2) | **RDD** process (video) + **Utility** process (audio), both sandboxed |
+| Document-pipeline threading | **Single main thread** per renderer (parse/style/layout/paint/JS); background threads only for net I/O, workers, WebSocket/EventSource | **Pervasively multithreaded**: main thread + style, image-decode, parser, compositor, GC, and IO pools per process |
+| Platform substrate | **None** beyond C + **GLib** (a GLib main loop per process) | **XPCOM** — a component/interface model (`nsISupports`, XPIDL) underpinning everything |
+
+### The deeper contrasts
+
+**Process topology — fewer, coarser vs many, specialized.** Nordstjernen
+draws exactly one isolation line — the tab — and keeps *everything else*
+(network, image/video decode, layout, script) inside that one renderer.
+Mozilla draws many: content is split per-site, and whole *functions* (GPU,
+media decode, networking, misc. utility) each get their own sandboxed
+process, so a bug in any one is contained to that function. Nordstjernen's
+model is dramatically simpler to reason about; Mozilla's contains more,
+finer (this is exactly proposals #41, #3, #2 — extend the boundary).
+
+**IPC — improvised vs formalized.** Nordstjernen's shell talks to the
+renderer over a small HTTP/JSON protocol and reads pixels straight out of a
+shared-memory framebuffer — easy to read, easy to debug, no codegen.
+Mozilla's IPDL is a typed actor language that generates the message plumbing
+and enforces protocol state — necessary when there are dozens of process
+pairs and hundreds of message types, overkill when there is one.
+
+**Where the work runs — one thread vs a thread farm.** A Nordstjernen
+renderer is single-main-thread for the entire document pipeline; only
+inherently blocking or self-contained work (network I/O, workers) is
+offloaded, and every result is marshalled back through the GLib main
+context before it touches a `ns_node` or a `JSContext`. Mozilla parallelizes
+the pipeline itself — styling, image decode, parsing, and compositing all
+run off the main thread. The single-thread choice is the root of several
+performance proposals here (#32 image decode, #39 parsing, #33 retained
+paint, #15 parallel-style ideas): they are all "move one stage off the main
+thread," which Mozilla already did and Nordstjernen deliberately has not.
+
+**Substrate — plain C vs a component OS.** Nordstjernen sits directly on C
+and GLib with no abstraction layer; objects are structs, calls are function
+calls. Mozilla runs on XPCOM, an in-process component model (interfaces,
+reference-counted components, contract IDs) that lets thousands of
+contributors wire subsystems together across language boundaries — and is
+itself a large part of the line-count gap. The native-vs-HTML chrome split
+is the same story one level up: Nordstjernen's UI is a thin native shell,
+Mozilla's is a full privileged web app.
+
+The pattern is consistent with the rest of this document: **same pipeline,
+opposite philosophies of decomposition.** Mozilla decomposes aggressively —
+more processes, more threads, more layers, more languages — to scale to the
+whole web platform and to thousands of engineers. Nordstjernen keeps one
+process boundary, one main thread, one language, and no substrate, so the
+whole thing stays readable by one person. Most proposals above are about
+selectively adopting *one* of Mozilla's decompositions (a sandbox line, a
+thread offload) where the safety or responsiveness win clearly pays for the
+complexity it adds.
