@@ -33825,6 +33825,18 @@ ns_doc_wrapper_is_xml(JSContext *ctx, JSValueConst doc_val)
     return is_xml;
 }
 
+static gboolean
+ns_doc_wrapper_is_xhtml(JSContext *ctx, JSValueConst doc_val)
+{
+    if (!JS_IsObject(doc_val)) return FALSE;
+    JSValue ct = JS_GetPropertyStr(ctx, doc_val, "contentType");
+    const char *s = JS_ToCString(ctx, ct);
+    gboolean xh = s && strstr(s, "xhtml") != NULL;
+    if (s) JS_FreeCString(ctx, s);
+    JS_FreeValue(ctx, ct);
+    return xh;
+}
+
 static void
 ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
                       JSValueConst node_val)
@@ -33861,11 +33873,15 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
                                       "invalid element name");
     }
     gboolean is_xml = ns_doc_wrapper_is_xml(ctx, this_val);
+    gboolean html_ns = !is_xml || ns_doc_wrapper_is_xhtml(ctx, this_val);
     char *stored = is_xml ? g_strdup(name) : g_ascii_strdown(name, -1);
     JS_FreeCString(ctx, name);
     ns_node *el = ns_node_new_element(stored);
     el->flags |= NS_NODE_NOT_PARSER_INSERTED;
-    if (is_xml) el->flags |= NS_NODE_KEEP_CASE | NS_NODE_FOREIGN_NS;
+    if (is_xml) {
+        el->flags |= NS_NODE_KEEP_CASE;
+        if (!html_ns) el->flags |= NS_NODE_FOREIGN_NS;
+    }
     ns_js *js = js_from_ctx(ctx);
     g_hash_table_add(js->orphan_nodes, el);
     JSValue wrapper = ns_make_element(ctx, el);
@@ -38670,15 +38686,13 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     gboolean is_xhtml = resp && resp->content_type
         && strstr(resp->content_type, "xhtml") != NULL;
+    gboolean is_xml_content = is_xhtml || is_plain_xml;
     gboolean xhtml_suppress_scripts = FALSE;
-    if (is_xhtml && decoded) {
+    gboolean malformed_xml = FALSE;
+    if (is_xml_content && decoded) {
         char *root_ns = NULL;
         if (!ns_xml_well_formed(decoded, -1, &root_ns)) {
-            char *errdoc = g_strdup(
-                "<html><head><title>Parse Error</title></head><body>"
-                "<p>This XML document is not well-formed.</p></body></html>");
-            g_free(decoded);
-            decoded = errdoc;
+            malformed_xml = TRUE;
             xhtml_suppress_scripts = TRUE;
         } else if (!root_ns ||
                    strcmp(root_ns, "http://www.w3.org/1999/xhtml") != 0) {
@@ -38689,37 +38703,39 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 
     ns_node *content_root = NULL;
     ns_node *content_doc = NULL;
-    if (decoded) {
+    gboolean doc_is_xml = FALSE;
+    if (is_xml_content && !malformed_xml && decoded) {
+        content_doc = ns_xml_parse(decoded, (gssize)strlen(decoded));
+        if (content_doc) {
+            for (ns_node *c = content_doc->first_child; c; c = c->next_sibling)
+                if (c->kind == NS_NODE_ELEMENT) { content_root = c; break; }
+            if (!content_root) {
+                ns_node_free(content_doc);
+                content_doc = NULL;
+            } else {
+                doc_is_xml = TRUE;
+                ns_node_own_strings_deep(content_doc);
+                ns_node_append_child(iframe, content_doc);
+            }
+        }
+    }
+    if (!content_doc && decoded) {
+        if (malformed_xml) {
+            g_free(decoded);
+            decoded = g_strdup(
+                "<html><head><title>Parse Error</title></head><body>"
+                "<p>This XML document is not well-formed.</p></body></html>");
+        }
         ns_node *cdoc = ns_html_parse(decoded, (gssize)strlen(decoded));
         if (cdoc) {
             ns_node *html = ns_node_find_first_element(cdoc, "html");
-            if (is_plain_xml && html) {
-                ns_node *body = ns_node_find_first_element(html, "body");
-                ns_node *root_el = NULL;
-                for (ns_node *c = body ? body->first_child : NULL; c;
-                     c = c->next_sibling)
-                    if (c->kind == NS_NODE_ELEMENT) {
-                        if (root_el) { root_el = NULL; break; }
-                        root_el = c;
-                    }
-                if (root_el) {
-                    content_doc = ns_node_new_document();
-                    ns_node_remove(root_el);
-                    ns_node_own_strings_deep(root_el);
-                    ns_node_append_child(content_doc, root_el);
-                    content_root = root_el;
-                    ns_node_free(cdoc);
-                }
-            }
-            if (!content_doc && html) {
+            if (html) {
                 content_doc = cdoc;
                 content_root = html;
-            } else if (!content_doc) {
-                ns_node_free(cdoc);
-            }
-            if (content_doc) {
                 ns_node_own_strings_deep(content_doc);
                 ns_node_append_child(iframe, content_doc);
+            } else {
+                ns_node_free(cdoc);
             }
         }
     }
@@ -38737,7 +38753,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         if (!cs || !*cs) cs = "UTF-8";
         JSValue realm_doc = ns_make_realm_document(
             js->ctx, content_doc, iorigin, cs,
-            resp ? resp->content_type : NULL, is_plain_xml, FALSE);
+            resp ? resp->content_type : NULL, doc_is_xml, FALSE);
         if ((sandbox & NS_FRAME_CROSS_ORIGIN) ||
             ((sandbox & NS_SANDBOX_ACTIVE) &&
              !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)))

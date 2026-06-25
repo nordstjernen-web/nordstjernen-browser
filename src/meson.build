@@ -86,6 +86,7 @@ nordstjernen_engine_sources = files(
   'webgl.c',
   'ws.c',
   'html_lexbor.c',
+  'xml.c',
 )
 
 # GTK-free helpers used by the desktop executable but not the engine UI:
