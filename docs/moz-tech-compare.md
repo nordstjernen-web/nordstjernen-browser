@@ -735,3 +735,60 @@ minimalist clean-room browser:
 The throughline: adopt the reference engine's **security architecture**
 (isolation boundaries drawn tightly around every place untrusted bytes are
 parsed), and decline its scale-driven complexity.
+
+## Codebase & tech-stack comparison
+
+The size and language gap between the two trees is the single most
+important context for every proposal above, so it is worth stating plainly.
+Counts below are raw line counts (`find | wc -l`) over the two checkouts
+this comparison was drawn from; treat them as orders of magnitude, not
+precise SLOC.
+
+| | Nordstjernen | Mozilla (Gecko / Servo) |
+|---|---|---|
+| Hand-written / authored engine | **~136k** lines, **all C** (+ a ~3k C++ Qt shell, ~7k JS polyfills) | **~12M C/C++ + ~10.4M JS + ~0.5M Rust** (excl. tests & third-party) |
+| Whole checkout | ~1.0M C/C++ (incl. vendored libs) | ~17.4M C/C++ + ~15.2M JS + ~5.9M Rust (**≈ 38M**, with tests + vendored crates) |
+| JavaScript engine | QuickJS (forked), **~97k**, interpreter, **no JIT** | SpiderMonkey, **~1.28M**, JIT |
+| HTML / CSS / URL | lexbor (forked), ~606k | Gecko layout (C++) + Stylo (Rust) |
+| Wasm | WAMR subset, ~73k, interpreter | SpiderMonkey, JIT |
+| Languages in the engine | **C** (one language end to end) | **C++, Rust, JS** |
+
+The gap is roughly **three orders of magnitude** in authored code. That one
+number explains most of the divergence in this document: the claim that a
+single person can read and audit the whole engine end to end is credible at
+136k lines and simply is not at ~38M — so Nordstjernen can take Mozilla's
+*mitigations* but not its *scale*. Note also that Nordstjernen's biggest
+in-tree component is not its own code but the vendored **lexbor** parser
+(~606k); its entire JS engine (QuickJS, ~97k) is **~13× smaller** than
+SpiderMonkey alone.
+
+**Language choice.** Nordstjernen is one language end to end — C for the
+engine, with only a thin C++ shell (Qt/GTK glue) and a little JS
+(polyfills). That buys maximal portability, one mental model, small
+binaries, and direct control, and pays for it in memory safety — which it
+buys back three ways: staying small enough to audit, leaning on memory-safe
+vendored decoders (Wuffs) and an **interpreter with no JIT** (removing the
+single largest class of browser exploit primitives), and confining the
+renderer in a process sandbox. Mozilla is polyglot by scale and history:
+C++ for the legacy bulk it cannot rewrite, **Rust** for the new
+safety-critical pieces (Stylo's CSS engine, WebRender's compositor, parts
+of media/network/security), and **JS** for the entire front end and much of
+the platform.
+
+**Tech stack.** Nordstjernen composes a small set of focused libraries —
+GTK 4 / GSK (UI + software rendering), libcurl (network), OpenSSL (TLS +
+WebCrypto), QuickJS (script), lexbor (parse), Wuffs (images), WAMR (wasm),
+Pango/Cairo (text/2D), SDL2 (audio) — with **no custom GPU compositor and
+no JIT**. Mozilla builds those layers itself at scale: SpiderMonkey (JIT
+script + wasm), Stylo (parallel CSS), WebRender (GPU-retained display
+lists), Necko (network), NSS (crypto), and an XPCOM platform layer beneath
+it all.
+
+**Two answers to the same problem.** Both engines are mostly
+memory-unsafe C/C++ at the core and both know it. Mozilla's answer is
+incremental rewrite-in-Rust plus in-process sandboxing of the C it keeps
+(RLBox, #1). Nordstjernen's answer is to stay small enough to audit, drop
+the JIT, and lean on the OS sandbox and compiler hardening it already ships.
+Read that way, this whole document is an exercise in importing the first
+answer's cheap, bounded mitigations into the second answer's much smaller
+frame.
