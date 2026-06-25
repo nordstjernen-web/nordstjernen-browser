@@ -230,6 +230,27 @@
         }
     }
 
+    function runWheelSource(src) {
+        if (typeof global.__nsWptWheel !== 'function') return;
+        var acts = src.actions || [];
+        var state = { x: 0, y: 0, target: null };
+        for (var i = 0; i < acts.length; i++) {
+            var a = acts[i];
+            if (a.type !== 'scroll') continue;
+            var usesEl = a.origin && typeof a.origin === 'object' && a.origin.nodeType;
+            var r = resolveOrigin(a.origin, state);
+            var x = (a.x || 0) + (usesEl ? r.x : 0);
+            var y = (a.y || 0) + (usesEl ? r.y : 0);
+            var target = null;
+            try { target = global.document.elementFromPoint(x, y); } catch (e) {}
+            if (!target)
+                target = (global.document &&
+                    (global.document.scrollingElement || global.document.body));
+            try { global.__nsWptWheel(target, x, y, a.deltaX || 0, a.deltaY || 0); }
+            catch (e) {}
+        }
+    }
+
     function runActions(actions) {
         if (!actions) return;
         for (var i = 0; i < actions.length; i++) {
@@ -237,6 +258,7 @@
             if (!src) continue;
             if (src.type === 'pointer') runPointerSource(src);
             else if (src.type === 'key') runKeySource(src);
+            else if (src.type === 'wheel') runWheelSource(src);
         }
     }
 

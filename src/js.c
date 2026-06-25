@@ -18722,8 +18722,12 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     JS_FreeValue(ctx, global);
     if (reflected && js->current_doc) {
         ns_node *body = ns_node_find_first_element(js->current_doc, "body");
-        if (body && ns_fire_inline_on_handler(js, body, type, event))
-            fired = TRUE;
+        if (body) {
+            if (ns_fire_inline_on_handler(js, body, type, event))
+                fired = TRUE;
+            if (ns_fire_property_on_handler(js, body, type, event))
+                fired = TRUE;
+        }
     }
     return fired;
 }
@@ -18893,6 +18897,63 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     ns_drain_mutations(js);
     ns_js_budget_pop(js, &bg);
     return fired;
+}
+
+static gboolean
+ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
+{
+    if (!js || !js->listeners || !type) return FALSE;
+    for (guint i = 0; i < js->listeners->len; i++) {
+        ns_listener *l = g_ptr_array_index(js->listeners, i);
+        if (ns_listener_is_tombstoned(l) || l->passive) continue;
+        if (!l->type || strcmp(l->type, type) != 0) continue;
+        if (ns_listener_signal_aborted(js, l)) continue;
+        if (l->window_level) return TRUE;
+        for (const ns_node *cur = target; cur; cur = cur->parent)
+            if (l->target == cur) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
+                           double x, double y, double dx, double dy)
+{
+    if (!js || !target) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, "wheel", target);
+    gboolean cancelable = ns_path_has_active_listener(js, target, "wheel");
+    JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "clientX",    JS_NewFloat64(ctx, x));
+    JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
+    JS_SetPropertyStr(ctx, event, "screenX",    JS_NewFloat64(ctx, x));
+    JS_SetPropertyStr(ctx, event, "screenY",    JS_NewFloat64(ctx, y));
+    JS_SetPropertyStr(ctx, event, "deltaX",     JS_NewFloat64(ctx, dx));
+    JS_SetPropertyStr(ctx, event, "deltaY",     JS_NewFloat64(ctx, dy));
+    JS_SetPropertyStr(ctx, event, "deltaZ",     JS_NewFloat64(ctx, 0));
+    JS_SetPropertyStr(ctx, event, "deltaMode",  JS_NewInt32(ctx, 0));
+    return ns_js_dispatch_built_event(js, target, "wheel", event, NULL);
+}
+
+static JSValue
+ns_wpt_wheel(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 5) return JS_UNDEFINED;
+    const ns_node *target = ns_unwrap_element(argv[0]);
+    if (!target) target = js->current_doc;
+    if (!target) return JS_UNDEFINED;
+    double x = 0, y = 0, dx = 0, dy = 0;
+    JS_ToFloat64(ctx, &x,  argv[1]);
+    JS_ToFloat64(ctx, &y,  argv[2]);
+    JS_ToFloat64(ctx, &dx, argv[3]);
+    JS_ToFloat64(ctx, &dy, argv[4]);
+    ns_js_dispatch_wheel_event(js, target, x, y, dx, dy);
+    return JS_UNDEFINED;
 }
 
 void
@@ -30175,6 +30236,18 @@ ns_document_has_focus(JSContext *ctx, JSValueConst this_val,
     return JS_TRUE;
 }
 
+static gboolean
+ns_point_in_hit_bounds(ns_js *js, double x, double y)
+{
+    double w = ns_css_viewport_w();
+    double h = ns_css_viewport_h();
+    if (js->layout_root) {
+        if (js->layout_root->content_width  > w) w = js->layout_root->content_width;
+        if (js->layout_root->content_height > h) h = js->layout_root->content_height;
+    }
+    return x <= w && y <= h;
+}
+
 static JSValue
 ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
@@ -30189,9 +30262,7 @@ ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
     if (!js || !js->current_doc) return JS_NULL;
     ns_js_flush_layout(js);
     if (!js->layout_root) return JS_NULL;
-    if (x > js->layout_root->content_width ||
-        y > js->layout_root->content_height)
-        return JS_NULL;
+    if (!ns_point_in_hit_bounds(js, x, y)) return JS_NULL;
     const ns_box *hit = ns_box_hit_test(js->layout_root, x, y);
     return hit && hit->dom ? ns_make_element(ctx, hit->dom) : JS_NULL;
 }
@@ -30211,9 +30282,7 @@ ns_document_elements_from_point(JSContext *ctx, JSValueConst this_val,
     if (!js || !js->current_doc) return arr;
     ns_js_flush_layout(js);
     if (!js->layout_root) return arr;
-    if (x > js->layout_root->content_width ||
-        y > js->layout_root->content_height)
-        return arr;
+    if (!ns_point_in_hit_bounds(js, x, y)) return arr;
     const ns_box *hit = ns_box_hit_test(js->layout_root, x, y);
     uint32_t i = 0;
     for (const ns_node *n = hit && hit->dom ? hit->dom : NULL; n; n = n->parent)
@@ -33070,6 +33139,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "getComputedStyle",      ns_window_getComputedStyle,       1);
     ns_bind_fn(ctx, global, "requestAnimationFrame", ns_window_requestAnimationFrame,  1);
     ns_bind_fn(ctx, global, "cancelAnimationFrame",  ns_window_cancelAnimationFrame,   1);
+    ns_bind_fn(ctx, global, "__nsWptWheel",          ns_wpt_wheel,                     5);
     ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
@@ -34782,11 +34852,11 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc || argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
-    gboolean capture = FALSE, once = FALSE;
+    gboolean capture = FALSE, once = FALSE, passive = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
-                                   TRUE)) {
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, &passive,
+                                   &signal, TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
     }
@@ -34825,6 +34895,7 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     l->signal = signal;
     l->capture = capture;
     l->once    = once;
+    l->passive = passive;
     l->window_level = window_level;
     g_ptr_array_add(_js->listeners, l);
     ns_node_arm_js_invalidate(_js->current_doc);
