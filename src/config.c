@@ -147,6 +147,7 @@ static const cfg_field cfg_fields[] = {
     FE(reduced_motion,        CFG_REDUCED_MOTION,  NS_REDUCED_MOTION_PREF_AUTO),
     FB(do_not_track,          TRUE),
     FB(strip_tracking_params, TRUE),
+    FB(https_first,           TRUE),
     FB(images_enabled,        TRUE),
     FB(webgl_enabled,         FALSE),
     FB(local_storage_enabled, TRUE),
@@ -237,6 +238,7 @@ static const struct { const char *env; const char *key; } env_disable[] = {
     { "NS_NO_LOCAL_STORAGE", "local_storage_enabled" },
     { "NS_NO_IMAGES",        "images_enabled"        },
     { "NS_NO_WATCHDOG",      "watchdog_enabled"      },
+    { "NS_NO_HTTPS_FIRST",   "https_first"           },
 };
 
 static const struct { const char *env; const char *key; } env_value[] = {
@@ -459,6 +461,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "reduced_motion        = %s\n", reduced_motion_name(c->reduced_motion));
     g_string_append_printf(s, "do_not_track          = %s\n", c->do_not_track ? "true" : "false");
     g_string_append_printf(s, "strip_tracking_params = %s\n", c->strip_tracking_params ? "true" : "false");
+    g_string_append_printf(s, "https_first           = %s\n", c->https_first ? "true" : "false");
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
     g_string_append_printf(s, "webgl_enabled         = %s\n", c->webgl_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");

@@ -987,6 +987,30 @@ ns_net_hsts_upgrade(const char *url)
     return g_strconcat("https://", url + 7, NULL);
 }
 
+static gboolean
+ns_host_is_loopback(const char *host)
+{
+    return g_ascii_strcasecmp(host, "localhost") == 0 ||
+           g_str_has_suffix(host, ".localhost") ||
+           strcmp(host, "127.0.0.1") == 0 ||
+           strcmp(host, "::1") == 0 ||
+           strcmp(host, "[::1]") == 0;
+}
+
+char *
+ns_net_https_first_upgrade(const char *url)
+{
+    const ns_config *cfg = ns_config_get();
+    if (!cfg || !cfg->https_first) return NULL;
+    if (!url || !g_str_has_prefix(url, "http://")) return NULL;
+    char *host = ns_url_host_from(url);
+    if (!host) return NULL;
+    gboolean loopback = ns_host_is_loopback(host);
+    g_free(host);
+    if (loopback) return NULL;
+    return g_strconcat("https://", url + 7, NULL);
+}
+
 static const char *
 ns_net_cookie_dir(void)
 {

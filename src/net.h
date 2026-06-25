@@ -96,6 +96,7 @@ ns_response *ns_net_request_blocking(const char        *url,
 
 char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
+char    *ns_net_https_first_upgrade(const char *url);
 
 void  ns_net_log_clear(void);
 char *ns_net_log_dump(void);
