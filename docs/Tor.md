@@ -1,6 +1,6 @@
 # Implementing Nordstjernen as a Tor network client — design research
 
-Grounded in the actual source (June 2026, `1.0.15`). File:line refs point at
+Grounded in the actual source (June 2026, `1.0.16-dev`). File:line refs point at
 the code each decision touches.
 
 ## TL;DR
