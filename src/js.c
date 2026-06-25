@@ -38624,17 +38624,23 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
                     js->log_cb(line, js->log_user_data);
                     g_free(line);
                 }
-            } else if (resp && resp->body && resp->body->len > 0 &&
+            } else if (resp && resp->body &&
                 (resp->status == 200 || resp->status == 0) && !resp->error) {
-                decoded = ns_html_decode_body_full(
-                    (const char *)resp->body->data, resp->body->len,
-                    resp->content_type, NULL);
-                char *declared = ns_html_declared_charset(
-                    (const char *)resp->body->data, resp->body->len,
-                    resp->content_type);
-                ns_element_set_attr(iframe, "data-nd-frame-charset",
-                                    declared ? declared : "UTF-8");
-                g_free(declared);
+                if (resp->body->len > 0) {
+                    decoded = ns_html_decode_body_full(
+                        (const char *)resp->body->data, resp->body->len,
+                        resp->content_type, NULL);
+                    char *declared = ns_html_declared_charset(
+                        (const char *)resp->body->data, resp->body->len,
+                        resp->content_type);
+                    ns_element_set_attr(iframe, "data-nd-frame-charset",
+                                        declared ? declared : "UTF-8");
+                    g_free(declared);
+                } else if (resp->content_type &&
+                           strstr(resp->content_type, "xml") != NULL) {
+                    decoded = g_strdup("");
+                    ns_element_set_attr(iframe, "data-nd-frame-charset", "UTF-8");
+                }
             }
             else if (js->log_cb) {
                 char *line = g_strdup_printf("iframe %s: %s", abs_url,
@@ -38671,22 +38677,35 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     gboolean is_xml_content = is_xhtml || is_plain_xml;
     gboolean xhtml_suppress_scripts = FALSE;
     gboolean malformed_xml = FALSE;
+    gboolean xml_empty = FALSE;
     if (is_xml_content && decoded) {
-        char *root_ns = NULL;
-        if (!ns_xml_well_formed(decoded, -1, &root_ns)) {
-            malformed_xml = TRUE;
+        const char *q = decoded;
+        while (*q && g_ascii_isspace((unsigned char)*q)) q++;
+        if (!*q) {
+            xml_empty = TRUE;
             xhtml_suppress_scripts = TRUE;
-        } else if (!root_ns ||
-                   strcmp(root_ns, "http://www.w3.org/1999/xhtml") != 0) {
-            xhtml_suppress_scripts = TRUE;
+        } else {
+            char *root_ns = NULL;
+            if (!ns_xml_well_formed(decoded, -1, &root_ns)) {
+                malformed_xml = TRUE;
+                xhtml_suppress_scripts = TRUE;
+            } else if (!root_ns ||
+                       strcmp(root_ns, "http://www.w3.org/1999/xhtml") != 0) {
+                xhtml_suppress_scripts = TRUE;
+            }
+            g_free(root_ns);
         }
-        g_free(root_ns);
     }
 
     ns_node *content_root = NULL;
     ns_node *content_doc = NULL;
     gboolean doc_is_xml = FALSE;
-    if (is_xml_content && !malformed_xml && decoded) {
+    if (xml_empty) {
+        content_doc = ns_node_new_document();
+        content_root = content_doc;
+        doc_is_xml = TRUE;
+        ns_node_append_child(iframe, content_doc);
+    } else if (is_xml_content && !malformed_xml && decoded) {
         content_doc = ns_xml_parse(decoded, (gssize)strlen(decoded));
         if (content_doc) {
             for (ns_node *c = content_doc->first_child; c; c = c->next_sibling)
