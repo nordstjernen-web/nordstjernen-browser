@@ -15,7 +15,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
-![Nordstjernen start page — chatting with the local AI assistant](docs/screenshot.png)   
+![Nordstjernen's about:start start page — the Étoile du Nord splash](docs/screenshot.png)   
 
 <img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
 
