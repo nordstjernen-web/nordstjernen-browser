@@ -30,7 +30,7 @@ trap 'rm -rf "$w"' EXIT
 
 # text labels
 convert -background none -font "$fb" -pointsize 54 -fill '#ffffff' label:'Nordstjernen ' "$w/t1.png"
-convert -background none -font "$fb" -pointsize 54 -fill '#5ec8ff' label:"$ver" "$w/t2.png"
+convert -background none -font "$fb" -pointsize 54 -fill '#ffd27a' label:"$ver" "$w/t2.png"
 convert -background none -font "$fb" -pointsize 27 -fill '#e6edff' label:'Nordstjernen Web Browser' "$w/ts.png"
 convert -background none -font "$fb" -pointsize 25 -kerning 3 -fill '#ffd27a' label:"$codename" "$w/tc.png"
 convert -background none -font "$fr" -pointsize 21 -fill '#cdd8ee' \
