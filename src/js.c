@@ -1103,6 +1103,8 @@ typedef enum {
     NS_LIVE_CHILDNODES,
     NS_LIVE_BY_TAG,
     NS_LIVE_DOC_TAG,
+    NS_LIVE_BY_TAG_NS,
+    NS_LIVE_DOC_TAG_NS,
     NS_LIVE_BY_CLASS,
     NS_LIVE_DOC_CLASS,
     NS_LIVE_BY_NAME,
@@ -1112,6 +1114,13 @@ typedef enum {
 
 static JSValue ns_make_live(JSContext *ctx, JSValueConst owner,
                             ns_live_kind kind, const char *param);
+static JSValue ns_make_live2(JSContext *ctx, JSValueConst owner,
+                             ns_live_kind kind, const char *param,
+                             const char *param2);
+static void ns_collect_by_tag_ns(const ns_node *n, const char *ns,
+                                  gboolean ns_wild, const char *local,
+                                  gboolean local_wild, JSContext *ctx,
+                                  JSValue arr, uint32_t *idx);
 
 static ns_node *ns_unwrap_element_mut(JSValueConst val);
 
@@ -25460,6 +25469,7 @@ typedef struct {
     JSValue      owner;
     ns_live_kind kind;
     char        *param;
+    char        *param2;
     gboolean     html_collection;
     JSValue      cache;
     guint64      cache_gen;
@@ -25487,6 +25497,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
     case NS_LIVE_BY_NAME:
     case NS_LIVE_LINKS:
     case NS_LIVE_DOC_TAG:
+    case NS_LIVE_DOC_TAG_NS:
     case NS_LIVE_DOC_CLASS:
         root = js ? js->current_doc : NULL;
         break;
@@ -25514,6 +25525,17 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling)
             ns_collect_by_tag(c, b->param ? b->param : "*", ctx, arr, &i);
         break;
+    case NS_LIVE_BY_TAG_NS:
+    case NS_LIVE_DOC_TAG_NS: {
+        const char *local = b->param ? b->param : "*";
+        const char *ns = b->param2;
+        gboolean ns_wild = ns && strcmp(ns, "*") == 0;
+        gboolean local_wild = strcmp(local, "*") == 0;
+        for (const ns_node *c = root->first_child; c; c = c->next_sibling)
+            ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild,
+                                 ctx, arr, &i);
+        break;
+    }
     case NS_LIVE_BY_CLASS:
     case NS_LIVE_DOC_CLASS:
         for (const ns_node *c = root->first_child; c; c = c->next_sibling)
@@ -25788,6 +25810,7 @@ ns_live_finalizer(JSRuntime *rt, JSValue val)
     JS_FreeValueRT(rt, b->owner);
     if (b->has_cache) JS_FreeValueRT(rt, b->cache);
     g_free(b->param);
+    g_free(b->param2);
     g_free(b);
 }
 
@@ -25832,8 +25855,8 @@ static const JSCFunctionListEntry ns_nodelist_proto_funcs[] = {
 };
 
 static JSValue
-ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
-             const char *param)
+ns_make_live2(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
+              const char *param, const char *param2)
 {
     JSValue obj = JS_NewObjectClass(ctx, ns_live_class_id);
     if (JS_IsException(obj)) return obj;
@@ -25841,6 +25864,7 @@ ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
     b->owner           = JS_DupValue(ctx, owner);
     b->kind            = kind;
     b->param           = param ? g_strdup(param) : NULL;
+    b->param2          = param2 ? g_strdup(param2) : NULL;
     b->html_collection = kind != NS_LIVE_CHILDNODES && kind != NS_LIVE_BY_NAME;
     b->cache           = JS_UNDEFINED;
     b->has_cache       = FALSE;
@@ -25852,6 +25876,13 @@ ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
         JS_SetPrototype(ctx, obj, proto);
     }
     return obj;
+}
+
+static JSValue
+ns_make_live(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
+             const char *param)
+{
+    return ns_make_live2(ctx, owner, kind, param, NULL);
 }
 
 static JSValue
@@ -33658,11 +33689,11 @@ ns_collect_by_tag_ns(const ns_node *n, const char *ns, gboolean ns_wild,
 }
 
 static JSValue
-ns_getElementsByTagNameNS_in(JSContext *ctx, const ns_node *root,
-                             int argc, JSValueConst *argv)
+ns_getElementsByTagNameNS_in(JSContext *ctx, JSValueConst owner,
+                             ns_live_kind kind, int argc, JSValueConst *argv)
 {
-    if (!root || argc < 2)
-        return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
+    if (argc < 2)
+        return ns_make_live2(ctx, owner, kind, "*", NULL);
     JSValue ns_v = argv[0];
     const char *ns_raw =
         (JS_IsNull(ns_v) || JS_IsUndefined(ns_v))
@@ -33670,17 +33701,10 @@ ns_getElementsByTagNameNS_in(JSContext *ctx, const ns_node *root,
     const char *local = JS_ToCString(ctx, argv[1]);
     if (!local) {
         if (ns_raw) JS_FreeCString(ctx, ns_raw);
-        return ns_nodelist_finalize(ctx, ns_nodelist_new(ctx), 0);
+        return ns_make_live2(ctx, owner, kind, "*", NULL);
     }
     const char *ns = (ns_raw && *ns_raw == '\0') ? NULL : ns_raw;
-    gboolean ns_wild = ns && strcmp(ns, "*") == 0;
-    gboolean local_wild = strcmp(local, "*") == 0;
-
-    JSValue nl = ns_nodelist_new(ctx);
-    uint32_t i = 0;
-    for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild, ctx, nl, &i);
-    JSValue result = ns_nodelist_finalize(ctx, nl, i);
+    JSValue result = ns_make_live2(ctx, owner, kind, local, ns);
     if (ns_raw) JS_FreeCString(ctx, ns_raw);
     JS_FreeCString(ctx, local);
     return result;
@@ -33690,18 +33714,16 @@ static JSValue
 ns_document_getElementsByTagNameNS(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
-    (void)this_val;
-    ns_js *jsx = js_from_ctx(ctx);
-    const ns_node *doc = jsx ? jsx->current_doc : NULL;
-    return ns_getElementsByTagNameNS_in(ctx, doc, argc, argv);
+    return ns_getElementsByTagNameNS_in(ctx, this_val, NS_LIVE_DOC_TAG_NS,
+                                        argc, argv);
 }
 
 static JSValue
 ns_element_getElementsByTagNameNS(JSContext *ctx, JSValueConst this_val,
                                   int argc, JSValueConst *argv)
 {
-    const ns_node *root = ns_unwrap_element(this_val);
-    return ns_getElementsByTagNameNS_in(ctx, root, argc, argv);
+    return ns_getElementsByTagNameNS_in(ctx, this_val, NS_LIVE_BY_TAG_NS,
+                                        argc, argv);
 }
 
 static JSValue
