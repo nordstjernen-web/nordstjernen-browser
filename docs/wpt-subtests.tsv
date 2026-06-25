@@ -3486,15 +3486,15 @@ test	subtest	status
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in bare_xhtml.xhtml	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in bare_xhtml.xml	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created HTML document	PASS
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created HTML document by DOMParser ('text/html')	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created HTML document by DOMParser ('text/html')	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created MathML document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created SVG document	PASS
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created SVG document by DOMParser ('image/svg+xml')	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created SVG document by DOMParser ('image/svg+xml')	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document	PASS
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document by DOMParser ('application/xhtml+xml')	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XHTML document by DOMParser ('application/xhtml+xml')	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document	PASS
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('application/xml')	FAIL
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('text/xml')	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('application/xml')	PASS
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('text/xml')	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in current document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.html	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.svg	FAIL
@@ -7715,11 +7715,11 @@ test	subtest	status
 /dom/nodes/MutationObserver-takeRecords.html	All records present	PASS
 /dom/nodes/MutationObserver-takeRecords.html	No more records present	PASS
 /dom/nodes/MutationObserver-takeRecords.html	unreachabled test	PASS
-/dom/nodes/MutationObserver-textContent.html	<harness>	TIMEOUT
+/dom/nodes/MutationObserver-textContent.html	<harness>	OK
 /dom/nodes/MutationObserver-textContent.html	Setting Element.textContent	PASS
 /dom/nodes/MutationObserver-textContent.html	Setting Element.textContent to a different value	PASS
 /dom/nodes/MutationObserver-textContent.html	Setting Element.textContent to the same value	PASS
-/dom/nodes/MutationObserver-textContent.html	Setting Element.textContent to the same value when the old node is a CDATASection	NOTRUN
+/dom/nodes/MutationObserver-textContent.html	Setting Element.textContent to the same value when the old node is a CDATASection	PASS
 /dom/nodes/Node-appendChild-cereactions-vs-script.window.html	<harness>	OK
 /dom/nodes/Node-appendChild-cereactions-vs-script.window.html	Custom element reactions follow script execution	FAIL
 /dom/nodes/Node-appendChild.html	<harness>	OK
@@ -7767,9 +7767,9 @@ test	subtest	status
 /dom/nodes/Node-cloneNode-external-stylesheet-no-bc.sub.html	cloneNode on a stylesheet link in a browsing-context-less document	PASS
 /dom/nodes/Node-cloneNode-svg.html	<harness>	OK
 /dom/nodes/Node-cloneNode-svg.html	cloned <svg> should have the right properties	PASS
-/dom/nodes/Node-cloneNode-svg.html	cloned <svg>'s xmlns:xlink attribute should have the right properties	FAIL
+/dom/nodes/Node-cloneNode-svg.html	cloned <svg>'s xmlns:xlink attribute should have the right properties	PASS
 /dom/nodes/Node-cloneNode-svg.html	cloned <use> should have the right properties	PASS
-/dom/nodes/Node-cloneNode-svg.html	cloned <use>'s xlink:href attribute should have the right properties	FAIL
+/dom/nodes/Node-cloneNode-svg.html	cloned <use>'s xlink:href attribute should have the right properties	PASS
 /dom/nodes/Node-cloneNode.html	<harness>	OK
 /dom/nodes/Node-cloneNode.html	Node with custom prototype	FAIL
 /dom/nodes/Node-cloneNode.html	createAttribute	PASS
@@ -12188,8 +12188,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelector: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -12425,8 +12425,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Detached Element.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -12664,8 +12664,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelector: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -12901,8 +12901,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Document.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -13208,8 +13208,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelector: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -13445,8 +13445,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	Fragment.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -13685,8 +13685,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelector: Slotted selector (no matching closing paren): ::slotted(foo	PASS
@@ -13923,8 +13923,8 @@ test	subtest	status
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Invalid namespace: ^|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Invalid pseudo-element: :: before	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Invalid pseudo-element: :::before	PASS
-/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	FAIL
-/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	FAIL
+/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Namespace selector, matching any elements in no namespace only: #no-namespace |*	PASS
+/dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Namespace selector, matching div elements in no namespace only: #no-namespace |div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Namespace selector, matching element with any namespace: #any-namespace *|div	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Relative selector: >*	PASS
 /dom/nodes/ParentNode-querySelector-All.html	In-document Element.querySelectorAll: Slotted selector (no matching closing paren): ::slotted(foo	PASS
