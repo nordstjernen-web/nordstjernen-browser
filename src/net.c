@@ -400,6 +400,84 @@ ns_url_is_http_or_https(const char *url)
 }
 
 static gboolean
+ns_query_param_is_tracking(const char *key, size_t key_len)
+{
+    static const char *const exact[] = {
+        "gclid", "dclid", "gbraid", "wbraid",
+        "fbclid", "msclkid", "yclid", "twclid", "igshid",
+        "mc_cid", "mc_eid",
+        "_hsenc", "_hsmi", "__hssc", "__hstc", "__hsfp", "hsctatracking",
+        "vero_id", "vero_conv",
+        "oly_anon_id", "oly_enc_id",
+        "_openstat", "wickedid", "rb_clickid", "s_cid",
+        "ml_subscriber", "ml_subscriber_hash",
+        "mtm_source", "mtm_medium", "mtm_campaign", "mtm_keyword",
+        "mtm_cid", "mtm_content", "mtm_group", "mtm_placement",
+        "pk_source", "pk_medium", "pk_campaign", "pk_keyword",
+        "pk_cid", "pk_content",
+    };
+    if (key_len == 0)
+        return FALSE;
+    if (key_len >= 4 && g_ascii_strncasecmp(key, "utm_", 4) == 0)
+        return TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(exact); i++)
+        if (strlen(exact[i]) == key_len &&
+            g_ascii_strncasecmp(key, exact[i], key_len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+char *
+ns_url_strip_tracking_params(const char *url)
+{
+    if (!ns_url_is_http_or_https(url))
+        return NULL;
+    const ns_config *cfg = ns_config_get();
+    if (!cfg || !cfg->strip_tracking_params)
+        return NULL;
+
+    const char *frag = strchr(url, '#');
+    const char *query_end = frag ? frag : url + strlen(url);
+    const char *query = strchr(url, '?');
+    if (!query || query >= query_end)
+        return NULL;
+
+    GString *kept = g_string_new(NULL);
+    gboolean removed = FALSE;
+    for (const char *p = query + 1; ; ) {
+        const char *amp = memchr(p, '&', (size_t)(query_end - p));
+        const char *tok_end = amp ? amp : query_end;
+        const char *eq = memchr(p, '=', (size_t)(tok_end - p));
+        size_t key_len = (size_t)((eq ? eq : tok_end) - p);
+        if (ns_query_param_is_tracking(p, key_len)) {
+            removed = TRUE;
+        } else {
+            if (kept->len)
+                g_string_append_c(kept, '&');
+            g_string_append_len(kept, p, (gssize)(tok_end - p));
+        }
+        if (!amp)
+            break;
+        p = amp + 1;
+    }
+
+    if (!removed) {
+        g_string_free(kept, TRUE);
+        return NULL;
+    }
+
+    GString *out = g_string_new_len(url, (gssize)(query - url));
+    if (kept->len) {
+        g_string_append_c(out, '?');
+        g_string_append_len(out, kept->str, (gssize)kept->len);
+    }
+    if (frag)
+        g_string_append(out, frag);
+    g_string_free(kept, TRUE);
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
 ns_url_is_ftp(const char *url)
 {
     return url && g_str_has_prefix(url, "ftp://");

@@ -669,6 +669,10 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     char *file_url = resolve_local_path(url);
     const char *fetch_url = file_url ? file_url : url;
 
+    char *stripped_url = body ? NULL : ns_url_strip_tracking_params(fetch_url);
+    if (stripped_url)
+        fetch_url = stripped_url;
+
     GError *err = NULL;
     ns_response *resp = body
         ? ns_engine_post_blocking(fetch_url, NULL, body, body_len,
@@ -678,15 +682,24 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
         if (resp) ns_response_free(resp);
         g_clear_error(&err);
         g_free(file_url);
+        g_free(stripped_url);
         return NULL;
     }
     g_clear_error(&err);
 
     char *base = g_strdup(resp->final_url ? resp->final_url : fetch_url);
+    if (!body) {
+        char *base_stripped = ns_url_strip_tracking_params(base);
+        if (base_stripped) {
+            g_free(base);
+            base = base_stripped;
+        }
+    }
     char *refresh_hdr = g_strdup(resp->refresh);
     char *doc_language = g_strdup(resp->content_language);
     char *csp_header = g_strdup(resp->csp_header);
     g_free(file_url);
+    g_free(stripped_url);
     browser_prepare_document_response(resp);
 
     char *doc_charset = NULL;
