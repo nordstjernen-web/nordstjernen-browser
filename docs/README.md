@@ -32,7 +32,7 @@ top-level [README.md](../README.md); the development plan is
 - [threading.md](threading.md) — the threading model.
 - [watchdog.md](watchdog.md) — the watchdog supervisor.
 - [ipc-http-experiment.md](ipc-http-experiment.md) — the renderer IPC design experiment.
-- [moz-tech-compare.md](moz-tech-compare.md) — engine technical comparison: 42 transferable ideas from a full-scale engine, ranked by ROI.
+- [moz-tech-compare.md](moz-tech-compare.md) — engine technical comparison: 42 transferable ideas from a full-scale engine, priority-ranked.
 
 ## Web platform & standards
 

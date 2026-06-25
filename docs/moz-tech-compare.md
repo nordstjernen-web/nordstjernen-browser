@@ -26,8 +26,8 @@ The first 20 are grouped Security → Privacy → Performance → Quality/Proces
 ordered by leverage within each group; a second pass adds ten more (21–30),
 leaning privacy-and-platform, and a third (31–40) digs into engine internals
 — memory-safety mitigation and main-thread responsiveness; two final addenda
-(#41, #42) close cross-platform and download security gaps. A ranked summary
-table covering all 42 is at the end.
+(#41, #42) close cross-platform and download security gaps. A single
+priority ranking of all 42 (by ROI, then effort/risk) is at the end.
 
 ---
 
@@ -640,64 +640,82 @@ against the current code.
 
 ---
 
-## Ranked summary
+## Priority ranking
 
-Leverage is the headline judgement (security/privacy weighted for a
-browser whose pitch is security and privacy); effort is rough.
+The proposals above keep stable IDs (`#`, numbered in the order they were
+found). This table sorts the same 42 into a single execution priority
+(`P`). The rule: **leverage (ROI) first**; within a band, cheaper effort
+and lower risk rank higher, with security/privacy nudged up for a browser
+whose pitch is security and privacy. Two items (#41, #1) are pulled above
+pure effort order on strategic weight — see the notes below.
 
-| # | Proposal | Area | ROI | Effort |
-|---|----------|------|-----|--------|
-| 1 | WASM-sandbox a C decoder (reuse WAMR) | Security | High | M |
-| 2 | Sandbox the audio helper | Security | High | S–M |
-| 8 | HTTPS-First upgrade | Privacy/Sec | High | S–M |
-| 11 | Strip tracking query parameters | Privacy | High | S |
-| 42 | Mark-of-the-web on downloads | Security | High | S |
-| 9 | Partition the whole storage stack | Privacy | High | M |
-| 13 | Speculative preload scanner | Perf | High | M |
-| 14 | Back/forward cache | Perf | High | M |
-| 22 | Tracking-protection blocklists | Privacy | High | M |
-| 31 | Hardened heap allocator | Security | High | M |
-| 32 | Off-main-thread image decoding | Perf | High | M |
-| 37 | Private browsing mode | Privacy | High | M |
-| 33 | Retained paint tree / partial repaint | Perf | High | M–L |
-| 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
-| 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
-| 10 | Bounce-tracking protection | Privacy | Med–High | M |
-| 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
-| 7 | Reduce/jitter timer precision | Security | Med | S |
-| 12 | DNS-over-HTTPS | Privacy | Med | S |
-| 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
-| 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
-| 27 | Lazy image loading | Perf | Med | S–M |
-| 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
-| 5 | Opaque Response Blocking | Security | Med | M |
-| 4 | Font sanitization before raster | Security | Med | M |
-| 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
-| 16 | Image surface cache + downscale | Perf | Med | M |
-| 17 | Pre-spawned renderer | Perf | Med | M |
-| 18 | Reader mode | UX | Med | M |
-| 23 | Cookie-banner auto-handling | Privacy | Med | M |
-| 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
-| 30 | Session restore / crash recovery | UX | Med | M |
-| 34 | Background-tab unloading | Memory | Med | M |
-| 38 | HTML Sanitizer API | Security | Med | M |
-| 3 | Site isolation (per-origin) | Security | Med | L |
-| 19 | Accessibility tree | Quality | Med | L |
-| 6 | Compact cert revocation | Security | Med | L |
-| 28 | On-device page translation | UX | Med | L |
-| 29 | Password manager (local-only) | Security/UX | Med | L |
-| 39 | Off-main-thread HTML parsing | Perf | Med | L |
-| 40 | Incremental / low-pause GC | Perf | Med | L |
-| 20 | Vendored-library audit ledger | Process | Low–Med | S |
+The bands: **P1–P15** are the High-ROI set, **P16–P17** Med–High,
+**P18–P23** cheap Med wins, **P24–P34** Med/medium-effort, **P35–P41**
+Med/large-effort, **P42** the lone Low–Med housekeeping item.
 
-Suggested first picks: **#2** and **#8** are the lowest-risk, highest-certainty
-wins; **#11**, **#26**, and **#42** are tiny; **#1** is the highest-leverage and the most
-architecturally interesting (and uniquely cheap here because the WASM
-runtime is already in-tree); **#31** (a hardened allocator) is the cheapest
-broad exploit-mitigation for a C codebase; **#41** closes the biggest gap
-versus the project's own security pitch (macOS/Windows ship an unconfined
-renderer today); **#21** and **#37** are the biggest single privacy
-statements if appetite allows.
+| P | # | Proposal | Area | ROI | Effort |
+|---|---|----------|------|-----|--------|
+| 1 | 11 | Strip tracking query parameters | Privacy | High | S |
+| 2 | 42 | Mark-of-the-web on downloads | Security | High | S |
+| 3 | 2 | Sandbox the audio helper | Security | High | S–M |
+| 4 | 8 | HTTPS-First upgrade | Privacy/Sec | High | S–M |
+| 5 | 31 | Hardened heap allocator | Security | High | M |
+| 6 | 1 | WASM-sandbox a C decoder (reuse WAMR) | Security | High | M |
+| 7 | 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
+| 8 | 37 | Private browsing mode | Privacy | High | M |
+| 9 | 9 | Partition the whole storage stack | Privacy | High | M |
+| 10 | 32 | Off-main-thread image decoding | Perf | High | M |
+| 11 | 13 | Speculative preload scanner | Perf | High | M |
+| 12 | 14 | Back/forward cache | Perf | High | M |
+| 13 | 22 | Tracking-protection blocklists | Privacy | High | M |
+| 14 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
+| 15 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
+| 16 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
+| 17 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
+| 18 | 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
+| 19 | 7 | Reduce/jitter timer precision | Security | Med | S |
+| 20 | 12 | DNS-over-HTTPS | Privacy | Med | S |
+| 21 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
+| 22 | 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
+| 23 | 27 | Lazy image loading | Perf | Med | S–M |
+| 24 | 38 | HTML Sanitizer API | Security | Med | M |
+| 25 | 5 | Opaque Response Blocking | Security | Med | M |
+| 26 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
+| 27 | 4 | Font sanitization before raster | Security | Med | M |
+| 28 | 34 | Background-tab unloading | Memory | Med | M |
+| 29 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
+| 30 | 16 | Image surface cache + downscale | Perf | Med | M |
+| 31 | 17 | Pre-spawned renderer | Perf | Med | M |
+| 32 | 30 | Session restore / crash recovery | UX | Med | M |
+| 33 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
+| 34 | 18 | Reader mode | UX | Med | M |
+| 35 | 3 | Site isolation (per-origin) | Security | Med | L |
+| 36 | 6 | Compact cert revocation | Security | Med | L |
+| 37 | 19 | Accessibility tree | Quality | Med | L |
+| 38 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 39 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 40 | 28 | On-device page translation | UX | Med | L |
+| 41 | 40 | Incremental / low-pause GC | Perf | Med | L |
+| 42 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
+
+Notes on the ranking:
+
+- **P1–P4 are the do-this-week set** — all small, low-risk, and either pure
+  security or pure privacy: strip tracking params (#11), mark-of-the-web on
+  downloads (#42), sandbox the audio helper (#2), HTTPS-First (#8).
+- **#41 (P7) and #1 (P6) are pulled up on strategic weight.** They carry
+  more effort than their neighbours but are the security work most worth
+  scheduling: #41 because two of three desktops ship an *unconfined
+  renderer* today (the biggest gap versus the project's own pitch), and #1
+  because in-process WASM decoder sandboxing is the highest-leverage
+  architectural mitigation — and uniquely cheap here, since the runtime is
+  already in-tree.
+- **#21 (P15) and #37 (P8) are the biggest single privacy statements**;
+  #37 ranks higher only because the cookie/storage-partitioning plumbing it
+  needs largely exists.
+- **#20 (P42)** is cheap (S) but ranks last purely on leverage; it is
+  reasonable to fold in early as housekeeping rather than treat it as
+  "last to do."
 
 ## Anti-lessons — what *not* to copy
 
