@@ -534,10 +534,18 @@ curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     return fwrite(ptr, size, nmemb, f);
 }
 
+static const char *
+audio_tmp_dir(void)
+{
+    const char *d = getenv("TMPDIR");
+    return (d && *d) ? d : "/tmp";
+}
+
 static char *
 write_temp_from_url(const char *url)
 {
-    char tmpl[] = "/tmp/nsaudio-XXXXXX";
+    char tmpl[PATH_MAX];
+    snprintf(tmpl, sizeof tmpl, "%s/nsaudio-XXXXXX", audio_tmp_dir());
     int fd = mkstemp(tmpl);
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, "wb");
@@ -719,6 +727,23 @@ next_token(char **cursor)
     return start;
 }
 
+#ifdef __linux__
+void ns_security_add_writable_dir(const char *dir);
+void ns_security_sandbox_init(const char *self_exe);
+void ns_security_seccomp_init(void);
+
+static void
+sandbox_self(void)
+{
+    ns_security_add_writable_dir(audio_tmp_dir());
+    char self[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
+    self[n > 0 ? n : 0] = '\0';
+    ns_security_sandbox_init(n > 0 ? self : NULL);
+    ns_security_seccomp_init();
+}
+#endif
+
 int
 main(void)
 {
@@ -741,6 +766,10 @@ main(void)
         }
     }
     emit("ready %s", g_dev_ok ? "1" : "0");
+
+#ifdef __linux__
+    sandbox_self();
+#endif
 
     char line[4096];
     while (fgets(line, sizeof line, stdin)) {

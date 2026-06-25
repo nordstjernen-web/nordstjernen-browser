@@ -337,10 +337,23 @@ if not is_android
     # the C runtime on macOS and Windows, where find_library('m') is a harmless
     # no-op.
     audio_lib_deps = [cc.find_library('m', required: false)]
+
+    # On Linux the helper confines itself with the same Landlock + seccomp
+    # profile as the renderer once its audio device and network stack are up,
+    # so attacker-controlled codec bytes are decoded inside the sandbox.
+    audio_sandbox_sources = []
+    if host_machine.system() == 'linux'
+      audio_sandbox_sources += files('security.c')
+      audio_deps += [glib]
+      if have_seccomp
+        audio_deps += [libseccomp]
+      endif
+    endif
+
     executable(
       'nordstjernen-audio',
-      files('audio/main.c'),
-      include_directories: include_directories('audio'),
+      files('audio/main.c') + audio_sandbox_sources,
+      include_directories: include_directories('audio', '.'),
       link_with: libminimp3,
       dependencies: audio_deps + audio_lib_deps,
       install: true,
