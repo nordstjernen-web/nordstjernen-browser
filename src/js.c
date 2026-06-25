@@ -18916,14 +18916,12 @@ ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
 }
 
 static gboolean
-ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
-                           double x, double y, double dx, double dy)
+ns_js_dispatch_wheel_type(ns_js *js, const ns_node *target, const char *type,
+                          double x, double y, double dx, double dy)
 {
-    if (!js || !target) return FALSE;
-    if (js->halted || js->in_pump) return FALSE;
     JSContext *ctx = js->ctx;
-    JSValue event = ns_make_event(ctx, "wheel", target);
-    gboolean cancelable = ns_path_has_active_listener(js, target, "wheel");
+    JSValue event = ns_make_event(ctx, type, target);
+    gboolean cancelable = ns_path_has_active_listener(js, target, type);
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
@@ -18931,11 +18929,30 @@ ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
     JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
     JS_SetPropertyStr(ctx, event, "screenX",    JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, event, "screenY",    JS_NewFloat64(ctx, y));
-    JS_SetPropertyStr(ctx, event, "deltaX",     JS_NewFloat64(ctx, dx));
-    JS_SetPropertyStr(ctx, event, "deltaY",     JS_NewFloat64(ctx, dy));
-    JS_SetPropertyStr(ctx, event, "deltaZ",     JS_NewFloat64(ctx, 0));
-    JS_SetPropertyStr(ctx, event, "deltaMode",  JS_NewInt32(ctx, 0));
-    return ns_js_dispatch_built_event(js, target, "wheel", event, NULL);
+    if (strcmp(type, "mousewheel") == 0) {
+        JS_SetPropertyStr(ctx, event, "wheelDelta",  JS_NewFloat64(ctx, -dy));
+        JS_SetPropertyStr(ctx, event, "wheelDeltaX", JS_NewFloat64(ctx, -dx));
+        JS_SetPropertyStr(ctx, event, "wheelDeltaY", JS_NewFloat64(ctx, -dy));
+    } else {
+        JS_SetPropertyStr(ctx, event, "deltaX",    JS_NewFloat64(ctx, dx));
+        JS_SetPropertyStr(ctx, event, "deltaY",    JS_NewFloat64(ctx, dy));
+        JS_SetPropertyStr(ctx, event, "deltaZ",    JS_NewFloat64(ctx, 0));
+        JS_SetPropertyStr(ctx, event, "deltaMode", JS_NewInt32(ctx, 0));
+    }
+    return ns_js_dispatch_built_event(js, target, type, event, NULL);
+}
+
+static gboolean
+ns_js_dispatch_wheel_event(ns_js *js, const ns_node *target,
+                           double x, double y, double dx, double dy)
+{
+    if (!js || !target) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    gboolean fired = ns_js_dispatch_wheel_type(js, target, "wheel", x, y, dx, dy);
+    if (!js->halted && !js->in_pump)
+        fired |= ns_js_dispatch_wheel_type(js, target, "mousewheel",
+                                           x, y, dx, dy);
+    return fired;
 }
 
 static JSValue
