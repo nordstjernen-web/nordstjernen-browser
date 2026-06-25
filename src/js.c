@@ -4831,15 +4831,22 @@ ns_js_orphan_node(ns_js *js, ns_node *n)
 static void
 ns_js_clear_children(ns_js *js, ns_node *n)
 {
-    if (!js || js->dispatch_depth <= 0) {
+    if (!js) {
         ns_element_clear_children(n);
         return;
     }
+    gboolean defer_free = js->dispatch_depth > 0;
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
         ns_node_remove(c);
-        g_hash_table_add(js->orphan_nodes, c);
+        ns_js_index_child_change(js, n, NULL, c);
+        if (defer_free) {
+            g_hash_table_add(js->orphan_nodes, c);
+        } else {
+            ns_js_purge_subtree_rafs(js, c);
+            ns_node_free(c);
+        }
         c = next;
     }
     n->first_child = NULL;
