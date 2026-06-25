@@ -262,23 +262,28 @@
         }
     }
 
+    function settle(resolve) {
+        if (typeof global.setTimeout === 'function') global.setTimeout(resolve, 0);
+        else Promise.resolve().then(resolve);
+    }
+
     var bridge = {
         click: function (element) {
             return new Promise(function (resolve) {
                 try { realClick(element); } catch (e) {}
-                Promise.resolve().then(resolve);
+                settle(resolve);
             });
         },
         send_keys: function (element, keys) {
             return new Promise(function (resolve) {
                 try { sendKeysTo(element, keys); } catch (e) {}
-                Promise.resolve().then(resolve);
+                settle(resolve);
             });
         },
         action_sequence: function (actions) {
             return new Promise(function (resolve) {
                 try { runActions(actions); } catch (e) {}
-                Promise.resolve().then(resolve);
+                settle(resolve);
             });
         }
     };
