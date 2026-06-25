@@ -25,8 +25,9 @@ values: minimal, clean-room, single-human-auditable, no-JIT, no telemetry.
 The first 20 are grouped Security → Privacy → Performance → Quality/Process,
 ordered by leverage within each group; a second pass adds ten more (21–30),
 leaning privacy-and-platform, and a third (31–40) digs into engine internals
-— memory-safety mitigation and main-thread responsiveness. A ranked summary
-table covering all 40 is at the end.
+— memory-safety mitigation and main-thread responsiveness; a final addendum
+(#41) closes a cross-platform security gap. A ranked summary table covering
+all 41 is at the end.
 
 ---
 
@@ -585,6 +586,34 @@ against the current code.
   responsiveness lever.
 - **ROI: Med · Effort: L · Fit: medium (touches the JS runtime).**
 
+## One more — cross-platform parity (41)
+
+### 41. Sandbox the renderer on macOS and Windows, not only Linux ★ *(Security)*
+
+- **Upstream:** every content/decoder process is confined by a
+  platform-native sandbox on all three desktops — Linux seccomp-bpf + user
+  namespaces (`security/sandbox/linux`), macOS Seatbelt profiles
+  (`security/sandbox/mac/Sandbox.h`, `sandbox_init`), and a Windows
+  AppContainer / restricted-token / job-object broker
+  (`security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp`).
+- **Nordstjernen today:** the renderer is sandboxed **only on Linux**
+  (Landlock + seccomp in `src/security.c`, all under `#ifdef __linux__`); on
+  macOS and Windows `ns_security_sandbox_init` does nothing beyond refusing
+  to run as root, so a compromised renderer on those platforms has the
+  user's full filesystem and network access. Process-per-tab still stops a
+  page from taking down the UI, but not from stealing data.
+- **The move:** add the two missing backends behind the existing
+  `ns_security_sandbox_init` seam — a macOS Seatbelt profile via
+  `sandbox_init_with_parameters` denying filesystem/network beyond the
+  renderer's needs, and on Windows an AppContainer + restricted token + job
+  object + `SetProcessMitigationPolicy`, with a thin broker for the few
+  privileged operations. It is the same boundary already designed for Linux,
+  extended to the other two supported desktops — arguably the single biggest
+  security gap relative to the project's own pitch, since two of three
+  desktop platforms currently ship an unconfined renderer.
+- **ROI: High · Effort: M (macOS) / M–L (Windows) · Fit: excellent — closes
+  a whole-platform hole and reuses the existing IPC/sandbox seam.**
+
 ---
 
 ## Ranked summary
@@ -606,6 +635,7 @@ browser whose pitch is security and privacy); effort is rough.
 | 32 | Off-main-thread image decoding | Perf | High | M |
 | 37 | Private browsing mode | Privacy | High | M |
 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
+| 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
@@ -639,8 +669,10 @@ Suggested first picks: **#2** and **#8** are the lowest-risk, highest-certainty
 wins; **#11** and **#26** are tiny; **#1** is the highest-leverage and the most
 architecturally interesting (and uniquely cheap here because the WASM
 runtime is already in-tree); **#31** (a hardened allocator) is the cheapest
-broad exploit-mitigation for a C codebase; **#21** and **#37** are the biggest
-single privacy statements if appetite allows.
+broad exploit-mitigation for a C codebase; **#41** closes the biggest gap
+versus the project's own security pitch (macOS/Windows ship an unconfined
+renderer today); **#21** and **#37** are the biggest single privacy
+statements if appetite allows.
 
 ## Anti-lessons — what *not* to copy
 
