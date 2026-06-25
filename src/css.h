@@ -539,6 +539,7 @@ typedef struct ns_css_simple {
     GPtrArray *matches_none;
     GPtrArray *has_groups;
     gboolean   never_match;
+    gboolean   ns_none;
 } ns_css_simple;
 
 typedef enum ns_css_comb {

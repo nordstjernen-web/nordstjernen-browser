@@ -2162,6 +2162,8 @@ parse_one_selector(const char **pp, const char *end, int depth)
                     p++;
                 }
                 if (p < end && *p == '|' && !(p + 1 < end && p[1] == '=')) {
+                    if (cc == '|')
+                        cmp->ns_none = TRUE;
                     p++;
                     if (p < end && *p == '*') {
                         p++;
@@ -11881,6 +11883,12 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
 {
     if (sel->never_match) return FALSE;
     if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    if (sel->ns_none) {
+        gboolean null_ns = (el->flags & NS_NODE_FOREIGN_NS) &&
+                           !(el->flags & NS_NODE_SVG_NS) &&
+                           !ns_element_get_attr(el, "data-nd-ns-uri");
+        if (!null_ns) return FALSE;
+    }
     if (sel->type && strcmp(sel->type, "*") != 0) {
         if (!el->name) return FALSE;
         if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
