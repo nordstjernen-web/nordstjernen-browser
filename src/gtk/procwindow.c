@@ -114,7 +114,10 @@ install_status_css(void)
         "  border-bottom: 2px solid transparent;"
         "}"
         ".ns-tab > button.ns-tab-label.ns-tab-active {"
+        "  background-color: alpha(white, 0.65);"
         "  border-bottom-color: @accent_color;"
+        "  border-top-left-radius: 5px;"
+        "  border-top-right-radius: 5px;"
         "  font-weight: bold;"
         "}"
         ".ns-newtab { min-height: 0; padding: 2px 6px; }");
