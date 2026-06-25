@@ -22,9 +22,10 @@ Each proposal is tagged **ROI** (High / Med / Low) and **Effort**
 (S / M / L). "Fit" notes how well it sits with Nordstjernen's stated
 values: minimal, clean-room, single-human-auditable, no-JIT, no telemetry.
 
-The 20 are grouped Security → Privacy → Performance → Quality/Process,
-ordered by leverage within each group. A ranked summary table is at the
-end.
+The first 20 are grouped Security → Privacy → Performance → Quality/Process,
+ordered by leverage within each group; a second pass adds ten more (21–30),
+leaning privacy-and-platform. A ranked summary table covering all 30 is at
+the end.
 
 ---
 
@@ -313,6 +314,140 @@ end.
   the whole thing" value.
 - **ROI: Low–Med · Effort: S · Fit: excellent (on-brand).**
 
+## Additional proposals (second pass)
+
+A further ten, numbered sequentially and tagged by area, found on a deeper
+read of the same tree. They lean privacy-and-platform rather than the
+process-architecture themes above.
+
+### 21. Fingerprinting resistance ★ *(Privacy)*
+
+- **Upstream:** a coordinated mode normalizes or spoofs the values that
+  uniquely identify a browser — canvas/WebGL readback, enumerable fonts,
+  screen/`devicePixelRatio`, timezone, `navigator` details, audio
+  fingerprint — `toolkit/components/resistfingerprinting/`, pref
+  `privacy.resistFingerprinting`.
+- **Nordstjernen today:** no fingerprinting defense; canvas/WebGL readback,
+  the font list, screen metrics, and timezone each leak an identifying
+  signal — and being a rare engine makes the user-agent itself a strong
+  discriminator.
+- **The move:** a single opt-in mode that clamps `screen`/DPR to common
+  values, restricts font enumeration to a standard set, adds per-session
+  noise to canvas/`getImageData` readback, and pins timezone/locale where
+  configured. Pairs naturally with the timer clamp (#7).
+- **ROI: High · Effort: L · Fit: excellent — squarely the project's pitch.**
+
+### 22. Tracking-protection blocklists *(Privacy / Security)*
+
+- **Upstream:** known trackers, cryptominers, and fingerprinters are
+  blocked at the network layer from curated lists — `netwerk/url-classifier`,
+  `toolkit/components/url-classifier`.
+- **Nordstjernen today:** enforces CSP/SRI/HSTS but does no
+  blocklist-based blocking of third-party trackers or malware hosts.
+- **The move:** ship a compact, refreshable host/URL blocklist and consult
+  it in the fetch path (`ns_net_fetch_async`) before connecting, with a
+  per-site toggle. Complements the URL- and storage-level anti-tracking
+  items (#10, #11).
+- **ROI: High · Effort: M · Fit: excellent (needs a list channel, no
+  telemetry).**
+
+### 23. Cookie-banner auto-handling *(Privacy / UX)*
+
+- **Upstream:** consent banners are auto-dismissed (preferring "reject")
+  via per-site rules and common-framework heuristics —
+  `toolkit/components/cookiebanners`.
+- **Nordstjernen today:** none; every site shows its banner.
+- **The move:** a small rule set plus generic heuristics that click
+  reject/close on load. Self-contained; pure content scripting over the
+  existing DOM/JS path.
+- **ROI: Med · Effort: M · Fit: good.**
+
+### 24. Encrypted Client Hello (ECH) *(Privacy / Security)*
+
+- **Upstream:** the TLS ClientHello — including the SNI server name — is
+  encrypted so on-path observers can't see which host is being visited
+  (ECH plumbing in `netwerk/protocol/http/`).
+- **Nordstjernen today:** SNI is sent in cleartext on every HTTPS
+  connection, revealing the destination host to the network.
+- **The move:** OpenSSL/libcurl expose ECH; fetch the ECH config (via the
+  HTTPS/SVCB DNS record, ideally over the DoH resolver from #12) and enable
+  it on the easy handle in `src/net.c`.
+- **ROI: Med · Effort: S–M · Fit: excellent — opt-in, no new dependency.**
+
+### 25. COOP/COEP and real `crossOriginIsolated` *(Security)*
+
+- **Upstream:** `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy`
+  headers are parsed to put a document in a cross-origin-isolated agent
+  cluster, which gates powerful features like `SharedArrayBuffer`
+  (`dom/base/Document.cpp`, `netwerk/protocol/http/HttpBaseChannel.h`).
+- **Nordstjernen today:** `crossOriginIsolated` is hard-coded `false`
+  (`src/js.c:32437`) and the headers are not processed, so the isolation
+  state can never be granted and any SAB exposure is ungated.
+- **The move:** parse COOP/COEP, compute the isolation state, and gate
+  `SharedArrayBuffer`/high-res timers on it — the natural companion to the
+  timer-precision work in #7.
+- **ROI: Med · Effort: M · Fit: good.**
+
+### 26. MIME-sniffing safety (`nosniff` + type enforcement) *(Security)*
+
+- **Upstream:** content-type handling honors `X-Content-Type-Options:
+  nosniff` and constrains sniffing so a mislabelled response can't be
+  executed as script/style (`netwerk/base/nsIContentSniffer.idl`).
+- **Nordstjernen today:** `X-Content-Type-Options: nosniff` is not honored
+  and there is no guardrail stopping a `text/plain` body from being used as
+  a script/stylesheet.
+- **The move:** honor `nosniff`, and refuse to execute/apply a subresource
+  whose declared type doesn't match the context. A small, high-value
+  network-layer rule that complements ORB (#5).
+- **ROI: Med · Effort: S · Fit: excellent.**
+
+### 27. Lazy image loading (`loading=lazy`) *(Performance)*
+
+- **Upstream:** images (and iframes) with `loading=lazy`, and off-screen
+  images generally, are deferred until near the viewport
+  (`dom/html/HTMLImageElement.cpp`).
+- **Nordstjernen today:** the `loading` attribute is reflected as an IDL
+  property (`src/js.c:3265`) but off-screen images are still fetched and
+  decoded eagerly.
+- **The move:** defer the fetch/decode of images whose computed position is
+  far below the viewport until scroll brings them close, using the layout
+  geometry already available.
+- **ROI: Med · Effort: S–M · Fit: good.**
+
+### 28. On-device page translation *(UX / feature)*
+
+- **Upstream:** full-page translation runs locally with bundled models —
+  no cloud round-trip — `toolkit/components/translations`.
+- **Nordstjernen today:** no translation; but the project *already* ships
+  on-device inference (llama.cpp for `about:start`) and an in-tree i18n
+  catalogue, so the "local, no-cloud" muscle exists.
+- **The move:** an opt-in, on-device translate action that reuses the
+  existing local-model infrastructure — a strong thematic fit with the
+  no-telemetry, offline-capable ethos.
+- **ROI: Med · Effort: L · Fit: excellent (reuses on-device AI).**
+
+### 29. Password manager / credential storage *(Security / UX)*
+
+- **Upstream:** credentials are stored encrypted with autofill and a
+  breach-aware UI — `toolkit/components/passwordmgr`.
+- **Nordstjernen today:** no credential storage; users depend entirely on
+  an external manager.
+- **The move:** an optional, locally-encrypted credential store (the
+  WebCrypto/OpenSSL primitives in `src/webcrypto.c` already exist) with
+  save/fill on forms. Keep it strictly local — no sync, no cloud.
+- **ROI: Med · Effort: L · Fit: good (local-only).**
+
+### 30. Session restore / crash recovery *(UX)*
+
+- **Upstream:** open tabs and their navigation state are persisted and
+  restored after a restart or crash — `toolkit/components/sessionstore`.
+- **Nordstjernen today:** process-per-tab already keeps one tab's crash
+  from taking down the UI, but there is no whole-session restore after a
+  full restart or shell crash.
+- **The move:** periodically serialize open tabs + history + scroll
+  position and offer to restore them on next launch.
+- **ROI: Med · Effort: M · Fit: good.**
+
 ---
 
 ## Ranked summary
@@ -329,24 +464,35 @@ browser whose pitch is security and privacy); effort is rough.
 | 9 | Partition the whole storage stack | Privacy | High | M |
 | 13 | Speculative preload scanner | Perf | High | M |
 | 14 | Back/forward cache | Perf | High | M |
+| 22 | Tracking-protection blocklists | Privacy | High | M |
+| 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
 | 7 | Reduce/jitter timer precision | Security | Med | S |
 | 12 | DNS-over-HTTPS | Privacy | Med | S |
+| 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
+| 26 | MIME-sniffing safety (nosniff) | Security | Med | S |
+| 27 | Lazy image loading | Perf | Med | S–M |
 | 5 | Opaque Response Blocking | Security | Med | M |
 | 4 | Font sanitization before raster | Security | Med | M |
 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
 | 16 | Image surface cache + downscale | Perf | Med | M |
 | 17 | Pre-spawned renderer | Perf | Med | M |
 | 18 | Reader mode | UX | Med | M |
+| 23 | Cookie-banner auto-handling | Privacy | Med | M |
+| 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
+| 30 | Session restore / crash recovery | UX | Med | M |
 | 3 | Site isolation (per-origin) | Security | Med | L |
 | 19 | Accessibility tree | Quality | Med | L |
 | 6 | Compact cert revocation | Security | Med | L |
+| 28 | On-device page translation | UX | Med | L |
+| 29 | Password manager (local-only) | Security/UX | Med | L |
 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Suggested first picks: **#2** and **#8** are the lowest-risk, highest-certainty
-wins; **#11** is tiny; **#1** is the highest-leverage and the most
+wins; **#11** and **#26** are tiny; **#1** is the highest-leverage and the most
 architecturally interesting (and uniquely cheap here because the WASM
-runtime is already in-tree).
+runtime is already in-tree); **#21** is the biggest single privacy statement
+if appetite allows.
 
 ## Anti-lessons — what *not* to copy
 
