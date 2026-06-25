@@ -21677,7 +21677,8 @@ class_is_ascii_ws(char c)
 }
 
 static gboolean
-element_has_class_token(const ns_node *n, const char *want, gsize wl)
+element_has_class_token(const ns_node *n, const char *want, gsize wl,
+                        gboolean ci)
 {
     const char *cls = ns_element_get_attr(n, "class");
     if (!cls) return FALSE;
@@ -21686,13 +21687,16 @@ element_has_class_token(const ns_node *n, const char *want, gsize wl)
         while (class_is_ascii_ws(*p)) p++;
         const char *tok = p;
         while (*p && !class_is_ascii_ws(*p)) p++;
-        if ((gsize)(p - tok) == wl && strncmp(tok, want, wl) == 0) return TRUE;
+        if ((gsize)(p - tok) == wl &&
+            (ci ? g_ascii_strncasecmp(tok, want, wl) == 0
+                : strncmp(tok, want, wl) == 0))
+            return TRUE;
     }
     return FALSE;
 }
 
 static gboolean
-element_has_class(const ns_node *n, const char *want)
+element_has_class(const ns_node *n, const char *want, gboolean ci)
 {
     const char *p = want;
     gboolean any = FALSE;
@@ -21704,21 +21708,21 @@ element_has_class(const ns_node *n, const char *want)
         gsize wl = (gsize)(p - tok);
         if (wl == 0) continue;
         any = TRUE;
-        if (!element_has_class_token(n, tok, wl)) return FALSE;
+        if (!element_has_class_token(n, tok, wl, ci)) return FALSE;
     }
     return any;
 }
 
 static void
-ns_collect_by_class(const ns_node *n, const char *cls, JSContext *ctx,
-                    JSValue arr, uint32_t *idx)
+ns_collect_by_class(const ns_node *n, const char *cls, gboolean ci,
+                    JSContext *ctx, JSValue arr, uint32_t *idx)
 {
     if (!n) return;
-    if (n->kind == NS_NODE_ELEMENT && element_has_class(n, cls))
+    if (n->kind == NS_NODE_ELEMENT && element_has_class(n, cls, ci))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
     if (ns_node_is_element_named(n, "template")) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_collect_by_class(c, cls, ctx, arr, idx);
+        ns_collect_by_class(c, cls, ci, ctx, arr, idx);
 }
 
 static gboolean
@@ -25537,10 +25541,13 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         break;
     }
     case NS_LIVE_BY_CLASS:
-    case NS_LIVE_DOC_CLASS:
+    case NS_LIVE_DOC_CLASS: {
+        gboolean ci = js && js->current_doc &&
+                      (js->current_doc->flags & NS_NODE_QUIRKS);
         for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-            ns_collect_by_class(c, b->param ? b->param : "", ctx, arr, &i);
+            ns_collect_by_class(c, b->param ? b->param : "", ci, ctx, arr, &i);
         break;
+    }
     case NS_LIVE_BY_NAME:
         ns_collect_by_name(root, b->param ? b->param : "", ctx, arr, &i);
         break;
@@ -28418,7 +28425,11 @@ ns_table_insertRow(JSContext *ctx, JSValueConst this_val,
             ns_node_append_child(tbl, new_tr);
     }
     g_ptr_array_free(rows, TRUE);
-    if (_j) _j->mutated = TRUE;
+    if (_j) {
+        ns_js_record_child_change(_j, new_tr->parent, new_tr, NULL,
+                                  new_tr->prev_sibling, new_tr->next_sibling);
+        _j->mutated = TRUE;
+    }
     return ns_make_element(ctx, new_tr);
 }
 
@@ -28436,9 +28447,14 @@ ns_table_deleteRow(JSContext *ctx, JSValueConst this_val,
     if (idx >= 0 && (uint32_t)idx < rows->len) {
         ns_node *r = g_ptr_array_index(rows, idx);
         ns_js *_j = js_from_ctx(ctx);
+        ns_node *parent = r->parent;
+        ns_node *prev = r->prev_sibling, *next = r->next_sibling;
         ns_node_remove(r);
         ns_js_orphan_node(_j, r);
-        if (_j) _j->mutated = TRUE;
+        if (_j) {
+            ns_js_record_child_change(_j, parent, NULL, r, prev, next);
+            _j->mutated = TRUE;
+        }
     }
     g_ptr_array_free(rows, TRUE);
     return JS_UNDEFINED;
@@ -28469,7 +28485,11 @@ ns_tr_insertCell(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, tr, cell, ref);
     }
     g_ptr_array_free(cells, TRUE);
-    if (_j) _j->mutated = TRUE;
+    if (_j) {
+        ns_js_record_child_change(_j, cell->parent, cell, NULL,
+                                  cell->prev_sibling, cell->next_sibling);
+        _j->mutated = TRUE;
+    }
     return ns_make_element(ctx, cell);
 }
 
@@ -28492,9 +28512,14 @@ ns_tr_deleteCell(JSContext *ctx, JSValueConst this_val,
     if (idx >= 0 && (uint32_t)idx < cells->len) {
         ns_node *r = g_ptr_array_index(cells, idx);
         ns_js *_j = js_from_ctx(ctx);
+        ns_node *parent = r->parent;
+        ns_node *prev = r->prev_sibling, *next = r->next_sibling;
         ns_node_remove(r);
         ns_js_orphan_node(_j, r);
-        if (_j) _j->mutated = TRUE;
+        if (_j) {
+            ns_js_record_child_change(_j, parent, NULL, r, prev, next);
+            _j->mutated = TRUE;
+        }
     }
     g_ptr_array_free(cells, TRUE);
     return JS_UNDEFINED;
