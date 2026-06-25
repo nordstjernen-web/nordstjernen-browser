@@ -43,7 +43,9 @@ double
 ns_perf_now_ms(const ns_js *js)
 {
     gint64 origin = js ? js->time_origin_us : 0;
-    return (double)(g_get_monotonic_time() - origin) / 1000.0;
+    gint64 us = g_get_monotonic_time() - origin;
+    us = (us / 5) * 5;
+    return (double)us / 1000.0;
 }
 
 JSValue
