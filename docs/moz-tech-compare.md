@@ -25,9 +25,9 @@ values: minimal, clean-room, single-human-auditable, no-JIT, no telemetry.
 The first 20 are grouped Security → Privacy → Performance → Quality/Process,
 ordered by leverage within each group; a second pass adds ten more (21–30),
 leaning privacy-and-platform, and a third (31–40) digs into engine internals
-— memory-safety mitigation and main-thread responsiveness; a final addendum
-(#41) closes a cross-platform security gap. A ranked summary table covering
-all 41 is at the end.
+— memory-safety mitigation and main-thread responsiveness; two final addenda
+(#41, #42) close cross-platform and download security gaps. A ranked summary
+table covering all 42 is at the end.
 
 ---
 
@@ -586,7 +586,7 @@ against the current code.
   responsiveness lever.
 - **ROI: Med · Effort: L · Fit: medium (touches the JS runtime).**
 
-## One more — cross-platform parity (41)
+## Addenda — remaining security gaps (41–42)
 
 ### 41. Sandbox the renderer on macOS and Windows, not only Linux ★ *(Security)*
 
@@ -614,6 +614,30 @@ against the current code.
 - **ROI: High · Effort: M (macOS) / M–L (Windows) · Fit: excellent — closes
   a whole-platform hole and reuses the existing IPC/sandbox seam.**
 
+### 42. Mark downloaded files with the OS "downloaded-from-internet" tag ★ *(Security)*
+
+- **Upstream:** every completed download is tagged with the platform
+  mark-of-the-web so the OS's own gatekeeper screens it before it runs, and
+  executables get an extra reputation check — the quarantine attribute is
+  applied in `toolkit/components/downloads/DownloadIntegration.sys.mjs`, with
+  `toolkit/components/reputationservice/ApplicationReputation.cpp` vetting
+  executables.
+- **Nordstjernen today:** the shell saves downloads (the
+  `NS_PROC_EVT_DOWNLOAD` path in `src/gtk/procview.c`) with **no OS
+  quarantine** — no `com.apple.quarantine` xattr on macOS, no
+  `Zone.Identifier` alternate data stream on Windows — so Gatekeeper and
+  SmartScreen never get the chance to warn before a downloaded
+  installer/script/binary is executed.
+- **The move:** on save, set the platform mark-of-the-web
+  (`com.apple.quarantine` xattr / a `Zone.Identifier:$DATA` stream carrying
+  the source URL), and optionally warn when the saved file is a directly
+  executable type. This needs **no network and no telemetry** — it simply
+  lets the OS's existing gatekeeper do its job, so it sidesteps the
+  reputation-service machinery (which would otherwise overlap SafeBrowsing,
+  #35).
+- **ROI: High (per effort) · Effort: S · Fit: excellent — pure local
+  security, delegates the warning to the OS.**
+
 ---
 
 ## Ranked summary
@@ -627,6 +651,7 @@ browser whose pitch is security and privacy); effort is rough.
 | 2 | Sandbox the audio helper | Security | High | S–M |
 | 8 | HTTPS-First upgrade | Privacy/Sec | High | S–M |
 | 11 | Strip tracking query parameters | Privacy | High | S |
+| 42 | Mark-of-the-web on downloads | Security | High | S |
 | 9 | Partition the whole storage stack | Privacy | High | M |
 | 13 | Speculative preload scanner | Perf | High | M |
 | 14 | Back/forward cache | Perf | High | M |
@@ -666,7 +691,7 @@ browser whose pitch is security and privacy); effort is rough.
 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Suggested first picks: **#2** and **#8** are the lowest-risk, highest-certainty
-wins; **#11** and **#26** are tiny; **#1** is the highest-leverage and the most
+wins; **#11**, **#26**, and **#42** are tiny; **#1** is the highest-leverage and the most
 architecturally interesting (and uniquely cheap here because the WASM
 runtime is already in-tree); **#31** (a hardened allocator) is the cheapest
 broad exploit-mitigation for a C codebase; **#41** closes the biggest gap
