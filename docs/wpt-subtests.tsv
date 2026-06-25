@@ -1158,8 +1158,7 @@ test	subtest	status
 /dom/events/event-global-extra.window.html	window.event for constructors from another global: EventTarget	FAIL
 /dom/events/event-global-extra.window.html	window.event for constructors from another global: XMLHttpRequest	FAIL
 /dom/events/event-global-extra.window.html	window.event should not be affected by nodes moving post-dispatch	FAIL
-/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html	<harness>	OK
-/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html	window.event is still set when 'beforeunload' result is coerced to string	FAIL
+/dom/events/event-global-is-still-set-when-coercing-beforeunload-result.html	<harness>	TIMEOUT
 /dom/events/event-global-is-still-set-when-reporting-exception-onerror.html	<harness>	OK
 /dom/events/event-global-is-still-set-when-reporting-exception-onerror.html	window.onerror handler restores window.event after it reports an exception	FAIL
 /dom/events/event-global-set-before-handleEvent-lookup.window.html	<harness>	OK
@@ -1384,7 +1383,7 @@ test	subtest	status
 /dom/events/remove-all-listeners.html	Removing all listeners and then adding a new one should work.	PASS
 /dom/events/scrolling/iframe-chains.html	<harness>	OK
 /dom/events/scrolling/iframe-chains.html	Wheel scroll in iframe chains to containing element.	FAIL
-/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	NONE
+/dom/events/scrolling/input-text-scroll-event-when-using-arrow-keys.html	<harness>	TIMEOUT
 /dom/events/scrolling/save-iframe-scroll-offset-when-display-none.html	<harness>	TIMEOUT
 /dom/events/scrolling/scroll-cross-origin-iframes.html	<harness>	TIMEOUT
 /dom/events/scrolling/scroll-event-fired-to-element.html	<harness>	OK
@@ -1397,7 +1396,8 @@ test	subtest	status
 /dom/events/scrolling/scroll-event-fired-to-iframe.html	scrollX and scrollY being set with the same value.	FAIL
 /dom/events/scrolling/scroll-event-fired-to-iframe.html	scrollX and scrollY should fire scroll event.	FAIL
 /dom/events/scrolling/scroll-event-fired-to-iframe.html	scrollX and scrollY when scrolling above maximum Scroll.	FAIL
-/dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html	<harness>	TIMEOUT
+/dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html	<harness>	OK
+/dom/events/scrolling/scrollIntoView-in-onscroll-to-sticky.html	scrollIntoView-in-onscroll-to-sticky	PASS
 /dom/events/scrolling/scrollend-event-fired-after-instant-scroll-in-microtask.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	<harness>	OK
 /dom/events/scrolling/scrollend-event-fired-after-sequence-of-scrolls.tentative.html	Move down, up and down again, receive scrollend event only once	FAIL
@@ -1421,19 +1421,23 @@ test	subtest	status
 /dom/events/scrolling/scrollend-event-handler-content-attributes.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-not-fired-after-removing-scroller.tentative.html	<harness>	TIMEOUT
 /dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	<harness>	OK
-/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via keys on div shouldn't fire scrollend.	FAIL
-/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via keys on document shouldn't fire scrollend.	FAIL
-/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on div shouldn't fire scrollend.	FAIL
-/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on document shouldn't fire scrollend.	FAIL
+/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via keys on div shouldn't fire scrollend.	PASS
+/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via keys on document shouldn't fire scrollend.	PASS
+/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on div shouldn't fire scrollend.	PASS
+/dom/events/scrolling/scrollend-event-not-fired-on-no-scroll.html	No scroll via wheel on document shouldn't fire scrollend.	PASS
 /dom/events/scrolling/scrollend-fires-to-text-input.html	<harness>	TIMEOUT
-/dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html	<harness>	TIMEOUT
+/dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html	<harness>	OK
+/dom/events/scrolling/scrollend-with-snap-on-fractional-offset.html	snap to fractional offset fires scrollend exactly once.	FAIL
 /dom/events/scrolling/wheel-event-composed.html	<harness>	OK
-/dom/events/scrolling/wheel-event-composed.html	wheel event must be composed	FAIL
+/dom/events/scrolling/wheel-event-composed.html	wheel event must be composed	PASS
 /dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html	<harness>	OK
-/dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html	When `preventDefault` is called on a WheelEvent, scrolling should be prevented.	FAIL
-/dom/events/scrolling/wheel-event-transactions-basic.html	<harness>	TIMEOUT
+/dom/events/scrolling/wheel-event-no-scroll-after-prevent-default.html	When `preventDefault` is called on a WheelEvent, scrolling should be prevented.	PASS
+/dom/events/scrolling/wheel-event-transactions-basic.html	<harness>	OK
+/dom/events/scrolling/wheel-event-transactions-basic.html	The wheel event transactions target may not be a scroll frame	FAIL
+/dom/events/scrolling/wheel-event-transactions-basic.html	Wheel events should be captured to one target #1	FAIL
+/dom/events/scrolling/wheel-event-transactions-basic.html	Wheel events should be captured to one target #2	FAIL
 /dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html	<harness>	OK
-/dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html	Two separate webdriver action chains should have different wheel event transactions	FAIL
+/dom/events/scrolling/wheel-event-transactions-multiple-action-chains.html	Two separate webdriver action chains should have different wheel event transactions	PASS
 /dom/events/scrolling/wheel-event-transactions-target-display-change.html	<harness>	OK
 /dom/events/scrolling/wheel-event-transactions-target-display-change.html	Modify the initial wheel event target to display:contents	FAIL
 /dom/events/scrolling/wheel-event-transactions-target-display-change.html	Modify the initial wheel event target to display:none	FAIL
@@ -1446,7 +1450,9 @@ test	subtest	status
 /dom/events/scrolling/wheel-event-transactions-target-resize.html	<harness>	OK
 /dom/events/scrolling/wheel-event-transactions-target-resize.html	Resize the initial target and use a passive:false listener	FAIL
 /dom/events/scrolling/wheel-event-transactions-target-resize.html	Resize the initial target and use a passive:true listener	FAIL
-/dom/events/shadow-relatedTarget.html	<harness>	TIMEOUT
+/dom/events/shadow-relatedTarget.html	<harness>	OK
+/dom/events/shadow-relatedTarget.html	relatedTarget should not leak at capturing phase, at window object.	FAIL
+/dom/events/shadow-relatedTarget.html	relatedTarget should not leak at target.	FAIL
 /dom/events/webkit-animation-end-event.html	<harness>	TIMEOUT
 /dom/events/webkit-animation-iteration-event.html	<harness>	TIMEOUT
 /dom/events/webkit-animation-start-event.html	<harness>	TIMEOUT
