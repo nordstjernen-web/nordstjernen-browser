@@ -11452,7 +11452,8 @@ ns_css_node_language(const ns_node *el)
         const ns_attr *xa = ns_element_find_attr_ns(n, xml_ns, "lang");
         if (xa) return xa->value ? xa->value : "";
         const ns_attr *la = ns_element_find_attr_ns(n, NULL, "lang");
-        if (la) return la->value ? la->value : "";
+        if (la && !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+            return la->value ? la->value : "";
     }
     const ns_node *root = el;
     while (root && root->parent) root = root->parent;
