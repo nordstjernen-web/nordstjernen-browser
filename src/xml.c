@@ -138,7 +138,9 @@ xml_binding_free(gpointer p)
     g_free(b);
 }
 
-static gboolean xml_parse_element(xml_parser *xp, ns_node *parent);
+#define XML_MAX_DEPTH 256
+
+static gboolean xml_parse_element(xml_parser *xp, ns_node *parent, int depth);
 
 static void
 xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
@@ -270,8 +272,9 @@ xml_apply_namespace(ns_node *el, const char *qname, const char *uri)
 }
 
 static gboolean
-xml_parse_element(xml_parser *xp, ns_node *parent)
+xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
 {
+    if (depth > XML_MAX_DEPTH) { xp->ok = FALSE; return FALSE; }
     xp->p++;
     char *qname = xml_read_name(xp);
     if (!qname) { xp->ok = FALSE; return FALSE; }
@@ -380,7 +383,7 @@ xml_parse_element(xml_parser *xp, ns_node *parent)
                 xp->p = e + 2;
                 continue;
             }
-            if (!xml_parse_element(xp, el)) break;
+            if (!xml_parse_element(xp, el, depth + 1)) break;
             continue;
         }
         const char *ts = xp->p;
@@ -415,7 +418,7 @@ ns_xml_parse(const char *input, gssize len)
     ns_node *root = NULL;
     if (xp.p < xp.end && *xp.p == '<') {
         guint depth = xp.ns_stack->len;
-        if (xml_parse_element(&xp, doc))
+        if (xml_parse_element(&xp, doc, 0))
             root = doc->last_child;
         (void)depth;
     } else {
