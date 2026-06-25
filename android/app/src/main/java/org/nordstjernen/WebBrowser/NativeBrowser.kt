@@ -1,6 +1,6 @@
 /* Nordstjernen — Kotlin facade over the native renderer IPC bridge. */
 
-package com.nordstjernen.browser
+package org.nordstjernen.WebBrowser
 
 import android.graphics.Bitmap
 import android.util.Log

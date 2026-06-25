@@ -108,7 +108,7 @@
         android:layout_height="0dp"
         android:layout_weight="1">
 
-        <com.nordstjernen.browser.PageView
+        <org.nordstjernen.WebBrowser.PageView
             android:id="@+id/pageView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />

@@ -9,14 +9,14 @@
 #include <jni.h>
 
 JNIEXPORT jboolean JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeEngineAvailable(JNIEnv *env, jclass clazz)
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeEngineAvailable(JNIEnv *env, jclass clazz)
 {
     (void)env; (void)clazz;
     return JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz,
                                                        jstring data_dir, jstring ca_bundle)
 {
     (void)env; (void)clazz; (void)data_dir; (void)ca_bundle;
@@ -24,14 +24,14 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeInit(JNIEnv *env, jclass clazz
 }
 
 JNIEXPORT jint JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeDefaultSettleMs(JNIEnv *env, jclass clazz)
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeDefaultSettleMs(JNIEnv *env, jclass clazz)
 {
     (void)env; (void)clazz;
     return 400;
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz,
                                                        jstring url, jint viewport_width,
                                                        jint viewport_height,
                                                        jint settle_ms)
@@ -42,7 +42,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeOpen(JNIEnv *env, jclass clazz
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeNavigate(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeNavigate(JNIEnv *env, jclass clazz,
                                                            jlong handle, jstring url,
                                                            jint viewport_width,
                                                            jint viewport_height,
@@ -54,7 +54,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeNavigate(JNIEnv *env, jclass c
 }
 
 JNIEXPORT jintArray JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativePageSize(JNIEnv *env, jclass clazz,
                                                            jlong handle)
 {
     (void)env; (void)clazz; (void)handle;
@@ -62,7 +62,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativePageSize(JNIEnv *env, jclass c
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
                                                                   jclass clazz,
                                                                   jlong handle)
 {
@@ -71,7 +71,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditable(JNIEnv *env,
 }
 
 JNIEXPORT jobjectArray JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditableState(JNIEnv *env,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeFocusedEditableState(JNIEnv *env,
                                                                        jclass clazz,
                                                                        jlong handle)
 {
@@ -80,7 +80,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeFocusedEditableState(JNIEnv *e
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeSetFocusedEditableSelection(JNIEnv *env,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeSetFocusedEditableSelection(JNIEnv *env,
                                                                               jclass clazz,
                                                                               jlong handle,
                                                                               jint caret,
@@ -91,7 +91,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeSetFocusedEditableSelection(JN
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
                                                                  jclass clazz,
                                                                  jlong handle)
 {
@@ -100,7 +100,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeTakeNavigation(JNIEnv *env,
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
                                                                jclass clazz,
                                                                jlong handle)
 {
@@ -109,7 +109,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeTakeDownload(JNIEnv *env,
 }
 
 JNIEXPORT jint JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeRender(JNIEnv *env, jclass clazz,
                                                          jlong handle, jint scroll_x,
                                                          jint scroll_y, jdouble scale,
                                                          jobject bitmap)
@@ -120,7 +120,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRender(JNIEnv *env, jclass cla
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeTitle(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeTitle(JNIEnv *env, jclass clazz,
                                                         jlong handle)
 {
     (void)env; (void)clazz; (void)handle;
@@ -128,7 +128,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeTitle(JNIEnv *env, jclass claz
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeRenderText(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeRenderText(JNIEnv *env, jclass clazz,
                                                              jlong handle)
 {
     (void)clazz; (void)handle;
@@ -139,7 +139,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRenderText(JNIEnv *env, jclass
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeLinkAt(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeLinkAt(JNIEnv *env, jclass clazz,
                                                          jlong handle, jint x, jint y)
 {
     (void)env; (void)clazz; (void)handle; (void)x; (void)y;
@@ -147,7 +147,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeLinkAt(JNIEnv *env, jclass cla
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeClick(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeClick(JNIEnv *env, jclass clazz,
                                                         jlong handle, jint x, jint y,
                                                         jint mods)
 {
@@ -156,7 +156,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeClick(JNIEnv *env, jclass claz
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeRelease(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeRelease(JNIEnv *env, jclass clazz,
                                                           jlong handle)
 {
     (void)env; (void)clazz; (void)handle;
@@ -164,7 +164,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeRelease(JNIEnv *env, jclass cl
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeKey(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeKey(JNIEnv *env, jclass clazz,
                                                       jlong handle, jint kind,
                                                       jstring key, jstring code,
                                                       jint keycode, jint mods)
@@ -175,7 +175,7 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeKey(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeKeyText(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeKeyText(JNIEnv *env, jclass clazz,
                                                           jlong handle, jstring text)
 {
     (void)env; (void)clazz; (void)handle; (void)text;
@@ -183,14 +183,14 @@ Java_com_nordstjernen_browser_NativeBrowser_nativeKeyText(JNIEnv *env, jclass cl
 }
 
 JNIEXPORT void JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeClose(JNIEnv *env, jclass clazz,
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeClose(JNIEnv *env, jclass clazz,
                                                         jlong handle)
 {
     (void)env; (void)clazz; (void)handle;
 }
 
 JNIEXPORT void JNICALL
-Java_com_nordstjernen_browser_NativeBrowser_nativeShutdown(JNIEnv *env, jclass clazz)
+Java_org_nordstjernen_WebBrowser_NativeBrowser_nativeShutdown(JNIEnv *env, jclass clazz)
 {
     (void)env; (void)clazz;
 }

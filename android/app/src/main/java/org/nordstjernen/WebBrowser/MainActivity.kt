@@ -1,7 +1,7 @@
 /* Nordstjernen — Android host activity: URL bar over the engine render surface,
  * with history, reload, link following and rotation relayout. */
 
-package com.nordstjernen.browser
+package org.nordstjernen.WebBrowser
 
 import android.app.role.RoleManager
 import android.app.DownloadManager

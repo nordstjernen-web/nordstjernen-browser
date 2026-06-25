@@ -2,7 +2,7 @@
  * (with fling) in 2D, pinch/double-tap zooms, follows tapped links and offers a
  * long-press menu. */
 
-package com.nordstjernen.browser
+package org.nordstjernen.WebBrowser
 
 import android.content.ClipData
 import android.content.ClipboardManager

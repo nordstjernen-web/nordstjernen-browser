@@ -22,12 +22,12 @@ def syncLicenseAssets = tasks.register('syncLicenseAssets', Sync) {
 }
 
 android {
-    namespace 'com.nordstjernen.browser'
+    namespace 'org.nordstjernen.WebBrowser'
     compileSdk 36
     ndkVersion '27.3.13750724'
 
     defaultConfig {
-        applicationId 'com.nordstjernen.browser'
+        applicationId 'org.nordstjernen.WebBrowser'
         minSdk 35
         targetSdk 36
         versionCode 2
