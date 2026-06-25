@@ -11147,21 +11147,6 @@ static JSValue ns_synthdoc_get_title(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_synthdoc_get_forms(JSContext *ctx, JSValueConst this_val,
                                      int argc, JSValueConst *argv);
 
-static void
-ns_attach_document_view(JSContext *ctx, JSValueConst wrapper, ns_node *doc)
-{
-    if (!doc) return;
-    ns_synthdoc_define_getter(ctx, wrapper, "documentElement",
-                              ns_synthdoc_get_documentElement);
-    ns_synthdoc_define_getter(ctx, wrapper, "head", ns_synthdoc_get_head);
-    ns_synthdoc_define_getter(ctx, wrapper, "body", ns_synthdoc_get_body);
-    ns_synthdoc_define_getter(ctx, wrapper, "title", ns_synthdoc_get_title);
-    ns_synthdoc_define_getter(ctx, wrapper, "forms", ns_synthdoc_get_forms);
-    JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
-        JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
-    ns_document_define_implementation_getter(ctx, wrapper);
-}
-
 static JSValue
 ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
@@ -11181,24 +11166,12 @@ ns_dom_parser_parseFromString(JSContext *ctx, JSValueConst this_val,
         doc = ns_html_parse(src, -1);
     }
     JS_FreeCString(ctx, src);
-    if (mime) JS_FreeCString(ctx, mime);
-    if (!doc) return JS_NULL;
+    if (!doc) { if (mime) JS_FreeCString(ctx, mime); return JS_NULL; }
     ns_mark_scripts_already_started(doc);
     if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, doc);
-    JSValue wrapper = ns_make_element(ctx, doc);
-    if (as_xml) {
-        JS_DefinePropertyValueStr(ctx, wrapper, "__ndXmlDoc", JS_TRUE, 0);
-        ns_node *root = NULL;
-        for (ns_node *c = doc->first_child; c; c = c->next_sibling)
-            if (c->kind == NS_NODE_ELEMENT) { root = c; break; }
-        JS_DefinePropertyValueStr(ctx, wrapper, "documentElement",
-            root ? ns_make_element(ctx, root) : JS_NULL,
-            JS_PROP_C_W_E);
-        JS_DefinePropertyValueStr(ctx, wrapper, "nodeType",
-            JS_NewInt32(ctx, 9), JS_PROP_C_W_E);
-    } else {
-        ns_attach_document_view(ctx, wrapper, doc);
-    }
+    JSValue wrapper = ns_make_realm_document(ctx, doc, NULL, "UTF-8",
+                                             mime, as_xml, TRUE);
+    if (mime) JS_FreeCString(ctx, mime);
     return wrapper;
 }
 
