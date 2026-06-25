@@ -30,6 +30,8 @@ gboolean ns_security_sri_check(const char *integrity_attr,
 
 void ns_security_mark_download_origin(const char *path, const char *url);
 
+void ns_security_harden_allocator(void);
+
 G_END_DECLS
 
 #endif

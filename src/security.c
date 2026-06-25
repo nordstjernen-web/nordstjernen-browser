@@ -39,6 +39,10 @@
 #include <sys/xattr.h>
 #endif
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #ifdef G_OS_WIN32
 #include <windows.h>
 #include <bcrypt.h>
@@ -829,5 +833,13 @@ ns_security_mark_download_origin(const char *path, const char *url)
     g_free(stream);
 #else
     (void)url;
+#endif
+}
+
+void
+ns_security_harden_allocator(void)
+{
+#ifdef __GLIBC__
+    mallopt(M_PERTURB, 0xAA);
 #endif
 }

@@ -451,6 +451,8 @@ int
 ns_browser_init(void)
 {
     ns_config_init();
+    if (ns_config_get()->harden_allocator)
+        ns_security_harden_allocator();
     ns_net_init();
     ns_net_set_allow_file_urls(TRUE);
     ns_cache_init();
