@@ -55,6 +55,7 @@ they regenerate.
 | 2026-06-24 | e09e8b2 | f6fd39b13 | 352/696 (50%) | 67628/69501 (97%) | partial: dom/nodes/moveBefore |
 | 2026-06-25 | 7041e0f | 88deace8f | 358/696 (51%) | 67884/69508 (97%) | partial: dom/nodes dom/collections html/dom/elements |
 | 2026-06-25 | c34415a | 88deace8f | 360/696 (51%) | 67908/69508 (97%) | partial: dom/nodes |
+| 2026-06-25 | 0be73e3 | 88deace8f | 363/696 (52%) | 67913/69508 (97%) | partial: dom/nodes html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -64,11 +65,11 @@ touch.
 
 ## Per-area results — 2026-06-25
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-25-c34415a.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-25-0be73e3.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
-| `dom/nodes` | 159/275 | 12573/12821 | 220 | 18 | 10 | 0 |
+| `dom/nodes` | 160/275 | 12576/12821 | 217 | 18 | 10 | 0 |
 | `dom/events` | 50/167 | 424/742 | 273 | 22 | 23 | 0 |
 | `dom/traversal` | 13/17 | 1589/1605 | 16 | 0 | 0 | 0 |
 | `dom/ranges` | 33/55 | 44352/44537 | 185 | 0 | 0 | 0 |
@@ -79,11 +80,11 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-25-c34415a.tsv`.
 | `hr-time` | 4/13 | 14/23 | 8 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
 | `html/webappapis/timers` | 8/12 | 12/14 | 2 | 0 | 0 | 0 |
-| `html/dom/elements` | 40/56 | 748/907 | 156 | 1 | 2 | 0 |
+| `html/dom/elements` | 42/56 | 750/907 | 154 | 1 | 2 | 0 |
 | `WebCryptoAPI/digest` | 1/5 | 116/535 | 419 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 6/18 | 97/118 | 21 | 0 | 0 | 0 |
-| **Total** | **360/696** | **67908/69508** | **1522** | **43** | **35** | **0** |
+| **Total** | **363/696** | **67913/69508** | **1517** | **43** | **35** | **0** |
 
 ## ROI by area — 2026-06-25
 
@@ -100,10 +101,10 @@ file.
 |------|----------------|----------------|-----------|----------------|---------|
 | `WebCryptoAPI/digest` | 419 | 4 | 104.8 | 0 | 0 |
 | `dom/events` | 318 | 117 | 2.7 | 72 | 30 |
-| `dom/nodes` | 248 | 116 | 2.1 | 20 | 64 |
+| `dom/nodes` | 245 | 115 | 2.1 | 20 | 64 |
 | `url` | 204 | 17 | 12.0 | 3 | 4 |
 | `dom/ranges` | 185 | 22 | 8.4 | 0 | 5 |
-| `html/dom/elements` | 159 | 16 | 9.9 | 1 | 10 |
+| `html/dom/elements` | 157 | 14 | 11.2 | 1 | 8 |
 | `html/semantics/forms/the-form-element` | 21 | 12 | 1.8 | 2 | 9 |
 | `dom/traversal` | 16 | 4 | 4.0 | 0 | 2 |
 | `dom/collections` | 10 | 5 | 2.0 | 0 | 4 |

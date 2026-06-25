@@ -3497,9 +3497,9 @@ test	subtest	status
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in created XML document by DOMParser ('text/xml')	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in current document	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.html	PASS
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.svg	FAIL
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.xhtml	FAIL
-/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.xml	FAIL
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.svg	PASS
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.xhtml	PASS
+/dom/nodes/Document-createElement-namespace.html	Created element's namespace in empty.xml	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in mathml.html	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in mathml.svg	PASS
 /dom/nodes/Document-createElement-namespace.html	Created element's namespace in mathml.xhtml	PASS
@@ -61116,7 +61116,7 @@ test	subtest	status
 /html/dom/elements/global-attributes/classlist-nonstring.html	classList: non-string contains 5	PASS
 /html/dom/elements/global-attributes/classlist-nonstring.html	classList: non-string contains 6	PASS
 /html/dom/elements/global-attributes/custom-attrs.html	<harness>	OK
-/html/dom/elements/global-attributes/custom-attrs.html	Setting an Element's dataset property should not interfere with namespaced attributes with same name	FAIL
+/html/dom/elements/global-attributes/custom-attrs.html	Setting an Element's dataset property should not interfere with namespaced attributes with same name	PASS
 /html/dom/elements/global-attributes/data_unicode_attr.html	<harness>	OK
 /html/dom/elements/global-attributes/data_unicode_attr.html	dataset - SBCS	PASS
 /html/dom/elements/global-attributes/data_unicode_attr.html	dataset - UNICODE	PASS
@@ -61322,7 +61322,7 @@ test	subtest	status
 /html/dom/elements/global-attributes/lang-attribute-shadow.window.html	lang only on host	PASS
 /html/dom/elements/global-attributes/lang-attribute-shadow.window.html	lang only on slot	PASS
 /html/dom/elements/global-attributes/lang-attribute.window.html	<harness>	OK
-/html/dom/elements/global-attributes/lang-attribute.window.html	unnamespaced lang attribute only works on elements in the HTML namespace	FAIL
+/html/dom/elements/global-attributes/lang-attribute.window.html	unnamespaced lang attribute only works on elements in the HTML namespace	PASS
 /html/dom/elements/global-attributes/mapped-attribute-adopt-001.html	<harness>	OK
 /html/dom/elements/global-attributes/mapped-attribute-adopt-001.html	Adoption of an unrelated node shouldn't prevent mapped attributes from applying	PASS
 /html/dom/elements/global-attributes/the-lang-attribute-001.html	<harness>	OK
