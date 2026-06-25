@@ -5406,7 +5406,7 @@ ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
     *once = FALSE;
     if (passive) *passive = FALSE;
     if (signal_out) *signal_out = JS_NULL;
-    if (JS_IsBool(opts)) {
+    if (!JS_IsObject(opts)) {
         *capture = JS_ToBool(ctx, opts) ? TRUE : FALSE;
         return TRUE;
     }
@@ -5465,9 +5465,6 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 2 || !js_from_ctx(ctx)) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
-    if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
-        JS_FreeCString(ctx, type); return JS_UNDEFINED;
-    }
     gboolean capture = FALSE, once = FALSE, passive = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
@@ -5475,6 +5472,11 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
                                    &signal, TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
+    }
+    if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
+        JS_FreeValue(ctx, signal);
+        JS_FreeCString(ctx, type);
+        return JS_UNDEFINED;
     }
     if (ns_signal_is_aborted(ctx, signal)) {
         JS_FreeValue(ctx, signal);
@@ -34780,9 +34782,6 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc || argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
-    if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
-        JS_FreeCString(ctx, type); return JS_UNDEFINED;
-    }
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
@@ -34790,6 +34789,11 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
+    }
+    if (!JS_IsFunction(ctx, argv[1]) && !JS_IsObject(argv[1])) {
+        JS_FreeValue(ctx, signal);
+        JS_FreeCString(ctx, type);
+        return JS_UNDEFINED;
     }
     if (ns_signal_is_aborted(ctx, signal)) {
         JS_FreeValue(ctx, signal);
