@@ -467,16 +467,35 @@ document are in *rendering and behaviour*, not parsing.
 
 ## §14 The XML syntax
 
-🟡 **Partial.** There is no XHTML *document* navigation path; however
-`DOMParser.parseFromString(s, "application/xml" | "image/svg+xml" |
-"text/xml")` routes through the fragment parser (lexbor in HTML
-fragment mode) so the supplied root element becomes the result's
-`documentElement` rather than being wrapped in `<html><body>`. The
-parser is still HTML-shaped — namespaces aren't tracked per-element
-and XML well-formedness is not enforced — but the practical SVG /
-RSS / feed use case (parse, query, read attributes) works. Served
-`application/xhtml+xml` pages are handled via the HTML path rather
-than a strict XML processor.
+🟡 **Partial.** XML, XHTML and SVG resources are parsed by a real
+namespace-aware XML parser (`src/xml.c::ns_xml_parse`), not the HTML
+parser. A recursive-descent tokeniser builds the live `ns_node` DOM
+following the same conventions as `createElementNS` — qualified name,
+`data-nd-ns-uri` / `data-nd-ns-prefix`, the SVG / foreign / keep-case
+flags — resolving each element's and attribute's namespace from the
+in-scope `xmlns` / `xmlns:prefix` declarations, and handling elements,
+attributes, text, `CDATASection`s, comments, processing instructions,
+`DOCTYPE`, the predefined entities plus numeric character references,
+and self-closing tags. This drives two paths:
+
+- `DOMParser.parseFromString(s, "application/xml" | "text/xml" |
+  "application/xhtml+xml" | "image/svg+xml")` returns a real XML
+  document whose `documentElement` is the parsed root with correct
+  `namespaceURI` / `localName` / `prefix`.
+- An `<iframe>` whose response is `application/xhtml+xml`,
+  `text/xml` / `application/xml`, or `image/svg+xml` is parsed as XML,
+  its `contentDocument` is an `XMLDocument` (so `createElement` keeps
+  case and resolves the HTML-versus-null namespace per spec, and
+  `createCDATASection` / `createProcessingInstruction` work), and
+  well-formedness is enforced — a malformed XHTML frame falls back to a
+  parse-error page.
+
+Still partial: the top-level *navigation* path for a page served as
+`application/xhtml+xml` is still handled by the HTML parser (only
+embedded frames and `DOMParser` use the XML path); XML `Name`
+validation is ASCII-pragmatic rather than the full Unicode production;
+and only the five predefined entities (plus `&nbsp;`) and numeric
+references are recognised — DTD-declared entity sets are not.
 
 ## §15 Rendering
 
