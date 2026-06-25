@@ -1983,6 +1983,7 @@ serialize_node(const ns_node *n, GString *out, gboolean include_self, int depth)
         g_string_append_c(out, '<');
         g_string_append(out, n->name ? n->name : "");
         for (const ns_attr *a = n->attrs; a; a = a->next) {
+            if (ns_attr_name_is_internal(a->name)) continue;
             g_string_append_c(out, ' ');
             g_string_append(out, a->name);
             g_string_append(out, "=\"");
