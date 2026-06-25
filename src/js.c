@@ -26592,7 +26592,8 @@ ns_dataset_set_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
         return -1;
     }
     if (!ns_attr_name_is_internal(attr))
-        ns_js_set_attr_recorded(js_from_ctx(ctx), n, attr, value);
+        ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, NULL, NULL,
+                                   attr, attr, value);
     JS_FreeCString(ctx, value);
     g_free(attr);
     return TRUE;
