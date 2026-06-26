@@ -99,10 +99,20 @@ ns_video_emit_audio(ns_video_cache *cache, const char *fmt, ...)
     g_free(cmd);
 }
 
+static gboolean
+ns_video_url_audio_safe(const char *url)
+{
+    if (!url || !*url) return FALSE;
+    for (const unsigned char *p = (const unsigned char *)url; *p; p++)
+        if (*p < 0x20 || *p == 0x7f) return FALSE;
+    return TRUE;
+}
+
 static void
 ns_video_audio_start(ns_video_cache *cache, ns_video *v)
 {
     if (!cache || !cache->audio_cb || !v || v->muted || !v->has_audio) return;
+    if (!ns_video_url_audio_safe(v->url)) return;
     if (!v->token)
         v->token = g_strdup_printf("nv%u", ++cache->next_token);
     if (!v->audio_opened) {
