@@ -380,7 +380,11 @@ css_append_hex_escape(GString *out, const char **pp, const char *end)
         p++;
         n++;
     }
-    if (p < end && is_ws(*p)) p++;
+    if (p < end && is_ws(*p)) {
+        gboolean cr = *p == '\r';
+        p++;
+        if (cr && p < end && *p == '\n') p++;
+    }
     g_string_append_unichar(out, css_unescape_cp(cp));
     *pp = p;
 }
@@ -399,7 +403,11 @@ ns_css_append_unescaped(GString *out, const char **pp)
                 p++;
                 n++;
             }
-            if (is_ws(*p)) p++;
+            if (is_ws(*p)) {
+                gboolean cr = *p == '\r';
+                p++;
+                if (cr && *p == '\n') p++;
+            }
             g_string_append_unichar(out, css_unescape_cp(cp));
         } else {
             g_string_append_c(out, *p++);
