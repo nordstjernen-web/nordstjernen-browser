@@ -18,12 +18,25 @@ typedef struct {
 } ns_ext_cs;
 
 typedef struct {
+    int        priority;
+    int        action;
+    char      *url_filter;
+    GRegex    *regex;
+    gboolean   case_sensitive;
+    GPtrArray *request_domains;
+    GPtrArray *excluded_request_domains;
+    GPtrArray *initiator_domains;
+    GPtrArray *excluded_initiator_domains;
+} ns_dnr_rule;
+
+typedef struct {
     char      *id;
     char      *name;
     char      *version;
     char      *base_dir;
     char      *manifest_json;
     GPtrArray *content_scripts;
+    GPtrArray *dnr_rules;
 } ns_ext;
 
 static GPtrArray *g_exts;
@@ -399,6 +412,144 @@ ns_ext_parse_content_scripts(ns_ext *e, JSContext *ctx, JSValueConst manifest)
     JS_FreeValue(ctx, arr);
 }
 
+static void
+ns_dnr_rule_free(gpointer p)
+{
+    ns_dnr_rule *r = p;
+    g_free(r->url_filter);
+    if (r->regex) g_regex_unref(r->regex);
+    if (r->request_domains) g_ptr_array_free(r->request_domains, TRUE);
+    if (r->excluded_request_domains)
+        g_ptr_array_free(r->excluded_request_domains, TRUE);
+    if (r->initiator_domains) g_ptr_array_free(r->initiator_domains, TRUE);
+    if (r->excluded_initiator_domains)
+        g_ptr_array_free(r->excluded_initiator_domains, TRUE);
+    g_free(r);
+}
+
+static GPtrArray *
+ns_dnr_domains(JSContext *ctx, JSValueConst cond, const char *key)
+{
+    JSValue v = JS_GetPropertyStr(ctx, cond, key);
+    GPtrArray *out = NULL;
+    if (JS_IsObject(v)) {
+        out = g_ptr_array_new_with_free_func(g_free);
+        ns_ext_collect_strings(ctx, v, out);
+        for (guint i = 0; i < out->len; i++) {
+            char *low = g_ascii_strdown(g_ptr_array_index(out, i), -1);
+            g_free(g_ptr_array_index(out, i));
+            out->pdata[i] = low;
+        }
+        if (out->len == 0) { g_ptr_array_free(out, TRUE); out = NULL; }
+    }
+    JS_FreeValue(ctx, v);
+    return out;
+}
+
+static ns_dnr_rule *
+ns_dnr_parse_rule(JSContext *ctx, JSValueConst r)
+{
+    if (!JS_IsObject(r)) return NULL;
+    JSValue act = JS_GetPropertyStr(ctx, r, "action");
+    g_autofree char *atype =
+        JS_IsObject(act) ? ns_ext_js_string(ctx, act, "type") : NULL;
+    JS_FreeValue(ctx, act);
+    int action;
+    if (atype && strcmp(atype, "block") == 0)
+        action = 0;
+    else if (atype && (strcmp(atype, "allow") == 0 ||
+                       strcmp(atype, "allowAllRequests") == 0))
+        action = 1;
+    else
+        return NULL;
+
+    ns_dnr_rule *rule = g_new0(ns_dnr_rule, 1);
+    rule->action = action;
+    rule->priority = 1;
+    JSValue pv = JS_GetPropertyStr(ctx, r, "priority");
+    if (JS_IsNumber(pv)) { int32_t pr = 1; JS_ToInt32(ctx, &pr, pv); rule->priority = pr; }
+    JS_FreeValue(ctx, pv);
+
+    JSValue cond = JS_GetPropertyStr(ctx, r, "condition");
+    if (JS_IsObject(cond)) {
+        rule->url_filter = ns_ext_js_string(ctx, cond, "urlFilter");
+        JSValue csv = JS_GetPropertyStr(ctx, cond, "isUrlFilterCaseSensitive");
+        rule->case_sensitive = JS_ToBool(ctx, csv) > 0;
+        JS_FreeValue(ctx, csv);
+        g_autofree char *rx = ns_ext_js_string(ctx, cond, "regexFilter");
+        if (rx)
+            rule->regex = g_regex_new(rx,
+                rule->case_sensitive ? 0 : G_REGEX_CASELESS, 0, NULL);
+        rule->request_domains = ns_dnr_domains(ctx, cond, "requestDomains");
+        rule->excluded_request_domains =
+            ns_dnr_domains(ctx, cond, "excludedRequestDomains");
+        rule->initiator_domains = ns_dnr_domains(ctx, cond, "initiatorDomains");
+        rule->excluded_initiator_domains =
+            ns_dnr_domains(ctx, cond, "excludedInitiatorDomains");
+    }
+    JS_FreeValue(ctx, cond);
+    return rule;
+}
+
+static void
+ns_ext_load_rule_file(ns_ext *e, JSContext *ctx, const char *path)
+{
+    g_autofree char *full = g_build_filename(e->base_dir, path, NULL);
+    char *raw = NULL;
+    gsize len = 0;
+    if (!g_file_get_contents(full, &raw, &len, NULL)) return;
+    JSValue arr = JS_ParseJSON(ctx, raw, len, full);
+    if (JS_IsException(arr)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        g_free(raw);
+        return;
+    }
+    if (JS_IsObject(arr)) {
+        JSValue lenv = JS_GetPropertyStr(ctx, arr, "length");
+        uint32_t n = 0;
+        JS_ToUint32(ctx, &n, lenv);
+        JS_FreeValue(ctx, lenv);
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue rv = JS_GetPropertyUint32(ctx, arr, i);
+            ns_dnr_rule *rule = ns_dnr_parse_rule(ctx, rv);
+            if (rule) g_ptr_array_add(e->dnr_rules, rule);
+            JS_FreeValue(ctx, rv);
+        }
+    }
+    JS_FreeValue(ctx, arr);
+    g_free(raw);
+}
+
+static void
+ns_ext_parse_dnr(ns_ext *e, JSContext *ctx, JSValueConst manifest)
+{
+    JSValue dnr = JS_GetPropertyStr(ctx, manifest, "declarative_net_request");
+    if (JS_IsObject(dnr)) {
+        JSValue res = JS_GetPropertyStr(ctx, dnr, "rule_resources");
+        if (JS_IsObject(res)) {
+            JSValue lenv = JS_GetPropertyStr(ctx, res, "length");
+            uint32_t n = 0;
+            JS_ToUint32(ctx, &n, lenv);
+            JS_FreeValue(ctx, lenv);
+            for (uint32_t i = 0; i < n; i++) {
+                JSValue item = JS_GetPropertyUint32(ctx, res, i);
+                if (JS_IsObject(item)) {
+                    gboolean enabled = TRUE;
+                    JSValue ev = JS_GetPropertyStr(ctx, item, "enabled");
+                    if (JS_IsBool(ev)) enabled = JS_ToBool(ctx, ev) > 0;
+                    JS_FreeValue(ctx, ev);
+                    g_autofree char *path = ns_ext_js_string(ctx, item, "path");
+                    if (enabled && path)
+                        ns_ext_load_rule_file(e, ctx, path);
+                }
+                JS_FreeValue(ctx, item);
+            }
+        }
+        JS_FreeValue(ctx, res);
+    }
+    JS_FreeValue(ctx, dnr);
+}
+
 static char *
 ns_ext_parse_id(JSContext *ctx, JSValueConst manifest, const char *dir)
 {
@@ -440,7 +591,9 @@ ns_ext_load_one(const char *dir, JSContext *ctx)
     e->version = ns_ext_js_string(ctx, obj, "version");
     e->id = ns_ext_parse_id(ctx, obj, dir);
     e->content_scripts = g_ptr_array_new_with_free_func(ns_ext_cs_free);
+    e->dnr_rules = g_ptr_array_new_with_free_func(ns_dnr_rule_free);
     ns_ext_parse_content_scripts(e, ctx, obj);
+    ns_ext_parse_dnr(e, ctx, obj);
     JS_FreeValue(ctx, obj);
     g_ptr_array_add(g_exts, e);
 }
@@ -466,11 +619,8 @@ ns_ext_scan_root(const char *root, JSContext *ctx)
 }
 
 static void
-ns_ext_init(void)
+ns_ext_do_init(void)
 {
-    static gboolean done;
-    if (done) return;
-    done = TRUE;
     g_exts = g_ptr_array_new();
 
     JSRuntime *rt = JS_NewRuntime();
@@ -492,6 +642,16 @@ ns_ext_init(void)
 
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
+}
+
+static void
+ns_ext_init(void)
+{
+    static gsize once;
+    if (g_once_init_enter(&once)) {
+        ns_ext_do_init();
+        g_once_init_leave(&once, 1);
+    }
 }
 
 guint
@@ -560,4 +720,144 @@ ns_ext_content_scripts_for_url(const char *url, gboolean at_start)
     }
     if (out->len == 0) { g_string_free(out, TRUE); return NULL; }
     return g_string_free(out, FALSE);
+}
+
+static gboolean
+ns_dnr_sep(char c)
+{
+    return !(g_ascii_isalnum((guchar)c) ||
+             c == '_' || c == '-' || c == '.' || c == '%');
+}
+
+static gboolean
+ns_dnr_match_here(const char *p, const char *s, gboolean end_anchor)
+{
+    while (*p) {
+        if (*p == '*') {
+            p++;
+            if (!*p) return TRUE;
+            for (;;) {
+                if (ns_dnr_match_here(p, s, end_anchor)) return TRUE;
+                if (!*s) return FALSE;
+                s++;
+            }
+        }
+        if (*p == '^') {
+            if (*s == '\0') { p++; continue; }
+            if (ns_dnr_sep(*s)) { p++; s++; continue; }
+            return FALSE;
+        }
+        if (*s != *p) return FALSE;
+        p++;
+        s++;
+    }
+    return end_anchor ? (*s == '\0') : TRUE;
+}
+
+static gboolean
+ns_dnr_urlfilter_match(const char *filter, const char *url, gboolean cs)
+{
+    if (!filter || !*filter) return TRUE;
+    g_autofree char *u = cs ? g_strdup(url) : g_ascii_strdown(url, -1);
+    g_autofree char *f = cs ? g_strdup(filter) : g_ascii_strdown(filter, -1);
+    const char *p = f;
+    gboolean domain_anchor = FALSE, start_anchor = FALSE, end_anchor = FALSE;
+    if (p[0] == '|' && p[1] == '|') { domain_anchor = TRUE; p += 2; }
+    else if (p[0] == '|')           { start_anchor = TRUE; p += 1; }
+    g_autofree char *body = g_strdup(p);
+    gsize bl = strlen(body);
+    if (bl > 0 && body[bl - 1] == '|') { end_anchor = TRUE; body[bl - 1] = '\0'; }
+
+    if (domain_anchor) {
+        const char *h = strstr(u, "://");
+        const char *hs = h ? h + 3 : u;
+        const char *he = hs;
+        while (*he && *he != '/' && *he != '?' && *he != '#') he++;
+        for (const char *pos = hs; pos <= he; pos++)
+            if (pos == hs || pos[-1] == '.')
+                if (ns_dnr_match_here(body, pos, end_anchor)) return TRUE;
+        return FALSE;
+    }
+    if (start_anchor)
+        return ns_dnr_match_here(body, u, end_anchor);
+    for (const char *pos = u; ; pos++) {
+        if (ns_dnr_match_here(body, pos, end_anchor)) return TRUE;
+        if (!*pos) return FALSE;
+    }
+}
+
+static gboolean
+ns_dnr_domain_match(const char *domain, const char *host)
+{
+    if (!domain || !host) return FALSE;
+    if (strcmp(domain, host) == 0) return TRUE;
+    gsize dl = strlen(domain), hl = strlen(host);
+    return hl > dl && host[hl - dl - 1] == '.' &&
+           strcmp(host + hl - dl, domain) == 0;
+}
+
+static gboolean
+ns_dnr_domain_list_match(GPtrArray *list, const char *host)
+{
+    if (!host) return FALSE;
+    for (guint i = 0; i < list->len; i++)
+        if (ns_dnr_domain_match(g_ptr_array_index(list, i), host)) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_dnr_rule_matches(const ns_dnr_rule *r, const char *url,
+                    const char *host, const char *init_host)
+{
+    if (r->request_domains && !ns_dnr_domain_list_match(r->request_domains, host))
+        return FALSE;
+    if (r->excluded_request_domains &&
+        ns_dnr_domain_list_match(r->excluded_request_domains, host))
+        return FALSE;
+    if (r->initiator_domains &&
+        !ns_dnr_domain_list_match(r->initiator_domains, init_host))
+        return FALSE;
+    if (r->excluded_initiator_domains && init_host &&
+        ns_dnr_domain_list_match(r->excluded_initiator_domains, init_host))
+        return FALSE;
+    if (r->url_filter &&
+        !ns_dnr_urlfilter_match(r->url_filter, url, r->case_sensitive))
+        return FALSE;
+    if (r->regex && !g_regex_match(r->regex, url, 0, NULL))
+        return FALSE;
+    return TRUE;
+}
+
+gboolean
+ns_ext_should_block(const char *url, const char *initiator)
+{
+    ns_ext_init();
+    if (!url || !g_exts || g_exts->len == 0) return FALSE;
+    if (!g_str_has_prefix(url, "http://") && !g_str_has_prefix(url, "https://"))
+        return FALSE;
+
+    g_autofree char *us = NULL, *uh = NULL, *up = NULL;
+    ns_ext_url_split(url, &us, &uh, &up);
+    g_autofree char *is = NULL, *ih = NULL, *ip = NULL;
+    if (initiator) ns_ext_url_split(initiator, &is, &ih, &ip);
+
+    int best_pri = -1;
+    gboolean best_allow = FALSE, best_block = FALSE;
+    for (guint i = 0; i < g_exts->len; i++) {
+        ns_ext *e = g_ptr_array_index(g_exts, i);
+        if (!e->dnr_rules) continue;
+        for (guint j = 0; j < e->dnr_rules->len; j++) {
+            const ns_dnr_rule *r = g_ptr_array_index(e->dnr_rules, j);
+            if (!ns_dnr_rule_matches(r, url, uh, ih)) continue;
+            if (r->priority > best_pri) {
+                best_pri = r->priority;
+                best_allow = (r->action == 1);
+                best_block = (r->action == 0);
+            } else if (r->priority == best_pri) {
+                if (r->action == 1) best_allow = TRUE;
+                else best_block = TRUE;
+            }
+        }
+    }
+    return best_pri >= 0 && best_block && !best_allow;
 }

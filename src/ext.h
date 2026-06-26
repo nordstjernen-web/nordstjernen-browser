@@ -11,9 +11,10 @@
 
 G_BEGIN_DECLS
 
-void   ns_ext_install(JSContext *ctx, JSValueConst global);
-char  *ns_ext_content_scripts_for_url(const char *url, gboolean at_start);
-guint  ns_ext_count(void);
+void     ns_ext_install(JSContext *ctx, JSValueConst global);
+char    *ns_ext_content_scripts_for_url(const char *url, gboolean at_start);
+gboolean ns_ext_should_block(const char *url, const char *initiator);
+guint    ns_ext_count(void);
 
 G_END_DECLS
 
