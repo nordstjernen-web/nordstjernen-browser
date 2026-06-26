@@ -810,8 +810,14 @@
                 }
                 function defineFrameAccessor(name, getter) {
                     if (Object.getOwnPropertyDescriptor(elementProto, name)) return;
+                    var nativeGet = null;
+                    for (var anc = Object.getPrototypeOf(elementProto); anc;
+                         anc = Object.getPrototypeOf(anc)) {
+                        var d = Object.getOwnPropertyDescriptor(anc, name);
+                        if (d && d.get) { nativeGet = d.get; break; }
+                    }
                     Object.defineProperty(elementProto, name, {
-                        configurable: true, get: getter
+                        configurable: true, get: nativeGet || getter
                     });
                 }
                 function isFrameElement(el) {
