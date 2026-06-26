@@ -188,6 +188,7 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     g_render_page_uses_active = uses_active;
 
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    ns_css_set_render_zoom(c->zoom > 0 ? c->zoom : 1.0);
     GHashTable *styles = ns_css_compute(c->doc, c->sheets, c->n_sheets);
     gint64 t1 = profile ? g_get_monotonic_time() : 0;
 

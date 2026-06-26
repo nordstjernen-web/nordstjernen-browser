@@ -12640,6 +12640,7 @@ static void
 ns_style_free(ns_style *s)
 {
     if (!s) return;
+    if (s->ref > 0) { s->ref--; return; }
     for (int i = 0; i < NS_CSS_PROP_COUNT; i++)
         if (s->values[i]) ns_css_value_free(s->values[i]);
     ns_style_free(s->before);
@@ -14418,6 +14419,13 @@ static guint64        g_incr_has_sig;
 static gboolean       g_incr_eligible;
 static guint          g_incr_reused;
 static guint          g_incr_recomputed;
+static double         g_incr_zoom = 1.0;
+
+void
+ns_css_set_render_zoom(double zoom)
+{
+    g_incr_zoom = zoom > 0 ? zoom : 1.0;
+}
 
 void
 ns_css_mark_restyle_dirty(ns_node *parent)
@@ -14636,15 +14644,16 @@ cascade_walk(ns_node *node,
     if (node->kind == NS_NODE_ELEMENT) {
         gboolean nd_node_dirty = under_dirty ||
             (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
-        const ns_style *nd_prev =
+        ns_style *nd_prev =
             (g_incr_pass_active && !nd_node_dirty && g_incr_prev_styles)
             ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;
-        ns_style *s = ns_style_alloc();
+        ns_style *s;
         if (nd_prev) {
-            ns_style_free(s);
-            s = ns_style_clone_shared(nd_prev);
+            s = nd_prev;
+            s->ref++;
             g_incr_reused++;
         } else {
+        s = ns_style_alloc();
         g_incr_recomputed++;
         nd_node_dirty = TRUE;
         static GArray *sc_matches, *sc_var, *sc_pending;
@@ -15340,7 +15349,8 @@ ns_css_compute(ns_node *doc,
         g_incr_has_sig = sig;
     }
     gboolean incr_want = g_getenv("NS_NO_INCR_RESTYLE") == NULL
-        && g_incr_eligible && g_cq_map == NULL;
+        && g_incr_eligible && g_cq_map == NULL
+        && fabs(g_incr_zoom - 1.0) <= 0.001;
     g_incr_pass_active = incr_want
         && g_incr_prev_styles != NULL
         && g_incr_prev_doc == doc
@@ -15359,9 +15369,10 @@ ns_css_compute(ns_node *doc,
             g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)ns_style_free);
         GHashTableIter pit; gpointer pk, pv;
         g_hash_table_iter_init(&pit, out);
-        while (g_hash_table_iter_next(&pit, &pk, &pv))
-            g_hash_table_insert(new_prev, pk,
-                                ns_style_clone_shared((const ns_style *)pv));
+        while (g_hash_table_iter_next(&pit, &pk, &pv)) {
+            ((ns_style *)pv)->ref++;
+            g_hash_table_insert(new_prev, pk, pv);
+        }
         if (g_incr_prev_styles) g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = new_prev;
         g_incr_prev_doc = doc;

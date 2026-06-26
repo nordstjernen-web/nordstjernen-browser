@@ -703,6 +703,7 @@ typedef struct ns_style {
     struct ns_style *marker;
     struct ns_style *backdrop;
     guint share_id;
+    int   ref;
     struct ns_var_map *vars;
 } ns_style;
 
@@ -726,6 +727,7 @@ GHashTable *ns_css_compute(ns_node                 *doc,
 
 void ns_css_mark_restyle_dirty(ns_node *parent);
 void ns_css_restyle_invalidate(void);
+void ns_css_set_render_zoom(double zoom);
 
 void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);

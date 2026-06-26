@@ -410,3 +410,28 @@ production engines do (Blink invalidation sets, Gecko/Stylo's parallel restyle +
 rule tree): the conservative "dirty the parent subtree" rule recomputes more
 than strictly necessary, and the per-pass clone-maintenance could be replaced by
 storing the computed style on the node. Those are the next steps.
+
+### Reuse instead of clone (2026-06-26)
+
+The first incremental-restyle cut cloned every clean node's computed style each
+pass (once in `cascade_walk`, once rebuilding the previous-styles table) — the
+clone was the dominant remaining cost. `ns_style` now carries a refcount, and at
+render zoom ~= 1 (where the post-cascade passes do not mutate computed styles —
+`ns_anim_observe` is read-only and `render_apply_zoom` is a no-op) a clean node
+**reuses** the previous pass's exact style struct (`ref++`) instead of cloning
+it, and the previous-styles table is rebuilt by ref-counting rather than
+copying. `ns_css_set_render_zoom` (called from `src/render.c`) gates this; when
+zoom != 1 the cascade falls back to the clone path so the zoomed font-size value
+is never shared back into the cache.
+
+Median of 3, complex suites, full cascade vs clone-incremental vs reuse:
+
+| Aggregate                  |  full | clone | reuse | reuse vs full |
+|----------------------------|------:|------:|------:|--------------:|
+| Sum of 10 complex suites   | 14875 | 11643 | 10708 |        -28.0% |
+
+ES5-Complex over 5 iterations: 910.7 (full) -> 666.5 (clone) -> 610.6 (reuse).
+Output remains byte-identical to the full cascade (verified across vanilla
+ES5/ES6, React, and Vue complex and light suites). The reuse path shares style
+structs across passes, which is safe only because the cascade output is
+immutable at zoom ~= 1; the zoom gate preserves that invariant.
