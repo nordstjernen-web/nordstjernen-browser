@@ -150,7 +150,8 @@ rel_is_stylesheet(const char *rel)
 
 static void
 preload_collect(const ns_node *n, const char *base, gboolean include_images,
-                GPtrArray *out, GHashTable *seen)
+                GPtrArray *out, GHashTable *seen,
+                GPtrArray *connect_out, GHashTable *connect_seen)
 {
     if (!n) return;
     const char *attr = NULL;
@@ -160,10 +161,25 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
         attr = ns_element_get_attr(n, "src");
     else if (ns_node_is_element_named(n, "link")) {
         const char *rel = ns_element_get_attr(n, "rel");
-        if (rel && (rel_has_token(rel, "stylesheet") ||
-                    rel_has_token(rel, "preload") ||
-                    rel_has_token(rel, "modulepreload")))
+        if (rel && (rel_has_token(rel, "preconnect") ||
+                    rel_has_token(rel, "dns-prefetch"))) {
+            const char *href = ns_element_get_attr(n, "href");
+            char *abs = (href && *href) ? ns_url_resolve(base, href) : NULL;
+            char *origin = abs ? ns_url_origin_from(abs) : NULL;
+            if (origin && ns_url_is_http_or_https(origin) &&
+                !g_hash_table_contains(connect_seen, origin)) {
+                g_hash_table_add(connect_seen, g_strdup(origin));
+                g_ptr_array_add(connect_out, origin);
+                origin = NULL;
+            }
+            g_free(origin);
+            g_free(abs);
+        } else if (rel && (rel_has_token(rel, "stylesheet") ||
+                           rel_has_token(rel, "preload") ||
+                           rel_has_token(rel, "modulepreload") ||
+                           rel_has_token(rel, "prefetch"))) {
             attr = ns_element_get_attr(n, "href");
+        }
     }
     if (attr && *attr && !g_str_has_prefix(attr, "data:")) {
         char *abs = ns_url_resolve(base, attr);
@@ -176,7 +192,8 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
         g_free(abs);
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        preload_collect(c, base, include_images, out, seen);
+        preload_collect(c, base, include_images, out, seen,
+                        connect_out, connect_seen);
 }
 
 static void
@@ -195,14 +212,22 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
     if (!doc || !base_url || !ns_url_is_http_or_https(base_url))
         return;
     GPtrArray *urls = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *connects = g_ptr_array_new_with_free_func(g_free);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    preload_collect(doc, base_url, include_images, urls, seen);
+    GHashTable *connect_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                     g_free, NULL);
+    preload_collect(doc, base_url, include_images, urls, seen,
+                    connects, connect_seen);
     g_hash_table_destroy(seen);
+    g_hash_table_destroy(connect_seen);
+    for (guint i = 0; i < connects->len; i++)
+        ns_net_preconnect_async(g_ptr_array_index(connects, i));
     for (guint i = 0; i < urls->len; i++)
         ns_net_fetch_async(g_ptr_array_index(urls, i), base_url, NULL,
                            on_preload_fetched, NULL);
     g_ptr_array_free(urls, TRUE);
+    g_ptr_array_free(connects, TRUE);
 }
 
 static void

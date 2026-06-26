@@ -4914,6 +4914,39 @@ ns_fetch_thread(GTask        *task,
     ns_fetch_throttle_dispatch();
 }
 
+static void
+ns_preconnect_thread(GTask *task, gpointer source_object, gpointer task_data,
+                     GCancellable *cancellable)
+{
+    (void)source_object;
+    (void)cancellable;
+    const char *url = task_data;
+    CURL *curl = curl_easy_init();
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
+        if (g_share) curl_easy_setopt(curl, CURLOPT_SHARE, g_share);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 6L);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+        ns_net_apply_curl_proxy(curl, url);
+        ns_net_apply_curl_tls(curl);
+        curl_easy_perform(curl);
+        curl_easy_cleanup(curl);
+    }
+    g_task_return_boolean(task, TRUE);
+}
+
+void
+ns_net_preconnect_async(const char *url)
+{
+    if (!url || !ns_url_is_http_or_https(url)) return;
+    GTask *task = g_task_new(NULL, NULL, NULL, NULL);
+    g_task_set_task_data(task, g_strdup(url), g_free);
+    g_task_run_in_thread(task, ns_preconnect_thread);
+    g_object_unref(task);
+}
+
 static ns_net_blob_resolver g_blob_resolver = NULL;
 static gpointer g_blob_resolver_ud = NULL;
 
