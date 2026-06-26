@@ -31308,12 +31308,39 @@ static JSClassDef ns_node_iter_class = {
     .finalizer = ns_node_iter_finalizer,
 };
 
+static gboolean
+ns_node_is_nested_doc(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
+}
+
+static ns_node *
+ns_ni_skip_doc_fwd(ns_node *n)
+{
+    while (n && ns_node_is_nested_doc(n)) n = n->next_sibling;
+    return n;
+}
+
+static ns_node *
+ns_ni_skip_doc_back(ns_node *n)
+{
+    while (n && ns_node_is_nested_doc(n)) n = n->prev_sibling;
+    return n;
+}
+
 static ns_node *
 ns_ni_following(ns_node *node, ns_node *root)
 {
-    if (node->first_child) return node->first_child;
-    for (ns_node *n = node; n && n != root; n = n->parent)
-        if (n->next_sibling) return n->next_sibling;
+    if (node->first_child) {
+        ns_node *c = ns_node_is_nested_doc(node->first_child)
+            ? ns_ni_skip_doc_fwd(node->first_child->next_sibling)
+            : node->first_child;
+        if (c) return c;
+    }
+    for (ns_node *n = node; n && n != root; n = n->parent) {
+        ns_node *s = ns_ni_skip_doc_fwd(n->next_sibling);
+        if (s) return s;
+    }
     return NULL;
 }
 
@@ -31321,9 +31348,13 @@ static ns_node *
 ns_ni_preceding(ns_node *node, ns_node *root)
 {
     if (node == root) return NULL;
-    if (node->prev_sibling) {
-        ns_node *p = node->prev_sibling;
-        while (p->last_child) p = p->last_child;
+    ns_node *p = ns_ni_skip_doc_back(node->prev_sibling);
+    if (p) {
+        for (;;) {
+            ns_node *lc = ns_ni_skip_doc_back(p->last_child);
+            if (!lc) break;
+            p = lc;
+        }
         return p;
     }
     return node->parent;
