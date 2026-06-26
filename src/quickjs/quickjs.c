@@ -1863,7 +1863,7 @@ typedef struct JSClassShortDef {
 static JSClassShortDef const js_std_class_def[] = {
     { JS_ATOM_Object, NULL, NULL },                             /* JS_CLASS_OBJECT */
     { JS_ATOM_Array, js_array_finalizer, js_array_mark },       /* JS_CLASS_ARRAY */
-    { JS_ATOM_Error, NULL, NULL }, /* JS_CLASS_ERROR */
+    { JS_ATOM_Error, js_object_data_finalizer, js_object_data_mark }, /* JS_CLASS_ERROR */
     { JS_ATOM_Number, js_object_data_finalizer, js_object_data_mark }, /* JS_CLASS_NUMBER */
     { JS_ATOM_String, js_object_data_finalizer, js_object_data_mark }, /* JS_CLASS_STRING */
     { JS_ATOM_Boolean, js_object_data_finalizer, js_object_data_mark }, /* JS_CLASS_BOOLEAN */
@@ -5829,6 +5829,7 @@ static JSValue JS_NewObjectFromShape(JSContext *ctx, JSShape *sh, JSClassID clas
         p->u.array.u.ptr = NULL;
         p->u.array.count = 0;
         break;
+    case JS_CLASS_ERROR:
     case JS_CLASS_NUMBER:
     case JS_CLASS_STRING:
     case JS_CLASS_BOOLEAN:
@@ -7286,6 +7287,7 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
                 }
             }
             break;
+        case JS_CLASS_ERROR:             /* u.object_data */
         case JS_CLASS_NUMBER:            /* u.object_data */
         case JS_CLASS_STRING:            /* u.object_data */
         case JS_CLASS_BOOLEAN:           /* u.object_data */
@@ -7749,7 +7751,23 @@ static bool can_add_backtrace(JSValueConst obj)
     if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
         return false;
     p = JS_VALUE_GET_OBJ(obj);
-    if (p->class_id != JS_CLASS_ERROR && p->class_id != JS_CLASS_DOM_EXCEPTION)
+    if (p->class_id != JS_CLASS_DOM_EXCEPTION)
+        return false;
+    if (find_own_property1(p, JS_ATOM_stack))
+        return false;
+    return true;
+}
+
+/* Note: it is important that no exception is returned by this function */
+static bool can_store_error_stack(JSValueConst obj)
+{
+    JSObject *p;
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(obj);
+    if (p->class_id != JS_CLASS_ERROR)
+        return false;
+    if (!JS_IsUndefined(p->u.object_data))
         return false;
     if (find_own_property1(p, JS_ATOM_stack))
         return false;
@@ -7952,7 +7970,18 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
 
     if (JS_IsUndefined(ctx->error_back_trace))
         ctx->error_back_trace = js_dup(stack);
-    if (has_filter_func || can_add_backtrace(error_obj)) {
+    if (has_filter_func) {
+        /* Error.captureStackTrace(target, ...): install an own data property
+           on the (possibly non-Error) target, shadowing the accessor */
+        JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_stack, stack,
+                               JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    } else if (can_store_error_stack(error_obj)) {
+        /* genuine Error instance: store as the [[ErrorData]] stack value */
+        p = JS_VALUE_GET_OBJ(error_obj);
+        JS_FreeValue(ctx, p->u.object_data);
+        p->u.object_data = stack;
+    } else if (can_add_backtrace(error_obj)) {
+        /* DOMException and the like keep an own "stack" data property */
         JS_DefinePropertyValue(ctx, error_obj, JS_ATOM_stack, stack,
                                JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     } else {
@@ -8838,8 +8867,10 @@ static JSValue JS_ThrowTypeErrorPrivateNotFound(JSContext *ctx, JSAtom atom)
                                  atom);
 }
 
-/* Private fields can be added even on non extensible objects or
-   Proxies */
+/* Per the nonextensible-applies-to-private proposal, private fields cannot
+   be added to non-extensible objects. Note that a Proxy's JSObject stays
+   extensible (its trap reflects the target), so private fields can still be
+   stamped onto Proxies. */
 static int JS_DefinePrivateField(JSContext *ctx, JSValueConst obj,
                                  JSValue name, JSValue val)
 {
@@ -8859,6 +8890,10 @@ static int JS_DefinePrivateField(JSContext *ctx, JSValueConst obj,
     }
     prop = js_symbol_to_atom(ctx, name);
     p = JS_VALUE_GET_OBJ(obj);
+    if (unlikely(!p->extensible)) {
+        JS_ThrowTypeError(ctx, "object is not extensible");
+        goto fail;
+    }
     prs = find_own_property(&pr, p, prop);
     if (prs) {
         JS_ThrowTypeErrorAtom(ctx, "private class field '%s' already exists",
@@ -8962,6 +8997,11 @@ static int JS_AddBrand(JSContext *ctx, JSValueConst obj, JSValueConst home_obj)
 
     if (JS_IsObject(obj)) {
         p1 = JS_VALUE_GET_OBJ(obj);
+        if (unlikely(!p1->extensible)) {
+            JS_FreeAtom(ctx, brand_atom);
+            JS_ThrowTypeError(ctx, "object is not extensible");
+            return -1;
+        }
         prs = find_own_property(&pr, p1, brand_atom);
         if (unlikely(prs)) {
             JS_FreeAtom(ctx, brand_atom);
@@ -9334,20 +9374,12 @@ retry:
                     if (desc) {
                         desc->flags = JS_PROP_WRITABLE | JS_PROP_ENUMERABLE |
                             JS_PROP_CONFIGURABLE;
-                        if (is_typed_array(p->class_id) && typed_array_is_immutable(p)) {
-                            desc->flags &= ~JS_PROP_WRITABLE;
-                            desc->flags &= ~JS_PROP_CONFIGURABLE;
-                        }
                         desc->getter = JS_UNDEFINED;
                         desc->setter = JS_UNDEFINED;
                         desc->value = JS_GetPropertyUint32(ctx, JS_MKPTR(JS_TAG_OBJECT, p), idx);
                     } else if (flags_only) {
                         *pflags = JS_PROP_WRITABLE | JS_PROP_ENUMERABLE |
                             JS_PROP_CONFIGURABLE;
-                        if (is_typed_array(p->class_id) && typed_array_is_immutable(p)) {
-                            *pflags &= ~JS_PROP_WRITABLE;
-                            *pflags &= ~JS_PROP_CONFIGURABLE;
-                        }
                     }
                     return true;
                 }
@@ -15332,6 +15364,11 @@ static no_inline __exception int js_binary_logic_slow(JSContext *ctx,
         JSBigInt *p1, *p2, *r;
         JSBigIntBuf buf1, buf2;
     slow_big_int:
+        /* buf2 is zero-initialized here (after the label, so it also runs on
+           the goto slow_big_int paths) to silence a -Wmaybe-uninitialized
+           false positive: GCC cannot prove buf2 is initialized through the
+           inlined js_bigint_get_si_sat() -> js_bigint_sign() read below. */
+        memset(&buf2, 0, sizeof(buf2));
         if (JS_VALUE_GET_TAG(op1) == JS_TAG_SHORT_BIG_INT)
             p1 = js_bigint_set_short(&buf1, op1);
         else
@@ -17595,14 +17632,7 @@ static void print_func_name(JSFunctionBytecode *b);
 
 static bool needs_backtrace(JSValue exc)
 {
-    JSObject *p;
-
-    if (JS_VALUE_GET_TAG(exc) != JS_TAG_OBJECT)
-        return false;
-    p = JS_VALUE_GET_OBJ(exc);
-    if (p->class_id != JS_CLASS_ERROR)
-        return false;
-    return !find_own_property1(p, JS_ATOM_stack);
+    return can_store_error_stack(exc) || can_add_backtrace(exc);
 }
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
@@ -42106,10 +42136,50 @@ static JSValue js_error_toString(JSContext *ctx, JSValueConst this_val,
     return JS_ConcatString(ctx, name, msg);
 }
 
+static JSValue js_error_get_stack(JSContext *ctx, JSValueConst this_val)
+{
+    JSObject *p;
+
+    if (JS_VALUE_GET_TAG(this_val) != JS_TAG_OBJECT)
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+    p = JS_VALUE_GET_OBJ(this_val);
+    if (p->class_id != JS_CLASS_ERROR)
+        return JS_UNDEFINED;
+    return js_dup(p->u.object_data);
+}
+
+static JSValue js_error_set_stack(JSContext *ctx, JSValueConst this_val,
+                                  JSValueConst value)
+{
+    int ret, flags;
+
+    if (JS_VALUE_GET_TAG(this_val) != JS_TAG_OBJECT)
+        return JS_ThrowTypeErrorNotAnObject(ctx);
+    if (!JS_IsString(value))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter expects a string");
+    if (js_same_value(ctx, this_val, ctx->class_proto[JS_CLASS_ERROR]))
+        return JS_ThrowTypeError(ctx, "Error.prototype.stack setter called on the home object");
+    ret = JS_GetOwnPropertyFlagsInternal(ctx, &flags, JS_VALUE_GET_OBJ(this_val),
+                                         JS_ATOM_stack);
+    if (ret < 0)
+        return JS_EXCEPTION;
+    if (ret == 0) {
+        if (JS_DefinePropertyValue(ctx, this_val, JS_ATOM_stack, js_dup(value),
+                                   JS_PROP_C_W_E | JS_PROP_THROW) < 0)
+            return JS_EXCEPTION;
+    } else {
+        if (JS_SetPropertyInternal2(ctx, this_val, JS_ATOM_stack, js_dup(value),
+                                    this_val, JS_PROP_THROW) < 0)
+            return JS_EXCEPTION;
+    }
+    return JS_UNDEFINED;
+}
+
 static const JSCFunctionListEntry js_error_proto_funcs[] = {
     JS_CFUNC_DEF("toString", 0, js_error_toString ),
     JS_PROP_STRING_DEF("name", "Error", JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE ),
     JS_PROP_STRING_DEF("message", "", JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE ),
+    JS_CGETSET_DEF("stack", js_error_get_stack, js_error_set_stack ),
 };
 
 static JSValue js_error_isError(JSContext *ctx, JSValueConst this_val,
@@ -42711,7 +42781,8 @@ static int js_typed_array_get_length_unsafe(JSContext *ctx, JSValueConst obj)
 
 static JSValue js_typed_array___speciesCreate(JSContext *ctx,
                                               JSValueConst this_val,
-                                              int argc, JSValueConst *argv);
+                                              int argc, JSValueConst *argv,
+                                              bool require_mutable);
 
 static JSValue js_array_every(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv, int special)
@@ -42765,7 +42836,7 @@ static JSValue js_array_every(JSContext *ctx, JSValueConst this_val,
     case special_map | special_TA:
         args[0] = obj;
         args[1] = js_int32(len);
-        ret = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+        ret = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
         if (JS_IsException(ret))
             goto exception;
         break;
@@ -42842,7 +42913,7 @@ done:
         JSValue arr;
         args[0] = obj;
         args[1] = js_int32(n);
-        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
         if (JS_IsException(arr))
             goto exception;
         args[0] = ret;
@@ -58378,13 +58449,14 @@ static JSValue js_array_buffer_transfer(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     if (abuf->shared)
         return JS_ThrowTypeError(ctx, "cannot transfer a SharedArrayBuffer");
-    if (magic == JS_ARRAY_BUFFER_TRANSFER_TO_IMMUTABLE && abuf->immutable)
-        return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
+    // Spec (ArrayBufferCopyAndDetach): the newLength argument must be
+    // coerced (its valueOf observed) before the buffer's detachability /
+    // immutability is checked, so side effects of coercion are visible.
     if (argc < 1 || JS_IsUndefined(argv[0]))
         new_len = abuf->byte_length;
     else if (JS_ToIndex(ctx, &new_len, argv[0]))
         return JS_EXCEPTION;
-    if (magic != JS_ARRAY_BUFFER_TRANSFER_TO_IMMUTABLE && abuf->immutable)
+    if (abuf->immutable)
         return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
     if (abuf->detached)
         return JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
@@ -58561,8 +58633,15 @@ static JSValue js_array_buffer_slice(JSContext *ctx,
         goto fail;
     }
     /* must test again because of side effects */
-    if (abuf->detached || abuf->byte_length < start + new_len) {
+    if (abuf->detached) {
         JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
+        goto fail;
+    }
+    if (abuf->byte_length < start + new_len) {
+        if (immutable)
+            JS_ThrowRangeError(ctx, "invalid array buffer length");
+        else
+            JS_ThrowTypeErrorDetachedArrayBuffer(ctx);
         goto fail;
     }
     memcpy(new_abuf->data, abuf->data + start, new_len);
@@ -59041,7 +59120,8 @@ static JSValue js_create_typed_array_iterator(JSContext *ctx, JSValueConst this_
 }
 
 static JSValue js_typed_array_create(JSContext *ctx, JSValueConst ctor,
-                                     int argc, JSValueConst *argv)
+                                     int argc, JSValueConst *argv,
+                                     bool require_mutable)
 {
     JSValue ret;
     int new_len;
@@ -59054,6 +59134,10 @@ static JSValue js_typed_array_create(JSContext *ctx, JSValueConst ctor,
     new_len = js_typed_array_get_length_unsafe(ctx, ret);
     if (new_len < 0)
         goto fail;
+    if (require_mutable && typed_array_is_immutable(JS_VALUE_GET_OBJ(ret))) {
+        JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
+        goto fail;
+    }
     if (argc == 1) {
         /* ensure that it is large enough */
         if (JS_ToLengthFree(ctx, &len, js_dup(argv[0])))
@@ -59070,7 +59154,8 @@ static JSValue js_typed_array_create(JSContext *ctx, JSValueConst ctor,
 
 static JSValue js_typed_array___speciesCreate(JSContext *ctx,
                                               JSValueConst this_val,
-                                              int argc, JSValueConst *argv)
+                                              int argc, JSValueConst *argv,
+                                              bool require_mutable)
 {
     JSValueConst obj;
     JSObject *p;
@@ -59089,7 +59174,7 @@ static JSValue js_typed_array___speciesCreate(JSContext *ctx,
         ret = js_typed_array_constructor(ctx, JS_UNDEFINED, argc1, argv + 1,
                                          p->class_id);
     } else {
-        ret = js_typed_array_create(ctx, ctor, argc1, argv + 1);
+        ret = js_typed_array_create(ctx, ctor, argc1, argv + 1, require_mutable);
         JS_FreeValue(ctx, ctor);
     }
     return ret;
@@ -59127,14 +59212,24 @@ static JSValue js_typed_array_from(JSContext *ctx, JSValueConst this_val,
     iter = JS_GetProperty(ctx, items, JS_ATOM_Symbol_iterator);
     if (JS_IsException(iter))
         goto exception;
-    if (!JS_IsUndefined(iter)) {
-        JS_FreeValue(ctx, iter);
+    if (!JS_IsUndefined(iter) && !JS_IsNull(iter)) {
+        if (!JS_IsFunction(ctx, iter)) {
+            JS_FreeValue(ctx, iter);
+            JS_ThrowTypeError(ctx, "value is not iterable");
+            goto exception;
+        }
         arr = JS_NewArray(ctx);
-        if (JS_IsException(arr))
+        if (JS_IsException(arr)) {
+            JS_FreeValue(ctx, iter);
             goto exception;
-        stack[0] = js_dup(items);
-        if (js_for_of_start(ctx, &stack[1], false))
+        }
+        stack[0] = JS_GetIterator2(ctx, items, iter);
+        JS_FreeValue(ctx, iter);
+        if (JS_IsException(stack[0]))
             goto exception;
+        stack[1] = JS_GetProperty(ctx, stack[0], JS_ATOM_next);
+        if (JS_IsException(stack[1]))
+            goto exception_close;
         for (k = 0;; k++) {
             v = JS_IteratorNext(ctx, stack[0], stack[1], 0, NULL, &done);
             if (JS_IsException(v))
@@ -59152,7 +59247,7 @@ static JSValue js_typed_array_from(JSContext *ctx, JSValueConst this_val,
     if (js_get_length64(ctx, &len, arr) < 0)
         goto exception;
     v = js_int64(len);
-    r = js_typed_array_create(ctx, this_val, 1, vc(&v));
+    r = js_typed_array_create(ctx, this_val, 1, vc(&v), true);
     JS_FreeValue(ctx, v);
     if (JS_IsException(r))
         goto exception;
@@ -59194,7 +59289,7 @@ static JSValue js_typed_array_of(JSContext *ctx, JSValueConst this_val,
     int i;
 
     v = js_int32(argc);
-    obj = js_typed_array_create(ctx, this_val, 1, vc(&v));
+    obj = js_typed_array_create(ctx, this_val, 1, vc(&v), true);
     if (JS_IsException(obj))
         return obj;
 
@@ -59793,8 +59888,10 @@ static JSValue js_typed_array_reverse(JSContext *ctx, JSValueConst this_val,
     len = js_typed_array_get_length_unsafe(ctx, this_val);
     if (len < 0)
         return JS_EXCEPTION;
+    p = JS_VALUE_GET_OBJ(this_val);
+    if (typed_array_is_immutable(p))
+        return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
     if (len > 0) {
-        p = JS_VALUE_GET_OBJ(this_val);
         switch (typed_array_size_log2(p->class_id)) {
         case 0:
             {
@@ -59892,7 +59989,7 @@ static JSValue js_typed_array_slice(JSContext *ctx, JSValueConst this_val,
 
     args[0] = this_val;
     args[1] = js_int32(count);
-    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args);
+    arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 2, args, true);
     if (JS_IsException(arr))
         goto exception;
 
@@ -59981,9 +60078,9 @@ static JSValue js_typed_array_subarray(JSContext *ctx, JSValueConst this_val,
     // given; in that case the spec omits the length argument entirely
     // rather than passing undefined
     if (ta->track_rab && JS_IsUndefined(argv[1]))
-        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 3, args);
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 3, args, false);
     else
-        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args);
+        arr = js_typed_array___speciesCreate(ctx, JS_UNDEFINED, 4, args, false);
     JS_FreeValue(ctx, ta_buffer);
     return arr;
  exception:
@@ -63437,6 +63534,9 @@ static JSValue js_uint8array_set_from_base64(JSContext *ctx,
     if (!p)
         return JS_EXCEPTION;
 
+    if (typed_array_is_immutable(p))
+        return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
+
     if (!JS_IsString(argv[0]))
         return JS_ThrowTypeError(ctx, "expected string");
 
@@ -63492,6 +63592,9 @@ static JSValue js_uint8array_set_from_hex(JSContext *ctx,
     p = check_uint8array(ctx, this_val);
     if (!p)
         return JS_EXCEPTION;
+
+    if (typed_array_is_immutable(p))
+        return JS_ThrowTypeErrorImmutableArrayBuffer(ctx);
 
     if (!JS_IsString(argv[0]))
         return JS_ThrowTypeError(ctx, "expected string");

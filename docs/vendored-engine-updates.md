@@ -1,0 +1,132 @@
+# Vendored engine updates — QuickJS & Lexbor
+
+Nordstjernen carries in-tree forks of two upstream C libraries that we
+modify freely for browser integration:
+
+- **QuickJS** (`src/quickjs/`) — forked from
+  [quickjs-ng](https://github.com/quickjs-ng/quickjs).
+- **Lexbor** (`src/lexbor/`) — forked from
+  [lexbor](https://github.com/lexbor/lexbor), trimmed to the modules we
+  use (`core dom encoding html ns ports punycode tag unicode url utils`;
+  upstream's `css engine selectors style test utils/*` tooling is not
+  carried).
+
+We track the upstream **main** branch. This document records each refresh:
+the upstream point we rebased onto, the upstream changes that landed, and
+the local modifications that were preserved on top.
+
+## How an update is done
+
+For each fork, the true fork-base commit is recovered (the upstream commit
+whose tree equals ours minus our deliberate edits), then every carried file
+is classified:
+
+- **copy** — we never touched it, upstream did → take upstream's version.
+- **keep** — only we touched it (upstream unchanged in range) → keep ours.
+- **merge** — both touched it → 3-way merge (`git merge-file ours BASE
+  theirs`), reviewing every hunk.
+
+Sources are listed explicitly in each `meson.build`, so new upstream files
+in unused areas are simply not compiled; the build is the final gate.
+
+## 2026-06-26 — QuickJS 66adc82 → 4d6fe60, Lexbor 3.0.0 → 3.1.0
+
+### QuickJS
+
+| | value |
+|---|---|
+| Fork base | `66adc82` ("Only export API symbols for shared builds", #1525) |
+| Updated to | `4d6fe60` (main, "Add Unicode license to libunicode-table.h", #1547) |
+| Reported version | `0.15.1` (unchanged upstream; `QJS_VERSION_*` in `quickjs.h`) |
+
+**Upstream changes pulled in** (15 commits since the fork base; those that
+touch carried files):
+
+- Implement the *nonextensible-applies-to-private* proposal.
+- ArrayBuffer immutable-method semantics fixes (`sliceToImmutable` /
+  `transferToImmutable` error types and coercion order).
+- Enforce immutability on TypedArray write paths — adds a `require_mutable`
+  argument to `js_typed_array___speciesCreate` and the related create paths.
+- Implement the `Error.prototype.stack` accessor proposal.
+- Add `JS_Free{Atoms,Values}` vararg macros (#1535).
+- `-Wmaybe-uninitialized` fix in `js_binary_logic_slow`; test262, unicode
+  table (+license), CI and meson-default-build housekeeping.
+
+**Local modifications preserved** (`quickjs.c`, `quickjs.h`, `libregexp.c`):
+
+- `JS_RepointArrayBuffer()` — repoint an externally-managed ArrayBuffer at a
+  new backing store and update live views (browser-side hook).
+- TypedArray `[[Set]]` only coerces the value when the receiver is the typed
+  array itself (out-of-bounds index with a foreign receiver leaves the value
+  untouched).
+- `with`-statement object Environment Record semantics: `GetBindingValue` /
+  `SetMutableBinding` re-probe the binding and raise `ReferenceError` in
+  strict mode (`OP_with_get_var/_ref/_ref_undef/_put_var`).
+- `Function.prototype.caller` getter resolving the live caller for
+  non-strict functions (legacy web behaviour); `arguments` stays poisoned.
+- Parser: `get`/`set` on its own line before a generator method is treated
+  as a class field (ASI); computed property keys run through `ToPropertyKey`
+  before the value expression.
+- Module resolution: `export * as ns` ambiguity compared by canonical
+  (module, binding) so the same namespace re-exported via different modules
+  compares equal.
+- Array sort always invokes a user comparator, even for bitwise-identical
+  values (matches V8/JSC/SM; `jQuery.uniqueSort` relies on it).
+- RegExp legacy static captures `RegExp.$1`…`$9`, updated on every successful
+  `exec`.
+- `%AsyncFromSyncIteratorPrototype%` closes the sync iterator on a rejected
+  value promise (`closeOnRejection`).
+- TypedArray `subarray` species-create omits the length argument (rather than
+  passing `undefined`) for length-tracking results.
+- `DOMException` prototype stored via `set_value` (drops a leaked reference).
+- `libregexp.c`: the regexp `v` flag (unicodeSets) also enables full Unicode
+  semantics (`is_unicode`).
+- `quickjs.h`: `JS_EXTERN` / `JS_MODULE_EXTERN` only get default visibility
+  for shared/module builds; `JS_RepointArrayBuffer` declaration.
+
+The merge produced one conflict (subarray species-create) where our
+length-omission edit met upstream's new `require_mutable` parameter; resolved
+by keeping our branch and threading the new `false` (read-access) argument.
+
+### Lexbor
+
+| | value |
+|---|---|
+| Fork base | post-3.0.0 main (around `6772a05`) |
+| Updated to | `cf07699` (main, "URL: fixed setters for empty hosts") |
+| Version | `3.0.0` → `3.1.0` (`LEXBOR_VERSION_*`, `version`) |
+
+**Upstream changes pulled in** (carried modules only):
+
+- HTML: nobr adoption-agency fallback fix
+  (`html/tree/insertion_mode/in_body.c`).
+- URL: empty-host setter fixes — `lxb_url_host_is_empty()` helper, empty-host
+  short-circuit in host copy/parse (`url/url.c`).
+- DOM: expanded attribute constant/lookup tables
+  (`dom/interfaces/attr_const.h`, `attr_res.h`).
+- Version bump to 3.1.0 (`core/base.h`, `version`).
+
+**Local modifications preserved:**
+
+- `unicode/idna.c`, `unicode/idna.h`, `unicode/idna_validity.c` — our IDNA
+  processing/validity layer (custom file plus heavy local edits).
+- `core/mraw.h` — `lexbor_mraw_data_size` reads the size header via `memcpy`
+  to avoid an unaligned load.
+- `url/url.c` — port state under a state override returns `LXB_STATUS_OK`
+  with an empty buffer, so `url.host = "example.com:invalid"` keeps the
+  hostname instead of rejecting the assignment. This sits in a different
+  region from upstream's empty-host fix and was combined cleanly by the
+  3-way merge.
+- `meson.build` — our in-tree build description (sources listed explicitly).
+
+`url/url.c` merged with zero conflicts (our edit and upstream's empty-host
+fix occupy disjoint regions); all other carried files were pure copy/keep.
+
+### Verification
+
+- `meson compile -C builddir` — full browser builds and links cleanly, no
+  new warnings on the QuickJS/Lexbor objects.
+- Headless run of a page whose inline script exercises the preserved engine
+  changes: `RegExp.$1` static captures, always-called sort comparator, and
+  the regexp `v` flag all behave correctly, and the Lexbor DOM dump parses
+  `<select size>` / `<nobr>` as expected.
