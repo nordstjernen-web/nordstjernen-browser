@@ -39500,7 +39500,21 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
     gboolean xhtml_suppress_scripts = FALSE;
     gboolean malformed_xml = FALSE;
     gboolean xml_empty = FALSE;
-    if (is_xml_content && decoded) {
+    if (is_xml_content && decoded && resp && resp->body) {
+        char *xml_charset = ns_html_declared_charset(
+            (const char *)resp->body->data, resp->body->len, resp->content_type);
+        gboolean utf8_declared = !xml_charset ||
+            g_ascii_strcasecmp(xml_charset, "UTF-8") == 0 ||
+            g_ascii_strcasecmp(xml_charset, "UTF8") == 0;
+        g_free(xml_charset);
+        if (utf8_declared &&
+            !g_utf8_validate((const char *)resp->body->data,
+                             (gssize)resp->body->len, NULL)) {
+            malformed_xml = TRUE;
+            xhtml_suppress_scripts = TRUE;
+        }
+    }
+    if (is_xml_content && decoded && !malformed_xml) {
         const char *q = decoded;
         while (*q && g_ascii_isspace((unsigned char)*q)) q++;
         if (!*q) {
