@@ -57,7 +57,9 @@ toggleable in Settings. Honouring these signals is the responsibility
 of the websites that receive them.
 
 By default Nordstjernen also blocks third-party cookies, strips common
-tracking parameters from URLs, and upgrades connections to HTTPS.
+tracking parameters from URLs, upgrades connections to HTTPS, and coarsens
+script-visible high-resolution timers (such as `performance.now()`) to
+limit timing-based fingerprinting and side-channel attacks.
 
 ## Children
 
