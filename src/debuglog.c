@@ -141,10 +141,10 @@ ns_debug_log_emit_v(ns_dlog_level level, const char *category,
     e->category = g_strdup(category ? category : "");
     e->message = fmt ? g_strdup_vprintf(fmt, ap) : g_strdup("");
 
-    ns_dlog_file_write(e);
     ns_dlog_dispatch(e);
 
     g_mutex_lock(&g_dlog_mutex);
+    ns_dlog_file_write(e);
     g_queue_push_tail(g_dlog_entries, e);
     while (g_queue_get_length(g_dlog_entries) > NS_DLOG_CAPACITY) {
         ns_dlog_entry *drop = g_queue_pop_head(g_dlog_entries);
