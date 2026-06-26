@@ -2364,6 +2364,11 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         return;
     }
 
+    if (!n->name) {
+        for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+            collect_walk(c, ctx, depth + 1);
+        return;
+    }
     if (strcmp(n->name, "br") == 0) {
         g_string_append(ctx->out, "\xe2\x80\xa8");
         return;
