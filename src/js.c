@@ -3305,6 +3305,86 @@ ns_element_int_attr_setter(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_make_svg_length(JSContext *ctx, const char *str)
+{
+    double val = 0;
+    int unit = 1;
+    if (str && *str) {
+        char *end = NULL;
+        val = g_ascii_strtod(str, &end);
+        if (end && *end) {
+            while (*end == ' ') end++;
+            if      (strcmp(end, "%") == 0)                 unit = 2;
+            else if (g_ascii_strcasecmp(end, "em") == 0)    unit = 3;
+            else if (g_ascii_strcasecmp(end, "ex") == 0)    unit = 4;
+            else if (g_ascii_strcasecmp(end, "px") == 0)    unit = 5;
+            else if (g_ascii_strcasecmp(end, "cm") == 0)    unit = 6;
+            else if (g_ascii_strcasecmp(end, "mm") == 0)    unit = 7;
+            else if (g_ascii_strcasecmp(end, "in") == 0)    unit = 8;
+            else if (g_ascii_strcasecmp(end, "pt") == 0)    unit = 9;
+            else if (g_ascii_strcasecmp(end, "pc") == 0)    unit = 10;
+        }
+    }
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "unitType", JS_NewInt32(ctx, unit));
+    JS_SetPropertyStr(ctx, o, "value", JS_NewFloat64(ctx, val));
+    JS_SetPropertyStr(ctx, o, "valueInSpecifiedUnits", JS_NewFloat64(ctx, val));
+    JS_SetPropertyStr(ctx, o, "valueAsString",
+                      JS_NewString(ctx, str && *str ? str : "0"));
+    return o;
+}
+
+static JSValue
+ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
+{
+    const char *base = ns_element_get_attr(n, attr);
+    if (!base) base = "0";
+    char anim_attr[64];
+    g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
+    const char *anim = ns_element_get_attr(n, anim_attr);
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "baseVal", ns_make_svg_length(ctx, base));
+    JS_SetPropertyStr(ctx, o, "animVal",
+                      ns_make_svg_length(ctx, anim && *anim ? anim : base));
+    return o;
+}
+
+static JSValue
+ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (n && (n->flags & NS_NODE_SVG_NS))
+        return ns_make_svg_animated_length(ctx, n, magic == 8 ? "width"
+                                                              : "height");
+    return ns_element_int_attr_getter(ctx, this_val, magic);
+}
+
+static JSValue
+ns_svg_beginElement(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || !(n->flags & NS_NODE_SVG_NS) || !n->parent) return JS_UNDEFINED;
+    const char *attr = ns_element_get_attr(n, "attributeName");
+    const char *to   = ns_element_get_attr(n, "to");
+    if (attr && *attr && to) {
+        char anim_attr[64];
+        g_snprintf(anim_attr, sizeof anim_attr, "data-nd-anim-%s", attr);
+        ns_js_set_attr_recorded(js_from_ctx(ctx), n->parent, anim_attr, to);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_svg_setCurrentTime(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_element_get_tabIndex(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
@@ -30299,8 +30379,10 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("maxLength",      ns_element_int_attr_getter, ns_element_int_attr_setter, 0),
     JS_CGETSET_MAGIC_DEF("minLength",      ns_element_int_attr_getter, ns_element_int_attr_setter, 1),
     JS_CGETSET_MAGIC_DEF("span",           ns_element_int_attr_getter, ns_element_int_attr_setter, 5),
-    JS_CGETSET_MAGIC_DEF("width",          ns_element_int_attr_getter, ns_element_int_attr_setter, 8),
-    JS_CGETSET_MAGIC_DEF("height",         ns_element_int_attr_getter, ns_element_int_attr_setter, 9),
+    JS_CGETSET_MAGIC_DEF("width",          ns_element_dimension_getter, ns_element_int_attr_setter, 8),
+    JS_CGETSET_MAGIC_DEF("height",         ns_element_dimension_getter, ns_element_int_attr_setter, 9),
+    JS_CFUNC_DEF("beginElement",   0, ns_svg_beginElement),
+    JS_CFUNC_DEF("setCurrentTime", 1, ns_svg_setCurrentTime),
     JS_CGETSET_MAGIC_DEF("start",          ns_element_int_attr_getter, ns_element_int_attr_setter, 10),
     JS_CGETSET_MAGIC_DEF("coords",         ns_element_attr_getter, ns_element_attr_setter, 37),
     JS_CGETSET_MAGIC_DEF("shape",          ns_element_attr_getter, ns_element_attr_setter, 38),
@@ -32869,6 +32951,30 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
         if (!ns_global_has(ctx, global, interfaces[i]))
             ns_bind_ctor(ctx, global, interfaces[i],
                          ns_illegal_constructor, 0);
+
+    {
+        static const struct { const char *n; int v; } svglen_consts[] = {
+            { "SVG_LENGTHTYPE_UNKNOWN",    0 }, { "SVG_LENGTHTYPE_NUMBER",     1 },
+            { "SVG_LENGTHTYPE_PERCENTAGE", 2 }, { "SVG_LENGTHTYPE_EMS",        3 },
+            { "SVG_LENGTHTYPE_EXS",        4 }, { "SVG_LENGTHTYPE_PX",         5 },
+            { "SVG_LENGTHTYPE_CM",         6 }, { "SVG_LENGTHTYPE_MM",         7 },
+            { "SVG_LENGTHTYPE_IN",         8 }, { "SVG_LENGTHTYPE_PT",         9 },
+            { "SVG_LENGTHTYPE_PC",        10 },
+        };
+        JSValue svglen = JS_GetPropertyStr(ctx, global, "SVGLength");
+        if (JS_IsObject(svglen)) {
+            JSValue proto = JS_GetPropertyStr(ctx, svglen, "prototype");
+            for (gsize i = 0; i < G_N_ELEMENTS(svglen_consts); i++) {
+                JS_SetPropertyStr(ctx, svglen, svglen_consts[i].n,
+                                  JS_NewInt32(ctx, svglen_consts[i].v));
+                if (JS_IsObject(proto))
+                    JS_SetPropertyStr(ctx, proto, svglen_consts[i].n,
+                                      JS_NewInt32(ctx, svglen_consts[i].v));
+            }
+            JS_FreeValue(ctx, proto);
+        }
+        JS_FreeValue(ctx, svglen);
+    }
 
     ns_install_event_handler_props(ctx, global);
 
