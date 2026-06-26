@@ -20615,12 +20615,27 @@ ns_node_normalize_walk(ns_js *js, ns_node *n)
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
-        if (c->kind == NS_NODE_TEXT && next && next->kind == NS_NODE_TEXT) {
-            if (!ns_text_node_concat(c, next)) { c = next; continue; }
-            ns_node *rm_prev = next->prev_sibling, *rm_next = next->next_sibling;
-            ns_node_remove(next);
-            ns_js_orphan_node(js, next);
-            if (js) ns_js_record_child_change(js, n, NULL, next, rm_prev, rm_next);
+        gboolean is_text = c->kind == NS_NODE_TEXT && !(c->flags & NS_NODE_CDATA);
+        if (is_text) {
+            if (!c->text || c->text[0] == '\0') {
+                ns_node *rm_prev = c->prev_sibling, *rm_next = c->next_sibling;
+                ns_node_remove(c);
+                ns_js_orphan_node(js, c);
+                if (js) ns_js_record_child_change(js, n, NULL, c, rm_prev, rm_next);
+                c = next;
+                continue;
+            }
+            while (next && next->kind == NS_NODE_TEXT &&
+                   !(next->flags & NS_NODE_CDATA)) {
+                ns_node *after = next->next_sibling;
+                if (!ns_text_node_concat(c, next)) break;
+                ns_node *rm_prev = next->prev_sibling, *rm_next = next->next_sibling;
+                ns_node_remove(next);
+                ns_js_orphan_node(js, next);
+                if (js) ns_js_record_child_change(js, n, NULL, next, rm_prev, rm_next);
+                next = after;
+            }
+            c = next;
             continue;
         }
         if (c->kind == NS_NODE_ELEMENT) ns_node_normalize_walk(js, c);
