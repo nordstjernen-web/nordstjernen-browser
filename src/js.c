@@ -4212,6 +4212,7 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
     char *head = g_strndup(n->text, head_len);
     ns_node_replace_text_owned(n, head);
     ns_node *tail = ns_node_new_text(tail_text);
+    ns_js *_j = js_from_ctx(ctx);
     if (n->parent) {
         tail->parent = n->parent;
         tail->prev_sibling = n;
@@ -4219,10 +4220,13 @@ ns_element_split_text(JSContext *ctx, JSValueConst this_val,
         if (n->next_sibling) n->next_sibling->prev_sibling = tail;
         else n->parent->last_child = tail;
         n->next_sibling = tail;
-    } else if (js_from_ctx(ctx)) {
-        g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, tail);
+        if (_j)
+            ns_js_record_child_change(_j, n->parent, tail, NULL,
+                                      tail->prev_sibling, tail->next_sibling);
+    } else if (_j) {
+        g_hash_table_add(_j->orphan_nodes, tail);
     }
-    { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
+    if (_j) _j->mutated = TRUE;
     return ns_make_element(ctx, tail);
 }
 
@@ -12043,11 +12047,13 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     JSValue method_v = JS_GetPropertyStr(ctx, this_val, "_method");
     const char *method = JS_ToCString(ctx, method_v);
     JS_FreeValue(ctx, method_v);
-    gboolean is_post = method && g_ascii_strcasecmp(method, "POST") == 0;
+    gboolean send_body = method &&
+                         g_ascii_strcasecmp(method, "GET") != 0 &&
+                         g_ascii_strcasecmp(method, "HEAD") != 0;
     char *body = NULL;
     gsize body_len = 0;
     char *auto_content_type = NULL;
-    if (is_post && argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
+    if (send_body && argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
         if (ns_js_value_is_form_data(ctx, argv[0])) {
             body = ns_js_form_data_serialize(ctx, argv[0], &body_len,
                                              &auto_content_type);
@@ -12118,7 +12124,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     g_ptr_array_add(hdr_terminated, NULL);
 
     const char *effective_ct = NULL;
-    if (is_post) {
+    if (send_body && body) {
         if (user_set_content_type)         effective_ct = NULL;
         else if (auto_content_type)        effective_ct = auto_content_type;
         else                               effective_ct = "application/x-www-form-urlencoded";
@@ -12141,7 +12147,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 
     ns_net_request_async(st->url,
                          st->js ? st->js->current_url : NULL,
-                         is_post ? "POST" : (st->method ? st->method : "GET"),
+                         st->method ? st->method : "GET",
                          body, body_len,
                          effective_ct,
                          (const char *const *)hdr_terminated->pdata,
@@ -21510,10 +21516,15 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || argc < 1 || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
-    const char *name = JS_ToCString(ctx, argv[0]);
-    if (!name) return JS_UNDEFINED;
+    const char *raw_name = JS_ToCString(ctx, argv[0]);
+    if (!raw_name) return JS_UNDEFINED;
+    char *lowered = NULL;
+    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+        lowered = g_ascii_strdown(raw_name, -1);
+    const char *name = lowered ? lowered : raw_name;
     if (ns_attr_name_is_internal(name)) {
-        JS_FreeCString(ctx, name);
+        JS_FreeCString(ctx, raw_name);
+        g_free(lowered);
         return JS_UNDEFINED;
     }
     ns_attr **prev = &n->attrs;
@@ -21540,7 +21551,8 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
             break;
         }
     }
-    JS_FreeCString(ctx, name);
+    JS_FreeCString(ctx, raw_name);
+    g_free(lowered);
     return JS_UNDEFINED;
 }
 
