@@ -32715,6 +32715,36 @@ ns_define_element_unscopables(JSContext *ctx, JSValue proto)
     JS_FreeValue(ctx, gobj);
 }
 
+static JSValue
+ns_window_performance_toJSON(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue out = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, out, "timeOrigin",
+                      JS_GetPropertyStr(ctx, this_val, "timeOrigin"));
+    JSValue timing = JS_GetPropertyStr(ctx, this_val, "timing");
+    if (JS_IsObject(timing)) JS_SetPropertyStr(ctx, out, "timing", timing);
+    else JS_FreeValue(ctx, timing);
+    JSValue nav = JS_GetPropertyStr(ctx, this_val, "navigation");
+    if (JS_IsObject(nav)) JS_SetPropertyStr(ctx, out, "navigation", nav);
+    else JS_FreeValue(ctx, nav);
+    return out;
+}
+
+static void
+ns_performance_extend_event_target(JSContext *ctx, JSValueConst global,
+                                   JSValueConst performance)
+{
+    JSValue et = JS_GetPropertyStr(ctx, global, "EventTarget");
+    if (JS_IsObject(et)) {
+        JSValue etp = JS_GetPropertyStr(ctx, et, "prototype");
+        if (JS_IsObject(etp)) JS_SetPrototype(ctx, performance, etp);
+        JS_FreeValue(ctx, etp);
+    }
+    JS_FreeValue(ctx, et);
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -33150,7 +33180,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, performance, "eventCounts", JS_NewObject(ctx));
     ns_bind_fn(ctx, performance, "clearResourceTimings",        ns_event_noop, 0);
     ns_bind_fn(ctx, performance, "setResourceTimingBufferSize", ns_event_noop, 1);
-    ns_bind_fn(ctx, performance, "toJSON",                      ns_event_noop, 0);
+    ns_bind_fn(ctx, performance, "toJSON",          ns_window_performance_toJSON, 0);
 
     JS_SetPropertyStr(ctx, global, "performance", performance);
 
@@ -33496,6 +33526,12 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                 JS_FreeValue(ctx, et_proto);
             }
             JS_FreeValue(ctx, et);
+        }
+        {
+            JSValue perf = JS_GetPropertyStr(ctx, global, "performance");
+            if (JS_IsObject(perf))
+                ns_performance_extend_event_target(ctx, global, perf);
+            JS_FreeValue(ctx, perf);
         }
         JS_FreeValue(ctx, element_proto);
         JSValue ev_carrier = JS_GetPropertyStr(ctx, global, "Event");
