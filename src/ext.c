@@ -14,6 +14,7 @@
 typedef struct {
     GPtrArray *matches;
     char      *all_js;
+    char      *all_css;
     gboolean   at_start;
 } ns_ext_cs;
 
@@ -27,6 +28,8 @@ typedef struct {
     GPtrArray *excluded_request_domains;
     GPtrArray *initiator_domains;
     GPtrArray *excluded_initiator_domains;
+    GPtrArray *resource_types;
+    GPtrArray *excluded_resource_types;
 } ns_dnr_rule;
 
 typedef struct {
@@ -349,9 +352,10 @@ ns_ext_collect_strings(JSContext *ctx, JSValueConst arr, GPtrArray *out)
 }
 
 static char *
-ns_ext_read_js_files(const char *base_dir, JSContext *ctx, JSValueConst entry)
+ns_ext_read_files(const char *base_dir, JSContext *ctx, JSValueConst entry,
+                  const char *key)
 {
-    JSValue jsv = JS_GetPropertyStr(ctx, entry, "js");
+    JSValue jsv = JS_GetPropertyStr(ctx, entry, key);
     GPtrArray *files = g_ptr_array_new_with_free_func(g_free);
     ns_ext_collect_strings(ctx, jsv, files);
     JS_FreeValue(ctx, jsv);
@@ -377,6 +381,7 @@ ns_ext_cs_free(gpointer p)
     ns_ext_cs *cs = p;
     if (cs->matches) g_ptr_array_free(cs->matches, TRUE);
     g_free(cs->all_js);
+    g_free(cs->all_css);
     g_free(cs);
 }
 
@@ -400,8 +405,9 @@ ns_ext_parse_content_scripts(ns_ext *e, JSContext *ctx, JSValueConst manifest)
                 g_autofree char *run_at =
                     ns_ext_js_string(ctx, entry, "run_at");
                 cs->at_start = run_at && strcmp(run_at, "document_start") == 0;
-                cs->all_js = ns_ext_read_js_files(e->base_dir, ctx, entry);
-                if (cs->matches->len > 0 && cs->all_js)
+                cs->all_js = ns_ext_read_files(e->base_dir, ctx, entry, "js");
+                cs->all_css = ns_ext_read_files(e->base_dir, ctx, entry, "css");
+                if (cs->matches->len > 0 && (cs->all_js || cs->all_css))
                     g_ptr_array_add(e->content_scripts, cs);
                 else
                     ns_ext_cs_free(cs);
@@ -424,6 +430,9 @@ ns_dnr_rule_free(gpointer p)
     if (r->initiator_domains) g_ptr_array_free(r->initiator_domains, TRUE);
     if (r->excluded_initiator_domains)
         g_ptr_array_free(r->excluded_initiator_domains, TRUE);
+    if (r->resource_types) g_ptr_array_free(r->resource_types, TRUE);
+    if (r->excluded_resource_types)
+        g_ptr_array_free(r->excluded_resource_types, TRUE);
     g_free(r);
 }
 
@@ -486,6 +495,9 @@ ns_dnr_parse_rule(JSContext *ctx, JSValueConst r)
         rule->initiator_domains = ns_dnr_domains(ctx, cond, "initiatorDomains");
         rule->excluded_initiator_domains =
             ns_dnr_domains(ctx, cond, "excludedInitiatorDomains");
+        rule->resource_types = ns_dnr_domains(ctx, cond, "resourceTypes");
+        rule->excluded_resource_types =
+            ns_dnr_domains(ctx, cond, "excludedResourceTypes");
     }
     JS_FreeValue(ctx, cond);
     return rule;
@@ -692,6 +704,23 @@ ns_ext_append_id(GString *out, const char *id)
     }
 }
 
+static void
+ns_ext_append_js_string(GString *out, const char *s)
+{
+    g_string_append_c(out, '"');
+    for (const char *p = s; *p; p++) {
+        switch (*p) {
+        case '\\': g_string_append(out, "\\\\"); break;
+        case '"':  g_string_append(out, "\\\""); break;
+        case '\n': g_string_append(out, "\\n"); break;
+        case '\r': g_string_append(out, "\\r"); break;
+        case '\t': g_string_append(out, "\\t"); break;
+        default:   g_string_append_c(out, *p);
+        }
+    }
+    g_string_append_c(out, '"');
+}
+
 char *
 ns_ext_content_scripts_for_url(const char *url, gboolean at_start)
 {
@@ -708,13 +737,25 @@ ns_ext_content_scripts_for_url(const char *url, gboolean at_start)
                 hit = ns_ext_pattern_match(g_ptr_array_index(cs->matches, k),
                                            url);
             if (!hit) continue;
+            g_string_append(out, ";(function(){try{\n");
+            if (cs->all_css) {
+                g_string_append(out,
+                    "var __ndcss=document.createElement('style');"
+                    "__ndcss.textContent=");
+                ns_ext_append_js_string(out, cs->all_css);
+                g_string_append(out,
+                    ";(document.head||document.documentElement||document)"
+                    ".appendChild(__ndcss);\n");
+            }
+            if (cs->all_js) {
+                g_string_append(out, "var browser=__nd_ext_make_api(\"");
+                ns_ext_append_id(out, e->id);
+                g_string_append(out, "\");var chrome=browser;\n");
+                g_string_append(out, cs->all_js);
+                g_string_append(out, "\n");
+            }
             g_string_append(out,
-                ";(function(){try{var browser=__nd_ext_make_api(\"");
-            ns_ext_append_id(out, e->id);
-            g_string_append(out, "\");var chrome=browser;\n");
-            g_string_append(out, cs->all_js);
-            g_string_append(out,
-                "\n}catch(e){try{console.error(\"[nordstjernen ext]\",e);}"
+                "}catch(e){try{console.error(\"[nordstjernen ext]\",e);}"
                 "catch(_){}}})();\n");
         }
     }
@@ -805,6 +846,46 @@ ns_dnr_domain_list_match(GPtrArray *list, const char *host)
     return FALSE;
 }
 
+static const char *
+ns_dnr_infer_type(const char *url)
+{
+    const char *end = strpbrk(url, "?#");
+    const char *path_end = end ? end : url + strlen(url);
+    const char *dot = NULL;
+    for (const char *p = url; p < path_end; p++) {
+        if (*p == '.') dot = p;
+        else if (*p == '/') dot = NULL;
+    }
+    if (!dot) return NULL;
+    g_autofree char *ext = g_ascii_strdown(dot + 1, path_end - dot - 1);
+    static const struct { const char *ext; const char *type; } map[] = {
+        { "js", "script" }, { "mjs", "script" },
+        { "css", "stylesheet" },
+        { "png", "image" }, { "jpg", "image" }, { "jpeg", "image" },
+        { "gif", "image" }, { "webp", "image" }, { "svg", "image" },
+        { "ico", "image" }, { "bmp", "image" }, { "avif", "image" },
+        { "apng", "image" },
+        { "woff", "font" }, { "woff2", "font" }, { "ttf", "font" },
+        { "otf", "font" }, { "eot", "font" },
+        { "mp4", "media" }, { "webm", "media" }, { "mp3", "media" },
+        { "ogg", "media" }, { "oga", "media" }, { "ogv", "media" },
+        { "wav", "media" }, { "m4a", "media" }, { "m4v", "media" },
+        { "mpg", "media" }, { "mpeg", "media" }, { "mov", "media" },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(map); i++)
+        if (strcmp(ext, map[i].ext) == 0) return map[i].type;
+    return NULL;
+}
+
+static gboolean
+ns_dnr_type_in_list(GPtrArray *list, const char *type)
+{
+    if (!type) return FALSE;
+    for (guint i = 0; i < list->len; i++)
+        if (strcmp(g_ptr_array_index(list, i), type) == 0) return TRUE;
+    return FALSE;
+}
+
 static gboolean
 ns_dnr_rule_matches(const ns_dnr_rule *r, const char *url,
                     const char *host, const char *init_host)
@@ -825,6 +906,14 @@ ns_dnr_rule_matches(const ns_dnr_rule *r, const char *url,
         return FALSE;
     if (r->regex && !g_regex_match(r->regex, url, 0, NULL))
         return FALSE;
+    if (r->resource_types || r->excluded_resource_types) {
+        const char *t = ns_dnr_infer_type(url);
+        if (r->resource_types && !ns_dnr_type_in_list(r->resource_types, t))
+            return FALSE;
+        if (r->excluded_resource_types &&
+            ns_dnr_type_in_list(r->excluded_resource_types, t))
+            return FALSE;
+    }
     return TRUE;
 }
 

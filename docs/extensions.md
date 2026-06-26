@@ -33,15 +33,17 @@ locations are scanned at renderer start:
   `block` / `allow` / `allowAllRequests`, and conditions `urlFilter`
   (Adblock-Plus-style `||`, `|`, `^`, `*`), `regexFilter`,
   `isUrlFilterCaseSensitive`, `requestDomains` / `excludedRequestDomains`,
-  and `initiatorDomains` / `excludedInitiatorDomains`. The
-  highest-priority matching rule wins; `allow` beats `block` at equal
-  priority. Rules are evaluated in the renderer's network path, so no
-  per-request JavaScript runs. This is enough to drive simple ad/tracker
-  blocking from a hosts-style or filter-list ruleset.
-- **Content scripts**: `matches`, `js`, and `run_at`
+  `initiatorDomains` / `excludedInitiatorDomains`, and `resourceTypes` /
+  `excludedResourceTypes` (`script`, `stylesheet`, `image`, `font`,
+  `media`). The highest-priority matching rule wins; `allow` beats
+  `block` at equal priority. Rules are evaluated in the renderer's
+  network path, so no per-request JavaScript runs. This is enough to
+  drive ad/tracker blocking from a hosts-style or filter-list ruleset.
+- **Content scripts**: `matches`, `js`, `css`, and `run_at`
   (`document_start` runs before page scripts; `document_end` /
-  `document_idle` run after `load`). Match patterns support `<all_urls>`,
-  `*` schemes, `*`/`*.domain` hosts, and `*` path globs.
+  `document_idle` run after `load`). `css` files are injected as a
+  `<style>` element. Match patterns support `<all_urls>`, `*` schemes,
+  `*`/`*.domain` hosts, and `*` path globs.
 - **`browser` / `chrome` API** exposed per-extension to its content
   scripts:
   - `runtime`: `id`, `getManifest()`, `getURL()`, `getPlatformInfo()`,
@@ -65,13 +67,15 @@ scheme). Extensions are unsigned and fully trusted — only install code
 you trust.
 
 `declarativeNetRequest` is **static-rules only** (no dynamic/session
-rules JS API). Matching is URL-based: `resourceTypes` / `excludedResourceTypes`
-are not yet evaluated (a rule applies regardless of request type), and
-rules are only applied to **sub-resource** requests — top-level document
-navigations are never blocked. `redirect`, `modifyHeaders`, and
-`upgradeScheme` actions are ignored.
+rules JS API). `resourceTypes` / `excludedResourceTypes` are matched by
+inferring the type from the request URL's file extension, so a rule that
+restricts by type only matches when the type can be inferred (it fails
+open — does not block — for extension-less URLs). Rules are applied to
+**sub-resource** requests only; top-level document navigations are never
+blocked. `redirect`, `modifyHeaders`, and `upgradeScheme` actions are
+ignored.
 
-## Example
+## Example: content script
 
 ```
 ~/.local/share/nordstjernen/extensions/hello/
@@ -95,3 +99,69 @@ navigations are never blocked. `redirect`, `modifyHeaders`, and
 document.title = "[" + browser.runtime.getManifest().name + "] " + document.title;
 browser.storage.local.set({ seen: Date.now() });
 ```
+
+## Example: ad blocker
+
+A minimal content blocker using `declarativeNetRequest`. It blocks
+requests to a few ad/tracker hosts and any URL with an `/ads/` path
+segment, and hides leftover ad containers with an injected stylesheet.
+
+```
+~/.local/share/nordstjernen/extensions/adblock/
+├── manifest.json
+├── rules.json
+└── hide.css
+```
+
+`manifest.json`:
+
+```json
+{
+  "manifest_version": 3,
+  "name": "Tiny Adblock",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "adblock@example" } },
+  "permissions": ["declarativeNetRequest"],
+  "declarative_net_request": {
+    "rule_resources": [
+      { "id": "ruleset", "enabled": true, "path": "rules.json" }
+    ]
+  },
+  "content_scripts": [
+    { "matches": ["*://*/*"], "css": ["hide.css"], "run_at": "document_start" }
+  ]
+}
+```
+
+`rules.json` — higher-priority rules win, so the `allow` rule keeps the
+first-party CDN working even though it would match the generic `/ads/`
+block:
+
+```json
+[
+  { "id": 1, "priority": 1, "action": { "type": "block" },
+    "condition": { "urlFilter": "||doubleclick.net^" } },
+  { "id": 2, "priority": 1, "action": { "type": "block" },
+    "condition": { "urlFilter": "||googlesyndication.com^" } },
+  { "id": 3, "priority": 1, "action": { "type": "block" },
+    "condition": { "urlFilter": "||google-analytics.com^" } },
+  { "id": 4, "priority": 1, "action": { "type": "block" },
+    "condition": { "urlFilter": "/ads/",
+                   "resourceTypes": ["script", "image", "media"] } },
+  { "id": 5, "priority": 2, "action": { "type": "allow" },
+    "condition": { "urlFilter": "/ads/", "requestDomains": ["cdn.example.com"] } }
+]
+```
+
+`hide.css`:
+
+```css
+.ad, .ads, .advert, [id^="google_ads_"], ins.adsbygoogle { display: none !important; }
+```
+
+The network rules are evaluated for every sub-resource the page loads, so
+blocked hosts never leave the browser; the stylesheet removes ad slots
+that have no network request of their own. For real coverage, generate
+`rules.json` from a filter list (e.g. convert EasyList to the
+`declarativeNetRequest` rule format) — the format above is exactly what
+the converters emit.
