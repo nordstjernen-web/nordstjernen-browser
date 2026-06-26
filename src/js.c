@@ -21023,6 +21023,13 @@ ns_element_removeAttributeNode(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT || argc < 1 || !JS_IsObject(argv[0]))
         return argc >= 1 ? JS_DupValue(ctx, argv[0]) : JS_NULL;
+    JSValue owner_v = JS_GetPropertyStr(ctx, argv[0], "ownerElement");
+    gboolean owned_here = JS_IsObject(owner_v) &&
+        JS_VALUE_GET_PTR(owner_v) == JS_VALUE_GET_PTR(this_val);
+    JS_FreeValue(ctx, owner_v);
+    if (!owned_here)
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "the attribute is not owned by this element");
     JSValue name_v = JS_GetPropertyStr(ctx, argv[0], "name");
     JSValue ns_v = JS_GetPropertyStr(ctx, argv[0], "namespaceURI");
     JSValue local_v = JS_GetPropertyStr(ctx, argv[0], "localName");
@@ -21043,6 +21050,7 @@ ns_element_removeAttributeNode(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ns_v);
     JS_FreeValue(ctx, local_v);
     JS_FreeValue(ctx, name_v);
+    JS_SetPropertyStr(ctx, argv[0], "ownerElement", JS_NULL);
     return JS_DupValue(ctx, argv[0]);
 }
 
@@ -21053,6 +21061,14 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT || argc < 1 || !JS_IsObject(argv[0]))
         return JS_NULL;
+    JSValue cur_owner = JS_GetPropertyStr(ctx, argv[0], "ownerElement");
+    if (JS_IsObject(cur_owner) &&
+        JS_VALUE_GET_PTR(cur_owner) != JS_VALUE_GET_PTR(this_val)) {
+        JS_FreeValue(ctx, cur_owner);
+        return ns_throw_dom_exception(ctx, "InUseAttributeError", 10,
+            "the attribute is in use by another element");
+    }
+    JS_FreeValue(ctx, cur_owner);
     JSValue name_v = JS_GetPropertyStr(ctx, argv[0], "name");
     JSValue val_v  = JS_GetPropertyStr(ctx, argv[0], "value");
     JSValue ns_v = JS_GetPropertyStr(ctx, argv[0], "namespaceURI");
