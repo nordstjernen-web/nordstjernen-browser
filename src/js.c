@@ -24,6 +24,7 @@
 #include "css.h"
 #include "datetime.h"
 #include "debuglog.h"
+#include "ext.h"
 #include "html.h"
 #include "idb.h"
 #include "image.h"
@@ -33808,6 +33809,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     ns_wasm_install(ctx, global);
 
+    ns_ext_install(ctx, global);
+
     JSValue local_obj = JS_NewObjectClass(ctx, ns_storage_class_id);
     JS_SetOpaque(local_obj, js->local_storage);
     JS_SetPropertyStr(ctx, global, "localStorage", local_obj);
@@ -39126,6 +39129,12 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         char *r = ns_js_eval_source(js, js->early_inject_src, "early-inject");
         g_free(r);
     }
+    {
+        g_autofree char *cs =
+            ns_ext_content_scripts_for_url(base_url && *base_url ? base_url : NULL,
+                                           TRUE);
+        if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
+    }
     ns_js_schedule_static_iframes(js, doc);
     gint64 t_install = profile ? g_get_monotonic_time() : 0;
     ns_js_prefetch_external_scripts(js, doc,
@@ -39155,6 +39164,12 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     ns_js_dispatch_event(js, doc, "load", NULL);
     ns_js_fire_page_transition(js, "pageshow", FALSE);
     ns_ce_upgrade_subtree_all(js, doc);
+    {
+        g_autofree char *cs =
+            ns_ext_content_scripts_for_url(base_url && *base_url ? base_url : NULL,
+                                           FALSE);
+        if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
+    }
     gint64 t_load = profile ? g_get_monotonic_time() : 0;
     if (profile)
         g_printerr("[profile] js phases  install=%.1f prefetch=%.1f blocking=%.1f deferred=%.1f DCL=%.1f async=%.1f load=%.1f total=%.1fms\n",
