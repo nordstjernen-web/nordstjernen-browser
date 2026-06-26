@@ -215,6 +215,18 @@ struct ns_js {
     JSAtom        atom_propagation_stopped;
     int           listener_atoms_set;
     guint64       dom_gen;
+    JSValue       proto_node;
+    JSValue       proto_element;
+    JSValue       proto_htmlelement;
+    JSValue       proto_svgelement;
+    JSValue       proto_chardata;
+    JSValue       proto_text;
+    JSValue       proto_comment;
+    JSValue       proto_cdata;
+    JSValue       proto_pi;
+    JSValue       proto_doctype;
+    JSValue       proto_docfrag;
+    int           dom_protos_set;
     struct {
         const void *root;
         char        kind;

@@ -2477,6 +2477,31 @@ ns_node_arm_js_invalidate(ns_node *n)
     if (n && !n->js_invalidate) n->js_invalidate = ns_invalidate_wrapper;
 }
 
+static JSValue
+ns_node_kind_proto(ns_js *js, const ns_node *node)
+{
+    if (!js || !js->dom_protos_set || !node) return JS_UNDEFINED;
+    switch (node->kind) {
+    case NS_NODE_ELEMENT:
+        if (node->flags & NS_NODE_SVG_NS)
+            return JS_IsObject(js->proto_svgelement)
+                ? js->proto_svgelement : js->proto_element;
+        if (node->flags & NS_NODE_FOREIGN_NS)
+            return js->proto_element;
+        return js->proto_htmlelement;
+    case NS_NODE_TEXT:
+        return (node->flags & NS_NODE_CDATA) ? js->proto_cdata : js->proto_text;
+    case NS_NODE_COMMENT:
+        return (node->flags & NS_NODE_PI) ? js->proto_pi : js->proto_comment;
+    case NS_NODE_DOCTYPE:
+        return js->proto_doctype;
+    case NS_NODE_DOCUMENT:
+        return (node->flags & NS_NODE_FRAGMENT) ? js->proto_docfrag : JS_UNDEFINED;
+    default:
+        return JS_UNDEFINED;
+    }
+}
+
 JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
 {
@@ -2500,6 +2525,8 @@ ns_make_element(JSContext *ctx, const ns_node *cnode)
     JS_SetOpaque(obj, node);
     node->js_wrapper = JS_VALUE_GET_PTR(obj);
     node->js_invalidate = ns_invalidate_wrapper;
+    JSValue kind_proto = ns_node_kind_proto(js, node);
+    if (JS_IsObject(kind_proto)) JS_SetPrototype(ctx, obj, kind_proto);
     if (node->kind == NS_NODE_DOCTYPE) {
         const char *pub = "", *sys = "";
         for (const ns_attr *a = node->attrs; a; a = a->next) {
@@ -32803,6 +32830,121 @@ ns_performance_extend_event_target(JSContext *ctx, JSValueConst global,
     JS_FreeValue(ctx, et);
 }
 
+static JSValue
+ns_proto_of(JSContext *ctx, JSValueConst global, const char *ctor_name)
+{
+    JSValue ctor = JS_GetPropertyStr(ctx, global, ctor_name);
+    JSValue proto = JS_IsObject(ctor)
+        ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    return proto;
+}
+
+static void
+ns_chain_proto(JSContext *ctx, JSValueConst global, const char *child_ctor,
+               JSValueConst parent_proto)
+{
+    if (!JS_IsObject(parent_proto)) return;
+    JSValue proto = ns_proto_of(ctx, global, child_ctor);
+    if (JS_IsObject(proto)) JS_SetPrototype(ctx, proto, parent_proto);
+    JS_FreeValue(ctx, proto);
+}
+
+static void
+ns_set_ctor_proto(JSContext *ctx, JSValueConst global, const char *ctor_name,
+                  JSValueConst proto)
+{
+    JSValue ctor = JS_GetPropertyStr(ctx, global, ctor_name);
+    if (JS_IsObject(ctor) && JS_IsObject(proto)) {
+        JS_DefinePropertyValueStr(ctx, ctor, "prototype",
+            JS_DupValue(ctx, proto), JS_PROP_WRITABLE);
+        JS_DefinePropertyValueStr(ctx, (JSValue)proto, "constructor",
+            JS_DupValue(ctx, ctor), JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    }
+    JS_FreeValue(ctx, ctor);
+}
+
+static void
+ns_proto_delete_names(JSContext *ctx, JSValueConst proto,
+                      const char *const *names, gsize n)
+{
+    if (!JS_IsObject(proto)) return;
+    for (gsize i = 0; i < n; i++) {
+        JSAtom a = JS_NewAtom(ctx, names[i]);
+        JS_DeleteProperty(ctx, proto, a, 0);
+        JS_FreeAtom(ctx, a);
+    }
+}
+
+static const char *const ns_element_only_methods[] = {
+    "matches", "closest", "webkitMatchesSelector",
+};
+
+static void
+ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
+{
+    JSValue node_proto = ns_proto_of(ctx, global, "Node");
+    if (!JS_IsObject(node_proto)) { JS_FreeValue(ctx, node_proto); return; }
+
+    JSValue elem_proto = JS_NewObject(ctx);
+    JS_SetPrototype(ctx, elem_proto, node_proto);
+    ns_bind_fn(ctx, elem_proto, "matches",               ns_element_matches, 1);
+    ns_bind_fn(ctx, elem_proto, "webkitMatchesSelector", ns_element_matches, 1);
+    ns_bind_fn(ctx, elem_proto, "closest",               ns_element_closest, 1);
+
+    ns_proto_delete_names(ctx, node_proto, ns_element_only_methods,
+                          G_N_ELEMENTS(ns_element_only_methods));
+    static const char *const doc_like[] = {
+        "Document", "HTMLDocument", "XMLDocument", "DocumentFragment",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(doc_like); i++) {
+        JSValue p = ns_proto_of(ctx, global, doc_like[i]);
+        ns_proto_delete_names(ctx, p, ns_element_only_methods,
+                              G_N_ELEMENTS(ns_element_only_methods));
+        JS_FreeValue(ctx, p);
+    }
+
+    ns_set_ctor_proto(ctx, global, "Node", node_proto);
+    ns_set_ctor_proto(ctx, global, "Element", elem_proto);
+
+    JSValue htmlelem_proto = JS_NewObject(ctx);
+    JS_SetPrototype(ctx, htmlelem_proto, elem_proto);
+    ns_set_ctor_proto(ctx, global, "HTMLElement", htmlelem_proto);
+    ns_chain_proto(ctx, global, "SVGElement", elem_proto);
+    ns_chain_proto(ctx, global, "SVGSVGElement", elem_proto);
+    JSValue svg_proto = ns_proto_of(ctx, global, "SVGElement");
+
+    JSValue chardata_proto = ns_proto_of(ctx, global, "CharacterData");
+    if (JS_IsObject(chardata_proto)) {
+        JS_SetPrototype(ctx, chardata_proto, node_proto);
+        ns_chain_proto(ctx, global, "Text", chardata_proto);
+        ns_chain_proto(ctx, global, "Comment", chardata_proto);
+        ns_chain_proto(ctx, global, "ProcessingInstruction", chardata_proto);
+    }
+    JSValue text_proto    = ns_proto_of(ctx, global, "Text");
+    JSValue comment_proto = ns_proto_of(ctx, global, "Comment");
+    JSValue pi_proto      = ns_proto_of(ctx, global, "ProcessingInstruction");
+    JSValue cdata_proto   = ns_proto_of(ctx, global, "CDATASection");
+    JSValue doctype_proto = ns_proto_of(ctx, global, "DocumentType");
+    JSValue docfrag_proto = ns_proto_of(ctx, global, "DocumentFragment");
+    if (JS_IsObject(text_proto)) ns_chain_proto(ctx, global, "CDATASection", text_proto);
+    if (JS_IsObject(doctype_proto)) JS_SetPrototype(ctx, doctype_proto, node_proto);
+    if (JS_IsObject(docfrag_proto)) JS_SetPrototype(ctx, docfrag_proto, node_proto);
+
+    js->proto_node        = node_proto;
+    js->proto_element     = elem_proto;
+    js->proto_htmlelement = htmlelem_proto;
+    js->proto_svgelement  = svg_proto;
+    js->proto_chardata    = chardata_proto;
+    js->proto_text        = text_proto;
+    js->proto_comment     = comment_proto;
+    js->proto_pi          = pi_proto;
+    js->proto_cdata       = cdata_proto;
+    js->proto_doctype     = doctype_proto;
+    js->proto_docfrag     = docfrag_proto;
+    js->dom_protos_set    = 1;
+}
+
 ns_js *
 ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
           ns_js_mutated_cb mut_cb, gpointer mut_user_data,
@@ -36472,6 +36614,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         JS_FreeValue(ctx, xml_ctor);
         JS_FreeValue(ctx, xml_proto);
     }
+    ns_install_dom_hierarchy(js, ctx, global);
     ns_bind_ctor(ctx, global, "FontFace", ns_window_fontface_ctor, 3);
     {
         JSValue ctor = JS_GetPropertyStr(ctx, global, "CSSStyleDeclaration");
@@ -36745,6 +36888,20 @@ ns_js_free(ns_js *js)
         js->iframe_globals = NULL;
     }
     JS_FreeValue(js->ctx, js->pristine_promise);
+    if (js->dom_protos_set) {
+        JS_FreeValue(js->ctx, js->proto_node);
+        JS_FreeValue(js->ctx, js->proto_element);
+        JS_FreeValue(js->ctx, js->proto_htmlelement);
+        JS_FreeValue(js->ctx, js->proto_svgelement);
+        JS_FreeValue(js->ctx, js->proto_chardata);
+        JS_FreeValue(js->ctx, js->proto_text);
+        JS_FreeValue(js->ctx, js->proto_comment);
+        JS_FreeValue(js->ctx, js->proto_cdata);
+        JS_FreeValue(js->ctx, js->proto_pi);
+        JS_FreeValue(js->ctx, js->proto_doctype);
+        JS_FreeValue(js->ctx, js->proto_docfrag);
+        js->dom_protos_set = 0;
+    }
     if (js->mutation_observers) {
         for (guint i = 0; i < js->mutation_observers->len; i++) {
             ns_mut_observer *o = g_ptr_array_index(js->mutation_observers, i);
