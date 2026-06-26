@@ -90,22 +90,60 @@ ns_engine_post_blocking(const char *url, const char *top_url,
 }
 
 static gboolean
+content_type_is_css(const char *ct)
+{
+    if (!ct || !*ct) return TRUE; /* missing type: be lenient */
+    while (*ct == ' ' || *ct == '\t') ct++;
+    return g_ascii_strncasecmp(ct, "text/css", 8) == 0 &&
+           (ct[8] == '\0' || ct[8] == ';' || ct[8] == ' ' || ct[8] == '\t');
+}
+
+static GBytes *
+fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
+                gboolean strict_mime)
+{
+    if (!url || !*url) return NULL;
+    if (cache) {
+        GBytes *hit = g_hash_table_lookup(cache, url);
+        if (hit) return g_bytes_get_size(hit) ? g_bytes_ref(hit) : NULL;
+    }
+    ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
+    GBytes *bytes = NULL;
+    gboolean mime_ok = !strict_mime || !resp ||
+                       content_type_is_css(resp->content_type);
+    if (resp && !resp->error && resp->status < 400 && mime_ok &&
+        resp->body && resp->body->len > 0) {
+        bytes = g_bytes_new(resp->body->data, resp->body->len);
+        if (cache)
+            g_hash_table_insert(cache, g_strdup(url), g_bytes_ref(bytes));
+    } else if (cache) {
+        g_hash_table_insert(cache, g_strdup(url), g_bytes_new(NULL, 0));
+    }
+    if (resp) ns_response_free(resp);
+    return bytes;
+}
+
+static gboolean
 rel_has_token(const char *rel, const char *token)
 {
-    if (!rel || !token) return FALSE;
-    size_t tlen = strlen(token);
-    for (const char *p = rel; *p;) {
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f')
-            p++;
-        const char *start = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' &&
-               *p != '\f')
-            p++;
-        if ((size_t)(p - start) == tlen &&
-            g_ascii_strncasecmp(start, token, tlen) == 0)
-            return TRUE;
+    if (!rel || !token || !*token) return FALSE;
+    gchar **parts = g_strsplit_set(rel, " \t\r\n\f", -1);
+    gboolean found = FALSE;
+    for (gchar **p = parts; *p; p++) {
+        if (**p && g_ascii_strcasecmp(*p, token) == 0) {
+            found = TRUE;
+            break;
+        }
     }
-    return FALSE;
+    g_strfreev(parts);
+    return found;
+}
+
+static gboolean
+rel_is_stylesheet(const char *rel)
+{
+    return rel_has_token(rel, "stylesheet") &&
+           !rel_has_token(rel, "alternate");
 }
 
 static void
@@ -163,63 +201,6 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
         ns_net_fetch_async(g_ptr_array_index(urls, i), base_url, NULL,
                            on_preload_fetched, NULL);
     g_ptr_array_free(urls, TRUE);
-}
-
-static gboolean
-content_type_is_css(const char *ct)
-{
-    if (!ct || !*ct) return TRUE; /* missing type: be lenient */
-    while (*ct == ' ' || *ct == '\t') ct++;
-    return g_ascii_strncasecmp(ct, "text/css", 8) == 0 &&
-           (ct[8] == '\0' || ct[8] == ';' || ct[8] == ' ' || ct[8] == '\t');
-}
-
-static GBytes *
-fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
-                gboolean strict_mime)
-{
-    if (!url || !*url) return NULL;
-    if (cache) {
-        GBytes *hit = g_hash_table_lookup(cache, url);
-        if (hit) return g_bytes_get_size(hit) ? g_bytes_ref(hit) : NULL;
-    }
-    ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
-    GBytes *bytes = NULL;
-    gboolean mime_ok = !strict_mime || !resp ||
-                       content_type_is_css(resp->content_type);
-    if (resp && !resp->error && resp->status < 400 && mime_ok &&
-        resp->body && resp->body->len > 0) {
-        bytes = g_bytes_new(resp->body->data, resp->body->len);
-        if (cache)
-            g_hash_table_insert(cache, g_strdup(url), g_bytes_ref(bytes));
-    } else if (cache) {
-        g_hash_table_insert(cache, g_strdup(url), g_bytes_new(NULL, 0));
-    }
-    if (resp) ns_response_free(resp);
-    return bytes;
-}
-
-static gboolean
-rel_has_token(const char *rel, const char *token)
-{
-    if (!rel || !token || !*token) return FALSE;
-    gchar **parts = g_strsplit_set(rel, " \t\r\n\f", -1);
-    gboolean found = FALSE;
-    for (gchar **p = parts; *p; p++) {
-        if (**p && g_ascii_strcasecmp(*p, token) == 0) {
-            found = TRUE;
-            break;
-        }
-    }
-    g_strfreev(parts);
-    return found;
-}
-
-static gboolean
-rel_is_stylesheet(const char *rel)
-{
-    return rel_has_token(rel, "stylesheet") &&
-           !rel_has_token(rel, "alternate");
 }
 
 static void
