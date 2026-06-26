@@ -6,6 +6,7 @@
 #include "rproc_http.h"
 #include "rproc_inproc.h"
 #include "bookmarks.h"
+#include "cache.h"
 #include "config.h"
 #include "history.h"
 #include "net.h"
@@ -1764,12 +1765,15 @@ on_settings_close(GtkButton *button, gpointer user_data)
 }
 
 static void
-on_settings_clear_history(GtkButton *button, gpointer user_data)
+on_settings_clear_data(GtkButton *button, gpointer user_data)
 {
     (void)user_data;
     ns_history_clear();
+    ns_cache_clear();
+    ns_net_cookies_clear();
+    ns_net_site_storage_clear();
     gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
-    gtk_button_set_label(button, ns_i18n("History cleared"));
+    gtk_button_set_label(button, ns_i18n("Browsing data cleared"));
 }
 
 static GtkWidget *
@@ -1878,17 +1882,20 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_box_append(GTK_BOX(box), note);
 
     GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *clear_hist = gtk_button_new_with_label(ns_i18n("Clear history"));
-    gtk_widget_set_halign(clear_hist, GTK_ALIGN_START);
-    gtk_widget_set_hexpand(clear_hist, TRUE);
+    GtkWidget *clear_data =
+        gtk_button_new_with_label(ns_i18n("Clear all browsing data"));
+    gtk_widget_set_tooltip_text(clear_data,
+        ns_i18n("Delete history, cookies, cache, and site storage."));
+    gtk_widget_set_halign(clear_data, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(clear_data, TRUE);
     GtkWidget *cancel = gtk_button_new_with_label(ns_i18n("Cancel"));
     GtkWidget *save = gtk_button_new_with_label(ns_i18n("Save"));
     gtk_widget_add_css_class(save, "suggested-action");
-    g_signal_connect(clear_hist, "clicked",
-                     G_CALLBACK(on_settings_clear_history), s);
+    g_signal_connect(clear_data, "clicked",
+                     G_CALLBACK(on_settings_clear_data), s);
     g_signal_connect(cancel, "clicked", G_CALLBACK(on_settings_close), s);
     g_signal_connect(save, "clicked", G_CALLBACK(on_settings_save), s);
-    gtk_box_append(GTK_BOX(buttons), clear_hist);
+    gtk_box_append(GTK_BOX(buttons), clear_data);
     gtk_box_append(GTK_BOX(buttons), cancel);
     gtk_box_append(GTK_BOX(buttons), save);
     gtk_box_append(GTK_BOX(box), buttons);

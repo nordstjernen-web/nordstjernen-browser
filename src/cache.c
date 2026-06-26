@@ -244,6 +244,40 @@ ns_cache_shutdown(void)
     g_clear_pointer(&g_cache_dir, g_free);
 }
 
+static void
+cache_rmrf(const char *path)
+{
+    GDir *dir = g_dir_open(path, 0, NULL);
+    if (dir) {
+        const char *name;
+        while ((name = g_dir_read_name(dir))) {
+            char *child = g_build_filename(path, name, NULL);
+            if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
+                !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+                cache_rmrf(child);
+            else
+                g_unlink(child);
+            g_free(child);
+        }
+        g_dir_close(dir);
+    }
+    g_rmdir(path);
+}
+
+void
+ns_cache_clear(void)
+{
+    G_GNUC_UNUSED g_autoptr(GMutexLocker) locker =
+        g_mutex_locker_new(&g_cache_mutex);
+    if (g_cache_db)
+        cache_exec("DELETE FROM entries");
+    if (g_cache_dir) {
+        char *bodies = g_build_filename(g_cache_dir, "bodies", NULL);
+        cache_rmrf(bodies);
+        g_free(bodies);
+    }
+}
+
 static gboolean
 ns_cache_enabled(void)
 {

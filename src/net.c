@@ -1106,6 +1106,44 @@ ns_net_cookie_dir(void)
     return g_cookie_dir;
 }
 
+static void
+ns_net_empty_dir(const char *dir)
+{
+    if (!dir) return;
+    GDir *d = g_dir_open(dir, 0, NULL);
+    if (!d) return;
+    const char *name;
+    while ((name = g_dir_read_name(d))) {
+        char *child = g_build_filename(dir, name, NULL);
+        if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
+            !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+            ns_rmrf(child);
+        else
+            g_unlink(child);
+        g_free(child);
+    }
+    g_dir_close(d);
+}
+
+void
+ns_net_cookies_clear(void)
+{
+    ns_net_empty_dir(ns_net_cookie_dir());
+}
+
+void
+ns_net_site_storage_clear(void)
+{
+    char *base = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME, NULL);
+    char *localstorage = g_build_filename(base, "localstorage", NULL);
+    char *indexeddb    = g_build_filename(base, "indexeddb", NULL);
+    ns_rmrf(localstorage);
+    ns_rmrf(indexeddb);
+    g_free(localstorage);
+    g_free(indexeddb);
+    g_free(base);
+}
+
 static char *
 ns_net_cookie_path_for_partition(const char *top_origin)
 {

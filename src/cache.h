@@ -24,6 +24,7 @@ typedef struct ns_cache_entry {
 
 void   ns_cache_init(void);
 void   ns_cache_shutdown(void);
+void   ns_cache_clear(void);
 
 ns_cache_entry *ns_cache_get(const char *url, const char *partition);
 gboolean        ns_cache_is_fresh(const ns_cache_entry *e);
