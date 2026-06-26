@@ -1128,6 +1128,7 @@ parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
     if (!p) return FALSE;
     p++;
     double values[4] = { 0, 0, 0, 1 };
+    gboolean alpha_pct = FALSE;
     int count = 0;
     while (*p && *p != ')' && count < 4) {
         while (*p == ' ' || *p == ',' || *p == '/') p++;
@@ -1149,6 +1150,7 @@ parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
             if (*end != '%') return FALSE;   /* saturation/lightness need % */
             end++;
         } else if (*end == '%') {
+            alpha_pct = TRUE;
             end++;
         }
         values[count++] = v;
@@ -1178,7 +1180,7 @@ parse_hsl_func(const char *s, guint8 *r, guint8 *g, guint8 *b, guint8 *a)
     *b = (guint8)CLAMP((int)(bb * 255 + 0.5), 0, 255);
     if (count >= 4) {
         double alpha = values[3];
-        if (alpha > 1) alpha /= 100.0;
+        if (alpha_pct) alpha /= 100.0;
         *a = (guint8)CLAMP((int)(alpha * 255 + 0.5), 0, 255);
     } else {
         *a = 255;
@@ -1927,6 +1929,18 @@ css_find_nth_of(const char *s, const char *end)
 }
 
 static gboolean
+anb_int_strict(const char *str, int *out)
+{
+    const char *p = str;
+    if (*p == '+' || *p == '-') p++;
+    if (!g_ascii_isdigit(*p)) return FALSE;
+    for (const char *q = p; *q; q++)
+        if (!g_ascii_isdigit(*q)) return FALSE;
+    *out = ns_parse_int(str, 0, -1000000, 1000000);
+    return TRUE;
+}
+
+static gboolean
 parse_anb(const char *arg, gsize alen, int *out_a, int *out_b)
 {
     char *raw = g_strndup(arg, alen);
@@ -1937,6 +1951,7 @@ parse_anb(const char *arg, gsize alen, int *out_a, int *out_b)
         if (!is_ws(*r)) *w++ = *r;
     *w = '\0';
     int a = 0, b = 0;
+    gboolean ok = TRUE;
     if (g_ascii_strcasecmp(s, "odd") == 0) {
         a = 2;
         b = 1;
@@ -1948,21 +1963,23 @@ parse_anb(const char *arg, gsize alen, int *out_a, int *out_b)
         if (!n_pos) n_pos = strchr(s, 'N');
         if (n_pos) {
             *n_pos = '\0';
-            char *a_str = s;
-            while (*a_str == ' ') a_str++;
+            const char *a_str = s;
             if (!*a_str || strcmp(a_str, "+") == 0) a = 1;
             else if (strcmp(a_str, "-") == 0) a = -1;
-            else a = ns_parse_int(a_str, 0, -1000000, 1000000);
-            char *b_str = n_pos + 1;
-            while (*b_str == ' ') b_str++;
-            if (*b_str) b = ns_parse_int(b_str, 0, -1000000, 1000000);
+            else ok = anb_int_strict(a_str, &a);
+            const char *b_str = n_pos + 1;
+            if (*b_str) {
+                if (*b_str != '+' && *b_str != '-') ok = FALSE;
+                else ok = ok && anb_int_strict(b_str, &b);
+            }
         } else {
             a = 0;
-            b = ns_parse_int(s, 0, -1000000, 1000000);
+            ok = anb_int_strict(s, &b);
         }
     }
     g_free(s);
     g_free(raw);
+    if (!ok) return FALSE;
     *out_a = a;
     *out_b = b;
     return TRUE;
@@ -7407,7 +7424,7 @@ parse_declaration_block(const char **pp, const char *end,
                 continue;
             }
             char *tokens[16] = {0};
-            int n = split_ws(vtext, tokens);
+            int n = split_ws_limit(vtext, tokens, (int)G_N_ELEMENTS(tokens));
             char *family_buf = NULL;
             int size_idx = -1;
             for (int i = 0; i < n; i++) {
