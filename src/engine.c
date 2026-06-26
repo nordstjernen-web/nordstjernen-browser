@@ -109,7 +109,9 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
     }
     ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
     GBytes *bytes = NULL;
-    gboolean mime_ok = !strict_mime || !resp ||
+    gboolean enforce_mime = strict_mime ||
+        (resp && ns_net_header_is_nosniff(resp->x_content_type_options));
+    gboolean mime_ok = !enforce_mime || !resp ||
                        content_type_is_css(resp->content_type);
     if (resp && !resp->error && resp->status < 400 && mime_ok &&
         resp->body && resp->body->len > 0) {

@@ -1011,6 +1011,21 @@ ns_net_https_first_upgrade(const char *url)
     return g_strconcat("https://", url + 7, NULL);
 }
 
+gboolean
+ns_net_header_is_nosniff(const char *value)
+{
+    if (!value || !*value) return FALSE;
+    for (const char *p = value; *p;) {
+        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+        const char *start = p;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t') p++;
+        if ((size_t)(p - start) == 7 &&
+            g_ascii_strncasecmp(start, "nosniff", 7) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 static const char *
 ns_net_cookie_dir(void)
 {
@@ -1743,6 +1758,7 @@ ns_response_free(ns_response *resp)
     g_free(resp->content_disposition);
     g_free(resp->csp_header);
     g_free(resp->xframe_options);
+    g_free(resp->x_content_type_options);
     g_free(resp->cors_allow_origin);
     g_free(resp->refresh);
     g_free(resp->content_language);
@@ -1982,6 +1998,7 @@ typedef struct ns_header_ctx {
     char **content_disposition_out;
     char **csp_out;
     char **xframe_options_out;
+    char **x_content_type_options_out;
     char **cors_allow_origin_out;
     char **refresh_out;
     char **content_language_out;
@@ -2075,6 +2092,8 @@ ns_header_cb(char *buffer, size_t size, size_t nitems, void *userdata)
     else if (header_append(buffer, bytes, "Content-Security-Policy:",
                             hc->csp_out))                                                     {}
     else if (header_capture(buffer, bytes, "X-Frame-Options:", hc->xframe_options_out))       {}
+    else if (header_capture(buffer, bytes, "X-Content-Type-Options:",
+                            hc->x_content_type_options_out))                                  {}
     else if (header_capture(buffer, bytes, "Access-Control-Allow-Origin:",
                             hc->cors_allow_origin_out))                                       {}
     else if (header_capture(buffer, bytes, "Content-Disposition:",
@@ -4356,6 +4375,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     header_ctx.content_disposition_out = &resp->content_disposition;
     header_ctx.csp_out          = &resp->csp_header;
     header_ctx.xframe_options_out = &resp->xframe_options;
+    header_ctx.x_content_type_options_out = &resp->x_content_type_options;
     header_ctx.cors_allow_origin_out = &resp->cors_allow_origin;
     header_ctx.refresh_out = &resp->refresh;
     header_ctx.content_language_out = &resp->content_language;

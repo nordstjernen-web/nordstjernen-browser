@@ -37430,6 +37430,27 @@ ns_script_type_supported(const ns_node *n)
 }
 
 static gboolean
+content_type_is_javascript(const char *ct)
+{
+    if (!ct || !*ct) return FALSE;
+    while (*ct == ' ' || *ct == '\t') ct++;
+    const char *end = ct;
+    while (*end && *end != ';' && *end != ' ' && *end != '\t') end++;
+    size_t len = (size_t)(end - ct);
+    static const char *const ok[] = {
+        "text/javascript", "application/javascript",
+        "application/ecmascript", "text/ecmascript",
+        "application/x-javascript", "text/x-javascript",
+        "application/x-ecmascript", "text/x-ecmascript",
+        "text/jscript", "text/livescript",
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(ok); i++)
+        if (len == strlen(ok[i]) && g_ascii_strncasecmp(ct, ok[i], len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 ns_script_skipped_by_nomodule(const ns_node *n)
 {
     return !ns_script_type_is_module(n) &&
@@ -37568,6 +37589,22 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         };
         ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
                                                  script_headers, &err);
+        if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
+            !content_type_is_javascript(resp->content_type)) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf(
+                    "nosniff blocked: script %s (Content-Type %s)", abs_url,
+                    resp->content_type && *resp->content_type ?
+                        resp->content_type : "(none)");
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            ns_response_free(resp);
+            g_clear_error(&err);
+            g_free(abs_url);
+            ns_js_dispatch_resource_event(js, n, "error");
+            return;
+        }
         if (resp && resp->status == 200 && resp->body &&
             resp->body->len <= NS_MAX_SCRIPT_BYTES) {
             if (!ns_security_sri_check(integrity,
@@ -38540,8 +38577,11 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             if (abs_url) {
                 GError *err = NULL;
                 ns_response *r = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
-                if (r && r->body && r->body->len > 0 && !r->error &&
-                    (r->status == 200 || r->status == 0)) {
+                gboolean nosniff_blocked = r &&
+                    ns_net_header_is_nosniff(r->x_content_type_options) &&
+                    !content_type_is_javascript(r->content_type);
+                if (!nosniff_blocked && r && r->body && r->body->len > 0 &&
+                    !r->error && (r->status == 200 || r->status == 0)) {
                     if (r->body->len <= expose_scan_cap &&
                         !ns_js_iframe_source_is_webpack_chunk((const char *)r->body->data,
                             r->body->len))

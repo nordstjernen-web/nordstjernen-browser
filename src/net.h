@@ -27,6 +27,7 @@ typedef struct ns_response {
     char *content_disposition;
     char *csp_header;
     char *xframe_options;
+    char *x_content_type_options;
     char *cors_allow_origin;
     char *refresh;
     char *content_language;
@@ -97,6 +98,7 @@ ns_response *ns_net_request_blocking(const char        *url,
 char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 char    *ns_net_https_first_upgrade(const char *url);
+gboolean ns_net_header_is_nosniff(const char *value);
 
 void  ns_net_log_clear(void);
 char *ns_net_log_dump(void);
