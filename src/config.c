@@ -140,6 +140,7 @@ static const cfg_field cfg_fields[] = {
     FS(http_proxy,            ""),
     FS(https_proxy,           ""),
     FS(no_proxy,              ""),
+    FS(doh_url,               ""),
     FS(gsk_renderer,          "auto"),
     FE(referer_policy,        CFG_REFERER,      NS_REFERER_STRICT_ORIGIN_WHEN_CROSS),
     FE(cookie_policy,         CFG_COOKIE,       NS_COOKIE_FIRST_PARTY),
@@ -254,6 +255,7 @@ static const struct { const char *env; const char *key; } env_value[] = {
     { "NS_HTTP_PROXY",  "http_proxy"  },
     { "NS_HTTPS_PROXY", "https_proxy" },
     { "NS_NO_PROXY",    "no_proxy"    },
+    { "NS_DOH_URL",     "doh_url"     },
     { "NS_GSK_RENDERER","gsk_renderer"},
 };
 
@@ -293,6 +295,7 @@ ns_config_shutdown(void)
     g_free(g_cfg.http_proxy);
     g_free(g_cfg.https_proxy);
     g_free(g_cfg.no_proxy);
+    g_free(g_cfg.doh_url);
     g_free(g_cfg.gsk_renderer);
     memset(&g_cfg, 0, sizeof(g_cfg));
     g_clear_pointer(&g_cfg_path, g_free);
@@ -463,6 +466,8 @@ ns_config_dump(void)
         g_free(hp);
         g_free(hsp);
     }
+    g_string_append_printf(s, "doh_url               = %s\n",
+                           c->doh_url && *c->doh_url ? c->doh_url : "(system resolver)");
     g_string_append_printf(s, "referer_policy        = %s\n", referer_policy_name(c->referer_policy));
     g_string_append_printf(s, "cookie_policy         = %s\n", cookie_policy_name(c->cookie_policy));
     g_string_append_printf(s, "color_scheme          = %s\n", color_scheme_name(c->color_scheme));
