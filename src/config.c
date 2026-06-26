@@ -150,6 +150,7 @@ static const cfg_field cfg_fields[] = {
     FB(https_first,           TRUE),
     FB(harden_allocator,      TRUE),
     FB(speculative_preload,   TRUE),
+    FB(async_image_decode,    FALSE),
     FB(images_enabled,        TRUE),
     FB(webgl_enabled,         FALSE),
     FB(local_storage_enabled, TRUE),
@@ -246,6 +247,7 @@ static const struct { const char *env; const char *key; } env_disable[] = {
 };
 
 static const struct { const char *env; const char *key; } env_value[] = {
+    { "NS_ASYNC_IMG_DECODE", "async_image_decode" },
     { "NS_HOME_URL",    "home_url"    },
     { "NS_USER_AGENT",  "user_agent"  },
     { "NS_HTTP_PROXY",  "http_proxy"  },
@@ -468,6 +470,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "https_first           = %s\n", c->https_first ? "true" : "false");
     g_string_append_printf(s, "harden_allocator      = %s\n", c->harden_allocator ? "true" : "false");
     g_string_append_printf(s, "speculative_preload   = %s\n", c->speculative_preload ? "true" : "false");
+    g_string_append_printf(s, "async_image_decode    = %s\n", c->async_image_decode ? "true" : "false");
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
     g_string_append_printf(s, "webgl_enabled         = %s\n", c->webgl_enabled ? "true" : "false");
     g_string_append_printf(s, "local_storage_enabled = %s\n", c->local_storage_enabled ? "true" : "false");

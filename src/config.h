@@ -54,6 +54,7 @@ typedef struct ns_config {
     gboolean https_first;
     gboolean harden_allocator;
     gboolean speculative_preload;
+    gboolean async_image_decode;
     gboolean images_enabled;
     gboolean webgl_enabled;
     gboolean local_storage_enabled;

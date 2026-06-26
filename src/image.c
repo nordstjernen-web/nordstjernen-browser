@@ -666,6 +666,131 @@ ns_image_anim_frames_from_pixels(GArray *pixel_frames,
     return frames;
 }
 
+typedef struct {
+    ns_texture *tex;
+    GArray     *frames;
+    int         w;
+    int         h;
+} ns_img_decoded;
+
+static ns_img_decoded
+ns_image_decode_body(const guchar *data, gsize len)
+{
+    ns_img_decoded d = { NULL, NULL, 0, 0 };
+    int w = 0, h = 0;
+    GArray *frames = NULL;
+    if (len >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F')
+        frames = ns_image_decode_wuffs_anim(data, len, &w, &h);
+    if (frames && frames->len > 1) {
+        d.frames = frames;
+        d.w = w;
+        d.h = h;
+        return d;
+    }
+    if (frames) {
+        g_array_set_clear_func(frames, ns_image_anim_frame_clear);
+        g_array_free(frames, TRUE);
+    }
+    d.tex = ns_image_decode_bytes(data, len, &w, &h);
+    d.w = w;
+    d.h = h;
+    return d;
+}
+
+static void
+ns_image_apply_decoded_state(ns_image *img, ns_img_decoded *d,
+                             const char *content_type, gsize body_len)
+{
+    if (d->frames) {
+        g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
+        img->anim_frames = d->frames;
+        ns_image_anim_frame *f0 =
+            &g_array_index(d->frames, ns_image_anim_frame, 0);
+        img->texture = f0->texture;
+        img->natural_width  = d->w;
+        img->natural_height = d->h;
+        int total = 0;
+        for (guint i = 0; i < d->frames->len; i++)
+            total += g_array_index(d->frames, ns_image_anim_frame, i).delay_ms;
+        img->anim_total_ms = total > 0 ? total : 1;
+        img->anim_start_us = g_get_monotonic_time();
+        img->loaded = TRUE;
+    } else if (d->tex) {
+        img->texture = d->tex;
+        img->natural_width  = d->w;
+        img->natural_height = d->h;
+        img->loaded = TRUE;
+    } else {
+        img->failed = TRUE;
+        img->failed_at_us = g_get_monotonic_time();
+        img->error = g_strdup_printf("could not decode image (%s, %u bytes)",
+            content_type && *content_type ? content_type : "unknown type",
+            (unsigned)body_len);
+    }
+}
+
+typedef struct {
+    ns_pending *pending;
+    GBytes     *body;
+    char       *content_type;
+    gsize       body_len;
+} ns_decode_job;
+
+static void
+ns_decode_job_free(ns_decode_job *job)
+{
+    if (!job) return;
+    if (job->body) g_bytes_unref(job->body);
+    g_free(job->content_type);
+    g_free(job);
+}
+
+static void
+image_decode_worker(GTask *task, gpointer source, gpointer task_data,
+                    GCancellable *cancellable)
+{
+    (void)source;
+    (void)cancellable;
+    ns_decode_job *job = task_data;
+    gsize len = 0;
+    const guchar *data = g_bytes_get_data(job->body, &len);
+    ns_img_decoded *d = g_new(ns_img_decoded, 1);
+    *d = ns_image_decode_body(data, len);
+    g_task_return_pointer(task, d, g_free);
+}
+
+static void
+on_image_decoded(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)src;
+    ns_decode_job *job = user_data;
+    ns_img_decoded *d = g_task_propagate_pointer(G_TASK(res), NULL);
+    ns_pending *pending = job->pending;
+    if (pending->dead) {
+        if (d) {
+            if (d->frames) {
+                g_array_set_clear_func(d->frames, ns_image_anim_frame_clear);
+                g_array_free(d->frames, TRUE);
+            }
+            if (d->tex) ns_texture_unref(d->tex);
+            g_free(d);
+        }
+        g_free(pending);
+        ns_decode_job_free(job);
+        return;
+    }
+    ns_img_decoded result = { NULL, NULL, 0, 0 };
+    if (d) {
+        result = *d;
+        g_free(d);
+    }
+    ns_image_apply_decoded_state(pending->img, &result,
+                                 job->content_type, job->body_len);
+    ns_image_cache_account(pending->cache, pending->img);
+    ns_image_fire_pending(pending);
+    ns_decode_job_free(job);
+}
+
 static void
 on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -703,54 +828,24 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
         pending->img->failed = TRUE;
         pending->img->failed_at_us = g_get_monotonic_time();
         pending->img->error = g_strdup("empty response");
+    } else if (ns_config_get()->async_image_decode) {
+        ns_decode_job *job = g_new0(ns_decode_job, 1);
+        job->pending = pending;
+        job->body = g_bytes_new(resp->body->data, resp->body->len);
+        job->content_type =
+            g_strdup(resp->content_type ? resp->content_type : "");
+        job->body_len = resp->body->len;
+        ns_response_free(resp);
+        GTask *task = g_task_new(NULL, NULL, on_image_decoded, job);
+        g_task_set_task_data(task, job, NULL);
+        g_task_run_in_thread(task, image_decode_worker);
+        g_object_unref(task);
+        return;
     } else {
-        int w = 0, h = 0;
-        GArray *frames = NULL;
-        if (resp->body->len >= 6 &&
-            resp->body->data[0] == 'G' && resp->body->data[1] == 'I' &&
-            resp->body->data[2] == 'F') {
-            frames = ns_image_decode_wuffs_anim(resp->body->data,
-                                                resp->body->len, &w, &h);
-        }
-        if (frames && frames->len > 1) {
-            g_array_set_clear_func(frames, ns_image_anim_frame_clear);
-            pending->img->anim_frames = frames;
-            ns_image_anim_frame *f0 = &g_array_index(frames,
-                                                    ns_image_anim_frame, 0);
-            pending->img->texture = f0->texture;
-            pending->img->natural_width  = w;
-            pending->img->natural_height = h;
-            int total = 0;
-            for (guint i = 0; i < frames->len; i++) {
-                ns_image_anim_frame *f =
-                    &g_array_index(frames, ns_image_anim_frame, i);
-                total += f->delay_ms;
-            }
-            pending->img->anim_total_ms = total > 0 ? total : 1;
-            pending->img->anim_start_us = g_get_monotonic_time();
-            pending->img->loaded = TRUE;
-        } else {
-            if (frames) {
-                g_array_set_clear_func(frames, ns_image_anim_frame_clear);
-                g_array_free(frames, TRUE);
-            }
-            ns_texture *tex = ns_image_decode_bytes(resp->body->data,
-                                                   resp->body->len, &w, &h);
-            if (tex) {
-                pending->img->texture = tex;
-                pending->img->natural_width  = w;
-                pending->img->natural_height = h;
-                pending->img->loaded = TRUE;
-            } else {
-                pending->img->failed = TRUE;
-                pending->img->failed_at_us = g_get_monotonic_time();
-                pending->img->error = g_strdup_printf(
-                    "could not decode image (%s, %u bytes)",
-                    resp->content_type && *resp->content_type
-                        ? resp->content_type : "unknown type",
-                    (unsigned)resp->body->len);
-            }
-        }
+        ns_img_decoded d = ns_image_decode_body(resp->body->data,
+                                                resp->body->len);
+        ns_image_apply_decoded_state(pending->img, &d,
+                                     resp->content_type, resp->body->len);
     }
     ns_response_free(resp);
     ns_image_cache_account(pending->cache, pending->img);
