@@ -43,6 +43,22 @@ Websites you visit receive the information any browser sends them
 (your IP address, requested URLs, cookies they set) and are governed
 by their own privacy policies.
 
+## Privacy preference signals
+
+To help you exercise your rights under laws such as the California
+Consumer Privacy Act (CCPA/CPRA) and similar US state statutes,
+Nordstjernen sends a Global Privacy Control signal by default — the
+`Sec-GPC: 1` request header and the `navigator.globalPrivacyControl`
+property — which many jurisdictions treat as a legally binding request
+to opt out of the sale or sharing of your personal information. It also
+sends the legacy Do Not Track signal (`DNT: 1` and
+`navigator.doNotTrack`) by default. Both signals are independently
+toggleable in Settings. Honouring these signals is the responsibility
+of the websites that receive them.
+
+By default Nordstjernen also blocks third-party cookies, strips common
+tracking parameters from URLs, and upgrades connections to HTTPS.
+
 ## Children
 
 Nordstjernen provides unfiltered access to the web and is not

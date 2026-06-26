@@ -50,6 +50,7 @@ typedef struct ns_config {
     ns_color_scheme_pref   color_scheme;
     ns_reduced_motion_pref reduced_motion;
     gboolean do_not_track;
+    gboolean global_privacy_control;
     gboolean strip_tracking_params;
     gboolean https_first;
     gboolean harden_allocator;

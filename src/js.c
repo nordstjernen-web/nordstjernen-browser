@@ -15910,7 +15910,10 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetPropertyStr(ctx, navigator, "language", JS_NewString(ctx, "en-US"));
     JS_SetPropertyStr(ctx, navigator, "onLine", JS_TRUE);
     JS_SetPropertyStr(ctx, navigator, "hardwareConcurrency", JS_NewInt32(ctx, 4));
-    JS_SetPropertyStr(ctx, navigator, "doNotTrack", JS_NewString(ctx, "1"));
+    JS_SetPropertyStr(ctx, navigator, "doNotTrack",
+                      (!c || c->do_not_track) ? JS_NewString(ctx, "1") : JS_NULL);
+    JS_SetPropertyStr(ctx, navigator, "globalPrivacyControl",
+                      JS_NewBool(ctx, !c || c->global_privacy_control));
     JS_SetPropertyStr(ctx, global, "navigator", navigator);
 
     JSValue performance = JS_NewObject(ctx);
@@ -32925,6 +32928,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "fetch",         ns_js_fetch,             1);
     ns_bind_fn(ctx, global, "postMessage",   ns_event_noop,           2);
 
+    const ns_config *nav_cfg = ns_config_get();
     JSValue navigator = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, navigator, "userAgent",
                       JS_NewString(ctx, NS_USER_AGENT));
@@ -32944,7 +32948,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, navigator, "languages", langs);
     JS_SetPropertyStr(ctx, navigator, "onLine", JS_TRUE);
     JS_SetPropertyStr(ctx, navigator, "doNotTrack",
-                      JS_NewString(ctx, "1"));
+                      (!nav_cfg || nav_cfg->do_not_track)
+                          ? JS_NewString(ctx, "1") : JS_NULL);
+    JS_SetPropertyStr(ctx, navigator, "globalPrivacyControl",
+                      JS_NewBool(ctx, !nav_cfg || nav_cfg->global_privacy_control));
     JS_SetPropertyStr(ctx, navigator, "cookieEnabled", JS_TRUE);
     JS_SetPropertyStr(ctx, navigator, "hardwareConcurrency",
                       JS_NewInt32(ctx, 4));
