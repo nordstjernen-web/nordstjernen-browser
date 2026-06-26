@@ -170,7 +170,9 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
         close(mapfd);
         mapfd = -1;
     }
-    http_set_bufsize(sv[0], (int)size + 65536);
+    size_t bufsz = size + 65536;
+    if (bufsz > 0x7fffffff) bufsz = 0x7fffffff;
+    http_set_bufsize(sv[0], (int)bufsz);
     http_set_read_timeout(sv[0], 30);
 
     ns_rproc_http *r = calloc(1, sizeof *r);

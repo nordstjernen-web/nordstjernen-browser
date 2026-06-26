@@ -185,8 +185,10 @@ main(int argc, char **argv)
     }
     ns_browser_sandbox(argv[0]);
 
-    http_set_bufsize(ctrl_r, (int)fb_size + 65536);
-    http_set_bufsize(ctrl_w, (int)fb_size + 65536);
+    size_t bufsz = fb_size + 65536;
+    if (bufsz > 0x7fffffff) bufsz = 0x7fffffff;
+    http_set_bufsize(ctrl_r, (int)bufsz);
+    http_set_bufsize(ctrl_w, (int)bufsz);
 
     ns_renderer_session *session =
         ns_renderer_session_new(ctrl_w, fb, max_w, max_h, shm_mode);
