@@ -135,6 +135,8 @@ static void ns_js_remove_attr_recorded(ns_js *js, ns_node *n, const char *name);
 static void ns_js_remove_attr_ns_recorded(ns_js *js, ns_node *n,
                                           const char *namespace_uri,
                                           const char *local_name);
+static void ns_js_orphan_node(ns_js *js, ns_node *n);
+static void ns_qcache_invalidate(ns_js *js);
 static void ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
                                const char *old_value, const char *new_value);
 static void ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root);
@@ -4255,6 +4257,40 @@ ns_element_get_wholeText(JSContext *ctx, JSValueConst this_val)
     JSValue v = JS_NewStringLen(ctx, s->str, s->len);
     g_string_free(s, TRUE);
     return v;
+}
+
+static JSValue
+ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n || n->kind != NS_NODE_TEXT) return JS_NULL;
+    const char *content = argc > 0 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])
+        ? JS_ToCString(ctx, argv[0]) : NULL;
+    gboolean empty = !content || !*content;
+    ns_node *start = n;
+    while (start->prev_sibling && start->prev_sibling->kind == NS_NODE_TEXT)
+        start = start->prev_sibling;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *result = NULL;
+    ns_node *c = start;
+    while (c && c->kind == NS_NODE_TEXT) {
+        ns_node *next = c->next_sibling;
+        if (!empty && c == n) {
+            char *old_copy = c->text ? g_strdup(c->text) : g_strdup("");
+            ns_node_replace_text_owned(c, g_strdup(content));
+            if (js) ns_js_record_character_data(js, c, old_copy);
+            g_free(old_copy);
+            result = c;
+        } else {
+            ns_node_remove(c);
+            ns_js_orphan_node(js, c);
+        }
+        c = next;
+    }
+    if (js) { js->mutated = TRUE; ns_qcache_invalidate(js); }
+    if (content) JS_FreeCString(ctx, content);
+    return result ? ns_make_element(ctx, result) : JS_NULL;
 }
 
 static JSValue
@@ -20970,9 +21006,71 @@ ns_namedmap_item(JSContext *ctx, JSValueConst this_val,
     return e;
 }
 
+static JSValue ns_attr_to_js(JSContext *ctx, JSValueConst owner,
+                             const ns_attr *a, gboolean include_base);
 static const ns_attr *ns_element_attr_by_namespace(const ns_node *n,
                                                    const char *namespace_uri,
                                                    const char *local);
+
+static ns_node *
+ns_namedmap_owner(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue ow = JS_GetPropertyStr(ctx, this_val, "__ns_owner");
+    ns_node *n = ns_unwrap_element_mut(ow);
+    JS_FreeValue(ctx, ow);
+    return n;
+}
+
+static JSValue
+ns_namedmap_removeNamedItem(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_ThrowTypeError(ctx, "1 argument required");
+    ns_node *n = ns_namedmap_owner(ctx, this_val);
+    const char *name = JS_ToCString(ctx, argv[0]);
+    if (!name) return JS_EXCEPTION;
+    const ns_attr *a = NULL;
+    if (n && n->kind == NS_NODE_ELEMENT) {
+        for (const ns_attr *it = n->attrs; it; it = it->next) {
+            if (it->name && !ns_attr_name_is_internal(it->name) &&
+                g_ascii_strcasecmp(it->name, name) == 0) { a = it; break; }
+        }
+    }
+    if (!a) {
+        JS_FreeCString(ctx, name);
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "no attribute with that name");
+    }
+    JSValue removed = ns_attr_to_js(ctx, JS_NULL, a, FALSE);
+    ns_js_remove_attr_recorded(js_from_ctx(ctx), n, name);
+    JS_FreeCString(ctx, name);
+    return removed;
+}
+
+static JSValue
+ns_namedmap_removeNamedItemNS(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    if (argc < 2) return JS_ThrowTypeError(ctx, "2 arguments required");
+    ns_node *n = ns_namedmap_owner(ctx, this_val);
+    const char *ns = JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])
+        ? NULL : JS_ToCString(ctx, argv[0]);
+    if (ns && !*ns) { JS_FreeCString(ctx, ns); ns = NULL; }
+    const char *local = JS_ToCString(ctx, argv[1]);
+    if (!local) { if (ns) JS_FreeCString(ctx, ns); return JS_EXCEPTION; }
+    const ns_attr *a = n ? ns_element_attr_by_namespace(n, ns, local) : NULL;
+    if (!a) {
+        if (ns) JS_FreeCString(ctx, ns);
+        JS_FreeCString(ctx, local);
+        return ns_throw_dom_exception(ctx, "NotFoundError", 8,
+            "no attribute with that namespace and local name");
+    }
+    JSValue removed = ns_attr_to_js(ctx, JS_NULL, a, FALSE);
+    ns_js_remove_attr_ns_recorded(js_from_ctx(ctx), n, ns, local);
+    if (ns) JS_FreeCString(ctx, ns);
+    JS_FreeCString(ctx, local);
+    return removed;
+}
 
 static JSValue ns_attr_cloneNode(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv);
@@ -21039,6 +21137,10 @@ ns_element_get_attributes(JSContext *ctx, JSValueConst this_val)
     }
     ns_bind_fn(ctx, arr, "getNamedItem", ns_namedmap_getNamedItem, 1);
     ns_bind_fn(ctx, arr, "item",         ns_namedmap_item,         1);
+    ns_bind_fn(ctx, arr, "removeNamedItem",   ns_namedmap_removeNamedItem,   1);
+    ns_bind_fn(ctx, arr, "removeNamedItemNS", ns_namedmap_removeNamedItemNS, 2);
+    JS_DefinePropertyValueStr(ctx, arr, "__ns_owner",
+                              JS_DupValue(ctx, this_val), 0);
     return arr;
 }
 
@@ -28469,7 +28571,7 @@ ns_table_create_section(JSContext *ctx, JSValueConst this_val, const char *name,
     } else {
         ns_node_append_child(tbl, sec);
     }
-    if (_j) _j->mutated = TRUE;
+    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, sec);
 }
 
@@ -28503,7 +28605,7 @@ ns_table_createCaption(JSContext *ctx, JSValueConst this_val,
         ns_element_insert_before_single(_j, tbl, cap, tbl->first_child);
     else
         ns_node_append_child(tbl, cap);
-    if (_j) _j->mutated = TRUE;
+    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
     return ns_make_element(ctx, cap);
 }
 
@@ -28517,7 +28619,7 @@ ns_table_delete_section(JSContext *ctx, JSValueConst this_val, const char *name)
     ns_js *_j = js_from_ctx(ctx);
     ns_node_remove(existing);
     ns_js_orphan_node(_j, existing);
-    if (_j) _j->mutated = TRUE;
+    if (_j) { _j->mutated = TRUE; ns_qcache_invalidate(_j); }
 }
 
 static JSValue
@@ -30011,6 +30113,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("nodeValue",     ns_element_get_nodeValue, ns_element_set_nodeValue),
     JS_CGETSET_DEF("data",          ns_element_get_data, ns_element_set_data),
     JS_CGETSET_DEF("wholeText",     ns_element_get_wholeText, ns_element_noop_set),
+    JS_CFUNC_DEF("replaceWholeText", 1, ns_text_replaceWholeText),
     JS_CGETSET_DEF("nodeName",      ns_element_get_nodeName, ns_element_noop_set),
     JS_CGETSET_DEF("dataset",       ns_element_get_dataset,  ns_element_noop_set),
     JS_CGETSET_DEF("offsetTop",     ns_element_get_offsetTop,    ns_element_noop_set),
@@ -34413,8 +34516,10 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     static const char xml_ns[]   = "http://www.w3.org/XML/1998/namespace";
     static const char xmlns_ns[] = "http://www.w3.org/2000/xmlns/";
     const char *err_name = NULL;
-    if (!ns_is_xml_qname(name))
+    if (!ns_is_xml_name_n(name, strlen(name)))
         err_name = "InvalidCharacterError";
+    else if (!ns_is_xml_qname(name))
+        err_name = "NamespaceError";
     else if (has_prefix && !ns)
         err_name = "NamespaceError";
     else if (prefix_is_xml && (!ns || strcmp(ns, xml_ns) != 0))
@@ -35187,6 +35292,11 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
         JS_FreeCString(ctx, name);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
             "invalid doctype name");
+    }
+    if (strchr(name, ':') && !ns_is_xml_qname(name)) {
+        JS_FreeCString(ctx, name);
+        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
+            "malformed qualified name");
     }
     const char *public_id = JS_ToCString(ctx, argv[1]);
     const char *system_id = public_id ? JS_ToCString(ctx, argv[2]) : NULL;
