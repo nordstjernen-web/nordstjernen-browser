@@ -180,7 +180,7 @@ elements (`head title meta link style script noscript template`) to
 | `img` | ✅ | layout + decode pipeline |
 | `img srcset` / `sizes` | ✅ | descriptor parsing (`first_url_from_srcset_sized`) + `sizes` evaluation (`ns_css_sizes_resolve`); width & density descriptors selected by viewport/density. `HTMLImageElement.currentSrc` reflects the actually-selected source (resolved to an absolute URL via the shared `ns_img_chosen_url` so it always matches the image the engine renders, including `<picture>` selection) |
 | `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
-| `img loading="lazy"` | ✅ | fetch deferred |
+| `img loading="lazy"` | ✅ | fetch/decode deferred until the image scrolls near the viewport (`src/engine.c`) |
 | Decode pipeline | ✅/🟡 | ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG) → WebP via libwebp (lossy VP8 + lossless VP8L, `src/image_webp.c`) → AVIF via libavif (`src/image_avif.c`, if built) → GDK-Pixbuf fallback (TIFF and other loader formats) → librsvg (static SVG) |
 | `iframe` | 🟡 | `src`/`srcdoc` load; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
