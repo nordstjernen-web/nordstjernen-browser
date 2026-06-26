@@ -109,6 +109,36 @@ nordstjernen
 Or, equivalently, put the same keys in `nordstjernen.conf` and
 launch with no flags.
 
+## Encrypted DNS (DNS-over-HTTPS)
+
+By default Nordstjernen resolves host names with the system resolver,
+which usually means plaintext DNS the local network can see. Setting
+`doh_url` to a DNS-over-HTTPS endpoint makes libcurl resolve names over an
+encrypted HTTPS connection to that resolver instead, hiding lookups from
+the network. It is **opt-in and off by default**, adds no new dependency,
+and the URL must be `https://`.
+
+```sh
+export NS_DOH_URL=https://dns.quad9.net/dns-query
+nordstjernen
+```
+
+Or put it in `nordstjernen.conf`:
+
+```ini
+doh_url = https://cloudflare-dns.com/dns-query
+```
+
+Common endpoints are `https://dns.quad9.net/dns-query`,
+`https://cloudflare-dns.com/dns-query`, and `https://dns.google/dns-query`.
+Confirm the effective value with `nordstjernen --print-config`.
+
+DoH and proxies overlap: a `socks5h://` proxy already resolves DNS on the
+far side (no local leak), so DoH matters most for direct connections or
+for HTTP/HTTPS proxies that would otherwise resolve through the local
+resolver. When a proxy performs remote resolution, it handles the lookup
+for proxied requests.
+
 ## Limitations
 
 - WebSocket connections (`ws://`, `wss://`) use the same libcurl

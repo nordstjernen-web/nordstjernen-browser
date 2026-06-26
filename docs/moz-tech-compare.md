@@ -116,18 +116,6 @@ remaining proposals (by ROI, then effort/risk) is at the end.
   within a window.
 - **ROI: Med–High · Effort: M · Fit: excellent (privacy-first ethos).**
 
-### 12. DNS-over-HTTPS (encrypted, centralizable resolver)
-
-- **Upstream:** DNS can be resolved over HTTPS to a trusted resolver,
-  hiding lookups from the local network — `netwerk/dns/TRRService.cpp`,
-  `netwerk/dns/TRR.h`.
-- **Nordstjernen today:** name resolution uses the system resolver
-  (cleartext DNS on most networks).
-- **The move:** libcurl already supports DoH (`CURLOPT_DOH_URL`); expose
-  an opt-in resolver URL in config and wire it into the easy-handle setup
-  in `src/net.c`.
-- **ROI: Med · Effort: S · Fit: excellent — small, opt-in, no new dep.**
-
 ## Performance
 
 ### 14. Back/forward cache (bfcache)
@@ -479,8 +467,8 @@ whose pitch is security and privacy. One item (#41) is pulled above pure
 effort order on strategic weight — see the notes below.
 
 The bands: **P1–P5** are the High-ROI set, **P6–P7** Med–High,
-**P8–P12** cheap Med wins, **P13–P23** Med/medium-effort, **P24–P30**
-Med/large-effort, **P31** the lone Low–Med housekeeping item.
+**P8–P11** cheap Med wins, **P12–P22** Med/medium-effort, **P23–P29**
+Med/large-effort, **P30** the lone Low–Med housekeeping item.
 
 | P | # | Proposal | Area | ROI | Effort |
 |---|---|----------|------|-----|--------|
@@ -492,29 +480,28 @@ Med/large-effort, **P31** the lone Low–Med housekeeping item.
 | 6 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
 | 7 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
 | 8 | 7 | Reduce/jitter timer precision | Security | Med | S |
-| 9 | 12 | DNS-over-HTTPS | Privacy | Med | S |
-| 10 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
-| 11 | 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
-| 12 | 27 | Lazy image loading | Perf | Med | S–M |
-| 13 | 38 | HTML Sanitizer API | Security | Med | M |
-| 14 | 5 | Opaque Response Blocking | Security | Med | M |
-| 15 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
-| 16 | 4 | Font sanitization before raster | Security | Med | M |
-| 17 | 34 | Background-tab unloading | Memory | Med | M |
-| 18 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
-| 19 | 16 | Image surface cache + downscale | Perf | Med | M |
-| 20 | 17 | Pre-spawned renderer | Perf | Med | M |
-| 21 | 30 | Session restore / crash recovery | UX | Med | M |
-| 22 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
-| 23 | 18 | Reader mode | UX | Med | M |
-| 24 | 3 | Site isolation (per-origin) | Security | Med | L |
-| 25 | 6 | Compact cert revocation | Security | Med | L |
-| 26 | 19 | Accessibility tree | Quality | Med | L |
-| 27 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
-| 28 | 29 | Password manager (local-only) | Security/UX | Med | L |
-| 29 | 28 | On-device page translation | UX | Med | L |
-| 30 | 40 | Incremental / low-pause GC | Perf | Med | L |
-| 31 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
+| 9 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
+| 10 | 36 | Resource hints (preconnect/prefetch) | Perf | Med | S–M |
+| 11 | 27 | Lazy image loading | Perf | Med | S–M |
+| 12 | 38 | HTML Sanitizer API | Security | Med | M |
+| 13 | 5 | Opaque Response Blocking | Security | Med | M |
+| 14 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
+| 15 | 4 | Font sanitization before raster | Security | Med | M |
+| 16 | 34 | Background-tab unloading | Memory | Med | M |
+| 17 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
+| 18 | 16 | Image surface cache + downscale | Perf | Med | M |
+| 19 | 17 | Pre-spawned renderer | Perf | Med | M |
+| 20 | 30 | Session restore / crash recovery | UX | Med | M |
+| 21 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
+| 22 | 18 | Reader mode | UX | Med | M |
+| 23 | 3 | Site isolation (per-origin) | Security | Med | L |
+| 24 | 6 | Compact cert revocation | Security | Med | L |
+| 25 | 19 | Accessibility tree | Quality | Med | L |
+| 26 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 27 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 28 | 28 | On-device page translation | UX | Med | L |
+| 29 | 40 | Incremental / low-pause GC | Perf | Med | L |
+| 30 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Notes on the ranking:
 
@@ -522,9 +509,9 @@ Notes on the ranking:
   mark-of-the-web on downloads (#42), the audio-helper sandbox (#2),
   HTTPS-First (#8), the hardened heap allocator (#31), the speculative
   preload scanner (#13), off-main-thread image decoding (#32),
-  MIME-sniffing safety / `nosniff` (#26), private browsing mode (#37) and
-  storage-stack partitioning by top-level site (#9) are all implemented and
-  dropped from the list.
+  MIME-sniffing safety / `nosniff` (#26), private browsing mode (#37),
+  storage-stack partitioning by top-level site (#9) and DNS-over-HTTPS
+  (#12) are all implemented and dropped from the list.
   (In-process WASM sandboxing of a decoder, the former #1, was also
   dropped: it needs a WASM build toolchain and an iterative build/measure
   loop better suited to dedicated work than to this ranking.) The ranking
@@ -536,7 +523,7 @@ Notes on the ranking:
 - **#21 (P5), fingerprinting resistance, is now the biggest single
   privacy statement left** on the list, after private browsing mode (#37)
   and storage partitioning (#9) shipped.
-- **#20 (P31)** is cheap (S) but ranks last purely on leverage; it is
+- **#20 (P30)** is cheap (S) but ranks last purely on leverage; it is
   reasonable to fold in early as housekeeping rather than treat it as
   "last to do."
 
