@@ -40,6 +40,12 @@ ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
 ns_rproc_http *ns_rproc_http_spawn_shm(const char *renderer_path,
                                        int max_width, int max_height);
 
+/* Like ns_rproc_http_spawn_shm, but when private_mode is non-zero the renderer
+   is launched in private/incognito mode (ephemeral cookies/cache/storage). */
+ns_rproc_http *ns_rproc_http_spawn_shm_ex(const char *renderer_path,
+                                          int max_width, int max_height,
+                                          int private_mode);
+
 /* Single-process mode: when an attach hook is installed, spawn creates an
    in-process renderer connection (control channel + malloc'd framebuffer
    handed to the hook) instead of forking a renderer process. The hook

@@ -38,6 +38,11 @@ GtkWidget  *ns_proc_view_widget(NsProcView *view);
 void        ns_proc_view_set_notify(NsProcView *view, NsProcNotify cb,
                                     gpointer user_data);
 
+/* Mark this tab's renderer as private/incognito. Must be set before the first
+   load so the spawned renderer starts in ephemeral mode. */
+void        ns_proc_view_set_private(NsProcView *view, gboolean private_mode);
+gboolean    ns_proc_view_is_private(NsProcView *view);
+
 void ns_proc_view_load(NsProcView *view, const char *url);
 void ns_proc_view_back(NsProcView *view);
 void ns_proc_view_forward(NsProcView *view);

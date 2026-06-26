@@ -125,6 +125,7 @@ struct NsProcView {
     ns_rproc_http *proc;
     GMutex      proc_lock;
     char       *renderer_path;
+    gboolean    private_mode;
 
     GSubprocess  *audio_proc;
     GOutputStream *audio_in;
@@ -657,8 +658,9 @@ worker_main(gpointer data)
             break;
         }
         if (!v->proc && !v->closed)
-            pv_swap_proc(v, ns_rproc_http_spawn_shm(v->renderer_path,
-                                     NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT));
+            pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
+                                     NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
+                                     v->private_mode));
 
         if (req->type == REQ_LOAD) {
             Res *res = g_new0(Res, 1);
@@ -672,8 +674,9 @@ worker_main(gpointer data)
                              : -1;
             if (rc != 0 && v->proc && !v->closed) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
-                pv_swap_proc(v, ns_rproc_http_spawn_shm(v->renderer_path,
-                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT));
+                pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
+                                         NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
+                                         v->private_mode));
                 rc = v->proc ? ns_rproc_http_open(v->proc, req->url, req->vw,
                                              req->vh, settle, &pg)
                              : -1;
@@ -3041,4 +3044,17 @@ ns_proc_view_set_notify(NsProcView *v, NsProcNotify cb, gpointer ud)
 {
     v->notify = cb;
     v->notify_ud = ud;
+}
+
+void
+ns_proc_view_set_private(NsProcView *v, gboolean private_mode)
+{
+    if (v)
+        v->private_mode = private_mode;
+}
+
+gboolean
+ns_proc_view_is_private(NsProcView *v)
+{
+    return v && v->private_mode;
 }

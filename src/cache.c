@@ -199,7 +199,7 @@ void
 ns_cache_init(void)
 {
     const ns_config *c = ns_config_get();
-    if (c && !c->cache_enabled) {
+    if (c && (!c->cache_enabled || c->private_mode)) {
         g_cache_disabled = TRUE;
         return;
     }

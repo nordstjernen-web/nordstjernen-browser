@@ -43,6 +43,7 @@
 #endif
 
 static char *g_cookie_dir;
+static char *g_private_root;
 static char *g_hsts_curl_path;
 static char *g_altsvc_path;
 static GHashTable *g_hsts_cache;
@@ -329,8 +330,70 @@ ns_net_data_path(char **slot, const char *basename)
     return *slot;
 }
 
+static void
+ns_rmrf(const char *path)
+{
+    if (!path) return;
+    GDir *dir = g_dir_open(path, 0, NULL);
+    if (dir) {
+        const char *name;
+        while ((name = g_dir_read_name(dir))) {
+            char *child = g_build_filename(path, name, NULL);
+            if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
+                !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+                ns_rmrf(child);
+            else
+                g_unlink(child);
+            g_free(child);
+        }
+        g_dir_close(dir);
+    }
+    g_rmdir(path);
+}
+
+static const char *
+ns_net_private_root(void)
+{
+    if (g_private_root) return g_private_root;
+    g_private_root = g_dir_make_tmp("nordstjernen-private-XXXXXX", NULL);
+    if (!g_private_root) {
+        char *base = g_strdup_printf("nordstjernen-private-%u", g_random_int());
+        g_private_root = g_build_filename(g_get_tmp_dir(), base, NULL);
+        g_free(base);
+        g_mkdir_with_parents(g_private_root, 0700);
+    }
+    g_chmod(g_private_root, 0700);
+    return g_private_root;
+}
+
+static gboolean
+ns_net_is_private(void)
+{
+    const ns_config *cfg = ns_config_get();
+    return cfg && cfg->private_mode;
+}
+
 static char *
-ns_net_hsts_curl_path(void) { return ns_net_data_path(&g_hsts_curl_path, "hsts-curl.txt"); }
+ns_net_hsts_curl_path(void)
+{
+    if (g_hsts_curl_path) return g_hsts_curl_path;
+    if (!ns_net_is_private())
+        return ns_net_data_path(&g_hsts_curl_path, "hsts-curl.txt");
+    const char *root = ns_net_private_root();
+    if (!root) return NULL;
+    g_hsts_curl_path = g_build_filename(root, "hsts-curl.txt", NULL);
+    char *real_dir = g_build_filename(g_get_user_data_dir(), NS_APP_DIR_NAME,
+                                      NULL);
+    char *real = g_build_filename(real_dir, "hsts-curl.txt", NULL);
+    char *contents = NULL;
+    gsize len = 0;
+    if (g_file_get_contents(real, &contents, &len, NULL))
+        g_file_set_contents(g_hsts_curl_path, contents, (gssize)len, NULL);
+    g_free(contents);
+    g_free(real);
+    g_free(real_dir);
+    return g_hsts_curl_path;
+}
 
 static void
 ns_hsts_cache_reload_locked(const char *path)
@@ -1030,8 +1093,15 @@ static const char *
 ns_net_cookie_dir(void)
 {
     if (g_cookie_dir) return g_cookie_dir;
-    const char *config = g_get_user_config_dir();
-    g_cookie_dir = g_build_filename(config, NS_APP_DIR_NAME, "cookies", NULL);
+    if (ns_net_is_private()) {
+        const char *root = ns_net_private_root();
+        g_cookie_dir = g_build_filename(root ? root : g_get_tmp_dir(),
+                                        "cookies", NULL);
+    } else {
+        const char *config = g_get_user_config_dir();
+        g_cookie_dir = g_build_filename(config, NS_APP_DIR_NAME, "cookies",
+                                        NULL);
+    }
     g_mkdir_with_parents(g_cookie_dir, 0700);
     return g_cookie_dir;
 }
@@ -1299,6 +1369,8 @@ ns_net_cookie_store_from_js(const char *url, const char *cookie)
 static const char *
 ns_net_altsvc_path(void)
 {
+    if (ns_net_is_private())
+        return NULL;
     return ns_net_data_path(&g_altsvc_path, "altsvc.txt");
 }
 
@@ -1584,6 +1656,11 @@ ns_net_shutdown(void)
     g_hsts_curl_path = NULL;
     g_free(g_altsvc_path);
     g_altsvc_path = NULL;
+    if (g_private_root) {
+        ns_rmrf(g_private_root);
+        g_free(g_private_root);
+        g_private_root = NULL;
+    }
     g_free(g_ca_bundle);
     g_ca_bundle = NULL;
     if (g_hsts_cache) {

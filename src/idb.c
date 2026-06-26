@@ -120,6 +120,8 @@ static char *
 ns_idb_path_for_name(JSContext *ctx, const char *name)
 {
     if (!name || !*name) return NULL;
+    const ns_config *cfg = ns_config_get();
+    if (cfg && cfg->private_mode) return g_strdup(":memory:");
     g_autofree char *dir = ns_idb_partition_dir(ctx);
     if (!dir) return NULL;
     g_autofree char *hash = ns_idb_hash_string(name);

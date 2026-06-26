@@ -265,6 +265,7 @@ apply_env(ns_config *c)
         const char *v = g_getenv(env_value[i].env);
         if (v && *v) apply_pair(c, env_value[i].key, v);
     }
+    if (g_getenv("NS_PRIVATE")) c->private_mode = TRUE;
 }
 
 void
@@ -477,6 +478,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "cache_enabled         = %s\n", c->cache_enabled ? "true" : "false");
     g_string_append_printf(s, "tls_allow_insecure_override = %s\n", c->tls_allow_insecure_override ? "true" : "false");
     g_string_append_printf(s, "watchdog_enabled      = %s\n", c->watchdog_enabled ? "true" : "false");
+    g_string_append_printf(s, "private_mode          = %s\n", c->private_mode ? "true" : "false");
     g_string_append_printf(s, "cache_cap_mb          = %d\n", c->cache_cap_mb);
     g_string_append_printf(s, "js_eval_budget_ms     = %d\n", c->js_eval_budget_ms);
     g_string_append_printf(s, "js_memory_cap_mb      = %d\n", c->js_memory_cap_mb);

@@ -96,17 +96,20 @@ wait_child(pid_t pid)
 #ifndef _WIN32
 #if defined(__ANDROID__)
 static ns_rproc_http *
-spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
+spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
+             int priv)
 {
     (void)renderer_path;
     (void)max_width;
     (void)max_height;
     (void)shm;
+    (void)priv;
     return NULL;
 }
 #else
 static ns_rproc_http *
-spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
+spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
+             int priv)
 {
     if (!renderer_path || max_width <= 0 || max_height <= 0 ||
         max_width > 32768 || max_height > 32768)
@@ -150,8 +153,14 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
         char wbuf[16], hbuf[16];
         snprintf(wbuf, sizeof wbuf, "%d", max_width);
         snprintf(hbuf, sizeof hbuf, "%d", max_height);
-        char *argv[] = { (char *)renderer_path, wbuf, hbuf,
-                         shm ? (char *)"shm" : NULL, NULL };
+        char *argv[6];
+        int ai = 0;
+        argv[ai++] = (char *)renderer_path;
+        argv[ai++] = wbuf;
+        argv[ai++] = hbuf;
+        if (shm) argv[ai++] = (char *)"shm";
+        if (priv) argv[ai++] = (char *)"private";
+        argv[ai] = NULL;
         execv(renderer_path, argv);
         _exit(127);
     }
@@ -221,7 +230,8 @@ win_dirname_dup(const char *path)
 }
 
 static ns_rproc_http *
-spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
+spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
+             int priv)
 {
     if (!renderer_path || max_width <= 0 || max_height <= 0 ||
         max_width > 32768 || max_height > 32768)
@@ -260,13 +270,14 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm)
         goto winfail;
 
     char cmd[1024];
+    const char *priv_arg = priv ? " private" : "";
     if (shm)
-        snprintf(cmd, sizeof cmd, "\"%s\" %d %d shm %llu", renderer_path,
+        snprintf(cmd, sizeof cmd, "\"%s\" %d %d shm %llu%s", renderer_path,
                  max_width, max_height,
-                 (unsigned long long)(uintptr_t)mapping);
+                 (unsigned long long)(uintptr_t)mapping, priv_arg);
     else
-        snprintf(cmd, sizeof cmd, "\"%s\" %d %d", renderer_path, max_width,
-                 max_height);
+        snprintf(cmd, sizeof cmd, "\"%s\" %d %d%s", renderer_path, max_width,
+                 max_height, priv_arg);
 
     STARTUPINFOA si;
     PROCESS_INFORMATION pi;
@@ -412,7 +423,7 @@ ns_rproc_http_spawn(const char *renderer_path, int max_width, int max_height)
 {
     if (g_inproc_attach)
         return spawn_inproc(max_width, max_height);
-    return spawn_common(renderer_path, max_width, max_height, 0);
+    return spawn_common(renderer_path, max_width, max_height, 0, 0);
 }
 
 ns_rproc_http *
@@ -421,7 +432,16 @@ ns_rproc_http_spawn_shm(const char *renderer_path, int max_width,
 {
     if (g_inproc_attach)
         return spawn_inproc(max_width, max_height);
-    return spawn_common(renderer_path, max_width, max_height, 1);
+    return spawn_common(renderer_path, max_width, max_height, 1, 0);
+}
+
+ns_rproc_http *
+ns_rproc_http_spawn_shm_ex(const char *renderer_path, int max_width,
+                           int max_height, int private_mode)
+{
+    if (g_inproc_attach)
+        return spawn_inproc(max_width, max_height);
+    return spawn_common(renderer_path, max_width, max_height, 1, private_mode);
 }
 
 int

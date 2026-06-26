@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <glib.h>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <fcntl.h>
@@ -170,6 +172,12 @@ main(int argc, char **argv)
     }
 #endif
     }
+
+    for (int i = 3; i < argc; i++)
+        if (strcmp(argv[i], "private") == 0) {
+            g_setenv("NS_PRIVATE", "1", TRUE);
+            break;
+        }
 
     if (ns_browser_init() != 0) {
         free(fb);

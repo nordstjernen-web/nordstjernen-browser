@@ -236,5 +236,7 @@ ns_bytecode_cache_put(const char *src, gsize src_len,
     g_mem_bytes += bc_len;
     g_mutex_unlock(&g_lock);
 
-    write_disk(key, bc, bc_len);
+    const ns_config *cfg = ns_config_get();
+    if (!cfg || !cfg->private_mode)
+        write_disk(key, bc, bc_len);
 }

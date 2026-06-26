@@ -569,7 +569,8 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
 
     switch (evt) {
     case NS_PROC_EVT_TITLE: {
-        ns_history_record(ns_proc_view_url(v), text);
+        if (!ns_proc_view_is_private(v))
+            ns_history_record(ns_proc_view_url(v), text);
         if (idx >= 0) {
             GtkWidget *p =
                 gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
@@ -623,7 +624,7 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         }
         break;
     case NS_PROC_EVT_FAVICON:
-        if (idx >= 0) {
+        if (idx >= 0 && !ns_proc_view_is_private(v)) {
             GtkWidget *p =
                 gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), idx);
             GtkWidget *icon = g_object_get_data(G_OBJECT(p), "ns-tab-icon");
@@ -686,9 +687,10 @@ on_tab_close(GtkButton *button, gpointer user_data)
 }
 
 static void
-proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
+proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
+                         gboolean private_mode)
 {
-    if (ns_rproc_single_process_enabled() &&
+    if (!private_mode && ns_rproc_single_process_enabled() &&
         gtk_notebook_get_n_pages(GTK_NOTEBOOK(pw->notebook)) > 0) {
         NsProcView *cur = current_view(pw);
         if (cur) {
@@ -701,6 +703,8 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     }
 
     NsProcView *v = ns_proc_view_new();
+    if (private_mode)
+        ns_proc_view_set_private(v, TRUE);
     ns_proc_view_set_notify(v, on_view_notify, pw);
     GtkWidget *page = ns_proc_view_widget(v);
     g_object_set_data(G_OBJECT(page), "ns-proc-view", v);
@@ -712,9 +716,13 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     gtk_button_set_has_frame(GTK_BUTTON(tabbtn), FALSE);
     gtk_widget_add_css_class(tabbtn, "ns-tab-label");
     GtkWidget *tabcontent = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    GtkWidget *icon = gtk_image_new_from_icon_name("text-x-generic-symbolic");
+    GtkWidget *icon = gtk_image_new_from_icon_name(
+        private_mode ? "view-private-symbolic" : "text-x-generic-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
-    GtkWidget *label = gtk_label_new(ns_i18n("New Tab"));
+    if (private_mode)
+        gtk_widget_set_tooltip_text(tabbtn, ns_i18n("Private tab"));
+    GtkWidget *label = gtk_label_new(
+        private_mode ? ns_i18n("Private tab") : ns_i18n("New Tab"));
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
     gtk_label_set_width_chars(GTK_LABEL(label), 16);
     gtk_box_append(GTK_BOX(tabcontent), icon);
@@ -752,6 +760,12 @@ proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
     char *resolved = normalize_url(url);
     ns_proc_view_load(v, resolved);
     g_free(resolved);
+}
+
+static void
+proc_window_add_tab(ProcWindow *pw, const char *url, gboolean foreground)
+{
+    proc_window_add_tab_full(pw, url, foreground, FALSE);
 }
 
 static gboolean
@@ -917,6 +931,14 @@ act_new_tab(GSimpleAction *a, GVariant *p, gpointer ud)
     (void)a;
     (void)p;
     proc_window_add_tab(ud, "about:start", TRUE);
+}
+
+static void
+act_new_private_tab(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    proc_window_add_tab_full(ud, "about:start", TRUE, TRUE);
 }
 
 static void
@@ -1256,6 +1278,8 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Alt>Home", NULL });
     install_action(pw, "new-tab", G_CALLBACK(act_new_tab),
                    (const char *[]){ "<Ctrl>t", NULL });
+    install_action(pw, "new-private-tab", G_CALLBACK(act_new_private_tab),
+                   (const char *[]){ "<Ctrl><Alt>p", NULL });
     install_action(pw, "close-tab", G_CALLBACK(act_close_tab),
                    (const char *[]){ "<Ctrl>w", NULL });
     install_action(pw, "focus-address", G_CALLBACK(act_focus_address),
@@ -1289,6 +1313,9 @@ install_shortcuts(ProcWindow *pw)
         GAction *nt = g_action_map_lookup_action(G_ACTION_MAP(pw->window),
                                                  "new-tab");
         if (nt) g_simple_action_set_enabled(G_SIMPLE_ACTION(nt), FALSE);
+        GAction *npt = g_action_map_lookup_action(G_ACTION_MAP(pw->window),
+                                                  "new-private-tab");
+        if (npt) g_simple_action_set_enabled(G_SIMPLE_ACTION(npt), FALSE);
     }
 }
 
@@ -1397,6 +1424,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
     GMenu *appmenu = g_menu_new();
     g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
+    g_menu_append(appmenu, ns_i18n("New Private Tab"), "win.new-private-tab");
     g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
     g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");

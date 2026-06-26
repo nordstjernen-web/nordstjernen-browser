@@ -1764,6 +1764,8 @@ static char *
 ns_storage_path_for_origin(const char *origin)
 {
     if (!origin || !*origin) return NULL;
+    const ns_config *cfg = ns_config_get();
+    if (cfg && cfg->private_mode) return NULL;
     g_autofree char *hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
                                                           origin, -1);
     g_autofree char *dir = g_build_filename(g_get_user_data_dir(),
