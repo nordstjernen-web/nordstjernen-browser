@@ -30,6 +30,7 @@ These work from anywhere in the window.
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+T` | New tab |
+| `Ctrl+Alt+P` | New private tab (ephemeral — nothing saved to disk) |
 | `Ctrl+W` | Close tab (closes the window if it is the last tab) |
 | `Ctrl+Tab` · `Ctrl+Page Down` | Next tab |
 | `Ctrl+Shift+Tab` · `Ctrl+Page Up` | Previous tab |
@@ -60,7 +61,15 @@ Zoom is clamped to the 0.25×–5.0× range.
 
 Bookmarks are managed from the bookmarks toolbar button (bookmark the
 current page, open or remove saved bookmarks). The **☰** toolbar menu
-offers New Tab, Reload, Settings, and About.
+offers New Tab, New Private Tab, Reload, Settings, and About.
+
+A **private tab** (☰ menu → New Private Tab, or `Ctrl+Alt+P`) runs its own
+renderer in an ephemeral mode: cookies, the HTTP cache, history,
+`localStorage`, and IndexedDB are kept in memory and discarded when the
+tab closes, so the session leaves no trace on disk. Private tabs are
+marked with a distinct icon in the tab bar. Launching with `--private`
+opens the first tab this way. (Private tabs require the default
+multi-process mode; the entry is disabled under `--single-process`.)
 
 Settings includes a **Search engine** drop-down with the common engines
 (DuckDuckGo Lite — the default — DuckDuckGo, Baidu, Google, Bing, Yandex,
