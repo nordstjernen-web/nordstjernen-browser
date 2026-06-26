@@ -20677,6 +20677,33 @@ ns_element_cloneNode(JSContext *ctx, JSValueConst this_val,
         if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, frag);
         return ns_make_element(ctx, frag);
     }
+    if (src->kind == NS_NODE_DOCUMENT && !(src->flags & NS_NODE_FRAGMENT)) {
+        ns_node *copy = ns_node_clone(src, deep);
+        if (!copy) return JS_NULL;
+        if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, copy);
+        JSValue xmlv = JS_GetPropertyStr(ctx, this_val, "__ndXmlDoc");
+        gboolean is_xml = JS_ToBool(ctx, xmlv);
+        JS_FreeValue(ctx, xmlv);
+        JSValue ctv = JS_GetPropertyStr(ctx, this_val, "contentType");
+        JSValue csv = JS_GetPropertyStr(ctx, this_val, "characterSet");
+        JSValue urlv = JS_GetPropertyStr(ctx, this_val, "URL");
+        const char *ct = JS_ToCString(ctx, ctv);
+        const char *cs = JS_ToCString(ctx, csv);
+        const char *url = JS_ToCString(ctx, urlv);
+        JSValue w = ns_make_realm_document(ctx, copy, url, cs, ct, is_xml, TRUE);
+        if (ct) JS_FreeCString(ctx, ct);
+        if (cs) JS_FreeCString(ctx, cs);
+        if (url) JS_FreeCString(ctx, url);
+        JS_FreeValue(ctx, ctv);
+        JS_FreeValue(ctx, csv);
+        JS_FreeValue(ctx, urlv);
+        if (JS_IsObject(w)) {
+            JSValue proto = JS_GetPrototype(ctx, this_val);
+            if (JS_IsObject(proto)) JS_SetPrototype(ctx, w, proto);
+            JS_FreeValue(ctx, proto);
+        }
+        return w;
+    }
     ns_node *copy = ns_node_clone(src, deep);
     if (!copy) return JS_NULL;
     if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, copy);
