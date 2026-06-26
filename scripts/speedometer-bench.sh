@@ -179,6 +179,7 @@ sleep 1
 mapfile -t PATHS < <(cd "$WORK" && ls resources/todomvc/*/*/dist/index.html | sed 's#resources/todomvc/##')
 
 printf "%-44s %10s %10s %10s %10s %8s\n" "SUITE" "total(ms)" "add" "complete" "delete" "dom"
+MEDS=()
 for p in "${PATHS[@]}"; do
     [ -n "$FILTER" ] && case "$p" in *"$FILTER"*) ;; *) continue ;; esac
     url="http://localhost:$PORT/resources/todomvc/$p"
@@ -197,9 +198,23 @@ for p in "${PATHS[@]}"; do
     done
     if [ "${#tots[@]}" -gt 0 ]; then
         med=$(printf "%s\n" "${tots[@]}" | sort -n | awk '{a[NR]=$1} END{print (NR%2)?a[(NR+1)/2]:(a[NR/2]+a[NR/2+1])/2}')
+        MEDS+=("$med")
         printf "%-44s %10.1f %10.1f %10.1f %10.1f %8s\n" "${name}" "$med" "${add:-0}" "${comp:-0}" "${del:-0}" "${dom:-?}"
     else
         short=$(echo "$p" | sed -E 's#/dist/index.html##; s#.*/##')
         printf "%-44s %10s   (does not load — see docs/Benchmarking.md)\n" "$short" "n/a"
     fi
 done
+
+if [ "${#MEDS[@]}" -gt 0 ]; then
+    printf '%s\n' "${MEDS[@]}" | awk '
+        { s += log(1000.0/$1); n++ }
+        END {
+            if (n > 0) {
+                score = exp(s/n);
+                printf "\n%-44s %d suites scored\n", "AGGREGATE", n;
+                printf "%-44s %10.4f  (geomean of 1000/total, higher is faster)\n", \
+                       "Speedometer-style score", score;
+            }
+        }'
+fi
