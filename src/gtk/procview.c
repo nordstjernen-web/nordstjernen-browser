@@ -218,6 +218,13 @@ enum {
 
 static NsProcView *pv_ref(NsProcView *v) { g_ref_count_inc(&v->rc); return v; }
 
+static void
+set_accessible_label(GtkWidget *w, const char *label)
+{
+    gtk_accessible_update_property(GTK_ACCESSIBLE(w),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
+}
+
 /* Closed silhouette of both glass bulbs, drawn around centre (16,16) so the
    whole glyph fits a compact 32px cursor with rounded bulbs. */
 static void
@@ -2795,9 +2802,11 @@ build_console_window(NsProcView *v)
     gtk_widget_set_hexpand(spacer, TRUE);
     GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
     gtk_widget_set_tooltip_text(refresh, ns_i18n("Refresh"));
+    set_accessible_label(refresh, ns_i18n("Refresh"));
     g_signal_connect(refresh, "clicked", G_CALLBACK(on_console_refresh), v);
     GtkWidget *clear = gtk_button_new_from_icon_name("edit-clear-symbolic");
     gtk_widget_set_tooltip_text(clear, ns_i18n("Clear"));
+    set_accessible_label(clear, ns_i18n("Clear"));
     g_signal_connect(clear, "clicked", G_CALLBACK(on_console_clear), v);
     gtk_box_append(GTK_BOX(header), spacer);
     gtk_box_append(GTK_BOX(header), refresh);
@@ -2865,6 +2874,7 @@ build_search_bar(NsProcView *v)
 
     v->search_entry = gtk_search_entry_new();
     gtk_widget_set_size_request(v->search_entry, 220, -1);
+    set_accessible_label(v->search_entry, ns_i18n("Find in page"));
     g_signal_connect(v->search_entry, "search-changed",
                      G_CALLBACK(on_search_changed), v);
     g_signal_connect(v->search_entry, "activate",
@@ -2885,6 +2895,9 @@ build_search_bar(NsProcView *v)
     gtk_widget_set_tooltip_text(prev, ns_i18n("Previous match (Shift+Enter)"));
     gtk_widget_set_tooltip_text(next, ns_i18n("Next match (Enter)"));
     gtk_widget_set_tooltip_text(close, ns_i18n("Close (Esc)"));
+    set_accessible_label(prev, ns_i18n("Previous match"));
+    set_accessible_label(next, ns_i18n("Next match"));
+    set_accessible_label(close, ns_i18n("Close search"));
     g_signal_connect(prev, "clicked", G_CALLBACK(on_search_prev), v);
     g_signal_connect(next, "clicked", G_CALLBACK(on_search_next), v);
     g_signal_connect(close, "clicked", G_CALLBACK(on_search_close_clicked), v);

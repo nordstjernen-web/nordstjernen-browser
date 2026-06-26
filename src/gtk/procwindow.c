@@ -129,6 +129,13 @@ install_status_css(void)
     g_object_unref(p);
 }
 
+static void
+set_accessible_label(GtkWidget *w, const char *label)
+{
+    gtk_accessible_update_property(GTK_ACCESSIBLE(w),
+                                   GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
+}
+
 static GtkWidget *
 toolbar_button(const char *icon, const char *tooltip, GCallback cb,
                gpointer data)
@@ -136,6 +143,7 @@ toolbar_button(const char *icon, const char *tooltip, GCallback cb,
     GtkWidget *b = gtk_button_new_from_icon_name(icon);
     gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
     gtk_widget_set_tooltip_text(b, tooltip);
+    set_accessible_label(b, tooltip);
     g_signal_connect(b, "clicked", cb, data);
     return b;
 }
@@ -735,6 +743,8 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
 
     GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
     gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
+    gtk_widget_set_tooltip_text(close, ns_i18n("Close tab"));
+    set_accessible_label(close, ns_i18n("Close tab"));
     g_object_set_data(G_OBJECT(close), "ns-pw", pw);
     g_signal_connect(close, "clicked", G_CALLBACK(on_tab_close), page);
     gtk_box_append(GTK_BOX(wrapper), close);
@@ -1375,6 +1385,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_button_set_has_frame(GTK_BUTTON(pw->newtab_btn), FALSE);
     gtk_widget_add_css_class(pw->newtab_btn, "ns-newtab");
     gtk_widget_set_tooltip_text(pw->newtab_btn, ns_i18n("New tab"));
+    set_accessible_label(pw->newtab_btn, ns_i18n("New tab"));
     g_signal_connect(pw->newtab_btn, "clicked",
                      G_CALLBACK(on_newtab_clicked), pw);
     gtk_box_append(GTK_BOX(pw->tabstrip), pw->newtab_btn);
@@ -1410,6 +1421,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
                                    ns_i18n("Enter a URL and press Enter"));
+    set_accessible_label(pw->address, ns_i18n("Address and search bar"));
     g_signal_connect(pw->address, "activate",
                      G_CALLBACK(on_address_activate), pw);
     GtkEventController *addr_focus = gtk_event_controller_focus_new();
@@ -1441,6 +1453,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
                                    G_MENU_MODEL(appmenu));
     gtk_widget_set_tooltip_text(menu_button, ns_i18n("Menu"));
+    set_accessible_label(menu_button, ns_i18n("Menu"));
     g_object_unref(appmenu);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("nordstjernen");
@@ -1449,6 +1462,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);
     gtk_widget_set_tooltip_text(logo_button, ns_i18n("Visit nordstjernen.org"));
+    set_accessible_label(logo_button, ns_i18n("Visit nordstjernen.org"));
     g_signal_connect(logo_button, "clicked", G_CALLBACK(on_logo_clicked), pw);
 
     gtk_box_append(GTK_BOX(toolbar), pw->back);
@@ -1990,6 +2004,8 @@ build_bookmarks_popover(ProcWindow *pw)
         g_signal_connect(open, "clicked", G_CALLBACK(on_bookmark_activate), pw);
         GtkWidget *del = gtk_button_new_from_icon_name("user-trash-symbolic");
         gtk_button_set_has_frame(GTK_BUTTON(del), FALSE);
+        gtk_widget_set_tooltip_text(del, ns_i18n("Remove bookmark"));
+        set_accessible_label(del, ns_i18n("Remove bookmark"));
         g_object_set_data_full(G_OBJECT(del), "ns-bm-url",
                                g_strdup(bm->url), g_free);
         g_signal_connect(del, "clicked", G_CALLBACK(on_bookmark_remove), pw);
