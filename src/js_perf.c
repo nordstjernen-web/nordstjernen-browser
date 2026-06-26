@@ -39,13 +39,21 @@ ns_perf_entry_clone(const ns_perf_entry *e)
     return copy;
 }
 
+#define NS_TIMER_RESOLUTION_US 100
+
+double
+ns_perf_clamp_ms(gint64 delta_us)
+{
+    if (delta_us < 0) delta_us = 0;
+    delta_us = (delta_us / NS_TIMER_RESOLUTION_US) * NS_TIMER_RESOLUTION_US;
+    return (double)delta_us / 1000.0;
+}
+
 double
 ns_perf_now_ms(const ns_js *js)
 {
     gint64 origin = js ? js->time_origin_us : 0;
-    gint64 us = g_get_monotonic_time() - origin;
-    us = (us / 5) * 5;
-    return (double)us / 1000.0;
+    return ns_perf_clamp_ms(g_get_monotonic_time() - origin);
 }
 
 JSValue

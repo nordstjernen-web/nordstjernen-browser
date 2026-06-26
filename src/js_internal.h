@@ -591,6 +591,7 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
                              gboolean *was_set);
 
 double ns_perf_now_ms(const ns_js *js);
+double ns_perf_clamp_ms(gint64 delta_us);
 void ns_perf_entry_free(gpointer p);
 JSValue ns_perf_supported_entry_types(JSContext *ctx);
 JSValue ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,

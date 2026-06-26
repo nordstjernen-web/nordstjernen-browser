@@ -15240,7 +15240,8 @@ ns_worker_performance_now(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
-    double ms = js ? (double)(g_get_monotonic_time() - js->time_origin_us) / 1000.0 : 0.0;
+    double ms = js ? ns_perf_clamp_ms(g_get_monotonic_time() - js->time_origin_us)
+                   : 0.0;
     return JS_NewFloat64(ctx, ms);
 }
 
@@ -19042,7 +19043,7 @@ ns_js_run_animation_frame(ns_js *js)
     js->raf_last_us = now_us;
     GArray *fired = js->raf_pending;
     js->raf_pending = g_array_new(FALSE, FALSE, sizeof(ns_raf_entry));
-    double ts_ms = (now_us - js->time_origin_us) / 1000.0;
+    double ts_ms = ns_perf_clamp_ms(now_us - js->time_origin_us);
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     for (guint i = 0; i < fired->len; i++) {
