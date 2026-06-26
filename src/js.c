@@ -32306,6 +32306,16 @@ ns_speech_utterance_ctor(JSContext *ctx, JSValueConst this_val,
     return u;
 }
 
+static gboolean
+ns_value_nodetype_in(JSContext *ctx, JSValueConst v, int32_t a, int32_t b)
+{
+    JSValue nt = JS_GetPropertyStr(ctx, v, "nodeType");
+    int32_t t = 0;
+    JS_ToInt32(ctx, &t, nt);
+    JS_FreeValue(ctx, nt);
+    return t == a || t == b;
+}
+
 static JSValue
 ns_static_range_ctor(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -32316,10 +32326,25 @@ ns_static_range_ctor(JSContext *ctx, JSValueConst this_val,
             "Failed to construct 'StaticRange': 1 argument required");
     JSValue sc = JS_GetPropertyStr(ctx, argv[0], "startContainer");
     JSValue ec = JS_GetPropertyStr(ctx, argv[0], "endContainer");
+    JSValue sov = JS_GetPropertyStr(ctx, argv[0], "startOffset");
+    JSValue eov = JS_GetPropertyStr(ctx, argv[0], "endOffset");
+    if (!JS_IsObject(sc) || !JS_IsObject(ec) ||
+        JS_IsUndefined(sov) || JS_IsUndefined(eov)) {
+        JS_FreeValue(ctx, sc); JS_FreeValue(ctx, ec);
+        JS_FreeValue(ctx, sov); JS_FreeValue(ctx, eov);
+        return JS_ThrowTypeError(ctx,
+            "Failed to construct 'StaticRange': a required member is undefined");
+    }
+    if (ns_value_nodetype_in(ctx, sc, 10, 2) ||
+        ns_value_nodetype_in(ctx, ec, 10, 2)) {
+        JS_FreeValue(ctx, sc); JS_FreeValue(ctx, ec);
+        JS_FreeValue(ctx, sov); JS_FreeValue(ctx, eov);
+        return ns_throw_dom_exception(ctx, "InvalidNodeTypeError", 24,
+            "StaticRange boundary must not be a DocumentType or Attr node");
+    }
     int32_t so = 0, eo = 0;
-    JSValue v;
-    v = JS_GetPropertyStr(ctx, argv[0], "startOffset"); JS_ToInt32(ctx, &so, v); JS_FreeValue(ctx, v);
-    v = JS_GetPropertyStr(ctx, argv[0], "endOffset");   JS_ToInt32(ctx, &eo, v); JS_FreeValue(ctx, v);
+    JS_ToInt32(ctx, &so, sov); JS_FreeValue(ctx, sov);
+    JS_ToInt32(ctx, &eo, eov); JS_FreeValue(ctx, eov);
     gboolean collapsed = (so == eo) &&
         JS_VALUE_GET_PTR(sc) == JS_VALUE_GET_PTR(ec) && JS_IsObject(sc);
     JSValue r = JS_NewObject(ctx);
