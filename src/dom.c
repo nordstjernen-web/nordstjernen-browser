@@ -590,6 +590,19 @@ ns_node_set_name_borrow(ns_node *n, const char *name)
 }
 
 void
+ns_node_set_name_owned(ns_node *n, char *name)
+{
+    if (!n) {
+        g_free(name);
+        return;
+    }
+    if (n->flags & NS_NODE_OWN_NAME)
+        g_free(n->name);
+    n->name = name;
+    n->flags |= NS_NODE_OWN_NAME;
+}
+
+void
 ns_node_set_text_borrow(ns_node *n, const char *text)
 {
     if (!n) return;

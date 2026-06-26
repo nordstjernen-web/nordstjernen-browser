@@ -98,6 +98,7 @@ ns_node *ns_node_new_text(char *text);
 ns_node *ns_node_new_comment(char *text);
 
 void ns_node_set_name_borrow(ns_node *n, const char *name);
+void ns_node_set_name_owned(ns_node *n, char *name);
 void ns_node_set_text_borrow(ns_node *n, const char *text);
 void ns_node_replace_text_owned(ns_node *n, char *text);
 void ns_node_own_strings_deep(ns_node *n);

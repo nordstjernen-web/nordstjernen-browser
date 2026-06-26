@@ -162,9 +162,8 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
                 const char *d = tn;
                 while (d < e && xml_is_space(*d)) d++;
                 ns_node *pi = ns_node_new_comment(g_strndup(d, (gsize)(e - d)));
-                ns_node_set_name_borrow(pi, target);
+                ns_node_set_name_owned(pi, target);
                 pi->flags |= NS_NODE_PI;
-                g_free(target);
                 ns_node_append_child(doc, pi);
             }
             xp->p = e + 2;
@@ -198,10 +197,7 @@ xml_skip_misc_and_doctype(xml_parser *xp, ns_node *doc)
                     while (tn < e && !xml_is_space(*tn) && *tn != '>' && *tn != '[') tn++;
                     if (tn > t) {
                         ns_node *dt = ns_node_new_element(NULL);
-                        ns_node_set_name_borrow(dt, "");
-                        char *nm = g_strndup(t, (gsize)(tn - t));
-                        ns_node_set_name_borrow(dt, nm);
-                        g_free(nm);
+                        ns_node_set_name_owned(dt, g_strndup(t, (gsize)(tn - t)));
                         ns_element_set_attr(dt, "publicId", "");
                         ns_element_set_attr(dt, "systemId", "");
                         dt->kind = NS_NODE_DOCTYPE;
@@ -378,9 +374,8 @@ xml_parse_element(xml_parser *xp, ns_node *parent, int depth)
                 const char *d = tn;
                 while (d < e && xml_is_space(*d)) d++;
                 ns_node *pi = ns_node_new_comment(g_strndup(d, (gsize)(e - d)));
-                ns_node_set_name_borrow(pi, target);
+                ns_node_set_name_owned(pi, target);
                 pi->flags |= NS_NODE_PI;
-                g_free(target);
                 ns_node_append_child(el, pi);
                 xp->p = e + 2;
                 continue;

@@ -38395,6 +38395,21 @@ ns_subtree_has_wrapper(ns_node *root)
 }
 
 static void
+ns_js_purge_subtree_pending_iframes(ns_js *js, ns_node *root)
+{
+    if (!js || !js->pending_iframe_loads || !root) return;
+    guint i = 0;
+    while (i < js->pending_iframe_loads->len) {
+        if (g_ptr_array_index(js->pending_iframe_loads, i) == root)
+            g_ptr_array_remove_index(js->pending_iframe_loads, i);
+        else
+            i++;
+    }
+    for (ns_node *c = root->first_child; c; c = c->next_sibling)
+        ns_js_purge_subtree_pending_iframes(js, c);
+}
+
+static void
 ns_js_sweep_orphans(ns_js *js)
 {
     if (!js || !js->orphan_nodes || g_hash_table_size(js->orphan_nodes) == 0) return;
@@ -38418,6 +38433,7 @@ ns_js_sweep_orphans(ns_js *js)
         ns_node *r = g_ptr_array_index(to_free, i);
         g_hash_table_remove(js->orphan_nodes, r);
         ns_js_purge_subtree_rafs(js, r);
+        ns_js_purge_subtree_pending_iframes(js, r);
         ns_node_free(r);
     }
     g_ptr_array_free(to_free, TRUE);
