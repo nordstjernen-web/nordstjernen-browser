@@ -4268,6 +4268,7 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
     const char *content = argc > 0 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])
         ? JS_ToCString(ctx, argv[0]) : NULL;
     gboolean empty = !content || !*content;
+    ns_node *parent = n->parent;
     ns_node *start = n;
     while (start->prev_sibling && start->prev_sibling->kind == NS_NODE_TEXT)
         start = start->prev_sibling;
@@ -4288,7 +4289,11 @@ ns_text_replaceWholeText(JSContext *ctx, JSValueConst this_val,
         }
         c = next;
     }
-    if (js) { js->mutated = TRUE; ns_qcache_invalidate(js); }
+    if (js) {
+        js->mutated = TRUE;
+        ns_qcache_invalidate(js);
+        if (parent) ns_css_mark_restyle_dirty(parent);
+    }
     if (content) JS_FreeCString(ctx, content);
     return result ? ns_make_element(ctx, result) : JS_NULL;
 }
@@ -16917,6 +16922,7 @@ ns_js_record_attr_change(ns_js *js, ns_node *target,
 static void
 ns_js_record_character_data(ns_js *js, ns_node *target, const char *old_value)
 {
+    ns_css_mark_restyle_dirty(target && target->parent ? target->parent : target);
     ns_mut_record_emit(js, "characterData", target, NULL, NULL,
                        NULL, NULL, NULL, old_value);
 }
@@ -25455,6 +25461,7 @@ ns_element_set_checked(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         ns_element_set_attr(el, "data-nd-checked", "0");
     }
     if (_j) _j->mutated = TRUE;
+    ns_css_mark_restyle_dirty(el->parent ? el->parent : el);
     return JS_UNDEFINED;
 }
 
