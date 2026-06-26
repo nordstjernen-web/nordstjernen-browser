@@ -146,6 +146,7 @@ static const cfg_field cfg_fields[] = {
     FE(color_scheme,          CFG_COLOR_SCHEME,    NS_COLOR_SCHEME_PREF_AUTO),
     FE(reduced_motion,        CFG_REDUCED_MOTION,  NS_REDUCED_MOTION_PREF_AUTO),
     FB(do_not_track,          TRUE),
+    FB(global_privacy_control, TRUE),
     FB(strip_tracking_params, TRUE),
     FB(https_first,           TRUE),
     FB(harden_allocator,      TRUE),
@@ -467,6 +468,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "color_scheme          = %s\n", color_scheme_name(c->color_scheme));
     g_string_append_printf(s, "reduced_motion        = %s\n", reduced_motion_name(c->reduced_motion));
     g_string_append_printf(s, "do_not_track          = %s\n", c->do_not_track ? "true" : "false");
+    g_string_append_printf(s, "global_privacy_control = %s\n", c->global_privacy_control ? "true" : "false");
     g_string_append_printf(s, "strip_tracking_params = %s\n", c->strip_tracking_params ? "true" : "false");
     g_string_append_printf(s, "https_first           = %s\n", c->https_first ? "true" : "false");
     g_string_append_printf(s, "harden_allocator      = %s\n", c->harden_allocator ? "true" : "false");

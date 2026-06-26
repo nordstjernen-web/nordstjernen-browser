@@ -4382,7 +4382,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             g_free(ua_plat);
         }
 
-        if (cfg && cfg->do_not_track) {
+        if (!cfg || cfg->global_privacy_control) {
             headers = curl_slist_append(headers, "Sec-GPC: 1");
         }
     }

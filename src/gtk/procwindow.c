@@ -1704,6 +1704,7 @@ typedef struct {
     GtkWidget  *webgl;
     GtkWidget  *storage;
     GtkWidget  *dnt;
+    GtkWidget  *gpc;
     GtkWidget  *cache;
 } SettingsDlg;
 
@@ -1745,6 +1746,7 @@ on_settings_save(GtkButton *button, gpointer user_data)
         cfg->local_storage_enabled =
             gtk_switch_get_active(GTK_SWITCH(s->storage));
         cfg->do_not_track = gtk_switch_get_active(GTK_SWITCH(s->dnt));
+        cfg->global_privacy_control = gtk_switch_get_active(GTK_SWITCH(s->gpc));
         cfg->cache_enabled = gtk_switch_get_active(GTK_SWITCH(s->cache));
         ns_config_save(NULL);
         g_free(s->pw->home_url);
@@ -1861,7 +1863,10 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
                                      cfg ? cfg->local_storage_enabled : TRUE);
     s->dnt     = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Send Do Not Track"),
                                      cfg ? cfg->do_not_track : FALSE);
-    s->cache   = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Enable cache"),
+    s->gpc     = settings_add_switch(GTK_GRID(grid), 6,
+                                     ns_i18n("Send Global Privacy Control (GPC)"),
+                                     cfg ? cfg->global_privacy_control : TRUE);
+    s->cache   = settings_add_switch(GTK_GRID(grid), 7, ns_i18n("Enable cache"),
                                      cfg ? cfg->cache_enabled : TRUE);
 
     gtk_box_append(GTK_BOX(box), grid);
