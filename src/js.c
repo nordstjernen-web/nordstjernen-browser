@@ -21265,16 +21265,12 @@ ns_element_hasAttributeNS(JSContext *ctx, JSValueConst this_val, int argc, JSVal
     return a ? JS_TRUE : JS_FALSE;
 }
 
+static gboolean ns_is_xml_qname(const char *s);
+
 static gboolean
 ns_qname_structurally_valid(const char *q)
 {
-    if (!q || !*q) return FALSE;
-    const char *c1 = strchr(q, ':');
-    if (!c1) return TRUE;
-    if (c1 == q) return FALSE;
-    if (!*(c1 + 1)) return FALSE;
-    if (strchr(c1 + 1, ':')) return FALSE;
-    return TRUE;
+    return ns_is_xml_qname(q);
 }
 
 static JSValue
@@ -33929,40 +33925,74 @@ ns_document_getElementsByClassName(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
-ns_valid_element_local_name(const char *s)
+ns_xml_name_start_char(gunichar c)
 {
-    if (!s || !*s) return FALSE;
-    guchar c0 = (guchar)s[0];
-    if (g_ascii_isalpha(c0)) {
-        for (const char *p = s; *p; p++) {
-            guchar c = (guchar)*p;
-            if (c == ' ' || c == '\t' || c == '\n' || c == '\f' ||
-                c == '\r' || c == '/' || c == '>')
-                return FALSE;
-        }
-        return TRUE;
-    }
-    if (c0 != ':' && c0 != '_' && c0 < 0x80) return FALSE;
-    for (const char *p = s + 1; *p; p++) {
-        guchar c = (guchar)*p;
-        if (!g_ascii_isalnum(c) && c != '-' && c != '.' && c != ':' &&
-            c != '_' && c < 0x80)
-            return FALSE;
+    return c == ':' || c == '_' ||
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= 0xC0 && c <= 0xD6) || (c >= 0xD8 && c <= 0xF6) ||
+        (c >= 0xF8 && c <= 0x2FF) || (c >= 0x370 && c <= 0x37D) ||
+        (c >= 0x37F && c <= 0x1FFF) || (c >= 0x200C && c <= 0x200D) ||
+        (c >= 0x2070 && c <= 0x218F) || (c >= 0x2C00 && c <= 0x2FEF) ||
+        (c >= 0x3001 && c <= 0xD7FF) || (c >= 0xF900 && c <= 0xFDCF) ||
+        (c >= 0xFDF0 && c <= 0xFFFD) || (c >= 0x10000 && c <= 0xEFFFF);
+}
+
+static gboolean
+ns_xml_name_char(gunichar c)
+{
+    return ns_xml_name_start_char(c) || c == '-' || c == '.' ||
+        (c >= '0' && c <= '9') || c == 0xB7 ||
+        (c >= 0x0300 && c <= 0x036F) || (c >= 0x203F && c <= 0x2040);
+}
+
+static gboolean
+ns_is_xml_name_n(const char *s, gsize len)
+{
+    if (!s || len == 0) return FALSE;
+    const char *p = s, *end = s + len;
+    gunichar c = g_utf8_get_char_validated(p, end - p);
+    if (c == (gunichar)-1 || c == (gunichar)-2) return FALSE;
+    if (!ns_xml_name_start_char(c)) return FALSE;
+    p = g_utf8_next_char(p);
+    while (p < end) {
+        c = g_utf8_get_char_validated(p, end - p);
+        if (c == (gunichar)-1 || c == (gunichar)-2) return FALSE;
+        if (!ns_xml_name_char(c)) return FALSE;
+        p = g_utf8_next_char(p);
     }
     return TRUE;
 }
 
 static gboolean
-ns_valid_attr_name(const char *s)
+ns_is_xml_ncname_n(const char *s, gsize len)
+{
+    if (!ns_is_xml_name_n(s, len)) return FALSE;
+    for (gsize i = 0; i < len; i++)
+        if (s[i] == ':') return FALSE;
+    return TRUE;
+}
+
+static gboolean
+ns_is_xml_qname(const char *s)
 {
     if (!s || !*s) return FALSE;
-    for (const char *p = s; *p; p++) {
-        guchar c = (guchar)*p;
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\f' ||
-            c == '\r' || c == '/' || c == '>')
-            return FALSE;
-    }
-    return TRUE;
+    const char *colon = strchr(s, ':');
+    if (!colon) return ns_is_xml_ncname_n(s, strlen(s));
+    if (strchr(colon + 1, ':')) return FALSE;
+    return ns_is_xml_ncname_n(s, (gsize)(colon - s)) &&
+           ns_is_xml_ncname_n(colon + 1, strlen(colon + 1));
+}
+
+static gboolean
+ns_valid_element_local_name(const char *s)
+{
+    return s && ns_is_xml_name_n(s, strlen(s));
+}
+
+static gboolean
+ns_valid_attr_name(const char *s)
+{
+    return s && ns_is_xml_name_n(s, strlen(s));
 }
 
 static gboolean
@@ -34072,19 +34102,6 @@ ns_document_createTextNode(JSContext *ctx, JSValueConst this_val,
     return wrapper;
 }
 
-static gboolean
-ns_valid_namespace_prefix(const char *s, gsize len)
-{
-    if (len == 0) return FALSE;
-    for (gsize i = 0; i < len; i++) {
-        guchar c = (guchar)s[i];
-        if (c == ' ' || c == '\t' || c == '\n' || c == '\f' ||
-            c == '\r' || c == '/' || c == '>')
-            return FALSE;
-    }
-    return TRUE;
-}
-
 static JSValue
 ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
@@ -34111,9 +34128,7 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     static const char xml_ns[]   = "http://www.w3.org/XML/1998/namespace";
     static const char xmlns_ns[] = "http://www.w3.org/2000/xmlns/";
     const char *err_name = NULL;
-    if (has_prefix && !ns_valid_namespace_prefix(name, prefix_len))
-        err_name = "InvalidCharacterError";
-    else if (!ns_valid_element_local_name(local))
+    if (!ns_is_xml_qname(name))
         err_name = "InvalidCharacterError";
     else if (has_prefix && !ns)
         err_name = "NamespaceError";
@@ -34362,10 +34377,10 @@ ns_document_createAttribute(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowTypeError(ctx, "1 argument required, but only 0 present");
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
-    if (!*raw) {
+    if (!ns_valid_attr_name(raw)) {
         JS_FreeCString(ctx, raw);
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
-            "createAttribute: name must not be empty");
+            "createAttribute: invalid attribute name");
     }
     char *name = ns_doc_wrapper_is_xml(ctx, this_val)
         ? g_strdup(raw) : g_ascii_strdown(raw, -1);

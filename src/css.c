@@ -11539,11 +11539,14 @@ ns_dir_first_strong(const ns_node *n, int depth)
     }
     if (n->kind != NS_NODE_ELEMENT) return NULL;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        gboolean html_ns = c->kind == NS_NODE_ELEMENT &&
+            !(c->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
         if (c->kind == NS_NODE_ELEMENT && c->name &&
-            (g_ascii_strcasecmp(c->name, "script") == 0 ||
-             g_ascii_strcasecmp(c->name, "style") == 0 ||
-             g_ascii_strcasecmp(c->name, "textarea") == 0 ||
-             g_ascii_strcasecmp(c->name, "bdi") == 0 ||
+            ((html_ns &&
+              (g_ascii_strcasecmp(c->name, "script") == 0 ||
+               g_ascii_strcasecmp(c->name, "style") == 0 ||
+               g_ascii_strcasecmp(c->name, "textarea") == 0 ||
+               g_ascii_strcasecmp(c->name, "bdi") == 0)) ||
              ns_element_get_attr(c, "dir")))
             continue;
         const char *d = ns_dir_first_strong(c, depth + 1);
