@@ -128,7 +128,8 @@ standards mode (see [§13](#13-the-html-syntax)).
 | `base` (`href`, `target`) | ✅ | `href` feeds URL resolution via `ns_url_resolve` |
 | `link rel="stylesheet"` | ✅ | fetched and cascaded (`src/css.c`) |
 | `link rel="icon"` | ✅ | favicon fetched as image |
-| `link rel="preload"`/`prefetch`/`dns-prefetch` | 🟡 | parsed as a generic link; no dedicated preload queue |
+| `link rel="preload"`/`prefetch` | ✅ | fetched early into the disk cache by the speculative-preload scanner (`src/engine.c`); no `as=`-based prioritization |
+| `link rel="preconnect"`/`dns-prefetch` | ✅ | warm the origin's DNS + TLS connection early via libcurl (`ns_net_preconnect_async`) |
 | `meta charset` | ✅ | feeds charset decode |
 | `meta name="viewport"` | 🟡 | parsed; viewport width/height come from `ns_css_set_viewport` (`src/css.c`); not all directives enforced |
 | `meta http-equiv` (CSP, refresh, etc.) | ✅ | CSP/Referrer-Policy honoured where reflected; **declarative refresh is applied**: the `refresh` directive and the HTTP `Refresh` response header are parsed per the WHATWG shared-declarative-refresh steps (digit time, `;`/`,` separators, optional `url`/`=` keyword, quoted/whitespace-trimmed URL — `ns_net_parse_refresh` in `src/net.c`), armed on document open (`browser_arm_declarative_refresh` in `src/libnordstjernen.c`, header first then the first `<meta>` in tree order), and after the timeout the navigation is handed to the shell through the pending-nav channel (`ns_browser_take_pending_nav` → the renderer's `X-Nav` header); an armed refresh keeps `ns_browser_animating` true so the shell's frame loop stays alive to deliver it |
