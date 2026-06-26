@@ -435,7 +435,7 @@ ns_run_headless(ns_headless_opts *hopts)
 static int
 ns_run_proc_gui(int argc, char **argv, const char *url,
                 const char *gsk_renderer_override, const char *session_path,
-                gboolean recover)
+                gboolean recover, gboolean private_mode)
 {
     (void)argc; (void)argv;
     const ns_config *cfg = ns_config_get();
@@ -454,7 +454,7 @@ ns_run_proc_gui(int argc, char **argv, const char *url,
         g_free(abs_path);
         if (file_url) start = file_url;
     }
-    int status = ns_procapp_run(start, session_path, recover);
+    int status = ns_procapp_run(start, session_path, recover, private_mode);
     g_free(file_url);
     g_free(g_self_exe);
     g_self_exe = NULL;
@@ -556,6 +556,7 @@ main(int argc, char **argv)
 #endif
 
     const char *gsk_renderer_override = NULL;
+    gboolean private_window = FALSE;
     ns_headless_opts hopts = {
         .url = NULL,
         .dump = NS_DUMP_TEXT,
@@ -570,6 +571,8 @@ main(int argc, char **argv)
             ns_net_set_proxy_override(argv[i] + 8);
         } else if (g_str_has_prefix(argv[i], "--gsk-renderer=")) {
             gsk_renderer_override = argv[i] + 15;
+        } else if (g_strcmp0(argv[i], "--private") == 0) {
+            private_window = TRUE;
         } else if (g_strcmp0(argv[i], "--print-config") == 0) {
             char *dump = ns_config_dump();
             fputs(dump, stdout);
@@ -650,7 +653,7 @@ main(int argc, char **argv)
         const char *session = ns_watchdog_child_session_arg(argc, argv);
         gboolean recover = ns_watchdog_child_is_recovery();
         return ns_run_proc_gui(argc, argv, hopts.url, gsk_renderer_override,
-                               session, recover);
+                               session, recover, private_window);
     }
 
     ns_apply_gsk_renderer(gsk_renderer_override ? gsk_renderer_override

@@ -16,7 +16,7 @@ G_BEGIN_DECLS
  * URLs (NULL when unsupervised), and recover requests reopening that session
  * after a crash. */
 int ns_procapp_run(const char *startup_url, const char *session_path,
-                   gboolean recover);
+                   gboolean recover, gboolean private_mode);
 
 G_END_DECLS
 

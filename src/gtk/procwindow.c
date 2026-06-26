@@ -717,7 +717,7 @@ proc_window_add_tab_full(ProcWindow *pw, const char *url, gboolean foreground,
     gtk_widget_add_css_class(tabbtn, "ns-tab-label");
     GtkWidget *tabcontent = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *icon = gtk_image_new_from_icon_name(
-        private_mode ? "view-private-symbolic" : "text-x-generic-symbolic");
+        private_mode ? "user-not-tracked-symbolic" : "text-x-generic-symbolic");
     gtk_image_set_pixel_size(GTK_IMAGE(icon), 16);
     if (private_mode)
         gtk_widget_set_tooltip_text(tabbtn, ns_i18n("Private tab"));
@@ -2008,6 +2008,7 @@ typedef struct {
     char    *url;
     char    *session_path;
     gboolean recover;
+    gboolean private_mode;
 } ProcAppCtx;
 
 static gboolean
@@ -2071,7 +2072,8 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
                                        "an unexpected exit"));
     }
     if (!opened)
-        proc_window_add_tab(pw, ctx->url ? ctx->url : "about:start", TRUE);
+        proc_window_add_tab_full(pw, ctx->url ? ctx->url : "about:start", TRUE,
+                                 ctx->private_mode);
 
     if (pw->session_path)
         pw->session_timer = g_timeout_add_seconds(4, write_session_cb, pw);
@@ -2081,12 +2083,13 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
 
 int
 ns_procapp_run(const char *startup_url, const char *session_path,
-               gboolean recover)
+               gboolean recover, gboolean private_mode)
 {
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
         .session_path = g_strdup(session_path),
         .recover = recover,
+        .private_mode = private_mode,
     };
     GtkApplication *app =
         gtk_application_new(NS_PROC_APP_ID, G_APPLICATION_NON_UNIQUE);
