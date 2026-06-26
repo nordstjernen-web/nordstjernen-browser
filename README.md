@@ -56,6 +56,13 @@ The full section-by-section walk-through lives in
   (`crypto.subtle` over OpenSSL).
 - **Networking** over HTTP/2 with libcurl — HSTS, CSP,
   subresource-integrity (SRI) checks, partitioned cookies.
+- **Safe browsing** — before a top-level navigation is fetched, its host
+  is checked against a local SHA-256 blocklist (`src/safebrowsing.c`,
+  `data/safebrowsing.list`); a match shows a full-page warning with the
+  choice to go back or continue. The check runs entirely on-device —
+  nothing about your browsing leaves the machine — and the list is
+  overridable via `~/.config/nordstjernen/safebrowsing.list` or
+  `$NS_SAFEBROWSING_LIST`.
 - **Media** — images, optional inline PDF; `<video>` plays **inline** for
   MPEG-1 (decoded in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg),
   MIT) and, when FFmpeg's libav is present at build time, **WebM** (VP9/VP8 +

@@ -359,6 +359,11 @@ install_data(
 )
 
 install_data(
+  'data/safebrowsing.list',
+  install_dir: get_option('datadir') / 'nordstjernen',
+)
+
+install_data(
   'data/i18n/am.lang',
   'data/i18n/ar.lang',
   'data/i18n/bn.lang',

@@ -31,6 +31,7 @@
 #include "paint.h"
 #include "pdf.h"
 #include "render.h"
+#include "safebrowsing.h"
 #include "security.h"
 #include "selection.h"
 #include "video.h"
@@ -682,11 +683,107 @@ headers_have_no_store(const char *raw)
 }
 
 static ns_browser *
+browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
+                       double viewport_height, int settle_ms,
+                       gboolean bfcache_ok, char *refresh_hdr,
+                       char *doc_language, char *csp_header, char *doc_charset,
+                       const char *url)
+{
+    int vw = viewport_width > 0 ? viewport_width : 1000;
+    double vh = viewport_height > 0.0
+        ? viewport_height
+        : (double)vw * 0.75;
+    ns_css_set_viewport((double)vw, vh);
+    const char *frag = strchr(url, '#');
+    ns_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
+
+    if (ns_config_get()->speculative_preload)
+        ns_engine_speculative_preload(doc, base,
+                                      ns_config_get()->images_enabled);
+
+    ns_browser *b = g_new0(ns_browser, 1);
+    b->doc = doc;
+    b->doc_charset = doc_charset;
+    b->doc_language = doc_language;
+    b->base_url = base;
+    ns_css_set_doc_language(b->doc_language);
+    b->vw = vw;
+    b->vh = vh;
+    b->bfcache_ok = bfcache_ok;
+    b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+                                         (GDestroyNotify)g_bytes_unref);
+    b->images = ns_image_cache_new();
+    b->videos = ns_video_cache_new();
+    ns_video_cache_set_base(b->videos, base);
+    b->styles = ns_engine_compute_cascade(doc, base, b->css_cache);
+
+    b->anim = ns_anim_new();
+    ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
+    ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
+
+    b->js = ns_js_new(browser_js_log, b,
+                      browser_js_mutated, b,
+                      browser_js_navigate, b);
+    if (b->js) {
+        ns_js_set_style_table(b->js, b->styles);
+        ns_js_set_image_cache(b->js, b->images);
+        ns_js_set_layout_flush_cb(b->js, browser_flush, b);
+        ns_js_set_download_cb(b->js, browser_js_download, b);
+        ns_js_set_audio_cb(b->js, browser_js_audio, b);
+        ns_js_add_csp_header(b->js, csp_header);
+        browser_apply_meta_csp(b->js, doc);
+        ns_js_run_scripts_in_doc(b->js, doc, base);
+    }
+    g_free(csp_header);
+    if (b->videos) {
+        ns_video_cache_set_js_cb(b->videos, browser_js_video, b);
+        ns_video_cache_set_audio_cb(b->videos, browser_js_audio, b);
+    }
+
+    browser_arm_declarative_refresh(b, refresh_hdr);
+    g_free(refresh_hdr);
+
+    browser_settle(b, settle_ms);
+    if (!b->layout || b->dirty)
+        browser_relayout(b);
+    return b;
+}
+
+static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
                     const void *body, size_t body_len, const char *content_type)
 {
     if (!url || !*url) return NULL;
+
+    if (g_str_has_prefix(url, NS_UNSAFE_CONTINUE_SCHEME)) {
+        char *real = g_strdup(url + strlen(NS_UNSAFE_CONTINUE_SCHEME));
+        char *host = ns_url_host_from(real);
+        if (host) {
+            ns_safebrowsing_allow_host(host);
+            g_free(host);
+        }
+        ns_browser *b = browser_open_common(real, viewport_width,
+                                            viewport_height, settle_ms,
+                                            body, body_len, content_type);
+        g_free(real);
+        return b;
+    }
+
+    if (!body) {
+        char *host = ns_url_host_from(url);
+        if (host && ns_safebrowsing_blocked(host)) {
+            char *html = ns_safebrowsing_interstitial(url, host);
+            g_free(host);
+            ns_node *doc = ns_html_parse(html, html ? (gssize)strlen(html) : 0);
+            g_free(html);
+            return browser_build_from_doc(doc, g_strdup(url), viewport_width,
+                                          viewport_height, settle_ms, FALSE,
+                                          NULL, NULL, NULL, g_strdup("UTF-8"),
+                                          url);
+        }
+        g_free(host);
+    }
 
     char *file_url = resolve_local_path(url);
     const char *fetch_url = file_url ? file_url : url;
@@ -755,64 +852,9 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     g_free(decoded);
     ns_response_free(resp);
 
-    int vw = viewport_width > 0 ? viewport_width : 1000;
-    double vh = viewport_height > 0.0
-        ? viewport_height
-        : (double)vw * 0.75;
-    ns_css_set_viewport((double)vw, vh);
-    const char *frag = strchr(url, '#');
-    ns_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
-
-    if (ns_config_get()->speculative_preload)
-        ns_engine_speculative_preload(doc, base,
-                                      ns_config_get()->images_enabled);
-
-    ns_browser *b = g_new0(ns_browser, 1);
-    b->doc = doc;
-    b->doc_charset = doc_charset;
-    b->doc_language = doc_language;
-    b->base_url = base;
-    ns_css_set_doc_language(b->doc_language);
-    b->vw = vw;
-    b->vh = vh;
-    b->bfcache_ok = bfcache_ok;
-    b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
-                                         (GDestroyNotify)g_bytes_unref);
-    b->images = ns_image_cache_new();
-    b->videos = ns_video_cache_new();
-    ns_video_cache_set_base(b->videos, base);
-    b->styles = ns_engine_compute_cascade(doc, base, b->css_cache);
-
-    b->anim = ns_anim_new();
-    ns_engine_load_keyframes(b->anim, doc, base, b->css_cache);
-    ns_engine_anim_observe(b->anim, b->styles, g_get_monotonic_time());
-
-    b->js = ns_js_new(browser_js_log, b,
-                      browser_js_mutated, b,
-                      browser_js_navigate, b);
-    if (b->js) {
-        ns_js_set_style_table(b->js, b->styles);
-        ns_js_set_image_cache(b->js, b->images);
-        ns_js_set_layout_flush_cb(b->js, browser_flush, b);
-        ns_js_set_download_cb(b->js, browser_js_download, b);
-        ns_js_set_audio_cb(b->js, browser_js_audio, b);
-        ns_js_add_csp_header(b->js, csp_header);
-        browser_apply_meta_csp(b->js, doc);
-        ns_js_run_scripts_in_doc(b->js, doc, base);
-    }
-    g_free(csp_header);
-    if (b->videos) {
-        ns_video_cache_set_js_cb(b->videos, browser_js_video, b);
-        ns_video_cache_set_audio_cb(b->videos, browser_js_audio, b);
-    }
-
-    browser_arm_declarative_refresh(b, refresh_hdr);
-    g_free(refresh_hdr);
-
-    browser_settle(b, settle_ms);
-    if (!b->layout || b->dirty)
-        browser_relayout(b);
-    return b;
+    return browser_build_from_doc(doc, base, viewport_width, viewport_height,
+                                  settle_ms, bfcache_ok, refresh_hdr,
+                                  doc_language, csp_header, doc_charset, url);
 }
 
 ns_browser *
