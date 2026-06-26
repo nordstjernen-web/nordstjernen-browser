@@ -3,6 +3,7 @@
 #include "ipc_http.h"
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -368,7 +369,10 @@ json_escape(const char *s)
 {
     if (!s)
         s = "";
-    size_t cap = strlen(s) * 6 + 1;
+    size_t len = strlen(s);
+    if (len > (SIZE_MAX - 1) / 6)
+        return NULL;
+    size_t cap = len * 6 + 1;
     char *out = malloc(cap);
     if (!out)
         return NULL;
