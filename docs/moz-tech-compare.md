@@ -145,17 +145,6 @@ remaining proposals (by ROI, then effort/risk) is at the end.
 
 ## Quality, UX & process
 
-### 18. Reader mode (article extraction)
-
-- **Upstream:** a standalone readability algorithm extracts the main
-  article and renders a clean, distraction-free view —
-  `toolkit/components/reader/readability/Readability.js`.
-- **Nordstjernen today:** no reader mode.
-- **The move:** a content-extraction pass (scoring blocks by text/link
-  density) feeding a minimal reader stylesheet. Self-contained; pairs well
-  with the engine's strong text-layout path.
-- **ROI: Med (UX) · Effort: M · Fit: good.**
-
 ### 19. Expose an accessibility tree
 
 - **Upstream:** a full accessibility subsystem maps the DOM to platform
@@ -413,8 +402,8 @@ whose pitch is security and privacy. One item (#41) is pulled above pure
 effort order on strategic weight — see the notes below.
 
 The bands: **P1–P4** are the High-ROI set, **P5–P6** Med–High,
-**P7** the lone cheap Med win, **P8–P18** Med/medium-effort, **P19–P25**
-Med/large-effort, **P26** the lone Low–Med housekeeping item.
+**P7** the lone cheap Med win, **P8–P17** Med/medium-effort, **P18–P24**
+Med/large-effort, **P25** the lone Low–Med housekeeping item.
 
 | P | # | Proposal | Area | ROI | Effort |
 |---|---|----------|------|-----|--------|
@@ -435,15 +424,14 @@ Med/large-effort, **P26** the lone Low–Med housekeeping item.
 | 15 | 17 | Pre-spawned renderer | Perf | Med | M |
 | 16 | 30 | Session restore / crash recovery | UX | Med | M |
 | 17 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
-| 18 | 18 | Reader mode | UX | Med | M |
-| 19 | 3 | Site isolation (per-origin) | Security | Med | L |
-| 20 | 6 | Compact cert revocation | Security | Med | L |
-| 21 | 19 | Accessibility tree | Quality | Med | L |
-| 22 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
-| 23 | 29 | Password manager (local-only) | Security/UX | Med | L |
-| 24 | 28 | On-device page translation | UX | Med | L |
-| 25 | 40 | Incremental / low-pause GC | Perf | Med | L |
-| 26 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
+| 18 | 3 | Site isolation (per-origin) | Security | Med | L |
+| 19 | 6 | Compact cert revocation | Security | Med | L |
+| 20 | 19 | Accessibility tree | Quality | Med | L |
+| 21 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 22 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 23 | 28 | On-device page translation | UX | Med | L |
+| 24 | 40 | Incremental / low-pause GC | Perf | Med | L |
+| 25 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Notes on the ranking:
 
@@ -458,8 +446,9 @@ Notes on the ranking:
   back/forward cache (#14) are all implemented and dropped from the list.
   (In-process WASM sandboxing of a decoder, the former #1, was also
   dropped: it needs a WASM build toolchain and an iterative build/measure
-  loop better suited to dedicated work than to this ranking.) The ranking
-  now opens with the cross-platform renderer sandbox (#41, P1).
+  loop better suited to dedicated work than to this ranking. Reader mode,
+  the former #18, was likewise dropped from the list.) The ranking now
+  opens with the cross-platform renderer sandbox (#41, P1).
 - **#41 (P1) is pulled up on strategic weight.** It carries more effort
   than some neighbours but is the security work most worth scheduling: two
   of three desktops ship an *unconfined renderer* today — the biggest gap
@@ -467,7 +456,7 @@ Notes on the ranking:
 - **#21 (P4), fingerprinting resistance, is now the biggest single
   privacy statement left** on the list, after private browsing mode (#37)
   and storage partitioning (#9) shipped.
-- **#20 (P26)** is cheap (S) but ranks last purely on leverage; it is
+- **#20 (P25)** is cheap (S) but ranks last purely on leverage; it is
   reasonable to fold in early as housekeeping rather than treat it as
   "last to do."
 
