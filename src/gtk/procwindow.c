@@ -1716,6 +1716,7 @@ typedef struct {
     GtkWidget  *home;
     GtkWidget  *search;
     GtkWidget  *search_dd;
+    GtkWidget  *cookies;
     GtkWidget  *webgl;
     GtkWidget  *storage;
     GtkWidget  *dnt;
@@ -1762,6 +1763,8 @@ on_settings_save(GtkButton *button, gpointer user_data)
             gtk_switch_get_active(GTK_SWITCH(s->storage));
         cfg->do_not_track = gtk_switch_get_active(GTK_SWITCH(s->dnt));
         cfg->global_privacy_control = gtk_switch_get_active(GTK_SWITCH(s->gpc));
+        cfg->cookie_policy = (ns_cookie_policy)
+            gtk_drop_down_get_selected(GTK_DROP_DOWN(s->cookies));
         cfg->cache_enabled = gtk_switch_get_active(GTK_SWITCH(s->cache));
         ns_config_save(NULL);
         g_free(s->pw->home_url);
@@ -1874,17 +1877,37 @@ act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_grid_attach(GTK_GRID(grid), s->search, 1, 2, 1, 1);
     g_signal_connect(s->search_dd, "notify::selected",
                      G_CALLBACK(on_search_engine_selected), s);
+    set_accessible_label(s->home, ns_i18n("Home page"));
+    set_accessible_label(s->search_dd, ns_i18n("Search engine"));
+    set_accessible_label(s->search, ns_i18n("Custom search URL"));
 
-    s->webgl   = settings_add_switch(GTK_GRID(grid), 3, ns_i18n("Enable WebGL"),
+    GtkWidget *cookie_l = gtk_label_new(ns_i18n("Cookies"));
+    gtk_widget_set_halign(cookie_l, GTK_ALIGN_START);
+    const char *cookie_names[] = {
+        ns_i18n("Accept all cookies"),
+        ns_i18n("Block third-party cookies"),
+        ns_i18n("Block all cookies"),
+        NULL
+    };
+    s->cookies = gtk_drop_down_new_from_strings(cookie_names);
+    gtk_widget_set_hexpand(s->cookies, TRUE);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->cookies),
+                               cfg ? (guint)cfg->cookie_policy
+                                   : (guint)NS_COOKIE_FIRST_PARTY);
+    set_accessible_label(s->cookies, ns_i18n("Cookies"));
+    gtk_grid_attach(GTK_GRID(grid), cookie_l, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), s->cookies, 1, 3, 1, 1);
+
+    s->webgl   = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Enable WebGL"),
                                      cfg ? cfg->webgl_enabled : FALSE);
-    s->storage = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Enable local storage"),
+    s->storage = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Enable local storage"),
                                      cfg ? cfg->local_storage_enabled : TRUE);
-    s->dnt     = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Send Do Not Track"),
+    s->dnt     = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Send Do Not Track"),
                                      cfg ? cfg->do_not_track : FALSE);
-    s->gpc     = settings_add_switch(GTK_GRID(grid), 6,
+    s->gpc     = settings_add_switch(GTK_GRID(grid), 7,
                                      ns_i18n("Send Global Privacy Control (GPC)"),
                                      cfg ? cfg->global_privacy_control : TRUE);
-    s->cache   = settings_add_switch(GTK_GRID(grid), 7, ns_i18n("Enable cache"),
+    s->cache   = settings_add_switch(GTK_GRID(grid), 8, ns_i18n("Enable cache"),
                                      cfg ? cfg->cache_enabled : TRUE);
 
     gtk_box_append(GTK_BOX(box), grid);
