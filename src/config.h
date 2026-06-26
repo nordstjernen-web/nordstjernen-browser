@@ -53,6 +53,7 @@ typedef struct ns_config {
     gboolean strip_tracking_params;
     gboolean https_first;
     gboolean harden_allocator;
+    gboolean speculative_preload;
     gboolean images_enabled;
     gboolean webgl_enabled;
     gboolean local_storage_enabled;

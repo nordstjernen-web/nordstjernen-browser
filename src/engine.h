@@ -29,6 +29,9 @@ ns_response *ns_engine_post_blocking(const char *url, const char *top_url,
 void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
                                    GPtrArray *out, GHashTable *css_cache);
 
+void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
+                                   gboolean include_images);
+
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                                       GHashTable *css_cache);
 

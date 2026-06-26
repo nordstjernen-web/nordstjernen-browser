@@ -738,6 +738,10 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     const char *frag = strchr(url, '#');
     ns_css_set_target_fragment(frag && *(frag + 1) ? frag + 1 : NULL);
 
+    if (ns_config_get()->speculative_preload)
+        ns_engine_speculative_preload(doc, base,
+                                      ns_config_get()->images_enabled);
+
     ns_browser *b = g_new0(ns_browser, 1);
     b->doc = doc;
     b->doc_charset = doc_charset;

@@ -90,6 +90,82 @@ ns_engine_post_blocking(const char *url, const char *top_url,
 }
 
 static gboolean
+rel_has_token(const char *rel, const char *token)
+{
+    if (!rel || !token) return FALSE;
+    size_t tlen = strlen(token);
+    for (const char *p = rel; *p;) {
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == '\f')
+            p++;
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' &&
+               *p != '\f')
+            p++;
+        if ((size_t)(p - start) == tlen &&
+            g_ascii_strncasecmp(start, token, tlen) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+preload_collect(const ns_node *n, const char *base, gboolean include_images,
+                GPtrArray *out, GHashTable *seen)
+{
+    if (!n) return;
+    const char *attr = NULL;
+    if (include_images && ns_node_is_element_named(n, "img"))
+        attr = ns_element_get_attr(n, "src");
+    else if (ns_node_is_element_named(n, "script"))
+        attr = ns_element_get_attr(n, "src");
+    else if (ns_node_is_element_named(n, "link")) {
+        const char *rel = ns_element_get_attr(n, "rel");
+        if (rel && (rel_has_token(rel, "stylesheet") ||
+                    rel_has_token(rel, "preload") ||
+                    rel_has_token(rel, "modulepreload")))
+            attr = ns_element_get_attr(n, "href");
+    }
+    if (attr && *attr && !g_str_has_prefix(attr, "data:")) {
+        char *abs = ns_url_resolve(base, attr);
+        if (abs && ns_url_is_http_or_https(abs) &&
+            !g_hash_table_contains(seen, abs)) {
+            g_hash_table_add(seen, g_strdup(abs));
+            g_ptr_array_add(out, abs);
+            abs = NULL;
+        }
+        g_free(abs);
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling)
+        preload_collect(c, base, include_images, out, seen);
+}
+
+static void
+on_preload_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)src;
+    (void)user_data;
+    ns_response *resp = ns_net_fetch_finish(res, NULL);
+    if (resp) ns_response_free(resp);
+}
+
+void
+ns_engine_speculative_preload(ns_node *doc, const char *base_url,
+                              gboolean include_images)
+{
+    if (!doc || !base_url || !ns_url_is_http_or_https(base_url))
+        return;
+    GPtrArray *urls = g_ptr_array_new_with_free_func(g_free);
+    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                             g_free, NULL);
+    preload_collect(doc, base_url, include_images, urls, seen);
+    g_hash_table_destroy(seen);
+    for (guint i = 0; i < urls->len; i++)
+        ns_net_fetch_async(g_ptr_array_index(urls, i), base_url, NULL,
+                           on_preload_fetched, NULL);
+    g_ptr_array_free(urls, TRUE);
+}
+
+static gboolean
 content_type_is_css(const char *ct)
 {
     if (!ct || !*ct) return TRUE; /* missing type: be lenient */
