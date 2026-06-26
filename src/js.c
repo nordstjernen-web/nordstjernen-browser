@@ -194,6 +194,12 @@ static JSValue ns_element_getElementsByTagNameNS(JSContext *ctx, JSValueConst th
                                                  int argc, JSValueConst *argv);
 static gboolean ns_valid_element_local_name(const char *s);
 static gboolean ns_valid_attr_name(const char *s);
+static JSValue ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv);
+static JSValue ns_event_initMouseEvent(JSContext *ctx, JSValueConst this_val,
+                                       int argc, JSValueConst *argv);
+static JSValue ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv);
 static JSValue ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val);
 static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
@@ -33673,6 +33679,12 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_event_link_proto(ctx, global, "TextEvent",        "UIEvent");
     ns_event_link_proto(ctx, global, "InputEvent",       "UIEvent");
     ns_event_link_proto(ctx, global, "TouchEvent",       "UIEvent");
+    ns_bind_ctor_proto_fn(ctx, global, "UIEvent", "initUIEvent",
+                          ns_event_initUIEvent, 5);
+    ns_bind_ctor_proto_fn(ctx, global, "MouseEvent", "initMouseEvent",
+                          ns_event_initMouseEvent, 15);
+    ns_bind_ctor_proto_fn(ctx, global, "KeyboardEvent", "initKeyboardEvent",
+                          ns_event_initKeyboardEvent, 10);
 
     static const ns_fn_def event_base_ctors[] = {
         { "EventTarget", 0 }, { "Node", 0 }, { "Element", 0 },
@@ -34727,6 +34739,70 @@ ns_event_initUIEvent(JSContext *ctx, JSValueConst this_val,
                       argc >= 4 ? JS_DupValue(ctx, argv[3]) : JS_NULL);
     JS_SetPropertyStr(ctx, this_val, "detail",
                       argc >= 5 ? JS_DupValue(ctx, argv[4]) : JS_NewInt32(ctx, 0));
+    return JS_UNDEFINED;
+}
+
+static gboolean
+ns_event_init_in_dispatch(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue d = JS_GetPropertyStr(ctx, this_val, "_dispatching");
+    gboolean in = JS_ToBool(ctx, d) ? TRUE : FALSE;
+    JS_FreeValue(ctx, d);
+    return in;
+}
+
+static JSValue
+ns_event_initMouseEvent(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "initMouseEvent requires at least 1 argument");
+    if (ns_event_init_in_dispatch(ctx, this_val)) return JS_UNDEFINED;
+    int base = argc < 5 ? argc : 5;
+    JS_FreeValue(ctx, ns_event_initUIEvent(ctx, this_val, base, argv));
+    static const char *const coords[4] =
+        { "screenX", "screenY", "clientX", "clientY" };
+    for (int i = 0; i < 4; i++) {
+        int32_t v = 0;
+        if (argc >= 6 + i) JS_ToInt32(ctx, &v, argv[5 + i]);
+        JS_SetPropertyStr(ctx, this_val, coords[i], JS_NewInt32(ctx, v));
+    }
+    static const char *const mods[4] =
+        { "ctrlKey", "altKey", "shiftKey", "metaKey" };
+    for (int i = 0; i < 4; i++) {
+        gboolean b = argc >= 10 + i && JS_ToBool(ctx, argv[9 + i]);
+        JS_SetPropertyStr(ctx, this_val, mods[i], b ? JS_TRUE : JS_FALSE);
+    }
+    int32_t button = 0;
+    if (argc >= 14) JS_ToInt32(ctx, &button, argv[13]);
+    JS_SetPropertyStr(ctx, this_val, "button", JS_NewInt32(ctx, button));
+    JS_SetPropertyStr(ctx, this_val, "relatedTarget",
+                      argc >= 15 ? JS_DupValue(ctx, argv[14]) : JS_NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "initKeyboardEvent requires at least 1 argument");
+    if (ns_event_init_in_dispatch(ctx, this_val)) return JS_UNDEFINED;
+    int base = argc < 4 ? argc : 4;
+    JS_FreeValue(ctx, ns_event_initUIEvent(ctx, this_val, base, argv));
+    if (argc >= 5)
+        JS_SetPropertyStr(ctx, this_val, "key", JS_DupValue(ctx, argv[4]));
+    if (argc >= 6) {
+        int32_t loc = 0;
+        JS_ToInt32(ctx, &loc, argv[5]);
+        JS_SetPropertyStr(ctx, this_val, "location", JS_NewInt32(ctx, loc));
+    }
+    static const char *const mods[4] =
+        { "ctrlKey", "altKey", "shiftKey", "metaKey" };
+    for (int i = 0; i < 4; i++) {
+        gboolean b = argc >= 7 + i && JS_ToBool(ctx, argv[6 + i]);
+        JS_SetPropertyStr(ctx, this_val, mods[i], b ? JS_TRUE : JS_FALSE);
+    }
     return JS_UNDEFINED;
 }
 
