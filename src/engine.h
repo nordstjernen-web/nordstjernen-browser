@@ -57,7 +57,8 @@ typedef struct ns_engine_img_session ns_engine_img_session;
 
 ns_engine_img_session *ns_engine_fetch_images_start(
     ns_box *root, const char *base_url, ns_image_cache *cache,
-    GHashTable *requested,
+    GHashTable *requested, double scroll_y, double viewport_h,
+    gboolean *deferred_any,
     void (*arrived_cb)(gpointer user_data), gpointer user_data);
 int  ns_engine_img_session_outstanding(const ns_engine_img_session *s);
 void ns_engine_img_session_close(ns_engine_img_session *s);

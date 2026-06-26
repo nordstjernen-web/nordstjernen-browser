@@ -155,9 +155,11 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
 {
     if (!n) return;
     const char *attr = NULL;
-    if (include_images && ns_node_is_element_named(n, "img"))
-        attr = ns_element_get_attr(n, "src");
-    else if (ns_node_is_element_named(n, "script"))
+    if (include_images && ns_node_is_element_named(n, "img")) {
+        const char *loading = ns_element_get_attr(n, "loading");
+        if (!loading || g_ascii_strcasecmp(loading, "lazy") != 0)
+            attr = ns_element_get_attr(n, "src");
+    } else if (ns_node_is_element_named(n, "script"))
         attr = ns_element_get_attr(n, "src");
     else if (ns_node_is_element_named(n, "link")) {
         const char *rel = ns_element_get_attr(n, "rel");
@@ -526,17 +528,34 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     g_free(it);
 }
 
+#define NS_LAZY_IMAGE_MARGIN_PX 1200.0
+
+static gboolean
+engine_image_is_lazy(const ns_box *box)
+{
+    if (!box || box->kind != NS_BOX_IMAGE || !box->dom) return FALSE;
+    const char *l = ns_element_get_attr(box->dom, "loading");
+    return l && g_ascii_strcasecmp(l, "lazy") == 0;
+}
+
 static GHashTable *
 engine_collect_wanted_images(ns_box *root, const char *base_url,
-                             ns_image_cache *cache)
+                             ns_image_cache *cache, double scroll_y,
+                             double viewport_h, gboolean *deferred_any)
 {
     GPtrArray *imgs = g_ptr_array_new();
     ns_layout_collect_images(root, imgs);
     GHashTable *wanted = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                g_free, NULL);
+    double lazy_limit = (viewport_h > 0.0)
+        ? scroll_y + viewport_h + NS_LAZY_IMAGE_MARGIN_PX : G_MAXDOUBLE;
     for (guint i = 0; i < imgs->len; i++) {
         ns_box *box = g_ptr_array_index(imgs, i);
         if (!box->media) continue;
+        if (box->y > lazy_limit && engine_image_is_lazy(box)) {
+            if (deferred_any) *deferred_any = TRUE;
+            continue;
+        }
         GPtrArray *srcs = g_ptr_array_new();
         if (box->media->image_src)
             g_ptr_array_add(srcs, box->media->image_src);
@@ -619,11 +638,15 @@ ns_engine_img_session *
 ns_engine_fetch_images_start(ns_box *root, const char *base_url,
                              ns_image_cache *cache,
                              GHashTable *requested,
+                             double scroll_y, double viewport_h,
+                             gboolean *deferred_any,
                              void (*arrived_cb)(gpointer user_data),
                              gpointer user_data)
 {
     if (!root || !base_url || !cache) return NULL;
-    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache);
+    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache,
+                                                      scroll_y, viewport_h,
+                                                      deferred_any);
     if (requested) {
         GHashTableIter rit;
         gpointer rkey;
@@ -683,7 +706,8 @@ ns_engine_fetch_images(ns_box *root, const char *base_url,
                        ns_image_cache *cache)
 {
     if (!root || !base_url || !cache) return;
-    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache);
+    GHashTable *wanted = engine_collect_wanted_images(root, base_url, cache,
+                                                      0.0, 0.0, NULL);
 
     guint n = g_hash_table_size(wanted);
     if (n == 0) {

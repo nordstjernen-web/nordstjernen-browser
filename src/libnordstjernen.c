@@ -51,6 +51,9 @@ struct ns_browser {
     int             vw;
     double          vh;
     gboolean        images_fetched;
+    gboolean        has_deferred_lazy;
+    double          cur_scroll_y;
+    double          cur_viewport_h;
     GPtrArray      *img_sessions;
     GHashTable     *img_requested;
     gboolean        dirty;
@@ -153,6 +156,7 @@ browser_relayout(ns_browser *b)
     b->relayout_cost_us = g_get_monotonic_time() - relayout_t0;
     b->relaying = FALSE;
     b->images_fetched = FALSE;
+    b->has_deferred_lazy = FALSE;
     if (b->js) {
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_layout_root(b->js, b->layout);
@@ -250,18 +254,23 @@ browser_images_outstanding(ns_browser *browser)
 static void
 browser_ensure_images(ns_browser *browser)
 {
-    if (browser->images_fetched) return;
-    browser->images_fetched = TRUE;
+    if (browser->images_fetched && !browser->has_deferred_lazy) return;
     if (!browser->img_requested)
         browser->img_requested = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                        g_free, NULL);
     if (!browser->img_sessions)
         browser->img_sessions = g_ptr_array_new();
+    double vp_h = browser->cur_viewport_h > 0.0 ? browser->cur_viewport_h
+                                                : browser->vh;
+    gboolean deferred = FALSE;
     ns_engine_img_session *s =
         ns_engine_fetch_images_start(browser->layout, browser->base_url,
                                      browser->images, browser->img_requested,
+                                     browser->cur_scroll_y, vp_h, &deferred,
                                      browser_image_arrived, browser);
     if (s) g_ptr_array_add(browser->img_sessions, s);
+    browser->images_fetched = TRUE;
+    browser->has_deferred_lazy = deferred;
 }
 
 static void
@@ -1107,6 +1116,8 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
     if (!(scale > 0)) scale = 1.0;
 
+    browser->cur_scroll_y = (double)scroll_y;
+    browser->cur_viewport_h = (double)height / scale;
     browser_ensure_images(browser);
 
     cairo_surface_t *surf =
@@ -1166,6 +1177,8 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
     if (!(scale > 0)) scale = 1.0;
 
+    browser->cur_scroll_y = (double)scroll_y;
+    browser->cur_viewport_h = (double)height / scale;
     browser_ensure_images(browser);
 
     cairo_surface_t *surf =
