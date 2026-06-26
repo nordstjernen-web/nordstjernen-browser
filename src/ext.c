@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <glib/gstdio.h>
+#include <libpsl.h>
 
 #include "config.h"
 
@@ -21,6 +22,7 @@ typedef struct {
 typedef struct {
     int        priority;
     int        action;
+    int        third_party;
     char      *url_filter;
     GRegex    *regex;
     gboolean   case_sensitive;
@@ -33,6 +35,12 @@ typedef struct {
 } ns_dnr_rule;
 
 typedef struct {
+    GPtrArray *domains;
+    GPtrArray *excluded_domains;
+    char      *selector;
+} ns_cosmetic_rule;
+
+typedef struct {
     char      *id;
     char      *name;
     char      *version;
@@ -40,9 +48,11 @@ typedef struct {
     char      *manifest_json;
     GPtrArray *content_scripts;
     GPtrArray *dnr_rules;
+    GPtrArray *cosmetic_rules;
 } ns_ext;
 
-static GPtrArray *g_exts;
+static GPtrArray  *g_exts;
+static GHashTable *g_blocked_hosts;
 
 static gboolean
 ns_ext_area_ok(const char *area)
@@ -562,6 +572,206 @@ ns_ext_parse_dnr(ns_ext *e, JSContext *ctx, JSValueConst manifest)
     JS_FreeValue(ctx, dnr);
 }
 
+static void
+ns_cosmetic_rule_free(gpointer p)
+{
+    ns_cosmetic_rule *c = p;
+    if (c->domains) g_ptr_array_free(c->domains, TRUE);
+    if (c->excluded_domains) g_ptr_array_free(c->excluded_domains, TRUE);
+    g_free(c->selector);
+    g_free(c);
+}
+
+static void
+ns_abp_split_domains(const char *spec, char sep,
+                     GPtrArray **inc, GPtrArray **exc)
+{
+    if (!spec || !*spec) return;
+    gchar **parts = g_strsplit(spec, sep == ',' ? "," : "|", -1);
+    for (gchar **p = parts; *p; p++) {
+        char *d = g_strstrip(*p);
+        if (!*d) continue;
+        if (*d == '~') {
+            d++;
+            if (!*d) continue;
+            if (!*exc) *exc = g_ptr_array_new_with_free_func(g_free);
+            g_ptr_array_add(*exc, g_ascii_strdown(d, -1));
+        } else {
+            if (!*inc) *inc = g_ptr_array_new_with_free_func(g_free);
+            g_ptr_array_add(*inc, g_ascii_strdown(d, -1));
+        }
+    }
+    g_strfreev(parts);
+}
+
+static const char *
+ns_abp_type_token(const char *t)
+{
+    if (strcmp(t, "script") == 0)     return "script";
+    if (strcmp(t, "stylesheet") == 0) return "stylesheet";
+    if (strcmp(t, "image") == 0)      return "image";
+    if (strcmp(t, "font") == 0)       return "font";
+    if (strcmp(t, "media") == 0)      return "media";
+    return NULL;
+}
+
+static gboolean
+ns_abp_option_unsupported(const char *o)
+{
+    static const char *skip[] = {
+        "redirect", "redirect-rule", "removeparam", "csp", "replace",
+        "rewrite", "removeheader", "cookie", "header", "empty", "mp4",
+        "popup", "popunder", "webrtc", "inline-script", "inline-font",
+        "genericblock", "generichide", "specifichide", "elemhide",
+        "ehide", "document", "doc",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(skip); i++)
+        if (strcmp(o, skip[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_abp_is_simple_host(const char *pat)
+{
+    if (!g_str_has_prefix(pat, "||") || !g_str_has_suffix(pat, "^")) return FALSE;
+    for (const char *p = pat + 2; *p && *(p + 1); p++)
+        if (!(g_ascii_isalnum((guchar)*p) || *p == '.' || *p == '-'))
+            return FALSE;
+    return strlen(pat) > 3;
+}
+
+static void
+ns_abp_parse_network(ns_ext *e, const char *line)
+{
+    gboolean exception = FALSE;
+    const char *pat = line;
+    if (g_str_has_prefix(pat, "@@")) { exception = TRUE; pat += 2; }
+
+    g_autofree char *pattern = NULL;
+    g_autofree char *options = NULL;
+    if (*pat == '/') {
+        const char *close = strrchr(pat, '/');
+        if (close && close != pat) {
+            pattern = g_strndup(pat, close - pat + 1);
+            if (*(close + 1) == '$') options = g_strdup(close + 2);
+        } else {
+            pattern = g_strdup(pat);
+        }
+    } else {
+        const char *dollar = strchr(pat, '$');
+        if (dollar) {
+            pattern = g_strndup(pat, dollar - pat);
+            options = g_strdup(dollar + 1);
+        } else {
+            pattern = g_strdup(pat);
+        }
+    }
+    if (!pattern || !*pattern) return;
+
+    if (!exception && !options && ns_abp_is_simple_host(pattern)) {
+        char *host = g_ascii_strdown(pattern + 2, strlen(pattern) - 3);
+        g_hash_table_add(g_blocked_hosts, host);
+        return;
+    }
+
+    ns_dnr_rule *rule = g_new0(ns_dnr_rule, 1);
+    rule->action = exception ? 1 : 0;
+    rule->priority = 1;
+
+    gboolean is_regex = (*pattern == '/' && g_str_has_suffix(pattern, "/") &&
+                         strlen(pattern) > 1);
+    if (is_regex) {
+        g_autofree char *rx = g_strndup(pattern + 1, strlen(pattern) - 2);
+        rule->regex = g_regex_new(rx, G_REGEX_CASELESS, 0, NULL);
+        if (!rule->regex) { ns_dnr_rule_free(rule); return; }
+    } else {
+        rule->url_filter = g_strdup(pattern);
+    }
+
+    if (options) {
+        gchar **opts = g_strsplit(options, ",", -1);
+        for (gchar **o = opts; *o; o++) {
+            char *opt = g_strstrip(*o);
+            gboolean neg = (*opt == '~');
+            if (neg) opt++;
+            if (g_str_has_prefix(opt, "domain=")) {
+                ns_abp_split_domains(opt + 7, '|',
+                                     &rule->initiator_domains,
+                                     &rule->excluded_initiator_domains);
+            } else if (strcmp(opt, "third-party") == 0) {
+                rule->third_party = neg ? -1 : 1;
+            } else if (strcmp(opt, "match-case") == 0) {
+                rule->case_sensitive = TRUE;
+            } else if (ns_abp_type_token(opt)) {
+                GPtrArray **dst = neg ? &rule->excluded_resource_types
+                                      : &rule->resource_types;
+                if (!*dst) *dst = g_ptr_array_new_with_free_func(g_free);
+                g_ptr_array_add(*dst, g_strdup(ns_abp_type_token(opt)));
+            } else if (ns_abp_option_unsupported(opt)) {
+                g_strfreev(opts);
+                ns_dnr_rule_free(rule);
+                return;
+            }
+        }
+        g_strfreev(opts);
+    }
+    g_ptr_array_add(e->dnr_rules, rule);
+}
+
+static void
+ns_abp_parse_cosmetic(ns_ext *e, const char *line, const char *sep)
+{
+    const char *at = strstr(line, sep);
+    if (!at) return;
+    g_autofree char *dom_spec = g_strndup(line, at - line);
+    const char *selector = at + strlen(sep);
+    while (*selector == ' ') selector++;
+    if (!*selector || strchr(selector, '{')) return;
+    if (g_str_has_prefix(selector, "+js") || g_str_has_prefix(selector, "script:"))
+        return;
+
+    ns_cosmetic_rule *c = g_new0(ns_cosmetic_rule, 1);
+    ns_abp_split_domains(dom_spec, ',', &c->domains, &c->excluded_domains);
+    c->selector = g_strstrip(g_strdup(selector));
+    g_ptr_array_add(e->cosmetic_rules, c);
+}
+
+static void
+ns_ext_load_filter_list(ns_ext *e, const char *path)
+{
+    g_autofree char *full = g_build_filename(e->base_dir, path, NULL);
+    char *raw = NULL;
+    if (!g_file_get_contents(full, &raw, NULL, NULL)) return;
+    gchar **lines = g_strsplit(raw, "\n", -1);
+    for (gchar **lp = lines; *lp; lp++) {
+        char *line = g_strstrip(*lp);
+        if (!*line || *line == '!' || *line == '[') continue;
+        if (strstr(line, "#@#") || strstr(line, "#?#") ||
+            strstr(line, "#$#") || strstr(line, "#%#"))
+            continue;
+        if (strstr(line, "##"))
+            ns_abp_parse_cosmetic(e, line, "##");
+        else
+            ns_abp_parse_network(e, line);
+    }
+    g_strfreev(lines);
+    g_free(raw);
+}
+
+static void
+ns_ext_parse_filter_lists(ns_ext *e, JSContext *ctx, JSValueConst manifest)
+{
+    JSValue arr = JS_GetPropertyStr(ctx, manifest, "nordstjernen_filter_lists");
+    if (JS_IsObject(arr)) {
+        GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+        ns_ext_collect_strings(ctx, arr, paths);
+        for (guint i = 0; i < paths->len; i++)
+            ns_ext_load_filter_list(e, g_ptr_array_index(paths, i));
+        g_ptr_array_free(paths, TRUE);
+    }
+    JS_FreeValue(ctx, arr);
+}
+
 static char *
 ns_ext_parse_id(JSContext *ctx, JSValueConst manifest, const char *dir)
 {
@@ -604,8 +814,10 @@ ns_ext_load_one(const char *dir, JSContext *ctx)
     e->id = ns_ext_parse_id(ctx, obj, dir);
     e->content_scripts = g_ptr_array_new_with_free_func(ns_ext_cs_free);
     e->dnr_rules = g_ptr_array_new_with_free_func(ns_dnr_rule_free);
+    e->cosmetic_rules = g_ptr_array_new_with_free_func(ns_cosmetic_rule_free);
     ns_ext_parse_content_scripts(e, ctx, obj);
     ns_ext_parse_dnr(e, ctx, obj);
+    ns_ext_parse_filter_lists(e, ctx, obj);
     JS_FreeValue(ctx, obj);
     g_ptr_array_add(g_exts, e);
 }
@@ -634,6 +846,8 @@ static void
 ns_ext_do_init(void)
 {
     g_exts = g_ptr_array_new();
+    g_blocked_hosts = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                            g_free, NULL);
 
     JSRuntime *rt = JS_NewRuntime();
     if (!rt) return;
@@ -721,12 +935,30 @@ ns_ext_append_js_string(GString *out, const char *s)
     g_string_append_c(out, '"');
 }
 
+static char *ns_ext_cosmetic_css_for_host(const char *host);
+static char *ns_ext_strip_port(const char *host);
+
 char *
 ns_ext_content_scripts_for_url(const char *url, gboolean at_start)
 {
     ns_ext_init();
     if (!url || !*url || g_exts->len == 0) return NULL;
     GString *out = g_string_new(NULL);
+    if (at_start) {
+        g_autofree char *s = NULL, *h = NULL, *pth = NULL;
+        ns_ext_url_split(url, &s, &h, &pth);
+        g_autofree char *h_np = ns_ext_strip_port(h);
+        g_autofree char *cosmetic = ns_ext_cosmetic_css_for_host(h_np);
+        if (cosmetic) {
+            g_string_append(out,
+                ";(function(){try{var __ndch=document.createElement('style');"
+                "__ndch.textContent=");
+            ns_ext_append_js_string(out, cosmetic);
+            g_string_append(out,
+                ";(document.head||document.documentElement||document)"
+                ".appendChild(__ndch);}catch(e){}})();\n");
+        }
+    }
     for (guint i = 0; i < g_exts->len; i++) {
         ns_ext *e = g_ptr_array_index(g_exts, i);
         for (guint j = 0; j < e->content_scripts->len; j++) {
@@ -846,6 +1078,29 @@ ns_dnr_domain_list_match(GPtrArray *list, const char *host)
     return FALSE;
 }
 
+static char *
+ns_ext_cosmetic_css_for_host(const char *host)
+{
+    if (!host || !*host || !g_exts) return NULL;
+    GString *css = g_string_new(NULL);
+    for (guint i = 0; i < g_exts->len; i++) {
+        ns_ext *e = g_ptr_array_index(g_exts, i);
+        if (!e->cosmetic_rules) continue;
+        for (guint j = 0; j < e->cosmetic_rules->len; j++) {
+            ns_cosmetic_rule *c = g_ptr_array_index(e->cosmetic_rules, j);
+            if (c->excluded_domains &&
+                ns_dnr_domain_list_match(c->excluded_domains, host))
+                continue;
+            if (c->domains && !ns_dnr_domain_list_match(c->domains, host))
+                continue;
+            g_string_append(css, c->selector);
+            g_string_append(css, "{display:none !important}\n");
+        }
+    }
+    if (css->len == 0) { g_string_free(css, TRUE); return NULL; }
+    return g_string_free(css, FALSE);
+}
+
 static const char *
 ns_dnr_infer_type(const char *url)
 {
@@ -886,10 +1141,49 @@ ns_dnr_type_in_list(GPtrArray *list, const char *type)
     return FALSE;
 }
 
+static char *
+ns_ext_strip_port(const char *host)
+{
+    if (!host) return NULL;
+    const char *c = strchr(host, ':');
+    return c ? g_strndup(host, c - host) : g_strdup(host);
+}
+
+static int
+ns_ext_third_party(const char *req_host, const char *init_host)
+{
+    if (!req_host || !init_host) return -1;
+    g_autofree char *rh = ns_ext_strip_port(req_host);
+    g_autofree char *ih = ns_ext_strip_port(init_host);
+    if (!*rh || !*ih) return -1;
+    if (strcmp(rh, ih) == 0) return 0;
+    const psl_ctx_t *psl = psl_builtin();
+    if (!psl) return strcmp(rh, ih) == 0 ? 0 : 1;
+    const char *rr = psl_registrable_domain(psl, rh);
+    const char *ir = psl_registrable_domain(psl, ih);
+    if (!rr || !ir) return strcmp(rh, ih) == 0 ? 0 : 1;
+    return strcmp(rr, ir) == 0 ? 0 : 1;
+}
+
+static gboolean
+ns_ext_host_indexed(const char *host)
+{
+    if (!host || g_hash_table_size(g_blocked_hosts) == 0) return FALSE;
+    g_autofree char *h = ns_ext_strip_port(host);
+    for (const char *p = h; p && *p; ) {
+        if (g_hash_table_contains(g_blocked_hosts, p)) return TRUE;
+        const char *dot = strchr(p, '.');
+        p = dot ? dot + 1 : NULL;
+    }
+    return FALSE;
+}
+
 static gboolean
 ns_dnr_rule_matches(const ns_dnr_rule *r, const char *url,
-                    const char *host, const char *init_host)
+                    const char *host, const char *init_host, int tp)
 {
+    if (r->third_party == 1 && tp != 1) return FALSE;
+    if (r->third_party == -1 && tp != 0) return FALSE;
     if (r->request_domains && !ns_dnr_domain_list_match(r->request_domains, host))
         return FALSE;
     if (r->excluded_request_domains &&
@@ -929,15 +1223,20 @@ ns_ext_should_block(const char *url, const char *initiator)
     ns_ext_url_split(url, &us, &uh, &up);
     g_autofree char *is = NULL, *ih = NULL, *ip = NULL;
     if (initiator) ns_ext_url_split(initiator, &is, &ih, &ip);
+    int tp = ns_ext_third_party(uh, ih);
+    g_autofree char *uh_np = ns_ext_strip_port(uh);
+    g_autofree char *ih_np = ih ? ns_ext_strip_port(ih) : NULL;
 
     int best_pri = -1;
     gboolean best_allow = FALSE, best_block = FALSE;
+    if (ns_ext_host_indexed(uh)) { best_pri = 1; best_block = TRUE; }
+
     for (guint i = 0; i < g_exts->len; i++) {
         ns_ext *e = g_ptr_array_index(g_exts, i);
         if (!e->dnr_rules) continue;
         for (guint j = 0; j < e->dnr_rules->len; j++) {
             const ns_dnr_rule *r = g_ptr_array_index(e->dnr_rules, j);
-            if (!ns_dnr_rule_matches(r, url, uh, ih)) continue;
+            if (!ns_dnr_rule_matches(r, url, uh_np, ih_np, tp)) continue;
             if (r->priority > best_pri) {
                 best_pri = r->priority;
                 best_allow = (r->action == 1);

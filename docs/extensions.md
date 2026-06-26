@@ -39,6 +39,27 @@ locations are scanned at renderer start:
   `block` at equal priority. Rules are evaluated in the renderer's
   network path, so no per-request JavaScript runs. This is enough to
   drive ad/tracker blocking from a hosts-style or filter-list ruleset.
+- **Adblock filter lists (EasyList / ABP)**: a manifest key
+  `nordstjernen_filter_lists` lists paths to plain-text filter lists in
+  Adblock-Plus / EasyList syntax, so an existing list (EasyList,
+  EasyPrivacy, uBO filters) can be dropped in without converting to the
+  `declarativeNetRequest` JSON format. Supported:
+  - **Network rules** — `||host^`, `|`/`^`/`*` anchors, plain
+    substrings, and `/regex/` rules; `@@` exception (allow) rules; and
+    options after `$`: resource types (`script`, `image`, `stylesheet`,
+    `font`, `media`, with `~` negation), `third-party` / `~third-party`
+    (first/third party decided by registrable domain via the public
+    suffix list), `domain=a.com|~b.com`, and `match-case`. Rules whose
+    options require unimplemented behavior (`redirect`, `removeparam`,
+    `csp`, `replace`, `popup`, …) are skipped rather than mis-applied.
+    Pure `||host^` rules are placed in a hostname hash for O(1) lookup,
+    so lists with tens of thousands of rules stay fast.
+  - **Cosmetic rules** — element hiding `##selector` (global) and
+    `domain.com##selector` / `~excluded.com##selector` (per-site),
+    injected as a `display:none !important` stylesheet at
+    `document_start`. Each selector is emitted as its own rule so one
+    unsupported selector cannot disable the rest. Exception (`#@#`),
+    procedural (`#?#`), and scriptlet (`#$#`, `##+js`) rules are skipped.
 - **Content scripts**: `matches`, `js`, `css`, and `run_at`
   (`document_start` runs before page scripts; `document_end` /
   `document_idle` run after `load`). `css` files are injected as a
@@ -165,3 +186,47 @@ that have no network request of their own. For real coverage, generate
 `rules.json` from a filter list (e.g. convert EasyList to the
 `declarativeNetRequest` rule format) — the format above is exactly what
 the converters emit.
+
+## Example: ad blocker from an EasyList file
+
+For real-world coverage the easiest path is to ship an actual filter list
+and point at it with `nordstjernen_filter_lists` — no conversion to JSON
+needed. Both network and cosmetic (element-hiding) rules are honored.
+
+```
+~/.local/share/nordstjernen/extensions/easylist/
+├── manifest.json
+└── easylist.txt
+```
+
+`manifest.json`:
+
+```json
+{
+  "manifest_version": 3,
+  "name": "EasyList Blocker",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "easylist@example" } },
+  "nordstjernen_filter_lists": ["easylist.txt"]
+}
+```
+
+`easylist.txt` (excerpt — drop in the real EasyList here):
+
+```
+! Title: My filters
+||doubleclick.net^
+||googlesyndication.com^
+||example.com/ads/*$script,image,third-party
+@@||example.com/ads/allowed/*
+/\.com\/ads\/\d+/$image
+! Cosmetic element hiding
+##.ad-banner
+##div[id^="google_ads_"]
+example.com##.sponsored
+~news.example.com##.promo
+```
+
+Place the file and restart the browser; the list is parsed once at
+start-up. Tens of thousands of `||host^` rules are fine — they are
+indexed by hostname for constant-time lookup.
