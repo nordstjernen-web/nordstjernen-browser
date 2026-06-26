@@ -258,9 +258,11 @@ xml_apply_namespace(ns_node *el, const char *qname, const char *uri)
     gboolean has_prefix = colon != NULL;
     el->flags |= NS_NODE_KEEP_CASE;
     if (uri && strcmp(uri, XML_NS_XHTML) == 0) {
-        if (has_prefix)
-            ns_element_set_attr(el, "data-nd-ns-prefix",
-                                g_strndup(qname, (gsize)(colon - qname)));
+        if (has_prefix) {
+            char *prefix = g_strndup(qname, (gsize)(colon - qname));
+            ns_element_set_attr(el, "data-nd-ns-prefix", prefix);
+            g_free(prefix);
+        }
         return;
     }
     if (uri && strcmp(uri, XML_NS_SVG) == 0)
