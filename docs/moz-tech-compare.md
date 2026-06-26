@@ -104,18 +104,6 @@ remaining proposals (by ROI, then effort/risk) is at the end.
 
 ## Performance
 
-### 14. Back/forward cache (bfcache)
-
-- **Upstream:** recently-visited pages are frozen and kept alive so
-  back/forward is instant instead of a reload — the bfcache machinery in
-  `dom/base/Document.cpp` and the `*bfcache*` test corpus.
-- **Nordstjernen today:** every history navigation re-fetches and
-  re-renders (each `/open` is a fresh load through `browser_open_common`).
-- **The move:** cache the last *N* frozen page states keyed by history
-  entry; restore on back/forward when the page is cacheable (no
-  `unload`/`Cache-Control: no-store` constraints).
-- **ROI: High (UX) · Effort: M · Fit: good.**
-
 ### 15. Style-sharing cache + ancestor Bloom filter
 
 - **Upstream:** the style engine shares computed style between similar
@@ -329,8 +317,8 @@ against the current code.
 - **Nordstjernen today:** every open tab keeps a live renderer process; no
   memory-pressure-driven discard.
 - **The move:** on a memory-pressure signal, snapshot and tear down the
-  LRU background tab's renderer, restoring it (via the #14 bfcache state)
-  when reselected.
+  LRU background tab's renderer, restoring it (via the shipped bfcache
+  state) when reselected.
 - **ROI: Med · Effort: M · Fit: good (pairs with bfcache).**
 
 ### 35. SafeBrowsing-style phishing & malware protection *(Safety)*
@@ -424,39 +412,38 @@ and lower risk rank higher, with security/privacy nudged up for a browser
 whose pitch is security and privacy. One item (#41) is pulled above pure
 effort order on strategic weight — see the notes below.
 
-The bands: **P1–P5** are the High-ROI set, **P6–P7** Med–High,
-**P8** the lone cheap Med win, **P9–P19** Med/medium-effort, **P20–P26**
-Med/large-effort, **P27** the lone Low–Med housekeeping item.
+The bands: **P1–P4** are the High-ROI set, **P5–P6** Med–High,
+**P7** the lone cheap Med win, **P8–P18** Med/medium-effort, **P19–P25**
+Med/large-effort, **P26** the lone Low–Med housekeeping item.
 
 | P | # | Proposal | Area | ROI | Effort |
 |---|---|----------|------|-----|--------|
 | 1 | 41 | Cross-platform renderer sandbox (macOS/Windows) | Security | High | M–L |
-| 2 | 14 | Back/forward cache | Perf | High | M |
-| 3 | 22 | Tracking-protection blocklists | Privacy | High | M |
-| 4 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
-| 5 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
-| 6 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
-| 7 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
-| 8 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
-| 9 | 38 | HTML Sanitizer API | Security | Med | M |
-| 10 | 5 | Opaque Response Blocking | Security | Med | M |
-| 11 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
-| 12 | 4 | Font sanitization before raster | Security | Med | M |
-| 13 | 34 | Background-tab unloading | Memory | Med | M |
-| 14 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
-| 15 | 16 | Image surface cache + downscale | Perf | Med | M |
-| 16 | 17 | Pre-spawned renderer | Perf | Med | M |
-| 17 | 30 | Session restore / crash recovery | UX | Med | M |
-| 18 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
-| 19 | 18 | Reader mode | UX | Med | M |
-| 20 | 3 | Site isolation (per-origin) | Security | Med | L |
-| 21 | 6 | Compact cert revocation | Security | Med | L |
-| 22 | 19 | Accessibility tree | Quality | Med | L |
-| 23 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
-| 24 | 29 | Password manager (local-only) | Security/UX | Med | L |
-| 25 | 28 | On-device page translation | UX | Med | L |
-| 26 | 40 | Incremental / low-pause GC | Perf | Med | L |
-| 27 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
+| 2 | 22 | Tracking-protection blocklists | Privacy | High | M |
+| 3 | 33 | Retained paint tree / partial repaint | Perf | High | M–L |
+| 4 | 21 | Fingerprinting resistance (RFP) | Privacy | High | L |
+| 5 | 35 | SafeBrowsing phishing/malware | Safety | Med–High | M |
+| 6 | 10 | Bounce-tracking protection | Privacy | Med–High | M |
+| 7 | 24 | Encrypted Client Hello (ECH) | Privacy/Sec | Med | S–M |
+| 8 | 38 | HTML Sanitizer API | Security | Med | M |
+| 9 | 5 | Opaque Response Blocking | Security | Med | M |
+| 10 | 25 | COOP/COEP + crossOriginIsolated | Security | Med | M |
+| 11 | 4 | Font sanitization before raster | Security | Med | M |
+| 12 | 34 | Background-tab unloading | Memory | Med | M |
+| 13 | 15 | Style-sharing cache + Bloom filter | Perf | Med | M |
+| 14 | 16 | Image surface cache + downscale | Perf | Med | M |
+| 15 | 17 | Pre-spawned renderer | Perf | Med | M |
+| 16 | 30 | Session restore / crash recovery | UX | Med | M |
+| 17 | 23 | Cookie-banner auto-handling | Privacy | Med | M |
+| 18 | 18 | Reader mode | UX | Med | M |
+| 19 | 3 | Site isolation (per-origin) | Security | Med | L |
+| 20 | 6 | Compact cert revocation | Security | Med | L |
+| 21 | 19 | Accessibility tree | Quality | Med | L |
+| 22 | 39 | Off-main-thread HTML parsing | Perf | Med | L |
+| 23 | 29 | Password manager (local-only) | Security/UX | Med | L |
+| 24 | 28 | On-device page translation | UX | Med | L |
+| 25 | 40 | Incremental / low-pause GC | Perf | Med | L |
+| 26 | 20 | Vendored-library audit ledger | Process | Low–Med | S |
 
 Notes on the ranking:
 
@@ -467,8 +454,8 @@ Notes on the ranking:
   MIME-sniffing safety / `nosniff` (#26), private browsing mode (#37),
   storage-stack partitioning by top-level site (#9), DNS-over-HTTPS (#12),
   timer-precision reduction (#7), resource hints —
-  preconnect/prefetch (#36) — and lazy image loading (#27) are all
-  implemented and dropped from the list.
+  preconnect/prefetch (#36), lazy image loading (#27) — and the
+  back/forward cache (#14) are all implemented and dropped from the list.
   (In-process WASM sandboxing of a decoder, the former #1, was also
   dropped: it needs a WASM build toolchain and an iterative build/measure
   loop better suited to dedicated work than to this ranking.) The ranking
@@ -477,10 +464,10 @@ Notes on the ranking:
   than some neighbours but is the security work most worth scheduling: two
   of three desktops ship an *unconfined renderer* today — the biggest gap
   versus the project's own pitch.
-- **#21 (P5), fingerprinting resistance, is now the biggest single
+- **#21 (P4), fingerprinting resistance, is now the biggest single
   privacy statement left** on the list, after private browsing mode (#37)
   and storage partitioning (#9) shipped.
-- **#20 (P27)** is cheap (S) but ranks last purely on leverage; it is
+- **#20 (P26)** is cheap (S) but ranks last purely on leverage; it is
   reasonable to fold in early as housekeeping rather than treat it as
   "last to do."
 

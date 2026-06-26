@@ -100,6 +100,8 @@ void     ns_js_dispatch_resize(ns_js *js);
 struct ns_box;
 void     ns_js_set_layout_root(ns_js *js, const struct ns_box *root);
 void     ns_js_fire_media_load_events(ns_js *js, const struct ns_box *layout);
+void     ns_js_fire_page_transition(ns_js *js, const char *type,
+                                    gboolean persisted);
 
 cairo_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
 

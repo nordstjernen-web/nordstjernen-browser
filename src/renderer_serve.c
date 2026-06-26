@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define NS_BFCACHE_MAX 4
+
 struct ns_renderer_session {
     int            ctrl_w;
     unsigned char *fb;
@@ -19,6 +21,8 @@ struct ns_renderer_session {
     int            max_h;
     int            shm_mode;
     ns_browser    *cur;
+    ns_browser    *bf[NS_BFCACHE_MAX];
+    int            bf_n;
     int            tick_budget_ms;
     int            frame_valid;
     long           frame_sx;
@@ -31,6 +35,53 @@ struct ns_renderer_session {
     size_t         post_len;
     char          *post_ct;
 };
+
+static void
+session_bfcache_park_or_close(ns_renderer_session *s, ns_browser *b)
+{
+    if (!b)
+        return;
+    if (!ns_browser_bfcache_eligible(b)) {
+        ns_browser_close(b);
+        return;
+    }
+    ns_browser_bfcache_park(b);
+    if (s->bf_n >= NS_BFCACHE_MAX) {
+        ns_browser_close(s->bf[0]);
+        for (int i = 1; i < s->bf_n; i++)
+            s->bf[i - 1] = s->bf[i];
+        s->bf_n--;
+    }
+    s->bf[s->bf_n++] = b;
+}
+
+static ns_browser *
+session_bfcache_take(ns_renderer_session *s, const char *url)
+{
+    if (!url)
+        return NULL;
+    for (int i = s->bf_n - 1; i >= 0; i--) {
+        char *u = ns_browser_url(s->bf[i]);
+        int match = u && strcmp(u, url) == 0;
+        free(u);
+        if (!match)
+            continue;
+        ns_browser *b = s->bf[i];
+        for (int j = i + 1; j < s->bf_n; j++)
+            s->bf[j - 1] = s->bf[j];
+        s->bf_n--;
+        return b;
+    }
+    return NULL;
+}
+
+static void
+session_bfcache_clear(ns_renderer_session *s)
+{
+    for (int i = 0; i < s->bf_n; i++)
+        ns_browser_close(s->bf[i]);
+    s->bf_n = 0;
+}
 
 static void
 session_stash_post(ns_renderer_session *s, const char *href)
@@ -183,6 +234,7 @@ ns_renderer_session_free(ns_renderer_session *s)
     if (!s)
         return;
     session_clear_post(s);
+    session_bfcache_clear(s);
     if (s->cur)
         ns_browser_close(s->cur);
     free(s);
@@ -213,19 +265,25 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
 
     if (strcmp(head->path, "/open") == 0) {
         char *url = json_get_str(body, "url");
-        long w = 0, h = 0, settle = 0;
+        long w = 0, h = 0, settle = 0, history = 0;
         json_get_long(body, "width", &w);
         json_get_long(body, "height", &h);
         json_get_long(body, "settle_ms", &settle);
+        json_get_long(body, "history", &history);
         int vw = clamp((int)w, 1, s->max_w);
         int vh = clamp((int)h, 1, s->max_h);
+        ns_browser *restored = (history && url)
+            ? session_bfcache_take(s, url) : NULL;
         if (s->cur) {
-            ns_browser_close(s->cur);
+            session_bfcache_park_or_close(s, s->cur);
             s->cur = NULL;
         }
         s->frame_valid = 0;
         ns_net_log_clear();
-        if (url && s->post_body && s->post_url &&
+        if (restored) {
+            ns_browser_bfcache_restore(restored, vw, (double)vh);
+            s->cur = restored;
+        } else if (url && s->post_body && s->post_url &&
             strcmp(url, s->post_url) == 0)
             s->cur = ns_browser_open_post_viewport(url, vw, vh, (int)settle,
                                                    s->post_body, s->post_len,

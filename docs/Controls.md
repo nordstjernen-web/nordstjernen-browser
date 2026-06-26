@@ -25,6 +25,12 @@ These work from anywhere in the window.
 | `Ctrl+R` · `F5` | Reload |
 | `Escape` | Return focus to the page |
 
+Back and Forward restore the previous page from an in-memory back/forward
+cache when it is eligible — a successful `http(s)` GET without a
+`Cache-Control: no-store` directive — so the page reappears instantly with
+its scripts' state intact and fires a `pageshow` event with `persisted`
+true, instead of re-fetching and re-rendering. Reload always re-fetches.
+
 ### Tabs
 
 | Shortcut | Action |

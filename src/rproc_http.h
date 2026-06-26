@@ -57,6 +57,14 @@ void ns_rproc_http_set_inproc(ns_rproc_inproc_attach_fn attach);
 int  ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                         int viewport_height, int settle_ms,
                         ns_rproc_http_page *out);
+
+/* Like ns_rproc_http_open, but when history is non-zero the open is a
+   back/forward navigation, allowing the renderer to restore a parked
+   back/forward-cache entry for url instead of refetching. */
+int  ns_rproc_http_open_ex(ns_rproc_http *r, const char *url,
+                           int viewport_width, int viewport_height,
+                           int settle_ms, int history,
+                           ns_rproc_http_page *out);
 int  ns_rproc_http_render(ns_rproc_http *r, int width, int height,
                           int scroll_x, int scroll_y, double scale,
                           ns_rproc_http_frame *out);

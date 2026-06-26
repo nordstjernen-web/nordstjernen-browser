@@ -32102,6 +32102,19 @@ ns_js_dispatch_resize(ns_js *js)
         ns_js_dispatch_event(js, js->current_doc, "resize", NULL);
 }
 
+void
+ns_js_fire_page_transition(ns_js *js, const char *type, gboolean persisted)
+{
+    if (!js || !js->ctx || !type) return;
+    JSContext *ctx = js->ctx;
+    JSValue ev = ns_make_event(ctx, type, NULL);
+    JS_SetPropertyStr(ctx, ev, "persisted", persisted ? JS_TRUE : JS_FALSE);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
+    JS_FreeValue(ctx, global);
+    ns_js_dispatch_window_only_event(js, type, ev, NULL);
+}
+
 static void
 ns_beacon_done(GObject *src, GAsyncResult *result, gpointer user_data)
 {
@@ -39140,6 +39153,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     if (js->rt) JS_RunGC(js->rt);
     ns_js_dispatch_event(js, doc, "readystatechange", NULL);
     ns_js_dispatch_event(js, doc, "load", NULL);
+    ns_js_fire_page_transition(js, "pageshow", FALSE);
     ns_ce_upgrade_subtree_all(js, doc);
     gint64 t_load = profile ? g_get_monotonic_time() : 0;
     if (profile)

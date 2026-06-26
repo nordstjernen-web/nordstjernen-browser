@@ -448,6 +448,15 @@ int
 ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
                    int viewport_height, int settle_ms, ns_rproc_http_page *out)
 {
+    return ns_rproc_http_open_ex(r, url, viewport_width, viewport_height,
+                                 settle_ms, 0, out);
+}
+
+int
+ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
+                      int viewport_height, int settle_ms, int history,
+                      ns_rproc_http_page *out)
+{
     if (!r || !url || !out)
         return -1;
     memset(out, 0, sizeof *out);
@@ -457,8 +466,9 @@ ns_rproc_http_open(ns_rproc_http *r, const char *url, int viewport_width,
     char *json = NULL;
     int jn = asprintf(&json,
                       "{\"url\":\"%s\",\"width\":%d,\"height\":%d,"
-                      "\"settle_ms\":%d}",
-                      ue, viewport_width, viewport_height, settle_ms);
+                      "\"settle_ms\":%d,\"history\":%d}",
+                      ue, viewport_width, viewport_height, settle_ms,
+                      history ? 1 : 0);
     free(ue);
     if (jn < 0)
         return -1;

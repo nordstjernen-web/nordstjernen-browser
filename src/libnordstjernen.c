@@ -52,6 +52,7 @@ struct ns_browser {
     double          vh;
     gboolean        images_fetched;
     gboolean        has_deferred_lazy;
+    gboolean        bfcache_ok;
     double          cur_scroll_y;
     double          cur_viewport_h;
     GPtrArray      *img_sessions;
@@ -670,6 +671,16 @@ browser_apply_meta_csp(ns_js *js, const ns_node *node)
     }
 }
 
+static gboolean
+headers_have_no_store(const char *raw)
+{
+    if (!raw) return FALSE;
+    char *low = g_ascii_strdown(raw, -1);
+    gboolean found = strstr(low, "no-store") != NULL;
+    g_free(low);
+    return found;
+}
+
 static ns_browser *
 browser_open_common(const char *url, int viewport_width, double viewport_height,
                     int settle_ms,
@@ -721,6 +732,11 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             base = base_stripped;
         }
     }
+    gboolean bfcache_ok = !body &&
+        (g_str_has_prefix(base, "http://") ||
+         g_str_has_prefix(base, "https://")) &&
+        resp->status >= 200 && resp->status < 400 &&
+        !headers_have_no_store(resp->raw_headers);
     char *refresh_hdr = g_strdup(resp->refresh);
     char *doc_language = g_strdup(resp->content_language);
     char *csp_header = g_strdup(resp->csp_header);
@@ -759,6 +775,7 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     ns_css_set_doc_language(b->doc_language);
     b->vw = vw;
     b->vh = vh;
+    b->bfcache_ok = bfcache_ok;
     b->css_cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
                                          (GDestroyNotify)g_bytes_unref);
     b->images = ns_image_cache_new();
@@ -2398,6 +2415,31 @@ ns_browser_favicon_url(ns_browser *browser)
     char *dup = strdup(out);
     g_free(out);
     return dup;
+}
+
+int
+ns_browser_bfcache_eligible(ns_browser *browser)
+{
+    return browser && browser->bfcache_ok;
+}
+
+void
+ns_browser_bfcache_park(ns_browser *browser)
+{
+    if (!browser) return;
+    if (browser->js)
+        ns_js_fire_page_transition(browser->js, "pagehide", TRUE);
+}
+
+void
+ns_browser_bfcache_restore(ns_browser *browser, int viewport_width,
+                           double viewport_height)
+{
+    if (!browser) return;
+    if (viewport_width > 0 && viewport_height > 0.0)
+        ns_browser_set_viewport(browser, viewport_width, viewport_height);
+    if (browser->js)
+        ns_js_fire_page_transition(browser->js, "pageshow", TRUE);
 }
 
 void

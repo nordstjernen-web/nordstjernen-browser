@@ -255,6 +255,15 @@ char *ns_browser_links(ns_browser *browser);
  * page has no origin. Newly allocated; free() it. */
 char *ns_browser_favicon_url(ns_browser *browser);
 
+/* Back/forward cache support. A page is eligible to be frozen and reused on
+ * history navigation when it was a successful http(s) GET without a no-store
+ * directive. park fires pagehide(persisted) before freezing; restore fires
+ * pageshow(persisted) and re-fits the viewport. */
+int  ns_browser_bfcache_eligible(ns_browser *browser);
+void ns_browser_bfcache_park(ns_browser *browser);
+void ns_browser_bfcache_restore(ns_browser *browser, int viewport_width,
+                                double viewport_height);
+
 void ns_browser_close(ns_browser *browser);
 
 void ns_browser_shutdown(void);

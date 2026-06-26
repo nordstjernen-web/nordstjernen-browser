@@ -67,6 +67,7 @@ typedef struct {
     char   *paths;
     int     dump_tab;
     gboolean inspect;
+    gboolean history;
 } Req;
 
 typedef enum {
@@ -193,6 +194,7 @@ struct NsProcView {
 
     char       *deferred_url;
     gboolean    deferred_record;
+    gboolean    deferred_history;
 
     int         js_redirects;
 
@@ -676,16 +678,16 @@ worker_main(gpointer data)
             res->seq = req->seq;
             ns_rproc_http_page pg;
             int settle = pv_settle_ms();
-            int rc = v->proc ? ns_rproc_http_open(v->proc, req->url, req->vw,
-                                             req->vh, settle, &pg)
+            int rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
+                                             req->vh, settle, req->history, &pg)
                              : -1;
             if (rc != 0 && v->proc && !v->closed) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
                 pv_swap_proc(v, ns_rproc_http_spawn_shm_ex(v->renderer_path,
                                          NS_PROC_MAX_WIDTH, NS_PROC_MAX_HEIGHT,
                                          v->private_mode));
-                rc = v->proc ? ns_rproc_http_open(v->proc, req->url, req->vw,
-                                             req->vh, settle, &pg)
+                rc = v->proc ? ns_rproc_http_open_ex(v->proc, req->url, req->vw,
+                                             req->vh, settle, req->history, &pg)
                              : -1;
             }
             if (rc == 0 && pg.ok) {
@@ -1383,7 +1385,7 @@ push_history(NsProcView *v, const char *url)
 }
 
 static void
-do_load(NsProcView *v, const char *url, gboolean record)
+do_load(NsProcView *v, const char *url, gboolean record, gboolean history)
 {
     if (!url || !*url)
         return;
@@ -1458,6 +1460,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
         g_free(v->deferred_url);
         v->deferred_url = g_strdup(url);
         v->deferred_record = record;
+        v->deferred_history = history;
         return;
     }
     v->last_vp_w = vw;
@@ -1469,6 +1472,7 @@ do_load(NsProcView *v, const char *url, gboolean record)
     req->url = g_strdup(url);
     req->vw = vw;
     req->vh = vh;
+    req->history = history;
     push_req(v, req);
 }
 
@@ -1476,7 +1480,7 @@ void
 ns_proc_view_load(NsProcView *v, const char *url)
 {
     v->render_restarts = 0;
-    do_load(v, url, TRUE);
+    do_load(v, url, TRUE, FALSE);
 }
 
 gboolean ns_proc_view_can_back(NsProcView *v) { return v->hist_index > 0; }
@@ -1495,7 +1499,7 @@ ns_proc_view_back(NsProcView *v)
     v->hist_index--;
     v->render_restarts = 0;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
-    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE);
+    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE);
 }
 
 void
@@ -1506,7 +1510,7 @@ ns_proc_view_forward(NsProcView *v)
     v->hist_index++;
     v->render_restarts = 0;
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
-    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE);
+    do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, TRUE);
 }
 
 void
@@ -1514,9 +1518,9 @@ ns_proc_view_reload(NsProcView *v)
 {
     v->render_restarts = 0;
     if (v->hist_index >= 0 && v->hist_index < (int)v->history->len)
-        do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE);
+        do_load(v, g_ptr_array_index(v->history, v->hist_index), FALSE, FALSE);
     else if (v->current_url)
-        do_load(v, v->current_url, FALSE);
+        do_load(v, v->current_url, FALSE, FALSE);
 }
 
 void
@@ -1608,7 +1612,7 @@ pv_webgl_resolve(NsProcView *v, const char *origin, gboolean allow)
     req->mods = allow ? 1 : 0;
     push_req(v, req);
     if (allow && v->current_url && !v->closed)
-        do_load(v, v->current_url, FALSE);
+        do_load(v, v->current_url, FALSE, FALSE);
 }
 
 static GtkWindow *
@@ -1678,7 +1682,7 @@ on_result(gpointer data)
         if (res->nav && *res->nav) {
             if (v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
                 v->js_redirects++;
-                do_load(v, res->nav, v->pending_record);
+                do_load(v, res->nav, v->pending_record, FALSE);
                 goto done;
             }
             post_emit(v, NS_PROC_EVT_STATUS,
@@ -1725,7 +1729,7 @@ on_result(gpointer data)
         if (current && res->ok && res->nav && *res->nav &&
             v->js_redirects < NS_PROC_MAX_JS_REDIRECTS) {
             v->js_redirects++;
-            do_load(v, res->nav, FALSE);
+            do_load(v, res->nav, FALSE, FALSE);
         }
         if (res->ok && res->webgl && *res->webgl)
             pv_webgl_prompt(v, res->webgl);
@@ -1741,7 +1745,7 @@ on_result(gpointer data)
             if (v->render_restarts < NS_PROC_MAX_RESTARTS) {
                 v->render_restarts++;
                 post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("Renderer restarted"));
-                do_load(v, v->current_url, FALSE);
+                do_load(v, v->current_url, FALSE, FALSE);
             } else {
                 post_emit(v, NS_PROC_EVT_STATUS,
                           ns_i18n("This tab's renderer keeps failing — "
@@ -2026,8 +2030,9 @@ on_resize(GtkDrawingArea *area, int width, int height, gpointer data)
     if (v->deferred_url && width > 1 && height > 1) {
         char *u = v->deferred_url;
         gboolean rec = v->deferred_record;
+        gboolean hist = v->deferred_history;
         v->deferred_url = NULL;
-        do_load(v, u, rec);
+        do_load(v, u, rec, hist);
         g_free(u);
         return;
     }
