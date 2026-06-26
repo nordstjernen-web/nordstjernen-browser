@@ -299,3 +299,54 @@ and ES6-Webpack. In 4.0-alpha the same change improved the aggregate score,
 with jQuery, Backbone, Vue, ES5, and ES6-Webpack moving most; jQuery-Complex
 remains noisy and should be rechecked with multi-iteration medians before
 treating one run as a regression.
+
+## Cache inline-SVG textures before the document defs walk (2026-06-26)
+
+A fresh sampling profile of the `*-Complex-DOM` add phase (the
+`scripts/sample-profile.sh` poor-man's sampler against a long-settle stress
+run that repeatedly forces a full-document relayout) put **~40% of leaf time
+in `ns_collect_svg_defs`** and the `__strcmp_evex` it drives — not in the
+cascade at all. The Speedometer "complex" big-DOM carries **769 inline
+`<svg>` elements** and **zero** `<defs>`-type elements
+(`symbol`/`linearGradient`/`radialGradient`/`clipPath`/`mask`/`filter`/`pattern`).
+
+`build_box`'s `<svg>` path decodes each inline SVG to a texture cached by node
+pointer (`nd-inline-svg:%p`), but it called `ns_svg_outer_with_defs(n)` —
+which walks the **whole document from the root** to gather referenced `<defs>`
+and serializes the element's outer HTML — *before* peeking that cache. So every
+relayout rebuilt a throwaway XML string for all 769 SVGs, each walk testing
+~6650 nodes against seven tag names (~36M `strcmp`s per relayout) only to
+discard the result on the cache hit. The add phase forces ~100 relayouts, so
+this was paid ~100×.
+
+The decoded texture is already frozen at first sight (keyed by node pointer,
+never re-decoded), so building the XML on a hit never affected output. The fix
+peeks the texture cache **first** using the node-pointer key and only runs the
+document walk + serialize + decode on a miss (`build_box`, `src/layout.c`).
+Layouts 2..N over a given SVG become pure cache hits; only the first layout
+pays the walk.
+
+`scripts/speedometer-bench.sh`, `NS_ITERS=1`, `NS_SETTLE=12000`, release build,
+Linux, median total ms (lower is faster):
+
+| Suite                                | before |  after |  delta |
+|--------------------------------------|-------:|-------:|-------:|
+| TodoMVC-Backbone-Complex-DOM         |   2506 |   1686 | -32.7% |
+| TodoMVC-jQuery-Complex-DOM           |   3633 |   2767 | -23.8% |
+| TodoMVC-Svelte-Complex-DOM           |   1109 |    900 | -18.8% |
+| TodoMVC-JavaScript-ES5-Complex-DOM   |   1127 |    924 | -18.0% |
+| TodoMVC-JavaScript-ES6-Webpack-Complex| 1086 |    901 | -17.1% |
+| TodoMVC-React-Complex-DOM            |   1207 |   1041 | -13.8% |
+| TodoMVC-Vue-Complex-DOM              |   1559 |   1407 |  -9.8% |
+| TodoMVC-jQuery (light)               |   1274 |   1164 |  -8.7% |
+| TodoMVC-Lit-Complex-DOM              |   2093 |   1924 |  -8.1% |
+| TodoMVC-Angular-Complex-DOM          |    852 |    800 |  -6.1% |
+| **Sum of all 22 loadable suites**    | **27719** | **24795** | **-10.5%** |
+
+The light-DOM suites stay flat (their trees carry no big-DOM SVG), confirming
+the change only removes work. After the fix the sampler no longer shows
+`ns_collect_svg_defs`; the remaining add-phase cost is the genuine
+full-document re-cascade (`match_simple` / `gather_matches_multi` plus
+allocator churn), i.e. the incremental-restyle lever already noted above. The
+same engine path serves the Speedometer 4.0-alpha TodoMVC workloads, which
+reuse these complex pages.
