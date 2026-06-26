@@ -350,3 +350,63 @@ full-document re-cascade (`match_simple` / `gather_matches_multi` plus
 allocator churn), i.e. the incremental-restyle lever already noted above. The
 same engine path serves the Speedometer 4.0-alpha TodoMVC workloads, which
 reuse these complex pages.
+
+## Incremental restyle (2026-06-26)
+
+The full-document re-cascade noted above was the dominant remaining cost: every
+forced layout re-matched all ~6,650 nodes of the complex DOM even when a single
+todo was added. `cascade_walk` now reuses the previous pass's computed style for
+any element whose subtree is provably unaffected by the mutations since the last
+cascade, recomputing only the dirty subtrees.
+
+How it works:
+
+- The attribute and childList mutation recorders (`ns_js_record_attr_change`,
+  `ns_js_record_child_change` in `src/js.c`) call `ns_css_mark_restyle_dirty(parent)`,
+  marking the changed element's parent as a dirty root (covers the element, its
+  siblings — for `+`/`~`/`:nth-child` — and their subtrees).
+- `cascade_walk` threads an `under_dirty` flag. A node with no dirty ancestor
+  **clones** its style from the previous table (`ns_style_clone_shared`, sharing
+  the already-refcounted `ns_css_value`s) instead of gathering and matching
+  rules. Anything inside a dirty subtree recomputes fully. A recomputed node
+  marks its descendants dirty, so inherited values stay correct.
+- The previous styles are kept in an independent table owned by `ns_css_compute`
+  (cloned from the prior `out`), so the borrowed-table lifetime of the
+  free-before-recompute callers is not an issue.
+
+Safety: the optimisation is **on by default** but falls back to a full cascade
+whenever it cannot prove equivalence — a stylesheet uses `:has()` (ancestor
+matching depends on descendants), container queries are in play, the
+focus/hover/active element moved, or the stylesheet set changed. Pages that use
+`:has()` or `@container` skip the machinery entirely (no clone-maintenance
+overhead). Set `NS_NO_INCR_RESTYLE=1` to force the full cascade.
+
+Verification: the `--dump=layout` output is **byte-identical** (after
+normalising non-deterministic inline-SVG cache-key pointers) between the full
+cascade (`NS_NO_INCR_RESTYLE=1`) and incremental modes after an
+add-40 / complete-every-3rd / delete-5 interaction, across vanilla ES5/ES6,
+React, and Vue complex and light suites.
+
+`scripts/speedometer-bench.sh complex`, `NS_ITERS=3`, release build, Linux,
+median total ms (lower is faster), full cascade vs incremental:
+
+| Suite                                 |  full |  incr |  delta |
+|---------------------------------------|------:|------:|-------:|
+| TodoMVC-WebComponents-Complex-DOM     |  2279 |  1586 | -30.4% |
+| TodoMVC-Backbone-Complex-DOM          |  1699 |  1214 | -28.5% |
+| TodoMVC-Svelte-Complex-DOM            |   905 |   662 | -26.9% |
+| TodoMVC-JavaScript-ES6-Webpack-Complex|   897 |   665 | -25.8% |
+| TodoMVC-JavaScript-ES5-Complex-DOM    |   922 |   699 | -24.2% |
+| TodoMVC-React-Complex-DOM             |  1032 |   788 | -23.6% |
+| TodoMVC-Angular-Complex-DOM           |   764 |   588 | -23.0% |
+| TodoMVC-Lit-Complex-DOM               |  2031 |  1642 | -19.1% |
+| TodoMVC-Vue-Complex-DOM               |  1380 |  1188 | -13.9% |
+| TodoMVC-jQuery-Complex-DOM            |  2968 |  2611 | -12.0% |
+| **Sum of complex suites**             | **14875** | **11643** | **-21.7%** |
+
+A 5-iteration ES5-Complex run moved 910.7 -> 666.5 ms (-26.8%); the steady-state
+reuse rate is ~97% of nodes cloned per pass. This is a coarse version of what
+production engines do (Blink invalidation sets, Gecko/Stylo's parallel restyle +
+rule tree): the conservative "dirty the parent subtree" rule recomputes more
+than strictly necessary, and the per-pass clone-maintenance could be replaced by
+storing the computed style on the node. Those are the next steps.

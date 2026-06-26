@@ -16836,6 +16836,7 @@ ns_js_record_child_change(ns_js *js, ns_node *parent,
                           ns_node *previous_sibling, ns_node *next_sibling)
 {
     ns_js_index_child_change(js, parent, added, removed);
+    ns_css_mark_restyle_dirty(parent);
     ns_mut_record_emit(js, "childList", parent, added, removed,
                        previous_sibling, next_sibling, NULL, NULL);
 }
@@ -16908,6 +16909,7 @@ ns_js_record_attr_change(ns_js *js, ns_node *target,
         if (new_cls && *new_cls)
             ns_doc_class_index_register(doc, new_cls, target);
     }
+    ns_css_mark_restyle_dirty(target && target->parent ? target->parent : target);
     ns_mut_record_emit(js, "attributes", target, NULL, NULL,
                        NULL, NULL, name, old_value);
 }

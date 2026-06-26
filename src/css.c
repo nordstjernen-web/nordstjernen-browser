@@ -14403,7 +14403,76 @@ cascade_walk(ns_node *node,
              const ns_style *parent_style,
              double *root_px,
              GHashTable *layer_ranks,
-             GHashTable *out);
+             GHashTable *out,
+             gboolean under_dirty);
+
+static GHashTable    *g_incr_prev_styles;
+static ns_node       *g_incr_prev_doc;
+static guint64        g_incr_prev_sig;
+static const ns_node *g_incr_prev_focus;
+static const ns_node *g_incr_prev_hover;
+static const ns_node *g_incr_prev_active;
+static GHashTable    *g_incr_dirty;
+static gboolean       g_incr_pass_active;
+static guint64        g_incr_has_sig;
+static gboolean       g_incr_eligible;
+static guint          g_incr_reused;
+static guint          g_incr_recomputed;
+
+void
+ns_css_mark_restyle_dirty(ns_node *parent)
+{
+    if (!parent) return;
+    if (!g_incr_dirty)
+        g_incr_dirty = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(g_incr_dirty, parent);
+}
+
+void
+ns_css_restyle_invalidate(void)
+{
+    g_incr_prev_styles = NULL;
+    g_incr_prev_doc = NULL;
+}
+
+static gboolean
+incr_selector_uses_has(const ns_css_selector *sel)
+{
+    if (!sel || !sel->compounds) return FALSE;
+    for (guint i = 0; i < sel->compounds->len; i++) {
+        const ns_css_simple *c = g_ptr_array_index(sel->compounds, i);
+        if (c && c->has_groups && c->has_groups->len > 0) return TRUE;
+    }
+    return FALSE;
+}
+
+static gboolean
+incr_sheet_uses_has(const ns_css_stylesheet *sh)
+{
+    if (!sh || !sh->rules) return FALSE;
+    for (guint ri = 0; ri < sh->rules->len; ri++) {
+        const ns_css_rule *r = g_ptr_array_index(sh->rules, ri);
+        if (!r || !r->selectors) continue;
+        for (guint si = 0; si < r->selectors->len; si++)
+            if (incr_selector_uses_has(g_ptr_array_index(r->selectors, si)))
+                return TRUE;
+    }
+    return FALSE;
+}
+
+static guint64
+incr_sheet_sig(const ns_css_stylesheet *ua,
+               const ns_css_stylesheet *const *author, gsize n)
+{
+    guint64 h = 1469598103934665603ULL;
+    guint64 vals[2] = { (guint64)(gsize)(gconstpointer)ua, (guint64)n };
+    for (int i = 0; i < 2; i++) { h ^= vals[i]; h *= 1099511628211ULL; }
+    for (gsize i = 0; i < n; i++) {
+        h ^= (guint64)(gsize)(gconstpointer)author[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
 
 static GHashTable *g_style_share;
 static GByteArray *g_share_scratch;
@@ -14556,14 +14625,28 @@ cascade_walk(ns_node *node,
              const ns_style *parent_style,
              double *root_px,
              GHashTable *layer_ranks,
-             GHashTable *out)
+             GHashTable *out,
+             gboolean under_dirty)
 {
     static int depth;
     if (depth >= NS_CSS_MAX_CASCADE_DEPTH) return;
     depth++;
     const ns_style *child_parent_style = parent_style;
+    gboolean nd_recurse_dirty = under_dirty;
     if (node->kind == NS_NODE_ELEMENT) {
+        gboolean nd_node_dirty = under_dirty ||
+            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
+        const ns_style *nd_prev =
+            (g_incr_pass_active && !nd_node_dirty && g_incr_prev_styles)
+            ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;
         ns_style *s = ns_style_alloc();
+        if (nd_prev) {
+            ns_style_free(s);
+            s = ns_style_clone_shared(nd_prev);
+            g_incr_reused++;
+        } else {
+        g_incr_recomputed++;
+        nd_node_dirty = TRUE;
         static GArray *sc_matches, *sc_var, *sc_pending;
         static GPtrArray *sc_owned;
         static GArray *sc_pe_m[8], *sc_pe_v[8], *sc_pe_p[8];
@@ -14814,6 +14897,7 @@ cascade_walk(ns_node *node,
                 g_hash_table_insert(g_style_share, k, s);
             }
         }
+        }
         g_hash_table_insert(out, node, s);
         child_parent_style = s;
         if (*root_px <= 0 &&
@@ -14821,6 +14905,7 @@ cascade_walk(ns_node *node,
             s->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
             s->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_PX)
             *root_px = s->values[NS_CSS_FONT_SIZE]->u.length.v;
+        nd_recurse_dirty = nd_node_dirty;
     }
     gboolean pushed = FALSE;
     if (g_cq_map && g_cq_stack) {
@@ -14832,7 +14917,7 @@ cascade_walk(ns_node *node,
     }
     for (ns_node *c = node->first_child; c; c = c->next_sibling)
         cascade_walk(c, ua, author, n_author, child_parent_style, root_px,
-                     layer_ranks, out);
+                     layer_ranks, out, nd_recurse_dirty);
     if (pushed) g_array_set_size(g_cq_stack, g_cq_stack->len - 1);
     depth--;
 }
@@ -15243,8 +15328,57 @@ ns_css_compute(ns_node *doc,
     g_style_share_next_id = 0;
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
+
+    guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
+    if (sig != g_incr_has_sig) {
+        gboolean ineligible = incr_sheet_uses_has(cached_ua)
+            || ns_css_stylesheet_has_container_rules(cached_ua);
+        for (gsize i = 0; i < n_sheets && !ineligible; i++)
+            ineligible = incr_sheet_uses_has(author_sheets[i])
+                || ns_css_stylesheet_has_container_rules(author_sheets[i]);
+        g_incr_eligible = !ineligible;
+        g_incr_has_sig = sig;
+    }
+    gboolean incr_want = g_getenv("NS_NO_INCR_RESTYLE") == NULL
+        && g_incr_eligible && g_cq_map == NULL;
+    g_incr_pass_active = incr_want
+        && g_incr_prev_styles != NULL
+        && g_incr_prev_doc == doc
+        && g_incr_prev_sig == sig
+        && g_css_focus_node == g_incr_prev_focus
+        && g_css_hover_node == g_incr_prev_hover
+        && g_css_active_node == g_incr_prev_active;
+    g_incr_reused = 0;
+    g_incr_recomputed = 0;
+
     cascade_walk(doc, cached_ua, author_sheets, n_sheets, NULL, &root_px,
-                 layer_ranks, out);
+                 layer_ranks, out, FALSE);
+
+    if (incr_want) {
+        GHashTable *new_prev = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)ns_style_free);
+        GHashTableIter pit; gpointer pk, pv;
+        g_hash_table_iter_init(&pit, out);
+        while (g_hash_table_iter_next(&pit, &pk, &pv))
+            g_hash_table_insert(new_prev, pk,
+                                ns_style_clone_shared((const ns_style *)pv));
+        if (g_incr_prev_styles) g_hash_table_destroy(g_incr_prev_styles);
+        g_incr_prev_styles = new_prev;
+        g_incr_prev_doc = doc;
+        g_incr_prev_sig = sig;
+        g_incr_prev_focus = g_css_focus_node;
+        g_incr_prev_hover = g_css_hover_node;
+        g_incr_prev_active = g_css_active_node;
+        if (g_getenv("NS_PROFILE"))
+            g_printerr("[incr] active=%d reused=%u recomputed=%u\n",
+                       g_incr_pass_active, g_incr_reused, g_incr_recomputed);
+    } else if (g_incr_prev_styles) {
+        g_hash_table_destroy(g_incr_prev_styles);
+        g_incr_prev_styles = NULL;
+        g_incr_prev_doc = NULL;
+    }
+    if (g_incr_dirty) g_hash_table_remove_all(g_incr_dirty);
+
     g_hash_table_destroy(g_has_memo);
     g_has_memo = NULL;
     g_hash_table_destroy(g_style_share);

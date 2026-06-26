@@ -724,6 +724,9 @@ GHashTable *ns_css_compute(ns_node                 *doc,
                            const ns_css_stylesheet *const *author_sheets,
                            gsize                     n_sheets);
 
+void ns_css_mark_restyle_dirty(ns_node *parent);
+void ns_css_restyle_invalidate(void);
+
 void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);
 GHashTable *ns_css_container_map_new(void);
