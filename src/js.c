@@ -35012,7 +35012,10 @@ ns_document_ctor(JSContext *ctx, JSValueConst this_val,
                  int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
-    return ns_make_synth_xml_document(ctx);
+    JSValue d = ns_make_synth_xml_document(ctx);
+    if (JS_IsObject(d))
+        ns_document_use_document_prototype(ctx, d);
+    return d;
 }
 
 static JSValue
