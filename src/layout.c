@@ -4288,12 +4288,17 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         m->declared_image_size =
             box->content_width > 0 && box->content_height > 0;
         if (g_image_cache_for_layout) {
-            char *xml = ns_svg_outer_with_defs(n);
-            if (xml && *xml) {
-                char *key = g_strdup_printf("nd-inline-svg:%p", (void *)n);
+            char *key = g_strdup_printf("nd-inline-svg:%p", (void *)n);
+            m->image = ns_image_cache_peek(g_image_cache_for_layout, key);
+            if (m->image) {
                 m->image_src = key;
-                m->image = ns_image_cache_peek(g_image_cache_for_layout, key);
-                if (!m->image) {
+                const ns_image *img = m->image;
+                if (box->content_width  <= 0) box->content_width  = img->natural_width;
+                if (box->content_height <= 0) box->content_height = img->natural_height;
+            } else {
+                char *xml = ns_svg_outer_with_defs(n);
+                if (xml && *xml) {
+                    m->image_src = key;
                     int iw = 0, ih = 0;
                     ns_texture *tex = ns_image_decode_bytes(
                         (const guchar *)xml, strlen(xml), &iw, &ih);
@@ -4304,12 +4309,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                         if (box->content_height <= 0) box->content_height = ih;
                     }
                 } else {
-                    const ns_image *img = m->image;
-                    if (box->content_width  <= 0) box->content_width  = img->natural_width;
-                    if (box->content_height <= 0) box->content_height = img->natural_height;
+                    g_free(key);
                 }
+                g_free(xml);
             }
-            g_free(xml);
         }
         return box;
     }
