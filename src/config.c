@@ -150,7 +150,7 @@ static const cfg_field cfg_fields[] = {
     FB(https_first,           TRUE),
     FB(harden_allocator,      TRUE),
     FB(speculative_preload,   TRUE),
-    FB(async_image_decode,    FALSE),
+    FB(async_image_decode,    TRUE),
     FB(images_enabled,        TRUE),
     FB(webgl_enabled,         FALSE),
     FB(local_storage_enabled, TRUE),
@@ -244,10 +244,10 @@ static const struct { const char *env; const char *key; } env_disable[] = {
     { "NS_NO_HTTPS_FIRST",   "https_first"           },
     { "NS_NO_HARDEN_ALLOC",  "harden_allocator"      },
     { "NS_NO_PRELOAD_SCAN",  "speculative_preload"   },
+    { "NS_NO_ASYNC_IMG_DECODE", "async_image_decode" },
 };
 
 static const struct { const char *env; const char *key; } env_value[] = {
-    { "NS_ASYNC_IMG_DECODE", "async_image_decode" },
     { "NS_HOME_URL",    "home_url"    },
     { "NS_USER_AGENT",  "user_agent"  },
     { "NS_HTTP_PROXY",  "http_proxy"  },
