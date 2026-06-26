@@ -31362,6 +31362,9 @@ ns_ni_preceding(ns_node *node, ns_node *root)
     return node->parent;
 }
 
+static gboolean ns_ni_is_inclusive_ancestor(const ns_node *anc,
+                                             const ns_node *node);
+
 static JSValue
 ns_ni_traverse(JSContext *ctx, JSValueConst obj, gboolean forward)
 {
@@ -31387,11 +31390,20 @@ ns_ni_traverse(JSContext *ctx, JSValueConst obj, gboolean forward)
         }
         int r = ns_traversal_filter(ctx, obj, node);
         if (r < 0) return JS_EXCEPTION;
+        gboolean detached = !ns_ni_is_inclusive_ancestor(root, node);
         if (r == NS_FILTER_ACCEPT) {
-            JS_FreeValue(ctx, it->ref);
-            it->ref = ns_make_element(ctx, node);
-            it->before = before;
+            if (!detached) {
+                JS_FreeValue(ctx, it->ref);
+                it->ref = ns_make_element(ctx, node);
+                it->before = before;
+            }
             return ns_make_element(ctx, node);
+        }
+        if (detached) {
+            ns_node *rn = ns_unwrap_element_mut(it->ref);
+            if (!rn) return JS_NULL;
+            node = rn;
+            before = it->before;
         }
     }
 }
