@@ -60,6 +60,16 @@
   </branding>
 
   <releases>
+    <release version="1.0.16" date="2026-06-26">
+      <description>
+        <p>Extensions, content blocking, and engine hardening release.</p>
+        <ul>
+          <li>Initial WebExtensions support with declarativeNetRequest content blocking and EasyList/ABP filter lists.</li>
+          <li>Local SafeBrowsing-style phishing and malware protection.</li>
+          <li>Updated vendored QuickJS and Lexbor engines, with DOM, XHR, and CSS spec-compliance fixes.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.12" date="2026-06-21">
       <description>
         <p>Networking and developer tooling release.</p>
