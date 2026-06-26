@@ -21305,6 +21305,21 @@ ns_attr_to_js(JSContext *ctx, JSValueConst owner, const ns_attr *a,
         g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         JS_SetPropertyStr(ctx, entry, "baseURI",
             JS_NewString(ctx, base && *base ? base : "about:blank"));
+        ns_js *js = js_from_ctx(ctx);
+        const char *aval = a && a->value ? a->value : "";
+        JSValue kids = JS_NewArray(ctx);
+        if (*aval) {
+            ns_node *tn = ns_node_new_text(g_strdup(aval));
+            if (js && js->orphan_nodes) g_hash_table_add(js->orphan_nodes, tn);
+            JSValue tnw = ns_make_element(ctx, tn);
+            JS_SetPropertyUint32(ctx, kids, 0, JS_DupValue(ctx, tnw));
+            JS_SetPropertyStr(ctx, entry, "firstChild", JS_DupValue(ctx, tnw));
+            JS_SetPropertyStr(ctx, entry, "lastChild", tnw);
+        } else {
+            JS_SetPropertyStr(ctx, entry, "firstChild", JS_NULL);
+            JS_SetPropertyStr(ctx, entry, "lastChild", JS_NULL);
+        }
+        JS_SetPropertyStr(ctx, entry, "childNodes", kids);
     }
     return entry;
 }

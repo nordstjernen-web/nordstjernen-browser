@@ -5456,6 +5456,12 @@
             var sc = this._sc, so = this._so, ec = this._ec, eo = this._eo;
             if (sc === ec && isTextNode(sc))
                 return (sc.data || '').substring(so, eo);
+            if (sc === ec && sc.nodeType === 2) {
+                var av = '', akids = sc.childNodes || [];
+                for (var ai = so; ai < eo && ai < akids.length; ai++)
+                    if (isTextNode(akids[ai])) av += akids[ai].data || '';
+                return av;
+            }
             var s = '';
             if (isTextNode(sc)) s += (sc.data || '').substring(so);
             var self = this;
@@ -5484,6 +5490,18 @@
             var sc = r._sc, so = r._so, ec = r._ec, eo = r._eo;
             var frag = ownerDoc(sc).createDocumentFragment();
             if (r.collapsed) return frag;
+            if (sc === ec && sc.nodeType === 2) {
+                var akids = sc.childNodes || [];
+                for (var ai = so; ai < eo && ai < akids.length; ai++) {
+                    if (extract) frag.appendChild(akids[ai]);
+                    else frag.appendChild(akids[ai].cloneNode(true));
+                }
+                if (extract) {
+                    sc.value = '';
+                    r._sc = sc; r._so = 0; r._ec = sc; r._eo = 0;
+                }
+                return frag;
+            }
             if (sc === ec && isCharData(sc)) {
                 var c0 = sc.cloneNode(false);
                 c0.data = (sc.data || '').substring(so, eo);
