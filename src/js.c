@@ -29247,6 +29247,7 @@ static const char ns_iframe_scope_bootstrap[] =
     "      catch(e){ return new Error('SecurityError'); } };"
     "    Object.defineProperty(ov, 'localStorage', { configurable:true, get: function(){ throw denyStore(); } });"
     "    Object.defineProperty(ov, 'sessionStorage', { configurable:true, get: function(){ throw denyStore(); } });"
+    "    Object.defineProperty(ov, 'indexedDB', { configurable:true, get: function(){ throw denyStore(); } });"
     "  }"
     "  function ovGet(p){"
     "    var d = Object.getOwnPropertyDescriptor(ov, p);"
@@ -29392,6 +29393,7 @@ static const char ns_iframe_global_bootstrap[] =
     "      catch(e){ return new Error('SecurityError'); } };"
     "    def('localStorage',   { get: function(){ throw denyStore(); } });"
     "    def('sessionStorage', { get: function(){ throw denyStore(); } });"
+    "    def('indexedDB',      { get: function(){ throw denyStore(); } });"
     "  }"
     "  return { location: loc, history: hist };"
     "})";
