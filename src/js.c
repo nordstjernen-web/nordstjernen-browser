@@ -2510,6 +2510,60 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
     }
 }
 
+static const char *const ns_body_window_reflected_handlers[] = {
+    "onafterprint", "onbeforeprint", "onbeforeunload", "onblur", "onerror",
+    "onfocus", "onhashchange", "onlanguagechange", "onload", "onmessage",
+    "onmessageerror", "onoffline", "ononline", "onpagehide", "onpageshow",
+    "onpopstate", "onrejectionhandled", "onresize", "onscroll", "onstorage",
+    "onunhandledrejection", "onunload",
+};
+
+static JSValue
+ns_body_reflected_get(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv, int magic, JSValueConst *func_data)
+{
+    (void)this_val; (void)argc; (void)argv; (void)magic;
+    const char *name = JS_ToCString(ctx, func_data[0]);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue v = name ? JS_GetPropertyStr(ctx, global, name) : JS_NULL;
+    JS_FreeValue(ctx, global);
+    if (name) JS_FreeCString(ctx, name);
+    return v;
+}
+
+static JSValue
+ns_body_reflected_set(JSContext *ctx, JSValueConst this_val, int argc,
+                      JSValueConst *argv, int magic, JSValueConst *func_data)
+{
+    (void)this_val; (void)magic;
+    const char *name = JS_ToCString(ctx, func_data[0]);
+    JSValue global = JS_GetGlobalObject(ctx);
+    if (name)
+        JS_SetPropertyStr(ctx, global, name,
+                          argc > 0 ? JS_DupValue(ctx, argv[0]) : JS_NULL);
+    JS_FreeValue(ctx, global);
+    if (name) JS_FreeCString(ctx, name);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_install_body_reflected_handlers(JSContext *ctx, JSValueConst wrapper)
+{
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_body_window_reflected_handlers); i++) {
+        const char *name = ns_body_window_reflected_handlers[i];
+        JSValue data = JS_NewString(ctx, name);
+        JSValue getter = JS_NewCFunctionData(ctx, ns_body_reflected_get,
+                                             0, 0, 1, &data);
+        JSValue setter = JS_NewCFunctionData(ctx, ns_body_reflected_set,
+                                             1, 0, 1, &data);
+        JSAtom atom = JS_NewAtom(ctx, name);
+        JS_DefinePropertyGetSet(ctx, wrapper, atom, getter, setter,
+                                JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+        JS_FreeAtom(ctx, atom);
+        JS_FreeValue(ctx, data);
+    }
+}
+
 JSValue
 ns_make_element(JSContext *ctx, const ns_node *cnode)
 {
@@ -2549,6 +2603,10 @@ ns_make_element(JSContext *ctx, const ns_node *cnode)
         JS_DefinePropertyValueStr(ctx, obj, "systemId",
             JS_NewString(ctx, sys), JS_PROP_ENUMERABLE);
     }
+    if (node->kind == NS_NODE_ELEMENT && node->name &&
+        (strcmp(node->name, "body") == 0 ||
+         strcmp(node->name, "frameset") == 0))
+        ns_install_body_reflected_handlers(ctx, obj);
     if (js && js->pinned_wrappers_set) {
         JS_DupValue(ctx, obj);
         g_hash_table_add(js->pinned_wrappers_set, node);
@@ -5609,12 +5667,13 @@ ns_get_bool_atom(JSContext *ctx, JSValueConst obj, JSAtom atom, gboolean *was_se
 static gboolean
 ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
                           gboolean *capture, gboolean *once,
-                          gboolean *passive, JSValue *signal_out,
-                          gboolean strict_signal)
+                          gboolean *passive, gboolean *passive_set,
+                          JSValue *signal_out, gboolean strict_signal)
 {
     *capture = FALSE;
     *once = FALSE;
     if (passive) *passive = FALSE;
+    if (passive_set) *passive_set = FALSE;
     if (signal_out) *signal_out = JS_NULL;
     if (!JS_IsObject(opts)) {
         *capture = JS_ToBool(ctx, opts) ? TRUE : FALSE;
@@ -5632,7 +5691,7 @@ ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
             v = ns_get_bool_atom(ctx, opts, js->atom_once, &set);
             if (set) *once = v;
             v = ns_get_bool_atom(ctx, opts, js->atom_passive, &set);
-            if (set && passive) *passive = v;
+            if (set) { if (passive) *passive = v; if (passive_set) *passive_set = TRUE; }
             sig = JS_GetProperty(ctx, opts, js->atom_signal);
         } else {
             v = ns_js_get_bool_prop(ctx, opts, "capture", &set);
@@ -5640,7 +5699,7 @@ ns_listener_parse_options(JSContext *ctx, JSValueConst opts,
             v = ns_js_get_bool_prop(ctx, opts, "once", &set);
             if (set) *once = v;
             v = ns_js_get_bool_prop(ctx, opts, "passive", &set);
-            if (set && passive) *passive = v;
+            if (set) { if (passive) *passive = v; if (passive_set) *passive_set = TRUE; }
             sig = JS_GetPropertyStr(ctx, opts, "signal");
         }
         if (JS_IsObject(sig)) {
@@ -5667,6 +5726,17 @@ ns_signal_is_aborted(JSContext *ctx, JSValueConst signal)
     return already;
 }
 
+static gboolean
+ns_event_type_is_passive_default(const char *type)
+{
+    static const char *const t[] = {
+        "touchstart", "touchmove", "wheel", "mousewheel",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(t); i++)
+        if (strcmp(type, t[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 static JSValue
 ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
@@ -5675,11 +5745,11 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
     if (!n || argc < 2 || !js_from_ctx(ctx)) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
-    gboolean capture = FALSE, once = FALSE, passive = FALSE;
+    gboolean capture = FALSE, once = FALSE, passive = FALSE, passive_set = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
         !ns_listener_parse_options(ctx, argv[2], &capture, &once, &passive,
-                                   &signal, TRUE)) {
+                                   &passive_set, &signal, TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
     }
@@ -5710,6 +5780,14 @@ ns_element_addEventListener(JSContext *ctx, JSValueConst this_val,
             return JS_UNDEFINED;
         }
     }
+    if (!passive_set && ns_event_type_is_passive_default(type) &&
+        _js->current_doc) {
+        ns_node *html = ns_node_is_element_named(_js->current_doc, "html")
+            ? _js->current_doc
+            : ns_node_find_first_element(_js->current_doc, "html");
+        ns_node *body = ns_node_find_first_element(_js->current_doc, "body");
+        if (n == html || n == body) passive = TRUE;
+    }
     ns_listener *l = g_new0(ns_listener, 1);
     l->target = n;
     l->type   = g_strdup(type);
@@ -5735,7 +5813,7 @@ ns_element_removeEventListener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3)
-        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
+        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
                                   FALSE);
     JS_FreeValue(ctx, signal);
     ns_js *js = js_from_ctx(ctx);
@@ -8679,7 +8757,7 @@ ns_port_add_event_listener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
@@ -11661,7 +11739,7 @@ ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
-        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
+        !ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
                                    TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
@@ -18967,12 +19045,8 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
     JS_FreeValue(ctx, global);
     if (reflected && js->current_doc) {
         ns_node *body = ns_node_find_first_element(js->current_doc, "body");
-        if (body) {
-            if (ns_fire_inline_on_handler(js, body, type, event))
-                fired = TRUE;
-            if (ns_fire_property_on_handler(js, body, type, event))
-                fired = TRUE;
-        }
+        if (body && ns_fire_inline_on_handler(js, body, type, event))
+            fired = TRUE;
     }
     return fired;
 }
@@ -35809,11 +35883,11 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc || argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
-    gboolean capture = FALSE, once = FALSE, passive = FALSE;
+    gboolean capture = FALSE, once = FALSE, passive = FALSE, passive_set = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3 &&
         !ns_listener_parse_options(ctx, argv[2], &capture, &once, &passive,
-                                   &signal, TRUE)) {
+                                   &passive_set, &signal, TRUE)) {
         JS_FreeCString(ctx, type);
         return JS_EXCEPTION;
     }
@@ -35845,6 +35919,8 @@ ns_document_add_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
             return JS_UNDEFINED;
         }
     }
+    if (!passive_set && ns_event_type_is_passive_default(type))
+        passive = TRUE;
     ns_listener *l = g_new0(ns_listener, 1);
     l->target = _js->current_doc;
     l->type   = g_strdup(type);
@@ -35887,7 +35963,7 @@ ns_document_remove_listener_impl(JSContext *ctx, int argc, JSValueConst *argv,
     gboolean capture = FALSE, once = FALSE;
     JSValue signal = JS_NULL;
     if (argc >= 3)
-        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, &signal,
+        ns_listener_parse_options(ctx, argv[2], &capture, &once, NULL, NULL, &signal,
                                   FALSE);
     JS_FreeValue(ctx, signal);
     for (guint i = 0; i < js->listeners->len; i++) {
