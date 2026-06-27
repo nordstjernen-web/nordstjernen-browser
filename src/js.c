@@ -23722,7 +23722,7 @@ static JSValue
 ns_element_get_ownerSVGElement(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n) return JS_NULL;
+    if (!n || !(n->flags & NS_NODE_SVG_NS)) return JS_UNDEFINED;
     const ns_node *svg = NULL;
     for (const ns_node *p = n->parent; p; p = p->parent)
         if (p->name && g_ascii_strcasecmp(p->name, "svg") == 0) { svg = p; break; }
