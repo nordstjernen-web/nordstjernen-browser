@@ -6007,6 +6007,19 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
     }
 }
 
+static gboolean
+ns_final_url_connect_blocked(ns_js *js, const char *final_url)
+{
+    if (!js || !final_url || !*final_url) return FALSE;
+    const char *page = js->current_url;
+    gboolean mixed = page &&
+        g_ascii_strncasecmp(page, "https://", 8) == 0 &&
+        g_ascii_strncasecmp(final_url, "http://", 7) == 0;
+    gboolean csp = js->csp &&
+        !ns_csp_allows(js->csp, NS_CSP_CONNECT, final_url, page);
+    return mixed || csp;
+}
+
 static void
 ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
 {
@@ -6027,6 +6040,10 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         ns_js_fetch_state_free(st);
         return;
     }
+    if (resp && !resp->error &&
+        ns_final_url_connect_blocked(st->js, resp->final_url))
+        resp->error = g_strdup(
+            "blocked after redirect (mixed content or connect-src CSP)");
     if (!resp || resp->error) {
         const char *msg = resp ? resp->error :
                                 (err ? err->message : "fetch failed");
@@ -11875,7 +11892,9 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JSContext *ctx = st->ctx;
     if (resp && !err) {
         gboolean allow = cors_allows(js_from_ctx(ctx) ? js_from_ctx(ctx)->current_url : NULL,
-                                     resp->final_url, resp->cors_allow_origin);
+                                     resp->final_url, resp->cors_allow_origin)
+                         && !ns_final_url_connect_blocked(js_from_ctx(ctx),
+                                                          resp->final_url);
         int code = allow ? (int)resp->status : 0;
         JS_SetPropertyStr(ctx, st->obj, "status", JS_NewInt32(ctx, code));
         JS_SetPropertyStr(ctx, st->obj, "statusText",
