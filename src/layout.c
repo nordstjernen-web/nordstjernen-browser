@@ -934,6 +934,8 @@ static gsize          g_focused_sel_anchor_byte_for_layout;
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
 static GHashTable    *g_counters_for_layout;
+static char          *g_svg_defs_for_layout;
+static gboolean       g_svg_defs_computed_for_layout;
 static ns_box *ns_layout_build_(const ns_node *doc, GHashTable *styles, double viewport_width);
 
 typedef struct ns_subgrid_cols {
@@ -3667,6 +3669,25 @@ svg_inject_namespaces(char *outer)
     return g_string_free(r, FALSE);
 }
 
+static const char *
+ns_document_svg_defs(const ns_node *root)
+{
+    if (g_svg_defs_computed_for_layout)
+        return g_svg_defs_for_layout;
+    g_svg_defs_computed_for_layout = TRUE;
+    GString *defs = g_string_new(NULL);
+    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    ns_collect_svg_defs(root, defs, seen, 0);
+    g_hash_table_destroy(seen);
+    if (defs->len == 0) {
+        g_string_free(defs, TRUE);
+        g_svg_defs_for_layout = NULL;
+    } else {
+        g_svg_defs_for_layout = g_string_free(defs, FALSE);
+    }
+    return g_svg_defs_for_layout;
+}
+
 static char *
 ns_svg_outer_with_defs(const ns_node *n)
 {
@@ -3674,25 +3695,18 @@ ns_svg_outer_with_defs(const ns_node *n)
     if (!outer || !*outer) return outer;
     const ns_node *root = ns_node_document_root(n);
     if (root == n) return outer;
-    GString *defs = g_string_new(NULL);
-    GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-    ns_collect_svg_defs(root, defs, seen, 0);
-    g_hash_table_destroy(seen);
-    if (defs->len == 0) {
-        g_string_free(defs, TRUE);
-        return outer;
-    }
+    const char *defs = ns_document_svg_defs(root);
+    if (!defs) return outer;
     const char *gt = strchr(outer, '>');
-    if (!gt) { g_string_free(defs, TRUE); return outer; }
+    if (!gt) return outer;
     gsize prefix_len = (gsize)(gt - outer + 1);
     GString *aug = g_string_new(NULL);
     g_string_append_len(aug, outer, prefix_len);
     g_string_append(aug, "<defs>");
-    g_string_append_len(aug, defs->str, defs->len);
+    g_string_append(aug, defs);
     g_string_append(aug, "</defs>");
     g_string_append(aug, outer + prefix_len);
     g_free(outer);
-    g_string_free(defs, TRUE);
     return g_string_free(aug, FALSE);
 }
 
@@ -9383,6 +9397,8 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = focused_sel_anchor_byte;
     g_image_cache_for_layout = image_cache;
     g_base_url_for_layout = base_url;
+    g_svg_defs_for_layout = NULL;
+    g_svg_defs_computed_for_layout = FALSE;
     ns_image_cache_begin_generation(image_cache);
     g_counters_for_layout = build_counter_snapshots(doc, styles);
     ns_box *root = ns_layout_build_(doc, styles, viewport_width);
@@ -9393,6 +9409,9 @@ ns_layout_build(const ns_node *doc, GHashTable *styles, double viewport_width,
     g_focused_sel_anchor_byte_for_layout = 0;
     g_image_cache_for_layout = NULL;
     g_base_url_for_layout = NULL;
+    g_free(g_svg_defs_for_layout);
+    g_svg_defs_for_layout = NULL;
+    g_svg_defs_computed_for_layout = FALSE;
     if (g_counters_for_layout) {
         g_hash_table_destroy(g_counters_for_layout);
         g_counters_for_layout = NULL;
