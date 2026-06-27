@@ -322,6 +322,7 @@ ns_es_connect_once(ns_es *es, gboolean *opened_out)
     curl_easy_setopt(curl, CURLOPT_USERAGENT, NS_USER_AGENT);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     ns_net_apply_curl_tls(curl);
+    ns_net_apply_curl_proxy(curl, es->url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);

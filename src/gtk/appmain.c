@@ -568,7 +568,12 @@ main(int argc, char **argv)
     gboolean dump_set = FALSE;
     for (int i = 1; i < argc; i++) {
         if (g_str_has_prefix(argv[i], "--proxy=")) {
-            ns_net_set_proxy_override(argv[i] + 8);
+            const char *pxy = argv[i] + 8;
+            ns_net_set_proxy_override(pxy);
+            if (pxy && *pxy) {
+                g_setenv("NS_HTTP_PROXY", pxy, TRUE);
+                g_setenv("NS_HTTPS_PROXY", pxy, TRUE);
+            }
         } else if (g_str_has_prefix(argv[i], "--gsk-renderer=")) {
             gsk_renderer_override = argv[i] + 15;
         } else if (g_strcmp0(argv[i], "--private") == 0) {

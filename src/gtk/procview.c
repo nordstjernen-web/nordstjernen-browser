@@ -7,6 +7,7 @@
 #include "proc_limits.h"
 #include "rproc_http.h"
 #include "rproc_inproc.h"
+#include "net.h"
 
 #include <cairo.h>
 #include <glib/gstdio.h>
@@ -544,16 +545,42 @@ ns_proc_audio_helper_path(void)
 }
 
 static void
+ns_proc_audio_apply_proxy_env(GSubprocessLauncher *launcher)
+{
+    const char *override = ns_net_proxy_override();
+    if (override && *override) {
+        g_subprocess_launcher_setenv(launcher, "all_proxy", override, TRUE);
+        g_subprocess_launcher_setenv(launcher, "http_proxy", override, TRUE);
+        g_subprocess_launcher_setenv(launcher, "https_proxy", override, TRUE);
+    } else {
+        const char *http_proxy = ns_net_http_proxy();
+        const char *https_proxy = ns_net_https_proxy();
+        if (http_proxy && *http_proxy)
+            g_subprocess_launcher_setenv(launcher, "http_proxy", http_proxy, TRUE);
+        if (https_proxy && *https_proxy)
+            g_subprocess_launcher_setenv(launcher, "https_proxy", https_proxy, TRUE);
+    }
+    const char *no_proxy = ns_net_no_proxy();
+    if (no_proxy && *no_proxy)
+        g_subprocess_launcher_setenv(launcher, "no_proxy", no_proxy, TRUE);
+    const char *ca = ns_net_ca_bundle_path();
+    if (ca && *ca)
+        g_subprocess_launcher_setenv(launcher, "CURL_CA_BUNDLE", ca, TRUE);
+}
+
+static void
 pv_audio_pump(NsProcView *v, const char *commands)
 {
     if (!commands || !*commands) return;
     if (!v->audio_proc) {
         char *path = ns_proc_audio_helper_path();
         GError *err = NULL;
-        v->audio_proc = g_subprocess_new(
+        GSubprocessLauncher *launcher = g_subprocess_launcher_new(
             G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_SILENCE |
-            G_SUBPROCESS_FLAGS_STDERR_SILENCE,
-            &err, path, NULL);
+            G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+        ns_proc_audio_apply_proxy_env(launcher);
+        v->audio_proc = g_subprocess_launcher_spawn(launcher, &err, path, NULL);
+        g_object_unref(launcher);
         g_free(path);
         if (!v->audio_proc) {
             g_clear_error(&err);

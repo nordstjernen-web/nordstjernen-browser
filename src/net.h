@@ -153,6 +153,11 @@ void  ns_net_perf_snapshot(guint64 *fetches, guint64 *bytes,
 char *ns_net_proxy_mask(const char *proxy_url);
 void  ns_net_apply_curl_proxy(void *curl_handle, const char *url);
 void  ns_net_apply_curl_tls(void *curl_handle);
+const char *ns_net_proxy_override(void);
+const char *ns_net_http_proxy(void);
+const char *ns_net_https_proxy(void);
+const char *ns_net_no_proxy(void);
+const char *ns_net_ca_bundle_path(void);
 
 gboolean ns_address_is_search(const char *s);
 char *ns_search_url_for(const char *query);

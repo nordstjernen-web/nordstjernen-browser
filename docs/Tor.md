@@ -150,18 +150,18 @@ that **not every connection honors the NS proxy config**:
 | Egress | Proxy applied? | Evidence | Action |
 |---|---|---|---|
 | Page/subresource fetch | ✅ yes | `src/net.c:4007` | the chokepoint — already correct |
-| **WebSocket** | ❌ **no** — TLS only | `src/ws.c:423,911` apply `ns_net_apply_curl_tls`, never `..._proxy` | **bug + leak.** Add `ns_net_apply_curl_proxy` |
-| **EventSource/SSE** | ❌ **no** | `src/eventsource.c:304,316` | **leak.** Add proxy |
-| **Audio/video stream fetch** | ❌ **no** | `src/audio/main.c:547` (unsandboxed helper) | **leak.** Route helper through SOCKS too |
+| WebSocket | ✅ yes | `src/ws.c:438,941` now also apply `ns_net_apply_curl_proxy` | fixed in 1.0.17-dev |
+| EventSource/SSE | ✅ yes | `src/eventsource.c:325` now applies `ns_net_apply_curl_proxy` | fixed in 1.0.17-dev |
+| Audio/video stream fetch | ✅ yes | helper is spawned with the proxy + CA in its environment (`src/gtk/procview.c`); the unsandboxed helper's libcurl honors it | fixed in 1.0.17-dev |
 | AI model download (HuggingFace) | ✅ yes | `src/ai.c:376` | proxied, but multi-GB over Tor is impractical — **disable model download in Tor mode** |
 | AI web search (DuckDuckGo) | ✅ yes | `src/ai.c:583` (`html.duckduckgo.com`) | proxied; consider gating background AI calls in Tor mode |
 | AI image search (Wikipedia) | ✅ yes | `src/ai.c:583` (`<lang>.wikipedia.org`) | proxied; reveals UI language — gate in Tor mode |
 
-Note this also contradicts `docs/Proxy.md:114-115` ("WebSocket connections use
-the same libcurl config and are tunneled through the same proxy") — true only if
-libcurl picks up the lowercase `http_proxy`/`HTTPS_PROXY` env on its own; **false
-for `--proxy=` / `NS_*_PROXY` / config-file proxy**, which only take effect
-through `ns_net_apply_curl_proxy`. Fix the code and the doc.
+As of 1.0.17-dev the WebSocket, SSE, and audio-helper paths apply the configured
+proxy (the helper via its spawn environment), and `--proxy=` is propagated to
+every renderer through `NS_HTTP_PROXY`/`NS_HTTPS_PROXY` (which `config.c` loads in
+each process). So `docs/Proxy.md`'s "tunneled through the same proxy" now holds
+for `--proxy=` and config-file proxies, not only for inherited lowercase env.
 
 **Make egress fail-closed when Tor mode is on:**
 1. **One enforcement point.** Have `ns_net_apply_curl_proxy` (and the ws/es/audio
@@ -177,11 +177,12 @@ through `ns_net_apply_curl_proxy`. Fix the code and the doc.
    a single rule allowing the Tor SOCKS port. Now the renderer *cannot* connect
    anywhere else. (Today `handled_access_fs` is the only handled class — network
    is unrestricted, which is why direct connects are even possible.)
-4. **Propagate the setting to renderers.** `--proxy=` sets `g_proxy_override` in
-   the *shell* (`appmain.c:569`); the *renderer* does the fetching. Route Tor
-   config through the config/env layer (which `config.c` loads in every process)
-   or forward it on the renderer spawn, so every per-tab process is pointed at
-   Tor — not just the shell.
+4. **Propagate the setting to renderers.** *Done in 1.0.17-dev.* `--proxy=` still
+   sets `g_proxy_override` in the *shell* (`appmain.c`) and now also exports
+   `NS_HTTP_PROXY`/`NS_HTTPS_PROXY`, which `config.c` loads in every per-tab
+   renderer — so the renderer that actually does the fetching is pointed at the
+   proxy too, not just the shell. (Verified: with `--proxy` set, WebSocket/SSE
+   egress from a renderer process routes through the proxy.)
 5. **WebRTC:** none exists (it's a documented non-goal), so the classic Tor
    IP-leak vector is absent by construction. Worth stating as a plus.
 

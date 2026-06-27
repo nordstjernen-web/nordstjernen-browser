@@ -1825,7 +1825,8 @@ ns_net_pick_configured_proxy(const char *url)
     if (g_proxy_override && *g_proxy_override) return g_proxy_override;
     const ns_config *cfg = ns_config_get();
     if (!cfg) return NULL;
-    gboolean https = g_str_has_prefix(url, "https://");
+    gboolean https = g_str_has_prefix(url, "https://") ||
+                     g_str_has_prefix(url, "wss://");
     if (https && cfg->https_proxy && *cfg->https_proxy) return cfg->https_proxy;
     if (cfg->http_proxy && *cfg->http_proxy)            return cfg->http_proxy;
     return NULL;
@@ -1849,6 +1850,39 @@ ns_net_apply_curl_proxy(void *curl_handle, const char *url)
     const char *no_proxy = ns_net_configured_no_proxy();
     if (no_proxy && *no_proxy)
         curl_easy_setopt(curl, CURLOPT_NOPROXY, no_proxy);
+}
+
+const char *
+ns_net_proxy_override(void)
+{
+    return g_proxy_override;
+}
+
+const char *
+ns_net_http_proxy(void)
+{
+    const ns_config *cfg = ns_config_get();
+    return cfg ? cfg->http_proxy : NULL;
+}
+
+const char *
+ns_net_https_proxy(void)
+{
+    const ns_config *cfg = ns_config_get();
+    return cfg ? cfg->https_proxy : NULL;
+}
+
+const char *
+ns_net_no_proxy(void)
+{
+    const ns_config *cfg = ns_config_get();
+    return cfg ? cfg->no_proxy : NULL;
+}
+
+const char *
+ns_net_ca_bundle_path(void)
+{
+    return g_ca_bundle;
 }
 
 void
