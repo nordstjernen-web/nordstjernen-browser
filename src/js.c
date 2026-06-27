@@ -154,6 +154,8 @@ static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
+static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
+static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
 static void ns_js_process_pending_iframes(ns_js *js);
 static GBytes *ns_js_blob_url_lookup(ns_js *js, const char *url, char **out_type);
 static void ns_js_record_child_change(ns_js *js, ns_node *parent,
@@ -18852,6 +18854,7 @@ ns_run_listener_array(ns_js *js, GPtrArray *to_call, JSValue current_target,
                 JS_FreeValue(js->ctx, stack);
             }
             if (m) JS_FreeCString(js->ctx, m);
+            ns_js_report_uncaught(js, ex, js->current_url);
             JS_FreeValue(js->ctx, ex);
         }
         JS_FreeValue(js->ctx, ret);
@@ -19197,6 +19200,45 @@ ns_wpt_wheel(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     JS_ToFloat64(ctx, &dx, argv[3]);
     JS_ToFloat64(ctx, &dy, argv[4]);
     ns_js_dispatch_wheel_event(js, target, x, y, dx, dy);
+    return JS_UNDEFINED;
+}
+
+static gboolean
+ns_js_dispatch_touch_type(ns_js *js, const ns_node *target, const char *type,
+                          double x, double y)
+{
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, target);
+    gboolean cancelable = ns_path_has_active_listener(js, target, type);
+    JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "composed",   JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "clientX",    JS_NewFloat64(ctx, x));
+    JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
+    JS_SetPropertyStr(ctx, event, "touches",        JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, event, "targetTouches",  JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, event, "changedTouches", JS_NewArray(ctx));
+    return ns_js_dispatch_built_event(js, target, type, event, NULL);
+}
+
+static JSValue
+ns_wpt_touch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 2) return JS_UNDEFINED;
+    const ns_node *target = ns_unwrap_element(argv[0]);
+    if (!target) target = js->current_doc;
+    if (!target) return JS_UNDEFINED;
+    const char *type = JS_ToCString(ctx, argv[1]);
+    if (!type) return JS_UNDEFINED;
+    double x = 0, y = 0;
+    if (argc > 2) JS_ToFloat64(ctx, &x, argv[2]);
+    if (argc > 3) JS_ToFloat64(ctx, &y, argv[3]);
+    if (!js->halted && !js->in_pump)
+        ns_js_dispatch_touch_type(js, target, type, x, y);
+    JS_FreeCString(ctx, type);
     return JS_UNDEFINED;
 }
 
@@ -32265,11 +32307,11 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
     {
         ns_node *prev = js->ce_upgrading;
         js->ce_upgrading = node;
-        js->ce_defer_upgrades++;
+        js->ce_constructing++;
         JSValue ctor_result = JS_CallConstructor(ctx, klass, 0, NULL);
         if (JS_IsException(ctor_result)) ns_ce_log_error(js, "constructor");
         JS_FreeValue(ctx, ctor_result);
-        js->ce_defer_upgrades--;
+        js->ce_constructing--;
         js->ce_upgrading = prev;
     }
 
@@ -32299,7 +32341,7 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
     }
     JS_FreeValue(ctx, observed);
 
-    if (js->ce_defer_upgrades == 0)
+    if (js->ce_defer_upgrades == 0 && js->ce_constructing == 0)
         for (ns_node *c = node->first_child; c; c = c->next_sibling)
             ns_ce_upgrade_subtree_all(js, c);
 
@@ -32343,7 +32385,7 @@ ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
                                 const char *target_name, int depth)
 {
     if (!js || !root || !target_name || depth >= 512) return;
-    if (js->ce_defer_upgrades > 0) return;
+    if (js->ce_defer_upgrades > 0 || js->ce_constructing > 0) return;
     if (ns_node_in_template_content(root)) return;
     if (root->kind == NS_NODE_ELEMENT && root->name &&
         g_ascii_strcasecmp(root->name, target_name) == 0) {
@@ -32365,7 +32407,7 @@ ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || !js->ce_registry || depth >= 512) return;
     if (g_hash_table_size(js->ce_registry) == 0) return;
-    if (js->ce_defer_upgrades > 0) return;
+    if (js->ce_defer_upgrades > 0 || js->ce_constructing > 0) return;
     if (ns_node_in_template_content(root)) return;
     if (root->kind == NS_NODE_ELEMENT && root->name && strchr(root->name, '-')) {
         char *lower = g_ascii_strdown(root->name, -1);
@@ -32458,8 +32500,12 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     g_hash_table_replace(js->ce_registry, g_strdup(name), slot);
     ns_css_register_defined_element(name);
 
-    if (js->current_doc && !js->ce_defer_upgrades)
+    if (js->current_doc && js->ce_constructing == 0) {
+        int saved = js->ce_defer_upgrades;
+        js->ce_defer_upgrades = 0;
         ns_ce_upgrade_subtree_named(js, js->current_doc, name);
+        js->ce_defer_upgrades = saved;
+    }
 
     if (js->ce_pending) {
         GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, name);
@@ -33928,6 +33974,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "requestAnimationFrame", ns_window_requestAnimationFrame,  1);
     ns_bind_fn(ctx, global, "cancelAnimationFrame",  ns_window_cancelAnimationFrame,   1);
     ns_bind_fn(ctx, global, "__nsWptWheel",          ns_wpt_wheel,                     5);
+    ns_bind_fn(ctx, global, "__nsWptTouch",          ns_wpt_touch,                     4);
     ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
@@ -34843,10 +34890,8 @@ ns_document_createElementNS(JSContext *ctx, JSValueConst this_val,
     static const char xml_ns[]   = "http://www.w3.org/XML/1998/namespace";
     static const char xmlns_ns[] = "http://www.w3.org/2000/xmlns/";
     const char *err_name = NULL;
-    if (!ns_is_xml_name_n(name, strlen(name)))
+    if (!ns_is_xml_qname(name))
         err_name = "InvalidCharacterError";
-    else if (!ns_is_xml_qname(name))
-        err_name = "NamespaceError";
     else if (has_prefix && !ns)
         err_name = "NamespaceError";
     else if (prefix_is_xml && (!ns || strcmp(ns, xml_ns) != 0))
@@ -35607,11 +35652,6 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
         return ns_throw_dom_exception(ctx, "InvalidCharacterError", 5,
             "invalid doctype name");
     }
-    if (strchr(name, ':') && !ns_is_xml_qname(name)) {
-        JS_FreeCString(ctx, name);
-        return ns_throw_dom_exception(ctx, "NamespaceError", 14,
-            "malformed qualified name");
-    }
     const char *public_id = JS_ToCString(ctx, argv[1]);
     const char *system_id = public_id ? JS_ToCString(ctx, argv[2]) : NULL;
     if (!public_id || !system_id) {
@@ -35625,8 +35665,10 @@ ns_impl_create_document_type(JSContext *ctx, JSValueConst this_val,
     dt->kind = NS_NODE_DOCTYPE;
     g_hash_table_add(js->orphan_nodes, dt);
     JSValue wrapper = ns_make_element(ctx, dt);
-    JS_DefinePropertyValueStr(ctx, wrapper, "__ndNoOwnerDoc", JS_TRUE,
-                              JS_PROP_CONFIGURABLE);
+    JSValue impl_doc = JS_GetPropertyStr(ctx, this_val, "__ndDocument");
+    if (JS_IsObject(impl_doc))
+        ns_tag_owner_document(ctx, impl_doc, wrapper);
+    JS_FreeValue(ctx, impl_doc);
     JS_FreeCString(ctx, name);
     JS_FreeCString(ctx, public_id);
     JS_FreeCString(ctx, system_id);
@@ -37656,6 +37698,33 @@ ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len
 }
 
 static void
+ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
+{
+    if (!js || !js->ctx || js->in_error_report) return;
+    JSContext *ctx = js->ctx;
+    js->in_error_report = 1;
+
+    JSValue ev = ns_make_event(ctx, "error", NULL);
+    JS_SetPropertyStr(ctx, ev, "bubbles", JS_FALSE);
+    JSValue g = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, g));
+    JS_FreeValue(ctx, g);
+
+    const char *es = JS_ToCString(ctx, ex);
+    JS_SetPropertyStr(ctx, ev, "message",
+                      JS_NewString(ctx, es ? es : "Script error."));
+    if (es) JS_FreeCString(ctx, es);
+    JS_SetPropertyStr(ctx, ev, "filename",
+                      JS_NewString(ctx, origin ? origin : ""));
+    JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, ev, "error", JS_DupValue(ctx, ex));
+
+    ns_js_dispatch_window_only_event(js, "error", ev, NULL);
+    js->in_error_report = 0;
+}
+
+static void
 ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 {
     if (js->iframe_doc_set) {
@@ -37752,6 +37821,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
             JS_FreeValue(js->ctx, stk);
         }
         if (msg) JS_FreeCString(js->ctx, msg);
+        ns_js_report_uncaught(js, ex, origin);
         JS_FreeValue(js->ctx, ex);
     }
     ns_js_apply_site_quirks(js);
@@ -38717,6 +38787,7 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     if (!js || !root || !js->current_doc || js->halted || js->in_pump) return;
     if (js->ce_upgrading) return;
     if (!ns_js_root_connected(js, root)) return;
+    ns_js_schedule_static_iframes(js, root);
     GPtrArray *sheets = g_ptr_array_new();
     ns_js_collect_pending_stylesheets(root, sheets);
     if (!ns_subtree_has_pending_script(root) && sheets->len == 0) {
@@ -38813,7 +38884,8 @@ ns_js_iframe_source_loaded(ns_js *js, ns_node *iframe)
 
     const char *attr = ns_frame_src_attr(iframe);
     const char *src = attr ? ns_element_get_attr(iframe, attr) : NULL;
-    if (!src || !*src || g_str_has_prefix(src, "about:")) return FALSE;
+    if (!src || !*src || g_str_has_prefix(src, "about:"))
+        return ns_node_is_element_named(iframe, "iframe");
     const char *origin = (js->current_url && *js->current_url)
                        ? js->current_url : "inline";
     char *abs_url = ns_url_resolve(origin, src);
@@ -39837,6 +39909,13 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
     }
 
+    if (!content_doc && !decoded &&
+        ns_node_is_element_named(iframe, "iframe")) {
+        content_root = ns_iframe_ensure_content_root(iframe);
+        if (content_root) content_doc = content_root->parent;
+        if (!abs_url) abs_url = g_strdup(origin);
+    }
+
     if (content_root && content_doc) {
         ns_element_set_attr(iframe, "data-nd-frame-loaded", "1");
         ns_js_record_child_change(js, iframe, content_doc, NULL, NULL, NULL);
@@ -39965,7 +40044,8 @@ ns_js_schedule_static_iframes_rec(ns_js *js, ns_node *n, int depth)
         if (!ns_element_get_attr(n, "data-nd-frame-loaded")) {
             const char *src    = ns_element_get_attr(n, frame_attr);
             const char *srcdoc = ns_element_get_attr(n, "srcdoc");
-            if ((src && *src) || (srcdoc && *srcdoc))
+            if ((src && *src) || (srcdoc && *srcdoc) ||
+                ns_node_is_element_named(n, "iframe"))
                 ns_js_schedule_iframe_load(js, n);
         }
         return;
