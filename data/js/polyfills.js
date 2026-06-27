@@ -5345,7 +5345,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw rangeEx(2);
+            if (!parent) throw domEx('InvalidNodeTypeError');
             this.setStart(parent, indexOfNode(node));
         };
 
@@ -5353,7 +5353,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw rangeEx(2);
+            if (!parent) throw domEx('InvalidNodeTypeError');
             this.setStart(parent, indexOfNode(node) + 1);
         };
 
@@ -5361,7 +5361,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw rangeEx(2);
+            if (!parent) throw domEx('InvalidNodeTypeError');
             this.setEnd(parent, indexOfNode(node));
         };
 
@@ -5369,7 +5369,7 @@
             if (!node || typeof node.nodeType !== 'number')
                 throw new TypeError('parameter 1 is not of type Node');
             var parent = node.parentNode;
-            if (!parent) throw rangeEx(2);
+            if (!parent) throw domEx('InvalidNodeTypeError');
             this.setEnd(parent, indexOfNode(node) + 1);
         };
 
@@ -5693,10 +5693,10 @@
                 throw new TypeError('parameter 1 is not of type Node');
             for (var a = this._sc; a && !isInclusiveAncestor(a, this._ec);
                  a = a.parentNode)
-                if (!isTextNode(a)) throw rangeEx(1);
+                if (!isTextNode(a)) throw domEx('InvalidStateError');
             for (var b = this._ec; b && !isInclusiveAncestor(b, this._sc);
                  b = b.parentNode)
-                if (!isTextNode(b)) throw rangeEx(1);
+                if (!isTextNode(b)) throw domEx('InvalidStateError');
             var nt = newParent.nodeType;
             if (nt === 9 || nt === 10 || nt === 11)
                 throw domEx('InvalidNodeTypeError');

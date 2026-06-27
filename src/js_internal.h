@@ -191,6 +191,8 @@ struct ns_js {
     ns_node      *ce_upgrading;
     int           ce_in_attr_callback;
     int           ce_defer_upgrades;
+    int           ce_constructing;
+    int           in_error_report;
     JSValue       nodelist_decorator;
     int           nodelist_decorator_set;
     JSValue       live_html_proto;

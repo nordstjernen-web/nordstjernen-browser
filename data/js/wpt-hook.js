@@ -122,6 +122,11 @@
         try { target.dispatchEvent(ev); } catch (e) {}
     }
 
+    function fireTouch(target, type, x, y) {
+        if (!target || typeof global.__nsWptTouch !== 'function') return;
+        try { global.__nsWptTouch(target, type, x || 0, y || 0); } catch (e) {}
+    }
+
     function realClick(element) {
         if (!element) return;
         var c = elementCenter(element);
@@ -191,6 +196,8 @@
                 firePointer(state.target, 'pointermove', state.x, state.y, pt);
                 if (pt === 'mouse')
                     fireMouse(state.target, 'mousemove', state.x, state.y, 0);
+                else if (pt === 'touch' && state.downTarget)
+                    fireTouch(state.downTarget, 'touchmove', state.x, state.y);
             } else if (a.type === 'pointerDown') {
                 if (!state.target) state.target = resolveOrigin(null, state).target;
                 state.downTarget = state.target;
@@ -198,11 +205,16 @@
                 if (pt === 'mouse')
                     fireMouse(state.target, 'mousedown', state.x, state.y,
                               a.button || 0);
+                else if (pt === 'touch')
+                    fireTouch(state.target, 'touchstart', state.x, state.y);
             } else if (a.type === 'pointerUp') {
                 firePointer(state.target, 'pointerup', state.x, state.y, pt);
                 if (pt === 'mouse')
                     fireMouse(state.target, 'mouseup', state.x, state.y,
                               a.button || 0);
+                else if (pt === 'touch')
+                    fireTouch(state.downTarget || state.target, 'touchend',
+                              state.x, state.y);
                 if (state.target && state.target === state.downTarget) {
                     try { state.target.click(); } catch (e) {}
                 }

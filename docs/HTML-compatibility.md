@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.10**, 2026-06-17 (rev 27).
+Snapshot: **1.0.16**, 2026-06-27 (rev 28).
 
 §1–§16 row tally (counted across the section tables below): **139 ✅
 implemented · 29 🟡 partial · 3 ❌ absent · 7 🚫 absent by design**.
@@ -182,7 +182,7 @@ elements (`head title meta link style script noscript template`) to
 | `picture` / `source` | ✅ | `pick_picture_source_url` matches `media`/`type` via `ns_css_media_query_matches` |
 | `img loading="lazy"` | ✅ | fetch/decode deferred until the image scrolls near the viewport (`src/engine.c`) |
 | Decode pipeline | ✅/🟡 | ICO (`src/image_ico.c`) → Wuffs (PNG/APNG, GIF, BMP, JPEG) → WebP via libwebp (lossy VP8 + lossless VP8L, `src/image_webp.c`) → AVIF via libavif (`src/image_avif.c`, if built) → GDK-Pixbuf fallback (TIFF and other loader formats) → librsvg (static SVG) |
-| `iframe` | 🟡 | `src`/`srcdoc` load; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
+| `iframe` | 🟡 | `src`/`srcdoc` load; a **srcless or `about:blank`** frame, when connected, runs the load algorithm — a real same-origin `about:blank` content document is created and a `load` event fires (`ns_js_load_iframe_now`), so script that waits on `iframe.onload` proceeds; `sandbox` parsed **and enforced** — scripts, forms, popups, modals, and same-origin (cookie/storage) gated per the token list, restrictions inherited by nested frames (`ns_iframe_effective_sandbox` in `src/js.c`) |
 | `iframe srcdoc` | 🟡 | attribute and DOM reflection; embedded rendering still limited |
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
 | `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and for VP9/VP8 WebM (`.webm`, when FFmpeg libav is built in) — decoded in the sandboxed renderer (`src/video_decode.c`), honouring `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. Other codecs render a poster + play overlay; click hands the source URL to the system media player (`ns_media_try_launch`). Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp. **Navigating to a recognised video-page URL** (YouTube `watch`/`shorts`/`embed`/`live`, `youtu.be`, `music.youtube.com` — `ns_media_is_video_page` in `src/media.c`) hands off to the external player automatically *before* loading the page, so the browser plays the video without rendering (or crashing on) the site's heavy player app; if no player is installed it falls back to loading the page. See [media.md](media.md) |
@@ -269,7 +269,7 @@ validation.
 
 | Topic | Status | Notes |
 |-------|:--:|------|
-| `customElements.define` / `get` | ✅ | `src/js.c` |
+| `customElements.define` / `get` | ✅ | `src/js.c`; `define()` upgrades already-connected matching elements **synchronously**, so `connectedCallback` runs before the next statement (an in-construction deferral counter keeps the explicit upgrade from being suppressed during the initial inline-script run) |
 | Autonomous custom elements | ✅ | name validation (hyphen required); `customElements.define(name, ctor)` |
 | Customized built-in elements (`define(..., {extends})` / `is=`) | ❌ | the `options`/`extends` argument is ignored and there is no `is=` upgrade path (`ns_ce_define` in `src/js.c`) |
 | Lifecycle (`connected`/`disconnected`/`adopted`/`attributeChanged`) callbacks | ✅ | |
