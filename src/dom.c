@@ -1699,9 +1699,11 @@ ns_strip_and_collapse_ascii_ws(const char *s)
     if (!s) return g_strdup("");
     GString *out = g_string_new(NULL);
     gboolean in_ws = TRUE;
+    const char *end = s + strlen(s);
     for (const char *p = s; *p; ) {
         gunichar ch = g_utf8_get_char(p);
         const char *next = g_utf8_next_char(p);
+        if (next > end) next = end;
         gboolean is_ws = (ch == 0x09 || ch == 0x0A || ch == 0x0C ||
                           ch == 0x0D || ch == 0x20);
         if (is_ws) {

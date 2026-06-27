@@ -508,9 +508,9 @@ resolve_local_path(const char *url)
 }
 
 static const char *
-browser_find_meta_refresh(const ns_node *n)
+browser_find_meta_refresh(const ns_node *n, int depth)
 {
-    if (!n) return NULL;
+    if (!n || depth > 1024) return NULL;
     if (ns_node_is_element_named(n, "meta")) {
         const char *equiv = ns_element_get_attr(n, "http-equiv");
         if (equiv && g_ascii_strcasecmp(equiv, "refresh") == 0) {
@@ -519,7 +519,7 @@ browser_find_meta_refresh(const ns_node *n)
         }
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        const char *found = browser_find_meta_refresh(c);
+        const char *found = browser_find_meta_refresh(c, depth + 1);
         if (found) return found;
     }
     return NULL;
@@ -533,7 +533,7 @@ browser_arm_declarative_refresh(ns_browser *b, const char *header_value)
     gboolean armed = header_value &&
         ns_net_parse_refresh(header_value, &seconds, &target);
     if (!armed) {
-        const char *meta = browser_find_meta_refresh(b->doc);
+        const char *meta = browser_find_meta_refresh(b->doc, 0);
         armed = meta && ns_net_parse_refresh(meta, &seconds, &target);
     }
     if (!armed) return;
@@ -655,8 +655,9 @@ browser_prepare_document_response(ns_response *resp)
 }
 
 static void
-browser_apply_meta_csp(ns_js *js, const ns_node *node)
+browser_apply_meta_csp(ns_js *js, const ns_node *node, int depth)
 {
+    if (depth > 1024) return;
     for (const ns_node *c = node ? node->first_child : NULL; c;
          c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
@@ -668,7 +669,7 @@ browser_apply_meta_csp(ns_js *js, const ns_node *node)
                     ns_js_add_csp_header(js, content);
             }
         }
-        browser_apply_meta_csp(js, c);
+        browser_apply_meta_csp(js, c, depth + 1);
     }
 }
 
@@ -731,7 +732,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_add_csp_header(b->js, csp_header);
-        browser_apply_meta_csp(b->js, doc);
+        browser_apply_meta_csp(b->js, doc, 0);
         ns_js_run_scripts_in_doc(b->js, doc, base);
     }
     g_free(csp_header);
@@ -924,11 +925,12 @@ ns_browser_dump_layout(ns_browser *browser)
 }
 
 static int
-node_count_walk(const ns_node *n)
+node_count_walk(const ns_node *n, int depth)
 {
+    if (depth > 1024) return 0;
     int c = 0;
     for (; n; n = n->next_sibling)
-        c += 1 + node_count_walk(n->first_child);
+        c += 1 + node_count_walk(n->first_child, depth + 1);
     return c;
 }
 
@@ -989,7 +991,7 @@ ns_browser_dump_performance(ns_browser *browser)
     g_string_append_printf(out, "  charset     %s\n",
                            browser->doc_charset ? browser->doc_charset : "");
     g_string_append_printf(out, "  DOM nodes   %d\n",
-                           node_count_walk(browser->doc));
+                           node_count_walk(browser->doc, 0));
     g_string_append_printf(out, "  layout boxes %d\n",
                            box_count_walk(browser->layout));
     g_string_append_printf(out, "  page size   %d x %d px\n", pw, ph);
@@ -2366,8 +2368,9 @@ ns_browser_resolve_webgl(ns_browser *browser, const char *origin, int allow)
 
 static void
 collect_links(const ns_node *node, const char *base, GString *out,
-              GHashTable *seen)
+              GHashTable *seen, int depth)
 {
+    if (!node || depth > 1024) return;
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "a")) {
             const char *href = ns_element_get_attr(c, "href");
@@ -2382,7 +2385,7 @@ collect_links(const ns_node *node, const char *base, GString *out,
                 g_free(abs);
             }
         }
-        collect_links(c, base, out, seen);
+        collect_links(c, base, out, seen, depth + 1);
     }
 }
 
@@ -2393,7 +2396,7 @@ ns_browser_links(ns_browser *browser)
     GString *out = g_string_new(NULL);
     GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, NULL);
-    collect_links(browser->doc, browser->base_url, out, seen);
+    collect_links(browser->doc, browser->base_url, out, seen, 0);
     g_hash_table_destroy(seen);
     if (out->len == 0) { g_string_free(out, TRUE); return NULL; }
     char *result = strdup(out->str);
@@ -2420,15 +2423,16 @@ rel_token_is_icon(const char *rel)
 }
 
 static const char *
-find_icon_href(const ns_node *node)
+find_icon_href(const ns_node *node, int depth)
 {
+    if (!node || depth > 1024) return NULL;
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "link")) {
             const char *href = ns_element_get_attr(c, "href");
             if (href && *href && rel_token_is_icon(ns_element_get_attr(c, "rel")))
                 return href;
         }
-        const char *found = find_icon_href(c);
+        const char *found = find_icon_href(c, depth + 1);
         if (found)
             return found;
     }
@@ -2440,7 +2444,7 @@ ns_browser_favicon_url(ns_browser *browser)
 {
     if (!browser || !browser->doc)
         return NULL;
-    const char *href = find_icon_href(browser->doc);
+    const char *href = find_icon_href(browser->doc, 0);
     char *abs = (href && *href) ? ns_url_resolve(browser->base_url, href) : NULL;
     if (abs && *abs) {
         char *out = strdup(abs);

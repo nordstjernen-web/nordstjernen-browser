@@ -11440,8 +11440,9 @@ ns_css_sibling_counts_for_nth(const ns_node *el, const ns_css_pseudo_pred *pc,
 }
 
 static void
-ns_css_pragma_language_scan(const ns_node *n, const char **found)
+ns_css_pragma_language_scan(const ns_node *n, const char **found, int depth)
 {
+    if (!n || depth >= 512) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, "meta") == 0) {
@@ -11464,7 +11465,7 @@ ns_css_pragma_language_scan(const ns_node *n, const char **found)
                 }
             }
         }
-        ns_css_pragma_language_scan(c, found);
+        ns_css_pragma_language_scan(c, found, depth + 1);
     }
 }
 
@@ -11483,7 +11484,7 @@ ns_css_node_language(const ns_node *el)
     const ns_node *root = el;
     while (root && root->parent) root = root->parent;
     const char *found = NULL;
-    if (root) ns_css_pragma_language_scan(root, &found);
+    if (root) ns_css_pragma_language_scan(root, &found, 0);
     return found ? found : g_css_doc_language;
 }
 

@@ -112,16 +112,16 @@ render_style_pass(const ns_render_ctx *c, GHashTable *styles)
 }
 
 static const ns_node *
-render_find_viewport_meta(const ns_node *n)
+render_find_viewport_meta(const ns_node *n, int depth)
 {
-    if (!n) return NULL;
+    if (!n || depth >= 512) return NULL;
     if (ns_node_is_element_named(n, "meta")) {
         const char *name = ns_element_get_attr(n, "name");
         if (name && g_ascii_strcasecmp(name, "viewport") == 0)
             return n;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        const ns_node *found = render_find_viewport_meta(c);
+        const ns_node *found = render_find_viewport_meta(c, depth + 1);
         if (found) return found;
     }
     return NULL;
@@ -157,7 +157,7 @@ static double
 render_effective_viewport_width(const ns_render_ctx *c)
 {
     double width = c->viewport_width;
-    const ns_node *meta = render_find_viewport_meta(c->doc);
+    const ns_node *meta = render_find_viewport_meta(c->doc, 0);
     const char *content = meta ? ns_element_get_attr(meta, "content") : NULL;
     double hint = render_parse_viewport_width(content);
     if (hint > width) width = hint;

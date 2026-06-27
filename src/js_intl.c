@@ -1411,7 +1411,8 @@ intl_lf_parts(JSContext *ctx, JSValueConst this_val, JSValueConst list)
     char *type = intl_hget_str(ctx, this_val, "_type");
     JSValue lv = JS_GetPropertyStr(ctx, list, "length");
     uint32_t len = 0; JS_ToUint32(ctx, &len, lv); JS_FreeValue(ctx, lv);
-    char **items = g_new0(char *, len + 1);
+    if (len > (1u << 20)) len = 1u << 20;
+    char **items = g_new0(char *, (gsize)len + 1);
     for (uint32_t i = 0; i < len; i++) {
         JSValue e = JS_GetPropertyUint32(ctx, list, i);
         const char *s = JS_ToCString(ctx, e);

@@ -180,7 +180,15 @@ main(int argc, char **argv)
         }
 
     if (ns_browser_init() != 0) {
-        free(fb);
+        if (!shm_mode)
+            free(fb);
+#ifdef _WIN32
+        else
+            UnmapViewOfFile(fb);
+#else
+        else
+            munmap(fb, fb_size);
+#endif
         return 2;
     }
     ns_browser_sandbox(argv[0]);

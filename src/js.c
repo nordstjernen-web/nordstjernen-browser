@@ -184,7 +184,8 @@ static gboolean ns_checkable_pre_click(ns_js *js, ns_node *el, int kind);
 static void ns_checkable_post_click(ns_js *js, ns_node *el, int kind,
                                     gboolean was_checked, gboolean prevented);
 static void ns_collect_by_name(const ns_node *root, const char *name,
-                               JSContext *ctx, JSValue arr, uint32_t *idx);
+                               JSContext *ctx, JSValue arr, uint32_t *idx,
+                               int depth);
 static JSValue ns_nodelist_new(JSContext *ctx);
 static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
@@ -1130,7 +1131,7 @@ static JSValue ns_make_live2(JSContext *ctx, JSValueConst owner,
 static void ns_collect_by_tag_ns(const ns_node *n, const char *ns,
                                   gboolean ns_wild, const char *local,
                                   gboolean local_wild, JSContext *ctx,
-                                  JSValue arr, uint32_t *idx);
+                                  JSValue arr, uint32_t *idx, int depth);
 
 static ns_node *ns_unwrap_element_mut(JSValueConst val);
 
@@ -7909,7 +7910,7 @@ ns_subtle_deriveKey(JSContext *ctx, JSValueConst this_val,
         ns_js_promise_reject(ctx, resolvers, "deriveKey: 5 arguments required");
         return promise;
     }
-    ns_wc_alg a, dk;
+    ns_wc_alg a = {0}, dk = {0};
     ns_crypto_key *k = JS_GetOpaque(argv[1], ns_cryptokey_class_id);
     if (!ns_wc_parse_alg(ctx, argv[0], &a) ||
         !ns_wc_parse_alg(ctx, argv[2], &dk) || !k) {
@@ -9401,9 +9402,9 @@ ns_css_supports_top_colon(const char *s)
 }
 
 static int
-ns_css_eval_supports_condition(const char *s)
+ns_css_eval_supports_condition(const char *s, int depth)
 {
-    if (!s) return -1;
+    if (!s || depth >= 512) return -1;
     while (g_ascii_isspace((guchar)*s)) s++;
     const char *end = s + strlen(s);
     while (end > s && g_ascii_isspace((guchar)end[-1])) end--;
@@ -9412,31 +9413,31 @@ ns_css_eval_supports_condition(const char *s)
 
     if (len > 3 && g_ascii_strncasecmp(s, "not", 3) == 0 &&
         (g_ascii_isspace((guchar)s[3]) || s[3] == '(')) {
-        int r = ns_css_eval_supports_condition(s + 3);
+        int r = ns_css_eval_supports_condition(s + 3, depth + 1);
         return r < 0 ? -1 : !r;
     }
 
-    int depth = 0;
+    int paren = 0;
     for (gsize i = 0; i < len; i++) {
         char c = s[i];
-        if (c == '(') depth++;
-        else if (c == ')') { if (depth) depth--; }
-        else if (depth == 0 && i > 0 && g_ascii_isspace((guchar)s[i - 1])) {
+        if (c == '(') paren++;
+        else if (c == ')') { if (paren) paren--; }
+        else if (paren == 0 && i > 0 && g_ascii_isspace((guchar)s[i - 1])) {
             if (g_ascii_strncasecmp(s + i, "and", 3) == 0 &&
                 i + 3 < len && g_ascii_isspace((guchar)s[i + 3])) {
                 char *left = g_strndup(s, i);
-                int lr = ns_css_eval_supports_condition(left);
+                int lr = ns_css_eval_supports_condition(left, depth + 1);
                 g_free(left);
-                int rr = ns_css_eval_supports_condition(s + i + 3);
+                int rr = ns_css_eval_supports_condition(s + i + 3, depth + 1);
                 if (lr < 0 || rr < 0) return -1;
                 return lr && rr;
             }
             if (g_ascii_strncasecmp(s + i, "or", 2) == 0 &&
                 i + 2 < len && g_ascii_isspace((guchar)s[i + 2])) {
                 char *left = g_strndup(s, i);
-                int lr = ns_css_eval_supports_condition(left);
+                int lr = ns_css_eval_supports_condition(left, depth + 1);
                 g_free(left);
-                int rr = ns_css_eval_supports_condition(s + i + 2);
+                int rr = ns_css_eval_supports_condition(s + i + 2, depth + 1);
                 if (lr < 0 || rr < 0) return -1;
                 return lr || rr;
             }
@@ -9454,7 +9455,7 @@ ns_css_eval_supports_condition(const char *s)
             g_free(pn);
             g_free(pv);
         } else if (strchr(inner, '(')) {
-            r = ns_css_eval_supports_condition(inner);
+            r = ns_css_eval_supports_condition(inner, depth + 1);
         } else {
             r = -1;
         }
@@ -9489,7 +9490,7 @@ ns_css_supports(JSContext *ctx, JSValueConst this_val,
         if (val) JS_FreeCString(ctx, val);
     } else {
         const char *cond = JS_ToCString(ctx, argv[0]);
-        int r = cond ? ns_css_eval_supports_condition(cond) : -1;
+        int r = cond ? ns_css_eval_supports_condition(cond, 0) : -1;
         if (cond) JS_FreeCString(ctx, cond);
         result = (r != 0);
     }
@@ -22166,15 +22167,15 @@ ns_tag_query_matches(const ns_node *n, const char *tag, const char *tag_lower)
 
 static void
 ns_collect_by_tag_h(const ns_node *n, const char *tag, const char *tag_lower,
-                    JSContext *ctx, JSValue arr, uint32_t *idx)
+                    JSContext *ctx, JSValue arr, uint32_t *idx, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && n->name &&
         ns_tag_query_matches(n, tag, tag_lower))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
     if (ns_node_is_element_named(n, "template")) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_collect_by_tag_h(c, tag, tag_lower, ctx, arr, idx);
+        ns_collect_by_tag_h(c, tag, tag_lower, ctx, arr, idx, depth + 1);
 }
 
 static void
@@ -22182,7 +22183,7 @@ ns_collect_by_tag(const ns_node *n, const char *tag, JSContext *ctx,
                   JSValue arr, uint32_t *idx)
 {
     char *tag_lower = g_ascii_strdown(tag, -1);
-    ns_collect_by_tag_h(n, tag, tag_lower, ctx, arr, idx);
+    ns_collect_by_tag_h(n, tag, tag_lower, ctx, arr, idx, 0);
     g_free(tag_lower);
 }
 
@@ -22231,14 +22232,14 @@ element_has_class(const ns_node *n, const char *want, gboolean ci)
 
 static void
 ns_collect_by_class(const ns_node *n, const char *cls, gboolean ci,
-                    JSContext *ctx, JSValue arr, uint32_t *idx)
+                    JSContext *ctx, JSValue arr, uint32_t *idx, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && element_has_class(n, cls, ci))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
     if (ns_node_is_element_named(n, "template")) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_collect_by_class(c, cls, ci, ctx, arr, idx);
+        ns_collect_by_class(c, cls, ci, ctx, arr, idx, depth + 1);
 }
 
 static gboolean
@@ -22273,14 +22274,14 @@ ns_matches_any_selector(GPtrArray *sels, const ns_node *el)
 }
 
 static const ns_node *
-ns_walk_first_match(const ns_node *root, GPtrArray *sels)
+ns_walk_first_match(const ns_node *root, GPtrArray *sels, int depth)
 {
-    if (!root) return NULL;
+    if (!root || depth >= 512) return NULL;
     if (root->kind == NS_NODE_ELEMENT && ns_matches_any_selector(sels, root))
         return root;
     if (ns_node_is_element_named(root, "template")) return NULL;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-        const ns_node *m = ns_walk_first_match(c, sels);
+        const ns_node *m = ns_walk_first_match(c, sels, depth + 1);
         if (m) return m;
     }
     return NULL;
@@ -22288,14 +22289,14 @@ ns_walk_first_match(const ns_node *root, GPtrArray *sels)
 
 static void
 ns_walk_all_matches(const ns_node *root, GPtrArray *sels, JSContext *ctx,
-                    JSValue arr, uint32_t *idx)
+                    JSValue arr, uint32_t *idx, int depth)
 {
-    if (!root) return;
+    if (!root || depth >= 512) return;
     if (root->kind == NS_NODE_ELEMENT && ns_matches_any_selector(sels, root))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, root));
     if (ns_node_is_element_named(root, "template")) return;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_walk_all_matches(c, sels, ctx, arr, idx);
+        ns_walk_all_matches(c, sels, ctx, arr, idx, depth + 1);
 }
 
 static JSValue
@@ -22802,7 +22803,7 @@ ns_query_selector_impl(JSContext *ctx, const ns_node *root,
                 ns_matches_any_selector(sels, root))
                 JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, root));
             for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-                ns_walk_all_matches(c, sels, ctx, arr, &i);
+                ns_walk_all_matches(c, sels, ctx, arr, &i, 0);
             ret = ns_nodelist_from_array(ctx, arr);
         } else {
             const ns_node *m = NULL;
@@ -22811,7 +22812,7 @@ ns_query_selector_impl(JSContext *ctx, const ns_node *root,
                 m = root;
             if (!m)
                 for (const ns_node *c = root->first_child; !m && c; c = c->next_sibling)
-                    m = ns_walk_first_match(c, sels);
+                    m = ns_walk_first_match(c, sels, 0);
             ret = ns_make_element(ctx, m);
         }
     }
@@ -26058,7 +26059,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         gboolean local_wild = strcmp(local, "*") == 0;
         for (const ns_node *c = root->first_child; c; c = c->next_sibling)
             ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild,
-                                 ctx, arr, &i);
+                                 ctx, arr, &i, 0);
         break;
     }
     case NS_LIVE_BY_CLASS:
@@ -26066,11 +26067,11 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         gboolean ci = js && js->current_doc &&
                       (js->current_doc->flags & NS_NODE_QUIRKS);
         for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-            ns_collect_by_class(c, b->param ? b->param : "", ci, ctx, arr, &i);
+            ns_collect_by_class(c, b->param ? b->param : "", ci, ctx, arr, &i, 0);
         break;
     }
     case NS_LIVE_BY_NAME:
-        ns_collect_by_name(root, b->param ? b->param : "", ctx, arr, &i);
+        ns_collect_by_name(root, b->param ? b->param : "", ctx, arr, &i, 0);
         break;
     case NS_LIVE_FORM_ELEMENTS:
         if (root->name && strcmp(root->name, "form") == 0) {
@@ -34513,9 +34514,9 @@ ns_node_local_name_ptr(const ns_node *n)
 static void
 ns_collect_by_tag_ns(const ns_node *n, const char *ns, gboolean ns_wild,
                      const char *local, gboolean local_wild,
-                     JSContext *ctx, JSValue arr, uint32_t *idx)
+                     JSContext *ctx, JSValue arr, uint32_t *idx, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
         gboolean ns_ok;
         if (ns_wild) {
@@ -34534,7 +34535,7 @@ ns_collect_by_tag_ns(const ns_node *n, const char *ns, gboolean ns_wild,
     if (ns_node_is_element_named(n, "template")) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         ns_collect_by_tag_ns(c, ns, ns_wild, local, local_wild,
-                             ctx, arr, idx);
+                             ctx, arr, idx, depth + 1);
 }
 
 static JSValue
@@ -35902,9 +35903,9 @@ ns_doc_find_title_node(JSContext *ctx)
 
 static void
 ns_collect_by_name(const ns_node *root, const char *name,
-                   JSContext *ctx, JSValue arr, uint32_t *idx)
+                   JSContext *ctx, JSValue arr, uint32_t *idx, int depth)
 {
-    if (!root) return;
+    if (!root || depth >= 512) return;
     if (root->kind == NS_NODE_ELEMENT) {
         const char *n = ns_element_get_attr(root, "name");
         if (n && strcmp(n, name) == 0)
@@ -35912,7 +35913,7 @@ ns_collect_by_name(const ns_node *root, const char *name,
     }
     if (ns_node_is_element_named(root, "template")) return;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_collect_by_name(c, name, ctx, arr, idx);
+        ns_collect_by_name(c, name, ctx, arr, idx, depth + 1);
 }
 
 static JSValue
@@ -38994,8 +38995,7 @@ ns_js_iframe_collect_var_names(GPtrArray *names, GHashTable *seen,
         }
         if (*p == '(' || *p == '[' || *p == '{') depth++;
         else if ((*p == ')' || *p == ']' || *p == '}') && depth > 0) depth--;
-        else if (depth == 0 && *p == ',') p++;
-        else p++;
+        p++;
     }
     return p;
 }

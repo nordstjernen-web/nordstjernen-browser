@@ -1445,6 +1445,8 @@ do_load(NsProcView *v, const char *url, gboolean record, gboolean history)
         gtk_label_set_text(GTK_LABEL(v->search_label), "");
     v->opened = FALSE;
     disarm_anim(v);
+    if (v->frame)
+        cairo_surface_destroy(v->frame);
     v->frame = NULL;
     gtk_widget_queue_draw(v->area);
     if (!v->loading) {

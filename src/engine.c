@@ -151,9 +151,9 @@ rel_is_stylesheet(const char *rel)
 static void
 preload_collect(const ns_node *n, const char *base, gboolean include_images,
                 GPtrArray *out, GHashTable *seen,
-                GPtrArray *connect_out, GHashTable *connect_seen)
+                GPtrArray *connect_out, GHashTable *connect_seen, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     const char *attr = NULL;
     if (include_images && ns_node_is_element_named(n, "img")) {
         const char *loading = ns_element_get_attr(n, "loading");
@@ -195,7 +195,7 @@ preload_collect(const ns_node *n, const char *base, gboolean include_images,
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
         preload_collect(c, base, include_images, out, seen,
-                        connect_out, connect_seen);
+                        connect_out, connect_seen, depth + 1);
 }
 
 static void
@@ -220,7 +220,7 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
     GHashTable *connect_seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                      g_free, NULL);
     preload_collect(doc, base_url, include_images, urls, seen,
-                    connects, connect_seen);
+                    connects, connect_seen, 0);
     g_hash_table_destroy(seen);
     g_hash_table_destroy(connect_seen);
     for (guint i = 0; i < connects->len; i++)
@@ -301,9 +301,9 @@ sheet_run_flush(sheet_collect_ctx *cc)
 
 static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
-                         sheet_collect_ctx *cc)
+                         sheet_collect_ctx *cc, int depth)
 {
-    if (!n || ns_node_is_element_named(n, "noscript")) return;
+    if (!n || depth >= 512 || ns_node_is_element_named(n, "noscript")) return;
     if (ns_node_is_element_named(n, "iframe")) {
         sheet_run_flush(cc);
         const char *furl = ns_element_get_attr(n, "data-nd-frame-url");
@@ -365,7 +365,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
         }
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_stylesheets_walk(c, base_url, cc);
+        collect_stylesheets_walk(c, base_url, cc, depth + 1);
 }
 
 void
@@ -378,7 +378,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
         .top_url = base_url,
         .strict_css_mime = doc && !(doc->flags & NS_NODE_QUIRKS),
     };
-    collect_stylesheets_walk(doc, base_url, &cc);
+    collect_stylesheets_walk(doc, base_url, &cc, 0);
     sheet_run_flush(&cc);
     g_string_free(cc.run, TRUE);
 }
