@@ -85,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          meson setup builddir -Dqt=enabled
+          meson setup builddir -Dqt=enabled -Dgtk=disabled
           meson compile -C builddir 2>&1 | tee build.log
 
       - name: ccache stats

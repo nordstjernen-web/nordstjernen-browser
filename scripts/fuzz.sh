@@ -19,7 +19,7 @@ if [ ! -d "$build" ]; then
     ( cd "$root" && CC="$cc" meson setup "$build" \
         -Dai=disabled -Dbuildtype=debug -Doptimization=1 -Db_lundef=false \
         -Db_sanitize=address,undefined \
-        -Dc_args=-fsanitize=fuzzer-no-link )
+        -Dc_args="-fsanitize=fuzzer-no-link -fno-sanitize=function" )
 fi
 ninja -C "$build" src/lexbor/liblexbor_static.a
 lib=$build/src/lexbor/liblexbor_static.a
@@ -27,7 +27,7 @@ lib=$build/src/lexbor/liblexbor_static.a
 mkdir -p "$out"
 for t in $targets; do
     echo "== building fuzz_$t =="
-    "$cc" -g -O1 -fsanitize=fuzzer,address,undefined \
+    "$cc" -g -O1 -fsanitize=fuzzer,address,undefined -fno-sanitize=function \
         -I"$inc" "$root/fuzz/fuzz_$t.c" "$lib" -o "$out/fuzz_$t"
 done
 for t in $targets; do

@@ -9,8 +9,9 @@ root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 build=${SAN_BUILDDIR:-$root/builddir-san}
 
 if [ ! -d "$build" ]; then
-    ( cd "$root" && meson setup "$build" \
+    ( cd "$root" && CC="${CC:-clang}" CXX="${CXX:-clang++}" meson setup "$build" \
         -Db_sanitize=address,undefined -Db_lundef=false \
+        -Dc_args=-fno-sanitize=function -Dcpp_args=-fno-sanitize=function \
         -Dai=disabled -Doptimization=1 -Dbuildtype=debug )
 fi
 meson compile -C "$build"
