@@ -34,6 +34,6 @@ for t in $targets; do
     echo "== running fuzz_$t for ${secs}s =="
     mkdir -p "$out/corpus_$t"
     "$out/fuzz_$t" -max_total_time="$secs" -timeout=25 -rss_limit_mb=4096 \
-        "$out/corpus_$t"
+        -max_len=8192 "$out/corpus_$t" "$root/fuzz/seeds/$t"
 done
 echo "fuzz: all targets clean"

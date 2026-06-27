@@ -20,7 +20,9 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
             return 0;
         }
     }
-    lxb_url_parse(g_parser, NULL, (const lxb_char_t *)data, size);
+    lxb_url_t *u = lxb_url_parse(g_parser, NULL, (const lxb_char_t *)data, size);
+    if (u != NULL)
+        lxb_url_destroy(u);
     lxb_url_parser_clean(g_parser);
     return 0;
 }
