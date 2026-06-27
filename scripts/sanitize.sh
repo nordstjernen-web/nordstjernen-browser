@@ -24,8 +24,9 @@ export NS_ALLOW_ROOT=1
 
 fail=0
 for f in "$root"/data/render-tests/*.html; do
+    [ -e "$f" ] || continue
     if ! "$bin" --headless --url="file://$f" \
-            --dump="png:$tmp/out.png" --viewport=1024x768 \
+            --dump="png:$tmp/out.png" --viewport=1024 --viewport-height=768 \
             --settle-ms=100 >"$tmp/log" 2>&1; then
         echo "SANITIZER FAILURE on $(basename "$f"):"
         cat "$tmp/log"
