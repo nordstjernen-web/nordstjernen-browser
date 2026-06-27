@@ -5264,14 +5264,20 @@ ns_element_set_outerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
 #define NS_SCRIPT_ALREADY_STARTED "data-nd-script-already-started"
 
 static void
-ns_mark_scripts_already_started(ns_node *root)
+ns_mark_scripts_already_started_rec(ns_node *root, int depth)
 {
-    if (!root) return;
+    if (!root || depth >= 512) return;
     if (root->kind == NS_NODE_ELEMENT && root->name &&
         strcmp(root->name, "script") == 0)
         ns_element_set_attr(root, NS_SCRIPT_ALREADY_STARTED, "1");
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_mark_scripts_already_started(c);
+        ns_mark_scripts_already_started_rec(c, depth + 1);
+}
+
+static void
+ns_mark_scripts_already_started(ns_node *root)
+{
+    ns_mark_scripts_already_started_rec(root, 0);
 }
 
 static gboolean
@@ -37789,9 +37795,9 @@ ns_js_register_import_map_json(ns_js *js, const char *text, gsize len,
 }
 
 static void
-ns_js_register_import_maps(ns_js *js, ns_node *root)
+ns_js_register_import_maps_rec(ns_js *js, ns_node *root, int depth)
 {
-    if (!js || !root) return;
+    if (!js || !root || depth >= 512) return;
     if (ns_node_is_element_named(root, "script")) {
         const char *type = ns_element_get_attr(root, "type");
         if (type && g_ascii_strcasecmp(type, "importmap") == 0 &&
@@ -37809,7 +37815,13 @@ ns_js_register_import_maps(ns_js *js, ns_node *root)
     }
     if (ns_node_is_element_named(root, "template")) return;
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_js_register_import_maps(js, c);
+        ns_js_register_import_maps_rec(js, c, depth + 1);
+}
+
+static void
+ns_js_register_import_maps(ns_js *js, ns_node *root)
+{
+    ns_js_register_import_maps_rec(js, root, 0);
 }
 
 static char *
@@ -38108,10 +38120,11 @@ ns_js_eval_module(ns_js *js, const char *src, gsize len, const char *origin)
 }
 
 static void
-ns_js_collect_external_script_urls(const ns_node *n, const char *origin,
-                                   GPtrArray *out, GHashTable *seen)
+ns_js_collect_external_script_urls_rec(const ns_node *n, const char *origin,
+                                       GPtrArray *out, GHashTable *seen,
+                                       int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (ns_node_is_element_named(n, "script")) {
         const char *type = ns_element_get_attr(n, "type");
         gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
@@ -38138,7 +38151,14 @@ ns_js_collect_external_script_urls(const ns_node *n, const char *origin,
         }
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_collect_external_script_urls(c, origin, out, seen);
+        ns_js_collect_external_script_urls_rec(c, origin, out, seen, depth + 1);
+}
+
+static void
+ns_js_collect_external_script_urls(const ns_node *n, const char *origin,
+                                   GPtrArray *out, GHashTable *seen)
+{
+    ns_js_collect_external_script_urls_rec(n, origin, out, seen, 0);
 }
 
 typedef struct ns_prefetch_state {
@@ -38261,21 +38281,27 @@ ns_script_schedule_for(const ns_node *n)
 }
 
 static void
-ns_js_mark_scripts_already_started(ns_node *n)
+ns_js_mark_scripts_already_started_rec(ns_node *n, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (ns_node_is_element_named(n, "script")) {
         ns_element_set_attr(n, NS_SCRIPT_ALREADY_STARTED, "1");
         return;
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_mark_scripts_already_started(c);
+        ns_js_mark_scripts_already_started_rec(c, depth + 1);
 }
 
 static void
-ns_js_collect_script_tasks(ns_node *n, GArray *tasks)
+ns_js_mark_scripts_already_started(ns_node *n)
 {
-    if (!n) return;
+    ns_js_mark_scripts_already_started_rec(n, 0);
+}
+
+static void
+ns_js_collect_script_tasks_rec(ns_node *n, GArray *tasks, int depth)
+{
+    if (!n || depth >= 512) return;
     if (ns_node_is_element_named(n, "script")) {
         if (ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED)) return;
         if (!ns_script_type_supported(n) || ns_script_skipped_by_nomodule(n)) {
@@ -38291,7 +38317,13 @@ ns_js_collect_script_tasks(ns_node *n, GArray *tasks)
     }
     if (ns_node_is_element_named(n, "template")) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_collect_script_tasks(c, tasks);
+        ns_js_collect_script_tasks_rec(c, tasks, depth + 1);
+}
+
+static void
+ns_js_collect_script_tasks(ns_node *n, GArray *tasks)
+{
+    ns_js_collect_script_tasks_rec(n, tasks, 0);
 }
 
 static void
@@ -38473,16 +38505,22 @@ ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
 }
 
 static gboolean
-ns_subtree_has_pending_script(const ns_node *n)
+ns_subtree_has_pending_script_rec(const ns_node *n, int depth)
 {
-    if (!n) return FALSE;
+    if (!n || depth >= 512) return FALSE;
     if (ns_node_is_element_named(n, "script") &&
         !ns_element_get_attr(n, NS_SCRIPT_ALREADY_STARTED))
         return TRUE;
     if (ns_node_is_element_named(n, "template")) return FALSE;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        if (ns_subtree_has_pending_script(c)) return TRUE;
+        if (ns_subtree_has_pending_script_rec(c, depth + 1)) return TRUE;
     return FALSE;
+}
+
+static gboolean
+ns_subtree_has_pending_script(const ns_node *n)
+{
+    return ns_subtree_has_pending_script_rec(n, 0);
 }
 
 static gboolean
@@ -38504,16 +38542,22 @@ ns_link_is_loadable_stylesheet(const ns_node *n)
 }
 
 static void
-ns_js_collect_pending_stylesheets(ns_node *n, GPtrArray *out)
+ns_js_collect_pending_stylesheets_rec(ns_node *n, GPtrArray *out, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (ns_link_is_loadable_stylesheet(n)) {
         g_ptr_array_add(out, n);
         return;
     }
     if (ns_node_is_element_named(n, "template")) return;
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_collect_pending_stylesheets(c, out);
+        ns_js_collect_pending_stylesheets_rec(c, out, depth + 1);
+}
+
+static void
+ns_js_collect_pending_stylesheets(ns_node *n, GPtrArray *out)
+{
+    ns_js_collect_pending_stylesheets_rec(n, out, 0);
 }
 
 static void
@@ -39876,9 +39920,9 @@ ns_js_process_pending_iframes(ns_js *js)
 }
 
 static void
-ns_js_schedule_static_iframes(ns_js *js, ns_node *n)
+ns_js_schedule_static_iframes_rec(ns_js *js, ns_node *n, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     const char *frame_attr = ns_frame_src_attr(n);
     if (frame_attr) {
         if (!ns_element_get_attr(n, "data-nd-frame-loaded")) {
@@ -39890,7 +39934,13 @@ ns_js_schedule_static_iframes(ns_js *js, ns_node *n)
         return;
     }
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_js_schedule_static_iframes(js, c);
+        ns_js_schedule_static_iframes_rec(js, c, depth + 1);
+}
+
+static void
+ns_js_schedule_static_iframes(ns_js *js, ns_node *n)
+{
+    ns_js_schedule_static_iframes_rec(js, n, 0);
 }
 
 void
