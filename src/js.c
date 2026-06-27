@@ -34700,37 +34700,26 @@ ns_xml_name_start_char(gunichar c)
 }
 
 static gboolean
-ns_xml_name_char(gunichar c)
+ns_lenient_name_start(gunichar c)
 {
-    return ns_xml_name_start_char(c) || c == '-' || c == '.' ||
-        (c >= '0' && c <= '9') || c == 0xB7 ||
-        (c >= 0x0300 && c <= 0x036F) || (c >= 0x203F && c <= 0x2040);
+    return c >= 0x80 || ns_xml_name_start_char(c);
 }
 
 static gboolean
-ns_is_xml_name_n(const char *s, gsize len)
+ns_name_forbidden_char(gunichar c)
 {
-    if (!s || len == 0) return FALSE;
-    const char *p = s, *end = s + len;
-    gunichar c = g_utf8_get_char_validated(p, end - p);
-    if (c == (gunichar)-1 || c == (gunichar)-2) return FALSE;
-    if (!ns_xml_name_start_char(c)) return FALSE;
-    p = g_utf8_next_char(p);
-    while (p < end) {
-        c = g_utf8_get_char_validated(p, end - p);
+    return c == 0 || c == ' ' || c == '\t' || c == '\n' ||
+           c == '\r' || c == '\f' || c == '>' || c == '/';
+}
+
+static gboolean
+ns_name_no_forbidden(const char *s, const char *end)
+{
+    for (const char *p = s; p < end; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char_validated(p, end - p);
         if (c == (gunichar)-1 || c == (gunichar)-2) return FALSE;
-        if (!ns_xml_name_char(c)) return FALSE;
-        p = g_utf8_next_char(p);
+        if (ns_name_forbidden_char(c)) return FALSE;
     }
-    return TRUE;
-}
-
-static gboolean
-ns_is_xml_ncname_n(const char *s, gsize len)
-{
-    if (!ns_is_xml_name_n(s, len)) return FALSE;
-    for (gsize i = 0; i < len; i++)
-        if (s[i] == ':') return FALSE;
     return TRUE;
 }
 
@@ -34738,23 +34727,35 @@ static gboolean
 ns_is_xml_qname(const char *s)
 {
     if (!s || !*s) return FALSE;
+    const char *end = s + strlen(s);
+    if (!ns_name_no_forbidden(s, end)) return FALSE;
+    const char *local = s;
     const char *colon = strchr(s, ':');
-    if (!colon) return ns_is_xml_ncname_n(s, strlen(s));
-    if (strchr(colon + 1, ':')) return FALSE;
-    return ns_is_xml_ncname_n(s, (gsize)(colon - s)) &&
-           ns_is_xml_ncname_n(colon + 1, strlen(colon + 1));
+    if (colon) {
+        if (colon == s || *(colon + 1) == '\0') return FALSE;
+        local = colon + 1;
+    }
+    gunichar lc = g_utf8_get_char_validated(local, end - local);
+    if (lc == (gunichar)-1 || lc == (gunichar)-2) return FALSE;
+    return ns_lenient_name_start(lc);
 }
 
 static gboolean
 ns_valid_element_local_name(const char *s)
 {
-    return s && ns_is_xml_name_n(s, strlen(s));
+    if (!s || !*s) return FALSE;
+    const char *end = s + strlen(s);
+    gunichar c0 = g_utf8_get_char_validated(s, end - s);
+    if (c0 == (gunichar)-1 || c0 == (gunichar)-2) return FALSE;
+    if (!ns_lenient_name_start(c0)) return FALSE;
+    return ns_name_no_forbidden(s, end);
 }
 
 static gboolean
 ns_valid_attr_name(const char *s)
 {
-    return s && ns_is_xml_name_n(s, strlen(s));
+    if (!s || !*s) return FALSE;
+    return ns_name_no_forbidden(s, s + strlen(s));
 }
 
 static gboolean
