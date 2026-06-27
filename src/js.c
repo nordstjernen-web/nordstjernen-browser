@@ -31740,14 +31740,14 @@ static void ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
                                   JSValueConst node_val);
 
 static void
-ns_adopt_owner_walk(JSContext *ctx, JSValueConst doc_val, ns_node *n)
+ns_adopt_owner_walk(JSContext *ctx, JSValueConst doc_val, ns_node *n, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     JSValue w = ns_make_element(ctx, n);
     if (JS_IsObject(w)) ns_tag_owner_document(ctx, doc_val, w);
     JS_FreeValue(ctx, w);
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_adopt_owner_walk(ctx, doc_val, c);
+        ns_adopt_owner_walk(ctx, doc_val, c, depth + 1);
 }
 
 static JSValue
@@ -31770,7 +31770,7 @@ ns_document_adopt_node(JSContext *ctx, JSValueConst this_val,
             ns_js_record_child_change(_j, p, NULL, node, sp, sn);
         }
     }
-    ns_adopt_owner_walk(ctx, this_val, node);
+    ns_adopt_owner_walk(ctx, this_val, node, 0);
     if (_j) _j->mutated = TRUE;
     return JS_DupValue(ctx, argv[0]);
 }
@@ -36262,9 +36262,9 @@ ns_form_expose_legacy_members(JSContext *ctx, JSValueConst form)
 
 static void
 ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
-                                   const ns_node *n)
+                                   const ns_node *n, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (ns_node_is_element_named(n, "form") ||
         ns_node_is_element_named(n, "img")) {
         JSValue element = ns_make_element(ctx, n);
@@ -36277,7 +36277,7 @@ ns_document_expose_legacy_named_in(JSContext *ctx, JSValueConst document,
         JS_FreeValue(ctx, element);
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        ns_document_expose_legacy_named_in(ctx, document, c);
+        ns_document_expose_legacy_named_in(ctx, document, c, depth + 1);
 }
 
 static void
@@ -36285,7 +36285,7 @@ ns_document_expose_legacy_named(ns_js *js, const ns_node *root,
                                 JSValueConst document)
 {
     if (!js || !root || !JS_IsObject(document)) return;
-    ns_document_expose_legacy_named_in(js->ctx, document, root);
+    ns_document_expose_legacy_named_in(js->ctx, document, root, 0);
 }
 
 static void
