@@ -155,7 +155,7 @@ printf "%-44s %10s %10s %10s %10s %8s\n" "SUITE" "total(ms)" "add" "complete" "d
 for p in "${PATHS[@]}"; do
     [ -n "$FILTER" ] && case "$p" in *"$FILTER"*) ;; *) continue ;; esac
     url="http://localhost:$PORT/resources/todomvc/$p"
-    case "$p" in *react*|*preact*) url="$url#/home" ;; esac
+    case "$p" in *react*|*preact*) url="$url#/" ;; esac
     tots=(); add=""; comp=""; del=""; dom=""; name=""
     for _ in $(seq 1 "$ITERS"); do
         line=$(NS_ALLOW_ROOT=1 "$BIN" --headless --dump=none --settle-ms="$SETTLE" "$url" 2>&1 \
