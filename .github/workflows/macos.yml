@@ -114,6 +114,12 @@ jobs:
           file builddir/src/gtk/nordstjernen
           otool -L builddir/src/gtk/nordstjernen | head -20
 
+      - name: Headless smoke (about:start)
+        if: hashFiles('builddir/src/gtk/nordstjernen') != ''
+        run: |
+          ./builddir/src/gtk/nordstjernen --headless --dump=text about:start > about.txt
+          grep -q Nordstjernen about.txt
+
       - name: Upload build log
         if: always() && hashFiles('build.log') != ''
         continue-on-error: true

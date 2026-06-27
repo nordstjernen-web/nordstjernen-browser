@@ -99,6 +99,16 @@ jobs:
           file builddir/src/qt/nordstjernen-qt
           ldd builddir/src/qt/nordstjernen-qt | head -30
 
+      - name: Headless smoke (Qt shell, offscreen)
+        if: hashFiles('builddir/src/qt/nordstjernen-qt') != ''
+        run: |
+          export QT_QPA_PLATFORM=offscreen
+          timeout 15 ./builddir/src/qt/nordstjernen-qt about:start || code=$?
+          if [ "${code:-0}" -ne 0 ] && [ "${code:-0}" -ne 124 ]; then
+            echo "qt shell crashed (exit ${code})"; exit 1
+          fi
+          echo "qt offscreen smoke: ok"
+
       - name: Upload build log
         if: always() && hashFiles('build.log') != ''
         continue-on-error: true

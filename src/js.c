@@ -880,8 +880,7 @@ ns_drain_microtasks(ns_js *js)
     ns_js_budget_push(js, &g);
     JSContext *ctx_out = NULL;
     int r = 0;
-    int safety = 100000;
-    while (safety-- > 0) {
+    for (;;) {
         if (js->eval_deadline_us != 0 &&
             g_get_monotonic_time() > js->eval_deadline_us)
             break;
@@ -910,8 +909,6 @@ ns_drain_microtasks(ns_js *js)
         g_free(msg);
     }
     ns_js_budget_pop(js, &g);
-    if (safety <= 0 && js->log_cb)
-        js->log_cb("[warning] microtask drain hit safety limit", js->log_user_data);
 }
 
 static void ns_storage_flush(ns_js *js);
