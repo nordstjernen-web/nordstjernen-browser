@@ -11447,6 +11447,10 @@ ns_css_sibling_counts_for_nth(const ns_node *el, const ns_css_pseudo_pred *pc,
     return TRUE;
 }
 
+static __thread const ns_node *g_pragma_doc;
+static __thread const char    *g_pragma_lang;
+static __thread gboolean       g_pragma_valid;
+
 static void
 ns_css_pragma_language_scan(const ns_node *n, const char **found, int depth)
 {
@@ -11491,9 +11495,14 @@ ns_css_node_language(const ns_node *el)
     }
     const ns_node *root = el;
     while (root && root->parent) root = root->parent;
-    const char *found = NULL;
-    if (root) ns_css_pragma_language_scan(root, &found, 0);
-    return found ? found : g_css_doc_language;
+    if (!g_pragma_valid || g_pragma_doc != root) {
+        const char *found = NULL;
+        if (root) ns_css_pragma_language_scan(root, &found, 0);
+        g_pragma_doc = root;
+        g_pragma_lang = found;
+        g_pragma_valid = TRUE;
+    }
+    return g_pragma_lang ? g_pragma_lang : g_css_doc_language;
 }
 
 static gboolean
@@ -11932,7 +11941,9 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
         if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
             if (strcmp(sel->type, el->name) != 0) return FALSE;
         }
-        else if (g_ascii_strcasecmp(sel->type, el->name) != 0) {
+        else if (g_ascii_tolower((unsigned char)el->name[0]) !=
+                     g_ascii_tolower((unsigned char)sel->type[0]) ||
+                 g_ascii_strcasecmp(sel->type, el->name) != 0) {
             return FALSE;
         }
     }
@@ -15642,6 +15653,8 @@ ns_css_compute(ns_node *doc,
 {
     GHashTable *out = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                             NULL, (GDestroyNotify)ns_style_free);
+
+    g_pragma_valid = FALSE;
 
     static ns_css_stylesheet *cached_ua = NULL;
     if (!cached_ua) cached_ua = ns_css_stylesheet_parse(kUa, -1);
