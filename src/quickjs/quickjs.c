@@ -16429,16 +16429,38 @@ static JSValue build_for_in_iterator(JSContext *ctx, JSValue obj)
             break;
         if (JS_IsException(obj1))
             goto fail;
-        if (JS_GetOwnPropertyNamesInternal(ctx, &tab_atom, &tab_atom_count,
-                                           JS_VALUE_GET_OBJ(obj1),
-                                           JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY)) {
-            JS_FreeValue(ctx, obj1);
-            goto fail;
-        }
-        js_free_prop_enum(ctx, tab_atom, tab_atom_count);
-        if (tab_atom_count != 0) {
-            JS_FreeValue(ctx, obj1);
-            goto slow_path;
+        {
+            JSObject *po = JS_VALUE_GET_OBJ(obj1);
+            bool has_enum;
+            if (!po->is_exotic) {
+                /* scan the shape for an enumerable string key without
+                   allocating an own-property-name array */
+                JSShape *psh = po->shape;
+                JSShapeProperty *pprs = psh->prop;
+                int k;
+                has_enum = false;
+                for (k = 0; k < psh->prop_count; k++, pprs++) {
+                    if (pprs->atom != JS_ATOM_NULL &&
+                        (pprs->flags & JS_PROP_ENUMERABLE) &&
+                        JS_AtomGetKind(ctx, pprs->atom) == JS_ATOM_KIND_STRING) {
+                        has_enum = true;
+                        break;
+                    }
+                }
+            } else {
+                if (JS_GetOwnPropertyNamesInternal(ctx, &tab_atom,
+                                                   &tab_atom_count, po,
+                                                   JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY)) {
+                    JS_FreeValue(ctx, obj1);
+                    goto fail;
+                }
+                js_free_prop_enum(ctx, tab_atom, tab_atom_count);
+                has_enum = (tab_atom_count != 0);
+            }
+            if (has_enum) {
+                JS_FreeValue(ctx, obj1);
+                goto slow_path;
+            }
         }
         /* must check for timeout to avoid infinite loop */
         if (js_poll_interrupts(ctx)) {
