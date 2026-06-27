@@ -3624,11 +3624,19 @@ parse_areas(const char *text)
     while (*p && rows < NS_CSS_TRACKS_MAX) {
         while (*p && is_ws(*p)) p++;
         if (!*p) break;
-        if (*p != '"' && *p != '\'') return NULL;
+        if (*p != '"' && *p != '\'') {
+            for (int r = 0; r < rows; r++)
+                for (int k = 0; k < NS_CSS_TRACKS_MAX; k++)
+                    g_free(grid[r][k]);
+            return NULL;
+        }
         const char *row_start = p;
         char *row = read_css_string(&p, p + strlen(p));
         if (p == row_start) {
             g_free(row);
+            for (int r = 0; r < rows; r++)
+                for (int k = 0; k < NS_CSS_TRACKS_MAX; k++)
+                    g_free(grid[r][k]);
             return NULL;
         }
         char **toks = g_strsplit_set(row, " \t\r\n", -1);

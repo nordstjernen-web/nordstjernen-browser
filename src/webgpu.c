@@ -252,6 +252,9 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     if (!buf) return JS_UNDEFINED;
     int64_t buffer_offset = 0;
     JS_ToInt64(ctx, &buffer_offset, argv[1]);
+    int64_t data_offset = 0, size = -1;
+    if (argc >= 4 && !JS_IsUndefined(argv[3])) JS_ToInt64(ctx, &data_offset, argv[3]);
+    if (argc >= 5 && !JS_IsUndefined(argv[4])) JS_ToInt64(ctx, &size, argv[4]);
 
     size_t byte_len = 0;
     size_t view_off = 0, view_len = 0, bpe = 0;
@@ -269,9 +272,6 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     if (!bytes) return JS_UNDEFINED;
 
     size_t elem = bpe > 0 ? bpe : 1;
-    int64_t data_offset = 0, size = -1;
-    if (argc >= 4 && !JS_IsUndefined(argv[3])) JS_ToInt64(ctx, &data_offset, argv[3]);
-    if (argc >= 5 && !JS_IsUndefined(argv[4])) JS_ToInt64(ctx, &size, argv[4]);
     int64_t byte_off = data_offset * (int64_t)elem;
     if (byte_off < 0 || (size_t)byte_off > byte_len) return JS_UNDEFINED;
     size_t byte_size = size < 0 ? byte_len - (size_t)byte_off
@@ -295,6 +295,7 @@ wg_queue_submit(JSContext *ctx, JSValueConst this_val,
     JS_ToUint32(ctx, &len, jlen);
     JS_FreeValue(ctx, jlen);
     if (len == 0) return JS_UNDEFINED;
+    if (len > 4096) len = 4096;
 
     WGPUCommandBuffer *cmds = g_new0(WGPUCommandBuffer, len);
     uint32_t n = 0;
@@ -2193,21 +2194,6 @@ wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, jtex);
     if (!tex || !tex->texture) return JS_UNDEFINED;
 
-    size_t byte_len = 0;
-    uint8_t *bytes = NULL;
-    size_t view_off = 0, view_len = 0, bpe = 0;
-    JSValue abuf = JS_GetTypedArrayBuffer(ctx, argv[1], &view_off, &view_len, &bpe);
-    if (!JS_IsException(abuf)) {
-        size_t total = 0;
-        uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
-        if (base) { bytes = base + view_off; byte_len = view_len; }
-        JS_FreeValue(ctx, abuf);
-    } else {
-        JS_FreeValue(ctx, abuf);
-        bytes = JS_GetArrayBuffer(ctx, &byte_len, argv[1]);
-    }
-    if (!bytes) return JS_UNDEFINED;
-
     WGPUTexelCopyTextureInfo dst;
     memset(&dst, 0, sizeof dst);
     dst.texture = tex->texture;
@@ -2225,6 +2211,21 @@ wg_queue_writeTexture(JSContext *ctx, JSValueConst this_val,
     }
     WGPUExtent3D ext;
     wg_read_extent(ctx, argv[3], &ext);
+
+    size_t byte_len = 0;
+    uint8_t *bytes = NULL;
+    size_t view_off = 0, view_len = 0, bpe = 0;
+    JSValue abuf = JS_GetTypedArrayBuffer(ctx, argv[1], &view_off, &view_len, &bpe);
+    if (!JS_IsException(abuf)) {
+        size_t total = 0;
+        uint8_t *base = JS_GetArrayBuffer(ctx, &total, abuf);
+        if (base) { bytes = base + view_off; byte_len = view_len; }
+        JS_FreeValue(ctx, abuf);
+    } else {
+        JS_FreeValue(ctx, abuf);
+        bytes = JS_GetArrayBuffer(ctx, &byte_len, argv[1]);
+    }
+    if (!bytes) return JS_UNDEFINED;
 
     wgpuQueueWriteTexture(q->queue, &dst, bytes, byte_len, &layout, &ext);
     return JS_UNDEFINED;

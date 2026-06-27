@@ -4628,6 +4628,9 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
                        : MAX((maxx - minx) / MAX(q->bw, 1.0),
                              (maxy - miny) / MAX(q->bh, 1.0));
     k = CLAMP(k, 1.0, 3.0);
+    double maxdim = MAX(q->bw, q->bh);
+    if (maxdim > 0.0 && maxdim * k > 4096.0)
+        k = 4096.0 / maxdim;
     int tw = (int)ceil(q->bw * k);
     int th = (int)ceil(q->bh * k);
     if (tw < 1 || th < 1) return;

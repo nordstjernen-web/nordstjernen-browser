@@ -4455,7 +4455,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             g_free(ct_hdr);
         }
     } else if (method && *method &&
-               g_ascii_strcasecmp(method, "GET") != 0) {
+               g_ascii_strcasecmp(method, "GET") != 0 &&
+               !strpbrk(method, "\r\n")) {
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     }
 

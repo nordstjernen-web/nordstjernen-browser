@@ -338,6 +338,9 @@ transform_lerp(const ns_css_transform *from, const ns_css_transform *to,
         out->ops[i].b_is_percent = from->ops[i].b_is_percent;
         out->ops[i].e_is_percent = from->ops[i].e_is_percent;
         out->ops[i].f_is_percent = from->ops[i].f_is_percent;
+        for (int k = 0; k < 16; k++)
+            out->ops[i].m3d[k] = from->ops[i].m3d[k] +
+                (to->ops[i].m3d[k] - from->ops[i].m3d[k]) * t;
     }
 }
 
@@ -821,7 +824,9 @@ advance_animation(ns_anim *a, ns_anim_state *s, gint64 now_us)
         return TRUE;
     }
 
-    int iter = (int)(elapsed / cycle_ms);
+    double iter_d = elapsed / cycle_ms;
+    if (iter_d > 1e9) iter_d = 1e9;
+    int iter = (int)iter_d;
     if (s->anim_iter_count > 0 && iter >= s->anim_iter_count) {
         if (s->anim_active) {
             s->anim_active = FALSE;

@@ -593,6 +593,15 @@ ns_ws_target_clear(ns_ws_target *t)
 }
 
 static gboolean
+ns_ws_has_control_char(const char *s)
+{
+    for (; *s; s++)
+        if ((guchar)*s < 0x20 || (guchar)*s == 0x7f)
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
 ns_ws_parse_url(const char *url, ns_ws_target *out)
 {
     gboolean tls;
@@ -610,6 +619,12 @@ ns_ws_parse_url(const char *url, ns_ws_target *out)
     const char *frag = strchr(path, '#');
     char *path_dup = frag ? g_strndup(path, (gsize)(frag - path)) : g_strdup(path);
     if (!*path_dup) { g_free(path_dup); path_dup = g_strdup("/"); }
+
+    if (ns_ws_has_control_char(hostport) || ns_ws_has_control_char(path_dup)) {
+        g_free(hostport);
+        g_free(path_dup);
+        return FALSE;
+    }
 
     char *host_hdr = g_strdup(hostport);
     if (strchr(hostport, ']') == NULL) {

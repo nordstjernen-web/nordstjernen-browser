@@ -182,6 +182,8 @@ static void
 tmp_fill(JSContext *ctx, JSValueConst obj, ns_temporal *t)
 {
     char mc[8];
+    if (t->year < -NS_DT_MAX_YEAR) t->year = -NS_DT_MAX_YEAR;
+    if (t->year > NS_DT_MAX_YEAR) t->year = NS_DT_MAX_YEAR;
     switch (t->kind) {
     case TK_PLAINDATE:
         tmp_fill_date(ctx, obj, t);

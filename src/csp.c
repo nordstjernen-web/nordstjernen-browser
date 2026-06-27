@@ -247,7 +247,8 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
         gsize sfx_len = host_len - 1;
         gsize rh_len  = strlen(res->hostname);
         host_ok = rh_len > sfx_len &&
-             g_ascii_strcasecmp(res->hostname + rh_len - sfx_len, suffix) == 0;
+             g_ascii_strncasecmp(res->hostname + rh_len - sfx_len, suffix,
+                                 sfx_len) == 0;
     } else {
         host_ok = strlen(res->hostname) == host_len &&
              g_ascii_strncasecmp(res->hostname, src_host_start, host_len) == 0;
