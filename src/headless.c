@@ -1451,9 +1451,10 @@ inspect_print_box(const ns_box *box, GString *out)
 }
 
 static void
-headless_collect_matches(const ns_node *n, GPtrArray *sels, GPtrArray *out)
+headless_collect_matches(const ns_node *n, GPtrArray *sels, GPtrArray *out,
+                         int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && n->name) {
         for (guint i = 0; i < sels->len; i++) {
             if (ns_css_selector_matches(g_ptr_array_index(sels, i), n)) {
@@ -1463,7 +1464,7 @@ headless_collect_matches(const ns_node *n, GPtrArray *sels, GPtrArray *out)
         }
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        headless_collect_matches(c, sels, out);
+        headless_collect_matches(c, sels, out, depth + 1);
 }
 
 static void
@@ -1478,7 +1479,7 @@ headless_inspect(const ns_box *layout, const ns_node *doc, const char *selector,
         return;
     }
     GPtrArray *matches = g_ptr_array_new();
-    headless_collect_matches(doc, sels, matches);
+    headless_collect_matches(doc, sels, matches, 0);
     g_string_append_printf(out, "inspect: '%s' matched %u element(s)\n",
                            selector, matches->len);
     for (guint i = 0; i < matches->len; i++) {

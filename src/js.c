@@ -4775,13 +4775,14 @@ microdata_build_propset(const ns_node *root, ns_node *doc, GHashTable *propset)
 }
 
 static void
-microdata_collect_nodes_in_order(ns_node *n, GHashTable *propset, GPtrArray *out)
+microdata_collect_nodes_in_order(ns_node *n, GHashTable *propset, GPtrArray *out,
+                                 int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && g_hash_table_contains(propset, n))
         g_ptr_array_add(out, n);
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        microdata_collect_nodes_in_order(c, propset, out);
+        microdata_collect_nodes_in_order(c, propset, out, depth + 1);
 }
 
 static gboolean
@@ -4878,7 +4879,7 @@ ns_element_get_properties(JSContext *ctx, JSValueConst this_val)
     if (n && microdata_has_itemscope(n)) {
         GHashTable *propset = g_hash_table_new(NULL, NULL);
         microdata_build_propset(n, doc, propset);
-        microdata_collect_nodes_in_order(doc ? doc : n, propset, nodes);
+        microdata_collect_nodes_in_order(doc ? doc : n, propset, nodes, 0);
         g_hash_table_destroy(propset);
     }
     for (guint i = 0; i < nodes->len; i++)
@@ -4955,15 +4956,15 @@ microdata_item_matches_types(const ns_node *item, GHashTable *wanted)
 
 static void
 microdata_collect_top_items(ns_node *n, GHashTable *wanted, JSContext *ctx,
-                            JSValue arr, uint32_t *idx)
+                            JSValue arr, uint32_t *idx, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_ELEMENT && microdata_has_itemscope(n) &&
         !microdata_has_itemprop(n) &&
         microdata_item_matches_types(n, wanted))
         JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, n));
     for (ns_node *c = n->first_child; c; c = c->next_sibling)
-        microdata_collect_top_items(c, wanted, ctx, arr, idx);
+        microdata_collect_top_items(c, wanted, ctx, arr, idx, depth + 1);
 }
 
 static JSValue
@@ -4985,7 +4986,7 @@ ns_document_getItems(JSContext *ctx, JSValueConst this_val,
         }
     }
     uint32_t i = 0;
-    microdata_collect_top_items(doc, wanted, ctx, arr, &i);
+    microdata_collect_top_items(doc, wanted, ctx, arr, &i, 0);
     g_hash_table_destroy(wanted);
     return ns_nodelist_from_array(ctx, arr);
 }
@@ -23415,9 +23416,9 @@ ns_svg_flatten_path(const char *d)
 
 static gboolean
 ns_node_local_bbox(const ns_node *n, double *bx, double *by,
-                   double *bw, double *bh)
+                   double *bw, double *bh, int depth)
 {
-    if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
+    if (!n || depth >= 512 || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     const char *tag = n->name;
     if (g_ascii_strcasecmp(tag, "rect") == 0) {
         *bx = ns_svg_num(n,"x",0); *by = ns_svg_num(n,"y",0);
@@ -23475,7 +23476,7 @@ ns_node_local_bbox(const ns_node *n, double *bx, double *by,
     double ux0=0, uy0=0, ux1=0, uy1=0;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         double cx, cy, cw, ch;
-        if (ns_node_local_bbox(c, &cx, &cy, &cw, &ch)) {
+        if (ns_node_local_bbox(c, &cx, &cy, &cw, &ch, depth + 1)) {
             if (!any) { ux0=cx; uy0=cy; ux1=cx+cw; uy1=cy+ch; any=TRUE; }
             else {
                 if (cx < ux0) ux0 = cx;
@@ -23496,7 +23497,7 @@ ns_element_getBBox(JSContext *ctx, JSValueConst this_val,
     (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
     double x = 0, y = 0, w = 0, h = 0;
-    if (!ns_node_local_bbox(n, &x, &y, &w, &h)) {
+    if (!ns_node_local_bbox(n, &x, &y, &w, &h, 0)) {
         const ns_box *b = ns_box_for_this(ctx, this_val);
         if (b) ns_box_border_box(b, &x, &y, &w, &h);
     }
@@ -25258,9 +25259,9 @@ ns_node_element_prefix_dup(const ns_node *n)
 }
 
 static const char *
-ns_locate_namespace(const ns_node *node, const char *prefix)
+ns_locate_namespace(const ns_node *node, const char *prefix, int depth)
 {
-    if (!node || (node->flags & NS_NODE_FRAGMENT)) return NULL;
+    if (!node || depth >= 512 || (node->flags & NS_NODE_FRAGMENT)) return NULL;
     switch (node->kind) {
     case NS_NODE_ELEMENT: {
         if (prefix && strcmp(prefix, "xml") == 0)
@@ -25285,27 +25286,27 @@ ns_locate_namespace(const ns_node *node, const char *prefix)
                 return (a->value && *a->value) ? a->value : NULL;
         }
         if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
-            return ns_locate_namespace(node->parent, prefix);
+            return ns_locate_namespace(node->parent, prefix, depth + 1);
         return NULL;
     }
     case NS_NODE_DOCUMENT:
         for (const ns_node *c = node->first_child; c; c = c->next_sibling)
             if (c->kind == NS_NODE_ELEMENT)
-                return ns_locate_namespace(c, prefix);
+                return ns_locate_namespace(c, prefix, depth + 1);
         return NULL;
     case NS_NODE_DOCTYPE:
         return NULL;
     default:
         if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
-            return ns_locate_namespace(node->parent, prefix);
+            return ns_locate_namespace(node->parent, prefix, depth + 1);
         return NULL;
     }
 }
 
 static char *
-ns_locate_prefix(const ns_node *node, const char *ns)
+ns_locate_prefix(const ns_node *node, const char *ns, int depth)
 {
-    if (!node || node->kind != NS_NODE_ELEMENT) return NULL;
+    if (!node || depth >= 512 || node->kind != NS_NODE_ELEMENT) return NULL;
     const char *ens = ns_node_element_namespace(node);
     char *epfx = ns_node_element_prefix_dup(node);
     if (ens && ns && strcmp(ens, ns) == 0 && epfx) return epfx;
@@ -25315,7 +25316,7 @@ ns_locate_prefix(const ns_node *node, const char *ns)
             a->value && ns && strcmp(a->value, ns) == 0 && a->local_name)
             return g_strdup(a->local_name);
     if (node->parent && node->parent->kind == NS_NODE_ELEMENT)
-        return ns_locate_prefix(node->parent, ns);
+        return ns_locate_prefix(node->parent, ns, depth + 1);
     return NULL;
 }
 
@@ -25330,7 +25331,7 @@ ns_element_lookupNamespaceURI(JSContext *ctx, JSValueConst this_val,
         tmp = JS_ToCString(ctx, argv[0]);
         if (tmp && *tmp) prefix = tmp;
     }
-    const char *result = ns_locate_namespace(n, prefix);
+    const char *result = ns_locate_namespace(n, prefix, 0);
     JSValue ret = result ? JS_NewString(ctx, result) : JS_NULL;
     if (tmp) JS_FreeCString(ctx, tmp);
     return ret;
@@ -25349,13 +25350,13 @@ ns_element_lookupPrefix(JSContext *ctx, JSValueConst this_val,
     if (n->flags & NS_NODE_FRAGMENT) {
         result = NULL;
     } else if (n->kind == NS_NODE_ELEMENT) {
-        result = ns_locate_prefix(n, ns);
+        result = ns_locate_prefix(n, ns, 0);
     } else if (n->kind == NS_NODE_DOCUMENT) {
         for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-            if (c->kind == NS_NODE_ELEMENT) { result = ns_locate_prefix(c, ns); break; }
+            if (c->kind == NS_NODE_ELEMENT) { result = ns_locate_prefix(c, ns, 0); break; }
     } else if (n->kind != NS_NODE_DOCTYPE && n->parent &&
                n->parent->kind == NS_NODE_ELEMENT) {
-        result = ns_locate_prefix(n->parent, ns);
+        result = ns_locate_prefix(n->parent, ns, 0);
     }
     JSValue ret = result ? JS_NewString(ctx, result) : JS_NULL;
     g_free(result);
@@ -25374,7 +25375,7 @@ ns_element_isDefaultNamespace(JSContext *ctx, JSValueConst this_val,
         tmp = JS_ToCString(ctx, argv[0]);
         if (tmp && *tmp) ns = tmp;
     }
-    const char *def = ns_locate_namespace(n, NULL);
+    const char *def = ns_locate_namespace(n, NULL, 0);
     gboolean eq = (def == NULL && ns == NULL) ||
                   (def && ns && strcmp(def, ns) == 0);
     if (tmp) JS_FreeCString(ctx, tmp);
@@ -26015,13 +26016,15 @@ typedef struct {
 } ns_live_back;
 
 static void
-ns_collect_links(const ns_node *n, JSContext *ctx, JSValue arr, uint32_t *idx)
+ns_collect_links(const ns_node *n, JSContext *ctx, JSValue arr, uint32_t *idx,
+                 int depth)
 {
+    if (!n || depth >= 512) return;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if ((ns_node_is_element_named(c, "a") || ns_node_is_element_named(c, "area")) &&
             ns_element_get_attr(c, "href"))
             JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, c));
-        ns_collect_links(c, ctx, arr, idx);
+        ns_collect_links(c, ctx, arr, idx, depth + 1);
     }
 }
 
@@ -26095,7 +26098,7 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
         }
         break;
     case NS_LIVE_LINKS:
-        ns_collect_links(root, ctx, arr, &i);
+        ns_collect_links(root, ctx, arr, &i, 0);
         break;
     }
     return arr;
@@ -27278,8 +27281,10 @@ typedef struct focus_candidate {
 } focus_candidate;
 
 static void
-collect_focus_candidates(const ns_node *root, GArray *out, guint *order)
+collect_focus_candidates(const ns_node *root, GArray *out, guint *order,
+                         int depth)
 {
+    if (!root || depth >= 512) return;
     for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT) continue;
         if (ns_node_in_template_content(c)) continue;
@@ -27289,7 +27294,7 @@ collect_focus_candidates(const ns_node *root, GArray *out, guint *order)
             focus_candidate fc = { c, has_ti ? ti : 0, (*order)++ };
             g_array_append_val(out, fc);
         }
-        collect_focus_candidates(c, out, order);
+        collect_focus_candidates(c, out, order, depth + 1);
     }
 }
 
@@ -27328,7 +27333,7 @@ ns_js_sequential_focus_target(ns_js *js, gboolean backward)
     if (!scope) return NULL;
     GArray *cands = g_array_new(FALSE, FALSE, sizeof(focus_candidate));
     guint order = 0;
-    collect_focus_candidates(scope, cands, &order);
+    collect_focus_candidates(scope, cands, &order, 0);
     if (cands->len == 0) { g_array_free(cands, TRUE); return NULL; }
     g_array_sort(cands, focus_candidate_cmp);
     int cur = -1;
@@ -27533,7 +27538,7 @@ ns_js_first_focusable_in(const ns_node *root)
 {
     GArray *cands = g_array_new(FALSE, FALSE, sizeof(focus_candidate));
     guint order = 0;
-    collect_focus_candidates(root, cands, &order);
+    collect_focus_candidates(root, cands, &order, 0);
     const ns_node *autofocus = NULL, *first = NULL;
     for (guint i = 0; i < cands->len; i++) {
         const ns_node *n = g_array_index(cands, focus_candidate, i).node;
@@ -28748,29 +28753,42 @@ ns_input_setRangeText(JSContext *ctx, JSValueConst this_val,
 }
 
 static ns_node *
-ns_first_descendant_named(ns_node *root, const char *name)
+ns_first_descendant_named_rec(ns_node *root, const char *name, int depth)
 {
-    if (!root) return NULL;
+    if (!root || depth >= 512) return NULL;
     for (ns_node *c = root->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, name) == 0)
             return c;
-        ns_node *d = ns_first_descendant_named(c, name);
+        ns_node *d = ns_first_descendant_named_rec(c, name, depth + 1);
         if (d) return d;
     }
     return NULL;
 }
 
-static void
-ns_collect_descendants_named(ns_node *root, const char *name, GPtrArray *out)
+static ns_node *
+ns_first_descendant_named(ns_node *root, const char *name)
 {
-    if (!root) return;
+    return ns_first_descendant_named_rec(root, name, 0);
+}
+
+static void
+ns_collect_descendants_named_rec(ns_node *root, const char *name,
+                                 GPtrArray *out, int depth)
+{
+    if (!root || depth >= 512) return;
     for (ns_node *c = root->first_child; c; c = c->next_sibling) {
         if (c->kind == NS_NODE_ELEMENT && c->name &&
             g_ascii_strcasecmp(c->name, name) == 0)
             g_ptr_array_add(out, c);
-        ns_collect_descendants_named(c, name, out);
+        ns_collect_descendants_named_rec(c, name, out, depth + 1);
     }
+}
+
+static void
+ns_collect_descendants_named(ns_node *root, const char *name, GPtrArray *out)
+{
+    ns_collect_descendants_named_rec(root, name, out, 0);
 }
 
 static JSValue
@@ -32291,9 +32309,9 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
 }
 
 static void
-ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
+ns_ce_disconnect_subtree_rec(ns_js *js, ns_node *root, int depth)
 {
-    if (!js || !root || !js->ctx) return;
+    if (!js || !root || !js->ctx || depth >= 512) return;
     if (root->kind == NS_NODE_ELEMENT && root->js_wrapper) {
         JSContext *ctx = js->ctx;
         JSValue elem = JS_MKPTR(JS_TAG_OBJECT, root->js_wrapper);
@@ -32311,13 +32329,20 @@ ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
         }
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_ce_disconnect_subtree(js, c);
+        ns_ce_disconnect_subtree_rec(js, c, depth + 1);
 }
 
 static void
-ns_ce_upgrade_subtree_named(ns_js *js, ns_node *root, const char *target_name)
+ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
 {
-    if (!js || !root || !target_name) return;
+    ns_ce_disconnect_subtree_rec(js, root, 0);
+}
+
+static void
+ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
+                                const char *target_name, int depth)
+{
+    if (!js || !root || !target_name || depth >= 512) return;
     if (js->ce_defer_upgrades > 0) return;
     if (ns_node_in_template_content(root)) return;
     if (root->kind == NS_NODE_ELEMENT && root->name &&
@@ -32326,13 +32351,19 @@ ns_ce_upgrade_subtree_named(ns_js *js, ns_node *root, const char *target_name)
         if (slot) ns_ce_upgrade_element_with(js, root, *slot);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_ce_upgrade_subtree_named(js, c, target_name);
+        ns_ce_upgrade_subtree_named_rec(js, c, target_name, depth + 1);
 }
 
 static void
-ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
+ns_ce_upgrade_subtree_named(ns_js *js, ns_node *root, const char *target_name)
 {
-    if (!js || !root || !js->ce_registry) return;
+    ns_ce_upgrade_subtree_named_rec(js, root, target_name, 0);
+}
+
+static void
+ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth)
+{
+    if (!js || !root || !js->ce_registry || depth >= 512) return;
     if (g_hash_table_size(js->ce_registry) == 0) return;
     if (js->ce_defer_upgrades > 0) return;
     if (ns_node_in_template_content(root)) return;
@@ -32343,7 +32374,13 @@ ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
         g_free(lower);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_ce_upgrade_subtree_all(js, c);
+        ns_ce_upgrade_subtree_all_rec(js, c, depth + 1);
+}
+
+static void
+ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
+{
+    ns_ce_upgrade_subtree_all_rec(js, root, 0);
 }
 
 static void
