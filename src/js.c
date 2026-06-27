@@ -16371,6 +16371,12 @@ ns_sw_register(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         JS_FreeValue(ctx, sv);
     }
     if (!scope) scope = ns_sw_default_scope(abs_url);
+    if (!ns_url_same_origin(abs_url, scope)) {
+        g_free(abs_url);
+        g_free(scope);
+        return ns_sw_reject(ctx, "SecurityError",
+                            "scope origin does not match the script URL");
+    }
 
     ns_worker_host policy = {0};
     policy.base_url = js->current_url;

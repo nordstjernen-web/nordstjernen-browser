@@ -77,12 +77,16 @@ hash_source(const char *src, gsize len, char out[65])
 static char *
 disk_path_for(const char *key)
 {
-    if (!g_dir || !key || !*key) return NULL;
+    g_mutex_lock(&g_lock);
+    char *base = g_strdup(g_dir);
+    g_mutex_unlock(&g_lock);
+    if (!base || !key || !*key) { g_free(base); return NULL; }
     char sub[3] = { key[0], key[1], '\0' };
-    char *dir = g_build_filename(g_dir, sub, NULL);
+    char *dir = g_build_filename(base, sub, NULL);
     g_mkdir_with_parents(dir, 0700);
     char *file = g_build_filename(dir, key + 2, NULL);
     g_free(dir);
+    g_free(base);
     return file;
 }
 

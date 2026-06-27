@@ -11,6 +11,7 @@
 
 #define NS_ES_MAX_LINE  (1 << 20)
 #define NS_ES_MAX_EVENT (8 << 20)
+#define NS_ES_MAX_PENDING 256
 
 struct ns_es {
     char     *url;
@@ -21,6 +22,7 @@ struct ns_es {
     GMutex    lock;
     volatile gint exit_requested;
     volatile gint detached;
+    volatile gint pending;
     int       refcount;
     ns_es_callbacks cbs;
     gpointer  user_data;
@@ -70,6 +72,7 @@ ns_es_dispatch_run(gpointer data)
     if (!g_atomic_int_get(&es->detached) && d->invoke)
         d->invoke(es, d->payload);
     if (d->payload && d->payload_free) d->payload_free(d->payload);
+    g_atomic_int_add(&es->pending, -1);
     ns_es_unref(es);
     g_free(d);
     return G_SOURCE_REMOVE;
@@ -83,6 +86,11 @@ ns_es_post(ns_es *es, void (*invoke)(ns_es *, gpointer), gpointer payload,
         if (payload && payload_free) payload_free(payload);
         return;
     }
+    if (g_atomic_int_get(&es->pending) >= NS_ES_MAX_PENDING) {
+        if (payload && payload_free) payload_free(payload);
+        return;
+    }
+    g_atomic_int_inc(&es->pending);
     ns_es_dispatch *d = g_new0(ns_es_dispatch, 1);
     d->es = ns_es_ref(es);
     d->invoke = invoke;
