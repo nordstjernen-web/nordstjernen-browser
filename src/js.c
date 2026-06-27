@@ -3969,9 +3969,9 @@ ns_inner_text_blockifies_children(const ns_style *s)
 static void
 ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
                       ns_inner_text_ws ws, gboolean visible, const char *tt,
-                      gboolean force_block)
+                      gboolean force_block, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     if (n->kind == NS_NODE_TEXT) {
         if (visible && n->text) ns_inner_text_emit_text(c, n->text, ws, tt);
         return;
@@ -4003,7 +4003,7 @@ ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
     if (breaks) ns_inner_text_require_break(c, breaks);
     for (const ns_node *ch = n->first_child; ch; ch = ch->next_sibling)
         ns_inner_text_collect(js, ch, c, child_ws, child_visible, child_tt,
-                              child_block);
+                              child_block, depth + 1);
     if (breaks) ns_inner_text_require_break(c, breaks);
 }
 
@@ -4031,7 +4031,7 @@ ns_element_get_innerText(JSContext *ctx, JSValueConst this_val)
             return ns_element_get_textContent(ctx, this_val);
     }
     ns_inner_text_ctx c = { g_string_new(NULL), FALSE, 0, FALSE };
-    ns_inner_text_collect(js, n, &c, NS_IT_WS_NORMAL, TRUE, NULL, FALSE);
+    ns_inner_text_collect(js, n, &c, NS_IT_WS_NORMAL, TRUE, NULL, FALSE, 0);
     JSValue v = JS_NewString(ctx, c.out->str);
     g_string_free(c.out, TRUE);
     return v;
@@ -20779,9 +20779,9 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
-ns_node_normalize_walk(ns_js *js, ns_node *n)
+ns_node_normalize_walk(ns_js *js, ns_node *n, int depth)
 {
-    if (!n) return;
+    if (!n || depth >= 512) return;
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
@@ -20808,7 +20808,7 @@ ns_node_normalize_walk(ns_js *js, ns_node *n)
             c = next;
             continue;
         }
-        if (c->kind == NS_NODE_ELEMENT) ns_node_normalize_walk(js, c);
+        if (c->kind == NS_NODE_ELEMENT) ns_node_normalize_walk(js, c, depth + 1);
         c = next;
     }
 }
@@ -20821,7 +20821,7 @@ ns_element_normalize(JSContext *ctx, JSValueConst this_val,
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    ns_node_normalize_walk(_j, el);
+    ns_node_normalize_walk(_j, el, 0);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -23002,10 +23002,10 @@ ns_node_attrs_equal(const ns_node *a, const ns_node *b)
 }
 
 static gboolean
-ns_node_equal(const ns_node *a, const ns_node *b)
+ns_node_equal(const ns_node *a, const ns_node *b, int depth)
 {
     if (a == b) return TRUE;
-    if (!a || !b) return FALSE;
+    if (!a || !b || depth >= 512) return FALSE;
     if (a->kind != b->kind) return FALSE;
     if ((a->name == NULL) != (b->name == NULL)) return FALSE;
     if (a->name && b->name && strcmp(a->name, b->name) != 0) return FALSE;
@@ -23014,7 +23014,7 @@ ns_node_equal(const ns_node *a, const ns_node *b)
     if (!ns_node_attrs_equal(a, b)) return FALSE;
     const ns_node *ca = a->first_child, *cb = b->first_child;
     while (ca && cb) {
-        if (!ns_node_equal(ca, cb)) return FALSE;
+        if (!ns_node_equal(ca, cb, depth + 1)) return FALSE;
         ca = ca->next_sibling;
         cb = cb->next_sibling;
     }
@@ -23031,7 +23031,7 @@ ns_element_isEqualNode(JSContext *ctx, JSValueConst this_val,
     if (JS_IsNull(argv[0]) || JS_IsUndefined(argv[0])) return JS_FALSE;
     const ns_node *b = ns_unwrap_element(argv[0]);
     if (!b) return JS_FALSE;
-    return ns_node_equal(a, b) ? JS_TRUE : JS_FALSE;
+    return ns_node_equal(a, b, 0) ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
@@ -30895,9 +30895,9 @@ typedef struct {
 } ns_range_text_ctx;
 
 static void
-ns_range_text_walk(ns_node *n, ns_range_text_ctx *c)
+ns_range_text_walk(ns_node *n, ns_range_text_ctx *c, int depth)
 {
-    if (!n || c->state == 2) return;
+    if (!n || c->state == 2 || depth >= 512) return;
 
     if (n->kind == NS_NODE_TEXT) {
         if (n->text) {
@@ -30936,7 +30936,7 @@ ns_range_text_walk(ns_node *n, ns_range_text_ctx *c)
     for (ns_node *ch = n->first_child; ch; ch = ch->next_sibling, idx++) {
         if (is_start_el && c->state == 0 && idx == c->soff) c->state = 1;
         if (is_end_el && idx == c->eoff) { c->state = 2; return; }
-        ns_range_text_walk(ch, c);
+        ns_range_text_walk(ch, c, depth + 1);
         if (c->state == 2) return;
     }
     if (is_start_el && c->state == 0 && c->soff >= idx) c->state = 1;
@@ -30979,7 +30979,7 @@ ns_range_toString_impl(JSContext *ctx, JSValueConst this_val,
     while (root->parent) root = root->parent;
 
     ns_range_text_ctx c = { start, end, (int)soff, (int)eoff, g_string_new(NULL), 0 };
-    ns_range_text_walk(root, &c);
+    ns_range_text_walk(root, &c, 0);
     JSValue v = JS_NewString(ctx, c.buf->str);
     g_string_free(c.buf, TRUE);
     return v;
