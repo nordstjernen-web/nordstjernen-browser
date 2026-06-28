@@ -103,6 +103,15 @@ The full section-by-section walk-through lives in
   optional GPU offload (Vulkan / Metal). The assistant can also pull a
   Wikipedia image, run a DuckDuckGo web search, or open a site for you.
   See [`docs/ai.md`](docs/ai.md).
+- **Email client** — a built-in mail reader and composer at `about:email`,
+  rendered in HTML inside the browser. Configure one IMAP or POP3 account
+  for reading and an SMTP server for sending; messages are fetched and
+  MIME-decoded (multipart, quoted-printable / base64, RFC 2047 headers)
+  into an inbox / reader / compose UI. It speaks `imaps://`, `pop3s://`
+  and `smtp(s)://` directly over libcurl — no extra mail stack — and your
+  account details stay on your machine
+  (`~/.config/nordstjernen/email.conf`), sent only to your own mail
+  servers, never relayed through anyone else.
 - **UI** — tabs, bookmarks, find-in-page, save-to-PDF, JS console,
   settings, headless mode, and a C embedding API.
 
