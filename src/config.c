@@ -313,6 +313,20 @@ ns_config_mut(void)
     return &g_cfg;
 }
 
+static GMutex g_cfg_mutex;
+
+void
+ns_config_lock(void)
+{
+    g_mutex_lock(&g_cfg_mutex);
+}
+
+void
+ns_config_unlock(void)
+{
+    g_mutex_unlock(&g_cfg_mutex);
+}
+
 static const char *const referer_policy_names[] = {
     [NS_REFERER_NO_REFERRER]              = "none",
     [NS_REFERER_SAME_ORIGIN]              = "same-origin",

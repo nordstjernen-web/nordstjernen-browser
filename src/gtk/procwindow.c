@@ -852,6 +852,23 @@ on_home_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
+on_email_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    ProcWindow *pw = ud;
+    NsProcView *v = current_view(pw);
+    if (v)
+        ns_proc_view_load(v, "about:email");
+}
+
+static void
+act_email(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    (void)action; (void)parameter;
+    on_email_clicked(NULL, user_data);
+}
+
+static void
 on_logo_clicked(GtkButton *b, gpointer ud)
 {
     (void)b;
@@ -1315,6 +1332,8 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "downloads", G_CALLBACK(act_downloads),
                    (const char *[]){ "<Ctrl>j", NULL });
     install_action(pw, "about", G_CALLBACK(act_about), NULL);
+    install_action(pw, "email", G_CALLBACK(act_email),
+                   (const char *[]){ "<Ctrl>m", NULL });
     install_action(pw, "settings", G_CALLBACK(act_settings),
                    (const char *[]){ "<Ctrl>comma", NULL });
     install_action(pw, "quit", G_CALLBACK(act_quit),
@@ -1434,6 +1453,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
+    GtkWidget *email = toolbar_button("nordstjernen-email", ns_i18n("Email"),
+                                      G_CALLBACK(on_email_clicked), pw);
 
     GMenu *appmenu = g_menu_new();
     g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
@@ -1442,6 +1463,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
     g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");
     g_menu_append(appmenu, ns_i18n("Task Manager"), "win.task-manager");
+    g_menu_append(appmenu, ns_i18n("Email"), "win.email");
     g_menu_append(appmenu, ns_i18n("Settings"), "win.settings");
     GMenu *appmenu_about = g_menu_new();
     g_menu_append(appmenu_about, ns_i18n("About Nordstjernen"), "win.about");
@@ -1473,6 +1495,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
+    gtk_box_append(GTK_BOX(toolbar), email);
     gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);
@@ -1694,251 +1717,14 @@ act_about(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_window_present(GTK_WINDOW(about));
 }
 
-static const struct { const char *name; const char *url; } k_search_engines[] = {
-    { "DuckDuckGo Lite", "https://lite.duckduckgo.com/lite/?q=%s" },
-    { "DuckDuckGo",      "https://duckduckgo.com/?q=%s" },
-    { "Baidu",           "https://www.baidu.com/s?wd=%s" },
-    { "Google",          "https://www.google.com/search?q=%s" },
-    { "Bing",            "https://www.bing.com/search?q=%s" },
-    { "Yandex",          "https://yandex.com/search/?text=%s" },
-    { "Yahoo",           "https://search.yahoo.com/search?p=%s" },
-    { "Yahoo! Japan",    "https://search.yahoo.co.jp/search?p=%s" },
-    { "Sogou",           "https://www.sogou.com/web?query=%s" },
-    { "Naver",           "https://search.naver.com/search.naver?query=%s" },
-    { "Startpage",       "https://www.startpage.com/sp/search?query=%s" },
-    { "Brave Search",    "https://search.brave.com/search?q=%s" },
-    { "Ecosia",          "https://www.ecosia.org/search?q=%s" },
-};
-
-typedef struct {
-    ProcWindow *pw;
-    GtkWidget  *window;
-    GtkWidget  *home;
-    GtkWidget  *search;
-    GtkWidget  *search_dd;
-    GtkWidget  *cookies;
-    GtkWidget  *webgl;
-    GtkWidget  *storage;
-    GtkWidget  *dnt;
-    GtkWidget  *gpc;
-    GtkWidget  *cache;
-} SettingsDlg;
-
-static void
-settings_set_str(char **field, const char *value)
-{
-    g_free(*field);
-    *field = g_strdup(value ? value : "");
-}
-
-static void
-on_search_engine_selected(GObject *dd, GParamSpec *pspec, gpointer user_data)
-{
-    (void)pspec;
-    SettingsDlg *s = user_data;
-    guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(dd));
-    if (sel < G_N_ELEMENTS(k_search_engines)) {
-        gtk_editable_set_text(GTK_EDITABLE(s->search),
-                              k_search_engines[sel].url);
-        gtk_widget_set_sensitive(s->search, FALSE);
-    } else {
-        gtk_widget_set_sensitive(s->search, TRUE);
-        gtk_widget_grab_focus(s->search);
-    }
-}
-
-static void
-on_settings_save(GtkButton *button, gpointer user_data)
-{
-    (void)button;
-    SettingsDlg *s = user_data;
-    ns_config *cfg = ns_config_mut();
-    if (cfg) {
-        settings_set_str(&cfg->home_url,
-            gtk_editable_get_text(GTK_EDITABLE(s->home)));
-        settings_set_str(&cfg->search_engine,
-            gtk_editable_get_text(GTK_EDITABLE(s->search)));
-        cfg->webgl_enabled = gtk_switch_get_active(GTK_SWITCH(s->webgl));
-        cfg->local_storage_enabled =
-            gtk_switch_get_active(GTK_SWITCH(s->storage));
-        cfg->do_not_track = gtk_switch_get_active(GTK_SWITCH(s->dnt));
-        cfg->global_privacy_control = gtk_switch_get_active(GTK_SWITCH(s->gpc));
-        cfg->cookie_policy = (ns_cookie_policy)
-            gtk_drop_down_get_selected(GTK_DROP_DOWN(s->cookies));
-        cfg->cache_enabled = gtk_switch_get_active(GTK_SWITCH(s->cache));
-        ns_config_save(NULL);
-        g_free(s->pw->home_url);
-        s->pw->home_url = g_strdup(cfg->home_url);
-    }
-    gtk_window_destroy(GTK_WINDOW(s->window));
-}
-
-static void
-on_settings_close(GtkButton *button, gpointer user_data)
-{
-    (void)button;
-    SettingsDlg *s = user_data;
-    gtk_window_destroy(GTK_WINDOW(s->window));
-}
-
-static void
-on_settings_clear_data(GtkButton *button, gpointer user_data)
-{
-    (void)user_data;
-    ns_history_clear();
-    ns_cache_clear();
-    ns_net_cookies_clear();
-    ns_net_site_storage_clear();
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
-    gtk_button_set_label(button, ns_i18n("Browsing data cleared"));
-}
-
-static GtkWidget *
-settings_add_switch(GtkGrid *grid, int row, const char *label, gboolean on)
-{
-    GtkWidget *l = gtk_label_new(label);
-    gtk_widget_set_halign(l, GTK_ALIGN_START);
-    GtkWidget *sw = gtk_switch_new();
-    gtk_switch_set_active(GTK_SWITCH(sw), on);
-    gtk_widget_set_halign(sw, GTK_ALIGN_START);
-    gtk_widget_set_valign(sw, GTK_ALIGN_CENTER);
-    gtk_grid_attach(grid, l, 0, row, 1, 1);
-    gtk_grid_attach(grid, sw, 1, row, 1, 1);
-    return sw;
-}
-
 static void
 act_settings(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     (void)action; (void)parameter;
     ProcWindow *pw = user_data;
-    const ns_config *cfg = ns_config_get();
-
-    SettingsDlg *s = g_new0(SettingsDlg, 1);
-    s->pw = pw;
-    s->window = gtk_window_new();
-    gtk_window_set_title(GTK_WINDOW(s->window), ns_i18n("Settings"));
-    gtk_window_set_transient_for(GTK_WINDOW(s->window), GTK_WINDOW(pw->window));
-    gtk_window_set_modal(GTK_WINDOW(s->window), TRUE);
-    gtk_window_set_default_size(GTK_WINDOW(s->window), 460, -1);
-    g_object_set_data_full(G_OBJECT(s->window), "ns-settings", s, g_free);
-
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
-    gtk_widget_set_margin_top(box, 16);
-    gtk_widget_set_margin_bottom(box, 16);
-    gtk_widget_set_margin_start(box, 16);
-    gtk_widget_set_margin_end(box, 16);
-
-    GtkWidget *grid = gtk_grid_new();
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 14);
-
-    GtkWidget *home_l = gtk_label_new(ns_i18n("Home page"));
-    gtk_widget_set_halign(home_l, GTK_ALIGN_START);
-    s->home = gtk_entry_new();
-    gtk_widget_set_hexpand(s->home, TRUE);
-    gtk_editable_set_text(GTK_EDITABLE(s->home),
-                          cfg && cfg->home_url ? cfg->home_url : "");
-    gtk_grid_attach(GTK_GRID(grid), home_l, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), s->home, 1, 0, 1, 1);
-
-    const char *cur_engine =
-        cfg && cfg->search_engine ? cfg->search_engine : "";
-    guint match = G_N_ELEMENTS(k_search_engines);
-    for (guint i = 0; i < G_N_ELEMENTS(k_search_engines); i++)
-        if (g_strcmp0(cur_engine, k_search_engines[i].url) == 0) {
-            match = i;
-            break;
-        }
-
-    GtkWidget *search_l = gtk_label_new(ns_i18n("Search engine"));
-    gtk_widget_set_halign(search_l, GTK_ALIGN_START);
-    const char *dd_names[G_N_ELEMENTS(k_search_engines) + 2];
-    for (guint i = 0; i < G_N_ELEMENTS(k_search_engines); i++)
-        dd_names[i] = k_search_engines[i].name;
-    dd_names[G_N_ELEMENTS(k_search_engines)] = ns_i18n("Custom\xe2\x80\xa6");
-    dd_names[G_N_ELEMENTS(k_search_engines) + 1] = NULL;
-    s->search_dd = gtk_drop_down_new_from_strings(dd_names);
-    gtk_widget_set_hexpand(s->search_dd, TRUE);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->search_dd), match);
-    gtk_grid_attach(GTK_GRID(grid), search_l, 0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), s->search_dd, 1, 1, 1, 1);
-
-    GtkWidget *custom_l = gtk_label_new(ns_i18n("Custom URL"));
-    gtk_widget_set_halign(custom_l, GTK_ALIGN_START);
-    s->search = gtk_entry_new();
-    gtk_widget_set_hexpand(s->search, TRUE);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(s->search),
-                                   "https://example.com/search?q=%s");
-    gtk_editable_set_text(GTK_EDITABLE(s->search), cur_engine);
-    gtk_widget_set_sensitive(s->search,
-                             match >= G_N_ELEMENTS(k_search_engines));
-    gtk_grid_attach(GTK_GRID(grid), custom_l, 0, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), s->search, 1, 2, 1, 1);
-    g_signal_connect(s->search_dd, "notify::selected",
-                     G_CALLBACK(on_search_engine_selected), s);
-    set_accessible_label(s->home, ns_i18n("Home page"));
-    set_accessible_label(s->search_dd, ns_i18n("Search engine"));
-    set_accessible_label(s->search, ns_i18n("Custom search URL"));
-
-    GtkWidget *cookie_l = gtk_label_new(ns_i18n("Cookies"));
-    gtk_widget_set_halign(cookie_l, GTK_ALIGN_START);
-    const char *cookie_names[] = {
-        ns_i18n("Accept all cookies"),
-        ns_i18n("Block third-party cookies"),
-        ns_i18n("Block all cookies"),
-        NULL
-    };
-    s->cookies = gtk_drop_down_new_from_strings(cookie_names);
-    gtk_widget_set_hexpand(s->cookies, TRUE);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(s->cookies),
-                               cfg ? (guint)cfg->cookie_policy
-                                   : (guint)NS_COOKIE_FIRST_PARTY);
-    set_accessible_label(s->cookies, ns_i18n("Cookies"));
-    gtk_grid_attach(GTK_GRID(grid), cookie_l, 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), s->cookies, 1, 3, 1, 1);
-
-    s->webgl   = settings_add_switch(GTK_GRID(grid), 4, ns_i18n("Enable WebGL"),
-                                     cfg ? cfg->webgl_enabled : FALSE);
-    s->storage = settings_add_switch(GTK_GRID(grid), 5, ns_i18n("Enable local storage"),
-                                     cfg ? cfg->local_storage_enabled : TRUE);
-    s->dnt     = settings_add_switch(GTK_GRID(grid), 6, ns_i18n("Send Do Not Track"),
-                                     cfg ? cfg->do_not_track : FALSE);
-    s->gpc     = settings_add_switch(GTK_GRID(grid), 7,
-                                     ns_i18n("Send Global Privacy Control (GPC)"),
-                                     cfg ? cfg->global_privacy_control : TRUE);
-    s->cache   = settings_add_switch(GTK_GRID(grid), 8, ns_i18n("Enable cache"),
-                                     cfg ? cfg->cache_enabled : TRUE);
-
-    gtk_box_append(GTK_BOX(box), grid);
-
-    GtkWidget *note = gtk_label_new(
-        ns_i18n("Changes apply to newly opened pages."));
-    gtk_widget_add_css_class(note, "dim-label");
-    gtk_widget_set_halign(note, GTK_ALIGN_START);
-    gtk_box_append(GTK_BOX(box), note);
-
-    GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *clear_data =
-        gtk_button_new_with_label(ns_i18n("Clear all browsing data"));
-    gtk_widget_set_tooltip_text(clear_data,
-        ns_i18n("Delete history, cookies, cache, and site storage."));
-    gtk_widget_set_halign(clear_data, GTK_ALIGN_START);
-    gtk_widget_set_hexpand(clear_data, TRUE);
-    GtkWidget *cancel = gtk_button_new_with_label(ns_i18n("Cancel"));
-    GtkWidget *save = gtk_button_new_with_label(ns_i18n("Save"));
-    gtk_widget_add_css_class(save, "suggested-action");
-    g_signal_connect(clear_data, "clicked",
-                     G_CALLBACK(on_settings_clear_data), s);
-    g_signal_connect(cancel, "clicked", G_CALLBACK(on_settings_close), s);
-    g_signal_connect(save, "clicked", G_CALLBACK(on_settings_save), s);
-    gtk_box_append(GTK_BOX(buttons), clear_data);
-    gtk_box_append(GTK_BOX(buttons), cancel);
-    gtk_box_append(GTK_BOX(buttons), save);
-    gtk_box_append(GTK_BOX(box), buttons);
-
-    gtk_window_set_child(GTK_WINDOW(s->window), box);
-    gtk_window_present(GTK_WINDOW(s->window));
+    NsProcView *v = current_view(pw);
+    if (v)
+        ns_proc_view_load(v, "about:settings");
 }
 
 static void

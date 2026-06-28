@@ -80,6 +80,9 @@ ns_config       *ns_config_mut(void);
 char            *ns_config_dump(void);
 gboolean         ns_config_save(GError **error);
 
+void             ns_config_lock(void);
+void             ns_config_unlock(void);
+
 #define NS_APP_DIR_NAME "nordstjernen"
 
 G_END_DECLS

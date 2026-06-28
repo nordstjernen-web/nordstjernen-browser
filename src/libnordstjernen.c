@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "ai.h"
+#include "mail.h"
 #include "anim.h"
 #include "bytecode_cache.h"
 #include "cache.h"
@@ -486,6 +487,7 @@ void
 ns_browser_shutdown(void)
 {
     ns_ai_shutdown();
+    ns_mail_shutdown();
     ns_font_shutdown();
     ns_bytecode_cache_shutdown();
     ns_history_shutdown();

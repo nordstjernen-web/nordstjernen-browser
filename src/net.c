@@ -5,6 +5,7 @@
 
 #include "net.h"
 #include "ai.h"
+#include "mail.h"
 #include "cache.h"
 #include "config.h"
 #include "history.h"
@@ -3937,6 +3938,496 @@ static const char k_about_start_template[] =
     "</script></body></html>";
 #endif
 
+static const char k_about_email_html[] =
+"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+"<meta name=\"color-scheme\" content=\"light\">\n"
+"<title>Nordstjernen Mail</title>\n"
+"<style>\n"
+"html,body{margin:0;background:#f4f6f9;color:#16202e;font-family:system-ui,"
+"-apple-system,\"Segoe UI\",Helvetica,Arial,sans-serif;min-height:100%}\n"
+".bar{display:flex;align-items:center;gap:12px;padding:11px 18px;"
+"background:#1b2a4a;color:#fff;position:sticky;top:0;z-index:5}\n"
+".brand{font-weight:700;font-size:1.12em}\n"
+".who{color:#b9c6e0;font-size:.9em}\n"
+".bar .actions{margin-left:auto;display:flex;gap:8px}\n"
+"button{font:inherit;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;"
+"background:#2d6cf6;color:#fff;font-weight:600}\n"
+"button.ghost{background:rgba(255,255,255,.16);color:#fff}\n"
+"button:hover{filter:brightness(1.08)}\n"
+"main{max-width:920px;margin:0 auto;padding:18px}\n"
+".status{color:#5b6470;font-size:.9em;margin:2px 2px 12px}\n"
+".status.err{color:#c0392b}\n"
+"table.list{width:100%;border-collapse:collapse;background:#fff;"
+"border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
+"tr.msg{cursor:pointer;border-bottom:1px solid #eef1f5}\n"
+"tr.msg:last-child{border-bottom:0}\n"
+"tr.msg:hover{background:#f0f5ff}\n"
+"tr.msg td{padding:11px 14px;vertical-align:top}\n"
+"td.from{font-weight:600;width:26%;white-space:nowrap;overflow:hidden;"
+"text-overflow:ellipsis;max-width:0}\n"
+"td.subj{color:#27313f}\n"
+"td.date{color:#8a93a3;font-size:.85em;text-align:right;white-space:nowrap;"
+"width:1%}\n"
+".empty{color:#8a93a3;text-align:center;padding:48px}\n"
+".back{background:#e7ebf2;color:#16202e}\n"
+".rtools{display:flex;gap:8px;margin-bottom:4px}\n"
+".msghdr{background:#fff;border-radius:12px;padding:16px 18px;margin:12px 0;"
+"box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
+".subj{font-size:1.25em;font-weight:700;margin-bottom:6px;word-wrap:break-word}\n"
+".meta{color:#6b7583;font-size:.9em;margin-top:2px;word-wrap:break-word}\n"
+"pre.body{background:#fff;border-radius:12px;padding:18px;white-space:pre-wrap;"
+"overflow-wrap:break-word;font-family:inherit;line-height:1.5;"
+"box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
+".card{background:#fff;border-radius:12px;padding:18px;margin:0 0 14px;"
+"box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
+"h2{font-size:1.2em;margin:.1em 0 .6em}\n"
+"h3{font-size:.95em;color:#6b7583;margin:18px 0 8px}\n"
+".grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}\n"
+"label{display:flex;flex-direction:column;gap:5px;font-size:.82em;"
+"color:#5b6470;font-weight:600}\n"
+"input,select,textarea{font:inherit;color:#16202e;border:1px solid #ccd3de;"
+"border-radius:8px;padding:9px 11px;background:#fff;font-weight:400}\n"
+"input:focus,select:focus,textarea:focus{outline:2px solid #2d6cf6;"
+"outline-offset:-1px;border-color:#2d6cf6}\n"
+"textarea{resize:vertical;min-height:180px}\n"
+".row{display:flex;align-items:center;gap:12px;margin-top:16px}\n"
+".hint{color:#46506b;font-size:.86em;line-height:1.5;background:#eaf0fb;"
+"padding:10px 14px;border-radius:8px;margin:.2em 0 1em}\n"
+".ok{color:#1a8a4a;font-weight:600}.err{color:#c0392b;font-weight:600}\n"
+"@media(max-width:640px){.grid{grid-template-columns:1fr}"
+"td.from{width:40%}.bar{flex-wrap:wrap}}\n"
+"</style></head><body>\n"
+"<header class=\"bar\"><div class=\"brand\">\xe2\x9c\x89 Nordstjernen Mail</div>"
+"<div class=\"who\" id=\"who\"></div>"
+"<div class=\"actions\">"
+"<button id=\"btn-refresh\">Refresh</button>"
+"<button id=\"btn-compose\">Compose</button>"
+"<button id=\"btn-account\" class=\"ghost\">Account</button>"
+"</div></header>\n"
+"<main>\n"
+"<section id=\"view-inbox\" class=\"view\">"
+"<div id=\"sync\" class=\"status\"></div>"
+"<table class=\"list\"><tbody id=\"msglist\"></tbody></table>"
+"<div id=\"empty\" class=\"empty\" hidden>Your inbox is empty.</div>"
+"</section>\n"
+"<section id=\"view-read\" class=\"view\" hidden>"
+"<div class=\"rtools\"><button class=\"back\" id=\"read-back\">"
+"\xe2\x86\x90 Inbox</button>"
+"<button id=\"read-reply\">Reply</button></div>"
+"<div class=\"msghdr\"><div class=\"subj\" id=\"r-subject\"></div>"
+"<div class=\"meta\" id=\"r-from\"></div>"
+"<div class=\"meta\" id=\"r-to\"></div>"
+"<div class=\"meta\" id=\"r-date\"></div></div>"
+"<pre class=\"body\" id=\"r-body\"></pre>"
+"</section>\n"
+"<section id=\"view-compose\" class=\"view\" hidden>"
+"<div class=\"card\"><h2>New message</h2>"
+"<div style=\"display:flex;flex-direction:column;gap:13px\">"
+"<label>To<input id=\"c-to\" type=\"text\" autocomplete=\"off\"></label>"
+"<label>Cc<input id=\"c-cc\" type=\"text\" autocomplete=\"off\"></label>"
+"<label>Subject<input id=\"c-subject\" type=\"text\" autocomplete=\"off\"></label>"
+"<label>Message<textarea id=\"c-body\"></textarea></label>"
+"</div>"
+"<div class=\"row\"><button id=\"c-send\">Send</button>"
+"<button class=\"back\" id=\"c-cancel\">Cancel</button>"
+"<span id=\"c-status\"></span></div></div>"
+"</section>\n"
+"<section id=\"view-account\" class=\"view\" hidden>"
+"<div class=\"card\"><h2>Email account</h2>"
+"<p class=\"hint\">Your account details are stored locally on this computer "
+"and are sent only to your own mail servers. Nordstjernen never relays your "
+"mail through anyone else.</p>"
+"<div class=\"grid\">"
+"<label>Your name<input id=\"a-name\" type=\"text\"></label>"
+"<label>Email address<input id=\"a-email\" type=\"text\" "
+"placeholder=\"you@example.com\"></label></div>"
+"<h3>Incoming mail</h3><div class=\"grid\">"
+"<label>Protocol<select id=\"a-in-proto\">"
+"<option value=\"imap\">IMAP</option><option value=\"pop3\">POP3</option>"
+"</select></label>"
+"<label>Security<select id=\"a-in-sec\">"
+"<option value=\"ssl\">SSL / TLS</option>"
+"<option value=\"starttls\">STARTTLS</option>"
+"<option value=\"none\">None</option></select></label>"
+"<label>Server<input id=\"a-in-host\" placeholder=\"imap.example.com\"></label>"
+"<label>Port<input id=\"a-in-port\" type=\"number\" placeholder=\"993\"></label>"
+"<label>Username<input id=\"a-in-user\"></label>"
+"<label>Password<input id=\"a-in-pass\" type=\"password\"></label></div>"
+"<h3>Outgoing mail (SMTP)</h3><div class=\"grid\">"
+"<label>Security<select id=\"a-out-sec\">"
+"<option value=\"ssl\">SSL / TLS</option>"
+"<option value=\"starttls\">STARTTLS</option>"
+"<option value=\"none\">None</option></select></label>"
+"<label>Server<input id=\"a-out-host\" placeholder=\"smtp.example.com\"></label>"
+"<label>Port<input id=\"a-out-port\" type=\"number\" placeholder=\"465\"></label>"
+"<label>Username<input id=\"a-out-user\"></label>"
+"<label>Password<input id=\"a-out-pass\" type=\"password\"></label></div>"
+"<div class=\"row\"><button id=\"a-save\">Save account</button>"
+"<button class=\"back\" id=\"a-cancel\">Cancel</button>"
+"<span id=\"a-status\"></span></div></div>"
+"</section>\n"
+"</main>\n"
+"<script>\n"
+"function $(i){return document.getElementById(i);}\n"
+"function enc(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+'='+"
+"encodeURIComponent(o[k]==null?'':o[k]));return p.join('&');}\n"
+"function gj(u){return fetch(u).then(function(r){return r.json();});}\n"
+"function pj(u,o){return fetch(u,{method:'POST',headers:{'Content-Type':"
+"'application/x-www-form-urlencoded'},body:enc(o)}).then(function(r){"
+"return r.json();});}\n"
+"function show(v){var s=document.querySelectorAll('.view');"
+"for(var i=0;i<s.length;i++)s[i].hidden=true;$('view-'+v).hidden=false;}\n"
+"function setSync(t,c){var e=$('sync');e.textContent=t||'';"
+"e.className='status '+(c||'');}\n"
+"function renderList(m){var tb=$('msglist');tb.textContent='';"
+"if(!m||!m.length){$('empty').hidden=false;return;}$('empty').hidden=true;"
+"m.forEach(function(x){var tr=document.createElement('tr');tr.className='msg';"
+"var f=document.createElement('td');f.className='from';"
+"f.textContent=x.from||'(unknown sender)';"
+"var s=document.createElement('td');s.className='subj';"
+"s.textContent=x.subject||'(no subject)';"
+"var d=document.createElement('td');d.className='date';d.textContent=x.date||'';"
+"tr.appendChild(f);tr.appendChild(s);tr.appendChild(d);"
+"tr.onclick=function(){openMsg(x.uid);};tb.appendChild(tr);});}\n"
+"var DEEP=(location.search.match(/uid=([^&]+)/)||[])[1];\n"
+"var COMPOSE=/[?&]compose\\b/.test(location.search);\n"
+"function loadInbox(){show('inbox');gj('about:email-status').then(function(st){"
+"$('who').textContent=st.email||'';"
+"if(!st.configured){fillAccount();show('account');return;}"
+"renderList(st.messages);"
+"if(DEEP){var d=DEEP;DEEP=null;openMsg(decodeURIComponent(d));}"
+"else if(COMPOSE){COMPOSE=false;compose(null);}"
+"if(st.sync.state==='running'){setSync('Checking for new mail\\u2026');"
+"pollSync();}"
+"else if(st.sync.state==='idle'){refresh();}"
+"else if(st.sync.state==='error'){setSync('Could not sync: '+st.sync.error,"
+"'err');}"
+"else setSync(((st.messages||[]).length)+' message(s) in Inbox');});}\n"
+"function refresh(){setSync('Checking for new mail\\u2026');"
+"gj('about:email-refresh').then(function(){pollSync();});}\n"
+"function pollSync(){gj('about:email-status').then(function(st){"
+"$('who').textContent=st.email||'';"
+"if(st.sync.state==='running'){setTimeout(pollSync,900);return;}"
+"renderList(st.messages);"
+"if(st.sync.state==='error')setSync('Could not sync: '+st.sync.error,'err');"
+"else setSync(((st.messages||[]).length)+' message(s) in Inbox');});}\n"
+"var cur=null;\n"
+"function openMsg(uid){show('read');$('r-subject').textContent='Loading\\u2026';"
+"$('r-from').textContent='';$('r-to').textContent='';$('r-date').textContent='';"
+"$('r-body').textContent='';"
+"gj('about:email-open?'+enc({uid:uid})).then(function(){pollMsg();});}\n"
+"function pollMsg(){gj('about:email-message').then(function(j){"
+"if(j.state==='running'){setTimeout(pollMsg,500);return;}"
+"if(j.state==='error'){$('r-subject').textContent='Could not open message';"
+"$('r-body').textContent=j.error||'';return;}"
+"var m=j.message||{};cur=m;"
+"$('r-subject').textContent=m.subject||'(no subject)';"
+"$('r-from').textContent=m.from?('From: '+m.from):'';"
+"$('r-to').textContent=m.to?('To: '+m.to):'';"
+"$('r-date').textContent=m.date||'';"
+"$('r-body').textContent=m.body||'(this message has no readable text)';});}\n"
+"function compose(p){show('compose');$('c-to').value=p&&p.to||'';"
+"$('c-cc').value='';$('c-subject').value=p&&p.subject||'';"
+"$('c-body').value=p&&p.body||'';$('c-status').textContent='';"
+"$('c-status').className='';$('c-to').focus();}\n"
+"function reply(){var m=cur||{};var s=m.subject||'';"
+"if(s.toLowerCase().indexOf('re:')!==0)s='Re: '+s;"
+"var q='\\n\\n----- Original message -----\\n'+(m.body||'');"
+"compose({to:m.from,subject:s,body:q});}\n"
+"function send(){$('c-status').textContent='Sending\\u2026';"
+"$('c-status').className='';"
+"pj('about:email-send',{to:$('c-to').value,cc:$('c-cc').value,"
+"subject:$('c-subject').value,body:$('c-body').value})"
+".then(function(){pollSend();});}\n"
+"function pollSend(){gj('about:email-send-status').then(function(j){"
+"if(j.state==='running'){setTimeout(pollSend,700);return;}"
+"if(j.state==='error'){$('c-status').textContent='Failed: '+j.error;"
+"$('c-status').className='err';return;}"
+"$('c-status').textContent='Message sent.';$('c-status').className='ok';"
+"setTimeout(loadInbox,1100);});}\n"
+"function fillAccount(){gj('about:email-account').then(function(a){"
+"$('a-name').value=a.name||'';$('a-email').value=a.email||'';"
+"$('a-in-proto').value=a.incoming.protocol||'imap';"
+"$('a-in-sec').value=a.incoming.security||'ssl';"
+"$('a-in-host').value=a.incoming.host||'';"
+"$('a-in-port').value=a.incoming.port||'';"
+"$('a-in-user').value=a.incoming.user||'';"
+"$('a-out-sec').value=a.outgoing.security||'ssl';"
+"$('a-out-host').value=a.outgoing.host||'';"
+"$('a-out-port').value=a.outgoing.port||'';"
+"$('a-out-user').value=a.outgoing.user||'';"
+"$('a-in-pass').placeholder=a.incoming.has_pass?'\\u2022\\u2022\\u2022\\u2022"
+"\\u2022 (unchanged)':'';"
+"$('a-out-pass').placeholder=a.outgoing.has_pass?'\\u2022\\u2022\\u2022\\u2022"
+"\\u2022 (unchanged)':'';});}\n"
+"function saveAccount(){$('a-status').textContent='Saving\\u2026';"
+"$('a-status').className='';"
+"pj('about:email-account',{name:$('a-name').value,email:$('a-email').value,"
+"in_proto:$('a-in-proto').value,in_sec:$('a-in-sec').value,"
+"in_host:$('a-in-host').value,in_port:$('a-in-port').value,"
+"in_user:$('a-in-user').value,in_pass:$('a-in-pass').value,"
+"out_sec:$('a-out-sec').value,out_host:$('a-out-host').value,"
+"out_port:$('a-out-port').value,out_user:$('a-out-user').value,"
+"out_pass:$('a-out-pass').value}).then(function(){"
+"$('a-status').textContent='Saved.';$('a-status').className='ok';"
+"setTimeout(loadInbox,700);});}\n"
+"$('btn-refresh').onclick=refresh;"
+"$('btn-compose').onclick=function(){compose(null);};"
+"$('btn-account').onclick=function(){fillAccount();show('account');};"
+"$('read-back').onclick=loadInbox;$('read-reply').onclick=reply;"
+"$('c-send').onclick=send;$('c-cancel').onclick=loadInbox;"
+"$('a-save').onclick=saveAccount;$('a-cancel').onclick=loadInbox;\n"
+"loadInbox();\n"
+"</script></body></html>";
+
+static const char k_about_settings_html[] =
+"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+"<meta name=\"color-scheme\" content=\"light\">\n"
+"<title>Settings</title>\n"
+"<style>\n"
+"html,body{margin:0;background:#f4f6f9;color:#16202e;font-family:system-ui,"
+"-apple-system,\"Segoe UI\",Helvetica,Arial,sans-serif;min-height:100%}\n"
+".bar{display:flex;align-items:center;gap:12px;padding:11px 18px;"
+"background:#1b2a4a;color:#fff;position:sticky;top:0;z-index:5}\n"
+".brand{font-weight:700;font-size:1.12em}\n"
+"main{max-width:680px;margin:0 auto;padding:18px}\n"
+".card{background:#fff;border-radius:12px;padding:18px 20px;margin:0 0 14px;"
+"box-shadow:0 1px 3px rgba(20,30,50,.08)}\n"
+"h2{font-size:1.1em;margin:.1em 0 .7em}\n"
+".field{display:flex;flex-direction:column;gap:6px;font-size:.84em;"
+"color:#5b6470;font-weight:600;margin:0 0 14px}\n"
+".field:last-child{margin-bottom:0}\n"
+"input,select{font:inherit;color:#16202e;border:1px solid #ccd3de;"
+"border-radius:8px;padding:9px 11px;background:#fff;font-weight:400}\n"
+"input:focus,select:focus{outline:2px solid #2d6cf6;outline-offset:-1px;"
+"border-color:#2d6cf6}\n"
+".toggle{display:flex;align-items:center;gap:10px;font-size:.92em;"
+"color:#27313f;font-weight:500;margin:0 0 12px;cursor:pointer}\n"
+".toggle:last-child{margin-bottom:0}\n"
+".toggle input{width:18px;height:18px;accent-color:#2d6cf6;margin:0}\n"
+"button{font:inherit;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;"
+"background:#2d6cf6;color:#fff;font-weight:600}\n"
+"button.ghost{background:#e7ebf2;color:#16202e}\n"
+"button:hover{filter:brightness(1.05)}\n"
+".row{display:flex;align-items:center;gap:12px;margin-top:6px}\n"
+".spacer{flex:1 1 auto}\n"
+".note{color:#8a93a3;font-size:.85em;text-align:center;margin-top:14px}\n"
+".ok{color:#1a8a4a;font-weight:600}\n"
+"#custom_wrap[hidden]{display:none}\n"
+"</style></head><body>\n"
+"<header class=\"bar\"><div class=\"brand\">\xe2\x9a\x99 Settings</div></header>\n"
+"<main>\n"
+"<section class=\"card\"><h2>General</h2>"
+"<label class=\"field\">Home page<input id=\"home_url\" type=\"text\"></label>"
+"<label class=\"field\">Search engine<select id=\"search_pick\"></select></label>"
+"<label class=\"field\" id=\"custom_wrap\">Custom search URL"
+"<input id=\"search_engine\" type=\"text\" "
+"placeholder=\"https://example.com/?q=%s\"></label>"
+"</section>\n"
+"<section class=\"card\"><h2>Privacy</h2>"
+"<label class=\"field\">Cookies<select id=\"cookie_policy\">"
+"<option value=\"0\">Accept all cookies</option>"
+"<option value=\"1\">Block third-party cookies</option>"
+"<option value=\"2\">Block all cookies</option></select></label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"do_not_track\">"
+"Send \xe2\x80\x9c" "Do Not Track\xe2\x80\x9d</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"global_privacy_control\">"
+"Send Global Privacy Control (GPC)</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"strip_tracking_params\">"
+"Strip tracking parameters from links</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"https_first\">"
+"Try HTTPS first on every site</label>"
+"</section>\n"
+"<section class=\"card\"><h2>Content</h2>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"images_enabled\">"
+"Load images</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"webgl_enabled\">"
+"Enable WebGL</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"local_storage_enabled\">"
+"Enable local storage</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"cache_enabled\">"
+"Enable cache</label>"
+"</section>\n"
+"<div class=\"row\">"
+"<button id=\"clear\" class=\"ghost\">Clear all browsing data</button>"
+"<span class=\"spacer\"></span><span id=\"status\"></span>"
+"<button id=\"save\">Save</button></div>\n"
+"<p class=\"note\">Changes apply to newly opened pages.</p>\n"
+"</main>\n"
+"<script>\n"
+"function $(i){return document.getElementById(i);}\n"
+"function enc(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+'='+"
+"encodeURIComponent(o[k]==null?'':o[k]));return p.join('&');}\n"
+"var engines=[{n:'DuckDuckGo',u:'https://lite.duckduckgo.com/lite/?q=%s'},"
+"{n:'Startpage',u:'https://www.startpage.com/sp/search?query=%s'},"
+"{n:'Google',u:'https://www.google.com/search?q=%s'},"
+"{n:'Bing',u:'https://www.bing.com/search?q=%s'},"
+"{n:'Brave',u:'https://search.brave.com/search?q=%s'},"
+"{n:'Wikipedia',u:'https://en.wikipedia.org/w/index.php?search=%s'}];\n"
+"function buildPick(cur){var sel=$('search_pick');sel.textContent='';"
+"var matched=false;engines.forEach(function(e){var o=document.createElement("
+"'option');o.value=e.u;o.textContent=e.n;if(e.u===cur){o.selected=true;"
+"matched=true;}sel.appendChild(o);});"
+"var oc=document.createElement('option');oc.value='custom';"
+"oc.textContent='Custom\\u2026';if(!matched)oc.selected=true;"
+"sel.appendChild(oc);"
+"$('custom_wrap').hidden=matched;}\n"
+"$('search_pick')&&($('search_pick').onchange=function(){"
+"var v=this.value;if(v==='custom'){$('custom_wrap').hidden=false;}"
+"else{$('custom_wrap').hidden=true;$('search_engine').value=v;}});\n"
+"function load(){fetch('about:settings-data').then(function(r){"
+"return r.json();}).then(function(c){"
+"$('home_url').value=c.home_url||'';"
+"$('search_engine').value=c.search_engine||'';buildPick(c.search_engine||'');"
+"$('cookie_policy').value=''+(c.cookie_policy||0);"
+"['do_not_track','global_privacy_control','strip_tracking_params',"
+"'https_first','images_enabled','webgl_enabled','local_storage_enabled',"
+"'cache_enabled'].forEach(function(k){$(k).checked=!!c[k];});});}\n"
+"function bv(id){return $(id).checked?'1':'0';}\n"
+"function save(){var se=$('search_pick').value;"
+"if(se!=='custom')$('search_engine').value=se;"
+"fetch('about:settings-save',{method:'POST',headers:{'Content-Type':"
+"'application/x-www-form-urlencoded'},body:enc({"
+"home_url:$('home_url').value,search_engine:$('search_engine').value,"
+"cookie_policy:$('cookie_policy').value,do_not_track:bv('do_not_track'),"
+"global_privacy_control:bv('global_privacy_control'),"
+"strip_tracking_params:bv('strip_tracking_params'),"
+"https_first:bv('https_first'),images_enabled:bv('images_enabled'),"
+"webgl_enabled:bv('webgl_enabled'),"
+"local_storage_enabled:bv('local_storage_enabled'),"
+"cache_enabled:bv('cache_enabled')})}).then(function(){"
+"$('status').textContent='Saved.';$('status').className='ok';"
+"setTimeout(function(){$('status').textContent='';},2500);});}\n"
+"function clearData(){var b=$('clear');b.disabled=true;"
+"fetch('about:settings-clear',{method:'POST'}).then(function(){"
+"b.textContent='Browsing data cleared';});}\n"
+"$('save').onclick=save;$('clear').onclick=clearData;\n"
+"load();\n"
+"</script></body></html>";
+
+static char *
+about_query_param(const char *url, const char *key)
+{
+    const char *qs = strchr(url, '?');
+    if (!qs) return NULL;
+    GHashTable *q = g_uri_parse_params(qs + 1, -1, "&",
+                                       G_URI_PARAMS_WWW_FORM, NULL);
+    char *val = NULL;
+    if (q) {
+        const char *raw = g_hash_table_lookup(q, key);
+        if (raw) val = g_strdup(raw);
+        g_hash_table_destroy(q);
+    }
+    return val;
+}
+
+static char *
+about_request_form(const char *url, const char *method,
+                   const void *body, gsize body_len)
+{
+    if (method && g_ascii_strcasecmp(method, "POST") == 0 && body && body_len)
+        return g_strndup((const char *)body, body_len);
+    const char *qs = strchr(url, '?');
+    return g_strdup(qs ? qs + 1 : "");
+}
+
+static void
+about_emit_json(ns_response *resp, char *json)
+{
+    g_free(resp->content_type);
+    resp->content_type = g_strdup("application/json; charset=utf-8");
+    g_byte_array_append(resp->body, (const guint8 *)json, (guint)strlen(json));
+    g_free(json);
+}
+
+static char *
+about_json_escape(const char *s)
+{
+    GString *o = g_string_new(NULL);
+    for (; s && *s; s++) {
+        if (*s == '"' || *s == '\\') g_string_append_c(o, '\\');
+        if ((guchar)*s < 0x20) { g_string_append_printf(o, "\\u%04x", *s); continue; }
+        g_string_append_c(o, *s);
+    }
+    return g_string_free(o, FALSE);
+}
+
+static char *
+about_settings_json(void)
+{
+    const ns_config *c = ns_config_get();
+    char *home = about_json_escape(c && c->home_url ? c->home_url : "");
+    char *eng = about_json_escape(c && c->search_engine ? c->search_engine : "");
+    char *json = g_strdup_printf(
+        "{\"home_url\":\"%s\",\"search_engine\":\"%s\",\"cookie_policy\":%d,"
+        "\"do_not_track\":%s,\"global_privacy_control\":%s,"
+        "\"strip_tracking_params\":%s,\"https_first\":%s,"
+        "\"images_enabled\":%s,\"webgl_enabled\":%s,"
+        "\"local_storage_enabled\":%s,\"cache_enabled\":%s}",
+        home, eng, c ? (int)c->cookie_policy : 1,
+        (c && c->do_not_track) ? "true" : "false",
+        (c && c->global_privacy_control) ? "true" : "false",
+        (c && c->strip_tracking_params) ? "true" : "false",
+        (c && c->https_first) ? "true" : "false",
+        (c && c->images_enabled) ? "true" : "false",
+        (c && c->webgl_enabled) ? "true" : "false",
+        (c && c->local_storage_enabled) ? "true" : "false",
+        (c && c->cache_enabled) ? "true" : "false");
+    g_free(home);
+    g_free(eng);
+    return json;
+}
+
+static void
+about_settings_save(const char *form)
+{
+    GHashTable *q = form && *form
+        ? g_uri_parse_params(form, -1, "&", G_URI_PARAMS_WWW_FORM, NULL)
+        : NULL;
+    if (!q) return;
+    ns_config_lock();
+    ns_config *c = ns_config_mut();
+    const char *v;
+    if ((v = g_hash_table_lookup(q, "home_url"))) {
+        g_free(c->home_url); c->home_url = g_strdup(v);
+    }
+    if ((v = g_hash_table_lookup(q, "search_engine"))) {
+        g_free(c->search_engine); c->search_engine = g_strdup(v);
+    }
+    if ((v = g_hash_table_lookup(q, "cookie_policy")))
+        c->cookie_policy = (ns_cookie_policy)atoi(v);
+    if ((v = g_hash_table_lookup(q, "do_not_track")))
+        c->do_not_track = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "global_privacy_control")))
+        c->global_privacy_control = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "strip_tracking_params")))
+        c->strip_tracking_params = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "https_first")))
+        c->https_first = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "images_enabled")))
+        c->images_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "webgl_enabled")))
+        c->webgl_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "local_storage_enabled")))
+        c->local_storage_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "cache_enabled")))
+        c->cache_enabled = atoi(v) != 0;
+    ns_config_save(NULL);
+    ns_config_unlock();
+    g_hash_table_destroy(q);
+}
+
+static void
+about_settings_clear(void)
+{
+    ns_history_clear();
+    ns_cache_clear();
+    ns_net_cookies_clear();
+    ns_net_site_storage_clear();
+}
+
 static const char *
 about_start_tagline(void)
 {
@@ -3958,11 +4449,13 @@ about_request_from_chrome(const char *top_url)
 
 static gboolean
 synthesize_about_response(const char *url, const char *top_url,
-                          ns_response *resp)
+                          const char *method, const void *req_body,
+                          gsize req_body_len, ns_response *resp)
 {
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
-    if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history")) &&
+    if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
+         g_str_has_prefix(what, "email") || g_str_has_prefix(what, "settings")) &&
         !about_request_from_chrome(top_url)) {
         resp->status = 403;
         resp->final_url = g_strdup(url);
@@ -3980,11 +4473,14 @@ synthesize_about_response(const char *url, const char *top_url,
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
     } else if (g_str_equal(what, "start") || g_str_equal(what, "home") ||
                g_str_equal(what, "newtab")) {
+        ns_config_lock();
         const ns_config *scfg = ns_config_get();
-        const char *engine =
+        g_autofree char *engine_dup =
             (scfg && scfg->search_engine && *scfg->search_engine)
-            ? scfg->search_engine
-            : "https://lite.duckduckgo.com/lite/?q=%s";
+            ? g_strdup(scfg->search_engine)
+            : g_strdup("https://lite.duckduckgo.com/lite/?q=%s");
+        ns_config_unlock();
+        const char *engine = engine_dup;
         GString *esc_engine = g_string_new(NULL);
         for (const char *p = engine; *p; p++) {
             if (*p == '\'' || *p == '\\' || *p == '<' || *p == '"')
@@ -4110,6 +4606,48 @@ synthesize_about_response(const char *url, const char *top_url,
         char *body = ns_history_html_page();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
+    } else if (g_str_equal(what, "email") || g_str_has_prefix(what, "email?")) {
+        g_byte_array_append(resp->body, (const guint8 *)k_about_email_html,
+                            (guint)strlen(k_about_email_html));
+    } else if (g_str_has_prefix(what, "email-status")) {
+        about_emit_json(resp, ns_mail_status_json());
+    } else if (g_str_has_prefix(what, "email-refresh")) {
+        ns_mail_refresh();
+        about_emit_json(resp, ns_mail_status_json());
+    } else if (g_str_has_prefix(what, "email-account")) {
+        if (method && g_ascii_strcasecmp(method, "POST") == 0) {
+            char *form = about_request_form(url, method, req_body, req_body_len);
+            ns_mail_account_save(form);
+            g_free(form);
+        }
+        about_emit_json(resp, ns_mail_account_json());
+    } else if (g_str_has_prefix(what, "email-open")) {
+        char *uid = about_query_param(url, "uid");
+        if (uid && *uid) ns_mail_open(uid);
+        g_free(uid);
+        about_emit_json(resp, ns_mail_message_json());
+    } else if (g_str_has_prefix(what, "email-message")) {
+        about_emit_json(resp, ns_mail_message_json());
+    } else if (g_str_has_prefix(what, "email-send-status")) {
+        about_emit_json(resp, ns_mail_send_status_json());
+    } else if (g_str_has_prefix(what, "email-send")) {
+        char *form = about_request_form(url, method, req_body, req_body_len);
+        ns_mail_send(form);
+        g_free(form);
+        about_emit_json(resp, ns_mail_send_status_json());
+    } else if (g_str_equal(what, "settings")) {
+        g_byte_array_append(resp->body, (const guint8 *)k_about_settings_html,
+                            (guint)strlen(k_about_settings_html));
+    } else if (g_str_has_prefix(what, "settings-data")) {
+        about_emit_json(resp, about_settings_json());
+    } else if (g_str_has_prefix(what, "settings-save")) {
+        char *form = about_request_form(url, method, req_body, req_body_len);
+        about_settings_save(form);
+        g_free(form);
+        about_emit_json(resp, g_strdup("{\"ok\":true}"));
+    } else if (g_str_has_prefix(what, "settings-clear")) {
+        about_settings_clear();
+        about_emit_json(resp, g_strdup("{\"ok\":true}"));
     } else {
         const char *body = "<!doctype html><title>Nordstjernen</title>";
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
@@ -4164,7 +4702,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (synthesize_about_response(url, top_url, resp))
+    if (synthesize_about_response(url, top_url, method, body, body_len, resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;
