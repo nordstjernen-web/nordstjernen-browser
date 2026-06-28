@@ -6863,18 +6863,44 @@ layout_box(ns_box *box, double parent_content_width, const ns_style *inherited_s
 }
 
 static gboolean
+flex_box_is_border_box(const ns_box *c)
+{
+    const ns_css_value *bsv = c && c->style
+        ? c->style->values[NS_CSS_BOX_SIZING] : NULL;
+    return bsv && bsv->kind == NS_CSS_V_KEYWORD && bsv->u.keyword &&
+           strcmp(bsv->u.keyword, "border-box") == 0;
+}
+
+static double
+flex_main_axis_extras(const ns_box *c)
+{
+    if (!c) return 0;
+    return c->padding.left + c->padding.right + c->border.left + c->border.right;
+}
+
+static double
+flex_border_box_to_content(const ns_box *c, double v)
+{
+    if (flex_box_is_border_box(c)) {
+        v -= flex_main_axis_extras(c);
+        if (v < 0) v = 0;
+    }
+    return v;
+}
+
+static gboolean
 flex_main_basis_explicit(const ns_box *c, double cw, double *out)
 {
     const ns_style *s = c->style;
     if (!s) return FALSE;
     const ns_css_value *b = s->values[NS_CSS_FLEX_BASIS];
     if (b && (b->kind == NS_CSS_V_LENGTH || b->kind == NS_CSS_V_CALC)) {
-        *out = length_resolve(b, cw, 0);
+        *out = flex_border_box_to_content(c, length_resolve(b, cw, 0));
         return TRUE;
     }
     const ns_css_value *w = s->values[NS_CSS_WIDTH];
     if (w && (w->kind == NS_CSS_V_LENGTH || w->kind == NS_CSS_V_CALC)) {
-        *out = length_resolve(w, cw, 0);
+        *out = flex_border_box_to_content(c, length_resolve(w, cw, 0));
         return TRUE;
     }
     return FALSE;
@@ -6954,6 +6980,24 @@ estimate_natural_width(const ns_box *b, double cap)
     }
     w += b->padding.left + b->padding.right +
          b->border.left  + b->border.right;
+    if (b->style) {
+        const ns_css_value *bsv = b->style->values[NS_CSS_BOX_SIZING];
+        gboolean border_box = bsv && bsv->kind == NS_CSS_V_KEYWORD &&
+                              bsv->u.keyword &&
+                              strcmp(bsv->u.keyword, "border-box") == 0;
+        double box_extras = border_box ? 0 :
+            b->padding.left + b->padding.right + b->border.left + b->border.right;
+        const ns_css_value *mxw = b->style->values[NS_CSS_MAX_WIDTH];
+        if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
+            double mx = length_resolve(mxw, cap, -1);
+            if (mx >= 0 && w > mx + box_extras) w = mx + box_extras;
+        }
+        const ns_css_value *mnw = b->style->values[NS_CSS_MIN_WIDTH];
+        if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
+            double mn = length_resolve(mnw, cap, -1);
+            if (mn > 0 && w < mn + box_extras) w = mn + box_extras;
+        }
+    }
     if (w > cap) w = cap;
     return w;
 }
@@ -7171,7 +7215,7 @@ layout_flex_row(ns_box *box, double cw,
         if (a < 0) a = 0;
         const ns_css_value *mxw = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
         if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
-            double mx = length_resolve(mxw, cw, -1);
+            double mx = flex_border_box_to_content(c, length_resolve(mxw, cw, -1));
             if (mx > 0 && a > mx) {
                 leftover_capped += (a - mx);
                 a = mx;
@@ -7187,7 +7231,7 @@ layout_flex_row(ns_box *box, double cw,
             const ns_css_value *mxw = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
             double mx = -1;
             if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC))
-                mx = length_resolve(mxw, cw, -1);
+                mx = flex_border_box_to_content(c, length_resolve(mxw, cw, -1));
             gboolean at_cap = (mx > 0 && a >= mx - 0.5);
             if (!at_cap && flex_grow_of(c) > 0)
                 total_grow_remaining += flex_grow_of(c);
@@ -7200,7 +7244,7 @@ layout_flex_row(ns_box *box, double cw,
                 const ns_css_value *mxw = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
                 double mx = -1;
                 if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC))
-                    mx = length_resolve(mxw, cw, -1);
+                    mx = flex_border_box_to_content(c, length_resolve(mxw, cw, -1));
                 gboolean at_cap = (mx > 0 && a >= mx - 0.5);
                 if (!at_cap && flex_grow_of(c) > 0) {
                     double add = extra2 * flex_grow_of(c);
@@ -7217,7 +7261,7 @@ layout_flex_row(ns_box *box, double cw,
         const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
         if (!mnw || (mnw->kind != NS_CSS_V_LENGTH && mnw->kind != NS_CSS_V_CALC))
             continue;
-        double mn = length_resolve(mnw, cw, -1);
+        double mn = flex_border_box_to_content(c, length_resolve(mnw, cw, -1));
         double a = g_array_index(assigned_main, double, i);
         if (mn > 0 && a < mn) {
             min_deficit += mn - a;
@@ -7233,7 +7277,7 @@ layout_flex_row(ns_box *box, double cw,
             const ns_css_value *mnw = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
             double mn = 0;
             if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
-                double r = length_resolve(mnw, cw, -1);
+                double r = flex_border_box_to_content(c, length_resolve(mnw, cw, -1));
                 if (r > 0) mn = r;
             }
             double a = g_array_index(assigned_main, double, i);
