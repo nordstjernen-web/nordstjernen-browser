@@ -11,7 +11,6 @@ top-level [README.md](../README.md); the development plan is
 - [media.md](media.md) — how `<video>`/`<audio>` play (MPEG-1, optional WebM, the audio helper, external-player fallback).
 - [ai.md](ai.md) — the local AI start page (`about:start`), on-device via llama.cpp.
 - [Proxy.md](Proxy.md) — proxies and VPNs.
-- [Tor.md](Tor.md) — routing through Tor, and the design for an integrated Tor mode.
 - [privacy-policy.md](privacy-policy.md) — what the browser does and does not collect.
 
 ## Install, build & packaging
