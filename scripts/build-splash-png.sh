@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 ver=$(sed -n "s/^[[:space:]]*version:[[:space:]]*'\([^']*\)'.*/\1/p" meson.build | head -n1)
 [ -n "$ver" ] || { echo "could not read version from meson.build" >&2; exit 1; }
 ver=${ver%%-*}
-codename='« Firefoxdödaren »'
+codename='« Manifest Destiny »'
 
 find_font() {
     local q=$1; shift
@@ -63,99 +63,141 @@ convert -size 200x200 xc:none -stroke white -fill white \
     -strokewidth 1 -draw "line 55,55 145,145" -strokewidth 1 -draw "line 145,55 55,145" -blur 0x0.6 "$w/spikes.png"
 convert "$w/glow.png" "$w/spikes.png" -compose screen -composite -resize 140x140 "$w/star.png"
 
-# colourful hot air balloon — a surface-of-revolution envelope split into
-# bright flat-shaded gores, riding a wicker basket lit by a burner flame.
-bw=460; bh=720
-bdraw=$(python3 - "$w" <<'PY'
-import math, sys
-wdir = sys.argv[1]
-cx = 230.0
-apex_y = 26.0
-H = 470.0
-throat_y = apex_y + H
-R = 196.0
-CTRL = [(0.00,0.05),(0.05,0.33),(0.12,0.60),(0.22,0.84),(0.34,0.97),
-        (0.46,1.00),(0.58,0.965),(0.70,0.85),(0.80,0.67),(0.88,0.49),
-        (0.94,0.35),(1.00,0.235)]
-def width(u):
-    if u <= 0.0: return CTRL[0][1]*R
-    if u >= 1.0: return CTRL[-1][1]*R
-    for i in range(len(CTRL)-1):
-        u0, w0 = CTRL[i]; u1, w1 = CTRL[i+1]
-        if u <= u1:
-            t = (u-u0)/(u1-u0); t = t*t*(3-2*t)
-            return (w0+(w1-w0)*t)*R
-    return CTRL[-1][1]*R
-N = 16
-STEPS = 64
-PAL = [(229,55,55),(240,131,38),(247,201,58),(86,192,98),
-       (38,180,178),(54,116,214),(150,86,200),(228,94,160)]
-phiL = math.radians(-34)
-def sh(c, f): return tuple(min(255, max(0, int(v*f))) for v in c)
-out = []
-half = math.pi/N
-for i in range(N):
-    pl = -math.pi/2 + i*half; pr = pl + half; pc = (pl+pr)/2
-    diff = max(0.0, math.cos(pc - phiL))
-    f = 0.45 + 0.63*diff
-    idx = i if i < N//2 else N-1-i
-    col = sh(PAL[idx % len(PAL)], f)
-    pts = []
-    for s in range(STEPS+1):
-        u = s/STEPS; pts.append((cx + width(u)*math.sin(pl), apex_y + u*H))
-    for s in range(STEPS, -1, -1):
-        u = s/STEPS; pts.append((cx + width(u)*math.sin(pr), apex_y + u*H))
-    poly = " ".join("%.1f,%.1f" % p for p in pts)
-    out.append("stroke rgba(18,14,24,0.42) stroke-width 1.0 fill #%02x%02x%02x polygon %s" % (col[0], col[1], col[2], poly))
-out.append("stroke none fill rgba(245,245,250,0.16) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, apex_y+10, 24, 11))
-out.append("stroke rgba(18,14,24,0.30) stroke-width 1.0 fill none ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, apex_y+10, 24, 11))
-tw = width(1.0)
-out.append("stroke none fill rgba(24,18,26,0.90) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, throat_y, tw, 12))
-out.append("stroke none fill rgba(58,44,36,1) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, throat_y, tw*0.6, 6))
-btop = throat_y + 96
-bbot = btop + 72
-btw, bbw = 47.0, 41.0
-for a in (-74, -46, -20, 20, 46, 74):
-    rx = cx + tw*math.sin(math.radians(a))
-    side = 1 if a > 0 else -1
-    bx = cx + side*btw
-    midx = cx + 0.35*(bx - cx)
-    out.append("stroke rgba(222,226,234,0.65) stroke-width 1.0 fill none line %.1f,%.1f %.1f,%.1f" % (rx, throat_y+5, midx, throat_y+34))
-    out.append("stroke rgba(222,226,234,0.65) stroke-width 1.0 fill none line %.1f,%.1f %.1f,%.1f" % (midx, throat_y+34, bx, btop))
-out.append("stroke none fill rgba(36,30,26,1) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, throat_y+34, 10, 4))
-out.append("stroke rgba(70,44,24,0.9) stroke-width 1.2 fill #b07c46 polygon %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f" % (cx-btw, btop, cx+btw, btop, cx+bbw, bbot, cx-bbw, bbot))
-out.append("stroke none fill #6e4a28 roundrectangle %.1f,%.1f %.1f,%.1f 4,4" % (cx-btw-3, btop-6, cx+btw+3, btop+7))
-nv = 7
-for k in range(1, nv):
-    t = k/nv
-    xt = (cx-btw) + (2*btw)*t
-    xb = (cx-bbw) + (2*bbw)*t
-    out.append("stroke rgba(94,62,34,0.6) stroke-width 1.0 fill none line %.1f,%.1f %.1f,%.1f" % (xt, btop+8, xb, bbot-2))
-for k in range(1, 3):
-    yy = btop + (bbot-btop)*k/3.0
-    wl = btw + (bbw-btw)*(k/3.0)
-    out.append("stroke rgba(94,62,34,0.55) stroke-width 1.0 fill none line %.1f,%.1f %.1f,%.1f" % (cx-wl, yy, cx+wl, yy))
-fy = throat_y + 4
-flame_big = "fill #ff7a1e polygon %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f" % (
-    cx, fy, cx+9, fy+24, cx+5, fy+44, cx, fy+38, cx-5, fy+44, cx-9, fy+24)
-flame_core = "fill #ffe27a polygon %.1f,%.1f %.1f,%.1f %.1f,%.1f %.1f,%.1f" % (cx, fy+8, cx+4, fy+28, cx, fy+38, cx-4, fy+28)
-open(wdir+"/flame.txt", "w").write(flame_big + " " + flame_core)
-open(wdir+"/flameglow.txt", "w").write("fill rgba(255,150,40,0.85) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, fy+24, 16, 28))
-open(wdir+"/sheen.txt", "w").write("fill rgba(255,255,255,0.5) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx-58, apex_y+150, 58, 150))
-sys.stdout.write(" ".join(out))
+# two women under the aurora and the North Star — flat-shaded vector figures.
+wfig=$(python3 - <<'PY'
+import sys, math
+
+W, H = 560, 820
+
+def hexs(c): return "#%02x%02x%02x" % (int(c[0]), int(c[1]), int(c[2]))
+def dk(c, f=0.80): return tuple(max(0, int(v*f)) for v in c)
+def lt(c, f=1.16): return tuple(min(255, int(v*f)) for v in c)
+
+OUT = []
+SHADOW = []
+
+def poly(col, pts, stroke=None, sw=1.0, alpha=None):
+    s = ""
+    s += ("stroke %s " % hexs(stroke)) if stroke else "stroke none "
+    if stroke: s += "stroke-width %.2f " % sw
+    fill = ("rgba(%d,%d,%d,%.2f)" % (int(col[0]), int(col[1]), int(col[2]), alpha)) if alpha is not None else hexs(col)
+    s += "fill %s polygon %s" % (fill, " ".join("%.1f,%.1f" % p for p in pts))
+    OUT.append(s)
+
+def ell(col, cx, cy, rx, ry, alpha=None):
+    fill = ("rgba(%d,%d,%d,%.2f)" % (int(col[0]), int(col[1]), int(col[2]), alpha)) if alpha is not None else hexs(col)
+    OUT.append("stroke none fill %s ellipse %.1f,%.1f %.1f,%.1f 0,360" % (fill, cx, cy, rx, ry))
+
+def smile(cx, cy, w, col):
+    OUT.append("stroke %s stroke-width 2.0 fill none path 'M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f'"
+               % (hexs(col), cx-w, cy, cx, cy+w*0.9, cx+w, cy))
+
+def woman(cx, fy, h, skin, hair, dress, style, lean=0.0):
+    skin_sh = dk(skin, 0.88); dress_sh = dk(dress, 0.78); dress_hi = lt(dress, 1.12)
+    hair_hi = lt(hair, 1.4)
+    top = fy - h
+    hrx, hry = h*0.052, h*0.064
+    hcx = cx + lean*h*0.05
+    hcy = top + hry + h*0.012
+    neck_w = h*0.026
+    sh_y = hcy + hry + h*0.060
+    sh_w = h*0.108
+    waist_y = sh_y + h*0.180
+    waist_w = h*0.064
+    hem_y = fy - h*0.045
+    hem_w = h*0.150
+
+    # ground shadow
+    SHADOW.append("fill rgba(6,8,18,0.45) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, fy+h*0.006, hem_w*1.05, h*0.022))
+
+    # back hair (long styles drape behind shoulders)
+    if style in ("long", "wavy"):
+        poly(dk(hair, 0.92), [
+            (hcx-hrx*0.9, hcy-hry*0.2), (hcx-hrx*1.25, sh_y+h*0.02),
+            (hcx-hrx*0.95, waist_y), (hcx-hrx*0.2, waist_y+h*0.02),
+            (hcx+hrx*0.2, waist_y+h*0.02), (hcx+hrx*0.95, waist_y),
+            (hcx+hrx*1.25, sh_y+h*0.02), (hcx+hrx*0.9, hcy-hry*0.2)])
+
+    # gown
+    gown = [
+        (cx-sh_w, sh_y), (cx-waist_w, waist_y),
+        (cx-hem_w, hem_y-h*0.02), (cx-hem_w*0.95, hem_y), (cx, hem_y+h*0.014),
+        (cx+hem_w*0.95, hem_y), (cx+hem_w, hem_y-h*0.02),
+        (cx+waist_w, waist_y), (cx+sh_w, sh_y),
+        (cx+sh_w*0.46, sh_y-h*0.012), (cx, sh_y+h*0.022), (cx-sh_w*0.46, sh_y-h*0.012)]
+    poly(dress, gown)
+    # shaded right half (flat-shaded form)
+    poly(dress_sh, [(cx, sh_y+h*0.022), (cx, hem_y+h*0.014), (cx+hem_w*0.95, hem_y),
+                    (cx+hem_w, hem_y-h*0.02), (cx+waist_w, waist_y),
+                    (cx+sh_w, sh_y), (cx+sh_w*0.46, sh_y-h*0.012)], alpha=0.55)
+    # highlight seam on the lit side
+    poly(dress_hi, [(cx-sh_w*0.2, sh_y+h*0.03), (cx-waist_w*0.55, waist_y),
+                    (cx-hem_w*0.34, hem_y-h*0.01), (cx-hem_w*0.16, hem_y-h*0.01),
+                    (cx-waist_w*0.2, waist_y), (cx-sh_w*0.02, sh_y+h*0.03)], alpha=0.35)
+
+    # shoes peeking
+    for sgn in (-1, 1):
+        sxx = cx + sgn*h*0.045
+        poly((44, 40, 52), [(sxx-h*0.028, hem_y+h*0.012), (sxx+h*0.030, hem_y+h*0.012),
+                            (sxx+h*0.034, fy), (sxx-h*0.024, fy)])
+
+    # arms
+    aw = h*0.026
+    # left arm down
+    poly(skin, [(cx-sh_w*0.9, sh_y+h*0.01), (cx-sh_w*0.62, sh_y+h*0.01),
+                (cx-waist_w*1.1, waist_y+h*0.03), (cx-waist_w*1.5, waist_y+h*0.03)])
+    # right arm down
+    poly(skin, [(cx+sh_w*0.62, sh_y+h*0.01), (cx+sh_w*0.9, sh_y+h*0.01),
+                (cx+waist_w*1.5, waist_y+h*0.03), (cx+waist_w*1.1, waist_y+h*0.03)])
+    # hands
+    ell(skin, cx-waist_w*1.3, waist_y+h*0.045, aw*0.7, aw*0.8)
+    ell(skin, cx+waist_w*1.3, waist_y+h*0.045, aw*0.7, aw*0.8)
+
+    # neck
+    poly(skin_sh, [(hcx-neck_w, hcy+hry*0.55), (hcx+neck_w, hcy+hry*0.55),
+                   (hcx+neck_w*0.9, sh_y+h*0.004), (hcx-neck_w*0.9, sh_y+h*0.004)])
+
+    # head
+    ell(skin, hcx, hcy, hrx, hry)
+
+    # front hair / framing
+    if style == "bun":
+        ell(hair, hcx, hcy-hry*0.72, hrx*0.55, hry*0.42)            # top bun
+        poly(hair, [(hcx-hrx*1.04, hcy+hry*0.1), (hcx-hrx*1.04, hcy-hry*0.55),
+                    (hcx-hrx*0.4, hcy-hry*1.16), (hcx+hrx*0.4, hcy-hry*1.16),
+                    (hcx+hrx*1.04, hcy-hry*0.55), (hcx+hrx*1.04, hcy+hry*0.1),
+                    (hcx+hrx*0.78, hcy-hry*0.1), (hcx+hrx*0.6, hcy-hry*0.5),
+                    (hcx-hrx*0.6, hcy-hry*0.5), (hcx-hrx*0.78, hcy-hry*0.1)])
+    else:
+        poly(hair, [(hcx-hrx*1.12, hcy+hry*0.5), (hcx-hrx*1.16, hcy-hry*0.5),
+                    (hcx-hrx*0.5, hcy-hry*1.18), (hcx+hrx*0.5, hcy-hry*1.18),
+                    (hcx+hrx*1.16, hcy-hry*0.5), (hcx+hrx*1.12, hcy+hry*0.5),
+                    (hcx+hrx*0.82, hcy-hry*0.05), (hcx+hrx*0.62, hcy-hry*0.55),
+                    (hcx+hrx*0.2, hcy-hry*0.86), (hcx-hrx*0.2, hcy-hry*0.86),
+                    (hcx-hrx*0.62, hcy-hry*0.55), (hcx-hrx*0.82, hcy-hry*0.05)])
+    # hair highlight
+    OUT.append("stroke %s stroke-width 2.2 fill none path 'M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f'"
+               % (hexs(hair_hi), hcx-hrx*0.7, hcy-hry*0.5, hcx-hrx*0.95, hcy*1.0, hcx-hrx*0.78, hcy+hry*0.3))
+
+    # face
+    eye_y = hcy + hry*0.02
+    ell((40, 32, 36), hcx-hrx*0.34, eye_y, hrx*0.085, hry*0.10)
+    ell((40, 32, 36), hcx+hrx*0.34, eye_y, hrx*0.085, hry*0.10)
+    ell((228, 142, 138), hcx-hrx*0.55, eye_y+hry*0.30, hrx*0.16, hry*0.10, alpha=0.5)
+    ell((228, 142, 138), hcx+hrx*0.55, eye_y+hry*0.30, hrx*0.16, hry*0.10, alpha=0.5)
+    smile(hcx, eye_y+hry*0.42, hrx*0.26, dk(skin, 0.6))
+
+
+# woman B (right, slightly behind) drawn first
+woman(338, 720, 540, (170, 120, 86), (28, 24, 26), (58, 166, 156), "bun", lean=0.10)
+# woman A (left, front)
+woman(212, 726, 566, (236, 190, 158), (72, 46, 38), (220, 84, 96), "wavy", lean=-0.06)
+
+sys.stdout.write(" ".join(OUT))
+
 PY
 )
-flame=$(cat "$w/flame.txt"); flameglow=$(cat "$w/flameglow.txt"); sheen=$(cat "$w/sheen.txt")
-convert -size ${bw}x${bh} xc:none -draw "$bdraw" "$w/bbody.png"
-convert -size ${bw}x${bh} xc:none -draw "$sheen" -blur 0x24 "$w/bsheen.png"
-convert "$w/bsheen.png" "$w/bbody.png" -alpha on -compose DstIn -composite "$w/bsheenc.png"
-convert -size ${bw}x${bh} xc:none -draw "$flameglow" -blur 0x12 "$w/bfglow.png"
-convert -size ${bw}x${bh} xc:none -draw "$flame" -blur 0x2 "$w/bflame.png"
-convert "$w/bbody.png" \
-        "$w/bsheenc.png" -compose screen -composite \
-        "$w/bfglow.png" -compose screen -composite \
-        "$w/bflame.png" -compose screen -composite \
-        -trim +repage -resize x242 "$w/balloon.png"
+convert -size 560x820 xc:none -draw "$wfig" -trim +repage -resize x252 "$w/women.png"
 
 # compose
 convert "$w/sky.png" \( "$w/aurora.png" -channel A -evaluate multiply 0.82 +channel -gravity North -geometry +50+14 \) -compose screen -composite "$w/sky2.png"
@@ -174,7 +216,7 @@ PY
 convert "$w/sky2.png" -draw "$stars" "$w/sky3.png"
 convert "$w/sky3.png" \
     \( "$w/star.png" \) -gravity NorthWest -geometry +35+76 -compose screen -composite \
-    \( "$w/balloon.png" \) -gravity NorthEast -geometry +26+12 -compose over -composite \
+    \( "$w/women.png" \) -gravity NorthEast -geometry +40+18 -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/ts.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
