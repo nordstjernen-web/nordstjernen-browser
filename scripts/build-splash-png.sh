@@ -63,141 +63,199 @@ convert -size 200x200 xc:none -stroke white -fill white \
     -strokewidth 1 -draw "line 55,55 145,145" -strokewidth 1 -draw "line 145,55 55,145" -blur 0x0.6 "$w/spikes.png"
 convert "$w/glow.png" "$w/spikes.png" -compose screen -composite -resize 140x140 "$w/star.png"
 
-# two women under the aurora and the North Star — flat-shaded vector figures.
+# two women reaching for the North Star — flat-shaded vector figures.
 wfig=$(python3 - <<'PY'
 import sys, math
 
-W, H = 560, 820
+W, H = 640, 980
 
 def hexs(c): return "#%02x%02x%02x" % (int(c[0]), int(c[1]), int(c[2]))
 def dk(c, f=0.80): return tuple(max(0, int(v*f)) for v in c)
 def lt(c, f=1.16): return tuple(min(255, int(v*f)) for v in c)
 
-OUT = []
-SHADOW = []
+OPS = []   # silhouette + detail ops, rendered for rim then normal
 
-def poly(col, pts, stroke=None, sw=1.0, alpha=None):
-    s = ""
-    s += ("stroke %s " % hexs(stroke)) if stroke else "stroke none "
-    if stroke: s += "stroke-width %.2f " % sw
-    fill = ("rgba(%d,%d,%d,%.2f)" % (int(col[0]), int(col[1]), int(col[2]), alpha)) if alpha is not None else hexs(col)
-    s += "fill %s polygon %s" % (fill, " ".join("%.1f,%.1f" % p for p in pts))
-    OUT.append(s)
+def P(col, pts, sil=True, alpha=None, stroke=None, sw=1.0):
+    OPS.append(("poly", col, list(pts), sil, alpha, stroke, sw))
+def E(col, cx, cy, rx, ry, sil=True, alpha=None):
+    OPS.append(("ell", col, (cx, cy, rx, ry), sil, alpha, None, 0))
+def PATH(col, d, sw, sil=False):
+    OPS.append(("path", col, d, sil, None, None, sw))
 
-def ell(col, cx, cy, rx, ry, alpha=None):
-    fill = ("rgba(%d,%d,%d,%.2f)" % (int(col[0]), int(col[1]), int(col[2]), alpha)) if alpha is not None else hexs(col)
-    OUT.append("stroke none fill %s ellipse %.1f,%.1f %.1f,%.1f 0,360" % (fill, cx, cy, rx, ry))
+def limb(p0, p1, p2, w0, w1, w2, col, sil=True):
+    def seg(a, b, wa, wb):
+        dx, dy = b[0]-a[0], b[1]-a[1]; L = math.hypot(dx, dy) or 1.0
+        nx, ny = -dy/L, dx/L
+        return [(a[0]+nx*wa, a[1]+ny*wa), (b[0]+nx*wb, b[1]+ny*wb),
+                (b[0]-nx*wb, b[1]-ny*wb), (a[0]-nx*wa, a[1]-ny*wa)]
+    P(col, seg(p0, p1, w0, w1), sil); P(col, seg(p1, p2, w1, w2), sil)
+    E(col, p1[0], p1[1], w1, w1, sil)
 
-def smile(cx, cy, w, col):
-    OUT.append("stroke %s stroke-width 2.0 fill none path 'M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f'"
-               % (hexs(col), cx-w, cy, cx, cy+w*0.9, cx+w, cy))
-
-def woman(cx, fy, h, skin, hair, dress, style, lean=0.0):
-    skin_sh = dk(skin, 0.88); dress_sh = dk(dress, 0.78); dress_hi = lt(dress, 1.12)
-    hair_hi = lt(hair, 1.4)
+def woman(cx, fy, h, skin, hair, dress, sash, style, gaze=-1, raise_arm=None):
+    skin_sh = dk(skin, 0.86); dress_sh = dk(dress, 0.74); dress_hi = lt(dress, 1.14)
     top = fy - h
-    hrx, hry = h*0.052, h*0.064
-    hcx = cx + lean*h*0.05
-    hcy = top + hry + h*0.012
-    neck_w = h*0.026
-    sh_y = hcy + hry + h*0.060
-    sh_w = h*0.108
-    waist_y = sh_y + h*0.180
-    waist_w = h*0.064
-    hem_y = fy - h*0.045
+    hrx, hry = h*0.050, h*0.062
+    hcx = cx + gaze*h*0.018
+    hcy = top + hry + h*0.010
+    neck_w = h*0.024
+    sh_y = hcy + hry + h*0.058
+    sh_w = h*0.100
+    waist_y = sh_y + h*0.150
+    waist_w = h*0.058
+    hip_y = waist_y + h*0.060
+    hem_y = fy - h*0.030
     hem_w = h*0.150
+    aw = h*0.024
 
-    # ground shadow
-    SHADOW.append("fill rgba(6,8,18,0.45) ellipse %.1f,%.1f %.1f,%.1f 0,360" % (cx, fy+h*0.006, hem_w*1.05, h*0.022))
+    # flowing back hair, sweeping to one side
+    if style != "updo":
+        P(dk(hair, 0.9), [
+            (hcx-hrx*1.0, hcy-hry*0.3), (hcx-hrx*1.35, sh_y),
+            (hcx-hrx*1.15, waist_y), (hcx-hrx*1.5, hip_y+h*0.04),
+            (hcx-hrx*0.6, hip_y+h*0.02), (hcx-hrx*0.1, waist_y),
+            (hcx+hrx*0.5, hip_y), (hcx+hrx*1.25, waist_y),
+            (hcx+hrx*1.3, sh_y), (hcx+hrx*1.0, hcy-hry*0.3)])
 
-    # back hair (long styles drape behind shoulders)
-    if style in ("long", "wavy"):
-        poly(dk(hair, 0.92), [
-            (hcx-hrx*0.9, hcy-hry*0.2), (hcx-hrx*1.25, sh_y+h*0.02),
-            (hcx-hrx*0.95, waist_y), (hcx-hrx*0.2, waist_y+h*0.02),
-            (hcx+hrx*0.2, waist_y+h*0.02), (hcx+hrx*0.95, waist_y),
-            (hcx+hrx*1.25, sh_y+h*0.02), (hcx+hrx*0.9, hcy-hry*0.2)])
-
-    # gown
+    # gown: fitted bodice to a flared skirt, slight asymmetric sweep
     gown = [
-        (cx-sh_w, sh_y), (cx-waist_w, waist_y),
-        (cx-hem_w, hem_y-h*0.02), (cx-hem_w*0.95, hem_y), (cx, hem_y+h*0.014),
-        (cx+hem_w*0.95, hem_y), (cx+hem_w, hem_y-h*0.02),
-        (cx+waist_w, waist_y), (cx+sh_w, sh_y),
-        (cx+sh_w*0.46, sh_y-h*0.012), (cx, sh_y+h*0.022), (cx-sh_w*0.46, sh_y-h*0.012)]
-    poly(dress, gown)
-    # shaded right half (flat-shaded form)
-    poly(dress_sh, [(cx, sh_y+h*0.022), (cx, hem_y+h*0.014), (cx+hem_w*0.95, hem_y),
-                    (cx+hem_w, hem_y-h*0.02), (cx+waist_w, waist_y),
-                    (cx+sh_w, sh_y), (cx+sh_w*0.46, sh_y-h*0.012)], alpha=0.55)
-    # highlight seam on the lit side
-    poly(dress_hi, [(cx-sh_w*0.2, sh_y+h*0.03), (cx-waist_w*0.55, waist_y),
-                    (cx-hem_w*0.34, hem_y-h*0.01), (cx-hem_w*0.16, hem_y-h*0.01),
-                    (cx-waist_w*0.2, waist_y), (cx-sh_w*0.02, sh_y+h*0.03)], alpha=0.35)
+        (cx-sh_w*0.92, sh_y), (cx-waist_w, waist_y), (cx-waist_w*1.05, hip_y),
+        (cx-hem_w, hem_y-h*0.02), (cx-hem_w*0.95, hem_y), (cx-hem_w*0.2, hem_y+h*0.01),
+        (cx+hem_w*0.55, hem_y+h*0.012), (cx+hem_w, hem_y-h*0.015),
+        (cx+waist_w*1.05, hip_y), (cx+waist_w, waist_y), (cx+sh_w*0.92, sh_y),
+        (cx+sh_w*0.40, sh_y-h*0.010), (cx, sh_y+h*0.026), (cx-sh_w*0.40, sh_y-h*0.010)]
+    P(dress, gown)
+    # form shading on shadow side
+    P(dress_sh, [(cx, sh_y+h*0.026), (cx, hem_y+h*0.008), (cx+hem_w*0.55, hem_y+h*0.012),
+                 (cx+hem_w, hem_y-h*0.015), (cx+waist_w*1.05, hip_y),
+                 (cx+waist_w, waist_y), (cx+sh_w*0.40, sh_y-h*0.010)], sil=False, alpha=0.5)
+    # lit highlight fold
+    P(dress_hi, [(cx-sh_w*0.18, sh_y+h*0.035), (cx-waist_w*0.5, waist_y),
+                 (cx-hem_w*0.42, hem_y-h*0.01), (cx-hem_w*0.24, hem_y-h*0.01),
+                 (cx-waist_w*0.18, waist_y), (cx-sh_w*0.02, sh_y+h*0.035)], sil=False, alpha=0.32)
+    # sash at the waist
+    P(sash, [(cx-waist_w*1.04, waist_y), (cx+waist_w*1.04, waist_y),
+             (cx+waist_w*1.16, hip_y), (cx-waist_w*1.16, hip_y)], sil=False)
+    P(dk(sash, 0.7), [(cx, waist_y+h*0.004), (cx+waist_w*1.12, hip_y),
+             (cx+waist_w*1.16, hip_y), (cx+waist_w*1.04, waist_y)], sil=False, alpha=0.5)
 
-    # shoes peeking
-    for sgn in (-1, 1):
-        sxx = cx + sgn*h*0.045
-        poly((44, 40, 52), [(sxx-h*0.028, hem_y+h*0.012), (sxx+h*0.030, hem_y+h*0.012),
-                            (sxx+h*0.034, fy), (sxx-h*0.024, fy)])
+    # shoe tips
+    for s in (-1, 1):
+        sx = cx + s*h*0.040
+        P((46, 42, 56), [(sx-h*0.026, hem_y+h*0.008), (sx+h*0.028, hem_y+h*0.008),
+                         (sx+h*0.032, fy), (sx-h*0.022, fy)])
 
     # arms
-    aw = h*0.026
-    # left arm down
-    poly(skin, [(cx-sh_w*0.9, sh_y+h*0.01), (cx-sh_w*0.62, sh_y+h*0.01),
-                (cx-waist_w*1.1, waist_y+h*0.03), (cx-waist_w*1.5, waist_y+h*0.03)])
-    # right arm down
-    poly(skin, [(cx+sh_w*0.62, sh_y+h*0.01), (cx+sh_w*0.9, sh_y+h*0.01),
-                (cx+waist_w*1.5, waist_y+h*0.03), (cx+waist_w*1.1, waist_y+h*0.03)])
-    # hands
-    ell(skin, cx-waist_w*1.3, waist_y+h*0.045, aw*0.7, aw*0.8)
-    ell(skin, cx+waist_w*1.3, waist_y+h*0.045, aw*0.7, aw*0.8)
+    sL = (cx-sh_w*0.84, sh_y+h*0.006); sR = (cx+sh_w*0.84, sh_y+h*0.006)
+    if raise_arm == "L":
+        elb = (cx-sh_w*1.45, sh_y-h*0.085); wr = (cx-sh_w*1.95, sh_y-h*0.235)
+        limb(sL, elb, wr, aw*1.05, aw*0.85, aw*0.62, skin)
+        E(skin, wr[0]-aw*0.2, wr[1]-aw*0.3, aw*0.85, aw*0.95)        # hand
+        # the other arm rests down/inward
+        limb(sR, (cx+waist_w*1.2, waist_y), (cx+waist_w*0.7, hip_y+h*0.02), aw*1.05, aw*0.8, aw*0.62, skin)
+        E(skin, cx+waist_w*0.6, hip_y+h*0.04, aw*0.8, aw*0.85)
+    else:
+        limb(sL, (cx-waist_w*1.2, waist_y), (cx-waist_w*0.85, hip_y+h*0.02), aw*1.05, aw*0.8, aw*0.62, skin)
+        E(skin, cx-waist_w*0.75, hip_y+h*0.04, aw*0.8, aw*0.85)
+        # inner hand to chest
+        limb(sR, (cx+sh_w*0.5, waist_y-h*0.02), (cx+sh_w*0.08, waist_y-h*0.05), aw*1.05, aw*0.78, aw*0.6, skin)
+        E(skin, cx+sh_w*0.0, waist_y-h*0.055, aw*0.78, aw*0.82)
 
     # neck
-    poly(skin_sh, [(hcx-neck_w, hcy+hry*0.55), (hcx+neck_w, hcy+hry*0.55),
-                   (hcx+neck_w*0.9, sh_y+h*0.004), (hcx-neck_w*0.9, sh_y+h*0.004)])
+    P(skin_sh, [(hcx-neck_w, hcy+hry*0.5), (hcx+neck_w, hcy+hry*0.5),
+                (hcx+neck_w*0.9, sh_y+h*0.002), (hcx-neck_w*0.9, sh_y+h*0.002)])
 
     # head
-    ell(skin, hcx, hcy, hrx, hry)
+    E(skin, hcx, hcy, hrx, hry)
 
-    # front hair / framing
-    if style == "bun":
-        ell(hair, hcx, hcy-hry*0.72, hrx*0.55, hry*0.42)            # top bun
-        poly(hair, [(hcx-hrx*1.04, hcy+hry*0.1), (hcx-hrx*1.04, hcy-hry*0.55),
-                    (hcx-hrx*0.4, hcy-hry*1.16), (hcx+hrx*0.4, hcy-hry*1.16),
-                    (hcx+hrx*1.04, hcy-hry*0.55), (hcx+hrx*1.04, hcy+hry*0.1),
-                    (hcx+hrx*0.78, hcy-hry*0.1), (hcx+hrx*0.6, hcy-hry*0.5),
-                    (hcx-hrx*0.6, hcy-hry*0.5), (hcx-hrx*0.78, hcy-hry*0.1)])
+    # front hair framing + crown
+    if style == "updo":
+        E(hair, hcx, hcy-hry*0.82, hrx*0.62, hry*0.5)
+        E(dk(hair, 0.88), hcx+hrx*0.5, hcy-hry*1.02, hrx*0.3, hry*0.26)
+        P(hair, [(hcx-hrx*1.05, hcy+hry*0.18), (hcx-hrx*1.05, hcy-hry*0.5),
+                 (hcx-hrx*0.42, hcy-hry*1.16), (hcx+hrx*0.42, hcy-hry*1.16),
+                 (hcx+hrx*1.05, hcy-hry*0.5), (hcx+hrx*1.05, hcy+hry*0.18),
+                 (hcx+hrx*0.8, hcy-hry*0.06), (hcx+hrx*0.58, hcy-hry*0.52),
+                 (hcx-hrx*0.58, hcy-hry*0.52), (hcx-hrx*0.8, hcy-hry*0.06)])
     else:
-        poly(hair, [(hcx-hrx*1.12, hcy+hry*0.5), (hcx-hrx*1.16, hcy-hry*0.5),
-                    (hcx-hrx*0.5, hcy-hry*1.18), (hcx+hrx*0.5, hcy-hry*1.18),
-                    (hcx+hrx*1.16, hcy-hry*0.5), (hcx+hrx*1.12, hcy+hry*0.5),
-                    (hcx+hrx*0.82, hcy-hry*0.05), (hcx+hrx*0.62, hcy-hry*0.55),
-                    (hcx+hrx*0.2, hcy-hry*0.86), (hcx-hrx*0.2, hcy-hry*0.86),
-                    (hcx-hrx*0.62, hcy-hry*0.55), (hcx-hrx*0.82, hcy-hry*0.05)])
-    # hair highlight
-    OUT.append("stroke %s stroke-width 2.2 fill none path 'M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f'"
-               % (hexs(hair_hi), hcx-hrx*0.7, hcy-hry*0.5, hcx-hrx*0.95, hcy*1.0, hcx-hrx*0.78, hcy+hry*0.3))
+        P(hair, [(hcx-hrx*1.14, hcy+hry*0.62), (hcx-hrx*1.18, hcy-hry*0.5),
+                 (hcx-hrx*0.5, hcy-hry*1.2), (hcx+hrx*0.5, hcy-hry*1.2),
+                 (hcx+hrx*1.18, hcy-hry*0.5), (hcx+hrx*1.14, hcy+hry*0.62),
+                 (hcx+hrx*0.84, hcy+hry*0.05), (hcx+hrx*0.6, hcy-hry*0.56),
+                 (hcx+hrx*0.2, hcy-hry*0.88), (hcx-hrx*0.2, hcy-hry*0.88),
+                 (hcx-hrx*0.6, hcy-hry*0.56), (hcx-hrx*0.84, hcy+hry*0.05)])
+    PATH(lt(hair, 1.45), "M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f" % (
+        hcx-hrx*0.72, hcy-hry*0.55, hcx-hrx*1.0, hcy, hcx-hrx*0.8, hcy+hry*0.35), 2.2)
 
-    # face
-    eye_y = hcy + hry*0.02
-    ell((40, 32, 36), hcx-hrx*0.34, eye_y, hrx*0.085, hry*0.10)
-    ell((40, 32, 36), hcx+hrx*0.34, eye_y, hrx*0.085, hry*0.10)
-    ell((228, 142, 138), hcx-hrx*0.55, eye_y+hry*0.30, hrx*0.16, hry*0.10, alpha=0.5)
-    ell((228, 142, 138), hcx+hrx*0.55, eye_y+hry*0.30, hrx*0.16, hry*0.10, alpha=0.5)
-    smile(hcx, eye_y+hry*0.42, hrx*0.26, dk(skin, 0.6))
+    # face (looking up: features set a little high)
+    ey = hcy - hry*0.04
+    E((42, 34, 40), hcx-hrx*0.33, ey, hrx*0.09, hry*0.11, sil=False)
+    E((42, 34, 40), hcx+hrx*0.33, ey, hrx*0.09, hry*0.11, sil=False)
+    E((250, 252, 255), hcx-hrx*0.30, ey-hry*0.02, hrx*0.03, hry*0.035, sil=False)
+    E((250, 252, 255), hcx+hrx*0.36, ey-hry*0.02, hrx*0.03, hry*0.035, sil=False)
+    E((230, 140, 138), hcx-hrx*0.56, ey+hry*0.30, hrx*0.16, hry*0.10, sil=False, alpha=0.5)
+    E((230, 140, 138), hcx+hrx*0.56, ey+hry*0.30, hrx*0.16, hry*0.10, sil=False, alpha=0.5)
+    PATH(dk(skin, 0.55), "M %.1f,%.1f Q %.1f,%.1f %.1f,%.1f" % (
+        hcx-hrx*0.22, ey+hry*0.46, hcx, ey+hry*0.60, hcx+hrx*0.22, ey+hry*0.46), 2.2)
 
 
-# woman B (right, slightly behind) drawn first
-woman(338, 720, 540, (170, 120, 86), (28, 24, 26), (58, 166, 156), "bun", lean=0.10)
-# woman A (left, front)
-woman(212, 726, 566, (236, 190, 158), (72, 46, 38), (220, 84, 96), "wavy", lean=-0.06)
+# Woman B (right, behind) drawn first; updo, emerald gown, deeper skin
+woman(388, 858, 590, (172, 120, 86), (30, 24, 26), (52, 168, 150), (236, 196, 92),
+      "updo", gaze=-1, raise_arm=None)
+# Woman A (left, front, taller); flowing hair, rose gown, reaching toward the star
+woman(238, 866, 642, (236, 190, 158), (74, 46, 38), (214, 78, 96), (240, 206, 120),
+      "wavy", gaze=-1, raise_arm="L")
 
-sys.stdout.write(" ".join(OUT))
+# sparkles near the raised hand (toward the North Star)
+for (sx, sy, r) in [(70, 250, 5.0), (104, 300, 3.0), (150, 235, 3.6), (52, 320, 2.4)]:
+    OPS.append(("spark", (210, 246, 255), (sx, sy, r), False, None, None, 0))
+
+
+def emit(dx, dy, rim=None, only_sil=False):
+    s = []
+    for kind, col, geom, sil, alpha, stroke, sw in OPS:
+        if only_sil and not sil:
+            continue
+        c = rim if rim else col
+        if kind == "poly":
+            pts = " ".join("%.1f,%.1f" % (p[0]+dx, p[1]+dy) for p in geom)
+            fill = ("rgba(%d,%d,%d,%.2f)" % (c[0], c[1], c[2], alpha)) if alpha is not None else hexs(c)
+            s.append("stroke none fill %s polygon %s" % (fill, pts))
+        elif kind == "ell":
+            cx, cy, rx, ry = geom
+            fill = ("rgba(%d,%d,%d,%.2f)" % (c[0], c[1], c[2], alpha)) if alpha is not None else hexs(c)
+            s.append("stroke none fill %s ellipse %.1f,%.1f %.1f,%.1f 0,360" % (fill, cx+dx, cy+dy, rx, ry))
+        elif kind == "path":
+            s.append("stroke %s stroke-width %.1f fill none path '%s'" % (hexs(c), sw, _shift_path(geom, dx, dy)))
+        elif kind == "spark":
+            cx, cy, r = geom
+            s.append("stroke none fill %s polygon %s" % (hexs(c),
+                " ".join("%.1f,%.1f" % p for p in _star(cx+dx, cy+dy, r))))
+    return " ".join(s)
+
+def _shift_path(d, dx, dy):
+    out = []
+    for tok in d.split():
+        if "," in tok:
+            x, y = tok.split(","); out.append("%.1f,%.1f" % (float(x)+dx, float(y)+dy))
+        else:
+            out.append(tok)
+    return " ".join(out)
+
+def _star(cx, cy, r):
+    pts = []
+    for k in range(8):
+        ang = math.pi*k/4
+        rr = r if k % 2 == 0 else r*0.4
+        pts.append((cx+rr*math.cos(ang), cy+rr*math.sin(ang)))
+    return pts
+
+rim = emit(-3, -3, rim=(140, 226, 250), only_sil=True)
+body = emit(0, 0)
+sys.stdout.write(rim + " " + body)
 
 PY
 )
-convert -size 560x820 xc:none -draw "$wfig" -trim +repage -resize x252 "$w/women.png"
+convert -size 640x980 xc:none -draw "$wfig" -trim +repage -resize x266 "$w/women.png"
 
 # compose
 convert "$w/sky.png" \( "$w/aurora.png" -channel A -evaluate multiply 0.82 +channel -gravity North -geometry +50+14 \) -compose screen -composite "$w/sky2.png"
@@ -216,7 +274,7 @@ PY
 convert "$w/sky2.png" -draw "$stars" "$w/sky3.png"
 convert "$w/sky3.png" \
     \( "$w/star.png" \) -gravity NorthWest -geometry +35+76 -compose screen -composite \
-    \( "$w/women.png" \) -gravity NorthEast -geometry +40+18 -compose over -composite \
+    \( "$w/women.png" \) -gravity NorthEast -geometry +28+10 -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/ts.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
