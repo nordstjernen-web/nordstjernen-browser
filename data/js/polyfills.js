@@ -6036,7 +6036,7 @@
         };
         NdSelection.prototype.collapse = function (node, offset) {
             if (node == null) { this.removeAllRanges(); return; }
-            offset = offset | 0;
+            offset = checkBoundary(node, offset);
             this._range = mkRange(node, offset, node, offset);
             this._direction = 'forward';
         };
@@ -6053,8 +6053,9 @@
         };
         NdSelection.prototype.extend = function (node, offset) {
             if (!this._range) throw domEx('InvalidStateError');
-            offset = offset | 0;
+            offset = checkBoundary(node, offset);
             var an = this.anchorNode, ao = this.anchorOffset;
+            if (rootOf(node) !== rootOf(an)) throw domEx('WrongDocumentError');
             if (bpCompare(an, ao, node, offset) <= 0) {
                 this._range = mkRange(an, ao, node, offset); this._direction = 'forward';
             } else {
@@ -6062,7 +6063,9 @@
             }
         };
         NdSelection.prototype.setBaseAndExtent = function (an, ao, fn, fo) {
-            ao = ao | 0; fo = fo | 0;
+            ao = checkBoundary(an, ao);
+            fo = checkBoundary(fn, fo);
+            if (rootOf(an) !== rootOf(fn)) throw domEx('WrongDocumentError');
             if (bpCompare(an, ao, fn, fo) <= 0) {
                 this._range = mkRange(an, ao, fn, fo); this._direction = 'forward';
             } else {
