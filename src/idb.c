@@ -141,6 +141,7 @@ ns_idb_exec(sqlite3 *db, const char *sql)
 }
 
 #define NS_IDB_MAX_PAGES 65536
+#define NS_IDB_MAX_ORIGIN_PAGES (256 * 1024)
 
 static void
 ns_idb_configure(sqlite3 *db)
@@ -692,6 +693,58 @@ ns_idb_insert_index_entries(JSContext *ctx, sqlite3 *db,
     return ok;
 }
 
+static gint64
+ns_idb_db_pages(sqlite3 *db)
+{
+    sqlite3_stmt *st = NULL;
+    gint64 pages = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA page_count", -1, &st, NULL) == SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW)
+        pages = sqlite3_column_int64(st, 0);
+    if (st) sqlite3_finalize(st);
+    return pages;
+}
+
+static gint64
+ns_idb_max_origin_pages(void)
+{
+    static gint64 cached = -1;
+    if (cached < 0) {
+        cached = NS_IDB_MAX_ORIGIN_PAGES;
+        const char *env = g_getenv("NS_IDB_MAX_ORIGIN_PAGES");
+        if (env && *env) {
+            gint64 v = g_ascii_strtoll(env, NULL, 10);
+            if (v > 0) cached = v;
+        }
+    }
+    return cached;
+}
+
+static gint64
+ns_idb_origin_pages(JSContext *ctx, sqlite3 *current, const char *current_path)
+{
+    gint64 total = current ? ns_idb_db_pages(current) : 0;
+    g_autofree char *dir = ns_idb_partition_dir(ctx);
+    if (!dir) return total;
+    GDir *gd = g_dir_open(dir, 0, NULL);
+    if (!gd) return total;
+    const char *entry = NULL;
+    while ((entry = g_dir_read_name(gd)) != NULL) {
+        if (!g_str_has_suffix(entry, ".sqlite")) continue;
+        g_autofree char *path = g_build_filename(dir, entry, NULL);
+        if (current_path && !g_strcmp0(path, current_path)) continue;
+        sqlite3 *db = NULL;
+        if (sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+            if (db) sqlite3_close(db);
+            continue;
+        }
+        total += ns_idb_db_pages(db);
+        sqlite3_close(db);
+    }
+    g_dir_close(gd);
+    return total;
+}
+
 static JSValue
 ns_idb_backend_put(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
@@ -786,6 +839,11 @@ ns_idb_backend_put(JSContext *ctx, JSValueConst this_val,
         ok = sqlite3_step(st) == SQLITE_DONE;
     }
     if (st) sqlite3_finalize(st);
+    if (ok && ns_idb_origin_pages(ctx, h->db, h->path) > ns_idb_max_origin_pages()) {
+        ns_idb_throw(ctx, "QuotaExceededError",
+                     "IndexedDB origin storage limit reached");
+        ok = FALSE;
+    }
     sqlite3_exec(h->db, ok ? "COMMIT" : "ROLLBACK", NULL, NULL, NULL);
     JSValue out = ok ? JS_TRUE
                      : (JS_HasException(ctx) ? JS_EXCEPTION
