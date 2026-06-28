@@ -5969,6 +5969,129 @@
         global.__ndCreateRange = function (ownerDoc) {
             return new NdRange(ownerDoc && ownerDoc.nodeType === 9 ? ownerDoc : doc);
         };
+
+        var nativeGetSelection = global.getSelection;
+        function selNative() {
+            if (typeof nativeGetSelection !== 'function') return null;
+            try { return nativeGetSelection.call(global); } catch (e) { return null; }
+        }
+
+        function NdSelection() {
+            this._range = null;
+            this._direction = 'none';
+        }
+        Object.defineProperties(NdSelection.prototype, {
+            rangeCount: { get: function () {
+                if (this._range) return 1;
+                var n = selNative(); return n ? (n.rangeCount | 0) : 0;
+            }, configurable: true },
+            isCollapsed: { get: function () {
+                if (this._range) return this._range.collapsed;
+                var n = selNative(); return n ? !!n.isCollapsed : true;
+            }, configurable: true },
+            type: { get: function () {
+                if (this._range) return this._range.collapsed ? 'Caret' : 'Range';
+                var n = selNative(); return n ? String(n.type) : 'None';
+            }, configurable: true },
+            anchorNode: { get: function () {
+                if (!this._range) { var n = selNative(); return n ? n.anchorNode : null; }
+                return this._direction === 'backward'
+                    ? this._range.endContainer : this._range.startContainer;
+            }, configurable: true },
+            anchorOffset: { get: function () {
+                if (!this._range) { var n = selNative(); return n ? (n.anchorOffset | 0) : 0; }
+                return this._direction === 'backward'
+                    ? this._range.endOffset : this._range.startOffset;
+            }, configurable: true },
+            focusNode: { get: function () {
+                if (!this._range) { var n = selNative(); return n ? n.focusNode : null; }
+                return this._direction === 'backward'
+                    ? this._range.startContainer : this._range.endContainer;
+            }, configurable: true },
+            focusOffset: { get: function () {
+                if (!this._range) { var n = selNative(); return n ? (n.focusOffset | 0) : 0; }
+                return this._direction === 'backward'
+                    ? this._range.startOffset : this._range.endOffset;
+            }, configurable: true }
+        });
+        NdSelection.prototype.getRangeAt = function (i) {
+            if (this._range) { if ((i | 0) !== 0) throw domEx('IndexSizeError'); return this._range; }
+            var n = selNative();
+            if (n && (i | 0) < (n.rangeCount | 0)) return n.getRangeAt(i);
+            throw domEx('IndexSizeError');
+        };
+        NdSelection.prototype.removeAllRanges = function () {
+            this._range = null; this._direction = 'none';
+        };
+        NdSelection.prototype.empty = NdSelection.prototype.removeAllRanges;
+        NdSelection.prototype.addRange = function (range) {
+            if (this._range || !range) return;
+            this._range = range instanceof NdRange ? range
+                : mkRange(range.startContainer, range.startOffset,
+                          range.endContainer, range.endOffset);
+            this._direction = 'forward';
+        };
+        NdSelection.prototype.removeRange = function (range) {
+            if (this._range === range) this.removeAllRanges();
+        };
+        NdSelection.prototype.collapse = function (node, offset) {
+            if (node == null) { this.removeAllRanges(); return; }
+            offset = offset | 0;
+            this._range = mkRange(node, offset, node, offset);
+            this._direction = 'forward';
+        };
+        NdSelection.prototype.setPosition = NdSelection.prototype.collapse;
+        NdSelection.prototype.collapseToStart = function () {
+            if (!this._range) throw domEx('InvalidStateError');
+            var sc = this._range.startContainer, so = this._range.startOffset;
+            this._range = mkRange(sc, so, sc, so); this._direction = 'forward';
+        };
+        NdSelection.prototype.collapseToEnd = function () {
+            if (!this._range) throw domEx('InvalidStateError');
+            var ec = this._range.endContainer, eo = this._range.endOffset;
+            this._range = mkRange(ec, eo, ec, eo); this._direction = 'forward';
+        };
+        NdSelection.prototype.extend = function (node, offset) {
+            if (!this._range) throw domEx('InvalidStateError');
+            offset = offset | 0;
+            var an = this.anchorNode, ao = this.anchorOffset;
+            if (bpCompare(an, ao, node, offset) <= 0) {
+                this._range = mkRange(an, ao, node, offset); this._direction = 'forward';
+            } else {
+                this._range = mkRange(node, offset, an, ao); this._direction = 'backward';
+            }
+        };
+        NdSelection.prototype.setBaseAndExtent = function (an, ao, fn, fo) {
+            ao = ao | 0; fo = fo | 0;
+            if (bpCompare(an, ao, fn, fo) <= 0) {
+                this._range = mkRange(an, ao, fn, fo); this._direction = 'forward';
+            } else {
+                this._range = mkRange(fn, fo, an, ao); this._direction = 'backward';
+            }
+        };
+        NdSelection.prototype.selectAllChildren = function (node) {
+            if (!node) return;
+            this.setBaseAndExtent(node, 0, node, node.childNodes.length);
+        };
+        NdSelection.prototype.containsNode = function (node, allowPartial) {
+            if (!this._range || !node) return false;
+            return allowPartial ? this._range.intersectsNode(node)
+                                : containedIn(node, this._range);
+        };
+        NdSelection.prototype.deleteFromDocument = function () {
+            if (this._range) this._range.deleteContents();
+        };
+        NdSelection.prototype.modify = function () {};
+        NdSelection.prototype.toString = function () {
+            if (this._range) return this._range.toString();
+            var n = selNative(); return n ? String(n) : '';
+        };
+
+        global.Selection = NdSelection;
+        var theSelection = new NdSelection();
+        function getSelectionImpl() { return theSelection; }
+        global.getSelection = getSelectionImpl;
+        if (doc) { try { doc.getSelection = getSelectionImpl; } catch (e) {} }
     })();
 
     /* HTMLImageElement.decode(): the native binding always resolved. Per the
