@@ -877,12 +877,32 @@ email_button_set_unseen(GtkWidget *btn, int count)
 
 typedef struct { GtkWidget *btn; int count; } MailPollResult;
 
+static int g_mail_last_notified = -1;
+
+static void
+mail_notify_new(int count)
+{
+    GApplication *app = g_application_get_default();
+    if (!app) return;
+    GNotification *n = g_notification_new(ns_i18n("New email"));
+    char *body = g_strdup_printf("%d %s", count, ns_i18n("unread"));
+    g_notification_set_body(n, body);
+    g_notification_set_priority(n, G_NOTIFICATION_PRIORITY_NORMAL);
+    g_application_send_notification(app, "ns-mail-unread", n);
+    g_object_unref(n);
+    g_free(body);
+}
+
 static gboolean
 mail_poll_apply(gpointer data)
 {
     MailPollResult *r = data;
-    if (r->count >= 0)
+    if (r->count >= 0) {
         email_button_set_unseen(r->btn, r->count);
+        if (g_mail_last_notified >= 0 && r->count > g_mail_last_notified)
+            mail_notify_new(r->count);
+        g_mail_last_notified = r->count;
+    }
     g_object_unref(r->btn);
     g_free(r);
     return G_SOURCE_REMOVE;
