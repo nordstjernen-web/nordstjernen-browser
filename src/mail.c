@@ -39,6 +39,7 @@ typedef struct {
 #define NS_MAIL_LIST_MAX 25
 
 typedef struct {
+    const char *id;
     const char *domain;
     const char *label;
     const char *imap_host;
@@ -48,21 +49,28 @@ typedef struct {
     const char *smtp_sec;
     gboolean    app_password;
     const char *help_url;
+    const char *twofa_url;
 } ns_mail_provider;
 
 static const ns_mail_provider k_providers[] = {
-    { "gmail.com",      "Gmail",    "imap.gmail.com",      993, "smtp.gmail.com",      465, "ssl",      TRUE,
-      "https://support.google.com/accounts/answer/185833" },
-    { "googlemail.com", "Gmail",    "imap.gmail.com",      993, "smtp.gmail.com",      465, "ssl",      TRUE,
-      "https://support.google.com/accounts/answer/185833" },
-    { "yahoo.com",      "Yahoo",    "imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 465, "ssl",      TRUE,
-      "https://help.yahoo.com/kb/SLN15241.html" },
-    { "icloud.com",     "iCloud",   "imap.mail.me.com",    993, "smtp.mail.me.com",    587, "starttls", TRUE,
-      "https://support.apple.com/102654" },
-    { "me.com",         "iCloud",   "imap.mail.me.com",    993, "smtp.mail.me.com",    587, "starttls", TRUE,
-      "https://support.apple.com/102654" },
-    { "fastmail.com",   "Fastmail", "imap.fastmail.com",   993, "smtp.fastmail.com",   465, "ssl",      TRUE,
-      "https://www.fastmail.help/hc/en-us/articles/1500000278342" },
+    { "gmail", "gmail.com",      "Gmail",    "imap.gmail.com",      993, "smtp.gmail.com",      465, "ssl",      TRUE,
+      "https://support.google.com/accounts/answer/185833",
+      "https://myaccount.google.com/signinoptions/two-step-verification" },
+    { "gmail", "googlemail.com", "Gmail",    "imap.gmail.com",      993, "smtp.gmail.com",      465, "ssl",      TRUE,
+      "https://support.google.com/accounts/answer/185833",
+      "https://myaccount.google.com/signinoptions/two-step-verification" },
+    { "yahoo", "yahoo.com",      "Yahoo Mail", "imap.mail.yahoo.com", 993, "smtp.mail.yahoo.com", 465, "ssl",   TRUE,
+      "https://help.yahoo.com/kb/SLN15241.html",
+      "https://login.yahoo.com/account/security" },
+    { "icloud", "icloud.com",    "iCloud",   "imap.mail.me.com",    993, "smtp.mail.me.com",    587, "starttls", TRUE,
+      "https://support.apple.com/102654",
+      "https://support.apple.com/102660" },
+    { "icloud", "me.com",        "iCloud",   "imap.mail.me.com",    993, "smtp.mail.me.com",    587, "starttls", TRUE,
+      "https://support.apple.com/102654",
+      "https://support.apple.com/102660" },
+    { "fastmail", "fastmail.com","Fastmail", "imap.fastmail.com",   993, "smtp.fastmail.com",   465, "ssl",      TRUE,
+      "https://www.fastmail.help/hc/en-us/articles/1500000278342",
+      "https://app.fastmail.com/settings/security/2fa" },
 };
 
 static const ns_mail_provider *
@@ -81,6 +89,16 @@ provider_for_email(const char *email)
     }
     g_free(domain);
     return match;
+}
+
+static const ns_mail_provider *
+provider_by_id(const char *id)
+{
+    if (!id || !*id) return NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(k_providers); i++)
+        if (g_str_equal(id, k_providers[i].id))
+            return &k_providers[i];
+    return NULL;
 }
 
 static GMutex g_acct_lock;
@@ -323,19 +341,21 @@ ns_mail_account_json(void)
 }
 
 char *
-ns_mail_autoconfig_json(const char *email)
+ns_mail_autoconfig_json(const char *provider_id, const char *email)
 {
-    const ns_mail_provider *p = provider_for_email(email);
+    const ns_mail_provider *p = provider_by_id(provider_id);
+    if (!p) p = provider_for_email(email);
     if (!p) return g_strdup("{\"matched\":false}");
     char *user = ns_mail_json_escape(email ? email : "");
     char *o = g_strdup_printf(
-        "{\"matched\":true,\"provider\":\"%s\",\"app_password\":%s,"
-        "\"help_url\":\"%s\","
+        "{\"matched\":true,\"id\":\"%s\",\"provider\":\"%s\",\"app_password\":%s,"
+        "\"help_url\":\"%s\",\"twofa_url\":\"%s\","
         "\"incoming\":{\"protocol\":\"imap\",\"host\":\"%s\",\"port\":%d,"
         "\"security\":\"ssl\",\"user\":\"%s\"},"
         "\"outgoing\":{\"host\":\"%s\",\"port\":%d,\"security\":\"%s\","
         "\"user\":\"%s\"}}",
-        p->label, p->app_password ? "true" : "false", p->help_url,
+        p->id, p->label, p->app_password ? "true" : "false",
+        p->help_url, p->twofa_url,
         p->imap_host, p->imap_port, user,
         p->smtp_host, p->smtp_port, p->smtp_sec, user);
     g_free(user);
@@ -400,7 +420,10 @@ ns_mail_account_save(const char *form)
             g_acct.out_user = g_strdup(g_acct.email);
         }
     }
-    const ns_mail_provider *p = provider_for_email(g_acct.email);
+    char *vendor = form_get(q, "vendor");
+    const ns_mail_provider *p = provider_by_id(vendor);
+    if (!p) p = provider_for_email(g_acct.email);
+    g_free(vendor);
     if (p) {
         if (!g_acct.in_proto || !*g_acct.in_proto) {
             g_free(g_acct.in_proto);

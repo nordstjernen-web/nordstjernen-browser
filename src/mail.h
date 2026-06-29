@@ -12,7 +12,7 @@ gboolean ns_mail_is_configured(void);
 char    *ns_mail_account_json(void);
 gboolean ns_mail_account_save(const char *form_urlencoded);
 
-char    *ns_mail_autoconfig_json(const char *email);
+char    *ns_mail_autoconfig_json(const char *provider_id, const char *email);
 
 void  ns_mail_refresh(void);
 char *ns_mail_status_json(void);
