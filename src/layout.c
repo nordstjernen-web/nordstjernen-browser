@@ -4297,6 +4297,13 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         if (ir) return ir;
     }
 
+    if (n->name && strcmp(n->name, "textarea") == 0) {
+        if (s && (style_is_absolute_or_fixed(s) || style_is_block_level(s)))
+            return build_form_control_block(n, s, styles);
+        ns_box *ir = build_inline_run(n, n->next_sibling, styles);
+        if (ir) return ir;
+    }
+
     if (n->name && strcmp(n->name, "svg") == 0) {
         ns_box *box = box_new(NS_BOX_IMAGE);
         box->dom = n;
@@ -6955,8 +6962,22 @@ estimate_natural_width(const ns_box *b, double cap)
     }
     double w = 0;
     if (b->kind == NS_BOX_INLINE && b->text) {
-        double chars = (double)g_utf8_strlen(b->text, -1);
+        double chars = 0;
+        for (const char *p = b->text; *p; p = g_utf8_next_char(p))
+            if (g_utf8_get_char(p) != 0xFFFC) chars += 1;
         w = chars * font_size * 0.65 + font_size * 0.5;
+        if (b->inline_atomics)
+            for (guint i = 0; i < b->inline_atomics->len; i++) {
+                const ns_box *ab =
+                    g_array_index(b->inline_atomics, ns_inline_atomic, i).box;
+                if (!ab) continue;
+                double aw = ab->content_width > 0
+                    ? ab->content_width +
+                      ab->padding.left + ab->padding.right +
+                      ab->border.left  + ab->border.right
+                    : estimate_natural_width(ab, cap);
+                w += aw + ab->margin.left + ab->margin.right;
+            }
     } else if (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO) {
         w = b->content_width > 0 ? b->content_width : 0;
     } else {
