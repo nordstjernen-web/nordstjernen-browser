@@ -434,6 +434,11 @@ ns_mail_account_save(const char *form)
 
     g_mutex_lock(&g_acct_lock);
     account_load_locked();
+    if (g_acct.primary_check && *g_acct.primary_check && !g_primary) {
+        g_mutex_unlock(&g_acct_lock);
+        if (q) g_hash_table_destroy(q);
+        return FALSE;
+    }
     form_set_field(&g_acct.in_proto, q, "in_proto");
     form_set_field(&g_acct.in_host, q, "in_host");
     form_set_field(&g_acct.in_sec, q, "in_sec");
@@ -1455,12 +1460,15 @@ ns_mail_message_json(void)
 }
 
 gboolean
-ns_mail_attachment(int index, char **out_ctype, char **out_name,
+ns_mail_attachment(const char *uid, int index, char **out_ctype, char **out_name,
                    guint8 **out_data, gsize *out_len)
 {
     gboolean ok = FALSE;
     g_mutex_lock(&g_open_lock);
-    if (g_open_atts && index >= 0 && (guint)index < g_open_atts->len) {
+    gboolean uid_ok = uid && *uid && g_open_msg.uid &&
+                      g_str_equal(uid, g_open_msg.uid);
+    if (uid_ok && g_open_atts && index >= 0 &&
+        (guint)index < g_open_atts->len) {
         ns_mail_attach *a = g_ptr_array_index(g_open_atts, index);
         *out_ctype = g_strdup(a->content_type ? a->content_type
                                               : "application/octet-stream");

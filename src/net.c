@@ -4135,7 +4135,7 @@ static const char k_about_email_html[] =
 "var SETUP=(location.search.match(/[?&]provider=([a-z0-9]+)/)||[])[1];\n"
 "function loadInbox(){show('inbox');gj('about:email-status').then(function(st){"
 "$('who').textContent=st.email||'';"
-"if(st.security==='locked'&&!SETUP){show('unlock');$('u-pass').focus();return;}"
+"if(st.security==='locked'){show('unlock');$('u-pass').focus();return;}"
 "if(!st.configured||SETUP){fillAccount();show('account');return;}"
 "renderList(st.messages);"
 "if(DEEP){var d=DEEP;DEEP=null;openMsg(decodeURIComponent(d));}"
@@ -4162,10 +4162,10 @@ static const char k_about_email_html[] =
 "$('r-from').textContent='';$('r-to').textContent='';$('r-date').textContent='';"
 "$('r-body').textContent='';$('r-atts').textContent='';$('r-atts').hidden=true;"
 "gj('about:email-open?'+enc({uid:uid})).then(function(){pollMsg();});}\n"
-"function renderAtts(L){var at=$('r-atts');at.textContent='';"
+"function renderAtts(L,uid){var at=$('r-atts');at.textContent='';"
 "if(!L||!L.length){at.hidden=true;return;}at.hidden=false;"
 "L.forEach(function(x){var a=document.createElement('a');a.className='att';"
-"a.href='about:email-attachment?index='+x.index;"
+"a.href='about:email-attachment?'+enc({uid:uid,index:x.index});"
 "var nm=document.createElement('span');nm.textContent=x.filename||'attachment';"
 "var mt=document.createElement('span');mt.className='amt';"
 "mt.textContent=fmtSize(x.size)+(x.type?(' \\u00b7 '+x.type):'');"
@@ -4180,7 +4180,7 @@ static const char k_about_email_html[] =
 "$('r-to').textContent=m.to?('To: '+m.to):'';"
 "$('r-date').textContent=m.date||'';"
 "$('r-body').textContent=m.body||'(this message has no readable text)';"
-"renderAtts(m.attachments);});}\n"
+"renderAtts(m.attachments,m.uid);});}\n"
 "function compose(p){show('compose');$('c-to').value=p&&p.to||'';"
 "$('c-cc').value='';$('c-subject').value=p&&p.subject||'';"
 "$('c-body').value=p&&p.body||'';$('c-status').textContent='';"
@@ -4749,13 +4749,14 @@ synthesize_about_response(const char *url, const char *top_url,
     } else if (g_str_has_prefix(what, "email-message")) {
         about_emit_json(resp, ns_mail_message_json());
     } else if (g_str_has_prefix(what, "email-attachment")) {
+        char *att_uid = about_query_param(url, "uid");
         char *idxs = about_query_param(url, "index");
         int idx = idxs ? atoi(idxs) : -1;
         g_free(idxs);
         char *ctype = NULL, *name = NULL;
         guint8 *data = NULL;
         gsize len = 0;
-        if (ns_mail_attachment(idx, &ctype, &name, &data, &len)) {
+        if (ns_mail_attachment(att_uid, idx, &ctype, &name, &data, &len)) {
             gboolean img = g_ascii_strncasecmp(ctype, "image/", 6) == 0 &&
                            g_ascii_strncasecmp(ctype, "image/svg", 9) != 0;
             gboolean pdf = g_ascii_strcasecmp(ctype, "application/pdf") == 0;
@@ -4781,6 +4782,7 @@ synthesize_about_response(const char *url, const char *top_url,
                 "longer available. Reopen the message and try again.</p>";
             g_byte_array_append(resp->body, (const guint8 *)msg, (guint)strlen(msg));
         }
+        g_free(att_uid);
     } else if (g_str_has_prefix(what, "email-send-status")) {
         about_emit_json(resp, ns_mail_send_status_json());
     } else if (g_str_has_prefix(what, "email-send")) {
