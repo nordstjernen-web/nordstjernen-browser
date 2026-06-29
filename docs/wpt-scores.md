@@ -66,6 +66,8 @@ they regenerate.
 | 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 68408/70739 (96%) | partial: url |
 | 2026-06-29 | 9792f92 | 2a91c2e71 | 437/698 (62%) | 68454/70741 (96%) | partial: dom/events html/dom/elements |
 | 2026-06-29 | a6a818d | 2a91c2e71 | 437/698 (62%) | 68455/70741 (96%) | partial: html/dom/elements |
+| 2026-06-29 | 11918f6 | 2a91c2e71 | 437/698 (62%) | 68455/70741 (96%) | partial: dom/ranges |
+| 2026-06-29 | 11918f6 | 2a91c2e71 | 437/698 (62%) | 68455/70741 (96%) | partial: html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -75,7 +77,7 @@ touch.
 
 ## Per-area results — 2026-06-29
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-29-a6a818d.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-29-11918f6.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
