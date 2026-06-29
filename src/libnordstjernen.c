@@ -90,6 +90,10 @@ struct ns_browser {
     gint64          hover_relayout_us;
     gint64          relayout_cost_us;
     gboolean        hover_restyle_pending;
+    ns_box         *sb_box;
+    const ns_node  *sb_node;
+    double          sb_grab;
+    gboolean        sb_dragging;
 };
 
 #define NS_LAYOUT_OSC_THRESHOLD 6
@@ -1487,6 +1491,115 @@ ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
     if (consumed && browser->js && box->dom)
         ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
     return consumed;
+}
+
+static gboolean
+sb_vgeom(const ns_box *b, double *track_x, double *track_w,
+         double *track_y, double *track_h, double *thumb_y, double *thumb_h)
+{
+    if (!b || b->scroll_max_y <= 0) return FALSE;
+    double py = b->y + b->margin.top + b->border.top;
+    double ph = b->content_height + b->padding.top + b->padding.bottom;
+    if (ph <= 16.0) return FALSE;
+    double px = b->x + b->margin.left + b->border.left;
+    double pw = b->content_width + b->padding.left + b->padding.right;
+    double tw = 8.0;
+    double th = ph - 2.0;
+    double total = ph + b->scroll_max_y;
+    double thh = th * (ph / total);
+    if (thh < 16.0) thh = 16.0;
+    if (thh > th) thh = th;
+    *track_x = px + pw - tw - 1.0;
+    *track_w = tw;
+    *track_y = py + 1.0;
+    *track_h = th;
+    *thumb_h = thh;
+    *thumb_y = *track_y + (th - thh) * (b->scroll_y / b->scroll_max_y);
+    return TRUE;
+}
+
+static ns_box *
+box_find_scrollable_by_dom(ns_box *root, const ns_node *node)
+{
+    if (!root || !node) return NULL;
+    if (root->dom == node && root->scrolls) return root;
+    for (ns_box *c = root->first_child; c; c = c->next_sibling) {
+        ns_box *m = box_find_scrollable_by_dom(c, node);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+int
+ns_browser_scrollbar_press(ns_browser *browser, int x, int y)
+{
+    if (!browser || !browser->layout) return 0;
+    double lx = 0, ly = 0;
+    ns_box *box = ns_box_hit_scrollbar(browser->layout, (double)x, (double)y,
+                                       &lx, &ly);
+    if (!box) return 0;
+
+    double tx, tw, ty, th, thy, thh;
+    if (!sb_vgeom(box, &tx, &tw, &ty, &th, &thy, &thh)) return 0;
+    if (lx < tx - 3.0 || lx > tx + tw + 3.0 || ly < ty || ly > ty + th)
+        return 0;
+
+    double grab;
+    if (ly >= thy && ly <= thy + thh) {
+        grab = ly - thy;
+    } else {
+        grab = thh / 2.0;
+        double ns = (th > thh)
+            ? (ly - ty - grab) / (th - thh) * box->scroll_max_y : 0.0;
+        if (ns < 0) ns = 0;
+        if (ns > box->scroll_max_y) ns = box->scroll_max_y;
+        box->scroll_y = ns;
+        if (box->dom && browser->js)
+            ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+    }
+
+    browser->sb_dragging = TRUE;
+    browser->sb_box = box;
+    browser->sb_node = box->dom;
+    browser->sb_grab = grab;
+    return 1;
+}
+
+int
+ns_browser_scrollbar_drag(ns_browser *browser, int x, int y)
+{
+    (void)x;
+    if (!browser || !browser->sb_dragging) return 0;
+    ns_box *box = browser->sb_box;
+    if (browser->sb_node) {
+        ns_box *re = box_find_scrollable_by_dom(browser->layout,
+                                                browser->sb_node);
+        if (re) box = re;
+    }
+    if (!box) { browser->sb_dragging = FALSE; return 0; }
+    browser->sb_box = box;
+
+    double tx, tw, ty, th, thy, thh;
+    if (!sb_vgeom(box, &tx, &tw, &ty, &th, &thy, &thh) || th <= thh)
+        return 0;
+    double ns = ((double)y - ty - browser->sb_grab) / (th - thh)
+              * box->scroll_max_y;
+    if (ns < 0) ns = 0;
+    if (ns > box->scroll_max_y) ns = box->scroll_max_y;
+    if (ns == box->scroll_y) return 0;
+    box->scroll_y = ns;
+    if (box->dom && browser->js)
+        ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+    return 1;
+}
+
+void
+ns_browser_scrollbar_release(ns_browser *browser)
+{
+    if (!browser) return;
+    browser->sb_dragging = FALSE;
+    browser->sb_box = NULL;
+    browser->sb_node = NULL;
 }
 
 int

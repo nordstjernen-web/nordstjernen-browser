@@ -10380,6 +10380,31 @@ ns_box_hit_scrollable(ns_box *root, double x, double y)
     return NULL;
 }
 
+ns_box *
+ns_box_hit_scrollbar(ns_box *root, double x, double y, double *lx, double *ly)
+{
+    if (!root) return NULL;
+    if (root->paint_bottom > root->paint_top &&
+        (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
+        return NULL;
+    gboolean clipped = box_clips_children(root);
+    if (clipped && !box_padding_contains(root, x, y))
+        return NULL;
+    double cx = x + root->scroll_x;
+    double cy = y + root->scroll_y;
+    for (ns_box *c = root->first_child; c; c = c->next_sibling) {
+        ns_box *m = ns_box_hit_scrollbar(c, cx, cy, lx, ly);
+        if (m) return m;
+    }
+    if (root->scrolls && (root->scroll_max_x > 0 || root->scroll_max_y > 0) &&
+        box_padding_contains(root, x, y)) {
+        if (lx) *lx = x;
+        if (ly) *ly = y;
+        return root;
+    }
+    return NULL;
+}
+
 const ns_box *
 ns_box_hit_test(const ns_box *root, double x, double y)
 {

@@ -29,7 +29,7 @@ pv_settle_ms(void)
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
-    REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL,
+    REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL, REQ_SCROLLBAR,
     REQ_WEBGL, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
@@ -75,7 +75,8 @@ typedef struct {
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES, RES_SCROLL
+    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES, RES_SCROLL,
+    RES_SCROLLBAR
 } ResType;
 
 typedef struct {
@@ -211,6 +212,8 @@ struct NsProcView {
     double      drag_start_x, drag_start_y;
     double      pointer_x, pointer_y;
     gboolean    drag_anchored;
+    gboolean    sb_probe, sb_dragging, sb_have_last;
+    double      sb_last_x, sb_last_y;
 
     guint       anim_tick_id;
     gint64      last_anim_frame_us;
@@ -848,6 +851,16 @@ worker_main(gpointer data)
                 : 0;
             res->fallback_x = req->fallback_x;
             res->fallback_y = req->fallback_y;
+            post(res);
+        } else if (req->type == REQ_SCROLLBAR) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_SCROLLBAR;
+            res->seq = req->seq;
+            res->kind = req->kind;
+            res->ok = v->proc
+                ? ns_rproc_http_scrollbar(v->proc, req->kind, req->x, req->y)
+                : 0;
             post(res);
         } else if (req->type == REQ_DROPFILES) {
             Res *res = g_new0(Res, 1);
@@ -1930,6 +1943,37 @@ on_result(gpointer data)
                 v->vadj,
                 gtk_adjustment_get_value(v->vadj) + res->fallback_y * 60.0);
         }
+    } else if (res->type == RES_SCROLLBAR) {
+        if (res->kind == 0) {
+            gboolean still = v->sb_probe;
+            v->sb_probe = FALSE;
+            if (res->ok) {
+                request_render(v);
+                if (still) {
+                    v->sb_dragging = TRUE;
+                    if (v->sb_have_last) {
+                        double s = cur_scale(v);
+                        Req *req = g_new0(Req, 1);
+                        req->type = REQ_SCROLLBAR;
+                        req->kind = 1;
+                        req->x = v->scroll_x + (int)(v->sb_last_x / s);
+                        req->y = v->scroll_y + (int)(v->sb_last_y / s);
+                        push_req(v, req);
+                    }
+                }
+            } else if (still && v->sb_have_last) {
+                double s = cur_scale(v);
+                start_select(v, 0, v->scroll_x + (int)(v->drag_start_x / s),
+                             v->scroll_y + (int)(v->drag_start_y / s));
+                v->drag_anchored = TRUE;
+                start_select(v, 1, v->scroll_x + (int)(v->sb_last_x / s),
+                             v->scroll_y + (int)(v->sb_last_y / s));
+                v->has_selection = TRUE;
+            }
+        } else if (res->kind == 1) {
+            if (res->ok)
+                request_render(v);
+        }
     } else if (res->type == RES_RELEASE) {
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
@@ -2497,6 +2541,17 @@ on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
 }
 
 static void
+push_scrollbar(NsProcView *v, int kind, int px, int py)
+{
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_SCROLLBAR;
+    req->kind = kind;
+    req->x = px;
+    req->y = py;
+    push_req(v, req);
+}
+
+static void
 on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer data)
 {
     (void)g;
@@ -2504,6 +2559,15 @@ on_drag_begin(GtkGestureDrag *g, double sx, double sy, gpointer data)
     v->drag_start_x = sx;
     v->drag_start_y = sy;
     v->drag_anchored = FALSE;
+    v->sb_dragging = FALSE;
+    v->sb_have_last = FALSE;
+    v->sb_probe = FALSE;
+    if (v->opened) {
+        double s = cur_scale(v);
+        v->sb_probe = TRUE;
+        push_scrollbar(v, 0, v->scroll_x + (int)(sx / s),
+                       v->scroll_y + (int)(sy / s));
+    }
 }
 
 static void
@@ -2514,14 +2578,42 @@ on_drag_update(GtkGestureDrag *g, double ox, double oy, gpointer data)
     if (!v->opened)
         return;
     double s = cur_scale(v);
+    double wx = v->drag_start_x + ox;
+    double wy = v->drag_start_y + oy;
+    if (v->sb_dragging) {
+        push_scrollbar(v, 1, v->scroll_x + (int)(wx / s),
+                       v->scroll_y + (int)(wy / s));
+        return;
+    }
+    if (v->sb_probe) {
+        v->sb_last_x = wx;
+        v->sb_last_y = wy;
+        v->sb_have_last = TRUE;
+        return;
+    }
     if (!v->drag_anchored) {
         start_select(v, 0, v->scroll_x + (int)(v->drag_start_x / s),
                      v->scroll_y + (int)(v->drag_start_y / s));
         v->drag_anchored = TRUE;
     }
-    start_select(v, 1, v->scroll_x + (int)((v->drag_start_x + ox) / s),
-                 v->scroll_y + (int)((v->drag_start_y + oy) / s));
+    start_select(v, 1, v->scroll_x + (int)(wx / s),
+                 v->scroll_y + (int)(wy / s));
     v->has_selection = TRUE;
+}
+
+static void
+on_drag_end(GtkGestureDrag *g, double ox, double oy, gpointer data)
+{
+    (void)g;
+    (void)ox;
+    (void)oy;
+    NsProcView *v = data;
+    if (v->sb_dragging || v->sb_probe) {
+        push_scrollbar(v, 2, 0, 0);
+        v->sb_dragging = FALSE;
+        v->sb_probe = FALSE;
+        v->sb_have_last = FALSE;
+    }
 }
 
 static gboolean
@@ -3080,6 +3172,7 @@ ns_proc_view_new(void)
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(drag), GDK_BUTTON_PRIMARY);
     g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), v);
     g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), v);
+    g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), v);
     gtk_widget_add_controller(v->area, GTK_EVENT_CONTROLLER(drag));
 
     GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST,

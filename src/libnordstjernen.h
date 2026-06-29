@@ -149,6 +149,15 @@ int ns_browser_hover(ns_browser *browser, int x, int y);
  * applied so the caller should scroll the root viewport instead. */
 int ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy);
 
+/* Mouse-driven scrollbar interaction for nested overflow containers, in page
+ * coordinates (CSS px). _press begins a drag if (x,y) lands on a scroll
+ * container's scrollbar (paging the track when clicked off the thumb) and
+ * returns 1 if it grabbed one; _drag moves the active container to follow the
+ * pointer and returns 1 if it scrolled; _release ends the drag. */
+int  ns_browser_scrollbar_press(ns_browser *browser, int x, int y);
+int  ns_browser_scrollbar_drag(ns_browser *browser, int x, int y);
+void ns_browser_scrollbar_release(ns_browser *browser);
+
 /* Deliver a native OS file drop at page coordinates (CSS px). paths is an array
  * of n_paths absolute filesystem paths. Builds a DataTransfer carrying the files
  * and dispatches the HTML dragenter -> dragover -> drop (or dragleave) sequence

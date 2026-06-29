@@ -844,6 +844,25 @@ ns_rproc_http_scroll(ns_rproc_http *r, int x, int y, int dx, int dy)
 }
 
 int
+ns_rproc_http_scrollbar(ns_rproc_http *r, int kind, int x, int y)
+{
+    if (!r)
+        return 0;
+    const char *path = kind == 0 ? "/scrollbar-press"
+                     : kind == 1 ? "/scrollbar-drag"
+                                 : "/scrollbar-release";
+    char json[48];
+    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char *body = request(r, path, json);
+    if (!body)
+        return 0;
+    long hit = 0;
+    json_get_long(body, "hit", &hit);
+    free(body);
+    return hit != 0 ? 1 : 0;
+}
+
+int
 ns_rproc_http_find(ns_rproc_http *r, const char *query, int case_sensitive,
                    int direction, int from_y, int *out_total, int *out_current,
                    int *out_scroll_y)

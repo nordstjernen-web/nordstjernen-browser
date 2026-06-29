@@ -199,6 +199,8 @@ const ns_box *ns_box_find_by_id_or_name(const ns_box *root, const char *frag);
 const ns_box *ns_box_hit_test(const ns_box *root, double x, double y);
 
 ns_box *ns_box_hit_scrollable(ns_box *root, double x, double y);
+ns_box *ns_box_hit_scrollbar(ns_box *root, double x, double y,
+                             double *lx, double *ly);
 
 const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
 
