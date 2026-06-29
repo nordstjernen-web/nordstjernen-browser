@@ -4047,6 +4047,7 @@ static const char k_about_email_html[] =
 "<label>Your name<input id=\"a-name\" type=\"text\"></label>"
 "<label>Email address<input id=\"a-email\" type=\"text\" "
 "placeholder=\"you@example.com\"></label></div>"
+"<p class=\"hint\" id=\"a-provider-hint\" hidden></p>"
 "<h3>Incoming mail</h3><div class=\"grid\">"
 "<label>Protocol<select id=\"a-in-proto\">"
 "<option value=\"imap\">IMAP</option><option value=\"pop3\">POP3</option>"
@@ -4166,6 +4167,29 @@ static const char k_about_email_html[] =
 "\\u2022 (unchanged)':'';"
 "$('a-out-pass').placeholder=a.outgoing.has_pass?'\\u2022\\u2022\\u2022\\u2022"
 "\\u2022 (unchanged)':'';});}\n"
+"function autodetect(){var em=($('a-email').value||'').trim();"
+"var h=$('a-provider-hint');"
+"if(!em||em.indexOf('@')<1){h.hidden=true;return;}"
+"gj('about:email-autoconfig?'+enc({email:em})).then(function(a){"
+"if(!a||!a.matched){h.hidden=true;return;}"
+"$('a-in-proto').value=a.incoming.protocol||'imap';"
+"$('a-in-sec').value=a.incoming.security||'ssl';"
+"$('a-in-host').value=a.incoming.host||'';"
+"$('a-in-port').value=a.incoming.port||'';"
+"$('a-in-user').value=a.incoming.user||em;"
+"$('a-out-sec').value=a.outgoing.security||'ssl';"
+"$('a-out-host').value=a.outgoing.host||'';"
+"$('a-out-port').value=a.outgoing.port||'';"
+"$('a-out-user').value=a.outgoing.user||em;"
+"h.hidden=false;h.textContent='';"
+"var b=document.createElement('strong');"
+"b.textContent=a.provider+' settings filled in. ';h.appendChild(b);"
+"if(a.app_password){h.appendChild(document.createTextNode(a.provider+' needs "
+"an app password \\u2014 your normal password will be rejected. Create one, "
+"then paste it into both password fields. '));"
+"if(a.help_url){var lk=document.createElement('a');lk.href=a.help_url;"
+"lk.target='_blank';lk.rel='noopener';"
+"lk.textContent='How to create an app password';h.appendChild(lk);}}});}\n"
 "function saveAccount(){$('a-status').textContent='Saving\\u2026';"
 "$('a-status').className='';"
 "pj('about:email-account',{name:$('a-name').value,email:$('a-email').value,"
@@ -4183,6 +4207,7 @@ static const char k_about_email_html[] =
 "$('read-back').onclick=loadInbox;$('read-reply').onclick=reply;"
 "$('c-send').onclick=send;$('c-cancel').onclick=loadInbox;"
 "$('a-save').onclick=saveAccount;$('a-cancel').onclick=loadInbox;\n"
+"$('a-email').onchange=autodetect;\n"
 "loadInbox();\n"
 "</script></body></html>";
 
@@ -4626,6 +4651,10 @@ synthesize_about_response(const char *url, const char *top_url,
             g_free(form);
         }
         about_emit_json(resp, ns_mail_account_json());
+    } else if (g_str_has_prefix(what, "email-autoconfig")) {
+        char *email = about_query_param(url, "email");
+        about_emit_json(resp, ns_mail_autoconfig_json(email));
+        g_free(email);
     } else if (g_str_has_prefix(what, "email-open")) {
         char *uid = about_query_param(url, "uid");
         if (uid && *uid) ns_mail_open(uid);
