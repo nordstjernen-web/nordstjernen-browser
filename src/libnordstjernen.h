@@ -143,6 +143,12 @@ int   ns_browser_set_focused_editable_selection(ns_browser *browser,
  * should re-render, 0 if nothing visible changed, -1 if no page is open. */
 int ns_browser_hover(ns_browser *browser, int x, int y);
 
+/* Apply a mouse-wheel scroll of (dx, dy) CSS px at page coordinates (CSS px) to
+ * the nearest CSS overflow scroll container under that point. Returns 1 if a
+ * nested scroller consumed the scroll (the caller should re-render), 0 if none
+ * applied so the caller should scroll the root viewport instead. */
+int ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy);
+
 /* Deliver a native OS file drop at page coordinates (CSS px). paths is an array
  * of n_paths absolute filesystem paths. Builds a DataTransfer carrying the files
  * and dispatches the HTML dragenter -> dragover -> drop (or dragleave) sequence

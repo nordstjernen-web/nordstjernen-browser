@@ -558,6 +558,23 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/scroll") == 0) {
+        long x = 0, y = 0, dx = 0, dy = 0;
+        json_get_long(body, "x", &x);
+        json_get_long(body, "y", &y);
+        json_get_long(body, "dx", &dx);
+        json_get_long(body, "dy", &dy);
+        int consumed = s->cur ? ns_browser_scroll_at(s->cur, (int)x, (int)y,
+                                                      (int)dx, (int)dy) : 0;
+        if (consumed)
+            s->frame_valid = 0;
+        char json[32];
+        int n = snprintf(json, sizeof json, "{\"consumed\":%d}", consumed ? 1 : 0);
+        http_write_response(ctrl_w, 200, "application/json", NULL, json,
+                            (size_t)n);
+        return 0;
+    }
+
     if (strcmp(head->path, "/focused-editable") == 0) {
         char json[32];
         int active = s->cur ? ns_browser_focused_editable(s->cur) : 0;

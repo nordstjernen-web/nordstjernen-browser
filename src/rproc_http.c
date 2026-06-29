@@ -827,6 +827,23 @@ ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y, char **out_href,
 }
 
 int
+ns_rproc_http_scroll(ns_rproc_http *r, int x, int y, int dx, int dy)
+{
+    if (!r)
+        return 0;
+    char json[80];
+    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d,\"dx\":%d,\"dy\":%d}",
+             x, y, dx, dy);
+    char *body = request(r, "/scroll", json);
+    if (!body)
+        return 0;
+    long consumed = 0;
+    json_get_long(body, "consumed", &consumed);
+    free(body);
+    return consumed != 0 ? 1 : 0;
+}
+
+int
 ns_rproc_http_find(ns_rproc_http *r, const char *query, int case_sensitive,
                    int direction, int from_y, int *out_total, int *out_current,
                    int *out_scroll_y)

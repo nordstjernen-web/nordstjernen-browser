@@ -29,7 +29,7 @@ pv_settle_ms(void)
 typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
-    REQ_EVAL, REQ_DUMP, REQ_DROPFILES,
+    REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL,
     REQ_WEBGL, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
@@ -51,6 +51,7 @@ typedef struct {
     int     w, h, sx, sy;
     double  scale;
     int     x, y;
+    int     dx, dy;
     int     mods;
     int     kind;
     int     keycode;
@@ -74,7 +75,7 @@ typedef struct {
 typedef enum {
     RES_PAGE, RES_FRAME, RES_LINK, RES_CLICK, RES_VIEWPORT, RES_KEY,
     RES_SELECT, RES_COPY, RES_HOVER, RES_RELEASE, RES_FIND, RES_EXPORT,
-    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES
+    RES_CONSOLE, RES_EVAL, RES_DUMP, RES_FAVICON, RES_DROPFILES, RES_SCROLL
 } ResType;
 
 typedef struct {
@@ -208,6 +209,7 @@ struct NsProcView {
     int         key_seq, select_seq, hover_seq;
     int         last_vp_w, last_vp_h;
     double      drag_start_x, drag_start_y;
+    double      pointer_x, pointer_y;
     gboolean    drag_anchored;
 
     guint       anim_tick_id;
@@ -834,6 +836,18 @@ worker_main(gpointer data)
                 res->ok = ns_rproc_http_hover_full(v->proc, req->x, req->y,
                                                    &res->href,
                                                    &res->cursor) == 1;
+            post(res);
+        } else if (req->type == REQ_SCROLL) {
+            Res *res = g_new0(Res, 1);
+            res->view = pv_ref(v);
+            res->type = RES_SCROLL;
+            res->seq = req->seq;
+            res->ok = v->proc
+                ? ns_rproc_http_scroll(v->proc, req->x, req->y,
+                                       req->dx, req->dy)
+                : 0;
+            res->fallback_x = req->fallback_x;
+            res->fallback_y = req->fallback_y;
             post(res);
         } else if (req->type == REQ_DROPFILES) {
             Res *res = g_new0(Res, 1);
@@ -1905,6 +1919,17 @@ on_result(gpointer data)
     } else if (res->type == RES_DROPFILES) {
         if (res->ok)
             request_render(v);
+    } else if (res->type == RES_SCROLL) {
+        if (res->ok)
+            request_render(v);
+        else {
+            gtk_adjustment_set_value(
+                v->hadj,
+                gtk_adjustment_get_value(v->hadj) + res->fallback_x * 60.0);
+            gtk_adjustment_set_value(
+                v->vadj,
+                gtk_adjustment_get_value(v->vadj) + res->fallback_y * 60.0);
+        }
     } else if (res->type == RES_RELEASE) {
         if (res->href && *res->href) {
             post_emit(v, NS_PROC_EVT_STATUS, res->href);
@@ -2092,6 +2117,19 @@ on_scroll(GtkEventControllerScroll *ctrl, double dx, double dy, gpointer data)
             ns_proc_view_zoom_in(v);
         else if (delta > 0)
             ns_proc_view_zoom_out(v);
+        return TRUE;
+    }
+    if (v->proc) {
+        double s = cur_scale(v);
+        Req *req = g_new0(Req, 1);
+        req->type = REQ_SCROLL;
+        req->x = v->scroll_x + (int)(v->pointer_x / s);
+        req->y = v->scroll_y + (int)(v->pointer_y / s);
+        req->dx = (int)(dx * 60.0 / s);
+        req->dy = (int)(dy * 60.0 / s);
+        req->fallback_x = dx;
+        req->fallback_y = dy;
+        push_req(v, req);
         return TRUE;
     }
     gtk_adjustment_set_value(v->hadj,
@@ -2448,6 +2486,8 @@ on_motion(GtkEventControllerMotion *ctrl, double x, double y, gpointer data)
 {
     (void)ctrl;
     NsProcView *v = data;
+    v->pointer_x = x;
+    v->pointer_y = y;
     if (v->opened) {
         double s = cur_scale(v);
         int px = v->scroll_x + (int)(x / s);

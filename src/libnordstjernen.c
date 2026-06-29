@@ -1463,6 +1463,33 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 }
 
 int
+ns_browser_scroll_at(ns_browser *browser, int x, int y, int dx, int dy)
+{
+    if (!browser || !browser->layout) return 0;
+
+    ns_box *box = ns_box_hit_scrollable(browser->layout, (double)x, (double)y);
+    if (!box) return 0;
+
+    int consumed = 0;
+    if (dy != 0 && box->scroll_max_y > 0) {
+        double ny = box->scroll_y + dy;
+        if (ny < 0) ny = 0;
+        if (ny > box->scroll_max_y) ny = box->scroll_max_y;
+        if (ny != box->scroll_y) { box->scroll_y = ny; consumed = 1; }
+    }
+    if (dx != 0 && box->scroll_max_x > 0) {
+        double nx = box->scroll_x + dx;
+        if (nx < 0) nx = 0;
+        if (nx > box->scroll_max_x) nx = box->scroll_max_x;
+        if (nx != box->scroll_x) { box->scroll_x = nx; consumed = 1; }
+    }
+
+    if (consumed && browser->js && box->dom)
+        ns_js_dispatch_event(browser->js, box->dom, "scroll", NULL);
+    return consumed;
+}
+
+int
 ns_browser_drop_files(ns_browser *browser, int x, int y,
                       const char *const *paths, int n_paths)
 {

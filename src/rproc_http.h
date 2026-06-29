@@ -80,6 +80,7 @@ char *ns_rproc_http_key_full(ns_rproc_http *r, int kind, const char *key,
                              int *out_prevented);
 int   ns_rproc_http_hover_full(ns_rproc_http *r, int x, int y,
                                char **out_href, char **out_cursor);
+int   ns_rproc_http_scroll(ns_rproc_http *r, int x, int y, int dx, int dy);
 int   ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
                                const char *const *paths, int n_paths);
 int   ns_rproc_http_release(ns_rproc_http *r);
