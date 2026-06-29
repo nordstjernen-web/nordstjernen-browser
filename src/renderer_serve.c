@@ -7,6 +7,7 @@
 #include "net.h"
 #include "image.h"
 #include "texture.h"
+#include "mail.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -383,6 +384,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 if (*p == '\r') *p = ' ';
                 else if (*p == '\n') *p = '\x1f';
             }
+        char *mailkey = ns_mail_take_pending_shell_key();
         char hdrs[7808];
         int hn = snprintf(hdrs, sizeof hdrs,
                  "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
@@ -398,12 +400,16 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (download && *download && hn > 0 && (size_t)hn < sizeof hdrs)
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                      "X-Download: %.3000s\r\n", download);
+        if (mailkey && *mailkey && hn > 0 && (size_t)hn < sizeof hdrs)
+            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                     "X-Mail-Key: %.700s\r\n", mailkey);
         if (audio && *audio && hn > 0 && (size_t)hn < sizeof hdrs)
             snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                      "X-Audio: %.3000s\r\n", audio);
         free(nav);
         free(webgl);
         free(download);
+        g_free(mailkey);
         free(audio);
         if (s->shm_mode || unchanged)
             http_write_response(ctrl_w, 200, "application/octet-stream",

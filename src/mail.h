@@ -17,6 +17,9 @@ char    *ns_mail_autoconfig_json(const char *provider_id, const char *email);
 gboolean ns_mail_unlock(const char *form_urlencoded);
 gboolean ns_mail_set_primary(const char *form_urlencoded);
 
+char *ns_mail_take_pending_shell_key(void);
+void  ns_mail_set_session_key(const char *key_b64);
+
 void  ns_mail_refresh(void);
 char *ns_mail_status_json(void);
 

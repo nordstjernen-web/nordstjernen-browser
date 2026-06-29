@@ -119,6 +119,7 @@ static GMutex g_acct_lock;
 static ns_mail_account g_acct;
 static gboolean g_acct_loaded;
 static char *g_primary;
+static char *g_pending_shell_key;
 
 static GMutex g_inbox_lock;
 static GPtrArray *g_inbox;
@@ -547,6 +548,8 @@ ns_mail_unlock(const char *form)
         if (token && g_str_equal(token, NS_MAIL_PRIMARY_TOKEN)) {
             g_free(g_primary);
             g_primary = g_strdup(pw);
+            g_free(g_pending_shell_key);
+            g_pending_shell_key = g_strdup(pw);
             ok = TRUE;
         }
         g_free(token);
@@ -554,6 +557,43 @@ ns_mail_unlock(const char *form)
     g_mutex_unlock(&g_acct_lock);
     g_free(pw);
     return ok;
+}
+
+char *
+ns_mail_take_pending_shell_key(void)
+{
+    char *b64 = NULL;
+    g_mutex_lock(&g_acct_lock);
+    if (g_pending_shell_key) {
+        b64 = g_base64_encode((const guchar *)g_pending_shell_key,
+                              strlen(g_pending_shell_key));
+        OPENSSL_cleanse(g_pending_shell_key, strlen(g_pending_shell_key));
+        g_clear_pointer(&g_pending_shell_key, g_free);
+    }
+    g_mutex_unlock(&g_acct_lock);
+    return b64;
+}
+
+void
+ns_mail_set_session_key(const char *b64)
+{
+    if (!b64 || !*b64)
+        return;
+    gsize n = 0;
+    guchar *raw = g_base64_decode(b64, &n);
+    if (!raw)
+        return;
+    char *pw = g_strndup((const char *)raw, n);
+    OPENSSL_cleanse(raw, n);
+    g_free(raw);
+    g_mutex_lock(&g_acct_lock);
+    if (!g_primary || !g_str_equal(g_primary, pw)) {
+        g_free(g_primary);
+        g_primary = g_strdup(pw);
+    }
+    g_mutex_unlock(&g_acct_lock);
+    OPENSSL_cleanse(pw, strlen(pw));
+    g_free(pw);
 }
 
 gboolean
@@ -576,6 +616,8 @@ ns_mail_set_primary(const char *form)
             char *op = mail_pass_plain(g_acct.out_pass);
             g_free(g_primary);
             g_primary = g_strdup(pw);
+            g_free(g_pending_shell_key);
+            g_pending_shell_key = g_strdup(pw);
             char *new_in  = (ip && *ip) ? ns_secretbox_seal(ip, g_primary) : g_strdup("");
             char *new_out = (op && *op) ? ns_secretbox_seal(op, g_primary) : g_strdup("");
             g_free(g_acct.in_pass);  g_acct.in_pass  = new_in;

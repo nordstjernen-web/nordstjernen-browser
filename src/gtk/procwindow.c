@@ -33,7 +33,6 @@ typedef struct {
     GtkWidget      *spinner;
     GtkWidget      *status;
     GtkWidget      *bookmarks_button;
-    GtkWidget      *email_button;
     guint           mail_timer;
     char           *home_url;
     ns_bookmarks   *bookmarks;
@@ -111,10 +110,6 @@ install_status_css(void)
         "}"
         ".ns-toolbar button, .ns-toolbar entry {"
         "  min-height: 26px;"
-        "}"
-        ".ns-toolbar button.ns-mail-new {"
-        "  color: #1a73e8;"
-        "  background: alpha(#1a73e8, 0.16);"
         "}"
         ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
         ".ns-tabstrip { padding: 0; }"
@@ -860,22 +855,7 @@ on_home_clicked(GtkButton *b, gpointer ud)
         ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
 }
 
-static void
-email_button_set_unseen(GtkWidget *btn, int count)
-{
-    if (!GTK_IS_WIDGET(btn)) return;
-    if (count > 0) {
-        gtk_widget_add_css_class(btn, "ns-mail-new");
-        char *tip = g_strdup_printf("%s (%d)", ns_i18n("Email"), count);
-        gtk_widget_set_tooltip_text(btn, tip);
-        g_free(tip);
-    } else {
-        gtk_widget_remove_css_class(btn, "ns-mail-new");
-        gtk_widget_set_tooltip_text(btn, ns_i18n("Email"));
-    }
-}
-
-typedef struct { GtkWidget *btn; int count; } MailPollResult;
+typedef struct { int count; } MailPollResult;
 
 static int g_mail_last_notified = -1;
 
@@ -898,12 +878,10 @@ mail_poll_apply(gpointer data)
 {
     MailPollResult *r = data;
     if (r->count >= 0) {
-        email_button_set_unseen(r->btn, r->count);
         if (g_mail_last_notified >= 0 && r->count > g_mail_last_notified)
             mail_notify_new(r->count);
         g_mail_last_notified = r->count;
     }
-    g_object_unref(r->btn);
     g_free(r);
     return G_SOURCE_REMOVE;
 }
@@ -911,9 +889,8 @@ mail_poll_apply(gpointer data)
 static gpointer
 mail_poll_worker(gpointer data)
 {
-    GtkWidget *btn = data;
+    (void)data;
     MailPollResult *r = g_new0(MailPollResult, 1);
-    r->btn = btn;
     r->count = ns_mail_poll_unseen();
     g_idle_add(mail_poll_apply, r);
     return NULL;
@@ -922,12 +899,9 @@ mail_poll_worker(gpointer data)
 static gboolean
 mail_poll_tick(gpointer ud)
 {
-    ProcWindow *pw = ud;
-    if (pw->email_button) {
-        GThread *t = g_thread_new("ns-mail-poll", mail_poll_worker,
-                                  g_object_ref(pw->email_button));
-        if (t) g_thread_unref(t);
-    }
+    (void)ud;
+    GThread *t = g_thread_new("ns-mail-poll", mail_poll_worker, NULL);
+    if (t) g_thread_unref(t);
     return G_SOURCE_CONTINUE;
 }
 
@@ -1533,8 +1507,9 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
-    pw->email_button = toolbar_button("nordstjernen-email", ns_i18n("Email"),
-                                      G_CALLBACK(on_email_clicked), pw);
+    GtkWidget *email_button = toolbar_button("nordstjernen-email",
+                                             ns_i18n("Email"),
+                                             G_CALLBACK(on_email_clicked), pw);
 
     GMenu *appmenu = g_menu_new();
     g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
@@ -1575,7 +1550,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
-    gtk_box_append(GTK_BOX(toolbar), pw->email_button);
+    gtk_box_append(GTK_BOX(toolbar), email_button);
     gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);

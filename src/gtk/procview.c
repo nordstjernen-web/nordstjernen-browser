@@ -8,6 +8,7 @@
 #include "rproc_http.h"
 #include "rproc_inproc.h"
 #include "net.h"
+#include "mail.h"
 
 #include <cairo.h>
 #include <glib/gstdio.h>
@@ -766,6 +767,10 @@ worker_main(gpointer data)
                 if (fr.audio) {
                     res->audio = g_strdup(fr.audio);
                     free(fr.audio);
+                }
+                if (fr.mail_key) {
+                    ns_mail_set_session_key(fr.mail_key);
+                    free(fr.mail_key);
                 }
             } else if (v->proc) {
                 ns_rproc_http_close(pv_swap_proc(v, NULL));
