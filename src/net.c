@@ -4038,6 +4038,15 @@ static const char k_about_email_html[] =
 "<button class=\"back\" id=\"c-cancel\">Cancel</button>"
 "<span id=\"c-status\"></span></div></div>"
 "</section>\n"
+"<section id=\"view-unlock\" class=\"view\" hidden>"
+"<div class=\"card\"><h2>Unlock your mailbox</h2>"
+"<p class=\"hint\">Your saved mail passwords are encrypted with your primary "
+"password. Enter it to unlock them for this session.</p>"
+"<div class=\"grid\">"
+"<label>Primary password<input id=\"u-pass\" type=\"password\"></label></div>"
+"<div class=\"row\"><button id=\"u-unlock\">Unlock</button>"
+"<span id=\"u-status\" class=\"status\"></span></div></div>"
+"</section>\n"
 "<section id=\"view-account\" class=\"view\" hidden>"
 "<div class=\"card\"><h2>Email account</h2>"
 "<p class=\"hint\">Your account details are stored locally on this computer "
@@ -4077,6 +4086,16 @@ static const char k_about_email_html[] =
 "<label>Port<input id=\"a-out-port\" type=\"number\" placeholder=\"465\"></label>"
 "<label>Username<input id=\"a-out-user\"></label>"
 "<label>Password<input id=\"a-out-pass\" type=\"password\"></label></div>"
+"<h3>Security</h3>"
+"<p class=\"hint\">Protect your saved passwords with a primary password. When "
+"set, they are encrypted on disk with AES-256-GCM and you enter this password "
+"once per session.</p>"
+"<div class=\"grid\">"
+"<label>Primary password<input id=\"a-primary\" type=\"password\" "
+"placeholder=\"Set a primary password\"></label></div>"
+"<div class=\"row\"><button class=\"back\" id=\"a-setprimary\">"
+"Encrypt saved passwords</button>"
+"<span id=\"a-sec-status\" class=\"status\"></span></div>"
 "<div class=\"row\"><button id=\"a-save\">Save account</button>"
 "<button class=\"back\" id=\"a-cancel\">Cancel</button>"
 "<span id=\"a-status\"></span></div></div>"
@@ -4109,6 +4128,7 @@ static const char k_about_email_html[] =
 "var SETUP=(location.search.match(/[?&]provider=([a-z0-9]+)/)||[])[1];\n"
 "function loadInbox(){show('inbox');gj('about:email-status').then(function(st){"
 "$('who').textContent=st.email||'';"
+"if(st.security==='locked'&&!SETUP){show('unlock');$('u-pass').focus();return;}"
 "if(!st.configured||SETUP){fillAccount();show('account');return;}"
 "renderList(st.messages);"
 "if(DEEP){var d=DEEP;DEEP=null;openMsg(decodeURIComponent(d));}"
@@ -4219,6 +4239,22 @@ static const char k_about_email_html[] =
 "out_pass:$('a-out-pass').value}).then(function(){"
 "$('a-status').textContent='Saved.';$('a-status').className='ok';"
 "setTimeout(loadInbox,700);});}\n"
+"function unlock(){var p=$('u-pass').value;"
+"$('u-status').textContent='Unlocking\\u2026';$('u-status').className='status';"
+"pj('about:email-unlock',{password:p}).then(function(j){"
+"if(j&&j.ok){$('u-pass').value='';loadInbox();}"
+"else{$('u-status').textContent='Wrong password \\u2014 try again.';"
+"$('u-status').className='status err';}});}\n"
+"function setPrimary(){var p=$('a-primary').value;"
+"if(!p){$('a-sec-status').textContent='Enter a password first.';"
+"$('a-sec-status').className='status err';return;}"
+"$('a-sec-status').textContent='Encrypting\\u2026';"
+"$('a-sec-status').className='status';"
+"pj('about:email-set-primary',{password:p}).then(function(j){"
+"if(j&&j.ok){$('a-sec-status').textContent='Saved passwords are now encrypted.';"
+"$('a-sec-status').className='status ok';$('a-primary').value='';}"
+"else{$('a-sec-status').textContent='Could not set primary password.';"
+"$('a-sec-status').className='status err';}});}\n"
 "$('btn-refresh').onclick=refresh;"
 "$('btn-compose').onclick=function(){compose(null);};"
 "$('btn-account').onclick=function(){fillAccount();show('account');};"
@@ -4226,6 +4262,7 @@ static const char k_about_email_html[] =
 "$('c-send').onclick=send;$('c-cancel').onclick=loadInbox;"
 "$('a-save').onclick=saveAccount;$('a-cancel').onclick=loadInbox;\n"
 "$('a-email').onchange=autodetect;$('a-vendor').onchange=onVendor;\n"
+"$('u-unlock').onclick=unlock;$('a-setprimary').onclick=setPrimary;\n"
 "loadInbox();\n"
 "</script></body></html>";
 
@@ -4675,6 +4712,16 @@ synthesize_about_response(const char *url, const char *top_url,
         about_emit_json(resp, ns_mail_autoconfig_json(provider, email));
         g_free(provider);
         g_free(email);
+    } else if (g_str_has_prefix(what, "email-unlock")) {
+        char *form = about_request_form(url, method, req_body, req_body_len);
+        gboolean ok = ns_mail_unlock(form);
+        g_free(form);
+        about_emit_json(resp, g_strdup_printf("{\"ok\":%s}", ok ? "true" : "false"));
+    } else if (g_str_has_prefix(what, "email-set-primary")) {
+        char *form = about_request_form(url, method, req_body, req_body_len);
+        gboolean ok = ns_mail_set_primary(form);
+        g_free(form);
+        about_emit_json(resp, g_strdup_printf("{\"ok\":%s}", ok ? "true" : "false"));
     } else if (g_str_has_prefix(what, "email-open")) {
         char *uid = about_query_param(url, "uid");
         if (uid && *uid) ns_mail_open(uid);

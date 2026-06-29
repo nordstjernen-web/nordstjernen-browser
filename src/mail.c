@@ -5,9 +5,11 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <glib/gstdio.h>
+#include <openssl/crypto.h>
 
 #include "config.h"
 #include "net.h"
+#include "secretbox.h"
 
 enum { ST_IDLE, ST_RUNNING, ST_DONE, ST_ERROR };
 
@@ -34,7 +36,10 @@ typedef struct {
     char *out_pass;
     char *email;
     char *name;
+    char *primary_check;
 } ns_mail_account;
+
+#define NS_MAIL_PRIMARY_TOKEN "nordstjernen-primary-v1"
 
 #define NS_MAIL_LIST_MAX 25
 
@@ -104,6 +109,7 @@ provider_by_id(const char *id)
 static GMutex g_acct_lock;
 static ns_mail_account g_acct;
 static gboolean g_acct_loaded;
+static char *g_primary;
 
 static GMutex g_inbox_lock;
 static GPtrArray *g_inbox;
@@ -178,7 +184,17 @@ account_free(ns_mail_account *a)
     g_free(a->out_pass);
     g_free(a->email);
     g_free(a->name);
+    g_free(a->primary_check);
     g_free(a);
+}
+
+static char *
+mail_pass_plain(const char *raw)
+{
+    if (!raw || !*raw) return NULL;
+    if (ns_secretbox_is_sealed(raw))
+        return g_primary ? ns_secretbox_open(raw, g_primary) : NULL;
+    return g_strdup(raw);
 }
 
 static ns_mail_account *
@@ -240,6 +256,7 @@ account_load_locked(void)
             else if (g_str_equal(key, "out_pass")) { g_free(g_acct.out_pass); g_acct.out_pass = g_strdup(val); }
             else if (g_str_equal(key, "email")) { g_free(g_acct.email); g_acct.email = g_strdup(val); }
             else if (g_str_equal(key, "name")) { g_free(g_acct.name); g_acct.name = g_strdup(val); }
+            else if (g_str_equal(key, "primary_check")) { g_free(g_acct.primary_check); g_acct.primary_check = g_strdup(val); }
         }
         g_strfreev(lines);
         g_free(text);
@@ -269,6 +286,8 @@ account_save_locked(void)
     g_string_append_printf(s, "out_pass = %s\n", g_acct.out_pass ? g_acct.out_pass : "");
     g_string_append_printf(s, "email = %s\n", g_acct.email ? g_acct.email : "");
     g_string_append_printf(s, "name = %s\n", g_acct.name ? g_acct.name : "");
+    if (g_acct.primary_check && *g_acct.primary_check)
+        g_string_append_printf(s, "primary_check = %s\n", g_acct.primary_check);
 
     if (g_file_set_contents(path, s->str, (gssize)s->len, NULL))
         g_chmod(path, 0600);
@@ -282,6 +301,12 @@ account_snapshot(void)
     g_mutex_lock(&g_acct_lock);
     account_load_locked();
     ns_mail_account *snap = account_dup(&g_acct);
+    char *ip = mail_pass_plain(snap->in_pass);
+    g_free(snap->in_pass);
+    snap->in_pass = ip;
+    char *op = mail_pass_plain(snap->out_pass);
+    g_free(snap->out_pass);
+    snap->out_pass = op;
     g_mutex_unlock(&g_acct_lock);
     return snap;
 }
@@ -404,11 +429,19 @@ ns_mail_account_save(const char *form)
     if (op) { g_acct.out_port = atoi(op); g_free(op); }
 
     char *inpass = form_get(q, "in_pass");
-    if (inpass && *inpass) { g_free(g_acct.in_pass); g_acct.in_pass = inpass; }
-    else g_free(inpass);
+    if (inpass && *inpass) {
+        g_free(g_acct.in_pass);
+        g_acct.in_pass = g_primary ? ns_secretbox_seal(inpass, g_primary)
+                                   : g_strdup(inpass);
+    }
+    g_free(inpass);
     char *outpass = form_get(q, "out_pass");
-    if (outpass && *outpass) { g_free(g_acct.out_pass); g_acct.out_pass = outpass; }
-    else g_free(outpass);
+    if (outpass && *outpass) {
+        g_free(g_acct.out_pass);
+        g_acct.out_pass = g_primary ? ns_secretbox_seal(outpass, g_primary)
+                                    : g_strdup(outpass);
+    }
+    g_free(outpass);
 
     if (g_acct.email && *g_acct.email) {
         if (!g_acct.in_user || !*g_acct.in_user) {
@@ -456,6 +489,91 @@ ns_mail_account_save(const char *form)
     g_clear_pointer(&g_sync_error, g_free);
     g_mutex_unlock(&g_inbox_lock);
     return TRUE;
+}
+
+static char *
+mail_security_state(void)
+{
+    g_mutex_lock(&g_acct_lock);
+    account_load_locked();
+    const char *s = (g_acct.primary_check && *g_acct.primary_check)
+        ? (g_primary ? "unlocked" : "locked")
+        : "none";
+    g_mutex_unlock(&g_acct_lock);
+    return g_strdup(s);
+}
+
+gboolean
+ns_mail_is_locked(void)
+{
+    g_mutex_lock(&g_acct_lock);
+    account_load_locked();
+    gboolean locked = g_acct.primary_check && *g_acct.primary_check && !g_primary;
+    g_mutex_unlock(&g_acct_lock);
+    return locked;
+}
+
+gboolean
+ns_mail_unlock(const char *form)
+{
+    GHashTable *q = form && *form
+        ? g_uri_parse_params(form, -1, "&", G_URI_PARAMS_WWW_FORM, NULL) : NULL;
+    char *pw = form_get(q, "password");
+    if (q) g_hash_table_destroy(q);
+
+    gboolean ok = FALSE;
+    g_mutex_lock(&g_acct_lock);
+    account_load_locked();
+    if (pw && g_acct.primary_check && *g_acct.primary_check) {
+        char *token = ns_secretbox_open(g_acct.primary_check, pw);
+        if (token && g_str_equal(token, NS_MAIL_PRIMARY_TOKEN)) {
+            g_free(g_primary);
+            g_primary = g_strdup(pw);
+            ok = TRUE;
+        }
+        g_free(token);
+    }
+    g_mutex_unlock(&g_acct_lock);
+    g_free(pw);
+    return ok;
+}
+
+gboolean
+ns_mail_set_primary(const char *form)
+{
+    GHashTable *q = form && *form
+        ? g_uri_parse_params(form, -1, "&", G_URI_PARAMS_WWW_FORM, NULL) : NULL;
+    char *pw = form_get(q, "password");
+    if (q) g_hash_table_destroy(q);
+    if (!pw || !*pw) { g_free(pw); return FALSE; }
+
+    gboolean ok = FALSE;
+    g_mutex_lock(&g_acct_lock);
+    account_load_locked();
+    gboolean had = g_acct.primary_check && *g_acct.primary_check;
+    if (!had || g_primary) {
+        char *check = ns_secretbox_seal(NS_MAIL_PRIMARY_TOKEN, pw);
+        if (check) {
+            char *ip = mail_pass_plain(g_acct.in_pass);
+            char *op = mail_pass_plain(g_acct.out_pass);
+            g_free(g_primary);
+            g_primary = g_strdup(pw);
+            char *new_in  = (ip && *ip) ? ns_secretbox_seal(ip, g_primary) : g_strdup("");
+            char *new_out = (op && *op) ? ns_secretbox_seal(op, g_primary) : g_strdup("");
+            g_free(g_acct.in_pass);  g_acct.in_pass  = new_in;
+            g_free(g_acct.out_pass); g_acct.out_pass = new_out;
+            g_free(g_acct.primary_check); g_acct.primary_check = check;
+            account_save_locked();
+            if (ip) OPENSSL_cleanse(ip, strlen(ip));
+            if (op) OPENSSL_cleanse(op, strlen(op));
+            g_free(ip);
+            g_free(op);
+            ok = TRUE;
+        }
+    }
+    g_mutex_unlock(&g_acct_lock);
+    g_free(pw);
+    return ok;
 }
 
 static size_t
@@ -1038,6 +1156,15 @@ ns_mail_refresh(void)
 {
     ns_mail_account *snap = account_snapshot();
     if (!account_complete(snap)) { account_free(snap); return; }
+    if (ns_mail_is_locked()) {
+        account_free(snap);
+        g_mutex_lock(&g_inbox_lock);
+        g_sync_state = ST_ERROR;
+        g_free(g_sync_error);
+        g_sync_error = g_strdup("Enter your primary password to unlock mail.");
+        g_mutex_unlock(&g_inbox_lock);
+        return;
+    }
 
     g_mutex_lock(&g_inbox_lock);
     if (g_sync_state == ST_RUNNING) { g_mutex_unlock(&g_inbox_lock); account_free(snap); return; }
@@ -1059,6 +1186,7 @@ ns_mail_status_json(void)
 {
     ns_mail_account *a = account_snapshot();
     gboolean configured = account_complete(a);
+    char *sec = mail_security_state();
 
     g_mutex_lock(&g_inbox_lock);
     int st = g_sync_state;
@@ -1090,11 +1218,13 @@ ns_mail_status_json(void)
     g_string_append_printf(o, "\"email\":\"%s\",\"name\":\"%s\",", email, name);
     g_string_append_printf(o, "\"protocol\":\"%s\",",
                            a->in_proto ? a->in_proto : "imap");
+    g_string_append_printf(o, "\"security\":\"%s\",", sec);
     g_string_append_printf(o, "\"sync\":{\"state\":\"%s\",\"error\":\"%s\"},",
                            state_name(st), err);
     g_string_append_printf(o, "\"messages\":%s}", msgs->str);
     g_free(email);
     g_free(name);
+    g_free(sec);
     g_free(err);
     g_string_free(msgs, TRUE);
     account_free(a);
@@ -1167,6 +1297,15 @@ ns_mail_open(const char *uid)
     if (!uid || !*uid) return;
     ns_mail_account *snap = account_snapshot();
     if (!account_complete(snap)) { account_free(snap); return; }
+    if (ns_mail_is_locked()) {
+        account_free(snap);
+        g_mutex_lock(&g_open_lock);
+        g_open_state = ST_ERROR;
+        g_free(g_open_error);
+        g_open_error = g_strdup("Enter your primary password to unlock mail.");
+        g_mutex_unlock(&g_open_lock);
+        return;
+    }
 
     g_mutex_lock(&g_open_lock);
     if (g_open_state == ST_RUNNING) { g_mutex_unlock(&g_open_lock); account_free(snap); return; }
@@ -1396,6 +1535,16 @@ ns_mail_send(const char *form)
         g_send_state = ST_ERROR;
         g_free(g_send_error);
         g_send_error = g_strdup("Outgoing server not configured");
+        g_mutex_unlock(&g_send_lock);
+        return;
+    }
+    if (ns_mail_is_locked()) {
+        account_free(snap);
+        if (q) g_hash_table_destroy(q);
+        g_mutex_lock(&g_send_lock);
+        g_send_state = ST_ERROR;
+        g_free(g_send_error);
+        g_send_error = g_strdup("Enter your primary password to unlock mail.");
         g_mutex_unlock(&g_send_lock);
         return;
     }
