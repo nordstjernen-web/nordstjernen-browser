@@ -1193,18 +1193,28 @@ static ggml_backend_dev_t
 ns_ai_pick_gpu(void)
 {
     size_t n = ggml_backend_dev_count();
+    ggml_backend_dev_t best = NULL;
+    int best_rank = 0;
+    size_t best_free = 0;
     for (size_t i = 0; i < n; i++) {
         ggml_backend_dev_t d = ggml_backend_dev_get(i);
         enum ggml_backend_dev_type t = ggml_backend_dev_type(d);
-        if (t != GGML_BACKEND_DEVICE_TYPE_GPU &&
-            t != GGML_BACKEND_DEVICE_TYPE_IGPU)
+        int rank = t == GGML_BACKEND_DEVICE_TYPE_GPU  ? 2
+                 : t == GGML_BACKEND_DEVICE_TYPE_IGPU ? 1 : 0;
+        if (rank == 0)
             continue;
         if (ns_ai_device_is_software(ggml_backend_dev_name(d)) ||
             ns_ai_device_is_software(ggml_backend_dev_description(d)))
             continue;
-        return d;
+        size_t freem = 0, totalm = 0;
+        ggml_backend_dev_memory(d, &freem, &totalm);
+        if (rank > best_rank || (rank == best_rank && freem > best_free)) {
+            best = d;
+            best_rank = rank;
+            best_free = freem;
+        }
     }
-    return NULL;
+    return best;
 }
 
 static int
