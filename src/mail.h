@@ -20,6 +20,8 @@ gboolean ns_mail_set_primary(const char *form_urlencoded);
 void  ns_mail_refresh(void);
 char *ns_mail_status_json(void);
 
+int   ns_mail_poll_unseen(void);
+
 void  ns_mail_open(const char *uid);
 char *ns_mail_message_json(void);
 gboolean ns_mail_attachment(const char *uid, int index, char **out_ctype,

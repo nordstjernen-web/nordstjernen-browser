@@ -1287,6 +1287,51 @@ ns_mail_refresh(void)
     g_mutex_unlock(&g_inbox_lock);
 }
 
+int
+ns_mail_poll_unseen(void)
+{
+    gboolean locked = FALSE;
+    ns_mail_account *a = account_snapshot(&locked);
+    if (locked || !account_complete(a) ||
+        (a->in_proto && g_str_equal(a->in_proto, "pop3"))) {
+        account_free(a);
+        return -1;
+    }
+    char errbuf[CURL_ERROR_SIZE] = {0};
+    char *base = incoming_base_url(a, NULL);
+    GString *buf = g_string_new(NULL);
+    CURL *c = mail_curl_new(a, FALSE, errbuf, buf);
+    int count = -1;
+    if (c) {
+        char *url = g_strdup_printf("%s/INBOX", base);
+        curl_easy_setopt(c, CURLOPT_URL, url);
+        curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, "UID SEARCH UNSEEN");
+        CURLcode rc = curl_easy_perform(c);
+        g_free(url);
+        if (rc == CURLE_OK) {
+            int n = 0;
+            char **tok = g_strsplit_set(buf->str, " \r\n", -1);
+            gboolean after = FALSE;
+            for (int i = 0; tok[i]; i++) {
+                if (!*tok[i]) continue;
+                if (g_ascii_strcasecmp(tok[i], "SEARCH") == 0) { after = TRUE; continue; }
+                if (after) {
+                    char *endp = NULL;
+                    guint64 v = g_ascii_strtoull(tok[i], &endp, 10);
+                    if (endp && *endp == '\0' && v > 0) n++;
+                }
+            }
+            g_strfreev(tok);
+            count = n;
+        }
+        curl_easy_cleanup(c);
+    }
+    g_string_free(buf, TRUE);
+    g_free(base);
+    account_free(a);
+    return count;
+}
+
 char *
 ns_mail_status_json(void)
 {
