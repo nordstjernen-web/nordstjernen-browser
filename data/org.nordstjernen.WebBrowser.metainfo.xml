@@ -60,6 +60,18 @@
   </branding>
 
   <releases>
+    <release version="1.0.17" date="2026-06-29">
+      <description>
+        <p>Email client, media, and rendering release.</p>
+        <ul>
+          <li>Built-in email (about:email): IMAP/POP3/SMTP with one-step provider setup for Gmail, Yahoo, iCloud and Fastmail, app-password and 2-step-verification guidance, and attachment viewing.</li>
+          <li>An optional primary password encrypts saved mail credentials at rest with PBKDF2-SHA256 and AES-256-GCM.</li>
+          <li>Media: initial Media Source Extensions (MSE) append path.</li>
+          <li>Rendering: replaced elements (img, video, canvas, svg) are sized per the CSS rendering spec and default to inline-level.</li>
+          <li>Networking: per-host concurrent-fetch cap and tighter media/renderer IPC bounds.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.16" date="2026-06-26">
       <description>
         <p>Extensions, content blocking, and engine hardening release.</p>

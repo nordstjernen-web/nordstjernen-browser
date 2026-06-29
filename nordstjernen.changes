@@ -1,4 +1,23 @@
 -------------------------------------------------------------------
+Mon Jun 29 12:00:00 UTC 2026 - Andreas Røsdal <andreas.rosdal@gmail.com>
+
+- Release 1.0.17.
+- Email: a built-in IMAP/POP3/SMTP client (about:email) with one-step
+  provider setup for Gmail, Yahoo, iCloud and Fastmail, app-password and
+  2-step-verification guidance, attachment viewing, and plain-text compose.
+- An optional primary password encrypts saved mail credentials at rest with
+  PBKDF2-SHA256 and authenticated AES-256-GCM; nothing is written in the
+  clear once it is set.
+- Media: initial Media Source Extensions (MSE) append path.
+- Rendering: replaced elements (img, video, canvas, svg) are sized per the
+  CSS rendering spec and default to inline-level.
+- Networking: per-host concurrent-fetch cap to avoid CDN rate limiting, and
+  tighter media and renderer IPC bounds.
+- Build: removed the experimental Qt 6 frontend (the GTK 4 shell is the
+  single desktop frontend) and trimmed CI (dropped the 32-bit i586 job and
+  the advisory sanitizer/fuzz job).
+
+-------------------------------------------------------------------
 Tue Jun 23 12:00:00 UTC 2026 - Andreas Røsdal <andreas.rosdal@gmail.com>
 
 - Release 1.0.14.

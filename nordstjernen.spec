@@ -13,7 +13,7 @@
 
 
 Name:           nordstjernen
-Version:        1.14
+Version:        1.0.17
 Release:        0
 Summary:        Small, hand-written GTK web browser
 License:        SUSE-NonFree
