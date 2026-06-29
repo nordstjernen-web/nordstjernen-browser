@@ -813,6 +813,10 @@ ns_engine_dump_text(const ns_box *b, GString *out)
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         ns_engine_dump_text(c, out);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            ns_engine_dump_text(
+                g_array_index(b->inline_atomics, ns_inline_atomic, i).box, out);
 }
 
 void
@@ -837,6 +841,11 @@ ns_engine_dump_layout(const ns_box *b, int indent, GString *out)
     g_string_append_c(out, '\n');
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         ns_engine_dump_layout(c, indent + 2, out);
+    if (b->inline_atomics)
+        for (guint i = 0; i < b->inline_atomics->len; i++)
+            ns_engine_dump_layout(
+                g_array_index(b->inline_atomics, ns_inline_atomic, i).box,
+                indent + 2, out);
 }
 
 char *
