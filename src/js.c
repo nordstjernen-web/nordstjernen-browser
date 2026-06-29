@@ -16430,9 +16430,12 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetPropertyStr(ctx, global, "onmessageerror", JS_NULL);
     JS_SetPropertyStr(ctx, global, "onerror", JS_NULL);
 
+    const ns_config *wkr_cfg = ns_config_get();
+    const char *wkr_ua = (wkr_cfg && wkr_cfg->user_agent && *wkr_cfg->user_agent)
+                         ? wkr_cfg->user_agent : NS_USER_AGENT;
     JSValue navigator = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, navigator, "userAgent",
-                      JS_NewString(ctx, NS_USER_AGENT));
+                      JS_NewString(ctx, wkr_ua));
     JS_SetPropertyStr(ctx, navigator, "appName", JS_NewString(ctx, "Netscape"));
     JS_SetPropertyStr(ctx, navigator, "appCodeName", JS_NewString(ctx, "Mozilla"));
     JS_SetPropertyStr(ctx, navigator, "appVersion",
@@ -34053,9 +34056,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "postMessage",   ns_event_noop,           2);
 
     const ns_config *nav_cfg = ns_config_get();
+    const char *nav_ua = (nav_cfg && nav_cfg->user_agent && *nav_cfg->user_agent)
+                         ? nav_cfg->user_agent : NS_USER_AGENT;
     JSValue navigator = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, navigator, "userAgent",
-                      JS_NewString(ctx, NS_USER_AGENT));
+                      JS_NewString(ctx, nav_ua));
     JS_SetPropertyStr(ctx, navigator, "appName",
                       JS_NewString(ctx, "Netscape"));
     JS_SetPropertyStr(ctx, navigator, "appCodeName",
