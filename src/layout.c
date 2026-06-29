@@ -3895,8 +3895,8 @@ build_video_box(const ns_node *n)
     const char *ws = ns_element_get_attr(n, "width");
     const char *hs = ns_element_get_attr(n, "height");
     gboolean metadata = node_has_media_metadata(n);
-    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : (metadata ? 640 : 320);
-    box->content_height = hs ? g_ascii_strtod(hs, NULL) : (metadata ? 360 : 180);
+    box->content_width  = ws ? g_ascii_strtod(ws, NULL) : (metadata ? 640 : 300);
+    box->content_height = hs ? g_ascii_strtod(hs, NULL) : (metadata ? 360 : 150);
     const char *audio = ns_element_get_attr(n, "data-audio-src");
     if (audio && *audio) m->video_audio_src = g_strdup(audio);
     return box;
@@ -5979,12 +5979,6 @@ layout_image(ns_box *box, double parent_content_width)
     }
     if (min_w >= 0 && w < min_w) w = min_w;
     if (min_h >= 0 && h < min_h) h = min_h;
-
-    if (w > parent_content_width && parent_content_width > 0) {
-        double ratio = (w > 0) ? h / w : 0;
-        w = parent_content_width;
-        h = w * ratio;
-    }
 
     box->content_width = w;
     box->content_height = h;

@@ -13644,7 +13644,7 @@ static const char *kUa =
     "table[border=\"0\"], table[border=\"0\"] td, table[border=\"0\"] th { "
     "border-top-width: 0; border-right-width: 0; "
     "border-bottom-width: 0; border-left-width: 0; }\n"
-    "img { display: inline; max-width: 100%; }\n"
+    "img { display: inline; }\n"
     "figure { margin: 0.6em 24px; }\n"
     "figcaption { font-style: italic; font-size: 0.9em; text-align: center; }\n"
     "button, input, select, textarea { box-sizing: border-box; }\n"
