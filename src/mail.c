@@ -317,10 +317,12 @@ account_save_locked(void)
 }
 
 static ns_mail_account *
-account_snapshot(void)
+account_snapshot(gboolean *out_locked)
 {
     g_mutex_lock(&g_acct_lock);
     account_load_locked();
+    if (out_locked)
+        *out_locked = g_acct.primary_check && *g_acct.primary_check && !g_primary;
     ns_mail_account *snap = account_dup(&g_acct);
     char *ip = mail_pass_plain(snap->in_pass);
     g_free(snap->in_pass);
@@ -342,7 +344,7 @@ account_complete(const ns_mail_account *a)
 gboolean
 ns_mail_is_configured(void)
 {
-    ns_mail_account *a = account_snapshot();
+    ns_mail_account *a = account_snapshot(NULL);
     gboolean ok = account_complete(a);
     account_free(a);
     return ok;
@@ -351,7 +353,7 @@ ns_mail_is_configured(void)
 char *
 ns_mail_account_json(void)
 {
-    ns_mail_account *a = account_snapshot();
+    ns_mail_account *a = account_snapshot(NULL);
     GString *o = g_string_new("{");
     char *email = ns_mail_json_escape(a->email ? a->email : "");
     char *name = ns_mail_json_escape(a->name ? a->name : "");
@@ -527,16 +529,6 @@ mail_security_state(void)
         : "none";
     g_mutex_unlock(&g_acct_lock);
     return g_strdup(s);
-}
-
-gboolean
-ns_mail_is_locked(void)
-{
-    g_mutex_lock(&g_acct_lock);
-    account_load_locked();
-    gboolean locked = g_acct.primary_check && *g_acct.primary_check && !g_primary;
-    g_mutex_unlock(&g_acct_lock);
-    return locked;
 }
 
 gboolean
@@ -1090,25 +1082,58 @@ imap_search_uids(CURL *c, const char *base, char *errbuf, GError **error)
     return uids;
 }
 
+static char *
+imap_literal_body(const char *resp, gsize len, gsize *out_len)
+{
+    *out_len = 0;
+    const char *brace = NULL;
+    for (gsize i = 0; i < len; i++)
+        if (resp[i] == '{') { brace = resp + i; break; }
+    if (!brace) return NULL;
+    const char *p = brace + 1;
+    const char *end = resp + len;
+    gsize n = 0;
+    gboolean any = FALSE;
+    while (p < end && *p >= '0' && *p <= '9') {
+        n = n * 10 + (gsize)(*p - '0');
+        p++;
+        any = TRUE;
+    }
+    if (!any || p >= end || *p != '}') return NULL;
+    p++;
+    if (p + 1 < end && p[0] == '\r' && p[1] == '\n') p += 2;
+    else if (p < end && p[0] == '\n') p += 1;
+    else return NULL;
+    if ((gsize)(end - p) < n) n = (gsize)(end - p);
+    *out_len = n;
+    return g_strndup(p, n);
+}
+
 static ns_mail_hdr *
 imap_fetch_header(CURL *c, const char *base, guint uid, char *errbuf)
 {
     GString *buf = g_string_new(NULL);
-    char *url = g_strdup_printf("%s/INBOX;UID=%u;SECTION=HEADER", base, uid);
+    char *url = g_strdup_printf("%s/INBOX", base);
+    char *cmd = g_strdup_printf("UID FETCH %u BODY.PEEK[HEADER]", uid);
     curl_easy_setopt(c, CURLOPT_URL, url);
-    curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, NULL);
+    curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, cmd);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, buf);
     CURLcode rc = curl_easy_perform(c);
     g_free(url);
+    g_free(cmd);
     ns_mail_hdr *h = NULL;
     if (rc == CURLE_OK) {
-        char *headers = unfold_headers(buf->str, buf->len);
+        gsize blen = 0;
+        char *block = imap_literal_body(buf->str, buf->len, &blen);
+        char *headers = block ? unfold_headers(block, blen)
+                              : unfold_headers(buf->str, buf->len);
         h = g_new0(ns_mail_hdr, 1);
         h->uid = g_strdup_printf("%u", uid);
         h->from = header_value(headers, "From");
         h->subject = header_value(headers, "Subject");
         h->date = header_value(headers, "Date");
         g_free(headers);
+        g_free(block);
     } else if (errbuf[0]) {
         g_debug("imap header fetch: %s", errbuf);
     }
@@ -1234,9 +1259,10 @@ sync_thread(gpointer data)
 void
 ns_mail_refresh(void)
 {
-    ns_mail_account *snap = account_snapshot();
+    gboolean locked = FALSE;
+    ns_mail_account *snap = account_snapshot(&locked);
     if (!account_complete(snap)) { account_free(snap); return; }
-    if (ns_mail_is_locked()) {
+    if (locked) {
         account_free(snap);
         g_mutex_lock(&g_inbox_lock);
         g_sync_state = ST_ERROR;
@@ -1264,7 +1290,7 @@ ns_mail_refresh(void)
 char *
 ns_mail_status_json(void)
 {
-    ns_mail_account *a = account_snapshot();
+    ns_mail_account *a = account_snapshot(NULL);
     gboolean configured = account_complete(a);
     char *sec = mail_security_state();
 
@@ -1387,9 +1413,10 @@ void
 ns_mail_open(const char *uid)
 {
     if (!uid || !*uid) return;
-    ns_mail_account *snap = account_snapshot();
+    gboolean locked = FALSE;
+    ns_mail_account *snap = account_snapshot(&locked);
     if (!account_complete(snap)) { account_free(snap); return; }
-    if (ns_mail_is_locked()) {
+    if (locked) {
         account_free(snap);
         g_mutex_lock(&g_open_lock);
         g_open_state = ST_ERROR;
@@ -1656,7 +1683,8 @@ ns_mail_send(const char *form)
     GHashTable *q = form && *form
         ? g_uri_parse_params(form, -1, "&", G_URI_PARAMS_WWW_FORM, NULL)
         : NULL;
-    ns_mail_account *snap = account_snapshot();
+    gboolean locked = FALSE;
+    ns_mail_account *snap = account_snapshot(&locked);
     if (!account_complete(snap) || !snap->out_host || !*snap->out_host) {
         account_free(snap);
         if (q) g_hash_table_destroy(q);
@@ -1667,7 +1695,7 @@ ns_mail_send(const char *form)
         g_mutex_unlock(&g_send_lock);
         return;
     }
-    if (ns_mail_is_locked()) {
+    if (locked) {
         account_free(snap);
         if (q) g_hash_table_destroy(q);
         g_mutex_lock(&g_send_lock);

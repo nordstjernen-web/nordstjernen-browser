@@ -111,7 +111,11 @@ The full section-by-section walk-through lives in
   and `smtp(s)://` directly over libcurl — no extra mail stack — and your
   account details stay on your machine
   (`~/.config/nordstjernen/email.conf`), sent only to your own mail
-  servers, never relayed through anyone else.
+  servers, never relayed through anyone else. New in 1.0.17: one-step
+  setup for Gmail, Yahoo, iCloud and Fastmail (each needs an app
+  password — your normal login and OAuth-only services such as Outlook
+  are not supported), inline attachment viewing, and an optional primary
+  password that encrypts the saved credentials at rest with AES-256-GCM.
 - **UI** — tabs, bookmarks, find-in-page, save-to-PDF, JS console,
   settings, headless mode, and a C embedding API.
 

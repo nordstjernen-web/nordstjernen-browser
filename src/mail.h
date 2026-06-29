@@ -14,7 +14,6 @@ gboolean ns_mail_account_save(const char *form_urlencoded);
 
 char    *ns_mail_autoconfig_json(const char *provider_id, const char *email);
 
-gboolean ns_mail_is_locked(void);
 gboolean ns_mail_unlock(const char *form_urlencoded);
 gboolean ns_mail_set_primary(const char *form_urlencoded);
 
