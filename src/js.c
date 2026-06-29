@@ -7794,6 +7794,26 @@ ns_wc_export_jwk(JSContext *ctx, ns_crypto_key *k, char **err)
             return JS_NULL;
         }
         JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "RSA"));
+        {
+            const char *suf = NULL;
+            if (!g_strcmp0(k->hash, "SHA-1"))   suf = "1";
+            else if (!g_strcmp0(k->hash, "SHA-256")) suf = "256";
+            else if (!g_strcmp0(k->hash, "SHA-384")) suf = "384";
+            else if (!g_strcmp0(k->hash, "SHA-512")) suf = "512";
+            char *alg = NULL;
+            if (!g_strcmp0(k->algo, "RSA-OAEP"))
+                alg = g_strcmp0(k->hash, "SHA-1")
+                          ? g_strdup_printf("RSA-OAEP-%s", suf ? suf : "256")
+                          : g_strdup("RSA-OAEP");
+            else if (!g_strcmp0(k->algo, "RSASSA-PKCS1-v1_5") && suf)
+                alg = g_strdup_printf("RS%s", suf);
+            else if (!g_strcmp0(k->algo, "RSA-PSS") && suf)
+                alg = g_strdup_printf("PS%s", suf);
+            if (alg) {
+                JS_SetPropertyStr(ctx, o, "alg", JS_NewString(ctx, alg));
+                g_free(alg);
+            }
+        }
         char *bn = ns_b64url_encode(n, nl), *be = ns_b64url_encode(e, el);
         JS_SetPropertyStr(ctx, o, "n", JS_NewString(ctx, bn));
         JS_SetPropertyStr(ctx, o, "e", JS_NewString(ctx, be));
