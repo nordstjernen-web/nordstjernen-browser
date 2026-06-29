@@ -448,7 +448,7 @@ if not is_android and ai_feature.allowed()
   llama_opts.add_cmake_defines({
     'BUILD_SHARED_LIBS': false,
     'LLAMA_CURL': false,
-    'GGML_NATIVE': true,
+    'GGML_NATIVE': false,
     'GGML_OPENMP': false,
     'GGML_METAL': use_metal,
     'GGML_METAL_EMBED_LIBRARY': false,
