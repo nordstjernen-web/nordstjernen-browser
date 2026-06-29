@@ -5426,12 +5426,44 @@ ns_fetch_ctx_free(gpointer data)
 }
 
 #define NS_MAX_CONCURRENT_FETCHES 32
+#define NS_MAX_FETCHES_PER_HOST   6
 static GMutex g_fetch_throttle_mutex;
 static int    g_fetch_active;
 static GQueue g_fetch_queue = G_QUEUE_INIT;
 
+static GHashTable *g_fetch_host_active;
+
 static void ns_fetch_thread(GTask *task, gpointer source_object,
                             gpointer task_data, GCancellable *cancellable);
+
+static char *
+ns_fetch_task_host(GTask *task)
+{
+    ns_fetch_ctx *ctx = task ? g_task_get_task_data(task) : NULL;
+    return (ctx && ctx->url) ? ns_url_host_from(ctx->url) : NULL;
+}
+
+static int
+ns_fetch_host_count_locked(const char *host)
+{
+    if (!host || !g_fetch_host_active) return 0;
+    return GPOINTER_TO_INT(g_hash_table_lookup(g_fetch_host_active, host));
+}
+
+static void
+ns_fetch_host_adjust_locked(const char *host, int delta)
+{
+    if (!host) return;
+    if (!g_fetch_host_active)
+        g_fetch_host_active = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                    g_free, NULL);
+    int n = ns_fetch_host_count_locked(host) + delta;
+    if (n <= 0)
+        g_hash_table_remove(g_fetch_host_active, host);
+    else
+        g_hash_table_replace(g_fetch_host_active, g_strdup(host),
+                             GINT_TO_POINTER(n));
+}
 
 static void
 ns_fetch_throttle_dispatch(void)
@@ -5443,11 +5475,30 @@ ns_fetch_throttle_dispatch(void)
             g_mutex_unlock(&g_fetch_throttle_mutex);
             return;
         }
-        GTask *t = g_queue_pop_head(&g_fetch_queue);
+        GTask *chosen = NULL;
+        char *chosen_host = NULL;
+        for (GList *l = g_fetch_queue.head; l; l = l->next) {
+            GTask *t = l->data;
+            char *host = ns_fetch_task_host(t);
+            if (!host ||
+                ns_fetch_host_count_locked(host) < NS_MAX_FETCHES_PER_HOST) {
+                chosen = t;
+                chosen_host = host;
+                g_queue_delete_link(&g_fetch_queue, l);
+                break;
+            }
+            g_free(host);
+        }
+        if (!chosen) {
+            g_mutex_unlock(&g_fetch_throttle_mutex);
+            return;
+        }
         g_fetch_active++;
+        ns_fetch_host_adjust_locked(chosen_host, 1);
+        g_free(chosen_host);
         g_mutex_unlock(&g_fetch_throttle_mutex);
-        g_task_run_in_thread(t, ns_fetch_thread);
-        g_object_unref(t);
+        g_task_run_in_thread(chosen, ns_fetch_thread);
+        g_object_unref(chosen);
     }
 }
 
@@ -5490,9 +5541,14 @@ ns_fetch_thread(GTask        *task,
     }
     if (resp)
         g_task_return_pointer(task, resp, (GDestroyNotify)ns_response_free);
-    g_mutex_lock(&g_fetch_throttle_mutex);
-    if (g_fetch_active > 0) g_fetch_active--;
-    g_mutex_unlock(&g_fetch_throttle_mutex);
+    {
+        char *host = (ctx && ctx->url) ? ns_url_host_from(ctx->url) : NULL;
+        g_mutex_lock(&g_fetch_throttle_mutex);
+        if (g_fetch_active > 0) g_fetch_active--;
+        ns_fetch_host_adjust_locked(host, -1);
+        g_mutex_unlock(&g_fetch_throttle_mutex);
+        g_free(host);
+    }
     ns_fetch_throttle_dispatch();
 }
 
