@@ -1,5 +1,4 @@
-/* Nordstjernen — inline video decoding: MPEG-1 (pl_mpeg) and, when libav is
- * available, WebM/VP9 (libavformat + libavcodec + libswscale).
+/* Nordstjernen — inline video decoding: MPEG-1 and libav-backed containers.
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
@@ -64,6 +63,12 @@ bytes_are_matroska(const guint8 *bytes, gsize len)
     return bytes && len >= 4 && bytes[0] == 0x1A && bytes[1] == 0x45 &&
            bytes[2] == 0xDF && bytes[3] == 0xA3;
 }
+
+static gboolean
+bytes_are_isobmff(const guint8 *bytes, gsize len)
+{
+    return bytes && len >= 12 && memcmp(bytes + 4, "ftyp", 4) == 0;
+}
 #endif
 
 gboolean
@@ -73,6 +78,7 @@ ns_video_decode_probe(const guint8 *bytes, gsize len)
     if (bytes_are_mpeg1(bytes, len)) return TRUE;
 #ifdef NS_HAVE_LIBAV
     if (bytes_are_matroska(bytes, len)) return TRUE;
+    if (bytes_are_isobmff(bytes, len)) return TRUE;
 #endif
     return FALSE;
 }
@@ -153,7 +159,10 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
 
     AVStream *vs = L->fmt->streams[L->vstream];
     enum AVCodecID id = vs->codecpar->codec_id;
-    if (id != AV_CODEC_ID_VP9 && id != AV_CODEC_ID_VP8) {
+    if (id != AV_CODEC_ID_VP9 && id != AV_CODEC_ID_VP8 &&
+        id != AV_CODEC_ID_H264 && id != AV_CODEC_ID_HEVC &&
+        id != AV_CODEC_ID_AV1 && id != AV_CODEC_ID_MPEG4 &&
+        id != AV_CODEC_ID_THEORA) {
         ns_lav_free(L);
         return NULL;
     }
@@ -292,7 +301,7 @@ ns_video_player_new(const guint8 *bytes, gsize len)
     }
 
 #ifdef NS_HAVE_LIBAV
-    if (bytes_are_matroska(bytes, len)) {
+    if (bytes_are_matroska(bytes, len) || bytes_are_isobmff(bytes, len)) {
         int w = 0, h = 0, has_audio = 0;
         double dur = 0.0;
         ns_lav *L = ns_lav_open(bytes, len, &w, &h, &dur, &has_audio);

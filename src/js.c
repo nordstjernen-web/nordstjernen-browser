@@ -208,6 +208,8 @@ static JSValue ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val);
 static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
+static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
+                                            int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
@@ -13505,6 +13507,25 @@ ns_blob_entry_free(gpointer p)
 
 static GPtrArray *g_blob_js_registry = NULL;
 
+static ns_blob_entry *
+ns_blob_entry_new_for_object(JSContext *ctx, JSValueConst obj)
+{
+    gsize len = 0;
+    char *bytes = ns_blob_bytes_as_string(ctx, obj, &len);
+    char *type = NULL;
+    JSValue tv = JS_GetPropertyStr(ctx, obj, "type");
+    if (JS_IsString(tv)) {
+        const char *s = JS_ToCString(ctx, tv);
+        if (s && *s) type = g_strdup(s);
+        if (s) JS_FreeCString(ctx, s);
+    }
+    JS_FreeValue(ctx, tv);
+    ns_blob_entry *e = g_new0(ns_blob_entry, 1);
+    e->bytes = g_bytes_new_take(bytes, len);
+    e->type = type;
+    return e;
+}
+
 static GBytes *
 ns_js_net_blob_resolver(const char *url, char **out_type, gpointer user_data)
 {
@@ -13557,27 +13578,39 @@ ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
     g_free(uuid);
 
     if (js && argc >= 1 && JS_IsObject(argv[0])) {
-        gsize len = 0;
-        char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
-        char *type = NULL;
-        JSValue tv = JS_GetPropertyStr(ctx, argv[0], "type");
-        if (JS_IsString(tv)) {
-            const char *s = JS_ToCString(ctx, tv);
-            if (s && *s) type = g_strdup(s);
-            if (s) JS_FreeCString(ctx, s);
-        }
-        JS_FreeValue(ctx, tv);
         if (!js->blob_urls)
             js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                   g_free, ns_blob_entry_free);
-        ns_blob_entry *e = g_new0(ns_blob_entry, 1);
-        e->bytes = g_bytes_new_take(bytes, len);
-        e->type = type;
-        g_hash_table_replace(js->blob_urls, g_strdup(url), e);
+        g_hash_table_replace(js->blob_urls, g_strdup(url),
+                             ns_blob_entry_new_for_object(ctx, argv[0]));
     }
     JSValue ret = JS_NewString(ctx, url);
     g_free(url);
     return ret;
+}
+
+static JSValue
+ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || argc < 2 || !JS_IsString(argv[0]) || !JS_IsObject(argv[1]))
+        return JS_FALSE;
+    const char *url = JS_ToCString(ctx, argv[0]);
+    if (!url) return JS_FALSE;
+    if (!g_str_has_prefix(url, "blob:")) {
+        JS_FreeCString(ctx, url);
+        return JS_FALSE;
+    }
+    if (!js->blob_urls)
+        js->blob_urls = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                              g_free, ns_blob_entry_free);
+    g_hash_table_replace(js->blob_urls, g_strdup(url),
+                         ns_blob_entry_new_for_object(ctx, argv[1]));
+    js->mutated = TRUE;
+    JS_FreeCString(ctx, url);
+    return JS_TRUE;
 }
 
 static JSValue
@@ -29446,6 +29479,10 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
         strcmp(container, "video/mpeg") == 0 ||
         (libav && (strcmp(container, "video/webm") == 0 ||
                    strcmp(container, "audio/webm") == 0 ||
+                   strcmp(container, "video/mp4") == 0 ||
+                   strcmp(container, "audio/mp4") == 0 ||
+                   strcmp(container, "application/mp4") == 0 ||
+                   strcmp(container, "video/x-m4v") == 0 ||
                    strcmp(container, "audio/ogg") == 0 ||
                    strcmp(container, "application/ogg") == 0 ||
                    strcmp(container, "audio/opus") == 0));
@@ -29473,6 +29510,12 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
                     strstr(cd, "mp3") != NULL ||
                     g_str_has_prefix(cd, "mp4a.69") ||
                     g_str_has_prefix(cd, "mp4a.6b") ||
+                    (libav && (g_str_has_prefix(cd, "mp4a.40") ||
+                               g_str_has_prefix(cd, "avc1") ||
+                               g_str_has_prefix(cd, "avc3") ||
+                               g_str_has_prefix(cd, "hvc1") ||
+                               g_str_has_prefix(cd, "hev1") ||
+                               g_str_has_prefix(cd, "av01"))) ||
                     (libav && (g_str_has_prefix(cd, "vp8") ||
                                g_str_has_prefix(cd, "vp9") ||
                                g_str_has_prefix(cd, "vp08") ||
@@ -34227,6 +34270,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
+    ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
     {

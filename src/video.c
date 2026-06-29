@@ -303,11 +303,12 @@ static gboolean
 url_is_inline_video(const char *url)
 {
     if (!url) return FALSE;
+    if (g_str_has_prefix(url, "blob:")) return TRUE;
     gsize n = strcspn(url, "?#");
     static const char *const exts[] = {
         ".mpg", ".mpeg", ".m1v", ".mpeg1", ".mpg1",
 #ifdef NS_HAVE_LIBAV
-        ".webm",
+        ".mp4", ".m4v", ".webm",
 #endif
         NULL,
     };
@@ -366,10 +367,11 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us
         if (box->media->video) continue;
         const char *src = box->media->video_src;
         if (!src || !*src) continue;
-        char *abs = ns_url_resolve(cache->base_url, src);
+        char *abs = g_str_has_prefix(src, "blob:") ? g_strdup(src)
+                                                   : ns_url_resolve(cache->base_url, src);
         if (!abs) continue;
         if ((!g_str_has_prefix(abs, "http://") && !g_str_has_prefix(abs, "https://") &&
-             !g_str_has_prefix(abs, "file://")) ||
+             !g_str_has_prefix(abs, "file://") && !g_str_has_prefix(abs, "blob:")) ||
             !url_is_inline_video(abs)) {
             g_free(abs);
             continue;

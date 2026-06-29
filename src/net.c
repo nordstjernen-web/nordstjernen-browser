@@ -5577,6 +5577,8 @@ ns_net_fetch_async(const char        *url,
 {
     g_return_if_fail(url != NULL);
 
+    if (ns_net_complete_blob(url, cancellable, callback, user_data)) return;
+
     ns_fetch_ctx *ctx = g_new0(ns_fetch_ctx, 1);
     ctx->url = g_strdup(url);
     ctx->top_url = top_url ? g_strdup(top_url) : NULL;
