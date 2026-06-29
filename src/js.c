@@ -11063,8 +11063,7 @@ ns_url_parts_to_js(JSContext *ctx, const char *href)
     JS_SetPropertyStr(ctx, o, "hostname", JS_NewString(ctx, parts->hostname));
     JS_SetPropertyStr(ctx, o, "port",     JS_NewString(ctx, parts->port));
     JS_SetPropertyStr(ctx, o, "origin",   JS_NewString(ctx, parts->origin));
-    JS_SetPropertyStr(ctx, o, "pathname",
-                      JS_NewString(ctx, *parts->pathname ? parts->pathname : "/"));
+    JS_SetPropertyStr(ctx, o, "pathname", JS_NewString(ctx, parts->pathname));
     JS_SetPropertyStr(ctx, o, "search",   JS_NewString(ctx, parts->search));
     JS_SetPropertyStr(ctx, o, "hash",     JS_NewString(ctx, parts->hash));
     JS_SetPropertyStr(ctx, o, "username", JS_NewString(ctx, parts->username));
@@ -11172,13 +11171,14 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     if (argc < 1) return JS_ThrowTypeError(ctx, "URL: requires a url string");
-    const char *raw = JS_ToCString(ctx, argv[0]);
+    size_t raw_len = 0;
+    const char *raw = JS_ToCStringLen(ctx, &raw_len, argv[0]);
     if (!raw) return JS_ThrowTypeError(ctx, "URL: invalid url argument");
     char *resolved = NULL;
     if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
         const char *base = JS_ToCString(ctx, argv[1]);
         if (base) {
-            resolved = ns_url_resolve(base, raw);
+            resolved = ns_url_resolve_len(base, raw, raw_len);
             JS_FreeCString(ctx, base);
         }
         if (!resolved) {
@@ -11187,7 +11187,7 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (!resolved) {
-        resolved = ns_url_resolve(NULL, raw);
+        resolved = ns_url_resolve_len(NULL, raw, raw_len);
         if (!resolved) {
             JS_FreeCString(ctx, raw);
             return JS_ThrowTypeError(ctx,
@@ -11204,14 +11204,8 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
         JS_SetPropertyStr(ctx, obj, "hostname", JS_NewString(ctx, parts->hostname));
         JS_SetPropertyStr(ctx, obj, "port",     JS_NewString(ctx, parts->port));
         JS_SetPropertyStr(ctx, obj, "origin",   JS_NewString(ctx, parts->origin));
-        const char *proto = parts->protocol;
-        gboolean special = proto && (!strcmp(proto, "http:") ||
-            !strcmp(proto, "https:") || !strcmp(proto, "ws:") ||
-            !strcmp(proto, "wss:") || !strcmp(proto, "ftp:") ||
-            !strcmp(proto, "file:"));
         JS_SetPropertyStr(ctx, obj, "pathname",
-                          JS_NewString(ctx, (special && !*parts->pathname)
-                                            ? "/" : parts->pathname));
+                          JS_NewString(ctx, parts->pathname));
         JS_SetPropertyStr(ctx, obj, "search",   JS_NewString(ctx, parts->search));
         JS_SetPropertyStr(ctx, obj, "hash",     JS_NewString(ctx, parts->hash));
         JS_SetPropertyStr(ctx, obj, "username", JS_NewString(ctx, parts->username));
@@ -11288,7 +11282,7 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
             "   href: u.href, origin: u.origin,"
             "   protocol: u.protocol, username: u.username, password: u.password,"
             "   host: u.host, hostname: u.hostname, port: u.port,"
-            "   pathname: u.pathname || '/', search: u.search || '', hash: u.hash || ''"
+            "   pathname: (u.pathname == null ? '' : u.pathname), search: u.search || '', hash: u.hash || ''"
             " };"
             " var inst = Object.create(URLp);"
             " Object.defineProperty(inst, '__nd', { value: nd, configurable: true,"

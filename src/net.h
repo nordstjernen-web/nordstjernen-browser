@@ -118,6 +118,7 @@ gboolean ns_data_url_decode(const char *url, GByteArray *out, guint64 budget,
 gboolean ns_url_is_valid_absolute(const char *url);
 char    *ns_url_strip_tracking_params(const char *url);
 char    *ns_url_resolve(const char *base, const char *href);
+char    *ns_url_resolve_len(const char *base, const char *href, size_t href_len);
 char    *ns_url_set_component_len(const char *href, const char *component,
                                   const char *value, size_t value_len);
 

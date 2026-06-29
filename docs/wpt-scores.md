@@ -61,6 +61,9 @@ they regenerate.
 | 2026-06-25 | 8100989 | 88deace8f | 397/697 (56%) | 67956/69429 (97%) | partial: dom/events |
 | 2026-06-27 | e92c9b1 | d5fb546 | 433/698 (62%) | 65712/69646 (94%) | full; iframe/CE/error-event/touch |
 | 2026-06-27 | ab57a20 | d5fb546 | 437/698 (62%) | 67294/69646 (96%) | partial: dom/ranges dom/nodes; name-validation + Range exceptions |
+| 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 68361/70733 (96%) | partial: url |
+| 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 67257/69570 (96%) | partial: url |
+| 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 68408/70739 (96%) | partial: url |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -68,9 +71,9 @@ results. The Notes column records whether a row came from a full or
 partial run — a partial row mixes revisions for the areas it did not
 touch.
 
-## Per-area results — 2026-06-27
+## Per-area results — 2026-06-29
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-27-e92c9b1.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-29-48ebb3d.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
@@ -80,7 +83,7 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-27-e92c9b1.tsv`.
 | `dom/ranges` | 36/55 | 44357/44537 | 180 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
 | `dom/collections` | 5/10 | 43/53 | 10 | 0 | 0 | 0 |
-| `url` | 14/32 | 6441/7489 | 1047 | 1 | 0 | 0 |
+| `url` | 14/32 | 7555/8582 | 1020 | 2 | 5 | 0 |
 | `console` | 7/12 | 51/56 | 5 | 0 | 0 | 0 |
 | `hr-time` | 5/13 | 32/50 | 17 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
@@ -89,9 +92,9 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-27-e92c9b1.tsv`.
 | `WebCryptoAPI/digest` | 2/5 | 164/535 | 371 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 98/118 | 20 | 0 | 0 | 0 |
-| **Total** | **437/698** | **67294/69646** | **2247** | **44** | **55** | **6** |
+| **Total** | **437/698** | **68408/70739** | **2220** | **45** | **60** | **6** |
 
-## ROI by area — 2026-06-27
+## ROI by area — 2026-06-29
 
 Where score is cheapest to win, from the same data. Available
 gain is the non-passing subtest count (sorted descending);
@@ -104,7 +107,7 @@ file.
 
 | Area | Available gain | Affected files | Gain/file | Harness-broken | Near-ok |
 |------|----------------|----------------|-----------|----------------|---------|
-| `url` | 1048 | 18 | 58.2 | 3 | 4 |
+| `url` | 1027 | 18 | 57.1 | 2 | 4 |
 | `WebCryptoAPI/digest` | 371 | 3 | 123.7 | 0 | 0 |
 | `dom/events` | 298 | 62 | 4.8 | 30 | 20 |
 | `dom/nodes` | 222 | 104 | 2.1 | 18 | 57 |

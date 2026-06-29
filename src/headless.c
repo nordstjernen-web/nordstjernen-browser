@@ -1683,7 +1683,7 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     if (opts->actions && *opts->actions)
         headless_run_actions(&flush_ctx, &nav_cap, opts->actions);
 
-    if (nav_cap.pending_url && hop < 4) {
+    if (nav_cap.pending_url && hop < 4 && !opts->wpt) {
         char *next = NULL;
         if (strstr(nav_cap.pending_url, "://")) {
             next = g_strdup(nav_cap.pending_url);

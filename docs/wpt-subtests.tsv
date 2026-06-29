@@ -66122,7 +66122,7 @@ test	subtest	status
 /url/a-element.html	Parsing: <foo://ho st/> against <about:blank>	PASS
 /url/a-element.html	Parsing: <foo://ho st/> against <about:blank>	PASS
 /url/a-element.html	Parsing: <foo://ho st/> against <about:blank>	PASS
-/url/a-element.html	Parsing: <foo://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> against <about:blank>	FAIL
+/url/a-element.html	Parsing: <foo://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <foo://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <foo://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <foo://joe: !"$%&'()*+,-.:;<=>@[\]^_`{|}~@host/> against <about:blank>	PASS
@@ -66707,7 +66707,7 @@ test	subtest	status
 /url/a-element.html	Parsing: <wss://foo:80/> against <about:blank>	PASS
 /url/a-element.html	Parsing: <wss://foo:81/> against <about:blank>	PASS
 /url/a-element.html	Parsing: <wss://foo:815/> against <about:blank>	PASS
-/url/a-element.html	Parsing: <wss://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> against <about:blank>	FAIL
+/url/a-element.html	Parsing: <wss://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <wss://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <wss://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~> against <about:blank>	PASS
 /url/a-element.html	Parsing: <wss://joe: !"$%&'()*+,-.:;<=>@[]^_`{|}~@host/> against <about:blank>	PASS
@@ -66720,7 +66720,1170 @@ test	subtest	status
 /url/a-element.html	Test that embedded 0x0A is stripped	PASS
 /url/data-uri-fragment.html	<harness>	TIMEOUT
 /url/data-uri-fragment.html	Data URI parsing of fragments	TIMEOUT
-/url/failure.html	<harness>	NONE
+/url/failure.html	<harness>	OK
+/url/failure.html	Loading data…	PASS
+/url/failure.html	Location's href: asdf://%43|/ should throw	PASS
+/url/failure.html	Location's href: data://:443 should throw	PASS
+/url/failure.html	Location's href: data://[:1] should throw	PASS
+/url/failure.html	Location's href: data://test:test should throw	PASS
+/url/failure.html	Location's href: file://%43%3A should throw	PASS
+/url/failure.html	Location's href: file://%43%7C should throw	PASS
+/url/failure.html	Location's href: file://%43%7C/ should throw	PASS
+/url/failure.html	Location's href: file://%43| should throw	PASS
+/url/failure.html	Location's href: file://%C2%AD/p should throw	PASS
+/url/failure.html	Location's href: file://C%7C should throw	PASS
+/url/failure.html	Location's href: file://[example]/ should throw	PASS
+/url/failure.html	Location's href: file://example%/ should throw	PASS
+/url/failure.html	Location's href: file://example:1/ should throw	PASS
+/url/failure.html	Location's href: file://example:test/ should throw	PASS
+/url/failure.html	Location's href: file://­/p should throw	PASS
+/url/failure.html	Location's href: ftp://example.com%80/ should throw	PASS
+/url/failure.html	Location's href: ftp://example.com%A0/ should throw	PASS
+/url/failure.html	Location's href: http://# should throw	PASS
+/url/failure.html	Location's href: http://0..0x300./ should throw	PASS
+/url/failure.html	Location's href: http://0..0x300/ should throw	PASS
+/url/failure.html	Location's href: http://01.2.3.4.5 should throw	PASS
+/url/failure.html	Location's href: http://01.2.3.4.5. should throw	PASS
+/url/failure.html	Location's href: http://09.2.3.4 should throw	PASS
+/url/failure.html	Location's href: http://09.2.3.4. should throw	PASS
+/url/failure.html	Location's href: http://0999999999999999999/ should throw	PASS
+/url/failure.html	Location's href: http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	Location's href: http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	Location's href: http://0x100.2.3.4 should throw	PASS
+/url/failure.html	Location's href: http://0x100.2.3.4. should throw	PASS
+/url/failure.html	Location's href: http://1.2.3.08 should throw	PASS
+/url/failure.html	Location's href: http://1.2.3.08. should throw	PASS
+/url/failure.html	Location's href: http://1.2.3.09 should throw	PASS
+/url/failure.html	Location's href: http://? should throw	PASS
+/url/failure.html	Location's href: http://@/www.example.com should throw	PASS
+/url/failure.html	Location's href: http://@:www.example.com should throw	PASS
+/url/failure.html	Location's href: http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	Location's href: http://[www.google.com]/ should throw	PASS
+/url/failure.html	Location's href: http://a b/ should throw	FAIL
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://a b/ should throw	PASS
+/url/failure.html	Location's href: http://a%b/ should throw	PASS
+/url/failure.html	Location's href: http://a:b@/www.example.com should throw	PASS
+/url/failure.html	Location's href: http://a<b should throw	PASS
+/url/failure.html	Location's href: http://a>b should throw	PASS
+/url/failure.html	Location's href: http://a[b/ should throw	PASS
+/url/failure.html	Location's href: http://a]b/ should throw	PASS
+/url/failure.html	Location's href: http://a^b should throw	PASS
+/url/failure.html	Location's href: http://a|b/ should throw	PASS
+/url/failure.html	Location's href: http://ab/ should throw	PASS
+/url/failure.html	Location's href: http://foo.09 should throw	PASS
+/url/failure.html	Location's href: http://foo.09. should throw	PASS
+/url/failure.html	Location's href: http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	Location's href: http://foo.0x should throw	PASS
+/url/failure.html	Location's href: http://foo.0x4 should throw	PASS
+/url/failure.html	Location's href: http://foo.0x4. should throw	PASS
+/url/failure.html	Location's href: http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	Location's href: http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	Location's href: http://foo.2.3.4 should throw	PASS
+/url/failure.html	Location's href: http://foo.2.3.4. should throw	PASS
+/url/failure.html	Location's href: http://foo:-80/ should throw	PASS
+/url/failure.html	Location's href: http://ho%00st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%01st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%02st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%03st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%04st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%05st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%06st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%07st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%08st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%09st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Ast/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Bst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Cst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Dst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Est/ should throw	PASS
+/url/failure.html	Location's href: http://ho%0Fst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%10st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%11st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%12st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%13st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%14st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%15st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%16st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%17st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%18st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%19st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Ast/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Bst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Cst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Dst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Est/ should throw	PASS
+/url/failure.html	Location's href: http://ho%1Fst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%20st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%23st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%25st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%2Fst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%3Ast/ should throw	PASS
+/url/failure.html	Location's href: http://ho%3Cst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%3Est/ should throw	PASS
+/url/failure.html	Location's href: http://ho%3Fst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%40st/ should throw	PASS
+/url/failure.html	Location's href: http://ho%5Bst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%5Cst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%5Dst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%7Cst/ should throw	PASS
+/url/failure.html	Location's href: http://ho%7Fst/ should throw	PASS
+/url/failure.html	Location's href: http://user:pass@/ should throw	PASS
+/url/failure.html	Location's href: http://user@/www.example.com should throw	PASS
+/url/failure.html	Location's href: http://💩.123/ should throw	PASS
+/url/failure.html	Location's href: https:// y should throw	PASS
+/url/failure.html	Location's href: https://%43%7C/ should throw	PASS
+/url/failure.html	Location's href: https://%C2%AD/ should throw	PASS
+/url/failure.html	Location's href: https://%EF%BF%BD should throw	PASS
+/url/failure.html	Location's href: https://0x100000000/test should throw	PASS
+/url/failure.html	Location's href: https://256.0.0.1/test should throw	PASS
+/url/failure.html	Location's href: https://[0:.0] should throw	PASS
+/url/failure.html	Location's href: https://[0:0:] should throw	PASS
+/url/failure.html	Location's href: https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	Location's href: https://[0:1.23.23] should throw	PASS
+/url/failure.html	Location's href: https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	Location's href: https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	Location's href: https://[0::0::0] should throw	PASS
+/url/failure.html	Location's href: https://example.com%80/ should throw	PASS
+/url/failure.html	Location's href: https://example.com%A0/ should throw	PASS
+/url/failure.html	Location's href: https://x x:12 should throw	PASS
+/url/failure.html	Location's href: https://­/ should throw	PASS
+/url/failure.html	Location's href: https://� should throw	PASS
+/url/failure.html	Location's href: https://￿y should throw	PASS
+/url/failure.html	Location's href: intent://:443 should throw	PASS
+/url/failure.html	Location's href: intent://[:1] should throw	PASS
+/url/failure.html	Location's href: intent://test:test should throw	PASS
+/url/failure.html	Location's href: javascript://:443 should throw	PASS
+/url/failure.html	Location's href: javascript://[:1] should throw	PASS
+/url/failure.html	Location's href: javascript://test:test should throw	PASS
+/url/failure.html	Location's href: mailto://:443 should throw	PASS
+/url/failure.html	Location's href: mailto://[:1] should throw	PASS
+/url/failure.html	Location's href: mailto://test:test should throw	PASS
+/url/failure.html	Location's href: non-special://[:80/ should throw	PASS
+/url/failure.html	Location's href: non-special://host\a should throw	PASS
+/url/failure.html	Location's href: sc://:/ should throw	PASS
+/url/failure.html	Location's href: sc://:12/ should throw	PASS
+/url/failure.html	Location's href: sc://@/ should throw	PASS
+/url/failure.html	Location's href: sc://a b/ should throw	FAIL
+/url/failure.html	Location's href: sc://a b/ should throw	PASS
+/url/failure.html	Location's href: sc://a<b should throw	PASS
+/url/failure.html	Location's href: sc://a>b should throw	PASS
+/url/failure.html	Location's href: sc://a[b/ should throw	PASS
+/url/failure.html	Location's href: sc://a\b/ should throw	PASS
+/url/failure.html	Location's href: sc://a]b/ should throw	PASS
+/url/failure.html	Location's href: sc://a^b should throw	PASS
+/url/failure.html	Location's href: sc://a|b/ should throw	PASS
+/url/failure.html	Location's href: sc://te@s:t@/ should throw	PASS
+/url/failure.html	Location's href: stun://:443 should throw	PASS
+/url/failure.html	Location's href: stun://[:1] should throw	PASS
+/url/failure.html	Location's href: stun://test:test should throw	PASS
+/url/failure.html	Location's href: turn://:443 should throw	PASS
+/url/failure.html	Location's href: turn://[:1] should throw	PASS
+/url/failure.html	Location's href: turn://test:test should throw	PASS
+/url/failure.html	Location's href: urn://:443 should throw	PASS
+/url/failure.html	Location's href: urn://[:1] should throw	PASS
+/url/failure.html	Location's href: urn://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument:  should throw	FAIL
+/url/failure.html	URL's constructor's base argument: # should throw	PASS
+/url/failure.html	URL's constructor's base argument: ? should throw	PASS
+/url/failure.html	URL's constructor's base argument: \\\.\Y: should throw	PASS
+/url/failure.html	URL's constructor's base argument: \\\.\y: should throw	PASS
+/url/failure.html	URL's constructor's base argument: a should throw	PASS
+/url/failure.html	URL's constructor's base argument: a/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: a// should throw	PASS
+/url/failure.html	URL's constructor's base argument: asdf://%43|/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: data://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: data://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: data://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://%43%3A should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://%43%7C should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://%43%7C/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://%43| should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://%C2%AD/p should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://C%7C should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://[example]/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://example%/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://example:1/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://example:test/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: file://­/p should throw	PASS
+/url/failure.html	URL's constructor's base argument: ftp://example.com%80/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: ftp://example.com%A0/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://# should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0..0x300./ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0..0x300/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://01.2.3.4.5 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://01.2.3.4.5. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://09.2.3.4 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://09.2.3.4. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0999999999999999999/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0x100.2.3.4 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://0x100.2.3.4. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://1.2.3.08 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://1.2.3.08. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://1.2.3.09 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://? should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://@:www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://[www.google.com]/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a b/ should throw	FAIL
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a%b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a<b should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a>b should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a[b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a]b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a^b should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://a|b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ab/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.09 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.09. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.0x should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.0x4 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.0x4. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.2.3.4 should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo.2.3.4. should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://foo:-80/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%00st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%01st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%02st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%03st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%04st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%05st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%06st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%07st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%08st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%09st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Ast/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Bst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Cst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Dst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Est/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%0Fst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%10st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%11st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%12st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%13st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%14st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%15st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%16st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%17st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%18st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%19st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Ast/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Bst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Cst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Dst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Est/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%1Fst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%20st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%23st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%25st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%2Fst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%3Ast/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%3Cst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%3Est/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%3Fst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%40st/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%5Bst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%5Cst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%5Dst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%7Cst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://ho%7Fst/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://user:pass@/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://user@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http://💩.123/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:/:@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:/@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:/@:www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:/a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http::@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:@:www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: http:a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: https:// y should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://%43%7C/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://%C2%AD/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://%EF%BF%BD should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://0x100000000/test should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://256.0.0.1/test should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:.0] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:0:] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:1.23.23] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://[0::0::0] should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://example.com%80/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://example.com%A0/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://x x:12 should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://­/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://� should throw	PASS
+/url/failure.html	URL's constructor's base argument: https://￿y should throw	PASS
+/url/failure.html	URL's constructor's base argument: https:@/www.example.com should throw	PASS
+/url/failure.html	URL's constructor's base argument: intent://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: intent://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: intent://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: javascript://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: javascript://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: javascript://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: mailto://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: mailto://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: mailto://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: non-special://[:80/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: non-special://host\a should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://:/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://:12/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://@/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a b/ should throw	FAIL
+/url/failure.html	URL's constructor's base argument: sc://a b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a<b should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a>b should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a[b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a\b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a]b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a^b should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://a|b/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: sc://te@s:t@/ should throw	PASS
+/url/failure.html	URL's constructor's base argument: stun://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: stun://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: stun://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: turn://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: turn://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: turn://test:test should throw	PASS
+/url/failure.html	URL's constructor's base argument: urn://:443 should throw	PASS
+/url/failure.html	URL's constructor's base argument: urn://[:1] should throw	PASS
+/url/failure.html	URL's constructor's base argument: urn://test:test should throw	PASS
+/url/failure.html	URL's href:  should throw	PASS
+/url/failure.html	URL's href: # should throw	PASS
+/url/failure.html	URL's href: ? should throw	PASS
+/url/failure.html	URL's href: \\\.\Y: should throw	PASS
+/url/failure.html	URL's href: \\\.\y: should throw	PASS
+/url/failure.html	URL's href: a should throw	PASS
+/url/failure.html	URL's href: a/ should throw	PASS
+/url/failure.html	URL's href: a// should throw	PASS
+/url/failure.html	URL's href: asdf://%43|/ should throw	PASS
+/url/failure.html	URL's href: data://:443 should throw	PASS
+/url/failure.html	URL's href: data://[:1] should throw	PASS
+/url/failure.html	URL's href: data://test:test should throw	PASS
+/url/failure.html	URL's href: file://%43%3A should throw	PASS
+/url/failure.html	URL's href: file://%43%7C should throw	PASS
+/url/failure.html	URL's href: file://%43%7C/ should throw	PASS
+/url/failure.html	URL's href: file://%43| should throw	PASS
+/url/failure.html	URL's href: file://%C2%AD/p should throw	PASS
+/url/failure.html	URL's href: file://C%7C should throw	PASS
+/url/failure.html	URL's href: file://[example]/ should throw	PASS
+/url/failure.html	URL's href: file://example%/ should throw	PASS
+/url/failure.html	URL's href: file://example:1/ should throw	PASS
+/url/failure.html	URL's href: file://example:test/ should throw	PASS
+/url/failure.html	URL's href: file://­/p should throw	PASS
+/url/failure.html	URL's href: ftp://example.com%80/ should throw	PASS
+/url/failure.html	URL's href: ftp://example.com%A0/ should throw	PASS
+/url/failure.html	URL's href: http://# should throw	PASS
+/url/failure.html	URL's href: http://0..0x300./ should throw	PASS
+/url/failure.html	URL's href: http://0..0x300/ should throw	PASS
+/url/failure.html	URL's href: http://01.2.3.4.5 should throw	PASS
+/url/failure.html	URL's href: http://01.2.3.4.5. should throw	PASS
+/url/failure.html	URL's href: http://09.2.3.4 should throw	PASS
+/url/failure.html	URL's href: http://09.2.3.4. should throw	PASS
+/url/failure.html	URL's href: http://0999999999999999999/ should throw	PASS
+/url/failure.html	URL's href: http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	URL's href: http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	URL's href: http://0x100.2.3.4 should throw	PASS
+/url/failure.html	URL's href: http://0x100.2.3.4. should throw	PASS
+/url/failure.html	URL's href: http://1.2.3.08 should throw	PASS
+/url/failure.html	URL's href: http://1.2.3.08. should throw	PASS
+/url/failure.html	URL's href: http://1.2.3.09 should throw	PASS
+/url/failure.html	URL's href: http://? should throw	PASS
+/url/failure.html	URL's href: http://@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http://@:www.example.com should throw	PASS
+/url/failure.html	URL's href: http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	URL's href: http://[www.google.com]/ should throw	PASS
+/url/failure.html	URL's href: http://a b/ should throw	FAIL
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://a b/ should throw	PASS
+/url/failure.html	URL's href: http://a%b/ should throw	PASS
+/url/failure.html	URL's href: http://a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http://a<b should throw	PASS
+/url/failure.html	URL's href: http://a>b should throw	PASS
+/url/failure.html	URL's href: http://a[b/ should throw	PASS
+/url/failure.html	URL's href: http://a]b/ should throw	PASS
+/url/failure.html	URL's href: http://a^b should throw	PASS
+/url/failure.html	URL's href: http://a|b/ should throw	PASS
+/url/failure.html	URL's href: http://ab/ should throw	PASS
+/url/failure.html	URL's href: http://foo.09 should throw	PASS
+/url/failure.html	URL's href: http://foo.09. should throw	PASS
+/url/failure.html	URL's href: http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	URL's href: http://foo.0x should throw	PASS
+/url/failure.html	URL's href: http://foo.0x4 should throw	PASS
+/url/failure.html	URL's href: http://foo.0x4. should throw	PASS
+/url/failure.html	URL's href: http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	URL's href: http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	URL's href: http://foo.2.3.4 should throw	PASS
+/url/failure.html	URL's href: http://foo.2.3.4. should throw	PASS
+/url/failure.html	URL's href: http://foo:-80/ should throw	PASS
+/url/failure.html	URL's href: http://ho%00st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%01st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%02st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%03st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%04st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%05st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%06st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%07st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%08st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%09st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Ast/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Bst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Cst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Dst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Est/ should throw	PASS
+/url/failure.html	URL's href: http://ho%0Fst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%10st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%11st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%12st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%13st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%14st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%15st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%16st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%17st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%18st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%19st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Ast/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Bst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Cst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Dst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Est/ should throw	PASS
+/url/failure.html	URL's href: http://ho%1Fst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%20st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%23st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%25st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%2Fst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%3Ast/ should throw	PASS
+/url/failure.html	URL's href: http://ho%3Cst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%3Est/ should throw	PASS
+/url/failure.html	URL's href: http://ho%3Fst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%40st/ should throw	PASS
+/url/failure.html	URL's href: http://ho%5Bst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%5Cst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%5Dst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%7Cst/ should throw	PASS
+/url/failure.html	URL's href: http://ho%7Fst/ should throw	PASS
+/url/failure.html	URL's href: http://user:pass@/ should throw	PASS
+/url/failure.html	URL's href: http://user@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http://💩.123/ should throw	PASS
+/url/failure.html	URL's href: http:/:@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http:/@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http:/@:www.example.com should throw	PASS
+/url/failure.html	URL's href: http:/a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http::@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http:@/www.example.com should throw	PASS
+/url/failure.html	URL's href: http:@:www.example.com should throw	PASS
+/url/failure.html	URL's href: http:a:b@/www.example.com should throw	PASS
+/url/failure.html	URL's href: https:// y should throw	PASS
+/url/failure.html	URL's href: https://%43%7C/ should throw	PASS
+/url/failure.html	URL's href: https://%C2%AD/ should throw	PASS
+/url/failure.html	URL's href: https://%EF%BF%BD should throw	PASS
+/url/failure.html	URL's href: https://0x100000000/test should throw	PASS
+/url/failure.html	URL's href: https://256.0.0.1/test should throw	PASS
+/url/failure.html	URL's href: https://[0:.0] should throw	PASS
+/url/failure.html	URL's href: https://[0:0:] should throw	PASS
+/url/failure.html	URL's href: https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	URL's href: https://[0:1.23.23] should throw	PASS
+/url/failure.html	URL's href: https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	URL's href: https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	URL's href: https://[0::0::0] should throw	PASS
+/url/failure.html	URL's href: https://example.com%80/ should throw	PASS
+/url/failure.html	URL's href: https://example.com%A0/ should throw	PASS
+/url/failure.html	URL's href: https://x x:12 should throw	PASS
+/url/failure.html	URL's href: https://­/ should throw	PASS
+/url/failure.html	URL's href: https://� should throw	PASS
+/url/failure.html	URL's href: https://￿y should throw	PASS
+/url/failure.html	URL's href: https:@/www.example.com should throw	PASS
+/url/failure.html	URL's href: intent://:443 should throw	PASS
+/url/failure.html	URL's href: intent://[:1] should throw	PASS
+/url/failure.html	URL's href: intent://test:test should throw	PASS
+/url/failure.html	URL's href: javascript://:443 should throw	PASS
+/url/failure.html	URL's href: javascript://[:1] should throw	PASS
+/url/failure.html	URL's href: javascript://test:test should throw	PASS
+/url/failure.html	URL's href: mailto://:443 should throw	PASS
+/url/failure.html	URL's href: mailto://[:1] should throw	PASS
+/url/failure.html	URL's href: mailto://test:test should throw	PASS
+/url/failure.html	URL's href: non-special://[:80/ should throw	PASS
+/url/failure.html	URL's href: non-special://host\a should throw	PASS
+/url/failure.html	URL's href: sc://:/ should throw	PASS
+/url/failure.html	URL's href: sc://:12/ should throw	PASS
+/url/failure.html	URL's href: sc://@/ should throw	PASS
+/url/failure.html	URL's href: sc://a b/ should throw	FAIL
+/url/failure.html	URL's href: sc://a b/ should throw	PASS
+/url/failure.html	URL's href: sc://a<b should throw	PASS
+/url/failure.html	URL's href: sc://a>b should throw	PASS
+/url/failure.html	URL's href: sc://a[b/ should throw	PASS
+/url/failure.html	URL's href: sc://a\b/ should throw	PASS
+/url/failure.html	URL's href: sc://a]b/ should throw	PASS
+/url/failure.html	URL's href: sc://a^b should throw	PASS
+/url/failure.html	URL's href: sc://a|b/ should throw	PASS
+/url/failure.html	URL's href: sc://te@s:t@/ should throw	PASS
+/url/failure.html	URL's href: stun://:443 should throw	PASS
+/url/failure.html	URL's href: stun://[:1] should throw	PASS
+/url/failure.html	URL's href: stun://test:test should throw	PASS
+/url/failure.html	URL's href: turn://:443 should throw	PASS
+/url/failure.html	URL's href: turn://[:1] should throw	PASS
+/url/failure.html	URL's href: turn://test:test should throw	PASS
+/url/failure.html	URL's href: urn://:443 should throw	PASS
+/url/failure.html	URL's href: urn://[:1] should throw	PASS
+/url/failure.html	URL's href: urn://test:test should throw	PASS
+/url/failure.html	XHR: asdf://%43|/ should throw	PASS
+/url/failure.html	XHR: data://:443 should throw	PASS
+/url/failure.html	XHR: data://[:1] should throw	PASS
+/url/failure.html	XHR: data://test:test should throw	PASS
+/url/failure.html	XHR: file://%43%3A should throw	PASS
+/url/failure.html	XHR: file://%43%7C should throw	PASS
+/url/failure.html	XHR: file://%43%7C/ should throw	PASS
+/url/failure.html	XHR: file://%43| should throw	PASS
+/url/failure.html	XHR: file://%C2%AD/p should throw	PASS
+/url/failure.html	XHR: file://C%7C should throw	PASS
+/url/failure.html	XHR: file://[example]/ should throw	PASS
+/url/failure.html	XHR: file://example%/ should throw	PASS
+/url/failure.html	XHR: file://example:1/ should throw	PASS
+/url/failure.html	XHR: file://example:test/ should throw	PASS
+/url/failure.html	XHR: file://­/p should throw	PASS
+/url/failure.html	XHR: ftp://example.com%80/ should throw	PASS
+/url/failure.html	XHR: ftp://example.com%A0/ should throw	PASS
+/url/failure.html	XHR: http://# should throw	PASS
+/url/failure.html	XHR: http://0..0x300./ should throw	PASS
+/url/failure.html	XHR: http://0..0x300/ should throw	PASS
+/url/failure.html	XHR: http://01.2.3.4.5 should throw	PASS
+/url/failure.html	XHR: http://01.2.3.4.5. should throw	PASS
+/url/failure.html	XHR: http://09.2.3.4 should throw	PASS
+/url/failure.html	XHR: http://09.2.3.4. should throw	PASS
+/url/failure.html	XHR: http://0999999999999999999/ should throw	PASS
+/url/failure.html	XHR: http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	XHR: http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	XHR: http://0x100.2.3.4 should throw	PASS
+/url/failure.html	XHR: http://0x100.2.3.4. should throw	PASS
+/url/failure.html	XHR: http://1.2.3.08 should throw	PASS
+/url/failure.html	XHR: http://1.2.3.08. should throw	PASS
+/url/failure.html	XHR: http://1.2.3.09 should throw	PASS
+/url/failure.html	XHR: http://? should throw	PASS
+/url/failure.html	XHR: http://@/www.example.com should throw	PASS
+/url/failure.html	XHR: http://@:www.example.com should throw	PASS
+/url/failure.html	XHR: http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	XHR: http://[www.google.com]/ should throw	PASS
+/url/failure.html	XHR: http://a b/ should throw	FAIL
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://a b/ should throw	PASS
+/url/failure.html	XHR: http://a%b/ should throw	PASS
+/url/failure.html	XHR: http://a:b@/www.example.com should throw	PASS
+/url/failure.html	XHR: http://a<b should throw	PASS
+/url/failure.html	XHR: http://a>b should throw	PASS
+/url/failure.html	XHR: http://a[b/ should throw	PASS
+/url/failure.html	XHR: http://a]b/ should throw	PASS
+/url/failure.html	XHR: http://a^b should throw	PASS
+/url/failure.html	XHR: http://a|b/ should throw	PASS
+/url/failure.html	XHR: http://ab/ should throw	PASS
+/url/failure.html	XHR: http://foo.09 should throw	PASS
+/url/failure.html	XHR: http://foo.09. should throw	PASS
+/url/failure.html	XHR: http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	XHR: http://foo.0x should throw	PASS
+/url/failure.html	XHR: http://foo.0x4 should throw	PASS
+/url/failure.html	XHR: http://foo.0x4. should throw	PASS
+/url/failure.html	XHR: http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	XHR: http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	XHR: http://foo.2.3.4 should throw	PASS
+/url/failure.html	XHR: http://foo.2.3.4. should throw	PASS
+/url/failure.html	XHR: http://foo:-80/ should throw	PASS
+/url/failure.html	XHR: http://ho%00st/ should throw	PASS
+/url/failure.html	XHR: http://ho%01st/ should throw	PASS
+/url/failure.html	XHR: http://ho%02st/ should throw	PASS
+/url/failure.html	XHR: http://ho%03st/ should throw	PASS
+/url/failure.html	XHR: http://ho%04st/ should throw	PASS
+/url/failure.html	XHR: http://ho%05st/ should throw	PASS
+/url/failure.html	XHR: http://ho%06st/ should throw	PASS
+/url/failure.html	XHR: http://ho%07st/ should throw	PASS
+/url/failure.html	XHR: http://ho%08st/ should throw	PASS
+/url/failure.html	XHR: http://ho%09st/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Ast/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Bst/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Cst/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Dst/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Est/ should throw	PASS
+/url/failure.html	XHR: http://ho%0Fst/ should throw	PASS
+/url/failure.html	XHR: http://ho%10st/ should throw	PASS
+/url/failure.html	XHR: http://ho%11st/ should throw	PASS
+/url/failure.html	XHR: http://ho%12st/ should throw	PASS
+/url/failure.html	XHR: http://ho%13st/ should throw	PASS
+/url/failure.html	XHR: http://ho%14st/ should throw	PASS
+/url/failure.html	XHR: http://ho%15st/ should throw	PASS
+/url/failure.html	XHR: http://ho%16st/ should throw	PASS
+/url/failure.html	XHR: http://ho%17st/ should throw	PASS
+/url/failure.html	XHR: http://ho%18st/ should throw	PASS
+/url/failure.html	XHR: http://ho%19st/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Ast/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Bst/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Cst/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Dst/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Est/ should throw	PASS
+/url/failure.html	XHR: http://ho%1Fst/ should throw	PASS
+/url/failure.html	XHR: http://ho%20st/ should throw	PASS
+/url/failure.html	XHR: http://ho%23st/ should throw	PASS
+/url/failure.html	XHR: http://ho%25st/ should throw	PASS
+/url/failure.html	XHR: http://ho%2Fst/ should throw	PASS
+/url/failure.html	XHR: http://ho%3Ast/ should throw	PASS
+/url/failure.html	XHR: http://ho%3Cst/ should throw	PASS
+/url/failure.html	XHR: http://ho%3Est/ should throw	PASS
+/url/failure.html	XHR: http://ho%3Fst/ should throw	PASS
+/url/failure.html	XHR: http://ho%40st/ should throw	PASS
+/url/failure.html	XHR: http://ho%5Bst/ should throw	PASS
+/url/failure.html	XHR: http://ho%5Cst/ should throw	PASS
+/url/failure.html	XHR: http://ho%5Dst/ should throw	PASS
+/url/failure.html	XHR: http://ho%7Cst/ should throw	PASS
+/url/failure.html	XHR: http://ho%7Fst/ should throw	PASS
+/url/failure.html	XHR: http://user:pass@/ should throw	PASS
+/url/failure.html	XHR: http://user@/www.example.com should throw	PASS
+/url/failure.html	XHR: http://💩.123/ should throw	PASS
+/url/failure.html	XHR: https:// y should throw	PASS
+/url/failure.html	XHR: https://%43%7C/ should throw	PASS
+/url/failure.html	XHR: https://%C2%AD/ should throw	PASS
+/url/failure.html	XHR: https://%EF%BF%BD should throw	PASS
+/url/failure.html	XHR: https://0x100000000/test should throw	PASS
+/url/failure.html	XHR: https://256.0.0.1/test should throw	PASS
+/url/failure.html	XHR: https://[0:.0] should throw	PASS
+/url/failure.html	XHR: https://[0:0:] should throw	PASS
+/url/failure.html	XHR: https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	XHR: https://[0:1.23.23] should throw	PASS
+/url/failure.html	XHR: https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	XHR: https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	XHR: https://[0::0::0] should throw	PASS
+/url/failure.html	XHR: https://example.com%80/ should throw	PASS
+/url/failure.html	XHR: https://example.com%A0/ should throw	PASS
+/url/failure.html	XHR: https://x x:12 should throw	PASS
+/url/failure.html	XHR: https://­/ should throw	PASS
+/url/failure.html	XHR: https://� should throw	PASS
+/url/failure.html	XHR: https://￿y should throw	PASS
+/url/failure.html	XHR: intent://:443 should throw	PASS
+/url/failure.html	XHR: intent://[:1] should throw	PASS
+/url/failure.html	XHR: intent://test:test should throw	PASS
+/url/failure.html	XHR: javascript://:443 should throw	PASS
+/url/failure.html	XHR: javascript://[:1] should throw	PASS
+/url/failure.html	XHR: javascript://test:test should throw	PASS
+/url/failure.html	XHR: mailto://:443 should throw	PASS
+/url/failure.html	XHR: mailto://[:1] should throw	PASS
+/url/failure.html	XHR: mailto://test:test should throw	PASS
+/url/failure.html	XHR: non-special://[:80/ should throw	PASS
+/url/failure.html	XHR: non-special://host\a should throw	PASS
+/url/failure.html	XHR: sc://:/ should throw	PASS
+/url/failure.html	XHR: sc://:12/ should throw	PASS
+/url/failure.html	XHR: sc://@/ should throw	PASS
+/url/failure.html	XHR: sc://a b/ should throw	FAIL
+/url/failure.html	XHR: sc://a b/ should throw	PASS
+/url/failure.html	XHR: sc://a<b should throw	PASS
+/url/failure.html	XHR: sc://a>b should throw	PASS
+/url/failure.html	XHR: sc://a[b/ should throw	PASS
+/url/failure.html	XHR: sc://a\b/ should throw	PASS
+/url/failure.html	XHR: sc://a]b/ should throw	PASS
+/url/failure.html	XHR: sc://a^b should throw	PASS
+/url/failure.html	XHR: sc://a|b/ should throw	PASS
+/url/failure.html	XHR: sc://te@s:t@/ should throw	PASS
+/url/failure.html	XHR: stun://:443 should throw	PASS
+/url/failure.html	XHR: stun://[:1] should throw	PASS
+/url/failure.html	XHR: stun://test:test should throw	PASS
+/url/failure.html	XHR: turn://:443 should throw	PASS
+/url/failure.html	XHR: turn://[:1] should throw	PASS
+/url/failure.html	XHR: turn://test:test should throw	PASS
+/url/failure.html	XHR: urn://:443 should throw	PASS
+/url/failure.html	XHR: urn://[:1] should throw	PASS
+/url/failure.html	XHR: urn://test:test should throw	PASS
+/url/failure.html	sendBeacon(): asdf://%43|/ should throw	PASS
+/url/failure.html	sendBeacon(): data://:443 should throw	PASS
+/url/failure.html	sendBeacon(): data://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): data://test:test should throw	PASS
+/url/failure.html	sendBeacon(): file://%43%3A should throw	PASS
+/url/failure.html	sendBeacon(): file://%43%7C should throw	PASS
+/url/failure.html	sendBeacon(): file://%43%7C/ should throw	PASS
+/url/failure.html	sendBeacon(): file://%43| should throw	PASS
+/url/failure.html	sendBeacon(): file://%C2%AD/p should throw	PASS
+/url/failure.html	sendBeacon(): file://C%7C should throw	PASS
+/url/failure.html	sendBeacon(): file://[example]/ should throw	PASS
+/url/failure.html	sendBeacon(): file://example%/ should throw	PASS
+/url/failure.html	sendBeacon(): file://example:1/ should throw	PASS
+/url/failure.html	sendBeacon(): file://example:test/ should throw	PASS
+/url/failure.html	sendBeacon(): file://­/p should throw	PASS
+/url/failure.html	sendBeacon(): ftp://example.com%80/ should throw	PASS
+/url/failure.html	sendBeacon(): ftp://example.com%A0/ should throw	PASS
+/url/failure.html	sendBeacon(): http://# should throw	PASS
+/url/failure.html	sendBeacon(): http://0..0x300./ should throw	PASS
+/url/failure.html	sendBeacon(): http://0..0x300/ should throw	PASS
+/url/failure.html	sendBeacon(): http://01.2.3.4.5 should throw	PASS
+/url/failure.html	sendBeacon(): http://01.2.3.4.5. should throw	PASS
+/url/failure.html	sendBeacon(): http://09.2.3.4 should throw	PASS
+/url/failure.html	sendBeacon(): http://09.2.3.4. should throw	PASS
+/url/failure.html	sendBeacon(): http://0999999999999999999/ should throw	PASS
+/url/failure.html	sendBeacon(): http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	sendBeacon(): http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	sendBeacon(): http://0x100.2.3.4 should throw	PASS
+/url/failure.html	sendBeacon(): http://0x100.2.3.4. should throw	PASS
+/url/failure.html	sendBeacon(): http://1.2.3.08 should throw	PASS
+/url/failure.html	sendBeacon(): http://1.2.3.08. should throw	PASS
+/url/failure.html	sendBeacon(): http://1.2.3.09 should throw	PASS
+/url/failure.html	sendBeacon(): http://? should throw	PASS
+/url/failure.html	sendBeacon(): http://@/www.example.com should throw	PASS
+/url/failure.html	sendBeacon(): http://@:www.example.com should throw	PASS
+/url/failure.html	sendBeacon(): http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	sendBeacon(): http://[www.google.com]/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a b/ should throw	FAIL
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a b/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a%b/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a:b@/www.example.com should throw	PASS
+/url/failure.html	sendBeacon(): http://a<b should throw	PASS
+/url/failure.html	sendBeacon(): http://a>b should throw	PASS
+/url/failure.html	sendBeacon(): http://a[b/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a]b/ should throw	PASS
+/url/failure.html	sendBeacon(): http://a^b should throw	PASS
+/url/failure.html	sendBeacon(): http://a|b/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ab/ should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.09 should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.09. should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.0x should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.0x4 should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.0x4. should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.2.3.4 should throw	PASS
+/url/failure.html	sendBeacon(): http://foo.2.3.4. should throw	PASS
+/url/failure.html	sendBeacon(): http://foo:-80/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%00st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%01st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%02st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%03st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%04st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%05st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%06st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%07st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%08st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%09st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Ast/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Bst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Cst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Dst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Est/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%0Fst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%10st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%11st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%12st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%13st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%14st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%15st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%16st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%17st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%18st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%19st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Ast/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Bst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Cst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Dst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Est/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%1Fst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%20st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%23st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%25st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%2Fst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%3Ast/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%3Cst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%3Est/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%3Fst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%40st/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%5Bst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%5Cst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%5Dst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%7Cst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://ho%7Fst/ should throw	PASS
+/url/failure.html	sendBeacon(): http://user:pass@/ should throw	PASS
+/url/failure.html	sendBeacon(): http://user@/www.example.com should throw	PASS
+/url/failure.html	sendBeacon(): http://💩.123/ should throw	PASS
+/url/failure.html	sendBeacon(): https:// y should throw	PASS
+/url/failure.html	sendBeacon(): https://%43%7C/ should throw	PASS
+/url/failure.html	sendBeacon(): https://%C2%AD/ should throw	PASS
+/url/failure.html	sendBeacon(): https://%EF%BF%BD should throw	PASS
+/url/failure.html	sendBeacon(): https://0x100000000/test should throw	PASS
+/url/failure.html	sendBeacon(): https://256.0.0.1/test should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:.0] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:0:] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:1.23.23] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	sendBeacon(): https://[0::0::0] should throw	PASS
+/url/failure.html	sendBeacon(): https://example.com%80/ should throw	PASS
+/url/failure.html	sendBeacon(): https://example.com%A0/ should throw	PASS
+/url/failure.html	sendBeacon(): https://x x:12 should throw	PASS
+/url/failure.html	sendBeacon(): https://­/ should throw	PASS
+/url/failure.html	sendBeacon(): https://� should throw	PASS
+/url/failure.html	sendBeacon(): https://￿y should throw	PASS
+/url/failure.html	sendBeacon(): intent://:443 should throw	PASS
+/url/failure.html	sendBeacon(): intent://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): intent://test:test should throw	PASS
+/url/failure.html	sendBeacon(): javascript://:443 should throw	PASS
+/url/failure.html	sendBeacon(): javascript://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): javascript://test:test should throw	PASS
+/url/failure.html	sendBeacon(): mailto://:443 should throw	PASS
+/url/failure.html	sendBeacon(): mailto://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): mailto://test:test should throw	PASS
+/url/failure.html	sendBeacon(): non-special://[:80/ should throw	PASS
+/url/failure.html	sendBeacon(): non-special://host\a should throw	PASS
+/url/failure.html	sendBeacon(): sc://:/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://:12/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://@/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a<b should throw	PASS
+/url/failure.html	sendBeacon(): sc://a>b should throw	PASS
+/url/failure.html	sendBeacon(): sc://a[b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a\b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a]b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://a^b should throw	PASS
+/url/failure.html	sendBeacon(): sc://a|b/ should throw	PASS
+/url/failure.html	sendBeacon(): sc://te@s:t@/ should throw	PASS
+/url/failure.html	sendBeacon(): stun://:443 should throw	PASS
+/url/failure.html	sendBeacon(): stun://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): stun://test:test should throw	PASS
+/url/failure.html	sendBeacon(): turn://:443 should throw	PASS
+/url/failure.html	sendBeacon(): turn://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): turn://test:test should throw	PASS
+/url/failure.html	sendBeacon(): urn://:443 should throw	PASS
+/url/failure.html	sendBeacon(): urn://[:1] should throw	PASS
+/url/failure.html	sendBeacon(): urn://test:test should throw	PASS
+/url/failure.html	window.open(): asdf://%43|/ should throw	PASS
+/url/failure.html	window.open(): data://:443 should throw	PASS
+/url/failure.html	window.open(): data://[:1] should throw	PASS
+/url/failure.html	window.open(): data://test:test should throw	PASS
+/url/failure.html	window.open(): file://%43%3A should throw	PASS
+/url/failure.html	window.open(): file://%43%7C should throw	PASS
+/url/failure.html	window.open(): file://%43%7C/ should throw	PASS
+/url/failure.html	window.open(): file://%43| should throw	PASS
+/url/failure.html	window.open(): file://%C2%AD/p should throw	PASS
+/url/failure.html	window.open(): file://C%7C should throw	PASS
+/url/failure.html	window.open(): file://[example]/ should throw	PASS
+/url/failure.html	window.open(): file://example%/ should throw	PASS
+/url/failure.html	window.open(): file://example:1/ should throw	PASS
+/url/failure.html	window.open(): file://example:test/ should throw	PASS
+/url/failure.html	window.open(): file://­/p should throw	PASS
+/url/failure.html	window.open(): ftp://example.com%80/ should throw	PASS
+/url/failure.html	window.open(): ftp://example.com%A0/ should throw	PASS
+/url/failure.html	window.open(): http://# should throw	PASS
+/url/failure.html	window.open(): http://0..0x300./ should throw	PASS
+/url/failure.html	window.open(): http://0..0x300/ should throw	PASS
+/url/failure.html	window.open(): http://01.2.3.4.5 should throw	PASS
+/url/failure.html	window.open(): http://01.2.3.4.5. should throw	PASS
+/url/failure.html	window.open(): http://09.2.3.4 should throw	PASS
+/url/failure.html	window.open(): http://09.2.3.4. should throw	PASS
+/url/failure.html	window.open(): http://0999999999999999999/ should throw	PASS
+/url/failure.html	window.open(): http://0x1.2.3.4.5 should throw	PASS
+/url/failure.html	window.open(): http://0x1.2.3.4.5. should throw	PASS
+/url/failure.html	window.open(): http://0x100.2.3.4 should throw	PASS
+/url/failure.html	window.open(): http://0x100.2.3.4. should throw	PASS
+/url/failure.html	window.open(): http://1.2.3.08 should throw	PASS
+/url/failure.html	window.open(): http://1.2.3.08. should throw	PASS
+/url/failure.html	window.open(): http://1.2.3.09 should throw	PASS
+/url/failure.html	window.open(): http://? should throw	PASS
+/url/failure.html	window.open(): http://@/www.example.com should throw	PASS
+/url/failure.html	window.open(): http://@:www.example.com should throw	PASS
+/url/failure.html	window.open(): http://[::127.0.0.0.1] should throw	PASS
+/url/failure.html	window.open(): http://[www.google.com]/ should throw	PASS
+/url/failure.html	window.open(): http://a b/ should throw	FAIL
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://a b/ should throw	PASS
+/url/failure.html	window.open(): http://a%b/ should throw	PASS
+/url/failure.html	window.open(): http://a:b@/www.example.com should throw	PASS
+/url/failure.html	window.open(): http://a<b should throw	PASS
+/url/failure.html	window.open(): http://a>b should throw	PASS
+/url/failure.html	window.open(): http://a[b/ should throw	PASS
+/url/failure.html	window.open(): http://a]b/ should throw	PASS
+/url/failure.html	window.open(): http://a^b should throw	PASS
+/url/failure.html	window.open(): http://a|b/ should throw	PASS
+/url/failure.html	window.open(): http://ab/ should throw	PASS
+/url/failure.html	window.open(): http://foo.09 should throw	PASS
+/url/failure.html	window.open(): http://foo.09. should throw	PASS
+/url/failure.html	window.open(): http://foo.0XFfFfFfFfFfFfFfFfFfAcE123 should throw	PASS
+/url/failure.html	window.open(): http://foo.0x should throw	PASS
+/url/failure.html	window.open(): http://foo.0x4 should throw	PASS
+/url/failure.html	window.open(): http://foo.0x4. should throw	PASS
+/url/failure.html	window.open(): http://foo.1.2.3.4 should throw	PASS
+/url/failure.html	window.open(): http://foo.1.2.3.4. should throw	PASS
+/url/failure.html	window.open(): http://foo.2.3.4 should throw	PASS
+/url/failure.html	window.open(): http://foo.2.3.4. should throw	PASS
+/url/failure.html	window.open(): http://foo:-80/ should throw	PASS
+/url/failure.html	window.open(): http://ho%00st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%01st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%02st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%03st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%04st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%05st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%06st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%07st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%08st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%09st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Ast/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Bst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Cst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Dst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Est/ should throw	PASS
+/url/failure.html	window.open(): http://ho%0Fst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%10st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%11st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%12st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%13st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%14st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%15st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%16st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%17st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%18st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%19st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Ast/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Bst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Cst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Dst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Est/ should throw	PASS
+/url/failure.html	window.open(): http://ho%1Fst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%20st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%23st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%25st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%2Fst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%3Ast/ should throw	PASS
+/url/failure.html	window.open(): http://ho%3Cst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%3Est/ should throw	PASS
+/url/failure.html	window.open(): http://ho%3Fst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%40st/ should throw	PASS
+/url/failure.html	window.open(): http://ho%5Bst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%5Cst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%5Dst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%7Cst/ should throw	PASS
+/url/failure.html	window.open(): http://ho%7Fst/ should throw	PASS
+/url/failure.html	window.open(): http://user:pass@/ should throw	PASS
+/url/failure.html	window.open(): http://user@/www.example.com should throw	PASS
+/url/failure.html	window.open(): http://💩.123/ should throw	PASS
+/url/failure.html	window.open(): https:// y should throw	PASS
+/url/failure.html	window.open(): https://%43%7C/ should throw	PASS
+/url/failure.html	window.open(): https://%C2%AD/ should throw	PASS
+/url/failure.html	window.open(): https://%EF%BF%BD should throw	PASS
+/url/failure.html	window.open(): https://0x100000000/test should throw	PASS
+/url/failure.html	window.open(): https://256.0.0.1/test should throw	PASS
+/url/failure.html	window.open(): https://[0:.0] should throw	PASS
+/url/failure.html	window.open(): https://[0:0:] should throw	PASS
+/url/failure.html	window.open(): https://[0:1.00.0.0.0] should throw	PASS
+/url/failure.html	window.open(): https://[0:1.23.23] should throw	PASS
+/url/failure.html	window.open(): https://[0:1.290.0.0.0] should throw	PASS
+/url/failure.html	window.open(): https://[0:1:2:3:4:5:6:7.0.0.0.1] should throw	PASS
+/url/failure.html	window.open(): https://[0::0::0] should throw	PASS
+/url/failure.html	window.open(): https://example.com%80/ should throw	PASS
+/url/failure.html	window.open(): https://example.com%A0/ should throw	PASS
+/url/failure.html	window.open(): https://x x:12 should throw	PASS
+/url/failure.html	window.open(): https://­/ should throw	PASS
+/url/failure.html	window.open(): https://� should throw	PASS
+/url/failure.html	window.open(): https://￿y should throw	PASS
+/url/failure.html	window.open(): intent://:443 should throw	PASS
+/url/failure.html	window.open(): intent://[:1] should throw	PASS
+/url/failure.html	window.open(): intent://test:test should throw	PASS
+/url/failure.html	window.open(): javascript://:443 should throw	PASS
+/url/failure.html	window.open(): javascript://[:1] should throw	PASS
+/url/failure.html	window.open(): javascript://test:test should throw	PASS
+/url/failure.html	window.open(): mailto://:443 should throw	PASS
+/url/failure.html	window.open(): mailto://[:1] should throw	PASS
+/url/failure.html	window.open(): mailto://test:test should throw	PASS
+/url/failure.html	window.open(): non-special://[:80/ should throw	PASS
+/url/failure.html	window.open(): non-special://host\a should throw	PASS
+/url/failure.html	window.open(): sc://:/ should throw	PASS
+/url/failure.html	window.open(): sc://:12/ should throw	PASS
+/url/failure.html	window.open(): sc://@/ should throw	PASS
+/url/failure.html	window.open(): sc://a b/ should throw	FAIL
+/url/failure.html	window.open(): sc://a b/ should throw	PASS
+/url/failure.html	window.open(): sc://a<b should throw	PASS
+/url/failure.html	window.open(): sc://a>b should throw	PASS
+/url/failure.html	window.open(): sc://a[b/ should throw	PASS
+/url/failure.html	window.open(): sc://a\b/ should throw	PASS
+/url/failure.html	window.open(): sc://a]b/ should throw	PASS
+/url/failure.html	window.open(): sc://a^b should throw	PASS
+/url/failure.html	window.open(): sc://a|b/ should throw	PASS
+/url/failure.html	window.open(): sc://te@s:t@/ should throw	PASS
+/url/failure.html	window.open(): stun://:443 should throw	PASS
+/url/failure.html	window.open(): stun://[:1] should throw	PASS
+/url/failure.html	window.open(): stun://test:test should throw	PASS
+/url/failure.html	window.open(): turn://:443 should throw	PASS
+/url/failure.html	window.open(): turn://[:1] should throw	PASS
+/url/failure.html	window.open(): turn://test:test should throw	PASS
+/url/failure.html	window.open(): urn://:443 should throw	PASS
+/url/failure.html	window.open(): urn://[:1] should throw	PASS
+/url/failure.html	window.open(): urn://test:test should throw	PASS
 /url/historical.any.html	<a> and <area>.searchParams should be undefined	PASS
 /url/historical.any.html	<harness>	OK
 /url/historical.any.html	Constructor only takes strings	FAIL
@@ -66731,101 +67894,31 @@ test	subtest	status
 /url/historical.any.html	URLSearchParams: no structured serialize/deserialize support	FAIL
 /url/historical.any.html	searchParams on location object	PASS
 /url/idlharness.any.html	<harness>	OK
-/url/idlharness.any.html	Stringification of new URL("http://foo")	PASS
-/url/idlharness.any.html	Stringification of new URLSearchParams("hi=there&thank=you")	PASS
-/url/idlharness.any.html	URL interface object length	PASS
-/url/idlharness.any.html	URL interface object name	PASS
-/url/idlharness.any.html	URL interface: attribute hash	PASS
-/url/idlharness.any.html	URL interface: attribute host	PASS
-/url/idlharness.any.html	URL interface: attribute hostname	PASS
-/url/idlharness.any.html	URL interface: attribute href	PASS
-/url/idlharness.any.html	URL interface: attribute origin	PASS
-/url/idlharness.any.html	URL interface: attribute password	PASS
-/url/idlharness.any.html	URL interface: attribute pathname	PASS
-/url/idlharness.any.html	URL interface: attribute port	PASS
-/url/idlharness.any.html	URL interface: attribute protocol	PASS
-/url/idlharness.any.html	URL interface: attribute search	PASS
-/url/idlharness.any.html	URL interface: attribute searchParams	PASS
-/url/idlharness.any.html	URL interface: attribute username	PASS
-/url/idlharness.any.html	URL interface: calling canParse(USVString, optional USVString) on new URL("http://foo") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URL interface: calling parse(USVString, optional USVString) on new URL("http://foo") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URL interface: existence and properties of interface object	PASS
-/url/idlharness.any.html	URL interface: existence and properties of interface prototype object	PASS
-/url/idlharness.any.html	URL interface: existence and properties of interface prototype object's "constructor" property	PASS
-/url/idlharness.any.html	URL interface: existence and properties of interface prototype object's @@unscopables property	PASS
-/url/idlharness.any.html	URL interface: legacy window alias	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "canParse(USVString, optional USVString)" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "hash" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "host" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "hostname" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "href" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "origin" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "parse(USVString, optional USVString)" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "password" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "pathname" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "port" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "protocol" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "search" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "searchParams" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "toJSON()" with the proper type	PASS
-/url/idlharness.any.html	URL interface: new URL("http://foo") must inherit property "username" with the proper type	PASS
-/url/idlharness.any.html	URL interface: operation canParse(USVString, optional USVString)	PASS
-/url/idlharness.any.html	URL interface: operation parse(USVString, optional USVString)	PASS
-/url/idlharness.any.html	URL interface: operation toJSON()	PASS
-/url/idlharness.any.html	URL interface: stringifier	PASS
-/url/idlharness.any.html	URL interface: toJSON operation on new URL("http://foo")	PASS
-/url/idlharness.any.html	URL must be primary interface of new URL("http://foo")	PASS
-/url/idlharness.any.html	URLSearchParams interface object length	PASS
-/url/idlharness.any.html	URLSearchParams interface object name	PASS
-/url/idlharness.any.html	URLSearchParams interface: attribute size	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling append(USVString, USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling delete(USVString, optional USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling get(USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling getAll(USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling has(USVString, optional USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: calling set(USVString, USVString) on new URLSearchParams("hi=there&thank=you") with too few arguments must throw TypeError	PASS
-/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface object	FAIL
-/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object	PASS
-/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object's "constructor" property	PASS
-/url/idlharness.any.html	URLSearchParams interface: existence and properties of interface prototype object's @@unscopables property	PASS
-/url/idlharness.any.html	URLSearchParams interface: iterable<USVString, USVString>	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "append(USVString, USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "delete(USVString, optional USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "get(USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "getAll(USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "has(USVString, optional USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "set(USVString, USVString)" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "size" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: new URLSearchParams("hi=there&thank=you") must inherit property "sort()" with the proper type	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation append(USVString, USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation delete(USVString, optional USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation get(USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation getAll(USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation has(USVString, optional USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation set(USVString, USVString)	PASS
-/url/idlharness.any.html	URLSearchParams interface: operation sort()	PASS
-/url/idlharness.any.html	URLSearchParams interface: stringifier	PASS
-/url/idlharness.any.html	URLSearchParams must be primary interface of new URLSearchParams("hi=there&thank=you")	PASS
-/url/idlharness.any.html	idl_test setup	PASS
-/url/idlharness.any.html	idl_test validation	PASS
-/url/javascript-urls.window.html	<harness>	NONE
+/url/idlharness.any.html	idl_test setup	FAIL
+/url/javascript-urls.window.html	<harness>	TIMEOUT
+/url/javascript-urls.window.html	javascript: URL containing a JavaScript string split over path and query	NOTRUN
+/url/javascript-urls.window.html	javascript: URL containing a JavaScript string split over path and query and has a U+000A in scheme	NOTRUN
+/url/javascript-urls.window.html	javascript: URL that fails to parse due to invalid host	TIMEOUT
+/url/javascript-urls.window.html	javascript: URL that fails to parse due to invalid host and has a U+0009 in scheme	NOTRUN
+/url/javascript-urls.window.html	javascript: URL with extra slashes at the start	NOTRUN
+/url/javascript-urls.window.html	javascript: URL without an opaque path	NOTRUN
 /url/percent-encoding.window.html	<harness>	OK
-/url/percent-encoding.window.html	Input A with encoding big5	PASS
+/url/percent-encoding.window.html	Input A with encoding big5	FAIL
 /url/percent-encoding.window.html	Input A with encoding iso-2022-jp	FAIL
-/url/percent-encoding.window.html	Input A with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input A with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Input ¢ with encoding iso-8859-2	FAIL
-/url/percent-encoding.window.html	Input ¢ with encoding utf-8	PASS
-/url/percent-encoding.window.html	Input á| with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input ¢ with encoding utf-8	FAIL
+/url/percent-encoding.window.html	Input á| with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Input † with encoding big5	FAIL
 /url/percent-encoding.window.html	Input † with encoding euc-kr	FAIL
-/url/percent-encoding.window.html	Input † with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input † with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Input † with encoding windows-1252	FAIL
 /url/percent-encoding.window.html	Input ‾\ with encoding iso-2022-jp	FAIL
-/url/percent-encoding.window.html	Input ‾\ with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input ‾\ with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Input − with encoding shift_jis	FAIL
-/url/percent-encoding.window.html	Input − with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input − with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Input  with encoding gb18030	FAIL
-/url/percent-encoding.window.html	Input  with encoding utf-8	PASS
+/url/percent-encoding.window.html	Input  with encoding utf-8	FAIL
 /url/percent-encoding.window.html	Loading data…	PASS
 /url/toascii.window.html	lookout.net (using <a>)	PASS
 /url/toascii.window.html	lookout.net (using <a>.host)	PASS
@@ -67614,7 +68707,7 @@ test	subtest	status
 /url/toascii.window.html	㛼.com (using URL.hostname)	PASS
 /url/url-constructor.any.html	<harness>	OK
 /url/url-constructor.any.html	Loading data…	PASS
-/url/url-constructor.any.html	Parsing: <  http://example.com/   > without base	FAIL
+/url/url-constructor.any.html	Parsing: <  http://example.com/   > without base	PASS
 /url/url-constructor.any.html	Parsing: <    :foo.com    > against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <   > against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <  File:c|////foo\bar.html> against <file:///tmp/mock/path>	PASS
@@ -67637,7 +68730,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <#x> against <data:,>	PASS
 /url/url-constructor.any.html	Parsing: <#x> against <file:///test?test#test>	PASS
 /url/url-constructor.any.html	Parsing: <#x> against <mailto:x@x.com>	PASS
-/url/url-constructor.any.html	Parsing: <#x> against <sc://ñ>	FAIL
+/url/url-constructor.any.html	Parsing: <#x> against <sc://ñ>	PASS
 /url/url-constructor.any.html	Parsing: <#β> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <../../test.txt> against <http://www.example.com/test>	PASS
 /url/url-constructor.any.html	Parsing: <..//path> against <non-spec:/p>	PASS
@@ -67743,7 +68836,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <?i> against <sc:sd/sd>	PASS
 /url/url-constructor.any.html	Parsing: <?i> against <sc:sd>	PASS
 /url/url-constructor.any.html	Parsing: <?x> against <file:///test?test#test>	PASS
-/url/url-constructor.any.html	Parsing: <?x> against <sc://ñ>	FAIL
+/url/url-constructor.any.html	Parsing: <?x> against <sc://ñ>	PASS
 /url/url-constructor.any.html	Parsing: <C> against <file://host/dir/file>	PASS
 /url/url-constructor.any.html	Parsing: <C| /> against <file://host/dir/file>	PASS
 /url/url-constructor.any.html	Parsing: <C|#> against <file://host/dir/file>	PASS
@@ -67778,13 +68871,13 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <abc:rootless> against <abc:/path>	PASS
 /url/url-constructor.any.html	Parsing: <abc:rootless> against <abc:path>	PASS
 /url/url-constructor.any.html	Parsing: <about:/../> without base	PASS
-/url/url-constructor.any.html	Parsing: <about:blank#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé> without base	FAIL
+/url/url-constructor.any.html	Parsing: <about:blank#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé> without base	PASS
 /url/url-constructor.any.html	Parsing: <about:blank#<foo> <bar>> without base	PASS
-/url/url-constructor.any.html	Parsing: <android-app://x:0> without base	FAIL
+/url/url-constructor.any.html	Parsing: <android-app://x:0> without base	PASS
 /url/url-constructor.any.html	Parsing: <android://x:0/a> without base	PASS
 /url/url-constructor.any.html	Parsing: <asdf://%43%7C/> without base	PASS
 /url/url-constructor.any.html	Parsing: <asdf://%43|/> without base	PASS
-/url/url-constructor.any.html	Parsing: <blob:> without base	FAIL
+/url/url-constructor.any.html	Parsing: <blob:> without base	PASS
 /url/url-constructor.any.html	Parsing: <blob:about:blank> without base	PASS
 /url/url-constructor.any.html	Parsing: <blob:blob:> without base	PASS
 /url/url-constructor.any.html	Parsing: <blob:blob:https://example.org/> without base	PASS
@@ -67797,11 +68890,11 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <blob:ws://example.org/> without base	PASS
 /url/url-constructor.any.html	Parsing: <blob:wss://example.org/> without base	PASS
 /url/url-constructor.any.html	Parsing: <c:/foo> against <http://example.org/foo/bar>	PASS
-/url/url-constructor.any.html	Parsing: <chrome-distiller://x:0> without base	FAIL
-/url/url-constructor.any.html	Parsing: <chrome-extension://x:0> without base	FAIL
-/url/url-constructor.any.html	Parsing: <chrome-native://x:0> without base	FAIL
-/url/url-constructor.any.html	Parsing: <chrome-resource://x:0> without base	FAIL
-/url/url-constructor.any.html	Parsing: <chrome-search://x:0> without base	FAIL
+/url/url-constructor.any.html	Parsing: <chrome-distiller://x:0> without base	PASS
+/url/url-constructor.any.html	Parsing: <chrome-extension://x:0> without base	PASS
+/url/url-constructor.any.html	Parsing: <chrome-native://x:0> without base	PASS
+/url/url-constructor.any.html	Parsing: <chrome-resource://x:0> without base	PASS
+/url/url-constructor.any.html	Parsing: <chrome-search://x:0> without base	PASS
 /url/url-constructor.any.html	Parsing: <chromeos-steam://x:0/a> without base	PASS
 /url/url-constructor.any.html	Parsing: <data:/../> without base	PASS
 /url/url-constructor.any.html	Parsing: <data:///test> without base	PASS
@@ -67816,7 +68909,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <data:example.com/> without base	PASS
 /url/url-constructor.any.html	Parsing: <data:test# »> without base	PASS
 /url/url-constructor.any.html	Parsing: <data:text/html,test#test> against <http://example.org/foo/bar>	PASS
-/url/url-constructor.any.html	Parsing: <data:text/plain,test#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé> without base	FAIL
+/url/url-constructor.any.html	Parsing: <data:text/plain,test#     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé> without base	PASS
 /url/url-constructor.any.html	Parsing: <data:text/plain,test#<foo> <bar>> without base	PASS
 /url/url-constructor.any.html	Parsing: <dns://fw.example.org:9999/foo.bar.org?type=TXT> without base	PASS
 /url/url-constructor.any.html	Parsing: <drivefs://x:0/a> without base	PASS
@@ -67904,11 +68997,11 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <foo://///////> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <foo://///////bar.com/> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <foo:////://///> against <http://example.org/foo/bar>	PASS
-/url/url-constructor.any.html	Parsing: <foo://> against <http://example.org/foo/bar>	FAIL
+/url/url-constructor.any.html	Parsing: <foo://> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <foo://ho st/> without base	PASS
 /url/url-constructor.any.html	Parsing: <foo://ho st/> without base	PASS
 /url/url-constructor.any.html	Parsing: <foo://ho st/> without base	PASS
-/url/url-constructor.any.html	Parsing: <foo://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> without base	FAIL
+/url/url-constructor.any.html	Parsing: <foo://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <foo://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <foo://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <foo://joe: !"$%&'()*+,-.:;<=>@[\]^_`{|}~@host/> without base	PASS
@@ -67927,7 +69020,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <ftps:/example.com/> without base	PASS
 /url/url-constructor.any.html	Parsing: <ftps:example.com/> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <ftps:example.com/> without base	PASS
-/url/url-constructor.any.html	Parsing: <fuchsia-dir://x:0> without base	FAIL
+/url/url-constructor.any.html	Parsing: <fuchsia-dir://x:0> without base	PASS
 /url/url-constructor.any.html	Parsing: <git+https://github.com/foo/bar> without base	PASS
 /url/url-constructor.any.html	Parsing: <git://github.com/foo/bar.git> without base	PASS
 /url/url-constructor.any.html	Parsing: <gopher://foo:443/> without base	PASS
@@ -67937,7 +69030,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <gopher:example.com/> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <gopher:example.com/> without base	PASS
 /url/url-constructor.any.html	Parsing: <h t t p://h o s t:9 0 0 0/p a t h?q u e ry#f r a g> without base	PASS
-/url/url-constructor.any.html	Parsing: <h://.> without base	FAIL
+/url/url-constructor.any.html	Parsing: <h://.> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://!"$&'()*+,-.;=_`{}~/> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://#> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://%25> against <http://other.com/>	PASS
@@ -68037,7 +69130,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <http://[google.com]> against <http://other.com/>	PASS
 /url/url-constructor.any.html	Parsing: <http://[www.google.com]/> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://`{}:`{}@h/`{}?`{}> against <http://doesnotmatter/>	PASS
-/url/url-constructor.any.html	Parsing: <http://a b/> without base	FAIL
+/url/url-constructor.any.html	Parsing: <http://a b/> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://ab/> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://ab/> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://ab/> without base	PASS
@@ -68130,7 +69223,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <http://example.org/test?>> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://example.org/test?a#%EF> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://example.org/test?a#%GH> without base	PASS
-/url/url-constructor.any.html	Parsing: <http://example.org/test?a#b c> without base	FAIL
+/url/url-constructor.any.html	Parsing: <http://example.org/test?a#b c> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://example.org/test?⌣> without base	PASS
 /url/url-constructor.any.html	Parsing: <http://f: /c> against <http://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <http://f: /c> against <http://example.org/foo/bar>	PASS
@@ -68309,9 +69402,9 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <https://user:pass[@foo/bar> against <http://example.org>	PASS
 /url/url-constructor.any.html	Parsing: <https://www.example.com/path{path.html?query'=query#fragment<fragment> without base	PASS
 /url/url-constructor.any.html	Parsing: <https://x x:12> without base	PASS
-/url/url-constructor.any.html	Parsing: <https://x/ y> without base	FAIL
-/url/url-constructor.any.html	Parsing: <https://x/? y> without base	FAIL
-/url/url-constructor.any.html	Parsing: <https://x/?# y> without base	FAIL
+/url/url-constructor.any.html	Parsing: <https://x/ y> without base	PASS
+/url/url-constructor.any.html	Parsing: <https://x/? y> without base	PASS
+/url/url-constructor.any.html	Parsing: <https://x/?# y> without base	PASS
 /url/url-constructor.any.html	Parsing: <https://x/?#￿y> without base	PASS
 /url/url-constructor.any.html	Parsing: <https://x/?￿y> without base	PASS
 /url/url-constructor.any.html	Parsing: <https://x/�?�#�> without base	PASS
@@ -68337,7 +69430,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <intent://test/a/../b> without base	PASS
 /url/url-constructor.any.html	Parsing: <intent://test:test> without base	PASS
 /url/url-constructor.any.html	Parsing: <irc://myserver.com:6999/channel?passwd> without base	PASS
-/url/url-constructor.any.html	Parsing: <isolated-app://x:0> without base	FAIL
+/url/url-constructor.any.html	Parsing: <isolated-app://x:0> without base	PASS
 /url/url-constructor.any.html	Parsing: <javascript:/../> without base	PASS
 /url/url-constructor.any.html	Parsing: <javascript:///test> without base	PASS
 /url/url-constructor.any.html	Parsing: <javascript://:443> without base	PASS
@@ -68371,11 +69464,11 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <non-spec:/..//path> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-spec:/.//> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-spec:/.//path> without base	PASS
-/url/url-constructor.any.html	Parsing: <non-spec://example.org/test?a#b c> without base	FAIL
+/url/url-constructor.any.html	Parsing: <non-spec://example.org/test?a#b c> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-spec:/a/..//> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-spec:/a/..//path> without base	PASS
-/url/url-constructor.any.html	Parsing: <non-spec:/test?a#b c> without base	FAIL
-/url/url-constructor.any.html	Parsing: <non-special: y> without base	FAIL
+/url/url-constructor.any.html	Parsing: <non-spec:/test?a#b c> without base	PASS
+/url/url-constructor.any.html	Parsing: <non-special: y> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special://%E2%80%A0/> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special://:@test/x> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special://H%4fSt/path> without base	PASS
@@ -68392,7 +69485,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <non-special:\\opaque/path> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:\\opaque> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:\\opaque\path> without base	PASS
-/url/url-constructor.any.html	Parsing: <non-special:cannot-be-a-base-url- ~> without base	FAIL
+/url/url-constructor.any.html	Parsing: <non-special:cannot-be-a-base-url- ~> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:cannot-be-a-base-url-!"$%&'()*+,-.;<=>@[\]^_`{|}~@/> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:opaque      #hi> without base	FAIL
 /url/url-constructor.any.html	Parsing: <non-special:opaque      #hi> without base	FAIL
@@ -68402,9 +69495,9 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <non-special:opaque  ?hi> without base	FAIL
 /url/url-constructor.any.html	Parsing: <non-special:opaque  x#hi> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:opaque  x?hi> without base	PASS
-/url/url-constructor.any.html	Parsing: <non-special:x/ y> without base	FAIL
-/url/url-constructor.any.html	Parsing: <non-special:x/? y> without base	FAIL
-/url/url-constructor.any.html	Parsing: <non-special:x/?# y> without base	FAIL
+/url/url-constructor.any.html	Parsing: <non-special:x/ y> without base	PASS
+/url/url-constructor.any.html	Parsing: <non-special:x/? y> without base	PASS
+/url/url-constructor.any.html	Parsing: <non-special:x/?# y> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:x/?#￿y> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:x/?￿y> without base	PASS
 /url/url-constructor.any.html	Parsing: <non-special:x/￿y> without base	PASS
@@ -68415,13 +69508,13 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <redis://foo:bar@somehost:6379/0?baz=bam&qux=baz> without base	PASS
 /url/url-constructor.any.html	Parsing: <rsync://foo@host:911/sup> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://!"$%&'()*+,-.;=_`{}~/> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc://#> without base	FAIL
+/url/url-constructor.any.html	Parsing: <sc://#> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://%/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://:/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://:12/> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc://?> without base	FAIL
+/url/url-constructor.any.html	Parsing: <sc://?> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://@/> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc://a b/> without base	FAIL
+/url/url-constructor.any.html	Parsing: <sc://a b/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://a b/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://a<b> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://a>b> without base	PASS
@@ -68432,12 +69525,12 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <sc://a|b/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://faß.ExAmPlE/> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://te@s:t@/> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc://ñ#x> without base	FAIL
+/url/url-constructor.any.html	Parsing: <sc://ñ#x> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc://ñ.test/> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc://ñ> without base	FAIL
-/url/url-constructor.any.html	Parsing: <sc://ñ?x> without base	FAIL
+/url/url-constructor.any.html	Parsing: <sc://ñ> without base	PASS
+/url/url-constructor.any.html	Parsing: <sc://ñ?x> without base	PASS
 /url/url-constructor.any.html	Parsing: <sc::a@example.net> without base	PASS
-/url/url-constructor.any.html	Parsing: <sc:> against <https://example.org/foo/bar>	FAIL
+/url/url-constructor.any.html	Parsing: <sc:> against <https://example.org/foo/bar>	PASS
 /url/url-constructor.any.html	Parsing: <sc:\../> without base	PASS
 /url/url-constructor.any.html	Parsing: <ssh://example.com/foo/bar.git> against <http://example.org/>	PASS
 /url/url-constructor.any.html	Parsing: <steam://x:0/a> without base	PASS
@@ -68473,8 +69566,8 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <urn://test:test> without base	PASS
 /url/url-constructor.any.html	Parsing: <urn:ietf:rfc:2648> without base	PASS
 /url/url-constructor.any.html	Parsing: <ut2004://10.10.10.10:7777/Index.ut2> without base	PASS
-/url/url-constructor.any.html	Parsing: <w://x:0> without base	FAIL
-/url/url-constructor.any.html	Parsing: <west://x:0> without base	FAIL
+/url/url-constructor.any.html	Parsing: <w://x:0> without base	PASS
+/url/url-constructor.any.html	Parsing: <west://x:0> without base	PASS
 /url/url-constructor.any.html	Parsing: <wow:%1G> without base	PASS
 /url/url-constructor.any.html	Parsing: <wow:%NBD> without base	PASS
 /url/url-constructor.any.html	Parsing: <wow:￿> without base	PASS
@@ -68493,7 +69586,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <wss://foo:80/> without base	PASS
 /url/url-constructor.any.html	Parsing: <wss://foo:81/> without base	PASS
 /url/url-constructor.any.html	Parsing: <wss://foo:815/> without base	PASS
-/url/url-constructor.any.html	Parsing: <wss://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> without base	FAIL
+/url/url-constructor.any.html	Parsing: <wss://host/ !"$%&'()*+,-./:;<=>@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <wss://host/dir/# !"#$%&'()*+,-./:;<=>?@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <wss://host/dir/? !"$%&'()*+,-./:;<=>?@[\]^_`{|}~> without base	PASS
 /url/url-constructor.any.html	Parsing: <wss://joe: !"$%&'()*+,-.:;<=>@[]^_`{|}~@host/> without base	PASS
@@ -68505,7 +69598,7 @@ test	subtest	status
 /url/url-constructor.any.html	Parsing: <中/test.txt> against <http://www.example.com/test>	PASS
 /url/url-origin.any.html	<harness>	OK
 /url/url-origin.any.html	Loading data…	PASS
-/url/url-origin.any.html	Origin parsing: <  http://example.com/   > without base	FAIL
+/url/url-origin.any.html	Origin parsing: <  http://example.com/   > without base	PASS
 /url/url-origin.any.html	Origin parsing: <    :foo.com    > against <http://example.org/foo/bar>	PASS
 /url/url-origin.any.html	Origin parsing: <   > against <http://example.org/foo/bar>	PASS
 /url/url-origin.any.html	Origin parsing: < foo.com  > against <http://example.org/foo/bar>	PASS
@@ -68929,7 +70022,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<a>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
-/url/url-setters-a-area.window.html	<a>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters-a-area.window.html	<a>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters-a-area.window.html	<a>: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
@@ -69207,7 +70300,7 @@ test	subtest	status
 /url/url-setters-a-area.window.html	<area>: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
-/url/url-setters-a-area.window.html	<area>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters-a-area.window.html	<area>: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters-a-area.window.html	<area>: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
@@ -69750,7 +70843,7 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <a://example.net>.protocol = 'bé' Non-ASCII is rejected	PASS
 /url/url-setters.any.html	URL: Setting <a://example.net>.protocol = 'é' Non-ASCII is rejected	PASS
 /url/url-setters.any.html	URL: Setting <a:/>.hash = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' Simple percent-encoding; tabs and newlines are removed	PASS
-/url/url-setters.any.html	URL: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	FAIL
+/url/url-setters.any.html	URL: Setting <a:/>.pathname = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the default encode set. Tabs and newlines are removed.	PASS
 /url/url-setters.any.html	URL: Setting <a:/>.search = '     !"#$%&'()*+,-./09:;<=>?@AZ[\]^_`az{|}~Éé' UTF-8 percent encoding with the query encode set. Tabs and newlines are removed.	PASS
 /url/url-setters.any.html	URL: Setting <a:/foo>.host = 'example.net' Path-only URLs can gain a host	PASS
 /url/url-setters.any.html	URL: Setting <a:/foo>.hostname = 'example.net' Path-only URLs can gain a host	PASS
@@ -69788,10 +70881,10 @@ test	subtest	status
 /url/url-setters.any.html	URL: Setting <file://y/>.hostname = 'loc%41lhost'	PASS
 /url/url-setters.any.html	URL: Setting <file://y/>.hostname = 'x:123'	PASS
 /url/url-setters.any.html	URL: Setting <file:>.protocol = 'wss'	PASS
-/url/url-setters.any.html	URL: Setting <foo:///some/path>.pathname = '' Non-special URLs with an empty host can have their paths erased	FAIL
+/url/url-setters.any.html	URL: Setting <foo:///some/path>.pathname = '' Non-special URLs with an empty host can have their paths erased	PASS
 /url/url-setters.any.html	URL: Setting <foo://path/to>.host = ':80'	PASS
 /url/url-setters.any.html	URL: Setting <foo://path/to>.pathname = '/..'	PASS
-/url/url-setters.any.html	URL: Setting <foo://somehost/some/path>.pathname = '' Non-special URLs can have their paths erased	FAIL
+/url/url-setters.any.html	URL: Setting <foo://somehost/some/path>.pathname = '' Non-special URLs can have their paths erased	PASS
 /url/url-setters.any.html	URL: Setting <foo:/some/path>.pathname = '' Path-only URLs cannot have their paths erased	PASS
 /url/url-setters.any.html	URL: Setting <foo:/some/path>.pathname = 'test' Path-only URLs always have an initial slash	PASS
 /url/url-setters.any.html	URL: Setting <ftp://example.net>.protocol = 'test'	PASS

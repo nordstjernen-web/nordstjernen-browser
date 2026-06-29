@@ -659,10 +659,10 @@ ns_url_parser_close(lxb_url_parser_t *parser)
 }
 
 char *
-ns_url_resolve(const char *base, const char *href)
+ns_url_resolve_len(const char *base, const char *href, size_t href_len)
 {
     if (!href) return NULL;
-    if (!*href && !(base && *base)) return NULL;
+    if (href_len == 0 && !(base && *base)) return NULL;
 
     lxb_url_parser_t *parser = ns_url_parser_open();
     if (!parser) return NULL;
@@ -678,7 +678,7 @@ ns_url_resolve(const char *base, const char *href)
         }
     }
     lxb_url_t *resolved = lxb_url_parse(parser, base_url,
-                                        (const lxb_char_t *)href, strlen(href));
+                                        (const lxb_char_t *)href, href_len);
     char *out = NULL;
     if (resolved) {
         GString *s = g_string_new(NULL);
@@ -690,6 +690,12 @@ ns_url_resolve(const char *base, const char *href)
     }
     ns_url_parser_close(parser);
     return out;
+}
+
+char *
+ns_url_resolve(const char *base, const char *href)
+{
+    return ns_url_resolve_len(base, href, href ? strlen(href) : 0);
 }
 
 char *
