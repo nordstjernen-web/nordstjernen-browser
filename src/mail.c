@@ -23,6 +23,15 @@ typedef struct {
 } ns_mail_hdr;
 
 typedef struct {
+    char   *filename;
+    char   *content_type;
+    guint8 *data;
+    gsize   len;
+} ns_mail_attach;
+
+#define NS_MAIL_ATT_MAX (20u * 1024u * 1024u)
+
+typedef struct {
     char *in_proto;
     char *in_host;
     int   in_port;
@@ -122,6 +131,7 @@ static char *g_open_uid;
 static int g_open_state;
 static char *g_open_error;
 static ns_mail_hdr g_open_msg;
+static GPtrArray *g_open_atts;
 static GThread *g_open_thread;
 
 static GMutex g_send_lock;
@@ -167,6 +177,17 @@ hdr_free(gpointer p)
     g_free(h->date);
     g_free(h->body);
     g_free(h);
+}
+
+static void
+attach_free(gpointer p)
+{
+    ns_mail_attach *a = p;
+    if (!a) return;
+    g_free(a->filename);
+    g_free(a->content_type);
+    g_free(a->data);
+    g_free(a);
 }
 
 static void
@@ -866,7 +887,35 @@ html_to_text(const char *html)
     return g_string_free(clean, FALSE);
 }
 
-static char *mime_extract(const char *data, gsize len, int depth);
+typedef struct {
+    char      *best_plain;
+    char      *best_html;
+    GPtrArray *atts;
+} mime_acc;
+
+static void mime_collect(const char *data, gsize len, int depth, mime_acc *acc);
+
+static guint8 *
+cte_decode_raw(const char *body, gsize body_len, const char *cte, gsize *out_len)
+{
+    char *c = cte ? g_strstrip(g_strdup(cte)) : NULL;
+    guint8 *out;
+    gsize n;
+    if (c && g_ascii_strcasecmp(c, "base64") == 0) {
+        char *b = g_strndup(body, body_len);
+        out = g_base64_decode(b, &n);
+        g_free(b);
+    } else if (c && g_ascii_strcasecmp(c, "quoted-printable") == 0) {
+        out = (guint8 *)qp_decode(body, body_len, &n);
+    } else {
+        out = g_malloc(body_len ? body_len : 1);
+        memcpy(out, body, body_len);
+        n = body_len;
+    }
+    g_free(c);
+    *out_len = n;
+    return out;
+}
 
 static char *
 mime_extract_part_body(const char *headers, const char *body, gsize body_len,
@@ -877,19 +926,8 @@ mime_extract_part_body(const char *headers, const char *body, gsize body_len,
     char *charset = ctype_param(ctype, "charset");
     gboolean html = ctype && g_ascii_strncasecmp(ctype, "text/html", 9) == 0;
 
-    char *decoded = NULL;
     gsize decoded_len = 0;
-    if (cte && g_ascii_strcasecmp(g_strstrip(cte), "base64") == 0) {
-        char *b = g_strndup(body, body_len);
-        decoded = (char *)g_base64_decode(b, &decoded_len);
-        g_free(b);
-    } else if (cte && g_ascii_strcasecmp(g_strstrip(cte), "quoted-printable") == 0) {
-        decoded = qp_decode(body, body_len, &decoded_len);
-    } else {
-        decoded = g_strndup(body, body_len);
-        decoded_len = body_len;
-    }
-
+    char *decoded = (char *)cte_decode_raw(body, body_len, cte, &decoded_len);
     char *text = to_utf8(decoded, (gssize)decoded_len, charset);
     g_free(decoded);
     if (html) {
@@ -905,17 +943,71 @@ mime_extract_part_body(const char *headers, const char *body, gsize body_len,
 }
 
 static char *
-mime_extract(const char *data, gsize len, int depth)
+mime_type_only(const char *ctype)
+{
+    if (!ctype) return g_strdup("application/octet-stream");
+    char *t = g_strstrip(g_strdup(ctype));
+    char *semi = strchr(t, ';');
+    if (semi) *semi = '\0';
+    g_strchomp(t);
+    if (!*t) { g_free(t); return g_strdup("application/octet-stream"); }
+    return t;
+}
+
+static void
+mime_collect_leaf(const char *headers, const char *body, gsize body_len,
+                  mime_acc *acc)
+{
+    char *ctype = header_value(headers, "Content-Type");
+    char *cdisp = header_value(headers, "Content-Disposition");
+    char *cte = header_value(headers, "Content-Transfer-Encoding");
+    char *filename = ctype_param(cdisp, "filename");
+    if (!filename) filename = ctype_param(ctype, "name");
+
+    gboolean is_text = ctype == NULL ||
+        g_ascii_strncasecmp(ctype, "text/", 5) == 0;
+    gboolean attached = (cdisp &&
+                         g_ascii_strncasecmp(cdisp, "attachment", 10) == 0) ||
+                        filename != NULL || !is_text;
+
+    if (attached && acc->atts) {
+        gsize dlen = 0;
+        guint8 *raw = cte_decode_raw(body, body_len, cte, &dlen);
+        if (raw && dlen > 0 && dlen <= NS_MAIL_ATT_MAX) {
+            ns_mail_attach *a = g_new0(ns_mail_attach, 1);
+            a->filename = filename && *g_strstrip(filename)
+                ? g_strdup(filename) : g_strdup("attachment");
+            a->content_type = mime_type_only(ctype);
+            a->data = raw;
+            a->len = dlen;
+            g_ptr_array_add(acc->atts, a);
+            raw = NULL;
+        }
+        g_free(raw);
+    } else if (ctype && g_ascii_strncasecmp(ctype, "text/html", 9) == 0) {
+        if (!acc->best_html)
+            acc->best_html = mime_extract_part_body(headers, body, body_len, NULL);
+    } else {
+        if (!acc->best_plain)
+            acc->best_plain = mime_extract_part_body(headers, body, body_len, NULL);
+    }
+    g_free(ctype);
+    g_free(cdisp);
+    g_free(cte);
+    g_free(filename);
+}
+
+static void
+mime_collect(const char *data, gsize len, int depth, mime_acc *acc)
 {
     char *headers = unfold_headers(data, len);
     const char *body = data;
-    gsize body_len = 0;
     for (gsize i = 0; i + 1 < len; i++) {
         if (data[i] == '\n' && data[i + 1] == '\n') { body = data + i + 2; break; }
         if (i + 3 < len && data[i] == '\r' && data[i + 1] == '\n' &&
             data[i + 2] == '\r' && data[i + 3] == '\n') { body = data + i + 4; break; }
     }
-    body_len = (data + len) - body;
+    gsize body_len = (data + len) - body;
     if (body < data || body > data + len) { body = data; body_len = len; }
 
     char *ctype = header_value(headers, "Content-Type");
@@ -927,8 +1019,6 @@ mime_extract(const char *data, gsize len, int depth)
         if (boundary && *boundary) {
             char *delim = g_strdup_printf("--%s", boundary);
             gsize dlen = strlen(delim);
-            char *best_plain = NULL;
-            char *best_html = NULL;
             const char *scan = body;
             const char *bend = body + body_len;
             while (scan < bend) {
@@ -941,19 +1031,7 @@ mime_extract(const char *data, gsize len, int depth)
                     part_start++;
                 const char *next = g_strstr_len(part_start, bend - part_start, delim);
                 const char *part_end = next ? next : bend;
-                gboolean part_html = FALSE;
-                char *sub = mime_extract(part_start, part_end - part_start, depth + 1);
-                if (sub && *sub) {
-                    char *ph = unfold_headers(part_start, part_end - part_start);
-                    char *pct = header_value(ph, "Content-Type");
-                    part_html = pct && g_ascii_strncasecmp(pct, "text/html", 9) == 0;
-                    g_free(pct);
-                    g_free(ph);
-                    if (part_html) { if (!best_html) best_html = sub; else g_free(sub); }
-                    else { if (!best_plain) best_plain = sub; else g_free(sub); }
-                } else {
-                    g_free(sub);
-                }
+                mime_collect(part_start, part_end - part_start, depth + 1, acc);
                 if (!next) break;
                 scan = next;
             }
@@ -961,17 +1039,14 @@ mime_extract(const char *data, gsize len, int depth)
             g_free(boundary);
             g_free(ctype);
             g_free(headers);
-            if (best_plain) { g_free(best_html); return best_plain; }
-            if (best_html) return best_html;
-            return g_strdup("");
+            return;
         }
         g_free(boundary);
     }
 
     g_free(ctype);
-    char *text = mime_extract_part_body(headers, body, body_len, NULL);
+    mime_collect_leaf(headers, body, body_len, acc);
     g_free(headers);
-    return text;
 }
 
 static GArray *
@@ -1244,6 +1319,7 @@ open_thread(gpointer data)
     GString *buf = g_string_new(NULL);
     CURL *c = mail_curl_new(a, FALSE, errbuf, buf);
     char *body = NULL, *from = NULL, *to = NULL, *subject = NULL, *date = NULL;
+    GPtrArray *atts = NULL;
     gboolean ok = FALSE;
 
     if (c) {
@@ -1260,7 +1336,12 @@ open_thread(gpointer data)
             subject = header_value(headers, "Subject");
             date = header_value(headers, "Date");
             g_free(headers);
-            body = mime_extract(buf->str, buf->len, 0);
+            mime_acc acc = { NULL, NULL, g_ptr_array_new_with_free_func(attach_free) };
+            mime_collect(buf->str, buf->len, 0, &acc);
+            body = acc.best_plain ? acc.best_plain : acc.best_html;
+            if (acc.best_plain && acc.best_html) g_free(acc.best_html);
+            if (!body) body = g_strdup("");
+            atts = acc.atts;
             ok = TRUE;
         }
         curl_easy_cleanup(c);
@@ -1275,6 +1356,12 @@ open_thread(gpointer data)
     g_free(g_open_msg.subject); g_open_msg.subject = subject;
     g_free(g_open_msg.date); g_open_msg.date = date;
     g_free(g_open_msg.body); g_open_msg.body = body;
+    if (ok) {
+        if (g_open_atts) g_ptr_array_free(g_open_atts, TRUE);
+        g_open_atts = atts;
+    } else if (atts) {
+        g_ptr_array_free(atts, TRUE);
+    }
     if (ok) {
         g_open_state = ST_DONE;
         g_clear_pointer(&g_open_error, g_free);
@@ -1339,17 +1426,51 @@ ns_mail_message_json(void)
     char *subj = ns_mail_json_escape(g_open_msg.subject ? g_open_msg.subject : "");
     char *date = ns_mail_json_escape(g_open_msg.date ? g_open_msg.date : "");
     char *body = ns_mail_json_escape(g_open_msg.body ? g_open_msg.body : "");
+    GString *atts = g_string_new("[");
+    if (g_open_atts) {
+        for (guint i = 0; i < g_open_atts->len; i++) {
+            ns_mail_attach *at = g_ptr_array_index(g_open_atts, i);
+            char *fn = ns_mail_json_escape(at->filename ? at->filename : "");
+            char *ct = ns_mail_json_escape(at->content_type ? at->content_type : "");
+            g_string_append_printf(atts,
+                "%s{\"index\":%u,\"filename\":\"%s\",\"type\":\"%s\",\"size\":%" G_GSIZE_FORMAT "}",
+                i ? "," : "", i, fn, ct, at->len);
+            g_free(fn);
+            g_free(ct);
+        }
+    }
+    g_string_append_c(atts, ']');
     g_mutex_unlock(&g_open_lock);
 
     GString *o = g_string_new("{");
     g_string_append_printf(o, "\"state\":\"%s\",\"error\":\"%s\",", state_name(st), err);
     g_string_append_printf(o,
         "\"message\":{\"uid\":\"%s\",\"from\":\"%s\",\"to\":\"%s\","
-        "\"subject\":\"%s\",\"date\":\"%s\",\"body\":\"%s\"}}",
-        uid, from, to, subj, date, body);
+        "\"subject\":\"%s\",\"date\":\"%s\",\"body\":\"%s\",\"attachments\":%s}}",
+        uid, from, to, subj, date, body, atts->str);
     g_free(err); g_free(uid); g_free(from); g_free(to);
     g_free(subj); g_free(date); g_free(body);
+    g_string_free(atts, TRUE);
     return g_string_free(o, FALSE);
+}
+
+gboolean
+ns_mail_attachment(int index, char **out_ctype, char **out_name,
+                   guint8 **out_data, gsize *out_len)
+{
+    gboolean ok = FALSE;
+    g_mutex_lock(&g_open_lock);
+    if (g_open_atts && index >= 0 && (guint)index < g_open_atts->len) {
+        ns_mail_attach *a = g_ptr_array_index(g_open_atts, index);
+        *out_ctype = g_strdup(a->content_type ? a->content_type
+                                              : "application/octet-stream");
+        *out_name = g_strdup(a->filename ? a->filename : "attachment");
+        *out_data = g_memdup2(a->data, a->len);
+        *out_len = a->len;
+        ok = TRUE;
+    }
+    g_mutex_unlock(&g_open_lock);
+    return ok;
 }
 
 typedef struct { const char *data; gsize len; gsize off; } upload_ctx;

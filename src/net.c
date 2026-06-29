@@ -3999,6 +3999,12 @@ static const char k_about_email_html[] =
 ".row{display:flex;align-items:center;gap:12px;margin-top:16px}\n"
 ".hint{color:#46506b;font-size:.86em;line-height:1.5;background:#eaf0fb;"
 "padding:10px 14px;border-radius:8px;margin:.2em 0 1em}\n"
+".atts{display:flex;flex-direction:column;gap:8px;margin-top:14px}\n"
+".att{display:flex;align-items:baseline;gap:10px;background:#fff;"
+"border-radius:10px;padding:11px 15px;box-shadow:0 1px 3px rgba(20,30,50,.08);"
+"text-decoration:none;color:#1b2a4a;font-weight:600}\n"
+".att:hover{background:#f0f5ff}\n"
+".att .amt{color:#8a93a3;font-size:.85em;font-weight:400}\n"
 ".ok{color:#1a8a4a;font-weight:600}.err{color:#c0392b;font-weight:600}\n"
 "@media(max-width:640px){.grid{grid-template-columns:1fr}"
 "td.from{width:40%}.bar{flex-wrap:wrap}}\n"
@@ -4025,6 +4031,7 @@ static const char k_about_email_html[] =
 "<div class=\"meta\" id=\"r-to\"></div>"
 "<div class=\"meta\" id=\"r-date\"></div></div>"
 "<pre class=\"body\" id=\"r-body\"></pre>"
+"<div class=\"atts\" id=\"r-atts\" hidden></div>"
 "</section>\n"
 "<section id=\"view-compose\" class=\"view\" hidden>"
 "<div class=\"card\"><h2>New message</h2>"
@@ -4148,10 +4155,21 @@ static const char k_about_email_html[] =
 "if(st.sync.state==='error')setSync('Could not sync: '+st.sync.error,'err');"
 "else setSync(((st.messages||[]).length)+' message(s) in Inbox');});}\n"
 "var cur=null;\n"
+"function fmtSize(n){n=n||0;if(n<1024)return n+' B';"
+"if(n<1048576)return Math.round(n/1024)+' KB';"
+"return (n/1048576).toFixed(1)+' MB';}\n"
 "function openMsg(uid){show('read');$('r-subject').textContent='Loading\\u2026';"
 "$('r-from').textContent='';$('r-to').textContent='';$('r-date').textContent='';"
-"$('r-body').textContent='';"
+"$('r-body').textContent='';$('r-atts').textContent='';$('r-atts').hidden=true;"
 "gj('about:email-open?'+enc({uid:uid})).then(function(){pollMsg();});}\n"
+"function renderAtts(L){var at=$('r-atts');at.textContent='';"
+"if(!L||!L.length){at.hidden=true;return;}at.hidden=false;"
+"L.forEach(function(x){var a=document.createElement('a');a.className='att';"
+"a.href='about:email-attachment?index='+x.index;"
+"var nm=document.createElement('span');nm.textContent=x.filename||'attachment';"
+"var mt=document.createElement('span');mt.className='amt';"
+"mt.textContent=fmtSize(x.size)+(x.type?(' \\u00b7 '+x.type):'');"
+"a.appendChild(nm);a.appendChild(mt);at.appendChild(a);});}\n"
 "function pollMsg(){gj('about:email-message').then(function(j){"
 "if(j.state==='running'){setTimeout(pollMsg,500);return;}"
 "if(j.state==='error'){$('r-subject').textContent='Could not open message';"
@@ -4161,7 +4179,8 @@ static const char k_about_email_html[] =
 "$('r-from').textContent=m.from?('From: '+m.from):'';"
 "$('r-to').textContent=m.to?('To: '+m.to):'';"
 "$('r-date').textContent=m.date||'';"
-"$('r-body').textContent=m.body||'(this message has no readable text)';});}\n"
+"$('r-body').textContent=m.body||'(this message has no readable text)';"
+"renderAtts(m.attachments);});}\n"
 "function compose(p){show('compose');$('c-to').value=p&&p.to||'';"
 "$('c-cc').value='';$('c-subject').value=p&&p.subject||'';"
 "$('c-body').value=p&&p.body||'';$('c-status').textContent='';"
@@ -4729,6 +4748,39 @@ synthesize_about_response(const char *url, const char *top_url,
         about_emit_json(resp, ns_mail_message_json());
     } else if (g_str_has_prefix(what, "email-message")) {
         about_emit_json(resp, ns_mail_message_json());
+    } else if (g_str_has_prefix(what, "email-attachment")) {
+        char *idxs = about_query_param(url, "index");
+        int idx = idxs ? atoi(idxs) : -1;
+        g_free(idxs);
+        char *ctype = NULL, *name = NULL;
+        guint8 *data = NULL;
+        gsize len = 0;
+        if (ns_mail_attachment(idx, &ctype, &name, &data, &len)) {
+            gboolean img = g_ascii_strncasecmp(ctype, "image/", 6) == 0 &&
+                           g_ascii_strncasecmp(ctype, "image/svg", 9) != 0;
+            gboolean pdf = g_ascii_strcasecmp(ctype, "application/pdf") == 0;
+            gboolean txt = g_ascii_strncasecmp(ctype, "text/", 5) == 0;
+            g_free(resp->content_type);
+            if (img || pdf) resp->content_type = g_strdup(ctype);
+            else if (txt)   resp->content_type = g_strdup("text/plain; charset=utf-8");
+            else            resp->content_type = g_strdup("application/octet-stream");
+            for (char *p = name; p && *p; p++)
+                if ((guchar)*p < 0x20 || *p == '"' || *p == '\\') *p = '_';
+            g_free(resp->content_disposition);
+            resp->content_disposition = g_strdup_printf("inline; filename=\"%s\"", name);
+            g_byte_array_append(resp->body, data, (guint)len);
+            g_free(ctype);
+            g_free(name);
+            g_free(data);
+        } else {
+            g_free(resp->content_type);
+            resp->content_type = g_strdup("text/html; charset=utf-8");
+            const char *msg =
+                "<!doctype html><meta charset=utf-8><body style=\"font-family:"
+                "system-ui;padding:2em;color:#333\"><p>This attachment is no "
+                "longer available. Reopen the message and try again.</p>";
+            g_byte_array_append(resp->body, (const guint8 *)msg, (guint)strlen(msg));
+        }
     } else if (g_str_has_prefix(what, "email-send-status")) {
         about_emit_json(resp, ns_mail_send_status_json());
     } else if (g_str_has_prefix(what, "email-send")) {

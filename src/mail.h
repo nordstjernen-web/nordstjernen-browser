@@ -23,6 +23,8 @@ char *ns_mail_status_json(void);
 
 void  ns_mail_open(const char *uid);
 char *ns_mail_message_json(void);
+gboolean ns_mail_attachment(int index, char **out_ctype, char **out_name,
+                            guint8 **out_data, gsize *out_len);
 
 void  ns_mail_send(const char *form_urlencoded);
 char *ns_mail_send_status_json(void);
