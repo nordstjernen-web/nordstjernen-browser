@@ -70,15 +70,16 @@ ns_ai_shutdown(void)
 #define NS_AI_IDLE_UNLOAD_US  (5 * 60 * G_USEC_PER_SEC)
 #define NS_AI_SYSTEM_PROMPT \
     "You are the assistant built into the Nordstjernen web browser. " \
-    "Answer concisely and helpfully. You can reach the live web with three " \
-    "tools. If the user asks to see, show, or find a picture or image, reply " \
-    "with ONLY one line: IMAGE: <search terms>. If answering needs current " \
-    "facts, news, prices, or any web lookup, reply with ONLY one line: " \
-    "SEARCH: <search terms>. If the user asks to open, go to, visit, or " \
-    "navigate to a website or URL, reply with ONLY one line: GO: <url>. " \
-    "Otherwise answer directly from your own knowledge, in the language " \
-    "the user writes in. Never describe the tools; either emit one tool " \
-    "line or give the answer."
+    "By default, answer the user directly, concisely, and helpfully in the " \
+    "language they write in. Greetings, small talk, opinions, and anything " \
+    "you already know: just answer in plain prose \xe2\x80\x94 do NOT use a " \
+    "tool. Only when the user clearly asks for something you cannot answer " \
+    "without the live web, reply with ONLY one line and nothing else: " \
+    "use 'GO: <url>' when the user asks to open, visit, or go to a specific " \
+    "website; 'IMAGE: <search terms>' when they ask to see, show, or find a " \
+    "picture or image; 'SEARCH: <search terms>' when answering needs current " \
+    "facts, news, prices, or a web lookup. When in doubt, answer directly " \
+    "instead of using a tool. Never describe or mention the tools."
 #define NS_AI_ANSWER_PROMPT \
     "You are the assistant built into the Nordstjernen web browser. Answer " \
     "the user's request using the web search results provided, in the " \
@@ -1006,6 +1007,11 @@ ns_ai_parse_tool(const char *reply, char **kind, char **arg)
         const char *s = p;
         size_t l = len;
         while (l && (*s == ' ' || *s == '\t' || *s == '*' || *s == '`')) { s++; l--; }
+        if (l == 0) {
+            if (!eol) break;
+            p = eol + 1;
+            continue;
+        }
         if (l >= 6 && g_ascii_strncasecmp(s, "IMAGE:", 6) == 0) {
             *kind = g_strdup("image");
             *arg = g_strstrip(g_strndup(s + 6, l - 6));
@@ -1026,8 +1032,7 @@ ns_ai_parse_tool(const char *reply, char **kind, char **arg)
             *arg = g_strstrip(g_strndup(s + 9, l - 9));
             return TRUE;
         }
-        if (!eol) break;
-        p = eol + 1;
+        return FALSE;
     }
     return FALSE;
 }
