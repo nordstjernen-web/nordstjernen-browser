@@ -587,7 +587,7 @@ request(ns_rproc_http *r, const char *path, const char *json_body)
         return NULL;
     http_head head;
     if (http_read_head(&r->conn, &head) != 0 ||
-        head.content_length > NS_HTTP_MAX_REPLY)
+        head.content_length < 0 || head.content_length > NS_HTTP_MAX_REPLY)
         return NULL;
     char *body = malloc((size_t)head.content_length + 1);
     if (!body)
@@ -902,18 +902,26 @@ ns_rproc_http_drop_files(ns_rproc_http *r, int x, int y,
     if (!r || !paths || n_paths <= 0)
         return 0;
     size_t total = 1;
-    for (int i = 0; i < n_paths; i++)
-        total += (paths[i] ? strlen(paths[i]) : 0) + 1;
+    for (int i = 0; i < n_paths; i++) {
+        size_t len = paths[i] ? strlen(paths[i]) : 0;
+        if (len > SIZE_MAX - total - 1)
+            return 0;
+        total += len + 1;
+    }
     char *joined = malloc(total);
     if (!joined)
         return 0;
-    joined[0] = '\0';
+    char *dst = joined;
     for (int i = 0; i < n_paths; i++) {
         if (i)
-            strcat(joined, "\n");
-        if (paths[i])
-            strcat(joined, paths[i]);
+            *dst++ = '\n';
+        if (paths[i]) {
+            size_t len = strlen(paths[i]);
+            memcpy(dst, paths[i], len);
+            dst += len;
+        }
     }
+    *dst = '\0';
     char *pe = json_escape(joined);
     free(joined);
     char *json = NULL;

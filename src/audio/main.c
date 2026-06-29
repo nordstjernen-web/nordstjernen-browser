@@ -527,11 +527,24 @@ load_audio(ns_audio_player *p, const char *path)
     return 1;
 }
 
+typedef struct {
+    FILE   *file;
+    size_t  len;
+} ns_audio_download;
+
 static size_t
 curl_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-    FILE *f = userdata;
-    return fwrite(ptr, size, nmemb, f);
+    ns_audio_download *d = userdata;
+    if (!d || !d->file) return 0;
+    if (size != 0 && nmemb > SIZE_MAX / size) return 0;
+    size_t bytes = size * nmemb;
+    if (d->len > NS_AUDIO_MAX_BYTES) return 0;
+    if (bytes > NS_AUDIO_MAX_BYTES - d->len) return 0;
+    size_t wrote = fwrite(ptr, 1, bytes, d->file);
+    if (wrote != bytes) return wrote;
+    d->len += wrote;
+    return wrote;
 }
 
 static const char *
@@ -554,13 +567,37 @@ write_temp_from_url(const char *url)
     int ok = 0;
     CURL *c = curl_easy_init();
     if (c) {
+        ns_audio_download dl = { f, 0 };
         curl_easy_setopt(c, CURLOPT_URL, url);
         curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write_cb);
-        curl_easy_setopt(c, CURLOPT_WRITEDATA, f);
+        curl_easy_setopt(c, CURLOPT_WRITEDATA, &dl);
         curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+#ifdef CURLOPT_PROTOCOLS_STR
+        curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https,data");
+#endif
+#ifdef CURLOPT_REDIR_PROTOCOLS_STR
+        curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR,
+                         strncmp(url, "https://", 8) == 0 ? "https" :
+                         strncmp(url, "data:", 5) == 0 ? "data" :
+                         "http,https");
+#endif
+#ifdef CURLOPT_MAXFILESIZE_LARGE
+        curl_easy_setopt(c, CURLOPT_MAXFILESIZE_LARGE,
+                         (curl_off_t)NS_AUDIO_MAX_BYTES);
+#endif
         curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
         curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
         curl_easy_setopt(c, CURLOPT_USERAGENT, "Nordstjernen-Audio");
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 2L);
+#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
+        curl_easy_setopt(c, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
+#endif
+        const char *ca = getenv("CURL_CA_BUNDLE");
+        if (!ca || !*ca) ca = getenv("SSL_CERT_FILE");
+        if (ca && *ca)
+            curl_easy_setopt(c, CURLOPT_CAINFO, ca);
         ok = curl_easy_perform(c) == CURLE_OK;
         curl_easy_cleanup(c);
     }
