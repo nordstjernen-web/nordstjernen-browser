@@ -162,6 +162,7 @@ rm -rf "${BUILDDIR}"
 
 export PKG_CONFIG_LIBDIR="${SYSROOT_PKGCONFIG}"
 unset PKG_CONFIG_SYSROOT_DIR || true
+unset PKG_CONFIG_PATH || true
 echo "Using pkg-config: $(command -v pkg-config || echo missing)"
 pkg-config --list-all | sort > "${LOGDIR}/pkg-config-${ABI}.txt" || true
 echo "Wrote pkg-config module list: ${LOGDIR}/pkg-config-${ABI}.txt"

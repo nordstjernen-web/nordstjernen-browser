@@ -96,7 +96,8 @@ android {
 }
 
 tasks.configureEach { task ->
-    if (task.name.startsWith('merge') && task.name.endsWith('Assets')) {
+    if ((task.name.startsWith('merge') && task.name.endsWith('Assets')) ||
+            task.name.toLowerCase().contains('lint')) {
         task.dependsOn(syncLicenseAssets)
     }
 }
