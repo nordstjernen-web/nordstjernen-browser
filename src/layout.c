@@ -588,6 +588,7 @@ is_replaced_block_tag(const char *name)
     return name && (strcmp(name, "img") == 0 ||
                     strcmp(name, "picture") == 0 ||
                     strcmp(name, "svg") == 0 ||
+                    strcmp(name, "canvas") == 0 ||
                     strcmp(name, "audio") == 0 ||
                     strcmp(name, "video") == 0 ||
                     strcmp(name, "math") == 0 ||
@@ -600,7 +601,8 @@ is_inline_level_replaced(const ns_node *n, GHashTable *styles)
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
     if (!(strcmp(n->name, "img") == 0 || strcmp(n->name, "svg") == 0 ||
           strcmp(n->name, "picture") == 0 || strcmp(n->name, "audio") == 0 ||
-          strcmp(n->name, "video") == 0 || strcmp(n->name, "math") == 0))
+          strcmp(n->name, "video") == 0 || strcmp(n->name, "math") == 0 ||
+          strcmp(n->name, "canvas") == 0))
         return FALSE;
     const ns_style *s = styles ? g_hash_table_lookup(styles, n) : NULL;
     const ns_css_value *d = s ? s->values[NS_CSS_DISPLAY] : NULL;
@@ -912,7 +914,7 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     }
     if (strcmp(nm, "img") == 0 || strcmp(nm, "svg") == 0 ||
         strcmp(nm, "audio") == 0 || strcmp(nm, "video") == 0 ||
-        strcmp(nm, "math") == 0 ||
+        strcmp(nm, "math") == 0 || strcmp(nm, "canvas") == 0 ||
         strcmp(nm, "picture") == 0)
         return is_inline_level_replaced(n, styles);
     if (strcmp(nm, "input") == 0 || strcmp(nm, "textarea") == 0 ||

@@ -609,7 +609,7 @@ test	harness	total	pass	fail	timeout	notrun	precondition_failed
 /html/dom/elements/name-content-attribute-and-property.html	OK	141	141	0	0	0	0
 /html/dom/elements/the-innertext-and-outertext-properties/dynamic-getter.html	OK	7	7	0	0	0	0
 /html/dom/elements/the-innertext-and-outertext-properties/getter-first-letter-marker-multicol.html	OK	1	1	0	0	0	0
-/html/dom/elements/the-innertext-and-outertext-properties/getter.html	OK	276	246	30	0	0	0
+/html/dom/elements/the-innertext-and-outertext-properties/getter.html	OK	276	247	29	0	0	0
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-setter.html	OK	126	124	2	0	0	0
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-whitespace-pre-line.html	OK	2	2	0	0	0	0
 /html/dom/elements/the-innertext-and-outertext-properties/innertext-with-white-spaces.html	OK	79	0	79	0	0	0

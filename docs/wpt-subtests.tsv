@@ -61671,7 +61671,7 @@ test	subtest	status
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<button> contents preserved ("<div><button>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<canvas> contents ignored ("<canvas>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<canvas> contents ignored ("<div><canvas>abc")	PASS
-/html/dom/elements/the-innertext-and-outertext-properties/getter.html	<canvas> should not collapse following space ("<div><canvas></canvas> abc")	FAIL
+/html/dom/elements/the-innertext-and-outertext-properties/getter.html	<canvas> should not collapse following space ("<div><canvas></canvas> abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<canvas><div id='target'> contents ok for element not being rendered ("<canvas><div id='target'>abc")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<code> gets no special treatment ("<div>123<code>abc</code>def")	PASS
 /html/dom/elements/the-innertext-and-outertext-properties/getter.html	<div> in <option> ("<select><option class='poke-div'>123</select>")	PASS

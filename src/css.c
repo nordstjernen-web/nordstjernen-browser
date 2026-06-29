@@ -13663,7 +13663,7 @@ static const char *kUa =
     "[data-nd-shadow-root] { display: block; }\n"
     "input[type=\"hidden\"] { display: none; }\n"
     "video { display: block; }\n"
-    "canvas { display: block; }\n"
+    "canvas { display: inline; }\n"
     "iframe, frame, frameset, object, embed { display: none !important; }\n"
     "iframe[data-nd-frame-loaded] { display: block !important; overflow: hidden; }\n"
     "audio, source, track, param { display: none; }\n"
