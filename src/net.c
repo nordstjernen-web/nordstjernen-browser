@@ -5141,7 +5141,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
 #else
             "\"Unknown\"";
 #endif
-        if (!mobile_ua) {
+        gboolean chromium_ua = effective_ua && strstr(effective_ua, "Chrome");
+        if (!mobile_ua && chromium_ua) {
             char *ua_brand = g_strdup_printf(
                 "Sec-CH-UA: \"Nordstjernen\";v=\"" NS_VERSION
                 "\", \"Not.A/Brand\";v=\"99\"");

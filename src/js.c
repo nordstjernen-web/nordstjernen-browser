@@ -34149,15 +34149,17 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
                ns_navigator_register_protocol_handler, 2);
     ns_bind_fn(ctx, navigator, "unregisterProtocolHandler", ns_event_noop,       2);
 
-    JSValue userAgentData = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, userAgentData, "brands", JS_NewArray(ctx));
-    JS_SetPropertyStr(ctx, userAgentData, "mobile", JS_FALSE);
-    JS_SetPropertyStr(ctx, userAgentData, "platform",
-                      JS_NewString(ctx, "Linux"));
-    ns_bind_fn(ctx, userAgentData, "getHighEntropyValues",
-               ns_navigator_high_entropy_values, 1);
-    ns_bind_fn(ctx, userAgentData, "toJSON", ns_event_noop, 0);
-    JS_SetPropertyStr(ctx, navigator, "userAgentData", userAgentData);
+    if (nav_ua && strstr(nav_ua, "Chrome")) {
+        JSValue userAgentData = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, userAgentData, "brands", JS_NewArray(ctx));
+        JS_SetPropertyStr(ctx, userAgentData, "mobile", JS_FALSE);
+        JS_SetPropertyStr(ctx, userAgentData, "platform",
+                          JS_NewString(ctx, "Linux"));
+        ns_bind_fn(ctx, userAgentData, "getHighEntropyValues",
+                   ns_navigator_high_entropy_values, 1);
+        ns_bind_fn(ctx, userAgentData, "toJSON", ns_event_noop, 0);
+        JS_SetPropertyStr(ctx, navigator, "userAgentData", userAgentData);
+    }
 
     JSValue plugins = JS_NewArray(ctx);
     JS_SetPropertyStr(ctx, plugins, "length", JS_NewInt32(ctx, 0));
