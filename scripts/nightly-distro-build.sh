@@ -22,7 +22,7 @@ install_apt() {
         libsqlite3-dev librsvg2-dev libseccomp-dev libwebp-dev libsdl2-dev
     apt-get install -y --no-install-recommends \
         libpoppler-glib-dev \
-        libfontconfig-dev libpango1.0-dev libavif-dev qt6-base-dev libqt6svg6-dev || true
+        libfontconfig-dev libpango1.0-dev libavif-dev || true
     # FFmpeg libav* enables the auto-detected inline WebM path (VP9/VP8 video +
     # Opus/Vorbis audio). Optional and on its own line so its absence skips
     # WebM rather than dropping the other optional dev packages.
@@ -56,13 +56,13 @@ install_zypper() {
     # SDL2 backs the auto-detected audio helper; keep it out of the required
     # set so an unavailable/mid-sync package degrades to no audio, not a failed
     # nightly. Its own line (not the optional group) so it is independent of
-    # poppler/qt6 availability.
+    # poppler availability.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libSDL2-devel \
         || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio helper skipped" >&2
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libpoppler-glib-devel \
-        fontconfig-devel pango-devel libavif-devel qt6-base-devel qt6-svg-devel || true
+        fontconfig-devel pango-devel libavif-devel || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). openSUSE ships these
     # via Packman, not the default repos, so this commonly degrades to no WebM.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
@@ -78,7 +78,7 @@ install_apk() {
         librsvg-dev libseccomp-dev libwebp-dev sdl2-dev
     apk add --no-cache \
         poppler-dev \
-        fontconfig-dev pango-dev libavif-dev qt6-qtbase-dev qt6-qtsvg-dev || true
+        fontconfig-dev pango-dev libavif-dev || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). ffmpeg-dev provides
     # all of libavformat/libavcodec/libavutil/libswscale/libswresample.
     apk add --no-cache ffmpeg-dev \
@@ -106,11 +106,6 @@ export NS_BUILD_LTO=${NS_BUILD_LTO:-false}
 echo "nightly-distro-build($DISTRO): building with -j${NS_BUILD_JOBS} lto=${NS_BUILD_LTO} (mem-bounded)"
 
 ./scripts/pack-linux.sh
-
-if [ "$DISTRO" = ubuntu ]; then
-    NS_PACK_FLAVOR=qt ./scripts/pack-linux.sh \
-        || echo "nightly-distro-build($DISTRO): Qt-flavored pack failed (Qt 6 unavailable?); skipping qt zip" >&2
-fi
 
 case "$DISTRO" in
     debian|ubuntu) ./scripts/pack-deb.sh ;;

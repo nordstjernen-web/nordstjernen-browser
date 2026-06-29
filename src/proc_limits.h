@@ -1,4 +1,4 @@
-/* Nordstjernen — shared limits for the out-of-process renderer shells (GTK, Qt). */
+/* Nordstjernen — shared limits for the out-of-process renderer shells (GTK). */
 
 #ifndef NS_PROC_LIMITS_H
 #define NS_PROC_LIMITS_H

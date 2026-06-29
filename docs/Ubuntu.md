@@ -88,7 +88,6 @@ release distro build:
     -Dai=disabled    # drop the llama.cpp CMake subproject — the only
                      # build-time network dependency, and far too large
                      # to bundle in a store snap
-    -Dqt=disabled    # the GTK 4 shell is the shipped frontend
 
 `--prefix=/usr` makes meson install the three executables that the
 browser ships —

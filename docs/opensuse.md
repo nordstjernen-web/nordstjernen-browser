@@ -101,11 +101,10 @@ test -f meson.build
 
 ## Build options and dependencies
 
-The spec configures meson with three features off:
+The spec configures meson with two features off:
 
     -Dai=disabled       # the local llama.cpp chat page pulls a CMake git
                         # subproject — the only network build step, too big
-    -Dqt=disabled       # the GTK 4 shell is the shipped frontend
     -Dwebgpu=disabled   # needs external wgpu-native, not packaged
 
 On 32-bit x86 the bundled WebAssembly interpreter (WAMR, `src/wamr/`) fails

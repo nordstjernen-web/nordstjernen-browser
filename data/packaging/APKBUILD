@@ -39,7 +39,6 @@ build() {
 	# nothing is bundled.
 	abuild-meson \
 		-Dai=disabled \
-		-Dqt=disabled \
 		. output
 	meson compile -C output
 }

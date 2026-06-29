@@ -370,11 +370,6 @@ if not is_android and have_gtk
   subdir('gtk')
 endif
 
-qt_feature = get_option('qt')
-if not is_android and qt_feature.allowed()
-  subdir('qt')
-endif
-
 if not is_android and not have_gtk
   message('GTK 4 shell disabled — building the engine, out-of-process renderer' +
           ' and embeddable library without GTK. WebGL is unavailable in this' +

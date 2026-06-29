@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
  * A long-lived browser backed by a single {@code nordstjernen-renderer}
  * process. Unlike {@link RemotePage} (one page, then the renderer exits),
  * this keeps the renderer alive so an interactive shell can navigate, scroll,
- * render viewports, and follow links — the model the GTK and Qt shells use.
+ * render viewports, and follow links — the model the GTK shell uses.
  * No native engine is loaded into the JVM.
  *
  * <p>Not thread-safe; drive one instance from a single thread (or serialise).

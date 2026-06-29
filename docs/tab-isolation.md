@@ -12,7 +12,7 @@ next useful implementation steps. The current direction is:
 ## Current state
 
 Nordstjernen now runs each tab's engine in **its own sandboxed renderer
-process** (`nordstjernen-renderer`); the GTK/Qt shell is a thin
+process** (`nordstjernen-renderer`); the GTK shell is a thin
 display/input client. The process-per-tab boundary described later in
 this document is the implemented default — the sections below trace how
 the codebase got there from the original single-process model. An
@@ -244,28 +244,6 @@ IPC boundary (steps 6–7), independent of the threading cleanups above:
   page and services the HTTP operations above
   (`ns_browser_open_viewport` / `ns_browser_render_argb32` /
   `ns_browser_link_at` / …). It links no GUI toolkit.
-- `src/qt/procview.{h,cpp}` + `src/qt/procwindow.{h,cpp}` — the Qt frontend's
-  **default, tabbed, process-per-tab UI**. `ProcView` is a
-  `QAbstractScrollArea` that blits the shared framebuffer and queues page
-  loads, scroll/resize renders, and link hit-tests on a worker thread over
-  `ns_rproc_http_open` / `ns_rproc_http_render` / `ns_rproc_http_link_at`, applying only
-  current replies on the GUI thread; render and hover requests are coalesced
-  so stale IPC work does not pile up while the user scrolls or moves the
-  pointer. `ProcView` also handles mouse-wheel and keyboard scrolling and
-  per-tab page zoom (Ctrl +/−/0, Ctrl+wheel) rendered crisply at the
-  renderer's `scale`. `ProcWindow` is a `QTabWidget` of `ProcView`s with a
-  back/forward/reload toolbar, address bar, per-tab history, and new/close
-  tab — **each tab owning its own renderer process**, so a tab is one engine
-  process and a renderer crash is contained to that tab: a renderer that
-  dies is transparently restarted and the page reloaded, but a tab whose
-  renderer keeps failing stops after a few attempts with an honest status
-  message instead of thrashing. Middle-click or Ctrl+click on a link opens
-  it in a new background tab, i.e. spawns a fresh renderer process. The Qt-side code
-  links Qt + `rproc_http.c` only — no engine, GTK, Cairo, lexbor, or QuickJS — yet
-  every tab displays full-fidelity engine output (CSS colours, backgrounds,
-  Pango text). Built with `-Dqt=enabled`; this is the only Qt mode (there is
-  no in-process Qt renderer). Point `NS_RENDERER` at the renderer executable
-  to override discovery.
 - `src/gtk/procview.{h,c}` + `src/gtk/procwindow.{h,c}` — the **GTK** frontend's
   process-per-tab UI, the **only** GTK renderer (the former in-process engine
   renderer has been removed). `NsProcView` is a `GtkDrawingArea` that blits the
@@ -288,12 +266,12 @@ fork/zygote + inherited-mapping shape that fits the no-`execve` seccomp
 policy (step 7); Windows should grow the matching restricted token / Job
 Object / AppContainer shape separately. The control channel
 now has a startup handshake, bounded child teardown, client-side renderer
-restart in the Qt proc view, and a dirty-rect render command that
+restart in the proc view, and a dirty-rect render command that
 repaints only a requested rectangle inside the shared framebuffer. IPC
 reply reads are bounded on Linux/macOS and Windows so a wedged renderer
 becomes a failed request that the client can close or restart, not an
-unbounded browser-side wait. The Qt proc view still uses a synchronous
-request/reply rproc protocol, but it dispatches those calls off the GUI
+unbounded browser-side wait. The proc view still uses a synchronous
+request/reply rproc protocol, but it dispatches those calls off the UI
 thread so page load, scroll, resize, and hover paths no longer block on an
 IPC round trip.
 
@@ -310,16 +288,16 @@ gracefully, exactly as in the main process. Next: browser-process broker
 services for networking, cookies, cache, and storage so the renderer can be
 made credential-less rather than fetching and persisting on its own.
 
-## Proc-mode security posture (GTK + Qt shells)
+## Proc-mode security posture (GTK shell)
 
-With process-per-tab the **default** in both frontends, the GUI shell and the
+With process-per-tab the **default**, the GUI shell and the
 renderers have different threat models, so they are confined differently.
 
 - **Renderer processes** process untrusted bytes and carry the real sandbox:
   each `nordstjernen-renderer` applies Landlock + seccomp (`ns_browser_sandbox`)
   after mapping its framebuffer and before opening any page. This is unchanged
   and is where confinement matters most.
-- **The shell** (`nordstjernen` in proc mode, and the Qt client) blits
+- **The shell** (`nordstjernen` in proc mode) blits
   framebuffers and forwards input; it parses no untrusted content. It must,
   however, `fork`/`execv` renderer processes, which the engine's full sandbox
   blocks (the seccomp allow-list has no `execve`). So the GTK shell applies
@@ -328,7 +306,7 @@ renderers have different threat models, so they are confined differently.
   writable (`ns_security_add_writable_dir`) to cover the non-`memfd`
   shared-memory fallback, while seccomp is skipped. The renderer framebuffer
   is normally an anonymous `memfd` handed over the control socket, so it needs
-  no `/dev/shm` entry. The Qt client currently applies no sandbox of its own.
+  no `/dev/shm` entry.
 - **seccomp for the shell** is deferred: a shell profile would need to permit
   `execve`/`clone` (to spawn renderers), which removes seccomp's most valuable
   guarantee, and the shell's attack surface is low (no untrusted parsing). A

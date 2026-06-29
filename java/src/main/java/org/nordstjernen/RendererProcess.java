@@ -17,8 +17,8 @@ import java.util.Map;
 
 /**
  * Spawns and drives a {@code nordstjernen-renderer} child process over its
- * stdio control channel, speaking the same HTTP/JSON protocol the GTK and Qt
- * shells use. This is a thin wrapper: all rendering happens in the separate
+ * stdio control channel, speaking the same HTTP/JSON protocol the GTK shell
+ * uses. This is a thin wrapper: all rendering happens in the separate
  * renderer process, so the JVM never loads the native engine.
  *
  * <p>Not thread-safe; drive one instance from a single thread.

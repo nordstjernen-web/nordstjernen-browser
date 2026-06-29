@@ -9,7 +9,7 @@ and on Windows it is a desktop-OpenGL context created via WGL on a hidden
 popup window. WebGL renders into an FBO and the result is read back and
 composited by the page painter, so on the EGL path it needs no window, no
 display server, and no GTK — it works in the out-of-process renderer and in
-GTK-less (e.g. Qt-only) builds. There is no ANGLE layer and no GL
+GTK-less builds. There is no ANGLE layer and no GL
 command-stream validator between the page and the driver: WebGL calls
 become GL calls.
 

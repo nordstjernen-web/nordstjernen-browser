@@ -58,7 +58,6 @@ parts:
       - --prefix=/usr
       - --buildtype=release
       - -Dai=disabled
-      - -Dqt=disabled
     build-environment:
       - CCACHE_DISABLE: "1"
     override-pull: |

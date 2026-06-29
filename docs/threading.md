@@ -1,7 +1,7 @@
 # Threading model
 
 Nordstjernen runs each tab's engine in its own **renderer process**
-(`nordstjernen-renderer`); the GTK/Qt app is a separate, thin shell.
+(`nordstjernen-renderer`); the GTK app is a separate, thin shell.
 This document describes the threading model **inside one renderer
 process** — that is where the DOM, CSS, layout, paint, and page
 JavaScript live. The shell process is covered briefly at the end.
@@ -35,11 +35,11 @@ that are transferred by ownership.
 | **WebSocket** (1 per socket) | `ws.c` | connection lifetime | no |
 | **RNG warm-up** (transient) | `net.c` | one-shot at startup | no |
 
-The shell process (`src/gtk/procview.c`, `src/qt/procview.cpp`) has its
+The shell process (`src/gtk/procview.c`) has its
 own main/UI thread plus one **per-view worker thread** that runs the
 synchronous `rproc_http` IPC calls (open/render/click/key/find/…) off the UI
 thread; it touches no DOM or JS — only the shared-memory framebuffer and
-Qt/GTK widgets.
+GTK widgets.
 
 ## How the renderer main thread keeps making progress
 

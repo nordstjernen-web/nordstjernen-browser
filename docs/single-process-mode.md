@@ -2,16 +2,15 @@
 
 Nordstjernen's default architecture is **process-per-tab**: each tab's
 engine runs in its own sandboxed `nordstjernen-renderer` process, and
-the GTK / Qt shells are thin clients that blit a shared-memory
-framebuffer and forward input over an HTTP/JSON IPC control channel
+the GTK shell is a thin client that blits a shared-memory
+framebuffer and forwards input over an HTTP/JSON IPC control channel
 (see [`tab-isolation.md`](tab-isolation.md)).
 
-Passing **`--single-process`** to either desktop shell keeps everything
+Passing **`--single-process`** to the desktop shell keeps everything
 in one OS process instead:
 
 ```sh
 ./builddir/src/gtk/nordstjernen --single-process [URL]
-./builddir/src/qt/nordstjernen-qt --single-process [URL]
 ```
 
 Setting `NS_SINGLE_PROCESS=1` in the environment does the same (any
@@ -43,7 +42,7 @@ the transport and process boundary differ.
   (`ns_rproc_http_set_inproc`), "spawning a renderer" creates a
   `socketpair` (two `_pipe`s on Windows) and a plain `malloc`'d
   framebuffer instead of forking `nordstjernen-renderer`. The shell's
-  client code (`procview`/`procwindow` in both frontends) is unchanged
+  client code (`procview`/`procwindow`) is unchanged
   and does not know which mode it is running in.
 - `src/rproc_inproc.c` — the in-process host. A small reader thread
   per tab parses requests off the control channel and forwards them to
@@ -55,9 +54,7 @@ the transport and process boundary differ.
   the same `libnordstjernen` engine API in both modes.
 
 All engine work therefore runs on the thread that owns the default
-GLib main context — the GTK main thread, or the Qt main thread (the
-Qt shell pumps the GLib context through a `QTimer` so this also works
-where Qt does not use the GLib event dispatcher, e.g. Windows). This
+GLib main context — the GTK main thread. This
 matches the engine's threading model: its timers, async fetch
 completions, and settle loops all live on the default main context.
 The engine still uses its internal worker threads (tab workers, image

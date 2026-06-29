@@ -1,8 +1,8 @@
 # Rendering and scrolling
 
-Nordstjernen renders each tab out of process. The GTK and Qt apps are thin
-shells (`src/gtk/procview.c`, `src/qt/procview.cpp`) that spawn one sandboxed
-`nordstjernen-renderer` process per tab (`src/renderer_http.c`) and drive it
+Nordstjernen renders each tab out of process. The GTK app is a thin
+shell (`src/gtk/procview.c`) that spawns one sandboxed
+`nordstjernen-renderer` process per tab (`src/renderer_http.c`) and drives it
 over a tiny **HTTP/JSON control channel plus a shared-memory framebuffer**
 (`src/rproc_http.c`, `src/ipc_http.c`). The engine — HTML parse, the CSS
 cascade, layout into a live `ns_box` tree, and Cairo/Pango paint — runs entirely
@@ -35,7 +35,7 @@ and a `scale` that maps CSS pixels to device pixels. The renderer:
 
 Renders are coalesced so at most one is in flight, so the shell's per-view worker
 thread copies the frame out of the shared mapping into its display surface
-(Cairo surface on GTK, `QImage` on Qt) before issuing the next render. The copy
+(a Cairo surface on GTK) before issuing the next render. The copy
 runs off the UI thread; the data plane never crosses the socket. There is no
 retained per-tile paint cache in the UI process — a frame is a full repaint of
 the visible region inside the renderer, and the shared-memory handoff is the fast

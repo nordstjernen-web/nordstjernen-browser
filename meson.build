@@ -115,7 +115,7 @@ is_android = host_machine.system() == 'android'
 # (gtk4/epoxy) stays out of the shared engine deps and is added only to the
 # GTK shell, keeping the out-of-process renderer and the embeddable library
 # free of GTK. The GTK shell itself is a feature: disabling it yields a
-# renderer/Qt-only build that needs no GTK 4 at all.
+# renderer-only build that needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
 
 if is_android
@@ -486,7 +486,6 @@ if not is_android and ai_feature.allowed()
 endif
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AI chat': have_ai, 'AI GPU backend': ai_gpu_backend}, section: 'Features')
-summary({'GTK 4 shell': have_gtk, 'Qt 6 shell': get_option('qt').allowed()},
-        section: 'Shells')
+summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
 subdir('src')

@@ -50,5 +50,4 @@ top-level [README.md](../README.md); the development plan is
 
 ## Frontends & project
 
-- [qt.md](qt.md) — the experimental Qt 6 frontend.
 - [nordstjernen.org.md](nordstjernen.org.md) — the website plan.

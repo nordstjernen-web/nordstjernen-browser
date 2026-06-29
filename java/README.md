@@ -103,7 +103,7 @@ process-wide engine state.
 ### Renderer-process client (no JNI)
 
 `RemotePage` is an alternative that does **not** load the native engine into
-the JVM. Like the GTK and Qt shells — and the browser app above — it spawns a
+the JVM. Like the GTK shell — and the browser app above — it spawns a
 separate `nordstjernen-renderer` process (in its `stdio` mode) and drives it
 over the renderer's HTTP/JSON protocol, so an engine crash can't take down the
 JVM and no `libnordstjernen` needs to be on the Java library path. This is also

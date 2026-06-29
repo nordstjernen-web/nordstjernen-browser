@@ -55,7 +55,7 @@ debian/
 ├── changelog       # version history; top entry sets the package version
 ├── control         # Section: non-free/web, build-deps, binary package
 ├── copyright       # DEP-5; documents NSL-1.0 + bundled-engine licenses
-├── rules           # dh sequencer; configures meson with ai/qt disabled
+├── rules           # dh sequencer; configures meson with ai disabled
 ├── source/format   # 3.0 (quilt)
 └── watch           # tracks upstream GitHub tags
 ```
@@ -71,7 +71,6 @@ Key choices:
       -Dai=disabled    # drops the llama.cpp CMake subproject — the only
                        # build-time network dependency, and far too large
                        # for an archive package
-      -Dqt=disabled    # the GTK 4 shell is the shipped frontend
 
   Hardening is on via `DEB_BUILD_MAINT_OPTIONS = hardening=+all`; the
   meson build already enables PIE, stack protector, and FORTIFY itself.

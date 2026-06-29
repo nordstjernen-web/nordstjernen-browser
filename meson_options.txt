@@ -1,9 +1,7 @@
 option('build_date', type: 'string', value: '',
        description: 'Build date stamp shown in the About dialog (defaults to the configure-time date).')
 option('gtk', type: 'feature', value: 'auto',
-       description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for a renderer/Qt-only build that needs no GTK 4 toolkit at all.')
-option('qt', type: 'feature', value: 'disabled',
-       description: 'Build the experimental Qt 6 frontend (off by default; links the libnordstjernen engine).')
+       description: 'Build the GTK 4 desktop shell (on by default when GTK 4 is present). Disable for a renderer-only build that needs no GTK 4 toolkit at all.')
 option('ipc_experiment', type: 'boolean', value: false,
        description: 'Build the HTTP-vs-binary IPC comparison renderer and benchmark (experiment branch).')
 option('wasm', type: 'feature', value: 'auto',

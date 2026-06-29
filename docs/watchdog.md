@@ -18,10 +18,6 @@ nordstjernen https://example.com/ # supervised
 All arguments are forwarded unchanged to the child, so the supervisor is
 transparent.
 
-> The Qt shell (`nordstjernen-qt`) is not yet supervised — the supervisor
-> code lives in the C engine build, and wiring it into the Qt entry point
-> is a follow-up.
-
 ## Disabling it
 
 Three ways, highest priority first:

@@ -11,7 +11,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 134,000 lines of clean-room C (plus a thin C++ Qt shell) — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
+**Minimalism:** The whole engine is about 134,000 lines of clean-room C — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -87,12 +87,12 @@ The full section-by-section walk-through lives in
   runs wasm-bindgen bundles. See
   [`docs/webassembly.md`](docs/webassembly.md).
 - **Process-per-tab** — each tab's engine runs in its own sandboxed
-  `nordstjernen-renderer` process; the GTK and Qt apps are thin shells
-  that blit the renderer's shared-memory framebuffer and forward input
+  `nordstjernen-renderer` process; the GTK app is a thin shell
+  that blits the renderer's shared-memory framebuffer and forwards input
   over an IPC control channel (`src/rproc_http.c`), so a page can't take down
   the UI. See [`docs/tab-isolation.md`](docs/tab-isolation.md) and
   [`docs/Rendering.md`](docs/Rendering.md). An optional
-  `--single-process` flag (GTK and Qt) runs every tab's engine inside
+  `--single-process` flag runs every tab's engine inside
   the shell process instead — same protocol, threads instead of child
   processes — for low-memory machines, containers, and debugging. See
   [`docs/single-process-mode.md`](docs/single-process-mode.md).
@@ -128,7 +128,6 @@ latest build — bleeding edge, expect rough edges.
 | Ubuntu | [`nordstjernen-ubuntu-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb) |
 | openSUSE | [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm) |
 | Linux (portable GTK+) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
-| Linux (portable, Qt) | [`nordstjernen-linux-qt-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-qt-x86_64.zip) |
 | Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
 | FreeBSD (portable) | [`nordstjernen-freebsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip) |
 | NetBSD (portable) | [`nordstjernen-netbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip) |
@@ -157,9 +156,8 @@ the git-backed OBS build is wired up.
 
 **Windows 10 or later** is required: the GTK 4 frontend links
 DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
-(and GTK 4 targets Windows 10 anyway). The Qt frontend has the same
-floor — Qt 6 also requires Windows 10 — so there is no older-Windows
-build of either frontend.
+(and GTK 4 targets Windows 10 anyway). There is no older-Windows
+build.
 
 **Java (JVM).** A Java binding embeds the engine on the JVM (requires
 JDK 21): `org.nordstjernen.Nordstjernen` drives fetch / parse / layout /
@@ -268,7 +266,6 @@ Project home: <https://nordstjernen.org> · Copyright 2026 Andreas Røsdal.
 [![linux](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/linux.yml)
 [![macos](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/macos.yml)
 [![windows](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/windows.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/windows.yml)
-[![qt](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/qt.yml)
 [![android](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/android.yml)
 [![java](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/java.yml/badge.svg?branch=main)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/java.yml)
 [![codeql](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/codeql.yml/badge.svg)](https://github.com/nordstjernen-web/nordstjernen/actions/workflows/codeql.yml)

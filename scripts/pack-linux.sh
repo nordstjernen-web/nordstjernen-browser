@@ -16,13 +16,7 @@ VERSION=${VERSION:-$(awk -F"'" \
 ARCH=$(uname -m)
 FSVERSION=${VERSION//\~/-}
 FSVERSION=${FSVERSION//\//-}
-FLAVOR=${NS_PACK_FLAVOR:-}
-if [ "$FLAVOR" = qt ]; then
-    : "${NS_PACK_QT:=enabled}"
-    SLUG="nordstjernen-${FSVERSION}-linux-qt-${ARCH}"
-else
-    SLUG="nordstjernen-${FSVERSION}-linux-${ARCH}"
-fi
+SLUG="nordstjernen-${FSVERSION}-linux-${ARCH}"
 STAGE="$ROOT/dist/${SLUG}"
 ZIP="$ROOT/dist/${SLUG}.zip"
 
@@ -59,7 +53,7 @@ if [ ! -d "$BUILDDIR" ]; then
     # (e.g. dragged in transitively by ffmpeg-dev) would otherwise build the
     # GPU backend; pin it off here. Override with NS_PACK_AI_GPU=auto.
     meson setup "$BUILDDIR" --buildtype=release -Db_lto="${NS_BUILD_LTO:-true}" \
-        -Db_ndebug=true --strip -Dqt="${NS_PACK_QT:-auto}" \
+        -Db_ndebug=true --strip \
         -Dai_gpu="${NS_PACK_AI_GPU:-disabled}" \
         ${NS_BUILD_DATE:+-Dbuild_date="$NS_BUILD_DATE"} \
         ${WEBGPU_SETUP_ARGS[@]+"${WEBGPU_SETUP_ARGS[@]}"}
@@ -76,15 +70,6 @@ AUDIO_BIN="$BUILDDIR/src/nordstjernen-audio"
 if [ -f "$AUDIO_BIN" ]; then
     strip --strip-all "$AUDIO_BIN"
 fi
-QT_BIN="$BUILDDIR/src/qt/nordstjernen-qt"
-if [ -f "$QT_BIN" ]; then
-    strip --strip-all "$QT_BIN"
-fi
-if [ "$FLAVOR" = qt ] && [ ! -f "$QT_BIN" ]; then
-    log "ERROR: NS_PACK_FLAVOR=qt but $QT_BIN was not built (Qt 6 missing at configure time?)"
-    exit 1
-fi
-
 # Inline WebM (VP9/VP8 + Opus/Vorbis) is compiled in only when FFmpeg's libav*
 # was present at configure time (meson auto-detect). When it is, the engine
 # links libavformat directly, so the FFmpeg runtime libraries become a hard
@@ -131,18 +116,13 @@ cp "$BUILDDIR/src/nordstjernen-renderer" "$STAGE/"
 if [ -f "$AUDIO_BIN" ]; then
     cp "$AUDIO_BIN" "$STAGE/"
 fi
-# The experimental Qt 6 frontend, when Qt 6 was available at build time. It is
-# a second thin shell over the same nordstjernen-renderer process.
-if [ -f "$QT_BIN" ]; then
-    cp "$QT_BIN" "$STAGE/"
-fi
 cp "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen*.svg \
    "$ROOT"/data/icons/hicolor/scalable/apps/nordstjernen.gif \
    "$STAGE/data/icons/hicolor/scalable/apps/"
 cp "$ROOT/data/nordstjernen.desktop" "$STAGE/data/"
 
 # When WebGPU was built, ship libwgpu_native.so beside the binaries and point
-# their rpath at $ORIGIN so the renderer (and the GTK/Qt shells, which all link
+# their rpath at $ORIGIN so the renderer (and the GTK shell, which links
 # the engine) load it from the bundle rather than a system path. WebGPU still
 # stays dormant at runtime until the browser is launched with --enable-webgpu.
 WEBGPU_BUNDLED=0
@@ -155,7 +135,7 @@ if [ -n "$WGPU_ROOT" ] && [ -e "$WGPU_ROOT/lib/libwgpu_native.so" ]; then
         # alone would be ignored. Give the bundled copy a plain soname and
         # rewrite each binary's NEEDED to the bare name so $ORIGIN resolves it.
         patchelf --set-soname libwgpu_native.so "$STAGE/libwgpu_native.so"
-        for bin in nordstjernen nordstjernen-renderer nordstjernen-qt; do
+        for bin in nordstjernen nordstjernen-renderer; do
             [ -e "$STAGE/$bin" ] || continue
             cur=$(patchelf --print-needed "$STAGE/$bin" \
                   | grep -E '(^|/)libwgpu_native\.so$' | head -1)
@@ -174,29 +154,6 @@ fi
 cp "$ROOT/README.md" "$STAGE/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/"
 cp "$ROOT/License.md" "$STAGE/"
-
-if [ -f "$STAGE/nordstjernen-qt" ]; then
-    QT_REQ_NOTE='
-This build also ships **nordstjernen-qt**, the experimental Qt 6 frontend
-(`docs/qt.md`). It is a second thin shell that drives the same sandboxed
-nordstjernen-renderer process as the GTK app, so on top of the runtime above it
-needs the Qt 6 libraries:
-
-- Qt 6 Core, Gui, Widgets, Concurrent
-
-      sudo apt    install libqt6widgets6 libqt6gui6 libqt6core6     # Debian/Ubuntu
-      sudo dnf    install qt6-qtbase                                # Fedora/RHEL
-      sudo zypper install libQt6Widgets6 libQt6Gui6 libQt6Core6     # openSUSE
-'
-    QT_RUN_NOTE='
-### Qt frontend (experimental)
-
-    ./nordstjernen-qt https://example.com
-'
-else
-    QT_REQ_NOTE=''
-    QT_RUN_NOTE=''
-fi
 
 if [ "$WEBM" = 1 ]; then
     WEBM_REQ_NOTE='- FFmpeg libav* (libavformat / libavcodec / libavutil / libswscale /
@@ -262,11 +219,11 @@ ${RUNTIME_INSTALL}
 
 For Linux distros without modern GTK 4, build an AppImage instead
 (future work).
-${QT_REQ_NOTE}
+
 ## Run
 
     ./nordstjernen https://example.com
-${QT_RUN_NOTE}${WEBGPU_RUN_NOTE}
+${WEBGPU_RUN_NOTE}
 
 ## Install on user path
 
@@ -290,9 +247,5 @@ zip_size=$(du -h "$ZIP" 2>/dev/null | cut -f1 || echo '?')
 bin_size=$(du -h "$STAGE/nordstjernen" 2>/dev/null | cut -f1 || echo '?')
 echo "Built: $ZIP ($zip_size)"
 echo "Binary size: $bin_size"
-if [ -f "$STAGE/nordstjernen-qt" ]; then
-    qt_size=$(du -h "$STAGE/nordstjernen-qt" 2>/dev/null | cut -f1 || echo '?')
-    echo "Qt frontend:  included (nordstjernen-qt, $qt_size)"
-fi
 echo
 echo "Smoke test: ./dist/${SLUG}/nordstjernen --headless --url=https://example.com --dump=text"

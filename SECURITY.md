@@ -47,7 +47,7 @@ trusted.
 ## Defenses
 
 The browser renders each tab's untrusted content in its own
-sandboxed renderer process (`nordstjernen-renderer`); the GTK/Qt shell
+sandboxed renderer process (`nordstjernen-renderer`); the GTK shell
 is a thin, engine-free display/input process that spawns the renderers
 and blits their shared-memory framebuffers. Defenses are layered so that
 a memory-safety bug in the engine is confined to a per-tab renderer

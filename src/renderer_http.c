@@ -33,8 +33,8 @@
 #if defined(_WIN32) && defined(NS_HAVE_FONTCONFIG)
 /* Force pango's fontconfig backend and point fontconfig at the bundled
  * config, mirroring the GTK shell's startup. The GTK app sets these and the
- * renderer it spawns inherits them, but a renderer spawned by the Qt/Java
- * shells (or run standalone) would otherwise use the win32 pango backend and
+ * renderer it spawns inherits them, but a renderer spawned by the Java
+ * shell (or run standalone) would otherwise use the win32 pango backend and
  * render CJK / many scripts as tofu. Must run before any pango/font use. */
 static void
 renderer_win32_fontconfig(void)

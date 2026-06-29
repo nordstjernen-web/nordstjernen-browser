@@ -74,7 +74,6 @@ test -f meson.build
 %endif
 %meson \
     -Dai=disabled \
-    -Dqt=disabled \
     -Dwebgpu=disabled \
     %{?extra_meson}
 %meson_build
@@ -83,9 +82,9 @@ test -f meson.build
 %meson_install
 
 # The GTK browser statically compiles the engine; the embedding shared
-# library and its development header are only used by the experimental Qt
-# frontend, which this package does not build. Drop them so the package is
-# a clean application, not a -devel library.
+# library and its development header are only needed by external embedders,
+# not the browser app. Drop them so the package is a clean application,
+# not a -devel library.
 rm -f %{buildroot}%{_libdir}/libnordstjernen.so
 rm -f %{buildroot}%{_includedir}/nordstjernen/libnordstjernen.h
 rmdir %{buildroot}%{_includedir}/nordstjernen 2>/dev/null || :

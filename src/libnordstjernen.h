@@ -76,7 +76,7 @@ int ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
 /* Like ns_browser_render_rgba, but paints directly into the caller buffer in
  * Cairo-native ARGB32 (premultiplied, host byte order) with no intermediate
  * surface or channel swizzle — so an out-of-process renderer can hand the bytes
- * to a Cairo/Qt client that wraps them as ARGB32 without a second conversion.
+ * to a Cairo client that wraps them as ARGB32 without a second conversion.
  * Every pixel of the width x height region is written (opaque background), so
  * the buffer does not need pre-clearing. Returns 0 on success. */
 int ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
@@ -97,7 +97,7 @@ char *ns_browser_release_click(ns_browser *browser, int *out_changed);
 /* The computed CSS cursor keyword at page coordinates (CSS px) — one of the
  * standard cursor keywords ("pointer", "text", "move", ...) — or NULL when
  * the cursor is auto/default or no page is open. The keyword set matches the
- * CSS Basic UI names that GDK/Qt resolve natively. Newly allocated; the
+ * CSS Basic UI names that GDK resolves natively. Newly allocated; the
  * caller frees it with free(). */
 char *ns_browser_cursor_at(ns_browser *browser, int x, int y);
 

@@ -45,8 +45,8 @@ implemented · 29 🟡 partial · 3 ❌ absent · 7 🚫 absent by design**.
 
 ## The renderer: out-of-process (IPC)
 
-Nordstjernen has a single renderer architecture. The GTK and Qt apps
-are thin shells (`src/gtk/procview.c`, `src/qt/procview.cpp`) that spawn
+Nordstjernen has a single renderer architecture. The GTK app
+is a thin shell (`src/gtk/procview.c`) that spawns
 one sandboxed `nordstjernen-renderer` process per tab
 (`src/renderer_http.c`, `src/renderer_serve.c`) and drive it over a control channel +
 shared-memory framebuffer (`src/rproc_http.c`). The engine
@@ -59,26 +59,25 @@ same engine in-process without a display. The earlier in-process GTK
 renderer (`src/legacy/`) has been removed.
 
 Every §1–§16 row below describes that one engine. The browser-chrome
-features layered on top by the GTK shell — and their wiring status on the
-Qt shell — are tracked here:
+features layered on top by the GTK shell are tracked here:
 
-| Browser-chrome feature | GTK | Qt | Notes |
-|------------------------|:--:|:--:|------|
-| Page render · scroll · resize reflow | ✅ | ✅ | whole shared-memory frames (`RENDER`/`RENDER_RECT`/`VIEWPORT`) |
-| Per-tab process isolation / sandbox | ✅ | ✅ | each tab's engine runs in a Landlock+seccomp child |
-| Click activation (`pointerdown`→`mousedown`→`pointerup`→`mouseup`→`click`) | ✅ | ✅ | full sequence in `ns_browser_click` (`src/libnordstjernen.c`) |
-| `:hover` CSS restyle + pointer move/over/out JS events | ✅ | ✅ | `ns_browser_hover` tracks the hovered element and restyles (`ns_css_set_hover_node`) |
-| Keyboard input → JS + form/`contenteditable` editing | ✅ | ✅ | `KEY` messages drive the shared text-entry machinery |
-| Form submit (GET query + POST body) + navigation | ✅ | ✅ | stashes a pending POST and re-`OPEN`s |
-| Text selection (drag-select, select-all, copy) | ✅ | ✅ | `SELECT` messages |
-| Continuous CSS animation / `requestAnimationFrame` loop | ✅ | ✅ | renderer frame loop while `ns_browser_animating()` is true |
-| Per-page zoom | ✅ | ✅ | renderer-side `scale` |
-| Find-in-page | ✅ | ✅ | Ctrl+F search bar (live match count, next/prev with wrap) over an IPC `FIND` message → `ns_browser_find`, reusing the engine's `ns_box_*_match*` primitives with all matches painted and the active one emphasized |
-| Context menu (right-click) | ✅ | ✅ | open/copy link, back/forward/reload, copy page address, select-all/copy selection (GTK), save as PDF/image |
-| DevTools / console | ✅ | ✅ | F12 / Ctrl+Shift+J panel: streams `console.log`/`warn`/`error`/`info`/`debug` (`CONSOLE` poll) and evaluates JS in the live page (`EVAL` → `ns_browser_eval`). No DOM/network inspector |
-| Save / print / PDF export | ✅ | ✅ | full-page PDF or PNG (context menu / Ctrl+P / Ctrl+S) via an `EXPORT` message → `ns_browser_render_image`; the sandboxed renderer writes to its runtime dir and the shell copies to the chosen path |
-| External audio/video player handoff | ✅ | ✅ | clicking a `<video>`/`<audio>` resolves the media URL (`MEDIA` → `ns_browser_media_at`); both shells hand it to the shared `ns_media_try_launch` (mpv/vlc, yt-dlp) |
-| App menu · About | ✅ | ✅ | toolbar menu button with About, Settings, and bookmarks in both shells (the Qt shell links the engine's config/bookmarks store: `ns_config_get`, `ns_bookmarks_load`/`_add`) |
+| Browser-chrome feature | GTK | Notes |
+|------------------------|:--:|------|
+| Page render · scroll · resize reflow | ✅ | whole shared-memory frames (`RENDER`/`RENDER_RECT`/`VIEWPORT`) |
+| Per-tab process isolation / sandbox | ✅ | each tab's engine runs in a Landlock+seccomp child |
+| Click activation (`pointerdown`→`mousedown`→`pointerup`→`mouseup`→`click`) | ✅ | full sequence in `ns_browser_click` (`src/libnordstjernen.c`) |
+| `:hover` CSS restyle + pointer move/over/out JS events | ✅ | `ns_browser_hover` tracks the hovered element and restyles (`ns_css_set_hover_node`) |
+| Keyboard input → JS + form/`contenteditable` editing | ✅ | `KEY` messages drive the shared text-entry machinery |
+| Form submit (GET query + POST body) + navigation | ✅ | stashes a pending POST and re-`OPEN`s |
+| Text selection (drag-select, select-all, copy) | ✅ | `SELECT` messages |
+| Continuous CSS animation / `requestAnimationFrame` loop | ✅ | renderer frame loop while `ns_browser_animating()` is true |
+| Per-page zoom | ✅ | renderer-side `scale` |
+| Find-in-page | ✅ | Ctrl+F search bar (live match count, next/prev with wrap) over an IPC `FIND` message → `ns_browser_find`, reusing the engine's `ns_box_*_match*` primitives with all matches painted and the active one emphasized |
+| Context menu (right-click) | ✅ | open/copy link, back/forward/reload, copy page address, select-all/copy selection, save as PDF/image |
+| DevTools / console | ✅ | F12 / Ctrl+Shift+J panel: streams `console.log`/`warn`/`error`/`info`/`debug` (`CONSOLE` poll) and evaluates JS in the live page (`EVAL` → `ns_browser_eval`). No DOM/network inspector |
+| Save / print / PDF export | ✅ | full-page PDF or PNG (context menu / Ctrl+P / Ctrl+S) via an `EXPORT` message → `ns_browser_render_image`; the sandboxed renderer writes to its runtime dir and the shell copies to the chosen path |
+| External audio/video player handoff | ✅ | clicking a `<video>`/`<audio>` resolves the media URL (`MEDIA` → `ns_browser_media_at`); the shell hands it to the shared `ns_media_try_launch` (mpv/vlc, yt-dlp) |
+| App menu · About | ✅ | toolbar menu button with About, Settings, and bookmarks (it links the engine's config/bookmarks store: `ns_config_get`, `ns_bookmarks_load`/`_add`) |
 
 ---
 
@@ -310,7 +309,7 @@ surface).
 | `hidden` attribute | ✅ | plain `hidden` maps to `display:none`; `hidden="until-found"` maps (via the UA stylesheet) to the real `content-visibility: hidden` — its subtree is laid out (so its text stays in the box tree and is findable) and the element is size-contained (collapses to a zero-height box, `style_content_visibility_hidden` in `src/layout.c`) but its contents are skipped while painting (`box_is_hidden` in `src/paint.c`). `HTMLElement.hidden` follows the spec's enumerated getter/setter for `"until-found"`; fragment/hash navigation runs the ancestor reveal path before scrolling, removing `hidden="until-found"` ancestors and opening skipped `<details>` ancestors, with `beforematch` fired for same-document hidden-until-found reveals — removing the attribute drops the containment and reveals the content. The `content-visibility` property is also honoured directly (`auto` is treated as always-rendered, skipping only the lazy-render optimisation) |
 | `inert` attribute | ✅ | excludes the subtree from focus (`focus()`, sequential navigation) and click activation, and an open modal dialog makes the rest of the document inert (`ns_dom_set_active_modal` → `ns_element_effectively_inert`) |
 | Event dispatch / cancellation | ✅ | full capture → at-target → bubble propagation with `eventPhase`, `currentTarget`, `stopPropagation()`/`stopImmediatePropagation()`, `once`/`signal` listener removal, and inline `return false`; `preventDefault()` honours `event.cancelable` and is suppressed (a no-op) for `{passive:true}` listeners; `composedPath()` returns the live propagation path (target → ancestors → document → window) during dispatch and an empty array otherwise. A primary activation fires the full UI-Events button sequence `pointerdown`→`mousedown`→`pointerup`→`mouseup`→`click` (`ns_browser_click` in `src/libnordstjernen.c`) |
-| Pointer hover (`:hover`, `mousemove`/`mouseover`/`mouseout`) | ✅ | the out-of-process renderer reports the hovered point each time the pointer moves (`NS_RPROC_MSG_HOVER` → `ns_browser_hover` in `src/libnordstjernen.c`): it hit-tests the DOM, sets the CSS `:hover` state on the element under the pointer and its ancestors so `:hover` rules restyle and repaint, and fires the `pointermove`/`mousemove` and, on element transitions, `pointerover`/`mouseover`/`pointerout`/`mouseout`/`pointerenter`/`mouseenter`/`pointerleave`/`mouseleave` listeners. Restyle work is gated to pages that actually use `:hover` (`ns_css_stylesheet_has_hover_rules`) and skipped while a text selection is in progress. The thin GTK/Qt clients (`src/gtk/procview.c`, `src/qt/procview.cpp`) drive this on every mouse-move and re-render when the renderer reports a visual change |
+| Pointer hover (`:hover`, `mousemove`/`mouseover`/`mouseout`) | ✅ | the out-of-process renderer reports the hovered point each time the pointer moves (`NS_RPROC_MSG_HOVER` → `ns_browser_hover` in `src/libnordstjernen.c`): it hit-tests the DOM, sets the CSS `:hover` state on the element under the pointer and its ancestors so `:hover` rules restyle and repaint, and fires the `pointermove`/`mousemove` and, on element transitions, `pointerover`/`mouseover`/`pointerout`/`mouseout`/`pointerenter`/`mouseenter`/`pointerleave`/`mouseleave` listeners. Restyle work is gated to pages that actually use `:hover` (`ns_css_stylesheet_has_hover_rules`) and skipped while a text selection is in progress. The thin GTK client (`src/gtk/procview.c`) drives this on every mouse-move and re-renders when the renderer reports a visual change |
 | `contenteditable` | ✅ | in-page plaintext editing: a `contenteditable` host (`true`, the empty string, or `plaintext-only`) is focusable by click or Tab and edits as a single plaintext run — on focus its content is flattened to text, then the shared text-entry machinery (`ns_node_editable_value`/`ns_node_set_editable_value` in `src/dom.c`) drives a rendered caret, text selection, keyboard caret navigation (arrows, Home/End), insertion, Backspace/Delete, Enter→newline, and copy/cut/paste. Newlines in the host render as forced line breaks (`collect_walk` in `src/layout.c`); `beforeinput`/`input` fire and `document.activeElement`/`:focus` stay in sync. Rich inline structure is not preserved across an edit (the plaintext model); there is no per-range rich-text formatting |
 | `tabindex` / focus order | ✅ | sequential focus navigation (`ns_js_sequential_focus_target` in `src/js.c`) honours `tabindex` ordering — positive values first in ascending order, then `0`/auto in tree order, negative excluded — skipping disabled/inert/hidden controls; Tab / Shift+Tab walk it (`src/libnordstjernen.c`), and `focus()`/`blur()` route through the canonical `ns_js_set_focus`, keeping `document.activeElement` and `:focus` in sync |
 | `accesskey` | ✅ | reflected as `HTMLElement.accessKey`, and bound: pressing the access-key modifier (Alt, the platform combo) plus one of the element's space-separated `accesskey` characters focuses the element and runs its activation behaviour. The GTK shell forwards `Alt`+key to the engine (`on_key` in `src/gtk/procview.c`); `ns_browser_key_full` (`src/libnordstjernen.c`) finds the first non-inert element whose `accesskey` matches (case-insensitive) and calls `ns_js_activate_element` (`src/js.c`), which fires the click activation — so an `accesskey` button runs its `onclick`, a checkbox toggles, a link navigates, and a text field is focused |
@@ -583,7 +582,7 @@ CSS support (abridged):
   element and its ancestors match `:active` and the page restyles; the
   button release clears it through a dedicated renderer `release`
   message (`ns_browser_release`, wired to the GTK click gesture's
-  `released` signal and Qt's `mouseReleaseEvent`). Restyle work is
+  `released` signal). Restyle work is
   gated to pages whose stylesheets actually contain `:active` rules
   (`ns_css_stylesheet_has_active_rules`).
 - ✅ At-rules: `@media`, `@font-face`, `@keyframes` (subset),

@@ -5,8 +5,7 @@ mouse. This is a living map of the actual bindings; the browser's runtime
 behaviour is the source of truth. Window-level accelerators are registered
 in `src/gtk/procwindow.c` (`install_shortcuts`); the in-page key and
 pointer handling lives in `src/gtk/procview.c` (`on_key`, `on_pressed`,
-`on_motion`, `on_scroll`). The Qt shell mirrors most of these (its menus
-show the exact accelerators).
+`on_motion`, `on_scroll`).
 
 Shortcuts are written with **Ctrl** and use a literal Ctrl modifier.
 
