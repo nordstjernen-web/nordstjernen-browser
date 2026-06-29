@@ -64,6 +64,7 @@ they regenerate.
 | 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 68361/70733 (96%) | partial: url |
 | 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 67257/69570 (96%) | partial: url |
 | 2026-06-29 | 48ebb3d | 2a91c2e71 | 437/698 (62%) | 68408/70739 (96%) | partial: url |
+| 2026-06-29 | 9792f92 | 2a91c2e71 | 437/698 (62%) | 68454/70741 (96%) | partial: dom/events html/dom/elements |
 
 "Files ok" counts test files where the harness completed and every
 subtest passed; "subtests passing" counts individual testharness.js
@@ -73,12 +74,12 @@ touch.
 
 ## Per-area results — 2026-06-29
 
-Per-file detail for this run: `docs/wpt-runs/2026-06-29-48ebb3d.tsv`.
+Per-file detail for this run: `docs/wpt-runs/2026-06-29-9792f92.tsv`.
 
 | Area | Files ok | Subtests passing | Fail | Timeout | Notrun | Precondition failed |
 |------|----------|------------------|------|---------|--------|---------------------|
 | `dom/nodes` | 171/275 | 12592/12814 | 193 | 14 | 9 | 6 |
-| `dom/events` | 106/168 | 521/819 | 228 | 26 | 44 | 0 |
+| `dom/events` | 106/168 | 553/821 | 196 | 26 | 46 | 0 |
 | `dom/traversal` | 13/17 | 1586/1602 | 16 | 0 | 0 | 0 |
 | `dom/ranges` | 36/55 | 44357/44537 | 180 | 0 | 0 | 0 |
 | `dom/lists` | 5/5 | 189/189 | 0 | 0 | 0 | 0 |
@@ -88,11 +89,11 @@ Per-file detail for this run: `docs/wpt-runs/2026-06-29-48ebb3d.tsv`.
 | `hr-time` | 5/13 | 32/50 | 17 | 1 | 0 | 0 |
 | `html/webappapis/atob` | 1/1 | 380/380 | 0 | 0 | 0 | 0 |
 | `html/webappapis/timers` | 10/13 | 14/17 | 3 | 0 | 0 | 0 |
-| `html/dom/elements` | 40/56 | 749/907 | 154 | 2 | 2 | 0 |
+| `html/dom/elements` | 40/56 | 763/907 | 140 | 2 | 2 | 0 |
 | `WebCryptoAPI/digest` | 2/5 | 164/535 | 371 | 0 | 0 | 0 |
 | `xhr/formdata` | 15/18 | 77/80 | 3 | 0 | 0 | 0 |
 | `html/semantics/forms/the-form-element` | 7/18 | 98/118 | 20 | 0 | 0 | 0 |
-| **Total** | **437/698** | **68408/70739** | **2220** | **45** | **60** | **6** |
+| **Total** | **437/698** | **68454/70741** | **2174** | **45** | **62** | **6** |
 
 ## ROI by area — 2026-06-29
 
@@ -109,10 +110,10 @@ file.
 |------|----------------|----------------|-----------|----------------|---------|
 | `url` | 1027 | 18 | 57.1 | 2 | 4 |
 | `WebCryptoAPI/digest` | 371 | 3 | 123.7 | 0 | 0 |
-| `dom/events` | 298 | 62 | 4.8 | 30 | 20 |
+| `dom/events` | 268 | 62 | 4.3 | 30 | 20 |
 | `dom/nodes` | 222 | 104 | 2.1 | 18 | 57 |
 | `dom/ranges` | 180 | 19 | 9.5 | 0 | 3 |
-| `html/dom/elements` | 158 | 16 | 9.9 | 2 | 10 |
+| `html/dom/elements` | 144 | 16 | 9.0 | 2 | 10 |
 | `html/semantics/forms/the-form-element` | 20 | 11 | 1.8 | 2 | 8 |
 | `hr-time` | 18 | 8 | 2.2 | 3 | 4 |
 | `dom/traversal` | 16 | 4 | 4.0 | 0 | 2 |
