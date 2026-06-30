@@ -28,10 +28,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15 is the current Apple Silicon (arm64) runner. The project
-        # ships only modern Apple Silicon builds; an Intel Mac builds from
-        # source (see docs/macOS.md).
-        macos: ['15']
+        # macos-26 (Tahoe) is the Apple Silicon (arm64) runner matching the
+        # macOS version Nordstjernen targets and develops on. The project ships
+        # only modern Apple Silicon builds; an Intel Mac builds from source
+        # (see docs/macOS.md). macos-latest still points at macos-15, so pin
+        # the version explicitly.
+        macos: ['26']
         compiler: [clang]
 
     steps:

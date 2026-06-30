@@ -8,8 +8,8 @@ covers both **installing the prebuilt app** and **building from source**.
 
 - **Prebuilt download:** Apple Silicon (`arm64`) only — a Mac with an
   M1 chip or newer.
-- **macOS version:** built on macOS 15 (Sequoia); the bundle targets
-  macOS 11 (Big Sur) and later, including the current macOS 26 (Tahoe).
+- **macOS version:** built on macOS 26 (Tahoe); the bundle targets
+  macOS 11 (Big Sur) and later.
 - **Intel Macs:** not in the prebuilt release — [build from
   source](#build-from-source), which still compiles on an `x86_64`
   Homebrew prefix.
@@ -318,8 +318,8 @@ Updates ship only through the store — no self-update.
   `GDK_PIXBUF_MODULEDIR`, and `CURL_CA_BUNDLE` at those bundled copies
   when it detects it is running from inside an `.app`.
 - **Architecture.** CI builds an Apple Silicon (`arm64`) `.dmg` on the
-  `macos-15` runner; that is the only published build, matching the modern
-  macOS versions Nordstjernen targets. An Intel Mac is not covered by CI —
+  `macos-26` (Tahoe) runner; that is the only published build, matching the
+  modern macOS versions Nordstjernen targets. An Intel Mac is not covered by CI —
   the engine still compiles there, so build from source (the steps above
   work unchanged on an `x86_64` Homebrew prefix).
 - **Code signing.** `pack-macos.sh` signs the bundle inside-out (nested
