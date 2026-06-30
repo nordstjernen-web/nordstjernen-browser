@@ -363,14 +363,6 @@ ns_js_interrupt_cb(JSRuntime *rt, void *opaque)
                   (int)(NS_JS_MONITOR_LIMIT_US / 1000000LL));
         return 1;
     }
-    if (!js->worker_host && !js->in_pump && now - js->last_pump_us > 100000) {
-        js->last_pump_us = now;
-        js->in_pump = TRUE;
-        for (int i = 0; i < 8 && g_main_context_pending(NULL); i++)
-            g_main_context_iteration(NULL, FALSE);
-        js->in_pump = FALSE;
-        if (js->halted) return 1;
-    }
     if (js->eval_deadline_us == 0) return 0;
     return now > js->eval_deadline_us ? 1 : 0;
 }
