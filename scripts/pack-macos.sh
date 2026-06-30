@@ -42,6 +42,14 @@ run_dylibbundler() {
     wait "$pid"
 }
 
+# Homebrew's curl is keg-only, so a plain pkg-config resolves the macOS SDK's
+# system libcurl (LibreSSL/SecureTransport) rather than the OpenSSL build this
+# bundle is designed around — the vendored CA bundle (CURL_CA_BUNDLE) and the
+# modern TLS curve list both assume OpenSSL. Put the curl keg on PKG_CONFIG_PATH
+# so meson links it.
+CURL_PC="$(brew --prefix curl 2>/dev/null)/lib/pkgconfig"
+[ -d "$CURL_PC" ] && export PKG_CONFIG_PATH="$CURL_PC:${PKG_CONFIG_PATH:-}"
+
 if [ ! -d "$BUILDDIR" ]; then
     meson setup "$BUILDDIR" \
         --prefix=/usr/local \
