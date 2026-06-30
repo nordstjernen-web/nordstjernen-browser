@@ -1734,11 +1734,13 @@ pv_camera_prompt(NsProcView *v, const char *origin)
     PvCameraPrompt *p = g_new0(PvCameraPrompt, 1);
     p->v = pv_ref(v);
     p->origin = g_strdup(origin);
-    char *primary = g_strdup_printf("Allow %s to use your camera?", origin);
+    char *primary = g_strdup_printf("Allow %s to use your camera and microphone?",
+                                    origin);
     char *detail = g_strdup_printf(
-        "This page wants to access your camera on %s.\n\nAllowing lets the "
-        "site see live video from your webcam for the rest of the session. "
-        "Only allow it on sites you trust.", origin);
+        "This page wants to access your camera and/or microphone on %s.\n\n"
+        "Allowing lets the site see live video from your webcam and hear your "
+        "microphone for the rest of the session. Only allow it on sites you "
+        "trust.", origin);
     const char *buttons[] = { ns_i18n("Block"),
                               ns_i18n("Allow and trust this site"), NULL };
     GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);

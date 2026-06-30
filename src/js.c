@@ -21,6 +21,7 @@
 #include "anim.h"
 #include "bytecode_cache.h"
 #include "camera.h"
+#include "mic.h"
 #include "config.h"
 #include "css.h"
 #include "datetime.h"
@@ -6974,7 +6975,7 @@ ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     int d = ns_camera_permission(js);
     if (d == 1) {
         if (want_video) ns_camera_acquire();
-        (void)want_audio;
+        if (want_audio) ns_mic_acquire();
         return JS_NewString(ctx, "granted");
     }
     if (d == 0)
@@ -6987,6 +6988,54 @@ ns_cam_release(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
 {
     (void)ctx; (void)this_val; (void)argc; (void)argv;
     ns_camera_release();
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_mic_release_js(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    ns_mic_release();
+    return JS_UNDEFINED;
+}
+
+static gboolean
+ns_audio_u8_buffer(JSContext *ctx, JSValueConst arg, uint8_t **data, size_t *len)
+{
+    *data = NULL; *len = 0;
+    size_t byte_off = 0, byte_len = 0, bpe = 0;
+    JSValue buf = JS_GetTypedArrayBuffer(ctx, arg, &byte_off, &byte_len, &bpe);
+    if (JS_IsException(buf)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return FALSE;
+    }
+    size_t total = 0;
+    uint8_t *base = JS_GetArrayBuffer(ctx, &total, buf);
+    if (!base) JS_FreeValue(ctx, JS_GetException(ctx));
+    if (base && byte_off + byte_len <= total) { *data = base + byte_off; *len = byte_len; }
+    JS_FreeValue(ctx, buf);
+    return *data != NULL;
+}
+
+static JSValue
+ns_audio_get_byte_time_domain(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    uint8_t *data = NULL; size_t len = 0;
+    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data)
+        ns_mic_fill_time_domain(data, (int)len);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_audio_get_byte_frequency(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    uint8_t *data = NULL; size_t len = 0;
+    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data)
+        ns_mic_fill_frequency(data, (int)len);
     return JS_UNDEFINED;
 }
 
@@ -8671,8 +8720,8 @@ ns_audio_make_node(JSContext *ctx, const char *kind)
     ns_bind_fn(ctx, n, "disconnect",           ns_event_noop,              0);
     ns_bind_fn(ctx, n, "start",                ns_event_noop,              1);
     ns_bind_fn(ctx, n, "stop",                 ns_event_noop,              1);
-    ns_bind_fn(ctx, n, "getByteFrequencyData",  ns_audio_analysis_throw, 1);
-    ns_bind_fn(ctx, n, "getByteTimeDomainData", ns_audio_analysis_throw, 1);
+    ns_bind_fn(ctx, n, "getByteFrequencyData",  ns_audio_get_byte_frequency, 1);
+    ns_bind_fn(ctx, n, "getByteTimeDomainData", ns_audio_get_byte_time_domain, 1);
     ns_bind_fn(ctx, n, "getFloatFrequencyData", ns_audio_analysis_throw, 1);
     ns_bind_fn(ctx, n, "getFloatTimeDomainData", ns_audio_analysis_throw, 1);
     ns_bind_event_target_listeners(ctx, n);
@@ -34288,6 +34337,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
 
     ns_bind_fn(ctx, global, "__nd_camera_request",   ns_cam_request,   2);
     ns_bind_fn(ctx, global, "__nd_camera_release",   ns_cam_release,   0);
+    ns_bind_fn(ctx, global, "__nd_mic_release",      ns_mic_release_js, 0);
     ns_bind_fn(ctx, global, "__nd_camera_label",     ns_cam_label,     0);
     ns_bind_fn(ctx, global, "__nd_camera_enumerate", ns_cam_enumerate, 0);
 

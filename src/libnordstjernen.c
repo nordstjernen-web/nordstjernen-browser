@@ -2599,7 +2599,6 @@ void
 ns_browser_resolve_camera(ns_browser *browser, const char *origin, int allow)
 {
     ns_camera_set_decision(origin, allow);
-    if (allow) ns_camera_acquire();
     if (browser && browser->js) {
         char *r = ns_js_eval_source(browser->js,
             allow ? "__nd_camera_resolve_pending(true)"

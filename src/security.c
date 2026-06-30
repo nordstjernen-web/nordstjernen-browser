@@ -320,6 +320,8 @@ ns_security_sandbox_init(const char *self_exe)
         if (g_file_test(vdev, G_FILE_TEST_EXISTS))
             add_path_rw(rfd, fs_dev, vdev);
     }
+    if (g_file_test("/dev/snd", G_FILE_TEST_IS_DIR))
+        add_path_rw(rfd, fs_read | LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/snd");
 
     const char *xauth = g_getenv("XAUTHORITY");
     if (xauth && *xauth) {

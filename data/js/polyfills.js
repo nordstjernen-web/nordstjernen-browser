@@ -3091,6 +3091,9 @@
                             if (kind === 'video' &&
                                 typeof globalThis.__nd_camera_release === 'function')
                                 globalThis.__nd_camera_release();
+                            if (kind === 'audio' &&
+                                typeof globalThis.__nd_mic_release === 'function')
+                                globalThis.__nd_mic_release();
                             track.dispatchEvent({ type: 'ended' });
                         }
                     };
@@ -3188,8 +3191,17 @@
                 globalThis.__nd_camera_resolve_pending = function (allow) {
                     var q = pending; pending = [];
                     q.forEach(function (p) {
-                        if (allow) p.resolve(build(p.wantVideo, p.wantAudio));
-                        else p.reject(makeError('NotAllowedError', 'Permission denied'));
+                        if (!allow) {
+                            p.reject(makeError('NotAllowedError', 'Permission denied'));
+                            return;
+                        }
+                        var d = typeof globalThis.__nd_camera_request === 'function'
+                            ? globalThis.__nd_camera_request(p.wantVideo, p.wantAudio)
+                            : 'denied';
+                        if (d === 'denied')
+                            p.reject(makeError('NotAllowedError', 'Permission denied'));
+                        else
+                            p.resolve(build(p.wantVideo, p.wantAudio));
                     });
                 };
             })();
