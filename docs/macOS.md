@@ -164,6 +164,98 @@ with `dylibbundler`, code-signs the bundle, and produces
 `dist/nordstjernen-<version>-macos-<arch>.dmg`. What goes into the bundle
 and how it is signed is described under [Platform notes](#platform-notes).
 
+## Distribution
+
+Two channels, with very different feasibility for a multi-process browser:
+
+| | Mac App Store | Developer ID + notarisation (direct `.dmg`) |
+|---|---|---|
+| Apple review | Full App Review | Automated notarisation only |
+| App Sandbox | Mandatory | Not required |
+| Fits this architecture | No — see blockers below | Yes — already wired |
+| User experience | Install from store | Download `.dmg`, no quarantine prompt |
+
+No major independent browser (Chrome, Firefox, Brave) ships through the
+Mac App Store; they all use Developer ID + notarisation, because the App
+Sandbox fights a multi-process engine. Nordstjernen is in the same spot,
+so the notarised `.dmg` is the realistic target.
+
+### Developer ID + notarisation (recommended)
+
+This makes a *downloaded* `.dmg` open with no `xattr` step and no
+re-architecture. It needs a paid Apple Developer account ($99/yr).
+
+1. Create a **Developer ID Application** certificate and export it as a
+   `.p12`.
+2. Build signed:
+   ```sh
+   MACOS_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
+       ./scripts/pack-macos.sh
+   ```
+3. Notarise and staple the resulting `.dmg`:
+   ```sh
+   xcrun notarytool submit "$DMG" \
+       --apple-id you@example.com --team-id TEAMID \
+       --password <app-specific-password> --wait
+   xcrun stapler staple "$DMG"
+   ```
+4. Verify: `spctl -a -vv -t open "$DMG"` reports *accepted — Notarized
+   Developer ID*.
+
+**In CI**, `.github/workflows/macos.yml` performs steps 2–4 automatically
+when these repository secrets are present (without them it builds an
+ad-hoc `.dmg`, exactly as today):
+
+| Secret | Meaning |
+|--------|---------|
+| `MACOS_CERTIFICATE_P12_BASE64` | `base64` of the Developer ID Application `.p12` |
+| `MACOS_CERTIFICATE_PASSWORD` | password for that `.p12` |
+| `MACOS_SIGN_IDENTITY` | `Developer ID Application: NAME (TEAMID)` |
+| `MACOS_NOTARY_APPLE_ID` | Apple ID e-mail used for notarisation |
+| `MACOS_NOTARY_TEAM_ID` | the 10-character team ID |
+| `MACOS_NOTARY_PASSWORD` | an app-specific password for that Apple ID |
+
+Encode the certificate with `base64 -i DeveloperID.p12 | pbcopy`, and
+mint the app-specific password at <https://account.apple.com> → Sign-In
+and Security → App-Specific Passwords.
+
+### Mac App Store
+
+Allowed in principle — the WebKit-only rule is iOS App Review §2.5.6 and
+does **not** apply to macOS — but three things must change first, two of
+them large:
+
+1. **App Sandbox.** The store requires the
+   `com.apple.security.app-sandbox` entitlement, and a sandboxed app may
+   **not** `fork()`/`execv()` a sibling executable. Nordstjernen spawns a
+   `nordstjernen-renderer` per tab (and a `nordstjernen-audio` helper)
+   exactly that way (`src/rproc_http.c`) for OS-level tab isolation. Those
+   helpers would have to be re-built as **XPC services**
+   (`Contents/XPCServices/*.xpc`), or the app would ship
+   `--single-process` and forfeit the per-tab security boundary. This is
+   real engineering, not configuration.
+2. **Hardened Runtime + JIT.** WAMR (WebAssembly) maps executable memory,
+   so `com.apple.security.cs.allow-jit` is required (already in
+   `packaging/macos/entitlements.plist`); QuickJS is interpreter-only and
+   needs nothing extra. A browser also needs
+   `com.apple.security.network.client`.
+3. **Licensing.** The bundle ships **LGPL** GTK 4 / GLib, and Apple's
+   App Store terms are widely read as incompatible with the GPL family
+   (LGPL is more arguable when dynamically linked and relinkable — a legal
+   question to clear). Confirm too that **NSL-1.0** permits store
+   distribution; the store does let you supply your own EULA.
+
+Once those are resolved, the submission is the standard flow: enroll in
+the Apple Developer Program; create the app record in **App Store
+Connect** (bundle id `org.nordstjernen.Nordstjernen`, category
+`public.app-category.utilities` — both already in the generated
+`Info.plist`); sign the `.app` with an **Apple Distribution** certificate
+and a Mac App Store provisioning profile (`Contents/embedded.provisionprofile`);
+wrap it with `productbuild --sign "3rd Party Mac Developer Installer: …"`;
+upload the `.pkg` with the **Transporter** app; then fill in metadata and
+the privacy labels (Nordstjernen collects nothing) and submit for review.
+Updates ship only through the store — no self-update.
+
 ## Platform notes
 
 - **CA bundle.** Homebrew's `libcurl` links against OpenSSL, which

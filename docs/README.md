@@ -17,7 +17,7 @@ top-level [README.md](../README.md); the development plan is
 
 - [Linux.md](Linux.md) — build, run, and package on Linux.
 - [Windows.md](Windows.md) · [windows-store.md](windows-store.md) — Windows build and the Microsoft Store package.
-- [macOS.md](macOS.md) — macOS install (first-launch quarantine step, troubleshooting), build, and `.app`/`.dmg`.
+- [macOS.md](macOS.md) — macOS install (first-launch quarantine step, troubleshooting), build, `.app`/`.dmg`, and distribution (Developer ID notarisation, Mac App Store).
 - [Android.md](Android.md) — Android build and Google Play release.
 - [Debian.md](Debian.md) · [Ubuntu.md](Ubuntu.md) · [opensuse.md](opensuse.md) · [Alpine.md](Alpine.md) — per-distro packaging.
 - [Nightly.md](Nightly.md) — the nightly build server and artifact matrix.

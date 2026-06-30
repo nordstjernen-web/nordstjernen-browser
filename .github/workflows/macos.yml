@@ -142,6 +142,36 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Optional Developer ID signing. With no MACOS_CERTIFICATE_* secrets the
+      # bundle is signed ad-hoc (still needs the xattr quarantine step on
+      # download); with them it is signed for real and notarised below.
+      - name: Import Developer ID signing identity
+        if: hashFiles('builddir/src/gtk/nordstjernen') != ''
+        continue-on-error: true
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "${MACOS_CERTIFICATE_P12_BASE64}" ]; then
+            echo "No MACOS_CERTIFICATE_P12_BASE64 secret; pack-macos.sh signs ad-hoc."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/nordstjernen-signing.keychain-db"
+          KEYCHAIN_PW="$(uuidgen)"
+          printf '%s' "${MACOS_CERTIFICATE_P12_BASE64}" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "${MACOS_CERTIFICATE_PASSWORD}" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "NS_SIGN_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
       - name: Build .app bundle and .dmg
         id: pack
         if: hashFiles('builddir/src/gtk/nordstjernen') != ''
@@ -149,6 +179,7 @@ jobs:
         env:
           BUILDDIR: ${{ github.workspace }}/builddir
           NS_PACK_AI: disabled
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           set -o pipefail
           bash -x ./scripts/pack-macos.sh 2>&1 | tee pack-macos.log
@@ -174,6 +205,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Notarise + staple when the App Store Connect credentials are present;
+      # otherwise the .dmg ships ad-hoc and users clear the quarantine flag
+      # once. Non-fatal so a notary outage never fails the build.
+      - name: Notarize and staple the .dmg
+        if: hashFiles('dist/nordstjernen-*-macos-*.dmg') != ''
+        continue-on-error: true
+        env:
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          if [ -z "${MACOS_NOTARY_PASSWORD}" ]; then
+            echo "No MACOS_NOTARY_PASSWORD secret; skipping notarization."
+            exit 0
+          fi
+          DMG=$(ls dist/nordstjernen-*-macos-*.dmg | head -1)
+          echo "Notarizing $DMG"
+          xcrun notarytool submit "$DMG" \
+            --apple-id "${MACOS_NOTARY_APPLE_ID}" \
+            --team-id "${MACOS_NOTARY_TEAM_ID}" \
+            --password "${MACOS_NOTARY_PASSWORD}" \
+            --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+
       - name: Upload .dmg
         if: hashFiles('dist/nordstjernen-*-macos-*.dmg') != ''
         uses: actions/upload-artifact@v7
@@ -182,3 +238,7 @@ jobs:
           path: dist/nordstjernen-*-macos-*.dmg
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Remove temporary signing keychain
+        if: always() && env.NS_SIGN_KEYCHAIN != ''
+        run: security delete-keychain "$NS_SIGN_KEYCHAIN" || true
