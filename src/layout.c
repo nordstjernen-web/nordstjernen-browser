@@ -7466,6 +7466,25 @@ layout_flex_row_wrap(ns_box *box, double cw,
     typedef struct { double top, height; guint start, count; } flex_line;
     GArray *lines = g_array_new(FALSE, FALSE, sizeof(flex_line));
 
+    GArray *basis_arr  = g_array_new(FALSE, TRUE, sizeof(double));
+    GArray *extras_arr = g_array_new(FALSE, TRUE, sizeof(double));
+    GArray *main_arr   = g_array_new(FALSE, TRUE, sizeof(double));
+    g_array_set_size(basis_arr, items->len);
+    g_array_set_size(extras_arr, items->len);
+    g_array_set_size(main_arr, items->len);
+    for (guint n = 0; n < items->len; n++) {
+        ns_box *c = items->pdata[n];
+        edges_from_style(c->style, cw, &c->margin, &c->padding, &c->border);
+        g_array_index(extras_arr, double, n) =
+            c->margin.left + c->margin.right +
+            c->padding.left + c->padding.right +
+            c->border.left + c->border.right;
+        double b = 0;
+        gboolean exp = flex_main_basis_explicit(c, cw, &b);
+        if (!exp) b = flex_content_basis_from_natural(c, cw);
+        g_array_index(basis_arr, double, n) = b;
+    }
+
     double line_y = inner_y;
     guint i = 0;
     while (i < items->len) {
@@ -7474,36 +7493,26 @@ layout_flex_row_wrap(ns_box *box, double cw,
         double line_max_h = 0;
         guint line_count = 0;
         for (; i < items->len; i++) {
-            ns_box *c = items->pdata[i];
-            edges_from_style(c->style, cw,
-                             &c->margin, &c->padding, &c->border);
-            double extras = c->margin.left + c->margin.right +
-                            c->padding.left + c->padding.right +
-                            c->border.left + c->border.right;
-            double basis = 0;
-            gboolean exp = flex_main_basis_explicit(c, cw, &basis);
-            if (!exp) basis = flex_content_basis_from_natural(c, cw);
-            double item_outer = basis + extras;
+            double item_outer = g_array_index(basis_arr, double, i) +
+                                g_array_index(extras_arr, double, i);
             double try_used = used + (line_count > 0 ? gap : 0) + item_outer;
             if (try_used > cw && line_count > 0) break;
             used = try_used;
             line_count++;
-            c->x = inner_x;
-            c->y = line_y;
-            layout_box(c, basis + c->margin.left + c->margin.right +
-                       c->padding.left + c->padding.right +
-                       c->border.left + c->border.right, child_inherited);
-            double item_h = c->content_height +
-                            c->padding.top + c->padding.bottom +
-                            c->border.top + c->border.bottom +
-                            c->margin.top + c->margin.bottom;
-            if (item_h > line_max_h) line_max_h = item_h;
         }
+
         double remaining = cw - used;
         if (remaining < 0) remaining = 0;
+
+        double line_grow = 0;
+        for (guint k = 0; k < line_count; k++)
+            line_grow += flex_grow_of(items->pdata[line_start + k]);
+        double per_grow = (line_grow > 0 && remaining > 0)
+                        ? remaining / line_grow : 0;
+
         double leading = 0;
         double between = 0;
-        if (line_count > 0) {
+        if (line_count > 0 && per_grow == 0) {
             if (strcmp(justify, "flex-end") == 0 || strcmp(justify, "end") == 0)
                 leading = remaining;
             else if (strcmp(justify, "center") == 0)
@@ -7518,6 +7527,31 @@ layout_flex_row_wrap(ns_box *box, double cw,
                 leading = between;
             }
         }
+
+        for (guint k = 0; k < line_count; k++) {
+            guint gi = line_start + k;
+            ns_box *c = items->pdata[gi];
+            double a = g_array_index(basis_arr, double, gi)
+                     + per_grow * flex_grow_of(c);
+            if (a < 0) a = 0;
+            const ns_css_value *mxw = c->style
+                ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
+            if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
+                double mx = flex_border_box_to_content(c, length_resolve(mxw, cw, -1));
+                if (mx > 0 && a > mx) a = mx;
+            }
+            g_array_index(main_arr, double, gi) = a;
+            c->x = inner_x;
+            c->y = line_y;
+            layout_box(c, a + g_array_index(extras_arr, double, gi),
+                       child_inherited);
+            double item_h = c->content_height +
+                            c->padding.top + c->padding.bottom +
+                            c->border.top + c->border.bottom +
+                            c->margin.top + c->margin.bottom;
+            if (item_h > line_max_h) line_max_h = item_h;
+        }
+
         double cursor_x = inner_x + leading;
         for (guint k = 0; k < line_count; k++) {
             guint idx = reverse ? (line_start + line_count - 1 - k) : (line_start + k);
@@ -7538,11 +7572,11 @@ layout_flex_row_wrap(ns_box *box, double cw,
                 cy = line_y + line_max_h - item_h_full + c->margin.top;
             c->x = cursor_x + c->margin.left;
             c->y = cy;
+            layout_box(c, g_array_index(main_arr, double, idx) +
+                       g_array_index(extras_arr, double, idx), child_inherited);
             double outer = c->content_width
                 + c->padding.left + c->padding.right
                 + c->border.left + c->border.right;
-            layout_box(c, outer + c->margin.left + c->margin.right,
-                       child_inherited);
             if (strcmp(eff_align, "stretch") == 0) {
                 double stretched = line_max_h
                     - c->margin.top  - c->margin.bottom
@@ -7623,6 +7657,9 @@ layout_flex_row_wrap(ns_box *box, double cw,
     *cursor_y_out = line_y - (items->len > 0 ? row_gap : 0);
     g_ptr_array_free(items, TRUE);
     g_array_free(lines, TRUE);
+    g_array_free(basis_arr, TRUE);
+    g_array_free(extras_arr, TRUE);
+    g_array_free(main_arr, TRUE);
 }
 
 static void
