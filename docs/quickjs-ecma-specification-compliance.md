@@ -15,16 +15,33 @@ the in-tree `qjs` host tool (`builddir/src/quickjs/qjs.exe`).
 
 ## How we verify
 
-There is no test262 checkout in the tree. Each fix is reproduced with a
-minimal script driven through the standalone interpreter, e.g.:
+There is no test262 checkout in the tree (the submodule declared in
+`src/quickjs/.gitmodules` is deliberately left uninitialized). Most
+fixes are small enough to reproduce with a minimal script driven
+through the standalone interpreter, e.g.:
 
 ```sh
 ./builddir/src/quickjs/qjs.exe -e '<repro>'
 ```
 
+To run the full suite and get an authoritative score —
+`scripts/test262-run.sh` fetches a shallow `tc39/test262` checkout
+into `src/quickjs/test262` (gitignored, not vendored), builds
+`qjs`/`run-test262` via the upstream CMake path, and runs them:
+
+```sh
+scripts/test262-run.sh           # full suite, prints "Result: N/M errors, ..."
+scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pass/fail
+```
+
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
-"expected" failures). Categorising it gives the working backlog:
+"expected" failures, kept in sync with `-u` after each fix). As of
+this writing the full suite is 81150 test/mode combinations with 66
+unexpected errors (~99.92% pass rate excluding the intentionally
+skipped/excluded categories — `async`, `module`, and a handful of slow
+or out-of-scope feature areas, see `test262.conf`). Categorising the
+backlog:
 
 | Cluster | Subtests | Difficulty | Status |
 | --- | --- | --- | --- |
@@ -42,6 +59,9 @@ The known-failing baseline is captured in
 | Destructuring assignment-target evaluation order | ~6 | medium | open |
 | Module star-export of the same namespace is unambiguous | ~5 | medium | **done** |
 | AnnexB CallExpression assignment-target type | 7 | medium | open |
+| Legacy RegExp `$1`-`$9` must not throw when made non-writable | 2 | low | **done** |
+| `for await` loop must not close the iterator when `next()` itself rejects | 2 | medium | **done** |
+| `Function.prototype.caller`/`.arguments` as %ThrowTypeError% poison pills | 4 | n/a | **won't fix** (deliberate web-reality deviation, see below) |
 
 ## Changes
 
@@ -280,3 +300,109 @@ bindings. Genuinely distinct bindings (two local exports, or namespaces of
 Covers test262
 `language/module-code/ambiguous-export-bindings/namespace-unambiguous-if-*.js`
 and `import-and-export-propagates-binding.js`.
+
+### 9. Legacy RegExp `$1`-`$9` static properties throw when locked down
+
+**Spec:** [`UpdateLegacyRegExpStaticProperties`](https://tc39.es/proposal-regexp-legacy-features/#sec-updatelegacyregexpstaticproperties)
+(the Annex-B-adjacent "Legacy RegExp Features" proposal that defines
+`RegExp.$1`-`RegExp.$9`) updates each property with `? Set(C, name,
+value, false)` — a *non-throwing* `[[Set]]`. Per the `[[DefineOwnProperty]]`
+invariants, once a property is locked down (`writable: false,
+configurable: false`), its value must never change again, and updating it
+must fail silently rather than throw.
+
+**Bug:** `js_regexp_update_static_captures` called `JS_SetPropertyStr`,
+which always passes `JS_PROP_THROW`. After
+`Reflect.defineProperty(RegExp, '$1', {writable: false, configurable:
+false})`, the next `RegExp.prototype.exec` call threw an uncaught
+`TypeError: '$1' is read-only` instead of leaving the locked value alone.
+
+**Fix:** call `JS_SetPropertyInternal` directly with flags `0` (no
+throw) instead of going through `JS_SetPropertyStr`.
+`src/quickjs/quickjs.c`, `js_regexp_update_static_captures`.
+
+Covers test262
+`built-ins/Object/internals/DefineOwnProperty/consistent-value-regexp-dollar1.js`.
+
+### 10. `for await` loop closes the iterator twice (or wrongly) when `next()` itself rejects
+
+**Spec:** [`ForIn/OfBodyEvaluation`](https://tc39.es/ecma262/#sec-runtime-semantics-forin-div-ofbodyevaluation).
+Fetching the next result (`Call`/`Await` of the iterator's `next()`) is a
+`?`-prefixed step *outside* the body's try region: if it completes
+abruptly, the loop returns that completion directly without closing the
+iterator. Only an abrupt completion from the **loop body** (or an
+explicit `break`/`return`) calls `AsyncIteratorClose`/`IteratorClose`.
+
+**Bug:** the bytecode for `for await (x of iterable)` keeps `iter_obj`
+live on the operand stack across the `next()` call and its `await` for
+every iteration. A rejection from `await`ing the `next()` result was
+indistinguishable, at unwind time, from a rejection in the loop body, so
+the runtime's generic catch-offset handler (`quickjs.c`, the
+`JS_TAG_CATCH_OFFSET` case in `JS_CallInternal`'s `exception:` label)
+always called the iterator's `return()`. The synchronous `for (x of
+iterable)` loop already avoids this — `js_for_of_next` clears the
+`iter_obj` stack slot to `undefined` before propagating a `next()`
+failure, and the generic unwind path skips closing an `undefined`
+"iterator" — but the async `for await` codegen had no equivalent for the
+`OP_call_method` + `OP_await` sequence used to fetch the next result.
+
+This was directly visible as a double-`return()` call when combined with
+the `AsyncFromSyncIteratorContinuation` `closeOnRejection` fix above (#7):
+a `for await` loop over a *sync* iterable wrapped by
+`%AsyncFromSyncIteratorPrototype%` got one spec-mandated close from
+`js_async_from_sync_iterator_next` and a second, wrong one from the
+loop itself. But the bug is general: a `for await` loop over a *native*
+async iterable whose `next()` rejects also wrongly called `return()`,
+which is observable as premature/incorrect cleanup on any real-world
+async iterator (stream, connection, etc.) whose `next()` promise rejects.
+
+**Fix:** two new opcodes, `OP_for_await_of_dup` and
+`OP_for_await_of_restore` (appended at the *end* of the opcode table in
+`quickjs-opcode.h` so existing opcode numbers — and therefore the
+precompiled bytecode blobs like `builtin-array-fromasync.h` — don't
+shift), bracket the `next()` call + `await` in the `for await` loop body
+codegen (`js_parse_for_in_of`). `OP_for_await_of_dup` clears the live
+`iter_obj` stack slot to `undefined` for the duration of the call and
+`await` (mirroring `js_for_of_next`'s sync trick) while keeping a
+separate copy alive to actually make the call with; `OP_for_await_of_restore`
+restores it once the result is obtained without throwing. An abrupt
+completion in between now unwinds through an `undefined` iterator slot
+and the generic close is skipped, exactly like the sync case. Verified
+with the full test262 suite (no regressions, `next() `-rejection,
+break-from-body, throw-from-body, and natural-exhaustion cases all
+behave correctly) and an ASan build (no leaks or use-after-free).
+`src/quickjs/quickjs.c`, `src/quickjs/quickjs-opcode.h`,
+`js_parse_for_in_of`.
+
+Covers test262
+`built-ins/AsyncFromSyncIteratorPrototype/next/for-await-next-rejected-promise-close.js`.
+
+## Known, accepted test262 deviations
+
+Some test262 failures are not bugs — they're a deliberate choice to
+match real-world browser behavior ("web reality") over the formal
+specification text, the same trade-off every shipping engine makes.
+These are recorded here (and carried in `test262_errors.txt`) rather
+than "fixed", because fixing them would be a regression for
+compatibility with existing websites.
+
+### `Function.prototype.caller` / `Function.prototype.arguments`
+
+**Spec:** [`Function.prototype.caller`/`.arguments`](https://tc39.es/ecma262/#sec-function.prototype.caller)
+are required to be accessor properties whose getter *and* setter are
+both the exact same `%ThrowTypeError%` intrinsic — i.e. simply reading
+`fn.caller` must always throw.
+
+**Why we deviate:** every mainstream browser engine implements `.caller`
+as a working (if deprecated) accessor for non-strict functions, because
+real websites still read it. Nordstjernen follows that web reality:
+`JS_AddIntrinsicBaseObjects` wires `Function.prototype.caller`'s getter
+to `js_function_caller_get` (which resolves the live caller for
+non-strict functions) and only the setter to `%ThrowTypeError%`;
+`.arguments` stays a full poison pill (getter and setter both
+`%ThrowTypeError%`). `src/quickjs/quickjs.c`,
+`JS_AddIntrinsicBaseObjects`.
+
+Accounts for test262
+`built-ins/Function/prototype/caller/prop-desc.js` and
+`built-ins/Function/prototype/caller-arguments/accessor-properties.js`.

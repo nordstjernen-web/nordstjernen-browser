@@ -18945,6 +18945,43 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 goto exception;
             sp += 1;
             BREAK;
+        CASE(OP_for_await_of_dup):
+            {
+                /* stack: iter_obj next catch iter_obj_c next_c ->
+                   undefined next catch iter_obj iter_obj_c next_c
+                   Clearing the live iter_obj slot for the duration of
+                   the next()+await call means that if it throws (e.g.
+                   the awaited value rejects), unwinding to the loop's
+                   catch offset sees an undefined iterator and skips the
+                   close: per ForIn/OfBodyEvaluation, an abrupt next()
+                   result must not close the iterator. */
+                JSValue iter_obj = sp[-5];
+                JSValue iter_obj_c = sp[-2];
+                JSValue next_c = sp[-1];
+                sp[-5] = JS_UNDEFINED;
+                sp[-2] = iter_obj;
+                sp[-1] = iter_obj_c;
+                sp[0] = next_c;
+                sp += 1;
+            }
+            BREAK;
+        CASE(OP_for_await_of_restore):
+            {
+                /* stack: undefined next catch iter_obj value done ->
+                   iter_obj next catch value done
+                   Reached only once next()'s result has been obtained
+                   without throwing: restore the live iterator so the
+                   loop body and any later close see it again. */
+                JSValue iter_obj = sp[-3];
+                JSValue value = sp[-2];
+                JSValue done = sp[-1];
+                JS_FreeValue(ctx, sp[-6]);
+                sp[-6] = iter_obj;
+                sp[-3] = value;
+                sp[-2] = done;
+                sp -= 1;
+            }
+            BREAK;
         CASE(OP_check_object):
             if (unlikely(!JS_IsObject(sp[-1]))) {
                 JS_ThrowTypeErrorNotAnObject(ctx);
@@ -28847,12 +28884,17 @@ static __exception int js_parse_for_in_of(JSParseState *s, int label_name,
             /* stack: iter_obj next catch_offset */
             emit_op(s, OP_dup3);
             emit_op(s, OP_drop);
+            /* clear the live iter_obj while next() is pending: an
+               abrupt next()/await must not close the iterator */
+            emit_op(s, OP_for_await_of_dup);
             emit_op(s, OP_call_method);
             emit_u16(s, 0);
             /* get the result of the promise */
             emit_op(s, OP_await);
             /* unwrap the value and done values */
             emit_op(s, OP_iterator_get_value_done);
+            /* next() succeeded: restore the live iter_obj */
+            emit_op(s, OP_for_await_of_restore);
         } else {
             emit_op(s, OP_for_of_next);
             emit_u8(s, 0);
@@ -48769,6 +48811,8 @@ static int js_regexp_update_static_captures(JSContext *ctx, JSString *str,
 
     for (int i = 1; i <= 9; i++) {
         JSValue val;
+        JSAtom atom;
+        int ret;
 
         name[1] = '0' + i;
         if (i < capture_count && capture[2 * i] && capture[2 * i + 1]) {
@@ -48780,7 +48824,17 @@ static int js_regexp_update_static_captures(JSContext *ctx, JSString *str,
         }
         if (JS_IsException(val))
             return -1;
-        if (JS_SetPropertyStr(ctx, ctx->regexp_ctor, name, val) < 0)
+        atom = JS_NewAtom(ctx, name);
+        if (atom == JS_ATOM_NULL) {
+            JS_FreeValue(ctx, val);
+            return -1;
+        }
+        /* UpdateLegacyRegExpStaticProperties: Set(C, name, value, false) -
+           a non-writable/non-configurable "$1".."$9" must not throw and
+           must keep its old value. */
+        ret = JS_SetPropertyInternal(ctx, ctx->regexp_ctor, atom, val, 0);
+        JS_FreeAtom(ctx, atom);
+        if (ret < 0)
             return -1;
     }
     return 0;
