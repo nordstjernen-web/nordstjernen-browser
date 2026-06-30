@@ -206,8 +206,9 @@ nordstjernen_deps += [libpsl]
 
 sdl2_dep = dependency('sdl2', required: get_option('audio'))
 ns_lib_c_args = []
+ns_sdl_deps = []
 if sdl2_dep.found()
-  nordstjernen_deps += [sdl2_dep]
+  ns_sdl_deps += [sdl2_dep]
   ns_lib_c_args += ['-DNS_HAVE_SDL']
 endif
 
@@ -286,7 +287,7 @@ endif
 libnordstjernen_lib = library(
   'nordstjernen',
   nordstjernen_embed_sources,
-  dependencies: nordstjernen_deps,
+  dependencies: nordstjernen_deps + ns_sdl_deps,
   c_args: ns_lib_c_args,
   link_args: nordstjernen_link_args,
   install: true,
@@ -298,7 +299,7 @@ libnordstjernen_lib = library(
 libnordstjernen_static = static_library(
   'nordstjernen-static',
   nordstjernen_embed_sources,
-  dependencies: nordstjernen_deps,
+  dependencies: nordstjernen_deps + ns_sdl_deps,
   c_args: ns_lib_c_args,
   install: false,
 )
@@ -319,7 +320,8 @@ if not is_android
     files('renderer_http.c', 'renderer_serve.c', 'ipc_http.c'),
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
-    dependencies: nordstjernen_deps + rproc_deps,
+    dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,
+    c_args: ns_lib_c_args,
     link_args: nordstjernen_exe_link_args,
     install: true,
   )

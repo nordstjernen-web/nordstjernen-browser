@@ -1,6 +1,15 @@
 /* Nordstjernen — HTTP/JSON renderer server (IPC experiment, pixels in body). */
 
 #define _GNU_SOURCE
+
+#ifdef NS_HAVE_SDL
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
+#ifdef main
+#undef main
+#endif
+#endif
+
 #include "ipc_http.h"
 #include "libnordstjernen.h"
 #include "renderer_serve.h"
@@ -73,6 +82,9 @@ renderer_win32_fontconfig(void)
 int
 main(int argc, char **argv)
 {
+#ifdef NS_HAVE_SDL
+    SDL_SetMainReady();
+#endif
     if (argc < 3)
         return 2;
 
