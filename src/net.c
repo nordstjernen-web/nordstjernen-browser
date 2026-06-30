@@ -3567,7 +3567,7 @@ synthesize_file_response(const char *url, const char *top_url, ns_response *resp
     return TRUE;
 }
 
-#ifdef NS_HAVE_AI
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
 static const char k_about_start_template[] =
     "<!doctype html><html lang=\"en\"><head>"
     "<meta charset=\"utf-8\">"
