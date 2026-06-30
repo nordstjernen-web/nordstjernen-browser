@@ -329,6 +329,108 @@ Updates ship only through the store — no self-update.
   `xcrun notarytool submit "$DMG" --apple-id … --team-id … --password … --wait`
   then `xcrun stapler staple "$DMG"`.
 
+## Maintaining the macOS port from Linux / Windows
+
+Most development happens on Linux and Windows, and macOS only gets exercised
+when CI runs or someone builds the `.dmg`. The platform differs in ways that a
+Linux/Windows change can silently break, so this section collects the failure
+modes that have actually bitten the macOS build and how to stay ahead of them.
+
+### macOS links a *different* curl / TLS stack than you expect
+
+Homebrew's `curl` is **keg-only**, so a plain `meson setup` does **not** pick it
+up — `pkg-config` resolves the macOS SDK's **system** `libcurl`
+(`/usr/lib/libcurl.4.dylib`), which is **LibreSSL / SecureTransport**, not the
+OpenSSL build the app is designed around (vendored CA bundle, HTTP/3, modern TLS
+options). Put the keg on the path before configuring:
+
+```sh
+PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$PKG_CONFIG_PATH" \
+    meson setup builddir
+otool -L builddir/src/gtk/nordstjernen | grep curl   # expect .../opt/curl/...
+```
+
+`scripts/pack-macos.sh` and `.github/workflows/macos.yml` already do this; a
+manual `meson setup builddir` per the build instructions above does not, so a
+local dev binary links system curl unless you add the keg yourself.
+
+**The wider lesson — any curl/TLS option must degrade on the oldest backend
+macOS might link.** `CURLOPT_SSL_EC_CURVES`, cipher lists, and similar options
+are rejected **wholesale** if the linked backend doesn't recognise *one* entry.
+A post-quantum curve (`X25519MLKEM768`) hard-pinned in `src/net.c` once broke
+**every HTTPS connection** on a Mac whose curl was LibreSSL — it failed the
+whole curve list, not just that curve. The code now probes the backend
+(`curl_version_info`) and only requests features the active backend supports.
+When you touch `src/net.c` TLS setup, assume the runtime curl may be older or a
+different backend than your Linux box, and gate accordingly.
+
+### Test the *bundled* binary, not just the build-tree one
+
+CI's macOS smoke test runs `--headless --dump=text about:start` on the
+**builddir** binary. That page is local, so it proves neither **networking**
+(no HTTPS is fetched) nor anything **bundle-specific**. Two whole classes of bug
+sail past it:
+
+- HTTPS regressions (the curve bug above) — `about:start` never hits the
+  network.
+- Bundle-only failures — the build-tree binary uses Homebrew rpaths and runs
+  fine, while the relocated `.app` does not.
+
+So after any change to networking, the bundle layout, dylib dependencies, or
+rpaths, **build the `.dmg` and launch the bundled binary against a real URL**:
+
+```sh
+PKG_CONFIG_PATH="$(brew --prefix curl)/lib/pkgconfig:$PKG_CONFIG_PATH" \
+    BUILDDIR="$PWD/builddir" NS_PACK_AI=disabled ./scripts/pack-macos.sh
+dist/Nordstjernen.app/Contents/MacOS/Nordstjernen \
+    --headless --dump=text https://example.com    # must print page text
+```
+
+(Reusing an existing `BUILDDIR` skips the from-scratch compile; `dylibbundler`
+still takes a few minutes.) Worth adding to CI as a real gate.
+
+### `dylibbundler` + meson build-rpaths → duplicate `LC_RPATH` (fatal)
+
+The build binary carries one `LC_RPATH` per Homebrew dependency directory, and
+`dylibbundler` adds a `@executable_path/../Frameworks/` rpath for each of them —
+leaving many identical entries. **Modern macOS dyld treats a duplicate
+`LC_RPATH` as a fatal error**, so the `.app` fails to launch with
+`dyld: duplicate LC_RPATH`. `pack-macos.sh` now collapses them to a single
+entry after bundling; if you rework the packaging, keep that step (and re-sign
+*after* it — `install_name_tool` invalidates the signature).
+
+### Other macOS-only behaviour to keep in mind
+
+- **The Dock icon needs the `.app` or the programmatic setter.** GTK's Quartz
+  backend does **not** map `gtk_window_set_default_icon_name()` to the Dock
+  tile. The `.app` carries an `.icns`; an unbundled binary additionally renders
+  the embedded SVG and calls `[NSApp setApplicationIconImage:]`
+  (`src/gtk/macos_dock.m`). The icon is otherwise generic.
+- **AI (llama.cpp) is left out of macOS builds** (`-Dai=disabled` in CI and the
+  pack step), so `about:start` uses the **non-AI** start page on macOS
+  (`#if defined(NS_HAVE_AI) && !defined(__APPLE__)` in `src/net.c`). Don't wire
+  the start-page chat to assume AI on macOS.
+- **No Landlock/seccomp.** The sandbox is Linux-only; the only startup-side
+  restriction shared with Linux is the refuse-root check (exit 77 unless
+  `NS_ALLOW_ROOT=1`).
+- **`__APPLE__` is the platform guard** used across the tree (see `src/media.c`,
+  `src/security.c`, `src/ext.c`) — match it for new macOS-specific code rather
+  than introducing a new macro.
+- **Objective-C** is added as a meson language only on darwin
+  (`add_languages('objc')` in `src/gtk/meson.build`), guarded so Linux/Windows
+  builds never see it; macOS-only Cocoa code (`*.m`) goes there with the
+  relevant `-framework` link arg.
+
+### Quick triage when "it builds on Linux but macOS CI / the `.dmg` is broken"
+
+| Symptom | Likely cause | Where |
+|---------|--------------|-------|
+| Every HTTPS page fails | a TLS/curl option the linked backend rejects | `src/net.c` `ns_net_apply_curl_tls` |
+| `.dmg` app won't launch (`duplicate LC_RPATH`) | dylibbundler rpath duplication | `scripts/pack-macos.sh` |
+| App launches but no page loads on a clean Mac | missing/!vendored CA bundle, or system-curl SecureTransport ignoring `CAINFO` | `pack-macos.sh` CA step + curl linkage |
+| Generic Dock icon | running the unbundled binary, or the SVG/`.icns` path broke | `src/gtk/macos_dock.m`, `pack-macos.sh` icon step |
+| `glib`/`gtk4` schema or pixbuf-loader abort at runtime | bundle missing compiled schemas / `loaders.cache` | `pack-macos.sh` schema + pixbuf steps |
+
 ## Definition of done on macOS
 
 Same as everywhere else (`CLAUDE.md`):
