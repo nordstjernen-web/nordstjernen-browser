@@ -476,6 +476,7 @@ wg_device_createBuffer(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowInternalError(ctx, "createBuffer: wgpu returned null");
 
     JSValue obj = JS_NewObjectClass(ctx, g_buffer_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_buffer *b = g_new0(ns_wg_buffer, 1);
     b->buffer = wbuf;
     b->size = desc.size;
@@ -1476,6 +1477,7 @@ wg_device_createShaderModule(JSContext *ctx, JSValueConst this_val,
     if (!mod) return JS_ThrowInternalError(ctx, "createShaderModule failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_shader_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_shader *s = g_new0(ns_wg_shader, 1);
     s->mod = mod;
     JS_SetOpaque(obj, s);
@@ -1710,6 +1712,7 @@ wg_device_createRenderPipeline(JSContext *ctx, JSValueConst this_val,
     if (!pipe) return JS_ThrowInternalError(ctx, "createRenderPipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_pipeline_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_pipeline *p = g_new0(ns_wg_pipeline, 1);
     p->pipe = pipe;
     JS_SetOpaque(obj, p);
@@ -1885,6 +1888,7 @@ wg_device_createPipelineLayout(JSContext *ctx, JSValueConst this_val,
         return JS_ThrowInternalError(ctx, "createPipelineLayout failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_pllayout_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_pllayout *p = g_new0(ns_wg_pllayout, 1);
     p->layout = layout;
     JS_SetOpaque(obj, p);
@@ -1968,6 +1972,7 @@ wg_device_createBindGroup(JSContext *ctx, JSValueConst this_val,
     if (!group) return JS_ThrowInternalError(ctx, "createBindGroup failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_bindgroup_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_bindgroup *b = g_new0(ns_wg_bindgroup, 1);
     b->group = group;
     JS_SetOpaque(obj, b);
@@ -2105,6 +2110,7 @@ wg_device_createSampler(JSContext *ctx, JSValueConst this_val,
     WGPUSampler sampler = wgpuDeviceCreateSampler(d->device, &desc);
     if (!sampler) return JS_ThrowInternalError(ctx, "createSampler failed");
     JSValue obj = JS_NewObjectClass(ctx, g_sampler_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_sampler *s = g_new0(ns_wg_sampler, 1);
     s->sampler = sampler;
     JS_SetOpaque(obj, s);
@@ -2342,6 +2348,7 @@ wg_device_createQuerySet(JSContext *ctx, JSValueConst this_val,
         qs = wgpuDeviceCreateQuerySet(d->device, &desc);
     }
     JSValue obj = JS_NewObjectClass(ctx, g_queryset_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_queryset *q = g_new0(ns_wg_queryset, 1);
     q->qs = qs;
     JS_SetOpaque(obj, q);
@@ -2426,6 +2433,7 @@ wg_device_createComputePipeline(JSContext *ctx, JSValueConst this_val,
     if (!pipe) return JS_ThrowInternalError(ctx, "createComputePipeline failed");
 
     JSValue obj = JS_NewObjectClass(ctx, g_compute_pipe_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_compute_pipe *p = g_new0(ns_wg_compute_pipe, 1);
     p->pipe = pipe;
     JS_SetOpaque(obj, p);
@@ -2503,6 +2511,7 @@ wg_encoder_beginComputePass(JSContext *ctx, JSValueConst this_val,
     WGPUComputePassEncoder pass = wgpuCommandEncoderBeginComputePass(e->enc, NULL);
     if (!pass) return JS_UNDEFINED;
     JSValue obj = JS_NewObjectClass(ctx, g_compute_pass_class);
+    if (JS_IsException(obj)) return obj;
     ns_wg_compute_pass *p = g_new0(ns_wg_compute_pass, 1);
     p->pass = pass;
     JS_SetOpaque(obj, p);
