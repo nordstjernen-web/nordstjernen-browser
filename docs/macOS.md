@@ -1,25 +1,94 @@
-# Nordstjernen on macOS — build and run
+# Nordstjernen on macOS
 
-This document records the working setup for building and running
-Nordstjernen on modern macOS (Apple Silicon and Intel). The macOS CI
-workflow (`.github/workflows/macos.yml`) is the authoritative spec;
-what follows is the same recipe verified on a local MacBook.
+Nordstjernen runs natively on macOS through GTK 4's Quartz backend — no
+X11, no XQuartz, no WebKit. The same clean-room C engine shipped to Linux
+and Windows links the same GTK 4 / libcurl / Cairo / Pango / lexbor
+libraries here; there is no Xcode project and no CocoaPods. This page
+covers both **installing the prebuilt app** and **building from source**.
 
-The macOS build uses **Homebrew** for the toolchain and dependencies,
-the same source the CI workflow installs. No Xcode project, no
-CocoaPods. The meson build produces a single Mach-O executable
-linking the same GTK 4 / libcurl / Cairo / Pango / lexbor
-libraries shipped to Linux and Windows users;
-`scripts/pack-macos.sh` wraps that binary into a `.app` bundle and
-`.dmg` for distribution.
+- **Prebuilt download:** Apple Silicon (`arm64`) only — a Mac with an
+  M1 chip or newer.
+- **macOS version:** built on macOS 15 (Sequoia); the bundle targets
+  macOS 11 (Big Sur) and later, including the current macOS 26 (Tahoe).
+- **Intel Macs:** not in the prebuilt release — [build from
+  source](#build-from-source), which still compiles on an `x86_64`
+  Homebrew prefix.
 
-Tested against macOS 14 (Sonoma) and macOS 15 (Sequoia) on
-`arm64` (M1/M2/M3/M4) and `x86_64` MacBooks.
+## Install the app
 
-## One-time setup
+1. Download
+   [`nordstjernen-macos.dmg`](https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg).
+2. Open the `.dmg` and drag **Nordstjernen** into `/Applications`.
+3. Clear the download quarantine once (next section), then launch it from
+   Launchpad, Spotlight, or Finder.
 
-Install [Homebrew](https://brew.sh) if you do not already have it,
-then:
+### Opening an unsigned build
+
+The released `.dmg` is signed **ad-hoc**, not with an Apple Developer ID,
+and is not notarised (the project has no paid Apple Developer account).
+macOS stamps anything downloaded with a `com.apple.quarantine` flag, and
+Gatekeeper refuses to open a quarantined app that isn't notarised — the
+first launch fails with *"Nordstjernen is damaged and can't be opened"*
+or *"cannot be opened because Apple cannot check it for malicious
+software."* This is expected for an unsigned build; the download is not
+corrupt.
+
+Clear the quarantine flag once, after copying the app to `/Applications`:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Nordstjernen.app
+```
+
+The app then launches normally on every later run. (Right-click → **Open**
+also works on some macOS versions, but the `xattr` command is the reliable
+path — recent macOS has narrowed the right-click bypass for un-notarised
+apps.) A maintainer with a Developer ID can remove this step entirely by
+signing and notarising the `.dmg` — see the **Code signing** note under
+[Platform notes](#platform-notes).
+
+### Verifying what you downloaded
+
+```sh
+codesign -dv --verbose=2 /Applications/Nordstjernen.app   # shows the (ad-hoc) signature
+spctl -a -vv /Applications/Nordstjernen.app               # Gatekeeper's assessment
+shasum -a 256 ~/Downloads/nordstjernen-macos.dmg          # compare against SHA256SUMS
+```
+
+`spctl` reporting *"rejected"* / *"Unnotarized Developer ID"* is the
+expected state for an ad-hoc build and is exactly what the `xattr` step
+above works around. Published checksums are at
+<https://www.nordstjernen.org/nightly/SHA256SUMS>.
+
+### Uninstall
+
+```sh
+rm -rf /Applications/Nordstjernen.app
+rm -rf ~/.config/nordstjernen ~/.cache/nordstjernen ~/.local/share/nordstjernen
+```
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| *"…is damaged and can't be opened"* / *"…cannot be opened because Apple cannot check it"* | Download quarantine on an un-notarised app | `xattr -dr com.apple.quarantine /Applications/Nordstjernen.app` (see [above](#opening-an-unsigned-build)) |
+| App opens but **no web page loads** — every `https://` site fails | An old build with no bundled CA store, run on a Mac without Homebrew | Update to a current build (the `.dmg` now vendors a CA bundle); or set `CURL_CA_BUNDLE=/path/to/cert.pem` before launch |
+| `<video>` / `<audio>` plays but is **silent** | An old build that did not bundle the audio helper | Update to a current build (it ships `nordstjernen-audio` inside the `.app`) |
+| Quits immediately with status **77** from a terminal | Refuse-root check — launched via `sudo` | Run as a normal user, or set `NS_ALLOW_ROOT=1` |
+| Blank window or GPU glitches | Quartz GL renderer trouble | Relaunch with `GSK_RENDERER=cairo` to force the software renderer |
+| Need to see why it won't start | — | Launch from Terminal and read stderr: `/Applications/Nordstjernen.app/Contents/MacOS/Nordstjernen` |
+
+## Build from source
+
+The macOS build uses **Homebrew** for the toolchain and dependencies —
+the same packages the CI workflow
+([`.github/workflows/macos.yml`](../.github/workflows/macos.yml))
+installs, which is the authoritative spec. The meson build produces a
+single Mach-O executable; `scripts/pack-macos.sh` wraps it into a `.app`
+bundle and `.dmg`.
+
+### One-time setup
+
+Install [Homebrew](https://brew.sh) if you do not already have it, then:
 
 ```sh
 brew install meson ninja pkg-config cmake gtk4 libepoxy curl \
@@ -27,15 +96,21 @@ brew install meson ninja pkg-config cmake gtk4 libepoxy curl \
 brew install ccache    # optional, speeds up rebuilds
 ```
 
-Homebrew installs to:
+Homebrew installs to `/opt/homebrew` on Apple Silicon and `/usr/local` on
+Intel; both are wired through `pkg-config` automatically, so no extra
+environment variables are needed for a normal user install.
 
-- `/opt/homebrew` on Apple Silicon (arm64).
-- `/usr/local` on Intel (x86_64).
+Optional extras, all auto-detected — the build works without them:
 
-Both prefixes are wired up through `pkg-config` automatically; no
-extra environment variables are needed for a normal user install.
+- `brew install enchant` plus a dictionary enables on-screen
+  spell-checking of editable text.
+- `brew install ffmpeg` enables inline WebM (VP9/VP8 + Opus/Vorbis).
+  Stock Homebrew FFmpeg is GPL, so for a *redistributable* `.app` CI
+  instead builds a minimal LGPL FFmpeg with
+  `scripts/build-ffmpeg-lgpl.sh`; a local developer build can use the
+  Homebrew one directly.
 
-## Build
+### Build
 
 ```sh
 git clone https://github.com/nordstjernen-web/nordstjernen
@@ -44,30 +119,31 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-QuickJS and lexbor are vendored in-tree at `src/quickjs/` and
-`src/lexbor/`, so `meson setup` only auto-downloads the Wuffs
-image-decoder subproject. No git submodules.
+QuickJS, lexbor, WAMR, Wuffs, pl_mpeg and minimp3 are vendored in-tree,
+so `meson setup` only auto-downloads the Wuffs image-decoder subproject
+(and llama.cpp for the local-AI feature, unless you pass
+`-Dai=disabled`). No git submodules.
 
-If you prefer the same flags CI uses:
+To match CI exactly — including the local-AI feature being left out for
+speed:
 
 ```sh
 export CC="ccache clang"
-meson setup builddir --werror
+meson setup builddir --werror -Dai=disabled
 meson compile -C builddir
 ```
 
-## Run
+### Run
 
 ```sh
 ./builddir/src/gtk/nordstjernen https://example.com
 ```
 
-The first launch creates the per-user state directories under
-`~/.config/nordstjernen/`, `~/.cache/nordstjernen/`, and
-`~/.local/share/nordstjernen/`. GLib does **not** translate XDG base
-directories to the macOS-native `~/Library/...` paths — every GTK app
-on macOS follows the same Unix convention. Set `XDG_CONFIG_HOME`,
-`XDG_CACHE_HOME`, or `XDG_DATA_HOME` to relocate.
+The first launch creates per-user state under `~/.config/nordstjernen/`,
+`~/.cache/nordstjernen/`, and `~/.local/share/nordstjernen/`. GLib does
+**not** translate XDG base directories to the macOS-native `~/Library/...`
+paths — every GTK app on macOS follows the same Unix convention. Set
+`XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, or `XDG_DATA_HOME` to relocate.
 
 Headless rendering works the same as on Linux:
 
@@ -76,26 +152,17 @@ Headless rendering works the same as on Linux:
 ./builddir/src/gtk/nordstjernen --headless --dump=png:/tmp/page.png https://example.com
 ```
 
-## Opening an unsigned build
-
-The released `.dmg` is signed **ad-hoc**, not with an Apple Developer ID,
-and is not notarised (the project has no paid Apple Developer account).
-macOS stamps anything downloaded with a `com.apple.quarantine` flag, and
-Gatekeeper refuses to open a quarantined app that isn't notarised — the
-first launch fails with *"Nordstjernen is damaged and can't be opened"*
-or *"cannot be opened because the developer cannot be verified."* This is
-expected for an unsigned build and does not mean the download is corrupt.
-
-Clear the quarantine flag once, after copying the app to `/Applications`:
+### Package the `.app` and `.dmg`
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/Nordstjernen.app
+./scripts/pack-macos.sh                                          # ad-hoc signed
+MACOS_SIGN_IDENTITY="Developer ID Application: …" ./scripts/pack-macos.sh
 ```
 
-The app then launches normally. (Right-click → **Open** also works on some
-macOS versions, but the `xattr` command is the reliable path.) A
-maintainer with a Developer ID can remove this step entirely by signing
-and notarising the `.dmg` — see **Code signing** below.
+The script stages `dist/Nordstjernen.app`, vendors the Homebrew dylibs
+with `dylibbundler`, code-signs the bundle, and produces
+`dist/nordstjernen-<version>-macos-<arch>.dmg`. What goes into the bundle
+and how it is signed is described under [Platform notes](#platform-notes).
 
 ## Platform notes
 
@@ -130,6 +197,8 @@ and notarising the `.dmg` — see **Code signing** below.
   strings.
 - **Display server.** GTK 4 on macOS uses the native Quartz backend.
   There is no X11 or Wayland requirement, and no XQuartz dependency.
+  If the GPU (`ngl`) renderer misbehaves, `GSK_RENDERER=cairo` forces the
+  software path.
 - **Packaging.** The meson output is a plain Mach-O binary in
   `builddir/src/gtk/nordstjernen` that launches from Terminal or Finder
   and shows up in the Dock while it runs. For distribution,
@@ -159,9 +228,10 @@ and notarising the `.dmg` — see **Code signing** below.
 - **Code signing.** `pack-macos.sh` signs the bundle inside-out (nested
   dylibs and helpers first, the `.app` last). With no Apple Developer ID
   it signs **ad-hoc** (`codesign --sign -`), which seals the bundle so it
-  launches once the download quarantine is cleared (see below). Set
-  `MACOS_SIGN_IDENTITY` to a `Developer ID Application: …` identity to
-  produce a hardened-runtime, notarisation-ready bundle instead; the JIT
+  launches once the download quarantine is cleared (see [Opening an
+  unsigned build](#opening-an-unsigned-build)). Set `MACOS_SIGN_IDENTITY`
+  to a `Developer ID Application: …` identity to produce a
+  hardened-runtime, notarisation-ready bundle instead; the JIT
   entitlements in `packaging/macos/entitlements.plist` are applied on that
   path. Notarising still needs a maintainer's credentials:
   `xcrun notarytool submit "$DMG" --apple-id … --team-id … --password … --wait`

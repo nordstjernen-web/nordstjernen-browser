@@ -158,6 +158,14 @@ For Leap, swap `openSUSE_Tumbleweed` for your release (e.g. `16.0`). See
 licensing reality (it cannot enter openSUSE:Factory under NSL-1.0), and how
 the git-backed OBS build is wired up.
 
+**macOS (Apple Silicon, macOS 11+).** The prebuilt `.dmg` is for Apple
+Silicon (M1 or newer) and is unsigned, so clear the download quarantine
+once after copying it to `/Applications`:
+`xattr -dr com.apple.quarantine /Applications/Nordstjernen.app` (or
+right-click → **Open**). It then launches normally. Intel Macs build from
+source. Install, troubleshooting, and packaging are in
+[docs/macOS.md](docs/macOS.md).
+
 **Windows 10 or later** is required: the GTK 4 frontend links
 DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
 (and GTK 4 targets Windows 10 anyway). There is no older-Windows
