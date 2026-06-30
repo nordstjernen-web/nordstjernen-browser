@@ -34177,6 +34177,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, media_devices, "getDisplayMedia",         ns_media_reject_not_found, 1);
     ns_bind_fn(ctx, media_devices, "enumerateDevices",        ns_returns_resolved_empty_array, 0);
     ns_bind_fn(ctx, media_devices, "getSupportedConstraints", ns_event_noop,       0);
+    JS_SetPropertyStr(ctx, media_devices, "_listeners", JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, media_devices);
+    ns_bind_fn(ctx, media_devices, "dispatchEvent", ns_target_dispatchEvent, 1);
+    JS_SetPropertyStr(ctx, media_devices, "ondevicechange", JS_NULL);
     JS_SetPropertyStr(ctx, navigator, "mediaDevices", media_devices);
 
     ns_bind_fn(ctx, navigator, "share",                     ns_returns_rejected, 1);
