@@ -190,6 +190,21 @@ jobs:
           set -o pipefail
           bash -x ./scripts/pack-macos.sh 2>&1 | tee pack-macos.log
 
+      # Hard gate: launch the BUNDLED binary against a real HTTPS URL. The
+      # build-tree smoke test above uses the local about:start page, so it
+      # proves neither networking nor anything bundle-specific. This catches
+      # the failures that have actually shipped: a duplicate-LC_RPATH bundle
+      # that dyld refuses to launch, a missing relocated dylib, and TLS/curl
+      # regressions that break every HTTPS fetch. If the bundle exists, it
+      # must work.
+      - name: Smoke test the bundled .app (launch + HTTPS fetch)
+        if: hashFiles('dist/Nordstjernen.app/Contents/MacOS/Nordstjernen') != ''
+        run: |
+          set -o pipefail
+          BIN="dist/Nordstjernen.app/Contents/MacOS/Nordstjernen"
+          "$BIN" --headless --dump=text https://example.com | tee bundle-smoke.txt
+          grep -qi "Example Domain" bundle-smoke.txt
+
       - name: Publish pack-macos log on failure
         if: always() && hashFiles('pack-macos.log') != ''
         run: |
