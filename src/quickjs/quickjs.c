@@ -27980,27 +27980,18 @@ static __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
         if (get_lvalue(s, &opcode, &scope, &name, &label, NULL, (op != '='), op) < 0)
             return -1;
 
-        // comply with rather obtuse evaluation order of computed properties:
-        // obj[key]=val evaluates val->obj->key when obj is null/undefined
-        // but key->obj->val when an object
-        // FIXME(bnoordhuis) less stack shuffling; don't to_propkey twice in
-        // happy path; replace `dup is_undefined_or_null if_true` with new
-        // opcode if_undefined_or_null? replace `swap dup` with over?
-        if (op == '=' && opcode == OP_get_array_el) {
-            int label_next = -1;
+        // obj[key] = val / super[key] = val: ToPropertyKey(key) must
+        // observably happen after val is evaluated (it can run arbitrary
+        // code via toString/Symbol.toPrimitive), not as part of evaluating
+        // the lvalue. get_lvalue already emitted an eager conversion for
+        // these two cases; undo it here and redo the conversion once,
+        // after the right-hand side, below.
+        if (op == '=' && (opcode == OP_get_array_el || opcode == OP_get_super_value)) {
             JSFunctionDef *fd = s->cur_func;
-            assert(OP_to_propkey2 == fd->byte_code.buf[fd->last_opcode_pos]);
+            assert((opcode == OP_get_array_el ? OP_to_propkey2 : OP_to_propkey) ==
+                   fd->byte_code.buf[fd->last_opcode_pos]);
             fd->byte_code.size = fd->last_opcode_pos;
             fd->last_opcode_pos = -1;
-            emit_op(s, OP_swap); // obj key -> key obj
-            emit_op(s, OP_dup);
-            emit_op(s, OP_is_undefined_or_null);
-            label_next = emit_goto(s, OP_if_true, -1);
-            emit_op(s, OP_swap);
-            emit_op(s, OP_to_propkey);
-            emit_op(s, OP_swap);
-            emit_label(s, label_next);
-            emit_op(s, OP_swap);
         }
 
         if (js_parse_assign_expr2(s, parse_flags)) {
@@ -28008,8 +27999,8 @@ static __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
             return -1;
         }
 
-        if (op == '=' && opcode == OP_get_array_el) {
-            emit_op(s, OP_swap); // obj key val -> obj val key
+        if (op == '=' && (opcode == OP_get_array_el || opcode == OP_get_super_value)) {
+            emit_op(s, OP_swap); // [...obj] key val -> [...obj] val key
             emit_op(s, OP_to_propkey);
             emit_op(s, OP_swap);
         }
@@ -36306,7 +36297,7 @@ static __exception int compute_stack_size(JSContext *ctx,
 
 static int add_module_variables(JSContext *ctx, JSFunctionDef *fd)
 {
-    int i, idx;
+    int i, j, idx;
     JSModuleDef *m = fd->module;
     JSExportEntry *me;
     JSGlobalVar *hf;
@@ -36333,7 +36324,27 @@ static int add_module_variables(JSContext *ctx, JSFunctionDef *fd)
                                         me->local_name);
                 return -1;
             }
-            me->u.local.var_idx = idx;
+            /* ParseModule: a local export of a name introduced by an
+               import (`import {x} from "m"; export {x};`) is not a
+               binding of this module - rewrite it into an indirect
+               export through the imported module, exactly like
+               `export {ie.[[ImportName]]} from "m"` (or, for a
+               namespace import, like `export * as x from "m"`), so
+               ResolveExport sees the shared binding instead of a
+               second, spuriously distinct local one. */
+            for (j = 0; j < m->import_entries_count; j++) {
+                JSImportEntry *mi = &m->import_entries[j];
+                if (mi->var_idx == idx) {
+                    JSAtom new_local_name = JS_DupAtom(ctx, mi->import_name);
+                    JS_FreeAtom(ctx, me->local_name);
+                    me->local_name = new_local_name;
+                    me->export_type = JS_EXPORT_TYPE_INDIRECT;
+                    me->u.req_module_idx = mi->req_module_idx;
+                    break;
+                }
+            }
+            if (me->export_type == JS_EXPORT_TYPE_LOCAL)
+                me->u.local.var_idx = idx;
         }
     }
     return 0;
@@ -55854,7 +55865,7 @@ static JSValue js_async_from_sync_iterator_next(JSContext *ctx, JSValueConst thi
             JS_FreeValue(ctx, value);
             /* abrupt PromiseResolve closes the sync iterator too when
                closeOnRejection is true and the result is not done */
-            if (magic == GEN_MAGIC_NEXT && !done)
+            if (magic != GEN_MAGIC_RETURN && !done)
                 JS_IteratorClose(ctx, s->sync_iter, true);
             goto reject;
         }
@@ -55865,9 +55876,10 @@ static JSValue js_async_from_sync_iterator_next(JSContext *ctx, JSValueConst thi
             JS_FreeValue(ctx, value_wrapper_promise);
             goto fail;
         }
-        /* closeOnRejection is true for .next: when the result is not done,
-           a rejected value promise must close the sync iterator */
-        if (magic == GEN_MAGIC_NEXT && !done) {
+        /* closeOnRejection is true for .next and .throw (false for
+           .return): when the result is not done, a rejected value
+           promise must close the sync iterator */
+        if (magic != GEN_MAGIC_RETURN && !done) {
             resolve_reject[1] =
                 js_async_from_sync_iterator_close_func_create(ctx, s->sync_iter);
             if (JS_IsException(resolve_reject[1])) {
@@ -59670,8 +59682,13 @@ static JSValue js_typed_array_indexOf(JSContext *ctx, JSValueConst this_val,
     }
 
     /* if the array was detached, no need to go further (but no
-       exception is raised) */
-    if (typed_array_is_oob(p) || len > p->u.array.count) {
+       exception is raised). "includes" alone also bails out here (rather
+       than searching the clamped range below) when the buffer has merely
+       shrunk: per spec it scans up to the *original* length and sees
+       "undefined" for any now out-of-bounds index, which the clamped
+       search below cannot express. */
+    if (typed_array_is_oob(p) ||
+        (special == special_includes && len > p->u.array.count)) {
         /* "includes" scans all the properties, so "undefined" can match */
         if (special == special_includes)
             if (JS_IsUndefined(argv[0]))
@@ -59680,11 +59697,15 @@ static JSValue js_typed_array_indexOf(JSContext *ctx, JSValueConst this_val,
         goto done;
     }
 
-    // RAB may have been resized by evil .valueOf method
+    // RAB may have been resized by evil .valueOf method: re-clamp len, k
+    // and stop to the (possibly smaller) current length. lastIndexOf scans
+    // backwards starting *at* k, an inclusive index, so it must not exceed
+    // len - 1; indexOf scans forwards up to the exclusive stop bound, for
+    // which len is already correct.
     len = min_int(len, p->u.array.count);
     if (len == 0)
         goto done;
-    k = min_int(k, len);
+    k = min_int(k, special == special_lastIndexOf ? len - 1 : len);
     stop = min_int(stop, len);
 
     is_bigint = 0;
@@ -60120,10 +60141,26 @@ static JSValue js_typed_array_slice(JSContext *ctx, JSValueConst this_val,
         if (p1 != NULL && p->class_id == p1->class_id &&
             typed_array_length(p1) >= count &&
             typed_array_length(p) >= start + count) {
+            uint8_t *src, *dst;
+            size_t nbytes;
             shift = typed_array_size_log2(p->class_id);
-            memmove(p1->u.array.u.uint8_ptr,
-                    p->u.array.u.uint8_ptr + (start << shift),
-                    count << shift);
+            src = p->u.array.u.uint8_ptr + (start << shift);
+            dst = p1->u.array.u.uint8_ptr;
+            nbytes = (size_t)count << shift;
+            if (dst < src + nbytes && src < dst + nbytes) {
+                /* species can return a view aliasing this_val's own
+                   buffer at a different offset; per spec the bytes are
+                   copied with a plain ascending byte-by-byte loop
+                   (GetValueFromBuffer/SetValueInBuffer), not a memmove,
+                   so an overlapping destination observably "smears"
+                   already-copied bytes instead of preserving the
+                   pre-image of the source range. */
+                size_t i;
+                for (i = 0; i < nbytes; i++)
+                    dst[i] = src[i];
+            } else {
+                memmove(dst, src, nbytes);
+            }
         } else {
         slow_path:
             space = max_int(0, p->u.array.count - start);
@@ -60148,10 +60185,9 @@ static JSValue js_typed_array_slice(JSContext *ctx, JSValueConst this_val,
 static JSValue js_typed_array_subarray(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv)
 {
-    JSArrayBuffer *abuf;
     JSTypedArray *ta;
     JSValueConst args[4];
-    JSValue arr, byteOffset, ta_buffer;
+    JSValue arr, ta_buffer;
     JSObject *p;
     int len, start, final, count, shift, offset;
 
@@ -60167,21 +60203,14 @@ static JSValue js_typed_array_subarray(JSContext *ctx, JSValueConst this_val,
             goto exception;
     }
     count = max_int(final - start, 0);
-    byteOffset = js_typed_array_get_byteOffset(ctx, this_val);
-    if (JS_IsException(byteOffset))
-        goto exception;
+    /* O.[[ByteOffset]]: the raw internal slot, unlike the .byteOffset
+       accessor it is not zeroed once the buffer is detached or the view
+       goes out of bounds (start/end's ToIntegerOrInfinity conversion may
+       have just done either) - TypedArraySpeciesCreate validates the
+       result, not this step. */
     ta = p->u.typed_array;
-    abuf = ta->buffer->u.array_buffer;
-    if (ta->offset > abuf->byte_length)
-        goto range_error;
-    if (ta->offset == abuf->byte_length && count > 0) {
-    range_error:
-        JS_ThrowRangeError(ctx, "invalid offset");
-        goto exception;
-    }
     shift = typed_array_size_log2(p->class_id);
-    offset = JS_VALUE_GET_INT(byteOffset) + (start << shift);
-    JS_FreeValue(ctx, byteOffset);
+    offset = ta->offset + (start << shift);
     ta_buffer = js_typed_array_get_buffer(ctx, this_val);
     if (JS_IsException(ta_buffer))
         goto exception;

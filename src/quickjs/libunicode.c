@@ -1062,11 +1062,20 @@ int unicode_script(CharRange *cr,
     CharRange cr2_s = { 0 }, *cr2 = &cr2_s;
     bool is_common;
 
-    script_idx = unicode_find_name(unicode_script_name_table, script_name);
-    if (script_idx < 0)
-        return -2;
-    /* Note: we remove the "Unknown" Script */
-    script_idx += UNICODE_SCRIPT_Unknown + 1;
+    if (!strcmp(script_name, "Unknown") || !strcmp(script_name, "Zzzz")) {
+        /* "Unknown" (alias "Zzzz") is deliberately absent from
+           unicode_script_name_table (it is not a named script with its
+           own explicit ranges); its code points are exactly the gaps
+           left implicitly encoded with v == 0 in unicode_script_table
+           below, which is what UNICODE_SCRIPT_Unknown (== 0) selects. */
+        script_idx = UNICODE_SCRIPT_Unknown;
+    } else {
+        script_idx = unicode_find_name(unicode_script_name_table, script_name);
+        if (script_idx < 0)
+            return -2;
+        /* Note: we remove the "Unknown" Script */
+        script_idx += UNICODE_SCRIPT_Unknown + 1;
+    }
 
     is_common = (script_idx == UNICODE_SCRIPT_Common ||
                  script_idx == UNICODE_SCRIPT_Inherited);
@@ -1106,6 +1115,14 @@ int unicode_script(CharRange *cr,
                 goto fail;
         }
         c = c1;
+    }
+    if (script_idx == UNICODE_SCRIPT_Unknown && c <= 0x10ffff) {
+        /* unicode_script_table only encodes gaps up to its last listed
+           code point; the unassigned tail beyond it (no explicit
+           script, hence also Unknown) is implicit and must be added
+           here. */
+        if (cr_add_interval(cr1, c, 0x10ffff + 1))
+            goto fail;
     }
 
     if (is_ext) {

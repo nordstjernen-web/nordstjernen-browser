@@ -37,8 +37,8 @@ scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pa
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
 "expected" failures, kept in sync with `-u` after each fix). As of
-this writing the full suite is 81150 test/mode combinations with 66
-unexpected errors (~99.92% pass rate excluding the intentionally
+this writing the full suite is 81150 test/mode combinations with 45
+unexpected errors (~99.94% pass rate excluding the intentionally
 skipped/excluded categories — `async`, `module`, and a handful of slow
 or out-of-scope feature areas, see `test262.conf`). Categorising the
 backlog:
@@ -50,15 +50,20 @@ backlog:
 | `with` SetMutableBinding re-probe (write trap order) | ~3 | medium | open (needs a dedicated with-store opcode) |
 | AsyncFromSyncIterator close on rejection (`closeOnRejection`) | ~8 | medium | **done** |
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
-| TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | open |
+| TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | **done** (subarray byte-offset, slice overlapping-buffer copy) |
 | RegExp `v` flag — Unicode semantics (property escapes, `\u{}`, casing) | ~8 | medium | **done** |
 | RegExp `v` flag — set operations / strings (`&&`, `--`, `\q{}`, RGI_Emoji) | ~4 | high | open |
-| RegExp `\p{Script=Unknown}` value | 6 | medium | open |
+| RegExp `\p{Script=Unknown}` value | 6 | low | **done** |
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
 | Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
-| Destructuring assignment-target evaluation order | ~6 | medium | open |
+| Simple-assignment computed-member `ToPropertyKey` after RHS | 4 | medium | **done** |
+| Destructuring assignment-target evaluation order | ~6 | medium | open (same family as the simple-assignment fix, bigger surface) |
 | Module star-export of the same namespace is unambiguous | ~5 | medium | **done** |
-| AnnexB CallExpression assignment-target type | 7 | medium | open |
+| Module local export aliasing an import is not a fresh binding | 3 | medium | **done** |
+| AnnexB CallExpression assignment-target type | 7 | high | open (needs a context-aware `=` lookahead, see below) |
+| `{}`/`[]` eagerly resolve a trailing `=` regardless of precedence context | 2 | high | open (general parser issue, see below) |
+| `for await`/`for...of` diamond module graph with top-level await hangs | 2 | high | open |
+| Text module imports (`with {type: "text"}`) | 3 | n/a | out of scope (non-standard proposal, see below) |
 | Legacy RegExp `$1`-`$9` must not throw when made non-writable | 2 | low | **done** |
 | `for await` loop must not close the iterator when `next()` itself rejects | 2 | medium | **done** |
 | `Function.prototype.caller`/`.arguments` as %ThrowTypeError% poison pills | 4 | n/a | **won't fix** (deliberate web-reality deviation, see below) |
@@ -376,6 +381,290 @@ behave correctly) and an ASan build (no leaks or use-after-free).
 
 Covers test262
 `built-ins/AsyncFromSyncIteratorPrototype/next/for-await-next-rejected-promise-close.js`.
+
+### 11. `\p{Script=Unknown}` (alias `Zzzz`) was rejected as an unknown script name
+
+**Spec:** [`UnicodeMatchProperty`](https://tc39.es/ecma262/#sec-runtime-semantics-unicodematchproperty-p)
+requires `Script`/`Script_Extensions` to accept every value in
+[`PropertyValueAliases.txt`](https://unicode.org/Public/UCD/latest/ucd/PropertyValueAliases.txt),
+including `Unknown`/`Zzzz` — the code points Unicode has not assigned
+to any script.
+
+**Bug:** `unicode_script_name_table` deliberately omits `"Unknown"`
+(`libunicode.c` comment: *"we remove the 'Unknown' Script"*) because
+the generated `unicode_script_table` already encodes "no explicit
+script" gaps as a 0 value with no associated name lookup. With no name
+to find, `\p{Script=Unknown}` and `\p{Script=Zzzz}` always raised
+`SyntaxError: unknown unicode script`. Separately, the gap-encoding in
+`unicode_script_table` only covers the range up to its last explicit
+entry (0x00E01F0) — code points above that (most of planes 4-13 and
+the tail of plane 14) were simply never written to the table at all,
+so even a correct "Unknown" lookup would have under-matched.
+
+**Fix:** special-case the names `"Unknown"` and `"Zzzz"` in
+`unicode_script()` to resolve directly to `UNICODE_SCRIPT_Unknown`
+(`== 0`, matching the table's implicit gap value) instead of going
+through `unicode_script_name_table`; after walking the table, add the
+implicit trailing gap `[c, 0x10ffff]` (where `c` is the table's
+cumulative end) to the result so codepoints past the last explicit
+entry are included. `src/quickjs/libunicode.c`, `unicode_script`.
+
+Covers test262
+`built-ins/RegExp/property-escapes/generated/Script{,_Extensions}_-_Unknown.js`
+and `built-ins/RegExp/property-escapes/special-property-value-Script_Extensions-Unknown.js`.
+
+### 12. Local export of an imported binding is a fresh, ambiguous binding instead of the shared one
+
+**Spec:** [`ParseModule`](https://tc39.es/ecma262/#sec-parsemodule) step
+10.1.ii/iii: a local `export { x }` whose `x` is actually an imported
+name (`import { x } from "m"; export { x };`) is *not* added to
+`localExportEntries` — it is rewritten into an `IndirectExportEntry`
+through the same `(ModuleRequest, ImportName)` as the import (or, for
+a namespace import, an `export * as x from "m"`-shaped entry). This
+makes `ResolveExport` see the one binding `m` actually exports,
+regardless of how many modules re-export it by name vs. by re-export.
+
+**Bug:** `add_module_variables` (which resolves each `JS_EXPORT_TYPE_LOCAL`
+export entry's `local_name` to a closure-variable index post-parse) never
+checked whether that closure variable happened to be the *same* one an
+import already claimed. So `export { x }` over an imported `x` stayed a
+genuine `JS_EXPORT_TYPE_LOCAL` entry pointing at this module's own
+"copy" of the binding. When a third module did `export * from a; export
+* from b;` and both `a` and `b` (by different paths) ultimately exposed
+the same underlying name, `js_resolve_export1`'s star-merge correctly
+canonicalizes namespace (`export * as ns from`) bindings (fix #8 above)
+but had no way to know this module's "local" `x` was secretly the same
+binding as the other path's, and reported `ambiguous`.
+
+**Fix:** in `add_module_variables`, after resolving a local export's
+closure-variable index, scan `m->import_entries` for a matching
+`var_idx`; if found, rewrite the entry to `JS_EXPORT_TYPE_INDIRECT`
+with `local_name` replaced by the import's `import_name` (or kept as
+the `JS_ATOM__star_` marker for a namespace import) and
+`u.req_module_idx` set to the import's source module — exactly
+mirroring the entries `export {x} from "m"` already produces, so
+`js_resolve_export1`'s existing indirect-export and canonical-binding
+logic resolves it correctly without further changes.
+`src/quickjs/quickjs.c`, `add_module_variables`.
+
+Covers test262
+`language/module-code/ambiguous-export-bindings/import-and-export-propagates-binding.js`
+and the two `namespace-unambiguous-if-*-import-star-as-and-export.js` variants.
+
+### 13. `%AsyncFromSyncIteratorPrototype%.throw` never closed the iterator on a rejected value
+
+**Spec:** [`%AsyncFromSyncIteratorPrototype%.throw`](https://tc39.es/ecma262/#sec-%25asyncfromsynciteratorprototype%25.throw)
+step 13 calls `AsyncFromSyncIteratorContinuation(result, promiseCapability,
+syncIteratorRecord, true)` — `closeOnRejection` is `true`, exactly like
+`.next` (fix #7 above). Only `.return` passes `false`.
+
+**Bug:** `js_async_from_sync_iterator_next`'s two `closeOnRejection`
+checks both tested `magic == GEN_MAGIC_NEXT` specifically, so `.throw`
+(`GEN_MAGIC_THROW`) never closed the wrapped sync iterator when its
+yielded value was a rejected promise — the one fix from #7 only
+covered one of the two `true` cases.
+
+**Fix:** change both conditions to `magic != GEN_MAGIC_RETURN` (true
+for both `NEXT` and `THROW`, false for `RETURN`).
+`src/quickjs/quickjs.c`, `js_async_from_sync_iterator_next`.
+
+Covers test262
+`built-ins/AsyncFromSyncIteratorPrototype/throw/{iterator-result-rejected-promise-close,throw-result-poisoned-wrapper}.js`.
+
+### 14. Simple assignment to a computed member converts the key before the right-hand side
+
+**Spec:** [`AssignmentExpression : LeftHandSideExpression = AssignmentExpression`](https://tc39.es/ecma262/#sec-assignment-operators-runtime-semantics-evaluation),
+current text (post the [evaluation-order normative
+fix](https://github.com/tc39/ecma262/pull/2392)): for `base[key] =
+val`, `ToPropertyKey(key)` is *not* part of evaluating the
+`LeftHandSideExpression` reference — it is deferred until immediately
+before `PutValue`, i.e. strictly after `val` is evaluated. The same
+applies to `super[key] = val`.
+
+**Bug:** `get_lvalue` unconditionally emits the `ToPropertyKey`
+conversion (`OP_to_propkey2`/`OP_to_propkey`) for `OP_get_array_el`/
+`OP_get_super_value` as part of turning the just-parsed member
+expression into an assignment target — before the right-hand side is
+even parsed. `js_parse_assign_expr2` already special-cased
+`OP_get_array_el` to undo and redo that conversion around the RHS, but
+only for the case where the base is *not* null/undefined (the comment
+above it called this "rather obtuse" and flagged the redundant
+double-conversion as a known `FIXME`); the "happy path" (object base)
+still converted once early and once again after the RHS, so a
+`toString`/`Symbol.toPrimitive` side effect on the key observably ran
+before the right-hand side instead of after. `super[key] = val` had no
+such workaround at all — its conversion always ran early, unconditionally.
+
+**Fix:** simplify to always defer: strip `get_lvalue`'s eager
+conversion for both `OP_get_array_el` and `OP_get_super_value` right
+after it's parsed, and perform the conversion exactly once, after the
+right-hand side, immediately before the existing `put_lvalue` call (a
+`swap; to_propkey; swap` around the top two stack values, independent
+of how many elements — 2 for array, 3 for super — sit below). Verified
+against both the object-base and null/undefined-base cases (the
+explicit early-conversion-skip this replaces was specifically there
+for null/undefined, and continues to behave correctly since it no
+longer special-cases anything) plus the full test262 suite.
+`src/quickjs/quickjs.c`, `js_parse_assign_expr2`.
+
+Covers test262
+`language/expressions/assignment/target-{member,super}-computed-reference.js`.
+The companion `-null.js`/`-undefined.js` variants and the `dstr/`
+(destructuring) family with the same evaluation-order concern were
+already passing/are tracked separately — see "Destructuring
+assignment-target evaluation order" in the table above; destructuring
+goes through a much larger, separate code path
+(`js_parse_destructuring_element`) with its own per-depth stack
+shuffling and wasn't touched here.
+
+### 15. TypedArray `lastIndexOf`/`subarray`/`slice` and resizable-ArrayBuffer side effects
+
+Three related but independent bugs, all involving a `valueOf`/species
+callback that resizes or detaches the backing `ArrayBuffer` mid-call:
+
+**15a. `lastIndexOf` returned `-1` whenever `fromIndex`'s conversion shrank the buffer.**
+`js_typed_array_indexOf`'s "the buffer may have been resized by an evil
+`.valueOf`" recovery path was gated on `typed_array_is_oob(p) || len >
+p->u.array.count` — but a length-tracking view is by definition never
+"OOB" on shrink (`typed_array_is_oob` returns `false` unconditionally
+for `track_rab` views), so `len > p->u.array.count` alone decided
+whether to bail out, and it does precisely when the buffer shrank.
+Bailing out always returned "not found" instead of re-clamping and
+continuing the search within the smaller bounds. Fixed by gating the
+early bail-out to `special == special_includes` only (see 15b for why
+`includes` is special) and, for `indexOf`/`lastIndexOf`, re-clamping
+and continuing the search. A second bug in that same recovery path used
+`k = min_int(k, len)` uniformly; for `lastIndexOf`, `k` is an *inclusive*
+starting index scanned backwards, so capping it at `len` (the new
+element count) rather than `len - 1` left it one past the last valid
+index. Fixed by capping at `len - 1` specifically for
+`special_lastIndexOf`.
+
+**15b. `includes` needed the opposite fix.** Per spec `includes` scans
+up to the *original* length and observes `undefined` for indices past
+the buffer's new bounds (`built-ins/TypedArray/prototype/includes/
+{search-undefined-after-shrinking-buffer,coerced-searchelement-fromindex-resize}.js`,
+both already passing) — the exact early bail-out 15a removes for
+`indexOf`/`lastIndexOf` is required for `includes`, so it was kept,
+scoped to that one case.
+
+**15c. `subarray` used the public `.byteOffset` getter (which zeroes
+out once detached/OOB) instead of the raw `[[ByteOffset]]` internal
+slot, and threw a spurious `RangeError` for a detached buffer that the
+algorithm (per the spec text test262 quotes — `srcByteOffset is
+O.[[ByteOffset]]`, no validity check) doesn't ask for.** Removed the
+check and read `ta->offset` directly; `TypedArraySpeciesCreate`/the
+species constructor invocation is what's supposed to validate the
+result, not this step.
+
+**15d. `slice`'s memmove-based fast path produced the wrong result when
+the species constructor returns a view aliasing the *same* underlying
+buffer at a different offset** (a legal, if unusual, species result).
+Spec's copy step is a byte-by-byte forward loop
+(`GetValueFromBuffer`/`SetValueInBuffer`), which "smears" already-copied
+bytes into the source range when destination and source overlap with
+the destination ahead in memory — `memmove` deliberately avoids exactly
+that smearing, producing a different (incorrect, per spec) result.
+Fixed by detecting pointer-range overlap and falling back to a plain
+ascending byte-copy loop only in that case; the common non-overlapping
+path is untouched (still a single `memmove`).
+
+`src/quickjs/quickjs.c`: `js_typed_array_indexOf` (15a/15b),
+`js_typed_array_subarray` (15c), `js_typed_array_slice` (15d).
+
+Covers test262
+`built-ins/TypedArray/prototype/lastIndexOf/negative-index-and-resize-to-smaller.js`
+and
+`built-ins/TypedArray/prototype/subarray/byteoffset-with-detached-buffer.js`
+cleanly. `built-ins/TypedArray/prototype/slice/speciesctor-return-same-buffer-with-offset.js`
+(15d) still fails, but on a *different*, already-correct line: run
+across `testWithTypedArrayConstructors`'s buffer-source variants, its
+species function unconditionally returns `new TA(ta.buffer, offset)` —
+for the `makeImmutableArrayBuffer` variant this makes `ta.buffer`
+itself immutable, and `TypedArraySpeciesCreate(..., ~write~)` is
+required to reject that (`ValidateTypedArray` step 4), which is
+independently exercised and passing as
+`built-ins/TypedArray/prototype/slice/speciesctor-destination-backed-by-immutable-buffer.js`.
+The test has no `assert.throws` around that variant, so the (per spec,
+correct) `TypeError` now propagates as an uncaught error instead of the
+old, unrelated `memmove` smearing bug it was written to catch — this
+looks like an upstream test262 oversight (not accounting for the
+immutable-buffer variant when adding the same-buffer-aliasing
+assertion) rather than an engine bug worth working around.
+
+## Open issues found but not fixed this round
+
+Investigated and root-caused, but left open: either out of scope for a
+single sitting (the parser issue is a foundational, widely-used code
+path) or genuinely deep engine machinery where a wrong fix is worse
+than no fix.
+
+**`{`/`[` as a primary expression eagerly resolves a trailing `=`
+regardless of precedence context.** `#field in {} = 0` (test262
+`language/expressions/in/private-field-invalid-assignment-target.js`)
+and the plain (non-private) `'a' in {} = 0` are both parsed as `#field
+in ({} = 0)` / `'a' in ({} = 0)` instead of being a `SyntaxError` —
+because wherever `{`/`[` appears as a primary expression, the parser
+peeks ahead with `js_parse_skip_parens_token(...) == '='` to decide
+"this is a destructuring-assignment cover grammar", with no awareness
+of the *precedence level* it's currently being parsed at. Per grammar,
+`=` (AssignmentExpression) is lower precedence than RelationalExpression
+(`in`), so a `{}` appearing as the right operand of `in` should never
+even consider a following `=` as part of the same expression — that
+`=` belongs to the *outer* expression, where `#field in {}` (not a
+valid `LeftHandSideExpression`) should then correctly fail as an
+invalid assignment target. A real fix needs the destructuring/literal
+cover-grammar check to know its calling precedence context, which
+isn't threaded through today; this is the same general mechanism used
+everywhere object/array literals can appear, so the blast radius is
+large enough to warrant its own dedicated pass rather than a quick
+patch. The "AnnexB CallExpression assignment-target type" cluster in
+the table above (`a() = b`, `a()++`, `for (a() in/of b)`, all currently
+*accepted* when they must be `SyntaxError`s) looks adjacent — `get_lvalue`
+not rejecting a `CallExpression`-shaped reference — and may turn out to
+share a root cause once investigated.
+
+**`for await`/dynamic-import diamond module graphs with shared
+top-level-await hang instead of completing**
+(`language/module-code/top-level-await/{module-graphs-does-not-hang,rejection-order}.js`).
+Confirmed with a minimal repro (`import "./parent.js"; await
+import("./grandparent.js");` where both reach a common TLA-using leaf):
+the process hangs indefinitely rather than erroring or completing.
+`js_inner_module_evaluation`/`js_execute_async_module` is a careful,
+spec-annotated (it even preserves a documented upstream "spec bug: cycle
+root must be assigned before the test") port of `InnerModuleEvaluation`'s
+Tarjan-style cycle detection; a `JS_DUMP_MODULE_RESOLVE`-flagged trace
+produced *no* output before the hang, meaning the graph traversal itself
+completes and the hang is in the promise/job-queue draining that waits
+for the top-level await to settle — i.e. somewhere in
+`AsyncModuleExecutionFulfilled`/`AsyncModuleExecutionRejected`'s
+parent-notification fan-out, not the linking algorithm above it. Needs
+focused, dedicated debugging time rather than a guess.
+
+**Destructuring assignment-target evaluation order**
+(`language/{expressions/assignment,destructuring/binding}/.../
+{keyed-,iterator-}destructuring-property-reference-target-evaluation-order*.js`,
+~6 subtests). Same family as fix #14 (`ToPropertyKey` of a computed
+member-expression target must happen after the corresponding value is
+read, not when the target reference is evaluated) — confirmed
+`js_parse_destructuring_element` calls the same `get_lvalue` with the
+same eager-conversion problem for its `OP_get_array_el` target case —
+but the fix needs to thread through `js_parse_destructuring_element`'s
+much larger state space (four `depth_lvalue` cases each with their own
+stack-shuffling opcodes, `tok`-vs-assignment mode, `has_ellipsis`,
+nested object/array patterns), which is a meaningfully bigger and
+riskier change than #14's single, isolated code path.
+
+**Text module imports** (`import value from "./x" with {type:
+"text"}`, `language/import/import-attributes/text-self.js`,
+`language/expressions/dynamic-import/import-attributes/2nd-param-with-type-text.js`).
+Implementing a real text-module loader (read the resolved module's
+source as a synthetic module with a single string default export) is
+a self-contained feature addition, not a bug fix. Left out as out of
+scope: "Text modules" is not yet Stage 4, and `type: "json"` (the
+shipped, Stage-4 sibling of import attributes) is already supported —
+adding the still-proposal-stage `type: "text"` ahead of it isn't
+warranted by "pragmatic, without bloat" web compat.
 
 ## Known, accepted test262 deviations
 
