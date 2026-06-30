@@ -86,6 +86,7 @@ ns_mic_fill_time_domain(guint8 *out, int n)
         memset(out, 128, (gsize)n);
         return;
     }
+    SDL_LockAudioDevice(g_mic_dev);
     guint head = g_mic_head;
     for (int i = 0; i < n; i++) {
         int idx = (int)head - n + i;
@@ -95,6 +96,7 @@ ns_mic_fill_time_domain(guint8 *out, int n)
         int v = 128 + (int)(s * 128.0f);
         out[i] = (guint8)(v < 0 ? 0 : v > 255 ? 255 : v);
     }
+    SDL_UnlockAudioDevice(g_mic_dev);
 }
 
 void
@@ -105,17 +107,22 @@ ns_mic_fill_frequency(guint8 *out, int n)
         memset(out, 0, (gsize)n);
         return;
     }
-    guint head = g_mic_head;
     int win = n * 2;
     if (win > NS_MIC_RING) win = NS_MIC_RING;
+    float snap[NS_MIC_RING];
+    SDL_LockAudioDevice(g_mic_dev);
+    guint head = g_mic_head;
+    for (int t = 0; t < win; t++) {
+        int idx = (int)head - win + t;
+        snap[t] = idx >= 0 ? g_mic_ring[((guint)idx) % NS_MIC_RING] : 0.0f;
+    }
+    SDL_UnlockAudioDevice(g_mic_dev);
     for (int k = 0; k < n; k++) {
         double freq = (double)(k + 1) * M_PI / (double)n;
         double re = 0.0, im = 0.0;
         for (int t = 0; t < win; t++) {
-            int idx = (int)head - win + t;
-            float s = idx >= 0 ? g_mic_ring[((guint)idx) % NS_MIC_RING] : 0.0f;
-            re += s * cos(freq * t);
-            im -= s * sin(freq * t);
+            re += snap[t] * cos(freq * t);
+            im -= snap[t] * sin(freq * t);
         }
         double mag = sqrt(re * re + im * im) / (double)win;
         int db = (int)(mag * 4.0 * 255.0);
