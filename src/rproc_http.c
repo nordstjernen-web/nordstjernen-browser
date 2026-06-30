@@ -138,6 +138,7 @@ spawn_common(const char *renderer_path, int max_width, int max_height, int shm,
     int sv[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
         goto fail;
+    fcntl(sv[0], F_SETFD, FD_CLOEXEC);
     pid_t pid = fork();
     if (pid < 0) {
         close(sv[0]);

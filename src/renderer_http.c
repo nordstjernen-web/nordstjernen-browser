@@ -79,6 +79,25 @@ renderer_win32_fontconfig(void)
 }
 #endif
 
+#ifdef __APPLE__
+static gpointer
+renderer_parent_death_thread(gpointer unused)
+{
+    (void)unused;
+    while (getppid() != 1)
+        g_usleep(G_USEC_PER_SEC);
+    _exit(0);
+    return NULL;
+}
+
+static void
+renderer_watch_parent_death(void)
+{
+    g_thread_unref(g_thread_new("nd-rparent", renderer_parent_death_thread,
+                                NULL));
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
@@ -100,6 +119,10 @@ main(int argc, char **argv)
     prctl(PR_SET_PDEATHSIG, SIGKILL);
     if (getppid() == 1)
         return 0;
+#elif defined(__APPLE__)
+    if (getppid() == 1)
+        return 0;
+    renderer_watch_parent_death();
 #endif
 
     int shm_mode = argc > 3 && strcmp(argv[3], "shm") == 0;
