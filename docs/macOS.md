@@ -276,10 +276,15 @@ Updates ship only through the store — no self-update.
 - **Self-path resolution.** The new-window action re-execs the
   current binary; on macOS the binary path is resolved with
   `_NSGetExecutablePath(3)` and canonicalised with `realpath(3)`.
-- **Sandbox.** The Linux Landlock sandbox is Linux-only. On macOS,
-  the only startup-side restriction is the same refuse-root check
-  used on Linux — `nordstjernen` exits with status 77 if launched
-  via `sudo` unless `NS_ALLOW_ROOT=1` is set.
+- **Sandbox.** Landlock and seccomp are Linux-only, but macOS gets a
+  **Seatbelt** sandbox (`sandbox_init`) that write-confines both the shell
+  and the renderer to the per-user nordstjernen config/data/cache dirs,
+  Downloads, and the system temp roots — the same write set the Linux
+  Landlock layer allows. It is a filesystem-integrity boundary only (no
+  syscall/network confinement) and fails open. Disable with
+  `NS_NO_SANDBOX=1`. See [`SECURITY.md`](../SECURITY.md#macos-sandbox). The
+  refuse-root check also applies — `nordstjernen` exits with status 77 if
+  launched via `sudo` unless `NS_ALLOW_ROOT=1` is set.
 - **Keyboard shortcuts.** Every accelerator uses GTK's `<Primary>`
   modifier, which maps to ⌘ on macOS. So `⌘L` focuses the URL bar,
   `⌘T` opens a new tab and `⌘N` a new window, `⌘R` reloads, `⌘W`
@@ -410,9 +415,13 @@ entry after bundling; if you rework the packaging, keep that step (and re-sign
   pack step), so `about:start` uses the **non-AI** start page on macOS
   (`#if defined(NS_HAVE_AI) && !defined(__APPLE__)` in `src/net.c`). Don't wire
   the start-page chat to assume AI on macOS.
-- **No Landlock/seccomp.** The sandbox is Linux-only; the only startup-side
-  restriction shared with Linux is the refuse-root check (exit 77 unless
-  `NS_ALLOW_ROOT=1`).
+- **Sandbox is a Seatbelt write-confinement** (`sandbox_init`,
+  `security.c` `__APPLE__` arm), not Landlock+seccomp — filesystem writes
+  only, no syscall/network filter, fails open. If a new feature needs to
+  write outside the nordstjernen config/data/cache dirs or the system temp
+  roots, extend the SBPL profile (or call `ns_security_add_writable_dir`)
+  or it will be silently denied on macOS. The refuse-root check also applies
+  (exit 77 unless `NS_ALLOW_ROOT=1`).
 - **`__APPLE__` is the platform guard** used across the tree (see `src/media.c`,
   `src/security.c`, `src/ext.c`) — match it for new macOS-specific code rather
   than introducing a new macro.

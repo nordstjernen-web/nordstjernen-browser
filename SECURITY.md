@@ -128,6 +128,46 @@ socket, so it normally needs no `/dev/shm` name at all.
 Both layers can be disabled for debugging with `NS_NO_SANDBOX=1` /
 `NS_NO_SECCOMP=1`. Don't use those in normal operation.
 
+### macOS sandbox
+
+macOS has no Landlock or seccomp, but it ships the **Seatbelt** sandbox
+(`sandbox_init(3)`, `<sandbox.h>`) — a per-process, voluntary, post-launch
+confinement applied from an inline Sandbox Profile Language (SBPL) policy.
+This is the same mechanism Chromium and Firefox use for their macOS renderer
+sandboxes. Nordstjernen applies it from the `__APPLE__` arm of
+`ns_security_sandbox_init` (`src/security.c`), to **both** the per-tab
+`nordstjernen-renderer` and the UI shell, before any HTML is parsed.
+
+- **Filesystem write-confinement.** The profile is `(allow default)` then
+  `(deny file-write*)` then a re-allow of the same write set the Linux
+  Landlock layer permits: the per-user `~/.config/nordstjernen`,
+  `~/.local/share/nordstjernen`, `~/.cache/nordstjernen`, the GLib runtime
+  dir, the user's Downloads directory, the system temp roots
+  (`/private/var/folders`, `/private/tmp`, `/tmp`) and `/dev`. The rest of
+  `$HOME` — `~/.ssh`, `~/.aws`, other browsers' state, shell history, the
+  user's documents — is **not writable**, so a compromised renderer cannot
+  tamper with files, drop persistence, or modify the user's data. Writable
+  directories added at runtime (`ns_security_add_writable_dir`) are folded in
+  the same way.
+- **What it does *not* cover.** Unlike the Linux pairing, there is no
+  syscall-level filter (no seccomp analogue is applied), and reads, network,
+  and `exec` are left to `(allow default)` — the renderer does its own
+  networking, so a blanket network deny is not possible there. This is a
+  filesystem-integrity boundary, narrower than the Linux renderer's
+  read+syscall confinement; it is the macOS half of the same intent, not a
+  full equivalent.
+- **Caveats.** SBPL is undocumented and varies across macOS releases, and
+  `sandbox_init` is marked deprecated (since 10.7) yet remains the API every
+  major browser relies on; Apple keeps it working. The call **fails open** —
+  if the profile is rejected the process logs a warning and continues
+  unconfined rather than refusing to start. Disable for debugging with
+  `NS_NO_SANDBOX=1`.
+
+The App Sandbox / entitlements container is deliberately **not** used: it
+forbids `fork`/`execve` of sibling executables, which is exactly how each
+tab's renderer is spawned, so adopting it would require re-architecting the
+helpers as XPC services (see [`docs/macOS.md`](docs/macOS.md)).
+
 ### Windows process mitigations
 
 Windows has no direct Landlock or seccomp-bpf equivalent that a

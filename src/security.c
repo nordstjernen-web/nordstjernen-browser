@@ -751,6 +751,92 @@ ns_security_seccomp_init(void)
 #endif
 }
 
+#elif defined(__APPLE__)
+
+#include <limits.h>
+#include <sandbox.h>
+#include <stdlib.h>
+
+static void
+sb_append_subpath(GString *prof, const char *dir)
+{
+    if (!dir || !*dir)
+        return;
+    char resolved[PATH_MAX];
+    const char *use = realpath(dir, resolved) ? resolved : dir;
+    g_string_append(prof, "  (subpath \"");
+    for (const char *c = use; *c; c++) {
+        if (*c == '"' || *c == '\\')
+            g_string_append_c(prof, '\\');
+        g_string_append_c(prof, *c);
+    }
+    g_string_append(prof, "\")\n");
+}
+
+void
+ns_security_sandbox_init(const char *self_exe)
+{
+    (void)self_exe;
+    if (g_getenv("NS_NO_SANDBOX"))
+        return;
+
+    GString *prof = g_string_new(
+        "(version 1)\n"
+        "(allow default)\n"
+        "(deny file-write*)\n"
+        "(allow file-write*\n"
+        "  (subpath \"/private/var/folders\")\n"
+        "  (subpath \"/private/tmp\")\n"
+        "  (subpath \"/tmp\")\n"
+        "  (subpath \"/dev\")\n");
+
+    sb_append_subpath(prof, g_get_user_runtime_dir());
+
+    char *cfg = g_build_filename(g_get_user_config_dir(), "nordstjernen", NULL);
+    sb_append_subpath(prof, cfg);
+    g_free(cfg);
+    char *data = g_build_filename(g_get_user_data_dir(), "nordstjernen", NULL);
+    sb_append_subpath(prof, data);
+    g_free(data);
+    char *cache = g_build_filename(g_get_user_cache_dir(), "nordstjernen", NULL);
+    sb_append_subpath(prof, cache);
+    g_free(cache);
+
+    const char *dl = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
+    sb_append_subpath(prof, dl);
+
+    if (ns_extra_writable_dirs) {
+        for (guint i = 0; i < ns_extra_writable_dirs->len; i++)
+            sb_append_subpath(prof,
+                              g_ptr_array_index(ns_extra_writable_dirs, i));
+    }
+
+    g_string_append(prof, ")\n");
+
+    char *err = NULL;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    int rc = sandbox_init(prof->str, 0, &err);
+#pragma clang diagnostic pop
+    if (rc != 0) {
+        g_warning("sandbox: macOS Seatbelt init failed, process is NOT "
+                  "filesystem-confined: %s", err ? err : "unknown error");
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        if (err)
+            sandbox_free_error(err);
+#pragma clang diagnostic pop
+    } else {
+        g_info("sandbox: macOS Seatbelt filesystem write-confinement active");
+    }
+    g_string_free(prof, TRUE);
+}
+
+void
+ns_security_seccomp_init(void)
+{
+}
+
 #else
 
 void
