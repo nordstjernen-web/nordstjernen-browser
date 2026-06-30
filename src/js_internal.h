@@ -128,6 +128,7 @@ struct ns_js {
     guint         next_fetch_id;
     GPtrArray    *pending_xhrs;
     GPtrArray    *pending_ws;
+    GPtrArray    *pending_aborts;
     GPtrArray    *filereader_idles;
     GHashTable   *local_storage;
     GHashTable   *session_storage;

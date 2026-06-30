@@ -11,6 +11,8 @@
 #include "net.h"
 
 #define NS_FORM_MAX_DEPTH 512
+#define NS_PATTERN_MAX_LEN 2048
+#define NS_PATTERN_VALUE_MAX_LEN 10000
 
 gboolean
 ns_form_is_submit_trigger(const ns_node *n)
@@ -176,6 +178,8 @@ static gboolean
 ns_value_matches_pattern(const char *value, const char *pattern)
 {
     if (!pattern || !*pattern) return TRUE;
+    if (strlen(pattern) > NS_PATTERN_MAX_LEN) return FALSE;
+    if (value && strlen(value) > NS_PATTERN_VALUE_MAX_LEN) return FALSE;
     char *anchored = g_strdup_printf("^(?:%s)$", pattern);
     GError *err = NULL;
     GRegex *re = g_regex_new(anchored, 0, 0, &err);

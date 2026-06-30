@@ -13373,6 +13373,8 @@ ns_abort_signal_timeout_fire(gpointer user_data)
         JS_SetPropertyStr(t->ctx, t->sig, "reason", reason);
         ns_target_fire_event(t->ctx, t->sig, "abort");
     }
+    if (abort_js && abort_js->pending_aborts)
+        g_ptr_array_remove_fast(abort_js->pending_aborts, t);
     JS_FreeValue(t->ctx, t->sig);
     g_free(t);
     return G_SOURCE_REMOVE;
@@ -13390,6 +13392,11 @@ ns_abort_signal_static_timeout(JSContext *ctx, JSValueConst this_val,
     ns_abort_timeout *t = g_new0(ns_abort_timeout, 1);
     t->ctx = ctx;
     t->sig = JS_DupValue(ctx, sig);
+    ns_js *abort_js = js_from_ctx(ctx);
+    if (abort_js) {
+        if (!abort_js->pending_aborts) abort_js->pending_aborts = g_ptr_array_new();
+        g_ptr_array_add(abort_js->pending_aborts, t);
+    }
     g_timeout_add((guint)ms, ns_abort_signal_timeout_fire, t);
     return sig;
 }
@@ -16431,6 +16438,7 @@ ns_worker_js_new(ns_worker_host *host)
     js->fetch_states_by_id = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->pending_xhrs = g_ptr_array_new();
     js->pending_ws = g_ptr_array_new();
+    js->pending_aborts = g_ptr_array_new();
     js->listeners = g_ptr_array_new();
     js->pinned_wrappers_set = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->perf_entries = g_ptr_array_new_with_free_func(ns_perf_entry_free);
@@ -16443,6 +16451,7 @@ ns_worker_js_new(ns_worker_host *host)
         if (js->fetch_states_by_id) g_hash_table_destroy(js->fetch_states_by_id);
         if (js->pending_xhrs) g_ptr_array_free(js->pending_xhrs, TRUE);
         if (js->pending_ws) g_ptr_array_free(js->pending_ws, TRUE);
+        if (js->pending_aborts) g_ptr_array_free(js->pending_aborts, TRUE);
         if (js->listeners) g_ptr_array_free(js->listeners, TRUE);
         if (js->pinned_wrappers_set) g_hash_table_destroy(js->pinned_wrappers_set);
         g_free(js);
@@ -16468,6 +16477,7 @@ ns_worker_js_new(ns_worker_host *host)
         if (js->fetch_states_by_id) g_hash_table_destroy(js->fetch_states_by_id);
         if (js->pending_xhrs) g_ptr_array_free(js->pending_xhrs, TRUE);
         if (js->pending_ws) g_ptr_array_free(js->pending_ws, TRUE);
+        if (js->pending_aborts) g_ptr_array_free(js->pending_aborts, TRUE);
         if (js->listeners) g_ptr_array_free(js->listeners, TRUE);
         if (js->pinned_wrappers_set) g_hash_table_destroy(js->pinned_wrappers_set);
         g_free(js);
@@ -24509,10 +24519,15 @@ ns_element_get_empty_array_prop(JSContext *ctx, JSValueConst this_val)
     return JS_NewArray(ctx);
 }
 
+#define NS_JS_PATTERN_MAX_LEN 2048
+#define NS_JS_PATTERN_VALUE_MAX_LEN 10000
+
 static gboolean
 ns_js_value_matches_pattern(const char *v, const char *pat)
 {
     if (!pat || !*pat) return TRUE;
+    if (strlen(pat) > NS_JS_PATTERN_MAX_LEN) return FALSE;
+    if (v && strlen(v) > NS_JS_PATTERN_VALUE_MAX_LEN) return FALSE;
     char *a = g_strdup_printf("^(?:%s)$", pat);
     GError *err = NULL;
     GRegex *re = g_regex_new(a, 0, 0, &err);
@@ -34080,6 +34095,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->next_fetch_id = 0;
     js->pending_xhrs    = g_ptr_array_new();
     js->pending_ws      = g_ptr_array_new();
+    js->pending_aborts  = g_ptr_array_new();
     js->local_storage   = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     js->session_storage = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     js->session_storage_buckets = g_hash_table_new_full(
@@ -35140,8 +35156,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_FreeValue(ctx, crypto_obj);
 
     ns_wasm_install(ctx, global);
-
-    ns_ext_install(ctx, global);
 
     JSValue local_obj = JS_NewObjectClass(ctx, ns_storage_class_id);
     JS_SetOpaque(local_obj, js->local_storage);
@@ -37945,6 +37959,15 @@ ns_js_free(ns_js *js)
         g_ptr_array_free(js->pending_xhrs, TRUE);
         js->pending_xhrs = NULL;
     }
+    if (js->pending_aborts) {
+        for (guint i = 0; i < js->pending_aborts->len; i++) {
+            ns_abort_timeout *t = g_ptr_array_index(js->pending_aborts, i);
+            JS_FreeValue(js->ctx, t->sig);
+            t->ctx = NULL;
+        }
+        g_ptr_array_free(js->pending_aborts, TRUE);
+        js->pending_aborts = NULL;
+    }
     if (js->pending_ws) {
         for (guint i = 0; i < js->pending_ws->len; i++) {
             ns_js_ws *s = g_ptr_array_index(js->pending_ws, i);
@@ -40665,9 +40688,12 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         g_free(r);
     }
     {
+        JSValue global = JS_GetGlobalObject(js->ctx);
         g_autofree char *cs =
-            ns_ext_content_scripts_for_url(base_url && *base_url ? base_url : NULL,
+            ns_ext_content_scripts_for_url(js->ctx, global,
+                                           base_url && *base_url ? base_url : NULL,
                                            TRUE);
+        JS_FreeValue(js->ctx, global);
         if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
     }
     ns_js_schedule_static_iframes(js, doc);
@@ -40700,9 +40726,12 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     ns_js_fire_page_transition(js, "pageshow", FALSE);
     ns_ce_upgrade_subtree_all(js, doc);
     {
+        JSValue global = JS_GetGlobalObject(js->ctx);
         g_autofree char *cs =
-            ns_ext_content_scripts_for_url(base_url && *base_url ? base_url : NULL,
+            ns_ext_content_scripts_for_url(js->ctx, global,
+                                           base_url && *base_url ? base_url : NULL,
                                            FALSE);
+        JS_FreeValue(js->ctx, global);
         if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
     }
     gint64 t_load = profile ? g_get_monotonic_time() : 0;
