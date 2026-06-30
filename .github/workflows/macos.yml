@@ -28,11 +28,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15 is Apple Silicon (arm64); macos-13 is Intel (x86_64).
-        # Both run so the release carries an arm64 and an x86_64 .dmg — an
-        # arm64-only build will not launch on an Intel Mac (Rosetta only
-        # translates x86_64 -> arm64, not the reverse).
-        macos: ['15', '13']
+        # macos-15 is the current Apple Silicon (arm64) runner. The project
+        # ships only modern Apple Silicon builds; an Intel Mac builds from
+        # source (see docs/macOS.md).
+        macos: ['15']
         compiler: [clang]
 
     steps:

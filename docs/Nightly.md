@@ -50,9 +50,7 @@ current build (a platform that didn't build simply has no link):
 
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.exe`
-- `https://www.nordstjernen.org/nightly/nordstjernen-macos-arm64.dmg` (Apple Silicon)
-- `https://www.nordstjernen.org/nightly/nordstjernen-macos-x86_64.dmg` (Intel)
-- `https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg` (alias of the Intel `.dmg`; also runs on Apple Silicon via Rosetta)
+- `https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg` (Apple Silicon)
 - `https://www.nordstjernen.org/nightly/nordstjernen-macos-x86_64`
 - `https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb`
 - `https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb`

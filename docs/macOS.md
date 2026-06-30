@@ -151,12 +151,11 @@ and notarising the `.dmg` — see **Code signing** below.
   `GSETTINGS_SCHEMA_DIR`, `GDK_PIXBUF_MODULE_FILE`,
   `GDK_PIXBUF_MODULEDIR`, and `CURL_CA_BUNDLE` at those bundled copies
   when it detects it is running from inside an `.app`.
-- **Architecture.** CI builds one `.dmg` per architecture — `…-arm64.dmg`
-  on the `macos-15` (Apple Silicon) runner and `…-x86_64.dmg` on the
-  `macos-13` (Intel) runner. An arm64 binary will not launch on an Intel
-  Mac (Rosetta only translates x86_64 → arm64, never the reverse), so
-  publish both; the x86_64 build also runs on Apple Silicon under Rosetta
-  and is therefore the widest-compatibility single download.
+- **Architecture.** CI builds an Apple Silicon (`arm64`) `.dmg` on the
+  `macos-15` runner; that is the only published build, matching the modern
+  macOS versions Nordstjernen targets. An Intel Mac is not covered by CI —
+  the engine still compiles there, so build from source (the steps above
+  work unchanged on an `x86_64` Homebrew prefix).
 - **Code signing.** `pack-macos.sh` signs the bundle inside-out (nested
   dylibs and helpers first, the `.app` last). With no Apple Developer ID
   it signs **ad-hoc** (`codesign --sign -`), which seals the bundle so it
