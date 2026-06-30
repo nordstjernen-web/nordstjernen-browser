@@ -283,7 +283,12 @@ static const char *
 downloads_dir(void)
 {
     const char *d = g_get_user_special_dir(G_USER_DIRECTORY_DOWNLOAD);
-    return d && *d ? d : g_get_home_dir();
+    if (d && *d)
+        return d;
+    static char *fallback;
+    if (!fallback)
+        fallback = g_build_filename(g_get_home_dir(), "Downloads", NULL);
+    return fallback;
 }
 
 static void

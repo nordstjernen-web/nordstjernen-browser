@@ -331,16 +331,27 @@ ns_media_try_launch(const char *url, gboolean stream,
     static const char *const apps[] = {
         "IINA", "VLC", "mpv", "QuickTime Player", NULL,
     };
+    char *home_apps = g_build_filename(g_get_home_dir(), "Applications", NULL);
+    const char *dirs[] = {
+        home_apps, "/Applications", "/System/Applications", NULL,
+    };
     for (int i = 0; apps[i]; i++) {
-        char *bundle = g_strdup_printf("/Applications/%s.app", apps[i]);
-        gboolean present = g_file_test(bundle, G_FILE_TEST_EXISTS);
-        g_free(bundle);
+        gboolean present = FALSE;
+        for (int d = 0; dirs[d] && !present; d++) {
+            char *bundle = g_strdup_printf("%s/%s.app", dirs[d], apps[i]);
+            present = g_file_test(bundle, G_FILE_TEST_EXISTS);
+            g_free(bundle);
+        }
         if (!present) continue;
         char *argv[] = {
             (char *)"open", (char *)"-a", (char *)apps[i], (char *)url, NULL,
         };
-        if (ns_media_spawnv(argv)) return NS_MEDIA_LAUNCHED;
+        if (ns_media_spawnv(argv)) {
+            g_free(home_apps);
+            return NS_MEDIA_LAUNCHED;
+        }
     }
+    g_free(home_apps);
     char *argv[] = { (char *)"open", (char *)url, NULL };
     if (ns_media_spawnv(argv)) return NS_MEDIA_LAUNCHED;
     if (suggest_app) *suggest_app = g_strdup("IINA");
