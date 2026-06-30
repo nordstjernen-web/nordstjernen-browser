@@ -12291,6 +12291,34 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
 }
 
 
+static char *
+css_add_leading_zeros(char *v)
+{
+    if (!v) return NULL;
+    gboolean needs = FALSE;
+    for (const char *p = v; *p; p++) {
+        if (*p != '.' || !g_ascii_isdigit((guchar)p[1])) continue;
+        char prev = p == v ? 0 : p[-1];
+        if (prev == 0 || prev == ' ' || prev == '\t' || prev == '(' ||
+            prev == ',' || prev == '+' || prev == '-' || prev == '/' ||
+            prev == '*') { needs = TRUE; break; }
+    }
+    if (!needs) return v;
+    GString *out = g_string_new(NULL);
+    for (const char *p = v; *p; p++) {
+        if (*p == '.' && g_ascii_isdigit((guchar)p[1])) {
+            char prev = p == v ? 0 : p[-1];
+            if (prev == 0 || prev == ' ' || prev == '\t' || prev == '(' ||
+                prev == ',' || prev == '+' || prev == '-' || prev == '/' ||
+                prev == '*')
+                g_string_append_c(out, '0');
+        }
+        g_string_append_c(out, *p);
+    }
+    g_free(v);
+    return g_string_free(out, FALSE);
+}
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
@@ -12321,7 +12349,7 @@ ns_inline_style_get(const char *style, const char *prop)
         gboolean match = strlen(key) == plen &&
                          g_ascii_strcasecmp(key, prop) == 0;
         g_free(key);
-        if (match) return value;
+        if (match) return css_add_leading_zeros(value);
         g_free(value);
         p = term == ';' ? vend + 1 : vend;
     }
