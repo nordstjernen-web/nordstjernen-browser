@@ -7867,8 +7867,8 @@ justify_kw_stretches_auto(const char *jc)
 
 static void
 resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
-                         const double *content_px, double *out_sizes,
-                         gboolean stretch_auto)
+                         const double *content_min, const double *content_max,
+                         double *out_sizes, gboolean stretch_auto)
 {
     double total_fixed = 0;
     double total_fr    = 0;
@@ -7903,10 +7903,13 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         }
     }
     double auto_base[NS_CSS_TRACKS_MAX] = {0};
-    if (content_px) {
+    double auto_lim[NS_CSS_TRACKS_MAX]  = {0};
+    if (content_min) {
         for (int i = 0; i < tr->n; i++) {
             if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
-            auto_base[i] = content_px[i] > 0 ? content_px[i] : 0;
+            auto_base[i] = content_min[i] > 0 ? content_min[i] : 0;
+            double lim = content_max ? content_max[i] : auto_base[i];
+            auto_lim[i] = lim > auto_base[i] ? lim : auto_base[i];
             total_fixed += auto_base[i];
         }
     }
@@ -7920,6 +7923,26 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
 
     double remaining = available_main - total_fixed;
     if (remaining < 0) remaining = 0;
+
+    double auto_grow[NS_CSS_TRACKS_MAX] = {0};
+    if (total_fr == 0 && n_auto > 0 && remaining > 0 && content_min) {
+        double room_total = 0;
+        for (int i = 0; i < tr->n; i++) {
+            if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
+            double room = auto_lim[i] - auto_base[i];
+            if (room > 0) room_total += room;
+        }
+        if (room_total > 0) {
+            double give = remaining < room_total ? remaining : room_total;
+            for (int i = 0; i < tr->n; i++) {
+                if (tr->tracks[i].kind != NS_CSS_TRACK_AUTO) continue;
+                double room = auto_lim[i] - auto_base[i];
+                if (room > 0) auto_grow[i] = give * (room / room_total);
+            }
+            remaining -= give;
+        }
+    }
+
     double per_fr   = total_fr > 0 ? remaining / total_fr : 0;
     double per_auto = 0;
     if (total_fr == 0 && n_auto > 0 && stretch_auto)
@@ -7936,7 +7959,7 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             break;
         case NS_CSS_TRACK_FR:      out_sizes[i] = per_fr * (t->v > 0 ? t->v : 0); break;
         case NS_CSS_TRACK_AUTO:
-            out_sizes[i] = auto_base[i] + per_auto;
+            out_sizes[i] = auto_base[i] + auto_grow[i] + per_auto;
             break;
         }
         double mn = track_min_px(t, available_main);
@@ -8272,6 +8295,7 @@ layout_grid_areas(ns_box *box, double cw,
     if (n_rows > NS_CSS_TRACKS_MAX) n_rows = NS_CSS_TRACKS_MAX;
 
     double col_content[NS_CSS_TRACKS_MAX] = {0};
+    double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
     for (int t = 0; t < n_cols; t++) {
         if (cols_buf.tracks[t].kind != NS_CSS_TRACK_AUTO) continue;
@@ -8281,23 +8305,29 @@ layout_grid_areas(ns_box *box, double cw,
             if (cc0 != t || cc1 != t) continue;
             ns_box *c = items->pdata[i];
             const ns_css_value *wv = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
-            double nw = (wv && (wv->kind == NS_CSS_V_LENGTH ||
-                                wv->kind == NS_CSS_V_CALC))
+            gboolean fixed_w = wv && (wv->kind == NS_CSS_V_LENGTH ||
+                                      wv->kind == NS_CSS_V_CALC);
+            double nw = fixed_w
                       ? length_resolve(wv, avail, 0)
                       : measure_natural_width(c, child_inherited);
+            double mw = fixed_w ? nw : measure_min_width(c, c->style);
             if (c->style) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, nw, &m, &pd, &bd);
-                nw += m.left + m.right + pd.left + pd.right +
-                      bd.left + bd.right;
+                double ex = m.left + m.right + pd.left + pd.right +
+                            bd.left + bd.right;
+                nw += ex;
+                mw += ex;
             }
             if (nw > col_content[t]) col_content[t] = nw;
+            if (mw > col_min[t]) col_min[t] = mw;
             any_auto_content = TRUE;
         }
     }
 
     double col_sizes[NS_CSS_TRACKS_MAX] = {0};
     resolve_track_sizes_full(&cols_buf, avail,
+                             any_auto_content ? col_min : NULL,
                              any_auto_content ? col_content : NULL, col_sizes,
                              justify_kw_stretches_auto(
                                  keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT,
@@ -8638,6 +8668,7 @@ layout_grid(ns_box *box, double cw,
     if (n_rows > NS_CSS_TRACKS_MAX) n_rows = NS_CSS_TRACKS_MAX;
 
     double col_content[NS_CSS_TRACKS_MAX] = {0};
+    double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
     for (int t = 0; t < n_cols; t++) {
         if (cols->tracks[t].kind != NS_CSS_TRACK_AUTO) continue;
@@ -8648,11 +8679,20 @@ layout_grid(ns_box *box, double cw,
                 g_array_index(col_spans, int, k) != 1) continue;
             ns_box *c = items->pdata[k];
             double nw = estimate_natural_width(c, avail);
+            double mw = measure_min_width(c, c->style);
+            if (c->style) {
+                ns_edges m = {0}, pd = {0}, bd = {0};
+                edges_from_style(c->style, mw, &m, &pd, &bd);
+                mw += m.left + m.right + pd.left + pd.right +
+                      bd.left + bd.right;
+            }
             if (nw > col_content[t]) col_content[t] = nw;
+            if (mw > col_min[t]) col_min[t] = mw;
             any_auto_content = TRUE;
         }
     }
     resolve_track_sizes_full(cols, avail,
+                             any_auto_content ? col_min : NULL,
                              any_auto_content ? col_content : NULL, col_sizes,
                              justify_kw_stretches_auto(
                                  keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT,
