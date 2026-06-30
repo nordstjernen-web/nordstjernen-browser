@@ -811,10 +811,13 @@ on_address_activate(GtkEntry *entry, gpointer user_data)
     }
     if (!v) {
         proc_window_add_tab(pw, resolved, TRUE);
+        v = current_view(pw);
     } else {
         gtk_editable_set_text(GTK_EDITABLE(pw->address), resolved);
         ns_proc_view_load(v, resolved);
     }
+    if (v)
+        ns_proc_view_focus(v);
     g_free(resolved);
 }
 
