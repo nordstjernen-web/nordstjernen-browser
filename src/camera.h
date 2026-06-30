@@ -22,8 +22,6 @@ ns_texture *ns_camera_next_frame(ns_camera *cam);
 ns_camera  *ns_camera_acquire(void);
 void        ns_camera_release(void);
 ns_camera  *ns_camera_active(void);
-int         ns_camera_width(const ns_camera *cam);
-int         ns_camera_height(const ns_camera *cam);
 const char *ns_camera_device(const ns_camera *cam);
 void        ns_camera_close(ns_camera *cam);
 

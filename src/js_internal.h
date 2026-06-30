@@ -67,7 +67,6 @@ struct ns_js {
     gpointer      download_user_data;
     ns_js_audio_cb audio_cb;
     gpointer      audio_user_data;
-    GHashTable   *audio_tokens;
     guint         next_audio_token;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;

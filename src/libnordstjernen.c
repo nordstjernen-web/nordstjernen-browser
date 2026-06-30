@@ -459,16 +459,6 @@ ns_browser_take_pending_audio(ns_browser *browser)
     return out;
 }
 
-void
-ns_browser_audio_event(ns_browser *browser, const char *kind,
-                       const char *token, double value)
-{
-    if (!browser || !browser->js || !kind || !token) return;
-    ns_js_audio_event(browser->js, token, kind, value);
-    browser_relayout(browser);
-    browser->dirty = FALSE;
-}
-
 int
 ns_browser_init(void)
 {

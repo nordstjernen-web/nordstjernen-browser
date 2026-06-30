@@ -43,7 +43,6 @@ ns_js *ns_js_new(ns_js_log_cb      log_cb,  gpointer log_user_data,
 void   ns_js_set_form_submit_cb(ns_js *js, ns_js_form_submit_cb cb, gpointer user_data);
 void   ns_js_set_download_cb(ns_js *js, ns_js_download_cb cb, gpointer user_data);
 void   ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data);
-void   ns_js_audio_event(ns_js *js, const char *token, const char *kind, double value);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);

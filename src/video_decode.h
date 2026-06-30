@@ -14,8 +14,6 @@ G_BEGIN_DECLS
 
 typedef struct ns_video_player ns_video_player;
 
-gboolean ns_video_decode_probe(const guint8 *bytes, gsize len);
-
 ns_video_player *ns_video_player_new(const guint8 *bytes, gsize len);
 void             ns_video_player_free(ns_video_player *player);
 

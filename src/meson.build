@@ -48,7 +48,6 @@ nordstjernen_engine_sources = files(
   'debuglog.c',
   'dom.c',
   'engine.c',
-  'env.c',
   'eventsource.c',
   'ext.c',
   'forms.c',

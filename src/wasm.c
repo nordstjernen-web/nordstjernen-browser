@@ -57,7 +57,6 @@ typedef struct {
 } ns_wasm_linkage;
 
 typedef struct {
-    guint8 *bytes;
     guint8 *load_bytes;
     size_t len;
     wasm_module_t module;
@@ -1028,7 +1027,6 @@ ns_wasm_module_finalizer(JSRuntime *rt, JSValue val)
         wasm_runtime_unload(m->module);
     ns_wasm_linkage_clear(rt, &m->linkage);
     g_free(m->load_bytes);
-    g_free(m->bytes);
     g_free(m);
 }
 
@@ -1611,7 +1609,6 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
 
     ns_wasm_module *mod = g_new0(ns_wasm_module, 1);
     ns_wasm_linkage_init(&mod->linkage);
-    mod->bytes = ns_wasm_memdup_bytes(bytes, len);
     mod->load_bytes = ns_wasm_memdup_bytes(bytes, len);
     mod->len = len;
 
@@ -1631,7 +1628,6 @@ ns_wasm_module_from_bytes(JSContext *ctx, const guint8 *bytes, size_t len)
             wasm_runtime_unload(mod->module);
         ns_wasm_linkage_clear(JS_GetRuntime(ctx), &mod->linkage);
         g_free(mod->load_bytes);
-        g_free(mod->bytes);
         g_free(mod);
         if (!JS_HasException(ctx))
             return ns_wasm_throw_named(ctx, "CompileError", error_buf);

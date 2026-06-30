@@ -29875,10 +29875,6 @@ ns_media_token(JSContext *ctx, ns_node *node)
     }
     JS_FreeValue(ctx, tv);
     JS_FreeValue(ctx, v);
-    if (!js->audio_tokens)
-        js->audio_tokens = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                                 g_free, NULL);
-    g_hash_table_insert(js->audio_tokens, g_strdup(token), node);
     return token;
 }
 
@@ -37945,10 +37941,6 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->fetch_states_by_id);
         js->fetch_states_by_id = NULL;
     }
-    if (js->audio_tokens) {
-        g_hash_table_destroy(js->audio_tokens);
-        js->audio_tokens = NULL;
-    }
     if (js->pending_xhrs) {
         for (guint i = 0; i < js->pending_xhrs->len; i++) {
             ns_xhr_state *st = g_ptr_array_index(js->pending_xhrs, i);
@@ -40781,49 +40773,6 @@ ns_js_emit_audio(ns_js *js, const char *fmt, ...)
     va_end(ap);
     js->audio_cb(cmd, js->audio_user_data);
     g_free(cmd);
-}
-
-void
-ns_js_audio_event(ns_js *js, const char *token, const char *kind, double value)
-{
-    if (!js || !js->ctx || !js->audio_tokens || !token || !kind) return;
-    ns_node *node = g_hash_table_lookup(js->audio_tokens, token);
-    if (!node) return;
-    JSContext *ctx = js->ctx;
-    JSValue el = ns_make_element(ctx, node);
-    if (strcmp(kind, "meta") == 0) {
-        JS_SetPropertyStr(ctx, el, "duration", JS_NewFloat64(ctx, value));
-        JS_SetPropertyStr(ctx, el, "_nd_readyState", JS_NewInt32(ctx, 4));
-        JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
-        if (node) {
-            ns_js_dispatch_event(js, node, "loadedmetadata", NULL);
-            ns_js_dispatch_event(js, node, "durationchange", NULL);
-            ns_js_dispatch_event(js, node, "canplay", NULL);
-            ns_js_dispatch_event(js, node, "canplaythrough", NULL);
-        }
-    } else if (strcmp(kind, "pos") == 0) {
-        JS_SetPropertyStr(ctx, el, "currentTime", JS_NewFloat64(ctx, value));
-        if (node) ns_js_dispatch_event(js, node, "timeupdate", NULL);
-    } else if (strcmp(kind, "ended") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
-        JS_SetPropertyStr(ctx, el, "ended", JS_TRUE);
-        if (node) {
-            ns_js_dispatch_event(js, node, "timeupdate", NULL);
-            ns_js_dispatch_event(js, node, "ended", NULL);
-        }
-    } else if (strcmp(kind, "error") == 0) {
-        JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
-        JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 3));
-        JSValue err = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, err, "code", JS_NewInt32(ctx, 4));
-        JS_SetPropertyStr(ctx, err, "message",
-                          JS_NewString(ctx, "MEDIA_ERR_SRC_NOT_SUPPORTED"));
-        JS_SetPropertyStr(ctx, el, "error", err);
-        if (node) ns_js_dispatch_event(js, node, "error", NULL);
-    } else if (strcmp(kind, "playing") == 0) {
-        if (node) ns_js_dispatch_event(js, node, "playing", NULL);
-    }
-    JS_FreeValue(ctx, el);
 }
 
 void

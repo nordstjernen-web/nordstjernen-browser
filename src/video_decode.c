@@ -71,18 +71,6 @@ bytes_are_isobmff(const guint8 *bytes, gsize len)
 }
 #endif
 
-gboolean
-ns_video_decode_probe(const guint8 *bytes, gsize len)
-{
-    if (!bytes || len < 8) return FALSE;
-    if (bytes_are_mpeg1(bytes, len)) return TRUE;
-#ifdef NS_HAVE_LIBAV
-    if (bytes_are_matroska(bytes, len)) return TRUE;
-    if (bytes_are_isobmff(bytes, len)) return TRUE;
-#endif
-    return FALSE;
-}
-
 #ifdef NS_HAVE_LIBAV
 static int
 ns_lav_read(void *opaque, uint8_t *buf, int sz)

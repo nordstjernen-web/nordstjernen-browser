@@ -330,8 +330,6 @@ ns_camera_next_frame(ns_camera *cam)
     return tex;
 }
 
-int  ns_camera_width(const ns_camera *cam)  { return cam ? cam->width : 0; }
-int  ns_camera_height(const ns_camera *cam) { return cam ? cam->height : 0; }
 const char *ns_camera_device(const ns_camera *cam) { return cam ? cam->device : NULL; }
 
 void
@@ -388,8 +386,6 @@ struct ns_camera { int unused; };
 
 ns_camera  *ns_camera_open(const char *device) { (void)device; return NULL; }
 ns_texture *ns_camera_next_frame(ns_camera *cam) { (void)cam; return NULL; }
-int         ns_camera_width(const ns_camera *cam) { (void)cam; return 0; }
-int         ns_camera_height(const ns_camera *cam) { (void)cam; return 0; }
 const char *ns_camera_device(const ns_camera *cam) { (void)cam; return NULL; }
 void        ns_camera_close(ns_camera *cam) { (void)cam; }
 GPtrArray  *ns_camera_enumerate(void) { return g_ptr_array_new(); }
