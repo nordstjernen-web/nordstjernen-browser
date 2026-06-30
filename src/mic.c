@@ -21,14 +21,17 @@ static void
 ns_mic_cb(void *user, Uint8 *stream, int len)
 {
     (void)user;
-    const float *src = (const float *)stream;
     int channels = g_mic_spec.channels > 0 ? g_mic_spec.channels : 1;
     int frames = (int)((gsize)len / sizeof(float)) / channels;
     guint head = g_mic_head;
     for (int i = 0; i < frames; i++) {
         float acc = 0.0f;
-        for (int c = 0; c < channels; c++)
-            acc += src[i * channels + c];
+        for (int c = 0; c < channels; c++) {
+            float sample;
+            memcpy(&sample, stream + (gsize)(i * channels + c) * sizeof(float),
+                   sizeof sample);
+            acc += sample;
+        }
         g_mic_ring[head % NS_MIC_RING] = acc / (float)channels;
         head++;
     }
