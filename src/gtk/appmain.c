@@ -283,6 +283,14 @@ ns_macos_anchor_gtk_data(void)
     g_free(cache);
     g_free(loaders);
 
+    char *ca = g_build_filename(res, "etc", "ssl", "certs",
+                                "ca-bundle.crt", NULL);
+    if (g_file_test(ca, G_FILE_TEST_EXISTS)) {
+        if (!g_getenv("CURL_CA_BUNDLE")) g_setenv("CURL_CA_BUNDLE", ca, TRUE);
+        if (!g_getenv("SSL_CERT_FILE"))  g_setenv("SSL_CERT_FILE",  ca, TRUE);
+    }
+    g_free(ca);
+
     g_free(res);
 }
 #endif

@@ -76,16 +76,44 @@ Headless rendering works the same as on Linux:
 ./builddir/src/gtk/nordstjernen --headless --dump=png:/tmp/page.png https://example.com
 ```
 
+## Opening an unsigned build
+
+The released `.dmg` is signed **ad-hoc**, not with an Apple Developer ID,
+and is not notarised (the project has no paid Apple Developer account).
+macOS stamps anything downloaded with a `com.apple.quarantine` flag, and
+Gatekeeper refuses to open a quarantined app that isn't notarised — the
+first launch fails with *"Nordstjernen is damaged and can't be opened"*
+or *"cannot be opened because the developer cannot be verified."* This is
+expected for an unsigned build and does not mean the download is corrupt.
+
+Clear the quarantine flag once, after copying the app to `/Applications`:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Nordstjernen.app
+```
+
+The app then launches normally. (Right-click → **Open** also works on some
+macOS versions, but the `xattr` command is the reliable path.) A
+maintainer with a Developer ID can remove this step entirely by signing
+and notarising the `.dmg` — see **Code signing** below.
+
 ## Platform notes
 
 - **CA bundle.** Homebrew's `libcurl` links against OpenSSL, which
-  has no built-in trust store. Nordstjernen probes the standard
-  Homebrew and system paths at startup
+  has no built-in trust store and — unlike the deprecated SecureTransport
+  backend — no bridge to the macOS Keychain. For a *developer* build
+  Nordstjernen probes the standard Homebrew and system paths at startup
   (`/opt/homebrew/etc/ca-certificates/cert.pem`,
   `/usr/local/etc/ca-certificates/cert.pem`, `/etc/ssl/cert.pem`,
   and a handful of `openssl@3` variants) and points libcurl at
-  whichever exists. Override with `SSL_CERT_FILE` or
-  `CURL_CA_BUNDLE` if you ship your own bundle.
+  whichever exists. A clean Mac has none of these (no Homebrew, and
+  Apple ships no `/etc/ssl/cert.pem`), so `scripts/pack-macos.sh`
+  **vendors a CA bundle** into the `.app` at
+  `Contents/Resources/etc/ssl/certs/ca-bundle.crt` and
+  `ns_macos_anchor_gtk_data()` exports `CURL_CA_BUNDLE` / `SSL_CERT_FILE`
+  to it — the spawned renderer inherits those — so HTTPS verifies on a
+  machine with no Homebrew. Override with `SSL_CERT_FILE` or
+  `CURL_CA_BUNDLE` to ship your own bundle.
 - **Self-path resolution.** The new-window action re-execs the
   current binary; on macOS the binary path is resolved with
   `_NSGetExecutablePath(3)` and canonicalised with `realpath(3)`.
@@ -106,16 +134,39 @@ Headless rendering works the same as on Linux:
   `builddir/src/gtk/nordstjernen` that launches from Terminal or Finder
   and shows up in the Dock while it runs. For distribution,
   `scripts/pack-macos.sh` stages a `.app` bundle (with a generated
-  `Info.plist`) and produces a `.dmg`. Beyond vendoring the Homebrew
-  dylibs with `dylibbundler`, the bundle also carries the data GTK 4
-  reads at runtime so the `.dmg` works on a Mac with no Homebrew: the
-  app's own SVG toolbar icons under `Contents/Resources/share/icons`,
-  the GdkPixbuf loader modules plus a `loaders.cache` (the SVG loader
-  is what renders those icons), and the compiled GSettings schemas.
-  At startup `ns_macos_anchor_gtk_data()` (in `src/gtk/appmain.c`) points
-  `GSETTINGS_SCHEMA_DIR`, `GDK_PIXBUF_MODULE_FILE`, and
-  `GDK_PIXBUF_MODULEDIR` at those bundled copies when it detects it is
-  running from inside an `.app`.
+  `Info.plist`) and produces a `.dmg`. The bundle executable is the real
+  Mach-O (`Contents/MacOS/Nordstjernen`), not a wrapper script —
+  `dylibbundler` rewrites every dependency to
+  `@executable_path/../Frameworks`, so no `DYLD_LIBRARY_PATH` shim is
+  needed and the whole `.app` can be code-signed. The renderer
+  (`nordstjernen-renderer`) and the audio helper (`nordstjernen-audio`,
+  present whenever SDL2 was found at build time) ship beside it and are
+  run through `dylibbundler` too. Beyond the dylibs, the bundle carries
+  the data GTK 4 reads at runtime so the `.dmg` works on a Mac with no
+  Homebrew: the app's own SVG toolbar icons under
+  `Contents/Resources/share/icons`, the GdkPixbuf loader modules plus a
+  `loaders.cache` (the SVG loader is what renders those icons), the
+  compiled GSettings schemas, and the vendored CA bundle. At startup
+  `ns_macos_anchor_gtk_data()` (in `src/gtk/appmain.c`) points
+  `GSETTINGS_SCHEMA_DIR`, `GDK_PIXBUF_MODULE_FILE`,
+  `GDK_PIXBUF_MODULEDIR`, and `CURL_CA_BUNDLE` at those bundled copies
+  when it detects it is running from inside an `.app`.
+- **Architecture.** CI builds one `.dmg` per architecture — `…-arm64.dmg`
+  on the `macos-15` (Apple Silicon) runner and `…-x86_64.dmg` on the
+  `macos-13` (Intel) runner. An arm64 binary will not launch on an Intel
+  Mac (Rosetta only translates x86_64 → arm64, never the reverse), so
+  publish both; the x86_64 build also runs on Apple Silicon under Rosetta
+  and is therefore the widest-compatibility single download.
+- **Code signing.** `pack-macos.sh` signs the bundle inside-out (nested
+  dylibs and helpers first, the `.app` last). With no Apple Developer ID
+  it signs **ad-hoc** (`codesign --sign -`), which seals the bundle so it
+  launches once the download quarantine is cleared (see below). Set
+  `MACOS_SIGN_IDENTITY` to a `Developer ID Application: …` identity to
+  produce a hardened-runtime, notarisation-ready bundle instead; the JIT
+  entitlements in `packaging/macos/entitlements.plist` are applied on that
+  path. Notarising still needs a maintainer's credentials:
+  `xcrun notarytool submit "$DMG" --apple-id … --team-id … --password … --wait`
+  then `xcrun stapler staple "$DMG"`.
 
 ## Definition of done on macOS
 

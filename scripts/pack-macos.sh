@@ -58,24 +58,28 @@ mkdir -p "$STAGE/Contents/MacOS"
 mkdir -p "$STAGE/Contents/Resources/share/nordstjernen"
 mkdir -p "$STAGE/Contents/Frameworks"
 
+# The bundle executable is the real Mach-O, not a wrapper script: dylibbundler
+# rewrites every dependency to @executable_path/../Frameworks, so no
+# DYLD_LIBRARY_PATH shim is needed, and a Mach-O entry point is what lets the
+# whole .app be code-signed (a shell script cannot carry a signature).
 install -m755 "$BUILDDIR/src/gtk/nordstjernen" \
-    "$STAGE/Contents/MacOS/nordstjernen-bin"
+    "$STAGE/Contents/MacOS/Nordstjernen"
 # The GUI spawns one sandboxed renderer process per tab; ship it alongside.
 install -m755 "$BUILDDIR/src/nordstjernen-renderer" \
     "$STAGE/Contents/MacOS/nordstjernen-renderer"
+# The audio playback helper (MP2/MP3 + optional Opus/Vorbis decode, SDL2
+# output). Built only when SDL2 was present at configure time; ship it beside
+# the main binary so the shell can spawn it for <video>/<audio> sound.
+AUDIO_BIN="$BUILDDIR/src/nordstjernen-audio"
+if [ -f "$AUDIO_BIN" ]; then
+    install -m755 "$AUDIO_BIN" "$STAGE/Contents/MacOS/nordstjernen-audio"
+else
+    echo "pack-macos.sh: warning: $AUDIO_BIN missing; <video>/<audio> sound will not play" >&2
+fi
 
 cp "$ROOT/License.md" "$STAGE/Contents/Resources/share/nordstjernen/"
 cp "$ROOT/THIRD-PARTY-LICENSES.md" "$STAGE/Contents/Resources/share/nordstjernen/"
 cp "$ROOT/README.md" "$STAGE/Contents/Resources/share/nordstjernen/"
-
-cat > "$STAGE/Contents/MacOS/Nordstjernen" <<'LAUNCHER_EOF'
-#!/bin/bash
-DIR=$(cd "$(dirname "$0")" && pwd)
-BUNDLE=$(cd "$DIR/../.." && pwd)
-export DYLD_LIBRARY_PATH="$BUNDLE/Contents/Frameworks:${DYLD_LIBRARY_PATH:-}"
-exec "$DIR/nordstjernen-bin" "$@"
-LAUNCHER_EOF
-chmod +x "$STAGE/Contents/MacOS/Nordstjernen"
 
 ICONSET=$(mktemp -d)
 trap 'rm -rf "$ICONSET"' EXIT
@@ -89,6 +93,13 @@ if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
     done
     iconutil -c icns "$ICONSET/nordstjernen.iconset" \
         -o "$STAGE/Contents/Resources/nordstjernen.icns" >/dev/null 2>&1 || true
+fi
+if [ ! -f "$STAGE/Contents/Resources/nordstjernen.icns" ]; then
+    if command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+        echo "pack-macos.sh: ERROR: icon generation failed" >&2
+        exit 1
+    fi
+    echo "pack-macos.sh: warning: sips/iconutil unavailable; app uses a generic icon" >&2
 fi
 
 cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
@@ -138,17 +149,22 @@ cat > "$STAGE/Contents/Info.plist" <<PLIST_EOF
 </plist>
 PLIST_EOF
 
-# Bundle both the launcher and the renderer: the renderer links the same
-# image-codec dylibs (libavif, …) via the shared engine, so it needs its
-# references rewritten to the bundled Frameworks too, or it fails to start
-# with "Library not loaded: …/libavif.dylib".
+# Bundle the main binary, the renderer, and the audio helper together: each
+# links the same image-codec / SDL dylibs via the shared engine, so they all
+# need their references rewritten to the bundled Frameworks, or they fail to
+# start with "Library not loaded: …/lib….dylib".
+audio_bundle_args=()
+if [ -f "$STAGE/Contents/MacOS/nordstjernen-audio" ]; then
+    audio_bundle_args=(-x "$STAGE/Contents/MacOS/nordstjernen-audio")
+fi
 if ! run_dylibbundler 300 dylibbundler -of -cd -b \
-    -x "$STAGE/Contents/MacOS/nordstjernen-bin" \
+    -x "$STAGE/Contents/MacOS/Nordstjernen" \
     -x "$STAGE/Contents/MacOS/nordstjernen-renderer" \
+    "${audio_bundle_args[@]+"${audio_bundle_args[@]}"}" \
     -d "$STAGE/Contents/Frameworks/" \
     -p "@executable_path/../Frameworks/"; then
     echo "pack-macos.sh: dylibbundler failed; listing binary dylibs and continuing" >&2
-    otool -L "$STAGE/Contents/MacOS/nordstjernen-bin" || true
+    otool -L "$STAGE/Contents/MacOS/Nordstjernen" || true
     otool -L "$STAGE/Contents/MacOS/nordstjernen-renderer" || true
     exit 1
 fi
@@ -209,6 +225,73 @@ if [ -n "$PIXBUF_MODDIR" ] && [ -d "$PIXBUF_MODDIR" ]; then
         echo "pack-macos.sh: ERROR: loaders.cache has no loader entries" >&2
         exit 1
     fi
+fi
+
+# Homebrew's libcurl links OpenSSL, which has no built-in trust store and (on
+# macOS) no Keychain bridge. ns_net_resolve_ca_bundle() only finds a CA bundle
+# on a machine that has Homebrew or a Unix-style /etc/ssl/cert.pem — neither
+# exists on a clean Mac — so vendor one and point the app at it (the macOS
+# anchor sets CURL_CA_BUNDLE from Contents/Resources/etc/ssl/certs), or every
+# HTTPS page fails certificate verification.
+mkdir -p "$RES/etc/ssl/certs"
+OPENSSL_PREFIX=$(brew --prefix openssl@3 2>/dev/null || true)
+CA_DST="$RES/etc/ssl/certs/ca-bundle.crt"
+for ca in \
+    "$GTK_PREFIX/etc/ssl/certs/ca-bundle.crt" \
+    "$BREW_PREFIX/etc/ca-certificates/cert.pem" \
+    "$OPENSSL_PREFIX/etc/openssl@3/cert.pem" \
+    "$BREW_PREFIX/etc/openssl@3/cert.pem" \
+    "/etc/ssl/cert.pem"; do
+    if [ -n "$ca" ] && [ -f "$ca" ]; then
+        cp "$ca" "$CA_DST"
+        break
+    fi
+done
+if [ ! -f "$CA_DST" ]; then
+    echo "pack-macos.sh: ERROR: no CA bundle found to vendor; HTTPS would fail on a clean Mac" >&2
+    exit 1
+fi
+
+# Sign the bundle inside-out — nested code first, the .app last — so the seal
+# stays valid. Without an Apple Developer ID the project signs ad-hoc ("-"),
+# which seals the bundle so it launches once the user clears the download
+# quarantine (see docs/macOS.md). Set MACOS_SIGN_IDENTITY to a
+# "Developer ID Application: …" identity for a notarisation-ready bundle.
+# This must be the final mutation before hdiutil: anything written into the
+# bundle afterwards would invalidate the signature.
+IDENTITY="${MACOS_SIGN_IDENTITY:--}"
+if command -v codesign >/dev/null 2>&1; then
+    sign_opts=(--force --sign "$IDENTITY")
+    if [ "$IDENTITY" != "-" ]; then
+        sign_opts+=(--options runtime --timestamp)
+        ENTITLEMENTS="$ROOT/packaging/macos/entitlements.plist"
+        [ -f "$ENTITLEMENTS" ] && sign_opts+=(--entitlements "$ENTITLEMENTS")
+    fi
+    sign_ok=1
+    while IFS= read -r -d '' lib; do
+        codesign "${sign_opts[@]}" "$lib" || sign_ok=0
+    done < <(find "$STAGE/Contents" -type f \( -name '*.dylib' -o -name '*.so' \) -print0)
+    for helper in nordstjernen-renderer nordstjernen-audio; do
+        [ -f "$STAGE/Contents/MacOS/$helper" ] || continue
+        codesign "${sign_opts[@]}" "$STAGE/Contents/MacOS/$helper" || sign_ok=0
+    done
+    codesign "${sign_opts[@]}" "$STAGE" || sign_ok=0
+    if [ "$sign_ok" = 1 ] && ! codesign --verify --deep --strict "$STAGE"; then
+        sign_ok=0
+    fi
+    # An ad-hoc signature can't satisfy Gatekeeper for a downloaded build
+    # anyway (only notarisation does), so a hiccup there must not block the
+    # .dmg — it still carries the real fixes. A real Developer ID identity is
+    # different: shipping it half-signed would be a silent failure, so fail.
+    if [ "$sign_ok" != 1 ]; then
+        if [ "$IDENTITY" != "-" ]; then
+            echo "pack-macos.sh: ERROR: signing with '$IDENTITY' failed" >&2
+            exit 1
+        fi
+        echo "pack-macos.sh: warning: ad-hoc signing incomplete; bundle may need 'xattr -dr com.apple.quarantine'" >&2
+    fi
+else
+    echo "pack-macos.sh: warning: codesign not found; shipping an unsigned bundle" >&2
 fi
 
 rm -f "$DMG"
