@@ -125,6 +125,7 @@ typedef struct ns_box {
     double x, y;
 
     double content_width, content_height;
+    double definite_height;
     double paint_top, paint_bottom;
     ns_edges margin, padding, border;
 

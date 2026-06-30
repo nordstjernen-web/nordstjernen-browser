@@ -123,6 +123,7 @@ containing_block_definite_height(const ns_box *box)
     const ns_box *p = box ? box->parent : NULL;
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
+    if (p->definite_height > 0) return p->definite_height;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
     if (!h) {
         const ns_css_value *top = p->style->values[NS_CSS_TOP];
@@ -7739,6 +7740,12 @@ layout_flex_column(ns_box *box, double cw,
     double explicit_h = -1;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         explicit_h = resolve_used_height(box, hv, cw, -1);
+    if (explicit_h < 0 && box->style &&
+        style_is_absolute_or_fixed(box->style) &&
+        box->content_height > 0 &&
+        (hv || (box->style->values[NS_CSS_TOP] && box->style->values[NS_CSS_BOTTOM])))
+        explicit_h = box->content_height;
+    if (explicit_h > 0) box->definite_height = explicit_h;
     double min_h = resolve_used_height(box, mnh, parent_content_height, -1);
     if (box->style && box->style->values[NS_CSS_BOX_SIZING] &&
         box->style->values[NS_CSS_BOX_SIZING]->kind == NS_CSS_V_KEYWORD &&
@@ -7758,6 +7765,7 @@ layout_flex_column(ns_box *box, double cw,
 
     GArray *basis = g_array_new(FALSE, FALSE, sizeof(double));
     GArray *explicit_flags = g_array_new(FALSE, FALSE, sizeof(gboolean));
+    GArray *layout_widths = g_array_new(FALSE, FALSE, sizeof(double));
     double total_grow = 0;
     double total_basis = 0;
     double total_margins = 0;
@@ -7791,7 +7799,9 @@ layout_flex_column(ns_box *box, double cw,
         }
         c->x = inner_x;
         c->y = inner_y;
+        c->definite_height = 0;
         layout_box(c, w_for_layout, child_inherited);
+        g_array_append_val(layout_widths, w_for_layout);
         gboolean exp = FALSE;
         double b = flex_basis_main_height(c, cw, &exp);
         if (!exp) {
@@ -7910,11 +7920,13 @@ layout_flex_column(ns_box *box, double cw,
         {
             double target_h = main_size - vextra;
             if (target_h < 0) target_h = 0;
-            if (extra_per_grow > 0 && flex_grow_of(c) > 0 &&
-                target_h > c->content_height) {
+            gboolean grew = extra_per_grow > 0 && flex_grow_of(c) > 0 &&
+                            target_h > c->content_height;
+            gboolean shrank = definite_col && can_shrink &&
+                              target_h < c->content_height;
+            if (grew) {
                 c->content_height = target_h;
-            } else if (definite_col && can_shrink &&
-                       target_h < c->content_height) {
+            } else if (shrank) {
                 double natural_h = c->content_height;
                 c->content_height = target_h;
                 if (overflow_kw_scrolls(covy)) {
@@ -7922,6 +7934,16 @@ layout_flex_column(ns_box *box, double cw,
                     c->scroll_max_y = natural_h - target_h;
                     if (c->scroll_max_y < 0) c->scroll_max_y = 0;
                 }
+            }
+            if ((grew || shrank) && c->first_child &&
+                c->definite_height != target_h) {
+                c->definite_height = target_h;
+                double relw = g_array_index(layout_widths, double, i);
+                double sx = c->x, sy = c->y;
+                layout_box(c, relw, child_inherited);
+                if (c->x != sx || c->y != sy)
+                    shift_box_tree(c, sx - c->x, sy - c->y);
+                c->content_height = target_h;
             }
         }
 
@@ -7932,6 +7954,7 @@ layout_flex_column(ns_box *box, double cw,
     *cursor_y_out = cursor_y;
     g_array_free(basis, TRUE);
     g_array_free(explicit_flags, TRUE);
+    g_array_free(layout_widths, TRUE);
     g_ptr_array_free(items, TRUE);
 }
 
