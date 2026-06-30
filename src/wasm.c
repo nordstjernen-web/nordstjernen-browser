@@ -36,6 +36,8 @@ static JSClassID ns_wasm_table_class_id;
 static JSClassID ns_wasm_global_class_id;
 static JSClassID ns_wasm_func_class_id;
 
+static GMutex ns_wasm_link_mutex;
+
 typedef struct {
     JSContext *ctx;
     JSValue fn;
@@ -1457,6 +1459,8 @@ ns_wasm_link_import_symbols(JSContext *ctx, ns_wasm_module *mod)
     GPtrArray *reg_names = g_ptr_array_new();
     GPtrArray *reg_blocks = g_ptr_array_new();
     g_hash_table_iter_init(&it, groups);
+
+    g_mutex_lock(&ns_wasm_link_mutex);
     while (g_hash_table_iter_next(&it, &key, &value)) {
         GArray *group = value;
         NativeSymbol *syms =
@@ -1474,6 +1478,8 @@ ns_wasm_link_import_symbols(JSContext *ctx, ns_wasm_module *mod)
     for (guint i = 0; i < reg_names->len; i++)
         wasm_runtime_unregister_natives(g_ptr_array_index(reg_names, i),
                                         g_ptr_array_index(reg_blocks, i));
+    g_mutex_unlock(&ns_wasm_link_mutex);
+
     g_ptr_array_free(reg_names, TRUE);
     g_ptr_array_free(reg_blocks, TRUE);
     g_hash_table_destroy(groups);
