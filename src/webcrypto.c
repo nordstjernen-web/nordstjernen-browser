@@ -658,6 +658,7 @@ ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *
     if (!md || !k->pkey) { if (err) *err = g_strdup("NotSupportedError: sign"); return NULL; }
 
     EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (!mdctx) return ns_crypto_err(err, "OperationError: sign");
     EVP_PKEY_CTX *pctx = NULL;
     guint8 *out = NULL;
     size_t n = 0;
@@ -719,6 +720,11 @@ ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8
     }
 
     EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+    if (!mdctx) {
+        g_free(der);
+        if (err) *err = g_strdup("OperationError: verify");
+        return -1;
+    }
     EVP_PKEY_CTX *pctx = NULL;
     int rc = -1;
     if (EVP_DigestVerifyInit(mdctx, &pctx, md, NULL, k->pkey) > 0 &&
