@@ -334,6 +334,13 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                 rdrv_follow_nav(r, href, vw, vh, settle_ms);
             else
                 g_free(href);
+        } else if (g_str_has_prefix(a, "rightclick ")) {
+            double x = 0, y = 0;
+            if (sscanf(a + 11, "%lf , %lf", &x, &y) != 2) continue;
+            int prevented = 0;
+            ns_rproc_http_contextmenu(r, (int)x, (int)y, &prevented);
+            fprintf(stderr, "[headless] rightclick %g,%g prevented=%d\n",
+                    x, y, prevented);
         } else if (g_str_has_prefix(a, "type ")) {
             const char *text = a + 5;
             fprintf(stderr, "[headless] type \"%s\"\n", text);
@@ -1212,6 +1219,25 @@ headless_run_actions(headless_flush_ctx *fc, headless_nav_capture *nav,
             if (sscanf(a + 6, "%lf , %lf", &x, &y) == 2) {
                 fprintf(stderr, "[headless] click %g,%g\n", x, y);
                 headless_click(fc, nav, x, y);
+            }
+        } else if (g_str_has_prefix(a, "rightclick ")) {
+            double x = 0, y = 0;
+            if (sscanf(a + 11, "%lf , %lf", &x, &y) == 2) {
+                ns_box *layout = *fc->layout;
+                const ns_node *ft = layout ? ns_box_hit_form_dom(layout, x, y) : NULL;
+                const ns_node *it = layout ? ns_box_hit_inline_dom(layout, x, y) : NULL;
+                const ns_box *hit = layout ? ns_box_hit_test(layout, x, y) : NULL;
+                const ns_node *dom = ft ? ft : it ? it : hit ? hit->dom : NULL;
+                if (dom && fc->js) {
+                    gboolean prevented = FALSE;
+                    ns_js_dispatch_mouse_event(fc->js, dom, "contextmenu",
+                                               x, y, x, y, 2, 0,
+                                               FALSE, FALSE, FALSE, FALSE,
+                                               NULL, &prevented);
+                    fprintf(stderr, "[headless] rightclick %g,%g prevented=%d\n",
+                            x, y, prevented);
+                    headless_relayout(fc);
+                }
             }
         } else if (g_str_has_prefix(a, "hold ")) {
             double x = 0, y = 0;

@@ -1676,6 +1676,27 @@ ns_browser_eval(ns_browser *browser, const char *src)
     return res;
 }
 
+int
+ns_browser_contextmenu(ns_browser *browser, int x, int y)
+{
+    if (!browser || !browser->layout || !browser->js) return 0;
+    const ns_node *node = browser_hit_node(browser, x, y);
+    if (!node) return 0;
+    gboolean prevented = FALSE;
+    ns_js_dispatch_mouse_event(browser->js, node, "contextmenu",
+                               (double)x, (double)y, (double)x, (double)y,
+                               2, 0, FALSE, FALSE, FALSE, FALSE, NULL,
+                               &prevented);
+    if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    if (ns_js_run_animation_frame(browser->js)) browser->dirty = TRUE;
+    if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
+    if (browser->dirty) {
+        browser_relayout(browser);
+        browser->dirty = FALSE;
+    }
+    return prevented ? 1 : 0;
+}
+
 char *
 ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                     int *out_stream)

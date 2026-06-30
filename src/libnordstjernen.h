@@ -196,6 +196,11 @@ char *ns_browser_eval(ns_browser *browser, const char *src);
 char *ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                           int *out_stream);
 
+/* Dispatch a contextmenu DOM event at (x,y) in document coordinates. Returns
+ * 1 if a page handler called preventDefault() (the shell should then suppress
+ * its native context menu and re-render), 0 otherwise. */
+int ns_browser_contextmenu(ns_browser *browser, int x, int y);
+
 /* Find-in-page. query is the search text (NULL/empty clears the search and its
  * highlight). case_sensitive is 0/1. direction selects the match: 0 = search
  * from from_y (a document-space CSS-pixel scroll offset) downward, 1 = next

@@ -106,6 +106,8 @@ char *ns_rproc_http_dump(ns_rproc_http *r, const char *kind);
 char *ns_rproc_http_console_poll(ns_rproc_http *r);
 char *ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,
                              int *out_stream);
+void  ns_rproc_http_contextmenu(ns_rproc_http *r, int x, int y,
+                                int *out_prevented);
 int   ns_rproc_http_export(ns_rproc_http *r, const char *path);
 
 /* Fetch and decode the current page's favicon to BGRA premultiplied pixels.

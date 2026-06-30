@@ -785,6 +785,13 @@ worker_main(gpointer data)
             if (v->proc && req->action == ACT_HOVER)
                 res->href = ns_rproc_http_link_cursor_at(v->proc, req->x,
                                                          req->y, &res->cursor);
+            else if (v->proc && req->action == ACT_CONTEXT) {
+                int prevented = 0;
+                ns_rproc_http_contextmenu(v->proc, req->x, req->y, &prevented);
+                res->prevented = prevented;
+                if (!prevented)
+                    res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
+            }
             else if (v->proc)
                 res->href = ns_rproc_http_link_at(v->proc, req->x, req->y);
             post(res);
@@ -1889,7 +1896,10 @@ on_result(gpointer data)
         gboolean navigated = FALSE;
         GtkWidget *area = v->area;
         if (res->action == ACT_CONTEXT) {
-            show_context_menu(v, res->href);
+            if (res->prevented)
+                request_render(v);
+            else
+                show_context_menu(v, res->href);
             if (v->link_pending) {
                 v->link_pending = FALSE;
                 LinkAct a = v->link_pending_action;

@@ -759,6 +759,21 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/contextmenu") == 0) {
+        long x = 0, y = 0;
+        json_get_long(body, "x", &x);
+        json_get_long(body, "y", &y);
+        int prevented = s->cur
+            ? ns_browser_contextmenu(s->cur, (int)x, (int)y) : 0;
+        char *json = NULL;
+        int n = asprintf(&json, "{\"prevented\":%d}", prevented);
+        if (n > 0)
+            http_write_response(ctrl_w, 200, "application/json", NULL,
+                                json, (size_t)n);
+        free(json);
+        return 0;
+    }
+
     if (strcmp(head->path, "/export") == 0) {
         char *path = json_get_str(body, "path");
         s->frame_valid = 0;

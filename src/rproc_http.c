@@ -1063,6 +1063,23 @@ ns_rproc_http_media_at(ns_rproc_http *r, int x, int y, int *out_is_video,
     return url;
 }
 
+void
+ns_rproc_http_contextmenu(ns_rproc_http *r, int x, int y, int *out_prevented)
+{
+    if (out_prevented) *out_prevented = 0;
+    if (!r)
+        return;
+    char json[48];
+    snprintf(json, sizeof json, "{\"x\":%d,\"y\":%d}", x, y);
+    char *body = request(r, "/contextmenu", json);
+    if (!body)
+        return;
+    long pv = 0;
+    json_get_long(body, "prevented", &pv);
+    if (out_prevented) *out_prevented = (int)pv;
+    free(body);
+}
+
 int
 ns_rproc_http_export(ns_rproc_http *r, const char *path)
 {
