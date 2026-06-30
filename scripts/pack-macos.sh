@@ -177,6 +177,21 @@ if ! run_dylibbundler 300 dylibbundler -of -cd -b \
     exit 1
 fi
 
+# The build binaries carry one LC_RPATH per Homebrew dependency directory.
+# dylibbundler adds a "@executable_path/../Frameworks/" rpath for each of them,
+# leaving many identical LC_RPATH entries — which modern macOS dyld rejects as
+# a fatal "duplicate LC_RPATH" error, so the bundled app refuses to launch.
+# Collapse them to a single entry on each Mach-O executable.
+dedup_frameworks_rpath() {
+    local bin="$1" rp="@executable_path/../Frameworks/"
+    [ -f "$bin" ] || return 0
+    while install_name_tool -delete_rpath "$rp" "$bin" 2>/dev/null; do :; done
+    install_name_tool -add_rpath "$rp" "$bin"
+}
+for exe in Nordstjernen nordstjernen-renderer nordstjernen-audio; do
+    dedup_frameworks_rpath "$STAGE/Contents/MacOS/$exe"
+done
+
 RES="$STAGE/Contents/Resources"
 FW="$STAGE/Contents/Frameworks"
 
