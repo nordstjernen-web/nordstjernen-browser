@@ -26,6 +26,7 @@ find_catalogue(const char *self_exe, const char *lang)
     if (override && *override) return catalogue_path_in(override, lang);
 
     static const char *const rel[] = {
+        "../Resources/share/nordstjernen/i18n",
         "../share/nordstjernen/i18n",
         "share/nordstjernen/i18n",
         "data/i18n",

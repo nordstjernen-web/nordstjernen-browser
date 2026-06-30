@@ -195,6 +195,14 @@ done
 RES="$STAGE/Contents/Resources"
 FW="$STAGE/Contents/Frameworks"
 
+# Engine runtime data the binary looks up relative to itself (the i18n.c and
+# safebrowsing.c "../Resources/share/nordstjernen/..." search arm): the UI
+# translation catalogues and the safe-browsing blocklist. Without these the
+# .app shows an English-only UI and silently disables safe-browsing.
+mkdir -p "$RES/share/nordstjernen/i18n"
+cp "$ROOT"/data/i18n/*.lang "$RES/share/nordstjernen/i18n/" 2>/dev/null || true
+cp "$ROOT/data/safebrowsing.list" "$RES/share/nordstjernen/" 2>/dev/null || true
+
 mkdir -p "$RES/share/icons"
 cp -R "$ROOT/data/icons/hicolor" "$RES/share/icons/"
 GTK_PREFIX=$(pkg-config --variable=prefix gtk4 2>/dev/null || true)

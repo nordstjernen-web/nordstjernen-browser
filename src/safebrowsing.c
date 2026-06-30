@@ -102,6 +102,7 @@ static gboolean
 load_bundled(void)
 {
     static const char *const rel[] = {
+        "../Resources/share/nordstjernen/safebrowsing.list",
         "../share/nordstjernen/safebrowsing.list",
         "share/nordstjernen/safebrowsing.list",
         "data/safebrowsing.list",
