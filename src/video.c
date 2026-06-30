@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <string.h>
 
+#include "camera.h"
 #include "dom.h"
 #include "image.h"
 #include "layout.h"
@@ -299,6 +300,14 @@ attr_present(const ns_node *n, const char *name)
     return v != NULL;
 }
 
+static gboolean url_is_inline_video(const char *url);
+
+gboolean
+ns_video_url_is_inline(const char *url)
+{
+    return url_is_inline_video(url);
+}
+
 static gboolean
 url_is_inline_video(const char *url)
 {
@@ -365,6 +374,21 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us
         ns_box *box = g_ptr_array_index(vids, i);
         if (!box->media || !box->dom) continue;
         if (box->media->video) continue;
+        const char *stream = ns_element_get_attr(box->dom, NS_MEDIA_STREAM_ATTR);
+        if (stream && g_strcmp0(stream, "camera") == 0) {
+            char *ckey = g_strdup_printf("camera:%p", (const void *)box->dom);
+            ns_video *cv = g_hash_table_lookup(cache->by_url, ckey);
+            if (!cv) {
+                cv = g_new0(ns_video, 1);
+                cv->is_camera = TRUE;
+                cv->dom_node = box->dom;
+                cv->playing = TRUE;
+                g_hash_table_insert(cache->by_url, g_strdup(ckey), cv);
+            }
+            box->media->video = cv;
+            g_free(ckey);
+            continue;
+        }
         const char *src = box->media->video_src;
         if (!src || !*src) continue;
         char *abs = g_str_has_prefix(src, "blob:") ? g_strdup(src)
@@ -403,6 +427,20 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_video *v = val;
+        if (v->is_camera) {
+            ns_camera *cam = ns_camera_active();
+            if (cam) {
+                ns_texture *frame = ns_camera_next_frame(cam);
+                if (frame) {
+                    ns_texture_unref(v->frame_texture);
+                    v->frame_texture = frame;
+                    v->natural_width  = ns_texture_get_width(frame);
+                    v->natural_height = ns_texture_get_height(frame);
+                    changed = TRUE;
+                }
+            }
+            continue;
+        }
         if (!v->player) continue;
 
         if (!v->meta_sent && v->duration > 0.0) {
@@ -453,6 +491,7 @@ ns_video_cache_animating(const ns_video_cache *cache)
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_video *v = val;
+        if (v->is_camera && ns_camera_active()) return TRUE;
         if (v->player && v->playing) return TRUE;
     }
     return FALSE;

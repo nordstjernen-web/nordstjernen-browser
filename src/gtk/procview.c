@@ -31,7 +31,7 @@ typedef enum {
     REQ_LOAD, REQ_RENDER, REQ_LINK, REQ_CLICK, REQ_VIEWPORT, REQ_KEY,
     REQ_SELECT, REQ_HOVER, REQ_RELEASE, REQ_FIND, REQ_EXPORT, REQ_CONSOLE,
     REQ_EVAL, REQ_DUMP, REQ_DROPFILES, REQ_SCROLL, REQ_SCROLLBAR,
-    REQ_WEBGL, REQ_FAVICON, REQ_QUIT
+    REQ_WEBGL, REQ_CAMERA, REQ_FAVICON, REQ_QUIT
 } ReqType;
 typedef enum { ACT_HOVER, ACT_NAVIGATE, ACT_NEWTAB, ACT_CONTEXT } LinkAct;
 
@@ -90,6 +90,7 @@ typedef struct {
     char            *url;
     char            *nav;
     char            *webgl;
+    char            *camera;
     char            *download;
     char            *audio;
     cairo_surface_t *surface;
@@ -760,6 +761,10 @@ worker_main(gpointer data)
                     res->webgl = g_strdup(fr.webgl);
                     free(fr.webgl);
                 }
+                if (fr.camera) {
+                    res->camera = g_strdup(fr.camera);
+                    free(fr.camera);
+                }
                 if (fr.download) {
                     res->download = g_strdup(fr.download);
                     free(fr.download);
@@ -960,6 +965,9 @@ worker_main(gpointer data)
         } else if (req->type == REQ_WEBGL) {
             if (v->proc)
                 ns_rproc_http_resolve_webgl(v->proc, req->url, req->mods);
+        } else if (req->type == REQ_CAMERA) {
+            if (v->proc)
+                ns_rproc_http_resolve_camera(v->proc, req->url, req->mods);
         } else if (req->type == REQ_FAVICON) {
             Res *res = g_new0(Res, 1);
             res->view = pv_ref(v);
@@ -1663,6 +1671,11 @@ typedef struct {
     char       *origin;
 } PvWebglPrompt;
 
+typedef struct {
+    NsProcView *v;
+    char       *origin;
+} PvCameraPrompt;
+
 static void
 pv_webgl_prompt_free(PvWebglPrompt *p)
 {
@@ -1681,6 +1694,63 @@ pv_webgl_resolve(NsProcView *v, const char *origin, gboolean allow)
     push_req(v, req);
     if (allow && v->current_url && !v->closed)
         do_load(v, v->current_url, FALSE, FALSE);
+}
+
+static void
+pv_camera_prompt_free(PvCameraPrompt *p)
+{
+    pv_unref(p->v);
+    g_free(p->origin);
+    g_free(p);
+}
+
+static void
+pv_camera_resolve(NsProcView *v, const char *origin, gboolean allow)
+{
+    Req *req = g_new0(Req, 1);
+    req->type = REQ_CAMERA;
+    req->url = g_strdup(origin);
+    req->mods = allow ? 1 : 0;
+    push_req(v, req);
+}
+
+static GtkWindow *pv_window(NsProcView *v);
+
+static void
+pv_camera_first_done(GObject *src, GAsyncResult *res, gpointer ud)
+{
+    PvCameraPrompt *p = ud;
+    GError *err = NULL;
+    int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, &err);
+    if (err) { idx = 0; g_error_free(err); }
+    if (!p->v->closed)
+        pv_camera_resolve(p->v, p->origin, idx == 1);
+    pv_camera_prompt_free(p);
+}
+
+static void
+pv_camera_prompt(NsProcView *v, const char *origin)
+{
+    PvCameraPrompt *p = g_new0(PvCameraPrompt, 1);
+    p->v = pv_ref(v);
+    p->origin = g_strdup(origin);
+    char *primary = g_strdup_printf("Allow %s to use your camera?", origin);
+    char *detail = g_strdup_printf(
+        "This page wants to access your camera on %s.\n\nAllowing lets the "
+        "site see live video from your webcam for the rest of the session. "
+        "Only allow it on sites you trust.", origin);
+    const char *buttons[] = { ns_i18n("Block"),
+                              ns_i18n("Allow and trust this site"), NULL };
+    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
+    gtk_alert_dialog_set_detail(dlg, detail);
+    gtk_alert_dialog_set_buttons(dlg, buttons);
+    gtk_alert_dialog_set_cancel_button(dlg, 0);
+    gtk_alert_dialog_set_default_button(dlg, 0);
+    gtk_alert_dialog_set_modal(dlg, TRUE);
+    gtk_alert_dialog_choose(dlg, pv_window(v), NULL, pv_camera_first_done, p);
+    g_object_unref(dlg);
+    g_free(primary);
+    g_free(detail);
 }
 
 static GtkWindow *
@@ -1801,6 +1871,8 @@ on_result(gpointer data)
         }
         if (res->ok && res->webgl && *res->webgl)
             pv_webgl_prompt(v, res->webgl);
+        if (res->ok && res->camera && *res->camera)
+            pv_camera_prompt(v, res->camera);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->audio && *res->audio)
@@ -2104,6 +2176,7 @@ done:
     g_free(res->url);
     g_free(res->nav);
     g_free(res->webgl);
+    g_free(res->camera);
     g_free(res->download);
     g_free(res->audio);
     free(res->href);

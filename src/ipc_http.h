@@ -28,6 +28,7 @@ typedef struct {
     long  x_w, x_h, x_stride, x_anim, x_unchanged, x_render_rc;
     char  x_nav[2048];
     char  x_webgl[2048];
+    char  x_camera[2048];
     char  x_download[3072];
     char  x_audio[3072];
     char  x_mail_key[1024];

@@ -36,6 +36,7 @@
 #include "security.h"
 #include "selection.h"
 #include "video.h"
+#include "camera.h"
 #include "webgl.h"
 
 struct ns_browser {
@@ -1725,10 +1726,17 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
 
     if (media->media && media->media->video) {
         ns_video *iv = media->media->video;
+        if (iv->is_camera)
+            return NULL;
         if (iv->player) {
             ns_video_cache_toggle(browser->videos, iv, g_get_monotonic_time());
             return NULL;
         }
+    }
+    if (media->dom->kind == NS_NODE_ELEMENT) {
+        const char *stream_kind = ns_element_get_attr(media->dom, NS_MEDIA_STREAM_ATTR);
+        if (stream_kind && g_strcmp0(stream_kind, "camera") == 0)
+            return NULL;
     }
 
     gboolean is_video =
@@ -1755,6 +1763,10 @@ ns_browser_media_at(ns_browser *browser, int x, int y, int *out_is_video,
                                         : NULL;
     gboolean stream = force_stream || !abs || g_str_has_prefix(abs, "blob:") ||
                       g_str_has_prefix(abs, "data:");
+    if (!stream && is_video && abs && ns_video_url_is_inline(abs)) {
+        g_free(abs);
+        return NULL;
+    }
     if (stream) {
         g_free(abs);
         abs = browser->base_url ? g_strdup(browser->base_url) : NULL;
@@ -2574,6 +2586,27 @@ ns_browser_resolve_webgl(ns_browser *browser, const char *origin, int allow)
 {
     (void)browser;
     ns_webgl_set_decision(origin, allow);
+}
+
+char *
+ns_browser_take_pending_camera(ns_browser *browser)
+{
+    (void)browser;
+    return ns_camera_take_pending_origin();
+}
+
+void
+ns_browser_resolve_camera(ns_browser *browser, const char *origin, int allow)
+{
+    ns_camera_set_decision(origin, allow);
+    if (allow) ns_camera_acquire();
+    if (browser && browser->js) {
+        char *r = ns_js_eval_source(browser->js,
+            allow ? "__nd_camera_resolve_pending(true)"
+                  : "__nd_camera_resolve_pending(false)",
+            "camera-resolve");
+        free(r);
+    }
 }
 
 static void

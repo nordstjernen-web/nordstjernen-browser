@@ -264,6 +264,18 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         return 0;
     }
 
+    if (strcmp(head->path, "/camera") == 0) {
+        char *origin = json_get_str(body, "origin");
+        long allow = 0;
+        json_get_long(body, "allow", &allow);
+        if (s->cur && origin)
+            ns_browser_resolve_camera(s->cur, origin, (int)allow);
+        s->frame_valid = 0;
+        http_write_response(ctrl_w, 200, "text/plain", NULL, NULL, 0);
+        free(origin);
+        return 0;
+    }
+
     if (strcmp(head->path, "/open") == 0) {
         char *url = json_get_str(body, "url");
         long w = 0, h = 0, settle = 0, history = 0;
@@ -374,6 +386,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (webgl)
             for (char *p = webgl; *p; p++)
                 if (*p == '\r' || *p == '\n') *p = ' ';
+        char *camera = ns_browser_take_pending_camera(s->cur);
+        if (camera)
+            for (char *p = camera; *p; p++)
+                if (*p == '\r' || *p == '\n') *p = ' ';
         char *download = ns_browser_take_pending_download(s->cur);
         if (download)
             for (char *p = download; *p; p++)
@@ -397,6 +413,9 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         if (webgl && *webgl && hn > 0 && (size_t)hn < sizeof hdrs)
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                      "X-WebGL: %.2000s\r\n", webgl);
+        if (camera && *camera && hn > 0 && (size_t)hn < sizeof hdrs)
+            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
+                     "X-Camera: %.2000s\r\n", camera);
         if (download && *download && hn > 0 && (size_t)hn < sizeof hdrs)
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
                      "X-Download: %.3000s\r\n", download);
@@ -408,6 +427,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                      "X-Audio: %.3000s\r\n", audio);
         free(nav);
         free(webgl);
+        free(camera);
         free(download);
         g_free(mailkey);
         free(audio);

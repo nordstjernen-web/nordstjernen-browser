@@ -288,6 +288,13 @@ http_read_head(http_conn *c, http_head *out)
             memcpy(out->x_webgl, val, vlen);
             out->x_webgl[vlen] = '\0';
         }
+        else if (strcasecmp(line, "X-Camera") == 0) {
+            size_t vlen = strlen(val);
+            if (vlen >= sizeof out->x_camera)
+                vlen = sizeof out->x_camera - 1;
+            memcpy(out->x_camera, val, vlen);
+            out->x_camera[vlen] = '\0';
+        }
         else if (strcasecmp(line, "X-Download") == 0) {
             size_t vlen = strlen(val);
             if (vlen >= sizeof out->x_download)

@@ -20,6 +20,7 @@
 
 #include "anim.h"
 #include "bytecode_cache.h"
+#include "camera.h"
 #include "config.h"
 #include "css.h"
 #include "datetime.h"
@@ -6961,6 +6962,78 @@ ns_returns_resolved_empty_array(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     return ns_promise_resolve_take(ctx, JS_NewArray(ctx));
+}
+
+static JSValue
+ns_cam_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    gboolean want_video = argc > 0 && JS_ToBool(ctx, argv[0]);
+    gboolean want_audio = argc > 1 && JS_ToBool(ctx, argv[1]);
+    int d = ns_camera_permission(js);
+    if (d == 1) {
+        if (want_video) ns_camera_acquire();
+        (void)want_audio;
+        return JS_NewString(ctx, "granted");
+    }
+    if (d == 0)
+        return JS_NewString(ctx, "denied");
+    return JS_NewString(ctx, "pending");
+}
+
+static JSValue
+ns_cam_release(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    ns_camera_release();
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_cam_label(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_camera *cam = ns_camera_active();
+    GPtrArray *list = ns_camera_enumerate();
+    const char *label = NULL;
+    if (cam) {
+        for (guint i = 0; i < list->len; i++) {
+            ns_camera_info *info = g_ptr_array_index(list, i);
+            if (g_strcmp0(info->device, ns_camera_device(cam)) == 0) {
+                label = info->label;
+                break;
+            }
+        }
+    }
+    if (!label && list->len > 0)
+        label = ((ns_camera_info *)g_ptr_array_index(list, 0))->label;
+    JSValue r = JS_NewString(ctx, label ? label : "Camera");
+    for (guint i = 0; i < list->len; i++)
+        ns_camera_info_free(g_ptr_array_index(list, i));
+    g_ptr_array_free(list, TRUE);
+    return r;
+}
+
+static JSValue
+ns_cam_enumerate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    GPtrArray *list = ns_camera_enumerate();
+    JSValue arr = JS_NewArray(ctx);
+    uint32_t n = 0;
+    for (guint i = 0; i < list->len; i++) {
+        ns_camera_info *info = g_ptr_array_index(list, i);
+        JSValue dev = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, dev, "deviceId", JS_NewString(ctx, info->device));
+        JS_SetPropertyStr(ctx, dev, "groupId", JS_NewString(ctx, info->device));
+        JS_SetPropertyStr(ctx, dev, "kind", JS_NewString(ctx, "videoinput"));
+        JS_SetPropertyStr(ctx, dev, "label", JS_NewString(ctx, info->label));
+        JS_SetPropertyUint32(ctx, arr, n++, dev);
+        ns_camera_info_free(info);
+    }
+    g_ptr_array_free(list, TRUE);
+    return arr;
 }
 
 static JSValue
@@ -29777,6 +29850,35 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_media_get_srcObject(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_srcObject");
+    if (JS_IsUndefined(v)) { JS_FreeValue(ctx, v); return JS_NULL; }
+    return v;
+}
+
+static JSValue
+ns_media_set_srcObject(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    JS_SetPropertyStr(ctx, this_val, "_nd_srcObject", JS_DupValue(ctx, val));
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    gboolean is_cam = FALSE;
+    if (JS_IsObject(val)) {
+        JSValue m = JS_GetPropertyStr(ctx, val, "_nd_camera");
+        is_cam = JS_ToBool(ctx, m);
+        JS_FreeValue(ctx, m);
+    }
+    if (el) {
+        ns_element_set_attr(el, NS_MEDIA_STREAM_ATTR, is_cam ? "camera" : "");
+        if (js) js->mutated = TRUE;
+    }
+    if (el && js && is_cam)
+        ns_js_dispatch_event(js, el, "loadedmetadata", NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_media_pause(JSContext *ctx, JSValueConst this_val,
                int argc, JSValueConst *argv)
 {
@@ -30688,6 +30790,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("offsetParent",      ns_element_get_offsetParent,      ns_element_noop_set),
     JS_CGETSET_DEF("videoWidth",        ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("videoHeight",       ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("srcObject",         ns_media_get_srcObject,           ns_media_set_srcObject),
     JS_CGETSET_DEF("clientInformation", ns_element_get_null,              ns_element_noop_set),
     JS_CFUNC_DEF("decode",            0, ns_returns_resolved_undefined),
     JS_CFUNC_DEF("toBlob",            1, ns_element_toBlob),
@@ -34182,6 +34285,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, media_devices, "dispatchEvent", ns_target_dispatchEvent, 1);
     JS_SetPropertyStr(ctx, media_devices, "ondevicechange", JS_NULL);
     JS_SetPropertyStr(ctx, navigator, "mediaDevices", media_devices);
+
+    ns_bind_fn(ctx, global, "__nd_camera_request",   ns_cam_request,   2);
+    ns_bind_fn(ctx, global, "__nd_camera_release",   ns_cam_release,   0);
+    ns_bind_fn(ctx, global, "__nd_camera_label",     ns_cam_label,     0);
+    ns_bind_fn(ctx, global, "__nd_camera_enumerate", ns_cam_enumerate, 0);
 
     ns_bind_fn(ctx, navigator, "share",                     ns_returns_rejected, 1);
     ns_bind_fn(ctx, navigator, "canShare",                  ns_event_noop,       1);

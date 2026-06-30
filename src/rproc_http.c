@@ -554,6 +554,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->render_rc = (int)head.x_render_rc;
         out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
         out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
+        out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
         out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
         out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
         out->mail_key = head.x_mail_key[0] ? strdup(head.x_mail_key) : NULL;
@@ -575,6 +576,7 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->pixels = r->shm ? r->map : r->rxbuf;
     out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
     out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
+    out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
     out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
     out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
     out->mail_key = head.x_mail_key[0] ? strdup(head.x_mail_key) : NULL;
@@ -979,6 +981,24 @@ ns_rproc_http_resolve_webgl(ns_rproc_http *r, const char *origin, int allow)
         json = NULL;
     free(oe);
     char *body = json ? request(r, "/webgl", json) : NULL;
+    free(json);
+    int ok = body != NULL;
+    free(body);
+    return ok ? 0 : -1;
+}
+
+int
+ns_rproc_http_resolve_camera(ns_rproc_http *r, const char *origin, int allow)
+{
+    if (!r || !origin)
+        return -1;
+    char *oe = json_escape(origin);
+    char *json = NULL;
+    if (asprintf(&json, "{\"origin\":\"%s\",\"allow\":%d}",
+                 oe ? oe : "", allow ? 1 : 0) < 0)
+        json = NULL;
+    free(oe);
+    char *body = json ? request(r, "/camera", json) : NULL;
     free(json);
     int ok = body != NULL;
     free(body);

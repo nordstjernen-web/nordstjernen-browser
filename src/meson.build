@@ -52,6 +52,7 @@ nordstjernen_engine_sources = files(
   'eventsource.c',
   'ext.c',
   'forms.c',
+  'camera.c',
   'font.c',
   'glctx.c',
   'history.c',

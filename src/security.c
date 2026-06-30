@@ -313,6 +313,14 @@ ns_security_sandbox_init(const char *self_exe)
     for (gsize i = 0; system_read_dirs[i]; i++)
         add_path_rw(rfd, fs_read, system_read_dirs[i]);
 
+    guint64 fs_dev = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
+    for (int vi = 0; vi < 64; vi++) {
+        char vdev[32];
+        g_snprintf(vdev, sizeof vdev, "/dev/video%d", vi);
+        if (g_file_test(vdev, G_FILE_TEST_EXISTS))
+            add_path_rw(rfd, fs_dev, vdev);
+    }
+
     const char *xauth = g_getenv("XAUTHORITY");
     if (xauth && *xauth) {
         char *xauth_dir = g_path_get_dirname(xauth);

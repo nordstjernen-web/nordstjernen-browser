@@ -25,6 +25,7 @@ typedef struct ns_video {
 
     void        *player;
     const void  *dom_node;
+    gboolean     is_camera;
     gboolean     autoplay;
     gboolean     loop;
     gboolean     controls;
@@ -62,6 +63,7 @@ void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
 
+gboolean ns_video_url_is_inline(const char *url);
 gboolean ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us);
 gboolean ns_video_toggle(ns_video *v, gint64 now_us);
 void     ns_video_play(ns_video *v, gint64 now_us);

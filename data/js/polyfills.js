@@ -3037,6 +3037,162 @@
                     }
                 });
             } catch (e) {}
+
+            (function () {
+                var md = navigator.mediaDevices;
+                var pending = [];
+
+                function makeError(name, msg) {
+                    var e;
+                    try { e = new DOMException(msg, name); }
+                    catch (_) { e = new Error(msg); e.name = name; }
+                    return e;
+                }
+                function rnd() { return Math.random().toString(36).slice(2); }
+
+                function makeTrack(kind, label) {
+                    var L = {};
+                    var track = {
+                        kind: kind,
+                        id: 'track-' + kind + '-' + rnd(),
+                        label: label || (kind === 'video' ? 'Camera' : 'Microphone'),
+                        enabled: true, muted: false, readyState: 'live', contentHint: '',
+                        onended: null, onmute: null, onunmute: null,
+                        getSettings: function () {
+                            return kind === 'video'
+                                ? { deviceId: 'default', groupId: 'default',
+                                    width: 640, height: 480, frameRate: 30, facingMode: 'user' }
+                                : { deviceId: 'default', groupId: 'default',
+                                    sampleRate: 48000, channelCount: 1 };
+                        },
+                        getCapabilities: function () { return {}; },
+                        getConstraints: function () { return {}; },
+                        applyConstraints: function () { return Promise.resolve(); },
+                        clone: function () { return makeTrack(kind, label); },
+                        addEventListener: function (t, f) {
+                            if (typeof f === 'function') (L[t] = L[t] || []).push(f);
+                        },
+                        removeEventListener: function (t, f) {
+                            var a = L[t]; if (!a) return;
+                            var i = a.indexOf(f); if (i >= 0) a.splice(i, 1);
+                        },
+                        dispatchEvent: function (e) {
+                            var a = e && L[e.type];
+                            if (a) a.slice().forEach(function (fn) {
+                                try { fn.call(track, e); } catch (_) {}
+                            });
+                            var h = e && track['on' + e.type];
+                            if (typeof h === 'function') { try { h.call(track, e); } catch (_) {} }
+                            return true;
+                        },
+                        stop: function () {
+                            if (track.readyState === 'ended') return;
+                            track.readyState = 'ended';
+                            if (kind === 'video' &&
+                                typeof globalThis.__nd_camera_release === 'function')
+                                globalThis.__nd_camera_release();
+                            track.dispatchEvent({ type: 'ended' });
+                        }
+                    };
+                    return track;
+                }
+
+                function makeStream(tracks) {
+                    var L = {};
+                    var stream = {
+                        id: 'stream-' + rnd(),
+                        active: true, _nd_camera: true,
+                        onaddtrack: null, onremovetrack: null,
+                        getTracks: function () { return tracks.slice(); },
+                        getVideoTracks: function () {
+                            return tracks.filter(function (t) { return t.kind === 'video'; });
+                        },
+                        getAudioTracks: function () {
+                            return tracks.filter(function (t) { return t.kind === 'audio'; });
+                        },
+                        getTrackById: function (id) {
+                            for (var i = 0; i < tracks.length; i++)
+                                if (tracks[i].id === id) return tracks[i];
+                            return null;
+                        },
+                        addTrack: function (t) { if (tracks.indexOf(t) < 0) tracks.push(t); },
+                        removeTrack: function (t) {
+                            var i = tracks.indexOf(t); if (i >= 0) tracks.splice(i, 1);
+                        },
+                        clone: function () {
+                            return makeStream(tracks.map(function (t) { return t.clone(); }));
+                        },
+                        addEventListener: function (t, f) {
+                            if (typeof f === 'function') (L[t] = L[t] || []).push(f);
+                        },
+                        removeEventListener: function (t, f) {
+                            var a = L[t]; if (!a) return;
+                            var i = a.indexOf(f); if (i >= 0) a.splice(i, 1);
+                        },
+                        dispatchEvent: function (e) {
+                            var a = e && L[e.type];
+                            if (a) a.slice().forEach(function (fn) {
+                                try { fn.call(stream, e); } catch (_) {}
+                            });
+                            return true;
+                        }
+                    };
+                    return stream;
+                }
+
+                function build(wantVideo, wantAudio) {
+                    var tracks = [];
+                    if (wantVideo)
+                        tracks.push(makeTrack('video',
+                            typeof globalThis.__nd_camera_label === 'function'
+                                ? globalThis.__nd_camera_label() : 'Camera'));
+                    if (wantAudio) tracks.push(makeTrack('audio', 'Microphone'));
+                    return makeStream(tracks);
+                }
+
+                md.getUserMedia = function (constraints) {
+                    constraints = constraints || {};
+                    var wantVideo = !!constraints.video;
+                    var wantAudio = !!constraints.audio;
+                    return new Promise(function (resolve, reject) {
+                        if (!wantVideo && !wantAudio) {
+                            reject(new TypeError('getUserMedia: no media requested'));
+                            return;
+                        }
+                        var decision = typeof globalThis.__nd_camera_request === 'function'
+                            ? globalThis.__nd_camera_request(wantVideo, wantAudio) : 'denied';
+                        if (decision === 'granted')
+                            resolve(build(wantVideo, wantAudio));
+                        else if (decision === 'denied')
+                            reject(makeError('NotAllowedError', 'Permission denied'));
+                        else
+                            pending.push({ wantVideo: wantVideo, wantAudio: wantAudio,
+                                           resolve: resolve, reject: reject });
+                    });
+                };
+
+                md.enumerateDevices = function () {
+                    return new Promise(function (resolve) {
+                        var list = typeof globalThis.__nd_camera_enumerate === 'function'
+                            ? globalThis.__nd_camera_enumerate() : [];
+                        resolve((list || []).map(function (d) {
+                            return {
+                                deviceId: d.deviceId, groupId: d.groupId,
+                                kind: d.kind, label: d.label,
+                                toJSON: function () { return this; }
+                            };
+                        }));
+                    });
+                };
+
+                globalThis.__nd_camera_resolve_pending = function (allow) {
+                    var q = pending; pending = [];
+                    q.forEach(function (p) {
+                        if (allow) p.resolve(build(p.wantVideo, p.wantAudio));
+                        else p.reject(makeError('NotAllowedError', 'Permission denied'));
+                    });
+                };
+            })();
         }
         if (navigator.permissions) {
             var makePermissionStatus = function (name, state) {

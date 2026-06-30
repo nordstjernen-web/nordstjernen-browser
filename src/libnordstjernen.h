@@ -259,6 +259,9 @@ char *ns_browser_take_pending_nav(ns_browser *browser);
 char *ns_browser_take_pending_webgl(ns_browser *browser);
 void  ns_browser_resolve_webgl(ns_browser *browser, const char *origin,
                                int allow);
+char *ns_browser_take_pending_camera(ns_browser *browser);
+void  ns_browser_resolve_camera(ns_browser *browser, const char *origin,
+                                int allow);
 
 /* Download: the page activated a link with a download attribute. Returns a
  * newly-allocated "url\tfilename" string (free() it) or NULL. The host
