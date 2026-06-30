@@ -203,6 +203,29 @@ mkdir -p "$RES/share/nordstjernen/i18n"
 cp "$ROOT"/data/i18n/*.lang "$RES/share/nordstjernen/i18n/" 2>/dev/null || true
 cp "$ROOT/data/safebrowsing.list" "$RES/share/nordstjernen/" 2>/dev/null || true
 
+# Homebrew's "sdl2" is the sdl2-compat shim: the audio helper links
+# libSDL2-2.0.0.dylib, but that shim dlopen's the real SDL3 at runtime
+# (it probes @loader_path/libSDL3.dylib first). dylibbundler cannot follow a
+# dlopen, so it bundles the shim but not SDL3 — and playback then dies with a
+# "Failed loading SDL3 library" popup. Ship SDL3 next to the shim.
+if [ -f "$FW/libSDL2-2.0.0.dylib" ]; then
+    sdl3_prefix=$(brew --prefix sdl3 2>/dev/null || true)
+    sdl3_lib=""
+    for cand in "$sdl3_prefix/lib/libSDL3.0.dylib" "$sdl3_prefix/lib/libSDL3.dylib"; do
+        [ -f "$cand" ] && { sdl3_lib="$cand"; break; }
+    done
+    [ -z "$sdl3_lib" ] && sdl3_lib=$(find "$(brew --prefix 2>/dev/null)" \
+        -name 'libSDL3.0.dylib' -print -quit 2>/dev/null || true)
+    if [ -n "$sdl3_lib" ] && [ -f "$sdl3_lib" ]; then
+        cp "$sdl3_lib" "$FW/libSDL3.dylib"
+        run_dylibbundler 120 dylibbundler -of -cd -b -x "$FW/libSDL3.dylib" \
+            -d "$FW/" -p "@executable_path/../Frameworks/" >/dev/null 2>&1 || true
+        dedup_frameworks_rpath "$FW/libSDL3.dylib"
+    else
+        echo "pack-macos.sh: warning: sdl2-compat bundled but real SDL3 not found; audio will fail" >&2
+    fi
+fi
+
 mkdir -p "$RES/share/icons"
 cp -R "$ROOT/data/icons/hicolor" "$RES/share/icons/"
 GTK_PREFIX=$(pkg-config --variable=prefix gtk4 2>/dev/null || true)
