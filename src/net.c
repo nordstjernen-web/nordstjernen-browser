@@ -5171,12 +5171,21 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         }
     }
 
-    if (method && g_ascii_strcasecmp(method, "POST") == 0) {
+    gboolean method_is_post = method && g_ascii_strcasecmp(method, "POST") == 0;
+    gboolean method_is_get  = !method || !*method ||
+                              g_ascii_strcasecmp(method, "GET") == 0;
+    gboolean has_body = body && body_len > 0;
+
+    if (method_is_post)
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
-        if (body && body_len > 0) {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
-        }
+    if (has_body) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body_len);
+    }
+    if (!method_is_post && !method_is_get && !strpbrk(method, "\r\n"))
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
+
+    if (has_body && (method_is_post || (!method_is_get && method))) {
         gboolean extra_has_ct = FALSE;
         if (extra_headers) {
             for (guint i = 0; i < extra_headers->len; i++) {
@@ -5194,10 +5203,6 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             headers = curl_slist_append(headers, ct_hdr);
             g_free(ct_hdr);
         }
-    } else if (method && *method &&
-               g_ascii_strcasecmp(method, "GET") != 0 &&
-               !strpbrk(method, "\r\n")) {
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method);
     }
 
     if (extra_headers) {
