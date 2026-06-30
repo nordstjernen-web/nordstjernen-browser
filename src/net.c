@@ -52,6 +52,7 @@ static gint64      g_hsts_cache_mtime_us;
 static GMutex      g_hsts_lock;
 static char *g_ca_bundle;
 static gboolean g_has_http3;
+static const char *g_ec_curves = "X25519:P-256:P-384";
 static char *g_accept_encoding;
 static char *g_proxy_override;
 static CURLSH *g_share;
@@ -1638,6 +1639,12 @@ ns_net_init(void)
     curl_version_info_data *vi = curl_version_info(CURLVERSION_NOW);
     g_has_http3 = vi && (vi->features & CURL_VERSION_HTTP3) != 0;
 
+    unsigned ossl_major = 0, ossl_minor = 0;
+    if (vi && vi->ssl_version &&
+        sscanf(vi->ssl_version, "OpenSSL/%u.%u", &ossl_major, &ossl_minor) == 2 &&
+        (ossl_major > 3 || (ossl_major == 3 && ossl_minor >= 5)))
+        g_ec_curves = "X25519MLKEM768:X25519:P-256:P-384";
+
     GString *enc = g_string_new(NULL);
     if (vi && (vi->features & CURL_VERSION_LIBZ) != 0)
         g_string_append(enc, "gzip, deflate");
@@ -1908,7 +1915,7 @@ ns_net_apply_curl_tls(void *curl_handle)
         "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:"
         "TLS_CHACHA20_POLY1305_SHA256");
 #endif
-    curl_easy_setopt(curl, CURLOPT_SSL_EC_CURVES, "X25519MLKEM768:X25519:P-256:P-384");
+    curl_easy_setopt(curl, CURLOPT_SSL_EC_CURVES, g_ec_curves);
     if (g_ca_bundle)
         curl_easy_setopt(curl, CURLOPT_CAINFO, g_ca_bundle);
 #ifdef G_OS_WIN32
