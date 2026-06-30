@@ -401,7 +401,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 else if (*p == '\n') *p = '\x1f';
             }
         char *mailkey = ns_mail_take_pending_shell_key();
-        char hdrs[7808];
+        char hdrs[16384];
         int hn = snprintf(hdrs, sizeof hdrs,
                  "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
                  "X-Render-RC: %d\r\n%s",
