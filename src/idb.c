@@ -62,6 +62,8 @@ ns_idb_cache_trim(void)
     g_hash_table_iter_init(&it, g_idb_handles);
     while (g_hash_table_iter_next(&it, &k, &v)) {
         ns_idb_db *h = v;
+        if (h->path && strcmp(h->path, ":memory:") == 0)
+            continue;
         if (h->last_used < lru_stamp) {
             lru_stamp = h->last_used;
             lru_path = k;
