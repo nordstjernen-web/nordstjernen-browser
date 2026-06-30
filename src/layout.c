@@ -930,9 +930,16 @@ is_atomic_inline(const ns_node *n, GHashTable *styles)
     return keyword_is(d, "inline-block");
 }
 static const ns_node *g_focused_input_for_layout;
+static const ns_node *g_open_select_for_layout;
 static gboolean       g_focused_is_contenteditable_for_layout;
 static gsize          g_focused_caret_byte_for_layout;
 static gsize          g_focused_sel_anchor_byte_for_layout;
+
+void
+ns_layout_set_open_select(const ns_node *select)
+{
+    g_open_select_for_layout = select;
+}
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
 static GHashTable    *g_counters_for_layout;
@@ -2269,6 +2276,23 @@ append_pseudo_content(GString *out, const ns_css_value *cv,
 }
 
 static void
+emit_open_select_option(collector_ctx *ctx, const ns_node *option)
+{
+    if (!option) return;
+    g_string_append(ctx->out, "\xe2\x80\xa8");
+    gsize start = ctx->out->len;
+    gboolean sel = ns_element_get_attr(option, "selected") != NULL;
+    g_string_append(ctx->out, "\xc2\xa0");
+    g_string_append(ctx->out, sel ? "\xe2\x9c\x93\xc2\xa0" : "\xc2\xa0\xc2\xa0");
+    char *t = ns_option_label_dup(option);
+    if (t && *t) g_string_append(ctx->out, t);
+    g_free(t);
+    g_string_append(ctx->out, "\xc2\xa0");
+    emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
+                         start, ctx->out->len, option, ctx->styles);
+}
+
+static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
@@ -2750,10 +2774,38 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         gsize start = ctx->out->len;
         g_string_append(ctx->out, "\xc2\xa0");
         if (*label) g_string_append(ctx->out, label);
-        g_string_append(ctx->out, " \xe2\x96\xbe\xc2\xa0");
+        g_string_append(ctx->out, n == g_open_select_for_layout
+                                  ? " \xe2\x96\xb4\xc2\xa0" : " \xe2\x96\xbe\xc2\xa0");
         emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
                              start, ctx->out->len, n, ctx->styles);
         g_free(label);
+        if (n == g_open_select_for_layout) {
+            for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+                if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+                const ns_node *opts[2] = { NULL, NULL };
+                const ns_node *grp = NULL;
+                if (strcmp(c->name, "option") == 0) {
+                    opts[0] = c;
+                } else if (strcmp(c->name, "optgroup") == 0) {
+                    grp = c;
+                } else {
+                    continue;
+                }
+                if (grp) {
+                    const char *gl = ns_element_get_attr(grp, "label");
+                    if (gl && *gl) {
+                        g_string_append(ctx->out, "\xe2\x80\xa8\xc2\xa0");
+                        g_string_append(ctx->out, gl);
+                        g_string_append(ctx->out, "\xc2\xa0");
+                    }
+                    for (const ns_node *o = grp->first_child; o; o = o->next_sibling)
+                        if (ns_node_is_element_named(o, "option"))
+                            emit_open_select_option(ctx, o);
+                } else {
+                    emit_open_select_option(ctx, opts[0]);
+                }
+            }
+        }
         return;
     }
     if (strcmp(n->name, "option") == 0 || strcmp(n->name, "optgroup") == 0)

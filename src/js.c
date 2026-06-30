@@ -28557,6 +28557,32 @@ ns_js_click_activate(ns_js *js, const ns_node *node)
     return TRUE;
 }
 
+gboolean
+ns_js_select_choose_option(ns_js *js, ns_node *option)
+{
+    if (!js || !option) return FALSE;
+    ns_node *select = option->parent;
+    if (select && ns_node_is_element_named(select, "optgroup"))
+        select = select->parent;
+    if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (ns_node_is_disabled_form_control(option)) return FALSE;
+    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        if (strcmp(c->name, "option") == 0)
+            ns_element_remove_attr(c, "selected");
+        else if (strcmp(c->name, "optgroup") == 0)
+            for (ns_node *cc = c->first_child; cc; cc = cc->next_sibling)
+                if (ns_node_is_element_named(cc, "option"))
+                    ns_element_remove_attr(cc, "selected");
+    }
+    ns_element_set_attr(option, "selected", "");
+    gboolean p = FALSE;
+    ns_js_dispatch_event(js, select, "input",  &p);
+    ns_js_dispatch_event(js, select, "change", &p);
+    js->mutated = TRUE;
+    return TRUE;
+}
+
 static JSValue
 ns_element_form_requestSubmit(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)

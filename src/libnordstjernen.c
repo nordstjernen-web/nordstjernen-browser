@@ -73,6 +73,7 @@ struct ns_browser {
     gsize           sel_anchor_byte;
     ns_selection    selection;
     const ns_node  *hover_node;
+    const ns_node  *open_select;
     const ns_node  *press_node;
     int             press_x;
     int             press_y;
@@ -152,6 +153,7 @@ browser_relayout(ns_browser *b)
     if (b->layout) { ns_paint_3d_invalidate(); ns_box_free(b->layout); b->layout = NULL; }
     if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
+    ns_layout_set_open_select(b->open_select);
     gint64 relayout_t0 = g_get_monotonic_time();
     b->styles = ns_engine_relayout(b->doc, b->base_url, b->vw, b->vh,
                                    b->images, b->anim, b->js,
@@ -1988,6 +1990,47 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
     return nav;
 }
 
+static gboolean
+ns_is_dropdown_select(const ns_node *n)
+{
+    if (!ns_node_is_element_named(n, "select")) return FALSE;
+    if (ns_element_get_attr(n, "multiple")) return FALSE;
+    const char *sz = ns_element_get_attr(n, "size");
+    if (sz && atoi(sz) > 1) return FALSE;
+    return TRUE;
+}
+
+static gboolean
+browser_dropdown_click(ns_browser *browser, const ns_node *node)
+{
+    const ns_node *option = NULL, *select = NULL;
+    for (const ns_node *a = node; a; a = a->parent) {
+        if (!option && ns_node_is_element_named(a, "option")) option = a;
+        if (ns_node_is_element_named(a, "select")) { select = a; break; }
+    }
+    if (browser->open_select && option && select == browser->open_select) {
+        if (browser->js &&
+            ns_js_select_choose_option(browser->js, (ns_node *)option)) {
+            ns_js_consume_mutated(browser->js);
+            browser->open_select = NULL;
+        }
+        browser->dirty = TRUE;
+        return TRUE;
+    }
+    if (select && ns_is_dropdown_select(select) &&
+        !ns_element_get_attr(select, "disabled")) {
+        browser->open_select =
+            (browser->open_select == select) ? NULL : select;
+        browser->dirty = TRUE;
+        return TRUE;
+    }
+    if (browser->open_select) {
+        browser->open_select = NULL;
+        browser->dirty = TRUE;
+    }
+    return FALSE;
+}
+
 char *
 ns_browser_release_click(ns_browser *browser, int *out_changed)
 {
@@ -2022,6 +2065,10 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
+    gboolean select_consumed =
+        !prevented && node && browser_dropdown_click(browser, node);
+
+    if (!select_consumed) {
     if (!prevented && browser->js && node &&
         ns_js_click_activate(browser->js, node))
         browser->dirty = TRUE;
@@ -2051,6 +2098,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
             href = ns_box_hit_link(browser->layout, (double)x, (double)y);
         if (href && *href)
             browser->pending_nav = browser_resolve_navigation(browser, href);
+    }
     }
 
     const ns_node *prev = ns_css_set_active_node(NULL);
