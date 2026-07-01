@@ -29,23 +29,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
           DAYS: ${{ github.event.inputs.days || '2' }}
         run: |
-          cutoff=$(date -u -d "${DAYS} days ago" +%s)
-          echo "Deleting completed workflow runs created before $(date -u -d "@${cutoff}")"
-
-          runs=$(gh api --paginate \
-            "repos/${GH_REPO}/actions/runs?per_page=100" \
-            --jq '.workflow_runs[] | select(.status == "completed") | "\(.id) \(.created_at)"')
+          cutoff=$(date -u -d "${DAYS} days ago" +%Y-%m-%d)
+          deadline=$(( $(date -u +%s) + 13 * 60 ))
+          echo "Deleting completed workflow runs created before ${cutoff}"
 
           deleted=0
-          while read -r id created; do
-            [ -z "${id}" ] && continue
-            created_ts=$(date -u -d "${created}" +%s)
-            if [ "${created_ts}" -lt "${cutoff}" ]; then
-              if gh api -X DELETE "repos/${GH_REPO}/actions/runs/${id}" >/dev/null 2>&1; then
-                echo "deleted run ${id} (${created})"
-                deleted=$((deleted + 1))
-              fi
-            fi
-          done <<< "${runs}"
+          while [ "$(date -u +%s)" -lt "${deadline}" ]; do
+            ids=$(gh api "repos/${GH_REPO}/actions/runs" \
+              -f status=completed -f "created=<${cutoff}" -f per_page=100 \
+              --jq '.workflow_runs[].id')
+            [ -z "${ids}" ] && break
 
+            batch=$(echo "${ids}" | wc -l)
+            echo "${ids}" | xargs -P 10 -I{} gh api -X DELETE "repos/${GH_REPO}/actions/runs/{}" >/dev/null 2>&1 || true
+            deleted=$((deleted + batch))
+            echo "Deleted ${deleted} run(s) so far..."
+          done
+
+          if [ "$(date -u +%s)" -ge "${deadline}" ]; then
+            echo "Time budget reached; remaining old runs will be cleaned up on the next scheduled run."
+          fi
           echo "Done. Deleted ${deleted} run(s)."
