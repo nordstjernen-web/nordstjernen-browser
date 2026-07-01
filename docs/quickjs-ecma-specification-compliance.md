@@ -37,8 +37,8 @@ scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pa
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
 "expected" failures, kept in sync with `-u` after each fix). As of
-this writing the full suite is 81150 test/mode combinations with 45
-unexpected errors (~99.94% pass rate excluding the intentionally
+this writing the full suite is 81150 test/mode combinations with 33
+unexpected errors (~99.95% pass rate excluding the intentionally
 skipped/excluded categories — `async`, `module`, and a handful of slow
 or out-of-scope feature areas, see `test262.conf`). Categorising the
 backlog:
@@ -52,6 +52,7 @@ backlog:
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | **done** (subarray byte-offset, slice overlapping-buffer copy) |
 | RegExp `v` flag — Unicode semantics (property escapes, `\u{}`, casing) | ~8 | medium | **done** |
+| RegExp `v` flag — literal astral chars + `fullUnicode` advancement | 6 | low | **done** |
 | RegExp `v` flag — set operations / strings (`&&`, `--`, `\q{}`, RGI_Emoji) | ~4 | high | open |
 | RegExp `\p{Script=Unknown}` value | 6 | low | **done** |
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
@@ -591,6 +592,51 @@ old, unrelated `memmove` smearing bug it was written to catch — this
 looks like an upstream test262 oversight (not accounting for the
 immutable-buffer variant when adding the same-buffer-aliasing
 assertion) rather than an engine bug worth working around.
+
+### 16. RegExp `v` flag mishandled literal astral characters and empty-match advancement
+
+Two related gaps left by fix #6 (which made the `v` flag carry full
+Unicode *matching* semantics but not the surrounding string-encoding and
+`AdvanceStringIndex` machinery). Both are `v`-only — `u` was already
+correct — and share the root cause that the surrounding code tested for
+`LRE_FLAG_UNICODE` (the `u` flag) specifically rather than "`u` or `v`".
+
+**16a. A literal non-BMP character in a `/…/v` pattern never matched.**
+`js_compile_regexp` encodes the pattern source with
+`JS_ToCStringLen2(…, cesu8)` where `cesu8 = !(re_flags & LRE_FLAG_UNICODE)`.
+For a `u` regexp that is proper UTF-8 (a non-BMP code point is one 4-byte
+sequence, which `get_class_atom`'s `normal_char` path decodes with
+`utf8_decode`); for a `v` regexp `LRE_FLAG_UNICODE` is unset, so the
+pattern was CESU-8-encoded (the code point split into a surrogate pair of
+two 3-byte sequences), and the parser — which does *not* recombine
+surrogate pairs on that path — only ever saw the high surrogate. So
+`/𠮷/v`, `[𠮷]` etc. silently matched nothing, while `/\u{20BB7}/v` (an
+escape, decoded separately) and `/./v` (code-point iteration in the
+matcher) worked. Fixed by encoding the pattern as full UTF-8 whenever the
+`u` *or* `v` flag is set: `cesu8 = !(re_flags & (LRE_FLAG_UNICODE |
+LRE_FLAG_UNICODE_SETS))`. `src/quickjs/quickjs.c`, `js_compile_regexp`.
+
+**16b. `@@match`/`@@matchAll`/`@@replace`/`@@split` advanced empty
+matches by a code unit instead of a code point under `v`.** The spec for
+all four sets `fullUnicode`/`unicodeMatching` true when "*flags* contains
+`u` **or** `v`", then `AdvanceStringIndex(S, index, fullUnicode)` steps
+over a whole code point on an empty match. The four builtins derived that
+flag either from the `.unicode` getter (true only for `u`) or from a
+`string_indexof_char(flags, 'u')` scan (misses `v`), so a `v` regexp
+advanced one UTF-16 code unit at a time — e.g.
+`"𠮷a𠮷b𠮷".matchAll(/(?:)/gv)` yielded 9 empty matches instead of 6.
+Fixed all four sites to test the flags string for `'u'` **or** `'v'`
+(the flags string is already in scope at each), matching the spec text
+and dropping two now-redundant `.unicode` property reads.
+`src/quickjs/quickjs.c`, `js_regexp_Symbol_match`,
+`js_regexp_Symbol_matchAll`, `js_regexp_Symbol_replace`,
+`js_regexp_Symbol_split`.
+
+Covers test262
+`built-ins/RegExp/prototype/exec/regexp-builtin-exec-v-u-flag.js` and the
+`String.prototype.{match,matchAll,replace,search}` `*-v-u-flag.js` /
+`*-v-flag.js` subtests (12 test/mode combinations; the `matchAll`
+subtest's later `AdvanceStringIndex` assertion needed 16b on top of 16a).
 
 ## Open issues found but not fixed this round
 

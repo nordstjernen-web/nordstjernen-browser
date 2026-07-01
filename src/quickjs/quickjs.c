@@ -48349,7 +48349,8 @@ static JSValue js_compile_regexp(JSContext *ctx, JSValueConst pattern,
         if (re_flags & LRE_FLAG_UNICODE_SETS)
             return JS_ThrowSyntaxError(ctx, "invalid regular expression flags");
 
-    str = JS_ToCStringLen2(ctx, &len, pattern, !(re_flags & LRE_FLAG_UNICODE));
+    str = JS_ToCStringLen2(ctx, &len, pattern,
+                           !(re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)));
     if (!str)
         return JS_EXCEPTION;
     re_bytecode_buf = lre_compile(&re_bytecode_len, error_msg,
@@ -49234,9 +49235,8 @@ static JSValue js_regexp_Symbol_match(JSContext *ctx, JSValueConst this_val,
     if (!global) {
         A = JS_RegExpExec(ctx, rx, S);
     } else {
-        fullUnicode = JS_ToBoolFree(ctx, JS_GetProperty(ctx, rx, JS_ATOM_unicode));
-        if (fullUnicode < 0)
-            goto exception;
+        fullUnicode = (string_indexof_char(p, 'u', 0) >= 0 ||
+                       string_indexof_char(p, 'v', 0) >= 0);
 
         if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, js_int32(0)) < 0)
             goto exception;
@@ -49419,7 +49419,8 @@ static JSValue js_regexp_Symbol_matchAll(JSContext *ctx, JSValueConst this_val,
     it->iterated_string = S;
     strp = JS_VALUE_GET_STRING(flags);
     it->global = string_indexof_char(strp, 'g', 0) >= 0;
-    it->unicode = string_indexof_char(strp, 'u', 0) >= 0;
+    it->unicode = (string_indexof_char(strp, 'u', 0) >= 0 ||
+                   string_indexof_char(strp, 'v', 0) >= 0);
     it->done = false;
     JS_SetOpaqueInternal(iter, it);
 
@@ -49570,9 +49571,8 @@ static JSValue js_regexp_Symbol_replace(JSContext *ctx, JSValueConst this_val,
     fullUnicode = 0;
     is_global = (-1 != string_indexof_char(p, 'g', 0));
     if (is_global) {
-        fullUnicode = JS_ToBoolFree(ctx, JS_GetProperty(ctx, rx, JS_ATOM_unicode));
-        if (fullUnicode < 0)
-            goto exception;
+        fullUnicode = (string_indexof_char(p, 'u', 0) >= 0 ||
+                       string_indexof_char(p, 'v', 0) >= 0);
         if (JS_SetProperty(ctx, rx, JS_ATOM_lastIndex, js_int32(0)) < 0)
             goto exception;
     }
@@ -49798,7 +49798,8 @@ static JSValue js_regexp_Symbol_split(JSContext *ctx, JSValueConst this_val,
     if (JS_IsException(flags))
         goto exception;
     strp = JS_VALUE_GET_STRING(flags);
-    unicodeMatching = string_indexof_char(strp, 'u', 0) >= 0;
+    unicodeMatching = (string_indexof_char(strp, 'u', 0) >= 0 ||
+                       string_indexof_char(strp, 'v', 0) >= 0);
     if (string_indexof_char(strp, 'y', 0) < 0) {
         flags = JS_ConcatString3(ctx, "", flags, "y");
         if (JS_IsException(flags))
