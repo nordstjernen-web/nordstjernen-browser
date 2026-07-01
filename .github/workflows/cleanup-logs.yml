@@ -35,7 +35,7 @@ jobs:
 
           deleted=0
           while [ "$(date -u +%s)" -lt "${deadline}" ]; do
-            ids=$(gh api "repos/${GH_REPO}/actions/runs" \
+            ids=$(gh api -X GET "repos/${GH_REPO}/actions/runs" \
               -f status=completed -f "created=<${cutoff}" -f per_page=100 \
               --jq '.workflow_runs[].id')
             [ -z "${ids}" ] && break
