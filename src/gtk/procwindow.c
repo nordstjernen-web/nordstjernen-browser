@@ -957,6 +957,15 @@ on_newtab_clicked(GtkButton *b, gpointer ud)
     proc_window_add_tab(ud, "about:start", TRUE);
 }
 
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+static void
+on_ai_window_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    proc_window_add_tab(ud, "about:ai-window", TRUE);
+}
+#endif
+
 static void
 on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
 {
@@ -1033,6 +1042,16 @@ act_new_private_tab(GSimpleAction *a, GVariant *p, gpointer ud)
     (void)p;
     proc_window_add_tab_full(ud, "about:start", TRUE, TRUE);
 }
+
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+static void
+act_new_ai_window(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    proc_window_add_tab(ud, "about:ai-window", TRUE);
+}
+#endif
 
 static void
 act_close_tab(GSimpleAction *a, GVariant *p, gpointer ud)
@@ -1373,6 +1392,10 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl>t", NULL });
     install_action(pw, "new-private-tab", G_CALLBACK(act_new_private_tab),
                    (const char *[]){ "<Ctrl><Alt>p", NULL });
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+    install_action(pw, "new-ai-window", G_CALLBACK(act_new_ai_window),
+                   (const char *[]){ "<Ctrl><Shift>a", NULL });
+#endif
     install_action(pw, "close-tab", G_CALLBACK(act_close_tab),
                    (const char *[]){ "<Ctrl>w", NULL });
     install_action(pw, "focus-address", G_CALLBACK(act_focus_address),
@@ -1521,10 +1544,18 @@ proc_window_new(GtkApplication *app, const char *home_url)
     GtkWidget *email_button = toolbar_button("nordstjernen-email",
                                              ns_i18n("Email"),
                                              G_CALLBACK(on_email_clicked), pw);
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+    GtkWidget *ai_window_button =
+        toolbar_button("nordstjernen-ai", ns_i18n("New AI Window"),
+                       G_CALLBACK(on_ai_window_clicked), pw);
+#endif
 
     GMenu *appmenu = g_menu_new();
     g_menu_append(appmenu, ns_i18n("New Tab"), "win.new-tab");
     g_menu_append(appmenu, ns_i18n("New Private Tab"), "win.new-private-tab");
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+    g_menu_append(appmenu, ns_i18n("New AI Window"), "win.new-ai-window");
+#endif
     g_menu_append(appmenu, ns_i18n("Reload"), "win.reload");
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
     g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");
@@ -1562,6 +1593,9 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(toolbar), email_button);
+#if defined(NS_HAVE_AI) && !defined(__APPLE__)
+    gtk_box_append(GTK_BOX(toolbar), ai_window_button);
+#endif
     gtk_box_append(GTK_BOX(toolbar), menu_button);
     gtk_box_append(GTK_BOX(toolbar), logo_button);
     gtk_box_append(GTK_BOX(vbox), toolbar);
