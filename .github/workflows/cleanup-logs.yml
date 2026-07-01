@@ -41,7 +41,7 @@ jobs:
             [ -z "${ids}" ] && break
 
             batch=$(echo "${ids}" | wc -l)
-            echo "${ids}" | xargs -P 10 -I{} gh api -X DELETE "repos/${GH_REPO}/actions/runs/{}" >/dev/null 2>&1 || true
+            echo "${ids}" | xargs -P 20 -I{} gh api -X DELETE "repos/${GH_REPO}/actions/runs/{}" >/dev/null 2>&1 || true
             deleted=$((deleted + batch))
             echo "Deleted ${deleted} run(s) so far..."
           done
