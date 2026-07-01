@@ -358,6 +358,34 @@ if ! hdiutil create -volname "Nordstjernen ${VERSION}" \
     exit 1
 fi
 
+# Notarise and staple the .dmg when a stored notarytool credential profile is
+# supplied (created once with `xcrun notarytool store-credentials <name>`). This
+# only runs for a real Developer ID identity: an ad-hoc signature can never
+# notarise, so the step is skipped and the .dmg still ships (its quarantine is
+# cleared with xattr, see docs/macOS.md). Submitting the .dmg notarises the
+# signed .app inside it, and stapling attaches the ticket so a downloaded build
+# opens with no Gatekeeper prompt. A failure on a real identity is fatal —
+# publishing a build that looks notarised but isn't is worse than shipping none.
+NOTARY_PROFILE="${MACOS_NOTARY_PROFILE:-}"
+if [ -n "$NOTARY_PROFILE" ] && [ "$IDENTITY" != "-" ]; then
+    echo "pack-macos.sh: submitting $DMG to Apple notary service (profile: $NOTARY_PROFILE)..."
+    if ! xcrun notarytool submit "$DMG" \
+            --keychain-profile "$NOTARY_PROFILE" --wait; then
+        echo "pack-macos.sh: ERROR: notarisation submission failed" >&2
+        echo "pack-macos.sh:   inspect a rejection with: xcrun notarytool log <submission-id> --keychain-profile '$NOTARY_PROFILE'" >&2
+        exit 1
+    fi
+    if ! xcrun stapler staple "$DMG"; then
+        echo "pack-macos.sh: ERROR: stapling the notarisation ticket to $DMG failed" >&2
+        exit 1
+    fi
+    echo "pack-macos.sh: notarised and stapled $DMG"
+    spctl -a -vv -t open "$DMG" 2>&1 | sed 's/^/pack-macos.sh: spctl: /' || true
+elif [ "$IDENTITY" != "-" ]; then
+    echo "pack-macos.sh: note: signed with '$IDENTITY' but MACOS_NOTARY_PROFILE is unset — skipping notarisation." >&2
+    echo "pack-macos.sh:   notarise manually: xcrun notarytool submit '$DMG' --keychain-profile <profile> --wait && xcrun stapler staple '$DMG'" >&2
+fi
+
 echo
 echo "Built: $DMG ($(du -h "$DMG" | cut -f1))"
 echo "Bundle: $STAGE ($(du -sh "$STAGE" | cut -f1))"

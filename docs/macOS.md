@@ -157,12 +157,21 @@ Headless rendering works the same as on Linux:
 ```sh
 ./scripts/pack-macos.sh                                          # ad-hoc signed
 MACOS_SIGN_IDENTITY="Developer ID Application: …" ./scripts/pack-macos.sh
+# Signed, notarised and stapled in one shot (stored notarytool profile):
+MACOS_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
+    MACOS_NOTARY_PROFILE="nordstjernen-notary" ./scripts/pack-macos.sh
 ```
 
 The script stages `dist/Nordstjernen.app`, vendors the Homebrew dylibs
 with `dylibbundler`, code-signs the bundle, and produces
-`dist/nordstjernen-<version>-macos-<arch>.dmg`. What goes into the bundle
-and how it is signed is described under [Platform notes](#platform-notes).
+`dist/nordstjernen-<version>-macos-<arch>.dmg`. When `MACOS_NOTARY_PROFILE`
+names a stored notarytool credential profile (see below) and a real
+`MACOS_SIGN_IDENTITY` is set, it also submits the `.dmg` to Apple's notary
+service, staples the ticket, and runs a `spctl` acceptance check — so a single
+invocation produces a ready-to-publish, notarised `.dmg`. Without the profile it
+stops after signing and prints the manual `notarytool`/`stapler` commands. What
+goes into the bundle and how it is signed is described under
+[Platform notes](#platform-notes).
 
 ## Distribution
 
@@ -185,18 +194,30 @@ so the notarised `.dmg` is the realistic target.
 This makes a *downloaded* `.dmg` open with no `xattr` step and no
 re-architecture. It needs a paid Apple Developer account ($99/yr).
 
-1. Create a **Developer ID Application** certificate and export it as a
-   `.p12`.
-2. Build signed:
+1. Create a **Developer ID Application** certificate and install it in your
+   login keychain (or export it as a `.p12` for CI). `security find-identity
+   -v -p codesigning` should then list `Developer ID Application: NAME
+   (TEAMID)` — that whole string is `MACOS_SIGN_IDENTITY`.
+2. Store notarytool credentials once so the build never puts secrets on the
+   command line (uses an app-specific password minted at
+   <https://account.apple.com> → Sign-In and Security → App-Specific
+   Passwords):
+   ```sh
+   xcrun notarytool store-credentials nordstjernen-notary \
+       --apple-id you@example.com --team-id TEAMID \
+       --password <app-specific-password>
+   ```
+3. Build signed **and** notarised in one command — `pack-macos.sh` submits the
+   `.dmg`, waits, staples the ticket, and runs the `spctl` check:
    ```sh
    MACOS_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" \
+       MACOS_NOTARY_PROFILE="nordstjernen-notary" \
        ./scripts/pack-macos.sh
    ```
-3. Notarise and staple the resulting `.dmg`:
+   To keep the two steps separate instead, omit `MACOS_NOTARY_PROFILE` and run
+   the notarisation by hand on the produced `$DMG`:
    ```sh
-   xcrun notarytool submit "$DMG" \
-       --apple-id you@example.com --team-id TEAMID \
-       --password <app-specific-password> --wait
+   xcrun notarytool submit "$DMG" --keychain-profile nordstjernen-notary --wait
    xcrun stapler staple "$DMG"
    ```
 4. Verify: `spctl -a -vv -t open "$DMG"` reports *accepted — Notarized
@@ -330,9 +351,12 @@ Updates ship only through the store — no self-update.
   to a `Developer ID Application: …` identity to produce a
   hardened-runtime, notarisation-ready bundle instead; the JIT
   entitlements in `packaging/macos/entitlements.plist` are applied on that
-  path. Notarising still needs a maintainer's credentials:
-  `xcrun notarytool submit "$DMG" --apple-id … --team-id … --password … --wait`
-  then `xcrun stapler staple "$DMG"`.
+  path. Notarising still needs a maintainer's credentials: set
+  `MACOS_NOTARY_PROFILE` to a stored `notarytool` profile and the script
+  submits the `.dmg`, waits, and staples the ticket itself; without it the
+  build stops after signing and prints the manual
+  `xcrun notarytool submit "$DMG" --keychain-profile … --wait` then
+  `xcrun stapler staple "$DMG"` commands.
 
 ## Maintaining the macOS port from Linux / Windows
 
