@@ -182,11 +182,15 @@ endif
 
 if not is_android
   add_project_arguments('-DNS_ENABLE_WEBGL=1', language: 'c')
-  # The offscreen GL context (src/glctx.c) is EGL-based. macOS ships epoxy
-  # without EGL (it uses CGL), so gate the EGL backend on the header being
-  # present; without it, ns_gl_context_create() stubs out and WebGL is
-  # unavailable on that platform rather than failing the build.
-  if have_egl
+  # The offscreen GL context (src/glctx.c) has three backends: WGL on Windows,
+  # CGL on macOS (which has no EGL — its epoxy dispatches to the OpenGL
+  # framework, and its GL 4.1 core profile compiles GLSL-ES shaders), and EGL
+  # everywhere else. Pick CGL on darwin, otherwise EGL when its header is
+  # present; without any, ns_gl_context_create() stubs out and WebGL is simply
+  # unavailable rather than failing the build.
+  if host_machine.system() == 'darwin'
+    add_project_arguments('-DNS_HAVE_CGL=1', language: 'c')
+  elif have_egl
     add_project_arguments('-DNS_HAVE_EGL=1', language: 'c')
   endif
 endif

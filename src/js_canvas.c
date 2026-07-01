@@ -3111,8 +3111,10 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
         int webgl_version = 0;
         if (t && (strcmp(t, "webgl") == 0 || strcmp(t, "experimental-webgl") == 0))
             webgl_version = 1;
+#ifndef NS_HAVE_CGL
         else if (t && strcmp(t, "webgl2") == 0)
             webgl_version = 2;
+#endif
         gboolean is_webgpu = t && strcmp(t, "webgpu") == 0;
         gboolean is_2d = !t || strcmp(t, "2d") == 0;
         if (t) JS_FreeCString(ctx, t);

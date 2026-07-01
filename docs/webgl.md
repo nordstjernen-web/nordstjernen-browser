@@ -85,7 +85,14 @@ in only when `NS_HAVE_GTK` is defined (the GTK shell).
    (`#version 100` / `#version 300 es`) compile natively, no translation.
    On Windows it is a desktop-OpenGL context created via **WGL** on a
    hidden popup window, where GLSL-ES shaders rely on the desktop driver
-   accepting them.
+   accepting them. On macOS it is a **CGL** context on the GL 4.1 core
+   profile (Metal-backed): its compiler accepts GLSL-ES `#version 100`, so
+   `src/webgl.c` prepends `#version 100` when a shader omits a version
+   directive, and `glctx.c` binds a default vertex array because the core
+   profile has no usable object 0 — together these give working **WebGL 1**.
+   WebGL 2 is not advertised on macOS (`getContext('webgl2')` returns `null`,
+   so pages fall back to WebGL 1): Apple's OpenGL caps at 4.1 and lacks the
+   ES-3 shader compatibility WebGL 2 requires.
 2. **Offscreen render target** — the context renders into an offscreen
    framebuffer object (FBO) sized to the canvas, with a colour texture and,
    when requested, a depth/stencil renderbuffer.

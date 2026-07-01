@@ -203,6 +203,13 @@ endif
 
 nordstjernen_deps += [libpsl]
 
+# macOS WebGL: src/glctx.c creates the offscreen GL context through CGL, whose
+# symbols live in the OpenGL framework. Unused targets drop it via
+# -dead_strip_dylibs.
+if host_machine.system() == 'darwin'
+  nordstjernen_deps += [dependency('appleframeworks', modules: ['OpenGL'])]
+endif
+
 sdl2_dep = dependency('sdl2', required: get_option('audio'))
 ns_lib_c_args = []
 ns_sdl_deps = []

@@ -109,6 +109,81 @@ ns_gl_context_destroy(ns_gl_context *c)
     g_free(c);
 }
 
+#elif defined(NS_ENABLE_WEBGL) && defined(NS_HAVE_CGL)
+
+#include <OpenGL/OpenGL.h>
+#include <epoxy/gl.h>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+struct ns_gl_context {
+    CGLContextObj ctx;
+    GLuint        default_vao;
+};
+
+ns_gl_context *
+ns_gl_context_create(void)
+{
+    CGLPixelFormatAttribute attrs[] = {
+        kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core,
+        kCGLPFAColorSize,   (CGLPixelFormatAttribute)24,
+        kCGLPFAAlphaSize,   (CGLPixelFormatAttribute)8,
+        kCGLPFADepthSize,   (CGLPixelFormatAttribute)24,
+        kCGLPFAStencilSize, (CGLPixelFormatAttribute)8,
+        (CGLPixelFormatAttribute)0,
+    };
+    CGLPixelFormatObj pix = NULL;
+    GLint npix = 0;
+    if (CGLChoosePixelFormat(attrs, &pix, &npix) != kCGLNoError || !pix)
+        return NULL;
+    CGLContextObj ctx = NULL;
+    CGLError err = CGLCreateContext(pix, NULL, &ctx);
+    CGLDestroyPixelFormat(pix);
+    if (err != kCGLNoError || !ctx)
+        return NULL;
+    if (CGLSetCurrentContext(ctx) != kCGLNoError) {
+        CGLDestroyContext(ctx);
+        return NULL;
+    }
+
+    ns_gl_context *c = g_new0(ns_gl_context, 1);
+    c->ctx = ctx;
+    glGenVertexArrays(1, &c->default_vao);
+    glBindVertexArray(c->default_vao);
+    return c;
+}
+
+gboolean
+ns_gl_context_make_current(ns_gl_context *c)
+{
+    if (!c) return FALSE;
+    if (CGLGetCurrentContext() == c->ctx) return TRUE;
+    return CGLSetCurrentContext(c->ctx) == kCGLNoError ? TRUE : FALSE;
+}
+
+void
+ns_gl_context_release(ns_gl_context *c)
+{
+    if (!c) return;
+    if (CGLGetCurrentContext() == c->ctx)
+        CGLSetCurrentContext(NULL);
+}
+
+void
+ns_gl_context_destroy(ns_gl_context *c)
+{
+    if (!c) return;
+    if (CGLGetCurrentContext() == c->ctx) {
+        if (c->default_vao) glDeleteVertexArrays(1, &c->default_vao);
+        CGLSetCurrentContext(NULL);
+    }
+    CGLDestroyContext(c->ctx);
+    g_free(c);
+}
+
+#pragma clang diagnostic pop
+
 #elif defined(NS_ENABLE_WEBGL) && defined(NS_HAVE_EGL)
 
 #include <string.h>
