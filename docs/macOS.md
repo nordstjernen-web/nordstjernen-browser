@@ -19,19 +19,23 @@ covers both **installing the prebuilt app** and **building from source**.
 1. Download
    [`nordstjernen-macos.dmg`](https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg).
 2. Open the `.dmg` and drag **Nordstjernen** into `/Applications`.
-3. Clear the download quarantine once (next section), then launch it from
-   Launchpad, Spotlight, or Finder.
+3. Launch it from Launchpad, Spotlight, or Finder.
 
-### Opening an unsigned build
+The released `.dmg` is signed with an Apple **Developer ID** and
+**notarised**, so it opens straight away with no Gatekeeper prompt and no
+`xattr` step. (If you build your own `.dmg` without a Developer ID it is
+signed ad-hoc instead — see [Opening an ad-hoc build](#opening-an-ad-hoc-build).)
 
-The released `.dmg` is signed **ad-hoc**, not with an Apple Developer ID,
-and is not notarised (the project has no paid Apple Developer account).
-macOS stamps anything downloaded with a `com.apple.quarantine` flag, and
-Gatekeeper refuses to open a quarantined app that isn't notarised — the
-first launch fails with *"Nordstjernen is damaged and can't be opened"*
-or *"cannot be opened because Apple cannot check it for malicious
-software."* This is expected for an unsigned build; the download is not
-corrupt.
+### Opening an ad-hoc build
+
+The published `.dmg` is notarised and needs none of this. It only applies
+to a `.dmg` you built yourself **without** a Developer ID (`pack-macos.sh`
+falls back to an **ad-hoc** signature then). macOS stamps anything
+downloaded with a `com.apple.quarantine` flag, and Gatekeeper refuses to
+open a quarantined app that isn't notarised — the first launch fails with
+*"Nordstjernen is damaged and can't be opened"* or *"cannot be opened
+because Apple cannot check it for malicious software."* This is expected
+for an ad-hoc build; the download is not corrupt.
 
 Clear the quarantine flag once, after copying the app to `/Applications`:
 
@@ -42,21 +46,23 @@ xattr -dr com.apple.quarantine /Applications/Nordstjernen.app
 The app then launches normally on every later run. (Right-click → **Open**
 also works on some macOS versions, but the `xattr` command is the reliable
 path — recent macOS has narrowed the right-click bypass for un-notarised
-apps.) A maintainer with a Developer ID can remove this step entirely by
-signing and notarising the `.dmg` — see the **Code signing** note under
+apps.) Maintainers producing the release build avoid this entirely by
+signing and notarising — see the **Code signing** note under
 [Platform notes](#platform-notes).
 
 ### Verifying what you downloaded
 
 ```sh
-codesign -dv --verbose=2 /Applications/Nordstjernen.app   # shows the (ad-hoc) signature
+codesign -dv --verbose=2 /Applications/Nordstjernen.app   # shows the Developer ID signature
 spctl -a -vv /Applications/Nordstjernen.app               # Gatekeeper's assessment
 shasum -a 256 ~/Downloads/nordstjernen-macos.dmg          # compare against SHA256SUMS
 ```
 
-`spctl` reporting *"rejected"* / *"Unnotarized Developer ID"* is the
-expected state for an ad-hoc build and is exactly what the `xattr` step
-above works around. Published checksums are at
+For the published build, `spctl` reports *"accepted"* /
+*"source=Notarized Developer ID"* and `codesign` shows the authority
+*"Developer ID Application: … (49X98YTK33)"*. A self-built ad-hoc `.dmg`
+reports *"rejected"* / *"Unnotarized Developer ID"* instead — that is the
+state the `xattr` step above works around. Published checksums are at
 <https://www.nordstjernen.org/nightly/SHA256SUMS>.
 
 ### Uninstall
@@ -70,7 +76,7 @@ rm -rf ~/.config/nordstjernen ~/.cache/nordstjernen ~/.local/share/nordstjernen
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| *"…is damaged and can't be opened"* / *"…cannot be opened because Apple cannot check it"* | Download quarantine on an un-notarised app | `xattr -dr com.apple.quarantine /Applications/Nordstjernen.app` (see [above](#opening-an-unsigned-build)) |
+| *"…is damaged and can't be opened"* / *"…cannot be opened because Apple cannot check it"* | Download quarantine on a self-built **ad-hoc** `.dmg` (the published build is notarised and unaffected) | `xattr -dr com.apple.quarantine /Applications/Nordstjernen.app` (see [above](#opening-an-ad-hoc-build)) |
 | App opens but **no web page loads** — every `https://` site fails | An old build with no bundled CA store, run on a Mac without Homebrew | Update to a current build (the `.dmg` now vendors a CA bundle); or set `CURL_CA_BUNDLE=/path/to/cert.pem` before launch |
 | `<video>` / `<audio>` plays but is **silent** | An old build that did not bundle the audio helper | Update to a current build (it ships `nordstjernen-audio` inside the `.app`) |
 | Quits immediately with status **77** from a terminal | Refuse-root check — launched via `sudo` | Run as a normal user, or set `NS_ALLOW_ROOT=1` |
@@ -224,8 +230,9 @@ re-architecture. It needs a paid Apple Developer account ($99/yr).
    Developer ID*.
 
 **In CI**, `.github/workflows/macos.yml` performs steps 2–4 automatically
-when these repository secrets are present (without them it builds an
-ad-hoc `.dmg`, exactly as today):
+when these repository secrets are present — which they are for this
+project, so the published `.dmg` is signed and notarised. Without them the
+workflow falls back to an ad-hoc `.dmg`:
 
 | Secret | Meaning |
 |--------|---------|
@@ -347,7 +354,7 @@ Updates ship only through the store — no self-update.
   dylibs and helpers first, the `.app` last). With no Apple Developer ID
   it signs **ad-hoc** (`codesign --sign -`), which seals the bundle so it
   launches once the download quarantine is cleared (see [Opening an
-  unsigned build](#opening-an-unsigned-build)). Set `MACOS_SIGN_IDENTITY`
+  ad-hoc build](#opening-an-ad-hoc-build)). Set `MACOS_SIGN_IDENTITY`
   to a `Developer ID Application: …` identity to produce a
   hardened-runtime, notarisation-ready bundle instead; the JIT
   entitlements in `packaging/macos/entitlements.plist` are applied on that
