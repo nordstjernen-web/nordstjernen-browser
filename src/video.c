@@ -572,8 +572,7 @@ ns_video_for_mse_id(ns_video_cache *cache, guint id)
 }
 
 static void
-ns_video_mse_attach_player(ns_video_cache *cache, ns_video *v,
-                           ns_mse_stream *s)
+ns_video_mse_attach_player(ns_video *v, ns_mse_stream *s)
 {
     if (v->player || !s->video_bytes || s->video_bytes->len < 4096)
         return;
@@ -604,7 +603,7 @@ ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
 {
     if (!v || !s) return;
     if (!v->player) {
-        ns_video_mse_attach_player(cache, v, s);
+        ns_video_mse_attach_player(v, s);
         if (v->player) v->buf_sent = FALSE;
     } else if (s->video_bytes &&
                s->video_bytes->len > 0 &&
