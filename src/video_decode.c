@@ -246,6 +246,17 @@ ns_lav_rewind(ns_lav *L)
     L->draining = FALSE;
 }
 
+static gboolean
+ns_lav_seek_to(ns_lav *L, double seconds)
+{
+    int64_t ts = (int64_t)(seconds / av_q2d(L->time_base));
+    if (av_seek_frame(L->fmt, L->vstream, ts, AVSEEK_FLAG_BACKWARD) < 0)
+        return FALSE;
+    avcodec_flush_buffers(L->vdec);
+    L->draining = FALSE;
+    return TRUE;
+}
+
 static ns_texture *
 ns_lav_frame_to_texture(ns_lav *L, AVFrame *frame, int w, int h)
 {
@@ -514,11 +525,24 @@ ns_video_player_frame_at(ns_video_player *player, double seconds,
        ) return NULL;
     if (seconds < 0) seconds = 0;
 
-    if (seconds + 1e-4 < player->cur_time) {
-        ns_video_backend_rewind(player);
-        player->cur_time = -1.0;
-        ns_texture_clear(&player->pending_tex);
-        player->pending_time = -1.0;
+    gboolean backward = seconds + 1e-4 < player->cur_time;
+    gboolean far_forward = player->cur_time >= 0.0 &&
+                           seconds > player->cur_time + 2.0;
+    if (backward || far_forward) {
+        gboolean sought = FALSE;
+#ifdef NS_HAVE_LIBAV
+        if (player->lav)
+            sought = ns_lav_seek_to(player->lav, seconds);
+#endif
+        if (!sought) {
+            if (!backward) sought = TRUE;
+            else ns_video_backend_rewind(player);
+        }
+        if (backward || !sought || far_forward) {
+            player->cur_time = -1.0;
+            ns_texture_clear(&player->pending_tex);
+            player->pending_time = -1.0;
+        }
     }
 
     gboolean changed = FALSE;

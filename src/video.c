@@ -697,6 +697,7 @@ ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
                 ns_video *existing = g_hash_table_lookup(cache->by_url, skey);
                 g_free(skey);
                 if (existing) {
+                    existing->dom_node = node;
                     ns_video_note_stream_version(cache, existing, node, abs);
                 } else if (!g_hash_table_contains(cache->requested, abs)) {
                     g_hash_table_add(cache->requested, g_strdup(abs));
@@ -763,6 +764,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
         g_free(skey);
         if (existing) {
             box->media->video = existing;
+            if (box->dom) existing->dom_node = box->dom;
             ns_video_note_stream_version(cache, existing, box->dom, abs);
         } else if (!g_hash_table_contains(cache->requested, abs)) {
             g_hash_table_add(cache->requested, g_strdup(abs));
