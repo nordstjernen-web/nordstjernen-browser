@@ -61,6 +61,13 @@ struct ns_browser {
     GPtrArray      *img_sessions;
     GHashTable     *img_requested;
     gboolean        dirty;
+    gboolean        video_only_frame;
+    gboolean        last_frame_params_valid;
+    int             last_scroll_x;
+    int             last_scroll_y;
+    int             last_render_w;
+    int             last_render_h;
+    double          last_render_scale;
     gboolean        relaying;
     char           *pending_nav;
     char           *pending_download;
@@ -1091,6 +1098,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
 
     gint64 deadline = g_get_monotonic_time() + (gint64)budget_ms * 1000;
     gboolean changed = FALSE;
+    gboolean video_changed = FALSE;
+    gboolean other_changed = FALSE;
     int guard = 0;
     if (browser->hover_restyle_pending) {
         gint64 now = g_get_monotonic_time();
@@ -1106,32 +1115,40 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     }
     for (;;) {
         gint64 now = g_get_monotonic_time();
-        if (browser->images && ns_image_cache_tick(browser->images, now))
+        if (browser->images && ns_image_cache_tick(browser->images, now)) {
             changed = TRUE;
+            other_changed = TRUE;
+        }
         if (browser->videos && browser->layout) {
             ns_video_cache_discover(browser->videos, browser->layout, browser->doc, now);
-            if (ns_video_cache_tick(browser->videos, now))
+            if (ns_video_cache_tick(browser->videos, now)) {
                 changed = TRUE;
+                video_changed = TRUE;
+            }
         }
-        if (browser->anim && ns_anim_tick(browser->anim, now))
+        if (browser->anim && ns_anim_tick(browser->anim, now)) {
             changed = TRUE;
+            other_changed = TRUE;
+        }
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);
-        if (browser->js && ns_js_run_animation_frame(browser->js))
+        if (browser->js && ns_js_run_animation_frame(browser->js)) {
             changed = TRUE;
+            other_changed = TRUE;
+        }
 
         gboolean did_iter = FALSE;
         int it = 0;
         while (g_main_context_pending(NULL) && it++ < 64) {
             g_main_context_iteration(NULL, FALSE);
             did_iter = TRUE;
-            changed = TRUE;
         }
 
         if (browser->dirty ||
             (browser->js && ns_js_consume_mutated(browser->js))) {
             if (browser_relayout_from_mutation(browser)) {
                 changed = TRUE;
+                other_changed = TRUE;
                 browser->dirty = FALSE;
             }
         }
@@ -1140,6 +1157,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (++guard >= 4096) break;
         if (g_get_monotonic_time() >= deadline) break;
     }
+    browser->video_only_frame = video_changed && !other_changed;
     return changed ? 1 : 0;
 }
 
@@ -1235,6 +1253,36 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     cairo_clip(cr);
     cairo_scale(cr, scale, scale);
     cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
+
+    gboolean clip_videos = browser->video_only_frame &&
+        browser->last_frame_params_valid &&
+        browser->last_scroll_x == scroll_x &&
+        browser->last_scroll_y == scroll_y &&
+        browser->last_render_w == width &&
+        browser->last_render_h == height &&
+        browser->last_render_scale == scale;
+    if (clip_videos) {
+        GPtrArray *vboxes = g_ptr_array_new();
+        ns_layout_collect_videos(browser->layout, vboxes);
+        gboolean any = FALSE;
+        for (guint vi = 0; vi < vboxes->len; vi++) {
+            const ns_box *vb = g_ptr_array_index(vboxes, vi);
+            if (!vb->media || !vb->media->video) continue;
+            cairo_rectangle(cr, vb->x, vb->y,
+                            vb->content_width, vb->content_height);
+            any = TRUE;
+        }
+        g_ptr_array_free(vboxes, TRUE);
+        if (any)
+            cairo_clip(cr);
+    }
+    browser->last_scroll_x = scroll_x;
+    browser->last_scroll_y = scroll_y;
+    browser->last_render_w = width;
+    browser->last_render_h = height;
+    browser->last_render_scale = scale;
+    browser->last_frame_params_valid = TRUE;
+    browser->video_only_frame = FALSE;
 
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
