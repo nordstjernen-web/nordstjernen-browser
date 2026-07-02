@@ -526,57 +526,6 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
     if (t) g_thread_unref(t);
 }
 
-typedef struct {
-    GtkWindow *parent;
-    char      *url;
-} MediaHelpCtx;
-
-static void
-media_help_response(GObject *src, GAsyncResult *res, gpointer ud)
-{
-    MediaHelpCtx *c = ud;
-    int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, NULL);
-    if (idx == 0 && c->url && *c->url) {
-        GtkUriLauncher *launcher = gtk_uri_launcher_new(c->url);
-        gtk_uri_launcher_launch(launcher, c->parent, NULL, NULL, NULL);
-        g_object_unref(launcher);
-    }
-    if (c->parent)
-        g_object_remove_weak_pointer(G_OBJECT(c->parent),
-                                     (gpointer *)&c->parent);
-    g_free(c->url);
-    g_free(c);
-}
-
-static void
-pw_show_media_help(ProcWindow *pw, const char *app, const char *url)
-{
-    if (!app || !*app || !url || !*url)
-        return;
-    char *primary =
-        g_strconcat(ns_i18n("Nordstjernen plays this media by handing the link "
-                            "to an external player. Install the recommended "
-                            "application to play it:"),
-                    "\n\n", app, NULL);
-    char *get_label = g_strconcat(ns_i18n("Get"), " ", app, NULL);
-    const char *buttons[] = { get_label, ns_i18n("Close"), NULL };
-
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
-    gtk_alert_dialog_set_buttons(dlg, buttons);
-    gtk_alert_dialog_set_default_button(dlg, 0);
-    gtk_alert_dialog_set_cancel_button(dlg, 1);
-    gtk_alert_dialog_set_modal(dlg, TRUE);
-
-    MediaHelpCtx *c = g_new0(MediaHelpCtx, 1);
-    c->parent = GTK_WINDOW(pw->window);
-    c->url = g_strdup(url);
-    g_object_add_weak_pointer(G_OBJECT(c->parent), (gpointer *)&c->parent);
-    gtk_alert_dialog_choose(dlg, c->parent, NULL, media_help_response, c);
-
-    g_object_unref(dlg);
-    g_free(primary);
-    g_free(get_label);
-}
 
 static void
 on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
@@ -633,14 +582,6 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
             char **parts = g_strsplit(text, "\t", 2);
             pw_start_download(pw, parts[0],
                               parts[1] && *parts[1] ? parts[1] : NULL);
-            g_strfreev(parts);
-        }
-        break;
-    case NS_PROC_EVT_MEDIA_HELP:
-        if (is_current && text && *text) {
-            char **parts = g_strsplit(text, "\t", 2);
-            if (parts[0] && parts[1])
-                pw_show_media_help(pw, parts[0], parts[1]);
             g_strfreev(parts);
         }
         break;

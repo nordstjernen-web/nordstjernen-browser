@@ -99,7 +99,6 @@ nordstjernen_engine_sources = files(
 # code; the GTK frontend itself lives in src/gtk/.
 nordstjernen_app_sources = files(
   'headless.c',
-  'media.c',
   'watchdog.c',
 )
 

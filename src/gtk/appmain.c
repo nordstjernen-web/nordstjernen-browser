@@ -32,7 +32,6 @@
 #include "spellcheck.h"
 #include "history.h"
 #include "i18n.h"
-#include "media.h"
 #include "net.h"
 #include "proc_limits.h"
 #include "procview.h"
@@ -520,13 +519,6 @@ main(int argc, char **argv)
         ns_rproc_single_process_enable();
 
     if (proc_mode) {
-        /* The external media player (mpv/vlc + yt-dlp) would inherit this
-         * process's Landlock filesystem confinement if spawned directly,
-         * leaving it unable to write its cache/temp/socket files — it execs
-         * but then fails at runtime. Fork the media broker now, before the
-         * sandbox is installed, so the player is launched from an
-         * unconfined process. */
-        ns_media_broker_start();
         /* The proc-mode shell processes no untrusted bytes (it only blits
          * renderer framebuffers and forwards input), but it must fork/execv
          * renderer processes and create POSIX shm — which the no-execve seccomp
