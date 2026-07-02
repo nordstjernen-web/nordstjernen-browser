@@ -28892,7 +28892,7 @@ ns_js_image_ready_idle(gpointer data)
     }
     g_free(abs_url);
     ns_image *img = r->img;
-    if (img && img->failed && js->log_cb) {
+    if (img && img->failed && js->log_cb && img->http_status != 204) {
         char *line = g_strdup_printf("[image] error: %s — %s (HTTP %ld)",
             img->url ? img->url : "(no url)",
             img->error ? img->error : "(no error msg)",
