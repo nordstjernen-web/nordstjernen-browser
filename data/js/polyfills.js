@@ -726,6 +726,10 @@
         }
     }
 
+    var ndMseNative = typeof global.__ndMseAppend === 'function' &&
+                      typeof global.__ndMseEos === 'function';
+    var ndMseNextId = 0;
+
     function MediaSource() {
         if (!(this instanceof MediaSource)) return new MediaSource();
         this.sourceBuffers = new SourceBufferList();
@@ -739,6 +743,7 @@
         this._ndObjectURL = '';
         this._ndVersion = 0;
         this._ndBytes = 0;
+        this._ndMseId = 0;
     }
     ndEventMethods(MediaSource.prototype);
     MediaSource.isTypeSupported = ndSupportedMediaType;
@@ -761,7 +766,10 @@
     MediaSource.prototype.endOfStream = function () {
         if (this.readyState === 'closed') throw new Error('InvalidStateError');
         this.readyState = 'ended';
-        this._ndRefreshBlob();
+        if (ndMseNative && this._ndMseId)
+            global.__ndMseEos(this._ndMseId);
+        else
+            this._ndRefreshBlob();
         ndFireEvent(this, 'sourceended');
     };
     MediaSource.prototype.setLiveSeekableRange = function () {};
@@ -883,12 +891,18 @@
         ndFireEvent(this, 'updatestart');
         var self = this;
         ndMediaTask(function () {
-            self._parts.push(copy);
+            var ms = self._mediaSource;
+            if (ndMseNative && ms && ms._ndMseId) {
+                global.__ndMseAppend(ms._ndMseId,
+                    self._type.indexOf('audio/') === 0 ? 'a' : 'v', copy);
+            } else {
+                self._parts.push(copy);
+            }
             self._bytes += copy.length;
             var seconds = self._bytes > 0 ? Math.max(0.001, self._bytes / 262144) : 0;
             self.buffered = new ndTimeRanges(0, seconds);
             self.updating = false;
-            if (self._mediaSource) self._mediaSource._ndRefreshBlob();
+            if (ms && !(ndMseNative && ms._ndMseId)) ms._ndRefreshBlob();
             ndFireEvent(self, 'update');
             ndFireEvent(self, 'updateend');
         });
@@ -971,11 +985,19 @@
         var ndRevokeObjectURL = global.URL.revokeObjectURL;
         global.URL.createObjectURL = function (obj) {
             if (obj instanceof MediaSource) {
-                var url = ndCreateObjectURL.call(this,
-                    new Blob([], { type: 'application/octet-stream' }));
-                obj._ndUrl = url;
-                obj._ndObjectURL = url;
-                obj._ndRefreshBlob();
+                var url;
+                if (ndMseNative) {
+                    obj._ndMseId = ++ndMseNextId;
+                    url = 'blob:nd-mse/' + obj._ndMseId;
+                    obj._ndUrl = url;
+                    obj._ndObjectURL = url;
+                } else {
+                    url = ndCreateObjectURL.call(this,
+                        new Blob([], { type: 'application/octet-stream' }));
+                    obj._ndUrl = url;
+                    obj._ndObjectURL = url;
+                    obj._ndRefreshBlob();
+                }
                 ndMediaTask(function () { obj._ndOpen(); });
                 return url;
             }

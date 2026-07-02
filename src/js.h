@@ -31,6 +31,8 @@ typedef void (*ns_js_media_play_cb)(const void *node, gboolean play,
                                     gpointer user_data);
 typedef void (*ns_js_media_muted_cb)(const void *node, gboolean muted,
                                      gpointer user_data);
+typedef void (*ns_js_mse_cb)(guint stream_id, char kind, const guint8 *data,
+                             gsize len, gboolean eos, gpointer user_data);
 typedef void (*ns_js_scroll_to_cb)(const ns_node *target, gpointer user_data);
 typedef void (*ns_js_form_submit_cb)(const ns_node *form, const ns_node *submitter,
                                      gpointer user_data);
@@ -55,6 +57,7 @@ void   ns_js_set_media_play_cb(ns_js *js, ns_js_media_play_cb cb,
                                gpointer user_data);
 void   ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb,
                                 gpointer user_data);
+void   ns_js_set_mse_cb(ns_js *js, ns_js_mse_cb cb, gpointer user_data);
 void   ns_js_video_event(ns_js *js, const void *node, const char *kind, double value);
 void   ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_data);
 void   ns_js_set_early_inject_src(ns_js *js, const char *src);

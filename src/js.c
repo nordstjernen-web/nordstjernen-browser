@@ -213,6 +213,10 @@ static JSValue ns_event_initKeyboardEvent(JSContext *ctx, JSValueConst this_val,
 static JSValue ns_element_get_list_ref(JSContext *ctx, JSValueConst this_val);
 static JSValue ns_window_url_create_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
+static JSValue ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv);
+static JSValue ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv);
 static JSValue ns_window_url_update_object(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
 static const char *ns_http_status_text(int status);
@@ -34784,6 +34788,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);
     ns_bind_fn(ctx, global, "__ndUrlSet",            ns_window_url_set_internal,       3);
     ns_bind_fn(ctx, global, "__ndUpdateBlobURL",     ns_window_url_update_object,      2);
+    ns_bind_fn(ctx, global, "__ndMseAppend",         ns_window_mse_append,             3);
+    ns_bind_fn(ctx, global, "__ndMseEos",            ns_window_mse_eos,                1);
 
     ns_bind_ctor(ctx, global, "Event",        ns_event_ctor,        2);
     {
@@ -41006,6 +41012,50 @@ ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb, gpointer user_data)
     if (!js) return;
     js->media_muted_cb = cb;
     js->media_muted_user_data = user_data;
+}
+
+void
+ns_js_set_mse_cb(ns_js *js, ns_js_mse_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->mse_cb = cb;
+    js->mse_user_data = user_data;
+}
+
+static JSValue
+ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->mse_cb || argc < 3) return JS_FALSE;
+    guint32 id = 0;
+    JS_ToUint32(ctx, &id, argv[0]);
+    const char *kind_s = JS_ToCString(ctx, argv[1]);
+    char kind = kind_s && kind_s[0] == 'a' ? 'a' : 'v';
+    if (kind_s) JS_FreeCString(ctx, kind_s);
+    const uint8_t *data = NULL;
+    size_t len = 0;
+    JSValue holder = JS_UNDEFINED;
+    if (!ns_js_bytes_view(ctx, argv[2], &data, &len, &holder) || !id)
+        return JS_FALSE;
+    js->mse_cb(id, kind, data, len, FALSE, js->mse_user_data);
+    JS_FreeValue(ctx, holder);
+    return JS_TRUE;
+}
+
+static JSValue
+ns_window_mse_eos(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->mse_cb || argc < 1) return JS_FALSE;
+    guint32 id = 0;
+    JS_ToUint32(ctx, &id, argv[0]);
+    if (!id) return JS_FALSE;
+    js->mse_cb(id, 'v', NULL, 0, TRUE, js->mse_user_data);
+    return JS_TRUE;
 }
 
 static void

@@ -45,6 +45,7 @@ typedef struct ns_video {
     gint64       last_refresh_us;
     gboolean     stalled;
     gint64       stall_since_us;
+    guint        mse_id;
     double       cur_time;
     double       prev_tick_time;
     double       last_emit_time;
@@ -71,6 +72,9 @@ void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
 gboolean ns_video_cache_waiting_growth(const ns_video_cache *cache);
+void     ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id,
+                                   char kind, const guint8 *data, gsize len);
+void     ns_video_cache_mse_eos(ns_video_cache *cache, guint stream_id);
 gboolean ns_video_cache_has_pending(const ns_video_cache *cache);
 
 gboolean ns_video_url_is_inline(const char *url);

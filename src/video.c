@@ -25,6 +25,7 @@
 struct ns_video_cache {
     GHashTable       *by_url;
     GHashTable       *requested;
+    GHashTable       *mse_streams;
     GPtrArray        *pending;
     char             *base_url;
     ns_video_js_cb    js_cb;
@@ -43,6 +44,25 @@ typedef struct ns_pending {
 
 static void ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
                                        const guint8 *data, gsize len);
+
+typedef struct ns_mse_stream {
+    guint       id;
+    GByteArray *video_bytes;
+    GByteArray *audio_bytes;
+    gboolean    eos;
+    gboolean    audio_dirty;
+    gint64      audio_flush_us;
+} ns_mse_stream;
+
+static void
+ns_mse_stream_free(gpointer p)
+{
+    ns_mse_stream *s = p;
+    if (!s) return;
+    if (s->video_bytes) g_byte_array_free(s->video_bytes, TRUE);
+    if (s->audio_bytes) g_byte_array_free(s->audio_bytes, TRUE);
+    g_free(s);
+}
 static void on_msaudio_fetched(GObject *src, GAsyncResult *result,
                                gpointer user_data);
 static void ns_video_build_player(ns_pending *pending, ns_response *resp);
@@ -72,6 +92,8 @@ ns_video_cache_new(void)
     ns_video_cache *c = g_new0(ns_video_cache, 1);
     c->by_url = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, ns_video_free);
     c->requested = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+    c->mse_streams = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                           NULL, ns_mse_stream_free);
     c->pending = g_ptr_array_new();
     return c;
 }
@@ -182,6 +204,7 @@ ns_video_cache_free(ns_video_cache *cache)
     }
     g_hash_table_destroy(cache->by_url);
     g_hash_table_destroy(cache->requested);
+    g_hash_table_destroy(cache->mse_streams);
     g_ptr_array_free(cache->pending, TRUE);
     g_free(cache->base_url);
     g_free(cache);
@@ -324,9 +347,29 @@ ns_video_url_is_growing_stream(const char *url)
     return marker != NULL && strstr(marker, "&eos") == NULL;
 }
 
+static gboolean
+ns_video_stream_growing(ns_video_cache *cache, const ns_video *v)
+{
+    if (v->mse_id) {
+        ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
+                                               GUINT_TO_POINTER(v->mse_id));
+        return !s || !s->eos;
+    }
+    return ns_video_url_is_growing_stream(v->url);
+}
+
+static guint
+ns_mse_url_id(const char *url)
+{
+    if (!url || !g_str_has_prefix(url, "blob:nd-mse/")) return 0;
+    return (guint)g_ascii_strtoull(url + strlen("blob:nd-mse/"), NULL, 10);
+}
+
 static char *
 ns_video_stream_key(const char *abs_url)
 {
+    guint mse_id = ns_mse_url_id(abs_url);
+    if (mse_id) return g_strdup_printf("ndmse:%u", mse_id);
     const char *marker = strstr(abs_url, "#ndms=");
     return marker ? g_strndup(abs_url, (gsize)(marker - abs_url))
                   : g_strdup(abs_url);
@@ -411,6 +454,7 @@ static void
 ns_video_refresh_growing_stream(ns_video_cache *cache, ns_video *v,
                                 gint64 now_us)
 {
+    if (v->mse_id) return;
     if (!v->url || !v->player) return;
     if (now_us - v->last_refresh_us < G_GINT64_CONSTANT(500000)) return;
     v->last_refresh_us = now_us;
@@ -517,6 +561,102 @@ ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
     }
     g_free(path);
     g_free(dir);
+}
+
+static ns_video *
+ns_video_for_mse_id(ns_video_cache *cache, guint id)
+{
+    char key[32];
+    g_snprintf(key, sizeof key, "ndmse:%u", id);
+    return g_hash_table_lookup(cache->by_url, key);
+}
+
+static void
+ns_video_mse_attach_player(ns_video_cache *cache, ns_video *v,
+                           ns_mse_stream *s)
+{
+    if (v->player || !s->video_bytes || s->video_bytes->len < 4096)
+        return;
+    ns_video_player *player = ns_video_player_new(s->video_bytes->data,
+                                                  s->video_bytes->len);
+    if (!player) return;
+    v->player = player;
+    v->duration = ns_video_player_duration(player);
+    v->has_audio = ns_video_player_has_audio(player);
+    if (v->natural_width <= 0)
+        v->natural_width = ns_video_player_width(player);
+    if (v->natural_height <= 0)
+        v->natural_height = ns_video_player_height(player);
+    v->loaded = TRUE;
+    gboolean ended = FALSE;
+    ns_texture *frame = ns_video_player_frame_at(player, v->cur_time,
+                                                 v->loop, &ended);
+    if (frame) {
+        ns_texture_unref(v->frame_texture);
+        v->frame_texture = ns_texture_ref(frame);
+    }
+    if (v->playing && v->base_us == 0)
+        v->base_us = g_get_monotonic_time() - (gint64)(v->cur_time * 1e6);
+}
+
+static void
+ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
+{
+    if (!v || !s) return;
+    if (!v->player) {
+        ns_video_mse_attach_player(cache, v, s);
+        if (v->player) v->buf_sent = FALSE;
+    } else if (s->video_bytes &&
+               s->video_bytes->len > 0 &&
+               ns_video_player_extend(v->player, s->video_bytes->data,
+                                      s->video_bytes->len)) {
+        v->buf_sent = FALSE;
+    }
+    gint64 now = g_get_monotonic_time();
+    gboolean has_side_audio = s->audio_bytes && s->audio_bytes->len > 0;
+    if (has_side_audio && s->audio_dirty &&
+        (s->eos || now - s->audio_flush_us > G_GINT64_CONSTANT(1000000))) {
+        s->audio_dirty = FALSE;
+        s->audio_flush_us = now;
+        ns_video_materialize_audio(cache, v, s->audio_bytes->data,
+                                   s->audio_bytes->len);
+    }
+    if (!has_side_audio && v->player && v->has_audio && !v->audio_file &&
+        s->video_bytes && s->video_bytes->len > 0)
+        ns_video_materialize_audio(cache, v, s->video_bytes->data,
+                                   s->video_bytes->len);
+}
+
+void
+ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
+                          const guint8 *data, gsize len)
+{
+    if (!cache || !stream_id || !data || !len) return;
+    ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
+                                           GUINT_TO_POINTER(stream_id));
+    if (!s) {
+        s = g_new0(ns_mse_stream, 1);
+        s->id = stream_id;
+        g_hash_table_insert(cache->mse_streams,
+                            GUINT_TO_POINTER(stream_id), s);
+    }
+    GByteArray **dst = kind == 'a' ? &s->audio_bytes : &s->video_bytes;
+    if (!*dst) *dst = g_byte_array_new();
+    if ((*dst)->len + len > NS_VIDEO_MAX_BYTES) return;
+    g_byte_array_append(*dst, data, len);
+    if (kind == 'a') s->audio_dirty = TRUE;
+    ns_video_mse_sync(cache, s, ns_video_for_mse_id(cache, stream_id));
+}
+
+void
+ns_video_cache_mse_eos(ns_video_cache *cache, guint stream_id)
+{
+    if (!cache || !stream_id) return;
+    ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
+                                           GUINT_TO_POINTER(stream_id));
+    if (!s) return;
+    s->eos = TRUE;
+    ns_video_mse_sync(cache, s, ns_video_for_mse_id(cache, stream_id));
 }
 
 static void
@@ -629,11 +769,14 @@ static void
 ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
                      const char *abs_url, const char *poster_abs)
 {
-    char *key = ns_video_stream_key(abs_url);
+    guint mse_id = ns_mse_url_id(abs_url);
+    char *key = mse_id ? g_strdup_printf("ndmse:%u", mse_id)
+                       : ns_video_stream_key(abs_url);
     ns_video *v = g_hash_table_lookup(cache->by_url, key);
     if (v) {
         if (box) box->media->video = v;
-        ns_video_note_stream_version(cache, v, dom, abs_url);
+        if (!mse_id)
+            ns_video_note_stream_version(cache, v, dom, abs_url);
         g_free(key);
         return;
     }
@@ -647,8 +790,16 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->muted = attr_present(dom, "muted");
     v->cur_time = 0.0;
     v->seq = ++cache->next_seq;
+    v->mse_id = mse_id;
     g_hash_table_insert(cache->by_url, key, v);
     if (box) box->media->video = v;
+
+    if (mse_id) {
+        ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
+                                               GUINT_TO_POINTER(mse_id));
+        if (s) ns_video_mse_sync(cache, s, v);
+        return;
+    }
 
     ns_pending *pv = g_new0(ns_pending, 1);
     pv->video = v;
@@ -841,7 +992,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (v->loop && v->duration > 0.0)
             t = fmod(elapsed, v->duration);
 
-        if (ns_video_url_is_growing_stream(v->url)) {
+        if (ns_video_stream_growing(cache, v)) {
             double edge = ns_video_player_buffered_end(v->player) - 0.35;
             if (edge < 0) edge = 0;
             if (t > edge) {
@@ -881,7 +1032,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             ns_video_queue_emit(emits, v, "pos", v->cur_time);
         }
         if (ended) {
-            if (ns_video_url_is_growing_stream(v->url)) {
+            if (ns_video_stream_growing(cache, v)) {
                 double edge = ns_video_player_buffered_end(v->player);
                 if (edge <= 0) edge = v->prev_tick_time;
                 v->cur_time = edge;
