@@ -18409,8 +18409,10 @@ ns_observer_tick_timer(gpointer data)
 {
     ns_js *js = data;
     if (!js) return G_SOURCE_REMOVE;
+    if (!js->ctx) { js->observer_tick_source = 0; return G_SOURCE_REMOVE; }
+    if (js->in_pump || js->dispatch_depth > 0)
+        return G_SOURCE_CONTINUE;
     js->observer_tick_source = 0;
-    if (!js->ctx) return G_SOURCE_REMOVE;
     ns_intersection_observers_tick(js);
     ns_resize_observers_tick(js);
     ns_drain_microtasks(js);
