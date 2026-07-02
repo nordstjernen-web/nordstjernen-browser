@@ -41,6 +41,9 @@ typedef struct ns_pending {
     gboolean        dead;
 } ns_pending;
 
+static void ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
+                                       const guint8 *data, gsize len);
+
 static void
 ns_video_free(gpointer p)
 {
@@ -388,6 +391,11 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
         v->frame_texture = ns_texture_ref(frame);
     }
 
+    if (v->has_audio && !v->audio_file && v->url &&
+        g_str_has_prefix(v->url, "blob:"))
+        ns_video_materialize_audio(pending->cache, v,
+                                   resp->body->data, resp->body->len);
+
     if (v->playing) {
         ns_video_audio_start(pending->cache, v);
         if (v->audio_opened && v->cur_time > 0)
@@ -400,6 +408,29 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
 }
 
 static void
+ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
+                           const guint8 *data, gsize len)
+{
+    char *dir = g_build_filename(g_get_user_cache_dir(),
+                                 "nordstjernen", "msaudio", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    char *path = g_strdup_printf("%s/a%d-%u.dat", dir,
+                                 (int)getpid(), ++cache->next_token);
+    if (g_file_set_contents(path, (const char *)data, (gssize)len, NULL)) {
+        g_free(v->audio_file);
+        v->audio_file = g_strdup_printf("file://%s", path);
+        if (v->playing && !v->muted && !v->audio_opened) {
+            ns_video_audio_start(cache, v);
+            if (v->audio_opened && v->cur_time > 0)
+                ns_video_emit_audio(cache, "seek %s %.3f",
+                                    v->token, v->cur_time);
+        }
+    }
+    g_free(path);
+    g_free(dir);
+}
+
+static void
 on_msaudio_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 {
     (void)src;
@@ -409,26 +440,9 @@ on_msaudio_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     ns_video_cache *cache = pending->cache;
     ns_video *v = pending->video;
     if (!pending->dead && resp && !resp->error && resp->body &&
-        resp->body->len > 0 && resp->body->len <= NS_VIDEO_MAX_BYTES) {
-        char *dir = g_build_filename(g_get_user_cache_dir(),
-                                     "nordstjernen", "msaudio", NULL);
-        g_mkdir_with_parents(dir, 0700);
-        char *path = g_strdup_printf("%s/a%d-%u.dat", dir,
-                                     (int)getpid(), ++cache->next_token);
-        if (g_file_set_contents(path, (const char *)resp->body->data,
-                                (gssize)resp->body->len, NULL)) {
-            g_free(v->audio_file);
-            v->audio_file = g_strdup_printf("file://%s", path);
-            if (v->playing && !v->muted && !v->audio_opened) {
-                ns_video_audio_start(cache, v);
-                if (v->audio_opened && v->cur_time > 0)
-                    ns_video_emit_audio(cache, "seek %s %.3f",
-                                        v->token, v->cur_time);
-            }
-        }
-        g_free(path);
-        g_free(dir);
-    }
+        resp->body->len > 0 && resp->body->len <= NS_VIDEO_MAX_BYTES)
+        ns_video_materialize_audio(cache, v, resp->body->data,
+                                   resp->body->len);
     g_clear_error(&err);
     if (resp) ns_response_free(resp);
     if (!pending->dead)
