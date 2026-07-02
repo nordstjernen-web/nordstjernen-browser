@@ -278,6 +278,58 @@ ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
     return TRUE;
 }
 
+static gboolean
+ns_video_url_is_growing_stream(const char *url)
+{
+    if (!url) return FALSE;
+    const char *marker = strstr(url, "#ndms=");
+    return marker != NULL && strstr(marker, "&eos") == NULL;
+}
+
+static ns_video *
+ns_video_prior_stream_version(ns_video_cache *cache, const ns_node *dom,
+                              const char *abs_url)
+{
+    const char *hash = strchr(abs_url, '#');
+    size_t base_len = hash ? (size_t)(hash - abs_url) : strlen(abs_url);
+    ns_video *best = NULL;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *cand = val;
+        if (cand->dom_node != dom || cand->is_camera || !cand->url) continue;
+        if (strncmp(cand->url, abs_url, base_len) != 0) continue;
+        if (cand->url[base_len] != '\0' && cand->url[base_len] != '#') continue;
+        if (strcmp(cand->url, abs_url) == 0) continue;
+        if (!best || (cand->player && !best->player)) best = cand;
+    }
+    return best;
+}
+
+static void
+ns_video_adopt_stream_state(ns_video_cache *cache, ns_video *v, ns_video *prev,
+                            gint64 now_us)
+{
+    v->cur_time = prev->playing
+        ? (double)(now_us - prev->base_us) / 1e6
+        : prev->cur_time;
+    if (v->cur_time < 0) v->cur_time = 0;
+    v->prev_tick_time = v->cur_time;
+    v->last_emit_time = v->cur_time;
+    v->playing = prev->playing;
+    v->base_us = now_us - (gint64)(v->cur_time * 1e6);
+    v->natural_width = prev->natural_width;
+    v->natural_height = prev->natural_height;
+    v->duration = prev->duration;
+    v->meta_sent = prev->meta_sent;
+    v->muted = prev->muted;
+    if (prev->frame_texture)
+        v->frame_texture = ns_texture_ref(prev->frame_texture);
+    ns_video_audio_stop(cache, prev);
+    prev->playing = FALSE;
+}
+
 static void
 ns_video_build_player(ns_pending *pending, ns_response *resp)
 {
@@ -297,10 +349,19 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
     if (v->natural_height <= 0) v->natural_height = ns_video_player_height(player);
 
     gboolean ended = FALSE;
-    ns_texture *frame = ns_video_player_frame_at(player, 0.0, v->loop, &ended);
-    if (frame) v->frame_texture = ns_texture_ref(frame);
+    ns_texture *frame = ns_video_player_frame_at(player, v->cur_time, v->loop,
+                                                 &ended);
+    if (frame) {
+        ns_texture_unref(v->frame_texture);
+        v->frame_texture = ns_texture_ref(frame);
+    }
 
-    if (v->autoplay) {
+    if (v->playing) {
+        ns_video_audio_start(pending->cache, v);
+        if (v->audio_opened && v->cur_time > 0)
+            ns_video_emit_audio(pending->cache, "seek %s %.3f",
+                                v->token, v->cur_time);
+    } else if (v->autoplay) {
         ns_video_play(v, g_get_monotonic_time());
         ns_video_audio_start(pending->cache, v);
     }
@@ -407,6 +468,9 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->controls = attr_present(dom, "controls");
     v->muted = attr_present(dom, "muted");
     v->cur_time = 0.0;
+    ns_video *prev = ns_video_prior_stream_version(cache, dom, abs_url);
+    if (prev)
+        ns_video_adopt_stream_state(cache, v, prev, g_get_monotonic_time());
     g_hash_table_insert(cache->by_url, g_strdup(abs_url), v);
     if (box) box->media->video = v;
 
@@ -574,6 +638,11 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             ns_video_emit_js(cache, v, "pos", v->cur_time);
         }
         if (ended) {
+            if (ns_video_url_is_growing_stream(v->url)) {
+                v->cur_time = v->duration;
+                v->base_us = now_us - (gint64)(v->duration * 1e6);
+                continue;
+            }
             v->playing = FALSE;
             v->ended = TRUE;
             v->cur_time = v->duration;

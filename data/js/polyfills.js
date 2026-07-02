@@ -793,12 +793,14 @@
         }
         var blob = new Blob(parts, { type: type || 'application/octet-stream' });
         var oldUrl = this._ndUrl;
-        if (this._ndObjectURL && bytes !== this._ndBytes) {
+        var eos = this.readyState === 'ended';
+        if (this._ndObjectURL &&
+            (bytes !== this._ndBytes ||
+             (eos && this._ndUrl.indexOf('&eos') < 0))) {
             this._ndBytes = bytes;
             this._ndVersion++;
-            this._ndUrl = this._ndVersion > 0
-                ? this._ndObjectURL + '#ndms=' + this._ndVersion
-                : this._ndObjectURL;
+            this._ndUrl = this._ndObjectURL + '#ndms=' + this._ndVersion +
+                          (eos ? '&eos=1' : '');
         }
         var ok = !!global.__ndUpdateBlobURL(this._ndUrl, blob);
         if (this._ndObjectURL && this._ndObjectURL !== this._ndUrl)
