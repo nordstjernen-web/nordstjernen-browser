@@ -68,6 +68,26 @@ ns_canvas_state_free(gpointer data)
     g_free(st);
 }
 
+static void
+ns_canvas_state_reset(ns_canvas_state *st, int w, int h)
+{
+    if (st->fill_pattern)   { cairo_pattern_destroy(st->fill_pattern);   st->fill_pattern = NULL; }
+    if (st->stroke_pattern) { cairo_pattern_destroy(st->stroke_pattern); st->stroke_pattern = NULL; }
+    if (st->cr)   cairo_destroy(st->cr);
+    if (st->surf) cairo_surface_destroy(st->surf);
+    g_free(st->font);
+    st->w = w;
+    st->h = h;
+    st->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    st->cr   = cairo_create(st->surf);
+    st->fill_r = st->fill_g = st->fill_b = 0; st->fill_a = 1;
+    st->stroke_r = st->stroke_g = st->stroke_b = 0; st->stroke_a = 1;
+    st->line_width = 1;
+    st->font = g_strdup("10px sans-serif");
+    st->shadow_r = st->shadow_g = st->shadow_b = st->shadow_a = 0;
+    st->shadow_blur = st->shadow_ox = st->shadow_oy = 0;
+}
+
 JSValue
 ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -679,19 +699,10 @@ ns_canvas_state_for(ns_js *js, const ns_node *el)
     int w = ns_canvas_dim_from_attr(el, "width",  300);
     int h = ns_canvas_dim_from_attr(el, "height", 150);
     if (st && (st->w != w || st->h != h)) {
-        g_hash_table_remove(js->canvas_states, el);
-        st = NULL;
-    }
-    if (!st) {
+        ns_canvas_state_reset(st, w, h);
+    } else if (!st) {
         st = g_new0(ns_canvas_state, 1);
-        st->w = w;
-        st->h = h;
-        st->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
-        st->cr   = cairo_create(st->surf);
-        st->fill_r = st->fill_g = st->fill_b = 0; st->fill_a = 1;
-        st->stroke_r = st->stroke_g = st->stroke_b = 0; st->stroke_a = 1;
-        st->line_width = 1;
-        st->font = g_strdup("10px sans-serif");
+        ns_canvas_state_reset(st, w, h);
         g_hash_table_insert(js->canvas_states, (gpointer)el, st);
     }
     return st;
@@ -2170,8 +2181,6 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
             "Failed to execute 'drawImage' on 'CanvasRenderingContext2D': "
             "argument 1 is not a valid image source.");
     if (argc < 3) return JS_UNDEFINED;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (!st) return JS_UNDEFINED;
     int sw_total = 0, sh_total = 0;
     cairo_surface_t *src = ns_ctx_drawimage_source(ctx, argv[0],
                                                    &sw_total, &sh_total);
@@ -2207,6 +2216,11 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     }
     double ga = ns_ctx_global_alpha(ctx, this_val);
     gboolean smooth = ns_ctx_image_smoothing(ctx, this_val);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st) {
+        cairo_surface_destroy(src);
+        return JS_UNDEFINED;
+    }
     cairo_save(st->cr);
     ns_ctx_apply_composite(ctx, this_val, st->cr);
     cairo_translate(st->cr, dx, dy);
@@ -2373,7 +2387,6 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     if (argc < 4) return JS_NULL;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     int sx = 0, sy = 0, sw = 0, sh = 0;
     JS_ToInt32(ctx, &sx, argv[0]);
     JS_ToInt32(ctx, &sy, argv[1]);
@@ -2405,6 +2418,7 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     if (!out) return JS_ThrowRangeError(ctx, "getImageData allocation failed");
     /* A canvas with no backing surface (never drawn to) reads as
        transparent black, not null. */
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
     const uint8_t *cd = NULL;
     int cw = 0, ch = 0, cs = 0;
@@ -2446,8 +2460,6 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
                     int argc, JSValueConst *argv)
 {
     if (argc < 3 || !JS_IsObject(argv[0])) return JS_UNDEFINED;
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
-    if (!st || !st->surf) return JS_UNDEFINED;
     JSValue wv = JS_GetPropertyStr(ctx, argv[0], "width");
     JSValue hv = JS_GetPropertyStr(ctx, argv[0], "height");
     JSValue dv = JS_GetPropertyStr(ctx, argv[0], "data");
@@ -2486,6 +2498,10 @@ ns_ctx_putImageData(JSContext *ctx, JSValueConst this_val,
     if (rx + rw > iw)  { rw = iw - rx; }
     if (ry + rh > ih)  { rh = ih - ry; }
     if (rw <= 0 || rh <= 0) {
+        JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv); return JS_UNDEFINED;
+    }
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (!st || !st->surf) {
         JS_FreeValue(ctx, ab); JS_FreeValue(ctx, dv); return JS_UNDEFINED;
     }
     int cw = cairo_image_surface_get_width(st->surf);
