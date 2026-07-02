@@ -212,6 +212,10 @@ ns_font_woff_to_sfnt(const guint8 *data, gsize len, gsize *out_len,
         gboolean too_big = FALSE;
         for (FT_UInt i = 0; i < num; i++) {
             tabs[i].off = off;
+            if (tabs[i].len > max_sfnt) {
+                too_big = TRUE;
+                break;
+            }
             gsize padded = ((gsize)tabs[i].len + 3) & ~(gsize)3;
             if (padded > max_sfnt || off > max_sfnt - padded) {
                 too_big = TRUE;
