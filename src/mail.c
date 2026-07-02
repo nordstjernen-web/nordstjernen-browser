@@ -311,8 +311,8 @@ account_save_locked(void)
     if (g_acct.primary_check && *g_acct.primary_check)
         g_string_append_printf(s, "primary_check = %s\n", g_acct.primary_check);
 
-    if (g_file_set_contents(path, s->str, (gssize)s->len, NULL))
-        g_chmod(path, 0600);
+    g_file_set_contents_full(path, s->str, (gssize)s->len,
+                             G_FILE_SET_CONTENTS_CONSISTENT, 0600, NULL);
     g_string_free(s, TRUE);
     g_free(path);
 }
