@@ -2060,7 +2060,8 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
     else
         pango_layout_set_width(layout, (int)(b->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
-    ns_paint_apply_css_line_spacing(layout, s);
+    if (!(b->inline_atomics && b->inline_atomics->len > 0))
+        ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0)
@@ -2656,7 +2657,8 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
     else
         pango_layout_set_width(layout, (int)(b->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
-    ns_paint_apply_css_line_spacing(layout, s);
+    if (!(b->inline_atomics && b->inline_atomics->len > 0))
+        ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));

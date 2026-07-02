@@ -4929,6 +4929,9 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
             }
             PangoRectangle r = { 0, (int)(top * PANGO_SCALE),
                                  (int)(w * PANGO_SCALE), (int)(h * PANGO_SCALE) };
+            if (g_getenv("NS_DBG_ATOMIC"))
+                fprintf(stderr, "[atomic-shape] box=%p off=%zu w=%.1f h=%.1f top=%.1f\n",
+                        (void *)box, a->byte_off, w, h, top);
             PangoAttribute *attr = pango_attr_shape_new(&r, &r);
             attr->start_index = (guint)a->byte_off;
             attr->end_index   = (guint)(a->byte_off + 3);
@@ -4971,6 +4974,22 @@ ns_inline_layout_set_attrs(PangoLayout *layout, PangoAttrList *list,
         stretched = TRUE;
     }
     if (stretched) pango_layout_context_changed(layout);
+}
+
+static double inline_atomic_measure_basis(const ns_box *ab);
+static void layout_box(ns_box *box, double parent_content_width,
+                       const ns_style *inherited_style);
+
+static void
+inline_layout_atomics_prepare(ns_box *box, const ns_style *parent_style)
+{
+    if (!box->inline_atomics) return;
+    for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
+        ns_box *ab =
+            g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
+        if (ab && ab->content_width == 0 && ab->content_height == 0)
+            layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+    }
 }
 
 static double
@@ -5236,7 +5255,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     else
         pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
-    ns_paint_apply_css_line_spacing(layout, parent_style);
+    if (!(box->inline_atomics && box->inline_atomics->len > 0))
+        ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
@@ -5250,6 +5270,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
         }
     }
+    inline_layout_atomics_prepare(box, parent_style);
     PangoAttrList *i18n = pango_attr_list_new();
     ns_paint_apply_i18n(layout, i18n, box);
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
@@ -5306,6 +5327,11 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
+        if (g_getenv("NS_DBG_ATOMIC"))
+            fprintf(stderr, "[atomic-place] box=%p n=%u lines=%d ph=%.1f cw=%.1f nowrap=%d text=%.20s\n",
+                    (void *)box, box->inline_atomics->len,
+                    pango_layout_get_line_count(layout), measured,
+                    content_width, ws_nowrap, box->text ? box->text : "");
         pango_layout_set_text(layout, box->text, -1);
         double text_x0 = box->x;
         double ti = ns_text_indent_px(parent_style, content_width);
@@ -5318,6 +5344,11 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
             double nx = text_x0 + (double)pos.x / PANGO_SCALE + a->box->margin.left;
             double ny = box->y + (double)pos.y / PANGO_SCALE + a->box->margin.top;
+            if (g_getenv("NS_DBG_ATOMIC"))
+                fprintf(stderr, "[atomic-pos] box=%p off=%zu pos=(%.1f,%.1f) h=%.1f\n",
+                        (void *)box, a->byte_off,
+                        (double)pos.x / PANGO_SCALE, (double)pos.y / PANGO_SCALE,
+                        (double)pos.height / PANGO_SCALE);
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
     }
@@ -5364,7 +5395,8 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     PangoLayout *layout = make_pango_layout(parent_style);
     pango_layout_set_width(layout, (int)(box->content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
-    ns_paint_apply_css_line_spacing(layout, parent_style);
+    if (!(box->inline_atomics && box->inline_atomics->len > 0))
+        ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, box->content_width);
         if (ti > 0) pango_layout_set_indent(layout, (int)(ti * PANGO_SCALE));
@@ -5605,7 +5637,8 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
     PangoLayout *layout = make_pango_layout(parent_style);
     pango_layout_set_width(layout, (int)(content_width * PANGO_SCALE));
     pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
-    ns_paint_apply_css_line_spacing(layout, parent_style);
+    if (!(box->inline_atomics && box->inline_atomics->len > 0))
+        ns_paint_apply_css_line_spacing(layout, parent_style);
     pango_layout_set_text(layout, box->text, -1);
 
     PangoAttrList *i18n = pango_attr_list_new();
