@@ -69,10 +69,12 @@ function toggleMute(id) {
 }
 ['a1','a2','v1','v2'].forEach(function (id) {
   var el = document.getElementById(id);
+  log(id + ' initial: muted=' + el.muted);
   ['play','playing','pause','ended','error','loadedmetadata','volumechange']
     .forEach(function (t) {
       el.addEventListener(t, function () {
-        log(id + ' event: ' + t + ' t=' + el.currentTime.toFixed(2));
+        log(id + ' event: ' + t + ' t=' + el.currentTime.toFixed(2) +
+            ' muted=' + el.muted);
       });
     });
 });
