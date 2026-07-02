@@ -879,6 +879,7 @@ ns_drain_microtasks(ns_js *js)
     ns_js_budget_push(js, &g);
     JSContext *ctx_out = NULL;
     int r = 0;
+    js->callback_depth++;
     for (;;) {
         if (js->eval_deadline_us != 0 &&
             g_get_monotonic_time() > js->eval_deadline_us)
@@ -886,6 +887,7 @@ ns_drain_microtasks(ns_js *js)
         if ((r = JS_ExecutePendingJob(js->rt, &ctx_out)) <= 0)
             break;
     }
+    js->callback_depth--;
     if (r < 0 && js->log_cb) {
         char *msg = NULL;
         if (ctx_out) {
@@ -969,6 +971,7 @@ ns_timer_fire(gpointer data)
     }
 
     JSValue ret;
+    js->callback_depth++;
     if (code) {
         ret = JS_Eval(js->ctx, code, strlen(code), "<timer>",
                       JS_EVAL_TYPE_GLOBAL);
@@ -987,6 +990,7 @@ ns_timer_fire(gpointer data)
         ret = JS_Call(js->ctx, cb, JS_UNDEFINED, 0, NULL);
     }
 
+    js->callback_depth--;
     JS_FreeValue(js->ctx, cb);
     g_free(code);
     if (extra) {
@@ -19656,7 +19660,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         JS_FreeValue(js->ctx, dp);
     }
     JS_FreeValue(js->ctx, event);
-    if (js->eval_depth == 0 && !js->in_pump) {
+    if (js->eval_depth == 0 && js->callback_depth == 0 && !js->in_pump) {
         ns_drain_mutations(js);
     } else {
         if (js->mutated && js->mut_cb)
@@ -19806,6 +19810,7 @@ ns_js_run_animation_frame(ns_js *js)
     double ts_ms = ns_perf_clamp_ms(now_us - js->time_origin_us);
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
+    js->callback_depth++;
     for (guint i = 0; i < fired->len; i++) {
         ns_raf_entry *e = &g_array_index(fired, ns_raf_entry, i);
         if (e->frame) {
@@ -19857,6 +19862,7 @@ ns_js_run_animation_frame(ns_js *js)
         JS_FreeValue(js->ctx, e->cb);
     }
     js->raf_frame_ctx = NULL;
+    js->callback_depth--;
     g_array_free(fired, TRUE);
     ns_drain_mutations(js);
     ns_js_budget_pop(js, &bg);
