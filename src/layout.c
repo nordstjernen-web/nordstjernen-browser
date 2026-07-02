@@ -10223,21 +10223,6 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean cb_is_icb = (cb_dom == NULL);
         double cb_pad_w = cb->content_width + cb->padding.left + cb->padding.right;
         double cb_pad_h = cb->content_height + cb->padding.top + cb->padding.bottom;
-        if (g_getenv("NS_DBG_ABS")) {
-            const char *ecls = ns_element_get_attr(e.dom, "class");
-            if (ecls && strstr(ecls, "html5-video-player")) {
-                const char *ccls = cb_dom ? ns_element_get_attr(cb_dom, "class") : NULL;
-                fprintf(stderr,
-                        "[abs] i=%u cb=%s.%.30s cw=%.1f ch=%.1f pad=%.1f/%.1f/%.1f/%.1f icb=%d\n",
-                        i,
-                        cb_dom && cb_dom->name ? cb_dom->name : "(root)",
-                        ccls ? ccls : "",
-                        cb->content_width, cb->content_height,
-                        cb->padding.left, cb->padding.right,
-                        cb->padding.top, cb->padding.bottom,
-                        cb_is_icb);
-            }
-        }
         double avail = cb_is_icb ? viewport_width
                                  : (cb_pad_w > 0 ? cb_pad_w : viewport_width);
         double cb_h = cb_is_icb ? ns_css_viewport_h() : cb_pad_h;
