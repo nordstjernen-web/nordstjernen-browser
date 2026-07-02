@@ -40893,10 +40893,19 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         JS_SetPropertyStr(ctx, el, "_nd_duration", JS_NewFloat64(ctx, value));
         JS_SetPropertyStr(ctx, el, "_nd_readyState", JS_NewInt32(ctx, 4));
         JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
+        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
+                                  JS_PROP_C_W_E);
         ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
         ns_js_dispatch_event(js, n, "durationchange", NULL);
         ns_js_dispatch_event(js, n, "canplay", NULL);
         ns_js_dispatch_event(js, n, "canplaythrough", NULL);
+    } else if (strcmp(kind, "vwidth") == 0) {
+        JS_DefinePropertyValueStr(ctx, el, "videoWidth",
+                                  JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
+    } else if (strcmp(kind, "vheight") == 0) {
+        JS_DefinePropertyValueStr(ctx, el, "videoHeight",
+                                  JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
+        ns_js_dispatch_event(js, n, "resize", NULL);
     } else if (strcmp(kind, "pos") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "timeupdate", NULL);

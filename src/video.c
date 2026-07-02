@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
 
+#include <stdio.h>
 #include "video.h"
 
 #include <gio/gio.h>
@@ -483,6 +484,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (!v->meta_sent && v->duration > 0.0) {
             v->meta_sent = TRUE;
             ns_video_emit_js(cache, v, "meta", v->duration);
+            if (v->natural_width > 0)
+                ns_video_emit_js(cache, v, "vwidth", (double)v->natural_width);
+            if (v->natural_height > 0)
+                ns_video_emit_js(cache, v, "vheight", (double)v->natural_height);
         }
         if (!v->playing) continue;
 
