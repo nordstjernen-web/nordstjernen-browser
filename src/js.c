@@ -29975,6 +29975,44 @@ ns_media_get_duration(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv, int magic,
+                    JSValue *func_data)
+{
+    (void)this_val;
+    double dur = 0;
+    int32_t len = 0;
+    JS_ToFloat64(ctx, &dur, func_data[0]);
+    JS_ToInt32(ctx, &len, func_data[1]);
+    int32_t idx = 0;
+    if (argc >= 1) JS_ToInt32(ctx, &idx, argv[0]);
+    if (idx < 0 || idx >= len)
+        return JS_ThrowRangeError(ctx, "index out of TimeRanges bounds");
+    return JS_NewFloat64(ctx, magic == 0 ? 0.0 : dur);
+}
+
+static JSValue
+ns_media_get_time_ranges(JSContext *ctx, JSValueConst this_val)
+{
+    double dur = 0;
+    JSValue dv = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
+    if (JS_IsNumber(dv)) JS_ToFloat64(ctx, &dur, dv);
+    JS_FreeValue(ctx, dv);
+    if (isnan(dur) || dur <= 0) dur = 0;
+    int len = dur > 0 ? 1 : 0;
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, len));
+    JSValue data[2] = { JS_NewFloat64(ctx, dur), JS_NewInt32(ctx, len) };
+    JS_SetPropertyStr(ctx, obj, "start",
+        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 0, 2, data));
+    JS_SetPropertyStr(ctx, obj, "end",
+        JS_NewCFunctionData(ctx, ns_time_ranges_edge, 1, 1, 2, data));
+    JS_FreeValue(ctx, data[0]);
+    JS_FreeValue(ctx, data[1]);
+    return obj;
+}
+
+static JSValue
 ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_ended");
@@ -30953,8 +30991,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("muted",             ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
     JS_CGETSET_DEF("networkState",      ns_media_get_networkState,        ns_element_noop_set),
-    JS_CGETSET_DEF("seekable",          ns_element_get_empty_array_prop,  ns_element_noop_set),
-    JS_CGETSET_DEF("buffered",          ns_element_get_empty_array_prop,  ns_element_noop_set),
+    JS_CGETSET_DEF("seekable",          ns_media_get_time_ranges,         ns_element_noop_set),
+    JS_CGETSET_DEF("buffered",          ns_media_get_time_ranges,         ns_element_noop_set),
     JS_CGETSET_DEF("played",            ns_element_get_empty_array_prop,  ns_element_noop_set),
     JS_CGETSET_DEF("textTracks",        ns_element_get_empty_array_prop,  ns_element_noop_set),
     JS_CGETSET_DEF("videoTracks",       ns_element_get_empty_array_prop,  ns_element_noop_set),
