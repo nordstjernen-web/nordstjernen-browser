@@ -829,6 +829,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             ns_texture_unref(v->frame_texture);
             v->frame_texture = ns_texture_ref(frame);
             changed = TRUE;
+            if (v->stalled) {
+                v->stalled = FALSE;
+                ns_video_emit_js(cache, v, "resumed", t);
+            }
         }
         v->cur_time = t;
         if (t - v->last_emit_time >= 0.20 || ended) {
@@ -842,6 +846,10 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
                 v->cur_time = edge;
                 v->prev_tick_time = edge;
                 v->base_us = now_us - (gint64)(edge * 1e6);
+                if (!v->stalled) {
+                    v->stalled = TRUE;
+                    ns_video_emit_js(cache, v, "waiting", edge);
+                }
                 ns_video_refresh_growing_stream(cache, v, now_us);
                 continue;
             }

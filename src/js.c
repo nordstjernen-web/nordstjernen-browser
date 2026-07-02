@@ -41044,6 +41044,17 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         JS_DefinePropertyValueStr(ctx, el, "videoHeight",
                                   JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
         ns_js_dispatch_event(js, n, "resize", NULL);
+    } else if (strcmp(kind, "waiting") == 0) {
+        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
+        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 2),
+                                  JS_PROP_C_W_E);
+        ns_js_dispatch_event(js, n, "timeupdate", NULL);
+        ns_js_dispatch_event(js, n, "waiting", NULL);
+    } else if (strcmp(kind, "resumed") == 0) {
+        JS_DefinePropertyValueStr(ctx, el, "readyState", JS_NewInt32(ctx, 4),
+                                  JS_PROP_C_W_E);
+        ns_js_dispatch_event(js, n, "canplay", NULL);
+        ns_js_dispatch_event(js, n, "playing", NULL);
     } else if (strcmp(kind, "buf") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "progress", NULL);
