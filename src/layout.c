@@ -4974,8 +4974,6 @@ ns_inline_layout_set_attrs(PangoLayout *layout, PangoAttrList *list,
 }
 
 static double inline_atomic_measure_basis(const ns_box *ab);
-static void layout_box(ns_box *box, double parent_content_width,
-                       const ns_style *inherited_style);
 
 static void
 inline_layout_atomics_prepare(ns_box *box, const ns_style *parent_style)
