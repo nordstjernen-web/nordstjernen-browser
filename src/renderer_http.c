@@ -98,12 +98,37 @@ renderer_watch_parent_death(void)
 }
 #endif
 
+static int
+renderer_selftest(const char *url)
+{
+    if (ns_browser_init() != 0) return 1;
+    ns_browser *b = ns_browser_open_viewport(url, 1280, 720.0, 25000);
+    if (!b) return 1;
+    size_t stride = 1280 * 4;
+    unsigned char *fb = malloc(stride * 720);
+    if (!fb) { ns_browser_close(b); return 1; }
+    for (int frame = 0; frame < 600; frame++) {
+        ns_browser_tick(b, 8);
+        int rr = ns_browser_render_argb32(b, 0, 0, 1280, 720, 1.0, fb,
+                                          (int)stride);
+        if (frame == 0)
+            fprintf(stderr, "[selftest] first render rc=%d\n", rr);
+        g_usleep(16000);
+    }
+    free(fb);
+    ns_browser_close(b);
+    return 0;
+}
+
 int
 main(int argc, char **argv)
 {
 #ifdef NS_HAVE_SDL
     SDL_SetMainReady();
 #endif
+    const char *selftest_url = g_getenv("NS_RENDER_SELFTEST");
+    if (selftest_url && *selftest_url)
+        return renderer_selftest(selftest_url);
     if (argc < 3)
         return 2;
 

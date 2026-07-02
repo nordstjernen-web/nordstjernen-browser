@@ -1255,51 +1255,16 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     cairo_scale(cr, scale, scale);
     cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
 
-    gboolean clip_videos = browser->video_only_frame &&
-        browser->last_frame_params_valid &&
-        browser->last_scroll_x == scroll_x &&
-        browser->last_scroll_y == scroll_y &&
-        browser->last_render_w == width &&
-        browser->last_render_h == height &&
-        browser->last_render_scale == scale;
-    if (clip_videos) {
-        GPtrArray *vboxes = g_ptr_array_new();
-        ns_layout_collect_videos(browser->layout, vboxes);
-        gboolean any = FALSE;
-        for (guint vi = 0; vi < vboxes->len; vi++) {
-            const ns_box *vb = g_ptr_array_index(vboxes, vi);
-            if (!vb->media || !vb->media->video) continue;
-            cairo_rectangle(cr, vb->x, vb->y,
-                            vb->content_width, vb->content_height);
-            any = TRUE;
-        }
-        g_ptr_array_free(vboxes, TRUE);
-        if (any)
-            cairo_clip(cr);
-    }
-    browser->last_scroll_x = scroll_x;
-    browser->last_scroll_y = scroll_y;
-    browser->last_render_w = width;
-    browser->last_render_h = height;
-    browser->last_render_scale = scale;
-    browser->last_frame_params_valid = TRUE;
-    browser->video_only_frame = FALSE;
 
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     const char *highlight = browser->search_query;
-    gint64 paint_t0 = g_get_monotonic_time();
     if (ns_selection_has_range(&browser->selection))
         ns_paint_with_selection(cr, browser->layout, highlight,
                                 &browser->selection);
     else
         ns_paint(cr, browser->layout, highlight);
-    if (g_getenv("NS_PROFILE"))
-        g_printerr("[profile] paint %s %6.1fms %dx%d\n",
-                   clip_videos ? "clip" : "full",
-                   (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
-                   width, height);
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
@@ -1353,15 +1318,52 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     cairo_scale(cr, scale, scale);
     cairo_translate(cr, -(double)scroll_x, -(double)scroll_y);
 
+
+    gboolean clip_videos = browser->video_only_frame &&
+        browser->last_frame_params_valid &&
+        browser->last_scroll_x == scroll_x &&
+        browser->last_scroll_y == scroll_y &&
+        browser->last_render_w == width &&
+        browser->last_render_h == height &&
+        browser->last_render_scale == scale;
+    if (clip_videos) {
+        GPtrArray *vboxes = g_ptr_array_new();
+        ns_layout_collect_videos(browser->layout, vboxes);
+        gboolean any = FALSE;
+        for (guint vi = 0; vi < vboxes->len; vi++) {
+            const ns_box *vb = g_ptr_array_index(vboxes, vi);
+            if (!vb->media || !vb->media->video) continue;
+            cairo_rectangle(cr, vb->x, vb->y,
+                            vb->content_width, vb->content_height);
+            any = TRUE;
+        }
+        g_ptr_array_free(vboxes, TRUE);
+        if (any)
+            cairo_clip(cr);
+    }
+    browser->last_scroll_x = scroll_x;
+    browser->last_scroll_y = scroll_y;
+    browser->last_render_w = width;
+    browser->last_render_h = height;
+    browser->last_render_scale = scale;
+    browser->last_frame_params_valid = TRUE;
+    browser->video_only_frame = FALSE;
+
     ns_paint_set_js(browser->js);
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     const char *highlight = browser->search_query;
+    gint64 paint_t0 = g_get_monotonic_time();
     if (ns_selection_has_range(&browser->selection))
         ns_paint_with_selection(cr, browser->layout, highlight,
                                 &browser->selection);
     else
         ns_paint(cr, browser->layout, highlight);
+    if (g_getenv("NS_PROFILE"))
+        g_printerr("[profile] paint %s %6.1fms %dx%d\n",
+                   clip_videos ? "clip" : "full",
+                   (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
+                   width, height);
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);
