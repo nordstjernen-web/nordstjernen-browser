@@ -35,6 +35,8 @@ typedef struct {
     GtkWidget      *reload;
     GtkWidget      *spinner;
     GtkWidget      *status;
+    char           *status_base;
+    gboolean        webgl_active;
     GtkWidget      *bookmarks_button;
     guint           mail_timer;
     char           *home_url;
@@ -66,6 +68,7 @@ procwindow_free(gpointer data)
         g_source_remove(pw->mail_timer);
     g_free(pw->session_path);
     g_free(pw->home_url);
+    g_free(pw->status_base);
     if (pw->bookmarks)
         ns_bookmarks_free(pw->bookmarks);
     g_free(pw);
@@ -528,6 +531,21 @@ pw_start_download(ProcWindow *pw, const char *url, const char *suggested)
 
 
 static void
+pw_render_status(ProcWindow *pw)
+{
+    const char *base = pw->status_base ? pw->status_base : "";
+    if (pw->webgl_active) {
+        char *composed = *base
+            ? g_strconcat(base, " · ", ns_i18n("WebGL enabled"), NULL)
+            : g_strdup(ns_i18n("WebGL enabled"));
+        gtk_label_set_text(GTK_LABEL(pw->status), composed);
+        g_free(composed);
+    } else {
+        gtk_label_set_text(GTK_LABEL(pw->status), base);
+    }
+}
+
+static void
 on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
                gpointer user_data)
 {
@@ -556,12 +574,25 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     }
     case NS_PROC_EVT_URL:
-        if (is_current)
+        if (is_current) {
             set_address_text(pw, text);
+            pw->webgl_active = FALSE;
+            g_clear_pointer(&pw->status_base, g_free);
+            pw_render_status(pw);
+        }
         break;
     case NS_PROC_EVT_STATUS:
-        if (is_current)
-            gtk_label_set_text(GTK_LABEL(pw->status), text ? text : "");
+        if (is_current) {
+            g_free(pw->status_base);
+            pw->status_base = g_strdup(text ? text : "");
+            pw_render_status(pw);
+        }
+        break;
+    case NS_PROC_EVT_WEBGL:
+        if (is_current && !pw->webgl_active) {
+            pw->webgl_active = TRUE;
+            pw_render_status(pw);
+        }
         break;
     case NS_PROC_EVT_HISTORY:
         if (is_current) {
