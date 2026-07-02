@@ -777,11 +777,25 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
     g_ptr_array_free(vids, TRUE);
 }
 
+typedef struct {
+    ns_video   *v;
+    const char *kind;
+    double      value;
+} ns_video_emit_rec;
+
+static void
+ns_video_queue_emit(GArray *q, ns_video *v, const char *kind, double value)
+{
+    ns_video_emit_rec rec = { v, kind, value };
+    g_array_append_val(q, rec);
+}
+
 gboolean
 ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
 {
     if (!cache) return FALSE;
     gboolean changed = FALSE;
+    GArray *emits = g_array_new(FALSE, FALSE, sizeof(ns_video_emit_rec));
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, cache->by_url);
@@ -805,18 +819,18 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
 
         if (!v->meta_sent && v->duration > 0.0) {
             v->meta_sent = TRUE;
-            ns_video_emit_js(cache, v, "meta", v->duration);
+            ns_video_queue_emit(emits, v, "meta", v->duration);
             if (v->natural_width > 0)
-                ns_video_emit_js(cache, v, "vwidth", (double)v->natural_width);
+                ns_video_queue_emit(emits, v, "vwidth", (double)v->natural_width);
             if (v->natural_height > 0)
-                ns_video_emit_js(cache, v, "vheight", (double)v->natural_height);
+                ns_video_queue_emit(emits, v, "vheight", (double)v->natural_height);
         }
         if (!v->buf_sent) {
             v->buf_sent = TRUE;
             double buffered_end = ns_video_player_buffered_end(v->player);
             if (buffered_end <= 0.0) buffered_end = v->duration;
             if (buffered_end > 0.0)
-                ns_video_emit_js(cache, v, "buf", buffered_end);
+                ns_video_queue_emit(emits, v, "buf", buffered_end);
         }
         if (!v->playing) continue;
 
@@ -837,13 +851,13 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             changed = TRUE;
             if (v->stalled) {
                 v->stalled = FALSE;
-                ns_video_emit_js(cache, v, "resumed", t);
+                ns_video_queue_emit(emits, v, "resumed", t);
             }
         }
         v->cur_time = t;
         if (t - v->last_emit_time >= 0.20 || ended) {
             v->last_emit_time = t;
-            ns_video_emit_js(cache, v, "pos", v->cur_time);
+            ns_video_queue_emit(emits, v, "pos", v->cur_time);
         }
         if (ended) {
             if (ns_video_url_is_growing_stream(v->url)) {
@@ -854,7 +868,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
                 v->base_us = now_us - (gint64)(edge * 1e6);
                 if (!v->stalled) {
                     v->stalled = TRUE;
-                    ns_video_emit_js(cache, v, "waiting", edge);
+                    ns_video_queue_emit(emits, v, "waiting", edge);
                 }
                 ns_video_refresh_growing_stream(cache, v, now_us);
                 continue;
@@ -863,9 +877,15 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->ended = TRUE;
             v->cur_time = v->duration;
             ns_video_audio_stop(cache, v);
-            ns_video_emit_js(cache, v, "ended", v->duration);
+            ns_video_queue_emit(emits, v, "ended", v->duration);
         }
     }
+    for (guint ei = 0; ei < emits->len; ei++) {
+        ns_video_emit_rec *rec =
+            &g_array_index(emits, ns_video_emit_rec, ei);
+        ns_video_emit_js(cache, rec->v, rec->kind, rec->value);
+    }
+    g_array_free(emits, TRUE);
     return changed;
 }
 
