@@ -9,6 +9,7 @@
 
 #define NS_SBX_PREFIX "nsbx1:"
 #define NS_SBX_ITERS  600000
+#define NS_SBX_ITERS_MAX  10000000
 #define NS_SBX_SALT   16
 #define NS_SBX_IV     12
 #define NS_SBX_TAG    16
@@ -81,16 +82,16 @@ ns_secretbox_open(const char *blob, const char *password)
     char **f = g_strsplit(blob + strlen(NS_SBX_PREFIX), ":", -1);
     char *out = NULL;
     if (g_strv_length(f) == 5) {
-        int iters = atoi(f[0]);
+        gint64 iters = g_ascii_strtoll(f[0], NULL, 10);
         gsize slen = 0, ivlen = 0, ctlen = 0, taglen = 0;
         guint8 *salt = g_base64_decode(f[1], &slen);
         guint8 *iv   = g_base64_decode(f[2], &ivlen);
         guint8 *ct   = g_base64_decode(f[3], &ctlen);
         guint8 *tag  = g_base64_decode(f[4], &taglen);
-        if (iters > 0 && slen == NS_SBX_SALT && ivlen == NS_SBX_IV &&
-            taglen == NS_SBX_TAG) {
+        if (iters > 0 && iters <= NS_SBX_ITERS_MAX && slen == NS_SBX_SALT &&
+            ivlen == NS_SBX_IV && taglen == NS_SBX_TAG) {
             guint8 key[NS_SBX_KEY];
-            if (derive_key(password, salt, slen, iters, key)) {
+            if (derive_key(password, salt, slen, (int)iters, key)) {
                 guint8 *pt = g_malloc(ctlen + 1);
                 int len = 0, ptlen = 0;
                 gboolean ok = FALSE;
