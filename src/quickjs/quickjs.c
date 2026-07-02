@@ -26362,6 +26362,14 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                     var_name = js_parse_destructuring_var(s, tok, is_arg);
                     if (var_name == JS_ATOM_NULL)
                         goto prop_error;
+                    if (tok == TOK_VAR) {
+                        emit_op(s, OP_scope_get_var);
+                        emit_atom(s, var_name);
+                        emit_u16(s, s->cur_func->scope_level);
+                        JS_FreeAtom(s->ctx, var_name);
+                        var_name = JS_ATOM_NULL;
+                        goto lvalue;
+                    }
                 } else {
                     if (js_parse_left_hand_side_expr(s))
                         goto prop_error;
