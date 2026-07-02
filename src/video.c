@@ -7,6 +7,8 @@
 #include "video.h"
 
 #include <gio/gio.h>
+#include <glib/gstdio.h>
+#include <unistd.h>
 #include <math.h>
 #include <stdarg.h>
 #include <string.h>
@@ -44,6 +46,12 @@ ns_video_free(gpointer p)
     ns_video *v = p;
     if (!v) return;
     g_free(v->url);
+    g_free(v->audio_url);
+    if (v->audio_file) {
+        if (g_str_has_prefix(v->audio_file, "file://"))
+            g_unlink(v->audio_file + 7);
+        g_free(v->audio_file);
+    }
     g_free(v->token);
     ns_texture_unref(v->poster_texture);
     ns_texture_unref(v->frame_texture);
@@ -113,12 +121,14 @@ ns_video_url_audio_safe(const char *url)
 static void
 ns_video_audio_start(ns_video_cache *cache, ns_video *v)
 {
-    if (!cache || !cache->audio_cb || !v || v->muted || !v->has_audio) return;
-    if (!ns_video_url_audio_safe(v->url)) return;
+    if (!cache || !cache->audio_cb || !v || v->muted) return;
+    if (!v->has_audio && !v->audio_file) return;
+    const char *src = v->audio_file ? v->audio_file : v->url;
+    if (!ns_video_url_audio_safe(src)) return;
     if (!v->token)
         v->token = g_strdup_printf("nv%u", ++cache->next_token);
     if (!v->audio_opened) {
-        ns_video_emit_audio(cache, "open %s %s", v->token, v->url);
+        ns_video_emit_audio(cache, "open %s %s", v->token, src);
         if (v->loop)
             ns_video_emit_audio(cache, "loop %s 1", v->token);
         v->audio_opened = TRUE;
@@ -267,6 +277,32 @@ ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
 }
 
 gboolean
+ns_video_cache_set_node_muted(ns_video_cache *cache, const void *dom_node,
+                              gboolean muted)
+{
+    if (!cache || !dom_node) return FALSE;
+    ns_video *v = NULL;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *cand = val;
+        if (cand->dom_node == dom_node && !cand->is_camera) { v = cand; break; }
+    }
+    if (!v) return FALSE;
+    if (v->muted == muted) return TRUE;
+    v->muted = muted;
+    if (muted) {
+        ns_video_audio_pause(cache, v);
+    } else if (v->playing) {
+        ns_video_audio_start(cache, v);
+        if (v->audio_opened && v->cur_time > 0)
+            ns_video_emit_audio(cache, "seek %s %.3f", v->token, v->cur_time);
+    }
+    return TRUE;
+}
+
+gboolean
 ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return FALSE;
@@ -365,6 +401,43 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
         ns_video_play(v, g_get_monotonic_time());
         ns_video_audio_start(pending->cache, v);
     }
+}
+
+static void
+on_msaudio_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
+{
+    (void)src;
+    ns_pending *pending = user_data;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    ns_video_cache *cache = pending->cache;
+    ns_video *v = pending->video;
+    if (!pending->dead && resp && !resp->error && resp->body &&
+        resp->body->len > 0 && resp->body->len <= NS_VIDEO_MAX_BYTES) {
+        char *dir = g_build_filename(g_get_user_cache_dir(),
+                                     "nordstjernen", "msaudio", NULL);
+        g_mkdir_with_parents(dir, 0700);
+        char *path = g_strdup_printf("%s/a%d-%u.dat", dir,
+                                     (int)getpid(), ++cache->next_token);
+        if (g_file_set_contents(path, (const char *)resp->body->data,
+                                (gssize)resp->body->len, NULL)) {
+            g_free(v->audio_file);
+            v->audio_file = g_strdup_printf("file://%s", path);
+            if (v->playing && !v->muted && !v->audio_opened) {
+                ns_video_audio_start(cache, v);
+                if (v->audio_opened && v->cur_time > 0)
+                    ns_video_emit_audio(cache, "seek %s %.3f",
+                                        v->token, v->cur_time);
+            }
+        }
+        g_free(path);
+        g_free(dir);
+    }
+    g_clear_error(&err);
+    if (resp) ns_response_free(resp);
+    if (!pending->dead)
+        g_ptr_array_remove_fast(cache->pending, pending);
+    g_free(pending);
 }
 
 static void
@@ -479,6 +552,17 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     pv->cache = cache;
     g_ptr_array_add(cache->pending, pv);
     ns_net_fetch_async(abs_url, cache->base_url, NULL, on_video_fetched, pv);
+
+    const char *asrc = ns_element_get_attr(dom, "data-audio-src");
+    if (asrc && *asrc && g_str_has_prefix(asrc, "blob:")) {
+        v->audio_url = g_strdup(asrc);
+        ns_pending *pa = g_new0(ns_pending, 1);
+        pa->video = v;
+        pa->cache = cache;
+        g_ptr_array_add(cache->pending, pa);
+        ns_net_fetch_async(asrc, cache->base_url, NULL,
+                           on_msaudio_fetched, pa);
+    }
 
     if (poster_abs && *poster_abs) {
         ns_pending *pp = g_new0(ns_pending, 1);

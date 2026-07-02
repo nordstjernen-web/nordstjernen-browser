@@ -30044,6 +30044,35 @@ ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_media_get_muted(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_muted");
+    if (!JS_IsUndefined(v)) {
+        gboolean m = JS_ToBool(ctx, v) ? TRUE : FALSE;
+        JS_FreeValue(ctx, v);
+        return JS_NewBool(ctx, m);
+    }
+    JS_FreeValue(ctx, v);
+    const ns_node *n = ns_unwrap_element(this_val);
+    return JS_NewBool(ctx, n && ns_element_get_attr(n, "muted") != NULL);
+}
+
+static JSValue
+ns_media_set_muted(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    gboolean m = JS_ToBool(ctx, val) ? TRUE : FALSE;
+    JS_SetPropertyStr(ctx, this_val, "_nd_muted", JS_NewBool(ctx, m));
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (js && el) {
+        if (js->media_muted_cb)
+            js->media_muted_cb(el, m, js->media_muted_user_data);
+        ns_js_dispatch_event(js, el, "volumechange", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
                           JSValueConst val)
 {
@@ -31010,7 +31039,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("volume",            ns_element_get_one_int,           ns_element_noop_set),
     JS_CGETSET_DEF("playbackRate",      ns_element_get_one_int,           ns_element_noop_set),
-    JS_CGETSET_DEF("muted",             ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("muted",             ns_media_get_muted,               ns_media_set_muted),
     JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
     JS_CGETSET_DEF("networkState",      ns_media_get_networkState,        ns_element_noop_set),
     JS_CGETSET_DEF("seekable",          ns_media_get_seekable_ranges,     ns_element_noop_set),
@@ -40953,6 +40982,14 @@ ns_js_set_media_play_cb(ns_js *js, ns_js_media_play_cb cb, gpointer user_data)
     if (!js) return;
     js->media_play_cb = cb;
     js->media_play_user_data = user_data;
+}
+
+void
+ns_js_set_media_muted_cb(ns_js *js, ns_js_media_muted_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->media_muted_cb = cb;
+    js->media_muted_user_data = user_data;
 }
 
 static void

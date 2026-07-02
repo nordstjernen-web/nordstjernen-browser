@@ -701,7 +701,7 @@
         return false;
     }
 
-    function ndRetargetMediaSourceUrl(from, to) {
+    function ndRetargetMediaSourceUrl(from, to, audioUrl) {
         if (!from || !to || from === to ||
             !global.document || !global.document.querySelectorAll)
             return;
@@ -716,6 +716,8 @@
             try { prop = node.src || ''; } catch (e) {}
             if (attr === from || prop === from) {
                 try {
+                    if (audioUrl && node.setAttribute)
+                        node.setAttribute('data-audio-src', audioUrl);
                     if (node.setAttribute) node.setAttribute('src', to);
                     else node.src = to;
                     if (typeof node.load === 'function') node.load();
@@ -792,6 +794,14 @@
                 parts.push(selected._parts[j]);
         }
         var blob = new Blob(parts, { type: type || 'application/octet-stream' });
+        var audioSel = null;
+        for (var ai = 0; ai < this.sourceBuffers.length; ai++) {
+            var ab = this.sourceBuffers.item(ai);
+            if (ab && ab !== selected && ab._type.indexOf('audio/') === 0) {
+                audioSel = ab;
+                break;
+            }
+        }
         var oldUrl = this._ndUrl;
         var eos = this.readyState === 'ended';
         if (this._ndObjectURL &&
@@ -805,6 +815,12 @@
         var ok = !!global.__ndUpdateBlobURL(this._ndUrl, blob);
         if (this._ndObjectURL && this._ndObjectURL !== this._ndUrl)
             global.__ndUpdateBlobURL(this._ndObjectURL, blob);
+        if (audioSel && audioSel._parts.length && this._ndObjectURL) {
+            var audioBlob = new Blob(audioSel._parts,
+                                     { type: audioSel._type });
+            this._ndAudioUrl = this._ndObjectURL + '#ndmsa=' + this._ndVersion;
+            global.__ndUpdateBlobURL(this._ndAudioUrl, audioBlob);
+        }
         this._ndScheduleRetarget(oldUrl);
         return ok;
     };
@@ -821,7 +837,7 @@
             var from = this._ndRetargetFrom || oldUrl;
             this._ndRetargetFrom = '';
             this._ndLastRetarget = now;
-            ndRetargetMediaSourceUrl(from, this._ndUrl);
+            ndRetargetMediaSourceUrl(from, this._ndUrl, this._ndAudioUrl);
             return;
         }
         if (!this._ndRetargetFrom) this._ndRetargetFrom = oldUrl;
@@ -831,7 +847,7 @@
             var deferredFrom = self._ndRetargetFrom;
             self._ndRetargetFrom = '';
             self._ndLastRetarget = Date.now();
-            ndRetargetMediaSourceUrl(deferredFrom, self._ndUrl);
+            ndRetargetMediaSourceUrl(deferredFrom, self._ndUrl, self._ndAudioUrl);
         }, wait);
     };
 

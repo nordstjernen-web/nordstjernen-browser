@@ -33,6 +33,8 @@ typedef struct ns_video {
     gboolean     muted;
     gboolean     has_audio;
     gboolean     audio_opened;
+    char        *audio_url;
+    char        *audio_file;
     char        *token;
     gboolean     playing;
     gboolean     ended;
@@ -72,6 +74,8 @@ gboolean ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
 gboolean ns_video_cache_set_node_playing(ns_video_cache *cache,
                                          const void *dom_node, gboolean play,
                                          gint64 now_us);
+gboolean ns_video_cache_set_node_muted(ns_video_cache *cache,
+                                       const void *dom_node, gboolean muted);
 gboolean ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us);
 gboolean ns_video_toggle(ns_video *v, gint64 now_us);
 void     ns_video_play(ns_video *v, gint64 now_us);
