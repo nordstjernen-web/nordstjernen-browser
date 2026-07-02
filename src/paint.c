@@ -26,6 +26,9 @@ typedef struct rgba {
 
 static gboolean       g_caret_visible = TRUE;
 static int            g_paint_no_cull;
+static GPtrArray     *g_paint_deferred_list;
+static int            g_paint_defer_depth;
+static const ns_box  *g_paint_flush_box;
 static ns_js         *g_paint_js;
 static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
@@ -2626,7 +2629,10 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_save(cr);
             cairo_translate(cr, sx - a->box->x, sy - a->box->y);
             g_paint_no_cull++;
+            const ns_box *saved_flush = g_paint_flush_box;
+            g_paint_flush_box = a->box;
             paint_walk(cr, a->box, highlight);
+            g_paint_flush_box = saved_flush;
             g_paint_no_cull--;
             cairo_restore(cr);
         }
@@ -4221,6 +4227,71 @@ paint_entry_cmp(const void *a, const void *b)
 }
 
 static gboolean
+box_defers_to_positioned_layer(const ns_box *b)
+{
+    return box_is_positioned(b) && box_z_index(b) >= 0;
+}
+
+static int
+dom_tree_order_cmp(const ns_node *a, const ns_node *b)
+{
+    if (!a || !b || a == b) return 0;
+    const ns_node *pa[128], *pb[128];
+    int na = 0, nb = 0;
+    for (const ns_node *n = a; n && na < 128; n = n->parent) pa[na++] = n;
+    for (const ns_node *n = b; n && nb < 128; n = n->parent) pb[nb++] = n;
+    if (na >= 128 || nb >= 128) return 0;
+    int ia = na - 1, ib = nb - 1;
+    while (ia >= 0 && ib >= 0 && pa[ia] == pb[ib]) { ia--; ib--; }
+    if (ia < 0) return -1;
+    if (ib < 0) return 1;
+    if (pa[ia]->parent != pb[ib]->parent) return 0;
+    for (const ns_node *s = pa[ia]->next_sibling; s; s = s->next_sibling)
+        if (s == pb[ib]) return -1;
+    return 1;
+}
+
+typedef struct deferred_entry {
+    const ns_box *box;
+    guint idx;
+} deferred_entry;
+
+static int
+deferred_entry_cmp(const void *va, const void *vb)
+{
+    const deferred_entry *a = va;
+    const deferred_entry *b = vb;
+    if (!a->box || !b->box)
+        return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
+    int za = box_z_index(a->box), zb = box_z_index(b->box);
+    if (za != zb) return za < zb ? -1 : 1;
+    int c = dom_tree_order_cmp(a->box->dom, b->box->dom);
+    if (c) return c;
+    return a->idx < b->idx ? -1 : a->idx > b->idx ? 1 : 0;
+}
+
+static void
+paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
+{
+    if (!list || list->len == 0) return;
+    deferred_entry entries_buf[32];
+    deferred_entry *entries = list->len <= G_N_ELEMENTS(entries_buf)
+        ? entries_buf : g_new(deferred_entry, list->len);
+    for (guint i = 0; i < list->len; i++) {
+        entries[i].box = g_ptr_array_index(list, i);
+        entries[i].idx = i;
+    }
+    qsort(entries, list->len, sizeof(deferred_entry), deferred_entry_cmp);
+    const ns_box *saved_flush = g_paint_flush_box;
+    for (guint i = 0; i < list->len; i++) {
+        g_paint_flush_box = entries[i].box;
+        paint_walk(cr, entries[i].box, highlight);
+    }
+    g_paint_flush_box = saved_flush;
+    if (entries != entries_buf) g_free(entries);
+}
+
+static gboolean
 sticky_length(const ns_css_value *v, double *out)
 {
     if (!v || v->kind != NS_CSS_V_LENGTH) return FALSE;
@@ -4671,7 +4742,9 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
         cairo_scale(tcr, k, k);
         cairo_translate(tcr, -q->bx, -q->by);
         const ns_box *saved_root = g_paint_tex_root;
+        const ns_box *saved_flush = g_paint_flush_box;
         g_paint_tex_root = q->box;
+        g_paint_flush_box = q->box;
         g_paint_no_cull++;
         if (q->own_only)
             paint_block(tcr, q->box);
@@ -4679,6 +4752,7 @@ paint_quad3(cairo_t *cr, const ns_quad3 *q, const char *highlight)
             paint_walk(tcr, q->box, highlight);
         g_paint_no_cull--;
         g_paint_tex_root = saved_root;
+        g_paint_flush_box = saved_flush;
         cairo_destroy(tcr);
         const ns_style *st = q->box->style;
         const char *filter_kw = st && st->values[NS_CSS_FILTER] &&
@@ -5078,6 +5152,13 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (g_paint_collect_stats) g_paint_stats.skipped_top++;
         return;
     }
+    if (g_paint_defer_depth > 0 && b != g_paint_flush_box &&
+        box_defers_to_positioned_layer(b)) {
+        if (!g_paint_deferred_list)
+            g_paint_deferred_list = g_ptr_array_new();
+        g_ptr_array_add(g_paint_deferred_list, (gpointer)b);
+        return;
+    }
     if (!g_paint_no_cull && g_paint_have_clip &&
         b->paint_bottom > b->paint_top) {
         if (b->paint_bottom < g_paint_clip_y0 - g_paint_cull_margin ||
@@ -5297,10 +5378,29 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     } else {
         clip_overflow = FALSE;
     }
+    gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
+                               clip_overflow || b == g_paint_flush_box;
+    GPtrArray *saved_layer_list = NULL;
+    if (own_layer_scope) {
+        saved_layer_list = g_paint_deferred_list;
+        g_paint_deferred_list = NULL;
+        g_paint_defer_depth++;
+    }
     if (has_transform || has_sticky) g_paint_no_cull++;
     for (guint i = 0; i < n_children; i++)
         paint_walk(cr, entries[i].box, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;
+    if (own_layer_scope) {
+        GPtrArray *mine = g_paint_deferred_list;
+        g_paint_deferred_list = saved_layer_list;
+        g_paint_defer_depth--;
+        if (mine) {
+            if (has_transform || has_sticky) g_paint_no_cull++;
+            paint_flush_deferred(cr, mine, highlight);
+            if (has_transform || has_sticky) g_paint_no_cull--;
+            g_ptr_array_free(mine, TRUE);
+        }
+    }
     const char *sbw_kw = b->style && b->style->values[NS_CSS_SCROLLBAR_WIDTH] &&
         b->style->values[NS_CSS_SCROLLBAR_WIDTH]->kind == NS_CSS_V_KEYWORD
         ? b->style->values[NS_CSS_SCROLLBAR_WIDTH]->u.keyword : NULL;
@@ -5522,8 +5622,11 @@ paint_top_layer(cairo_t *cr, const ns_box *root, const char *highlight)
         cairo_restore(cr);
     }
     const ns_box *saved = g_paint_skip_box;
+    const ns_box *saved_flush = g_paint_flush_box;
     g_paint_skip_box = NULL;
+    g_paint_flush_box = top;
     paint_walk(cr, top, highlight);
+    g_paint_flush_box = saved_flush;
     g_paint_skip_box = saved;
 }
 
