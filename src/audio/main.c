@@ -655,6 +655,43 @@ cmd_open(const char *token, const char *url)
 }
 
 static void
+cmd_reload(const char *token, const char *url)
+{
+    ns_audio_player *p = player_find(token);
+    if (!p) { cmd_open(token, url); return; }
+
+    char *tmp = NULL;
+    const char *path = local_path_for(url, &tmp);
+    if (!path) { emit("error %s fetch-failed", token); free(tmp); return; }
+
+    ns_audio_player fresh;
+    memset(&fresh, 0, sizeof fresh);
+    if (!load_audio(&fresh, path)) {
+        emit("error %s decode-failed", token);
+        free(tmp);
+        return;
+    }
+
+    audio_lock();
+    float *old_pcm = p->pcm;
+    char *old_tmp = p->tmp_path;
+    p->pcm = fresh.pcm;
+    p->frames = fresh.frames;
+    if (p->cursor > p->frames) p->cursor = p->frames;
+    if (p->reached_end && p->cursor < p->frames) {
+        p->reached_end = 0;
+        p->playing = 1;
+    }
+    p->tmp_path = tmp;
+    audio_unlock();
+    free(old_pcm);
+    if (old_tmp) { unlink(old_tmp); free(old_tmp); }
+
+    double len = (double)p->frames / NS_AUDIO_DEVICE_RATE;
+    emit("meta %s %.3f", token, len);
+}
+
+static void
 cmd_play(const char *token)
 {
     ns_audio_player *p = player_find(token);
@@ -841,6 +878,9 @@ main(void)
             cmd_loop(token, v ? atoi(v) : 0);
         } else if (strcmp(op, "stop") == 0) {
             cmd_stop(token);
+        } else if (strcmp(op, "reload") == 0) {
+            while (*cur == ' ') cur++;
+            cmd_reload(token, cur);
         }
     }
 

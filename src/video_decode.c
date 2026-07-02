@@ -198,6 +198,46 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     return L;
 }
 
+static double
+ns_lav_probe_end(const guint8 *bytes, gsize len)
+{
+    ns_lav probe = {0};
+    probe.data = (guint8 *)bytes;
+    probe.len = len;
+
+    double last_pts = 0.0;
+    unsigned char *iobuf = av_malloc(32768);
+    if (!iobuf) return 0.0;
+    AVIOContext *avio = avio_alloc_context(iobuf, 32768, 0, &probe,
+                                           ns_lav_read, NULL, ns_lav_seek);
+    if (!avio) { av_free(iobuf); return 0.0; }
+    AVFormatContext *fmt = avformat_alloc_context();
+    if (!fmt) { av_freep(&avio->buffer); avio_context_free(&avio); return 0.0; }
+    fmt->pb = avio;
+    if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
+        av_freep(&avio->buffer);
+        avio_context_free(&avio);
+        return 0.0;
+    }
+    int vstream = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    AVPacket *pkt = av_packet_alloc();
+    if (vstream >= 0 && pkt) {
+        AVRational tb = fmt->streams[vstream]->time_base;
+        while (av_read_frame(fmt, pkt) >= 0) {
+            if (pkt->stream_index == vstream && pkt->pts != AV_NOPTS_VALUE) {
+                double t = (double)pkt->pts * av_q2d(tb);
+                if (t > last_pts) last_pts = t;
+            }
+            av_packet_unref(pkt);
+        }
+    }
+    if (pkt) av_packet_free(&pkt);
+    avformat_close_input(&fmt);
+    av_freep(&avio->buffer);
+    avio_context_free(&avio);
+    return last_pts;
+}
+
 static void
 ns_lav_rewind(ns_lav *L)
 {
@@ -368,6 +408,43 @@ double
 ns_video_player_buffered_end(const ns_video_player *player)
 {
     return player ? player->demuxed_end : 0.0;
+}
+
+gboolean
+ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
+{
+#ifdef NS_HAVE_LIBAV
+    if (!player || !player->lav || !bytes) return FALSE;
+    ns_lav *L = player->lav;
+    if (len < L->len) return FALSE;
+    if (len == L->len) return TRUE;
+    gsize head = MIN(L->len, (gsize)4096);
+    if (memcmp(bytes, L->data, head) != 0) return FALSE;
+    if (L->len > 4096 &&
+        memcmp(bytes + L->len - 4096, L->data + L->len - 4096, 4096) != 0)
+        return FALSE;
+
+    guint8 *copy = g_try_malloc(len);
+    if (!copy) return FALSE;
+    memcpy(copy, bytes, len);
+    g_free(L->data);
+    L->data = copy;
+    L->len = len;
+    L->avio->eof_reached = 0;
+    L->avio->error = 0;
+    if (L->draining) {
+        avcodec_flush_buffers(L->vdec);
+        L->draining = FALSE;
+    }
+
+    double end = ns_lav_probe_end(bytes, len);
+    if (end > player->demuxed_end) player->demuxed_end = end;
+    if (end > player->duration) player->duration = end;
+    return TRUE;
+#else
+    (void)player; (void)bytes; (void)len;
+    return FALSE;
+#endif
 }
 
 static ns_texture *
