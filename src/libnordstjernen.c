@@ -471,6 +471,7 @@ browser_media_play(const void *node, gboolean play, gpointer ud)
     if (!b || !b->videos) return;
     ns_video_cache_set_node_playing(b->videos, node, play,
                                     g_get_monotonic_time());
+    if (b->js) ns_js_request_repaint(b->js);
 }
 
 static void
@@ -479,6 +480,7 @@ browser_media_muted(const void *node, gboolean muted, gpointer ud)
     ns_browser *b = ud;
     if (!b || !b->videos) return;
     ns_video_cache_set_node_muted(b->videos, node, muted);
+    if (b->js) ns_js_request_repaint(b->js);
 }
 
 char *

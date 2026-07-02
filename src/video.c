@@ -392,6 +392,22 @@ on_extend_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
 }
 
 static void
+ns_video_check_audio_attr(ns_video_cache *cache, ns_video *v,
+                          const ns_node *dom)
+{
+    const char *asrc = dom ? ns_element_get_attr(dom, "data-audio-src") : NULL;
+    if (!asrc || !*asrc || !g_str_has_prefix(asrc, "blob:")) return;
+    if (v->audio_url && strcmp(v->audio_url, asrc) == 0) return;
+    g_free(v->audio_url);
+    v->audio_url = g_strdup(asrc);
+    ns_pending *pa = g_new0(ns_pending, 1);
+    pa->video = v;
+    pa->cache = cache;
+    g_ptr_array_add(cache->pending, pa);
+    ns_net_fetch_async(asrc, cache->base_url, NULL, on_msaudio_fetched, pa);
+}
+
+static void
 ns_video_refresh_growing_stream(ns_video_cache *cache, ns_video *v,
                                 gint64 now_us)
 {
@@ -405,6 +421,7 @@ ns_video_refresh_growing_stream(ns_video_cache *cache, ns_video *v,
     g_ptr_array_add(cache->pending, pe);
     ns_net_fetch_async(base, cache->base_url, NULL, on_extend_fetched, pe);
     g_free(base);
+    ns_video_check_audio_attr(cache, v, v->dom_node);
 }
 
 static void
@@ -423,18 +440,7 @@ ns_video_note_stream_version(ns_video_cache *cache, ns_video *v,
     g_ptr_array_add(cache->pending, pe);
     ns_net_fetch_async(abs_url, cache->base_url, NULL,
                        on_extend_fetched, pe);
-    const char *asrc = dom ? ns_element_get_attr(dom, "data-audio-src") : NULL;
-    if (asrc && *asrc && g_str_has_prefix(asrc, "blob:") &&
-        (!v->audio_url || strcmp(v->audio_url, asrc) != 0)) {
-        g_free(v->audio_url);
-        v->audio_url = g_strdup(asrc);
-        ns_pending *pa = g_new0(ns_pending, 1);
-        pa->video = v;
-        pa->cache = cache;
-        g_ptr_array_add(cache->pending, pa);
-        ns_net_fetch_async(asrc, cache->base_url, NULL,
-                           on_msaudio_fetched, pa);
-    }
+    ns_video_check_audio_attr(cache, v, dom);
 }
 
 static void
