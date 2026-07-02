@@ -10220,9 +10220,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         box_append_child(paint_parent, abox);
         abs_box_map_build(box_map, abox);
         gboolean cb_is_icb = (cb_dom == NULL);
-        double avail = cb->content_width > 0 ? cb->content_width : viewport_width;
-        double cb_h = cb_is_icb ? ns_css_viewport_h() : cb->content_height;
-        if (cb_is_icb) avail = viewport_width;
+        double cb_pad_w = cb->content_width + cb->padding.left + cb->padding.right;
+        double cb_pad_h = cb->content_height + cb->padding.top + cb->padding.bottom;
+        double avail = cb_is_icb ? viewport_width
+                                 : (cb_pad_w > 0 ? cb_pad_w : viewport_width);
+        double cb_h = cb_is_icb ? ns_css_viewport_h() : cb_pad_h;
         const ns_style *cs = cb->style;
         ns_abs_static *st = (g_abs_static && !e.pseudo)
             ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
