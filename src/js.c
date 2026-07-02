@@ -19656,7 +19656,14 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         JS_FreeValue(js->ctx, dp);
     }
     JS_FreeValue(js->ctx, event);
-    ns_drain_mutations(js);
+    if (js->eval_depth == 0 && !js->in_pump) {
+        ns_drain_mutations(js);
+    } else {
+        if (js->mutated && js->mut_cb)
+            js->mut_cb(js->mut_user_data);
+        js->mutated = FALSE;
+        ns_storage_schedule_flush(js);
+    }
     ns_js_budget_pop(js, &bg);
     return fired;
 }
