@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<title>Container query evaluation — nearest container, named lookup, cqw</title>
+<style>
+  .outer { container-type: inline-size; container-name: outer; width: 600px; }
+  .inner { container-type: inline-size; container-name: inner; width: 200px; }
+  .card { background: red; width: 50cqw; height: 40px; }
+  @container (max-width: 300px) { .card { background: green; } }
+  @container outer (min-width: 500px) { .card { border: 5px solid blue; } }
+  @container inner (min-width: 500px) { .card { border: 5px solid black; } }
+</style>
+<div class="outer"><div class="inner"><div class="card">card</div></div></div>
+<p>Expected: green background (max-width:300 matches the 200px inner container),
+5px blue border (outer named query matches 600px), width 100px (50cqw of the
+200px inner container). A red/black/orange card or a non-100px width is a bug.</p>
