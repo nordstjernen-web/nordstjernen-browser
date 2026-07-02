@@ -686,6 +686,8 @@ ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
                                                       const char *css,
                                                       gssize len);
 void               ns_css_style_element_cache_begin(void);
+void               ns_css_relayout_enter(void);
+void               ns_css_relayout_leave(void);
 void               ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s,
                                                   const char *base_url);
 void               ns_css_stylesheet_free(ns_css_stylesheet *s);

@@ -387,6 +387,7 @@ GHashTable *
 ns_engine_compute_cascade(ns_node *doc, const char *base_url,
                           GHashTable *css_cache)
 {
+    ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
@@ -397,6 +398,7 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
     for (guint i = 0; i < page_sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(page_sheets, i));
     g_ptr_array_free(page_sheets, TRUE);
+    ns_css_relayout_leave();
     return styles;
 }
 
@@ -409,6 +411,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
                    gsize caret_byte,
                    gsize sel_anchor_byte, ns_box **out_layout)
 {
+    ns_css_relayout_enter();
     ns_css_set_doc_base(base_url);
     ns_css_style_element_cache_begin();
     GPtrArray *sheets = g_ptr_array_new();
@@ -464,6 +467,7 @@ ns_engine_relayout(ns_node *doc, const char *base_url,
     for (guint i = 0; i < sheets->len; i++)
         ns_css_stylesheet_free(g_ptr_array_index(sheets, i));
     g_ptr_array_free(sheets, TRUE);
+    ns_css_relayout_leave();
     return styles;
 }
 

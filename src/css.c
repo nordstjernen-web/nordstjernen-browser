@@ -10829,7 +10829,7 @@ void
 ns_css_stylesheet_free(ns_css_stylesheet *s)
 {
     if (!s || s->cached) return;
-    g_ptr_array_free(s->rules, TRUE);
+    if (s->rules) g_ptr_array_free(s->rules, TRUE);
     if (s->imports) g_array_free(s->imports, TRUE);
     if (s->layers) g_hash_table_destroy(s->layers);
     if (s->layer_names) g_ptr_array_free(s->layer_names, TRUE);
@@ -10837,6 +10837,14 @@ ns_css_stylesheet_free(ns_css_stylesheet *s)
     if (s->keyframes) g_array_free(s->keyframes, TRUE);
     if (s->property_rules) g_array_free(s->property_rules, TRUE);
     if (s->index) ns_css_rule_index_free(s->index);
+    s->rules = NULL;
+    s->imports = NULL;
+    s->layers = NULL;
+    s->layer_names = NULL;
+    s->font_faces = NULL;
+    s->keyframes = NULL;
+    s->property_rules = NULL;
+    s->index = NULL;
     g_free(s);
 }
 
@@ -15608,9 +15616,24 @@ ns_style_el_cached_free(gpointer data)
     g_free(e);
 }
 
+static int g_css_relayout_depth;
+
+void
+ns_css_relayout_enter(void)
+{
+    g_css_relayout_depth++;
+}
+
+void
+ns_css_relayout_leave(void)
+{
+    if (g_css_relayout_depth > 0) g_css_relayout_depth--;
+}
+
 void
 ns_css_style_element_cache_begin(void)
 {
+    if (g_css_relayout_depth > 1) return;
     if (g_style_el_cache && g_hash_table_size(g_style_el_cache) > 2048)
         g_hash_table_remove_all(g_style_el_cache);
     if (g_merged_style_cache && g_hash_table_size(g_merged_style_cache) > 64)
