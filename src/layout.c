@@ -4929,9 +4929,6 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
             }
             PangoRectangle r = { 0, (int)(top * PANGO_SCALE),
                                  (int)(w * PANGO_SCALE), (int)(h * PANGO_SCALE) };
-            if (g_getenv("NS_DBG_ATOMIC"))
-                fprintf(stderr, "[atomic-shape] box=%p off=%zu w=%.1f h=%.1f top=%.1f\n",
-                        (void *)box, a->byte_off, w, h, top);
             PangoAttribute *attr = pango_attr_shape_new(&r, &r);
             attr->start_index = (guint)a->byte_off;
             attr->end_index   = (guint)(a->byte_off + 3);
@@ -5327,11 +5324,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
 
     if (box->inline_atomics && box->inline_atomics->len > 0) {
-        if (g_getenv("NS_DBG_ATOMIC"))
-            fprintf(stderr, "[atomic-place] box=%p n=%u lines=%d ph=%.1f cw=%.1f nowrap=%d text=%.20s\n",
-                    (void *)box, box->inline_atomics->len,
-                    pango_layout_get_line_count(layout), measured,
-                    content_width, ws_nowrap, box->text ? box->text : "");
         pango_layout_set_text(layout, box->text, -1);
         double text_x0 = box->x;
         double ti = ns_text_indent_px(parent_style, content_width);
@@ -5344,11 +5336,6 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
             double nx = text_x0 + (double)pos.x / PANGO_SCALE + a->box->margin.left;
             double ny = box->y + (double)pos.y / PANGO_SCALE + a->box->margin.top;
-            if (g_getenv("NS_DBG_ATOMIC"))
-                fprintf(stderr, "[atomic-pos] box=%p off=%zu pos=(%.1f,%.1f) h=%.1f\n",
-                        (void *)box, a->byte_off,
-                        (double)pos.x / PANGO_SCALE, (double)pos.y / PANGO_SCALE,
-                        (double)pos.height / PANGO_SCALE);
             shift_box_tree(a->box, nx - a->box->x, ny - a->box->y);
         }
     }
