@@ -400,20 +400,6 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     }
 }
 
-static gboolean
-ns_nodes_share_player(const ns_node *a, const ns_node *b)
-{
-    const ns_node *anc[16];
-    int n = 0;
-    for (const ns_node *p = a; p && n < 16; p = p->parent)
-        anc[n++] = p;
-    int steps = 0;
-    for (const ns_node *p = b; p && steps < 16; p = p->parent, steps++)
-        for (int i = 0; i < n; i++)
-            if (anc[i] == p) return TRUE;
-    return FALSE;
-}
-
 static void
 ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
 {
@@ -454,7 +440,6 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
     if (!cache || !root) return;
 
     GPtrArray *vids = g_ptr_array_new();
-    GPtrArray *placeholders = g_ptr_array_new();
     ns_layout_collect_videos(root, vids);
     for (guint i = 0; i < vids->len; i++) {
         ns_box *box = g_ptr_array_index(vids, i);
@@ -476,10 +461,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
             continue;
         }
         const char *src = box->media->video_src;
-        if (!src || !*src) {
-            g_ptr_array_add(placeholders, box);
-            continue;
-        }
+        if (!src || !*src) continue;
         char *abs = g_str_has_prefix(src, "blob:") ? g_strdup(src)
                                                    : ns_url_resolve(cache->base_url, src);
         if (!abs) continue;
@@ -506,28 +488,6 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
     if (doc)
         ns_video_discover_dom(cache, doc);
 
-    if (placeholders->len > 0) {
-        for (guint i = 0; i < placeholders->len; i++) {
-            ns_box *box = g_ptr_array_index(placeholders, i);
-            if (box->media->video) continue;
-            ns_video *best = NULL;
-            GHashTableIter it;
-            gpointer key, val;
-            g_hash_table_iter_init(&it, cache->by_url);
-            while (g_hash_table_iter_next(&it, &key, &val)) {
-                ns_video *cand = val;
-                if (cand->is_camera || !cand->player || !cand->dom_node)
-                    continue;
-                if (!ns_nodes_share_player(box->dom, cand->dom_node))
-                    continue;
-                best = cand;
-                break;
-            }
-            if (best)
-                box->media->video = best;
-        }
-    }
-    g_ptr_array_free(placeholders, TRUE);
     g_ptr_array_free(vids, TRUE);
 }
 
