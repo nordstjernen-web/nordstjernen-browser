@@ -791,7 +791,7 @@ ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
     JS_FreeValue(ctx, stops);
     if (sa->len == 0) { g_array_free(sa, TRUE); return NULL; }
     g_array_sort(sa, ns_conic_stop_cmp);
-    const ns_conic_stop *cs = (const ns_conic_stop *)sa->data;
+    const ns_conic_stop *cs = &g_array_index(sa, ns_conic_stop, 0);
 
     cairo_pattern_t *pat = cairo_pattern_create_mesh();
     const int sectors = 256;
