@@ -37,8 +37,8 @@ scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pa
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
 "expected" failures, kept in sync with `-u` after each fix). As of
-this writing the full suite is 81150 test/mode combinations with 33
-unexpected errors (~99.95% pass rate excluding the intentionally
+this writing the full suite is 81150 test/mode combinations with 28
+unexpected errors (~99.97% pass rate excluding the intentionally
 skipped/excluded categories — `async`, `module`, and a handful of slow
 or out-of-scope feature areas, see `test262.conf`). Categorising the
 backlog:
@@ -58,7 +58,8 @@ backlog:
 | Class field named `get`/`set` + generator (ASI) | 2 | low | **done** |
 | Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
 | Simple-assignment computed-member `ToPropertyKey` after RHS | 4 | medium | **done** |
-| Destructuring assignment-target evaluation order | ~6 | medium | open (same family as the simple-assignment fix, bigger surface) |
+| Destructuring assignment-target evaluation order | 5 | medium | **done** |
+| Destructuring `var` binding ResolveBinding order under `with` | 1 | medium | open (same family as the with-store opcode work) |
 | Module star-export of the same namespace is unambiguous | ~5 | medium | **done** |
 | Module local export aliasing an import is not a fresh binding | 3 | medium | **done** |
 | AnnexB CallExpression assignment-target type | 7 | high | open (needs a context-aware `=` lookahead, see below) |
@@ -638,6 +639,47 @@ Covers test262
 `*-v-flag.js` subtests (12 test/mode combinations; the `matchAll`
 subtest's later `AdvanceStringIndex` assertion needed 16b on top of 16a).
 
+### 17. Destructuring assignment to a computed member converts the key before the value is read
+
+**Spec:** [`KeyedDestructuringAssignmentEvaluation`](https://tc39.es/ecma262/#sec-runtime-semantics-keyeddestructuringassignmentevaluation)
+and its iterator sibling: for `({[srcKey]: target[tgtKey]} = source)` /
+`([target[tgtKey]] = source)`, evaluating the DestructuringAssignmentTarget
+produces a reference whose computed key is *not* yet passed through
+`ToPropertyKey` — the conversion happens inside the final `PutValue`,
+i.e. observably after `GetV(value, propertyName)` reads the value from
+the source (and after a default-value initializer runs). Same
+post-[PR 2392](https://github.com/tc39/ecma262/pull/2392) ordering as
+fix #14, on the destructuring path.
+
+**Bug:** all three `get_lvalue` call sites in
+`js_parse_destructuring_element` (object property, object rest, array
+element) left `get_lvalue`'s eager `OP_to_propkey2`/`OP_to_propkey` in
+place, so a `toString`/`Symbol.toPrimitive` side effect on the target
+key ran before the source read instead of after the default value.
+
+**Fix:** factor fix #14's undo/redo into a helper pair
+(`strip_eager_propkey_conversion` / `emit_deferred_propkey_conversion`),
+call the strip right after each of the three destructuring
+`get_lvalue`s, and emit the deferred conversion (`swap; to_propkey;
+swap` over the top two stack slots) immediately before the two
+`put_lvalue`s. The target key sits untouched on the stack across the
+value fetch and default-value branch in every case (object named,
+object computed, object rest, array, array rest, `super[key]` targets),
+so the single late conversion is equivalent for all of them.
+`js_parse_assign_expr2`'s inline #14 code now uses the same helpers.
+`src/quickjs/quickjs.c`.
+
+Covers test262
+`language/expressions/assignment/destructuring/{keyed,iterator}-destructuring-property-reference-target-evaluation-order.js`
+(plain + strict) and
+`keyed-destructuring-property-reference-target-evaluation-order-with-bindings.js`
+(5 test/mode combinations). The sibling
+`language/destructuring/binding/...-with-bindings.js` failure is a
+*different* gap — `ResolveBinding` of a plain `var` target must probe
+the `with` environment before `GetV` — tracked as its own cluster in
+the table above (it needs the same with-aware store machinery as the
+"`with` SetMutableBinding re-probe" item).
+
 ## Open issues found but not fixed this round
 
 Investigated and root-caused, but left open: either out of scope for a
@@ -687,19 +729,18 @@ for the top-level await to settle — i.e. somewhere in
 parent-notification fan-out, not the linking algorithm above it. Needs
 focused, dedicated debugging time rather than a guess.
 
-**Destructuring assignment-target evaluation order**
-(`language/{expressions/assignment,destructuring/binding}/.../
-{keyed-,iterator-}destructuring-property-reference-target-evaluation-order*.js`,
-~6 subtests). Same family as fix #14 (`ToPropertyKey` of a computed
-member-expression target must happen after the corresponding value is
-read, not when the target reference is evaluated) — confirmed
-`js_parse_destructuring_element` calls the same `get_lvalue` with the
-same eager-conversion problem for its `OP_get_array_el` target case —
-but the fix needs to thread through `js_parse_destructuring_element`'s
-much larger state space (four `depth_lvalue` cases each with their own
-stack-shuffling opcodes, `tok`-vs-assignment mode, `has_ellipsis`,
-nested object/array patterns), which is a meaningfully bigger and
-riskier change than #14's single, isolated code path.
+**Destructuring `var` binding ResolveBinding order under `with`**
+(`language/destructuring/binding/keyed-destructuring-property-reference-target-evaluation-order-with-bindings.js`,
+1 subtest, noStrict). For `with (proxyEnv) { var {[k]: v} = source; }`
+the spec's `KeyedBindingInitialization` resolves the target binding
+(`ResolveBinding`, observable as a `has` trap on the `with` object)
+*before* `GetV(value, propertyName)`; the engine's binding path stores
+through `OP_scope_put_var` after the value read, so the probe fires
+last. Fixing it means resolving the reference eagerly (an
+`OP_scope_make_ref` before the value fetch) for `var` bindings inside
+`with` scopes — the same with-aware store machinery the "`with`
+SetMutableBinding re-probe" cluster needs, so it should land with that
+work rather than alone.
 
 **Text module imports** (`import value from "./x" with {type:
 "text"}`, `language/import/import-attributes/text-self.js`,

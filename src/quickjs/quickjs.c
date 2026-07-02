@@ -26042,6 +26042,32 @@ static void put_lvalue(JSParseState *s, int opcode, int scope,
     }
 }
 
+/* obj[key] = val / super[key] = val: ToPropertyKey(key) must observably
+   happen after val is evaluated (it can run arbitrary code via
+   toString/Symbol.toPrimitive), not as part of evaluating the lvalue.
+   get_lvalue emits an eager conversion for these two cases; callers that
+   need spec evaluation order undo it right after get_lvalue and redo it
+   once, immediately before put_lvalue. */
+static void strip_eager_propkey_conversion(JSParseState *s, int opcode)
+{
+    JSFunctionDef *fd = s->cur_func;
+    if (opcode != OP_get_array_el && opcode != OP_get_super_value)
+        return;
+    assert((opcode == OP_get_array_el ? OP_to_propkey2 : OP_to_propkey) ==
+           fd->byte_code.buf[fd->last_opcode_pos]);
+    fd->byte_code.size = fd->last_opcode_pos;
+    fd->last_opcode_pos = -1;
+}
+
+static void emit_deferred_propkey_conversion(JSParseState *s, int opcode)
+{
+    if (opcode != OP_get_array_el && opcode != OP_get_super_value)
+        return;
+    emit_op(s, OP_swap); /* [...obj] key val -> [...obj] val key */
+    emit_op(s, OP_to_propkey);
+    emit_op(s, OP_swap);
+}
+
 static __exception int js_parse_expr_paren(JSParseState *s)
 {
     if (js_parse_expect(s, '('))
@@ -26249,6 +26275,7 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                     if (get_lvalue(s, &opcode, &scope, &var_name,
                                    &label_lvalue, &depth_lvalue, false, '{'))
                         return -1;
+                    strip_eager_propkey_conversion(s, opcode);
                 }
                 if (s->token.val != '}') {
                     js_parse_error(s, "assignment rest property must be last");
@@ -26342,6 +26369,7 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                     if (get_lvalue(s, &opcode, &scope, &var_name,
                                    &label_lvalue, &depth_lvalue, false, '{'))
                         goto prop_error;
+                    strip_eager_propkey_conversion(s, opcode);
                     /* swap ref and lvalue object if any */
                     if (prop_name == JS_ATOM_NULL) {
                         switch(depth_lvalue) {
@@ -26454,6 +26482,7 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                 emit_label(s, label_hasval);
             }
             /* store value into lvalue object */
+            emit_deferred_propkey_conversion(s, opcode);
             put_lvalue(s, opcode, scope, var_name, label_lvalue,
                        PUT_LVALUE_NOKEEP_DEPTH,
                        (tok == TOK_CONST || tok == TOK_LET));
@@ -26534,6 +26563,7 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                                    &label_lvalue, &enum_depth, false, '[')) {
                         return -1;
                     }
+                    strip_eager_propkey_conversion(s, opcode);
                 }
                 if (has_spread) {
                     js_emit_spread_code(s, enum_depth);
@@ -26559,6 +26589,7 @@ static int js_parse_destructuring_element(JSParseState *s, int tok,
                     emit_label(s, label_hasval);
                 }
                 /* store value into lvalue object */
+                emit_deferred_propkey_conversion(s, opcode);
                 put_lvalue(s, opcode, scope, var_name,
                            label_lvalue, PUT_LVALUE_NOKEEP_DEPTH,
                            (tok == TOK_CONST || tok == TOK_LET));
@@ -27980,30 +28011,16 @@ static __exception int js_parse_assign_expr2(JSParseState *s, int parse_flags)
         if (get_lvalue(s, &opcode, &scope, &name, &label, NULL, (op != '='), op) < 0)
             return -1;
 
-        // obj[key] = val / super[key] = val: ToPropertyKey(key) must
-        // observably happen after val is evaluated (it can run arbitrary
-        // code via toString/Symbol.toPrimitive), not as part of evaluating
-        // the lvalue. get_lvalue already emitted an eager conversion for
-        // these two cases; undo it here and redo the conversion once,
-        // after the right-hand side, below.
-        if (op == '=' && (opcode == OP_get_array_el || opcode == OP_get_super_value)) {
-            JSFunctionDef *fd = s->cur_func;
-            assert((opcode == OP_get_array_el ? OP_to_propkey2 : OP_to_propkey) ==
-                   fd->byte_code.buf[fd->last_opcode_pos]);
-            fd->byte_code.size = fd->last_opcode_pos;
-            fd->last_opcode_pos = -1;
-        }
+        if (op == '=')
+            strip_eager_propkey_conversion(s, opcode);
 
         if (js_parse_assign_expr2(s, parse_flags)) {
             JS_FreeAtom(s->ctx, name);
             return -1;
         }
 
-        if (op == '=' && (opcode == OP_get_array_el || opcode == OP_get_super_value)) {
-            emit_op(s, OP_swap); // [...obj] key val -> [...obj] val key
-            emit_op(s, OP_to_propkey);
-            emit_op(s, OP_swap);
-        }
+        if (op == '=')
+            emit_deferred_propkey_conversion(s, opcode);
 
         if (op == '=') {
             if ((opcode == OP_get_ref_value || opcode == OP_scope_get_var) && name == name0) {
