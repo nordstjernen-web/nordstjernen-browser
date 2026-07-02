@@ -26,6 +26,9 @@ The `WebAssembly` namespace (`src/wasm.c`):
 | `Memory.buffer` | live `ArrayBuffer` over linear memory; detached on every grow (from JS *or* from wasm `memory.grow`) |
 | `Memory.grow(pages)` | returns the old page count |
 | `Table.get/set/grow/length` | funcref tables hand back callable wrappers; externref tables round-trip arbitrary JS values |
+| `new Memory({initial, maximum})` | standalone memory backed by staging bytes; adopted by the instance when passed as a memory import |
+| `new Table({element})` / `new Global({value, mutable}, v)` | standalone constructors; a `Global` holds `i32`/`i64`/`f32`/`f64`/`externref`/`funcref` with a mutable `value` accessor and `valueOf` |
+| Imported memories/tables/globals | a provided `Memory`'s staging bytes seed the instance memory (data segments win); a provided `Global`'s (or plain number/BigInt) current value initializes the imported global at instantiate time |
 | `CompileError`, `LinkError`, `RuntimeError` | thrown from the matching phases; `LinkError` lists every unresolved import by name |
 
 Marshalling at the JS ↔ wasm boundary:
@@ -42,15 +45,17 @@ Marshalling at the JS ↔ wasm boundary:
 
 ## What is not implemented
 
-- **Standalone `new WebAssembly.Memory/Table/Global(...)`** — throws.
-  Only module-exported memories, tables and globals exist, which is
-  what wasm-bindgen output uses.
-- **Imported memories/tables/globals** — modules that *import* these
-  fail with a `LinkError`.
+- **Live mutation of imported globals** — a `Global` passed as an
+  import is *snapshotted* at instantiate time; later `.value`
+  assignments do not propagate into the running instance (and wasm
+  writes to a mutable imported global are not visible on the JS
+  object).
+- **Ref-typed (`externref`/`funcref`) imported globals** — standalone
+  `Global`s of these types work from JS, but linking one as a module
+  import is skipped.
 - **Threads/atomics, SIMD, GC, exception handling, memory64** — off in
   the WAMR build. Pages that feature-detect get a clean
   `CompileError` and fall back.
-- **`WebAssembly.Global`** as a JS-visible object.
 
 ## Vendored runtime
 
