@@ -1519,6 +1519,46 @@ control_dim_px_clamped(const ns_style *s, ns_css_prop value_prop,
     return out;
 }
 
+static gboolean
+control_is_border_box(const ns_node *dom, const ns_style *s)
+{
+    if (s && keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box"))
+        return TRUE;
+    if (s && keyword_is(s->values[NS_CSS_BOX_SIZING], "content-box"))
+        return FALSE;
+    if (!dom || !dom->name) return FALSE;
+    if (strcmp(dom->name, "button") == 0 || strcmp(dom->name, "select") == 0)
+        return TRUE;
+    if (strcmp(dom->name, "input") != 0) return FALSE;
+    const char *type = ns_element_get_attr(dom, "type");
+    if (!type || !*type) return FALSE;
+    return g_ascii_strcasecmp(type, "submit") == 0 ||
+           g_ascii_strcasecmp(type, "reset") == 0 ||
+           g_ascii_strcasecmp(type, "button") == 0 ||
+           g_ascii_strcasecmp(type, "checkbox") == 0 ||
+           g_ascii_strcasecmp(type, "radio") == 0 ||
+           g_ascii_strcasecmp(type, "color") == 0 ||
+           g_ascii_strcasecmp(type, "search") == 0;
+}
+
+double
+ns_control_css_extra_w(const ns_node *dom, const ns_style *s)
+{
+    if (!s || control_is_border_box(dom, s)) return 0;
+    ns_edges m, p, b;
+    edges_from_style(s, 0, &m, &p, &b);
+    return p.left + p.right + b.left + b.right;
+}
+
+double
+ns_control_css_extra_h(const ns_node *dom, const ns_style *s)
+{
+    if (!s || control_is_border_box(dom, s)) return 0;
+    ns_edges m, p, b;
+    edges_from_style(s, 0, &m, &p, &b);
+    return p.top + p.bottom + b.top + b.bottom;
+}
+
 static double
 inline_attr_control_width(const ns_inline_attr *r, const ns_box *box)
 {
@@ -1527,6 +1567,7 @@ inline_attr_control_width(const ns_inline_attr *r, const ns_box *box)
     double w = control_dim_px_clamped(r->style, NS_CSS_WIDTH,
                                       NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
                                       fs, box ? box->content_width : 0);
+    if (w > 0) w += ns_control_css_extra_w(r->dom, r->style);
     return w > 0 ? w : r->box_w;
 }
 
@@ -1611,6 +1652,8 @@ emit_form_attr_sized(GArray *attrs, ns_inline_attr_kind k, gsize start, gsize en
             bh = control_dim_px_clamped(s, NS_CSS_HEIGHT,
                                         NS_CSS_MIN_HEIGHT, NS_CSS_MAX_HEIGHT,
                                         fs, 0);
+            if (bw > 0) bw += ns_control_css_extra_w(dom, s);
+            if (bh > 0) bh += ns_control_css_extra_h(dom, s);
             const ns_css_value *bg = s->values[NS_CSS_BACKGROUND_IMAGE];
             if (bg && bg->kind == NS_CSS_V_URL && bg->u.url) {
                 bg_image_src = bg->u.url;
@@ -4827,44 +4870,6 @@ apply_inline_layout_attrs(PangoAttrList *attrs, const ns_box *box)
     }
 }
 
-static double
-field_blank_cell_px(const ns_style *s)
-{
-    static GHashTable *cache;
-    double fs = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
-    const char *fam = NULL;
-    const ns_css_value *ff = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
-    if (ff && ff->kind == NS_CSS_V_KEYWORD && ff->u.keyword)
-        fam = ff->u.keyword;
-    char key[160];
-    g_snprintf(key, sizeof key, "%.2f|%s", fs, fam ? fam : "");
-    if (!cache)
-        cache = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-    double *hit = g_hash_table_lookup(cache, key);
-    if (hit) return *hit;
-
-    PangoFontMap *fm = pango_cairo_font_map_get_default();
-    PangoContext *pctx = pango_font_map_create_context(fm);
-    PangoLayout *l = pango_layout_new(pctx);
-    PangoFontDescription *fd = pango_font_description_new();
-    if (fam) pango_font_description_set_family(fd, fam);
-    pango_font_description_set_absolute_size(fd, fs * PANGO_SCALE);
-    pango_layout_set_font_description(l, fd);
-    pango_layout_set_text(l,
-        "\xc2\xa0\xc2\xa0\xc2\xa0\xc2\xa0\xc2\xa0\xc2\xa0\xc2\xa0\xc2\xa0", -1);
-    int w = 0;
-    pango_layout_get_pixel_size(l, &w, NULL);
-    pango_font_description_free(fd);
-    g_object_unref(l);
-    g_object_unref(pctx);
-
-    double cell = w > 0 ? (double)w / 8.0 : fs * 0.5;
-    double *store = g_new(double, 1);
-    *store = cell;
-    g_hash_table_insert(cache, g_strdup(key), store);
-    return cell;
-}
-
 static gboolean
 field_attr_is_text_input(const ns_inline_attr *r)
 {
@@ -4931,7 +4936,15 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
         }
     }
 
-    if (!box->attrs) return;
+}
+
+void
+ns_inline_layout_set_attrs(PangoLayout *layout, PangoAttrList *list,
+                           const ns_box *box)
+{
+    pango_layout_set_attributes(layout, list);
+    if (!box || !box->attrs) return;
+    gboolean stretched = FALSE;
     for (guint i = 0; i < box->attrs->len; i++) {
         const ns_inline_attr *r =
             &g_array_index(box->attrs, ns_inline_attr, i);
@@ -4939,21 +4952,25 @@ ns_inline_apply_atomic_shapes(PangoAttrList *list, const ns_box *box)
         if (r->len < 4) continue;
         double css_w = inline_attr_control_width(r, box);
         if (css_w <= 0) continue;
-        double cell = field_blank_cell_px(r->style);
-        if (cell <= 0) continue;
-        double natural = (double)(r->len / 2) * cell;
-        double slack = css_w - natural;
-        if (slack <= cell) continue;
+        PangoRectangle p0, p1;
+        pango_layout_index_to_pos(layout, (int)r->start, &p0);
+        pango_layout_index_to_pos(layout, (int)(r->start + r->len - 2), &p1);
+        if (p1.y != p0.y) continue;
+        double prefix = (double)(p1.x - p0.x) / PANGO_SCALE;
+        if (prefix < 0) continue;
         double fs = length_or(r->style ? r->style->values[NS_CSS_FONT_SIZE]
                                        : NULL, 16);
-        double w = cell + slack;
+        double w = css_w - prefix;
+        if (w < fs * 0.4) continue;
         PangoRectangle rect = { 0, (int)(-fs * 0.8 * PANGO_SCALE),
                                 (int)(w * PANGO_SCALE), (int)(fs * PANGO_SCALE) };
         PangoAttribute *attr = pango_attr_shape_new(&rect, &rect);
         attr->start_index = (guint)(r->start + r->len - 2);
         attr->end_index   = (guint)(r->start + r->len);
         pango_attr_list_insert(list, attr);
+        stretched = TRUE;
     }
+    if (stretched) pango_layout_context_changed(layout);
 }
 
 static double
@@ -5239,7 +5256,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     ns_inline_apply_atomic_shapes(i18n, box);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
-    pango_layout_set_attributes(layout, i18n);
+    ns_inline_layout_set_attrs(layout, i18n, box);
     pango_attr_list_unref(i18n);
 
     double measured;
@@ -5362,7 +5379,7 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     ns_inline_apply_atomic_shapes(i18n, box);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
-    pango_layout_set_attributes(layout, i18n);
+    ns_inline_layout_set_attrs(layout, i18n, box);
     pango_attr_list_unref(i18n);
     const ns_css_value *ta_v =
         parent_style ? parent_style->values[NS_CSS_TEXT_ALIGN] : NULL;
@@ -5426,10 +5443,12 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
             PangoRectangle r0, r1;
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
             pango_layout_index_to_pos(layout, (int)(r->start + r->len - 1), &r1);
-            double x0 = (double)r0.x / PANGO_SCALE - 10;
-            double y0 = (double)r0.y / PANGO_SCALE - 5;
-            double x1 = (double)(r1.x + r1.width) / PANGO_SCALE + 10;
-            double y1 = (double)(r0.y + r0.height) / PANGO_SCALE + 5;
+            double bleed_x = r->box_w > 0 || r->box_h > 0 ? 0 : 10;
+            double bleed_y = r->box_w > 0 || r->box_h > 0 ? 0 : 5;
+            double x0 = (double)r0.x / PANGO_SCALE - bleed_x;
+            double y0 = (double)r0.y / PANGO_SCALE - bleed_y;
+            double x1 = (double)(r1.x + r1.width) / PANGO_SCALE + bleed_x;
+            double y1 = (double)(r0.y + r0.height) / PANGO_SCALE + bleed_y;
             double css_w = inline_attr_control_width(r, box);
             if (css_w > 0) {
                 x0 = (double)r0.x / PANGO_SCALE;
@@ -5594,7 +5613,7 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
     ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
     apply_inline_spacing(i18n, parent_style, box->text);
     apply_inline_layout_attrs(i18n, box);
-    pango_layout_set_attributes(layout, i18n);
+    ns_inline_layout_set_attrs(layout, i18n, box);
     pango_attr_list_unref(i18n);
     return layout;
 }
@@ -6106,7 +6125,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         ns_inline_apply_atomic_shapes(i18n, box);
         apply_inline_spacing(i18n, parent_style, box->text);
         apply_inline_layout_attrs(i18n, box);
-        pango_layout_set_attributes(layout, i18n);
+        ns_inline_layout_set_attrs(layout, i18n, box);
         pango_attr_list_unref(i18n);
         int pw, ph;
         pango_layout_get_pixel_size(layout, &pw, &ph);
@@ -6213,7 +6232,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         ns_inline_apply_atomic_shapes(i18n, box);
         apply_inline_spacing(i18n, parent_style, box->text);
         apply_inline_layout_attrs(i18n, box);
-        pango_layout_set_attributes(layout, i18n);
+        ns_inline_layout_set_attrs(layout, i18n, box);
         pango_attr_list_unref(i18n);
         int pw, ph;
         pango_layout_get_pixel_size(layout, &pw, &ph);

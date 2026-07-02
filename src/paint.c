@@ -418,6 +418,7 @@ inline_control_css_width(const ns_inline_attr *r, const ns_box *b)
     double w = inline_control_dim_px_clamped(r->style, NS_CSS_WIDTH,
                                              NS_CSS_MIN_WIDTH, NS_CSS_MAX_WIDTH,
                                              fs, b ? b->content_width : 0);
+    if (w > 0) w += ns_control_css_extra_w(r->dom, r->style);
     return w > 0 ? w : r->box_w;
 }
 
@@ -2284,7 +2285,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                                    (guint)(line0->start_index + line0->length));
     }
     paint_spell_underlines(attrs, b);
-    pango_layout_set_attributes(layout, attrs);
+    ns_inline_layout_set_attrs(layout, attrs, b);
     pango_attr_list_unref(attrs);
 
     apply_text_align(layout, s);
@@ -2328,10 +2329,12 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
             pango_layout_index_to_pos(layout,
                 (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
-            double x0 = text_x + (double)r0.x / PANGO_SCALE - 10;
-            double y0 = y_origin + (double)r0.y / PANGO_SCALE - 5;
-            double x1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE + 10;
-            double y1 = y_origin + (double)(r0.y + r0.height) / PANGO_SCALE + 5;
+            double bleed_x = r->box_w > 0 || r->box_h > 0 ? 0 : 10;
+            double bleed_y = r->box_w > 0 || r->box_h > 0 ? 0 : 5;
+            double x0 = text_x + (double)r0.x / PANGO_SCALE - bleed_x;
+            double y0 = y_origin + (double)r0.y / PANGO_SCALE - bleed_y;
+            double x1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE + bleed_x;
+            double y1 = y_origin + (double)(r0.y + r0.height) / PANGO_SCALE + bleed_y;
             double css_w = inline_control_css_width(r, b);
             if ((r->kind == NS_INLINE_INPUT_FIELD ||
                  r->kind == NS_INLINE_INPUT_FIELD_FOCUSED) && r->dom) {
@@ -2706,7 +2709,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
             attr_insert_range(attrs, a, r->start, r->len);
         }
     }
-    pango_layout_set_attributes(layout, attrs);
+    ns_inline_layout_set_attrs(layout, attrs, b);
     pango_attr_list_unref(attrs);
 
     apply_text_align(layout, s);

@@ -166,8 +166,13 @@ typedef struct ns_box {
 } ns_box;
 
 struct _PangoAttrList;
+struct _PangoLayout;
 void ns_inline_apply_atomic_shapes(struct _PangoAttrList *list, const ns_box *box);
+void ns_inline_layout_set_attrs(struct _PangoLayout *layout,
+                                struct _PangoAttrList *list, const ns_box *box);
 double ns_text_indent_px(const ns_style *s, double basis);
+double ns_control_css_extra_w(const ns_node *dom, const ns_style *s);
+double ns_control_css_extra_h(const ns_node *dom, const ns_style *s);
 
 void ns_box_free(ns_box *box);
 
