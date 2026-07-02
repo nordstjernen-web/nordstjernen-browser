@@ -595,6 +595,10 @@ pv_audio_pump(NsProcView *v, const char *commands)
         ns_proc_audio_apply_proxy_env(launcher);
         v->audio_proc = g_subprocess_launcher_spawn(launcher, &err, path, NULL);
         g_object_unref(launcher);
+        if (g_getenv("NS_DBG_AUDIO"))
+            g_printerr("[audio-pump] spawn %s -> %s (%s)\n", path,
+                       v->audio_proc ? "ok" : "FAIL",
+                       err ? err->message : "-");
         g_free(path);
         if (!v->audio_proc) {
             g_clear_error(&err);
@@ -608,6 +612,8 @@ pv_audio_pump(NsProcView *v, const char *commands)
     for (int i = 0; lines[i]; i++) {
         if (!*lines[i]) continue;
         char *line = g_strconcat(lines[i], "\n", NULL);
+        if (g_getenv("NS_DBG_AUDIO"))
+            g_printerr("[audio-pump] cmd: %s", line);
         g_output_stream_write_all(v->audio_in, line, strlen(line),
                                   NULL, NULL, NULL);
         g_free(line);

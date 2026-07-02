@@ -304,10 +304,13 @@ ns_security_sandbox_init(const char *self_exe)
     static const char *const system_read_dirs[] = {
         "/etc", "/var/lib/ca-certificates", "/var/cache/fontconfig",
         "/proc", "/sys", "/run",
-        "/dev/urandom", "/dev/null", "/dev/shm", "/dev/dri",
+        "/dev/shm", "/dev/dri",
         "/tmp/.X11-unix", "/tmp/.ICE-unix",
         NULL,
     };
+    add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE, "/dev/urandom");
+    add_path_rw(rfd, LANDLOCK_ACCESS_FS_READ_FILE |
+                     LANDLOCK_ACCESS_FS_WRITE_FILE, "/dev/null");
     for (gsize i = 0; system_exec_dirs[i]; i++)
         add_path_rw(rfd, fs_read | fs_exec, system_exec_dirs[i]);
     for (gsize i = 0; system_read_dirs[i]; i++)
