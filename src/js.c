@@ -29992,13 +29992,8 @@ ns_time_ranges_edge(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_media_get_time_ranges(JSContext *ctx, JSValueConst this_val)
+ns_media_time_ranges_for(JSContext *ctx, double dur)
 {
-    double dur = 0;
-    JSValue dv = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
-    if (JS_IsNumber(dv)) JS_ToFloat64(ctx, &dur, dv);
-    JS_FreeValue(ctx, dv);
-    if (isnan(dur) || dur <= 0) dur = 0;
     int len = dur > 0 ? 1 : 0;
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "length", JS_NewInt32(ctx, len));
@@ -30010,6 +30005,33 @@ ns_media_get_time_ranges(JSContext *ctx, JSValueConst this_val)
     JS_FreeValue(ctx, data[0]);
     JS_FreeValue(ctx, data[1]);
     return obj;
+}
+
+static double
+ns_media_prop_number(JSContext *ctx, JSValueConst this_val, const char *name)
+{
+    double out = 0;
+    JSValue v = JS_GetPropertyStr(ctx, this_val, name);
+    if (JS_IsNumber(v)) JS_ToFloat64(ctx, &out, v);
+    JS_FreeValue(ctx, v);
+    if (isnan(out) || out <= 0) out = 0;
+    return out;
+}
+
+static JSValue
+ns_media_get_seekable_ranges(JSContext *ctx, JSValueConst this_val)
+{
+    return ns_media_time_ranges_for(ctx,
+        ns_media_prop_number(ctx, this_val, "_nd_duration"));
+}
+
+static JSValue
+ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
+{
+    double end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
+    if (end <= 0)
+        end = ns_media_prop_number(ctx, this_val, "_nd_duration");
+    return ns_media_time_ranges_for(ctx, end);
 }
 
 static JSValue
@@ -30991,8 +31013,8 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("muted",             ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
     JS_CGETSET_DEF("networkState",      ns_media_get_networkState,        ns_element_noop_set),
-    JS_CGETSET_DEF("seekable",          ns_media_get_time_ranges,         ns_element_noop_set),
-    JS_CGETSET_DEF("buffered",          ns_media_get_time_ranges,         ns_element_noop_set),
+    JS_CGETSET_DEF("seekable",          ns_media_get_seekable_ranges,     ns_element_noop_set),
+    JS_CGETSET_DEF("buffered",          ns_media_get_buffered_ranges,     ns_element_noop_set),
     JS_CGETSET_DEF("played",            ns_element_get_empty_array_prop,  ns_element_noop_set),
     JS_CGETSET_DEF("textTracks",        ns_element_get_empty_array_prop,  ns_element_noop_set),
     JS_CGETSET_DEF("videoTracks",       ns_element_get_empty_array_prop,  ns_element_noop_set),
@@ -40969,6 +40991,9 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         JS_DefinePropertyValueStr(ctx, el, "videoHeight",
                                   JS_NewInt32(ctx, (int)value), JS_PROP_C_W_E);
         ns_js_dispatch_event(js, n, "resize", NULL);
+    } else if (strcmp(kind, "buf") == 0) {
+        JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
+        ns_js_dispatch_event(js, n, "progress", NULL);
     } else if (strcmp(kind, "pos") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "timeupdate", NULL);

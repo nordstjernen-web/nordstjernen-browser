@@ -614,6 +614,13 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             if (v->natural_height > 0)
                 ns_video_emit_js(cache, v, "vheight", (double)v->natural_height);
         }
+        if (!v->buf_sent) {
+            v->buf_sent = TRUE;
+            double buffered_end = ns_video_player_buffered_end(v->player);
+            if (buffered_end <= 0.0) buffered_end = v->duration;
+            if (buffered_end > 0.0)
+                ns_video_emit_js(cache, v, "buf", buffered_end);
+        }
         if (!v->playing) continue;
 
         double elapsed = (double)(now_us - v->base_us) / 1e6;

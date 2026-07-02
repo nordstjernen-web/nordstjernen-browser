@@ -43,6 +43,7 @@ struct ns_video_player {
     int         height;
     int         has_audio;
     double      duration;
+    double      demuxed_end;
     ns_texture *cur_tex;
     double      cur_time;
     ns_texture *pending_tex;
@@ -114,7 +115,7 @@ ns_lav_free(ns_lav *L)
 
 static ns_lav *
 ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
-            double *out_dur, int *out_has_audio)
+            double *out_dur, double *out_end, int *out_has_audio)
 {
     av_log_set_level(AV_LOG_QUIET);
 
@@ -177,9 +178,21 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     else if (vs->duration > 0)
         dur = (double)vs->duration * av_q2d(vs->time_base);
 
+    double last_pts = 0.0;
+    while (av_read_frame(L->fmt, L->pkt) >= 0) {
+        if (L->pkt->stream_index == L->vstream &&
+            L->pkt->pts != AV_NOPTS_VALUE) {
+            double t = (double)L->pkt->pts * av_q2d(vs->time_base);
+            if (t > last_pts) last_pts = t;
+        }
+        av_packet_unref(L->pkt);
+    }
+    av_seek_frame(L->fmt, L->vstream, 0, AVSEEK_FLAG_BACKWARD);
+
     *out_w = w;
     *out_h = h;
     *out_dur = dur;
+    *out_end = last_pts;
     *out_has_audio =
         av_find_best_stream(L->fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0) >= 0;
     return L;
@@ -283,6 +296,7 @@ ns_video_player_new(const guint8 *bytes, gsize len)
         player->height = h;
         player->has_audio = plm_get_num_audio_streams(plm) > 0;
         player->duration = plm_get_duration(plm);
+        player->demuxed_end = player->duration;
         player->cur_time = -1.0;
         player->pending_time = -1.0;
         return player;
@@ -292,7 +306,9 @@ ns_video_player_new(const guint8 *bytes, gsize len)
     if (bytes_are_matroska(bytes, len) || bytes_are_isobmff(bytes, len)) {
         int w = 0, h = 0, has_audio = 0;
         double dur = 0.0;
-        ns_lav *L = ns_lav_open(bytes, len, &w, &h, &dur, &has_audio);
+        double demuxed_end = 0.0;
+        ns_lav *L = ns_lav_open(bytes, len, &w, &h, &dur, &demuxed_end,
+                                &has_audio);
         if (!L) return NULL;
 
         ns_video_player *player = g_new0(ns_video_player, 1);
@@ -301,6 +317,7 @@ ns_video_player_new(const guint8 *bytes, gsize len)
         player->height = h;
         player->has_audio = has_audio;
         player->duration = dur;
+        player->demuxed_end = demuxed_end;
         player->cur_time = -1.0;
         player->pending_time = -1.0;
         return player;
@@ -345,6 +362,12 @@ double
 ns_video_player_duration(const ns_video_player *player)
 {
     return player ? player->duration : 0.0;
+}
+
+double
+ns_video_player_buffered_end(const ns_video_player *player)
+{
+    return player ? player->demuxed_end : 0.0;
 }
 
 static ns_texture *

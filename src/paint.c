@@ -3405,6 +3405,9 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
     cairo_translate(cr, b->x + ox, b->y + oy);
     cairo_scale(cr, sx, sy);
     cairo_set_source_surface(cr, surf, 0, 0);
+    ns_video *pv = b->media ? (ns_video *)b->media->video : NULL;
+    if (pv && pv->playing && pv->frame_texture == tex)
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_FAST);
     const ns_css_value *ir = st ? st->values[NS_CSS_IMAGE_RENDERING] : NULL;
     if (ir && ir->kind == NS_CSS_V_KEYWORD && ir->u.keyword &&
         (strcmp(ir->u.keyword, "pixelated") == 0 ||

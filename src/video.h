@@ -37,6 +37,7 @@ typedef struct ns_video {
     gboolean     playing;
     gboolean     ended;
     gboolean     meta_sent;
+    gboolean     buf_sent;
     gint64       base_us;
     double       cur_time;
     double       prev_tick_time;
