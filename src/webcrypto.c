@@ -303,7 +303,8 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
 static BIGNUM *
 ns_crypto_bn(const guint8 *b, gsize len)
 {
-    return (b && len) ? BN_bin2bn(b, (int)len, NULL) : NULL;
+    return (b && len && len <= (gsize)G_MAXINT) ? BN_bin2bn(b, (int)len, NULL)
+                                                : NULL;
 }
 
 ns_crypto_key *
@@ -801,7 +802,8 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
     gsize ct_len = len;
     guint8 tagbuf[16];
 
-    if (!ctx || len > (gsize)G_MAXINT - 64 || p->aad_len > (gsize)G_MAXINT)
+    if (!ctx || len > (gsize)G_MAXINT - 64 || p->aad_len > (gsize)G_MAXINT ||
+        p->iv_len > (gsize)G_MAXINT)
         goto fail;
     out = g_malloc(len + 32 + (gsize)tag_len);
 
@@ -949,6 +951,10 @@ ns_crypto_pbkdf2(const ns_crypto_key *k, const ns_crypto_params *p, int length_b
     if (!md || length_bits <= 0) { if (err) *err = g_strdup("OperationError: PBKDF2"); return NULL; }
     if (p->iterations <= 0) {
         if (err) *err = g_strdup("OperationError: PBKDF2 iterations must be positive");
+        return NULL;
+    }
+    if (k->raw_len > (gsize)G_MAXINT || p->salt_len > (gsize)G_MAXINT) {
+        if (err) *err = g_strdup("OperationError: PBKDF2 input too large");
         return NULL;
     }
     gsize n = (gsize)length_bits / 8;
