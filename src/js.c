@@ -30064,6 +30064,34 @@ ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
 }
 
 static JSValue
+ns_media_get_volume(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_volume");
+    if (JS_IsNumber(v)) return v;
+    JS_FreeValue(ctx, v);
+    return JS_NewFloat64(ctx, 1.0);
+}
+
+static JSValue
+ns_media_set_volume(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    double vol = 1.0;
+    if (JS_ToFloat64(ctx, &vol, val)) return JS_EXCEPTION;
+    if (isnan(vol)) vol = 1.0;
+    if (vol < 0) vol = 0;
+    if (vol > 1) vol = 1;
+    JS_SetPropertyStr(ctx, this_val, "_nd_volume", JS_NewFloat64(ctx, vol));
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (js && el) {
+        if (js->media_volume_cb)
+            js->media_volume_cb(el, vol, js->media_volume_user_data);
+        ns_js_dispatch_event(js, el, "volumechange", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_media_get_muted(JSContext *ctx, JSValueConst this_val)
 {
     JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_muted");
@@ -31057,7 +31085,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("paused",            ns_media_get_paused,              ns_element_noop_set),
     JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
     JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
-    JS_CGETSET_DEF("volume",            ns_element_get_one_int,           ns_element_noop_set),
+    JS_CGETSET_DEF("volume",            ns_media_get_volume,              ns_media_set_volume),
     JS_CGETSET_DEF("playbackRate",      ns_element_get_one_int,           ns_element_noop_set),
     JS_CGETSET_DEF("muted",             ns_media_get_muted,               ns_media_set_muted),
     JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
@@ -41020,6 +41048,15 @@ ns_js_set_mse_cb(ns_js *js, ns_js_mse_cb cb, gpointer user_data)
     if (!js) return;
     js->mse_cb = cb;
     js->mse_user_data = user_data;
+}
+
+void
+ns_js_set_media_volume_cb(ns_js *js, ns_js_media_volume_cb cb,
+                          gpointer user_data)
+{
+    if (!js) return;
+    js->media_volume_cb = cb;
+    js->media_volume_user_data = user_data;
 }
 
 static JSValue

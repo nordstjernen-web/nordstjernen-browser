@@ -309,6 +309,23 @@ ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
 }
 
 gboolean
+ns_video_cache_set_node_volume(ns_video_cache *cache, const void *dom_node,
+                               double volume)
+{
+    if (!cache || !dom_node) return FALSE;
+    ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
+    if (!v) return FALSE;
+    if (v->token && v->audio_opened)
+        ns_video_emit_audio(cache, "volume %s %.3f", v->token, volume);
+    if (volume > 0 && !v->muted && v->playing && !v->audio_opened) {
+        ns_video_audio_start(cache, v);
+        if (v->audio_opened && v->cur_time > 0)
+            ns_video_emit_audio(cache, "seek %s %.3f", v->token, v->cur_time);
+    }
+    return TRUE;
+}
+
+gboolean
 ns_video_cache_set_node_muted(ns_video_cache *cache, const void *dom_node,
                               gboolean muted)
 {

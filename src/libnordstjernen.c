@@ -484,6 +484,15 @@ browser_media_muted(const void *node, gboolean muted, gpointer ud)
 }
 
 static void
+browser_media_volume(const void *node, double volume, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->videos) return;
+    ns_video_cache_set_node_volume(b->videos, node, volume);
+    if (b->js) ns_js_request_repaint(b->js);
+}
+
+static void
 browser_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
                  gboolean eos, gpointer ud)
 {
@@ -783,6 +792,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_media_play_cb(b->js, browser_media_play, b);
         ns_js_set_media_muted_cb(b->js, browser_media_muted, b);
         ns_js_set_mse_cb(b->js, browser_mse_data, b);
+        ns_js_set_media_volume_cb(b->js, browser_media_volume, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         ns_js_run_scripts_in_doc(b->js, doc, base);
