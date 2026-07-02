@@ -397,6 +397,9 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
                                    resp->body->data, resp->body->len);
 
     if (v->playing) {
+        if (v->base_us == 0)
+            v->base_us = g_get_monotonic_time()
+                       - (gint64)(v->cur_time * 1e6);
         ns_video_audio_start(pending->cache, v);
         if (v->audio_opened && v->cur_time > 0)
             ns_video_emit_audio(pending->cache, "seek %s %.3f",
