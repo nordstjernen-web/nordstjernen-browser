@@ -2193,6 +2193,24 @@ ns_browser_release(ns_browser *browser)
     return changed;
 }
 
+static void
+browser_video_click_toggle(ns_browser *browser, int x, int y)
+{
+    if (!browser || !browser->layout || !browser->videos) return;
+    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
+    for (const ns_box *b = hit; b; b = b->parent) {
+        if (!b->media || !b->media->video) continue;
+        ns_video *iv = b->media->video;
+        if (iv->is_camera || !iv->player) return;
+        if (browser->js && b->dom &&
+            ns_js_node_has_click_handler(browser->js, b->dom))
+            return;
+        ns_video_cache_toggle(browser->videos, iv, g_get_monotonic_time());
+        browser->dirty = TRUE;
+        return;
+    }
+}
+
 char *
 ns_browser_click(ns_browser *browser, int x, int y, int mods)
 {
@@ -2206,7 +2224,10 @@ ns_browser_click(ns_browser *browser, int x, int y, int mods)
         return nav;
     }
     free(nav);
-    return ns_browser_release_click(browser, NULL);
+    char *out = ns_browser_release_click(browser, NULL);
+    if (!out || !*out)
+        browser_video_click_toggle(browser, x, y);
+    return out;
 }
 
 static void

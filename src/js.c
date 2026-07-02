@@ -19675,6 +19675,19 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     return fired;
 }
 
+static gboolean ns_path_has_active_listener(ns_js *js, const ns_node *target,
+                                            const char *type);
+
+gboolean
+ns_js_node_has_click_handler(ns_js *js, const ns_node *target)
+{
+    if (!js || !target) return FALSE;
+    return ns_path_has_active_listener(js, target, "click") ||
+           ns_path_has_active_listener(js, target, "pointerdown") ||
+           ns_path_has_active_listener(js, target, "mousedown") ||
+           ns_path_has_active_listener(js, target, "touchstart");
+}
+
 static gboolean
 ns_path_has_active_listener(ns_js *js, const ns_node *target, const char *type)
 {
