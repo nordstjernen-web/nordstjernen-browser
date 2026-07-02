@@ -1614,12 +1614,34 @@ style_has_visible_control_box(const ns_style *s)
 }
 
 static gboolean
+control_style_strips_chrome(const ns_style *s)
+{
+    static const ns_css_prop styles_p[4] = {
+        NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+        NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE,
+    };
+    static const ns_css_prop widths_p[4] = {
+        NS_CSS_BORDER_TOP_WIDTH, NS_CSS_BORDER_RIGHT_WIDTH,
+        NS_CSS_BORDER_BOTTOM_WIDTH, NS_CSS_BORDER_LEFT_WIDTH,
+    };
+    if (!s) return FALSE;
+    (void)widths_p;
+    for (int i = 0; i < 4; i++) {
+        const ns_css_value *st = s->values[styles_p[i]];
+        if (!keyword_is(st, "none") && !keyword_is(st, "hidden"))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
 control_prefers_css_chrome(ns_inline_attr_kind k, const ns_node *dom,
                            const ns_style *s)
 {
     if (!dom || !s) return FALSE;
     if (keyword_is(s->values[NS_CSS_APPEARANCE], "none"))
         return TRUE;
+    if (control_style_strips_chrome(s)) return TRUE;
     if (style_has_visible_control_box(s)) return TRUE;
     if (!ns_element_get_attr(dom, "class")) return FALSE;
     const ns_css_value *d = s->values[NS_CSS_DISPLAY];
@@ -7243,6 +7265,8 @@ layout_flex_row(ns_box *box, double cw,
         }
     }
     if (min_cross > explicit_cross) explicit_cross = min_cross;
+    if (explicit_cross <= 0 && box->definite_height > 0)
+        explicit_cross = box->definite_height;
 
     GPtrArray *items = g_ptr_array_new();
     for (ns_box *c = box->first_child; c; c = c->next_sibling)
@@ -10242,8 +10266,13 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         gboolean has_explicit_height = ahv &&
             (ahv->kind == NS_CSS_V_LENGTH || ahv->kind == NS_CSS_V_CALC);
         if (has_explicit_height && height_is_percent(ahv) &&
-            cb_h > 0)
-            abox->content_height = cb_h;
+            cb_h > 0) {
+            double pre_h = resolve_height_with_basis(ahv, avail, cb_h, -1);
+            if (pre_h > 0) {
+                abox->content_height = pre_h;
+                abox->definite_height = pre_h;
+            }
+        }
         layout_box(abox, layout_w, cs);
         if (!stretch_w && !has_explicit_width && abox->kind == NS_BOX_BLOCK) {
             double fit = estimate_natural_width(abox, avail);
