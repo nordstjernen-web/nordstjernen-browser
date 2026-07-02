@@ -803,8 +803,34 @@
         var ok = !!global.__ndUpdateBlobURL(this._ndUrl, blob);
         if (this._ndObjectURL && this._ndObjectURL !== this._ndUrl)
             global.__ndUpdateBlobURL(this._ndObjectURL, blob);
-        ndRetargetMediaSourceUrl(oldUrl, this._ndUrl);
+        this._ndScheduleRetarget(oldUrl);
         return ok;
+    };
+    MediaSource.prototype._ndScheduleRetarget = function (oldUrl) {
+        var self = this;
+        var now = Date.now();
+        var last = this._ndLastRetarget || 0;
+        var wait = 5000 - (now - last);
+        if (this.readyState === 'ended' || !last || wait <= 0) {
+            if (this._ndRetargetTimer) {
+                clearTimeout(this._ndRetargetTimer);
+                this._ndRetargetTimer = 0;
+            }
+            var from = this._ndRetargetFrom || oldUrl;
+            this._ndRetargetFrom = '';
+            this._ndLastRetarget = now;
+            ndRetargetMediaSourceUrl(from, this._ndUrl);
+            return;
+        }
+        if (!this._ndRetargetFrom) this._ndRetargetFrom = oldUrl;
+        if (this._ndRetargetTimer) return;
+        this._ndRetargetTimer = setTimeout(function () {
+            self._ndRetargetTimer = 0;
+            var deferredFrom = self._ndRetargetFrom;
+            self._ndRetargetFrom = '';
+            self._ndLastRetarget = Date.now();
+            ndRetargetMediaSourceUrl(deferredFrom, self._ndUrl);
+        }, wait);
     };
 
     function SourceBuffer(mediaSource, type) {
