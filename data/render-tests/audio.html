@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Audio test</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; max-width: 640px; }
+  section { border: 1px solid #ccc; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
+  h2 { margin: 0 0 8px; font-size: 16px; }
+  button { margin-right: 8px; padding: 4px 14px; }
+  #log { font-family: monospace; font-size: 12px; white-space: pre-wrap;
+         background: #f4f4f4; padding: 8px; min-height: 5em; }
+  video { display: block; margin-top: 8px; background: #000; }
+</style>
+</head>
+<body>
+<h1>Nordstjernen audio test</h1>
+
+<section>
+  <h2>1. MP3 &lt;audio&gt; — 440 Hz, 2 s</h2>
+  <audio id="a1" src="media/tone440.mp3"></audio>
+  <button onclick="run('a1','play')">Play</button>
+  <button onclick="run('a1','pause')">Pause</button>
+</section>
+
+<section>
+  <h2>2. Opus/WebM &lt;audio&gt; — 330 Hz, 2 s</h2>
+  <audio id="a2" src="media/tone330.webm"></audio>
+  <button onclick="run('a2','play')">Play</button>
+  <button onclick="run('a2','pause')">Pause</button>
+</section>
+
+<section>
+  <h2>3. VP9+Opus &lt;video&gt; — test pattern + 550 Hz, 4 s</h2>
+  <video id="v1" src="media/av550.webm" width="320" height="240"></video>
+  <button onclick="run('v1','play')">Play</button>
+  <button onclick="run('v1','pause')">Pause</button>
+  <button onclick="toggleMute('v1')">Toggle mute</button>
+</section>
+
+<section>
+  <h2>4. MSE (audio+video SourceBuffers) — same clip via MediaSource</h2>
+  <video id="v2" width="320" height="240" muted></video>
+  <button onclick="mseStart()">Start MSE</button>
+  <button onclick="run('v2','play')">Play</button>
+  <button onclick="toggleMute('v2')">Toggle mute</button>
+</section>
+
+<section>
+  <h2>Event log</h2>
+  <div id="log"></div>
+</section>
+
+<script>
+var logEl = document.getElementById('log');
+function log(s) { logEl.textContent += s + '\n'; }
+function run(id, op) {
+  var el = document.getElementById(id);
+  try {
+    var r = el[op]();
+    if (r && r.catch) r.catch(function (e) { log(id + ' ' + op + ' rejected: ' + e); });
+    log(id + ' ' + op + '() called; muted=' + el.muted);
+  } catch (e) { log(id + ' ' + op + ' threw: ' + e); }
+}
+function toggleMute(id) {
+  var el = document.getElementById(id);
+  el.muted = !el.muted;
+  log(id + ' muted=' + el.muted);
+}
+['a1','a2','v1','v2'].forEach(function (id) {
+  var el = document.getElementById(id);
+  ['play','playing','pause','ended','error','loadedmetadata','volumechange']
+    .forEach(function (t) {
+      el.addEventListener(t, function () {
+        log(id + ' event: ' + t + ' t=' + el.currentTime.toFixed(2));
+      });
+    });
+});
+function mseStart() {
+  var v = document.getElementById('v2');
+  var ms = new MediaSource();
+  v.src = URL.createObjectURL(ms);
+  ms.addEventListener('sourceopen', function () {
+    var sb = ms.addSourceBuffer('video/webm; codecs="vp9,opus"');
+    fetch('media/av550.webm')
+      .then(function (r) { return r.arrayBuffer(); })
+      .then(function (buf) {
+        sb.addEventListener('updateend', function done() {
+          sb.removeEventListener('updateend', done);
+          ms.endOfStream();
+          log('v2 MSE: appended ' + buf.byteLength + ' bytes, endOfStream');
+        });
+        sb.appendBuffer(buf);
+      })
+      .catch(function (e) { log('v2 MSE fetch failed: ' + e); });
+  });
+  log('v2 MSE started');
+}
+</script>
+</body>
+</html>

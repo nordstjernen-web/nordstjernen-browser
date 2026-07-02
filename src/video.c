@@ -32,6 +32,7 @@ struct ns_video_cache {
     ns_video_audio_cb audio_cb;
     gpointer          audio_user;
     guint             next_token;
+    guint             next_seq;
 };
 
 typedef struct ns_pending {
@@ -214,19 +215,27 @@ ns_video_toggle(ns_video *v, gint64 now_us)
     return TRUE;
 }
 
-gboolean
-ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
-                         double seconds, gint64 now_us)
+static ns_video *
+ns_video_cache_find_by_node(ns_video_cache *cache, const void *dom_node)
 {
-    if (!cache || !dom_node) return FALSE;
-    ns_video *v = NULL;
+    ns_video *best = NULL;
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_video *cand = val;
-        if (cand->dom_node == dom_node) { v = cand; break; }
+        if (cand->dom_node != dom_node || cand->is_camera) continue;
+        if (!best || cand->seq > best->seq) best = cand;
     }
+    return best;
+}
+
+gboolean
+ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
+                         double seconds, gint64 now_us)
+{
+    if (!cache || !dom_node) return FALSE;
+    ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
     if (!v || !v->player || v->is_camera) return FALSE;
 
     double t = seconds;
@@ -256,15 +265,9 @@ ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
                                 gboolean play, gint64 now_us)
 {
     if (!cache || !dom_node) return FALSE;
-    ns_video *v = NULL;
-    GHashTableIter it;
-    gpointer key, val;
-    g_hash_table_iter_init(&it, cache->by_url);
-    while (g_hash_table_iter_next(&it, &key, &val)) {
-        ns_video *cand = val;
-        if (cand->dom_node == dom_node) { v = cand; break; }
-    }
-    if (!v || !v->player || v->is_camera) return FALSE;
+    ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
+    if (!v || v->is_camera) return FALSE;
+    if (!v->player) { v->playing = play; return TRUE; }
     if (play == v->playing) return FALSE;
     if (play) {
         ns_video_play(v, now_us);
@@ -281,14 +284,7 @@ ns_video_cache_set_node_muted(ns_video_cache *cache, const void *dom_node,
                               gboolean muted)
 {
     if (!cache || !dom_node) return FALSE;
-    ns_video *v = NULL;
-    GHashTableIter it;
-    gpointer key, val;
-    g_hash_table_iter_init(&it, cache->by_url);
-    while (g_hash_table_iter_next(&it, &key, &val)) {
-        ns_video *cand = val;
-        if (cand->dom_node == dom_node && !cand->is_camera) { v = cand; break; }
-    }
+    ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
     if (!v) return FALSE;
     if (v->muted == muted) return TRUE;
     v->muted = muted;
@@ -541,6 +537,7 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->controls = attr_present(dom, "controls");
     v->muted = attr_present(dom, "muted");
     v->cur_time = 0.0;
+    v->seq = ++cache->next_seq;
     ns_video *prev = ns_video_prior_stream_version(cache, dom, abs_url);
     if (prev)
         ns_video_adopt_stream_state(cache, v, prev, g_get_monotonic_time());
