@@ -9405,10 +9405,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->y = float_y + c->margin.top;
             double saved_cw = c->content_width;
             c->content_width = cw_for_float;
-            layout_box(c, cw_for_float
-                       + c->padding.left + c->padding.right
-                       + c->border.left + c->border.right
-                       + c->margin.left + c->margin.right,
+            gboolean explicit_float_w = wv2 &&
+                (wv2->kind == NS_CSS_V_LENGTH || wv2->kind == NS_CSS_V_CALC);
+            layout_box(c, explicit_float_w
+                       ? cw
+                       : cw_for_float
+                         + c->padding.left + c->padding.right
+                         + c->border.left + c->border.right
+                         + c->margin.left + c->margin.right,
                        child_inherited);
             (void)saved_cw;
             double actual_outer = c->content_width
