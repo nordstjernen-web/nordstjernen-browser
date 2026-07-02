@@ -44,6 +44,7 @@ typedef struct ns_video {
     gint64       base_us;
     gint64       last_refresh_us;
     gboolean     stalled;
+    gint64       stall_since_us;
     double       cur_time;
     double       prev_tick_time;
     double       last_emit_time;

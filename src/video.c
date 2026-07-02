@@ -412,7 +412,7 @@ ns_video_refresh_growing_stream(ns_video_cache *cache, ns_video *v,
                                 gint64 now_us)
 {
     if (!v->url || !v->player) return;
-    if (now_us - v->last_refresh_us < G_GINT64_CONSTANT(1000000)) return;
+    if (now_us - v->last_refresh_us < G_GINT64_CONSTANT(500000)) return;
     v->last_refresh_us = now_us;
     char *base = ns_video_stream_key(v->url);
     ns_pending *pe = g_new0(ns_pending, 1);
@@ -840,6 +840,25 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         double t = elapsed;
         if (v->loop && v->duration > 0.0)
             t = fmod(elapsed, v->duration);
+
+        if (ns_video_url_is_growing_stream(v->url)) {
+            double edge = ns_video_player_buffered_end(v->player) - 0.35;
+            if (edge < 0) edge = 0;
+            if (t > edge) {
+                ns_video_refresh_growing_stream(cache, v, now_us);
+                v->base_us = now_us - (gint64)(edge * 1e6);
+                t = edge;
+                if (!v->stall_since_us)
+                    v->stall_since_us = now_us;
+                if (!v->stalled &&
+                    now_us - v->stall_since_us > G_GINT64_CONSTANT(1500000)) {
+                    v->stalled = TRUE;
+                    ns_video_queue_emit(emits, v, "waiting", edge);
+                }
+            } else {
+                v->stall_since_us = 0;
+            }
+        }
 
         if (v->loop && t + 1e-3 < v->prev_tick_time)
             ns_video_audio_resync(cache, v);
