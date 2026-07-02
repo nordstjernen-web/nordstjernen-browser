@@ -1764,7 +1764,7 @@ on_result(gpointer data)
             do_load(v, res->nav, FALSE, FALSE);
         }
         if (res->ok && res->webgl && *res->webgl)
-            pv_perm_bar_show(v, REQ_WEBGL, res->webgl);
+            post_emit(v, NS_PROC_EVT_STATUS, ns_i18n("WebGL enabled"));
         if (res->ok && res->camera && *res->camera)
             pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (res->ok && res->download && *res->download)
