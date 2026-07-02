@@ -828,7 +828,7 @@
         var self = this;
         var now = Date.now();
         var last = this._ndLastRetarget || 0;
-        var wait = 5000 - (now - last);
+        var wait = 2500 - (now - last);
         if (this.readyState === 'ended' || !last || wait <= 0) {
             if (this._ndRetargetTimer) {
                 clearTimeout(this._ndRetargetTimer);
