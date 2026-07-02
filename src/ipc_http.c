@@ -363,16 +363,26 @@ int
 http_write_response(int fd, int status, const char *content_type,
                     const char *extra_headers, const void *body, size_t n)
 {
-    char head[512];
-    int hlen = snprintf(head, sizeof head,
+    const char *ct = content_type ? content_type : "text/plain";
+    const char *eh = extra_headers ? extra_headers : "";
+    int hlen = snprintf(NULL, 0,
                         "HTTP/1.1 %d OK\r\nContent-Type: %s\r\n%s"
                         "Content-Length: %zu\r\n\r\n",
-                        status, content_type ? content_type : "text/plain",
-                        extra_headers ? extra_headers : "", n);
-    if (hlen < 0 || (size_t)hlen >= sizeof head)
+                        status, ct, eh, n);
+    if (hlen < 0)
         return -1;
-    if (write_all(fd, head, (size_t)hlen) != 0)
+    char *head = malloc((size_t)hlen + 1);
+    if (!head)
         return -1;
+    if (snprintf(head, (size_t)hlen + 1,
+                 "HTTP/1.1 %d OK\r\nContent-Type: %s\r\n%s"
+                 "Content-Length: %zu\r\n\r\n",
+                 status, ct, eh, n) != hlen ||
+        write_all(fd, head, (size_t)hlen) != 0) {
+        free(head);
+        return -1;
+    }
+    free(head);
     if (n && write_all(fd, body, n) != 0)
         return -1;
     return 0;
