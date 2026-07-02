@@ -176,6 +176,13 @@ struct NsProcView {
     int         find_seq;
     gboolean    find_case;
 
+    GtkWidget  *overlay;
+    GtkWidget  *perm_revealer;
+    GtkWidget  *perm_label;
+    ReqType     perm_kind;
+    gboolean    perm_pending;
+    char       *perm_origin;
+
     GtkWidget    *console_window;
     GtkWidget    *console_notebook;
     GtkWidget    *console_entry;
@@ -470,6 +477,7 @@ pv_free(NsProcView *v)
     g_free(v->current_url);
     g_free(v->current_title);
     g_free(v->deferred_url);
+    g_free(v->perm_origin);
     if (v->hourglass_cursor)
         g_object_unref(v->hourglass_cursor);
     g_mutex_clear(&v->proc_lock);
@@ -1458,11 +1466,14 @@ push_history(NsProcView *v, const char *url)
     post_emit(v, NS_PROC_EVT_HISTORY, NULL);
 }
 
+static void pv_perm_resolve(NsProcView *v, gboolean allow);
+
 static void
 do_load(NsProcView *v, const char *url, gboolean record, gboolean history)
 {
     if (!url || !*url)
         return;
+    pv_perm_resolve(v, FALSE);
     pv_audio_shutdown(v);
     if (ns_media_is_video_page(url)) {
         char *app = NULL, *app_url = NULL;
@@ -1666,139 +1677,62 @@ void ns_proc_view_zoom_in(NsProcView *v)  { set_zoom(v, cur_scale(v) * NS_PROC_Z
 void ns_proc_view_zoom_out(NsProcView *v) { set_zoom(v, cur_scale(v) / NS_PROC_ZOOM_STEP); }
 void ns_proc_view_zoom_reset(NsProcView *v) { set_zoom(v, 1.0); }
 
-typedef struct {
-    NsProcView *v;
-    char       *origin;
-} PvWebglPrompt;
-
-typedef struct {
-    NsProcView *v;
-    char       *origin;
-} PvCameraPrompt;
-
 static void
-pv_webgl_prompt_free(PvWebglPrompt *p)
+pv_perm_resolve(NsProcView *v, gboolean allow)
 {
-    pv_unref(p->v);
-    g_free(p->origin);
-    g_free(p);
+    if (!v->perm_pending)
+        return;
+    v->perm_pending = FALSE;
+    ReqType kind = v->perm_kind;
+    char *origin = v->perm_origin;
+    v->perm_origin = NULL;
+    if (v->perm_revealer)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), FALSE);
+    if (!v->closed) {
+        Req *req = g_new0(Req, 1);
+        req->type = kind;
+        req->url = g_strdup(origin);
+        req->mods = allow ? 1 : 0;
+        push_req(v, req);
+        if (kind == REQ_WEBGL && allow && v->current_url)
+            do_load(v, v->current_url, FALSE, FALSE);
+    }
+    g_free(origin);
 }
 
 static void
-pv_webgl_resolve(NsProcView *v, const char *origin, gboolean allow)
+on_perm_allow(GtkButton *btn, gpointer data)
 {
-    Req *req = g_new0(Req, 1);
-    req->type = REQ_WEBGL;
-    req->url = g_strdup(origin);
-    req->mods = allow ? 1 : 0;
-    push_req(v, req);
-    if (allow && v->current_url && !v->closed)
-        do_load(v, v->current_url, FALSE, FALSE);
+    (void)btn;
+    pv_perm_resolve(data, TRUE);
 }
 
 static void
-pv_camera_prompt_free(PvCameraPrompt *p)
+on_perm_deny(GtkButton *btn, gpointer data)
 {
-    pv_unref(p->v);
-    g_free(p->origin);
-    g_free(p);
+    (void)btn;
+    pv_perm_resolve(data, FALSE);
 }
 
 static void
-pv_camera_resolve(NsProcView *v, const char *origin, gboolean allow)
+pv_perm_bar_show(NsProcView *v, ReqType kind, const char *origin)
 {
-    Req *req = g_new0(Req, 1);
-    req->type = REQ_CAMERA;
-    req->url = g_strdup(origin);
-    req->mods = allow ? 1 : 0;
-    push_req(v, req);
-}
-
-static GtkWindow *pv_window(NsProcView *v);
-
-static void
-pv_camera_first_done(GObject *src, GAsyncResult *res, gpointer ud)
-{
-    PvCameraPrompt *p = ud;
-    GError *err = NULL;
-    int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, &err);
-    if (err) { idx = 0; g_error_free(err); }
-    if (!p->v->closed)
-        pv_camera_resolve(p->v, p->origin, idx == 1);
-    pv_camera_prompt_free(p);
-}
-
-static void
-pv_camera_prompt(NsProcView *v, const char *origin)
-{
-    PvCameraPrompt *p = g_new0(PvCameraPrompt, 1);
-    p->v = pv_ref(v);
-    p->origin = g_strdup(origin);
-    char *primary = g_strdup_printf("Allow %s to use your camera and microphone?",
-                                    origin);
-    char *detail = g_strdup_printf(
-        "This page wants to access your camera and/or microphone on %s.\n\n"
-        "Allowing lets the site see live video from your webcam and hear your "
-        "microphone for the rest of the session. Only allow it on sites you "
-        "trust.", origin);
-    const char *buttons[] = { ns_i18n("Block"),
-                              ns_i18n("Allow and trust this site"), NULL };
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
-    gtk_alert_dialog_set_detail(dlg, detail);
-    gtk_alert_dialog_set_buttons(dlg, buttons);
-    gtk_alert_dialog_set_cancel_button(dlg, 0);
-    gtk_alert_dialog_set_default_button(dlg, 0);
-    gtk_alert_dialog_set_modal(dlg, TRUE);
-    gtk_alert_dialog_choose(dlg, pv_window(v), NULL, pv_camera_first_done, p);
-    g_object_unref(dlg);
-    g_free(primary);
-    g_free(detail);
-}
-
-static GtkWindow *
-pv_window(NsProcView *v)
-{
-    GtkWidget *root = v->area ? gtk_widget_get_ancestor(v->area, GTK_TYPE_WINDOW)
-                              : NULL;
-    return GTK_IS_WINDOW(root) ? GTK_WINDOW(root) : NULL;
-}
-
-static void
-pv_webgl_first_done(GObject *src, GAsyncResult *res, gpointer ud)
-{
-    PvWebglPrompt *p = ud;
-    GError *err = NULL;
-    int idx = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(src), res, &err);
-    if (err) { idx = 0; g_error_free(err); }
-    if (!p->v->closed)
-        pv_webgl_resolve(p->v, p->origin, idx == 1);
-    pv_webgl_prompt_free(p);
-}
-
-static void
-pv_webgl_prompt(NsProcView *v, const char *origin)
-{
-    PvWebglPrompt *p = g_new0(PvWebglPrompt, 1);
-    p->v = pv_ref(v);
-    p->origin = g_strdup(origin);
-    char *primary = g_strdup_printf("Enable WebGL for %s?", origin);
-    char *detail = g_strdup_printf(
-        "This page wants to use WebGL (hardware-accelerated 3D graphics) on "
-        "%s.\n\nWebGL hands the page near-direct access to your GPU driver — "
-        "only allow it on sites you trust. Allowing keeps WebGL enabled for "
-        "this site for the rest of the session and reloads the page.", origin);
-    const char *buttons[] = { ns_i18n("Block"),
-                              ns_i18n("Allow and trust this site"), NULL };
-    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", primary);
-    gtk_alert_dialog_set_detail(dlg, detail);
-    gtk_alert_dialog_set_buttons(dlg, buttons);
-    gtk_alert_dialog_set_cancel_button(dlg, 0);
-    gtk_alert_dialog_set_default_button(dlg, 0);
-    gtk_alert_dialog_set_modal(dlg, TRUE);
-    gtk_alert_dialog_choose(dlg, pv_window(v), NULL, pv_webgl_first_done, p);
-    g_object_unref(dlg);
-    g_free(primary);
-    g_free(detail);
+    if (v->perm_pending && v->perm_kind == kind &&
+        g_strcmp0(v->perm_origin, origin) == 0)
+        return;
+    if (v->perm_pending)
+        pv_perm_resolve(v, FALSE);
+    v->perm_pending = TRUE;
+    v->perm_kind = kind;
+    v->perm_origin = g_strdup(origin);
+    const char *what =
+        kind == REQ_WEBGL
+            ? ns_i18n("This site wants to use WebGL (3D graphics)")
+            : ns_i18n("This site wants to use your camera and microphone");
+    char *text = g_strdup_printf("%s — %s", what, origin);
+    gtk_label_set_text(GTK_LABEL(v->perm_label), text);
+    g_free(text);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(v->perm_revealer), TRUE);
 }
 
 static gboolean
@@ -1872,9 +1806,9 @@ on_result(gpointer data)
             do_load(v, res->nav, FALSE, FALSE);
         }
         if (res->ok && res->webgl && *res->webgl)
-            pv_webgl_prompt(v, res->webgl);
+            pv_perm_bar_show(v, REQ_WEBGL, res->webgl);
         if (res->ok && res->camera && *res->camera)
-            pv_camera_prompt(v, res->camera);
+            pv_perm_bar_show(v, REQ_CAMERA, res->camera);
         if (res->ok && res->download && *res->download)
             post_emit(v, NS_PROC_EVT_DOWNLOAD, res->download);
         if (res->ok && res->audio && *res->audio)
@@ -2834,6 +2768,8 @@ on_area_destroy(GtkWidget *widget, gpointer data)
         v->ctx_popover = NULL;
     }
     v->area = NULL;
+    v->perm_revealer = NULL;
+    v->perm_label = NULL;
     Req *req = g_new0(Req, 1);
     req->type = REQ_QUIT;
     push_req(v, req);
@@ -3173,7 +3109,49 @@ build_search_bar(NsProcView *v)
     gtk_revealer_set_child(GTK_REVEALER(v->search_revealer), frame);
     gtk_widget_set_halign(v->search_revealer, GTK_ALIGN_END);
     gtk_widget_set_valign(v->search_revealer, GTK_ALIGN_START);
-    gtk_overlay_add_overlay(GTK_OVERLAY(v->root), v->search_revealer);
+    gtk_overlay_add_overlay(GTK_OVERLAY(v->overlay), v->search_revealer);
+}
+
+static void
+build_perm_bar(NsProcView *v)
+{
+    GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_margin_top(bar, 4);
+    gtk_widget_set_margin_bottom(bar, 4);
+    gtk_widget_set_margin_start(bar, 8);
+    gtk_widget_set_margin_end(bar, 8);
+
+    GtkWidget *icon = gtk_image_new_from_icon_name("dialog-question-symbolic");
+
+    v->perm_label = gtk_label_new("");
+    gtk_label_set_xalign(GTK_LABEL(v->perm_label), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(v->perm_label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_widget_set_hexpand(v->perm_label, TRUE);
+
+    GtkWidget *allow = gtk_button_new_with_label(ns_i18n("Allow"));
+    gtk_widget_add_css_class(allow, "suggested-action");
+    gtk_widget_set_tooltip_text(allow, ns_i18n("Allow and trust this site"));
+    GtkWidget *deny = gtk_button_new_with_label(ns_i18n("Not now"));
+    GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_button_set_has_frame(GTK_BUTTON(close), FALSE);
+    set_accessible_label(close, ns_i18n("Dismiss"));
+    g_signal_connect(allow, "clicked", G_CALLBACK(on_perm_allow), v);
+    g_signal_connect(deny, "clicked", G_CALLBACK(on_perm_deny), v);
+    g_signal_connect(close, "clicked", G_CALLBACK(on_perm_deny), v);
+
+    gtk_box_append(GTK_BOX(bar), icon);
+    gtk_box_append(GTK_BOX(bar), v->perm_label);
+    gtk_box_append(GTK_BOX(bar), allow);
+    gtk_box_append(GTK_BOX(bar), deny);
+    gtk_box_append(GTK_BOX(bar), close);
+
+    GtkWidget *frame = gtk_frame_new(NULL);
+    gtk_frame_set_child(GTK_FRAME(frame), bar);
+
+    v->perm_revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(v->perm_revealer),
+                                     GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+    gtk_revealer_set_child(GTK_REVEALER(v->perm_revealer), frame);
 }
 
 static gboolean
@@ -3247,8 +3225,13 @@ ns_proc_view_new(void)
     gtk_widget_set_visible(v->vscroll, FALSE);
     gtk_widget_set_visible(v->hscroll, FALSE);
 
-    v->root = gtk_overlay_new();
-    gtk_overlay_set_child(GTK_OVERLAY(v->root), grid);
+    v->overlay = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(v->overlay), grid);
+    gtk_widget_set_vexpand(v->overlay, TRUE);
+    build_perm_bar(v);
+    v->root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(v->root), v->perm_revealer);
+    gtk_box_append(GTK_BOX(v->root), v->overlay);
     gtk_widget_set_vexpand(v->root, TRUE);
     build_search_bar(v);
 
