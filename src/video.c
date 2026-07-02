@@ -242,6 +242,31 @@ ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
 }
 
 gboolean
+ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
+                                gboolean play, gint64 now_us)
+{
+    if (!cache || !dom_node) return FALSE;
+    ns_video *v = NULL;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *cand = val;
+        if (cand->dom_node == dom_node) { v = cand; break; }
+    }
+    if (!v || !v->player || v->is_camera) return FALSE;
+    if (play == v->playing) return FALSE;
+    if (play) {
+        ns_video_play(v, now_us);
+        ns_video_audio_start(cache, v);
+    } else {
+        ns_video_pause(v, now_us);
+        ns_video_audio_pause(cache, v);
+    }
+    return TRUE;
+}
+
+gboolean
 ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return FALSE;

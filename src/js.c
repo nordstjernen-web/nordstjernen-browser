@@ -29934,6 +29934,8 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     if (el && js) {
         ns_js_dispatch_event(js, el, "play", NULL);
+        if (js->media_play_cb)
+            js->media_play_cb(el, TRUE, js->media_play_user_data);
         char *url = ns_media_resolve_src(ctx, el);
         if (url && js->audio_cb && ns_media_src_is_mp3(url)) {
             char *token = ns_media_token(ctx, el);
@@ -30068,6 +30070,8 @@ ns_media_pause(JSContext *ctx, JSValueConst this_val,
         }
         JS_FreeValue(ctx, tv);
         ns_js_dispatch_event(js, el, "pause", NULL);
+        if (js->media_play_cb)
+            js->media_play_cb(el, FALSE, js->media_play_user_data);
     }
     return JS_UNDEFINED;
 }
@@ -40881,6 +40885,14 @@ ns_js_set_media_seek_cb(ns_js *js, ns_js_media_seek_cb cb, gpointer user_data)
     if (!js) return;
     js->media_seek_cb = cb;
     js->media_seek_user_data = user_data;
+}
+
+void
+ns_js_set_media_play_cb(ns_js *js, ns_js_media_play_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->media_play_cb = cb;
+    js->media_play_user_data = user_data;
 }
 
 static void

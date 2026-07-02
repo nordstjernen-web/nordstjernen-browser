@@ -464,6 +464,15 @@ browser_media_seek(const void *node, double seconds, gpointer ud)
                                     g_get_monotonic_time());
 }
 
+static void
+browser_media_play(const void *node, gboolean play, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->videos) return;
+    ns_video_cache_set_node_playing(b->videos, node, play,
+                                    g_get_monotonic_time());
+}
+
 char *
 ns_browser_take_pending_audio(ns_browser *browser)
 {
@@ -749,6 +758,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
         ns_js_set_media_seek_cb(b->js, browser_media_seek, b);
+        ns_js_set_media_play_cb(b->js, browser_media_play, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         ns_js_run_scripts_in_doc(b->js, doc, base);
