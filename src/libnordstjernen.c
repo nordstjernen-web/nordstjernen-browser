@@ -330,6 +330,7 @@ browser_settle_quiet(ns_browser *b)
     if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
     if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
+    if (b->videos && ns_video_cache_has_pending(b->videos)) return FALSE;
     if (g_main_context_pending(NULL)) return FALSE;
     return TRUE;
 }
@@ -341,6 +342,10 @@ settle_tick_cb(gpointer user_data)
     ns_browser *b = ctx->b;
     gint64 now = g_get_monotonic_time();
     if (b->images) ns_image_cache_tick(b->images, now);
+    if (b->videos && b->layout) {
+        ns_video_cache_discover(b->videos, b->layout, now);
+        ns_video_cache_tick(b->videos, now);
+    }
     if (b->anim) ns_anim_tick(b->anim, now);
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
@@ -363,6 +368,8 @@ static void
 browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
+    if (b->videos && b->layout)
+        ns_video_cache_discover(b->videos, b->layout, g_get_monotonic_time());
     if (browser_settle_quiet(b)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     settle_ctx ctx = { .b = b, .loop = loop };
@@ -446,6 +453,15 @@ browser_js_video(const void *node, const char *kind, double value, gpointer ud)
     ns_browser *b = ud;
     if (!b || !b->js) return;
     ns_js_video_event(b->js, node, kind, value);
+}
+
+static gboolean
+browser_media_seek(const void *node, double seconds, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->videos) return FALSE;
+    return ns_video_cache_seek_node(b->videos, node, seconds,
+                                    g_get_monotonic_time());
 }
 
 char *
@@ -732,6 +748,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_download_cb(b->js, browser_js_download, b);
         ns_js_set_audio_cb(b->js, browser_js_audio, b);
+        ns_js_set_media_seek_cb(b->js, browser_media_seek, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
         ns_js_run_scripts_in_doc(b->js, doc, base);
@@ -745,6 +762,8 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     browser_arm_declarative_refresh(b, refresh_hdr);
     g_free(refresh_hdr);
 
+    if (!b->layout || b->dirty)
+        browser_relayout(b);
     browser_settle(b, settle_ms);
     if (!b->layout || b->dirty)
         browser_relayout(b);

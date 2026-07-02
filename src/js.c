@@ -29914,7 +29914,7 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
 {
     (void)argc; (void)argv;
     JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_TRUE);
-    JS_SetPropertyStr(ctx, this_val, "ended", JS_FALSE);
+    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
     ns_node *el = ns_unwrap_element_mut(this_val);
     ns_js *js = js_from_ctx(ctx);
     if (el && js) {
@@ -29937,6 +29937,75 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
         g_free(url);
     }
     return ns_returns_resolved_undefined(ctx, this_val, 0, NULL);
+}
+
+static JSValue
+ns_media_get_current_time(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_pos");
+    if (JS_IsNumber(v)) return v;
+    JS_FreeValue(ctx, v);
+    return JS_NewFloat64(ctx, 0.0);
+}
+
+static JSValue
+ns_media_get_duration(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_duration");
+    if (JS_IsNumber(v)) return v;
+    JS_FreeValue(ctx, v);
+    return JS_NewFloat64(ctx, NAN);
+}
+
+static JSValue
+ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_ended");
+    gboolean ended = JS_ToBool(ctx, v);
+    JS_FreeValue(ctx, v);
+    return JS_NewBool(ctx, ended);
+}
+
+static JSValue
+ns_media_set_current_time(JSContext *ctx, JSValueConst this_val,
+                          JSValueConst val)
+{
+    double t = 0.0;
+    if (JS_ToFloat64(ctx, &t, val)) return JS_EXCEPTION;
+    if (isnan(t) || t < 0.0) t = 0.0;
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js) return JS_UNDEFINED;
+    gboolean handled = js->media_seek_cb &&
+        js->media_seek_cb(el, t, js->media_seek_user_data);
+    if (!handled && js->audio_cb) {
+        JSValue tv = JS_GetPropertyStr(ctx, this_val, "_nd_audio_token");
+        if (JS_IsString(tv)) {
+            const char *token = JS_ToCString(ctx, tv);
+            if (token) {
+                ns_js_emit_audio(js, "seek %s %.3f", token, t);
+                handled = TRUE;
+                JS_FreeCString(ctx, token);
+            }
+        }
+        JS_FreeValue(ctx, tv);
+    }
+    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, t));
+    if (handled) {
+        JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
+        ns_js_dispatch_event(js, el, "seeking", NULL);
+        ns_js_dispatch_event(js, el, "timeupdate", NULL);
+        ns_js_dispatch_event(js, el, "seeked", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_media_fast_seek(JSContext *ctx, JSValueConst this_val,
+                   int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    return ns_media_set_current_time(ctx, this_val, argv[0]);
 }
 
 static JSValue
@@ -30838,7 +30907,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("pause",               0, ns_media_pause),
     JS_CFUNC_DEF("load",                0, ns_event_noop),
     JS_CFUNC_DEF("canPlayType",         1, ns_media_canPlayType),
-    JS_CFUNC_DEF("fastSeek",            1, ns_event_noop),
+    JS_CFUNC_DEF("fastSeek",            1, ns_media_fast_seek),
     JS_CFUNC_DEF("addTextTrack",        3, ns_event_noop),
     JS_CFUNC_DEF("setMediaKeys",        1, ns_media_set_media_keys),
     JS_CFUNC_DEF("requestVideoFrameCallback", 1, ns_media_request_video_frame_callback),
@@ -30855,10 +30924,10 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("defaultValue",      ns_element_get_default_value,     ns_element_set_default_value),
     JS_CGETSET_DEF("defaultChecked",    ns_element_get_default_checked,   ns_element_set_default_checked),
     JS_CGETSET_DEF("defaultSelected",   ns_element_get_default_selected,  ns_element_set_default_selected),
-    JS_CGETSET_DEF("currentTime",       ns_element_get_zero_int,          ns_element_noop_set),
-    JS_CGETSET_DEF("duration",          ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("currentTime",       ns_media_get_current_time,        ns_media_set_current_time),
+    JS_CGETSET_DEF("duration",          ns_media_get_duration,            ns_element_noop_set),
     JS_CGETSET_DEF("paused",            ns_media_get_paused,              ns_element_noop_set),
-    JS_CGETSET_DEF("ended",             ns_element_get_zero_int,          ns_element_noop_set),
+    JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
     JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("volume",            ns_element_get_one_int,           ns_element_noop_set),
     JS_CGETSET_DEF("playbackRate",      ns_element_get_one_int,           ns_element_noop_set),
@@ -40793,6 +40862,14 @@ ns_js_set_audio_cb(ns_js *js, ns_js_audio_cb cb, gpointer user_data)
     js->audio_user_data = user_data;
 }
 
+void
+ns_js_set_media_seek_cb(ns_js *js, ns_js_media_seek_cb cb, gpointer user_data)
+{
+    if (!js) return;
+    js->media_seek_cb = cb;
+    js->media_seek_user_data = user_data;
+}
+
 static void
 ns_js_emit_audio(ns_js *js, const char *fmt, ...)
 {
@@ -40813,7 +40890,7 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
     const ns_node *n = node;
     JSValue el = ns_make_element(ctx, n);
     if (strcmp(kind, "meta") == 0) {
-        JS_SetPropertyStr(ctx, el, "duration", JS_NewFloat64(ctx, value));
+        JS_SetPropertyStr(ctx, el, "_nd_duration", JS_NewFloat64(ctx, value));
         JS_SetPropertyStr(ctx, el, "_nd_readyState", JS_NewInt32(ctx, 4));
         JS_SetPropertyStr(ctx, el, "_nd_networkState", JS_NewInt32(ctx, 1));
         ns_js_dispatch_event(js, n, "loadedmetadata", NULL);
@@ -40821,20 +40898,20 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
         ns_js_dispatch_event(js, n, "canplay", NULL);
         ns_js_dispatch_event(js, n, "canplaythrough", NULL);
     } else if (strcmp(kind, "pos") == 0) {
-        JS_SetPropertyStr(ctx, el, "currentTime", JS_NewFloat64(ctx, value));
+        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "timeupdate", NULL);
     } else if (strcmp(kind, "play") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_playing", JS_TRUE);
-        JS_SetPropertyStr(ctx, el, "ended", JS_FALSE);
+        JS_SetPropertyStr(ctx, el, "_nd_ended", JS_FALSE);
         ns_js_dispatch_event(js, n, "play", NULL);
         ns_js_dispatch_event(js, n, "playing", NULL);
     } else if (strcmp(kind, "pause") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
         ns_js_dispatch_event(js, n, "pause", NULL);
     } else if (strcmp(kind, "ended") == 0) {
-        JS_SetPropertyStr(ctx, el, "currentTime", JS_NewFloat64(ctx, value));
+        JS_SetPropertyStr(ctx, el, "_nd_pos", JS_NewFloat64(ctx, value));
         JS_SetPropertyStr(ctx, el, "_nd_playing", JS_FALSE);
-        JS_SetPropertyStr(ctx, el, "ended", JS_TRUE);
+        JS_SetPropertyStr(ctx, el, "_nd_ended", JS_TRUE);
         ns_js_dispatch_event(js, n, "timeupdate", NULL);
         ns_js_dispatch_event(js, n, "ended", NULL);
     }

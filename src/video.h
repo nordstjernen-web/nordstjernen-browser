@@ -62,8 +62,11 @@ void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
                                  gint64 now_us);
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
+gboolean ns_video_cache_has_pending(const ns_video_cache *cache);
 
 gboolean ns_video_url_is_inline(const char *url);
+gboolean ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
+                                  double seconds, gint64 now_us);
 gboolean ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us);
 gboolean ns_video_toggle(ns_video *v, gint64 now_us);
 void     ns_video_play(ns_video *v, gint64 now_us);

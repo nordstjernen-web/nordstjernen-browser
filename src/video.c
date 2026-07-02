@@ -204,6 +204,43 @@ ns_video_toggle(ns_video *v, gint64 now_us)
 }
 
 gboolean
+ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
+                         double seconds, gint64 now_us)
+{
+    if (!cache || !dom_node) return FALSE;
+    ns_video *v = NULL;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *cand = val;
+        if (cand->dom_node == dom_node) { v = cand; break; }
+    }
+    if (!v || !v->player || v->is_camera) return FALSE;
+
+    double t = seconds;
+    if (t < 0.0) t = 0.0;
+    if (v->duration > 0.0 && t > v->duration) t = v->duration;
+    v->cur_time = t;
+    v->prev_tick_time = t;
+    v->last_emit_time = t;
+    v->ended = v->duration > 0.0 && t >= v->duration && !v->loop;
+    if (v->playing)
+        v->base_us = now_us - (gint64)(t * 1e6);
+
+    gboolean ended = FALSE;
+    ns_texture *frame = ns_video_player_frame_at(v->player, t, v->loop, &ended);
+    if (frame) {
+        ns_texture_unref(v->frame_texture);
+        v->frame_texture = ns_texture_ref(frame);
+    }
+    if (v->audio_opened)
+        ns_video_emit_audio(cache, "seek %s %.3f", v->token, t);
+    ns_video_emit_js(cache, v, "pos", t);
+    return TRUE;
+}
+
+gboolean
 ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return FALSE;
@@ -479,6 +516,12 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         }
     }
     return changed;
+}
+
+gboolean
+ns_video_cache_has_pending(const ns_video_cache *cache)
+{
+    return cache && cache->pending->len > 0;
 }
 
 gboolean

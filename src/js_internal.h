@@ -67,6 +67,8 @@ struct ns_js {
     gpointer      download_user_data;
     ns_js_audio_cb audio_cb;
     gpointer      audio_user_data;
+    ns_js_media_seek_cb media_seek_cb;
+    gpointer      media_seek_user_data;
     guint         next_audio_token;
     ns_js_scroll_to_cb scroll_to_cb;
     gpointer      scroll_to_user_data;
