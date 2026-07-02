@@ -495,6 +495,9 @@ JSValue
 ns_ctx_createRadialGradient(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv);
 JSValue
+ns_ctx_createConicGradient(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv);
+JSValue
 ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba);
 JSValue
 ns_ctx_createImageData(JSContext *ctx, JSValueConst this_val,

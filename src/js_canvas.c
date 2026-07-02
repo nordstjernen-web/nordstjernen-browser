@@ -722,6 +722,103 @@ ns_ctx_state(JSContext *ctx, JSValueConst this_val)
     return ns_canvas_state_for(js_from_ctx(ctx), n);
 }
 
+typedef struct { double pos, r, g, b, a; } ns_conic_stop;
+
+static int
+ns_conic_stop_cmp(const void *pa, const void *pb)
+{
+    double da = ((const ns_conic_stop *)pa)->pos;
+    double db = ((const ns_conic_stop *)pb)->pos;
+    return da < db ? -1 : da > db ? 1 : 0;
+}
+
+static void
+ns_conic_color_at(const ns_conic_stop *stops, guint n, double t,
+                  double *r, double *g, double *b, double *a)
+{
+    if (n == 0) { *r = *g = *b = 0; *a = 0; return; }
+    if (t <= stops[0].pos) {
+        *r = stops[0].r; *g = stops[0].g; *b = stops[0].b; *a = stops[0].a;
+        return;
+    }
+    if (t >= stops[n - 1].pos) {
+        *r = stops[n - 1].r; *g = stops[n - 1].g;
+        *b = stops[n - 1].b; *a = stops[n - 1].a;
+        return;
+    }
+    for (guint i = 1; i < n; i++) {
+        if (t <= stops[i].pos) {
+            double span = stops[i].pos - stops[i - 1].pos;
+            double f = span > 0 ? (t - stops[i - 1].pos) / span : 0;
+            *r = stops[i - 1].r + (stops[i].r - stops[i - 1].r) * f;
+            *g = stops[i - 1].g + (stops[i].g - stops[i - 1].g) * f;
+            *b = stops[i - 1].b + (stops[i].b - stops[i - 1].b) * f;
+            *a = stops[i - 1].a + (stops[i].a - stops[i - 1].a) * f;
+            return;
+        }
+    }
+}
+
+static cairo_pattern_t *
+ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
+{
+    double cx = 0, cy = 0, angle = 0;
+    JSValue v;
+    v = JS_GetPropertyStr(ctx, obj, "_x0"); JS_ToFloat64(ctx, &cx, v); JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, obj, "_y0"); JS_ToFloat64(ctx, &cy, v); JS_FreeValue(ctx, v);
+    v = JS_GetPropertyStr(ctx, obj, "_angle"); JS_ToFloat64(ctx, &angle, v); JS_FreeValue(ctx, v);
+
+    GArray *sa = g_array_new(FALSE, FALSE, sizeof(ns_conic_stop));
+    JSValue stops = JS_GetPropertyStr(ctx, obj, "_stops");
+    if (JS_IsArray(stops)) {
+        JSValue lenv = JS_GetPropertyStr(ctx, stops, "length");
+        uint32_t n = 0; JS_ToUint32(ctx, &n, lenv); JS_FreeValue(ctx, lenv);
+        for (uint32_t i = 0; i < n; i++) {
+            JSValue s = JS_GetPropertyUint32(ctx, stops, i);
+            if (JS_IsObject(s)) {
+                ns_conic_stop cs = { 0, 0, 0, 0, 1 };
+                JSValue f;
+                f = JS_GetPropertyStr(ctx, s, "pos"); JS_ToFloat64(ctx, &cs.pos, f); JS_FreeValue(ctx, f);
+                f = JS_GetPropertyStr(ctx, s, "r");   JS_ToFloat64(ctx, &cs.r,   f); JS_FreeValue(ctx, f);
+                f = JS_GetPropertyStr(ctx, s, "g");   JS_ToFloat64(ctx, &cs.g,   f); JS_FreeValue(ctx, f);
+                f = JS_GetPropertyStr(ctx, s, "b");   JS_ToFloat64(ctx, &cs.b,   f); JS_FreeValue(ctx, f);
+                f = JS_GetPropertyStr(ctx, s, "a");   JS_ToFloat64(ctx, &cs.a,   f); JS_FreeValue(ctx, f);
+                g_array_append_val(sa, cs);
+            }
+            JS_FreeValue(ctx, s);
+        }
+    }
+    JS_FreeValue(ctx, stops);
+    if (sa->len == 0) { g_array_free(sa, TRUE); return NULL; }
+    g_array_sort(sa, ns_conic_stop_cmp);
+    const ns_conic_stop *cs = (const ns_conic_stop *)sa->data;
+
+    cairo_pattern_t *pat = cairo_pattern_create_mesh();
+    const int sectors = 256;
+    const double radius = 1e5;
+    for (int i = 0; i < sectors; i++) {
+        double t0 = (double)i / sectors;
+        double t1 = (double)(i + 1) / sectors;
+        double a0 = angle + t0 * 2.0 * G_PI;
+        double a1 = angle + t1 * 2.0 * G_PI;
+        double r0, g0, b0, al0, r1, g1, b1, al1;
+        ns_conic_color_at(cs, sa->len, t0, &r0, &g0, &b0, &al0);
+        ns_conic_color_at(cs, sa->len, t1, &r1, &g1, &b1, &al1);
+        cairo_mesh_pattern_begin_patch(pat);
+        cairo_mesh_pattern_move_to(pat, cx, cy);
+        cairo_mesh_pattern_line_to(pat, cx + radius * cos(a0), cy + radius * sin(a0));
+        cairo_mesh_pattern_line_to(pat, cx + radius * cos(a1), cy + radius * sin(a1));
+        cairo_mesh_pattern_line_to(pat, cx, cy);
+        cairo_mesh_pattern_set_corner_color_rgba(pat, 0, r0, g0, b0, al0);
+        cairo_mesh_pattern_set_corner_color_rgba(pat, 1, r0, g0, b0, al0);
+        cairo_mesh_pattern_set_corner_color_rgba(pat, 2, r1, g1, b1, al1);
+        cairo_mesh_pattern_set_corner_color_rgba(pat, 3, r1, g1, b1, al1);
+        cairo_mesh_pattern_end_patch(pat);
+    }
+    g_array_free(sa, TRUE);
+    return pat;
+}
+
 cairo_pattern_t *
 ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
 {
@@ -792,6 +889,9 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
         v = JS_GetPropertyStr(ctx, obj, "_y1"); JS_ToFloat64(ctx, &y1, v); JS_FreeValue(ctx, v);
         v = JS_GetPropertyStr(ctx, obj, "_r1"); JS_ToFloat64(ctx, &r1, v); JS_FreeValue(ctx, v);
         pat = cairo_pattern_create_radial(x0, y0, r0, x1, y1, r1);
+    } else if (strcmp(type, "conic") == 0) {
+        JS_FreeCString(ctx, type);
+        return ns_ctx_build_conic_pattern(ctx, obj);
     }
     JS_FreeCString(ctx, type);
     if (!pat) return NULL;
@@ -2197,6 +2297,22 @@ ns_ctx_createRadialGradient(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
+ns_ctx_createConicGradient(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 3) return JS_NULL;
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "_type", JS_NewString(ctx, "conic"));
+    JS_SetPropertyStr(ctx, obj, "_angle", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[0])));
+    JS_SetPropertyStr(ctx, obj, "_x0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[1])));
+    JS_SetPropertyStr(ctx, obj, "_y0", JS_NewFloat64(ctx, ns_arg_d(ctx, argv[2])));
+    JS_SetPropertyStr(ctx, obj, "_stops", JS_NewArray(ctx));
+    ns_bind_fn(ctx, obj, "addColorStop", ns_ctx_gradient_addColorStop, 2);
+    return obj;
+}
+
+JSValue
 ns_image_data_make(JSContext *ctx, int w, int h, const uint8_t *rgba)
 {
     if (w <= 0 || h <= 0) return JS_NULL;
@@ -3225,6 +3341,7 @@ ns_element_getContext(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "getLineDash",    ns_ctx_getLineDash,     0);
     ns_bind_fn(ctx, obj, "createLinearGradient", ns_ctx_createLinearGradient, 4);
     ns_bind_fn(ctx, obj, "createRadialGradient", ns_ctx_createRadialGradient, 6);
+    ns_bind_fn(ctx, obj, "createConicGradient", ns_ctx_createConicGradient, 3);
     ns_bind_fn(ctx, obj, "createPattern",        ns_ctx_createPattern, 2);
     ns_bind_fn(ctx, obj, "createImageData",      ns_ctx_createImageData, 2);
     ns_bind_fn(ctx, obj, "getImageData",         ns_ctx_getImageData,    4);
