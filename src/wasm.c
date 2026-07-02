@@ -1642,19 +1642,22 @@ ns_wasm_build_exports(JSContext *ctx, JSValueConst instance_obj,
             break;
         }
         case WASM_IMPORT_EXPORT_KIND_MEMORY: {
-            JSValue mem_obj =
-                JS_NewObjectClass(ctx, ns_wasm_memory_class_id);
-            if (JS_IsException(mem_obj)) {
-                JS_FreeValue(ctx, exports);
-                return mem_obj;
-            }
-            ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
-            m->ctx = ctx;
-            m->instance = JS_DupValue(ctx, instance_obj);
-            m->buffer = JS_UNDEFINED;
-            JS_SetOpaque(mem_obj, m);
-            if (JS_IsUndefined(wi->memory_obj))
+            JSValue mem_obj;
+            if (!JS_IsUndefined(wi->memory_obj)) {
+                mem_obj = JS_DupValue(ctx, wi->memory_obj);
+            } else {
+                mem_obj = JS_NewObjectClass(ctx, ns_wasm_memory_class_id);
+                if (JS_IsException(mem_obj)) {
+                    JS_FreeValue(ctx, exports);
+                    return mem_obj;
+                }
+                ns_wasm_memory *m = g_new0(ns_wasm_memory, 1);
+                m->ctx = ctx;
+                m->instance = JS_DupValue(ctx, instance_obj);
+                m->buffer = JS_UNDEFINED;
+                JS_SetOpaque(mem_obj, m);
                 wi->memory_obj = JS_DupValue(ctx, mem_obj);
+            }
             if (JS_SetPropertyStr(ctx, exports, exp.name, mem_obj) < 0) {
                 JS_FreeValue(ctx, exports);
                 return JS_EXCEPTION;
