@@ -165,6 +165,7 @@ struct ns_js {
     GPtrArray    *intersection_observers;
     GPtrArray    *resize_observers;
     guint         observer_tick_source;
+    gboolean      observer_ticking;
     GArray       *doc_stack;
     JSValue       iframe_doc;
     int           iframe_doc_set;

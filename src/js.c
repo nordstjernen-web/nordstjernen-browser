@@ -18101,6 +18101,8 @@ static void
 ns_intersection_observers_tick(ns_js *js)
 {
     if (!js || !js->intersection_observers || !js->ctx) return;
+    if (js->observer_ticking) return;
+    js->observer_ticking = TRUE;
     JSContext *ctx = js->ctx;
     for (guint oi = 0; oi < js->intersection_observers->len; oi++) {
         ns_io_observer *o = g_ptr_array_index(js->intersection_observers, oi);
@@ -18126,6 +18128,7 @@ ns_intersection_observers_tick(ns_js *js)
             JS_FreeValue(ctx, entries);
         }
     }
+    js->observer_ticking = FALSE;
 }
 
 static JSValue
@@ -18328,6 +18331,8 @@ static void
 ns_resize_observers_tick(ns_js *js)
 {
     if (!js || !js->resize_observers || !js->ctx) return;
+    if (js->observer_ticking) return;
+    js->observer_ticking = TRUE;
     JSContext *ctx = js->ctx;
     for (guint oi = 0; oi < js->resize_observers->len; oi++) {
         JSValue observer = JS_MKPTR(JS_TAG_OBJECT,
@@ -18374,6 +18379,7 @@ ns_resize_observers_tick(ns_js *js)
         JS_FreeValue(ctx, cb);
         JS_FreeValue(ctx, targets);
     }
+    js->observer_ticking = FALSE;
 }
 
 static gboolean
