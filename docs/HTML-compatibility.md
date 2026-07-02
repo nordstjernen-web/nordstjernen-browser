@@ -370,10 +370,13 @@ surface).
 
 ## §10 Web workers · §11 Worklets
 
-✅ **Dedicated workers are implemented** (classic only). `new Worker(url,
-options)` creates a classic dedicated worker in its own QuickJS runtime
-on its own thread. Supported surface: same-origin classic worker script
-loading, `worker.postMessage()`, worker-global `postMessage()`,
+✅ **Dedicated workers are implemented** (classic and module). `new
+Worker(url, options)` creates a dedicated worker in its own QuickJS
+runtime on its own thread; `{type: 'module'}` evaluates the entry script
+as an ES module with static and dynamic `import` resolved through the
+same module loader the main realm uses (`importScripts` throws a
+`TypeError` there, per spec). Supported surface: same-origin worker
+script loading, `worker.postMessage()`, worker-global `postMessage()`,
 `message` / `messageerror` / `error` events, `onmessage`,
 `addEventListener`, worker-thread timers, `close()`, `terminate()`,
 worker `location`, `navigator`, `performance.now()`, `URL`,
@@ -432,8 +435,8 @@ named stores. The cache lives for the session and is per-runtime — the
 Service Worker thread has its own, which it can populate and serve from in
 its `FetchEvent` handler (`event.respondWith(caches.match(event.request))`).
 
-🚫 `SharedWorker`, module workers, worklets, transferable `MessagePort`s,
-and nested workers are not implemented yet.
+🚫 `SharedWorker`, worklets, transferable `MessagePort`s, and nested
+workers are not implemented yet.
 
 ## §12 Web storage
 

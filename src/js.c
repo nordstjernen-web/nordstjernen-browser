@@ -70,6 +70,7 @@ struct ns_worker_host {
     char         *origin;
     char         *inline_script;
     gsize         inline_script_len;
+    gboolean      is_module;
     gboolean      is_service_worker;
     gint          sw_active;
     char         *scope;
@@ -126,6 +127,8 @@ static void ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin
 static JSModuleDef *ns_js_module_loader(JSContext *ctx,
                                         const char *module_name, void *opaque,
                                         JSValueConst attributes);
+static JSValue ns_js_compile_module_cached(JSContext *ctx, const char *src,
+                                           gsize len, const char *module_name);
 static void ns_js_set_attr_recorded(ns_js *js, ns_node *n, const char *name, const char *value);
 static void ns_js_set_attr_ns_recorded(ns_js *js, ns_node *n,
                                        const char *namespace_uri,
@@ -15733,8 +15736,21 @@ ns_worker_eval_script(ns_js *js, const char *src, gsize len,
     if (!js || !js->ctx) return FALSE;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
-    JSValue v = JS_Eval(js->ctx, src ? src : "", len, url ? url : "<worker>",
-                        JS_EVAL_TYPE_GLOBAL);
+    JSValue v;
+    if (js->worker_host && js->worker_host->is_module) {
+        JSValue fn = ns_js_compile_module_cached(js->ctx, src ? src : "", len,
+                                                 url ? url : "<worker>");
+        v = JS_IsException(fn) ? fn : JS_EvalFunction(js->ctx, fn);
+        if (!JS_IsException(v) &&
+            JS_PromiseState(js->ctx, v) == JS_PROMISE_REJECTED) {
+            JSValue reason = JS_PromiseResult(js->ctx, v);
+            JS_FreeValue(js->ctx, v);
+            v = JS_Throw(js->ctx, reason);
+        }
+    } else {
+        v = JS_Eval(js->ctx, src ? src : "", len, url ? url : "<worker>",
+                    JS_EVAL_TYPE_GLOBAL);
+    }
     gboolean ok = !JS_IsException(v);
     if (!ok) {
         JSValue ex = JS_GetException(js->ctx);
@@ -15868,6 +15884,10 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     ns_worker_host *host = js ? js->worker_host : NULL;
     if (!js || !host) return JS_UNDEFINED;
+    if (host->is_module)
+        return JS_ThrowTypeError(ctx,
+                                 "importScripts is not available in module "
+                                 "workers");
     for (int i = 0; i < argc; i++) {
         const char *raw = JS_ToCString(ctx, argv[i]);
         if (!raw) return JS_EXCEPTION;
@@ -16485,6 +16505,8 @@ ns_worker_js_new(ns_worker_host *host)
     }
     JS_SetContextOpaque(js->ctx, js);
     JS_SetRuntimeOpaque(js->rt, js);
+    JS_SetModuleLoaderFunc2(js->rt, ns_js_module_normalize,
+                            ns_js_module_loader, NULL, js);
     JSContext *ctx = js->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
 
@@ -16740,10 +16762,11 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     if (!abs_url) return JS_ThrowTypeError(ctx, "Worker: invalid script URL");
 
     g_autofree char *type = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "type") : NULL;
-    if (type && *type && g_ascii_strcasecmp(type, "classic") != 0) {
+    gboolean is_module = type && g_ascii_strcasecmp(type, "module") == 0;
+    if (type && *type && !is_module && g_ascii_strcasecmp(type, "classic") != 0) {
         g_free(abs_url);
         g_free(inline_script);
-        return JS_ThrowTypeError(ctx, "Worker: module workers are not supported");
+        return JS_ThrowTypeError(ctx, "Worker: unsupported worker type");
     }
     g_autofree char *name = argc >= 2 ? ns_worker_option_string(ctx, argv[1], "name") : NULL;
 
@@ -16789,6 +16812,7 @@ ns_worker_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
     host->name = g_strdup(name ? name : "");
     host->inline_script = inline_script;
     host->inline_script_len = inline_script_len;
+    host->is_module = is_module;
     host->origin = ns_url_origin_from(host->base_url);
     if (!host->origin) host->origin = g_strdup("");
     host->log_cb = js->log_cb;
