@@ -1132,10 +1132,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         }
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);
-        if (browser->js && ns_js_run_animation_frame(browser->js)) {
+        if (browser->js && ns_js_run_animation_frame(browser->js))
             changed = TRUE;
-            other_changed = TRUE;
-        }
 
         gboolean did_iter = FALSE;
         int it = 0;
@@ -1158,6 +1156,9 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (g_get_monotonic_time() >= deadline) break;
     }
     browser->video_only_frame = video_changed && !other_changed;
+    if (!changed && browser->videos &&
+        ns_video_cache_waiting_growth(browser->videos))
+        changed = TRUE;
     return changed ? 1 : 0;
 }
 
@@ -1288,11 +1289,17 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     ns_paint_set_anim(browser->anim);
     ns_paint_set_search(browser->search_case, browser->search_active);
     const char *highlight = browser->search_query;
+    gint64 paint_t0 = g_get_monotonic_time();
     if (ns_selection_has_range(&browser->selection))
         ns_paint_with_selection(cr, browser->layout, highlight,
                                 &browser->selection);
     else
         ns_paint(cr, browser->layout, highlight);
+    if (g_getenv("NS_PROFILE"))
+        g_printerr("[profile] paint %s %6.1fms %dx%d\n",
+                   clip_videos ? "clip" : "full",
+                   (double)(g_get_monotonic_time() - paint_t0) / 1000.0,
+                   width, height);
     ns_paint_set_search(FALSE, NULL);
     ns_paint_set_anim(NULL);
     ns_paint_set_js(NULL);

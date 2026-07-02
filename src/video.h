@@ -69,6 +69,7 @@ void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
                                  const ns_node *doc, gint64 now_us);
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
+gboolean ns_video_cache_waiting_growth(const ns_video_cache *cache);
 gboolean ns_video_cache_has_pending(const ns_video_cache *cache);
 
 gboolean ns_video_url_is_inline(const char *url);

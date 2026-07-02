@@ -876,6 +876,20 @@ ns_video_cache_has_pending(const ns_video_cache *cache)
 }
 
 gboolean
+ns_video_cache_waiting_growth(const ns_video_cache *cache)
+{
+    if (!cache) return FALSE;
+    GHashTableIter it;
+    gpointer key, val;
+    g_hash_table_iter_init(&it, ((ns_video_cache *)cache)->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *v = val;
+        if (v->playing && v->stalled) return TRUE;
+    }
+    return FALSE;
+}
+
+gboolean
 ns_video_cache_animating(const ns_video_cache *cache)
 {
     if (!cache) return FALSE;
