@@ -368,22 +368,22 @@ url_is_inline_video(const char *url)
 }
 
 static void
-ns_video_cache_start(ns_video_cache *cache, ns_box *box,
+ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
                      const char *abs_url, const char *poster_abs)
 {
     ns_video *v = g_hash_table_lookup(cache->by_url, abs_url);
-    if (v) { box->media->video = v; return; }
+    if (v) { if (box) box->media->video = v; return; }
 
     v = g_new0(ns_video, 1);
     v->url = g_strdup(abs_url);
-    v->dom_node = box->dom;
-    v->autoplay = attr_present(box->dom, "autoplay");
-    v->loop = attr_present(box->dom, "loop");
-    v->controls = attr_present(box->dom, "controls");
-    v->muted = attr_present(box->dom, "muted");
+    v->dom_node = dom;
+    v->autoplay = attr_present(dom, "autoplay");
+    v->loop = attr_present(dom, "loop");
+    v->controls = attr_present(dom, "controls");
+    v->muted = attr_present(dom, "muted");
     v->cur_time = 0.0;
     g_hash_table_insert(cache->by_url, g_strdup(abs_url), v);
-    box->media->video = v;
+    if (box) box->media->video = v;
 
     ns_pending *pv = g_new0(ns_pending, 1);
     pv->video = v;
@@ -400,8 +400,41 @@ ns_video_cache_start(ns_video_cache *cache, ns_box *box,
     }
 }
 
+static void
+ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
+{
+    if (!node) return;
+    if (node->kind == NS_NODE_ELEMENT && node->name &&
+        strcmp(node->name, "video") == 0) {
+        const char *src = ns_element_get_attr(node, "src");
+        if (!src || !*src) src = ns_element_get_attr(node, NS_MEDIA_SRC_ATTR);
+        if (src && *src) {
+            char *abs = g_str_has_prefix(src, "blob:")
+                ? g_strdup(src)
+                : ns_url_resolve(cache->base_url, src);
+            if (abs && url_is_inline_video(abs) &&
+                (g_str_has_prefix(abs, "http://") ||
+                 g_str_has_prefix(abs, "https://") ||
+                 g_str_has_prefix(abs, "file://") ||
+                 g_str_has_prefix(abs, "blob:")) &&
+                !g_hash_table_contains(cache->requested, abs)) {
+                g_hash_table_add(cache->requested, g_strdup(abs));
+                const char *poster_raw = ns_element_get_attr(node, "poster");
+                char *poster = (poster_raw && *poster_raw)
+                    ? ns_url_resolve(cache->base_url, poster_raw) : NULL;
+                ns_video_cache_start(cache, node, NULL, abs, poster);
+                g_free(poster);
+            }
+            g_free(abs);
+        }
+    }
+    for (const ns_node *c = node->first_child; c; c = c->next_sibling)
+        ns_video_discover_dom(cache, c);
+}
+
 void
-ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us)
+ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
+                        const ns_node *doc, gint64 now_us)
 {
     (void)now_us;
     if (!cache || !root) return;
@@ -447,12 +480,15 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root, gint64 now_us
             box->media->video = existing;
         } else if (!g_hash_table_contains(cache->requested, abs)) {
             g_hash_table_add(cache->requested, g_strdup(abs));
-            ns_video_cache_start(cache, box, abs, poster);
+            ns_video_cache_start(cache, box->dom, box, abs, poster);
         }
         g_free(poster);
         g_free(abs);
     }
     g_ptr_array_free(vids, TRUE);
+
+    if (doc)
+        ns_video_discover_dom(cache, doc);
 }
 
 gboolean

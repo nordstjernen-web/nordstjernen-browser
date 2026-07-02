@@ -13,6 +13,7 @@
 G_BEGIN_DECLS
 
 typedef struct ns_box ns_box;
+typedef struct ns_node ns_node;
 
 typedef struct ns_video {
     char        *url;
@@ -59,7 +60,7 @@ void            ns_video_cache_set_audio_cb(ns_video_cache *cache,
                                             gpointer user_data);
 
 void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
-                                 gint64 now_us);
+                                 const ns_node *doc, gint64 now_us);
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
 gboolean ns_video_cache_has_pending(const ns_video_cache *cache);

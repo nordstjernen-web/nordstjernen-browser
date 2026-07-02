@@ -343,7 +343,7 @@ settle_tick_cb(gpointer user_data)
     gint64 now = g_get_monotonic_time();
     if (b->images) ns_image_cache_tick(b->images, now);
     if (b->videos && b->layout) {
-        ns_video_cache_discover(b->videos, b->layout, now);
+        ns_video_cache_discover(b->videos, b->layout, b->doc, now);
         ns_video_cache_tick(b->videos, now);
     }
     if (b->anim) ns_anim_tick(b->anim, now);
@@ -369,7 +369,7 @@ browser_settle(ns_browser *b, int settle_ms)
 {
     if (settle_ms <= 0) return;
     if (b->videos && b->layout)
-        ns_video_cache_discover(b->videos, b->layout, g_get_monotonic_time());
+        ns_video_cache_discover(b->videos, b->layout, b->doc, g_get_monotonic_time());
     if (browser_settle_quiet(b)) return;
     GMainLoop *loop = g_main_loop_new(NULL, FALSE);
     settle_ctx ctx = { .b = b, .loop = loop };
@@ -1088,7 +1088,7 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (browser->images && ns_image_cache_tick(browser->images, now))
             changed = TRUE;
         if (browser->videos && browser->layout) {
-            ns_video_cache_discover(browser->videos, browser->layout, now);
+            ns_video_cache_discover(browser->videos, browser->layout, browser->doc, now);
             if (ns_video_cache_tick(browser->videos, now))
                 changed = TRUE;
         }
