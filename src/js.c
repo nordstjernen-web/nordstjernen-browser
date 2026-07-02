@@ -19606,8 +19606,10 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(js->ctx, event, "_dispatching", JS_TRUE);
 
     GPtrArray *path = g_ptr_array_new();
-    for (const ns_node *cur = target; cur; cur = cur->parent)
+    for (const ns_node *cur = target; cur; cur = cur->parent) {
         g_ptr_array_add(path, (gpointer)cur);
+        if (cur->kind == NS_NODE_DOCUMENT) break;
+    }
 
     gboolean window_in_path = path->len > 0 &&
         path->pdata[path->len - 1] == (gpointer)js->current_doc;
