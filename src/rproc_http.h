@@ -26,6 +26,8 @@ typedef struct {
     int                  height;
     int                  stride;
     int                  animating;
+    int                  page_w;
+    int                  page_h;
     int                  unchanged;
     int                  render_rc;
     const unsigned char *pixels;

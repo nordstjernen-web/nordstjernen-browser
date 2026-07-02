@@ -552,6 +552,8 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->ok = 1;
         out->unchanged = 1;
         out->animating = head.x_anim > 0;
+        out->page_w = (int)head.x_page_w;
+        out->page_h = (int)head.x_page_h;
         out->render_rc = (int)head.x_render_rc;
         out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;
         out->webgl = head.x_webgl[0] ? strdup(head.x_webgl) : NULL;
@@ -573,6 +575,8 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->height = (int)head.x_h;
     out->stride = (int)head.x_stride;
     out->animating = head.x_anim > 0;
+    out->page_w = (int)head.x_page_w;
+    out->page_h = (int)head.x_page_h;
     out->render_rc = (int)head.x_render_rc;
     out->pixels = r->shm ? r->map : r->rxbuf;
     out->nav = head.x_nav[0] ? strdup(head.x_nav) : NULL;

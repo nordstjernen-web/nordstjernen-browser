@@ -750,6 +750,8 @@ worker_main(gpointer data)
             if (rendered) {
                 res->ok = TRUE;
                 res->animating = fr.animating ? TRUE : FALSE;
+                res->pw = fr.page_w;
+                res->ph = fr.page_h;
                 res->frame_unchanged = fr.unchanged ? TRUE : FALSE;
                 if (!fr.unchanged) {
                     res->surface = stage_fill(v, fr.pixels, fr.width,
@@ -1752,6 +1754,11 @@ on_result(gpointer data)
                 arm_anim(v);
             else
                 disarm_anim(v);
+            if (res->ph > 0 && res->ph != v->page_h) {
+                v->page_h = res->ph;
+                if (res->pw > 0) v->page_w = res->pw;
+                gtk_widget_queue_draw(v->area);
+            }
         }
         if (current && res->ok && res->surface) {
             if (v->frame)

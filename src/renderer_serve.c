@@ -401,11 +401,15 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 else if (*p == '\n') *p = '\x1f';
             }
         char *mailkey = ns_mail_take_pending_shell_key();
+        int page_w = 0, page_h = 0;
+        ns_browser_page_size(s->cur, &page_w, &page_h);
         char hdrs[16384];
         int hn = snprintf(hdrs, sizeof hdrs,
                  "X-W: %d\r\nX-H: %d\r\nX-Stride: %d\r\nX-Anim: %d\r\n"
+                 "X-PageW: %d\r\nX-PageH: %d\r\n"
                  "X-Render-RC: %d\r\n%s",
                  vw, vh, stride, ns_browser_animating(s->cur) ? 1 : 0,
+                 page_w, page_h,
                  render_rc, unchanged ? "X-Unchanged: 1\r\n" : "");
         if (nav && *nav && hn > 0 && (size_t)hn < sizeof hdrs)
             hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
