@@ -37,8 +37,8 @@ scripts/test262-run.sh -u        # regenerate test262_errors.txt from current pa
 The known-failing baseline is captured in
 `src/quickjs/test262_errors.txt` (the list quickjs-ng ships as
 "expected" failures, kept in sync with `-u` after each fix). As of
-this writing the full suite is 81150 test/mode combinations with 28
-unexpected errors (~99.97% pass rate excluding the intentionally
+this writing the full suite is 81150 test/mode combinations with 15
+unexpected errors (~99.98% pass rate excluding the intentionally
 skipped/excluded categories — `async`, `module`, and a handful of slow
 or out-of-scope feature areas, see `test262.conf`). Categorising the
 backlog:
@@ -47,7 +47,7 @@ backlog:
 | --- | --- | --- | --- |
 | TypedArray `[[Set]]` value-coercion on invalid index | ~12 | low | **done** |
 | `with` GetBindingValue re-probe (read trap order + strict) | ~5 | medium | **done** |
-| `with` SetMutableBinding re-probe (write trap order) | ~3 | medium | open (needs a dedicated with-store opcode) |
+| `with` SetMutableBinding re-probe (write trap order) | 3 | medium | **done** |
 | AsyncFromSyncIterator close on rejection (`closeOnRejection`) | ~8 | medium | **done** |
 | TypedArray `subarray` species-ctor argument list | 4 | low | **done** |
 | TypedArray `subarray`/`slice` detach + species offset | ~4 | medium | **done** (subarray byte-offset, slice overlapping-buffer copy) |
@@ -59,13 +59,14 @@ backlog:
 | Object computed-key `ToPropertyKey` before value | 2 | low | **done** |
 | Simple-assignment computed-member `ToPropertyKey` after RHS | 4 | medium | **done** |
 | Destructuring assignment-target evaluation order | 5 | medium | **done** |
-| Destructuring `var` binding ResolveBinding order under `with` | 1 | medium | open (same family as the with-store opcode work) |
+| Destructuring `var` binding ResolveBinding order under `with` | 1 | medium | **done** |
 | Module star-export of the same namespace is unambiguous | ~5 | medium | **done** |
 | Module local export aliasing an import is not a fresh binding | 3 | medium | **done** |
-| AnnexB CallExpression assignment-target type | 7 | high | open (needs a context-aware `=` lookahead, see below) |
+| AnnexB CallExpression assignment-target type | 7 | high | **done** |
 | `{}`/`[]` eagerly resolve a trailing `=` regardless of precedence context | 2 | high | open (general parser issue, see below) |
-| `for await`/`for...of` diamond module graph with top-level await hangs | 2 | high | open |
-| Text module imports (`with {type: "text"}`) | 3 | n/a | out of scope (non-standard proposal, see below) |
+| Diamond module graph with top-level await hangs | 2 | high | **done** |
+| Text module imports (`with {type: "text"}`) | 3 | low | **done** (attribute-aware module map; the dynamic-import test still fails under the multithreaded harness while passing standalone) |
+| `CanonicalNumericIndexString("NaN")` not treated as a typed-array index | 1 | low | **done** |
 | Legacy RegExp `$1`-`$9` must not throw when made non-writable | 2 | low | **done** |
 | `for await` loop must not close the iterator when `next()` itself rejects | 2 | medium | **done** |
 | `Function.prototype.caller`/`.arguments` as %ThrowTypeError% poison pills | 4 | n/a | **won't fix** (deliberate web-reality deviation, see below) |
@@ -680,6 +681,131 @@ the `with` environment before `GetV` — tracked as its own cluster in
 the table above (it needs the same with-aware store machinery as the
 "`with` SetMutableBinding re-probe" item).
 
+### 18. AnnexB: a CallExpression assignment target parses and throws ReferenceError at runtime
+
+**Spec:** the [Runtime Errors for Function Call Assignment Targets](https://github.com/tc39/proposal-call-assignment-runtime-error)
+web-reality change: in non-strict code, `f() = v`, `f() += v`, `f()++`,
+`--f()` and `for (f() in/of x)` are not early SyntaxErrors — the call
+evaluates and using its result as an assignment target throws a
+ReferenceError (before the right-hand side or ToNumeric coercion runs).
+Logical assignment (`f() &&= v`) and tagged templates (``o.f()`` ` `` = v``)
+remain early errors, as does everything in strict mode.
+
+**Fix:** `get_lvalue` accepts a call opcode (`OP_call`/`OP_call_method`/
+`OP_eval`/`OP_apply_eval`) as the previous instruction in sloppy mode
+(rejecting the logical-assignment tokens and, via a
+`last_template_call_pos` marker stamped by the tagged-template call
+emission, tagged templates), leaves the call in place, and emits an
+immediate `OP_throw_error` with a new `JS_THROW_ERROR_FUNCALL_REF` type;
+`put_lvalue` treats the sentinel as emitting no store (the code after
+the throw is unreachable). `src/quickjs/quickjs.c`.
+
+Covers the 7 test262
+`annexB/language/expressions/assignmenttargettype/*` tests without
+regressing the `language/expressions/assignmenttargettype` early-error
+suite.
+
+### 19. Import attributes key the module map
+
+**Spec:** [import attributes](https://tc39.es/proposal-import-attributes/):
+the module map key includes the `type` attribute, so the same specifier
+can load both as an ES module and (say) a text module.
+
+**Bug:** `js_find_loaded_module` matched by name only, so
+`import self from "./x.js" with {type: "text"}` inside `x.js` found the
+already-registered JS module and failed with "Could not find export
+'default'".
+
+**Fix:** `JSModuleDef` records the requested `type` attribute
+(`import_attr_type`, `JS_ATOM_NULL` for plain JS) and
+`js_find_loaded_module` matches (name, type); the host loader's module
+is stamped with the requested type after loading.
+`src/quickjs/quickjs.c`. Covers
+`language/import/import-attributes/text-self.js`; JSON-module
+idempotency is preserved (same name + same type still hits the map).
+
+### 20. Diamond module graphs with shared top-level await no longer hang
+
+**Spec:** [`AsyncModuleExecutionFulfilled`](https://tc39.es/ecma262/#sec-async-module-execution-fulfilled)
+step 12.c.iv: an ancestor executed synchronously during the fan-out gets
+`[[AsyncEvaluation]]` set to *false*.
+
+**Bug:** the port left `async_evaluation` true on such ancestors, so a
+later `InnerModuleEvaluation` (a dynamic import sharing part of the
+graph) registered itself as an async dependent of an
+already-finished module that would never notify again — the dynamic
+import promise never settled. `import "./parent.js"; await
+import("./grandparent.js")` with a common TLA leaf hung forever.
+
+**Fix:** clear `async_evaluation` in `js_set_module_evaluated` and in
+`js_async_module_execution_rejected`. Covers test262
+`language/module-code/top-level-await/module-graphs-does-not-hang.js`
+(and `rejection-order.js`, which still trips the multithreaded harness
+while passing standalone). `src/quickjs/quickjs.c`.
+
+### 21. `with` object-environment bindings re-probe on reads and writes through references
+
+**Spec:** [Object Environment Record `GetBindingValue`/`SetMutableBinding`](https://tc39.es/ecma262/#sec-object-environment-records):
+both re-check `HasProperty(bindings, N)` — observably, through proxy
+traps — before the get/set; a deleted binding is a ReferenceError in
+strict code, reads return undefined in sloppy code, and sloppy writes
+still perform the `Set` (which recreates a plain property but, e.g.,
+falls through a typed-array prototype's `[[Set]]` untouched).
+
+**Bug:** the reference path (`OP_with_make_ref` +
+`OP_get_ref_value`/`OP_put_ref_value`) resolved the binding once and
+then used plain gets/sets, so the re-probe `has` trap never fired and
+deleted bindings misbehaved; `OP_with_put_var` had the probe but not
+the strict/sloppy split.
+
+**Fix:** `OP_get_ref_value` and `OP_put_ref_value` perform the
+`HasProperty` re-probe for non-global bases (the global object keeps
+the create-on-assign path); reads of a missing binding yield undefined
+(sloppy) or ReferenceError (strict), writes throw in strict mode and
+otherwise proceed with the plain `Set`. `src/quickjs/quickjs.c`.
+
+Covers test262
+`language/statements/with/set-mutable-binding-idref-with-proxy-env.js`,
+`set-mutable-binding-idref-compound-assign-with-proxy-env.js` and (with
+fix #22) `set-mutable-binding-binding-deleted-with-typed-array-in-proto-chain.js`,
+without regressing the `S11.13.*` delete-then-assign suite.
+
+### 22. `"NaN"` is a canonical numeric index string
+
+**Spec:** [`CanonicalNumericIndexString`](https://tc39.es/ecma262/#sec-canonicalnumericindexstring):
+`"NaN"` round-trips through ToNumber/ToString, so it is a canonical
+numeric index — a typed array's integer-indexed `[[Set]]`/`[[Get]]`
+treats it as an (invalid) element index rather than an ordinary
+property.
+
+**Bug:** `JS_AtomIsNumericIndex1`'s fast path only admitted strings
+starting with a digit, `-`, or `Infinity` (an upstream `XXX: should
+test NaN` comment marked the gap), so `"NaN"` fell through to ordinary
+property handling and e.g. `Set` through a typed-array prototype
+created an own `NaN` property on the receiver.
+
+**Fix:** admit `"NaN"` in both the 8-bit and wide-char fast paths; the
+existing slow path validates it. `src/quickjs/quickjs.c`.
+
+### 23. Destructuring `var` bindings resolve through `with` environments before the read
+
+**Spec:** [`KeyedBindingInitialization` : *SingleNameBinding*](https://tc39.es/ecma262/#sec-runtime-semantics-keyedbindinginitialization)
+steps 1–3: `ResolveBinding(bindingId)` — observable as a `has` probe on
+a `with` environment — happens before `GetV(value, propertyName)`.
+
+**Bug:** the binding path stored through `OP_scope_put_var` after the
+value read, so the probe fired last.
+
+**Fix:** in `js_parse_destructuring_element`'s object-pattern `var`
+branch, emit a plain `OP_scope_get_var` for the binding and route it
+through the shared `get_lvalue` path, which already builds the
+reference eagerly (`OP_scope_make_ref`, probing the `with` environment)
+and stores through `OP_put_ref_value`. `src/quickjs/quickjs.c`. Covers
+test262
+`language/destructuring/binding/keyed-destructuring-property-reference-target-evaluation-order-with-bindings.js`.
+The array-pattern and rest-property `var` cases keep the late store
+(no test262 coverage; same recipe applies if it grows some).
+
 ## Open issues found but not fixed this round
 
 Investigated and root-caused, but left open: either out of scope for a
@@ -706,52 +832,9 @@ cover-grammar check to know its calling precedence context, which
 isn't threaded through today; this is the same general mechanism used
 everywhere object/array literals can appear, so the blast radius is
 large enough to warrant its own dedicated pass rather than a quick
-patch. The "AnnexB CallExpression assignment-target type" cluster in
-the table above (`a() = b`, `a()++`, `for (a() in/of b)`, all currently
-*accepted* when they must be `SyntaxError`s) looks adjacent — `get_lvalue`
-not rejecting a `CallExpression`-shaped reference — and may turn out to
-share a root cause once investigated.
-
-**`for await`/dynamic-import diamond module graphs with shared
-top-level-await hang instead of completing**
-(`language/module-code/top-level-await/{module-graphs-does-not-hang,rejection-order}.js`).
-Confirmed with a minimal repro (`import "./parent.js"; await
-import("./grandparent.js");` where both reach a common TLA-using leaf):
-the process hangs indefinitely rather than erroring or completing.
-`js_inner_module_evaluation`/`js_execute_async_module` is a careful,
-spec-annotated (it even preserves a documented upstream "spec bug: cycle
-root must be assigned before the test") port of `InnerModuleEvaluation`'s
-Tarjan-style cycle detection; a `JS_DUMP_MODULE_RESOLVE`-flagged trace
-produced *no* output before the hang, meaning the graph traversal itself
-completes and the hang is in the promise/job-queue draining that waits
-for the top-level await to settle — i.e. somewhere in
-`AsyncModuleExecutionFulfilled`/`AsyncModuleExecutionRejected`'s
-parent-notification fan-out, not the linking algorithm above it. Needs
-focused, dedicated debugging time rather than a guess.
-
-**Destructuring `var` binding ResolveBinding order under `with`**
-(`language/destructuring/binding/keyed-destructuring-property-reference-target-evaluation-order-with-bindings.js`,
-1 subtest, noStrict). For `with (proxyEnv) { var {[k]: v} = source; }`
-the spec's `KeyedBindingInitialization` resolves the target binding
-(`ResolveBinding`, observable as a `has` trap on the `with` object)
-*before* `GetV(value, propertyName)`; the engine's binding path stores
-through `OP_scope_put_var` after the value read, so the probe fires
-last. Fixing it means resolving the reference eagerly (an
-`OP_scope_make_ref` before the value fetch) for `var` bindings inside
-`with` scopes — the same with-aware store machinery the "`with`
-SetMutableBinding re-probe" cluster needs, so it should land with that
-work rather than alone.
-
-**Text module imports** (`import value from "./x" with {type:
-"text"}`, `language/import/import-attributes/text-self.js`,
-`language/expressions/dynamic-import/import-attributes/2nd-param-with-type-text.js`).
-Implementing a real text-module loader (read the resolved module's
-source as a synthetic module with a single string default export) is
-a self-contained feature addition, not a bug fix. Left out as out of
-scope: "Text modules" is not yet Stage 4, and `type: "json"` (the
-shipped, Stage-4 sibling of import attributes) is already supported —
-adding the still-proposal-stage `type: "text"` ahead of it isn't
-warranted by "pragmatic, without bloat" web compat.
+patch. (The "AnnexB CallExpression assignment-target type" cluster that
+once looked adjacent turned out to be independent and is fixed — see
+#18.)
 
 ## Known, accepted test262 deviations
 

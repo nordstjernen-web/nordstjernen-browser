@@ -942,6 +942,8 @@ typedef enum {
 struct JSModuleDef {
     JSRefCountHeader header; /* must come first, 32-bit */
     JSAtom module_name;
+    JSAtom import_attr_type; /* "type" import attribute the module was
+                                requested with; JS_ATOM_NULL for plain JS */
     struct list_head link;
 
     JSReqModuleEntry *req_module_entries;
@@ -3585,12 +3587,12 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
             if (c == '0' && len == 2)
                 goto minus_zero;
         }
-        /* XXX: should test NaN, but the tests do not check it */
         if (!is_num(c)) {
             /* XXX: String should be normalized, therefore 8-bit only */
             const uint16_t nfinity16[7] = { 'n', 'f', 'i', 'n', 'i', 't', 'y' };
             if (!(c =='I' && (r_end - r) == 8 &&
-                  !memcmp(r + 1, nfinity16, sizeof(nfinity16))))
+                  !memcmp(r + 1, nfinity16, sizeof(nfinity16))) &&
+                !(c == 'N' && len == 3 && r[1] == 'a' && r[2] == 'N'))
                 return JS_UNDEFINED;
         }
     } else {
@@ -3611,7 +3613,8 @@ static JSValue JS_AtomIsNumericIndex1(JSContext *ctx, JSAtom atom)
         }
         if (!is_num(c)) {
             if (!(c =='I' && (r_end - r) == 8 &&
-                  !memcmp(r + 1, "nfinity", 7)))
+                  !memcmp(r + 1, "nfinity", 7)) &&
+                !(c == 'N' && len == 3 && r[1] == 'a' && r[2] == 'N'))
                 return JS_UNDEFINED;
         }
     }
@@ -18307,6 +18310,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #define JS_THROW_VAR_UNINITIALIZED  2
 #define JS_THROW_ERROR_DELETE_SUPER   3
 #define JS_THROW_ERROR_ITERATOR_THROW 4
+#define JS_THROW_ERROR_FUNCALL_REF    5
             {
                 JSAtom atom;
                 int type;
@@ -18327,6 +18331,9 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 else
                 if (type == JS_THROW_ERROR_ITERATOR_THROW)
                     JS_ThrowTypeError(ctx, "iterator does not have a throw method");
+                else
+                if (type == JS_THROW_ERROR_FUNCALL_REF)
+                    JS_ThrowReferenceError(ctx, "invalid assignment left-hand side");
                 else
                     JS_ThrowInternalError(ctx, "invalid throw var type %d", type);
             }
@@ -19551,6 +19558,33 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                     }
                     goto exception;
                 }
+                /* object environment GetBindingValue: re-probe the binding
+                   so a deleted one is a strict ReferenceError or a sloppy
+                   undefined; the global object keeps the plain-get path */
+                if (JS_VALUE_GET_OBJ(sp[-2]) != JS_VALUE_GET_OBJ(ctx->global_obj) &&
+                    JS_VALUE_GET_OBJ(sp[-2]) != JS_VALUE_GET_OBJ(ctx->global_var_obj)) {
+                    JSAtom atom = JS_ValueToAtom(ctx, sp[-1]);
+                    int ret;
+                    if (unlikely(atom == JS_ATOM_NULL))
+                        goto exception;
+                    ret = JS_HasProperty(ctx, sp[-2], atom);
+                    if (unlikely(ret < 0)) {
+                        JS_FreeAtom(ctx, atom);
+                        goto exception;
+                    }
+                    if (!ret) {
+                        if (is_strict_mode(ctx)) {
+                            JS_ThrowReferenceErrorNotDefined(ctx, atom);
+                            JS_FreeAtom(ctx, atom);
+                            goto exception;
+                        }
+                        JS_FreeAtom(ctx, atom);
+                        sp[0] = JS_UNDEFINED;
+                        sp++;
+                        BREAK;
+                    }
+                    JS_FreeAtom(ctx, atom);
+                }
                 val = JS_GetPropertyValue(ctx, sp[-2],
                                           js_dup(sp[-1]));
                 if (unlikely(JS_IsException(val)))
@@ -19651,6 +19685,28 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 } else {
                     if (is_strict_mode(ctx))
                         flags |= JS_PROP_NO_ADD;
+                    /* object environment SetMutableBinding: re-probe the
+                       binding (observable through proxy traps) and throw a
+                       ReferenceError for a deleted one in strict mode; the
+                       set itself still proceeds. The global object keeps
+                       the plain-set path. */
+                    if (JS_VALUE_GET_OBJ(sp[-3]) != JS_VALUE_GET_OBJ(ctx->global_obj) &&
+                        JS_VALUE_GET_OBJ(sp[-3]) != JS_VALUE_GET_OBJ(ctx->global_var_obj)) {
+                        JSAtom atom = JS_ValueToAtom(ctx, sp[-2]);
+                        if (unlikely(atom == JS_ATOM_NULL))
+                            goto exception;
+                        ret = JS_HasProperty(ctx, sp[-3], atom);
+                        if (unlikely(ret < 0)) {
+                            JS_FreeAtom(ctx, atom);
+                            goto exception;
+                        }
+                        if (!ret && is_strict_mode(ctx)) {
+                            JS_ThrowReferenceErrorNotDefined(ctx, atom);
+                            JS_FreeAtom(ctx, atom);
+                            goto exception;
+                        }
+                        JS_FreeAtom(ctx, atom);
+                    }
                 }
                 ret = JS_SetPropertyValue(ctx, sp[-3], sp[-2], sp[-1], flags);
                 JS_FreeValue(ctx, sp[-3]);
@@ -20394,7 +20450,8 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                         break;
                     case OP_with_put_var:
                         /* SetMutableBinding: re-probe the binding; a missing
-                           binding is a ReferenceError in strict mode */
+                           binding is a ReferenceError in strict mode, and the
+                           set still proceeds in sloppy mode */
                         ret = JS_HasProperty(ctx, obj, atom);
                         if (unlikely(ret < 0))
                             goto exception;
@@ -21920,6 +21977,8 @@ typedef struct JSFunctionDef {
 
     DynBuf byte_code;
     int last_opcode_pos; /* -1 if no last opcode */
+    int last_template_call_pos; /* 1 + pos of the latest tagged-template
+                                   call opcode; 0 if none */
 
     LabelSlot *label_slots;
     int label_size; /* allocated size for label_slots[] */
@@ -25818,6 +25877,28 @@ static __exception int get_lvalue(JSParseState *s, int *popcode, int *pscope,
     case OP_get_super_value:
         depth = 3;
         break;
+    case OP_call:
+    case OP_call_method:
+    case OP_eval:
+    case OP_apply_eval:
+        /* web reality (Runtime Errors for Function Call Assignment
+           Targets): a non-strict CallExpression assignment target
+           parses, evaluates the call, then throws ReferenceError.
+           Logical assignment and tagged templates stay early errors. */
+        if (fd->is_strict_mode || tok == '[' || tok == '{' ||
+            (tok >= TOK_LAND_ASSIGN && tok <= TOK_DOUBLE_QUESTION_MARK_ASSIGN) ||
+            fd->last_template_call_pos == fd->last_opcode_pos + 1)
+            goto invalid_lvalue;
+        emit_op(s, OP_throw_error);
+        emit_atom(s, JS_ATOM_NULL);
+        emit_u8(s, JS_THROW_ERROR_FUNCALL_REF);
+        *popcode = OP_call;
+        *pscope = 0;
+        *pname = JS_ATOM_NULL;
+        *plabel = -1;
+        if (pdepth)
+            *pdepth = 0;
+        return 0;
     default:
     invalid_lvalue:
         if (tok == TOK_FOR) {
@@ -26036,6 +26117,8 @@ static void put_lvalue(JSParseState *s, int opcode, int scope,
         break;
     case OP_get_super_value:
         emit_op(s, OP_put_super_value);
+        break;
+    case OP_call:
         break;
     default:
         abort();
@@ -27251,6 +27334,8 @@ static __exception int js_parse_postfix_expr(JSParseState *s, int parse_flags)
                     break;
                 }
             }
+            if (call_type == FUNC_CALL_TEMPLATE)
+                fd->last_template_call_pos = fd->last_opcode_pos + 1;
             call_type = FUNC_CALL_NORMAL;
         } else if (s->token.val == '.') {
             if (next_token(s))
@@ -29914,6 +29999,7 @@ static void js_free_module_def(JSContext *ctx, JSModuleDef *m)
     int i;
 
     JS_FreeAtom(ctx, m->module_name);
+    JS_FreeAtom(ctx, m->import_attr_type);
 
     for(i = 0; i < m->req_module_entries_count; i++) {
         JSReqModuleEntry *rme = &m->req_module_entries[i];
@@ -30210,7 +30296,8 @@ static char *js_default_module_normalize_name(JSContext *ctx,
     return filename;
 }
 
-static JSModuleDef *js_find_loaded_module(JSContext *ctx, JSAtom name)
+static JSModuleDef *js_find_loaded_module(JSContext *ctx, JSAtom name,
+                                          JSAtom import_attr_type)
 {
     struct list_head *el;
     JSModuleDef *m;
@@ -30218,10 +30305,36 @@ static JSModuleDef *js_find_loaded_module(JSContext *ctx, JSAtom name)
     /* first look at the loaded modules */
     list_for_each(el, &ctx->loaded_modules) {
         m = list_entry(el, JSModuleDef, link);
-        if (m->module_name == name)
+        if (m->module_name == name &&
+            m->import_attr_type == import_attr_type)
             return m;
     }
     return NULL;
+}
+
+/* extract the interned "type" import attribute; JS_ATOM_NULL if absent */
+static JSAtom js_module_attributes_type(JSContext *ctx,
+                                        JSValueConst attributes)
+{
+    JSValue v;
+    JSAtom atom;
+
+    if (JS_IsUndefined(attributes))
+        return JS_ATOM_NULL;
+    v = JS_GetPropertyStr(ctx, attributes, "type");
+    if (JS_IsException(v)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_ATOM_NULL;
+    }
+    if (!JS_IsString(v)) {
+        JS_FreeValue(ctx, v);
+        return JS_ATOM_NULL;
+    }
+    atom = JS_ValueToAtom(ctx, v);
+    JS_FreeValue(ctx, v);
+    if (atom == JS_ATOM_NULL)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    return atom;
 }
 
 /* return NULL in case of exception (e.g. module could not be loaded) */
@@ -30255,11 +30368,14 @@ static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
         return NULL;
     }
 
+    JSAtom attr_type = js_module_attributes_type(ctx, attributes);
+
     /* first look at the loaded modules */
-    m = js_find_loaded_module(ctx, module_name);
+    m = js_find_loaded_module(ctx, module_name, attr_type);
     if (m) {
         js_free(ctx, cname);
         JS_FreeAtom(ctx, module_name);
+        JS_FreeAtom(ctx, attr_type);
         return m;
     }
 
@@ -30272,6 +30388,7 @@ static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
         JS_ThrowReferenceError(ctx, "could not load module '%s'",
                                cname);
         js_free(ctx, cname);
+        JS_FreeAtom(ctx, attr_type);
         return NULL;
     }
 
@@ -30280,6 +30397,9 @@ static JSModuleDef *js_host_resolve_imported_module(JSContext *ctx,
     } else {
         m = rt->u.module_loader_func(ctx, cname, rt->module_loader_opaque);
     }
+    if (m && m->import_attr_type == JS_ATOM_NULL && attr_type != JS_ATOM_NULL)
+        m->import_attr_type = JS_DupAtom(ctx, attr_type);
+    JS_FreeAtom(ctx, attr_type);
     js_free(ctx, cname);
     return m;
 }
@@ -31192,7 +31312,7 @@ static JSValue js_import_meta(JSContext *ctx)
 
     /* XXX: inefficient, need to add a module or script pointer in
        JSFunctionBytecode */
-    m = js_find_loaded_module(ctx, filename);
+    m = js_find_loaded_module(ctx, filename, JS_ATOM_NULL);
     JS_FreeAtom(ctx, filename);
     if (!m) {
     fail:
@@ -31449,6 +31569,7 @@ done:
 static void js_set_module_evaluated(JSContext *ctx, JSModuleDef *m)
 {
     m->status = JS_MODULE_STATUS_EVALUATED;
+    m->async_evaluation = false;
     if (!JS_IsUndefined(m->promise)) {
         JSValue ret_val;
         assert(m->cycle_root == m);
@@ -31543,6 +31664,7 @@ static JSValue js_async_module_execution_rejected(JSContext *ctx, JSValueConst t
     module->eval_has_exception = true;
     module->eval_exception = js_dup(error);
     module->status = JS_MODULE_STATUS_EVALUATED;
+    module->async_evaluation = false;
 
     for(i = 0; i < module->async_parent_modules_count; i++) {
         JSModuleDef *m = module->async_parent_modules[i];
