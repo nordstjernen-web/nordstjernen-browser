@@ -16484,9 +16484,7 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetInterruptHandler(js->rt, ns_js_interrupt_cb, js);
     JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
     JS_SetHostPromiseRejectionTracker(js->rt, ns_worker_promise_rejection_tracker, NULL);
-#ifdef G_OS_WIN32
     JS_SetMaxStackSize(js->rt, (size_t)5 * 1024 * 1024);
-#endif
 
     js->ctx = JS_NewContext(js->rt);
     if (!js->ctx) {
@@ -34151,9 +34149,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
         JS_SetHostPromiseRejectionTracker(
             js->rt, ns_js_promise_rejection_tracker, NULL);
-#ifdef G_OS_WIN32
         JS_SetMaxStackSize(js->rt, (size_t)5 * 1024 * 1024);
-#endif
     }
     if (!js->rt) { g_free(js); return NULL; }
     js->ctx = JS_NewContext(js->rt);
