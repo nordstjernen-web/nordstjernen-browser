@@ -13757,13 +13757,27 @@ resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
     case NS_CSS_UNIT_VMIN:
     case NS_CSS_UNIT_VMAX:
         return viewport_resolve(fs->u.length.v, fs->u.length.unit);
-    case NS_CSS_UNIT_CQW:   return fs->u.length.v * g_viewport_w / 100.0;
-    case NS_CSS_UNIT_CQH:   return fs->u.length.v * g_viewport_h / 100.0;
+    case NS_CSS_UNIT_CQW: {
+        const ns_cq_container *c = cq_select_container(NULL, 0);
+        double basis = c && c->width > 0 ? c->width : g_viewport_w;
+        return fs->u.length.v * basis / 100.0;
+    }
+    case NS_CSS_UNIT_CQH: {
+        const ns_cq_container *c = cq_select_container(NULL, 0);
+        double basis = c && c->type == NS_CQ_TYPE_SIZE && c->height > 0
+            ? c->height : g_viewport_h;
+        return fs->u.length.v * basis / 100.0;
+    }
     case NS_CSS_UNIT_CQMIN:
-    case NS_CSS_UNIT_CQMAX:
-        return viewport_resolve(fs->u.length.v,
-            fs->u.length.unit == NS_CSS_UNIT_CQMIN ? NS_CSS_UNIT_VMIN
-                                                   : NS_CSS_UNIT_VMAX);
+    case NS_CSS_UNIT_CQMAX: {
+        const ns_cq_container *c = cq_select_container(NULL, 0);
+        double w = c && c->width > 0 ? c->width : g_viewport_w;
+        double h = c && c->type == NS_CQ_TYPE_SIZE && c->height > 0
+            ? c->height : g_viewport_h;
+        return fs->u.length.v *
+               (fs->u.length.unit == NS_CSS_UNIT_CQMIN ? MIN(w, h)
+                                                       : MAX(w, h)) / 100.0;
+    }
     }
     return parent_px;
 }
