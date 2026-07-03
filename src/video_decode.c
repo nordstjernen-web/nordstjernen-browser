@@ -199,43 +199,61 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
 }
 
 static double
-ns_lav_probe_end(const guint8 *bytes, gsize len)
+ns_lav_probe_chunk_end(const guint8 *init, gsize init_len,
+                       const guint8 *chunk, gsize chunk_len)
 {
-    ns_lav probe = {0};
-    probe.data = (guint8 *)bytes;
-    probe.len = len;
+    if (!chunk || !chunk_len) return 0.0;
+    gsize total = init_len + chunk_len;
+    guint8 *joined = g_try_malloc(total);
+    if (!joined) return 0.0;
+    if (init_len) memcpy(joined, init, init_len);
+    memcpy(joined + init_len, chunk, chunk_len);
 
-    double last_pts = 0.0;
+    ns_lav probe = {0};
+    probe.data = joined;
+    probe.len = total;
+
+    double end = 0.0;
     unsigned char *iobuf = av_malloc(32768);
-    if (!iobuf) return 0.0;
+    if (!iobuf) { g_free(joined); return 0.0; }
     AVIOContext *avio = avio_alloc_context(iobuf, 32768, 0, &probe,
                                            ns_lav_read, NULL, ns_lav_seek);
-    if (!avio) { av_free(iobuf); return 0.0; }
+    if (!avio) { av_free(iobuf); g_free(joined); return 0.0; }
     AVFormatContext *fmt = avformat_alloc_context();
-    if (!fmt) { av_freep(&avio->buffer); avio_context_free(&avio); return 0.0; }
+    if (!fmt) {
+        av_freep(&avio->buffer);
+        avio_context_free(&avio);
+        g_free(joined);
+        return 0.0;
+    }
     fmt->pb = avio;
     if (avformat_open_input(&fmt, NULL, NULL, NULL) < 0) {
         av_freep(&avio->buffer);
         avio_context_free(&avio);
+        g_free(joined);
         return 0.0;
     }
-    int vstream = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     AVPacket *pkt = av_packet_alloc();
-    if (vstream >= 0 && pkt) {
-        AVRational tb = fmt->streams[vstream]->time_base;
+    if (pkt) {
         while (av_read_frame(fmt, pkt) >= 0) {
-            if (pkt->stream_index == vstream && pkt->pts != AV_NOPTS_VALUE) {
-                double t = (double)pkt->pts * av_q2d(tb);
-                if (t > last_pts) last_pts = t;
+            if (pkt->pts != AV_NOPTS_VALUE &&
+                pkt->stream_index >= 0 &&
+                pkt->stream_index < (int)fmt->nb_streams) {
+                AVRational tb = fmt->streams[pkt->stream_index]->time_base;
+                double t = ((double)pkt->pts +
+                            (pkt->duration > 0 ? (double)pkt->duration : 0.0)) *
+                           av_q2d(tb);
+                if (t > end) end = t;
             }
             av_packet_unref(pkt);
         }
+        av_packet_free(&pkt);
     }
-    if (pkt) av_packet_free(&pkt);
     avformat_close_input(&fmt);
     av_freep(&avio->buffer);
     avio_context_free(&avio);
-    return last_pts;
+    g_free(joined);
+    return end;
 }
 
 static void
@@ -421,6 +439,26 @@ ns_video_player_buffered_end(const ns_video_player *player)
     return player ? player->demuxed_end : 0.0;
 }
 
+void
+ns_video_player_note_end(ns_video_player *player, double end)
+{
+    if (!player || end <= 0.0) return;
+    if (end > player->demuxed_end) player->demuxed_end = end;
+    if (end > player->duration) player->duration = end;
+}
+
+double
+ns_video_probe_chunk_end(const guint8 *init, gsize init_len,
+                         const guint8 *chunk, gsize chunk_len)
+{
+#ifdef NS_HAVE_LIBAV
+    return ns_lav_probe_chunk_end(init, init_len, chunk, chunk_len);
+#else
+    (void)init; (void)init_len; (void)chunk; (void)chunk_len;
+    return 0.0;
+#endif
+}
+
 gboolean
 ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
 {
@@ -447,10 +485,6 @@ ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
         avcodec_flush_buffers(L->vdec);
         L->draining = FALSE;
     }
-
-    double end = ns_lav_probe_end(bytes, len);
-    if (end > player->demuxed_end) player->demuxed_end = end;
-    if (end > player->duration) player->duration = end;
     return TRUE;
 #else
     (void)player; (void)bytes; (void)len;

@@ -461,6 +461,8 @@ static gboolean
 browser_media_seek(const void *node, double seconds, gpointer ud)
 {
     ns_browser *b = ud;
+    if (g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[media-seek] to=%.3f\n", seconds);
     if (!b || !b->videos) return FALSE;
     return ns_video_cache_seek_node(b->videos, node, seconds,
                                     g_get_monotonic_time());
@@ -504,6 +506,14 @@ browser_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
         ns_video_cache_mse_eos(b->videos, stream_id);
     else
         ns_video_cache_mse_append(b->videos, stream_id, kind, data, len);
+}
+
+static double
+browser_mse_buffered(guint stream_id, char kind, gpointer ud)
+{
+    ns_browser *b = ud;
+    if (!b || !b->videos) return 0.0;
+    return ns_video_cache_mse_buffered(b->videos, stream_id, kind);
 }
 
 char *
@@ -794,6 +804,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_media_play_cb(b->js, browser_media_play, b);
         ns_js_set_media_muted_cb(b->js, browser_media_muted, b);
         ns_js_set_mse_cb(b->js, browser_mse_data, b);
+        ns_js_set_mse_buffered_cb(b->js, browser_mse_buffered, b);
         ns_js_set_media_volume_cb(b->js, browser_media_volume, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);

@@ -75,6 +75,8 @@ struct ns_js {
     gpointer      media_muted_user_data;
     ns_js_mse_cb  mse_cb;
     gpointer      mse_user_data;
+    ns_js_mse_buffered_cb mse_buffered_cb;
+    gpointer      mse_buffered_user_data;
     ns_js_media_volume_cb media_volume_cb;
     gpointer      media_volume_user_data;
     guint         next_audio_token;

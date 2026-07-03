@@ -363,6 +363,26 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             g_free(h);
             char *hu = ns_rproc_http_key(r, 1, jskey, jskey, code, 0);
             g_free(hu);
+        } else if (g_str_has_prefix(a, "eval ")) {
+            char *res = ns_rproc_http_eval(r, a + 5);
+            fprintf(stdout, "act-eval: %s\n", res ? res : "(null)");
+            free(res);
+        } else if (g_str_has_prefix(a, "wait ")) {
+            gint64 ms = g_ascii_strtoll(a + 5, NULL, 10);
+            fprintf(stderr, "[headless] wait %" G_GINT64_FORMAT "ms\n", ms);
+            gint64 end = g_get_monotonic_time() + ms * 1000;
+            while (g_get_monotonic_time() < end) {
+                ns_rproc_http_frame fr;
+                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr) == 0) {
+                    free(fr.nav);
+                    free(fr.webgl);
+                    free(fr.camera);
+                    free(fr.download);
+                    free(fr.audio);
+                    free(fr.mail_key);
+                }
+                g_usleep(33000);
+            }
         }
     }
     g_strfreev(acts);

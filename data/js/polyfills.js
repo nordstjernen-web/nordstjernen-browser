@@ -877,9 +877,22 @@
         this._parts = [];
         this._removed = false;
         this._bytes = 0;
-        this.buffered = new ndTimeRanges(0, 0);
+        this._buffered = new ndTimeRanges(0, 0);
     }
     ndEventMethods(SourceBuffer.prototype);
+    Object.defineProperty(SourceBuffer.prototype, 'buffered', {
+        configurable: true,
+        get: function () {
+            var ms = this._mediaSource;
+            if (ndMseNative && ms && ms._ndMseId &&
+                typeof global.__ndMseBuffered === 'function') {
+                var end = global.__ndMseBuffered(ms._ndMseId,
+                    this._type.indexOf('audio/') === 0 ? 'a' : 'v');
+                if (end > 0) return new ndTimeRanges(0, end);
+            }
+            return this._buffered;
+        }
+    });
     SourceBuffer.prototype.appendBuffer = function (data) {
         if (this._removed || !this._mediaSource ||
             this._mediaSource.readyState === 'closed' || this.updating)
@@ -900,7 +913,7 @@
             }
             self._bytes += copy.length;
             var seconds = self._bytes > 0 ? Math.max(0.001, self._bytes / 262144) : 0;
-            self.buffered = new ndTimeRanges(0, seconds);
+            self._buffered = new ndTimeRanges(0, seconds);
             self.updating = false;
             if (ms && !(ndMseNative && ms._ndMseId)) ms._ndRefreshBlob();
             ndFireEvent(self, 'update');
@@ -936,7 +949,7 @@
             if (start <= 0 && end > 0) {
                 self._parts = [];
                 self._bytes = 0;
-                self.buffered = new ndTimeRanges(0, 0);
+                self._buffered = new ndTimeRanges(0, 0);
             }
             self.updating = false;
             if (self._mediaSource) self._mediaSource._ndRefreshBlob();
