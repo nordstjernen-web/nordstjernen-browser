@@ -66,7 +66,15 @@ typedef struct ns_mse_stream {
     gboolean    audio_dirty;
     gboolean    audio_rebased;
     gint64      audio_flush_us;
+    gboolean    video_dirty;
+    gint64      video_flush_us;
 } ns_mse_stream;
+
+static gboolean
+ns_video_helper_enabled(void)
+{
+    return g_getenv("NS_VIDEO_HELPER") != NULL;
+}
 
 static gboolean
 ns_mse_bytes_are_init_segment(const guint8 *d, gsize n)
@@ -105,6 +113,11 @@ ns_video_free(gpointer p)
         if (g_str_has_prefix(v->audio_file, "file://"))
             g_unlink(v->audio_file + 7);
         g_free(v->audio_file);
+    }
+    if (v->video_file) {
+        if (g_str_has_prefix(v->video_file, "file://"))
+            g_unlink(v->video_file + 7);
+        g_free(v->video_file);
     }
     g_free(v->token);
     ns_texture_unref(v->poster_texture);
@@ -222,6 +235,55 @@ ns_video_audio_resync(ns_video_cache *cache, ns_video *v)
     ns_video_emit_audio(cache, "seek %s 0", v->token);
 }
 
+static void
+ns_video_helper_playpause(ns_video_cache *cache, ns_video *v, gboolean play)
+{
+    if (!cache || !cache->audio_cb || !v || !v->video_opened) return;
+    ns_video_emit_audio(cache, "video %s %s", play ? "play" : "pause",
+                        v->token);
+}
+
+static void
+ns_video_helper_seek(ns_video_cache *cache, ns_video *v, double seconds)
+{
+    if (!cache || !cache->audio_cb || !v || !v->video_opened) return;
+    ns_video_emit_audio(cache, "video seek %s %.3f", v->token, seconds);
+}
+
+static void
+ns_video_helper_stop(ns_video_cache *cache, ns_video *v)
+{
+    if (!cache || !cache->audio_cb || !v || !v->video_opened) return;
+    ns_video_emit_audio(cache, "video stop %s", v->token);
+    v->video_opened = FALSE;
+}
+
+void
+ns_video_note_paint_rect(ns_video *v, double x, double y, double w, double h)
+{
+    if (!v) return;
+    v->rect_x = x;
+    v->rect_y = y;
+    v->rect_w = w;
+    v->rect_h = h;
+    if (fabs(x - v->sent_rect_x) > 0.5 || fabs(y - v->sent_rect_y) > 0.5 ||
+        fabs(w - v->sent_rect_w) > 0.5 || fabs(h - v->sent_rect_h) > 0.5)
+        v->rect_dirty = TRUE;
+}
+
+static void
+ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v)
+{
+    if (!v->rect_dirty || !v->video_opened || !cache->audio_cb) return;
+    v->rect_dirty = FALSE;
+    v->sent_rect_x = v->rect_x;
+    v->sent_rect_y = v->rect_y;
+    v->sent_rect_w = v->rect_w;
+    v->sent_rect_h = v->rect_h;
+    ns_video_emit_audio(cache, "video rect %s %.1f %.1f %.1f %.1f",
+                        v->token, v->rect_x, v->rect_y, v->rect_w, v->rect_h);
+}
+
 void
 ns_video_cache_free(ns_video_cache *cache)
 {
@@ -230,8 +292,10 @@ ns_video_cache_free(ns_video_cache *cache)
         GHashTableIter it;
         gpointer key, val;
         g_hash_table_iter_init(&it, cache->by_url);
-        while (g_hash_table_iter_next(&it, &key, &val))
+        while (g_hash_table_iter_next(&it, &key, &val)) {
             ns_video_audio_stop(cache, val);
+            ns_video_helper_stop(cache, val);
+        }
     }
     for (guint i = 0; i < cache->pending->len; i++) {
         ns_pending *p = g_ptr_array_index(cache->pending, i);
@@ -313,6 +377,7 @@ ns_video_apply_node_state(ns_video_cache *cache, ns_video *v,
                 ns_video_pause(v, now);
                 ns_video_audio_pause(cache, v);
             }
+            ns_video_helper_playpause(cache, v, st->playing);
         } else {
             v->playing = st->playing;
         }
@@ -361,6 +426,7 @@ ns_video_cache_seek_node(ns_video_cache *cache, const void *dom_node,
     }
     if (v->audio_opened)
         ns_video_emit_audio(cache, "seek %s %.3f", v->token, t);
+    ns_video_helper_seek(cache, v, t);
     ns_video_emit_js(cache, v, "pos", t);
     return TRUE;
 }
@@ -387,6 +453,7 @@ ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
         ns_video_pause(v, now_us);
         ns_video_audio_pause(cache, v);
     }
+    ns_video_helper_playpause(cache, v, play);
     return TRUE;
 }
 
@@ -449,6 +516,7 @@ ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
     ns_video_emit_js(cache, v, was_playing ? "pause" : "play", v->cur_time);
     if (was_playing) ns_video_audio_pause(cache, v);
     else ns_video_audio_start(cache, v);
+    ns_video_helper_playpause(cache, v, !was_playing);
     return TRUE;
 }
 
@@ -676,6 +744,43 @@ ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
     g_free(dir);
 }
 
+static void
+ns_video_materialize_video(ns_video_cache *cache, ns_video *v,
+                           const guint8 *data, gsize len)
+{
+    if (!ns_video_helper_enabled() || !cache->audio_cb) return;
+    char *dir = g_build_filename(g_get_user_cache_dir(),
+                                 "nordstjernen", "msvideo", NULL);
+    g_mkdir_with_parents(dir, 0700);
+    char *path = g_strdup_printf("%s/v%d-%u.dat", dir,
+                                 (int)getpid(), ++cache->next_token);
+    if (g_file_set_contents(path, (const char *)data, (gssize)len, NULL)) {
+        char *old_file = v->video_file;
+        v->video_file = g_strdup_printf("file://%s", path);
+        if (!v->token)
+            v->token = g_strdup_printf("nv%u", ++cache->next_token);
+        if (v->video_opened) {
+            ns_video_emit_audio(cache, "video reload %s %s", v->token,
+                                v->video_file);
+        } else {
+            ns_video_emit_audio(cache, "video open %s %s", v->token,
+                                v->video_file);
+            v->video_opened = TRUE;
+            if (v->cur_time > 0)
+                ns_video_helper_seek(cache, v, v->cur_time);
+            if (v->playing)
+                ns_video_helper_playpause(cache, v, TRUE);
+        }
+        if (old_file) {
+            if (g_str_has_prefix(old_file, "file://"))
+                g_unlink(old_file + 7);
+            g_free(old_file);
+        }
+    }
+    g_free(path);
+    g_free(dir);
+}
+
 static ns_video *
 ns_video_for_mse_id(ns_video_cache *cache, guint id)
 {
@@ -730,6 +835,13 @@ ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
         if (d > v->duration) v->duration = d;
     }
     gint64 now = g_get_monotonic_time();
+    if (s->video_bytes && s->video_bytes->len > 0 && s->video_dirty &&
+        (s->eos || now - s->video_flush_us > G_GINT64_CONSTANT(1000000))) {
+        s->video_dirty = FALSE;
+        s->video_flush_us = now;
+        ns_video_materialize_video(cache, v, s->video_bytes->data,
+                                   s->video_bytes->len);
+    }
     gboolean has_side_audio = s->audio_bytes && s->audio_bytes->len > 0;
     if (has_side_audio && s->audio_dirty &&
         (s->eos || now - s->audio_flush_us > G_GINT64_CONSTANT(1000000))) {
@@ -804,6 +916,7 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
     if ((*dst)->len + len > NS_VIDEO_MAX_BYTES) return;
     g_byte_array_append(*dst, data, len);
     if (kind == 'a') s->audio_dirty = TRUE;
+    else s->video_dirty = TRUE;
 
     if (!is_init) {
         double chunk_end = ns_video_probe_chunk_end(
@@ -1173,6 +1286,9 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             if (buffered_end > 0.0)
                 ns_video_queue_emit(emits, v, "buf", buffered_end);
         }
+        gboolean helper = ns_video_helper_enabled() && v->video_opened;
+        if (helper)
+            ns_video_helper_flush_rect(cache, v);
         if (!v->playing) continue;
 
         if (v->base_us == 0)
@@ -1187,6 +1303,8 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->base_us = now_us - (gint64)(elapsed * 1e6);
             if (v->audio_opened)
                 ns_video_emit_audio(cache, "seek %s %.3f", v->token, elapsed);
+            if (helper)
+                ns_video_helper_seek(cache, v, elapsed);
         }
         double t = elapsed;
         if (v->loop && v->duration > 0.0)
@@ -1216,7 +1334,15 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         v->prev_tick_time = t;
 
         gboolean ended = FALSE;
-        ns_texture *frame = ns_video_player_frame_at(v->player, t, v->loop, &ended);
+        ns_texture *frame = helper ? NULL
+            : ns_video_player_frame_at(v->player, t, v->loop, &ended);
+        if (helper && !v->loop && v->duration > 0.0 && t >= v->duration)
+            ended = TRUE;
+        if (helper && v->stalled &&
+            t + 0.5 < ns_video_player_buffered_end(v->player)) {
+            v->stalled = FALSE;
+            ns_video_queue_emit(emits, v, "resumed", t);
+        }
         if (frame) {
             ns_texture_unref(v->frame_texture);
             v->frame_texture = ns_texture_ref(frame);
@@ -1246,6 +1372,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             v->ended = TRUE;
             v->cur_time = v->duration;
             ns_video_audio_stop(cache, v);
+            ns_video_helper_playpause(cache, v, FALSE);
             ns_video_queue_emit(emits, v, "ended", v->duration);
         }
     }

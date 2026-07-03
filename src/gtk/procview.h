@@ -70,6 +70,8 @@ void   ns_proc_view_zoom_reset(NsProcView *view);
 double ns_proc_view_zoom(NsProcView *view);
 void   ns_proc_view_focus(NsProcView *view);
 
+gboolean ns_proc_video_helper_available(void);
+
 G_END_DECLS
 
 #endif

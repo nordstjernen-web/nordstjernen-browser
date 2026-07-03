@@ -35,6 +35,11 @@ typedef struct ns_video {
     gboolean     audio_opened;
     char        *audio_url;
     char        *audio_file;
+    char        *video_file;
+    gboolean     video_opened;
+    double       rect_x, rect_y, rect_w, rect_h;
+    gboolean     rect_dirty;
+    double       sent_rect_x, sent_rect_y, sent_rect_w, sent_rect_h;
     char        *token;
     gboolean     playing;
     gboolean     ended;
@@ -94,6 +99,8 @@ gboolean ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us
 gboolean ns_video_toggle(ns_video *v, gint64 now_us);
 void     ns_video_play(ns_video *v, gint64 now_us);
 void     ns_video_pause(ns_video *v, gint64 now_us);
+void     ns_video_note_paint_rect(ns_video *v, double x, double y,
+                                  double w, double h);
 
 G_END_DECLS
 

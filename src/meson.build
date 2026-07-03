@@ -383,6 +383,27 @@ if not is_android
   else
     message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
   endif
+
+  if have_libav and host_machine.system() != 'windows'
+    videoproc_deps = [libavformat, libavcodec, libavutil, libswscale,
+                      dependency('threads')]
+    videoproc_sources = files('videoproc/main.c')
+    if host_machine.system() == 'linux'
+      videoproc_sources += files('security.c')
+      videoproc_deps += [glib]
+      if have_seccomp
+        videoproc_deps += [libseccomp]
+      endif
+      videoproc_deps += [cc.find_library('rt', required: false)]
+    endif
+    executable(
+      'nordstjernen-video',
+      videoproc_sources,
+      include_directories: include_directories('.'),
+      dependencies: videoproc_deps + [cc.find_library('m', required: false)],
+      install: true,
+    )
+  endif
 endif
 
 if not is_android and have_gtk

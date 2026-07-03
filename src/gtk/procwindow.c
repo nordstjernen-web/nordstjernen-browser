@@ -2015,6 +2015,8 @@ int
 ns_procapp_run(const char *startup_url, const char *session_path,
                gboolean recover, gboolean private_mode)
 {
+    if (ns_proc_video_helper_available())
+        g_setenv("NS_VIDEO_HELPER", "1", TRUE);
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
         .session_path = g_strdup(session_path),

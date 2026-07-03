@@ -3622,6 +3622,14 @@ paint_video(cairo_t *cr, const ns_box *b)
                                             : v->poster_texture)
                         : NULL;
     gboolean playing = v && v->playing;
+    if (v) {
+        double dx0 = b->x, dy0 = b->y;
+        double dx1 = b->x + b->content_width;
+        double dy1 = b->y + b->content_height;
+        cairo_user_to_device(cr, &dx0, &dy0);
+        cairo_user_to_device(cr, &dx1, &dy1);
+        ns_video_note_paint_rect(v, dx0, dy0, dx1 - dx0, dy1 - dy0);
+    }
     ns_image *bgimg = b->media ? b->media->bg_image : NULL;
     gboolean bg_painted = bgimg && bgimg->loaded && bgimg->texture;
     if (!bg_painted && b->media && b->media->bg_layer_images) {
