@@ -243,6 +243,7 @@ struct ns_js {
     JSValue       proto_doctype;
     JSValue       proto_docfrag;
     JSValue       proto_document;
+    GHashTable   *per_tag_protos;
     int           dom_protos_set;
     struct {
         const void *root;

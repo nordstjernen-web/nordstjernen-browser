@@ -2505,6 +2505,16 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
                 ? js->proto_svgelement : js->proto_element;
         if (node->flags & NS_NODE_FOREIGN_NS)
             return js->proto_element;
+        if (node->name && js->per_tag_protos) {
+            char lower[16];
+            gsize n = strlen(node->name);
+            if (n < sizeof lower) {
+                for (gsize i = 0; i <= n; i++)
+                    lower[i] = g_ascii_tolower(node->name[i]);
+                JSValue *slot = g_hash_table_lookup(js->per_tag_protos, lower);
+                if (slot) return *slot;
+            }
+        }
         return js->proto_htmlelement;
     case NS_NODE_TEXT:
         return (node->flags & NS_NODE_CDATA) ? js->proto_cdata : js->proto_text;
@@ -31006,7 +31016,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("textContent",            ns_element_get_textContent,            ns_element_set_textContent),
     JS_CGETSET_DEF("innerText",              ns_element_get_innerText,              ns_element_set_innerText),
     JS_CGETSET_DEF("outerText",              ns_element_get_innerText,              ns_element_set_outerText),
-    JS_CGETSET_DEF("text",                   ns_element_get_text,                   ns_element_set_text),
     JS_CGETSET_DEF("id",                     ns_element_get_id,                     ns_element_set_id),
     JS_CGETSET_DEF("className",              ns_element_get_className,              ns_element_set_className),
     JS_CGETSET_DEF("innerHTML",              ns_element_get_innerHTML,              ns_element_set_innerHTML),
@@ -31238,7 +31247,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("toDataURL",               0, ns_element_toDataURL),
     JS_CGETSET_DEF("nodeType",      ns_element_get_nodeType, ns_element_noop_set),
     JS_CGETSET_DEF("nodeValue",     ns_element_get_nodeValue, ns_element_set_nodeValue),
-    JS_CGETSET_DEF("data",          ns_element_get_data, ns_element_set_data),
     JS_CGETSET_DEF("wholeText",     ns_element_get_wholeText, ns_element_noop_set),
     JS_CFUNC_DEF("replaceWholeText", 1, ns_text_replaceWholeText),
     JS_CGETSET_DEF("nodeName",      ns_element_get_nodeName, ns_element_noop_set),
@@ -31391,7 +31399,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("attachShadow",             1, ns_element_attachShadow),
     JS_CGETSET_DEF("disabled",      ns_element_get_disabled,   ns_element_set_disabled),
     JS_CGETSET_DEF("checked",       ns_element_get_checked,    ns_element_set_checked),
-    JS_CGETSET_DEF("value",         ns_element_get_value_prop, ns_element_set_value_prop),
     JS_CGETSET_DEF("label",         ns_element_get_label_prop, ns_element_set_label_prop),
     JS_CGETSET_DEF("selectedIndex", ns_element_get_selectedIndex, ns_element_set_selectedIndex),
     JS_CGETSET_DEF("options",       ns_element_get_options,       ns_element_noop_set),
@@ -34302,6 +34309,22 @@ static const char *const ns_element_only_methods[] = {
 };
 
 static void
+ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
+                       JSValue (*getter)(JSContext *, JSValueConst),
+                       JSValue (*setter)(JSContext *, JSValueConst,
+                                         JSValueConst))
+{
+    JSAtom atom = JS_NewAtom(ctx, name);
+    JSValue g = JS_NewCFunction2(ctx, (JSCFunction *)(void *)getter, name, 0,
+                                 JS_CFUNC_getter, 0);
+    JSValue s = JS_NewCFunction2(ctx, (JSCFunction *)(void *)setter, name, 1,
+                                 JS_CFUNC_setter, 0);
+    JS_DefinePropertyGetSet(ctx, proto, atom, g, s,
+                            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static void
 ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
 {
     JSValue node_proto = ns_proto_of(ctx, global, "Node");
@@ -34394,6 +34417,51 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     js->proto_cdata       = cdata_proto;
     js->proto_doctype     = doctype_proto;
     js->proto_docfrag     = docfrag_proto;
+
+    js->per_tag_protos = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                               g_free, g_free);
+    static const struct {
+        const char *tag;
+        gboolean has_text, has_data, has_value;
+    } tag_props[] = {
+        { "option",   TRUE,  FALSE, TRUE  },
+        { "a",        TRUE,  FALSE, FALSE },
+        { "script",   TRUE,  FALSE, FALSE },
+        { "title",    TRUE,  FALSE, FALSE },
+        { "object",   FALSE, TRUE,  TRUE  },
+        { "input",    FALSE, FALSE, TRUE  },
+        { "select",   FALSE, FALSE, TRUE  },
+        { "textarea", FALSE, FALSE, TRUE  },
+        { "button",   FALSE, FALSE, TRUE  },
+        { "output",   FALSE, FALSE, TRUE  },
+        { "progress", FALSE, FALSE, TRUE  },
+        { "meter",    FALSE, FALSE, TRUE  },
+        { "li",       FALSE, FALSE, TRUE  },
+        { "param",    FALSE, FALSE, TRUE  },
+        { "data",     FALSE, FALSE, TRUE  },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(tag_props); i++) {
+        JSValue tp = JS_NewObject(ctx);
+        JS_SetPrototype(ctx, tp, htmlelem_proto);
+        if (tag_props[i].has_text)
+            ns_proto_define_getset(ctx, tp, "text",
+                                   ns_element_get_text, ns_element_set_text);
+        if (tag_props[i].has_data)
+            ns_proto_define_getset(ctx, tp, "data",
+                                   ns_element_get_data, ns_element_set_data);
+        if (tag_props[i].has_value)
+            ns_proto_define_getset(ctx, tp, "value",
+                                   ns_element_get_value_prop,
+                                   ns_element_set_value_prop);
+        JSValue *slot = g_new(JSValue, 1);
+        *slot = tp;
+        g_hash_table_insert(js->per_tag_protos,
+                            g_strdup(tag_props[i].tag), slot);
+    }
+    if (JS_IsObject(chardata_proto))
+        ns_proto_define_getset(ctx, chardata_proto, "data",
+                               ns_element_get_data, ns_element_set_data);
+
     js->dom_protos_set    = 1;
 }
 
@@ -38437,6 +38505,15 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_doctype);
         JS_FreeValue(js->ctx, js->proto_docfrag);
         JS_FreeValue(js->ctx, js->proto_document);
+        if (js->per_tag_protos) {
+            GHashTableIter it;
+            gpointer k, v;
+            g_hash_table_iter_init(&it, js->per_tag_protos);
+            while (g_hash_table_iter_next(&it, &k, &v))
+                JS_FreeValue(js->ctx, *(JSValue *)v);
+            g_hash_table_destroy(js->per_tag_protos);
+            js->per_tag_protos = NULL;
+        }
         js->dom_protos_set = 0;
     }
     if (js->mutation_observers) {
