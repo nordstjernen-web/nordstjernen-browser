@@ -29,9 +29,7 @@ typedef struct rgba {
 static gboolean       g_caret_visible = TRUE;
 static int            g_paint_no_cull;
 static GPtrArray     *g_paint_deferred_list;
-static const ns_box  *g_dbg_flush_owner;
-static const ns_box  *g_dbg_scope_stack[64];
-static int            g_dbg_scope_depth;
+
 static int            g_paint_defer_depth;
 static const ns_box  *g_paint_flush_box;
 static ns_js         *g_paint_js;
@@ -4343,22 +4341,6 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
         if (g_dbg_paint_x >= 0 && entries[i].box->dom) {
             double gx0, gy0, gx1, gy1;
             cairo_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
-            if (gx1 - gx0 < 1) {
-                GString *oc = g_string_new("[flush-owner-chain]");
-                for (const ns_box *p3 = g_dbg_flush_owner; p3;
-                     p3 = p3->parent) {
-                    const char *nm3 = p3->dom && p3->dom->name
-                                    ? p3->dom->name : "?";
-                    const char *id3 = p3->dom &&
-                                      p3->dom->kind == NS_NODE_ELEMENT
-                                    ? ns_element_get_attr(p3->dom, "id")
-                                    : NULL;
-                    g_string_append_printf(oc, " <%s#%s>", nm3,
-                                           id3 ? id3 : "");
-                }
-                g_printerr("%s\n", oc->str);
-                g_string_free(oc, TRUE);
-            }
             g_printerr("[flush-one] <%s#%s y=%.0f h=%.0f> d=%.0f,%.0f "
                        "clip=%.0f,%.0f..%.0f,%.0f\n",
                        entries[i].box->dom->name ? entries[i].box->dom->name
@@ -5337,21 +5319,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cap->box = b;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
-        if (g_dbg_paint_x >= 0 && b->dom && b->dom->name &&
-            ns_element_get_attr(b->dom, "id") &&
-            strcmp(ns_element_get_attr(b->dom, "id"), "below") == 0) {
-            const ns_box *own = g_dbg_scope_depth > 0
-                ? g_dbg_scope_stack[g_dbg_scope_depth - 1] : NULL;
-            g_printerr("[below-defer] open-owner=<%s#%s> depth=%d "
-                       "flushbox=%d\n",
-                       own && own->dom && own->dom->name ? own->dom->name
-                                                         : "?",
-                       own && own->dom &&
-                       ns_element_get_attr(own->dom, "id")
-                           ? ns_element_get_attr(own->dom, "id") : "",
-                       g_dbg_scope_depth,
-                       g_paint_flush_box != NULL);
-        }
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
             g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
                        b->dom->name,
@@ -5465,6 +5432,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                 g_printerr("[paint-nan-guard] transform <%s>\n",
                            b->dom && b->dom->name ? b->dom->name : "?");
         } else if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6) {
+            cairo_restore(cr);
+            if (grouped)
+                cairo_pattern_destroy(cairo_pop_group(cr));
             if (has_sticky) cairo_restore(cr);
             return;
         } else {
@@ -5664,8 +5634,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         saved_layer_list = g_paint_deferred_list;
         g_paint_deferred_list = NULL;
         g_paint_defer_depth++;
-        if (g_dbg_paint_x >= 0 && g_dbg_scope_depth < 63)
-            g_dbg_scope_stack[g_dbg_scope_depth++] = b;
     }
     if (has_transform || has_sticky) g_paint_no_cull++;
     for (guint i = 0; i < n_children; i++)
@@ -5676,9 +5644,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         deferred_mine = g_paint_deferred_list;
         g_paint_deferred_list = saved_layer_list;
         g_paint_defer_depth--;
-        if (g_dbg_paint_x >= 0 && g_dbg_scope_depth > 0)
-            g_dbg_scope_depth--;
-        g_dbg_flush_owner = b;
         if (deferred_mine && !clip_overflow && !has_path_clip) {
             if (g_dbg_paint_x >= 0) {
                 double fx0, fy0, fx1, fy1;
