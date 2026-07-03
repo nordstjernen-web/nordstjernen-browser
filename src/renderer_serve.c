@@ -428,7 +428,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                      "X-Mail-Key: %.700s\r\n", mailkey);
         if (audio && *audio && hn > 0 && (size_t)hn < sizeof hdrs)
             snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                     "X-Audio: %.3000s\r\n", audio);
+                     "X-Audio: %.16000s\r\n", audio);
         free(nav);
         free(webgl);
         free(camera);

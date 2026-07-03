@@ -434,7 +434,7 @@ static void browser_js_download(const char *url, const char *filename, gpointer 
     g_free(abs);
 }
 
-#define NS_PENDING_AUDIO_MAX 4096
+#define NS_PENDING_AUDIO_MAX 15000
 
 static void
 browser_js_audio(const char *command, gpointer ud)

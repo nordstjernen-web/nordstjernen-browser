@@ -872,14 +872,17 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
 {
     if (g_str_has_prefix(cmd, "rect ")) {
         char token[64];
-        double x, y, w, h;
-        if (sscanf(cmd + 5, "%63s %lf %lf %lf %lf",
+        int x, y, w, h;
+        if (sscanf(cmd + 5, "%63s %d %d %d %d",
                    token, &x, &y, &w, &h) == 5) {
             v->vid_x = x;
             v->vid_y = y;
             v->vid_w = w;
             v->vid_h = h;
-            v->vid_rect_valid = w > 0.5 && h > 0.5;
+            v->vid_rect_valid = w > 0 && h > 0;
+            if (g_getenv("NS_DBG_AUDIO"))
+                g_printerr("[video-rect] %d,%d %dx%d valid=%d\n",
+                           x, y, w, h, v->vid_rect_valid);
             gtk_widget_queue_draw(v->area);
         }
         return;

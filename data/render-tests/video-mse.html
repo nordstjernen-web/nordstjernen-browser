@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>MSE video helper test</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  video { display: block; background: #000; border: 4px solid #c00; }
+  #state { font-family: monospace; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>MSE video (helper/compositor path)</h1>
+<video id="v" width="480" height="360" muted autoplay></video>
+<div id="state">starting…</div>
+<script>
+var v = document.getElementById('v');
+var st = document.getElementById('state');
+var ms = new MediaSource();
+v.src = URL.createObjectURL(ms);
+ms.addEventListener('sourceopen', function () {
+  var sb = ms.addSourceBuffer('video/webm; codecs="vp9,opus"');
+  fetch('media/av550.webm')
+    .then(function (r) { return r.arrayBuffer(); })
+    .then(function (buf) {
+      var bytes = new Uint8Array(buf);
+      var chunk = 65536;
+      var off = 0;
+      function pump() {
+        if (off >= bytes.length) {
+          ms.endOfStream();
+          return;
+        }
+        var end = Math.min(off + chunk, bytes.length);
+        sb.addEventListener('updateend', function done() {
+          sb.removeEventListener('updateend', done);
+          setTimeout(pump, 120);
+        });
+        sb.appendBuffer(bytes.subarray(off, end));
+        off = end;
+      }
+      pump();
+      var p = v.play();
+      if (p && p.catch) p.catch(function (e) { st.textContent = 'play rejected: ' + e; });
+    });
+});
+setInterval(function () {
+  st.textContent = 'currentTime=' + v.currentTime.toFixed(2) +
+                   ' paused=' + v.paused +
+                   ' buffered=' + (v.buffered.length ? v.buffered.end(0).toFixed(2) : '-');
+}, 500);
+</script>
+</body>
+</html>

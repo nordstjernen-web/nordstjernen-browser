@@ -39,6 +39,7 @@ typedef struct ns_video {
     gboolean     video_opened;
     double       rect_x, rect_y, rect_w, rect_h;
     gboolean     rect_dirty;
+    gint64       rect_sent_us;
     double       sent_rect_x, sent_rect_y, sent_rect_w, sent_rect_h;
     char        *token;
     gboolean     playing;

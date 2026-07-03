@@ -261,6 +261,9 @@ ns_video_helper_stop(ns_video_cache *cache, ns_video *v)
 void
 ns_video_note_paint_rect(ns_video *v, double x, double y, double w, double h)
 {
+    if (v && g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[note-rect] %.0f,%.0f %.0fx%.0f opened=%d\n",
+                   x, y, w, h, v->video_opened);
     if (!v) return;
     v->rect_x = x;
     v->rect_y = y;
@@ -272,16 +275,23 @@ ns_video_note_paint_rect(ns_video *v, double x, double y, double w, double h)
 }
 
 static void
-ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v)
+ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
-    if (!v->rect_dirty || !v->video_opened || !cache->audio_cb) return;
+    if (!v->video_opened || !cache->audio_cb) return;
+    if (!v->rect_dirty &&
+        now_us - v->rect_sent_us < G_GINT64_CONSTANT(1000000))
+        return;
+    if (v->rect_w <= 0.5 || v->rect_h <= 0.5) return;
     v->rect_dirty = FALSE;
+    v->rect_sent_us = now_us;
     v->sent_rect_x = v->rect_x;
     v->sent_rect_y = v->rect_y;
     v->sent_rect_w = v->rect_w;
     v->sent_rect_h = v->rect_h;
-    ns_video_emit_audio(cache, "video rect %s %.1f %.1f %.1f %.1f",
-                        v->token, v->rect_x, v->rect_y, v->rect_w, v->rect_h);
+    ns_video_emit_audio(cache, "video rect %s %d %d %d %d",
+                        v->token, (int)lround(v->rect_x),
+                        (int)lround(v->rect_y), (int)lround(v->rect_w),
+                        (int)lround(v->rect_h));
 }
 
 void
@@ -1288,7 +1298,7 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         }
         gboolean helper = ns_video_helper_enabled() && v->video_opened;
         if (helper)
-            ns_video_helper_flush_rect(cache, v);
+            ns_video_helper_flush_rect(cache, v, now_us);
         if (!v->playing) continue;
 
         if (v->base_us == 0)

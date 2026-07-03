@@ -219,7 +219,7 @@ http_read_head(http_conn *c, http_head *out)
     out->x_page_w = out->x_page_h = -1;
     out->x_unchanged = 0;
 
-    char line[2048];
+    char line[20480];
     int len = conn_read_line(c, line, sizeof line);
     if (len <= 0)
         return -1;
