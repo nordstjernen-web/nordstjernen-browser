@@ -33124,6 +33124,61 @@ ns_ce_fire_connected_if_needed(JSContext *ctx, ns_js *js, ns_node *node,
 }
 
 static void
+ns_ce_reclaim_shadowed_props(JSContext *ctx, JSValueConst elem)
+{
+    JSPropertyEnum *tab = NULL;
+    uint32_t len = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &len, elem,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) != 0)
+        return;
+    for (uint32_t i = 0; i < len; i++) {
+        JSAtom atom = tab[i].atom;
+        const char *name = JS_AtomToCString(ctx, atom);
+        gboolean internal = !name || g_str_has_prefix(name, "__nd") ||
+                            g_str_has_prefix(name, "_");
+        if (name) JS_FreeCString(ctx, name);
+        if (internal) continue;
+
+        JSPropertyDescriptor own;
+        if (JS_GetOwnProperty(ctx, &own, elem, atom) != 1) continue;
+        gboolean own_is_data = !(own.flags & JS_PROP_GETSET);
+        JSValue value = own_is_data ? JS_DupValue(ctx, own.value) : JS_UNDEFINED;
+        JS_FreeValue(ctx, own.value);
+        JS_FreeValue(ctx, own.getter);
+        JS_FreeValue(ctx, own.setter);
+        if (!own_is_data) continue;
+
+        gboolean shadowed = FALSE;
+        JSValue proto = JS_GetPrototype(ctx, elem);
+        for (int depth = 0; depth < 8 && JS_IsObject(proto); depth++) {
+            JSPropertyDescriptor pd;
+            int has = JS_GetOwnProperty(ctx, &pd, proto, atom);
+            if (has == 1) {
+                shadowed = (pd.flags & JS_PROP_GETSET) &&
+                           JS_IsFunction(ctx, pd.setter);
+                JS_FreeValue(ctx, pd.value);
+                JS_FreeValue(ctx, pd.getter);
+                JS_FreeValue(ctx, pd.setter);
+                break;
+            }
+            JSValue next = JS_GetPrototype(ctx, proto);
+            JS_FreeValue(ctx, proto);
+            proto = next;
+        }
+        JS_FreeValue(ctx, proto);
+
+        if (shadowed) {
+            JS_DeleteProperty(ctx, elem, atom, 0);
+            if (JS_SetProperty(ctx, elem, atom, value) < 0)
+                JS_FreeValue(ctx, JS_GetException(ctx));
+        } else {
+            JS_FreeValue(ctx, value);
+        }
+    }
+    JS_FreePropertyEnum(ctx, tab, len);
+}
+
+static void
 ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
 {
     if (!js || !node || !js->ctx) return;
@@ -33158,6 +33213,8 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
         js->ce_constructing--;
         js->ce_upgrading = prev;
     }
+
+    ns_ce_reclaim_shadowed_props(ctx, elem);
 
     JSValue observed = JS_GetPropertyStr(ctx, klass, "observedAttributes");
     if (JS_IsArray(observed)) {
