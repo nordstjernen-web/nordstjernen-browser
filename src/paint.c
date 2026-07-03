@@ -5175,6 +5175,20 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
         if (s) sscanf(s, "%d,%d", &g_dbg_paint_x, &g_dbg_paint_y);
     }
     if (g_dbg_paint_x < 0) return;
+    if (b->dom && b->dom->name &&
+        strcmp(b->dom->name, "ytd-watch-metadata") == 0) {
+        GString *chain = g_string_new("[paint-chain]");
+        for (const ns_box *p2 = b; p2; p2 = p2->parent) {
+            const char *nm = p2->dom && p2->dom->name ? p2->dom->name : "?";
+            const char *id = p2->dom && p2->dom->kind == NS_NODE_ELEMENT
+                           ? ns_element_get_attr(p2->dom, "id") : NULL;
+            g_string_append_printf(chain, " <%s#%s y=%.0f h=%.0f>",
+                                   nm, id ? id : "", p2->y,
+                                   p2->content_height);
+        }
+        g_printerr("%s\n", chain->str);
+        g_string_free(chain, TRUE);
+    }
     double x0 = b->x, y0 = b->y;
     double x1 = b->x + b->content_width, y1 = b->y + b->content_height;
     cairo_user_to_device(cr, &x0, &y0);
@@ -5219,6 +5233,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (!g_paint_deferred_list)
             g_paint_deferred_list = g_ptr_array_new();
         g_ptr_array_add(g_paint_deferred_list, (gpointer)b);
+        if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
+            g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
+                       b->dom->name,
+                       ns_element_get_attr(b->dom, "id")
+                           ? ns_element_get_attr(b->dom, "id") : "",
+                       b->y, b->content_height);
         return;
     }
     if (!g_paint_no_cull && g_paint_have_clip &&
@@ -5470,6 +5490,16 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         g_paint_deferred_list = saved_layer_list;
         g_paint_defer_depth--;
         if (deferred_mine && !clip_overflow) {
+            if (g_dbg_paint_x >= 0) {
+                double fx0, fy0, fx1, fy1;
+                cairo_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
+                g_printerr("[paint-flush] owner=<%s#%s> n=%u "
+                           "clip=%.0f,%.0f..%.0f,%.0f\n",
+                           b->dom && b->dom->name ? b->dom->name : "?",
+                           b->dom && ns_element_get_attr(b->dom, "id")
+                               ? ns_element_get_attr(b->dom, "id") : "",
+                           deferred_mine->len, fx0, fy0, fx1, fy1);
+            }
             if (has_transform || has_sticky) g_paint_no_cull++;
             paint_flush_deferred(cr, deferred_mine, highlight);
             if (has_transform || has_sticky) g_paint_no_cull--;
@@ -5592,6 +5622,16 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (clip_overflow) cairo_restore(cr);
     if (deferred_mine) {
+        if (g_dbg_paint_x >= 0) {
+            double fx0, fy0, fx1, fy1;
+            cairo_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
+            g_printerr("[paint-flush-postclip] owner=<%s#%s> n=%u "
+                       "clip=%.0f,%.0f..%.0f,%.0f\n",
+                       b->dom && b->dom->name ? b->dom->name : "?",
+                       b->dom && ns_element_get_attr(b->dom, "id")
+                           ? ns_element_get_attr(b->dom, "id") : "",
+                       deferred_mine->len, fx0, fy0, fx1, fy1);
+        }
         if (has_transform || has_sticky) g_paint_no_cull++;
         paint_flush_deferred(cr, deferred_mine, highlight);
         if (has_transform || has_sticky) g_paint_no_cull--;
