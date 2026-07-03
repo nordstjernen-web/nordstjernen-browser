@@ -49,7 +49,14 @@ nothing imported.
   (WASAPI/CoreAudio/ALSA), mixing and resampling the streams itself. The
   renderer emits `open`/`play`/`pause`/`seek`/`stop`/`loop`/`volume`
   commands that ride the render-response `X-Audio` side-channel to the
-  shell, which spawns and pumps the helper (`src/gtk/procview.c`). The
+  shell, which spawns and pumps the helper (`src/gtk/procview.c`).
+  MSE video frames decode in a third process, `nordstjernen-video`
+  (`src/videoproc/main.c`, built when libav is present): the renderer
+  materializes the growing stream to `~/.cache/nordstjernen/msvideo/`
+  and drives it with `video …` lines on the same side-channel; the
+  helper writes BGRA frames into a shm ring that the shell composites
+  over the page surface each tick (see `docs/media.md`). Without the
+  helper (headless, Windows) the renderer decodes in-process as before. The
   in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
   vendor further single-file codecs. **WebM is the one optional extension:**
   when FFmpeg's libav\* is present (`libavformat`/`libavcodec`/`libavutil`/

@@ -56,6 +56,33 @@ itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/`st
 ride the renderer→shell render channel, and looping re-syncs the audio at each
 wrap.
 
+## The video helper process (`nordstjernen-video`)
+
+MSE streams (YouTube-style playback) decode in a **third process** that sits
+beside the renderer and the audio helper. The renderer appends the growing MSE
+byte stream to a file under `~/.cache/nordstjernen/msvideo/` (exactly as it
+materializes the audio track for `nordstjernen-audio`) and drives the helper
+over the same renderer→shell media channel with
+`video open`/`reload`/`play`/`pause`/`seek`/`stop` lines, plus a
+`video rect` line carrying the on-page rectangle of the `<video>` box captured
+at paint time. The helper decodes with libav on its own presentation clock and
+writes BGRA frames into a shared-memory ring (`/nsvid-<pid>-<n>`, three slots);
+the UI shell maps the ring and **composites the newest frame over the page
+surface** on every widget frame tick.
+
+This decouples video from page rendering: a page repaint is only needed when
+the page itself changes, while video advances at full rate in the compositor —
+so large players no longer force full-page repaints per frame, decode jank
+never blocks the renderer main loop, and attacker-controlled codec bytes are
+parsed in a small self-sandboxed process (Landlock on Linux) that can reach
+only its shm ring and temp files. The helper is optional: it is built when
+libav is available (not on Windows yet), and when the binary is missing —
+or in headless mode — the renderer decodes frames in-process exactly as
+before. The renderer always keeps the demuxer state that backs
+`buffered`/`duration`/`currentTime`, so page JS sees the same element state
+either way; audio stays in `nordstjernen-audio`, cued by the same
+play/pause/seek commands so both clocks anchor identically.
+
 ## Other media → external player
 
 Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 + Opus/Vorbis) path,
