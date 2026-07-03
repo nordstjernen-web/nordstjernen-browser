@@ -5473,7 +5473,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         clip_overflow = FALSE;
     }
     gboolean own_layer_scope = b->parent == NULL || grouped || has_transform ||
-                               clip_overflow || b == g_paint_flush_box;
+                               clip_overflow || has_path_clip ||
+                               b == g_paint_flush_box;
     GPtrArray *saved_layer_list = NULL;
     if (own_layer_scope) {
         saved_layer_list = g_paint_deferred_list;
@@ -5489,7 +5490,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         deferred_mine = g_paint_deferred_list;
         g_paint_deferred_list = saved_layer_list;
         g_paint_defer_depth--;
-        if (deferred_mine && !clip_overflow) {
+        if (deferred_mine && !clip_overflow && !has_path_clip) {
             if (g_dbg_paint_x >= 0) {
                 double fx0, fy0, fx1, fy1;
                 cairo_clip_extents(cr, &fx0, &fy0, &fx1, &fy1);
@@ -5621,6 +5622,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
     if (clip_overflow) cairo_restore(cr);
+    if (entries != entries_buf) g_free(entries);
+
+    if (has_path_clip) cairo_restore(cr);
     if (deferred_mine) {
         if (g_dbg_paint_x >= 0) {
             double fx0, fy0, fx1, fy1;
@@ -5637,9 +5641,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (has_transform || has_sticky) g_paint_no_cull--;
         g_ptr_array_free(deferred_mine, TRUE);
     }
-    if (entries != entries_buf) g_free(entries);
-
-    if (has_path_clip) cairo_restore(cr);
 
     if (has_transform) cairo_restore(cr);
 

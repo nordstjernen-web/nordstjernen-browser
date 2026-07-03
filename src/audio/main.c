@@ -12,6 +12,7 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include <curl/curl.h>
 
@@ -45,6 +46,8 @@ typedef struct {
     float   volume;
     int     reached_end;
     char   *tmp_path;
+    long    reload_size;
+    Uint32  reload_ticks;
 } ns_audio_player;
 
 static SDL_AudioDeviceID g_dev;
@@ -664,6 +667,21 @@ cmd_reload(const char *token, const char *url)
     const char *path = local_path_for(url, &tmp);
     if (!path) { emit("error %s fetch-failed", token); free(tmp); return; }
 
+    struct stat st;
+    long size_now = stat(path, &st) == 0 ? (long)st.st_size : -1;
+    Uint32 now = SDL_GetTicks();
+    int behind = p->reached_end || p->cursor + NS_AUDIO_DEVICE_RATE >= p->frames;
+    Uint32 min_gap = behind ? 1500 : 6000;
+    if (size_now >= 0 && size_now == p->reload_size &&
+        p->reload_ticks && now - p->reload_ticks < 30000) {
+        if (tmp) { unlink(tmp); free(tmp); }
+        return;
+    }
+    if (p->reload_ticks && now - p->reload_ticks < min_gap) {
+        if (tmp) { unlink(tmp); free(tmp); }
+        return;
+    }
+
     ns_audio_player fresh;
     memset(&fresh, 0, sizeof fresh);
     if (!load_audio(&fresh, path)) {
@@ -683,6 +701,8 @@ cmd_reload(const char *token, const char *url)
         p->playing = 1;
     }
     p->tmp_path = tmp;
+    p->reload_size = size_now;
+    p->reload_ticks = now;
     audio_unlock();
     free(old_pcm);
     if (old_tmp) { unlink(old_tmp); free(old_tmp); }
