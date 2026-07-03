@@ -27204,7 +27204,15 @@ ns_element_url_part_set(JSContext *ctx, JSValueConst this_val,
         case NS_ANCHOR_PASSWORD: name = "password"; break;
     }
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!name || !n) return JS_UNDEFINED;
+    if (!name) return JS_UNDEFINED;
+    gboolean hyperlink = n && n->kind == NS_NODE_ELEMENT && n->name &&
+                         (g_ascii_strcasecmp(n->name, "a") == 0 ||
+                          g_ascii_strcasecmp(n->name, "area") == 0);
+    if (!hyperlink) {
+        JS_DefinePropertyValueStr(ctx, this_val, name,
+                                  JS_DupValue(ctx, val), JS_PROP_C_W_E);
+        return JS_UNDEFINED;
+    }
     g_autofree char *href = ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
     if (!href) return JS_UNDEFINED;
     size_t vlen = 0;
