@@ -4282,6 +4282,11 @@ dom_tree_order_cmp(const ns_node *a, const ns_node *b)
     return 1;
 }
 
+typedef struct deferred_capture {
+    const ns_box *box;
+    double dev_x, dev_y;
+} deferred_capture;
+
 typedef struct deferred_entry {
     const ns_box *box;
     guint idx;
@@ -4309,14 +4314,27 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
     deferred_entry *entries = list->len <= G_N_ELEMENTS(entries_buf)
         ? entries_buf : g_new(deferred_entry, list->len);
     for (guint i = 0; i < list->len; i++) {
-        entries[i].box = g_ptr_array_index(list, i);
+        const deferred_capture *cap = g_ptr_array_index(list, i);
+        entries[i].box = cap->box;
         entries[i].idx = i;
     }
     qsort(entries, list->len, sizeof(deferred_entry), deferred_entry_cmp);
     const ns_box *saved_flush = g_paint_flush_box;
     for (guint i = 0; i < list->len; i++) {
+        const deferred_capture *cap = NULL;
+        for (guint j = 0; j < list->len; j++) {
+            const deferred_capture *c2 = g_ptr_array_index(list, j);
+            if (c2->box == entries[i].box) { cap = c2; break; }
+        }
+        double cur_x = 0, cur_y = 0;
+        cairo_user_to_device(cr, &cur_x, &cur_y);
+        double dx = cap ? cap->dev_x - cur_x : 0;
+        double dy = cap ? cap->dev_y - cur_y : 0;
+        cairo_save(cr);
+        if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
         g_paint_flush_box = entries[i].box;
         paint_walk(cr, entries[i].box, highlight);
+        cairo_restore(cr);
     }
     g_paint_flush_box = saved_flush;
     if (entries != entries_buf) g_free(entries);
@@ -5231,8 +5249,11 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     if (g_paint_defer_depth > 0 && b != g_paint_flush_box &&
         box_defers_to_positioned_layer(b)) {
         if (!g_paint_deferred_list)
-            g_paint_deferred_list = g_ptr_array_new();
-        g_ptr_array_add(g_paint_deferred_list, (gpointer)b);
+            g_paint_deferred_list = g_ptr_array_new_with_free_func(g_free);
+        deferred_capture *cap = g_new0(deferred_capture, 1);
+        cap->box = b;
+        cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
+        g_ptr_array_add(g_paint_deferred_list, cap);
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
             g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
                        b->dom->name,
