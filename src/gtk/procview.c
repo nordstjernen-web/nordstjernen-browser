@@ -1889,6 +1889,26 @@ ns_proc_view_renderer_pid(NsProcView *v)
     return pid;
 }
 
+static int
+pv_subprocess_pid(GSubprocess *proc)
+{
+    if (!proc) return -1;
+    const char *id = g_subprocess_get_identifier(proc);
+    return id ? atoi(id) : -1;
+}
+
+int
+ns_proc_view_audio_pid(NsProcView *v)
+{
+    return v ? pv_subprocess_pid(v->audio_proc) : -1;
+}
+
+int
+ns_proc_view_video_pid(NsProcView *v)
+{
+    return v ? pv_subprocess_pid(v->video_proc) : -1;
+}
+
 void
 ns_proc_view_end_task(NsProcView *v)
 {

@@ -1162,6 +1162,50 @@ task_mgr_header_label(const char *text, int width, gfloat xalign, gboolean expan
 }
 
 static void
+task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
+                 long rss, NsProcView *v)
+{
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start(box, 10);
+    gtk_widget_set_margin_end(box, 10);
+    gtk_widget_set_margin_top(box, 5);
+    gtk_widget_set_margin_bottom(box, 5);
+
+    GtkWidget *l_name = gtk_label_new(name);
+    gtk_label_set_xalign(GTK_LABEL(l_name), 0);
+    gtk_label_set_ellipsize(GTK_LABEL(l_name), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_hexpand(l_name, TRUE);
+
+    char pidbuf[24];
+    if (pid > 0) g_snprintf(pidbuf, sizeof pidbuf, "%d", pid);
+    else         g_strlcpy(pidbuf, "—", sizeof pidbuf);
+    GtkWidget *l_pid = gtk_label_new(pidbuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_pid), 8);
+    gtk_label_set_xalign(GTK_LABEL(l_pid), 1);
+
+    GtkWidget *l_state = gtk_label_new(state);
+    gtk_label_set_width_chars(GTK_LABEL(l_state), 11);
+    gtk_label_set_xalign(GTK_LABEL(l_state), 0);
+
+    char membuf[24];
+    if (rss >= 0) g_snprintf(membuf, sizeof membuf, "%.1f MB", rss / 1024.0);
+    else          g_strlcpy(membuf, "—", sizeof membuf);
+    GtkWidget *l_mem = gtk_label_new(membuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_mem), 10);
+    gtk_label_set_xalign(GTK_LABEL(l_mem), 1);
+
+    gtk_box_append(GTK_BOX(box), l_name);
+    gtk_box_append(GTK_BOX(box), l_pid);
+    gtk_box_append(GTK_BOX(box), l_state);
+    gtk_box_append(GTK_BOX(box), l_mem);
+
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+    if (v) g_object_set_data(G_OBJECT(row), "ns-view", v);
+    gtk_list_box_append(GTK_LIST_BOX(tm->list), row);
+}
+
+static void
 task_mgr_refresh(NsTaskMgr *tm)
 {
     GtkWidget *child;
@@ -1190,44 +1234,26 @@ task_mgr_refresh(NsTaskMgr *tm)
         const char *name = (title && *title) ? title
                          : (url && *url)     ? url : ns_i18n("New Tab");
 
-        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-        gtk_widget_set_margin_start(box, 10);
-        gtk_widget_set_margin_end(box, 10);
-        gtk_widget_set_margin_top(box, 5);
-        gtk_widget_set_margin_bottom(box, 5);
+        task_mgr_add_row(tm, name, pid, state, rss, v);
 
-        GtkWidget *l_name = gtk_label_new(name);
-        gtk_label_set_xalign(GTK_LABEL(l_name), 0);
-        gtk_label_set_ellipsize(GTK_LABEL(l_name), PANGO_ELLIPSIZE_END);
-        gtk_widget_set_hexpand(l_name, TRUE);
-
-        char pidbuf[24];
-        if (pid > 0) g_snprintf(pidbuf, sizeof pidbuf, "%d", pid);
-        else         g_strlcpy(pidbuf, "—", sizeof pidbuf);
-        GtkWidget *l_pid = gtk_label_new(pidbuf);
-        gtk_label_set_width_chars(GTK_LABEL(l_pid), 8);
-        gtk_label_set_xalign(GTK_LABEL(l_pid), 1);
-
-        GtkWidget *l_state = gtk_label_new(state);
-        gtk_label_set_width_chars(GTK_LABEL(l_state), 11);
-        gtk_label_set_xalign(GTK_LABEL(l_state), 0);
-
-        char membuf[24];
-        if (rss >= 0) g_snprintf(membuf, sizeof membuf, "%.1f MB", rss / 1024.0);
-        else          g_strlcpy(membuf, "—", sizeof membuf);
-        GtkWidget *l_mem = gtk_label_new(membuf);
-        gtk_label_set_width_chars(GTK_LABEL(l_mem), 10);
-        gtk_label_set_xalign(GTK_LABEL(l_mem), 1);
-
-        gtk_box_append(GTK_BOX(box), l_name);
-        gtk_box_append(GTK_BOX(box), l_pid);
-        gtk_box_append(GTK_BOX(box), l_state);
-        gtk_box_append(GTK_BOX(box), l_mem);
-
-        GtkWidget *row = gtk_list_box_row_new();
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
-        g_object_set_data(G_OBJECT(row), "ns-view", v);
-        gtk_list_box_append(GTK_LIST_BOX(tm->list), row);
+        int apid = ns_proc_view_audio_pid(v);
+        if (apid > 0) {
+            char astate[32] = "";
+            long arss = -1;
+            ns_rproc_http_proc_info(apid, astate, sizeof astate, &arss);
+            char *aname = g_strdup_printf("   ⤷ %s", ns_i18n("Audio playback"));
+            task_mgr_add_row(tm, aname, apid, astate, arss, NULL);
+            g_free(aname);
+        }
+        int vpid = ns_proc_view_video_pid(v);
+        if (vpid > 0) {
+            char vstate[32] = "";
+            long vrss = -1;
+            ns_rproc_http_proc_info(vpid, vstate, sizeof vstate, &vrss);
+            char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
+            task_mgr_add_row(tm, vname, vpid, vstate, vrss, NULL);
+            g_free(vname);
+        }
     }
 }
 
