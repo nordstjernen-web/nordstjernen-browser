@@ -7247,10 +7247,13 @@ layout_flex_row(ns_box *box, double cw,
 {
     const ns_css_value *hv_box = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
     const ns_css_value *mnh_box = box->style ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
+    const ns_css_value *mxh_box = box->style ? box->style->values[NS_CSS_MAX_HEIGHT] : NULL;
     double explicit_cross = 0;
     if (hv_box && (hv_box->kind == NS_CSS_V_LENGTH || hv_box->kind == NS_CSS_V_CALC))
         explicit_cross = resolve_used_height(box, hv_box, parent_content_width, 0);
     double min_cross = resolve_used_height(box, mnh_box, parent_content_width, -1);
+    double max_cross_limit = resolve_used_height(box, mxh_box,
+                                                 parent_content_width, -1);
     if (box->style && box->style->values[NS_CSS_BOX_SIZING] &&
         box->style->values[NS_CSS_BOX_SIZING]->kind == NS_CSS_V_KEYWORD &&
         strcmp(box->style->values[NS_CSS_BOX_SIZING]->u.keyword, "border-box") == 0) {
@@ -7263,6 +7266,10 @@ layout_flex_row(ns_box *box, double cw,
         if (min_cross > 0) {
             min_cross -= vex;
             if (min_cross < 0) min_cross = 0;
+        }
+        if (max_cross_limit > 0) {
+            max_cross_limit -= vex;
+            if (max_cross_limit < 0) max_cross_limit = 0;
         }
     }
     if (min_cross > explicit_cross) explicit_cross = min_cross;
@@ -7511,6 +7518,10 @@ layout_flex_row(ns_box *box, double cw,
     double cursor_x = inner_x + leading;
     const char *align = keyword_or(box->style, NS_CSS_ALIGN_ITEMS, "stretch");
     double cross_size = max_cross > explicit_cross ? max_cross : explicit_cross;
+    if (max_cross_limit >= 0 && cross_size > max_cross_limit) {
+        cross_size = max_cross_limit;
+        if (cross_size < min_cross) cross_size = min_cross;
+    }
 
     for (guint k = 0; k < items->len; k++) {
         guint i = reverse ? (items->len - 1 - k) : k;
@@ -7549,7 +7560,17 @@ layout_flex_row(ns_box *box, double cw,
                 - c->margin.top  - c->margin.bottom
                 - c->padding.top - c->padding.bottom
                 - c->border.top  - c->border.bottom;
-            if (stretched > c->content_height) c->content_height = stretched;
+            const ns_css_value *chv =
+                c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
+            gboolean cross_flexible =
+                !chv || chv->kind == NS_CSS_V_KEYWORD || height_is_percent(chv);
+            if (stretched > c->content_height)
+                c->content_height = stretched;
+            else if (cross_flexible && stretched >= 0 &&
+                     c->content_height > stretched)
+                c->content_height = stretched;
+            if (cross_flexible && c->definite_height <= 0)
+                c->definite_height = c->content_height;
         }
         cursor_x += a + c->margin.left + c->margin.right +
                     c->padding.left + c->padding.right +
