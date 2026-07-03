@@ -441,6 +441,8 @@ browser_js_audio(const char *command, gpointer ud)
 {
     ns_browser *b = ud;
     if (!b || !command || !*command) return;
+    if (g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[audio-cmd] %s\n", command);
     if (!b->pending_audio) b->pending_audio = g_string_new(NULL);
     if (b->pending_audio->len >= NS_PENDING_AUDIO_MAX) return;
     g_string_append(b->pending_audio, command);

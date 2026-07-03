@@ -26,6 +26,7 @@ struct ns_video_cache {
     GHashTable       *by_url;
     GHashTable       *requested;
     GHashTable       *mse_streams;
+    GHashTable       *node_state;
     GPtrArray        *pending;
     char             *base_url;
     ns_video_js_cb    js_cb;
@@ -44,6 +45,13 @@ typedef struct ns_pending {
 
 static void ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
                                        const guint8 *data, gsize len);
+
+typedef struct ns_node_media_state {
+    gboolean has_playing, playing;
+    gboolean has_muted, muted;
+    gboolean has_volume;
+    double   volume;
+} ns_node_media_state;
 
 typedef struct ns_mse_stream {
     guint       id;
@@ -94,6 +102,8 @@ ns_video_cache_new(void)
     c->requested = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
     c->mse_streams = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, ns_mse_stream_free);
+    c->node_state = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                          NULL, g_free);
     c->pending = g_ptr_array_new();
     return c;
 }
@@ -150,6 +160,10 @@ ns_video_url_audio_safe(const char *url)
 static void
 ns_video_audio_start(ns_video_cache *cache, ns_video *v)
 {
+    if (v && g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[audio-start] muted=%d has_audio=%d file=%s playing=%d\n",
+                   v->muted, v->has_audio,
+                   v->audio_file ? v->audio_file : "-", v->playing);
     if (!cache || !cache->audio_cb || !v || v->muted) return;
     if (!v->has_audio && !v->audio_file) return;
     const char *src = v->audio_file ? v->audio_file : v->url;
@@ -160,6 +174,8 @@ ns_video_audio_start(ns_video_cache *cache, ns_video *v)
         ns_video_emit_audio(cache, "open %s %s", v->token, src);
         if (v->loop)
             ns_video_emit_audio(cache, "loop %s 1", v->token);
+        if (v->volume >= 0.0 && v->volume < 1.0)
+            ns_video_emit_audio(cache, "volume %s %.3f", v->token, v->volume);
         v->audio_opened = TRUE;
     }
     ns_video_emit_audio(cache, "play %s", v->token);
@@ -205,6 +221,7 @@ ns_video_cache_free(ns_video_cache *cache)
     g_hash_table_destroy(cache->by_url);
     g_hash_table_destroy(cache->requested);
     g_hash_table_destroy(cache->mse_streams);
+    g_hash_table_destroy(cache->node_state);
     g_ptr_array_free(cache->pending, TRUE);
     g_free(cache->base_url);
     g_free(cache);
@@ -242,6 +259,46 @@ ns_video_toggle(ns_video *v, gint64 now_us)
     if (v->playing) ns_video_pause(v, now_us);
     else ns_video_play(v, now_us);
     return TRUE;
+}
+
+static ns_node_media_state *
+ns_video_node_state(ns_video_cache *cache, const void *dom_node)
+{
+    ns_node_media_state *st = g_hash_table_lookup(cache->node_state,
+                                                  (gpointer)dom_node);
+    if (!st) {
+        st = g_new0(ns_node_media_state, 1);
+        g_hash_table_insert(cache->node_state, (gpointer)dom_node, st);
+    }
+    return st;
+}
+
+static void
+ns_video_apply_node_state(ns_video_cache *cache, ns_video *v,
+                          const void *dom_node)
+{
+    ns_node_media_state *st = g_hash_table_lookup(cache->node_state,
+                                                  (gpointer)dom_node);
+    if (!st) return;
+    if (st->has_muted)
+        v->muted = st->muted;
+    if (st->has_volume)
+        v->volume = st->volume;
+    if (st->has_playing) {
+        if (v->player && st->playing != v->playing) {
+            gint64 now = g_get_monotonic_time();
+            if (st->playing) {
+                ns_video_play(v, now);
+                ns_video_audio_start(cache, v);
+            } else {
+                ns_video_pause(v, now);
+                ns_video_audio_pause(cache, v);
+            }
+        } else {
+            v->playing = st->playing;
+        }
+    }
+    g_hash_table_remove(cache->node_state, (gpointer)dom_node);
 }
 
 static ns_video *
@@ -295,7 +352,13 @@ ns_video_cache_set_node_playing(ns_video_cache *cache, const void *dom_node,
 {
     if (!cache || !dom_node) return FALSE;
     ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
-    if (!v || v->is_camera) return FALSE;
+    if (v && v->is_camera) return FALSE;
+    if (!v) {
+        ns_node_media_state *st = ns_video_node_state(cache, dom_node);
+        st->has_playing = TRUE;
+        st->playing = play;
+        return TRUE;
+    }
     if (!v->player) { v->playing = play; return TRUE; }
     if (play == v->playing) return FALSE;
     if (play) {
@@ -314,7 +377,13 @@ ns_video_cache_set_node_volume(ns_video_cache *cache, const void *dom_node,
 {
     if (!cache || !dom_node) return FALSE;
     ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
-    if (!v) return FALSE;
+    if (!v) {
+        ns_node_media_state *st = ns_video_node_state(cache, dom_node);
+        st->has_volume = TRUE;
+        st->volume = volume;
+        return TRUE;
+    }
+    v->volume = volume;
     if (v->token && v->audio_opened)
         ns_video_emit_audio(cache, "volume %s %.3f", v->token, volume);
     if (volume > 0 && !v->muted && v->playing && !v->audio_opened) {
@@ -331,7 +400,15 @@ ns_video_cache_set_node_muted(ns_video_cache *cache, const void *dom_node,
 {
     if (!cache || !dom_node) return FALSE;
     ns_video *v = ns_video_cache_find_by_node(cache, dom_node);
-    if (!v) return FALSE;
+    if (g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[set-muted] muted=%d video=%s was=%d\n",
+                   muted, v ? "yes" : "NULL", v ? v->muted : -1);
+    if (!v) {
+        ns_node_media_state *st = ns_video_node_state(cache, dom_node);
+        st->has_muted = TRUE;
+        st->muted = muted;
+        return TRUE;
+    }
     if (v->muted == muted) return TRUE;
     v->muted = muted;
     if (muted) {
@@ -661,7 +738,11 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
     if ((*dst)->len + len > NS_VIDEO_MAX_BYTES) return;
     g_byte_array_append(*dst, data, len);
     if (kind == 'a') s->audio_dirty = TRUE;
-    ns_video_mse_sync(cache, s, ns_video_for_mse_id(cache, stream_id));
+    ns_video *sv = ns_video_for_mse_id(cache, stream_id);
+    if (g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[mse-append] id=%u kind=%c len=%zu total=%u video=%s\n",
+                   stream_id, kind, len, (*dst)->len, sv ? "yes" : "NULL");
+    ns_video_mse_sync(cache, s, sv);
 }
 
 void
@@ -804,11 +885,13 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     v->loop = attr_present(dom, "loop");
     v->controls = attr_present(dom, "controls");
     v->muted = attr_present(dom, "muted");
+    v->volume = 1.0;
     v->cur_time = 0.0;
     v->seq = ++cache->next_seq;
     v->mse_id = mse_id;
     g_hash_table_insert(cache->by_url, key, v);
     if (box) box->media->video = v;
+    if (dom) ns_video_apply_node_state(cache, v, dom);
 
     if (mse_id) {
         ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
@@ -865,6 +948,7 @@ ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
                 g_free(skey);
                 if (existing) {
                     existing->dom_node = node;
+                    ns_video_apply_node_state(cache, existing, node);
                     ns_video_note_stream_version(cache, existing, node, abs);
                 } else if (!g_hash_table_contains(cache->requested, abs)) {
                     g_hash_table_add(cache->requested, g_strdup(abs));
@@ -931,7 +1015,10 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
         g_free(skey);
         if (existing) {
             box->media->video = existing;
-            if (box->dom) existing->dom_node = box->dom;
+            if (box->dom) {
+                existing->dom_node = box->dom;
+                ns_video_apply_node_state(cache, existing, box->dom);
+            }
             ns_video_note_stream_version(cache, existing, box->dom, abs);
         } else if (!g_hash_table_contains(cache->requested, abs)) {
             g_hash_table_add(cache->requested, g_strdup(abs));

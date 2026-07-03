@@ -38,6 +38,7 @@ typedef struct ns_video {
     char        *token;
     gboolean     playing;
     gboolean     ended;
+    double       volume;
     gboolean     meta_sent;
     gboolean     buf_sent;
     guint        seq;

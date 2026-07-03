@@ -31343,7 +31343,6 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("autofocus",   ns_element_boolattr_getter, ns_element_boolattr_setter,  4),
     JS_CGETSET_MAGIC_DEF("controls",    ns_element_boolattr_getter, ns_element_boolattr_setter,  5),
     JS_CGETSET_MAGIC_DEF("loop",        ns_element_boolattr_getter, ns_element_boolattr_setter,  6),
-    JS_CGETSET_MAGIC_DEF("muted",       ns_element_boolattr_getter, ns_element_boolattr_setter,  7),
     JS_CGETSET_MAGIC_DEF("autoplay",    ns_element_boolattr_getter, ns_element_boolattr_setter,  8),
     JS_CGETSET_MAGIC_DEF("defer",       ns_element_boolattr_getter, ns_element_boolattr_setter,  9),
     JS_CGETSET_MAGIC_DEF("async",       ns_element_boolattr_getter, ns_element_boolattr_setter, 10),
