@@ -831,7 +831,14 @@ ns_engine_dump_layout(const ns_box *b, int indent, GString *out)
     g_string_append_printf(out, "%s @(%.0f,%.0f) %.0fx%.0f",
         ns_box_kind_name(b->kind), b->x, b->y,
         b->content_width, b->content_height);
-    if (b->dom && b->dom->name) g_string_append_printf(out, " <%s>", b->dom->name);
+    if (b->dom && b->dom->name) {
+        const char *id = b->dom->kind == NS_NODE_ELEMENT
+                       ? ns_element_get_attr(b->dom, "id") : NULL;
+        if (id && *id)
+            g_string_append_printf(out, " <%s#%s>", b->dom->name, id);
+        else
+            g_string_append_printf(out, " <%s>", b->dom->name);
+    }
     if (b->media && b->media->image_src)
         g_string_append_printf(out, " img=%s", b->media->image_src);
     if (b->text && *b->text) {

@@ -5,6 +5,8 @@
 
 #include "paint.h"
 
+static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
+
 #include <math.h>
 #include <pango/pangocairo.h>
 #include <stdlib.h>
@@ -2444,6 +2446,22 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             paint_text_shadow_layer(cr, layout, text_x, y_origin, &sl->s[si]);
     }
 
+    if (g_dbg_paint_x >= 0 && b->text) {
+        double px0 = b->x, py0 = b->y;
+        double px1 = b->x + b->content_width, py1 = b->y + b->content_height;
+        cairo_user_to_device(cr, &px0, &py0);
+        cairo_user_to_device(cr, &px1, &py1);
+        if (g_dbg_paint_x >= px0 && g_dbg_paint_x <= px1 &&
+            g_dbg_paint_y >= py0 && g_dbg_paint_y <= py1) {
+            double cx0, cy0, cx1, cy1;
+            cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+            g_printerr("[paint-at] TEXT \"%.30s\" rgba(%.2f,%.2f,%.2f,%.2f) "
+                       "at %.0f,%.0f clip=%.0f,%.0f..%.0f,%.0f grp=%d\n",
+                       b->text, color.r, color.g, color.b, color.a,
+                       text_x, y_origin, cx0, cy0, cx1, cy1,
+                       cairo_get_group_target(cr) != cairo_get_target(cr));
+        }
+    }
     cairo_save(cr);
     set_source_rgba(cr, color);
     cairo_move_to(cr, text_x, y_origin);
@@ -5149,6 +5167,36 @@ paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
 }
 
 static void
+ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
+{
+    if (g_dbg_paint_x == -2) {
+        const char *s = g_getenv("NS_DBG_PAINT_AT");
+        g_dbg_paint_x = g_dbg_paint_y = -1;
+        if (s) sscanf(s, "%d,%d", &g_dbg_paint_x, &g_dbg_paint_y);
+    }
+    if (g_dbg_paint_x < 0) return;
+    double x0 = b->x, y0 = b->y;
+    double x1 = b->x + b->content_width, y1 = b->y + b->content_height;
+    cairo_user_to_device(cr, &x0, &y0);
+    cairo_user_to_device(cr, &x1, &y1);
+    if (g_dbg_paint_x < x0 || g_dbg_paint_x > x1 ||
+        g_dbg_paint_y < y0 || g_dbg_paint_y > y1)
+        return;
+    const ns_css_value *bgv =
+        b->style ? b->style->values[NS_CSS_BACKGROUND_COLOR] : NULL;
+    char bg[64] = "-";
+    if (bgv && bgv->kind == NS_CSS_V_COLOR)
+        g_snprintf(bg, sizeof bg, "rgba(%d,%d,%d,%d)",
+                   (int)bgv->u.color.r, (int)bgv->u.color.g,
+                   (int)bgv->u.color.b, (int)bgv->u.color.a);
+    double kx0, ky0, kx1, ky1;
+    cairo_clip_extents(cr, &kx0, &ky0, &kx1, &ky1);
+    g_printerr("[paint-at] <%s> %.0f,%.0f %.0fx%.0f bg=%s clip=%.0f,%.0f..%.0f,%.0f\n",
+               b->dom && b->dom->name ? b->dom->name : "?",
+               x0, y0, x1 - x0, y1 - y0, bg, kx0, ky0, kx1, ky1);
+}
+
+static void
 paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
 {
     if (!b) return;
@@ -5157,6 +5205,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (g_paint_collect_stats) g_paint_stats.hidden++;
         return;
     }
+    ns_dbg_paint_probe(cr, b);
     if (box_clip_hides(b)) {
         if (g_paint_collect_stats) g_paint_stats.hidden++;
         return;
@@ -5382,6 +5431,18 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             else
                 cairo_rectangle(cr, px, py, pw, ph);
             cairo_clip(cr);
+            if (g_dbg_paint_x >= 0) {
+                double ex0, ey0, ex1, ey1;
+                cairo_clip_extents(cr, &ex0, &ey0, &ex1, &ey1);
+                g_printerr("[paint-clip%s] <%s#%s> rect %.0f,%.0f %.0fx%.0f"
+                           " -> clip %.0f,%.0f..%.0f,%.0f\n",
+                           (ey1 - ey0 < 1 || ex1 - ex0 < 1) ? "-EMPTY" : "",
+                           b->dom && b->dom->name ? b->dom->name : "?",
+                           b->dom ? (ns_element_get_attr(b->dom, "id")
+                                     ? ns_element_get_attr(b->dom, "id") : "")
+                                  : "",
+                           px, py, pw, ph, ex0, ey0, ex1, ey1);
+            }
             if (b->scroll_x != 0 || b->scroll_y != 0)
                 cairo_translate(cr, -b->scroll_x, -b->scroll_y);
             if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
@@ -5403,15 +5464,17 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     for (guint i = 0; i < n_children; i++)
         paint_walk(cr, entries[i].box, highlight);
     if (has_transform || has_sticky) g_paint_no_cull--;
+    GPtrArray *deferred_mine = NULL;
     if (own_layer_scope) {
-        GPtrArray *mine = g_paint_deferred_list;
+        deferred_mine = g_paint_deferred_list;
         g_paint_deferred_list = saved_layer_list;
         g_paint_defer_depth--;
-        if (mine) {
+        if (deferred_mine && !clip_overflow) {
             if (has_transform || has_sticky) g_paint_no_cull++;
-            paint_flush_deferred(cr, mine, highlight);
+            paint_flush_deferred(cr, deferred_mine, highlight);
             if (has_transform || has_sticky) g_paint_no_cull--;
-            g_ptr_array_free(mine, TRUE);
+            g_ptr_array_free(deferred_mine, TRUE);
+            deferred_mine = NULL;
         }
     }
     const char *sbw_kw = b->style && b->style->values[NS_CSS_SCROLLBAR_WIDTH] &&
@@ -5528,6 +5591,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
     if (clip_overflow) cairo_restore(cr);
+    if (deferred_mine) {
+        if (has_transform || has_sticky) g_paint_no_cull++;
+        paint_flush_deferred(cr, deferred_mine, highlight);
+        if (has_transform || has_sticky) g_paint_no_cull--;
+        g_ptr_array_free(deferred_mine, TRUE);
+    }
     if (entries != entries_buf) g_free(entries);
 
     if (has_path_clip) cairo_restore(cr);

@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define NS_HTTP_MAX_BODY    (64 * 1024 * 1024)
-#define NS_HTTP_MAX_REPLY   (1024 * 1024)
+#define NS_HTTP_MAX_REPLY   (16 * 1024 * 1024)
 #define NS_HTTP_MAX_HEADERS 64
 
 typedef struct {
