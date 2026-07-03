@@ -23,6 +23,16 @@
 
 #define NS_PROC_APP_ID "org.nordstjernen.WebBrowser"
 
+static int g_initial_win_w;
+static int g_initial_win_h;
+
+void
+ns_procapp_set_window_size(int width, int height)
+{
+    g_initial_win_w = width;
+    g_initial_win_h = height;
+}
+
 typedef struct {
     GtkApplication *app;
     GtkWidget      *window;
@@ -1446,8 +1456,13 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_object_set_data_full(G_OBJECT(pw->window), "ns-procwindow", pw,
                            (GDestroyNotify)procwindow_free);
     gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
-    gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
-    gtk_window_maximize(GTK_WINDOW(pw->window));
+    if (g_initial_win_w > 0 && g_initial_win_h > 0) {
+        gtk_window_set_default_size(GTK_WINDOW(pw->window),
+                                    g_initial_win_w, g_initial_win_h);
+    } else {
+        gtk_window_set_default_size(GTK_WINDOW(pw->window), 1024, 768);
+        gtk_window_maximize(GTK_WINDOW(pw->window));
+    }
 
     GtkEventController *winkeys = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(winkeys, GTK_PHASE_CAPTURE);

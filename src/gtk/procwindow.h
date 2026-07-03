@@ -18,6 +18,9 @@ G_BEGIN_DECLS
 int ns_procapp_run(const char *startup_url, const char *session_path,
                    gboolean recover, gboolean private_mode);
 
+/* Request a fixed initial window size instead of the maximized default. */
+void ns_procapp_set_window_size(int width, int height);
+
 G_END_DECLS
 
 #endif

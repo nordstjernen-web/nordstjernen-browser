@@ -578,6 +578,16 @@ main(int argc, char **argv)
             gsk_renderer_override = argv[i] + 15;
         } else if (g_strcmp0(argv[i], "--private") == 0) {
             private_window = TRUE;
+        } else if (g_str_has_prefix(argv[i], "--window-size=")) {
+            char *end = NULL;
+            gint64 w = g_ascii_strtoll(argv[i] + 14, &end, 10);
+            if (end != argv[i] + 14 && (*end == 'x' || *end == 'X') &&
+                w > 0 && w < 100000) {
+                const char *hs = end + 1;
+                gint64 h = g_ascii_strtoll(hs, &end, 10);
+                if (end != hs && *end == '\0' && h > 0 && h < 100000)
+                    ns_procapp_set_window_size((int)w, (int)h);
+            }
         } else if (g_strcmp0(argv[i], "--print-config") == 0) {
             char *dump = ns_config_dump();
             fputs(dump, stdout);
