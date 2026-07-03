@@ -29,6 +29,9 @@ typedef struct rgba {
 static gboolean       g_caret_visible = TRUE;
 static int            g_paint_no_cull;
 static GPtrArray     *g_paint_deferred_list;
+static const ns_box  *g_dbg_flush_owner;
+static const ns_box  *g_dbg_scope_stack[64];
+static int            g_dbg_scope_depth;
 static int            g_paint_defer_depth;
 static const ns_box  *g_paint_flush_box;
 static ns_js         *g_paint_js;
@@ -4337,6 +4340,35 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
         cairo_save(cr);
         if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
         g_paint_flush_box = entries[i].box;
+        if (g_dbg_paint_x >= 0 && entries[i].box->dom) {
+            double gx0, gy0, gx1, gy1;
+            cairo_clip_extents(cr, &gx0, &gy0, &gx1, &gy1);
+            if (gx1 - gx0 < 1) {
+                GString *oc = g_string_new("[flush-owner-chain]");
+                for (const ns_box *p3 = g_dbg_flush_owner; p3;
+                     p3 = p3->parent) {
+                    const char *nm3 = p3->dom && p3->dom->name
+                                    ? p3->dom->name : "?";
+                    const char *id3 = p3->dom &&
+                                      p3->dom->kind == NS_NODE_ELEMENT
+                                    ? ns_element_get_attr(p3->dom, "id")
+                                    : NULL;
+                    g_string_append_printf(oc, " <%s#%s>", nm3,
+                                           id3 ? id3 : "");
+                }
+                g_printerr("%s\n", oc->str);
+                g_string_free(oc, TRUE);
+            }
+            g_printerr("[flush-one] <%s#%s y=%.0f h=%.0f> d=%.0f,%.0f "
+                       "clip=%.0f,%.0f..%.0f,%.0f\n",
+                       entries[i].box->dom->name ? entries[i].box->dom->name
+                                                 : "?",
+                       ns_element_get_attr(entries[i].box->dom, "id")
+                           ? ns_element_get_attr(entries[i].box->dom, "id")
+                           : "",
+                       entries[i].box->y, entries[i].box->content_height,
+                       dx, dy, gx0, gy0, gx1, gy1);
+        }
         paint_walk(cr, entries[i].box, highlight);
         cairo_restore(cr);
     }
@@ -5182,8 +5214,29 @@ paint_3d_root(cairo_t *cr, const ns_box *b, const char *highlight)
         }
     }
     g_paint_no_cull++;
-    for (guint i = 0; i < quads->len; i++)
+    for (guint i = 0; i < quads->len; i++) {
+        double w0 = 0, w1 = 0, w2 = 0, w3 = 0;
+        if (g_dbg_paint_x >= 0)
+            cairo_clip_extents(cr, &w0, &w1, &w2, &w3);
         paint_quad3(cr, &g_array_index(quads, ns_quad3, i), highlight);
+        if (g_dbg_paint_x >= 0) {
+            double v0, v1, v2, v3;
+            cairo_clip_extents(cr, &v0, &v1, &v2, &v3);
+            if (fabs(v0 - w0) > 0.5 || fabs(v1 - w1) > 0.5 ||
+                fabs(v2 - w2) > 0.5 || fabs(v3 - w3) > 0.5) {
+                const ns_quad3 *q = &g_array_index(quads, ns_quad3, i);
+                g_printerr("[quad3-LEAK] <%s class=%s> rect %.0f,%.0f "
+                           "%gx%g\n",
+                           q->box->dom && q->box->dom->name
+                               ? q->box->dom->name : "?",
+                           q->box->dom
+                               ? (ns_element_get_attr(q->box->dom, "class")
+                                      ?: "")
+                               : "",
+                           q->bx, q->by, q->bw, q->bh);
+            }
+        }
+    }
     g_paint_no_cull--;
     g_array_free(quads, TRUE);
 }
@@ -5284,6 +5337,21 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cap->box = b;
         cairo_user_to_device(cr, &cap->dev_x, &cap->dev_y);
         g_ptr_array_add(g_paint_deferred_list, cap);
+        if (g_dbg_paint_x >= 0 && b->dom && b->dom->name &&
+            ns_element_get_attr(b->dom, "id") &&
+            strcmp(ns_element_get_attr(b->dom, "id"), "below") == 0) {
+            const ns_box *own = g_dbg_scope_depth > 0
+                ? g_dbg_scope_stack[g_dbg_scope_depth - 1] : NULL;
+            g_printerr("[below-defer] open-owner=<%s#%s> depth=%d "
+                       "flushbox=%d\n",
+                       own && own->dom && own->dom->name ? own->dom->name
+                                                         : "?",
+                       own && own->dom &&
+                       ns_element_get_attr(own->dom, "id")
+                           ? ns_element_get_attr(own->dom, "id") : "",
+                       g_dbg_scope_depth,
+                       g_paint_flush_box != NULL);
+        }
         if (g_dbg_paint_x >= 0 && b->dom && b->dom->name)
             g_printerr("[paint-defer] <%s#%s> y=%.0f h=%.0f\n",
                        b->dom->name,
@@ -5300,6 +5368,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             return;
         }
     }
+    double dbg_e0 = 0, dbg_e1 = 0, dbg_e2 = 0, dbg_e3 = 0;
+    if (g_dbg_paint_x >= 0)
+        cairo_clip_extents(cr, &dbg_e0, &dbg_e1, &dbg_e2, &dbg_e3);
     const ns_style *style = b->style;
     double op = box_opacity(b);
     cairo_operator_t blend = blend_mode_operator(style);
@@ -5335,7 +5406,21 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         has_transform = FALSE;
     } else if (box_establishes_3d(b) ||
                (has_transform && ns_css_transform_is_3d(&eff_tf))) {
+        double u0 = 0, u1 = 0, u2 = 0, u3 = 0;
+        if (g_dbg_paint_x >= 0)
+            cairo_clip_extents(cr, &u0, &u1, &u2, &u3);
         paint_3d_root(cr, b, highlight);
+        if (g_dbg_paint_x >= 0) {
+            double z0, z1, z2, z3;
+            cairo_clip_extents(cr, &z0, &z1, &z2, &z3);
+            if (fabs(z0 - u0) > 0.5 || fabs(z1 - u1) > 0.5 ||
+                fabs(z2 - u2) > 0.5 || fabs(z3 - u3) > 0.5)
+                g_printerr("[3droot-LEAK] <%s class=%.60s>\n",
+                           b->dom && b->dom->name ? b->dom->name : "?",
+                           b->dom ? (ns_element_get_attr(b->dom, "class")
+                                         ?: "")
+                                  : "");
+        }
         if (has_sticky) cairo_restore(cr);
         return;
     }
@@ -5379,6 +5464,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             if (g_dbg_paint_x >= 0)
                 g_printerr("[paint-nan-guard] transform <%s>\n",
                            b->dom && b->dom->name ? b->dom->name : "?");
+        } else if (fabs(m.m[0] * m.m[5] - m.m[1] * m.m[4]) < 1e-6) {
+            if (has_sticky) cairo_restore(cr);
+            return;
         } else {
             cairo_translate(cr, ox, oy);
             cairo_transform(cr, &cm);
@@ -5397,6 +5485,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         else                                cairo_restore(cr);
     }
     if (!box_offscreen) {
+        double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+        if (g_dbg_paint_x >= 0)
+            cairo_clip_extents(cr, &s0, &s1, &s2, &s3);
         if (b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
             b->kind == NS_BOX_TABLE_CAPTION ||
             b->kind == NS_BOX_TABLE_ROW || b->kind == NS_BOX_TABLE_CELL ||
@@ -5404,6 +5495,18 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             b->kind == NS_BOX_MATH) {
             if (g_paint_collect_stats) g_paint_stats.blocks++;
             paint_block(cr, b);
+            if (g_dbg_paint_x >= 0) {
+                double t0, t1, t2, t3;
+                cairo_clip_extents(cr, &t0, &t1, &t2, &t3);
+                if (fabs(t0 - s0) > 0.5 || fabs(t1 - s1) > 0.5 ||
+                    fabs(t2 - s2) > 0.5 || fabs(t3 - s3) > 0.5)
+                    g_printerr("[block-LEAK] <%s class=%.60s>\n",
+                               b->dom && b->dom->name ? b->dom->name : "?",
+                               b->dom
+                                   ? (ns_element_get_attr(b->dom, "class")
+                                          ?: "")
+                                   : "");
+            }
         }
         if (b->kind == NS_BOX_BLOCK) {
             paint_marker(cr, b);
@@ -5413,6 +5516,15 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (b->kind == NS_BOX_INLINE) {
             if (g_paint_collect_stats) g_paint_stats.inlines++;
             paint_inline(cr, b, highlight);
+            if (g_dbg_paint_x >= 0) {
+                double t0, t1, t2, t3;
+                cairo_clip_extents(cr, &t0, &t1, &t2, &t3);
+                if (fabs(t0 - s0) > 0.5 || fabs(t1 - s1) > 0.5 ||
+                    fabs(t2 - s2) > 0.5 || fabs(t3 - s3) > 0.5)
+                    g_printerr("[inline-LEAK] <%s> text=%.30s\n",
+                               b->dom && b->dom->name ? b->dom->name : "?",
+                               b->text ? b->text : "");
+            }
         }
         if (b->kind == NS_BOX_IMAGE) {
             if (g_paint_collect_stats) g_paint_stats.images++;
@@ -5552,6 +5664,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         saved_layer_list = g_paint_deferred_list;
         g_paint_deferred_list = NULL;
         g_paint_defer_depth++;
+        if (g_dbg_paint_x >= 0 && g_dbg_scope_depth < 63)
+            g_dbg_scope_stack[g_dbg_scope_depth++] = b;
     }
     if (has_transform || has_sticky) g_paint_no_cull++;
     for (guint i = 0; i < n_children; i++)
@@ -5562,6 +5676,9 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         deferred_mine = g_paint_deferred_list;
         g_paint_deferred_list = saved_layer_list;
         g_paint_defer_depth--;
+        if (g_dbg_paint_x >= 0 && g_dbg_scope_depth > 0)
+            g_dbg_scope_depth--;
+        g_dbg_flush_owner = b;
         if (deferred_mine && !clip_overflow && !has_path_clip) {
             if (g_dbg_paint_x >= 0) {
                 double fx0, fy0, fx1, fy1;
@@ -5739,6 +5856,25 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
 
     if (has_sticky) cairo_restore(cr);
+    if (g_dbg_paint_x >= 0) {
+        double q0, q1, q2, q3;
+        cairo_clip_extents(cr, &q0, &q1, &q2, &q3);
+        if (fabs(q0 - dbg_e0) > 0.5 || fabs(q1 - dbg_e1) > 0.5 ||
+            fabs(q2 - dbg_e2) > 0.5 || fabs(q3 - dbg_e3) > 0.5)
+            g_printerr("[clip-LEAK] <%s#%s class=%.70s kind=%d grp=%d "
+                       "tf=%d ov=%d pc=%d st=%d> "
+                       "entry=%.0f,%.0f..%.0f,%.0f exit=%.0f,%.0f..%.0f,%.0f\n",
+                       b->dom && b->dom->name ? b->dom->name : "?",
+                       b->dom && b->dom->kind == NS_NODE_ELEMENT &&
+                       ns_element_get_attr(b->dom, "id")
+                           ? ns_element_get_attr(b->dom, "id") : "",
+                       b->dom && b->dom->kind == NS_NODE_ELEMENT
+                           ? (ns_element_get_attr(b->dom, "class") ?: "")
+                           : "",
+                       (int)b->kind, grouped, has_transform, clip_overflow,
+                       has_path_clip, has_sticky,
+                       dbg_e0, dbg_e1, dbg_e2, dbg_e3, q0, q1, q2, q3);
+    }
 }
 
 static const ns_box *
