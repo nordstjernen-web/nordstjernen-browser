@@ -4218,6 +4218,8 @@ ns_element_set_text(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         g_ascii_strcasecmp(n->name, "script") == 0 ||
         g_ascii_strcasecmp(n->name, "title")  == 0)
         return ns_element_set_textContent(ctx, this_val, val);
+    JS_DefinePropertyValueStr(ctx, this_val, "text", JS_DupValue(ctx, val),
+                              JS_PROP_C_W_E);
     return JS_UNDEFINED;
 }
 
@@ -4589,6 +4591,11 @@ ns_element_set_data(JSContext *ctx, JSValueConst this_val, JSValueConst val)
             if (changed) ns_js_schedule_iframe_load(js, n);
             JS_FreeCString(ctx, s);
         }
+        return JS_UNDEFINED;
+    }
+    if (n && n->kind == NS_NODE_ELEMENT) {
+        JS_DefinePropertyValueStr(ctx, this_val, "data",
+                                  JS_DupValue(ctx, val), JS_PROP_C_W_E);
         return JS_UNDEFINED;
     }
     return ns_element_set_nodeValue(ctx, this_val, val);
