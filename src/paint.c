@@ -3242,6 +3242,9 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
 {
     if (!b) return FALSE;
     gboolean clipped = FALSE;
+    if (isnan(b->x) || isnan(b->y) ||
+        isnan(b->content_width) || isnan(b->content_height))
+        return FALSE;
     corner_radii radii = box_border_radii(b);
     if (!corner_radii_zero(radii)) {
         rounded_rect_path(cr, b->x, b->y,
@@ -4330,6 +4333,7 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
         cairo_user_to_device(cr, &cur_x, &cur_y);
         double dx = cap ? cap->dev_x - cur_x : 0;
         double dy = cap ? cap->dev_y - cur_y : 0;
+        if (isnan(dx) || isnan(dy)) dx = dy = 0;
         cairo_save(cr);
         if (dx != 0 || dy != 0) cairo_translate(cr, dx, dy);
         g_paint_flush_box = entries[i].box;
@@ -5193,6 +5197,19 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
         if (s) sscanf(s, "%d,%d", &g_dbg_paint_x, &g_dbg_paint_y);
     }
     if (g_dbg_paint_x < 0) return;
+    if (isnan(b->x) || isnan(b->y) ||
+        isnan(b->content_width) || isnan(b->content_height)) {
+        GString *ch = g_string_new("[paint-NAN]");
+        for (const ns_box *p2 = b; p2; p2 = p2->parent) {
+            const char *nm = p2->dom && p2->dom->name ? p2->dom->name : "?";
+            const char *id = p2->dom && p2->dom->kind == NS_NODE_ELEMENT
+                           ? ns_element_get_attr(p2->dom, "id") : NULL;
+            g_string_append_printf(ch, " <%s#%s%s>", nm, id ? id : "",
+                                   isnan(p2->x) ? " NAN" : "");
+        }
+        g_printerr("%s\n", ch->str);
+        g_string_free(ch, TRUE);
+    }
     if (b->dom && b->dom->name &&
         strcmp(b->dom->name, "ytd-watch-metadata") == 0) {
         GString *chain = g_string_new("[paint-chain]");
@@ -5211,6 +5228,19 @@ ns_dbg_paint_probe(cairo_t *cr, const ns_box *b)
     double x1 = b->x + b->content_width, y1 = b->y + b->content_height;
     cairo_user_to_device(cr, &x0, &y0);
     cairo_user_to_device(cr, &x1, &y1);
+    if (isnan(x0) && !isnan(b->x)) {
+        GString *ch = g_string_new("[paint-CTM-NAN]");
+        for (const ns_box *p2 = b; p2; p2 = p2->parent) {
+            const char *nm = p2->dom && p2->dom->name ? p2->dom->name : "?";
+            const char *id = p2->dom && p2->dom->kind == NS_NODE_ELEMENT
+                           ? ns_element_get_attr(p2->dom, "id") : NULL;
+            g_string_append_printf(ch, " <%s#%s sx=%.0f sy=%.0f>",
+                                   nm, id ? id : "",
+                                   p2->scroll_x, p2->scroll_y);
+        }
+        g_printerr("%s\n", ch->str);
+        g_string_free(ch, TRUE);
+    }
     if (g_dbg_paint_x < x0 || g_dbg_paint_x > x1 ||
         g_dbg_paint_y < y0 || g_dbg_paint_y > y1)
         return;
@@ -5279,6 +5309,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     gboolean grouped = op < 0.999 || blend != CAIRO_OPERATOR_OVER || mask_grad;
     double sticky_dx = 0, sticky_dy = 0;
     compute_sticky_offset(b, cr, &sticky_dx, &sticky_dy);
+    if (isnan(sticky_dx) || isnan(sticky_dy)) {
+        if (g_dbg_paint_x >= 0)
+            g_printerr("[paint-nan-guard] sticky <%s>\n",
+                       b->dom && b->dom->name ? b->dom->name : "?");
+        sticky_dx = sticky_dy = 0;
+    }
     gboolean has_sticky = (sticky_dx != 0 || sticky_dy != 0);
     if (has_sticky) {
         cairo_save(cr);
@@ -5337,9 +5373,17 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_matrix_t cm;
         cairo_matrix_init(&cm, m.m[0], m.m[4], m.m[1], m.m[5],
                           m.m[3], m.m[7]);
-        cairo_translate(cr, ox, oy);
-        cairo_transform(cr, &cm);
-        cairo_translate(cr, -ox, -oy);
+        if (isnan(m.m[0]) || isnan(m.m[4]) || isnan(m.m[1]) ||
+            isnan(m.m[5]) || isnan(m.m[3]) || isnan(m.m[7]) ||
+            isnan(ox) || isnan(oy)) {
+            if (g_dbg_paint_x >= 0)
+                g_printerr("[paint-nan-guard] transform <%s>\n",
+                           b->dom && b->dom->name ? b->dom->name : "?");
+        } else {
+            cairo_translate(cr, ox, oy);
+            cairo_transform(cr, &cm);
+            cairo_translate(cr, -ox, -oy);
+        }
     }
     gboolean has_path_clip = FALSE;
     if ((b->kind == NS_BOX_BLOCK || b->kind == NS_BOX_TABLE ||
@@ -5449,6 +5493,12 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         double ph = b->content_height + b->padding.top + b->padding.bottom;
         if (pw < 0) pw = 0;
         if (ph < 0) ph = 0;
+        if (isnan(px) || isnan(py) || isnan(pw) || isnan(ph)) {
+            if (g_dbg_paint_x >= 0)
+                g_printerr("[paint-nan-guard] overflow-clip <%s>\n",
+                           b->dom && b->dom->name ? b->dom->name : "?");
+            px = py = 0; pw = ph = 0;
+        }
         const ns_style *bs = b->style;
         gboolean explicit_h = bs &&
             ((bs->values[NS_CSS_MAX_HEIGHT] &&
@@ -5484,7 +5534,8 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                   : "",
                            px, py, pw, ph, ex0, ey0, ex1, ey1);
             }
-            if (b->scroll_x != 0 || b->scroll_y != 0)
+            if ((b->scroll_x != 0 || b->scroll_y != 0) &&
+                !isnan(b->scroll_x) && !isnan(b->scroll_y))
                 cairo_translate(cr, -b->scroll_x, -b->scroll_y);
             if (g_paint_collect_stats) g_paint_stats.overflow_clips++;
         } else {
