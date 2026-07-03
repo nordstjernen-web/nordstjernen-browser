@@ -34243,6 +34243,28 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_bind_fn(ctx, elem_proto, "webkitMatchesSelector", ns_element_matches, 1);
     ns_bind_fn(ctx, elem_proto, "closest",               ns_element_closest, 1);
 
+    static const char *const element_spec_methods[] = {
+        "setAttribute", "getAttribute", "hasAttribute", "removeAttribute",
+        "toggleAttribute", "getAttributeNS", "setAttributeNS",
+        "removeAttributeNS", "hasAttributeNS", "getAttributeNames",
+        "attachShadow", "querySelector", "querySelectorAll",
+        "getElementsByTagName", "getElementsByClassName",
+        "insertAdjacentElement", "insertAdjacentHTML", "insertAdjacentText",
+        "getBoundingClientRect", "getClientRects", "scrollIntoView",
+        "append", "prepend", "before", "after", "remove", "replaceWith",
+        "replaceChildren",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(element_spec_methods); i++) {
+        JSValue fn = JS_GetPropertyStr(ctx, node_proto,
+                                       element_spec_methods[i]);
+        if (JS_IsFunction(ctx, fn))
+            JS_DefinePropertyValueStr(ctx, elem_proto,
+                                      element_spec_methods[i], fn,
+                                      JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        else
+            JS_FreeValue(ctx, fn);
+    }
+
     ns_proto_delete_names(ctx, node_proto, ns_element_only_methods,
                           G_N_ELEMENTS(ns_element_only_methods));
     static const char *const doc_like[] = {
