@@ -153,6 +153,7 @@ struct NsProcView {
     gboolean          vid_rect_valid;
     gboolean          vid_playing;
     guint             vid_tick_id;
+    guint             vid_tick_count;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -733,6 +734,8 @@ pv_vring_unmap(NsProcView *v)
     v->vid_playing = FALSE;
 }
 
+static void request_render(NsProcView *v);
+
 static gboolean
 pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
 {
@@ -743,6 +746,8 @@ pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
         return G_SOURCE_REMOVE;
     }
     gtk_widget_queue_draw(widget);
+    if (++v->vid_tick_count % 15 == 0)
+        request_render(v);
     return G_SOURCE_CONTINUE;
 }
 

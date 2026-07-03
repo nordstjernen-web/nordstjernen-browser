@@ -1301,10 +1301,8 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         if (elapsed - v->prev_tick_time > 1.0) {
             elapsed = v->prev_tick_time + 1.0;
             v->base_us = now_us - (gint64)(elapsed * 1e6);
-            if (v->audio_opened)
+            if (v->audio_opened && !helper)
                 ns_video_emit_audio(cache, "seek %s %.3f", v->token, elapsed);
-            if (helper)
-                ns_video_helper_seek(cache, v, elapsed);
         }
         double t = elapsed;
         if (v->loop && v->duration > 0.0)
