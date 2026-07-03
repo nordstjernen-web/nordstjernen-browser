@@ -61,7 +61,6 @@ typedef struct ns_mse_stream {
     GByteArray *audio_init;
     double      video_end;
     double      audio_end;
-    GHashTable *seen_chunks;
     gboolean    eos;
     gboolean    audio_dirty;
     gboolean    audio_rebased;
@@ -93,7 +92,6 @@ ns_mse_stream_free(gpointer p)
     if (!s) return;
     if (s->video_init) g_byte_array_free(s->video_init, TRUE);
     if (s->audio_init) g_byte_array_free(s->audio_init, TRUE);
-    if (s->seen_chunks) g_hash_table_destroy(s->seen_chunks);
     if (s->video_bytes) g_byte_array_free(s->video_bytes, TRUE);
     if (s->audio_bytes) g_byte_array_free(s->audio_bytes, TRUE);
     g_free(s);
@@ -889,23 +887,6 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
     double *appended_end = kind == 'a' ? &s->audio_end : &s->video_end;
     if (!*dst) *dst = g_byte_array_new();
     ns_video *sv = ns_video_for_mse_id(cache, stream_id);
-
-    guint64 csum = 1469598103934665603ull;
-    for (gsize i = 0; i < len; i++)
-        csum = (csum ^ data[i]) * 1099511628211ull;
-    csum ^= (guint64)len ^ ((guint64)(guchar)kind << 56);
-    if (!s->seen_chunks)
-        s->seen_chunks = g_hash_table_new_full(g_int64_hash, g_int64_equal,
-                                               g_free, NULL);
-    if (g_hash_table_contains(s->seen_chunks, &csum)) {
-        if (g_getenv("NS_DBG_AUDIO"))
-            g_printerr("[mse-append] id=%u kind=%c len=%zu DUP skipped\n",
-                       stream_id, kind, len);
-        return;
-    }
-    gint64 *ckey = g_new(gint64, 1);
-    *ckey = (gint64)csum;
-    g_hash_table_add(s->seen_chunks, ckey);
 
     gboolean is_init = ns_mse_bytes_are_init_segment(data, len);
     gboolean new_generation = (*dst)->len > 0 && is_init;
