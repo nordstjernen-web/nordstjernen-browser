@@ -26444,6 +26444,11 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
 {
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
+    if (ns_node_is_custom_element(el)) {
+        JS_DefinePropertyValueStr(ctx, this_val, "value",
+                                  JS_DupValue(ctx, val), JS_PROP_C_W_E);
+        return JS_UNDEFINED;
+    }
     if (el->name && (strcmp(el->name, "progress") == 0 ||
                      strcmp(el->name, "meter") == 0))
         return ns_element_set_double_attr(ctx, el, "value", val);
