@@ -9153,6 +9153,7 @@ typedef struct {
 static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
 static __thread GArray     *g_cq_stack;   /* ns_cq_container (by value) */
 static __thread GHashTable *g_registered_props; /* "--name" -> ns_css_property_rule* */
+static __thread GHashTable *g_var_adjust_cache; /* parent ns_var_map* -> adjusted ns_var_map* */
 
 void
 ns_css_set_container_map(GHashTable *map)
@@ -13493,15 +13494,18 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
         return ns_var_map_new(own, ns_var_map_ref(parent));
     }
 
-    GHashTable *parent_flat = parent_has ? flatten_var_map(parent) : NULL;
     if (parent_has && !have_local) {
+        if (g_var_adjust_cache) {
+            ns_var_map *hit = g_hash_table_lookup(g_var_adjust_cache, parent);
+            if (hit) return ns_var_map_ref(hit);
+        }
         gboolean same_as_parent = TRUE;
         GHashTableIter it;
         gpointer k, v;
         g_hash_table_iter_init(&it, g_registered_props);
         while (g_hash_table_iter_next(&it, &k, &v)) {
             ns_css_property_rule *pr = v;
-            gboolean present = g_hash_table_contains(parent_flat, k);
+            gboolean present = ns_var_map_lookup(parent, k) != NULL;
             if ((!pr->inherits && present) ||
                 (pr->has_initial && !present)) {
                 same_as_parent = FALSE;
@@ -13509,10 +13513,14 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
             }
         }
         if (same_as_parent) {
-            g_hash_table_destroy(parent_flat);
+            if (g_var_adjust_cache)
+                g_hash_table_insert(g_var_adjust_cache,
+                                    ns_var_map_ref(parent),
+                                    ns_var_map_ref(parent));
             return ns_var_map_ref(parent);
         }
     }
+    GHashTable *parent_flat = parent_has ? flatten_var_map(parent) : NULL;
     GHashTable *vars = g_hash_table_new_full(g_str_hash, g_str_equal,
                                              g_free, g_free);
     if (parent_flat) {
@@ -13544,7 +13552,11 @@ build_vars_for_element(const ns_style *parent_style, GArray *var_matches)
         if (!vm->name || !vm->text) continue;
         g_hash_table_replace(vars, g_strdup(vm->name), g_strdup(vm->text));
     }
-    return ns_var_map_new(vars, NULL);
+    ns_var_map *built = ns_var_map_new(vars, NULL);
+    if (parent_has && !have_local && g_var_adjust_cache)
+        g_hash_table_insert(g_var_adjust_cache, ns_var_map_ref(parent),
+                            ns_var_map_ref(built));
+    return built;
 }
 
 static void
@@ -15754,6 +15766,9 @@ ns_css_compute(ns_node *doc,
     g_style_share = g_hash_table_new_full(share_key_hash, share_key_equal,
                                           share_key_free, NULL);
     g_style_share_next_id = 0;
+    g_var_adjust_cache = g_hash_table_new_full(
+        g_direct_hash, g_direct_equal,
+        (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
 
@@ -15815,6 +15830,8 @@ ns_css_compute(ns_node *doc,
     g_has_memo = NULL;
     g_hash_table_destroy(g_style_share);
     g_style_share = NULL;
+    g_hash_table_destroy(g_var_adjust_cache);
+    g_var_adjust_cache = NULL;
     g_hash_table_destroy(layer_ranks);
     g_hash_table_destroy(g_registered_props);
     g_registered_props = NULL;
