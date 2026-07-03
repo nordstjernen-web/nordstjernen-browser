@@ -1,4 +1,7 @@
 /* nordstjernen-video: isolated video frame decoding helper driven over stdin/stdout. */
+#ifdef __linux__
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

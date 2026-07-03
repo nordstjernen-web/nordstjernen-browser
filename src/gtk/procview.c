@@ -1404,7 +1404,6 @@ cur_scale(NsProcView *v)
     return v->scale > 0.0 ? v->scale : 1.0;
 }
 
-static void request_render(NsProcView *v);
 
 static void
 configure_adjustments(NsProcView *v)
