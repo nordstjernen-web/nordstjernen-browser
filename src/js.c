@@ -2513,7 +2513,8 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
     case NS_NODE_DOCTYPE:
         return js->proto_doctype;
     case NS_NODE_DOCUMENT:
-        return (node->flags & NS_NODE_FRAGMENT) ? js->proto_docfrag : JS_UNDEFINED;
+        return (node->flags & NS_NODE_FRAGMENT) ? js->proto_docfrag
+                                                : js->proto_document;
     default:
         return JS_UNDEFINED;
     }
@@ -34373,6 +34374,15 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(doctype_proto)) JS_SetPrototype(ctx, doctype_proto, node_proto);
     if (JS_IsObject(docfrag_proto)) JS_SetPrototype(ctx, docfrag_proto, node_proto);
 
+    JSValue doc_proto = ns_proto_of(ctx, global, "Document");
+    if (JS_IsObject(doc_proto)) JS_SetPrototype(ctx, doc_proto, node_proto);
+    JSValue htmldoc_proto = ns_proto_of(ctx, global, "HTMLDocument");
+    if (JS_IsObject(htmldoc_proto) && JS_IsObject(doc_proto))
+        JS_SetPrototype(ctx, htmldoc_proto, doc_proto);
+    js->proto_document = JS_IsObject(htmldoc_proto) ? htmldoc_proto
+                                                    : JS_DupValue(ctx, doc_proto);
+    if (JS_IsObject(htmldoc_proto)) JS_FreeValue(ctx, doc_proto);
+
     js->proto_node        = node_proto;
     js->proto_element     = elem_proto;
     js->proto_htmlelement = htmlelem_proto;
@@ -38426,6 +38436,7 @@ ns_js_free(ns_js *js)
         JS_FreeValue(js->ctx, js->proto_pi);
         JS_FreeValue(js->ctx, js->proto_doctype);
         JS_FreeValue(js->ctx, js->proto_docfrag);
+        JS_FreeValue(js->ctx, js->proto_document);
         js->dom_protos_set = 0;
     }
     if (js->mutation_observers) {

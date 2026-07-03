@@ -242,6 +242,7 @@ struct ns_js {
     JSValue       proto_pi;
     JSValue       proto_doctype;
     JSValue       proto_docfrag;
+    JSValue       proto_document;
     int           dom_protos_set;
     struct {
         const void *root;
