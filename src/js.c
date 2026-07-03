@@ -41270,6 +41270,9 @@ ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
                                   JS_PROP_C_W_E);
         ns_js_dispatch_event(js, n, "canplay", NULL);
         ns_js_dispatch_event(js, n, "playing", NULL);
+    } else if (strcmp(kind, "unmuted") == 0) {
+        JS_SetPropertyStr(ctx, el, "_nd_muted", JS_FALSE);
+        ns_js_dispatch_event(js, n, "volumechange", NULL);
     } else if (strcmp(kind, "buf") == 0) {
         JS_SetPropertyStr(ctx, el, "_nd_buffered", JS_NewFloat64(ctx, value));
         ns_js_dispatch_event(js, n, "progress", NULL);

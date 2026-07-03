@@ -519,6 +519,14 @@ gboolean
 ns_video_cache_toggle(ns_video_cache *cache, ns_video *v, gint64 now_us)
 {
     if (!v || !v->player) return FALSE;
+    if (v->playing && v->muted) {
+        v->muted = FALSE;
+        ns_video_audio_start(cache, v);
+        if (v->audio_opened && v->cur_time > 0)
+            ns_video_emit_audio(cache, "seek %s %.3f", v->token, v->cur_time);
+        ns_video_emit_js(cache, v, "unmuted", v->cur_time);
+        return TRUE;
+    }
     gboolean was_playing = v->playing;
     ns_video_toggle(v, now_us);
     ns_video_emit_js(cache, v, was_playing ? "pause" : "play", v->cur_time);
