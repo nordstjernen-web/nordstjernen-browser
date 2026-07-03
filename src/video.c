@@ -1175,7 +1175,19 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         }
         if (!v->playing) continue;
 
+        if (v->base_us == 0)
+            v->base_us = now_us - (gint64)(v->cur_time * 1e6);
         double elapsed = (double)(now_us - v->base_us) / 1e6;
+        if (g_getenv("NS_DBG_CLOCK") && v->mse_id)
+            g_printerr("[clock] elapsed=%.2f prev=%.2f cur=%.2f edge=%.2f\n",
+                       elapsed, v->prev_tick_time, v->cur_time,
+                       ns_video_player_buffered_end(v->player));
+        if (elapsed - v->prev_tick_time > 1.0) {
+            elapsed = v->prev_tick_time + 1.0;
+            v->base_us = now_us - (gint64)(elapsed * 1e6);
+            if (v->audio_opened)
+                ns_video_emit_audio(cache, "seek %s %.3f", v->token, elapsed);
+        }
         double t = elapsed;
         if (v->loop && v->duration > 0.0)
             t = fmod(elapsed, v->duration);
@@ -1221,14 +1233,11 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         }
         if (ended) {
             if (ns_video_stream_growing(cache, v)) {
-                double edge = ns_video_player_buffered_end(v->player);
-                if (edge <= 0) edge = v->prev_tick_time;
-                v->cur_time = edge;
-                v->prev_tick_time = edge;
-                v->base_us = now_us - (gint64)(edge * 1e6);
+                v->prev_tick_time = v->cur_time;
+                v->base_us = now_us - (gint64)(v->cur_time * 1e6);
                 if (!v->stalled) {
                     v->stalled = TRUE;
-                    ns_video_queue_emit(emits, v, "waiting", edge);
+                    ns_video_queue_emit(emits, v, "waiting", v->cur_time);
                 }
                 ns_video_refresh_growing_stream(cache, v, now_us);
                 continue;

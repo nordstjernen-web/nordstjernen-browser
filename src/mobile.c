@@ -36,27 +36,6 @@ facebook_host(const char *host)
            host_eq(host, "m.facebook.com");
 }
 
-static gboolean
-youtube_site_host(const char *host)
-{
-    return host_eq(host, "youtube.com")              ||
-           host_eq(host, "www.youtube.com")          ||
-           host_eq(host, "m.youtube.com")            ||
-           host_eq(host, "music.youtube.com")        ||
-           host_eq(host, "youtube-nocookie.com")     ||
-           host_eq(host, "www.youtube-nocookie.com") ||
-           host_eq(host, "youtu.be");
-}
-
-static gboolean
-youtube_media_host(const char *host)
-{
-    if (!host) return FALSE;
-    return g_str_has_suffix(host, ".googlevideo.com") ||
-           g_str_has_suffix(host, ".ytimg.com")       ||
-           g_str_has_suffix(host, ".ggpht.com");
-}
-
 #if defined(__ANDROID__)
 static gboolean
 host_suffix(const char *host, const char *suffix)
@@ -81,8 +60,7 @@ wikipedia_site_host(const char *host)
 gboolean
 ns_mobile_force_host(const char *host)
 {
-    if (facebook_host(host) || youtube_site_host(host) ||
-        youtube_media_host(host))
+    if (facebook_host(host))
         return TRUE;
 #if defined(__ANDROID__)
     if (wikipedia_site_host(host))
