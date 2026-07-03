@@ -910,6 +910,82 @@ pv_video_shutdown(NsProcView *v)
 }
 
 static void
+pv_append_proc_threads(GString *out, int pid)
+{
+#ifdef __linux__
+    char *taskdir = g_strdup_printf("/proc/%d/task", pid);
+    GDir *dir = g_dir_open(taskdir, 0, NULL);
+    if (dir) {
+        long hz = sysconf(_SC_CLK_TCK);
+        if (hz <= 0) hz = 100;
+        const char *tid;
+        while ((tid = g_dir_read_name(dir))) {
+            char *stat_path = g_strdup_printf("%s/%s/stat", taskdir, tid);
+            char *stat = NULL;
+            if (g_file_get_contents(stat_path, &stat, NULL, NULL)) {
+                char *close = strrchr(stat, ')');
+                char *open = strchr(stat, '(');
+                if (open && close && close > open) {
+                    char name[32] = {0};
+                    g_strlcpy(name, open + 1,
+                              MIN((gsize)(close - open), sizeof name));
+                    char state = 0;
+                    unsigned long utime = 0, stime = 0;
+                    if (sscanf(close + 1,
+                               " %c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u "
+                               "%lu %lu", &state, &utime, &stime) >= 1)
+                        g_string_append_printf(
+                            out, "    tid %-7s %-16s %c  cpu %.2fs\n",
+                            tid, name, state,
+                            (double)(utime + stime) / (double)hz);
+                }
+                g_free(stat);
+            }
+            g_free(stat_path);
+        }
+        g_dir_close(dir);
+    }
+    g_free(taskdir);
+#else
+    (void)out; (void)pid;
+#endif
+}
+
+static void
+pv_append_media_process_stats(NsProcView *v, GString *out)
+{
+    struct { const char *label; int pid; } procs[] = {
+        { "audio helper (nordstjernen-audio)", ns_proc_view_audio_pid(v) },
+        { "video helper (nordstjernen-video)", ns_proc_view_video_pid(v) },
+    };
+    gboolean any = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(procs); i++) {
+        if (procs[i].pid <= 0) continue;
+        if (!any) {
+            g_string_append(out, "\n\n== Media helper processes ==\n");
+            any = TRUE;
+        }
+        char state[32] = "";
+        long rss = -1;
+        ns_rproc_http_proc_info(procs[i].pid, state, sizeof state, &rss);
+        g_string_append_printf(out, "%s  pid %d  %s  rss %.1f MB\n",
+                               procs[i].label, procs[i].pid, state,
+                               rss >= 0 ? rss / 1024.0 : 0.0);
+        pv_append_proc_threads(out, procs[i].pid);
+    }
+#ifndef G_OS_WIN32
+    if (any && v->vring) {
+        ns_vring_hdr *r = v->vring;
+        g_string_append_printf(out,
+                               "video ring %ux%u stride %u slot %d pts %.2fs\n",
+                               r->width, r->height, r->stride,
+                               r->latest == G_MAXUINT32 ? -1 : (int)r->latest,
+                               r->latest < r->nslots ? r->pts[r->latest] : 0.0);
+    }
+#endif
+}
+
+static void
 pv_media_pump(NsProcView *v, const char *commands)
 {
     if (!commands || !*commands) return;
@@ -2318,10 +2394,17 @@ on_result(gpointer data)
         case DEV_TAB_ELEMENTS:    buf = v->elements_buffer; break;
         default: break;
         }
-        if (buf)
+        if (buf == v->perf_buffer) {
+            GString *text = g_string_new(
+                (res->href && *res->href) ? res->href : ns_i18n("(empty)"));
+            pv_append_media_process_stats(v, text);
+            gtk_text_buffer_set_text(buf, text->str, -1);
+            g_string_free(text, TRUE);
+        } else if (buf) {
             gtk_text_buffer_set_text(
                 buf, (res->href && *res->href) ? res->href : ns_i18n("(empty)"),
                 -1);
+        }
     } else if (res->type == RES_FAVICON) {
         if (res->seq != v->load_seq)
             goto done;

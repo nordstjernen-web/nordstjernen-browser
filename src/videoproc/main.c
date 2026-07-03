@@ -245,6 +245,11 @@ static void *
 player_thread(void *ud)
 {
     ns_video_player *p = ud;
+#ifdef __linux__
+    char tname[16];
+    snprintf(tname, sizeof tname, "decode-%.8s", p->token);
+    pthread_setname_np(pthread_self(), tname);
+#endif
     ns_vdec d = {0};
     int opened = 0;
     double last_pos_emit = -10.0;
