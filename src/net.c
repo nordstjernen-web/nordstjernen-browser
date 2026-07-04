@@ -5107,7 +5107,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1L);
         break;
     default:
-        curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 1L);
+        curl_easy_setopt(curl, CURLOPT_AUTOREFERER, 0L);
         break;
     }
     if (referer && *referer)
@@ -5523,18 +5523,14 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
               GPtrArray *extra_headers,
               GCancellable *cancellable, GError **error)
 {
-    if (!ns_fetch_is_navigation(top_url, extra_headers)) {
-        if (ns_ext_should_block(url, top_url)) {
-            ns_response *blocked = g_new0(ns_response, 1);
-            blocked->body = g_byte_array_new();
-            blocked->final_url = g_strdup(url);
-            blocked->status = 0;
-            blocked->error = g_strdup("blocked by extension");
-            return blocked;
-        }
-        return ns_fetch_sync_hop(url, top_url, method, body, body_len,
-                                 content_type, extra_headers,
-                                 cancellable, error, TRUE, NULL);
+    if (!ns_fetch_is_navigation(top_url, extra_headers) &&
+        ns_ext_should_block(url, top_url)) {
+        ns_response *blocked = g_new0(ns_response, 1);
+        blocked->body = g_byte_array_new();
+        blocked->final_url = g_strdup(url);
+        blocked->status = 0;
+        blocked->error = g_strdup("blocked by extension");
+        return blocked;
     }
 
     const ns_config *cfg = ns_config_get();
