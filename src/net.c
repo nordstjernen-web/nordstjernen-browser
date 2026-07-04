@@ -37,6 +37,9 @@
 #include <webp/decode.h>
 #include <openssl/crypto.h>
 #include <openssl/opensslv.h>
+#ifdef NS_HAVE_LIBAV
+#include <libavutil/avutil.h>
+#endif
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -2495,6 +2498,9 @@ about_diagnostics_html(void)
                                   (wv >> 8) & 0xff, wv & 0xff);
     diag_kv(s, "libwebp", webpv);
     g_free(webpv);
+#ifdef NS_HAVE_LIBAV
+    diag_kv(s, "Video (FFmpeg libav*)", av_version_info());
+#endif
     diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
     diag_kv(s, "Networking", curl_version());
 
