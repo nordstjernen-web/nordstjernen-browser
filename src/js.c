@@ -17860,6 +17860,8 @@ typedef struct ns_io_target {
     JSValue   wrapper;
     gboolean  last_intersecting;
     gboolean  has_fired;
+    double    last_ratio;
+    gboolean  last_zero_area;
 } ns_io_target;
 
 typedef struct ns_io_observer {
@@ -18133,7 +18135,8 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
     gboolean intersecting = has_box &&
         tx <= rx + rw && tx + tw >= rx &&
         ty <= ry + rh && ty + th >= ry;
-    if (intersecting && (iw <= 0 || ih <= 0) && ratio <= 0)
+    gboolean zero_area = iw <= 0 || ih <= 0;
+    if (intersecting && zero_area && ratio <= 0)
         ratio = 1.0;
     if (!has_box && t->has_fired) {
         *out_entry = JS_UNDEFINED;
@@ -18145,7 +18148,20 @@ ns_io_evaluate_one(JSContext *ctx, ns_io_observer *o,
                                   ix, iy, iw, ih,
                                   ratio, intersecting);
     gboolean changed = !t->has_fired || intersecting != t->last_intersecting;
+    if (!changed && intersecting && zero_area != t->last_zero_area)
+        changed = TRUE;
+    if (!changed && intersecting && o->thresholds) {
+        for (guint k = 0; k < o->thresholds->len; k++) {
+            double thr = g_array_index(o->thresholds, double, k);
+            if ((t->last_ratio < thr) != (ratio < thr)) {
+                changed = TRUE;
+                break;
+            }
+        }
+    }
     t->last_intersecting = intersecting;
+    t->last_zero_area = zero_area;
+    t->last_ratio = ratio;
     t->has_fired = TRUE;
     return changed;
 }
