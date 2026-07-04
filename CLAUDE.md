@@ -68,8 +68,8 @@ nothing imported.
   machine without libav carries no libav symbol or dependency and behaves
   exactly as before. Other `<audio>` and other `<video>` codecs render a
   poster and play overlay; clicking resolves the media URL in the renderer
-  (`ns_browser_media_at`) and the shell hands it to an external player
-  (`src/media.c::ns_media_try_launch`).
+  (`ns_browser_media_at`) and reports it over the renderer protocol for
+  embedders — the GTK shell does not launch an external player.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue

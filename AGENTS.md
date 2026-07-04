@@ -14,15 +14,30 @@ nothing imported.
   maintainable by a single human.
 - HTML5 + modern CSS + modern JavaScript, supported pragmatically as
   far as is feasible without bloat.
-- **No** WebGPU or AI-style web APIs. WebGL **is** supported — the lone
-  GPU-API exception: a working, minimalist WebGL 1 / 2 over OpenGL ES
-  (`src/webgl.c`, see `docs/webgl.md`). It is opt-in — off by default
-  and gated by a per-site trust prompt — but fully functional once a
-  site is trusted.
-- No embedded audio/video codecs. `<audio>`/`<video>` render a poster
-  and play overlay; clicking resolves the media URL in the renderer
-  (`ns_browser_media_at`) and the shell hands it to an external player
-  (`src/media.c::ns_media_try_launch`).
+- **No** AI-style web APIs. WebGL **is** supported: a working,
+  minimalist WebGL 1 / 2 over OpenGL ES (`src/webgl.c`, see
+  `docs/webgl.md`). It is opt-in — off by default and gated by a
+  per-site trust prompt — but fully functional once a site is trusted.
+- **WebGPU** (`navigator.gpu`) is an **experimental** feature that
+  layers `src/webgpu.c` over the external wgpu-native library. The
+  `webgpu` meson feature is `auto`: built only when wgpu-native is
+  present, silently skipped otherwise, and even when built it stays
+  off at runtime until the browser is started with `--enable-webgpu`
+  (which sets `NS_WEBGPU_ALLOW=1`). See `docs/webgpu.md`.
+- The one vendored, in-tree video codec is MPEG-1, decoded by the
+  vendored pl_mpeg decoder (`subprojects/plmpeg/`, wrapped by
+  `src/video_decode.c`); such `<video>` plays inline (`src/video.c`).
+  Audio plays via the unsandboxed `nordstjernen-audio` helper
+  (`src/audio/main.c`), which decodes MPEG-1/MP2 (pl_mpeg) and MP3
+  (vendored minimp3, `src/audio/minimp3.h`) and outputs through SDL2.
+  MSE video frames decode in the `nordstjernen-video` helper
+  (`src/videoproc/main.c`, built when libav is present); the shell
+  composites its BGRA frames from a shm ring (see `docs/media.md`).
+  When FFmpeg's libav\* system packages are present, the build also
+  gains inline WebM (VP9/VP8 video + Opus/Vorbis audio) — never
+  vendored. Other `<audio>`/`<video>` codecs render a poster and
+  play overlay; the renderer resolves the media URL under the
+  pointer via `ns_browser_media_at`.
 - UI strings are English-source and translated to the operating-system
   language at startup through the in-tree catalogue lookup (`src/i18n.c`,
   `data/i18n/*.lang`); English is the fallback for any string a catalogue
@@ -78,9 +93,9 @@ This repo is driven by Codex in long uninterrupted sessions.
   — that's the per-change correctness gate, not CI. See
   `docs/Windows.md` for the MSYS2 setup; the rest of this guide
   uses Unix-style invocations that work in either shell.
-- **CI is enabled.** The Linux / macOS / Windows workflows run on
-  every push to `main` and every PR targeting `main`, plus manual
-  `workflow_dispatch`. Local Linux is still the primary
+- **CI is enabled.** The Linux / macOS / Windows / musl / Java
+  workflows run on every push to `main` and every PR targeting
+  `main`, plus manual `workflow_dispatch`. Local Linux is still the primary
   correctness gate before pushing; CI provides cross-platform
   sanity coverage.
 
@@ -181,7 +196,7 @@ System packages required on Debian/Ubuntu:
 ```sh
 sudo apt install build-essential pkg-config meson ninja-build \
     libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev librsvg2-dev \
-    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev
+    libpsl-dev libsqlite3-dev libseccomp-dev libwebp-dev libsdl2-dev
 ```
 
 On Fedora/RHEL:
@@ -189,7 +204,7 @@ On Fedora/RHEL:
 ```sh
 sudo dnf install gcc pkgconf meson ninja-build gtk4-devel libepoxy-devel libcurl-devel \
     openssl-devel uchardet-devel librsvg2-devel libpsl-devel sqlite-devel \
-    libseccomp-devel libwebp-devel
+    libseccomp-devel libwebp-devel SDL2-devel
 ```
 
 On openSUSE:
@@ -197,7 +212,7 @@ On openSUSE:
 ```sh
 sudo zypper install gcc pkgconf meson ninja gtk4-devel libepoxy-devel libcurl-devel \
     libopenssl-devel libuchardet-devel librsvg-devel libpsl-devel sqlite3-devel \
-    libseccomp-devel libwebp-devel
+    libseccomp-devel libwebp-devel libSDL2-devel
 ```
 
 `libseccomp` is required on Linux — `meson setup` fails without it.
@@ -242,9 +257,12 @@ don't add `meson test` targets.
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
   upstream browser engine source. Nordstjernen is a clean-room
   implementation, not a fork.
-- Don't add WebGPU/AI surface area, even as stubs. (WebGL already
-  exists as a deliberate, opt-in exception — extend `src/webgl.c`, don't
-  re-architect it.)
+- Don't add AI-style web-API surface area, even as stubs. (WebGL
+  already exists as a deliberate, opt-in exception — extend
+  `src/webgl.c`, don't re-architect it. WebGPU is an experimental
+  exception layered over external wgpu-native — `src/webgpu.c`, kept
+  behind the `--enable-webgpu` / `NS_WEBGPU_ALLOW` runtime gate; don't
+  make wgpu-native a hard/default dependency or vendor its library.)
 - Don't add telemetry, crash reporters, update pingers, or "studies"
   infrastructure. UI translation goes through `src/i18n.c` and the
   `data/i18n/*.lang` catalogues — don't introduce gettext or `.po`

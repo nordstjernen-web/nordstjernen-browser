@@ -60,8 +60,8 @@ and constraint validation; `overflow` boxes scroll. The full
 (`src/wasm.c`), and an opt-in, per-site-gated WebGL 1 / 2 maps onto
 OpenGL ES (`src/webgl.c`). Painting skips off-screen boxes (viewport
 culling). Runs on Linux, Windows (MSYS2) and macOS, with an Android
-port in progress; CI builds the desktop three plus musl,
-the Java binding and the BSDs on every push.
+port in progress; CI builds the desktop three plus musl and
+the Java binding on every push (the BSDs run nightly / on dispatch).
 The GTK frontend is a tabbed, **process-per-tab** browser:
 each tab drives its own sandboxed renderer process over the engine and
 shows full-fidelity output. The shell is a thin display/input client —
@@ -83,7 +83,9 @@ toolkit-agnostic:
 - **`src/` — common C core.** The engine (lexbor parse, CSS cascade,
   layout, Cairo/Pango paint, QuickJS, WAMR, image decode, networking)
   plus frontend-agnostic `ns_` helpers shared by alternative GUIs
-  (`htmlbox`, `fetch`, `url`, `page`, `jsrun`, `media`). New shared logic
+  (the `ns_net_fetch_*` networking calls, the `ns_url_*` URL helpers,
+  the `src/headless.c` driver, and the `ns_browser` embedding API in
+  `src/libnordstjernen.h`). New shared logic
   lands here in C, in the house style (`ns_` snake_case, one-line SPDX
   header, no comments).
 - **`src/gtk/` — GTK 4 frontend.** A thin process-per-tab
@@ -91,8 +93,9 @@ toolkit-agnostic:
   that spawns one sandboxed `nordstjernen-renderer` process per tab and
   blits its framebuffer. It carries the browser chrome — navigation,
   tabs, history, zoom, selection, `:hover`, find-in-page, a context menu,
-  the DevTools console, save/export, media handoff, an app menu, settings,
-  and bookmarks. The former in-process engine renderer has been removed.
+  the DevTools console, save/export, the media helper plumbing, an app
+  menu, settings, and bookmarks. The former in-process engine renderer
+  has been removed.
 - **`java/` — Java / JVM binding and Swing app.** A Java library
   (`org.nordstjernen.Nordstjernen`, JDK 21) embeds the engine on the JVM
   through a thin JNI bridge over the C embedding API
@@ -114,7 +117,8 @@ console/eval). This is the payoff that makes the design cohere: the GTK
 shell is a thin display-plus-input layer showing the engine's output
 (so it needs no separate renderer), and isolation is
 real — `nordstjernen-renderer` applies the same Landlock + seccomp
-confinement as the engine at startup (in `ns_browser_init`, before any page
+confinement as the engine at startup (`ns_browser_sandbox`, called right
+after `ns_browser_init` and before any page
 is opened), so a renderer crash is a per-tab failure and untrusted content
 always runs under a loaded syscall filter. The shell carries no bespoke
 in-process renderer any more; the optional `--single-process` mode serves the
@@ -148,13 +152,13 @@ seccomp skipped. The mechanics live in `docs/tab-isolation.md`.
   surface cache was tried and reverted (re-rastered the whole page on
   every change); smooth wheel scrolling was reverted for the same reason
   (full repaint × ~15 ease-frames saturated CPU). Both need dirty rects.
-- **14 · YouTube watch-page playback** — baseline shipped: clicking a
-  streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL to
-  the external player, which resolves it with yt-dlp
-  (`ns_media_try_launch`, with its `stream` flag set). Next: detect more sites and
-  surface a clearer in-page affordance; optionally run the `base.js`
-  signature-cipher transform in QuickJS to get a direct URL without
-  yt-dlp.
+- **14 · YouTube watch-page playback** — baseline shipped: a streaming
+  `<video>` (MSE/`blob:`, no file URL) plays *inline* — the renderer
+  materializes the growing stream and the `nordstjernen-video` helper
+  (`src/videoproc/main.c`, built when libav is present) decodes frames
+  into a shm ring the shell composites over the page (see
+  `docs/media.md`). Next: widen codec/site coverage and surface clearer
+  in-page feedback when the helper is unavailable.
 - **8 · Sign the Windows build** — biggest distribution-side ROI. Wire
   signtool + timestamp now; flip on once a cert is procured.
 
@@ -197,10 +201,11 @@ committed, listed to keep the long view in one place:
 - **Accessibility** — no AT-SPI / accessibility tree is exposed yet;
   a minimal accessible-name + role surface would be a high-value,
   self-contained slice.
-- **WebGL extensions** — `getExtension()` returns `null` today; a small
-  allow-list of widely-used, safe extensions (e.g. instancing,
-  `OES_*` float textures) would unblock more content without
-  re-architecting `src/webgl.c`.
+- **WebGL extensions** — `getExtension()` implements
+  `WEBGL_debug_renderer_info` and `EXT_texture_filter_anisotropic` and
+  returns `null` for the rest; a small allow-list of further widely-used,
+  safe extensions (e.g. instancing, `OES_*` float textures) would
+  unblock more content without re-architecting `src/webgl.c`.
 - **Packaging reach** — a signed Windows build and a notarized macOS
   DMG are the distribution-side levers.
 
