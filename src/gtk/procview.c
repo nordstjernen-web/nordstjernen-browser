@@ -3039,6 +3039,16 @@ on_drag_end(GtkGestureDrag *g, double ox, double oy, gpointer data)
     }
 }
 
+static void
+on_paste_text_ready(GObject *src, GAsyncResult *res, gpointer data)
+{
+    NsProcView *v = data;
+    char *text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(src), res, NULL);
+    if (text && *text && v->opened)
+        start_key_text(v, 2, text);
+    g_free(text);
+}
+
 static gboolean
 on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
        GdkModifierType state, gpointer data)
@@ -3069,6 +3079,11 @@ on_key(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         switch (keyval) {
         case GDK_KEY_c:
         case GDK_KEY_C:          start_select(v, 4, 0, 0); return TRUE;
+        case GDK_KEY_v:
+        case GDK_KEY_V:
+            gdk_clipboard_read_text_async(gtk_widget_get_clipboard(v->area),
+                                          NULL, on_paste_text_ready, v);
+            return TRUE;
         case GDK_KEY_a:
         case GDK_KEY_A:          start_select(v, 3, 0, 0); return TRUE;
         case GDK_KEY_plus:

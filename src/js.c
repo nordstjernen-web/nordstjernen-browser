@@ -34731,6 +34731,20 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
                                ns_element_get_data, ns_element_set_data);
 
     js->dom_protos_set    = 1;
+
+    if (js->pinned_wrappers_set) {
+        GHashTableIter it;
+        gpointer k;
+        g_hash_table_iter_init(&it, js->pinned_wrappers_set);
+        while (g_hash_table_iter_next(&it, &k, NULL)) {
+            ns_node *n = k;
+            if (!n->js_wrapper) continue;
+            JSValue kind_proto = ns_node_kind_proto(js, n);
+            if (JS_IsObject(kind_proto))
+                JS_SetPrototype(ctx, JS_MKPTR(JS_TAG_OBJECT, n->js_wrapper),
+                                kind_proto);
+        }
+    }
 }
 
 ns_js *
