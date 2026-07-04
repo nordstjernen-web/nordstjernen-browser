@@ -157,7 +157,7 @@ if not is_android and gtk_feature.allowed()
   endif
 endif
 gmodule = dependency('gmodule-2.0')
-libcurl = dependency('libcurl', version: '>=7.85')
+libcurl = dependency('libcurl', version: '>=7.86')
 libcrypto = dependency('libcrypto')
 libm = cc.find_library('m', required: false)
 
