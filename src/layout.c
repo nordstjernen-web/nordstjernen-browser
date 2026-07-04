@@ -3518,6 +3518,7 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         if (!box->inline_atomics)
             box->inline_atomics = g_array_new(FALSE, FALSE, sizeof(ns_inline_atomic));
         ns_inline_atomic ia = { .byte_off = ns, .box = rr->box };
+        if (rr->box && !rr->box->parent) rr->box->parent = box;
         g_array_append_val(box->inline_atomics, ia);
     }
 
