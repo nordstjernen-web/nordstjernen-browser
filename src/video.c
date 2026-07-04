@@ -263,6 +263,7 @@ ns_video_note_paint_rect(ns_video *v, double x, double y, double w, double h)
         g_printerr("[note-rect] %.0f,%.0f %.0fx%.0f opened=%d\n",
                    x, y, w, h, v->video_opened);
     if (!v) return;
+    v->last_paint_us = g_get_monotonic_time();
     v->rect_x = x;
     v->rect_y = y;
     v->rect_w = w;
@@ -1251,9 +1252,24 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
     GArray *emits = g_array_new(FALSE, FALSE, sizeof(ns_video_emit_rec));
     GHashTableIter it;
     gpointer key, val;
+    guint opened_count = 0;
+    g_hash_table_iter_init(&it, cache->by_url);
+    while (g_hash_table_iter_next(&it, &key, &val)) {
+        ns_video *c = val;
+        if (c->video_opened || c->audio_opened) opened_count++;
+    }
     g_hash_table_iter_init(&it, cache->by_url);
     while (g_hash_table_iter_next(&it, &key, &val)) {
         ns_video *v = val;
+        if (opened_count >= 2 && (v->video_opened || v->audio_opened) &&
+            v->last_paint_us > 0 &&
+            now_us - v->last_paint_us > (gint64)3000000) {
+            ns_video_audio_stop(cache, v);
+            ns_video_helper_stop(cache, v);
+            v->playing = FALSE;
+            opened_count--;
+            continue;
+        }
         if (v->is_camera) {
             ns_camera *cam = ns_camera_active();
             if (cam) {

@@ -45,6 +45,7 @@ typedef struct {
     char       path[PATH_MAX];
     int        used;
     int        playing;
+    unsigned long open_seq;
     int        quit;
     int        want_reopen;
     double     seek_to;
@@ -61,6 +62,7 @@ typedef struct {
 } ns_video_player;
 
 static ns_video_player g_players[NS_VIDEO_MAX_PLAYERS];
+static unsigned long   g_open_seq;
 static pthread_mutex_t g_emit_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned        g_next_shm;
 
@@ -426,11 +428,21 @@ cmd_open(const char *token, const char *url)
     for (int i = 0; i < NS_VIDEO_MAX_PLAYERS; i++)
         if (!g_players[i].used) { p = &g_players[i]; break; }
     if (!p) {
-        emit("error %s too-many-players", token);
-        return;
+        ns_video_player *victim = NULL;
+        for (int i = 0; i < NS_VIDEO_MAX_PLAYERS; i++) {
+            ns_video_player *c = &g_players[i];
+            if (!victim || (!c->playing && victim->playing) ||
+                (c->playing == victim->playing &&
+                 c->open_seq < victim->open_seq))
+                victim = c;
+        }
+        emit("closed %s %s", victim->token, victim->shm_name);
+        player_release(victim);
+        p = victim;
     }
     memset(p, 0, sizeof *p);
     p->used = 1;
+    p->open_seq = ++g_open_seq;
     p->shm_fd = -1;
     snprintf(p->token, sizeof p->token, "%s", token);
     snprintf(p->path, sizeof p->path, "%s", url);
