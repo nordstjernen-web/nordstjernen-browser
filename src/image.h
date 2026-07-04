@@ -105,6 +105,9 @@ guint8 *ns_image_webp_decode_to_bgra(const guchar *data, gsize len,
 
 gboolean ns_image_webp_supports_bytes(const guchar *data, gsize len);
 
+GArray *ns_image_decode_webp_anim_to_pixels(const guchar *data, gsize len,
+                                            int *out_w, int *out_h);
+
 void ns_image_pixel_frame_clear(gpointer data);
 
 guint8 *ns_image_decode_bytes_to_pixels(const guchar *data, gsize len,

@@ -261,6 +261,7 @@ if have_freetype
 endif
 
 libwebp = dependency('libwebp')
+libwebpdemux = dependency('libwebpdemux')
 
 libavif = dependency('libavif', required: false)
 have_avif = libavif.found() and not is_android

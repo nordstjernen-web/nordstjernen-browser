@@ -161,11 +161,12 @@ if uchardet can't classify the bytes at all.
 
 Required dependency (Debian/Ubuntu `libwebp-dev`, Fedora/RHEL
 `libwebp-devel`, openSUSE `libwebp-devel`, Alpine `libwebp-dev`,
-MSYS2 `mingw-w64-x86_64-libwebp`, Homebrew `webp`). Static WebP —
-both lossy VP8 (the dominant variant served by the BBC, Wikipedia
-thumbnails, and most modern CDNs) and lossless VP8L — is decoded
-in-tree by `src/image_webp.c` directly over `WebPDecodeBGRAInto`,
-tried right after the Wuffs decoders. No gdk-pixbuf loader, no
+MSYS2 `mingw-w64-x86_64-libwebp`, Homebrew `webp`). WebP —
+lossy VP8 (the dominant variant served by the BBC, Wikipedia
+thumbnails, and most modern CDNs), lossless VP8L, and **animated
+WebP** (via libwebpdemux's `WebPAnimDecoder`, playing like animated
+GIFs) — is decoded in-tree by `src/image_webp.c`, tried right after
+the Wuffs decoders. No gdk-pixbuf loader, no
 `loaders.cache` registration, and no sandbox interaction is
 involved; the old `webp-pixbuf-loader` runtime dependency is gone.
 
