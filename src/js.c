@@ -38927,15 +38927,6 @@ ns_js_free(ns_js *js)
     if (js->cookie_buckets)
         g_hash_table_destroy(js->cookie_buckets);
     g_free(js->partition_key);
-    for (int i = 0; i < 4; i++) {
-        int r;
-        JSContext *ctx_out = NULL;
-        while ((r = JS_ExecutePendingJob(js->rt, &ctx_out)) > 0) ;
-        if (r < 0) {
-            JSValue ex = JS_GetException(ctx_out ? ctx_out : js->ctx);
-            JS_FreeValue(ctx_out ? ctx_out : js->ctx, ex);
-        }
-    }
     if (js->nodelist_decorator_set) {
         JS_FreeValue(js->ctx, js->nodelist_decorator);
         js->nodelist_decorator_set = 0;
