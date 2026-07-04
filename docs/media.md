@@ -1,8 +1,8 @@
 # Media: video and audio
 
 How Nordstjernen plays `<video>` and `<audio>`. The engine ships a tiny,
-in-tree decoder set plus one optional WebM extension; anything else is handed
-to an external player.
+in-tree decoder set plus one optional WebM extension; anything else renders
+a poster and a play overlay.
 
 The video process handles video, the audio process handles audio 
 and the html process renders html.
@@ -32,7 +32,7 @@ time (auto-detected; `-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
 and decodes **VP9/VP8** frames, which are scaled to BGRA and served through the
 same off-tick frame loop as the MPEG-1 path — both royalty-free codecs. A build
 without the FFmpeg libraries carries no libav symbol or dependency and falls
-back to the external-player path.
+back to the poster-and-overlay path.
 
 How libav is obtained differs by platform, to keep it redistributable:
 
@@ -86,9 +86,18 @@ before. The renderer always keeps the demuxer state that backs
 either way; audio stays in `nordstjernen-audio`, cued by the same
 play/pause/seek commands so both clocks anchor identically.
 
+## Other media
 
+Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 + Opus/Vorbis) path,
+Nordstjernen ships no media codecs. Other `<audio>` and other `<video>` codecs
+render a poster and a play overlay instead of playing. Clicking one resolves
+the source URL inside the sandboxed renderer process (`ns_browser_media_at`),
+and the renderer's HTTP protocol reports it to whoever drives the renderer —
+the C embedding API and the Java binding can hand it to an external player of
+their own. The GTK shell itself does not launch an external player; the
+`.deb` and `.rpm` packages still `Recommend` one (`mpv`) for opening such
+URLs by hand.
 
-Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:` with no
-plain file URL. For those, clicking hands the **page URL** to the player instead,
-so `mpv`/`VLC` resolve it with [yt-dlp](https://github.com/yt-dlp/yt-dlp) —
-install yt-dlp alongside the player to watch them.
+Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
+with no plain file URL; those play inline through the video helper described
+above when libav is present.

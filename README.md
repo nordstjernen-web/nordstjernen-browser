@@ -11,7 +11,7 @@ Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl) 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
-**Minimalism:** The whole engine is about 134,000 lines of clean-room C — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
+**Minimalism:** The whole engine is about 145,000 lines of clean-room C — small enough for one person to read and audit end-to-end. Audio and video add only small single-file decoders (pl_mpeg, minimp3) and SDL2 for audio output, not a media stack; WebM (VP9/VP8 + Opus/Vorbis) is an optional extra over FFmpeg's libav — the system copy on Linux, a minimal LGPL build bundled on macOS/Windows.
 
 Nordstjernen has no JIT so it is much more secure, and can still be fast enough. It ships no telemetry of any kind.
 
@@ -33,7 +33,7 @@ in-process media codecs. Highlights:
 |-----------|:------:|
 | §2 Common infrastructure — WHATWG URL, IDN, origins, encodings | ✅ |
 | §3–§4 Semantics, document structure & tabular content | ✅ |
-| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM when FFmpeg libav is present); other codecs and `<audio>` hand off to an external player | 🟡 |
+| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM and MSE/`blob:` streams when FFmpeg libav is present); other codecs and `<audio>` render a poster and play overlay | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
 | §4.12–§4.13 Scripting, custom elements | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
@@ -66,8 +66,9 @@ The full section-by-section walk-through lives in
 - **Media** — images, optional inline PDF; `<video>` plays **inline** for
   MPEG-1 (decoded in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg),
   MIT) and, when FFmpeg's libav is present at build time, **WebM** (VP9/VP8 +
-  Opus/Vorbis), with `autoplay`/`loop`/click-to-play; other codecs and
-  streaming sites hand off to an external player. See
+  Opus/Vorbis), with `autoplay`/`loop`/click-to-play; MSE/`blob:` streaming
+  plays inline through the `nordstjernen-video` helper; other codecs render
+  a poster and play overlay. See
   [docs/media.md](docs/media.md).
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
@@ -239,10 +240,11 @@ moving parts:
 by pl_mpeg) and for **VP9/VP8 WebM** when FFmpeg's libav\* is present at
 build time — system FFmpeg on Linux, a minimal LGPL FFmpeg bundled on macOS
 and Windows. Audio (MP2/MP3, and Opus/Vorbis for WebM) plays through the
-unsandboxed `nordstjernen-audio` helper over SDL2. Every other codec, and
-streaming sites that use MSE/`blob:`, are handed to an external player
-(`mpv`/`VLC`, with `yt-dlp` for streaming) — a *recommended* runtime
-dependency, never a build one. Full details, including the licensing split
+unsandboxed `nordstjernen-audio` helper over SDL2. Streaming sites that use
+MSE/`blob:` also play inline: the `nordstjernen-video` helper
+(`src/videoproc/main.c`, built when libav\* is present) decodes the stream
+and the shell composites its frames over the page. Every other codec renders
+a poster and a play overlay. Full details, including the licensing split
 and the helper protocol, are in [docs/media.md](docs/media.md).
 
 ## License
