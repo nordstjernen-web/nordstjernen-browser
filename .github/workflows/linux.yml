@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: ['24.04', '26.04']
+        ubuntu: ['26.04']
         compiler: [clang, gcc]
 
     env:
