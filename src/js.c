@@ -10326,8 +10326,48 @@ ns_window_matchMedia(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, mql, "removeListener",    ns_mql_removeListener, 1);
     ns_bind_event_target_listeners(ctx, mql);
     ns_bind_fn(ctx, mql, "addEventListener",  ns_mql_addEventListener, 2);
+    ns_js *js = js_from_ctx(ctx);
+    if (js) {
+        if (!js->media_query_lists)
+            js->media_query_lists = g_ptr_array_new();
+        JSValue *slot = g_new(JSValue, 1);
+        *slot = JS_DupValue(ctx, mql);
+        g_ptr_array_add(js->media_query_lists, slot);
+    }
     if (q) JS_FreeCString(ctx, q);
     return mql;
+}
+
+void
+ns_js_media_queries_reeval(ns_js *js)
+{
+    if (!js || !js->ctx || !js->media_query_lists) return;
+    JSContext *ctx = js->ctx;
+    for (guint i = 0; i < js->media_query_lists->len; i++) {
+        JSValue *slot = g_ptr_array_index(js->media_query_lists, i);
+        JSValue mql = *slot;
+        JSValue mv = JS_GetPropertyStr(ctx, mql, "media");
+        const char *media = JS_ToCString(ctx, mv);
+        gboolean now = ns_css_media_query_matches(media);
+        if (media) JS_FreeCString(ctx, media);
+        JS_FreeValue(ctx, mv);
+        JSValue old = JS_GetPropertyStr(ctx, mql, "matches");
+        gboolean was = JS_ToBool(ctx, old);
+        JS_FreeValue(ctx, old);
+        if (now == was) continue;
+        JS_SetPropertyStr(ctx, mql, "matches", now ? JS_TRUE : JS_FALSE);
+        JSValue ev = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "change"));
+        JS_SetPropertyStr(ctx, ev, "matches", now ? JS_TRUE : JS_FALSE);
+        JS_SetPropertyStr(ctx, ev, "media",
+                          JS_GetPropertyStr(ctx, mql, "media"));
+        JSAtom de = JS_NewAtom(ctx, "dispatchEvent");
+        JSValue r = JS_Invoke(ctx, mql, de, 1, (JSValueConst *)&ev);
+        JS_FreeAtom(ctx, de);
+        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, ev);
+    }
 }
 
 static JSValue
@@ -33661,6 +33701,7 @@ ns_js_dispatch_resize(ns_js *js)
     JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
     JS_FreeValue(ctx, global);
     ns_js_dispatch_window_only_event(js, "resize", ev, NULL);
+    ns_js_media_queries_reeval(js);
     if (js->current_doc)
         ns_js_dispatch_event(js, js->current_doc, "resize", NULL);
 }
@@ -37946,6 +37987,15 @@ ns_js_reset_runtime_state(ns_js *js)
 
     if (js->timers)
         g_hash_table_remove_all(js->timers);
+
+    if (js->media_query_lists) {
+        for (guint i = 0; i < js->media_query_lists->len; i++) {
+            JSValue *slot = g_ptr_array_index(js->media_query_lists, i);
+            JS_FreeValue(js->ctx, *slot);
+            g_free(slot);
+        }
+        g_ptr_array_set_size(js->media_query_lists, 0);
+    }
 
     if (js->raf_pending) {
         for (guint i = 0; i < js->raf_pending->len; i++) {

@@ -176,6 +176,7 @@ struct ns_js {
     GPtrArray    *mutation_observers;
     gboolean      mutation_drain_scheduled;
     GPtrArray    *intersection_observers;
+    GPtrArray    *media_query_lists;
     GPtrArray    *resize_observers;
     guint         observer_tick_source;
     gboolean      observer_ticking;
