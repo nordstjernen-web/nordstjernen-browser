@@ -229,6 +229,11 @@ static JSValue ns_event_stop_immediate(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
                                     const char *type);
+static JSValue ns_target_make_event(JSContext *ctx, JSValueConst target,
+                                    const char *type);
+static void    ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
+                                             const char *type,
+                                             JSValueConst ev);
 static void    ns_observer_schedule_tick(ns_js *js);
 static JSValue ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -10356,16 +10361,11 @@ ns_js_media_queries_reeval(ns_js *js)
         JS_FreeValue(ctx, old);
         if (now == was) continue;
         JS_SetPropertyStr(ctx, mql, "matches", now ? JS_TRUE : JS_FALSE);
-        JSValue ev = JS_NewObject(ctx);
-        JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "change"));
+        JSValue ev = ns_target_make_event(ctx, mql, "change");
         JS_SetPropertyStr(ctx, ev, "matches", now ? JS_TRUE : JS_FALSE);
         JS_SetPropertyStr(ctx, ev, "media",
                           JS_GetPropertyStr(ctx, mql, "media"));
-        JSAtom de = JS_NewAtom(ctx, "dispatchEvent");
-        JSValue r = JS_Invoke(ctx, mql, de, 1, (JSValueConst *)&ev);
-        JS_FreeAtom(ctx, de);
-        if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
-        JS_FreeValue(ctx, r);
+        ns_target_dispatch_with_event(ctx, mql, "change", ev);
         JS_FreeValue(ctx, ev);
     }
 }

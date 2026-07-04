@@ -367,6 +367,24 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             char *res = ns_rproc_http_eval(r, a + 5);
             fprintf(stdout, "act-eval: %s\n", res ? res : "(null)");
             free(res);
+        } else if (g_str_has_prefix(a, "viewport ")) {
+            int nw = 0, nh = 0;
+            if (sscanf(a + 9, "%d %d", &nw, &nh) == 2 && nw > 0 && nh > 0) {
+                fprintf(stderr, "[headless] viewport %dx%d\n", nw, nh);
+                vw = nw;
+                vh = nh;
+                ns_rproc_http_page pg;
+                ns_rproc_http_set_viewport(r, vw, vh, &pg);
+                ns_rproc_http_frame fr;
+                if (ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr) == 0) {
+                    free(fr.nav);
+                    free(fr.webgl);
+                    free(fr.camera);
+                    free(fr.download);
+                    free(fr.audio);
+                    free(fr.mail_key);
+                }
+            }
         } else if (g_str_has_prefix(a, "wait ")) {
             gint64 ms = g_ascii_strtoll(a + 5, NULL, 10);
             fprintf(stderr, "[headless] wait %" G_GINT64_FORMAT "ms\n", ms);
