@@ -309,6 +309,16 @@ don't add `meson test` targets.
 - Don't introduce Mozilla/Gecko code, WebKit code, or any other
   upstream browser engine source. Nordstjernen is a clean-room
   implementation, not a fork.
+- **Don't add site-specific hacks.** No per-site rendering shims, no
+  hardcoded hostnames, no grepping a site's private JSON (e.g.
+  `ytInitialPlayerResponse`, `mediaDefinitions`, `ytimg`, `movie_player`).
+  Always improve the **generic** engine so it runs the **real** site: read
+  web standards (OpenGraph, JSON-LD, WHATWG DOM/JS APIs) and aim to execute
+  the site's own JavaScript rather than reverse-engineering its data. When a
+  page renders wrong, fix the engine capability it exercises — never
+  special-case the host. The standards-based media metadata extractor in
+  `src/html_lexbor.c` is the pattern; the deleted YouTube scraper was the
+  anti-pattern.
 - Don't add AI-style web-API surface area, even as stubs. WebGL is a
   deliberate opt-in exception — extend `src/webgl.c`, don't re-architect it.
 - WebGPU is an experimental exception layered over external wgpu-native
