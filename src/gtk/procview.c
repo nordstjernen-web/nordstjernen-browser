@@ -604,6 +604,23 @@ ns_proc_audio_apply_proxy_env(GSubprocessLauncher *launcher)
 }
 
 static void
+pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    (void)user_data;
+    GDataInputStream *in = G_DATA_INPUT_STREAM(src);
+    char *line = g_data_input_stream_read_line_finish(in, res, NULL, NULL);
+    if (!line) {
+        g_object_unref(in);
+        return;
+    }
+    if (g_str_has_prefix(line, "error ") || g_getenv("NS_DBG_AUDIO"))
+        g_printerr("[audio-helper] %s\n", line);
+    g_free(line);
+    g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL,
+                                        pv_audio_feedback_line, NULL);
+}
+
+static void
 pv_audio_pump(NsProcView *v, const char *commands)
 {
     if (!commands || !*commands) return;
@@ -611,21 +628,27 @@ pv_audio_pump(NsProcView *v, const char *commands)
         char *path = ns_proc_audio_helper_path();
         GError *err = NULL;
         GSubprocessLauncher *launcher = g_subprocess_launcher_new(
-            G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_SILENCE |
+            G_SUBPROCESS_FLAGS_STDIN_PIPE | G_SUBPROCESS_FLAGS_STDOUT_PIPE |
             G_SUBPROCESS_FLAGS_STDERR_SILENCE);
         ns_proc_audio_apply_proxy_env(launcher);
         v->audio_proc = g_subprocess_launcher_spawn(launcher, &err, path, NULL);
         g_object_unref(launcher);
-        if (g_getenv("NS_DBG_AUDIO"))
-            g_printerr("[audio-pump] spawn %s -> %s (%s)\n", path,
-                       v->audio_proc ? "ok" : "FAIL",
-                       err ? err->message : "-");
-        g_free(path);
         if (!v->audio_proc) {
+            g_printerr("nordstjernen: audio helper %s failed to start: %s\n",
+                       path, err ? err->message : "unknown error");
+            g_free(path);
             g_clear_error(&err);
             return;
         }
+        if (g_getenv("NS_DBG_AUDIO"))
+            g_printerr("[audio-pump] spawn %s -> ok\n", path);
+        g_free(path);
         v->audio_in = g_subprocess_get_stdin_pipe(v->audio_proc);
+        GInputStream *feedback = g_subprocess_get_stdout_pipe(v->audio_proc);
+        if (feedback)
+            g_data_input_stream_read_line_async(
+                g_data_input_stream_new(feedback), G_PRIORITY_DEFAULT, NULL,
+                pv_audio_feedback_line, NULL);
     }
     if (!v->audio_in) return;
 
