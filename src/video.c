@@ -1377,6 +1377,14 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             ns_video_helper_flush_rect(cache, v, now_us);
         if (!v->playing) continue;
 
+        if (!v->audio_opened && !v->muted &&
+            (v->has_audio || v->audio_file)) {
+            ns_video_audio_start(cache, v);
+            if (v->audio_opened && v->cur_time > 0)
+                ns_video_emit_audio(cache, "seek %s %.3f", v->token,
+                                    v->cur_time);
+        }
+
         if (v->base_us == 0)
             v->base_us = now_us - (gint64)(v->cur_time * 1e6);
         double elapsed = (double)(now_us - v->base_us) / 1e6;
