@@ -37,6 +37,9 @@ static ns_anim       *g_paint_anim;
 static gboolean       g_search_case_sensitive;
 static const ns_box  *g_search_active_box;
 
+static cairo_surface_t *texture_surface_cached(ns_texture *tex,
+                                               const char *filter_kw);
+
 static PangoLayout *
 paint_create_layout(void)
 {
@@ -542,16 +545,8 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     } else if (py && py->kind == NS_CSS_V_CALC) {
         off_y = (h - draw_h) * (py->u.calc.pct / 100.0) + py->u.calc.px;
     }
-    cairo_surface_t *surf = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, iw, ih);
-    if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
-        cairo_surface_destroy(surf);
-        return;
-    }
-    guchar *dst = cairo_image_surface_get_data(surf);
-    int dst_stride = cairo_image_surface_get_stride(surf);
-    ns_texture_download(img->texture, dst, (gsize)dst_stride);
-    cairo_surface_mark_dirty(surf);
+    cairo_surface_t *surf = texture_surface_cached(img->texture, NULL);
+    if (!surf) return;
     cairo_save(cr);
     rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
     cairo_clip(cr);
@@ -580,7 +575,6 @@ paint_bg_image_core(cairo_t *cr, ns_image *img,
     }
     cairo_pattern_destroy(pat);
     cairo_restore(cr);
-    cairo_surface_destroy(surf);
 }
 
 static void
@@ -921,13 +915,8 @@ paint_block(cairo_t *cr, const ns_box *b)
             double draw_w = iw * sc, draw_h = ih * sc;
             double off_x = (clip_w - draw_w) / 2.0;
             double off_y = (clip_h - draw_h) / 2.0;
-            cairo_surface_t *surf =
-                cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
-            if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
-                guchar *dst = cairo_image_surface_get_data(surf);
-                ns_texture_download(mimg->texture, dst,
-                    (gsize)cairo_image_surface_get_stride(surf));
-                cairo_surface_mark_dirty(surf);
+            cairo_surface_t *surf = texture_surface_cached(mimg->texture, NULL);
+            if (surf) {
                 cairo_save(cr);
                 rounded_rect_path(cr, clip_x, clip_y, clip_w, clip_h, radii);
                 cairo_clip(cr);
@@ -945,7 +934,6 @@ paint_block(cairo_t *cr, const ns_box *b)
                 cairo_restore(cr);
                 masked_fill = TRUE;
             }
-            cairo_surface_destroy(surf);
         }
     }
 
