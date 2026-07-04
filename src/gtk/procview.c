@@ -767,8 +767,14 @@ pv_video_handle_line(NsProcView *v, const char *line)
     char **tok = g_strsplit(line, " ", 8);
     guint n = g_strv_length(tok);
     if (n >= 6 && strcmp(tok[0], "shm") == 0 &&
-        strcmp(tok[1], v->vid_token) == 0) {
+        strcmp(tok[1], v->vid_token) != 0) {
+        if (g_getenv("NS_DBG_AUDIO"))
+            g_printerr("[shm-reject] line-tok=%s cur-tok=%s\n",
+                       tok[1], v->vid_token);
+    } else if (n >= 6 && strcmp(tok[0], "shm") == 0) {
 #ifndef G_OS_WIN32
+        if (g_getenv("NS_DBG_AUDIO"))
+            g_printerr("[shm-adopt] %s %s\n", tok[1], tok[2]);
         pv_vring_unmap(v);
         int fd = shm_open(tok[2], O_RDONLY, 0);
         if (fd >= 0) {
