@@ -1,6 +1,7 @@
 /* Nordstjernen — GTK tabbed process-per-tab browser shell (IPC renderer). */
 
 #include "procwindow.h"
+#include <glib/gstdio.h>
 #include "procview.h"
 #include "i18n.h"
 #include "rproc_http.h"
@@ -2037,12 +2038,65 @@ on_proc_activate(GtkApplication *app, gpointer user_data)
     gtk_window_present(GTK_WINDOW(pw->window));
 }
 
+static void
+procapp_clear_cache_dir(const char *name, gint64 min_age_s)
+{
+    char *dir = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
+                                 name, NULL);
+    gint64 cutoff = g_get_real_time() / G_USEC_PER_SEC - min_age_s;
+    GQueue *stack = g_queue_new();
+    GPtrArray *dirs = g_ptr_array_new_with_free_func(g_free);
+    g_queue_push_head(stack, g_strdup(dir));
+    guint guard = 0;
+    while (!g_queue_is_empty(stack) && guard++ < 100000) {
+        char *d = g_queue_pop_head(stack);
+        GDir *gd = g_dir_open(d, 0, NULL);
+        if (gd) {
+            const char *e;
+            while ((e = g_dir_read_name(gd))) {
+                char *child = g_build_filename(d, e, NULL);
+                if (g_file_test(child, G_FILE_TEST_IS_SYMLINK) ||
+                    !g_file_test(child, G_FILE_TEST_IS_DIR)) {
+                    GStatBuf st;
+                    if (min_age_s <= 0 ||
+                        (g_lstat(child, &st) == 0 && st.st_mtime < cutoff))
+                        g_unlink(child);
+                    g_free(child);
+                } else {
+                    g_queue_push_head(stack, child);
+                }
+            }
+            g_dir_close(gd);
+        }
+        g_ptr_array_add(dirs, d);
+    }
+    for (guint i = dirs->len; i > 1; i--)
+        g_rmdir(g_ptr_array_index(dirs, i - 1));
+    g_queue_free_full(stack, g_free);
+    g_ptr_array_free(dirs, TRUE);
+    g_free(dir);
+}
+
+static void
+procapp_clear_http_caches(gboolean at_exit)
+{
+    static const char *const object_dirs[] = {
+        "cache", "jsbc", "webfonts", "frames",
+    };
+    static const char *const stream_dirs[] = { "msaudio", "msvideo" };
+    for (gsize i = 0; i < G_N_ELEMENTS(object_dirs); i++)
+        procapp_clear_cache_dir(object_dirs[i], at_exit ? 0 : 3600);
+    for (gsize i = 0; i < G_N_ELEMENTS(stream_dirs); i++)
+        procapp_clear_cache_dir(stream_dirs[i], 3600);
+}
+
 int
 ns_procapp_run(const char *startup_url, const char *session_path,
                gboolean recover, gboolean private_mode)
 {
     if (ns_proc_video_helper_available())
         g_setenv("NS_VIDEO_HELPER", "1", TRUE);
+    procapp_clear_http_caches(FALSE);
     ProcAppCtx ctx = {
         .url = g_strdup(startup_url),
         .session_path = g_strdup(session_path),
@@ -2054,6 +2108,7 @@ ns_procapp_run(const char *startup_url, const char *session_path,
     g_signal_connect(app, "activate", G_CALLBACK(on_proc_activate), &ctx);
     int status = g_application_run(G_APPLICATION(app), 0, NULL);
     g_object_unref(app);
+    procapp_clear_http_caches(TRUE);
     g_free(ctx.url);
     g_free(ctx.session_path);
     return status;
