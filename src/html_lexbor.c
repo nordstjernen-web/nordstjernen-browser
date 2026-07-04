@@ -384,69 +384,131 @@ find_element_with_attr_contains(ns_node *n, const char *attr, const char *word,
 }
 
 static ns_node *
-script_document_media_target(ns_node *script)
+document_media_target(const ns_node *root)
 {
-    const ns_node *root = ns_node_root(script);
     ns_node *video = ns_node_find_first_element(root, "video");
     if (video) return video;
-    ns_node *target = ns_node_find_by_id(root, "movie_player");
-    if (target) return target;
-    target = ns_node_find_by_id(root, "player");
-    if (target) return target;
-    target = ns_node_find_by_id(root, "player-container-id");
+    ns_node *target = ns_node_find_by_id(root, "player");
     if (target) return target;
     return find_element_with_attr_contains((ns_node *)root, "class", "player",
                                            0);
 }
 
-static int
-yt_thumbnail_score(const char *url)
+static ns_node *
+find_meta_property(ns_node *n, const char *prop, int depth)
 {
-    if (!url || !strstr(url, "ytimg.com")) return -1;
-    int score = 10;
-    if (strstr(url, "maxresdefault")) score += 80;
-    if (strstr(url, "sddefault")) score += 60;
-    if (strstr(url, "hqdefault")) score += 50;
-    if (strstr(url, "mqdefault")) score += 30;
-    if (strstr(url, "default")) score += 10;
-    if (strstr(url, "/vi/")) score += 10;
-    return score;
+    if (!n || depth >= 512) return NULL;
+    if (n->kind == NS_NODE_ELEMENT && n->name && strcmp(n->name, "meta") == 0) {
+        const char *p = ns_element_get_attr(n, "property");
+        if (!p) p = ns_element_get_attr(n, "name");
+        const char *c = ns_element_get_attr(n, "content");
+        if (p && c && *c && g_ascii_strcasecmp(p, prop) == 0)
+            return n;
+    }
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        ns_node *hit = find_meta_property(c, prop, depth + 1);
+        if (hit) return hit;
+    }
+    return NULL;
 }
 
 static char *
-yt_best_thumbnail_url(const char *text)
+meta_property_content(const ns_node *root, const char *prop)
 {
-    static const char key[] = "\"url\"";
-    char *best = NULL;
-    int best_score = -1;
-    const char *p = text;
-    const char *match = NULL;
-    while (p && (p = json_string_value_for_key(p, key, &match))) {
-        char *url = json_string_unescape(p);
-        int score = yt_thumbnail_score(url);
-        if (score > best_score) {
-            g_free(best);
-            best = url;
-            best_score = score;
-        } else {
-            g_free(url);
+    ns_node *m = find_meta_property((ns_node *)root, prop, 0);
+    const char *c = m ? ns_element_get_attr(m, "content") : NULL;
+    return (c && *c) ? g_strdup(c) : NULL;
+}
+
+static char *
+jsonld_videoobject_url(const ns_node *n, const char *key, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (n->kind == NS_NODE_ELEMENT && n->name &&
+        strcmp(n->name, "script") == 0) {
+        const char *type = ns_element_get_attr(n, "type");
+        if (type && g_ascii_strcasecmp(type, "application/ld+json") == 0) {
+            g_autofree char *text = script_text(n);
+            if (text && strstr(text, "VideoObject")) {
+                char *v = json_first_url_for_key(text, key);
+                if (v && *v) return v;
+                g_free(v);
+            }
         }
-        p++;
     }
-    if (best) return best;
-    g_autofree char *video_id = json_first_url_for_key(text, "\"videoId\"");
-    if (video_id && *video_id)
-        return g_strdup_printf("https://i.ytimg.com/vi/%s/hqdefault.jpg",
-                               video_id);
+    for (ns_node *c = n->first_child; c; c = c->next_sibling) {
+        char *hit = jsonld_videoobject_url(c, key, depth + 1);
+        if (hit) return hit;
+    }
     return NULL;
 }
 
 static gboolean
-script_is_youtube_player_response(const char *text)
+media_url_is_direct_playable(const char *url)
 {
-    return text && strstr(text, "ytInitialPlayerResponse") &&
-           strstr(text, "\"videoDetails\"") &&
-           strstr(text, "\"videoId\"");
+    if (!url || !g_str_has_prefix(url, "http")) return FALSE;
+    const char *cut = strpbrk(url, "?#");
+    gsize len = cut ? (gsize)(cut - url) : strlen(url);
+    const char *dot = NULL;
+    for (const char *p = url; p < url + len; p++)
+        if (*p == '.') dot = p;
+    if (!dot) return FALSE;
+    g_autofree char *ext = g_ascii_strdown(dot, (gssize)(url + len - dot));
+    return strcmp(ext, ".webm") == 0 || strcmp(ext, ".mpg") == 0 ||
+           strcmp(ext, ".mpeg") == 0 || strcmp(ext, ".m1v") == 0 ||
+           strcmp(ext, ".ogv") == 0 || strcmp(ext, ".ogg") == 0;
+}
+
+static char *
+first_nonempty(char *a, char *b)
+{
+    if (a) { g_free(b); return a; }
+    return b;
+}
+
+static void
+ns_media_extract_standard(const ns_node *root)
+{
+    ns_node *target = document_media_target(root);
+    if (!target || ns_element_get_attr(target, NS_MEDIA_SRC_ATTR) ||
+        ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR))
+        return;
+
+    char *direct = jsonld_videoobject_url(root, "\"contentUrl\"", 0);
+    if (direct && !media_url_is_direct_playable(direct)) {
+        g_free(direct);
+        direct = NULL;
+    }
+    char *og_video = meta_property_content(root, "og:video:secure_url");
+    og_video = first_nonempty(og_video,
+                              meta_property_content(root, "og:video:url"));
+    og_video = first_nonempty(og_video,
+                              meta_property_content(root, "og:video"));
+    char *tw_player = meta_property_content(root, "twitter:player");
+
+    char *poster = meta_property_content(root, "og:image:secure_url");
+    poster = first_nonempty(poster, meta_property_content(root, "og:image"));
+    poster = first_nonempty(poster,
+                            jsonld_videoobject_url(root, "\"thumbnailUrl\"", 0));
+    poster = first_nonempty(poster,
+                            meta_property_content(root, "twitter:image"));
+
+    gboolean has_video = direct || og_video || tw_player ||
+                         jsonld_videoobject_url(root, "\"embedUrl\"", 0) != NULL;
+    if (has_video) {
+        if (direct)
+            ns_element_set_attr(target, NS_MEDIA_SRC_ATTR, direct);
+        else if (og_video && media_url_is_direct_playable(og_video))
+            ns_element_set_attr(target, NS_MEDIA_SRC_ATTR, og_video);
+        else
+            ns_element_set_attr(target, NS_MEDIA_STREAM_ATTR, "1");
+        if (poster && *poster)
+            ns_element_set_attr(target, NS_MEDIA_POSTER_ATTR, poster);
+    }
+    g_free(direct);
+    g_free(og_video);
+    g_free(tw_player);
+    g_free(poster);
 }
 
 static void
@@ -467,15 +529,6 @@ ns_media_metadata_convert(ns_node *n, int depth)
                     if (poster && *poster)
                         ns_element_set_attr(target, NS_MEDIA_POSTER_ATTR, poster);
                 }
-            }
-        } else if (script_is_youtube_player_response(text)) {
-            ns_node *target = script_document_media_target(n);
-            if (target && !ns_element_get_attr(target, NS_MEDIA_SRC_ATTR) &&
-                !ns_element_get_attr(target, NS_MEDIA_STREAM_ATTR)) {
-                g_autofree char *poster = yt_best_thumbnail_url(text);
-                ns_element_set_attr(target, NS_MEDIA_STREAM_ATTR, "1");
-                if (poster && *poster)
-                    ns_element_set_attr(target, NS_MEDIA_POSTER_ATTR, poster);
             }
         }
     }
@@ -631,6 +684,7 @@ ns_html_parse(const char *input, gssize len)
         root->flags |= NS_NODE_LIMITED_QUIRKS;
     ns_dsd_convert(root, 0);
     ns_media_metadata_convert(root, 0);
+    ns_media_extract_standard(root);
     ns_node_attach_backing(root, doc, lxb_doc_destroy_void);
     return root;
 }
