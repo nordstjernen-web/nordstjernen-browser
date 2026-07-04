@@ -111,3 +111,18 @@ URLs by hand.
 Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:`
 with no plain file URL; those play inline through the video helper described
 above when libav is present.
+
+## Poster / source metadata (standards, not site scraping)
+
+For pages whose player is JS-driven and has no server-side `<video src>`,
+`src/html_lexbor.c` reads **standard** video metadata during HTML parse and
+annotates the target element (`data-nd-media-poster` / `data-nd-media-src` /
+`data-nd-media-stream`). It reads, in priority order, JSON-LD `VideoObject`
+(`contentUrl` / `thumbnailUrl` / `embedUrl`), OpenGraph (`og:video*` /
+`og:image*`), and Twitter cards — never a site's private JSON. If a source URL
+has an extension the engine decodes it becomes a direct `data-nd-media-src`;
+otherwise (e.g. an `og:video` that is a `text/html` embed page, as YouTube
+emits) it falls to the MSE stream path — a general rule, not a per-site rule.
+The poster comes from `og:image`/`thumbnailUrl`. This covers YouTube, Vimeo and
+ordinary `og:video` news articles with the same code. There are no
+site-specific media hacks.
