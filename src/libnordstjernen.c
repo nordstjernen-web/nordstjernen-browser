@@ -151,7 +151,14 @@ browser_relayout(ns_browser *b)
     b->search_active = NULL;
     ns_selection_clear(&b->selection);
     if (b->js && b->layout) ns_js_set_layout_root(b->js, NULL);
-    if (b->layout) { ns_paint_3d_invalidate(); ns_box_free(b->layout); b->layout = NULL; }
+    if (b->layout) {
+        ns_paint_3d_invalidate();
+        ns_box_free(b->layout);
+        b->layout = NULL;
+        b->sb_box = NULL;
+        b->sb_node = NULL;
+        b->sb_dragging = FALSE;
+    }
     if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
     ns_layout_set_open_select(b->open_select);
@@ -1666,12 +1673,13 @@ ns_browser_scrollbar_drag(ns_browser *browser, int x, int y)
     (void)x;
     if (!browser || !browser->sb_dragging) return 0;
     ns_box *box = browser->sb_box;
-    if (browser->sb_node) {
-        ns_box *re = box_find_scrollable_by_dom(browser->layout,
-                                                browser->sb_node);
-        if (re) box = re;
+    if (browser->sb_node)
+        box = box_find_scrollable_by_dom(browser->layout, browser->sb_node);
+    if (!box) {
+        browser->sb_dragging = FALSE;
+        browser->sb_box = NULL;
+        return 0;
     }
-    if (!box) { browser->sb_dragging = FALSE; return 0; }
     browser->sb_box = box;
 
     double tx, tw, ty, th, thy, thh;

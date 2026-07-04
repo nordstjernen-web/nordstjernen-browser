@@ -275,10 +275,9 @@ render_mroot(cairo_t *cr, const ns_node *n, double fpx, int depth,
     double ia = 0, id = 0;
     double iw = mrender(NULL, args[1], ifpx, depth + 1, 0, 0, &ia, &id);
     double ra = 0, rd = 0;
-    mrender(NULL, args[0], fpx, depth + 1, 0, 0, &ra, &rd);
+    double rwid = mrender(NULL, args[0], fpx, depth + 1, 0, 0, &ra, &rd);
     double ox = x + iw * 0.7;
     double surd = 0;
-    double rwid = mrender(NULL, args[0], fpx, depth + 1, 0, 0, NULL, NULL);
     double total = render_radical(cr, fpx, rwid, ra, rd, ox, by, &surd);
     if (cr) {
         mrender(cr, args[0], fpx, depth + 1, ox + surd, by, NULL, NULL);
