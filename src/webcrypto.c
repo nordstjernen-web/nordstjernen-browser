@@ -903,6 +903,9 @@ ns_crypto_aes_cipher(const char *algo, int bits)
     if (!g_strcmp0(algo, "AES-CTR"))
         return bits == 128 ? EVP_aes_128_ctr()
              : bits == 192 ? EVP_aes_192_ctr() : EVP_aes_256_ctr();
+    if (!g_strcmp0(algo, "AES-KW"))
+        return bits == 128 ? EVP_aes_128_wrap()
+             : bits == 192 ? EVP_aes_192_wrap() : EVP_aes_256_wrap();
     return NULL;
 }
 
@@ -913,9 +916,15 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
     const EVP_CIPHER *cipher = ns_crypto_aes_cipher(k->algo, k->bits);
     if (!cipher || !k->raw) { if (err) *err = g_strdup("NotSupportedError: AES"); return NULL; }
     gboolean gcm = !g_strcmp0(k->algo, "AES-GCM");
+    gboolean kw = !g_strcmp0(k->algo, "AES-KW");
     if (gcm) {
         if (!p->iv || p->iv_len == 0) {
             if (err) *err = g_strdup("OperationError: invalid AES-GCM IV");
+            return NULL;
+        }
+    } else if (kw) {
+        if (len % 8 != 0 || len < (gsize)(enc ? 16 : 24)) {
+            if (err) *err = g_strdup("OperationError: invalid AES-KW length");
             return NULL;
         }
     } else {
@@ -949,12 +958,14 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
         goto fail;
     out = g_malloc(len + 32 + (gsize)tag_len);
 
+    if (kw) EVP_CIPHER_CTX_set_flags(ctx, EVP_CIPHER_CTX_FLAG_WRAP_ALLOW);
     if (!EVP_CipherInit_ex(ctx, cipher, NULL, NULL, NULL, enc)) goto fail;
     if (gcm) {
         if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, (int)p->iv_len, NULL))
             goto fail;
     }
-    if (!EVP_CipherInit_ex(ctx, NULL, NULL, k->raw, p->iv, enc)) goto fail;
+    if (!EVP_CipherInit_ex(ctx, NULL, NULL, k->raw, kw ? NULL : p->iv, enc))
+        goto fail;
 
     if (gcm && !enc) {
         if (ct_len < (gsize)tag_len) goto fail;

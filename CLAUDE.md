@@ -204,7 +204,7 @@ Required dependency (Debian/Ubuntu `libssl-dev`, Fedora/RHEL
 `openssl-devel`, openSUSE `libopenssl-devel`). `crypto.subtle` (the
 WebCrypto SubtleCrypto surface) is implemented in `src/webcrypto.c`
 directly over OpenSSL's EVP/`OSSL_PARAM` APIs — hashing, HMAC, AES
-(GCM/CBC/CTR), RSA (PKCS1/PSS/OAEP), ECDSA/ECDH (P-256/384/521),
+(GCM/CBC/CTR/KW), RSA (PKCS1/PSS/OAEP), ECDSA/ECDH (P-256/384/521),
 Ed25519/X25519, PBKDF2 and HKDF. The QuickJS `CryptoKey` class and `subtle.*` argument
 marshalling live in `src/js.c`. OpenSSL is already linked transitively
 through libcurl's TLS backend on Linux and Windows/MSYS2; `meson`
