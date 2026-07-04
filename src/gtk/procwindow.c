@@ -38,6 +38,7 @@ typedef struct {
     GtkWidget      *notebook;
     GtkWidget      *tabstrip;
     GtkWidget      *newtab_btn;
+    GtkWidget      *security_icon;
     GtkWidget      *address;
     GtkWidget      *back;
     GtkWidget      *forward;
@@ -124,6 +125,10 @@ install_status_css(void)
         "  min-height: 26px;"
         "}"
         ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
+        ".ns-sec-icon { margin-left: 2px; margin-right: 2px; }"
+        ".ns-sec-secure { color: #2e9e44; }"
+        ".ns-sec-invalid { color: #e01b24; }"
+        ".ns-sec-warn { color: #e5a50a; }"
         ".ns-tabstrip { padding: 0; }"
         ".ns-tab { padding: 0; }"
         ".ns-tab button { min-height: 0; padding: 2px 4px; }"
@@ -245,6 +250,58 @@ set_address_text(ProcWindow *pw, const char *url)
 }
 
 static void
+update_security_indicator(ProcWindow *pw, NsProcView *v)
+{
+    GtkWidget *icon = pw->security_icon;
+    if (!icon)
+        return;
+    gtk_widget_remove_css_class(icon, "ns-sec-secure");
+    gtk_widget_remove_css_class(icon, "ns-sec-invalid");
+    gtk_widget_remove_css_class(icon, "ns-sec-warn");
+
+    const char *url = v ? ns_proc_view_url(v) : NULL;
+    int sec = v ? ns_proc_view_security(v) : NS_SEC_NONE;
+    const char *icon_name = NULL, *label = NULL, *css = NULL;
+    switch (sec) {
+    case NS_SEC_SECURE:
+        icon_name = "security-high-symbolic";
+        label = ns_i18n("Secure — the certificate is valid");
+        css = "ns-sec-secure";
+        break;
+    case NS_SEC_INVALID:
+        icon_name = "security-low-symbolic";
+        label = ns_i18n("Not secure — the certificate is not trusted");
+        css = "ns-sec-invalid";
+        break;
+    case NS_SEC_PLAIN:
+        icon_name = "channel-insecure-symbolic";
+        label = ns_i18n("Not secure — the connection is not encrypted");
+        css = "ns-sec-warn";
+        break;
+    default:
+        break;
+    }
+    if (!icon_name || !url || !*url) {
+        gtk_widget_set_visible(icon, FALSE);
+        return;
+    }
+    gtk_image_set_from_icon_name(GTK_IMAGE(icon), icon_name);
+    gtk_widget_add_css_class(icon, css);
+
+    GString *tip = g_string_new(label);
+    char *host = ns_url_host_from(url);
+    if (host && *host)
+        g_string_append_printf(tip, "\n%s", host);
+    const char *ip = ns_proc_view_remote_ip(v);
+    if (ip && *ip)
+        g_string_append_printf(tip, "\n%s %s", ns_i18n("Server:"), ip);
+    gtk_widget_set_tooltip_text(icon, tip->str);
+    g_string_free(tip, TRUE);
+    g_free(host);
+    gtk_widget_set_visible(icon, TRUE);
+}
+
+static void
 update_chrome(ProcWindow *pw)
 {
     NsProcView *v = current_view(pw);
@@ -253,6 +310,7 @@ update_chrome(ProcWindow *pw)
         gtk_window_set_title(GTK_WINDOW(pw->window), ns_brand_versioned());
         gtk_widget_set_sensitive(pw->back, FALSE);
         gtk_widget_set_sensitive(pw->forward, FALSE);
+        update_security_indicator(pw, NULL);
         set_loading_ui(pw, FALSE);
         return;
     }
@@ -267,6 +325,7 @@ update_chrome(ProcWindow *pw)
     g_free(wt);
     gtk_widget_set_sensitive(pw->back, ns_proc_view_can_back(v));
     gtk_widget_set_sensitive(pw->forward, ns_proc_view_can_forward(v));
+    update_security_indicator(pw, v);
 }
 
 static void proc_window_add_tab(ProcWindow *pw, const char *url,
@@ -1503,6 +1562,12 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_set_valign(pw->spinner, GTK_ALIGN_CENTER);
     gtk_widget_set_visible(pw->spinner, FALSE);
 
+    pw->security_icon = gtk_image_new();
+    gtk_image_set_pixel_size(GTK_IMAGE(pw->security_icon), 16);
+    gtk_widget_set_valign(pw->security_icon, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(pw->security_icon, "ns-sec-icon");
+    gtk_widget_set_visible(pw->security_icon, FALSE);
+
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
@@ -1564,6 +1629,7 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->reload);
     gtk_box_append(GTK_BOX(toolbar), home);
     gtk_box_append(GTK_BOX(toolbar), pw->spinner);
+    gtk_box_append(GTK_BOX(toolbar), pw->security_icon);
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);

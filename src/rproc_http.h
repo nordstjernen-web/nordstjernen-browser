@@ -18,6 +18,8 @@ typedef struct {
     char *title;
     char *url;
     char *nav;
+    int   security;
+    char *remote_ip;
 } ns_rproc_http_page;
 
 typedef struct {

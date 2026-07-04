@@ -99,6 +99,8 @@ struct ns_browser {
     const ns_node  *sb_node;
     double          sb_grab;
     gboolean        sb_dragging;
+    int             security;
+    char           *remote_ip;
 };
 
 #define NS_LAYOUT_OSC_THRESHOLD 6
@@ -899,6 +901,25 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
             ? ns_engine_post_blocking(fetch_url, NULL, body, body_len,
                                       content_type, &err)
             : ns_engine_fetch_blocking(fetch_url, NULL, &err);
+    if (resp && resp->error && !body &&
+        g_str_has_prefix(fetch_url, "https://") &&
+        (!resp->body || resp->body->len == 0)) {
+        char *html = ns_build_error_page(fetch_url, 0, resp->error);
+        if (html) {
+            if (!resp->body)
+                resp->body = g_byte_array_new();
+            g_byte_array_set_size(resp->body, 0);
+            g_byte_array_append(resp->body, (const guint8 *)html, strlen(html));
+            g_free(html);
+            g_free(resp->error);
+            resp->error = NULL;
+            g_free(resp->content_type);
+            resp->content_type = g_strdup("text/html; charset=utf-8");
+            g_free(resp->final_url);
+            resp->final_url = g_strdup(fetch_url);
+            resp->security = NS_SEC_INVALID;
+        }
+    }
     if (!resp || resp->error || !resp->body) {
         if (resp) ns_response_free(resp);
         g_clear_error(&err);
@@ -938,11 +959,28 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
     ns_node *doc = ns_html_parse(decoded ? decoded : "",
                                  decoded ? (gssize)strlen(decoded) : 0);
     g_free(decoded);
+    int sec = resp->security;
+    if (sec == NS_SEC_NONE) {
+        const char *u = resp->final_url ? resp->final_url : fetch_url;
+        if (g_str_has_prefix(u, "https://"))
+            sec = NS_SEC_SECURE;
+        else if (g_str_has_prefix(u, "http://"))
+            sec = NS_SEC_PLAIN;
+    }
+    char *ip = g_strdup(resp->remote_ip);
     ns_response_free(resp);
 
-    return browser_build_from_doc(doc, base, viewport_width, viewport_height,
-                                  settle_ms, bfcache_ok, refresh_hdr,
-                                  doc_language, csp_header, doc_charset, url);
+    ns_browser *b = browser_build_from_doc(doc, base, viewport_width,
+                                           viewport_height, settle_ms,
+                                           bfcache_ok, refresh_hdr, doc_language,
+                                           csp_header, doc_charset, url);
+    if (b) {
+        b->security = sec;
+        b->remote_ip = ip;
+    } else {
+        g_free(ip);
+    }
+    return b;
 }
 
 ns_browser *
@@ -2691,6 +2729,14 @@ ns_browser_url(ns_browser *browser)
     return strdup(browser->base_url);
 }
 
+int
+ns_browser_security(ns_browser *browser, const char **out_ip)
+{
+    if (out_ip)
+        *out_ip = browser ? browser->remote_ip : NULL;
+    return browser ? browser->security : NS_SEC_NONE;
+}
+
 char *
 ns_browser_take_pending_nav(ns_browser *browser)
 {
@@ -2900,6 +2946,7 @@ ns_browser_close(ns_browser *browser)
     g_free(browser->pending_post_body);
     g_free(browser->pending_post_ct);
     g_free(browser->search_query);
+    g_free(browser->remote_ip);
     if (browser->console_buf) g_string_free(browser->console_buf, TRUE);
     g_free(browser);
 }

@@ -55,6 +55,12 @@ const char *ns_proc_view_url(NsProcView *view);
 const char *ns_proc_view_title(NsProcView *view);
 gboolean    ns_proc_view_is_loading(NsProcView *view);
 
+/* Connection security of the current page (ns_security in net.h:
+   0 none, 1 secure, 2 invalid, 3 plain) and the server IP (owned by the view,
+   or NULL). */
+int         ns_proc_view_security(NsProcView *view);
+const char *ns_proc_view_remote_ip(NsProcView *view);
+
 /* The tab's current favicon as a paintable, or NULL. Owned by the view; ref it
  * if you keep it. Updated just before an NS_PROC_EVT_FAVICON notification. */
 GdkPaintable *ns_proc_view_favicon(NsProcView *view);

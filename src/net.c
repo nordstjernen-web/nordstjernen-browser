@@ -1987,6 +1987,7 @@ ns_response_free(ns_response *resp)
         g_byte_array_unref(resp->body);
     g_free(resp->error);
     g_free(resp->tls_warning);
+    g_free(resp->remote_ip);
     g_free(resp);
 }
 
@@ -5257,6 +5258,24 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     resp->status = status;
     resp->final_url = g_strdup(eff_url ? eff_url : url);
     resp->redirect_count = (int)redirect_count;
+    {
+        char *ip = NULL;
+        curl_easy_getinfo(curl, CURLINFO_PRIMARY_IP, &ip);
+        if (ip && *ip)
+            resp->remote_ip = g_strdup(ip);
+        const char *sec_url = resp->final_url ? resp->final_url : url;
+        gboolean tls_fail = rc == CURLE_PEER_FAILED_VERIFICATION ||
+                            rc == CURLE_SSL_CACERT_BADFILE ||
+                            rc == CURLE_SSL_ISSUER_ERROR;
+        if (g_str_has_prefix(sec_url, "https://")) {
+            if (tls_fail || resp->tls_warning)
+                resp->security = NS_SEC_INVALID;
+            else if (rc == CURLE_OK)
+                resp->security = NS_SEC_SECURE;
+        } else if (g_str_has_prefix(sec_url, "http://")) {
+            resp->security = NS_SEC_PLAIN;
+        }
+    }
     if (g_log_fetches) {
         long http_version = 0, num_connects = 0;
         curl_easy_getinfo(curl, CURLINFO_HTTP_VERSION, &http_version);

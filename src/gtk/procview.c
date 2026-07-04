@@ -94,6 +94,8 @@ typedef struct {
     char            *title;
     char            *url;
     char            *nav;
+    int              security;
+    char            *remote_ip;
     char            *webgl;
     char            *camera;
     char            *download;
@@ -159,6 +161,8 @@ struct NsProcView {
 
     char       *current_url;
     char       *current_title;
+    int         security;
+    char       *remote_ip;
     int         page_w, page_h;
     int         scroll_x, scroll_y;
     gboolean    opened;
@@ -496,6 +500,7 @@ pv_free(NsProcView *v)
     g_free(v->renderer_path);
     g_free(v->current_url);
     g_free(v->current_title);
+    g_free(v->remote_ip);
     g_free(v->deferred_url);
     g_free(v->perm_origin);
     if (v->hourglass_cursor)
@@ -1151,6 +1156,8 @@ worker_main(gpointer data)
                 res->title = g_strdup(pg.title ? pg.title : "");
                 res->url = g_strdup(pg.url ? pg.url : req->url);
                 res->nav = pg.nav ? g_strdup(pg.nav) : NULL;
+                res->security = pg.security;
+                res->remote_ip = pg.remote_ip ? g_strdup(pg.remote_ip) : NULL;
             }
             if (rc == 0)
                 ns_rproc_http_page_clear(&pg);
@@ -1998,6 +2005,8 @@ ns_proc_view_toggle_console(NsProcView *v)
 
 const char *ns_proc_view_url(NsProcView *v) { return v->current_url; }
 const char *ns_proc_view_title(NsProcView *v) { return v->current_title; }
+int ns_proc_view_security(NsProcView *v) { return v ? v->security : 0; }
+const char *ns_proc_view_remote_ip(NsProcView *v) { return v ? v->remote_ip : NULL; }
 gboolean ns_proc_view_is_loading(NsProcView *v) { return v->loading; }
 GdkPaintable *ns_proc_view_favicon(NsProcView *v) { return v ? v->favicon : NULL; }
 
@@ -2178,6 +2187,9 @@ on_result(gpointer data)
         v->current_url = g_strdup(res->url);
         g_free(v->current_title);
         v->current_title = g_strdup(res->title);
+        v->security = res->security;
+        g_free(v->remote_ip);
+        v->remote_ip = res->remote_ip ? g_strdup(res->remote_ip) : NULL;
         v->page_w = res->pw;
         v->page_h = res->ph;
         v->scroll_x = 0;
@@ -2480,6 +2492,7 @@ done:
     g_free(res->title);
     g_free(res->url);
     g_free(res->nav);
+    g_free(res->remote_ip);
     g_free(res->webgl);
     g_free(res->camera);
     g_free(res->download);
