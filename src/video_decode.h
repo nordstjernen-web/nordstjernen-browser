@@ -25,6 +25,7 @@ double ns_video_player_buffered_end(const ns_video_player *player);
 void   ns_video_player_note_end(ns_video_player *player, double end);
 double ns_video_probe_chunk_end(const guint8 *init, gsize init_len,
                                 const guint8 *chunk, gsize chunk_len);
+gboolean ns_video_codec_available(const char *codec);
 gboolean ns_video_player_extend(ns_video_player *player, const guint8 *bytes,
                                 gsize len);
 

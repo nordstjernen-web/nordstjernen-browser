@@ -35,7 +35,11 @@ typedef struct ns_video {
     gboolean     audio_opened;
     char        *audio_url;
     char        *audio_file;
+    gsize        audio_file_len;
+    guint        audio_file_gen;
     char        *video_file;
+    gsize        video_file_len;
+    guint        video_file_gen;
     gboolean     video_opened;
     double       rect_x, rect_y, rect_w, rect_h;
     gint64       last_paint_us;
@@ -80,7 +84,7 @@ void     ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
 gboolean ns_video_cache_tick(ns_video_cache *cache, gint64 now_us);
 gboolean ns_video_cache_animating(const ns_video_cache *cache);
 gboolean ns_video_cache_waiting_growth(const ns_video_cache *cache);
-void     ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id,
+gboolean ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id,
                                    char kind, const guint8 *data, gsize len);
 void     ns_video_cache_mse_eos(ns_video_cache *cache, guint stream_id);
 double   ns_video_cache_mse_buffered(ns_video_cache *cache, guint stream_id,

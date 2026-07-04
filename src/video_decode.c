@@ -27,6 +27,7 @@ typedef struct {
     AVFrame           *frame;
     guint8            *data;
     gsize              len;
+    gsize              cap;
     gsize              pos;
     int                vstream;
     AVRational         time_base;
@@ -124,6 +125,7 @@ ns_lav_open(const guint8 *bytes, gsize len, int *out_w, int *out_h,
     if (!L->data) { g_free(L); return NULL; }
     memcpy(L->data, bytes, len);
     L->len = len;
+    L->cap = len;
 
     size_t bufsz = 32768;
     unsigned char *iobuf = av_malloc(bufsz);
@@ -460,6 +462,36 @@ ns_video_probe_chunk_end(const guint8 *init, gsize init_len,
 }
 
 gboolean
+ns_video_codec_available(const char *codec)
+{
+#ifdef NS_HAVE_LIBAV
+    if (!codec || !*codec) return FALSE;
+    enum AVCodecID id = AV_CODEC_ID_NONE;
+    if (g_str_has_prefix(codec, "avc1") || g_str_has_prefix(codec, "avc3"))
+        id = AV_CODEC_ID_H264;
+    else if (g_str_has_prefix(codec, "hvc1") || g_str_has_prefix(codec, "hev1"))
+        id = AV_CODEC_ID_HEVC;
+    else if (g_str_has_prefix(codec, "av01"))
+        id = AV_CODEC_ID_AV1;
+    else if (g_str_has_prefix(codec, "vp09") || g_str_has_prefix(codec, "vp9"))
+        id = AV_CODEC_ID_VP9;
+    else if (g_str_has_prefix(codec, "vp08") || g_str_has_prefix(codec, "vp8"))
+        id = AV_CODEC_ID_VP8;
+    else if (g_str_has_prefix(codec, "mp4a.40"))
+        id = AV_CODEC_ID_AAC;
+    else if (strstr(codec, "opus"))
+        id = AV_CODEC_ID_OPUS;
+    else if (strstr(codec, "vorbis"))
+        id = AV_CODEC_ID_VORBIS;
+    if (id == AV_CODEC_ID_NONE) return FALSE;
+    return avcodec_find_decoder(id) != NULL;
+#else
+    (void)codec;
+    return FALSE;
+#endif
+}
+
+gboolean
 ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
 {
 #ifdef NS_HAVE_LIBAV
@@ -473,11 +505,18 @@ ns_video_player_extend(ns_video_player *player, const guint8 *bytes, gsize len)
         memcmp(bytes + L->len - 4096, L->data + L->len - 4096, 4096) != 0)
         return FALSE;
 
-    guint8 *copy = g_try_malloc(len);
-    if (!copy) return FALSE;
-    memcpy(copy, bytes, len);
-    g_free(L->data);
-    L->data = copy;
+    if (len > L->cap) {
+        gsize cap = L->cap ? L->cap : len;
+        while (cap < len) {
+            if (cap > G_MAXSIZE / 2) { cap = len; break; }
+            cap *= 2;
+        }
+        guint8 *grown = g_try_realloc(L->data, cap);
+        if (!grown) return FALSE;
+        L->data = grown;
+        L->cap = cap;
+    }
+    memcpy(L->data + L->len, bytes + L->len, len - L->len);
     L->len = len;
     L->avio->eof_reached = 0;
     L->avio->error = 0;
