@@ -1226,22 +1226,6 @@ ns_rproc_self_pid(void)
 #endif
 }
 
-void
-ns_proc_kill(int pid)
-{
-    if (pid <= 0)
-        return;
-#ifdef _WIN32
-    HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, (DWORD)pid);
-    if (h) {
-        TerminateProcess(h, 1);
-        CloseHandle(h);
-    }
-#else
-    kill((pid_t)pid, SIGKILL);
-#endif
-}
-
 int
 ns_rproc_http_proc_info(int pid, char *state, int state_sz, long *rss_kb)
 {

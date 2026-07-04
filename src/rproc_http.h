@@ -132,7 +132,6 @@ int  ns_rproc_http_pid(ns_rproc_http *r);
 void ns_rproc_http_terminate(ns_rproc_http *r);
 
 /* Forcefully kill an OS process by pid (cross-platform). */
-void ns_proc_kill(int pid);
 
 /* This process's own pid (for task-manager rows of in-process renderers). */
 int  ns_rproc_self_pid(void);
