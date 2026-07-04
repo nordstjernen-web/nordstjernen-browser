@@ -1620,9 +1620,24 @@ rfc2047_encode_if_needed(const char *s)
 }
 
 static char *
+header_oneline(const char *s)
+{
+    if (!s) return g_strdup("");
+    GString *out = g_string_new(NULL);
+    for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
+        if (*p == '\t')
+            g_string_append_c(out, ' ');
+        else if (*p >= 0x20 && *p != 0x7f)
+            g_string_append_c(out, (char)*p);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
 addr_angle(const char *raw)
 {
-    char *t = g_strstrip(g_strdup(raw));
+    char *t = header_oneline(raw);
+    g_strstrip(t);
     char *out;
     if (strchr(t, '<')) out = g_strdup(t);
     else out = g_strdup_printf("<%s>", t);
@@ -1638,23 +1653,33 @@ build_message(const ns_mail_account *a, const char *to, const char *cc,
     char *date = g_date_time_format(now, "%a, %d %b %Y %H:%M:%S %z");
     g_date_time_unref(now);
 
-    char *enc_subject = rfc2047_encode_if_needed(subject ? subject : "");
+    char *safe_subject = header_oneline(subject ? subject : "");
+    char *enc_subject = rfc2047_encode_if_needed(safe_subject);
+    g_free(safe_subject);
+    char *safe_email = header_oneline(a->email ? a->email : "");
     char *from_disp;
     if (a->name && *a->name) {
-        char *enc_name = rfc2047_encode_if_needed(a->name);
-        from_disp = g_strdup_printf("\"%s\" <%s>", enc_name, a->email);
+        char *safe_name = header_oneline(a->name);
+        char *enc_name = rfc2047_encode_if_needed(safe_name);
+        from_disp = g_strdup_printf("\"%s\" <%s>", enc_name, safe_email);
+        g_free(safe_name);
         g_free(enc_name);
     } else {
-        from_disp = g_strdup_printf("<%s>", a->email);
+        from_disp = g_strdup_printf("<%s>", safe_email);
     }
+    g_free(safe_email);
     char *mid = g_uuid_string_random();
     const char *host = a->out_host ? a->out_host : "localhost";
 
     GString *m = g_string_new(NULL);
     g_string_append_printf(m, "Date: %s\r\n", date);
     g_string_append_printf(m, "From: %s\r\n", from_disp);
-    g_string_append_printf(m, "To: %s\r\n", to ? to : "");
-    if (cc && *cc) g_string_append_printf(m, "Cc: %s\r\n", cc);
+    char *safe_to = header_oneline(to ? to : "");
+    char *safe_cc = header_oneline(cc ? cc : "");
+    g_string_append_printf(m, "To: %s\r\n", safe_to);
+    if (*safe_cc) g_string_append_printf(m, "Cc: %s\r\n", safe_cc);
+    g_free(safe_to);
+    g_free(safe_cc);
     g_string_append_printf(m, "Subject: %s\r\n", enc_subject);
     g_string_append_printf(m, "Message-ID: <%s@%s>\r\n", mid, host);
     g_string_append(m, "MIME-Version: 1.0\r\n");
