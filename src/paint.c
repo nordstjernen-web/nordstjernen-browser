@@ -3643,7 +3643,6 @@ paint_video(cairo_t *cr, const ns_box *b)
     ns_texture *tex = v ? (v->frame_texture ? v->frame_texture
                                             : v->poster_texture)
                         : NULL;
-    gboolean playing = v && v->playing;
     if (v) {
         double dx0 = b->x, dy0 = b->y;
         double dx1 = b->x + b->content_width;
@@ -3663,26 +3662,17 @@ paint_video(cairo_t *cr, const ns_box *b)
             }
         }
     }
+    gboolean punched = ns_video_helper_composited(v);
     cairo_save(cr);
-    if (tex) {
+    if (punched) {
+        cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+        cairo_rectangle(cr, b->x, b->y, b->content_width, b->content_height);
+        cairo_fill(cr);
+    } else if (tex) {
         paint_texture(cr, b, tex);
     } else if (!bg_painted) {
         cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
         cairo_rectangle(cr, b->x, b->y, b->content_width, b->content_height);
-        cairo_fill(cr);
-    }
-    double cx = b->x + b->content_width  / 2;
-    double cy = b->y + b->content_height / 2;
-    double r  = b->content_height / 6;
-    if (r > 4 && !playing) {
-        cairo_arc(cr, cx, cy, r * 1.6, 0, 2 * G_PI);
-        cairo_set_source_rgba(cr, 0, 0, 0, 0.55);
-        cairo_fill(cr);
-        cairo_set_source_rgba(cr, 1, 1, 1, 0.92);
-        cairo_move_to(cr, cx - r * 0.6, cy - r);
-        cairo_line_to(cr, cx + r,       cy);
-        cairo_line_to(cr, cx - r * 0.6, cy + r);
-        cairo_close_path(cr);
         cairo_fill(cr);
     }
     cairo_restore(cr);

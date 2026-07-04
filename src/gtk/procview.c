@@ -2495,12 +2495,9 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_rectangle(cr, 0, 0, width, height);
         cairo_fill(cr);
     }
-    if (v->frame) {
-        cairo_set_source_surface(cr, v->frame, 0, 0);
-        cairo_paint(cr);
-    }
 #ifndef G_OS_WIN32
     if (v->vring && v->vid_rect_valid) {
+        gboolean frame_drawn = FALSE;
         ns_vring_hdr *r = v->vring;
         guint32 magic   = r->magic;
         guint32 slot    = r->latest;
@@ -2529,11 +2526,21 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
                 cairo_set_source_surface(cr, s, 0, 0);
                 cairo_paint(cr);
                 cairo_restore(cr);
+                frame_drawn = TRUE;
             }
             cairo_surface_destroy(s);
         }
+        if (!frame_drawn) {
+            cairo_set_source_rgb(cr, 0.10, 0.10, 0.10);
+            cairo_rectangle(cr, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
+            cairo_fill(cr);
+        }
     }
 #endif
+    if (v->frame) {
+        cairo_set_source_surface(cr, v->frame, 0, 0);
+        cairo_paint(cr);
+    }
 }
 
 static void
