@@ -103,9 +103,18 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
                 gboolean strict_mime)
 {
     if (!url || !*url) return NULL;
+    guint8 attempts = 0;
     if (cache) {
         GBytes *hit = g_hash_table_lookup(cache, url);
-        if (hit) return g_bytes_get_size(hit) ? g_bytes_ref(hit) : NULL;
+        if (hit) {
+            gsize hsize = 0;
+            const guint8 *hdata = g_bytes_get_data(hit, &hsize);
+            gboolean fail_marker = hsize == 0 ||
+                (hsize == 1 && hdata && hdata[0] <= 8);
+            if (!fail_marker) return g_bytes_ref(hit);
+            attempts = hsize == 1 ? hdata[0] : 1;
+            if (attempts >= 3) return NULL;
+        }
     }
     ns_response *resp = ns_engine_fetch_blocking(url, top_url, NULL);
     GBytes *bytes = NULL;
@@ -119,7 +128,9 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
         if (cache)
             g_hash_table_insert(cache, g_strdup(url), g_bytes_ref(bytes));
     } else if (cache) {
-        g_hash_table_insert(cache, g_strdup(url), g_bytes_new(NULL, 0));
+        guint8 marker = attempts + 1;
+        g_hash_table_insert(cache, g_strdup(url),
+                            g_bytes_new(&marker, 1));
     }
     if (resp) ns_response_free(resp);
     return bytes;
