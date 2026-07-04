@@ -13104,52 +13104,6 @@ match_cmp(gconstpointer a_, gconstpointer b_)
     return a->decl_order < b->decl_order ? -1 : 1;
 }
 
-static gboolean
-class_token_hides(const char *tok, gsize len)
-{
-    return len > 7 && tok[len - 7] == ':' &&
-           memcmp(tok + len - 6, "hidden", 6) == 0;
-}
-
-static gboolean
-element_has_hidden_utility(const ns_node *el)
-{
-    const char *cls = ns_element_get_attr(el, "class");
-    if (!cls || !*cls) return FALSE;
-    const char *s = cls;
-    while (*s) {
-        while (*s && is_ws(*s)) s++;
-        const char *tok = s;
-        while (*s && !is_ws(*s)) s++;
-        if (s > tok && class_token_hides(tok, (gsize)(s - tok)))
-            return TRUE;
-    }
-    return FALSE;
-}
-
-static void
-add_hidden_utility_match(const ns_node *el, GArray *matches,
-                         GPtrArray *owned_values)
-{
-    if (!element_has_hidden_utility(el)) return;
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_KEYWORD;
-    v->u.keyword = g_strdup("none");
-    g_ptr_array_add(owned_values, v);
-    match_entry e = {
-        .origin = 1,
-        .spec_a = 0, .spec_b = 1, .spec_c = 0,
-        .sheet_index = 0,
-        .layer_order = NS_CSS_LAYER_NONE,
-        .source_order = INT_MIN,
-        .decl_order = 0,
-        .important = FALSE,
-        .value = v,
-        .prop = NS_CSS_DISPLAY,
-    };
-    g_array_append_val(matches, e);
-}
-
 typedef struct css_rule_match_accum {
     guint epoch;
     int layer_order;
@@ -15162,7 +15116,6 @@ cascade_walk(ns_node *node,
         for (gsize i = 0; i < n_author; i++)
             gather_matches_multi(author[i], 1, (int)(i + 1), node, dests,
                                  (guint)n_pe + 1, layer_ranks);
-        add_hidden_utility_match(node, matches, owned_values);
 
         char *pres_css = presentational_hints_css(node);
         const ns_css_stylesheet *pres_sheet = NULL;

@@ -328,35 +328,6 @@ text_is_ws_only(const char *text)
     return TRUE;
 }
 
-static gboolean
-class_ws(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
-
-static gboolean
-class_token_hides(const char *tok, gsize len)
-{
-    return len > 7 && tok[len - 7] == ':' &&
-           memcmp(tok + len - 6, "hidden", 6) == 0;
-}
-
-static gboolean
-node_has_hidden_utility(const ns_node *n)
-{
-    if (!n || n->kind != NS_NODE_ELEMENT) return FALSE;
-    const char *cls = ns_element_get_attr(n, "class");
-    if (!cls || !*cls) return FALSE;
-    const char *s = cls;
-    while (*s) {
-        while (*s && class_ws(*s)) s++;
-        const char *tok = s;
-        while (*s && !class_ws(*s)) s++;
-        if (s > tok && class_token_hides(tok, (gsize)(s - tok)))
-            return TRUE;
-    }
-    return FALSE;
-}
 
 static double
 border_side_width(const ns_style *s, ns_css_prop width_prop,
@@ -651,7 +622,6 @@ contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         if (tag_is_non_rendering(c->name)) continue;
-        if (node_has_hidden_utility(c)) continue;
         if (node_has_media_metadata(c) ||
             (is_replaced_block_tag(c->name) &&
              !is_inline_level_replaced(c, styles)) ||
@@ -697,7 +667,6 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (!n) return FALSE;
     if (n->kind == NS_NODE_TEXT) return TRUE;
     if (n->kind != NS_NODE_ELEMENT) return FALSE;
-    if (node_has_hidden_utility(n)) return FALSE;
     if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
     if (node_has_media_metadata(n)) return FALSE;
     for (const ns_node *sc = n->first_child; sc; sc = sc->next_sibling)
@@ -2432,7 +2401,6 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     }
     if (n->kind != NS_NODE_ELEMENT) return;
     if (tag_is_non_rendering(n->name)) return;
-    if (node_has_hidden_utility(n)) return;
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
     if (s && style_is_absolute_or_fixed(s)) {
@@ -4382,7 +4350,6 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     }
     if (n->kind != NS_NODE_ELEMENT) return NULL;
     if (node_is_frame_fallback(n)) return NULL;
-    if (node_has_hidden_utility(n)) return NULL;
     if (ns_element_get_attr(n, NS_SHADOW_ATTR)) return NULL;
 
     const ns_style *s = g_hash_table_lookup(styles, n);
