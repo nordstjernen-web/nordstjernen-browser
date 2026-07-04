@@ -2413,31 +2413,25 @@ about_substitute(const char *template_text,
 }
 
 static char *
-build_about_license(void)
+build_about_markdown_page(const char *const *paths, const char *title,
+                          const char *back_href, const char *back_label,
+                          const char *missing_file)
 {
-    static const char *const license_paths[] = {
-        "nordstjernen/License.md",
-        "share/nordstjernen/License.md",
-        "../share/nordstjernen/License.md",
-        "../../../License.md",
-        "../../License.md",
-        "License.md",
-        NULL,
-    };
-    char *text = about_read_first(license_paths, NULL);
+    char *text = about_read_first(paths, NULL);
     if (!text) {
-        return g_strdup("<!doctype html><meta charset=utf-8>"
-                        "<title>Nordstjernen License</title>"
-                        "<p>License.md is missing from the install — "
-                        "reinstall the package or copy <code>License.md</code> "
-                        "next to the binary.</p>");
+        return g_strdup_printf(
+            "<!doctype html><meta charset=utf-8>"
+            "<title>%s</title>"
+            "<p>%s is missing from the install \xe2\x80\x94 reinstall the "
+            "package or copy <code>%s</code> next to the binary.</p>",
+            title, missing_file, missing_file);
     }
     char *escaped = ns_html_escape_text(text);
     g_free(text);
     char *html = g_strconcat(
         "<!doctype html><html><head>"
         "<meta charset=\"utf-8\">"
-        "<title>Nordstjernen Source License</title>"
+        "<title>", title, "</title>"
         "<style>"
         "body{font-family:system-ui,-apple-system,\"Segoe UI\","
         "Helvetica,Arial,sans-serif;max-width:780px;margin:2em auto;"
@@ -2449,13 +2443,47 @@ build_about_license(void)
         ".nav{color:#666;font-size:0.9em;margin:0 0 1.5em 0}"
         ".nav a{color:#3a63d0}"
         "</style></head><body>"
-        "<p class=\"nav\"><a href=\"about:start\">"
-        "&larr; Start page</a></p>"
-        "<h1>Nordstjernen Source License</h1>"
+        "<p class=\"nav\"><a href=\"", back_href, "\">"
+        "&larr; ", back_label, "</a></p>"
+        "<h1>", title, "</h1>"
         "<pre>", escaped, "</pre>"
         "</body></html>", NULL);
     g_free(escaped);
     return html;
+}
+
+static char *
+build_about_license(void)
+{
+    static const char *const paths[] = {
+        "nordstjernen/License.md",
+        "share/nordstjernen/License.md",
+        "../share/nordstjernen/License.md",
+        "../../../License.md",
+        "../../License.md",
+        "License.md",
+        NULL,
+    };
+    return build_about_markdown_page(paths, "Nordstjernen Source License",
+                                     "about:nordstjernen", "About Nordstjernen",
+                                     "License.md");
+}
+
+static char *
+build_about_third_party(void)
+{
+    static const char *const paths[] = {
+        "nordstjernen/THIRD-PARTY-LICENSES.md",
+        "share/nordstjernen/THIRD-PARTY-LICENSES.md",
+        "../share/nordstjernen/THIRD-PARTY-LICENSES.md",
+        "../../../THIRD-PARTY-LICENSES.md",
+        "../../THIRD-PARTY-LICENSES.md",
+        "THIRD-PARTY-LICENSES.md",
+        NULL,
+    };
+    return build_about_markdown_page(paths, "Third-party software notices",
+                                     "about:nordstjernen", "About Nordstjernen",
+                                     "THIRD-PARTY-LICENSES.md");
 }
 
 typedef struct ns_error_info {
@@ -4042,6 +4070,85 @@ static const char k_about_start_template[] =
     "</script></body></html>";
 #endif
 
+static const char k_about_nordstjernen_template[] =
+    "<!doctype html><html lang=\"en\"><head>"
+    "<meta charset=\"utf-8\">"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+    "<meta name=\"color-scheme\" content=\"light\">"
+    "<title>About Nordstjernen</title>"
+    "<style>\n"
+    "html, body { background:#ffffff; color:#111418;"
+    " font-family: system-ui, -apple-system, \"Segoe UI\","
+    " Helvetica, Arial, sans-serif; margin:0; padding:0; min-height:100%; }\n"
+    ".wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 32px;"
+    " box-sizing:border-box; }\n"
+    ".head { text-align:center; margin-bottom:22px; }\n"
+    ".mark-img { display:block; width:64px; height:64px;"
+    " margin:0 auto 14px; border-radius:15px; object-fit:cover; }\n"
+    ".title { font-size: 1.7em; font-weight: 600; line-height:1.15; }\n"
+    ".ver { color:#6b7280; font-size:0.92em; margin-top:5px; }\n"
+    ".tagline { color:#5b6470; font-style: italic; font-size:0.9em;"
+    " margin:6px auto 0; line-height:1.25; }\n"
+    ".intro { color:#4b5563; text-align:center; line-height:1.55;"
+    " margin:0 auto 18px; max-width:560px; }\n"
+    ".intro b { color:#111418; }\n"
+    ".license { max-width:560px; margin:24px auto 8px;"
+    " border-top:1px solid #e6e9ef; padding-top:22px; }\n"
+    ".license h2 { font-size:1.02em; font-weight:600; margin:0 0 8px;"
+    " text-align:center; }\n"
+    ".license p { color:#4b5563; line-height:1.55; font-size:0.92em;"
+    " margin:0 auto 10px; text-align:center; }\n"
+    ".license .third { color:#6b7280; font-size:0.86em; }\n"
+    ".docs { list-style:none; margin:16px auto 0; padding:0;"
+    " max-width:400px; }\n"
+    ".docs li { margin:0 0 8px; }\n"
+    ".docs a { color:#2d6cf6; font-weight:600; font-size:0.95em;"
+    " text-decoration:none; }\n"
+    ".docs a:hover { text-decoration:underline; }\n"
+    ".copy { text-align:center; color:#6b7280; font-size:0.85em;"
+    " margin:26px 0 14px; }\n"
+    ".links { text-align:center; color:#6b7280; font-size:0.86em;"
+    " line-height:1.7; }\n"
+    ".links a { color:#2d6cf6; margin:0 8px; }\n"
+    "@media (max-width:560px) { .wrap { padding:28px 22px; }"
+    " .mark-img { width:54px; height:54px; }"
+    " .title { font-size:1.42em; }"
+    " .links a { display:inline-block; margin:0 5px 4px; } }\n"
+    "</style></head>"
+    "<body><main class=\"wrap\">"
+    "<div class=\"head\">"
+    "__ND_LOGO_MARK__"
+    "<div class=\"title\">Nordstjernen</div>"
+    "<div class=\"ver\">Version " NS_VERSION "</div>"
+    "<div class=\"tagline\">The legendary web browser</div>"
+    "</div>"
+    "<p class=\"intro\">A web browser implemented in C.</p>"
+    "<section class=\"license\">"
+    "<h2>License</h2>"
+    "<p>Nordstjernen is distributed under the <b>Nordstjernen Source "
+    "License v1.0 (NSL-1.0)</b>, \xc2\xa9 2026 Andreas R\xc3\xb8sdal.</p>"
+    "<p class=\"third\">It bundles third-party open-source software under "
+    "the MIT, BSD, Apache\xc2\xa0" "2.0, LGPL, MPL and zlib licenses \xe2"
+    "\x80\x94 including lexbor, QuickJS, Wuffs, GTK\xc2\xa0" "4, Cairo, "
+    "libcurl, OpenSSL, uchardet, libwebp, libpsl, SQLite and zlib. Each "
+    "component\xe2\x80\x99s copyright notice and full license text is "
+    "reproduced in the notices below.</p>"
+    "<ul class=\"docs\">"
+    "<li><a href=\"about:license\">Nordstjernen Source License (NSL-1.0)"
+    " \xe2\x86\x92</a></li>"
+    "<li><a href=\"about:third-party\">Third-party software notices \xe2"
+    "\x86\x92</a></li>"
+    "</ul>"
+    "</section>"
+    "<p class=\"copy\">\xc2\xa9 2026 Andreas R\xc3\xb8sdal</p>"
+    "<p class=\"links\">"
+    "<a href=\"about:start\">\xe2\x86\x90 Start</a>"
+    "<a href=\"about:license\">License</a>"
+    "<a href=\"https://nordstjernen.org/privacy\">Privacy</a>"
+    "<a href=\"https://nordstjernen.org\">nordstjernen.org</a>"
+    "</p>"
+    "</main></body></html>";
+
 static const char k_about_settings_html[] =
 "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n"
 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
@@ -4453,8 +4560,21 @@ synthesize_about_response(const char *url, const char *top_url,
         g_byte_array_append(resp->body, (const guint8 *)json,
                             (guint)strlen(json));
         g_free(json);
+    } else if (g_str_equal(what, "nordstjernen") || g_str_equal(what, "about")) {
+        char *logo_markup = about_logo_markup();
+        char *body = about_substitute(k_about_nordstjernen_template,
+                                      "__ND_LOGO_MARK__", logo_markup);
+        g_free(logo_markup);
+        g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
+        g_free(body);
     } else if (g_str_equal(what, "license") || g_str_equal(what, "licence")) {
         char *body = build_about_license();
+        g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
+        g_free(body);
+    } else if (g_str_equal(what, "third-party") ||
+               g_str_equal(what, "third-party-licenses") ||
+               g_str_equal(what, "credits")) {
+        char *body = build_about_third_party();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "history")) {

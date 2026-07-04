@@ -1122,18 +1122,7 @@ public final class Browser {
     }
 
     private void showAbout() {
-        JOptionPane.showMessageDialog(frame,
-            "Nordstjernen " + VERSION + " (Java shell)\n\n"
-            + "A legendary web browser, built from scratch in C.\n"
-            + "It doesn't track you and doesn't phone home.\n\n"
-            + "This Swing shell drives the Nordstjernen renderer process.\n"
-            + "nordstjernen.org",
-            "About Nordstjernen",
-            JOptionPane.INFORMATION_MESSAGE, logoIcon());
-    }
-
-    private static Icon logoIcon() {
-        return icon("logo");
+        navigate("about:nordstjernen", true);
     }
 
     // --- Save / export -------------------------------------------------------
