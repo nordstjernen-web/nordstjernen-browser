@@ -7619,6 +7619,7 @@ ns_wc_canon(const char *n)
         "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP",
         "AES-GCM", "AES-CBC", "AES-CTR", "AES-KW",
         "HMAC", "ECDSA", "ECDH", "PBKDF2", "HKDF",
+        "Ed25519", "X25519",
         "SHA-1", "SHA-256", "SHA-384", "SHA-512",
         "P-256", "P-384", "P-521",
     };
@@ -8031,6 +8032,15 @@ ns_wc_do_import(JSContext *ctx, const char *format, JSValueConst keydata,
             k = ns_crypto_import_ec_jwk(curve, x, xl, y, yl, d, dl, a->name, ext,
                                         usages, err);
             g_free(x); g_free(y); g_free(d); g_free(crv);
+        } else if (!g_strcmp0(kty, "OKP")) {
+            char *crv = ns_wc_prop_str(ctx, keydata, "crv");
+            const char *curve = crv ? ns_wc_canon(crv) : a->name;
+            gsize xl, dl;
+            guint8 *x = ns_wc_jwk_field(ctx, keydata, "x", &xl);
+            guint8 *d = ns_wc_jwk_field(ctx, keydata, "d", &dl);
+            k = ns_crypto_import_okp_jwk(curve, x, xl, d, dl, a->name, ext,
+                                         usages, err);
+            g_free(x); g_free(d); g_free(crv);
         } else if (err && !*err) {
             *err = g_strdup("DataError: unsupported jwk kty");
         }
@@ -8160,6 +8170,26 @@ ns_wc_export_jwk(JSContext *ctx, ns_crypto_key *k, char **err)
             g_free(bd);
         }
         g_free(x); g_free(y); g_free(d);
+        return o;
+    }
+    if (!g_strcmp0(k->algo, "Ed25519") || !g_strcmp0(k->algo, "X25519")) {
+        guint8 *x, *d;
+        gsize xl, dl;
+        if (!ns_crypto_export_okp_jwk(k, &x, &xl, &d, &dl, err)) {
+            JS_FreeValue(ctx, o);
+            return JS_NULL;
+        }
+        JS_SetPropertyStr(ctx, o, "kty", JS_NewString(ctx, "OKP"));
+        JS_SetPropertyStr(ctx, o, "crv", JS_NewString(ctx, k->algo));
+        char *bx = ns_b64url_encode(x, xl);
+        JS_SetPropertyStr(ctx, o, "x", JS_NewString(ctx, bx));
+        g_free(bx);
+        if (d) {
+            char *bd = ns_b64url_encode(d, dl);
+            JS_SetPropertyStr(ctx, o, "d", JS_NewString(ctx, bd));
+            g_free(bd);
+        }
+        g_free(x); g_free(d);
         return o;
     }
     JS_FreeValue(ctx, o);

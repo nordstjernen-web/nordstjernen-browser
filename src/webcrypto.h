@@ -98,6 +98,11 @@ ns_crypto_key *ns_crypto_import_ec_jwk(const char *curve, const guint8 *x,
                                        const char *algo, gboolean extractable,
                                        guint32 usages, char **err);
 
+ns_crypto_key *ns_crypto_import_okp_jwk(const char *curve, const guint8 *x,
+                                        gsize x_len, const guint8 *d, gsize d_len,
+                                        const char *algo, gboolean extractable,
+                                        guint32 usages, char **err);
+
 guint8 *ns_crypto_export_raw(const char *format, const ns_crypto_key *k,
                              gsize *out_len, char **err);
 
@@ -110,6 +115,9 @@ gboolean ns_crypto_export_rsa_jwk(const ns_crypto_key *k, guint8 **n, gsize *n_l
 gboolean ns_crypto_export_ec_jwk(const ns_crypto_key *k, guint8 **x, gsize *x_len,
                                  guint8 **y, gsize *y_len, guint8 **d, gsize *d_len,
                                  char **err);
+
+gboolean ns_crypto_export_okp_jwk(const ns_crypto_key *k, guint8 **x, gsize *x_len,
+                                  guint8 **d, gsize *d_len, char **err);
 
 guint8 *ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p,
                        const guint8 *data, gsize len, gsize *out_len, char **err);

@@ -157,7 +157,10 @@ if not is_android and gtk_feature.allowed()
   endif
 endif
 gmodule = dependency('gmodule-2.0')
-libcurl = dependency('libcurl', version: '>=8.11')
+libcurl = dependency('libcurl', version: '>=8.5')
+if libcurl.version().version_compare('<8.11')
+  warning('libcurl @0@ predates stable WebSocket support (curl 8.11): WebSocket will be unavailable at runtime unless this libcurl was built with the ws/wss protocols.'.format(libcurl.version()))
+endif
 libcrypto = dependency('libcrypto')
 libm = cc.find_library('m', required: false)
 

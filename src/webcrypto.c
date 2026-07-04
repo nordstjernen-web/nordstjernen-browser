@@ -136,6 +136,15 @@ ns_crypto_curve_order_bytes(const char *curve)
     return 0;
 }
 
+static const char *
+ns_crypto_okp_name(const char *algo)
+{
+    if (!algo) return NULL;
+    if (!g_ascii_strcasecmp(algo, "Ed25519")) return "ED25519";
+    if (!g_ascii_strcasecmp(algo, "X25519"))  return "X25519";
+    return NULL;
+}
+
 ns_crypto_key *
 ns_crypto_generate_secret(const char *algo, const char *hash, int length_bits,
                           gboolean extractable, guint32 usages, char **err)
@@ -169,8 +178,17 @@ ns_crypto_generate_keypair(const char *algo, const char *hash, const char *curve
     EVP_PKEY *pkey = NULL;
     gboolean is_ec = !g_ascii_strcasecmp(algo, "ECDSA") ||
                      !g_ascii_strcasecmp(algo, "ECDH");
+    const char *okp = ns_crypto_okp_name(algo);
 
-    if (is_ec) {
+    if (okp) {
+        EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, okp, NULL);
+        if (!ctx || EVP_PKEY_keygen_init(ctx) <= 0 ||
+            EVP_PKEY_generate(ctx, &pkey) <= 0) {
+            EVP_PKEY_CTX_free(ctx);
+            return ns_crypto_err(err, "OperationError: keygen"), FALSE;
+        }
+        EVP_PKEY_CTX_free(ctx);
+    } else if (is_ec) {
         const char *group = ns_crypto_curve_group(curve);
         if (!group) { if (err) *err = g_strdup("NotSupportedError: curve"); return FALSE; }
         EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, "EC", NULL);
@@ -287,6 +305,17 @@ ns_crypto_import_raw(const char *format, const guint8 *data, gsize len,
                                              EVP_PKEY_get_bits(pkey), extractable,
                                              usages);
         k->pkey = pkey;
+        return k;
+    }
+
+    if (!g_strcmp0(format, "raw") && ns_crypto_okp_name(algo)) {
+        EVP_PKEY *okp_pkey = EVP_PKEY_new_raw_public_key_ex(
+            NULL, ns_crypto_okp_name(algo), NULL, data, len);
+        if (!okp_pkey) return ns_crypto_err(err, "DataError: raw import");
+        ns_crypto_key *k = ns_crypto_key_new(NS_CK_PUBLIC, algo, hash, NULL,
+                                             EVP_PKEY_get_bits(okp_pkey),
+                                             extractable, usages);
+        k->pkey = okp_pkey;
         return k;
     }
 
@@ -416,6 +445,71 @@ ns_crypto_import_ec_jwk(const char *curve, const guint8 *x, gsize x_len,
     return k;
 }
 
+ns_crypto_key *
+ns_crypto_import_okp_jwk(const char *curve, const guint8 *x, gsize x_len,
+                         const guint8 *d, gsize d_len, const char *algo,
+                         gboolean extractable, guint32 usages, char **err)
+{
+    const char *okp = ns_crypto_okp_name(curve);
+    gboolean private = d && d_len;
+    if (!okp || (!private && (!x || !x_len))) {
+        if (err) *err = g_strdup("DataError: OKP JWK");
+        return NULL;
+    }
+    EVP_PKEY *pkey = private
+        ? EVP_PKEY_new_raw_private_key_ex(NULL, okp, NULL, d, d_len)
+        : EVP_PKEY_new_raw_public_key_ex(NULL, okp, NULL, x, x_len);
+    if (!pkey) return ns_crypto_err(err, "DataError: OKP JWK import");
+    ns_crypto_key *k = ns_crypto_key_new(private ? NS_CK_PRIVATE : NS_CK_PUBLIC,
+                                         algo, NULL, NULL,
+                                         EVP_PKEY_get_bits(pkey), extractable,
+                                         usages);
+    k->pkey = pkey;
+    return k;
+}
+
+gboolean
+ns_crypto_export_okp_jwk(const ns_crypto_key *k, guint8 **x, gsize *x_len,
+                         guint8 **d, gsize *d_len, char **err)
+{
+    *x = *d = NULL;
+    *x_len = *d_len = 0;
+    if (!k->pkey || !ns_crypto_okp_name(k->algo)) {
+        if (err) *err = g_strdup("OperationError: OKP export");
+        return FALSE;
+    }
+    size_t n = 0;
+    if (EVP_PKEY_get_raw_public_key(k->pkey, NULL, &n) <= 0 || !n) {
+        ns_crypto_err(err, "OperationError: OKP export");
+        return FALSE;
+    }
+    *x = g_malloc(n);
+    if (EVP_PKEY_get_raw_public_key(k->pkey, *x, &n) <= 0) {
+        g_clear_pointer(x, g_free);
+        ns_crypto_err(err, "OperationError: OKP export");
+        return FALSE;
+    }
+    *x_len = n;
+    if (k->type == NS_CK_PRIVATE) {
+        size_t m = 0;
+        guint8 *priv = NULL;
+        if (EVP_PKEY_get_raw_private_key(k->pkey, NULL, &m) > 0 && m) {
+            priv = g_malloc(m);
+            if (EVP_PKEY_get_raw_private_key(k->pkey, priv, &m) <= 0)
+                g_clear_pointer(&priv, g_free);
+        }
+        if (!priv) {
+            g_clear_pointer(x, g_free);
+            *x_len = 0;
+            ns_crypto_err(err, "OperationError: OKP export");
+            return FALSE;
+        }
+        *d = priv;
+        *d_len = m;
+    }
+    return TRUE;
+}
+
 guint8 *
 ns_crypto_export_raw(const char *format, const ns_crypto_key *k, gsize *out_len,
                      char **err)
@@ -426,11 +520,23 @@ ns_crypto_export_raw(const char *format, const ns_crypto_key *k, gsize *out_len,
     }
     if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: export"); return NULL; }
 
+    if (!g_strcmp0(format, "raw") && ns_crypto_okp_name(k->algo)) {
+        size_t n = 0;
+        if (EVP_PKEY_get_raw_public_key(k->pkey, NULL, &n) <= 0 || !n)
+            return ns_crypto_err(err, "OperationError: raw export");
+        guint8 *out = g_malloc(n);
+        if (EVP_PKEY_get_raw_public_key(k->pkey, out, &n) <= 0) {
+            g_free(out);
+            return ns_crypto_err(err, "OperationError: raw export");
+        }
+        *out_len = n;
+        return out;
+    }
     if (!g_strcmp0(format, "raw") &&
         (!g_strcmp0(k->algo, "ECDSA") || !g_strcmp0(k->algo, "ECDH"))) {
         guint8 *buf = NULL;
         gsize n = EVP_PKEY_get1_encoded_public_key(k->pkey, &buf);
-        if (!n) return ns_crypto_err(err, "OperationError: EC raw export");
+        if (!n) return ns_crypto_err(err, "OperationError: raw export");
         guint8 *out = g_memdup2(buf, n);
         OPENSSL_free(buf);
         *out_len = n;
@@ -655,6 +761,27 @@ ns_crypto_sign(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *
     if (!g_strcmp0(k->algo, "HMAC"))
         return ns_crypto_hmac(k, data, len, out_len, err);
 
+    if (!g_strcmp0(k->algo, "Ed25519")) {
+        if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: sign"); return NULL; }
+        EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+        size_t n = 0;
+        if (!mdctx ||
+            EVP_DigestSignInit(mdctx, NULL, NULL, NULL, k->pkey) <= 0 ||
+            EVP_DigestSign(mdctx, NULL, &n, data, len) <= 0) {
+            EVP_MD_CTX_free(mdctx);
+            return ns_crypto_err(err, "OperationError: sign");
+        }
+        guint8 *out = g_malloc(n ? n : 1);
+        if (EVP_DigestSign(mdctx, out, &n, data, len) <= 0) {
+            g_free(out);
+            EVP_MD_CTX_free(mdctx);
+            return ns_crypto_err(err, "OperationError: sign");
+        }
+        EVP_MD_CTX_free(mdctx);
+        *out_len = n;
+        return out;
+    }
+
     const EVP_MD *md = ns_crypto_md(p->sign_hash ? p->sign_hash : k->hash);
     if (!md || !k->pkey) { if (err) *err = g_strdup("NotSupportedError: sign"); return NULL; }
 
@@ -704,6 +831,21 @@ ns_crypto_verify(const ns_crypto_key *k, const ns_crypto_params *p, const guint8
         OPENSSL_cleanse(mac, mlen);
         g_free(mac);
         return ok ? 1 : 0;
+    }
+
+    if (!g_strcmp0(k->algo, "Ed25519")) {
+        if (!k->pkey) { if (err) *err = g_strdup("NotSupportedError: verify"); return -1; }
+        EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+        int rc = -1;
+        if (mdctx && EVP_DigestVerifyInit(mdctx, NULL, NULL, NULL, k->pkey) > 0) {
+            int v = EVP_DigestVerify(mdctx, sig, sig_len, data, len);
+            rc = v == 1 ? 1 : 0;
+            if (v < 0) { ERR_clear_error(); rc = 0; }
+        } else {
+            ns_crypto_err(err, "OperationError: verify");
+        }
+        EVP_MD_CTX_free(mdctx);
+        return rc;
     }
 
     const EVP_MD *md = ns_crypto_md(p->sign_hash ? p->sign_hash : k->hash);
@@ -1007,7 +1149,7 @@ ns_crypto_derive_bits(const ns_crypto_key *k, const ns_crypto_params *p,
         if (err) *err = g_strdup("OperationError: deriveBits length too large");
         return NULL;
     }
-    if (!g_strcmp0(k->algo, "ECDH"))
+    if (!g_strcmp0(k->algo, "ECDH") || !g_strcmp0(k->algo, "X25519"))
         return ns_crypto_ecdh(k, p, length_bits, out_len, err);
     if (!g_strcmp0(k->algo, "PBKDF2"))
         return ns_crypto_pbkdf2(k, p, length_bits, out_len, err);
