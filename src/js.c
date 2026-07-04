@@ -22646,29 +22646,12 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
         g_free(lowered);
         return JS_UNDEFINED;
     }
-    ns_attr **prev = &n->attrs;
-    for (ns_attr *a = n->attrs; a; prev = &a->next, a = a->next) {
-        if (strcmp(a->name, name) == 0) {
-            char *old_copy = g_strdup(a->value);
-            *prev = a->next;
-            if (a->flags & NS_ATTR_OWN_NAME)  g_free(a->name);
-            if (a->flags & NS_ATTR_OWN_VALUE) g_free(a->value);
-            g_free(a->namespace_uri);
-            g_free(a->prefix);
-            g_free(a->local_name);
-            g_free(a);
-            ns_js *_j = js_from_ctx(ctx);
-            if (_j) {
-                _j->mutated = TRUE;
-                ns_js_record_attr_change(_j, n, name, old_copy);
-                ns_ce_attr_changed(_j, n, name, old_copy, NULL);
-            }
-            g_free(old_copy);
-            if (g_ascii_strcasecmp(name, "open") == 0 &&
-                ns_node_is_element_named(n, "details"))
-                ns_js_details_toggle_open(_j, n, FALSE);
-            break;
-        }
+    if (ns_element_get_attr(n, name)) {
+        ns_js *_j = js_from_ctx(ctx);
+        ns_js_remove_attr_recorded(_j, n, name);
+        if (g_ascii_strcasecmp(name, "open") == 0 &&
+            ns_node_is_element_named(n, "details"))
+            ns_js_details_toggle_open(_j, n, FALSE);
     }
     JS_FreeCString(ctx, raw_name);
     g_free(lowered);
