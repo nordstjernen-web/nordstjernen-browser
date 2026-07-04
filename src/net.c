@@ -1935,6 +1935,18 @@ ns_net_apply_curl_tls(void *curl_handle)
         "TLS_CHACHA20_POLY1305_SHA256");
 #endif
     curl_easy_setopt(curl, CURLOPT_SSL_EC_CURVES, g_ec_curves);
+#if LIBCURL_VERSION_NUM >= 0x080800
+    {
+        const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+        const char *const *feat = info ? info->feature_names : NULL;
+        for (; feat && *feat; feat++) {
+            if (!g_ascii_strcasecmp(*feat, "ECH")) {
+                curl_easy_setopt(curl, CURLOPT_ECH, "true");
+                break;
+            }
+        }
+    }
+#endif
     if (g_ca_bundle)
         curl_easy_setopt(curl, CURLOPT_CAINFO, g_ca_bundle);
 #ifdef G_OS_WIN32
