@@ -323,6 +323,23 @@ ns_node_sandbox_blocks_forms(const ns_node *node)
 }
 
 static JSValue
+ns_mql_initial_notify_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    (void)argc;
+    JSValue ev = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, ev, "type", JS_NewString(ctx, "change"));
+    JS_SetPropertyStr(ctx, ev, "matches",
+                      JS_GetPropertyStr(ctx, argv[0], "matches"));
+    JS_SetPropertyStr(ctx, ev, "media",
+                      JS_GetPropertyStr(ctx, argv[0], "media"));
+    JSValue r = JS_Call(ctx, argv[1], argv[0], 1, (JSValueConst *)&ev);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, ev);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_mql_addListener(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
@@ -330,6 +347,8 @@ ns_mql_addListener(JSContext *ctx, JSValueConst this_val,
     JSValueConst args[2] = { JS_NewString(ctx, "change"), argv[0] };
     JSValue r = ns_target_addEventListener(ctx, this_val, 2, args);
     JS_FreeValue(ctx, args[0]);
+    JSValueConst jargs[2] = { this_val, argv[0] };
+    JS_EnqueueJob(ctx, ns_mql_initial_notify_job, 2, jargs);
     return r;
 }
 
