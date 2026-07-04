@@ -1757,6 +1757,8 @@ write_session_cb(gpointer data)
     for (int i = 0; i < n; i++) {
         NsProcView *v = view_for_page(
             gtk_notebook_get_nth_page(GTK_NOTEBOOK(pw->notebook), i));
+        if (v && ns_proc_view_is_private(v))
+            continue;
         const char *u = v ? ns_proc_view_url(v) : NULL;
         if (session_url_recoverable(u)) {
             g_string_append(s, u);
