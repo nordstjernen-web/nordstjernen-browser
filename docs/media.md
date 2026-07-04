@@ -24,15 +24,18 @@ renderer's existing animation tick, honouring the `autoplay`, `loop`, `muted`,
 is the one always-on codec, by design — small, patent-free, and decoded in pure
 portable C.
 
-### WebM — VP9/VP8 (optional)
+### WebM — VP9/VP8 (required on Windows)
 
 `.webm` plays inline too when **FFmpeg's libav\*** (`libavformat` /
 `libavcodec` / `libavutil` / `libswscale` / `libswresample`) is present at build
-time (auto-detected; `-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
+time (`-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
 and decodes **VP9/VP8** frames, which are scaled to BGRA and served through the
-same off-tick frame loop as the MPEG-1 path — both royalty-free codecs. A build
-without the FFmpeg libraries carries no libav symbol or dependency and falls
-back to the poster-and-overlay path.
+same off-tick frame loop as the MPEG-1 path — both royalty-free codecs. It is
+**required on Windows** (`meson setup` fails without it) because YouTube and
+most modern sites serve VP9/WebM and the poster-and-overlay fallback there is
+unacceptable; on **Linux/macOS** it is auto-detected, and a build without the
+FFmpeg libraries carries no libav symbol or dependency and falls back to the
+poster-and-overlay path.
 
 How libav is obtained differs by platform, to keep it redistributable:
 

@@ -269,15 +269,18 @@ if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
 
-# Inline WebM (VP9/VP8 + Opus/Vorbis) over FFmpeg's libav*. Auto-detected on
-# the desktop targets (Linux/macOS/Windows); excluded on Android, whose
-# dependency sysroot (android/scripts/build-deps.sh) does not cross-build
-# FFmpeg, so WebM there stays on the external-player path.
-libavformat = dependency('libavformat', required: false)
-libavcodec = dependency('libavcodec', required: false)
-libavutil = dependency('libavutil', required: false)
-libswscale = dependency('libswscale', required: false)
-libswresample = dependency('libswresample', required: false)
+# Inline WebM (VP9/VP8 + Opus/Vorbis) over FFmpeg's libav*. Required on
+# Windows, where WebM is the dominant format served by YouTube and other
+# sites and the external-player fallback is undesirable; auto-detected on
+# Linux/macOS; excluded on Android, whose dependency sysroot
+# (android/scripts/build-deps.sh) does not cross-build FFmpeg, so WebM
+# there stays on the external-player path.
+libav_required = host_machine.system() == 'windows'
+libavformat = dependency('libavformat', required: libav_required)
+libavcodec = dependency('libavcodec', required: libav_required)
+libavutil = dependency('libavutil', required: libav_required)
+libswscale = dependency('libswscale', required: libav_required)
+libswresample = dependency('libswresample', required: libav_required)
 have_libav = libavformat.found() and libavcodec.found() and libavutil.found() \
   and libswscale.found() and libswresample.found() and not is_android
 if have_libav

@@ -99,9 +99,9 @@ jobs:
         run: |
           # MSYS2's mingw FFmpeg is GPL; build a minimal LGPL one (VP9/VP8 +
           # Opus/Vorbis only) into the mingw prefix so pack-windows.sh's DLL
-          # chase bundles its DLLs and meson auto-detects it via pkg-config.
-          scripts/build-ffmpeg-lgpl.sh /mingw64 \
-            || echo "windows: LGPL FFmpeg build failed; WebM skipped"
+          # chase bundles its DLLs and meson detects it via pkg-config. WebM
+          # is a required dependency on Windows, so this step must succeed.
+          scripts/build-ffmpeg-lgpl.sh /mingw64
 
       - name: Build
         id: build

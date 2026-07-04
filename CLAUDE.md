@@ -58,15 +58,22 @@ nothing imported.
   over the page surface each tick (see `docs/media.md`). Without the
   helper (headless, Windows) the renderer decodes in-process as before. The
   in-tree decoders stay pl_mpeg (MPEG-1 video + MP2) + minimp3 (MP3) — don't
-  vendor further single-file codecs. **WebM is the one optional extension:**
-  when FFmpeg's libav\* is present (`libavformat`/`libavcodec`/`libavutil`/
-  `libswscale`/`libswresample`, system packages — never vendored), the
-  `libav` build path is auto-enabled (`-DNS_HAVE_LIBAV`) and adds inline
+  vendor further single-file codecs. **WebM is the one FFmpeg-backed
+  extension**, over `libav\*` (`libavformat`/`libavcodec`/`libavutil`/
+  `libswscale`/`libswresample`, system packages — never vendored): the
+  `libav` build path (`-DNS_HAVE_LIBAV`) adds inline
   **VP9/VP8 video** (libav demux+decode → swscale → texture, in
   `src/video_decode.c`) and **Opus/Vorbis audio** (decoded in the helper,
-  `src/audio/main.c`) for `.webm`/`.opus`/`.ogg` sources; a stock build on a
-  machine without libav carries no libav symbol or dependency and behaves
-  exactly as before. Other `<audio>` and other `<video>` codecs render a
+  `src/audio/main.c`) for `.webm`/`.opus`/`.ogg` sources. It is **required on
+  Windows** (`libav_required` in `meson.build` — YouTube and most modern
+  sites serve VP9/WebM, so the external-player fallback there is
+  unacceptable; the Windows CI/packaging builds a minimal LGPL FFmpeg via
+  `scripts/build-ffmpeg-lgpl.sh` and the `--werror` build fails without it)
+  and **auto-detected on Linux/macOS** (a stock build on a machine without
+  libav there carries no libav symbol or dependency and behaves exactly as
+  before). Android stays on the external-player path — its dependency
+  sysroot does not cross-build FFmpeg. Other `<audio>` and other `<video>`
+  codecs render a
   poster and play overlay; clicking resolves the media URL in the renderer
   (`ns_browser_media_at`) and reports it over the renderer protocol for
   embedders — the GTK shell does not launch an external player.
@@ -222,11 +229,13 @@ Optional: `libenchant-2-dev` (plus a dictionary such as `hunspell-en-us`)
 enables on-screen spell-checking of editable text. It is auto-detected —
 the build works without it and simply does no spell-checking.
 
-Optional: the FFmpeg libav\* dev packages (Debian/Ubuntu `libavformat-dev
-libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`) enable
-inline WebM playback (VP9/VP8 video + Opus/Vorbis audio). Auto-detected;
-without them the build carries no libav dependency and WebM falls back to
-the external-player path.
+The FFmpeg libav\* dev packages (Debian/Ubuntu `libavformat-dev
+libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`;
+MSYS2 `mingw-w64-x86_64-ffmpeg`, or the LGPL build from
+`scripts/build-ffmpeg-lgpl.sh`) enable inline WebM playback (VP9/VP8 video
++ Opus/Vorbis audio). **Required on Windows** (`meson setup` fails without
+them); auto-detected on Linux/macOS, where without them the build carries
+no libav dependency and WebM falls back to the external-player path.
 
 On Fedora/RHEL:
 
