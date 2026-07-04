@@ -735,10 +735,10 @@
         this.sourceBuffers = new SourceBufferList();
         this.activeSourceBuffers = new SourceBufferList();
         this.readyState = 'closed';
-        this.duration = NaN;
         this.onsourceopen = null;
         this.onsourceended = null;
         this.onsourceclose = null;
+        this._ndDuration = NaN;
         this._ndUrl = '';
         this._ndObjectURL = '';
         this._ndVersion = 0;
@@ -747,6 +747,41 @@
     }
     ndEventMethods(MediaSource.prototype);
     MediaSource.isTypeSupported = ndSupportedMediaType;
+    Object.defineProperty(MediaSource.prototype, 'duration', {
+        configurable: true,
+        get: function () { return this._ndDuration; },
+        set: function (value) {
+            value = Number(value);
+            if (isNaN(value) || value < 0)
+                throw new TypeError('invalid duration');
+            if (this.readyState !== 'open')
+                throw new Error('InvalidStateError');
+            this._ndDuration = value;
+            var url = this._ndUrl;
+            if (!url || !global.document ||
+                !global.document.querySelectorAll)
+                return;
+            var nodes;
+            try { nodes = global.document.querySelectorAll('video,audio'); }
+            catch (e) { nodes = []; }
+            for (var i = 0; i < nodes.length; i++) {
+                var el = nodes[i];
+                var src = '';
+                try { src = el.src || el.getAttribute('src') || ''; }
+                catch (e) {}
+                if (src !== url) continue;
+                try {
+                    var prev = el._nd_duration;
+                    if (!(prev > value)) {
+                        el._nd_duration = value;
+                        if (typeof el.dispatchEvent === 'function' &&
+                            typeof Event === 'function')
+                            el.dispatchEvent(new Event('durationchange'));
+                    }
+                } catch (e) {}
+            }
+        }
+    });
     MediaSource.prototype.addSourceBuffer = function (type) {
         type = String(type || '');
         if (!MediaSource.isTypeSupported(type))
@@ -764,7 +799,11 @@
         this._ndRefreshBlob();
     };
     MediaSource.prototype.endOfStream = function () {
-        if (this.readyState === 'closed') throw new Error('InvalidStateError');
+        if (this.readyState !== 'open') throw new Error('InvalidStateError');
+        for (var i = 0; i < this.sourceBuffers.length; i++) {
+            var b = this.sourceBuffers.item(i);
+            if (b && b.updating) throw new Error('InvalidStateError');
+        }
         this.readyState = 'ended';
         if (ndMseNative && this._ndMseId)
             global.__ndMseEos(this._ndMseId);
@@ -878,6 +917,8 @@
         this._removed = false;
         this._bytes = 0;
         this._buffered = new ndTimeRanges(0, 0);
+        this._taskSeq = 0;
+        this._quotaFull = false;
     }
     ndEventMethods(SourceBuffer.prototype);
     Object.defineProperty(SourceBuffer.prototype, 'buffered', {
@@ -888,7 +929,7 @@
                 typeof global.__ndMseBuffered === 'function') {
                 var end = global.__ndMseBuffered(ms._ndMseId,
                     this._type.indexOf('audio/') === 0 ? 'a' : 'v');
-                if (end > 0) return new ndTimeRanges(0, end);
+                return new ndTimeRanges(0, end > 0 ? end : 0);
             }
             return this._buffered;
         }
@@ -897,25 +938,46 @@
         if (this._removed || !this._mediaSource ||
             this._mediaSource.readyState === 'closed' || this.updating)
             throw new Error('InvalidStateError');
+        if (this._quotaFull) {
+            var qe = new Error('QuotaExceededError');
+            qe.name = 'QuotaExceededError';
+            throw qe;
+        }
+        if (this._mediaSource.readyState === 'ended') {
+            this._mediaSource.readyState = 'open';
+            ndFireEvent(this._mediaSource, 'sourceopen');
+        }
         var bytes = blobPartBytes(data);
         var copy = new Uint8Array(bytes.length);
         copy.set(bytes);
         this.updating = true;
         ndFireEvent(this, 'updatestart');
         var self = this;
+        var seq = ++this._taskSeq;
         ndMediaTask(function () {
+            if (seq !== self._taskSeq) return;
             var ms = self._mediaSource;
+            var ok = true;
             if (ndMseNative && ms && ms._ndMseId) {
-                global.__ndMseAppend(ms._ndMseId,
+                ok = !!global.__ndMseAppend(ms._ndMseId,
                     self._type.indexOf('audio/') === 0 ? 'a' : 'v', copy);
             } else {
                 self._parts.push(copy);
             }
-            self._bytes += copy.length;
-            var seconds = self._bytes > 0 ? Math.max(0.001, self._bytes / 262144) : 0;
-            self._buffered = new ndTimeRanges(0, seconds);
             self.updating = false;
-            if (ms && !(ndMseNative && ms._ndMseId)) ms._ndRefreshBlob();
+            if (!ok) {
+                self._quotaFull = true;
+                ndFireEvent(self, 'error');
+                ndFireEvent(self, 'updateend');
+                return;
+            }
+            self._bytes += copy.length;
+            if (!(ndMseNative && ms && ms._ndMseId)) {
+                var seconds = self._bytes > 0 ?
+                    Math.max(0.001, self._bytes / 262144) : 0;
+                self._buffered = new ndTimeRanges(0, seconds);
+                if (ms) ms._ndRefreshBlob();
+            }
             ndFireEvent(self, 'update');
             ndFireEvent(self, 'updateend');
         });
@@ -940,19 +1002,30 @@
     };
     SourceBuffer.prototype.remove = function (start, end) {
         if (this._removed || this.updating) throw new Error('InvalidStateError');
+        var ms = this._mediaSource;
+        if (ms && ms.readyState === 'ended') {
+            ms.readyState = 'open';
+            ndFireEvent(ms, 'sourceopen');
+        }
         start = +start || 0;
         end = +end || 0;
         this.updating = true;
         ndFireEvent(this, 'updatestart');
         var self = this;
+        var seq = ++this._taskSeq;
         ndMediaTask(function () {
-            if (start <= 0 && end > 0) {
+            if (seq !== self._taskSeq) return;
+            if (start <= 0 && end > 0 &&
+                !(ndMseNative && self._mediaSource &&
+                  self._mediaSource._ndMseId)) {
                 self._parts = [];
                 self._bytes = 0;
                 self._buffered = new ndTimeRanges(0, 0);
             }
             self.updating = false;
-            if (self._mediaSource) self._mediaSource._ndRefreshBlob();
+            if (self._mediaSource &&
+                !(ndMseNative && self._mediaSource._ndMseId))
+                self._mediaSource._ndRefreshBlob();
             ndFireEvent(self, 'update');
             ndFireEvent(self, 'updateend');
         });
@@ -976,8 +1049,15 @@
         });
     };
     SourceBuffer.prototype.abort = function () {
-        this.updating = false;
-        ndFireEvent(this, 'abort');
+        if (!this._mediaSource ||
+            this._mediaSource.readyState === 'closed')
+            throw new Error('InvalidStateError');
+        this._taskSeq++;
+        if (this.updating) {
+            this.updating = false;
+            ndFireEvent(this, 'abort');
+            ndFireEvent(this, 'updateend');
+        }
     };
     SourceBuffer.prototype.changeType = function (type) {
         type = String(type || '');
