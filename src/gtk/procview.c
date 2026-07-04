@@ -766,7 +766,8 @@ pv_video_handle_line(NsProcView *v, const char *line)
         g_printerr("[video-helper] %s\n", line);
     char **tok = g_strsplit(line, " ", 8);
     guint n = g_strv_length(tok);
-    if (n >= 6 && strcmp(tok[0], "shm") == 0) {
+    if (n >= 6 && strcmp(tok[0], "shm") == 0 &&
+        strcmp(tok[1], v->vid_token) == 0) {
 #ifndef G_OS_WIN32
         pv_vring_unmap(v);
         int fd = shm_open(tok[2], O_RDONLY, 0);
@@ -795,12 +796,16 @@ pv_video_handle_line(NsProcView *v, const char *line)
         if (strcmp(tok[1], v->vid_token) == 0)
             pv_vring_unmap(v);
     } else if (n >= 2 && strcmp(tok[0], "playing") == 0) {
-        v->vid_playing = TRUE;
-        pv_video_ensure_tick(v);
+        if (strcmp(tok[1], v->vid_token) == 0) {
+            v->vid_playing = TRUE;
+            pv_video_ensure_tick(v);
+        }
     } else if (n >= 2 && (strcmp(tok[0], "paused") == 0 ||
                           strcmp(tok[0], "ended") == 0)) {
-        v->vid_playing = FALSE;
-        gtk_widget_queue_draw(v->area);
+        if (strcmp(tok[1], v->vid_token) == 0) {
+            v->vid_playing = FALSE;
+            gtk_widget_queue_draw(v->area);
+        }
     }
     g_strfreev(tok);
 }
@@ -874,7 +879,8 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
         char token[64];
         int x, y, w, h;
         if (sscanf(cmd + 5, "%63s %d %d %d %d",
-                   token, &x, &y, &w, &h) == 5) {
+                   token, &x, &y, &w, &h) == 5 &&
+            (strcmp(token, v->vid_token) == 0 || !v->vid_token[0])) {
             v->vid_x = x;
             v->vid_y = y;
             v->vid_w = w;
@@ -887,12 +893,20 @@ pv_video_dispatch(NsProcView *v, const char *cmd)
         }
         return;
     }
-    if (g_str_has_prefix(cmd, "open "))
+    char cmd_tok[64] = "";
+    if (g_str_has_prefix(cmd, "open ")) {
         sscanf(cmd + 5, "%63s", v->vid_token);
-    else if (g_str_has_prefix(cmd, "play "))
-        v->vid_playing = TRUE;
-    else if (g_str_has_prefix(cmd, "pause ") || g_str_has_prefix(cmd, "stop "))
-        v->vid_playing = FALSE;
+        v->vid_rect_valid = FALSE;
+    } else if (g_str_has_prefix(cmd, "play ")) {
+        sscanf(cmd + 5, "%63s", cmd_tok);
+        if (strcmp(cmd_tok, v->vid_token) == 0)
+            v->vid_playing = TRUE;
+    } else if (g_str_has_prefix(cmd, "pause ") ||
+               g_str_has_prefix(cmd, "stop ")) {
+        sscanf(cmd + (cmd[0] == 'p' ? 6 : 5), "%63s", cmd_tok);
+        if (strcmp(cmd_tok, v->vid_token) == 0)
+            v->vid_playing = FALSE;
+    }
     pv_video_send(v, cmd);
     pv_video_ensure_tick(v);
 }

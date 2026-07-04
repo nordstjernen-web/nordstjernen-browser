@@ -4,6 +4,7 @@
  */
 
 #include "headless.h"
+#include <cairo.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -314,6 +315,13 @@ rdrv_follow_nav(ns_rproc_http *r, char *href, int vw, int vh, int settle_ms)
     return NULL;
 }
 
+static cairo_status_t
+rdrv_png_sink(void *closure, const unsigned char *data, unsigned int length)
+{
+    g_byte_array_append((GByteArray *)closure, data, length);
+    return CAIRO_STATUS_SUCCESS;
+}
+
 static void
 rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                  int settle_ms)
@@ -367,6 +375,39 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
             char *res = ns_rproc_http_eval(r, a + 5);
             fprintf(stdout, "act-eval: %s\n", res ? res : "(null)");
             free(res);
+        } else if (g_str_has_prefix(a, "shot ")) {
+            const char *path = g_strstrip((char *)a + 5);
+            ns_rproc_http_frame fr;
+            char *inv = ns_rproc_http_eval(r, "0");
+            free(inv);
+            int shot_rc = *path ? ns_rproc_http_render(r, vw, vh, 0, 0, 1.0, &fr)
+                                : -2;
+            if (shot_rc == 0) {
+                if (fr.ok && fr.pixels && fr.width > 0 && fr.height > 0) {
+                    cairo_surface_t *surf = cairo_image_surface_create_for_data(
+                        (unsigned char *)fr.pixels, CAIRO_FORMAT_ARGB32,
+                        fr.width, fr.height, fr.stride);
+                    if (cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
+                        GByteArray *buf = g_byte_array_new();
+                        cairo_surface_write_to_png_stream(surf,
+                                                          rdrv_png_sink, buf);
+                        char *b64 = g_base64_encode(buf->data, buf->len);
+                        fprintf(stdout, "shot-b64:%s:%s\n", path, b64);
+                        fflush(stdout);
+                        g_free(b64);
+                        g_byte_array_free(buf, TRUE);
+                    }
+                    cairo_surface_destroy(surf);
+                    fprintf(stderr, "[headless] shot %dx%d emitted\n",
+                            fr.width, fr.height);
+                }
+                free(fr.nav);
+                free(fr.webgl);
+                free(fr.camera);
+                free(fr.download);
+                free(fr.audio);
+                free(fr.mail_key);
+            }
         } else if (g_str_has_prefix(a, "viewport ")) {
             int nw = 0, nh = 0;
             if (sscanf(a + 9, "%d %d", &nw, &nh) == 2 && nw > 0 && nh > 0) {
