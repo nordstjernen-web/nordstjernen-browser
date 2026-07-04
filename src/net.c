@@ -1421,6 +1421,24 @@ ns_net_altsvc_path(void)
     return ns_net_data_path(&g_altsvc_path, "altsvc.txt");
 }
 
+static long
+ns_net_http_version(void)
+{
+#ifdef CURL_VERSION_HTTP3
+    static gsize once = 0;
+    static long version = CURL_HTTP_VERSION_2TLS;
+    if (g_once_init_enter(&once)) {
+        const curl_version_info_data *info = curl_version_info(CURLVERSION_NOW);
+        if (info && (info->features & CURL_VERSION_HTTP3))
+            version = CURL_HTTP_VERSION_3;
+        g_once_init_leave(&once, 1);
+    }
+    return version;
+#else
+    return CURL_HTTP_VERSION_2TLS;
+#endif
+}
+
 #define NS_NET_DOMAIN ns_net_error_quark()
 
 static GQuark
@@ -4891,7 +4909,7 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         curl_easy_setopt(curl, CURLOPT_HSTS, hsts_curl);
     }
 
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, ns_net_http_version());
     const char *altsvc = ns_net_altsvc_path();
     if (altsvc)
         curl_easy_setopt(curl, CURLOPT_ALTSVC, altsvc);

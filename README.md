@@ -54,8 +54,9 @@ The full section-by-section walk-through lives in
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
-- **Networking** over HTTP/2 with libcurl — HSTS, CSP,
-  subresource-integrity (SRI) checks, partitioned cookies.
+- **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked
+  libcurl provides it — HSTS, CSP, subresource-integrity (SRI) checks,
+  partitioned cookies.
 - **Safe browsing** — before a top-level navigation is fetched, its host
   is checked against a local SHA-256 blocklist (`src/safebrowsing.c`,
   `data/safebrowsing.list`); a match shows a full-page warning with the
