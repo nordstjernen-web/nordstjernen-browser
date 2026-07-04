@@ -31,6 +31,12 @@
 #include <lexbor/url/url.h>
 
 #include <libpsl.h>
+#include <sqlite3.h>
+#include <cairo.h>
+#include <pango/pangocairo.h>
+#include <webp/decode.h>
+#include <openssl/crypto.h>
+#include <openssl/opensslv.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -2412,6 +2418,140 @@ about_substitute(const char *template_text,
     return joined;
 }
 
+static void
+diag_kv(GString *s, const char *key, const char *value)
+{
+    char *ev = g_markup_escape_text((value && *value) ? value : "\xe2\x80\x94",
+                                    -1);
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">%s</span>"
+        "<span class=\"dv\">%s</span></div>", key, ev);
+    g_free(ev);
+}
+
+static void
+diag_feature(GString *s, const char *key, gboolean on)
+{
+    g_string_append_printf(s,
+        "<div class=\"drow\"><span class=\"dk\">%s</span>"
+        "<span class=\"dv %s\">%s</span></div>",
+        key, on ? "on" : "off", on ? "Enabled" : "Not built");
+}
+
+static char *
+about_diagnostics_html(void)
+{
+    const char *platform =
+#if defined(G_OS_WIN32)
+        "Windows";
+#elif defined(__APPLE__)
+        "macOS";
+#elif defined(__linux__)
+        "Linux";
+#else
+        "Unknown";
+#endif
+    const char *arch =
+#if defined(__x86_64__) || defined(_M_X64)
+        "x86-64";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+        "arm64";
+#elif defined(__i386__) || defined(_M_IX86)
+        "x86";
+#elif defined(__arm__)
+        "arm";
+#else
+        "unknown";
+#endif
+
+    GString *s = g_string_new("<div class=\"diag\">");
+
+    g_string_append(s, "<h3>System</h3>");
+    char *os = g_get_os_info(G_OS_INFO_KEY_PRETTY_NAME);
+    if (!os) os = g_get_os_info(G_OS_INFO_KEY_NAME);
+    diag_kv(s, "Operating system", os ? os : platform);
+    g_free(os);
+    diag_kv(s, "Platform", platform);
+    diag_kv(s, "Architecture", arch);
+    char *cores = g_strdup_printf("%u", g_get_num_processors());
+    diag_kv(s, "Logical CPUs", cores);
+    g_free(cores);
+
+    g_string_append(s, "<h3>Version &amp; libraries</h3>");
+    diag_kv(s, "Nordstjernen", NS_VERSION " (built " NS_BUILD_DATE ")");
+    diag_kv(s, "JavaScript (QuickJS)", JS_GetVersion());
+#ifdef NS_LEXBOR_VERSION
+    diag_kv(s, "HTML / CSS (lexbor)", NS_LEXBOR_VERSION);
+#endif
+    char *glibv = g_strdup_printf("%u.%u.%u", glib_major_version,
+                                  glib_minor_version, glib_micro_version);
+    diag_kv(s, "GLib", glibv);
+    g_free(glibv);
+    diag_kv(s, "Pango", pango_version_string());
+    diag_kv(s, "Cairo", cairo_version_string());
+    diag_kv(s, "SQLite", sqlite3_libversion());
+    int wv = WebPGetDecoderVersion();
+    char *webpv = g_strdup_printf("%d.%d.%d", (wv >> 16) & 0xff,
+                                  (wv >> 8) & 0xff, wv & 0xff);
+    diag_kv(s, "libwebp", webpv);
+    g_free(webpv);
+    diag_kv(s, "TLS / crypto", OpenSSL_version(OPENSSL_VERSION));
+    diag_kv(s, "Networking", curl_version());
+
+    g_string_append(s, "<h3>Features</h3>");
+#ifdef NS_ENABLE_WEBGL
+    diag_feature(s, "WebGL (3D canvas)", TRUE);
+#else
+    diag_feature(s, "WebGL (3D canvas)", FALSE);
+#endif
+#ifdef ND_HAVE_WEBGPU
+    diag_kv(s, "WebGPU (experimental)",
+            g_getenv("NS_WEBGPU_ALLOW")
+                ? "Enabled (--enable-webgpu)"
+                : "Built \xe2\x80\x94 start with --enable-webgpu");
+#else
+    diag_feature(s, "WebGPU (experimental)", FALSE);
+#endif
+#ifdef NS_HAVE_AI
+    diag_feature(s, "Local AI assistant", TRUE);
+#else
+    diag_feature(s, "Local AI assistant", FALSE);
+#endif
+#ifdef NS_HAVE_LIBAV
+    diag_feature(s, "WebM video (VP8 / VP9 / Opus)", TRUE);
+#else
+    diag_feature(s, "WebM video (VP8 / VP9 / Opus)", FALSE);
+#endif
+#ifdef NS_HAVE_AVIF
+    diag_feature(s, "AVIF images", TRUE);
+#else
+    diag_feature(s, "AVIF images", FALSE);
+#endif
+#ifdef NS_HAVE_LIBRSVG
+    diag_feature(s, "SVG images (librsvg)", TRUE);
+#else
+    diag_feature(s, "SVG images (librsvg)", FALSE);
+#endif
+#ifdef NS_HAVE_POPPLER
+    diag_feature(s, "Inline PDF viewer", TRUE);
+#else
+    diag_feature(s, "Inline PDF viewer", FALSE);
+#endif
+#ifdef NS_HAVE_ENCHANT
+    diag_feature(s, "Spell checking", TRUE);
+#else
+    diag_feature(s, "Spell checking", FALSE);
+#endif
+#ifdef NS_HAVE_SECCOMP
+    diag_feature(s, "Seccomp sandbox", TRUE);
+#else
+    diag_feature(s, "Seccomp sandbox", FALSE);
+#endif
+
+    g_string_append(s, "</div>");
+    return g_string_free(s, FALSE);
+}
+
 static char *
 build_about_markdown_page(const char *const *paths, const char *title,
                           const char *back_href, const char *back_label,
@@ -4083,8 +4223,8 @@ static const char k_about_nordstjernen_template[] =
     ".wrap { max-width: 640px; margin: 0 auto; padding: 40px 24px 32px;"
     " box-sizing:border-box; }\n"
     ".head { text-align:center; margin-bottom:22px; }\n"
-    ".mark-img { display:block; width:64px; height:64px;"
-    " margin:0 auto 14px; border-radius:15px; object-fit:cover; }\n"
+    ".mark-img { display:block; width:104px; height:104px;"
+    " margin:0 auto 16px; border-radius:22px; object-fit:cover; }\n"
     ".title { font-size: 1.7em; font-weight: 600; line-height:1.15; }\n"
     ".ver { color:#6b7280; font-size:0.92em; margin-top:5px; }\n"
     ".tagline { color:#5b6470; font-style: italic; font-size:0.9em;"
@@ -4105,14 +4245,28 @@ static const char k_about_nordstjernen_template[] =
     ".docs a { color:#2d6cf6; font-weight:600; font-size:0.95em;"
     " text-decoration:none; }\n"
     ".docs a:hover { text-decoration:underline; }\n"
+    ".diag { max-width:560px; margin:26px auto 0; text-align:left;"
+    " border-top:1px solid #e6e9ef; padding-top:20px; }\n"
+    ".diag h3 { font-size:0.72em; text-transform:uppercase;"
+    " letter-spacing:0.05em; color:#8a94a3; font-weight:700;"
+    " margin:18px 0 6px; }\n"
+    ".diag h3:first-child { margin-top:0; }\n"
+    ".drow { display:flex; justify-content:space-between; gap:18px;"
+    " padding:5px 0; border-bottom:1px solid #f0f2f5; font-size:0.85em; }\n"
+    ".dk { color:#4b5563; flex:0 0 auto; }\n"
+    ".dv { color:#111418; text-align:right; word-break:break-word;"
+    " font-family:ui-monospace,\"SF Mono\",Menlo,Consolas,monospace; }\n"
+    ".dv.on { color:#137a3f; font-family:inherit; }\n"
+    ".dv.off { color:#9aa3af; font-family:inherit; }\n"
     ".copy { text-align:center; color:#6b7280; font-size:0.85em;"
     " margin:26px 0 14px; }\n"
     ".links { text-align:center; color:#6b7280; font-size:0.86em;"
     " line-height:1.7; }\n"
     ".links a { color:#2d6cf6; margin:0 8px; }\n"
     "@media (max-width:560px) { .wrap { padding:28px 22px; }"
-    " .mark-img { width:54px; height:54px; }"
+    " .mark-img { width:84px; height:84px; }"
     " .title { font-size:1.42em; }"
+    " .drow { font-size:0.8em; }"
     " .links a { display:inline-block; margin:0 5px 4px; } }\n"
     "</style></head>"
     "<body><main class=\"wrap\">"
@@ -4140,7 +4294,9 @@ static const char k_about_nordstjernen_template[] =
     "\x86\x92</a></li>"
     "</ul>"
     "</section>"
-    "<p class=\"copy\">\xc2\xa9 2026 Andreas R\xc3\xb8sdal</p>"
+    "__ND_DIAG__"
+    "<p class=\"copy\">Nordstjernen Web Browser \xc2\xa9 2026 "
+    "Andreas R\xc3\xb8sdal</p>"
     "<p class=\"links\">"
     "<a href=\"about:start\">\xe2\x86\x90 Start</a>"
     "<a href=\"about:license\">License</a>"
@@ -4562,9 +4718,13 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(json);
     } else if (g_str_equal(what, "nordstjernen") || g_str_equal(what, "about")) {
         char *logo_markup = about_logo_markup();
-        char *body = about_substitute(k_about_nordstjernen_template,
-                                      "__ND_LOGO_MARK__", logo_markup);
+        char *with_logo = about_substitute(k_about_nordstjernen_template,
+                                           "__ND_LOGO_MARK__", logo_markup);
         g_free(logo_markup);
+        char *diag = about_diagnostics_html();
+        char *body = about_substitute(with_logo, "__ND_DIAG__", diag);
+        g_free(diag);
+        g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
     } else if (g_str_equal(what, "license") || g_str_equal(what, "licence")) {

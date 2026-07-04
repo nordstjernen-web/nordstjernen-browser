@@ -233,7 +233,7 @@ moving parts:
 |---------|---------|
 | poppler-glib | inline PDF viewing |
 | libavif | AVIF images |
-| FFmpeg libav\* (libavformat / libavcodec / libavutil / libswscale / libswresample) | inline WebM playback — VP9/VP8 video (`src/video_decode.c`) and Opus/Vorbis audio (`src/audio/main.c`) |
+| [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* (libavformat / libavcodec / libavutil / libswscale / libswresample) | inline WebM playback — VP9/VP8 video (`src/video_decode.c`) and Opus/Vorbis audio (`src/audio/main.c`) |
 | Enchant (enchant-2) | on-screen spell-checking of editable text (`src/spellcheck.c`) |
 | fontconfig / pangoft2 | extra font discovery backends |
 
