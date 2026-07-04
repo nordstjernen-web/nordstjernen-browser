@@ -226,6 +226,7 @@ static const char *ns_http_status_text(int status);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
+static char *ns_fetch_normalize_method(const char *method);
 static JSValue ns_event_stop_immediate(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
@@ -1239,6 +1240,8 @@ camel_to_kebab(const char *s)
     if (!strcmp(s, "cssFloat")) return g_strdup("float");
     if (s[0] == '-' && s[1] == '-') return g_strdup(s);
     GString *out = g_string_new(NULL);
+    if (g_str_has_prefix(s, "webkit") && g_ascii_isupper(s[6]))
+        g_string_append_c(out, '-');
     for (const char *p = s; *p; p++) {
         if (*p >= 'A' && *p <= 'Z') {
             g_string_append_c(out, '-');
@@ -3534,9 +3537,13 @@ ns_element_get_tabIndex(JSContext *ctx, JSValueConst this_val)
     const char *v = ns_element_get_attr(n, "tabindex");
     if (!v) {
         static const char *const focusable[] = {
-            "a", "area", "button", "input", "select", "textarea", NULL,
+            "a", "area", "button", "frame", "iframe", "input", "object",
+            "select", "textarea", NULL,
         };
-        return JS_NewInt32(ctx, ns_node_name_is_any_of(n, focusable) ? 0 : -1);
+        gboolean zero = ns_node_name_is_any_of(n, focusable);
+        if (!zero && ns_node_is_element_named(n, "summary"))
+            zero = n->parent && ns_node_is_element_named(n->parent, "details");
+        return JS_NewInt32(ctx, zero ? 0 : -1);
     }
     return JS_NewInt32(ctx, ns_parse_int(v, 0, G_MININT, G_MAXINT));
 }
@@ -4606,7 +4613,7 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
     if (n->kind != NS_NODE_TEXT && n->kind != NS_NODE_COMMENT) return JS_UNDEFINED;
-    gboolean free_s = !JS_IsNull(val);
+    gboolean free_s = !JS_IsNull(val) && !JS_IsUndefined(val);
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (s) {
         char *old_copy = n->text ? g_strdup(n->text) : g_strdup("");
@@ -5562,11 +5569,12 @@ ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_node *fragment = ns_html_parse_fragment_in(n->name, s, -1);
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
     if (fragment) {
         if (ns_js_try_update_same_shape_text_html(_j, n, fragment)) {
             ns_node_free(fragment);
@@ -5640,12 +5648,13 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     const char *ctx_tag = (self->parent && self->parent->kind == NS_NODE_ELEMENT)
                           ? self->parent->name : NULL;
     ns_node *fragment = ns_html_parse_fragment_in(ctx_tag, s, -1);
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
     if (fragment) {
         ns_mark_scripts_already_started(fragment);
         ns_node *anchor = self;
@@ -6086,6 +6095,7 @@ typedef struct ns_js_fetch_state {
     JSValue        abort_handler;
     gboolean       aborted;
     gboolean       settled;
+    gboolean       no_cors;
     char          *fb_send_url;
     char          *fb_top;
     char          *fb_method;
@@ -6252,7 +6262,24 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
             gsize vlen = (gsize)(lineend - v);
             while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
             while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
-            JS_SetPropertyStr(ctx, init, name, JS_NewStringLen(ctx, v, vlen));
+            JSValue prev = JS_GetPropertyStr(ctx, init, name);
+            if (JS_IsString(prev)) {
+                const char *old = JS_ToCString(ctx, prev);
+                char *joined = old
+                    ? g_strdup_printf("%s, %.*s", old, (int)vlen, v) : NULL;
+                if (old) JS_FreeCString(ctx, old);
+                if (joined) {
+                    JS_SetPropertyStr(ctx, init, name, JS_NewString(ctx, joined));
+                    g_free(joined);
+                } else {
+                    JS_SetPropertyStr(ctx, init, name,
+                                      JS_NewStringLen(ctx, v, vlen));
+                }
+            } else {
+                JS_SetPropertyStr(ctx, init, name,
+                                  JS_NewStringLen(ctx, v, vlen));
+            }
+            JS_FreeValue(ctx, prev);
             g_free(name);
         }
         if (!*eol) break;
@@ -6314,6 +6341,21 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                                  (st->js ? st->js->current_url : NULL);
         gboolean allow = cors_allows(origin_url, resp->final_url,
                                      resp->cors_allow_origin);
+        if (!allow && !st->no_cors) {
+            JS_ThrowTypeError(st->ctx, "Failed to fetch: CORS request blocked");
+            JSValue ex = JS_GetException(st->ctx);
+            JSValue call_ret = JS_Call(st->ctx, st->reject, JS_UNDEFINED, 1,
+                                       (JSValueConst *)&ex);
+            if (JS_IsException(call_ret))
+                JS_FreeValue(st->ctx, JS_GetException(st->ctx));
+            JS_FreeValue(st->ctx, call_ret);
+            JS_FreeValue(st->ctx, ex);
+            ns_response_free(resp);
+            ns_drain_mutations(st->js);
+            ns_js_budget_pop(st->js, &bg);
+            ns_js_fetch_state_free(st);
+            return;
+        }
         JSValue r = JS_NewObject(st->ctx);
         JS_SetPropertyStr(st->ctx, r, "ok",
             JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
@@ -6323,9 +6365,12 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(st->ctx, r, "statusText",
             JS_NewString(st->ctx, ns_http_status_text((int)status)));
         JS_SetPropertyStr(st->ctx, r, "url",
-            JS_NewString(st->ctx, resp->final_url ? resp->final_url : ""));
+            JS_NewString(st->ctx, allow && resp->final_url
+                                  ? resp->final_url : ""));
         JS_SetPropertyStr(st->ctx, r, "type",
-            JS_NewString(st->ctx, allow ? "basic" : "opaque"));
+            JS_NewString(st->ctx, !allow ? "opaque"
+                : ns_url_same_origin(origin_url, resp->final_url)
+                    ? "basic" : "cors"));
         JS_SetPropertyStr(st->ctx, r, "redirected",
             JS_NewBool(st->ctx, resp->redirect_count > 0));
         JS_SetPropertyStr(st->ctx, r, "redirectCount",
@@ -6634,7 +6679,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                                 ns_js_fetch_has_prop(ctx, argv[1], "headers");
     if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
         g_autofree char *m = ns_js_get_string_prop(ctx, argv[0], "method");
-        if (m && *m) method = g_ascii_strup(m, -1);
+        if (m && *m) method = ns_fetch_normalize_method(m);
         ns_js_fetch_read_body(ctx, argv[0], &body, &body_len, &content_type);
         if (!init_has_headers) {
             JSValue h = JS_GetPropertyStr(ctx, argv[0], "headers");
@@ -6646,12 +6691,36 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_autofree char *m = ns_js_get_string_prop(ctx, argv[1], "method");
         if (m) {
             g_free(method);
-            method = g_ascii_strup(m, -1);
+            method = ns_fetch_normalize_method(m);
         }
         ns_js_fetch_read_body(ctx, argv[1], &body, &body_len, &content_type);
         JSValue h = JS_GetPropertyStr(ctx, argv[1], "headers");
         ns_js_fetch_collect_headers(ctx, h, extras, &content_type);
         JS_FreeValue(ctx, h);
+    }
+    gboolean no_cors = FALSE;
+    if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
+        g_autofree char *md = ns_js_get_string_prop(ctx, argv[0], "mode");
+        if (md) no_cors = strcmp(md, "no-cors") == 0;
+    }
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        g_autofree char *md = ns_js_get_string_prop(ctx, argv[1], "mode");
+        if (md) no_cors = strcmp(md, "no-cors") == 0;
+    }
+    if (method && (g_ascii_strcasecmp(method, "CONNECT") == 0 ||
+                   g_ascii_strcasecmp(method, "TRACE") == 0 ||
+                   g_ascii_strcasecmp(method, "TRACK") == 0)) {
+        JS_FreeCString(ctx, url);
+        g_ptr_array_free(extras, TRUE);
+        JS_ThrowTypeError(ctx, "fetch: '%s' is a forbidden method", method);
+        JSValue ex = JS_GetException(ctx);
+        JSValueConst rargs[1] = { ex };
+        JSValue r = JS_Call(ctx, resolving[1], JS_UNDEFINED, 1, rargs);
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, ex);
+        JS_FreeValue(ctx, resolving[0]);
+        JS_FreeValue(ctx, resolving[1]);
+        return promise;
     }
     if (body && !content_type)
         content_type = g_strdup("text/plain;charset=UTF-8");
@@ -6663,6 +6732,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->resolve = resolving[0];
     st->reject  = resolving[1];
     st->requested_url = g_strdup(url);
+    st->no_cors = no_cors;
     const char *top = base_url && *base_url ? base_url :
                       (st->js ? st->js->current_url : NULL);
     st->origin_url = g_strdup(top);
@@ -9142,10 +9212,6 @@ ns_structured_clone_value(JSContext *ctx, JSValueConst v)
     if (JS_IsFunction(ctx, clone)) {
         JSValueConst cargs[1] = { v };
         out = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
-        if (JS_IsException(out)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            out = JS_DupValue(ctx, v);
-        }
     } else {
         out = JS_DupValue(ctx, v);
     }
@@ -9207,18 +9273,24 @@ static JSValue
 ns_port_post_message(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
+    JSValueConst data = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JSValue cloned = ns_structured_clone_value(ctx, data);
+    if (JS_IsException(cloned)) return JS_EXCEPTION;
+
     JSValue closed = JS_GetPropertyStr(ctx, this_val, "_closed");
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
-    if (is_closed) return JS_UNDEFINED;
+    if (is_closed) {
+        JS_FreeValue(ctx, cloned);
+        return JS_UNDEFINED;
+    }
 
     JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
     if (JS_IsUndefined(pair) || JS_IsNull(pair)) {
         JS_FreeValue(ctx, pair);
+        JS_FreeValue(ctx, cloned);
         return JS_UNDEFINED;
     }
-    JSValueConst data = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    JSValue cloned = ns_structured_clone_value(ctx, data);
 
     JSValue started = JS_GetPropertyStr(ctx, pair, "_started");
     gboolean pair_started = JS_ToBool(ctx, started);
@@ -9436,7 +9508,7 @@ ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
     if (is_closed)
-        return JS_ThrowTypeError(ctx,
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
             "BroadcastChannel.postMessage: channel is closed");
 
     JSValueConst msg = argc >= 1 ? argv[0] : JS_UNDEFINED;
@@ -9448,8 +9520,8 @@ ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
         JSValueConst cargs[1] = { msg };
         data = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
         if (JS_IsException(data)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            data = JS_DupValue(ctx, msg);
+            JS_FreeValue(ctx, clone);
+            return JS_EXCEPTION;
         }
     } else {
         data = JS_DupValue(ctx, msg);
@@ -10103,7 +10175,7 @@ ns_css_supports(JSContext *ctx, JSValueConst this_val,
         const char *cond = JS_ToCString(ctx, argv[0]);
         int r = cond ? ns_css_eval_supports_condition(cond, 0) : -1;
         if (cond) JS_FreeCString(ctx, cond);
-        result = (r != 0);
+        result = (r == 1);
     }
     return result ? JS_TRUE : JS_FALSE;
 }
@@ -10113,17 +10185,34 @@ ns_css_escape(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1) return JS_NewString(ctx, "");
-    const char *s = JS_ToCString(ctx, argv[0]);
-    if (!s) return JS_NewString(ctx, "");
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "CSS.escape: 1 argument required");
+    size_t slen = 0;
+    const char *s = JS_ToCStringLen(ctx, &slen, argv[0]);
+    if (!s) return JS_EXCEPTION;
     GString *out = g_string_new(NULL);
-    for (const char *p = s; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '_' || c == '-' || c >= 0x80) {
-            g_string_append_c(out, c);
+    gboolean first_is_dash = slen > 0 && s[0] == '-';
+    gsize cp = 0;
+    for (size_t i = 0; i < slen; i++) {
+        unsigned char c = (unsigned char)s[i];
+        gboolean continuation = (c & 0xC0) == 0x80;
+        if (!continuation) cp++;
+        gsize pos = cp - 1;
+        gboolean digit = c >= '0' && c <= '9';
+        if (c == 0x00) {
+            g_string_append(out, "\xEF\xBF\xBD");
+        } else if (c <= 0x1F || c == 0x7F) {
+            g_string_append_printf(out, "\\%x ", c);
+        } else if (digit && (pos == 0 || (pos == 1 && first_is_dash))) {
+            g_string_append_printf(out, "\\%x ", c);
+        } else if (c == '-' && pos == 0 && slen == 1) {
+            g_string_append(out, "\\-");
+        } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   digit || c == '_' || c == '-' || c >= 0x80) {
+            g_string_append_c(out, (char)c);
         } else {
-            g_string_append_printf(out, "\\%c", c);
+            g_string_append_c(out, '\\');
+            g_string_append_c(out, (char)c);
         }
     }
     JS_FreeCString(ctx, s);
@@ -10450,6 +10539,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
 
     ns_history_ensure_stack(js);
 
+    JSValue state = JS_NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+        state = ns_window_structured_clone(ctx, JS_UNDEFINED, 1, &argv[0]);
+        if (JS_IsException(state)) return JS_EXCEPTION;
+    }
+
     char *new_url = NULL;
     if (argc >= 3 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
         const char *url_raw = JS_ToCString(ctx, argv[2]);
@@ -10458,6 +10553,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
                 new_url = ns_url_resolve(js->current_url, url_raw);
             else
                 new_url = g_strdup(url_raw);
+            if (!new_url) {
+                JS_FreeCString(ctx, url_raw);
+                JS_FreeValue(ctx, state);
+                return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                    "history: the URL could not be parsed");
+            }
         }
         if (url_raw) JS_FreeCString(ctx, url_raw);
     }
@@ -10470,13 +10571,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
                                strcmp(new_origin, curr_origin) == 0;
         if (!same_origin) {
             g_free(new_url);
-            return JS_ThrowTypeError(ctx,
-                "history.%sState: URL must be same-origin as the document",
-                replace ? "replace" : "push");
+            JS_FreeValue(ctx, state);
+            return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                "history: URL must be same-origin as the document");
         }
     }
 
-    JSValue state = argc >= 1 ? JS_DupValue(ctx, argv[0]) : JS_NULL;
     JS_FreeValue(ctx, js->history_state);
     js->history_state = state;
 
@@ -10551,9 +10651,8 @@ ns_history_navigate(JSContext *ctx, int delta)
     ns_history_ensure_stack(js);
     int n = (int)js->history_entries->len;
     int target = js->history_pos + delta;
-    if (target < 0) target = 0;
-    if (target > n - 1) target = n - 1;
-    if (target == js->history_pos) return JS_UNDEFINED;
+    if (target < 0 || target > n - 1 || target == js->history_pos)
+        return JS_UNDEFINED;
 
     js->history_pos = target;
     ns_history_entry *e = g_ptr_array_index(js->history_entries, target);
@@ -13811,6 +13910,24 @@ ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
     return TRUE;
 }
 
+static void
+ns_decode_windows1252(const guint8 *data, guint n, GByteArray *out)
+{
+    static const guint16 high[32] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    };
+    for (guint i = 0; i < n; i++) {
+        guint8 b = data[i];
+        gunichar cp = b < 0x80 ? b : (b < 0xA0 ? high[b - 0x80] : b);
+        gchar tmp[6];
+        gint len = g_unichar_to_utf8(cp, tmp);
+        g_byte_array_append(out, (guint8 *)tmp, (guint)len);
+    }
+}
+
 static JSValue
 ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -13864,11 +13981,18 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     guint n = buf->len;
     gsize pending = 0;
     GByteArray *out = g_byte_array_sized_new(n + 1);
-    gboolean ok = (mode == 1)
-        ? ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending)
-        : (mode == 2)
-            ? ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending)
-            : ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
+    gboolean ok;
+    if (mode == 1)
+        ok = ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending);
+    else if (mode == 2)
+        ok = ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending);
+    else if (mode == 3) {
+        ns_decode_windows1252(buf->data, n, out);
+        ok = TRUE;
+        pending = 0;
+    } else {
+        ok = ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
+    }
 
     if (!ok) {
         g_byte_array_free(out, TRUE);
@@ -14144,6 +14268,32 @@ ns_filereader_readAsText(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_filereader_readAsBinaryString(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    gsize len = 0;
+    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
+    GByteArray *utf8 = g_byte_array_sized_new(len + len / 2 + 1);
+    for (gsize i = 0; i < len; i++) {
+        guint8 b = (guint8)bytes[i];
+        if (b < 0x80) {
+            g_byte_array_append(utf8, &b, 1);
+        } else {
+            guint8 two[2] = { (guint8)(0xC0 | (b >> 6)),
+                              (guint8)(0x80 | (b & 0x3F)) };
+            g_byte_array_append(utf8, two, 2);
+        }
+    }
+    JS_SetPropertyStr(ctx, this_val, "result",
+                      JS_NewStringLen(ctx, (const char *)utf8->data, utf8->len));
+    g_byte_array_free(utf8, TRUE);
+    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
+    ns_filereader_schedule(ctx, this_val);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_filereader_readAsDataURL(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -14198,7 +14348,7 @@ ns_window_filereader_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "readAsText",         ns_filereader_readAsText, 2);
     ns_bind_fn(ctx, obj, "readAsDataURL",      ns_filereader_readAsDataURL, 1);
     ns_bind_fn(ctx, obj, "readAsArrayBuffer",  ns_filereader_readAsArrayBuffer, 1);
-    ns_bind_fn(ctx, obj, "readAsBinaryString", ns_filereader_readAsText, 1);
+    ns_bind_fn(ctx, obj, "readAsBinaryString", ns_filereader_readAsBinaryString, 1);
     ns_bind_fn(ctx, obj, "abort",              ns_event_noop, 0);
     JS_SetPropertyStr(ctx, obj, "_listeners",  JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, obj);
@@ -14224,13 +14374,35 @@ ns_window_text_decoder_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (label) {
-        if (!strcmp(label, "utf-16le") || !strcmp(label, "utf-16") ||
-            !strcmp(label, "unicode") || !strcmp(label, "csunicode") ||
-            !strcmp(label, "iso-10646-ucs-2") || !strcmp(label, "ucs-2")) {
+        static const char *const utf8_labels[] = {
+            "unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8",
+            "utf-8", "utf8", "x-unicode20utf8", NULL,
+        };
+        static const char *const utf16le_labels[] = {
+            "csunicode", "iso-10646-ucs-2", "ucs-2", "unicode",
+            "unicodefeff", "utf-16", "utf-16le", NULL,
+        };
+        static const char *const utf16be_labels[] = {
+            "unicodefffe", "utf-16be", NULL,
+        };
+        static const char *const win1252_labels[] = {
+            "ansi_x3.4-1968", "ascii", "cp1252", "cp819", "csisolatin1",
+            "ibm819", "iso-8859-1", "iso-ir-100", "iso8859-1", "iso88591",
+            "iso_8859-1", "iso_8859-1:1987", "l1", "latin1", "us-ascii",
+            "windows-1252", "x-cp1252", NULL,
+        };
+        if (g_strv_contains(utf8_labels, label)) {
+            mode = 0;
+        } else if (g_strv_contains(utf16le_labels, label)) {
             mode = 1; encoding = "utf-16le";
-        } else if (!strcmp(label, "utf-16be") ||
-                   !strcmp(label, "unicodefffe")) {
+        } else if (g_strv_contains(utf16be_labels, label)) {
             mode = 2; encoding = "utf-16be";
+        } else if (g_strv_contains(win1252_labels, label)) {
+            mode = 3; encoding = "windows-1252";
+        } else {
+            g_free(label);
+            return JS_ThrowRangeError(ctx,
+                "TextDecoder: the encoding label is not supported");
         }
     }
     g_free(label);
@@ -14527,7 +14699,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     JSValue obj = JS_NewObject(ctx);
-    JSValue body_v = (argc >= 1) ? JS_DupValue(ctx, argv[0]) : JS_NewString(ctx, "");
+    JSValue body_v = (argc >= 1) ? JS_DupValue(ctx, argv[0]) : JS_NULL;
     int32_t status = 200;
     const char *status_text = NULL;
     JSValue headers_init = JS_UNDEFINED;
@@ -14568,7 +14740,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
         }
         headers_init = JS_GetPropertyStr(ctx, argv[1], "headers");
     }
-    ns_body_install(ctx, obj, body_v, FALSE);
+    ns_body_install(ctx, obj, body_v, TRUE);
     JS_SetPropertyStr(ctx, obj, "bodyUsed",   JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "status",     JS_NewInt32(ctx, status));
     JS_SetPropertyStr(ctx, obj, "statusText",
@@ -14622,11 +14794,15 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1) {
         if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
             url_v = JS_GetPropertyStr(ctx, argv[0], "url");
-            if (!JS_IsUndefined(url_v)) url_raw = JS_ToCString(ctx, url_v);
-            method_v = JS_GetPropertyStr(ctx, argv[0], "method");
-            if (!JS_IsUndefined(method_v)) method = JS_ToCString(ctx, method_v);
-            headers_init = JS_GetPropertyStr(ctx, argv[0], "headers");
-            body_v = JS_GetPropertyStr(ctx, argv[0], "body");
+            if (JS_IsString(url_v)) {
+                url_raw = JS_ToCString(ctx, url_v);
+                method_v = JS_GetPropertyStr(ctx, argv[0], "method");
+                if (!JS_IsUndefined(method_v)) method = JS_ToCString(ctx, method_v);
+                headers_init = JS_GetPropertyStr(ctx, argv[0], "headers");
+                body_v = JS_GetPropertyStr(ctx, argv[0], "body");
+            } else {
+                url_raw = JS_ToCString(ctx, argv[0]);
+            }
         } else {
             url_raw = JS_ToCString(ctx, argv[0]);
         }
@@ -15043,7 +15219,7 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     if (!s || !s->ws || argc < 1) return JS_UNDEFINED;
     int cur = ns_ws_state_get(s->ws);
     if (cur == NS_WS_STATE_CONNECTING)
-        return JS_ThrowTypeError(ctx,
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
             "WebSocket.send: still in CONNECTING state");
     if (cur != NS_WS_STATE_OPEN) return JS_UNDEFINED;
 
@@ -15067,6 +15243,23 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     }
     JSValue ex = JS_GetException(ctx);
     JS_FreeValue(ctx, ex);
+
+    if (JS_IsObject(argv[0])) {
+        JSValue b = JS_GetPropertyStr(ctx, argv[0], "_b");
+        gboolean is_blob = !JS_IsException(b) &&
+                           !JS_IsUndefined(b) && !JS_IsNull(b);
+        if (JS_IsException(b)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, b);
+        if (is_blob) {
+            gsize blen = 0;
+            char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &blen);
+            if (bytes) {
+                ns_ws_send_binary(s->ws, (const uint8_t *)bytes, blen);
+                g_free(bytes);
+            }
+            return JS_UNDEFINED;
+        }
+    }
 
     size_t slen = 0;
     const char *str = JS_ToCStringLen(ctx, &slen, argv[0]);
@@ -15126,6 +15319,16 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
     g_free(resolved);
+
+    if (g_ascii_strncasecmp(target, "http://", 7) == 0) {
+        char *remapped = g_strconcat("ws://", target + 7, NULL);
+        g_free(target);
+        target = remapped;
+    } else if (g_ascii_strncasecmp(target, "https://", 8) == 0) {
+        char *remapped = g_strconcat("wss://", target + 8, NULL);
+        g_free(target);
+        target = remapped;
+    }
 
     if (g_ascii_strncasecmp(target, "ws://",  5) != 0 &&
         g_ascii_strncasecmp(target, "wss://", 6) != 0) {
@@ -16027,7 +16230,8 @@ ns_worker_post_message(JSContext *ctx, JSValueConst this_val,
             "Worker.postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
-        return JS_ThrowTypeError(ctx, "Worker.postMessage: value could not be cloned");
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "Worker.postMessage: value could not be cloned");
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
                                ns_worker_deliver_worker, msg, NULL);
@@ -16059,7 +16263,8 @@ ns_worker_global_post_message(JSContext *ctx, JSValueConst this_val,
             "postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
-        return JS_ThrowTypeError(ctx, "postMessage: value could not be cloned");
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "postMessage: value could not be cloned");
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     ns_worker_post_owner_message(host, msg);
     return JS_UNDEFINED;
@@ -21246,6 +21451,15 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
     }
     gboolean adjacent_to_self = (g_ascii_strcasecmp(pos, "beforebegin") == 0 ||
                                  g_ascii_strcasecmp(pos, "afterend") == 0);
+    if (adjacent_to_self &&
+        (!self->parent ||
+         (self->parent->kind == NS_NODE_DOCUMENT &&
+          !(self->parent->flags & NS_NODE_FRAGMENT)))) {
+        JS_FreeCString(ctx, pos);
+        JS_FreeCString(ctx, html);
+        return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+            "insertAdjacentHTML: the element has no parent element");
+    }
     const char *ctx_tag = adjacent_to_self
         ? ((self->parent && self->parent->kind == NS_NODE_ELEMENT)
            ? self->parent->name : NULL)
@@ -21448,6 +21662,26 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static void
+ns_convert_arg_node(ns_js *js, ns_node *node, GPtrArray *seq)
+{
+    if (node->kind == NS_NODE_DOCUMENT && !node->parent) {
+        if (js) ns_js_record_fragment_emptied(js, node);
+        ns_node *c = node->first_child;
+        while (c) {
+            ns_node *next = c->next_sibling;
+            ns_node_remove(c);
+            if (js) g_hash_table_remove(js->orphan_nodes, c);
+            g_ptr_array_add(seq, c);
+            c = next;
+        }
+    } else {
+        if (node->parent) ns_node_remove(node);
+        if (js) g_hash_table_remove(js->orphan_nodes, node);
+        g_ptr_array_add(seq, node);
+    }
+}
+
 static JSValue
 ns_element_before(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
@@ -21455,27 +21689,29 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *to_insert = NULL;
         if (child) {
             if (child == self || ns_node_ancestor_or_self(self->parent, child)) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            to_insert = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                to_insert = ns_node_new_text(g_strdup(txt));
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (!to_insert) continue;
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *to_insert = g_ptr_array_index(seq, k);
         ns_insert_sibling_before(self, to_insert);
         if (_j)
             ns_js_record_child_change(_j, self->parent, to_insert, NULL,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -21501,9 +21737,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
         ns_node *node = ns_unwrap_element_mut(argv[i]);
         if (node) {
             if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
-            ns_node_remove(node);
-            g_ptr_array_add(seq, node);
+            ns_convert_arg_node(_j, node, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
@@ -21555,9 +21789,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
         ns_node *node = ns_unwrap_element_mut(argv[i]);
         if (node) {
             if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
-            ns_node_remove(node);
-            g_ptr_array_add(seq, node);
+            ns_convert_arg_node(_j, node, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
@@ -21794,27 +22026,28 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(verr)) return verr;
         }
     }
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *added = NULL;
         if (child) {
             if (ns_node_ancestor_or_self(parent, child)) continue;
-            if (child->parent) ns_node_remove(child);
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            ns_node_append_child(parent, child);
-            added = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                added = ns_node_new_text(g_strdup(txt));
-                ns_node_append_child(parent, added);
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (added && _j)
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *added = g_ptr_array_index(seq, k);
+        ns_node_append_child(parent, added);
+        if (_j)
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -21838,22 +22071,22 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
         }
     }
     ns_node *ref = parent->first_child;
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *to_insert = NULL;
         if (child) {
             if (ns_node_ancestor_or_self(parent, child)) continue;
-            if (child->parent) ns_node_remove(child);
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            to_insert = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                to_insert = ns_node_new_text(g_strdup(txt));
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (!to_insert) continue;
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *to_insert = g_ptr_array_index(seq, k);
         if (!ref) {
             ns_node_append_child(parent, to_insert);
         } else {
@@ -21869,6 +22102,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -22184,13 +22418,18 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     if (!n || n->kind != NS_NODE_ELEMENT || argc < 1) return JS_NULL;
     const char *want = JS_ToCString(ctx, argv[0]);
     if (!want) return JS_NULL;
+    char *lowered = NULL;
+    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+        lowered = g_ascii_strdown(want, -1);
+    const char *name = lowered ? lowered : want;
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
-        if (a->name && g_ascii_strcasecmp(a->name, want) == 0) {
+        if (a->name && strcmp(a->name, name) == 0) {
             out = ns_attr_to_js(ctx, this_val, a, TRUE);
             break;
         }
     }
+    g_free(lowered);
     JS_FreeCString(ctx, want);
     return out;
 }
@@ -22282,8 +22521,12 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
         ? NULL : JS_ToCString(ctx, prefix_v);
     const char *local = JS_IsNull(local_v) || JS_IsUndefined(local_v)
         ? NULL : JS_ToCString(ctx, local_v);
+    JSValue old = JS_NULL;
     if (name && *name && !ns_attr_name_is_internal(name)) {
         const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
+        const ns_attr *prev = ns_element_attr_by_namespace(n, ns_uri,
+            local && *local ? local : name);
+        if (prev) old = ns_attr_to_js(ctx, JS_NULL, prev, TRUE);
         ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, prefix,
                                    local && *local ? local : name,
                                    name, val ? val : "");
@@ -22300,7 +22543,7 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ns_v);
     JS_FreeValue(ctx, prefix_v);
     JS_FreeValue(ctx, local_v);
-    return JS_NULL;
+    return old;
 }
 
 static JSValue
@@ -22310,7 +22553,9 @@ ns_element_hasAttributes(JSContext *ctx, JSValueConst this_val,
     (void)ctx; (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_FALSE;
-    return n->attrs ? JS_TRUE : JS_FALSE;
+    for (const ns_attr *a = n->attrs; a; a = a->next)
+        if (a->name && !ns_attr_name_is_internal(a->name)) return JS_TRUE;
+    return JS_FALSE;
 }
 
 static JSValue ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
@@ -22423,8 +22668,10 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     const char *name = lowered ? lowered : raw_name;
     gboolean had = ns_element_get_attr(n, name) != NULL;
     gboolean want;
-    if (argc >= 2) want = JS_ToBool(ctx, argv[1]) ? TRUE : FALSE;
-    else           want = !had;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]))
+        want = JS_ToBool(ctx, argv[1]) ? TRUE : FALSE;
+    else
+        want = !had;
     ns_js *_j = js_from_ctx(ctx);
     if (want && !had)      ns_js_set_attr_recorded(_j, n, name, "");
     else if (!want && had) ns_js_remove_attr_recorded(_j, n, name);
@@ -23367,6 +23614,11 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
         } else {
             const ns_node *byid = ns_node_find_by_id(root, sel + 1);
             if (byid) hit = byid;
+        }
+        if (hit == root && !include_self) {
+            hit = NULL;
+            for (const ns_node *c = root->first_child; c && !hit; c = c->next_sibling)
+                hit = ns_node_find_by_id(c, sel + 1);
         }
         if (!want_all) {
             return hit ? ns_make_element(ctx, hit) : JS_NULL;
@@ -24900,6 +25152,19 @@ ns_js_form_first_invalid(const ns_node *form, const ns_node *scan,
     return NULL;
 }
 
+static void
+ns_js_form_collect_invalid(const ns_node *form, const ns_node *scan,
+                           const ns_node *doc, int depth, GPtrArray *out)
+{
+    if (!form || !scan || depth >= 512) return;
+    if (scan->kind == NS_NODE_ELEMENT &&
+        ns_form_owner(scan, doc) == form &&
+        !ns_js_element_valid(scan))
+        g_ptr_array_add(out, (gpointer)scan);
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        ns_js_form_collect_invalid(form, c, doc, depth + 1, out);
+}
+
 static JSValue
 ns_element_get_validity(JSContext *ctx, JSValueConst this_val)
 {
@@ -24932,11 +25197,16 @@ ns_element_check_validity(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(this_val);
     if (ns_node_is_element_named(n, "form")) {
         const ns_node *doc = ns_node_root(n);
-        const ns_node *bad = ns_js_form_first_invalid(n, doc ? doc : n,
-                                                       doc ? doc : n, 0);
-        if (bad && js_from_ctx(ctx)) ns_js_dispatch_event(js_from_ctx(ctx),
-                                                          bad, "invalid", NULL);
-        return JS_NewBool(ctx, bad == NULL);
+        GPtrArray *bad = g_ptr_array_new();
+        ns_js_form_collect_invalid(n, doc ? doc : n, doc ? doc : n, 0, bad);
+        ns_js *js = js_from_ctx(ctx);
+        if (js)
+            for (guint i = 0; i < bad->len; i++)
+                ns_js_dispatch_event(js, g_ptr_array_index(bad, i),
+                                     "invalid", NULL);
+        gboolean ok = bad->len == 0;
+        g_ptr_array_free(bad, TRUE);
+        return JS_NewBool(ctx, ok);
     }
     gboolean ce = ns_node_has_custom_error(n);
     gboolean vm = FALSE, tm = FALSE, pm = FALSE;
@@ -25114,6 +25384,12 @@ ns_element_get_default_value(JSContext *ctx, JSValueConst this_val)
         g_free(t);
         return v;
     }
+    if (ns_node_is_element_named(n, "textarea")) {
+        char *t = ns_node_collect_text(n);
+        JSValue v = JS_NewString(ctx, t ? t : "");
+        g_free(t);
+        return v;
+    }
     return ns_element_reflect_str_get(ctx, this_val, "value", FALSE);
 }
 
@@ -25131,6 +25407,15 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
             if (s && *s)
                 ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         }
+        if (s) JS_FreeCString(ctx, s);
+        if (_j) _j->mutated = TRUE;
+        return JS_UNDEFINED;
+    }
+    if (ns_node_is_element_named(el, "textarea")) {
+        ns_js *_j = js_from_ctx(ctx);
+        ns_js_clear_children(_j, el);
+        if (s && *s)
+            ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
@@ -25791,21 +26076,26 @@ ns_element_attachShadow(JSContext *ctx, JSValueConst this_val,
     ns_node *host = ns_unwrap_element_mut(this_val);
     if (!host || host->kind != NS_NODE_ELEMENT)
         return JS_ThrowTypeError(ctx, "attachShadow requires an Element host");
+    if (ns_element_find_shadow_child(host))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "attachShadow: the element already hosts a shadow root");
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "attachShadow: argument 1 is not a dictionary");
+    const char *mode;
     {
-        ns_node *existing = ns_element_find_shadow_child(host);
-        if (existing) {
-            JSValue w = ns_make_element(ctx, existing);
-            ns_shadow_root_define_props(ctx, w);
-            return w;
-        }
-    }
-    const char *mode = "open";
-    if (argc >= 1 && JS_IsObject(argv[0])) {
         JSValue m = JS_GetPropertyStr(ctx, argv[0], "mode");
         const char *s = JS_ToCString(ctx, m);
-        if (s) { mode = (strcmp(s, "closed") == 0) ? "closed" : "open"; }
-        if (s) JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, m);
+        if (!s) return JS_EXCEPTION;
+        if (strcmp(s, "open") == 0) mode = "open";
+        else if (strcmp(s, "closed") == 0) mode = "closed";
+        else {
+            JS_FreeCString(ctx, s);
+            return JS_ThrowTypeError(ctx,
+                "attachShadow: mode must be 'open' or 'closed'");
+        }
+        JS_FreeCString(ctx, s);
     }
     ns_node *root = ns_node_new_element(g_strdup("div"));
     if (!root) return JS_ThrowOutOfMemory(ctx);
@@ -26203,7 +26493,7 @@ ns_element_get_scrollTop(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) return JS_NewInt32(ctx, 0);
-    return JS_NewInt32(ctx, (int)(b->scroll_y + 0.5));
+    return JS_NewFloat64(ctx, b->scroll_y);
 }
 
 static JSValue
@@ -26212,7 +26502,7 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) return JS_NewInt32(ctx, 0);
-    return JS_NewInt32(ctx, (int)(b->scroll_x + 0.5));
+    return JS_NewFloat64(ctx, b->scroll_x);
 }
 
 static JSValue
@@ -26638,7 +26928,9 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (el->name && (strcmp(el->name, "progress") == 0 ||
                      strcmp(el->name, "meter") == 0))
         return ns_element_set_double_attr(ctx, el, "value", val);
-    const char *s = JS_ToCString(ctx, val);
+    gboolean null_to_empty = JS_IsNull(val) && el->name &&
+        (strcmp(el->name, "input") == 0 || strcmp(el->name, "textarea") == 0);
+    const char *s = null_to_empty ? "" : JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
     if (el->name && strcmp(el->name, "select") == 0) {
         ns_node *chosen = NULL;
@@ -26695,13 +26987,13 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_js_clear_children(_j, el);
         if (s && *s)
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
-        JS_FreeCString(ctx, s);
+        if (!null_to_empty) JS_FreeCString(ctx, s);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
     ns_element_set_attr(el, ns_input_value_is_dirty_mode(el) ? "data-nd-value"
                                                              : "value", s);
-    JS_FreeCString(ctx, s);
+    if (!null_to_empty) JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
@@ -26713,26 +27005,24 @@ ns_element_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !el->name || strcmp(el->name, "select") != 0)
         return JS_NewInt32(ctx, -1);
-    gboolean multiple = ns_element_get_attr(el, "multiple") != NULL;
+    const ns_node *chosen = ns_select_chosen_option(el);
+    if (!chosen) return JS_NewInt32(ctx, -1);
     int idx = 0;
-    int first_idx = -1;
     for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         if (strcmp(c->name, "option") == 0) {
-            if (first_idx < 0) first_idx = idx;
-            if (ns_element_get_attr(c, "selected")) return JS_NewInt32(ctx, idx);
+            if (c == chosen) return JS_NewInt32(ctx, idx);
             idx++;
         } else if (strcmp(c->name, "optgroup") == 0) {
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
                 if (ns_node_is_element_named(cc, "option")) {
-                    if (first_idx < 0) first_idx = idx;
-                    if (ns_element_get_attr(cc, "selected")) return JS_NewInt32(ctx, idx);
+                    if (cc == chosen) return JS_NewInt32(ctx, idx);
                     idx++;
                 }
             }
         }
     }
-    return JS_NewInt32(ctx, multiple ? -1 : first_idx);
+    return JS_NewInt32(ctx, -1);
 }
 
 static JSValue
@@ -27501,18 +27791,27 @@ ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
     JSValue arr = JS_NewArray(ctx);
     if (!tbl) return arr;
     uint32_t idx = 0;
-    GQueue q = G_QUEUE_INIT;
-    g_queue_push_tail(&q, (ns_node *)tbl);
-    while (!g_queue_is_empty(&q)) {
-        ns_node *n = g_queue_pop_head(&q);
-        for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "tr"))
-                JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
-            else
-                g_queue_push_tail(&q, c);
-        }
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "thead"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "tr"))
+            JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
+        else if (ns_node_is_element_named(c, "tbody"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
     }
-    g_queue_clear(&q);
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "tfoot"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
     return arr;
 }
 

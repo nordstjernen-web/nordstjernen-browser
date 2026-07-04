@@ -1774,16 +1774,26 @@ ns_select_chosen_option(const ns_node *select)
     if (!select) return NULL;
     const ns_node *selected = ns_select_first_selected_option(select);
     if (selected) return selected;
+    if (ns_element_get_attr(select, "multiple")) return NULL;
+    const char *size = ns_element_get_attr(select, "size");
+    if (size) {
+        char *end = NULL;
+        long v = strtol(size, &end, 10);
+        if (end != size && v > 1) return NULL;
+    }
     const ns_node *first = NULL;
     for (const ns_node *c = select->first_child; c && !first; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "optgroup")) {
+            if (ns_element_get_attr(c, "disabled")) continue;
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option")) {
+                if (ns_node_is_element_named(cc, "option") &&
+                    !ns_element_get_attr(cc, "disabled")) {
                     first = cc;
                     break;
                 }
             }
-        } else if (ns_node_is_element_named(c, "option")) {
+        } else if (ns_node_is_element_named(c, "option") &&
+                   !ns_element_get_attr(c, "disabled")) {
             first = c;
         }
     }
