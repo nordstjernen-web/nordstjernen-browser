@@ -137,23 +137,6 @@ set_source_rgba(cairo_t *cr, rgba c)
 }
 
 static gboolean
-node_class_has(const ns_node *n, const char *needle)
-{
-    const char *cls = n ? ns_element_get_attr(n, "class") : NULL;
-    if (!cls || !needle || !*needle) return FALSE;
-    gsize len = strlen(needle);
-    const char *p = cls;
-    while (*p) {
-        while (*p && g_ascii_isspace((unsigned char)*p)) p++;
-        const char *tok = p;
-        while (*p && !g_ascii_isspace((unsigned char)*p)) p++;
-        if ((gsize)(p - tok) == len && memcmp(tok, needle, len) == 0)
-            return TRUE;
-    }
-    return FALSE;
-}
-
-static gboolean
 overflow_kw_clips(const char *ov)
 {
     return ov && (g_ascii_strcasecmp(ov, "hidden") == 0 ||
@@ -3525,35 +3508,6 @@ paint_image(cairo_t *cr, const ns_box *b)
 }
 
 static void
-paint_tmh_audio_player(cairo_t *cr, const ns_box *b)
-{
-    if (!b || !node_class_has(b->dom, "mw-tmh-player") ||
-        !node_class_has(b->dom, "audio"))
-        return;
-    double x = b->x + b->margin.left + b->border.left + b->padding.left;
-    double y = b->y + b->margin.top + b->border.top + b->padding.top;
-    double w = b->content_width;
-    double h = b->content_height;
-    if (!(w > 0) || !(h > 0)) return;
-    cairo_save(cr);
-    cairo_rectangle(cr, x, y, w, h);
-    cairo_set_source_rgba(cr, 0, 0, 0, 0.50);
-    cairo_fill(cr);
-    double cy = y + h / 2.0;
-    double px = x + 20.0;
-    double r = h * 0.26;
-    if (r < 5) r = 5;
-    if (r > 9) r = 9;
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.94);
-    cairo_move_to(cr, px - r * 0.55, cy - r);
-    cairo_line_to(cr, px + r, cy);
-    cairo_line_to(cr, px - r * 0.55, cy + r);
-    cairo_close_path(cr);
-    cairo_fill(cr);
-    cairo_restore(cr);
-}
-
-static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
@@ -5466,7 +5420,6 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         if (b->kind == NS_BOX_BLOCK) {
             paint_marker(cr, b);
             paint_hr(cr, b);
-            paint_tmh_audio_player(cr, b);
         }
         if (b->kind == NS_BOX_INLINE) {
             if (g_paint_collect_stats) g_paint_stats.inlines++;
