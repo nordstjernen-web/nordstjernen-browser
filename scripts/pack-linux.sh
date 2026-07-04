@@ -100,7 +100,7 @@ else
     GLIBC_MIN=$(objdump -T "$BUILDDIR/src/gtk/nordstjernen" 2>/dev/null \
         | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -t. -k1,1V -k2,2n -u \
         | tail -1 | cut -d_ -f2)
-    LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (for 2.38: Ubuntu 24.04 / Debian 13 / Fedora 39 era and later)"
+    LIBC_REQ="- glibc ${GLIBC_MIN:-2.38}+ (the build container's generation; check with: ldd --version)"
     RUNTIME_INSTALL='    sudo apt   install libgtk-4-1 libcurl4 libuchardet0 librsvg2-2 libwebp7 \
         libpoppler-glib8 libavif16 libpsl5 libseccomp2 libsqlite3-0 libsdl2-2.0-0   # Debian/Ubuntu
     sudo dnf   install gtk4 libcurl libuchardet librsvg2 poppler-glib libwebp \
