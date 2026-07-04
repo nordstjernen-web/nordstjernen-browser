@@ -113,7 +113,7 @@ http_recv_fd(int sock)
     msg.msg_control = u.buf;
     msg.msg_controllen = sizeof u.buf;
     ssize_t r;
-    while ((r = recvmsg(sock, &msg, 0)) < 0 && errno == EINTR)
+    while ((r = recvmsg(sock, &msg, MSG_CMSG_CLOEXEC)) < 0 && errno == EINTR)
         ;
     if (r <= 0)
         return -1;

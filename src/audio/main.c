@@ -1,4 +1,5 @@
 /* nordstjernen-audio: isolated MP3 / MPEG-1 audio playback helper driven over stdin/stdout. */
+#define _GNU_SOURCE
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #ifdef main
@@ -12,6 +13,7 @@
 #include <stdarg.h>
 #include <limits.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 
 #include <curl/curl.h>
@@ -796,7 +798,7 @@ write_temp_from_url(const char *url)
 {
     char tmpl[PATH_MAX];
     snprintf(tmpl, sizeof tmpl, "%s/nsaudio-XXXXXX", audio_tmp_dir());
-    int fd = mkstemp(tmpl);
+    int fd = mkostemp(tmpl, O_CLOEXEC);
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, "wb");
     if (!f) { close(fd); remove(tmpl); return NULL; }

@@ -24,16 +24,12 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #if !defined(__ANDROID__)
-#ifndef MFD_CLOEXEC
-#define MFD_CLOEXEC 0x0001U
-#endif
-
 static int
 open_fb_fd(size_t size)
 {
     int fd = -1;
 #if defined(__linux__)
-    fd = (int)syscall(SYS_memfd_create, "nshttp-fb", (unsigned)MFD_CLOEXEC);
+    fd = memfd_create("nshttp-fb", MFD_CLOEXEC);
 #endif
     if (fd < 0) {
         static unsigned counter = 0;
