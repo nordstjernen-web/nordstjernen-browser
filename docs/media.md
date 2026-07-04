@@ -28,7 +28,12 @@ portable C.
 
 `.webm` plays inline too when **FFmpeg's libav\*** (`libavformat` /
 `libavcodec` / `libavutil` / `libswscale` / `libswresample`) is present at build
-time (`-DNS_HAVE_LIBAV`). libav demuxes the Matroska container
+time (`-DNS_HAVE_LIBAV`). These are the component libraries of
+[FFmpeg](https://github.com/FFmpeg/FFmpeg) (canonical git
+<https://git.ffmpeg.org/ffmpeg.git>) — an actively maintained project, **not**
+the defunct [Libav](https://github.com/libav/libav) fork (last release 2018),
+whose `libav.org` domain is unrelated despite the shared library-name prefix.
+libav demuxes the Matroska container
 and decodes **VP9/VP8** frames, which are scaled to BGRA and served through the
 same off-tick frame loop as the MPEG-1 path — both royalty-free codecs. It is
 **required on Windows** (`meson setup` fails without it) because YouTube and
