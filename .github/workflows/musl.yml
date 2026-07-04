@@ -34,7 +34,6 @@ jobs:
             build-base clang ccache pkgconf meson ninja git cmake \
             gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev libwebp-dev sdl2-dev \
             librsvg-dev libseccomp-dev ffmpeg-dev \
-            vulkan-headers vulkan-loader-dev spirv-headers glslang glslang-dev shaderc \
             fontconfig font-dejavu ca-certificates file nodejs
 
       - uses: actions/checkout@v6
