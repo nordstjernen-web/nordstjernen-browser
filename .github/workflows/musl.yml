@@ -34,6 +34,7 @@ jobs:
             build-base clang ccache pkgconf meson ninja git cmake \
             gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev libwebp-dev sdl2-dev \
             librsvg-dev libseccomp-dev ffmpeg-dev \
+            vulkan-headers vulkan-loader-dev spirv-headers glslang glslang-dev shaderc \
             fontconfig font-dejavu ca-certificates file nodejs
 
       - uses: actions/checkout@v6
@@ -54,10 +55,7 @@ jobs:
       - name: Build (musl libc)
         run: |
           export CC="ccache clang"
-          # ffmpeg-dev pulls in Vulkan on Alpine, which would make GGML try to
-          # build its Vulkan backend (needs SPIRV-Headers, not packaged here).
-          # This is a libc sanity build, so keep the AI backend CPU-only.
-          meson setup builddir -Dai_gpu=disabled
+          meson setup builddir
           meson compile -C builddir
           file builddir/src/gtk/nordstjernen
 
