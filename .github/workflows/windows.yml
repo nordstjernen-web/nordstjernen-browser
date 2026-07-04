@@ -106,17 +106,20 @@ jobs:
         run: |
           # MSYS2's mingw FFmpeg is GPL; use a minimal LGPL one (VP9/VP8 +
           # Opus/Vorbis only). Build it once into a cached prefix (keyed on the
-          # build script), then expose it via pkg-config for meson and copy its
-          # DLLs into the mingw prefix so pack-windows.sh's DLL chase bundles
-          # them. WebM is required on Windows, so this must succeed.
+          # build script), then install it into the mingw prefix so meson finds
+          # it via the default pkg-config path and pack-windows.sh's DLL chase
+          # bundles it. WebM is required on Windows, so this must succeed.
           PREFIX="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-lgpl"
           if [ ! -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ]; then
             scripts/build-ffmpeg-lgpl.sh "$PREFIX"
           else
             echo "using cached LGPL FFmpeg at $PREFIX"
           fi
-          cp "$PREFIX"/bin/*.dll /mingw64/bin/
-          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
+          cp -r "$PREFIX"/bin/. /mingw64/bin/
+          cp -r "$PREFIX"/lib/. /mingw64/lib/
+          cp -r "$PREFIX"/include/. /mingw64/include/
+          sed -i "s|^prefix=.*|prefix=/mingw64|" /mingw64/lib/pkgconfig/libav*.pc \
+                                                 /mingw64/lib/pkgconfig/libsw*.pc
 
       - name: Build
         id: build
