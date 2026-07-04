@@ -3663,6 +3663,16 @@ paint_video(cairo_t *cr, const ns_box *b)
         }
     }
     gboolean punched = ns_video_helper_composited(v);
+    if (v && g_getenv("NS_DBG_COMPOSITE")) {
+        static gint64 plast;
+        gint64 pn = g_get_monotonic_time();
+        if (pn - plast > 1000000) {
+            plast = pn;
+            g_printerr("[hole] punched=%d opened=%d tex=%d box=%.0f,%.0f %.0fx%.0f\n",
+                       punched, v->video_opened ? 1 : 0, tex ? 1 : 0,
+                       b->x, b->y, b->content_width, b->content_height);
+        }
+    }
     cairo_save(cr);
     if (punched) {
         cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);

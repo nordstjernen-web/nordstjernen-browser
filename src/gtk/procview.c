@@ -2535,6 +2535,18 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             cairo_rectangle(cr, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
             cairo_fill(cr);
         }
+        if (g_getenv("NS_DBG_COMPOSITE")) {
+            static gint64 last_us;
+            gint64 nowu = g_get_monotonic_time();
+            if (nowu - last_us > 1000000) {
+                last_us = nowu;
+                g_printerr("[composite] drawn=%d slot=%u magic=%s %ux%u "
+                           "rect=%.0f,%.0f %.0fx%.0f\n",
+                           frame_drawn, slot,
+                           magic == NS_VRING_MAGIC ? "ok" : "BAD",
+                           fw, fh, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
+            }
+        }
     }
 #endif
     if (v->frame) {

@@ -1132,12 +1132,17 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     GtkWidget *row = gtk_list_box_row_new();
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     if (v) g_object_set_data(G_OBJECT(row), "ns-view", v);
+    g_object_set_data(G_OBJECT(row), "ns-pid", GINT_TO_POINTER(pid));
     gtk_list_box_append(GTK_LIST_BOX(tm->list), row);
 }
 
 static void
 task_mgr_refresh(NsTaskMgr *tm)
 {
+    GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(tm->list));
+    int selected_pid = sel
+        ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sel), "ns-pid")) : 0;
+
     GtkWidget *child;
     while ((child = gtk_widget_get_first_child(tm->list)))
         gtk_list_box_remove(GTK_LIST_BOX(tm->list), child);
@@ -1183,6 +1188,18 @@ task_mgr_refresh(NsTaskMgr *tm)
             char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
             task_mgr_add_row(tm, vname, vpid, vstate, vrss, NULL);
             g_free(vname);
+        }
+    }
+
+    if (selected_pid > 0) {
+        for (GtkWidget *r = gtk_widget_get_first_child(tm->list);
+             r; r = gtk_widget_get_next_sibling(r)) {
+            if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "ns-pid"))
+                    == selected_pid) {
+                gtk_list_box_select_row(GTK_LIST_BOX(tm->list),
+                                        GTK_LIST_BOX_ROW(r));
+                break;
+            }
         }
     }
 }

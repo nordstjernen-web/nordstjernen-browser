@@ -734,7 +734,7 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
     if (v->natural_width <= 0)  v->natural_width  = ns_video_player_width(player);
     if (v->natural_height <= 0) v->natural_height = ns_video_player_height(player);
 
-    if (!ns_video_helper_enabled()) {
+    {
         gboolean ended = FALSE;
         ns_texture *frame = ns_video_player_frame_at(player, v->cur_time,
                                                      v->loop, &ended);
