@@ -18,7 +18,7 @@ exactly the latest build. It contains:
 | --- | --- | --- |
 | Source tarballs (`.tar.gz`, `.tar.xz`) | `git archive` on the host | `source/` |
 | Debian package (`.deb`) + binary zip | `debian:trixie` container | `linux/debian/` |
-| Ubuntu package (`.deb`) + binary zip | `ubuntu:24.04` container | `linux/ubuntu/` |
+| Ubuntu package (`.deb`) + binary zip | `ubuntu:26.04` container | `linux/ubuntu/` |
 | openSUSE package (`.rpm`) + binary zip | `opensuse/tumbleweed` container | `linux/opensuse/` |
 | Alpine (musl) binary zip | `alpine:edge` container | `linux/alpine/` |
 | Windows bundle (`.zip`) + `nordstjernen.exe` | GitHub Actions `windows.yml` | `windows/` |
@@ -263,7 +263,7 @@ to the command (keep the cron file `chmod 600`):
 | `NIGHTLY_GHA_TIMEOUT` | `4200` | Seconds to wait for each GitHub run. |
 | `NIGHTLY_GHA_DISPATCH` | `1` | Dispatch a fresh run if none exists for the commit; set `0` to only reuse. |
 | `NIGHTLY_DEBIAN_IMAGE` | `debian:trixie` | Override the Debian base image. |
-| `NIGHTLY_UBUNTU_IMAGE` | `ubuntu:24.04` | Override the Ubuntu base image. |
+| `NIGHTLY_UBUNTU_IMAGE` | `ubuntu:26.04` | Override the Ubuntu base image. |
 | `NIGHTLY_OPENSUSE_IMAGE` | `opensuse/tumbleweed` | Override the openSUSE base image. |
 | `NIGHTLY_ALPINE_IMAGE` | `alpine:edge` | Override the Alpine (musl) base image. |
 | `NS_WEBGPU` | `auto` | WebGPU in the Linux builds: `auto` builds it when wgpu-native is fetched, `0` forces it off, `1` makes a missing wgpu-native fatal. Forwarded into the distro containers. |

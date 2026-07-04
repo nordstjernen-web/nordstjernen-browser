@@ -216,7 +216,7 @@ moving parts:
 | GLib / GModule | (ships with GTK) | core types, dynamic module loading |
 | libepoxy | — | OpenGL/ES function dispatch for WebGL (`src/webgl.c`) |
 | Pango | (ships with GTK) | text shaping and layout |
-| libcurl | ≥ 7.85 | HTTP/2 networking, HSTS, cookies |
+| libcurl | ≥ 8.11 | HTTP/2 networking, HSTS, cookies, native WebSocket |
 | OpenSSL (libcrypto) | — | WebCrypto (`crypto.subtle`) — hashing, HMAC, AES, RSA, ECDSA/ECDH, HKDF/PBKDF2 |
 | uchardet | — | charset detection for `ns_html_decode_body` |
 | libpsl | — | public-suffix list for cookie scoping |
