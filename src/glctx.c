@@ -261,11 +261,35 @@ ns_gl_context_create(void)
     EGLConfig config;
     if (!ns_gl_choose_config(d, &config)) return NULL;
 
-    EGLint ctx_attrs[] = { EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE };
-    EGLContext context = eglCreateContext(d, config, EGL_NO_CONTEXT, ctx_attrs);
-    if (context == EGL_NO_CONTEXT) {
-        ctx_attrs[1] = 2;
-        context = eglCreateContext(d, config, EGL_NO_CONTEXT, ctx_attrs);
+#ifndef EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT
+#define EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT 0x30BF
+#endif
+#ifndef EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT
+#define EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT 0x3138
+#endif
+#ifndef EGL_LOSE_CONTEXT_ON_RESET_EXT
+#define EGL_LOSE_CONTEXT_ON_RESET_EXT 0x31BF
+#endif
+    const char *egl_exts = eglQueryString(d, EGL_EXTENSIONS);
+    gboolean robust = egl_exts &&
+        strstr(egl_exts, "EGL_EXT_create_context_robustness") != NULL;
+
+    EGLContext context = EGL_NO_CONTEXT;
+    for (EGLint major = 3; major >= 2 && context == EGL_NO_CONTEXT; major--) {
+        if (robust) {
+            EGLint ra[] = {
+                EGL_CONTEXT_MAJOR_VERSION, major,
+                EGL_CONTEXT_OPENGL_ROBUST_ACCESS_EXT, EGL_TRUE,
+                EGL_CONTEXT_OPENGL_RESET_NOTIFICATION_STRATEGY_EXT,
+                    EGL_LOSE_CONTEXT_ON_RESET_EXT,
+                EGL_NONE,
+            };
+            context = eglCreateContext(d, config, EGL_NO_CONTEXT, ra);
+        }
+        if (context == EGL_NO_CONTEXT) {
+            EGLint na[] = { EGL_CONTEXT_MAJOR_VERSION, major, EGL_NONE };
+            context = eglCreateContext(d, config, EGL_NO_CONTEXT, na);
+        }
     }
     if (context == EGL_NO_CONTEXT) return NULL;
 
