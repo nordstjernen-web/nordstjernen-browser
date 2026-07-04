@@ -24,18 +24,6 @@ ns_image_webp_supports_bytes(const guchar *data, gsize len)
            memcmp(data + 8, "WEBP", 4) == 0;
 }
 
-static void
-ns_image_webp_premultiply(guint8 *pix, gsize size)
-{
-    for (gsize i = 0; i < size; i += 4) {
-        guint a = pix[i + 3];
-        if (a == 255) continue;
-        pix[i]     = (guint8)((pix[i]     * a + 127) / 255);
-        pix[i + 1] = (guint8)((pix[i + 1] * a + 127) / 255);
-        pix[i + 2] = (guint8)((pix[i + 2] * a + 127) / 255);
-    }
-}
-
 static guint8 *
 ns_image_webp_decode_still_premultiplied(const guchar *data, gsize len,
                                          int *out_w, int *out_h,
@@ -51,11 +39,20 @@ ns_image_webp_decode_still_premultiplied(const guchar *data, gsize len,
     gsize size = stride * (gsize)h;
     guint8 *pix = g_try_malloc(size);
     if (!pix) return NULL;
-    if (!WebPDecodeBGRAInto(data, len, pix, size, (int)stride)) {
+    WebPDecoderConfig config;
+    if (!WebPInitDecoderConfig(&config)) {
         g_free(pix);
         return NULL;
     }
-    ns_image_webp_premultiply(pix, size);
+    config.output.colorspace = MODE_bgrA;
+    config.output.is_external_memory = 1;
+    config.output.u.RGBA.rgba = pix;
+    config.output.u.RGBA.stride = (int)stride;
+    config.output.u.RGBA.size = size;
+    if (WebPDecode(data, len, &config) != VP8_STATUS_OK) {
+        g_free(pix);
+        return NULL;
+    }
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
     if (out_stride) *out_stride = stride;
