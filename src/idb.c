@@ -57,20 +57,24 @@ ns_idb_cache_trim(void)
         return;
     GHashTableIter it;
     gpointer k, v;
-    const char *lru_path = NULL;
-    guint64 lru_stamp = G_MAXUINT64;
+    const char *lru_disk = NULL, *lru_mem = NULL;
+    guint64 lru_disk_stamp = G_MAXUINT64, lru_mem_stamp = G_MAXUINT64;
     g_hash_table_iter_init(&it, g_idb_handles);
     while (g_hash_table_iter_next(&it, &k, &v)) {
         ns_idb_db *h = v;
-        if (h->path && strcmp(h->path, ":memory:") == 0)
-            continue;
-        if (h->last_used < lru_stamp) {
-            lru_stamp = h->last_used;
-            lru_path = k;
+        if (h->path && strcmp(h->path, ":memory:") == 0) {
+            if (h->last_used < lru_mem_stamp) {
+                lru_mem_stamp = h->last_used;
+                lru_mem = k;
+            }
+        } else if (h->last_used < lru_disk_stamp) {
+            lru_disk_stamp = h->last_used;
+            lru_disk = k;
         }
     }
-    if (lru_path)
-        g_hash_table_remove(g_idb_handles, lru_path);
+    const char *victim = lru_disk ? lru_disk : lru_mem;
+    if (victim)
+        g_hash_table_remove(g_idb_handles, victim);
 }
 
 static JSValue
