@@ -226,6 +226,7 @@ static const char *ns_http_status_text(int status);
 static void ns_attach_body_consumers(JSContext *ctx, JSValueConst obj);
 static char *ns_blob_bytes_as_string(JSContext *ctx, JSValueConst blob,
                                      gsize *out_len);
+static char *ns_fetch_normalize_method(const char *method);
 static JSValue ns_event_stop_immediate(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void    ns_target_fire_event(JSContext *ctx, JSValueConst obj,
@@ -6094,6 +6095,7 @@ typedef struct ns_js_fetch_state {
     JSValue        abort_handler;
     gboolean       aborted;
     gboolean       settled;
+    gboolean       no_cors;
     char          *fb_send_url;
     char          *fb_top;
     char          *fb_method;
@@ -6260,7 +6262,24 @@ ns_headers_init_add_raw(JSContext *ctx, JSValueConst init, const char *raw)
             gsize vlen = (gsize)(lineend - v);
             while (vlen > 0 && (*v == ' ' || *v == '\t')) { v++; vlen--; }
             while (vlen > 0 && (v[vlen - 1] == ' ' || v[vlen - 1] == '\t')) vlen--;
-            JS_SetPropertyStr(ctx, init, name, JS_NewStringLen(ctx, v, vlen));
+            JSValue prev = JS_GetPropertyStr(ctx, init, name);
+            if (JS_IsString(prev)) {
+                const char *old = JS_ToCString(ctx, prev);
+                char *joined = old
+                    ? g_strdup_printf("%s, %.*s", old, (int)vlen, v) : NULL;
+                if (old) JS_FreeCString(ctx, old);
+                if (joined) {
+                    JS_SetPropertyStr(ctx, init, name, JS_NewString(ctx, joined));
+                    g_free(joined);
+                } else {
+                    JS_SetPropertyStr(ctx, init, name,
+                                      JS_NewStringLen(ctx, v, vlen));
+                }
+            } else {
+                JS_SetPropertyStr(ctx, init, name,
+                                  JS_NewStringLen(ctx, v, vlen));
+            }
+            JS_FreeValue(ctx, prev);
             g_free(name);
         }
         if (!*eol) break;
@@ -6322,6 +6341,21 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
                                  (st->js ? st->js->current_url : NULL);
         gboolean allow = cors_allows(origin_url, resp->final_url,
                                      resp->cors_allow_origin);
+        if (!allow && !st->no_cors) {
+            JS_ThrowTypeError(st->ctx, "Failed to fetch: CORS request blocked");
+            JSValue ex = JS_GetException(st->ctx);
+            JSValue call_ret = JS_Call(st->ctx, st->reject, JS_UNDEFINED, 1,
+                                       (JSValueConst *)&ex);
+            if (JS_IsException(call_ret))
+                JS_FreeValue(st->ctx, JS_GetException(st->ctx));
+            JS_FreeValue(st->ctx, call_ret);
+            JS_FreeValue(st->ctx, ex);
+            ns_response_free(resp);
+            ns_drain_mutations(st->js);
+            ns_js_budget_pop(st->js, &bg);
+            ns_js_fetch_state_free(st);
+            return;
+        }
         JSValue r = JS_NewObject(st->ctx);
         JS_SetPropertyStr(st->ctx, r, "ok",
             JS_NewBool(st->ctx, allow && resp->status >= 200 && resp->status < 300));
@@ -6331,9 +6365,12 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         JS_SetPropertyStr(st->ctx, r, "statusText",
             JS_NewString(st->ctx, ns_http_status_text((int)status)));
         JS_SetPropertyStr(st->ctx, r, "url",
-            JS_NewString(st->ctx, resp->final_url ? resp->final_url : ""));
+            JS_NewString(st->ctx, allow && resp->final_url
+                                  ? resp->final_url : ""));
         JS_SetPropertyStr(st->ctx, r, "type",
-            JS_NewString(st->ctx, allow ? "basic" : "opaque"));
+            JS_NewString(st->ctx, !allow ? "opaque"
+                : ns_url_same_origin(origin_url, resp->final_url)
+                    ? "basic" : "cors"));
         JS_SetPropertyStr(st->ctx, r, "redirected",
             JS_NewBool(st->ctx, resp->redirect_count > 0));
         JS_SetPropertyStr(st->ctx, r, "redirectCount",
@@ -6642,7 +6679,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                                 ns_js_fetch_has_prop(ctx, argv[1], "headers");
     if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
         g_autofree char *m = ns_js_get_string_prop(ctx, argv[0], "method");
-        if (m && *m) method = g_ascii_strup(m, -1);
+        if (m && *m) method = ns_fetch_normalize_method(m);
         ns_js_fetch_read_body(ctx, argv[0], &body, &body_len, &content_type);
         if (!init_has_headers) {
             JSValue h = JS_GetPropertyStr(ctx, argv[0], "headers");
@@ -6654,12 +6691,36 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
         g_autofree char *m = ns_js_get_string_prop(ctx, argv[1], "method");
         if (m) {
             g_free(method);
-            method = g_ascii_strup(m, -1);
+            method = ns_fetch_normalize_method(m);
         }
         ns_js_fetch_read_body(ctx, argv[1], &body, &body_len, &content_type);
         JSValue h = JS_GetPropertyStr(ctx, argv[1], "headers");
         ns_js_fetch_collect_headers(ctx, h, extras, &content_type);
         JS_FreeValue(ctx, h);
+    }
+    gboolean no_cors = FALSE;
+    if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
+        g_autofree char *md = ns_js_get_string_prop(ctx, argv[0], "mode");
+        if (md) no_cors = strcmp(md, "no-cors") == 0;
+    }
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        g_autofree char *md = ns_js_get_string_prop(ctx, argv[1], "mode");
+        if (md) no_cors = strcmp(md, "no-cors") == 0;
+    }
+    if (method && (g_ascii_strcasecmp(method, "CONNECT") == 0 ||
+                   g_ascii_strcasecmp(method, "TRACE") == 0 ||
+                   g_ascii_strcasecmp(method, "TRACK") == 0)) {
+        JS_FreeCString(ctx, url);
+        g_ptr_array_free(extras, TRUE);
+        JS_ThrowTypeError(ctx, "fetch: '%s' is a forbidden method", method);
+        JSValue ex = JS_GetException(ctx);
+        JSValueConst rargs[1] = { ex };
+        JSValue r = JS_Call(ctx, resolving[1], JS_UNDEFINED, 1, rargs);
+        JS_FreeValue(ctx, r);
+        JS_FreeValue(ctx, ex);
+        JS_FreeValue(ctx, resolving[0]);
+        JS_FreeValue(ctx, resolving[1]);
+        return promise;
     }
     if (body && !content_type)
         content_type = g_strdup("text/plain;charset=UTF-8");
@@ -6671,6 +6732,7 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     st->resolve = resolving[0];
     st->reject  = resolving[1];
     st->requested_url = g_strdup(url);
+    st->no_cors = no_cors;
     const char *top = base_url && *base_url ? base_url :
                       (st->js ? st->js->current_url : NULL);
     st->origin_url = g_strdup(top);
@@ -13848,6 +13910,24 @@ ns_decode_utf16(const guint8 *data, gsize len, GByteArray *out, gboolean fatal,
     return TRUE;
 }
 
+static void
+ns_decode_windows1252(const guint8 *data, guint n, GByteArray *out)
+{
+    static const guint16 high[32] = {
+        0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+        0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178,
+    };
+    for (guint i = 0; i < n; i++) {
+        guint8 b = data[i];
+        gunichar cp = b < 0x80 ? b : (b < 0xA0 ? high[b - 0x80] : b);
+        gchar tmp[6];
+        gint len = g_unichar_to_utf8(cp, tmp);
+        g_byte_array_append(out, (guint8 *)tmp, (guint)len);
+    }
+}
+
 static JSValue
 ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
@@ -13901,11 +13981,18 @@ ns_text_decoder_decode(JSContext *ctx, JSValueConst this_val,
     guint n = buf->len;
     gsize pending = 0;
     GByteArray *out = g_byte_array_sized_new(n + 1);
-    gboolean ok = (mode == 1)
-        ? ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending)
-        : (mode == 2)
-            ? ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending)
-            : ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
+    gboolean ok;
+    if (mode == 1)
+        ok = ns_decode_utf16(buf->data, n, out, fatal, FALSE, stream, &pending);
+    else if (mode == 2)
+        ok = ns_decode_utf16(buf->data, n, out, fatal, TRUE, stream, &pending);
+    else if (mode == 3) {
+        ns_decode_windows1252(buf->data, n, out);
+        ok = TRUE;
+        pending = 0;
+    } else {
+        ok = ns_decode_utf8(buf->data, n, out, fatal, stream, &pending);
+    }
 
     if (!ok) {
         g_byte_array_free(out, TRUE);
@@ -14181,6 +14268,32 @@ ns_filereader_readAsText(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_filereader_readAsBinaryString(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv)
+{
+    if (argc < 1) return JS_UNDEFINED;
+    gsize len = 0;
+    g_autofree char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &len);
+    GByteArray *utf8 = g_byte_array_sized_new(len + len / 2 + 1);
+    for (gsize i = 0; i < len; i++) {
+        guint8 b = (guint8)bytes[i];
+        if (b < 0x80) {
+            g_byte_array_append(utf8, &b, 1);
+        } else {
+            guint8 two[2] = { (guint8)(0xC0 | (b >> 6)),
+                              (guint8)(0x80 | (b & 0x3F)) };
+            g_byte_array_append(utf8, two, 2);
+        }
+    }
+    JS_SetPropertyStr(ctx, this_val, "result",
+                      JS_NewStringLen(ctx, (const char *)utf8->data, utf8->len));
+    g_byte_array_free(utf8, TRUE);
+    JS_SetPropertyStr(ctx, this_val, "readyState", JS_NewInt32(ctx, 1));
+    ns_filereader_schedule(ctx, this_val);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_filereader_readAsDataURL(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -14235,7 +14348,7 @@ ns_window_filereader_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "readAsText",         ns_filereader_readAsText, 2);
     ns_bind_fn(ctx, obj, "readAsDataURL",      ns_filereader_readAsDataURL, 1);
     ns_bind_fn(ctx, obj, "readAsArrayBuffer",  ns_filereader_readAsArrayBuffer, 1);
-    ns_bind_fn(ctx, obj, "readAsBinaryString", ns_filereader_readAsText, 1);
+    ns_bind_fn(ctx, obj, "readAsBinaryString", ns_filereader_readAsBinaryString, 1);
     ns_bind_fn(ctx, obj, "abort",              ns_event_noop, 0);
     JS_SetPropertyStr(ctx, obj, "_listeners",  JS_NewArray(ctx));
     ns_bind_event_target_listeners(ctx, obj);
@@ -14261,13 +14374,35 @@ ns_window_text_decoder_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     if (label) {
-        if (!strcmp(label, "utf-16le") || !strcmp(label, "utf-16") ||
-            !strcmp(label, "unicode") || !strcmp(label, "csunicode") ||
-            !strcmp(label, "iso-10646-ucs-2") || !strcmp(label, "ucs-2")) {
+        static const char *const utf8_labels[] = {
+            "unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8",
+            "utf-8", "utf8", "x-unicode20utf8", NULL,
+        };
+        static const char *const utf16le_labels[] = {
+            "csunicode", "iso-10646-ucs-2", "ucs-2", "unicode",
+            "unicodefeff", "utf-16", "utf-16le", NULL,
+        };
+        static const char *const utf16be_labels[] = {
+            "unicodefffe", "utf-16be", NULL,
+        };
+        static const char *const win1252_labels[] = {
+            "ansi_x3.4-1968", "ascii", "cp1252", "cp819", "csisolatin1",
+            "ibm819", "iso-8859-1", "iso-ir-100", "iso8859-1", "iso88591",
+            "iso_8859-1", "iso_8859-1:1987", "l1", "latin1", "us-ascii",
+            "windows-1252", "x-cp1252", NULL,
+        };
+        if (g_strv_contains(utf8_labels, label)) {
+            mode = 0;
+        } else if (g_strv_contains(utf16le_labels, label)) {
             mode = 1; encoding = "utf-16le";
-        } else if (!strcmp(label, "utf-16be") ||
-                   !strcmp(label, "unicodefffe")) {
+        } else if (g_strv_contains(utf16be_labels, label)) {
             mode = 2; encoding = "utf-16be";
+        } else if (g_strv_contains(win1252_labels, label)) {
+            mode = 3; encoding = "windows-1252";
+        } else {
+            g_free(label);
+            return JS_ThrowRangeError(ctx,
+                "TextDecoder: the encoding label is not supported");
         }
     }
     g_free(label);
@@ -14564,7 +14699,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     JSValue obj = JS_NewObject(ctx);
-    JSValue body_v = (argc >= 1) ? JS_DupValue(ctx, argv[0]) : JS_NewString(ctx, "");
+    JSValue body_v = (argc >= 1) ? JS_DupValue(ctx, argv[0]) : JS_NULL;
     int32_t status = 200;
     const char *status_text = NULL;
     JSValue headers_init = JS_UNDEFINED;
@@ -14605,7 +14740,7 @@ ns_window_response_ctor(JSContext *ctx, JSValueConst this_val,
         }
         headers_init = JS_GetPropertyStr(ctx, argv[1], "headers");
     }
-    ns_body_install(ctx, obj, body_v, FALSE);
+    ns_body_install(ctx, obj, body_v, TRUE);
     JS_SetPropertyStr(ctx, obj, "bodyUsed",   JS_FALSE);
     JS_SetPropertyStr(ctx, obj, "status",     JS_NewInt32(ctx, status));
     JS_SetPropertyStr(ctx, obj, "statusText",
@@ -14659,11 +14794,15 @@ ns_window_request_ctor(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1) {
         if (JS_IsObject(argv[0]) && !JS_IsString(argv[0])) {
             url_v = JS_GetPropertyStr(ctx, argv[0], "url");
-            if (!JS_IsUndefined(url_v)) url_raw = JS_ToCString(ctx, url_v);
-            method_v = JS_GetPropertyStr(ctx, argv[0], "method");
-            if (!JS_IsUndefined(method_v)) method = JS_ToCString(ctx, method_v);
-            headers_init = JS_GetPropertyStr(ctx, argv[0], "headers");
-            body_v = JS_GetPropertyStr(ctx, argv[0], "body");
+            if (JS_IsString(url_v)) {
+                url_raw = JS_ToCString(ctx, url_v);
+                method_v = JS_GetPropertyStr(ctx, argv[0], "method");
+                if (!JS_IsUndefined(method_v)) method = JS_ToCString(ctx, method_v);
+                headers_init = JS_GetPropertyStr(ctx, argv[0], "headers");
+                body_v = JS_GetPropertyStr(ctx, argv[0], "body");
+            } else {
+                url_raw = JS_ToCString(ctx, argv[0]);
+            }
         } else {
             url_raw = JS_ToCString(ctx, argv[0]);
         }
