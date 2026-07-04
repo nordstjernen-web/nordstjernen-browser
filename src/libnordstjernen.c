@@ -8,6 +8,7 @@
 #include <cairo.h>
 #include <gio/gio.h>
 #include <glib.h>
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -56,7 +57,10 @@ struct ns_browser {
     gboolean        images_fetched;
     gboolean        has_deferred_lazy;
     gboolean        bfcache_ok;
+    double          cur_scroll_x;
     double          cur_scroll_y;
+    double          js_scroll_x;
+    double          js_scroll_y;
     double          cur_viewport_h;
     GPtrArray      *img_sessions;
     GHashTable     *img_requested;
@@ -503,16 +507,17 @@ browser_media_volume(const void *node, double volume, gpointer ud)
     if (b->js) ns_js_request_repaint(b->js);
 }
 
-static void
+static gboolean
 browser_mse_data(guint stream_id, char kind, const guint8 *data, gsize len,
                  gboolean eos, gpointer ud)
 {
     ns_browser *b = ud;
-    if (!b || !b->videos) return;
-    if (eos)
+    if (!b || !b->videos) return FALSE;
+    if (eos) {
         ns_video_cache_mse_eos(b->videos, stream_id);
-    else
-        ns_video_cache_mse_append(b->videos, stream_id, kind, data, len);
+        return TRUE;
+    }
+    return ns_video_cache_mse_append(b->videos, stream_id, kind, data, len);
 }
 
 static double
@@ -1137,6 +1142,14 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
     gboolean video_changed = FALSE;
     gboolean other_changed = FALSE;
     int guard = 0;
+    if (browser->js &&
+        (fabs(browser->cur_scroll_x - browser->js_scroll_x) > 0.5 ||
+         fabs(browser->cur_scroll_y - browser->js_scroll_y) > 0.5)) {
+        browser->js_scroll_x = browser->cur_scroll_x;
+        browser->js_scroll_y = browser->cur_scroll_y;
+        ns_js_note_viewport_scroll(browser->js, browser->cur_scroll_x,
+                                   browser->cur_scroll_y);
+    }
     if (browser->hover_restyle_pending) {
         gint64 now = g_get_monotonic_time();
         gint64 min_gap = browser->relayout_cost_us * 2;
@@ -1277,6 +1290,7 @@ ns_browser_render_rgba(ns_browser *browser, int scroll_x, int scroll_y,
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
     if (!(scale > 0)) scale = 1.0;
 
+    browser->cur_scroll_x = (double)scroll_x;
     browser->cur_scroll_y = (double)scroll_y;
     browser->cur_viewport_h = (double)height / scale;
     browser_ensure_images(browser);
@@ -1339,6 +1353,7 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     if (width <= 0 || height <= 0 || stride < width * 4) return -1;
     if (!(scale > 0)) scale = 1.0;
 
+    browser->cur_scroll_x = (double)scroll_x;
     browser->cur_scroll_y = (double)scroll_y;
     browser->cur_viewport_h = (double)height / scale;
     browser_ensure_images(browser);

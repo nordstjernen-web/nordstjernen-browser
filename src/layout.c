@@ -700,6 +700,10 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (node_has_hidden_utility(n)) return FALSE;
     if (n->name && strcmp(n->name, "slot") == 0) return FALSE;
     if (node_has_media_metadata(n)) return FALSE;
+    for (const ns_node *sc = n->first_child; sc; sc = sc->next_sibling)
+        if (sc->kind == NS_NODE_ELEMENT &&
+            ns_element_get_attr(sc, NS_SHADOW_ATTR))
+            return FALSE;
     if (is_replaced_block_tag(n->name)) {
         if (strcmp(n->name, "table") == 0) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);

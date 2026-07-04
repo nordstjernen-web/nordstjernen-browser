@@ -39,6 +39,7 @@
 #include "eventsource.h"
 #include "security.h"
 #include "video.h"
+#include "video_decode.h"
 #include "wasm.h"
 #include "webcrypto.h"
 #include "webgl.h"
@@ -426,6 +427,18 @@ ns_js_in_pump(const ns_js *js)
     return js && js->in_pump;
 }
 
+static void
+ns_js_credit_pumped_time(ns_js *js, gint64 pump_start_us)
+{
+    if (!js) return;
+    gint64 pumped_us = g_get_monotonic_time() - pump_start_us;
+    if (pumped_us <= 0) return;
+    if (js->eval_deadline_us != 0)
+        js->eval_deadline_us += pumped_us;
+    if (js->js_monitor_deadline_us != 0)
+        js->js_monitor_deadline_us += pumped_us;
+}
+
 typedef struct {
     GMainLoop   *loop;
     ns_response *resp;
@@ -457,8 +470,10 @@ ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
                          ns_js_pumped_fetch_done, &pf);
     gboolean saved = js->in_pump;
     js->in_pump = TRUE;
+    gint64 pump_start_us = g_get_monotonic_time();
     if (!pf.done)
         g_main_loop_run(pf.loop);
+    ns_js_credit_pumped_time(js, pump_start_us);
     js->in_pump = saved;
     g_main_loop_unref(pf.loop);
     if (pf.err) {
@@ -12620,6 +12635,22 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     JS_FreeValue(ctx, aborted_v);
     if (!aborted) {
         gboolean network_error = !resp || err || (resp && resp->error);
+        if (!network_error) {
+            gsize blen = resp->body ? resp->body->len : 0;
+            JS_SetPropertyStr(ctx, st->obj, "readyState", JS_NewInt32(ctx, 2));
+            ns_target_fire_event(ctx, st->obj, "readystatechange");
+            JS_SetPropertyStr(ctx, st->obj, "readyState", JS_NewInt32(ctx, 3));
+            ns_target_fire_event(ctx, st->obj, "readystatechange");
+            JSValue pev = ns_target_make_event(ctx, st->obj, "progress");
+            JS_SetPropertyStr(ctx, pev, "lengthComputable", JS_TRUE);
+            JS_SetPropertyStr(ctx, pev, "loaded",
+                              JS_NewFloat64(ctx, (double)blen));
+            JS_SetPropertyStr(ctx, pev, "total",
+                              JS_NewFloat64(ctx, (double)blen));
+            ns_target_dispatch_with_event(ctx, st->obj, "progress", pev);
+            JS_FreeValue(ctx, pev);
+            JS_SetPropertyStr(ctx, st->obj, "readyState", JS_NewInt32(ctx, 4));
+        }
         ns_target_fire_event(ctx, st->obj, "readystatechange");
         if (network_error) ns_target_fire_event(ctx, st->obj, "error");
         else               ns_target_fire_event(ctx, st->obj, "load");
@@ -12738,7 +12769,8 @@ ns_xhr_pump_until_done(JSContext *ctx, JSValueConst this_val)
 {
     ns_js *js = js_from_ctx(ctx);
     GMainContext *mc = js && js->main_context ? js->main_context : NULL;
-    gint64 deadline = g_get_monotonic_time() + 60 * G_USEC_PER_SEC;
+    gint64 pump_start_us = g_get_monotonic_time();
+    gint64 deadline = pump_start_us + 60 * G_USEC_PER_SEC;
     while (g_get_monotonic_time() < deadline) {
         if (js && js->halted)
             break;
@@ -12750,6 +12782,7 @@ ns_xhr_pump_until_done(JSContext *ctx, JSValueConst this_val)
             break;
         g_main_context_iteration(mc, TRUE);
     }
+    ns_js_credit_pumped_time(js, pump_start_us);
 }
 
 static gboolean
@@ -12935,6 +12968,13 @@ ns_window_xhr_ctor(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, obj, "overrideMimeType",      ns_xhr_overrideMimeType, 1);
     JS_SetPropertyStr(ctx, obj, "responseURL", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, obj, "_responseHeaders", JS_NewString(ctx, ""));
+    JS_SetPropertyStr(ctx, obj, "timeout", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, obj, "withCredentials", JS_FALSE);
+    JSValue upload = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, upload, "_listeners", JS_NewArray(ctx));
+    ns_bind_event_target_listeners(ctx, upload);
+    ns_bind_fn(ctx, upload, "dispatchEvent", ns_target_dispatchEvent, 1);
+    JS_SetPropertyStr(ctx, obj, "upload", upload);
     return obj;
 }
 
@@ -21614,18 +21654,6 @@ ns_element_cloneNode(JSContext *ctx, JSValueConst this_val,
     if (!src) return JS_NULL;
     gboolean deep = FALSE;
     if (argc >= 1) deep = JS_ToBool(ctx, argv[0]) ? TRUE : FALSE;
-    if (deep && src->kind == NS_NODE_ELEMENT && src->name &&
-        g_ascii_strcasecmp(src->name, "template") == 0) {
-        ns_node *frag = ns_node_new_document();
-        if (!frag) return JS_NULL;
-        frag->flags |= NS_NODE_FRAGMENT | NS_NODE_TEMPLATE_CONTENT;
-        for (const ns_node *c = src->first_child; c; c = c->next_sibling) {
-            ns_node *cc = ns_node_clone(c, TRUE);
-            if (cc) ns_node_append_child(frag, cc);
-        }
-        if (js_from_ctx(ctx)) g_hash_table_add(js_from_ctx(ctx)->orphan_nodes, frag);
-        return ns_make_element(ctx, frag);
-    }
     if (src->kind == NS_NODE_DOCUMENT && !(src->flags & NS_NODE_FRAGMENT)) {
         ns_node *copy = ns_node_clone(src, deep);
         if (!copy) return JS_NULL;
@@ -24680,13 +24708,6 @@ ns_element_get_isContentEditable(JSContext *ctx, JSValueConst this_val)
     return JS_FALSE;
 }
 
-static JSValue
-ns_element_get_one_int(JSContext *ctx, JSValueConst this_val)
-{
-    (void)this_val;
-    return JS_NewInt32(ctx, 1);
-}
-
 static const ns_image *
 ns_image_for_element(JSContext *ctx, JSValueConst this_val)
 {
@@ -25992,7 +26013,6 @@ static JSValue
 ns_element_getRootNode(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
-    (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n) {
         JSValue host = JS_GetPropertyStr(ctx, this_val, "host");
@@ -26005,6 +26025,21 @@ ns_element_getRootNode(JSContext *ctx, JSValueConst this_val,
         gboolean has_node_type = !JS_IsUndefined(node_type) && !JS_IsNull(node_type);
         JS_FreeValue(ctx, node_type);
         return has_node_type ? JS_DupValue(ctx, this_val) : JS_NULL;
+    }
+    gboolean composed = FALSE;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSValue cv = JS_GetPropertyStr(ctx, argv[0], "composed");
+        composed = JS_ToBool(ctx, cv) > 0;
+        JS_FreeValue(ctx, cv);
+    }
+    if (!composed) {
+        for (const ns_node *a = n; a; a = a->parent) {
+            if (ns_node_is_shadow_root(a)) {
+                JSValue w = ns_make_element(ctx, a);
+                ns_shadow_root_define_props(ctx, w);
+                return w;
+            }
+        }
     }
     while (n->parent) n = n->parent;
     return ns_make_element(ctx, n);
@@ -30003,18 +30038,7 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
                     strstr(cd, "mp3") != NULL ||
                     g_str_has_prefix(cd, "mp4a.69") ||
                     g_str_has_prefix(cd, "mp4a.6b") ||
-                    (libav && (g_str_has_prefix(cd, "mp4a.40") ||
-                               g_str_has_prefix(cd, "avc1") ||
-                               g_str_has_prefix(cd, "avc3") ||
-                               g_str_has_prefix(cd, "hvc1") ||
-                               g_str_has_prefix(cd, "hev1") ||
-                               g_str_has_prefix(cd, "av01"))) ||
-                    (libav && (g_str_has_prefix(cd, "vp8") ||
-                               g_str_has_prefix(cd, "vp9") ||
-                               g_str_has_prefix(cd, "vp08") ||
-                               g_str_has_prefix(cd, "vp09") ||
-                               strstr(cd, "opus") != NULL ||
-                               strstr(cd, "vorbis") != NULL));
+                    (libav && ns_video_codec_available(cd));
                 if (!ok) all_ok = FALSE;
             }
             g_strfreev(parts);
@@ -30134,7 +30158,10 @@ ns_media_play(JSContext *ctx, JSValueConst this_val,
         if (js->media_play_cb)
             js->media_play_cb(el, TRUE, js->media_play_user_data);
         char *url = ns_media_resolve_src(ctx, el);
-        if (url && js->audio_cb && ns_media_src_is_mp3(url)) {
+        gboolean inline_video = url && el->name &&
+            g_ascii_strcasecmp(el->name, "video") == 0 &&
+            ns_video_url_is_inline(url);
+        if (url && js->audio_cb && !inline_video && ns_media_src_is_mp3(url)) {
             char *token = ns_media_token(ctx, el);
             JSValue opened = JS_GetPropertyStr(ctx, this_val, "_nd_audio_opened");
             gboolean already = JS_ToBool(ctx, opened);
@@ -30226,8 +30253,6 @@ static JSValue
 ns_media_get_buffered_ranges(JSContext *ctx, JSValueConst this_val)
 {
     double end = ns_media_prop_number(ctx, this_val, "_nd_buffered");
-    if (end <= 0)
-        end = ns_media_prop_number(ctx, this_val, "_nd_duration");
     return ns_media_time_ranges_for(ctx, end);
 }
 
@@ -30238,6 +30263,98 @@ ns_media_get_ended(JSContext *ctx, JSValueConst this_val)
     gboolean ended = JS_ToBool(ctx, v);
     JS_FreeValue(ctx, v);
     return JS_NewBool(ctx, ended);
+}
+
+static gboolean
+ns_node_is_media_element(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT && n->name &&
+           (g_ascii_strcasecmp(n->name, "video") == 0 ||
+            g_ascii_strcasecmp(n->name, "audio") == 0);
+}
+
+static JSValue
+ns_media_get_error(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_error");
+    if (JS_IsObject(v)) return v;
+    JS_FreeValue(ctx, v);
+    const ns_node *n = ns_unwrap_element(this_val);
+    return ns_node_is_media_element(n) ? JS_NULL : JS_UNDEFINED;
+}
+
+static JSValue
+ns_media_get_playbackRate(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_rate");
+    if (JS_IsNumber(v)) return v;
+    JS_FreeValue(ctx, v);
+    return JS_NewFloat64(ctx, 1.0);
+}
+
+static JSValue
+ns_media_set_playbackRate(JSContext *ctx, JSValueConst this_val,
+                          JSValueConst val)
+{
+    double rate = 1.0;
+    if (JS_ToFloat64(ctx, &rate, val)) return JS_EXCEPTION;
+    if (isnan(rate)) rate = 1.0;
+    JS_SetPropertyStr(ctx, this_val, "_nd_rate", JS_NewFloat64(ctx, rate));
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (js && el && ns_node_is_media_element(el))
+        ns_js_dispatch_event(js, el, "ratechange", NULL);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_media_get_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue v = JS_GetPropertyStr(ctx, this_val, "_nd_default_rate");
+    if (JS_IsNumber(v)) return v;
+    JS_FreeValue(ctx, v);
+    return JS_NewFloat64(ctx, 1.0);
+}
+
+static JSValue
+ns_media_set_defaultPlaybackRate(JSContext *ctx, JSValueConst this_val,
+                                 JSValueConst val)
+{
+    double rate = 1.0;
+    if (JS_ToFloat64(ctx, &rate, val)) return JS_EXCEPTION;
+    if (isnan(rate)) rate = 1.0;
+    JS_SetPropertyStr(ctx, this_val, "_nd_default_rate",
+                      JS_NewFloat64(ctx, rate));
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_media_load(JSContext *ctx, JSValueConst this_val,
+              int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (!ns_node_is_media_element(el)) return JS_UNDEFINED;
+    JS_SetPropertyStr(ctx, this_val, "_nd_pos", JS_NewFloat64(ctx, 0.0));
+    JS_SetPropertyStr(ctx, this_val, "_nd_duration", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_buffered", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_ended", JS_FALSE);
+    JS_SetPropertyStr(ctx, this_val, "_nd_playing", JS_FALSE);
+    JS_SetPropertyStr(ctx, this_val, "_nd_error", JS_UNDEFINED);
+    JS_SetPropertyStr(ctx, this_val, "_nd_readyState", JS_NewInt32(ctx, 0));
+    JS_SetPropertyStr(ctx, this_val, "_nd_networkState", JS_NewInt32(ctx, 2));
+    JS_DefinePropertyValueStr(ctx, this_val, "readyState",
+                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, this_val, "videoWidth",
+                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, this_val, "videoHeight",
+                              JS_NewInt32(ctx, 0), JS_PROP_C_W_E);
+    ns_js *js = js_from_ctx(ctx);
+    if (js && el) {
+        ns_js_dispatch_event(js, el, "emptied", NULL);
+        ns_js_dispatch_event(js, el, "loadstart", NULL);
+    }
+    return JS_UNDEFINED;
 }
 
 static JSValue
@@ -31237,7 +31354,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("stepDown",            0, ns_input_stepDown),
     JS_CFUNC_DEF("play",                0, ns_media_play),
     JS_CFUNC_DEF("pause",               0, ns_media_pause),
-    JS_CFUNC_DEF("load",                0, ns_event_noop),
+    JS_CFUNC_DEF("load",                0, ns_media_load),
     JS_CFUNC_DEF("canPlayType",         1, ns_media_canPlayType),
     JS_CFUNC_DEF("fastSeek",            1, ns_media_fast_seek),
     JS_CFUNC_DEF("addTextTrack",        3, ns_event_noop),
@@ -31262,7 +31379,9 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("ended",             ns_media_get_ended,               ns_element_noop_set),
     JS_CGETSET_DEF("seeking",           ns_element_get_zero_int,          ns_element_noop_set),
     JS_CGETSET_DEF("volume",            ns_media_get_volume,              ns_media_set_volume),
-    JS_CGETSET_DEF("playbackRate",      ns_element_get_one_int,           ns_element_noop_set),
+    JS_CGETSET_DEF("playbackRate",      ns_media_get_playbackRate,        ns_media_set_playbackRate),
+    JS_CGETSET_DEF("defaultPlaybackRate", ns_media_get_defaultPlaybackRate, ns_media_set_defaultPlaybackRate),
+    JS_CGETSET_DEF("error",             ns_media_get_error,               ns_element_noop_set),
     JS_CGETSET_DEF("muted",             ns_media_get_muted,               ns_media_set_muted),
     JS_CGETSET_DEF("readyState",        ns_media_get_readyState,          ns_element_noop_set),
     JS_CGETSET_DEF("networkState",      ns_media_get_networkState,        ns_element_noop_set),
@@ -33394,11 +33513,11 @@ ns_ce_upgrade_element_with(ns_js *js, ns_node *node, JSValueConst klass)
     }
     JS_FreeValue(ctx, observed);
 
+    ns_ce_fire_connected_if_needed(ctx, js, node, elem, klass);
+
     if (js->ce_defer_upgrades == 0 && js->ce_constructing == 0)
         for (ns_node *c = node->first_child; c; c = c->next_sibling)
             ns_ce_upgrade_subtree_all(js, c);
-
-    ns_ce_fire_connected_if_needed(ctx, js, node, elem, klass);
 
     JS_FreeValue(ctx, elem);
 }
@@ -33693,6 +33812,25 @@ ns_js_sync_window_metrics(ns_js *js)
     JS_SetPropertyStr(ctx, global, "outerWidth",  JS_NewInt32(ctx, vw));
     JS_SetPropertyStr(ctx, global, "outerHeight", JS_NewInt32(ctx, vh));
     JS_FreeValue(ctx, global);
+}
+
+void
+ns_js_note_viewport_scroll(ns_js *js, double x, double y)
+{
+    if (!js || !js->ctx || js->halted) return;
+    JSContext *ctx = js->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "scrollX", JS_NewFloat64(ctx, x));
+    JS_SetPropertyStr(ctx, global, "scrollY", JS_NewFloat64(ctx, y));
+    JS_SetPropertyStr(ctx, global, "pageXOffset", JS_NewFloat64(ctx, x));
+    JS_SetPropertyStr(ctx, global, "pageYOffset", JS_NewFloat64(ctx, y));
+    JSValue ev = ns_make_event(ctx, "scroll", NULL);
+    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, global));
+    JS_FreeValue(ctx, global);
+    ns_js_dispatch_window_only_event(js, "scroll", ev, NULL);
+    if (js->current_doc)
+        ns_js_dispatch_event(js, js->current_doc, "scroll", NULL);
+    ns_observer_schedule_tick(js);
 }
 
 void
@@ -37975,14 +38113,74 @@ ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     return JS_UNDEFINED;
 }
 
+static JSValue
+ns_location_set_component(JSContext *ctx, JSValueConst val, const char *comp)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->current_url || !*js->current_url) return JS_UNDEFINED;
+    size_t vlen = 0;
+    const char *v = JS_ToCStringLen(ctx, &vlen, val);
+    if (!v) return JS_EXCEPTION;
+    char *next = ns_url_set_component_len(js->current_url, comp, v, vlen);
+    JS_FreeCString(ctx, v);
+    if (!next) return JS_UNDEFINED;
+    if (js->nav_cb && !ns_location_nav_in_iframe(js) &&
+        strcmp(next, js->current_url) != 0)
+        js->nav_cb(next, FALSE, js->nav_user_data);
+    g_free(next);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_location_set_protocol(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "protocol");
+}
+
+static JSValue
+ns_location_set_host(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "host");
+}
+
+static JSValue
+ns_location_set_hostname(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "hostname");
+}
+
+static JSValue
+ns_location_set_port(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "port");
+}
+
+static JSValue
+ns_location_set_pathname(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "pathname");
+}
+
+static JSValue
+ns_location_set_search(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    (void)this_val;
+    return ns_location_set_component(ctx, val, "search");
+}
+
 static const JSCFunctionListEntry ns_location_funcs[] = {
     JS_CGETSET_DEF("href",     ns_location_get_href, ns_location_set_href),
-    JS_CGETSET_DEF("protocol", ns_location_get_protocol, NULL),
-    JS_CGETSET_DEF("host",     ns_location_get_host, NULL),
-    JS_CGETSET_DEF("hostname", ns_location_get_hostname, NULL),
-    JS_CGETSET_DEF("port",     ns_location_get_port, NULL),
-    JS_CGETSET_DEF("pathname", ns_location_get_pathname, NULL),
-    JS_CGETSET_DEF("search",   ns_location_get_search, NULL),
+    JS_CGETSET_DEF("protocol", ns_location_get_protocol, ns_location_set_protocol),
+    JS_CGETSET_DEF("host",     ns_location_get_host, ns_location_set_host),
+    JS_CGETSET_DEF("hostname", ns_location_get_hostname, ns_location_set_hostname),
+    JS_CGETSET_DEF("port",     ns_location_get_port, ns_location_set_port),
+    JS_CGETSET_DEF("pathname", ns_location_get_pathname, ns_location_set_pathname),
+    JS_CGETSET_DEF("search",   ns_location_get_search, ns_location_set_search),
     JS_CGETSET_DEF("hash",     ns_location_get_hash, ns_location_set_hash),
     JS_CGETSET_DEF("origin",   ns_location_get_origin, NULL),
     JS_CFUNC_DEF("assign",   1, ns_location_assign),
@@ -39505,13 +39703,14 @@ ns_js_prefetch_external_scripts(ns_js *js, const ns_node *doc,
     st.loop = g_main_loop_new(NULL, FALSE);
     st.pending = (int)urls->len;
     gboolean profile = ns_js_profile_enabled();
-    gint64 t0 = profile ? g_get_monotonic_time() : 0;
+    gint64 t0 = g_get_monotonic_time();
     for (guint i = 0; i < urls->len; i++) {
         const char *u = g_ptr_array_index(urls, i);
         ns_net_fetch_async(u, origin, NULL, ns_js_prefetch_done, &st);
     }
     g_main_loop_run(st.loop);
     g_main_loop_unref(st.loop);
+    ns_js_credit_pumped_time(js, t0);
     if (profile)
         g_printerr("[profile] js prefetch %u scripts %6.1fms\n",
                    urls->len, (g_get_monotonic_time() - t0) / 1000.0);
@@ -41438,9 +41637,9 @@ ns_window_mse_append(JSContext *ctx, JSValueConst this_val,
     JSValue holder = JS_UNDEFINED;
     if (!ns_js_bytes_view(ctx, argv[2], &data, &len, &holder) || !id)
         return JS_FALSE;
-    js->mse_cb(id, kind, data, len, FALSE, js->mse_user_data);
+    gboolean ok = js->mse_cb(id, kind, data, len, FALSE, js->mse_user_data);
     JS_FreeValue(ctx, holder);
-    return JS_TRUE;
+    return ok ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue

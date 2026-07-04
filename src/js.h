@@ -31,8 +31,9 @@ typedef void (*ns_js_media_play_cb)(const void *node, gboolean play,
                                     gpointer user_data);
 typedef void (*ns_js_media_muted_cb)(const void *node, gboolean muted,
                                      gpointer user_data);
-typedef void (*ns_js_mse_cb)(guint stream_id, char kind, const guint8 *data,
-                             gsize len, gboolean eos, gpointer user_data);
+typedef gboolean (*ns_js_mse_cb)(guint stream_id, char kind,
+                                 const guint8 *data, gsize len, gboolean eos,
+                                 gpointer user_data);
 typedef double (*ns_js_mse_buffered_cb)(guint stream_id, char kind,
                                         gpointer user_data);
 typedef void (*ns_js_media_volume_cb)(const void *node, double volume,
@@ -120,6 +121,7 @@ void ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim);
 void     ns_js_set_style_table(ns_js *js, GHashTable *styles);
 void     ns_js_sync_window_metrics(ns_js *js);
 void     ns_js_dispatch_resize(ns_js *js);
+void     ns_js_note_viewport_scroll(ns_js *js, double x, double y);
 
 struct ns_box;
 void     ns_js_set_layout_root(ns_js *js, const struct ns_box *root);
