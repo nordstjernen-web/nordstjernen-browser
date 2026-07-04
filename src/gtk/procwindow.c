@@ -1420,7 +1420,7 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "reload", G_CALLBACK(act_reload),
                    (const char *[]){ "<Ctrl>r", "F5", NULL });
     install_action(pw, "console", G_CALLBACK(act_console),
-                   (const char *[]){ NULL });
+                   (const char *[]){ "<Ctrl><Shift>j", "F12", NULL });
     install_action(pw, "home", G_CALLBACK(act_home),
                    (const char *[]){ "<Alt>Home", NULL });
     install_action(pw, "new-tab", G_CALLBACK(act_new_tab),
