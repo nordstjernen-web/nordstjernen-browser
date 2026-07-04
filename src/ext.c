@@ -363,6 +363,22 @@ ns_ext_collect_strings(JSContext *ctx, JSValueConst arr, GPtrArray *out)
 }
 
 static char *
+ns_ext_safe_path(const char *base_dir, const char *rel)
+{
+    if (!base_dir || !rel || !*rel) return NULL;
+    g_autofree char *canon_base = g_canonicalize_filename(base_dir, NULL);
+    g_autofree char *joined = g_build_filename(base_dir, rel, NULL);
+    char *canon = g_canonicalize_filename(joined, NULL);
+    gsize blen = strlen(canon_base);
+    if (strncmp(canon, canon_base, blen) != 0 ||
+        (canon[blen] != '\0' && canon[blen] != G_DIR_SEPARATOR)) {
+        g_free(canon);
+        return NULL;
+    }
+    return canon;
+}
+
+static char *
 ns_ext_read_files(const char *base_dir, JSContext *ctx, JSValueConst entry,
                   const char *key)
 {
@@ -373,9 +389,9 @@ ns_ext_read_files(const char *base_dir, JSContext *ctx, JSValueConst entry,
     GString *src = g_string_new(NULL);
     for (guint i = 0; i < files->len; i++) {
         const char *rel = g_ptr_array_index(files, i);
-        g_autofree char *path = g_build_filename(base_dir, rel, NULL);
+        g_autofree char *path = ns_ext_safe_path(base_dir, rel);
         char *data = NULL;
-        if (g_file_get_contents(path, &data, NULL, NULL)) {
+        if (path && g_file_get_contents(path, &data, NULL, NULL)) {
             g_string_append(src, data);
             g_string_append_c(src, '\n');
             g_free(data);
@@ -517,10 +533,10 @@ ns_dnr_parse_rule(JSContext *ctx, JSValueConst r)
 static void
 ns_ext_load_rule_file(ns_ext *e, JSContext *ctx, const char *path)
 {
-    g_autofree char *full = g_build_filename(e->base_dir, path, NULL);
+    g_autofree char *full = ns_ext_safe_path(e->base_dir, path);
     char *raw = NULL;
     gsize len = 0;
-    if (!g_file_get_contents(full, &raw, &len, NULL)) return;
+    if (!full || !g_file_get_contents(full, &raw, &len, NULL)) return;
     JSValue arr = JS_ParseJSON(ctx, raw, len, full);
     if (JS_IsException(arr)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
@@ -740,9 +756,9 @@ ns_abp_parse_cosmetic(ns_ext *e, const char *line, const char *sep)
 static void
 ns_ext_load_filter_list(ns_ext *e, const char *path)
 {
-    g_autofree char *full = g_build_filename(e->base_dir, path, NULL);
+    g_autofree char *full = ns_ext_safe_path(e->base_dir, path);
     char *raw = NULL;
-    if (!g_file_get_contents(full, &raw, NULL, NULL)) return;
+    if (!full || !g_file_get_contents(full, &raw, NULL, NULL)) return;
     gchar **lines = g_strsplit(raw, "\n", -1);
     for (gchar **lp = lines; *lp; lp++) {
         char *line = g_strstrip(*lp);
@@ -949,7 +965,9 @@ ns_ext_content_scripts_for_url(JSContext *ctx, JSValueConst global,
                 hit = ns_ext_pattern_match(g_ptr_array_index(cs->matches, k),
                                            url);
             if (!hit) continue;
-            g_string_append(body, ";(function(){try{\n");
+            g_string_append(body,
+                ";(function(browser){var chrome=browser,"
+                "make_api,area,SR,SW,M,B,PL,UL;try{\n");
             if (cs->all_css) {
                 g_string_append(body,
                     "var __ndcss=document.createElement('style');"
@@ -960,31 +978,36 @@ ns_ext_content_scripts_for_url(JSContext *ctx, JSValueConst global,
                     ".appendChild(__ndcss);\n");
             }
             if (cs->all_js) {
-                g_string_append(body, "var browser=make_api(\"");
-                ns_ext_append_id(body, e->id);
-                g_string_append(body, "\");var chrome=browser;\n");
                 g_string_append(body, cs->all_js);
                 g_string_append(body, "\n");
             }
             g_string_append(body,
                 "}catch(e){try{console.error(\"[nordstjernen ext]\",e);}"
-                "catch(_){}}})();\n");
+                "catch(_){}}})(");
+            if (cs->all_js) {
+                g_string_append(body, "make_api(\"");
+                ns_ext_append_id(body, e->id);
+                g_string_append(body, "\")");
+            } else {
+                g_string_append(body, "null");
+            }
+            g_string_append(body, ");\n");
         }
     }
     if (body->len == 0) { g_string_free(body, TRUE); return NULL; }
 
-    JS_SetPropertyStr(ctx, global, "__nd_ext_manifest",
-                      JS_NewCFunction(ctx, ns_ext_js_manifest, "m", 1));
-    JS_SetPropertyStr(ctx, global, "__nd_ext_base",
-                      JS_NewCFunction(ctx, ns_ext_js_base, "b", 1));
-    JS_SetPropertyStr(ctx, global, "__nd_ext_sread",
-                      JS_NewCFunction(ctx, ns_ext_js_sread, "r", 2));
-    JS_SetPropertyStr(ctx, global, "__nd_ext_swrite",
-                      JS_NewCFunction(ctx, ns_ext_js_swrite, "w", 3));
-    JS_SetPropertyStr(ctx, global, "__nd_ext_platform",
-                      JS_NewCFunction(ctx, ns_ext_js_platform, "p", 0));
-    JS_SetPropertyStr(ctx, global, "__nd_ext_uilang",
-                      JS_NewCFunction(ctx, ns_ext_js_uilang, "l", 0));
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_manifest",
+        JS_NewCFunction(ctx, ns_ext_js_manifest, "m", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_base",
+        JS_NewCFunction(ctx, ns_ext_js_base, "b", 1), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_sread",
+        JS_NewCFunction(ctx, ns_ext_js_sread, "r", 2), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_swrite",
+        JS_NewCFunction(ctx, ns_ext_js_swrite, "w", 3), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_platform",
+        JS_NewCFunction(ctx, ns_ext_js_platform, "p", 0), JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, global, "__nd_ext_uilang",
+        JS_NewCFunction(ctx, ns_ext_js_uilang, "l", 0), JS_PROP_C_W_E);
 
     GString *out = g_string_new(ns_ext_shim_prelude);
     g_string_append(out, body->str);
