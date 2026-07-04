@@ -5215,10 +5215,16 @@ ns_js_record_child_change_arrays(ns_js *js, ns_node *parent,
 static void
 ns_element_clear_children(ns_node *n)
 {
+    ns_node *doc = (ns_node *)ns_node_root(n);
     ns_node *c = n->first_child;
     while (c) {
         ns_node *next = c->next_sibling;
         ns_node_remove(c);
+        if (doc && doc != c) {
+            ns_doc_id_index_subtree_removed(doc, c);
+            ns_doc_class_index_subtree_removed(doc, c);
+            ns_doc_tag_index_subtree_removed(doc, c);
+        }
         ns_node_free(c);
         c = next;
     }

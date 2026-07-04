@@ -490,9 +490,15 @@ ns_node_set_editable_value(ns_node *n, const char *value)
     if (!n) return;
     if ((n->name && strcmp(n->name, "textarea") == 0) ||
         ns_node_is_contenteditable_host(n)) {
+        ns_node *doc = (ns_node *)ns_node_root(n);
         for (ns_node *c = n->first_child; c; ) {
             ns_node *next = c->next_sibling;
             ns_node_remove(c);
+            if (doc && doc != c) {
+                ns_doc_id_index_subtree_removed(doc, c);
+                ns_doc_class_index_subtree_removed(doc, c);
+                ns_doc_tag_index_subtree_removed(doc, c);
+            }
             ns_node_free(c);
             c = next;
         }
