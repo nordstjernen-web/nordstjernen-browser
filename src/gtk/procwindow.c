@@ -1147,6 +1147,17 @@ task_mgr_refresh(NsTaskMgr *tm)
     while ((child = gtk_widget_get_first_child(tm->list)))
         gtk_list_box_remove(GTK_LIST_BOX(tm->list), child);
 
+    {
+        int gpid = ns_rproc_self_pid();
+        char gstate[32] = "";
+        long grss = -1;
+        ns_rproc_http_proc_info(gpid, gstate, sizeof gstate, &grss);
+        char *gname = g_strdup_printf("%s (GTK frontend)",
+                                      ns_i18n("Nordstjernen"));
+        task_mgr_add_row(tm, gname, gpid, gstate, grss, NULL);
+        g_free(gname);
+    }
+
     int n = gtk_notebook_get_n_pages(GTK_NOTEBOOK(tm->pw->notebook));
     for (int i = 0; i < n; i++) {
         NsProcView *v = view_for_page(
@@ -1166,10 +1177,12 @@ task_mgr_refresh(NsTaskMgr *tm)
 
         const char *title = ns_proc_view_title(v);
         const char *url = ns_proc_view_url(v);
-        const char *name = (title && *title) ? title
-                         : (url && *url)     ? url : ns_i18n("New Tab");
+        const char *tab = (title && *title) ? title
+                        : (url && *url)     ? url : ns_i18n("New Tab");
+        char *name = g_strdup_printf("%s  —  %s", ns_i18n("HTML renderer"), tab);
 
         task_mgr_add_row(tm, name, pid, state, rss, v);
+        g_free(name);
 
         int apid = ns_proc_view_audio_pid(v);
         if (apid > 0) {
@@ -1177,7 +1190,7 @@ task_mgr_refresh(NsTaskMgr *tm)
             long arss = -1;
             ns_rproc_http_proc_info(apid, astate, sizeof astate, &arss);
             char *aname = g_strdup_printf("   ⤷ %s", ns_i18n("Audio playback"));
-            task_mgr_add_row(tm, aname, apid, astate, arss, NULL);
+            task_mgr_add_row(tm, aname, apid, astate, arss, v);
             g_free(aname);
         }
         int vpid = ns_proc_view_video_pid(v);
@@ -1186,7 +1199,7 @@ task_mgr_refresh(NsTaskMgr *tm)
             long vrss = -1;
             ns_rproc_http_proc_info(vpid, vstate, sizeof vstate, &vrss);
             char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
-            task_mgr_add_row(tm, vname, vpid, vstate, vrss, NULL);
+            task_mgr_add_row(tm, vname, vpid, vstate, vrss, v);
             g_free(vname);
         }
     }
@@ -1218,7 +1231,16 @@ task_mgr_end_task(GtkButton *button, gpointer data)
     NsTaskMgr *tm = data;
     GtkListBoxRow *row = gtk_list_box_get_selected_row(GTK_LIST_BOX(tm->list));
     NsProcView *v = row ? g_object_get_data(G_OBJECT(row), "ns-view") : NULL;
-    if (v) ns_proc_view_end_task(v);
+    int pid = row ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(row), "ns-pid"))
+                  : 0;
+    if (v) {
+        if (pid > 0 && pid == ns_proc_view_video_pid(v))
+            ns_proc_view_stop_video(v);
+        else if (pid > 0 && pid == ns_proc_view_audio_pid(v))
+            ns_proc_view_stop_audio(v);
+        else
+            ns_proc_view_end_task(v);
+    }
     task_mgr_refresh(tm);
 }
 
