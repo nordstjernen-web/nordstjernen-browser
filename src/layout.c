@@ -7071,6 +7071,7 @@ estimate_natural_width(const ns_box *b, double cap)
     } else if (b->kind == NS_BOX_IMAGE || b->kind == NS_BOX_VIDEO) {
         w = b->content_width > 0 ? b->content_width : 0;
     } else {
+        int flow_children = 0;
         for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
             if (c->style && c->style != b->style &&
                 style_is_absolute_or_fixed(c->style)) continue;
@@ -7083,10 +7084,30 @@ estimate_natural_width(const ns_box *b, double cap)
                 cw_child += m.left + m.right;
             }
             w += cw_child;
+            flow_children++;
+        }
+        if (flow_children > 1 && style_is_flex_container(b->style) &&
+            strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+                   "column") != 0 &&
+            strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+                   "column-reverse") != 0) {
+            const ns_css_value *cg = b->style->values[NS_CSS_COLUMN_GAP];
+            const ns_css_value *gg = b->style->values[NS_CSS_GAP];
+            const ns_css_value *gv =
+                (cg && cg->kind == NS_CSS_V_LENGTH) ? cg :
+                (gg && gg->kind == NS_CSS_V_LENGTH) ? gg : NULL;
+            if (gv && gv->u.length.unit != NS_CSS_UNIT_PERCENT)
+                w += (flow_children - 1) * gv->u.length.v;
         }
     }
-    w += b->padding.left + b->padding.right +
-         b->border.left  + b->border.right;
+    if (b->style) {
+        ns_edges bm = {0}, bpd = {0}, bbd = {0};
+        edges_from_style(b->style, cap, &bm, &bpd, &bbd);
+        w += bpd.left + bpd.right + bbd.left + bbd.right;
+    } else {
+        w += b->padding.left + b->padding.right +
+             b->border.left  + b->border.right;
+    }
     if (b->style) {
         const ns_css_value *bsv = b->style->values[NS_CSS_BOX_SIZING];
         gboolean border_box = bsv && bsv->kind == NS_CSS_V_KEYWORD &&
@@ -7609,7 +7630,7 @@ layout_flex_row_wrap(ns_box *box, double cw,
             double item_outer = g_array_index(basis_arr, double, i) +
                                 g_array_index(extras_arr, double, i);
             double try_used = used + (line_count > 0 ? gap : 0) + item_outer;
-            if (try_used > cw && line_count > 0) break;
+            if (try_used > cw + 0.5 && line_count > 0) break;
             used = try_used;
             line_count++;
         }
