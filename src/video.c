@@ -1376,6 +1376,8 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
             if (buffered_end > 0.0)
                 ns_video_queue_emit(emits, v, "buf", buffered_end);
         }
+        gboolean helper_owns = ns_video_helper_enabled() &&
+                               (v->video_opened || v->mse_id != 0);
         gboolean helper = ns_video_helper_enabled() && v->video_opened;
         if (helper)
             ns_video_helper_flush_rect(cache, v, now_us);
@@ -1430,9 +1432,9 @@ ns_video_cache_tick(ns_video_cache *cache, gint64 now_us)
         v->prev_tick_time = t;
 
         gboolean ended = FALSE;
-        ns_texture *frame = helper ? NULL
+        ns_texture *frame = helper_owns ? NULL
             : ns_video_player_frame_at(v->player, t, v->loop, &ended);
-        if (helper && !v->loop && v->duration > 0.0 && t >= v->duration)
+        if (helper_owns && !v->loop && v->duration > 0.0 && t >= v->duration)
             ended = TRUE;
         if (helper && v->stalled &&
             t + 0.5 < ns_video_player_buffered_end(v->player)) {
