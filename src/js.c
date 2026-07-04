@@ -353,6 +353,22 @@ ns_mql_addListener(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_mql_addEventListener(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    JSValue r = ns_target_addEventListener(ctx, this_val, argc, argv);
+    if (argc >= 2 && JS_IsFunction(ctx, argv[1])) {
+        const char *type = JS_ToCString(ctx, argv[0]);
+        if (type && strcmp(type, "change") == 0) {
+            JSValueConst jargs[2] = { this_val, argv[1] };
+            JS_EnqueueJob(ctx, ns_mql_initial_notify_job, 2, jargs);
+        }
+        if (type) JS_FreeCString(ctx, type);
+    }
+    return r;
+}
+
+static JSValue
 ns_mql_removeListener(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
@@ -10261,6 +10277,7 @@ ns_window_matchMedia(JSContext *ctx, JSValueConst this_val,
     ns_bind_fn(ctx, mql, "addListener",       ns_mql_addListener, 1);
     ns_bind_fn(ctx, mql, "removeListener",    ns_mql_removeListener, 1);
     ns_bind_event_target_listeners(ctx, mql);
+    ns_bind_fn(ctx, mql, "addEventListener",  ns_mql_addEventListener, 2);
     if (q) JS_FreeCString(ctx, q);
     return mql;
 }
