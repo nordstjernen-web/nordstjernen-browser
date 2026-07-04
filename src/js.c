@@ -9146,10 +9146,6 @@ ns_structured_clone_value(JSContext *ctx, JSValueConst v)
     if (JS_IsFunction(ctx, clone)) {
         JSValueConst cargs[1] = { v };
         out = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
-        if (JS_IsException(out)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            out = JS_DupValue(ctx, v);
-        }
     } else {
         out = JS_DupValue(ctx, v);
     }
@@ -9211,18 +9207,24 @@ static JSValue
 ns_port_post_message(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
+    JSValueConst data = argc >= 1 ? argv[0] : JS_UNDEFINED;
+    JSValue cloned = ns_structured_clone_value(ctx, data);
+    if (JS_IsException(cloned)) return JS_EXCEPTION;
+
     JSValue closed = JS_GetPropertyStr(ctx, this_val, "_closed");
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
-    if (is_closed) return JS_UNDEFINED;
+    if (is_closed) {
+        JS_FreeValue(ctx, cloned);
+        return JS_UNDEFINED;
+    }
 
     JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
     if (JS_IsUndefined(pair) || JS_IsNull(pair)) {
         JS_FreeValue(ctx, pair);
+        JS_FreeValue(ctx, cloned);
         return JS_UNDEFINED;
     }
-    JSValueConst data = argc >= 1 ? argv[0] : JS_UNDEFINED;
-    JSValue cloned = ns_structured_clone_value(ctx, data);
 
     JSValue started = JS_GetPropertyStr(ctx, pair, "_started");
     gboolean pair_started = JS_ToBool(ctx, started);
@@ -9440,7 +9442,7 @@ ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
     if (is_closed)
-        return JS_ThrowTypeError(ctx,
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
             "BroadcastChannel.postMessage: channel is closed");
 
     JSValueConst msg = argc >= 1 ? argv[0] : JS_UNDEFINED;
@@ -9452,8 +9454,8 @@ ns_broadcast_post_message(JSContext *ctx, JSValueConst this_val,
         JSValueConst cargs[1] = { msg };
         data = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
         if (JS_IsException(data)) {
-            JS_FreeValue(ctx, JS_GetException(ctx));
-            data = JS_DupValue(ctx, msg);
+            JS_FreeValue(ctx, clone);
+            return JS_EXCEPTION;
         }
     } else {
         data = JS_DupValue(ctx, msg);
@@ -15074,7 +15076,7 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     if (!s || !s->ws || argc < 1) return JS_UNDEFINED;
     int cur = ns_ws_state_get(s->ws);
     if (cur == NS_WS_STATE_CONNECTING)
-        return JS_ThrowTypeError(ctx,
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
             "WebSocket.send: still in CONNECTING state");
     if (cur != NS_WS_STATE_OPEN) return JS_UNDEFINED;
 
@@ -15098,6 +15100,23 @@ ns_js_ws_send(JSContext *ctx, JSValueConst this_val,
     }
     JSValue ex = JS_GetException(ctx);
     JS_FreeValue(ctx, ex);
+
+    if (JS_IsObject(argv[0])) {
+        JSValue b = JS_GetPropertyStr(ctx, argv[0], "_b");
+        gboolean is_blob = !JS_IsException(b) &&
+                           !JS_IsUndefined(b) && !JS_IsNull(b);
+        if (JS_IsException(b)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JS_FreeValue(ctx, b);
+        if (is_blob) {
+            gsize blen = 0;
+            char *bytes = ns_blob_bytes_as_string(ctx, argv[0], &blen);
+            if (bytes) {
+                ns_ws_send_binary(s->ws, (const uint8_t *)bytes, blen);
+                g_free(bytes);
+            }
+            return JS_UNDEFINED;
+        }
+    }
 
     size_t slen = 0;
     const char *str = JS_ToCStringLen(ctx, &slen, argv[0]);
@@ -15157,6 +15176,16 @@ ns_window_websocket_ctor(JSContext *ctx, JSValueConst this_val,
     char *target = g_strdup(resolved ? resolved : url_raw);
     JS_FreeCString(ctx, url_raw);
     g_free(resolved);
+
+    if (g_ascii_strncasecmp(target, "http://", 7) == 0) {
+        char *remapped = g_strconcat("ws://", target + 7, NULL);
+        g_free(target);
+        target = remapped;
+    } else if (g_ascii_strncasecmp(target, "https://", 8) == 0) {
+        char *remapped = g_strconcat("wss://", target + 8, NULL);
+        g_free(target);
+        target = remapped;
+    }
 
     if (g_ascii_strncasecmp(target, "ws://",  5) != 0 &&
         g_ascii_strncasecmp(target, "wss://", 6) != 0) {
@@ -16058,7 +16087,8 @@ ns_worker_post_message(JSContext *ctx, JSValueConst this_val,
             "Worker.postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
-        return JS_ThrowTypeError(ctx, "Worker.postMessage: value could not be cloned");
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "Worker.postMessage: value could not be cloned");
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     g_main_context_invoke_full(host->context, G_PRIORITY_DEFAULT,
                                ns_worker_deliver_worker, msg, NULL);
@@ -16090,7 +16120,8 @@ ns_worker_global_post_message(JSContext *ctx, JSValueConst this_val,
             "postMessage: a value in the transfer list is not transferable");
     ns_worker_message *msg = ns_worker_message_new(ctx, host, argv[0]);
     if (!msg)
-        return JS_ThrowTypeError(ctx, "postMessage: value could not be cloned");
+        return ns_throw_dom_exception(ctx, "DataCloneError", 25,
+            "postMessage: value could not be cloned");
     ns_worker_walk_transfers(ctx, argc, argv, TRUE, NULL);
     ns_worker_post_owner_message(host, msg);
     return JS_UNDEFINED;
@@ -21479,6 +21510,26 @@ ns_element_insertAdjacentText(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+static void
+ns_convert_arg_node(ns_js *js, ns_node *node, GPtrArray *seq)
+{
+    if (node->kind == NS_NODE_DOCUMENT && !node->parent) {
+        if (js) ns_js_record_fragment_emptied(js, node);
+        ns_node *c = node->first_child;
+        while (c) {
+            ns_node *next = c->next_sibling;
+            ns_node_remove(c);
+            if (js) g_hash_table_remove(js->orphan_nodes, c);
+            g_ptr_array_add(seq, c);
+            c = next;
+        }
+    } else {
+        if (node->parent) ns_node_remove(node);
+        if (js) g_hash_table_remove(js->orphan_nodes, node);
+        g_ptr_array_add(seq, node);
+    }
+}
+
 static JSValue
 ns_element_before(JSContext *ctx, JSValueConst this_val,
                   int argc, JSValueConst *argv)
@@ -21486,27 +21537,29 @@ ns_element_before(JSContext *ctx, JSValueConst this_val,
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *to_insert = NULL;
         if (child) {
             if (child == self || ns_node_ancestor_or_self(self->parent, child)) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            to_insert = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                to_insert = ns_node_new_text(g_strdup(txt));
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (!to_insert) continue;
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *to_insert = g_ptr_array_index(seq, k);
         ns_insert_sibling_before(self, to_insert);
         if (_j)
             ns_js_record_child_change(_j, self->parent, to_insert, NULL,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -21532,9 +21585,7 @@ ns_element_after(JSContext *ctx, JSValueConst this_val,
         ns_node *node = ns_unwrap_element_mut(argv[i]);
         if (node) {
             if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
-            ns_node_remove(node);
-            g_ptr_array_add(seq, node);
+            ns_convert_arg_node(_j, node, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
@@ -21586,9 +21637,7 @@ ns_element_replaceWith(JSContext *ctx, JSValueConst this_val,
         ns_node *node = ns_unwrap_element_mut(argv[i]);
         if (node) {
             if (ns_node_ancestor_or_self(parent, node) && node != self) continue;
-            if (_j) g_hash_table_remove(_j->orphan_nodes, node);
-            ns_node_remove(node);
-            g_ptr_array_add(seq, node);
+            ns_convert_arg_node(_j, node, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
@@ -21825,27 +21874,28 @@ ns_element_append(JSContext *ctx, JSValueConst this_val,
             if (JS_IsException(verr)) return verr;
         }
     }
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *added = NULL;
         if (child) {
             if (ns_node_ancestor_or_self(parent, child)) continue;
-            if (child->parent) ns_node_remove(child);
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            ns_node_append_child(parent, child);
-            added = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                added = ns_node_new_text(g_strdup(txt));
-                ns_node_append_child(parent, added);
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (added && _j)
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *added = g_ptr_array_index(seq, k);
+        ns_node_append_child(parent, added);
+        if (_j)
             ns_js_record_child_change(_j, parent, added, NULL,
                                       added->prev_sibling, added->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -21869,22 +21919,22 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
         }
     }
     ns_node *ref = parent->first_child;
+    GPtrArray *seq = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
-        ns_node *to_insert = NULL;
         if (child) {
             if (ns_node_ancestor_or_self(parent, child)) continue;
-            if (child->parent) ns_node_remove(child);
-            if (_j) g_hash_table_remove(_j->orphan_nodes, child);
-            to_insert = child;
+            ns_convert_arg_node(_j, child, seq);
         } else {
             const char *txt = JS_ToCString(ctx, argv[i]);
             if (txt) {
-                to_insert = ns_node_new_text(g_strdup(txt));
+                g_ptr_array_add(seq, ns_node_new_text(g_strdup(txt)));
                 JS_FreeCString(ctx, txt);
             }
         }
-        if (!to_insert) continue;
+    }
+    for (guint k = 0; k < seq->len; k++) {
+        ns_node *to_insert = g_ptr_array_index(seq, k);
         if (!ref) {
             ns_node_append_child(parent, to_insert);
         } else {
@@ -21900,6 +21950,7 @@ ns_element_prepend(JSContext *ctx, JSValueConst this_val,
                                       to_insert->prev_sibling,
                                       to_insert->next_sibling);
     }
+    g_ptr_array_free(seq, TRUE);
     if (_j) _j->mutated = TRUE;
     return JS_UNDEFINED;
 }
@@ -22215,13 +22266,18 @@ ns_element_getAttributeNode(JSContext *ctx, JSValueConst this_val,
     if (!n || n->kind != NS_NODE_ELEMENT || argc < 1) return JS_NULL;
     const char *want = JS_ToCString(ctx, argv[0]);
     if (!want) return JS_NULL;
+    char *lowered = NULL;
+    if (!(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)))
+        lowered = g_ascii_strdown(want, -1);
+    const char *name = lowered ? lowered : want;
     JSValue out = JS_NULL;
     for (const ns_attr *a = n->attrs; a; a = a->next) {
-        if (a->name && g_ascii_strcasecmp(a->name, want) == 0) {
+        if (a->name && strcmp(a->name, name) == 0) {
             out = ns_attr_to_js(ctx, this_val, a, TRUE);
             break;
         }
     }
+    g_free(lowered);
     JS_FreeCString(ctx, want);
     return out;
 }
@@ -22313,8 +22369,12 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
         ? NULL : JS_ToCString(ctx, prefix_v);
     const char *local = JS_IsNull(local_v) || JS_IsUndefined(local_v)
         ? NULL : JS_ToCString(ctx, local_v);
+    JSValue old = JS_NULL;
     if (name && *name && !ns_attr_name_is_internal(name)) {
         const char *ns_uri = ns_raw && *ns_raw ? ns_raw : NULL;
+        const ns_attr *prev = ns_element_attr_by_namespace(n, ns_uri,
+            local && *local ? local : name);
+        if (prev) old = ns_attr_to_js(ctx, JS_NULL, prev, TRUE);
         ns_js_set_attr_ns_recorded(js_from_ctx(ctx), n, ns_uri, prefix,
                                    local && *local ? local : name,
                                    name, val ? val : "");
@@ -22331,7 +22391,7 @@ ns_element_setAttributeNode(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, ns_v);
     JS_FreeValue(ctx, prefix_v);
     JS_FreeValue(ctx, local_v);
-    return JS_NULL;
+    return old;
 }
 
 static JSValue
@@ -22341,7 +22401,9 @@ ns_element_hasAttributes(JSContext *ctx, JSValueConst this_val,
     (void)ctx; (void)argc; (void)argv;
     const ns_node *n = ns_unwrap_element(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_FALSE;
-    return n->attrs ? JS_TRUE : JS_FALSE;
+    for (const ns_attr *a = n->attrs; a; a = a->next)
+        if (a->name && !ns_attr_name_is_internal(a->name)) return JS_TRUE;
+    return JS_FALSE;
 }
 
 static JSValue ns_element_setAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
@@ -22454,8 +22516,10 @@ ns_element_toggleAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     const char *name = lowered ? lowered : raw_name;
     gboolean had = ns_element_get_attr(n, name) != NULL;
     gboolean want;
-    if (argc >= 2) want = JS_ToBool(ctx, argv[1]) ? TRUE : FALSE;
-    else           want = !had;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]))
+        want = JS_ToBool(ctx, argv[1]) ? TRUE : FALSE;
+    else
+        want = !had;
     ns_js *_j = js_from_ctx(ctx);
     if (want && !had)      ns_js_set_attr_recorded(_j, n, name, "");
     else if (!want && had) ns_js_remove_attr_recorded(_j, n, name);
@@ -23398,6 +23462,11 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
         } else {
             const ns_node *byid = ns_node_find_by_id(root, sel + 1);
             if (byid) hit = byid;
+        }
+        if (hit == root && !include_self) {
+            hit = NULL;
+            for (const ns_node *c = root->first_child; c && !hit; c = c->next_sibling)
+                hit = ns_node_find_by_id(c, sel + 1);
         }
         if (!want_all) {
             return hit ? ns_make_element(ctx, hit) : JS_NULL;
