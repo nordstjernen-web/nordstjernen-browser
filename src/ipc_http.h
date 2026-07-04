@@ -32,7 +32,6 @@ typedef struct {
     char  x_camera[2048];
     char  x_download[3072];
     char  x_audio[16384];
-    char  x_mail_key[1024];
 } http_head;
 
 void http_conn_init(http_conn *c, int fd);

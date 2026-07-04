@@ -406,7 +406,6 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                 free(fr.camera);
                 free(fr.download);
                 free(fr.audio);
-                free(fr.mail_key);
             }
         } else if (g_str_has_prefix(a, "viewport ")) {
             int nw = 0, nh = 0;
@@ -423,8 +422,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                     free(fr.camera);
                     free(fr.download);
                     free(fr.audio);
-                    free(fr.mail_key);
-                }
+                    }
             }
         } else if (g_str_has_prefix(a, "wait ")) {
             gint64 ms = g_ascii_strtoll(a + 5, NULL, 10);
@@ -438,8 +436,7 @@ rdrv_run_actions(ns_rproc_http *r, const char *spec, int vw, int vh,
                     free(fr.camera);
                     free(fr.download);
                     free(fr.audio);
-                    free(fr.mail_key);
-                }
+                    }
                 g_usleep(33000);
             }
         }

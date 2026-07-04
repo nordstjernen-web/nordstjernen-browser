@@ -560,7 +560,6 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
         out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
         out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
         out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
-        out->mail_key = head.x_mail_key[0] ? strdup(head.x_mail_key) : NULL;
         return 0;
     }
     if (head.x_w < 1 || head.x_w > r->max_w ||
@@ -584,7 +583,6 @@ ns_rproc_http_render(ns_rproc_http *r, int width, int height, int scroll_x,
     out->camera = head.x_camera[0] ? strdup(head.x_camera) : NULL;
     out->download = head.x_download[0] ? strdup(head.x_download) : NULL;
     out->audio = head.x_audio[0] ? strdup(head.x_audio) : NULL;
-    out->mail_key = head.x_mail_key[0] ? strdup(head.x_mail_key) : NULL;
     return 0;
 }
 

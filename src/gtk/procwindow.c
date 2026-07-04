@@ -10,7 +10,6 @@
 #include "cache.h"
 #include "config.h"
 #include "history.h"
-#include "mail.h"
 #include "net.h"
 #include "security.h"
 #include "version.h"
@@ -49,7 +48,6 @@ typedef struct {
     char           *status_base;
     gboolean        webgl_active;
     GtkWidget      *bookmarks_button;
-    guint           mail_timer;
     char           *home_url;
     ns_bookmarks   *bookmarks;
     char           *session_path;
@@ -75,8 +73,6 @@ procwindow_free(gpointer data)
     ProcWindow *pw = data;
     if (pw->session_timer)
         g_source_remove(pw->session_timer);
-    if (pw->mail_timer)
-        g_source_remove(pw->mail_timer);
     g_free(pw->session_path);
     g_free(pw->home_url);
     g_free(pw->status_base);
@@ -849,73 +845,6 @@ on_home_clicked(GtkButton *b, gpointer ud)
         ns_proc_view_load(v, pw->home_url ? pw->home_url : "about:start");
 }
 
-typedef struct { int count; } MailPollResult;
-
-static int g_mail_last_notified = -1;
-
-static void
-mail_notify_new(int count)
-{
-    GApplication *app = g_application_get_default();
-    if (!app) return;
-    GNotification *n = g_notification_new(ns_i18n("New email"));
-    char *body = g_strdup_printf("%d %s", count, ns_i18n("unread"));
-    g_notification_set_body(n, body);
-    g_notification_set_priority(n, G_NOTIFICATION_PRIORITY_NORMAL);
-    g_application_send_notification(app, "ns-mail-unread", n);
-    g_object_unref(n);
-    g_free(body);
-}
-
-static gboolean
-mail_poll_apply(gpointer data)
-{
-    MailPollResult *r = data;
-    if (r->count >= 0) {
-        if (g_mail_last_notified >= 0 && r->count > g_mail_last_notified)
-            mail_notify_new(r->count);
-        g_mail_last_notified = r->count;
-    }
-    g_free(r);
-    return G_SOURCE_REMOVE;
-}
-
-static gpointer
-mail_poll_worker(gpointer data)
-{
-    (void)data;
-    MailPollResult *r = g_new0(MailPollResult, 1);
-    r->count = ns_mail_poll_unseen();
-    g_idle_add(mail_poll_apply, r);
-    return NULL;
-}
-
-static gboolean
-mail_poll_tick(gpointer ud)
-{
-    (void)ud;
-    GThread *t = g_thread_new("ns-mail-poll", mail_poll_worker, NULL);
-    if (t) g_thread_unref(t);
-    return G_SOURCE_CONTINUE;
-}
-
-static void
-on_email_clicked(GtkButton *b, gpointer ud)
-{
-    (void)b;
-    ProcWindow *pw = ud;
-    NsProcView *v = current_view(pw);
-    if (v)
-        ns_proc_view_load(v, "about:email");
-}
-
-static void
-act_email(GSimpleAction *action, GVariant *parameter, gpointer user_data)
-{
-    (void)action; (void)parameter;
-    on_email_clicked(NULL, user_data);
-}
-
 static void
 on_logo_clicked(GtkButton *b, gpointer ud)
 {
@@ -1429,8 +1358,6 @@ install_shortcuts(ProcWindow *pw)
     install_action(pw, "downloads", G_CALLBACK(act_downloads),
                    (const char *[]){ "<Ctrl>j", NULL });
     install_action(pw, "about", G_CALLBACK(act_about), NULL);
-    install_action(pw, "email", G_CALLBACK(act_email),
-                   (const char *[]){ "<Ctrl>m", NULL });
     install_action(pw, "settings", G_CALLBACK(act_settings),
                    (const char *[]){ "<Ctrl>comma", NULL });
     install_action(pw, "quit", G_CALLBACK(act_quit),
@@ -1555,9 +1482,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
     pw->bookmarks_button = toolbar_button("user-bookmarks-symbolic",
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
-    GtkWidget *email_button = toolbar_button("nordstjernen-email",
-                                             ns_i18n("Email"),
-                                             G_CALLBACK(on_email_clicked), pw);
 #if defined(NS_HAVE_AI) && !defined(__APPLE__)
     GtkWidget *ai_window_button =
         toolbar_button("nordstjernen-ai", ns_i18n("New AI Window"),
@@ -1574,7 +1498,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append(appmenu, ns_i18n("JavaScript Console"), "win.console");
     g_menu_append(appmenu, ns_i18n("Downloads"), "win.downloads");
     g_menu_append(appmenu, ns_i18n("Task Manager"), "win.task-manager");
-    g_menu_append(appmenu, ns_i18n("Email"), "win.email");
     g_menu_append(appmenu, ns_i18n("Settings"), "win.settings");
     GMenu *appmenu_about = g_menu_new();
     g_menu_append(appmenu_about, ns_i18n("About Nordstjernen"), "win.about");
@@ -1606,7 +1529,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(toolbar), pw->address);
     gtk_box_append(GTK_BOX(toolbar), go);
     gtk_box_append(GTK_BOX(toolbar), pw->bookmarks_button);
-    gtk_box_append(GTK_BOX(toolbar), email_button);
 #if defined(NS_HAVE_AI) && !defined(__APPLE__)
     gtk_box_append(GTK_BOX(toolbar), ai_window_button);
 #endif
@@ -1633,8 +1555,6 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_window_set_child(GTK_WINDOW(pw->window), vbox);
     install_shortcuts(pw);
 
-    mail_poll_tick(pw);
-    pw->mail_timer = g_timeout_add_seconds(120, mail_poll_tick, pw);
     return pw;
 }
 

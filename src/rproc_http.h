@@ -36,7 +36,6 @@ typedef struct {
     char                *camera;
     char                *download;
     char                *audio;
-    char                *mail_key;
 } ns_rproc_http_frame;
 
 ns_rproc_http *ns_rproc_http_spawn(const char *renderer_path, int max_width,
