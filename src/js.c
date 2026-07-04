@@ -1239,6 +1239,8 @@ camel_to_kebab(const char *s)
     if (!strcmp(s, "cssFloat")) return g_strdup("float");
     if (s[0] == '-' && s[1] == '-') return g_strdup(s);
     GString *out = g_string_new(NULL);
+    if (g_str_has_prefix(s, "webkit") && g_ascii_isupper(s[6]))
+        g_string_append_c(out, '-');
     for (const char *p = s; *p; p++) {
         if (*p >= 'A' && *p <= 'Z') {
             g_string_append_c(out, '-');
@@ -4606,7 +4608,7 @@ ns_element_set_nodeValue(JSContext *ctx, JSValueConst this_val, JSValueConst val
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n) return JS_UNDEFINED;
     if (n->kind != NS_NODE_TEXT && n->kind != NS_NODE_COMMENT) return JS_UNDEFINED;
-    gboolean free_s = !JS_IsNull(val);
+    gboolean free_s = !JS_IsNull(val) && !JS_IsUndefined(val);
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (s) {
         char *old_copy = n->text ? g_strdup(n->text) : g_strdup("");
@@ -5562,11 +5564,12 @@ ns_element_set_innerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || n->kind != NS_NODE_ELEMENT) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
     ns_node *fragment = ns_html_parse_fragment_in(n->name, s, -1);
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
     if (fragment) {
         if (ns_js_try_update_same_shape_text_html(_j, n, fragment)) {
             ns_node_free(fragment);
@@ -5640,12 +5643,13 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
 {
     ns_node *self = ns_unwrap_element_mut(this_val);
     if (!self || !self->parent) return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
+    gboolean free_s = !JS_IsNull(val);
+    const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
     const char *ctx_tag = (self->parent && self->parent->kind == NS_NODE_ELEMENT)
                           ? self->parent->name : NULL;
     ns_node *fragment = ns_html_parse_fragment_in(ctx_tag, s, -1);
-    JS_FreeCString(ctx, s);
+    if (free_s) JS_FreeCString(ctx, s);
     if (fragment) {
         ns_mark_scripts_already_started(fragment);
         ns_node *anchor = self;
@@ -10103,7 +10107,7 @@ ns_css_supports(JSContext *ctx, JSValueConst this_val,
         const char *cond = JS_ToCString(ctx, argv[0]);
         int r = cond ? ns_css_eval_supports_condition(cond, 0) : -1;
         if (cond) JS_FreeCString(ctx, cond);
-        result = (r != 0);
+        result = (r == 1);
     }
     return result ? JS_TRUE : JS_FALSE;
 }
@@ -10113,17 +10117,34 @@ ns_css_escape(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1) return JS_NewString(ctx, "");
-    const char *s = JS_ToCString(ctx, argv[0]);
-    if (!s) return JS_NewString(ctx, "");
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "CSS.escape: 1 argument required");
+    size_t slen = 0;
+    const char *s = JS_ToCStringLen(ctx, &slen, argv[0]);
+    if (!s) return JS_EXCEPTION;
     GString *out = g_string_new(NULL);
-    for (const char *p = s; *p; p++) {
-        unsigned char c = (unsigned char)*p;
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-            (c >= '0' && c <= '9') || c == '_' || c == '-' || c >= 0x80) {
-            g_string_append_c(out, c);
+    gboolean first_is_dash = slen > 0 && s[0] == '-';
+    gsize cp = 0;
+    for (size_t i = 0; i < slen; i++) {
+        unsigned char c = (unsigned char)s[i];
+        gboolean continuation = (c & 0xC0) == 0x80;
+        if (!continuation) cp++;
+        gsize pos = cp - 1;
+        gboolean digit = c >= '0' && c <= '9';
+        if (c == 0x00) {
+            g_string_append(out, "\xEF\xBF\xBD");
+        } else if (c <= 0x1F || c == 0x7F) {
+            g_string_append_printf(out, "\\%x ", c);
+        } else if (digit && (pos == 0 || (pos == 1 && first_is_dash))) {
+            g_string_append_printf(out, "\\%x ", c);
+        } else if (c == '-' && pos == 0 && slen == 1) {
+            g_string_append(out, "\\-");
+        } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   digit || c == '_' || c == '-' || c >= 0x80) {
+            g_string_append_c(out, (char)c);
         } else {
-            g_string_append_printf(out, "\\%c", c);
+            g_string_append_c(out, '\\');
+            g_string_append_c(out, (char)c);
         }
     }
     JS_FreeCString(ctx, s);
@@ -10450,6 +10471,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
 
     ns_history_ensure_stack(js);
 
+    JSValue state = JS_NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])) {
+        state = ns_window_structured_clone(ctx, JS_UNDEFINED, 1, &argv[0]);
+        if (JS_IsException(state)) return JS_EXCEPTION;
+    }
+
     char *new_url = NULL;
     if (argc >= 3 && !JS_IsNull(argv[2]) && !JS_IsUndefined(argv[2])) {
         const char *url_raw = JS_ToCString(ctx, argv[2]);
@@ -10458,6 +10485,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
                 new_url = ns_url_resolve(js->current_url, url_raw);
             else
                 new_url = g_strdup(url_raw);
+            if (!new_url) {
+                JS_FreeCString(ctx, url_raw);
+                JS_FreeValue(ctx, state);
+                return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                    "history: the URL could not be parsed");
+            }
         }
         if (url_raw) JS_FreeCString(ctx, url_raw);
     }
@@ -10470,13 +10503,12 @@ ns_history_set_state_impl(JSContext *ctx, int argc, JSValueConst *argv,
                                strcmp(new_origin, curr_origin) == 0;
         if (!same_origin) {
             g_free(new_url);
-            return JS_ThrowTypeError(ctx,
-                "history.%sState: URL must be same-origin as the document",
-                replace ? "replace" : "push");
+            JS_FreeValue(ctx, state);
+            return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                "history: URL must be same-origin as the document");
         }
     }
 
-    JSValue state = argc >= 1 ? JS_DupValue(ctx, argv[0]) : JS_NULL;
     JS_FreeValue(ctx, js->history_state);
     js->history_state = state;
 
@@ -10551,9 +10583,8 @@ ns_history_navigate(JSContext *ctx, int delta)
     ns_history_ensure_stack(js);
     int n = (int)js->history_entries->len;
     int target = js->history_pos + delta;
-    if (target < 0) target = 0;
-    if (target > n - 1) target = n - 1;
-    if (target == js->history_pos) return JS_UNDEFINED;
+    if (target < 0 || target > n - 1 || target == js->history_pos)
+        return JS_UNDEFINED;
 
     js->history_pos = target;
     ns_history_entry *e = g_ptr_array_index(js->history_entries, target);
@@ -26203,7 +26234,7 @@ ns_element_get_scrollTop(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) return JS_NewInt32(ctx, 0);
-    return JS_NewInt32(ctx, (int)(b->scroll_y + 0.5));
+    return JS_NewFloat64(ctx, b->scroll_y);
 }
 
 static JSValue
@@ -26212,7 +26243,7 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_box *b = ns_box_for_this(ctx, this_val);
     if (!b) return JS_NewInt32(ctx, 0);
-    return JS_NewInt32(ctx, (int)(b->scroll_x + 0.5));
+    return JS_NewFloat64(ctx, b->scroll_x);
 }
 
 static JSValue
@@ -26638,7 +26669,9 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (el->name && (strcmp(el->name, "progress") == 0 ||
                      strcmp(el->name, "meter") == 0))
         return ns_element_set_double_attr(ctx, el, "value", val);
-    const char *s = JS_ToCString(ctx, val);
+    gboolean null_to_empty = JS_IsNull(val) && el->name &&
+        (strcmp(el->name, "input") == 0 || strcmp(el->name, "textarea") == 0);
+    const char *s = null_to_empty ? "" : JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
     if (el->name && strcmp(el->name, "select") == 0) {
         ns_node *chosen = NULL;
@@ -26695,13 +26728,13 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         ns_js_clear_children(_j, el);
         if (s && *s)
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
-        JS_FreeCString(ctx, s);
+        if (!null_to_empty) JS_FreeCString(ctx, s);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
     }
     ns_element_set_attr(el, ns_input_value_is_dirty_mode(el) ? "data-nd-value"
                                                              : "value", s);
-    JS_FreeCString(ctx, s);
+    if (!null_to_empty) JS_FreeCString(ctx, s);
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
@@ -26713,26 +26746,24 @@ ns_element_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el || !el->name || strcmp(el->name, "select") != 0)
         return JS_NewInt32(ctx, -1);
-    gboolean multiple = ns_element_get_attr(el, "multiple") != NULL;
+    const ns_node *chosen = ns_select_chosen_option(el);
+    if (!chosen) return JS_NewInt32(ctx, -1);
     int idx = 0;
-    int first_idx = -1;
     for (const ns_node *c = el->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
         if (strcmp(c->name, "option") == 0) {
-            if (first_idx < 0) first_idx = idx;
-            if (ns_element_get_attr(c, "selected")) return JS_NewInt32(ctx, idx);
+            if (c == chosen) return JS_NewInt32(ctx, idx);
             idx++;
         } else if (strcmp(c->name, "optgroup") == 0) {
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
                 if (ns_node_is_element_named(cc, "option")) {
-                    if (first_idx < 0) first_idx = idx;
-                    if (ns_element_get_attr(cc, "selected")) return JS_NewInt32(ctx, idx);
+                    if (cc == chosen) return JS_NewInt32(ctx, idx);
                     idx++;
                 }
             }
         }
     }
-    return JS_NewInt32(ctx, multiple ? -1 : first_idx);
+    return JS_NewInt32(ctx, -1);
 }
 
 static JSValue
