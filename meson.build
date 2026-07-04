@@ -453,7 +453,8 @@ if not is_android and ai_feature.allowed()
     else
       vulkan_dep = dependency('vulkan', required: false)
       glsl_compiler = find_program('glslc', 'glslangValidator', required: false)
-      if vulkan_dep.found() and glsl_compiler.found()
+      spirv_headers = dependency('SPIRV-Headers', method: 'cmake', required: false)
+      if vulkan_dep.found() and glsl_compiler.found() and spirv_headers.found()
         use_vulkan = true
       endif
     endif
