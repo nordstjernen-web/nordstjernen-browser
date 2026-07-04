@@ -505,6 +505,14 @@ ns_rproc_http_open_ex(ns_rproc_http *r, const char *url, int viewport_width,
         free(out->nav);
         out->nav = NULL;
     }
+    long sec = 0;
+    json_get_long(body, "security", &sec);
+    out->security = (int)sec;
+    out->remote_ip = json_get_str(body, "ip");
+    if (out->remote_ip && !*out->remote_ip) {
+        free(out->remote_ip);
+        out->remote_ip = NULL;
+    }
     free(body);
     return 0;
 }
@@ -1163,9 +1171,11 @@ ns_rproc_http_page_clear(ns_rproc_http_page *out)
     free(out->title);
     free(out->url);
     free(out->nav);
+    free(out->remote_ip);
     out->title = NULL;
     out->url = NULL;
     out->nav = NULL;
+    out->remote_ip = NULL;
 }
 
 void

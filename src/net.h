@@ -20,6 +20,13 @@ G_BEGIN_DECLS
     "Mozilla/5.0 (X11; Linux x86_64; rv:115.0) Gecko/20100101 " \
     "Firefox/115.0 Nordstjernen/" NS_VERSION
 
+typedef enum {
+    NS_SEC_NONE = 0,
+    NS_SEC_SECURE,
+    NS_SEC_INVALID,
+    NS_SEC_PLAIN
+} ns_security;
+
 typedef struct ns_response {
     long  status;
     char *final_url;
@@ -35,6 +42,8 @@ typedef struct ns_response {
     GByteArray *body;
     char *error;
     char *tls_warning;
+    char *remote_ip;
+    int   security;
     int   redirect_count;
 } ns_response;
 

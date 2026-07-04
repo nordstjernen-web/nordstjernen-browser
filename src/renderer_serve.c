@@ -305,25 +305,32 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                          : NULL;
         session_clear_post(s);
         int pw = 0, ph = 0, ok = s->cur != NULL;
+        int security = 0;
+        const char *ip = NULL;
         char *title = NULL, *final_url = NULL, *nav = NULL;
         char *title_escaped = NULL, *url_escaped = NULL, *nav_escaped = NULL;
+        char *ip_escaped = NULL;
         if (s->cur) {
             ns_browser_page_size(s->cur, &pw, &ph);
             title = ns_browser_title(s->cur);
             final_url = ns_browser_url(s->cur);
             nav = ns_browser_take_pending_nav(s->cur);
+            security = ns_browser_security(s->cur, &ip);
         }
         title_escaped = json_escape(title ? title : "");
         url_escaped = json_escape(final_url ? final_url : (url ? url : ""));
         nav_escaped = json_escape(nav ? nav : "");
+        ip_escaped = json_escape(ip ? ip : "");
         char *json = NULL;
         int n = asprintf(&json,
                          "{\"ok\":%d,\"page_width\":%d,\"page_height\":%d,"
-                         "\"title\":\"%s\",\"url\":\"%s\",\"nav\":\"%s\"}",
+                         "\"title\":\"%s\",\"url\":\"%s\",\"nav\":\"%s\","
+                         "\"security\":%d,\"ip\":\"%s\"}",
                          ok, pw, ph,
                          title_escaped ? title_escaped : "",
                          url_escaped ? url_escaped : "",
-                         nav_escaped ? nav_escaped : "");
+                         nav_escaped ? nav_escaped : "",
+                         security, ip_escaped ? ip_escaped : "");
         if (n >= 0)
             http_write_response(ctrl_w, 200, "application/json", NULL, json,
                                 (size_t)n);
@@ -331,6 +338,7 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         free(title_escaped);
         free(url_escaped);
         free(nav_escaped);
+        free(ip_escaped);
         free(title);
         free(final_url);
         free(nav);

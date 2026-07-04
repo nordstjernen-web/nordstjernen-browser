@@ -243,6 +243,11 @@ char *ns_browser_title(ns_browser *browser);
 /* The page's final URL (after redirects). Newly allocated; free() it. */
 char *ns_browser_url(ns_browser *browser);
 
+/* The page's connection security (ns_security in net.h): secure/invalid/plain/
+ * none. When out_ip is non-NULL it receives the server IP (owned by the
+ * browser, valid until it is closed), or NULL if unknown. */
+int ns_browser_security(ns_browser *browser, const char **out_ip);
+
 /* A URL the page's own scripts asked to navigate to (location.assign/replace/
  * href, meta refresh) since the last call, or NULL. Newly allocated; free()
  * it. Returning it clears the pending state. */
