@@ -1863,6 +1863,9 @@ intl_seg_segment(JSContext *ctx, JSValueConst this_val,
     char *gran = intl_hget_str(ctx, this_val, "_granularity");
     gboolean words = gran && !strcmp(gran, "word");
     gboolean sentences = gran && !strcmp(gran, "sentence");
+    char *locale = intl_hget_str(ctx, this_val, "_locale");
+    PangoLanguage *lang = (locale && *locale)
+        ? pango_language_from_string(locale) : NULL;
 
     glong nchars = g_utf8_strlen(input, -1);
     JSValue arr = JS_NewArray(ctx);
@@ -1870,7 +1873,7 @@ intl_seg_segment(JSContext *ctx, JSValueConst this_val,
 
     if (nchars > 0) {
         PangoLogAttr *attrs = g_new0(PangoLogAttr, nchars + 1);
-        pango_get_log_attrs(input, (int)strlen(input), -1, NULL,
+        pango_get_log_attrs(input, (int)strlen(input), -1, lang,
                             attrs, (int)(nchars + 1));
         glong seg_start = 0;
         const char *p = input;
@@ -1903,6 +1906,7 @@ intl_seg_segment(JSContext *ctx, JSValueConst this_val,
     intl_bind(ctx, arr, "containing", intl_seg_containing, 1);
     JS_FreeCString(ctx, input);
     g_free(gran);
+    g_free(locale);
     return arr;
 }
 

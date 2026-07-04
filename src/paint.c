@@ -1544,10 +1544,8 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
                       gboolean italic, ns_css_font_metrics *out)
 {
     if (size_px <= 0) return;
-    PangoFontMap *fm = pango_cairo_font_map_get_default();
-    if (!fm) return;
-    PangoContext *pctx = pango_font_map_create_context(fm);
-    PangoLayout *l = pango_layout_new(pctx);
+    PangoLayout *l = paint_create_layout();
+    if (!l) return;
     PangoFontDescription *fd = pango_font_description_new();
     char *pango_family = family ? ns_css_font_family_for_pango(family) : NULL;
     if (pango_family && *pango_family)
@@ -1579,7 +1577,6 @@ ns_paint_font_metrics(const char *family, double size_px, int weight,
 
     pango_font_description_free(fd);
     g_object_unref(l);
-    g_object_unref(pctx);
 }
 
 void
