@@ -734,12 +734,14 @@ ns_video_build_player(ns_pending *pending, ns_response *resp)
     if (v->natural_width <= 0)  v->natural_width  = ns_video_player_width(player);
     if (v->natural_height <= 0) v->natural_height = ns_video_player_height(player);
 
-    gboolean ended = FALSE;
-    ns_texture *frame = ns_video_player_frame_at(player, v->cur_time, v->loop,
-                                                 &ended);
-    if (frame) {
-        ns_texture_unref(v->frame_texture);
-        v->frame_texture = ns_texture_ref(frame);
+    if (!ns_video_helper_enabled()) {
+        gboolean ended = FALSE;
+        ns_texture *frame = ns_video_player_frame_at(player, v->cur_time,
+                                                     v->loop, &ended);
+        if (frame) {
+            ns_texture_unref(v->frame_texture);
+            v->frame_texture = ns_texture_ref(frame);
+        }
     }
 
     if (v->has_audio && !v->audio_file && v->url &&
@@ -888,12 +890,14 @@ ns_video_mse_attach_player(ns_video *v, ns_mse_stream *s)
     if (v->natural_height <= 0)
         v->natural_height = ns_video_player_height(player);
     v->loaded = TRUE;
-    gboolean ended = FALSE;
-    ns_texture *frame = ns_video_player_frame_at(player, v->cur_time,
-                                                 v->loop, &ended);
-    if (frame) {
-        ns_texture_unref(v->frame_texture);
-        v->frame_texture = ns_texture_ref(frame);
+    if (!ns_video_helper_enabled()) {
+        gboolean ended = FALSE;
+        ns_texture *frame = ns_video_player_frame_at(player, v->cur_time,
+                                                     v->loop, &ended);
+        if (frame) {
+            ns_texture_unref(v->frame_texture);
+            v->frame_texture = ns_texture_ref(frame);
+        }
     }
     if (v->playing && v->base_us == 0)
         v->base_us = g_get_monotonic_time() - (gint64)(v->cur_time * 1e6);
