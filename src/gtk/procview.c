@@ -983,7 +983,8 @@ pv_append_media_process_stats(NsProcView *v, GString *out)
                                "video ring %ux%u stride %u slot %d pts %.2fs\n",
                                r->width, r->height, r->stride,
                                r->latest == G_MAXUINT32 ? -1 : (int)r->latest,
-                               r->latest < r->nslots ? r->pts[r->latest] : 0.0);
+                               r->latest < G_N_ELEMENTS(r->pts) ? r->pts[r->latest]
+                                                                : 0.0);
     }
 #endif
 }
@@ -2463,23 +2464,30 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 #ifndef G_OS_WIN32
     if (v->vring && v->vid_rect_valid) {
         ns_vring_hdr *r = v->vring;
-        guint32 slot = r->latest;
-        if (r->magic == NS_VRING_MAGIC && slot != G_MAXUINT32 &&
-            slot < r->nslots &&
-            sizeof(ns_vring_hdr) + (gsize)(slot + 1) * r->frame_bytes
+        guint32 magic   = r->magic;
+        guint32 slot    = r->latest;
+        guint32 nslots  = r->nslots;
+        guint32 fw      = r->width;
+        guint32 fh      = r->height;
+        guint32 fstride = r->stride;
+        guint32 fbytes  = r->frame_bytes;
+        if (magic == NS_VRING_MAGIC && slot != G_MAXUINT32 && slot < nslots &&
+            fw > 0 && fh > 0 &&
+            (guint64)fstride >= (guint64)fw * 4 &&
+            (guint64)fstride * fh <= fbytes &&
+            sizeof(ns_vring_hdr) + (gsize)(slot + 1) * fbytes
                 <= v->vring_bytes) {
             unsigned char *px = (unsigned char *)r + sizeof(ns_vring_hdr) +
-                                (gsize)slot * r->frame_bytes;
+                                (gsize)slot * fbytes;
             cairo_surface_t *s = cairo_image_surface_create_for_data(
-                px, CAIRO_FORMAT_RGB24, (int)r->width, (int)r->height,
-                (int)r->stride);
+                px, CAIRO_FORMAT_RGB24, (int)fw, (int)fh, (int)fstride);
             if (cairo_surface_status(s) == CAIRO_STATUS_SUCCESS) {
                 cairo_save(cr);
                 cairo_rectangle(cr, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
                 cairo_clip(cr);
                 cairo_translate(cr, v->vid_x, v->vid_y);
-                cairo_scale(cr, v->vid_w / (double)r->width,
-                            v->vid_h / (double)r->height);
+                cairo_scale(cr, v->vid_w / (double)fw,
+                            v->vid_h / (double)fh);
                 cairo_set_source_surface(cr, s, 0, 0);
                 cairo_paint(cr);
                 cairo_restore(cr);
