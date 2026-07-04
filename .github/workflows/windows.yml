@@ -95,13 +95,28 @@ jobs:
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
 
-      - name: Build LGPL FFmpeg (inline WebM)
+      - name: Cache LGPL FFmpeg
+        id: ffcache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}\ffmpeg-lgpl
+          key: ffmpeg-lgpl-win-${{ matrix.windows }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.sh') }}
+
+      - name: Provide LGPL FFmpeg (inline WebM)
         run: |
-          # MSYS2's mingw FFmpeg is GPL; build a minimal LGPL one (VP9/VP8 +
-          # Opus/Vorbis only) into the mingw prefix so pack-windows.sh's DLL
-          # chase bundles its DLLs and meson detects it via pkg-config. WebM
-          # is a required dependency on Windows, so this step must succeed.
-          scripts/build-ffmpeg-lgpl.sh /mingw64
+          # MSYS2's mingw FFmpeg is GPL; use a minimal LGPL one (VP9/VP8 +
+          # Opus/Vorbis only). Build it once into a cached prefix (keyed on the
+          # build script), then expose it via pkg-config for meson and copy its
+          # DLLs into the mingw prefix so pack-windows.sh's DLL chase bundles
+          # them. WebM is required on Windows, so this must succeed.
+          PREFIX="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-lgpl"
+          if [ ! -f "$PREFIX/lib/pkgconfig/libavcodec.pc" ]; then
+            scripts/build-ffmpeg-lgpl.sh "$PREFIX"
+          else
+            echo "using cached LGPL FFmpeg at $PREFIX"
+          fi
+          cp "$PREFIX"/bin/*.dll /mingw64/bin/
+          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Build
         id: build
