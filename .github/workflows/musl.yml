@@ -54,7 +54,10 @@ jobs:
       - name: Build (musl libc)
         run: |
           export CC="ccache clang"
-          meson setup builddir
+          # ffmpeg-dev pulls in Vulkan on Alpine, which would make GGML try to
+          # build its Vulkan backend (needs SPIRV-Headers, not packaged here).
+          # This is a libc sanity build, so keep the AI backend CPU-only.
+          meson setup builddir -Dai_gpu=disabled
           meson compile -C builddir
           file builddir/src/gtk/nordstjernen
 
