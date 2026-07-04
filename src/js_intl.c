@@ -10,23 +10,23 @@
 
 #include "i18n.h"
 
-static void
+static gboolean
 intl_gmtime(const time_t *t, struct tm *out)
 {
 #ifdef _WIN32
-    gmtime_s(out, t);
+    return gmtime_s(out, t) == 0;
 #else
-    gmtime_r(t, out);
+    return gmtime_r(t, out) != NULL;
 #endif
 }
 
-static void
+static gboolean
 intl_localtime(const time_t *t, struct tm *out)
 {
 #ifdef _WIN32
-    localtime_s(out, t);
+    return localtime_s(out, t) == 0;
 #else
-    localtime_r(t, out);
+    return localtime_r(t, out) != NULL;
 #endif
 }
 
@@ -1039,8 +1039,12 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
     time_t secs = (time_t)floor(ms / 1000.0);
     struct tm tmv;
     gboolean utc = tz && !strcmp(tz, "UTC");
-    if (utc) intl_gmtime(&secs, &tmv);
-    else intl_localtime(&secs, &tmv);
+    gboolean ok = utc ? intl_gmtime(&secs, &tmv) : intl_localtime(&secs, &tmv);
+    if (!ok) {
+        JS_SetPropertyUint32(ctx, arr, n++,
+                             intl_part(ctx, "literal", "Invalid Date"));
+        return arr;
+    }
 
     int Y = tmv.tm_year + 1900, Mo = tmv.tm_mon, D = tmv.tm_mday,
         Wd = tmv.tm_wday, H = tmv.tm_hour, Mi = tmv.tm_min, S = tmv.tm_sec;
@@ -1060,7 +1064,7 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
     GPtrArray *dpt = g_ptr_array_new_with_free_func(g_free);
 
     if (weekday) {
-        const char *nm = intl_days[Wd % 7];
+        const char *nm = intl_days[((Wd % 7) + 7) % 7];
         char *v = !strcmp(weekday, "narrow") ? g_strndup(nm, 1)
                 : !strcmp(weekday, "short") ? g_strndup(nm, 3)
                 : g_strdup(nm);
@@ -1068,7 +1072,7 @@ intl_dtf_parts_core(JSContext *ctx, JSValueConst opts, const char *locale,
         g_free(v);
     }
     if (month) {
-        const char *nm = intl_months[Mo % 12];
+        const char *nm = intl_months[((Mo % 12) + 12) % 12];
         char *v;
         if (!strcmp(month, "long")) v = g_strdup(nm);
         else if (!strcmp(month, "short")) v = g_strndup(nm, 3);
