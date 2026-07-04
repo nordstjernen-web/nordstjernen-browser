@@ -665,6 +665,23 @@ ns_html_declared_charset(const char *body, gsize len, const char *content_type)
     return g_strdup(name);
 }
 
+static gboolean
+charset_is_dangerous(const char *cs)
+{
+    if (!cs || !*cs) return TRUE;
+    char *up = g_ascii_strup(cs, -1);
+    gboolean bad =
+        strstr(up, "UTF-7") || strstr(up, "UTF7") ||
+        strstr(up, "REPLACEMENT") ||
+        g_str_has_prefix(up, "HZ") ||
+        strstr(up, "2022-CN") || strstr(up, "2022CN") ||
+        strstr(up, "2022-KR") || strstr(up, "2022KR") ||
+        strstr(up, "IMAP") ||
+        strstr(up, "CESU") || strstr(up, "BOCU") || strstr(up, "SCSU");
+    g_free(up);
+    return bad;
+}
+
 char *
 ns_html_decode_body_full(const char *body, gsize len,
                          const char *content_type, char **charset_out)
@@ -700,7 +717,8 @@ ns_html_decode_body_full(const char *body, gsize len,
     if (declared) {
         char *cs = charset_normalize(declared);
         g_free(declared);
-        if (g_ascii_strcasecmp(cs, "UTF-8") != 0) {
+        if (!charset_is_dangerous(cs) &&
+            g_ascii_strcasecmp(cs, "UTF-8") != 0) {
             char *out = g_convert(body, (gssize)len, "UTF-8", cs,
                                   NULL, NULL, NULL);
             if (out) {
@@ -733,12 +751,14 @@ ns_html_decode_body_full(const char *body, gsize len,
     }
 
     if (charset) {
-        char *out = g_convert(body, (gssize)len, "UTF-8", charset,
-                              NULL, NULL, NULL);
-        if (out) {
-            charset_report(charset_out, charset);
-            g_free(charset);
-            return out;
+        if (!charset_is_dangerous(charset)) {
+            char *out = g_convert(body, (gssize)len, "UTF-8", charset,
+                                  NULL, NULL, NULL);
+            if (out) {
+                charset_report(charset_out, charset);
+                g_free(charset);
+                return out;
+            }
         }
         g_free(charset);
     }
