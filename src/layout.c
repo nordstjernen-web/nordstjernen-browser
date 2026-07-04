@@ -133,6 +133,11 @@ containing_block_definite_height(const ns_box *box)
             bottom && !length_is_auto(bottom) &&
             p->content_height > 0)
             return p->content_height;
+        const ns_css_value *arv = p->style->values[NS_CSS_ASPECT_RATIO];
+        if (arv && arv->kind == NS_CSS_V_LENGTH &&
+            arv->u.length.unit == NS_CSS_UNIT_NUMBER &&
+            arv->u.length.v > 0 && p->content_width > 0)
+            return p->content_width / arv->u.length.v;
         return -1;
     }
     if (height_is_percent(h)) {
@@ -7829,6 +7834,13 @@ layout_flex_column(ns_box *box, double cw,
         box->content_height > 0 &&
         (hv || (box->style->values[NS_CSS_TOP] && box->style->values[NS_CSS_BOTTOM])))
         explicit_h = box->content_height;
+    if (explicit_h < 0 && box->style) {
+        const ns_css_value *arv = box->style->values[NS_CSS_ASPECT_RATIO];
+        if (arv && arv->kind == NS_CSS_V_LENGTH &&
+            arv->u.length.unit == NS_CSS_UNIT_NUMBER &&
+            arv->u.length.v > 0 && cw > 0)
+            explicit_h = cw / arv->u.length.v;
+    }
     if (explicit_h > 0) box->definite_height = explicit_h;
     double min_h = resolve_used_height(box, mnh, parent_content_height, -1);
     if (box->style && box->style->values[NS_CSS_BOX_SIZING] &&
