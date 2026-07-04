@@ -272,12 +272,14 @@ wg_queue_writeBuffer(JSContext *ctx, JSValueConst this_val,
     if (!bytes) return JS_UNDEFINED;
 
     size_t elem = bpe > 0 ? bpe : 1;
-    int64_t byte_off = data_offset * (int64_t)elem;
-    if (byte_off < 0 || (size_t)byte_off > byte_len) return JS_UNDEFINED;
-    size_t byte_size = size < 0 ? byte_len - (size_t)byte_off
-                                : (size_t)size * elem;
-    if ((size_t)byte_off + byte_size > byte_len)
-        byte_size = byte_len - (size_t)byte_off;
+    if (buffer_offset < 0 || data_offset < 0 || size < -1) return JS_UNDEFINED;
+    uint64_t view_elems = byte_len / elem;
+    if ((uint64_t)data_offset > view_elems) return JS_UNDEFINED;
+    uint64_t avail = view_elems - (uint64_t)data_offset;
+    uint64_t write_elems = size < 0 ? avail : (uint64_t)size;
+    if (write_elems > avail) return JS_UNDEFINED;
+    size_t byte_off = (size_t)data_offset * elem;
+    size_t byte_size = (size_t)write_elems * elem;
 
     wgpuQueueWriteBuffer(q->queue, buf->buffer, (uint64_t)buffer_offset,
                          bytes + byte_off, byte_size);
@@ -377,9 +379,14 @@ wg_buffer_destroy(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
-wg_ab_noop_free(JSRuntime *rt, void *opaque, void *ptr)
+wg_ab_free(JSRuntime *rt, void *opaque, void *ptr)
 {
-    (void)rt; (void)opaque; (void)ptr;
+    (void)ptr;
+    if (opaque) {
+        JSValue *held = opaque;
+        JS_FreeValueRT(rt, *held);
+        g_free(held);
+    }
 }
 
 static JSValue
@@ -395,14 +402,19 @@ wg_buffer_getMappedRange(JSContext *ctx, JSValueConst this_val,
     size_t sz = size < 0 ? (size_t)(b->size - (uint64_t)offset) : (size_t)size;
     void *p = wgpuBufferGetMappedRange(b->buffer, (size_t)offset, sz);
     if (!p) return JS_ThrowInternalError(ctx, "getMappedRange failed");
-    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, wg_ab_noop_free,
-                                   NULL, false);
-    if (!JS_IsException(ab)) {
-        if (!b->mapped_ranges)
-            b->mapped_ranges = g_array_new(FALSE, FALSE, sizeof(JSValue));
-        JSValue keep = JS_DupValue(ctx, ab);
-        g_array_append_val(b->mapped_ranges, keep);
+    JSValue *held = g_new(JSValue, 1);
+    *held = JS_DupValue(ctx, this_val);
+    JSValue ab = JS_NewArrayBuffer(ctx, (uint8_t *)p, sz, wg_ab_free,
+                                   held, false);
+    if (JS_IsException(ab)) {
+        JS_FreeValue(ctx, *held);
+        g_free(held);
+        return ab;
     }
+    if (!b->mapped_ranges)
+        b->mapped_ranges = g_array_new(FALSE, FALSE, sizeof(JSValue));
+    JSValue keep = JS_DupValue(ctx, ab);
+    g_array_append_val(b->mapped_ranges, keep);
     return ab;
 }
 
