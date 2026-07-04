@@ -1039,6 +1039,8 @@ ns_net_hsts_should_upgrade(const char *host)
         g_hsts_cache_mtime_us = mtime;
     }
     char *lower = g_ascii_strdown(host, -1);
+    for (gsize ln = strlen(lower); ln > 0 && lower[ln - 1] == '.'; ln--)
+        lower[ln - 1] = '\0';
     gboolean hit = ns_hsts_lookup_locked(lower);
     g_free(lower);
     g_mutex_unlock(&g_hsts_lock);

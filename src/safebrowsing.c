@@ -171,6 +171,8 @@ ns_safebrowsing_blocked(const char *host)
     if (g_hash_table_size(g_blocked) == 0)
         return FALSE;
     char *low = g_ascii_strdown(host, -1);
+    for (gsize ln = strlen(low); ln > 0 && low[ln - 1] == '.'; ln--)
+        low[ln - 1] = '\0';
     if (g_hash_table_contains(g_allow, low)) {
         g_free(low);
         return FALSE;
