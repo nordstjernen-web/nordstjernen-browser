@@ -809,7 +809,12 @@ ns_engine_write_pdf(const ns_box *root, const char *path)
                                    "Nordstjernen");
     time_t now = time(NULL);
     struct tm tm_utc;
-    if (gmtime_r(&now, &tm_utc)) {
+#if defined(_WIN32)
+    int have_tm = gmtime_s(&tm_utc, &now) == 0;
+#else
+    int have_tm = gmtime_r(&now, &tm_utc) != NULL;
+#endif
+    if (have_tm) {
         char iso[32];
         if (strftime(iso, sizeof iso, "%Y-%m-%dT%H:%M:%SZ", &tm_utc) > 0)
             cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATE_DATE,

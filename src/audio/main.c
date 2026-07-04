@@ -798,7 +798,11 @@ write_temp_from_url(const char *url)
 {
     char tmpl[PATH_MAX];
     snprintf(tmpl, sizeof tmpl, "%s/nsaudio-XXXXXX", audio_tmp_dir());
+#if defined(_WIN32)
+    int fd = mkstemp(tmpl);
+#else
     int fd = mkostemp(tmpl, O_CLOEXEC);
+#endif
     if (fd < 0) return NULL;
     FILE *f = fdopen(fd, "wb");
     if (!f) { close(fd); remove(tmpl); return NULL; }
