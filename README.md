@@ -222,7 +222,7 @@ moving parts:
 | uchardet | — | charset detection for `ns_html_decode_body` |
 | libpsl | — | public-suffix list for cookie scoping |
 | SQLite | — | IndexedDB persistent storage |
-| librsvg | ≥ 2.46 | SVG rendering / icons |
+| librsvg | ≥ 2.54 | SVG rendering / icons |
 | libwebp | — | WebP decoding (lossy VP8 + lossless VP8L) |
 | SDL2 | — | audio output device for the `nordstjernen-audio` helper (WASAPI / CoreAudio / ALSA-PulseAudio) |
 | libseccomp | — (Linux only) | syscall sandbox; no-op on macOS/Windows |

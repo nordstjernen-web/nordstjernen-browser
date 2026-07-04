@@ -172,7 +172,7 @@ sqlite3 = dependency('sqlite3')
 
 # gdk-pixbuf (image fallback decoder) and librsvg (SVG) are desktop-only; on
 # Android, Wuffs handles PNG/JPEG/GIF/BMP and other formats degrade gracefully.
-librsvg = dependency('librsvg-2.0', version: '>=2.46', required: not is_android)
+librsvg = dependency('librsvg-2.0', version: '>=2.54', required: not is_android)
 have_librsvg = librsvg.found() and not is_android
 if have_librsvg
   add_project_arguments('-DNS_HAVE_LIBRSVG=1', language: 'c')
