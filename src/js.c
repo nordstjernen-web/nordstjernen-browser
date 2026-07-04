@@ -783,8 +783,14 @@ ns_js_form_data_serialize(JSContext *ctx, JSValueConst fd,
                 JSValue type_v = JS_GetPropertyStr(ctx, v, "type");
                 const char *type = JS_IsString(type_v)
                     ? JS_ToCString(ctx, type_v) : NULL;
+                GString *ct = g_string_new(NULL);
+                for (const char *tp = type; tp && *tp; tp++) {
+                    unsigned char c = (unsigned char)*tp;
+                    if (c >= 0x20 && c != 0x7f) g_string_append_c(ct, (char)c);
+                }
                 g_string_append_printf(body, "Content-Type: %s\r\n\r\n",
-                    type && *type ? type : "application/octet-stream");
+                    ct->len ? ct->str : "application/octet-stream");
+                g_string_free(ct, TRUE);
                 if (type) JS_FreeCString(ctx, type);
                 JS_FreeValue(ctx, type_v);
 
