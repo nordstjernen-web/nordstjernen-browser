@@ -500,6 +500,7 @@ cmd_stop(const char *token)
 #ifdef __linux__
 void ns_security_add_writable_dir(const char *dir);
 void ns_security_sandbox_init(const char *self_exe);
+void ns_security_seccomp_init(void);
 
 static void
 sandbox_self(void)
@@ -511,6 +512,7 @@ sandbox_self(void)
     ssize_t n = readlink("/proc/self/exe", self, sizeof self - 1);
     self[n > 0 ? n : 0] = '\0';
     ns_security_sandbox_init(n > 0 ? self : NULL);
+    ns_security_seccomp_init();
 }
 #endif
 

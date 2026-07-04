@@ -34,6 +34,7 @@
 #define NS_AUDIO_MAX_SECONDS 1800
 #define NS_AUDIO_DEVICE_RATE 44100
 #define NS_AUDIO_MAX_BYTES   (256u * 1024u * 1024u)
+#define NS_AUDIO_MAX_FLOATS  ((size_t)200u * 1024u * 1024u)
 
 typedef struct {
     char    token[64];
@@ -204,6 +205,7 @@ decode_mpeg(const unsigned char *bytes, size_t n,
     float *pcm = malloc(cap * sizeof(float));
     if (!pcm) { plm_destroy(plm); return 0; }
     size_t max_floats = (size_t)rate * 2u * NS_AUDIO_MAX_SECONDS;
+    if (max_floats > NS_AUDIO_MAX_FLOATS) max_floats = NS_AUDIO_MAX_FLOATS;
     plm_samples_t *s;
     while ((s = plm_decode_audio(plm)) != NULL) {
         size_t add = (size_t)s->count * 2u;
@@ -259,6 +261,8 @@ decode_mp3(const unsigned char *bytes, size_t n,
                 ch = info.channels;
                 if (rate <= 0 || ch < 1) { free(pcm); return 0; }
                 max_floats = (size_t)rate * (size_t)ch * NS_AUDIO_MAX_SECONDS;
+                if (max_floats > NS_AUDIO_MAX_FLOATS)
+                    max_floats = NS_AUDIO_MAX_FLOATS;
             }
             if (info.channels == ch && info.hz == rate) {
                 size_t add = (size_t)samples * (size_t)ch;
@@ -395,6 +399,7 @@ decode_libav(const unsigned char *bytes, size_t n,
     *out_rate = rate;
     *out_ch = ch;
     size_t max_floats = (size_t)rate * (size_t)ch * NS_AUDIO_MAX_SECONDS;
+    if (max_floats > NS_AUDIO_MAX_FLOATS) max_floats = NS_AUDIO_MAX_FLOATS;
     int eof = 0, capped = 0;
     while (!eof && !capped) {
         int r = av_read_frame(fmt, pkt);
@@ -686,7 +691,7 @@ cmd_reload(const char *token, const char *url)
     memset(&fresh, 0, sizeof fresh);
     if (!load_audio(&fresh, path)) {
         emit("error %s decode-failed", token);
-        free(tmp);
+        if (tmp) { unlink(tmp); free(tmp); }
         return;
     }
 
