@@ -95,6 +95,12 @@ read_disk(const char *key, gsize *out_len)
 {
     char *path = disk_path_for(key);
     if (!path) return NULL;
+    GStatBuf stbuf;
+    if (g_stat(path, &stbuf) != 0 || stbuf.st_size < 8 ||
+        (guint64)stbuf.st_size > (guint64)NS_BYTECODE_CACHE_VALUE_CAP_BYTES + 8) {
+        g_free(path);
+        return NULL;
+    }
     gchar *contents = NULL;
     gsize length = 0;
     gboolean ok = g_file_get_contents(path, &contents, &length, NULL);

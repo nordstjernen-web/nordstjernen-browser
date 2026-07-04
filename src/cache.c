@@ -471,6 +471,13 @@ ns_cache_get(const char *url, const char *partition)
     g_autofree char *bp = body_path_for_key(key, FALSE);
     char *data = NULL;
     gsize dlen = 0;
+    GStatBuf stbuf;
+    if (g_stat(bp, &stbuf) != 0 || stbuf.st_size < 0 ||
+        (guint64)stbuf.st_size > cache_cap_bytes()) {
+        ns_cache_entry_free(e);
+        delete_key(key);
+        return NULL;
+    }
     if (!g_file_get_contents(bp, &data, &dlen, NULL)) {
         ns_cache_entry_free(e);
         delete_key(key);
