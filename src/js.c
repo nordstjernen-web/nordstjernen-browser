@@ -7092,14 +7092,31 @@ ns_audio_u8_buffer(JSContext *ctx, JSValueConst arg, uint8_t **data, size_t *len
     return *data != NULL;
 }
 
+static gboolean
+ns_audio_node_is_mic(JSContext *ctx, JSValueConst node)
+{
+    JSValue s = JS_GetPropertyStr(ctx, node, "_micSrc");
+    gboolean mic = JS_ToBool(ctx, s);
+    JS_FreeValue(ctx, s);
+    if (!mic) {
+        JSValue t = JS_GetPropertyStr(ctx, node, "_micTaint");
+        mic = JS_ToBool(ctx, t);
+        JS_FreeValue(ctx, t);
+    }
+    return mic;
+}
+
 static JSValue
 ns_audio_get_byte_time_domain(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    (void)this_val;
     uint8_t *data = NULL; size_t len = 0;
-    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data)
-        ns_mic_fill_time_domain(data, (int)len);
+    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data) {
+        if (ns_audio_node_is_mic(ctx, this_val))
+            ns_mic_fill_time_domain(data, (int)len);
+        else
+            memset(data, 128, len);
+    }
     return JS_UNDEFINED;
 }
 
@@ -7107,10 +7124,13 @@ static JSValue
 ns_audio_get_byte_frequency(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
-    (void)this_val;
     uint8_t *data = NULL; size_t len = 0;
-    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data)
-        ns_mic_fill_frequency(data, (int)len);
+    if (argc >= 1 && ns_audio_u8_buffer(ctx, argv[0], &data, &len) && data) {
+        if (ns_audio_node_is_mic(ctx, this_val))
+            ns_mic_fill_frequency(data, (int)len);
+        else
+            memset(data, 0, len);
+    }
     return JS_UNDEFINED;
 }
 
@@ -8743,8 +8763,11 @@ static JSValue
 ns_audio_node_connect(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
-    if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0]))
+    if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
+        if (JS_IsObject(argv[0]) && ns_audio_node_is_mic(ctx, this_val))
+            JS_SetPropertyStr(ctx, argv[0], "_micTaint", JS_TRUE);
         return JS_DupValue(ctx, argv[0]);
+    }
     return JS_DupValue(ctx, this_val);
 }
 
@@ -8810,6 +8833,16 @@ ns_audio_create_node(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val; (void)argc; (void)argv;
     return ns_audio_make_node(ctx, "sine");
+}
+
+static JSValue
+ns_audio_create_mediastream_source(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    JSValue n = ns_audio_make_node(ctx, "mediastreamsource");
+    JS_SetPropertyStr(ctx, n, "_micSrc", JS_TRUE);
+    return n;
 }
 
 static JSValue
@@ -8933,6 +8966,8 @@ ns_audio_context_ctor(JSContext *ctx, JSValueConst this_val,
     };
     ns_bind_fns(ctx, a, ns_audio_create_node,
                 node_methods, G_N_ELEMENTS(node_methods));
+    ns_bind_fn(ctx, a, "createMediaStreamSource",
+               ns_audio_create_mediastream_source, 1);
     return a;
 }
 
