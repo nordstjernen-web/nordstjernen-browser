@@ -907,13 +907,17 @@ static void
 ns_video_mse_sync(ns_video_cache *cache, ns_mse_stream *s, ns_video *v)
 {
     if (!v || !s) return;
+    gboolean helper_owns = ns_video_helper_enabled() &&
+                           (v->video_opened || v->mse_id != 0);
     if (!v->player) {
         ns_video_mse_attach_player(v, s);
         if (v->player) v->buf_sent = FALSE;
-    } else if (s->video_bytes &&
+    } else if (!helper_owns && s->video_bytes &&
                s->video_bytes->len > 0 &&
                ns_video_player_extend(v->player, s->video_bytes->data,
                                       s->video_bytes->len)) {
+        v->buf_sent = FALSE;
+    } else if (helper_owns && s->video_bytes && s->video_bytes->len > 0) {
         v->buf_sent = FALSE;
     }
     if (v->player && s->video_end > 0.0) {
