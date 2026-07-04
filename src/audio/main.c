@@ -43,12 +43,29 @@ typedef struct {
     int     loop;
     float  *pcm;
     size_t  frames;
+    size_t  pcm_cap;
     size_t  cursor;
     float   volume;
     int     reached_end;
     char   *tmp_path;
     long    reload_size;
     Uint32  reload_ticks;
+#ifdef NS_HAVE_LIBAV
+    AVFormatContext *in_fmt;
+    AVCodecContext  *in_dec;
+    SwrContext      *in_swr;
+    AVPacket        *in_pkt;
+    AVFrame         *in_frame;
+    SDL_AudioStream *in_stream;
+    int              in_sidx;
+    int              in_rate;
+    int              in_ch;
+    int64_t          in_known_size;
+    double           in_resume_target;
+    int              in_resume_pending;
+    size_t           in_discard_frames;
+    char             in_path[PATH_MAX];
+#endif
 } ns_audio_player;
 
 static SDL_AudioDeviceID g_dev;
@@ -112,10 +129,29 @@ player_alloc(const char *token)
     return NULL;
 }
 
+#ifdef NS_HAVE_LIBAV
+static void
+ain_close(ns_audio_player *p)
+{
+    if (p->in_stream) SDL_FreeAudioStream(p->in_stream);
+    if (p->in_swr) swr_free(&p->in_swr);
+    if (p->in_frame) av_frame_free(&p->in_frame);
+    if (p->in_pkt) av_packet_free(&p->in_pkt);
+    if (p->in_dec) avcodec_free_context(&p->in_dec);
+    if (p->in_fmt) avformat_close_input(&p->in_fmt);
+    p->in_stream = NULL;
+    p->in_sidx = -1;
+    p->in_path[0] = '\0';
+}
+#endif
+
 static void
 player_release(ns_audio_player *p)
 {
     if (!p || !p->used) return;
+#ifdef NS_HAVE_LIBAV
+    ain_close(p);
+#endif
     char *tmp = p->tmp_path;
     free(p->pcm);
     memset(p, 0, sizeof *p);
@@ -462,6 +498,198 @@ done:
     if (avio) { av_freep(&avio->buffer); avio_context_free(&avio); }
     return ret;
 }
+
+static int64_t
+file_size_of(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0 ? (int64_t)st.st_size : -1;
+}
+
+static int
+file_is_container(const char *path)
+{
+    unsigned char head[12];
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(head, 1, sizeof head, f);
+    fclose(f);
+    return bytes_are_container(head, n);
+}
+
+static int
+pcm_append(ns_audio_player *p, const float *stereo, size_t nframes)
+{
+    if (!nframes) return 1;
+    size_t need = (p->frames + nframes) * 2;
+    if (need > NS_AUDIO_MAX_FLOATS) return 0;
+    audio_lock();
+    if (need > p->pcm_cap) {
+        size_t cap = p->pcm_cap ? p->pcm_cap : (size_t)NS_AUDIO_DEVICE_RATE * 2u * 8u;
+        while (cap < need) {
+            if (cap > SIZE_MAX / 2) { cap = need; break; }
+            cap *= 2;
+        }
+        float *grown = realloc(p->pcm, cap * sizeof(float));
+        if (!grown) {
+            audio_unlock();
+            return 0;
+        }
+        p->pcm = grown;
+        p->pcm_cap = cap;
+    }
+    memcpy(p->pcm + p->frames * 2, stereo, nframes * 2 * sizeof(float));
+    p->frames += nframes;
+    audio_unlock();
+    return 1;
+}
+
+static void
+ain_drain_stream(ns_audio_player *p)
+{
+    if (!p->in_stream) return;
+    float buf[4096];
+    for (;;) {
+        int avail = SDL_AudioStreamAvailable(p->in_stream);
+        if (avail < (int)(2 * sizeof(float))) break;
+        int want = avail < (int)sizeof buf ? avail : (int)sizeof buf;
+        want -= want % (int)(2 * sizeof(float));
+        int got = SDL_AudioStreamGet(p->in_stream, buf, want);
+        if (got <= 0) break;
+        size_t frames = (size_t)got / (2 * sizeof(float));
+        float *ptr = buf;
+        if (p->in_discard_frames) {
+            size_t drop = p->in_discard_frames < frames
+                        ? p->in_discard_frames : frames;
+            p->in_discard_frames -= drop;
+            ptr += drop * 2;
+            frames -= drop;
+        }
+        if (frames && !pcm_append(p, ptr, frames))
+            break;
+    }
+}
+
+static int
+ain_open(ns_audio_player *p, const char *path)
+{
+    ain_close(p);
+    if (avformat_open_input(&p->in_fmt, path, NULL, NULL) < 0) return 0;
+    if (avformat_find_stream_info(p->in_fmt, NULL) < 0) { ain_close(p); return 0; }
+    const AVCodec *codec = NULL;
+    p->in_sidx = av_find_best_stream(p->in_fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
+                                     &codec, 0);
+    if (p->in_sidx < 0 || !codec) { ain_close(p); return 0; }
+    p->in_dec = avcodec_alloc_context3(codec);
+    if (!p->in_dec ||
+        avcodec_parameters_to_context(
+            p->in_dec, p->in_fmt->streams[p->in_sidx]->codecpar) < 0 ||
+        avcodec_open2(p->in_dec, codec, NULL) < 0) {
+        ain_close(p);
+        return 0;
+    }
+    p->in_rate = p->in_dec->sample_rate;
+    p->in_ch = p->in_dec->ch_layout.nb_channels;
+    if (p->in_rate <= 0 || p->in_rate > 192000 ||
+        p->in_ch < 1 || p->in_ch > 8) {
+        ain_close(p);
+        return 0;
+    }
+    p->in_swr = swr_alloc();
+    if (!p->in_swr) { ain_close(p); return 0; }
+    av_opt_set_chlayout(p->in_swr, "in_chlayout", &p->in_dec->ch_layout, 0);
+    av_opt_set_chlayout(p->in_swr, "out_chlayout", &p->in_dec->ch_layout, 0);
+    av_opt_set_int(p->in_swr, "in_sample_rate", p->in_rate, 0);
+    av_opt_set_int(p->in_swr, "out_sample_rate", p->in_rate, 0);
+    av_opt_set_sample_fmt(p->in_swr, "in_sample_fmt", p->in_dec->sample_fmt, 0);
+    av_opt_set_sample_fmt(p->in_swr, "out_sample_fmt", AV_SAMPLE_FMT_FLT, 0);
+    if (swr_init(p->in_swr) < 0) { ain_close(p); return 0; }
+    p->in_pkt = av_packet_alloc();
+    p->in_frame = av_frame_alloc();
+    p->in_stream = SDL_NewAudioStream(AUDIO_F32SYS, (Uint8)p->in_ch,
+                                      p->in_rate, AUDIO_F32SYS, 2,
+                                      NS_AUDIO_DEVICE_RATE);
+    if (!p->in_pkt || !p->in_frame || !p->in_stream) { ain_close(p); return 0; }
+    snprintf(p->in_path, sizeof p->in_path, "%s", path);
+    p->in_known_size = file_size_of(path);
+    return 1;
+}
+
+static int
+ain_reopen_resume(ns_audio_player *p)
+{
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s", p->in_path);
+    ain_drain_stream(p);
+    double decoded_end = (double)p->frames / NS_AUDIO_DEVICE_RATE;
+    if (!ain_open(p, path)) return 0;
+    if (decoded_end > 0.05) {
+        AVRational tb = p->in_fmt->streams[p->in_sidx]->time_base;
+        int64_t ts = (int64_t)(decoded_end / av_q2d(tb));
+        if (av_seek_frame(p->in_fmt, p->in_sidx, ts,
+                          AVSEEK_FLAG_BACKWARD) >= 0) {
+            avcodec_flush_buffers(p->in_dec);
+            p->in_resume_target = decoded_end;
+            p->in_resume_pending = 1;
+        }
+    }
+    return 1;
+}
+
+static void
+ain_pump(ns_audio_player *p)
+{
+    if (!p->in_fmt) return;
+    int reopened = 0;
+    for (;;) {
+        int rr = av_read_frame(p->in_fmt, p->in_pkt);
+        if (rr < 0) {
+            if (!reopened && file_size_of(p->in_path) > p->in_known_size) {
+                reopened = 1;
+                if (ain_reopen_resume(p)) continue;
+            }
+            break;
+        }
+        if (p->in_pkt->stream_index != p->in_sidx) {
+            av_packet_unref(p->in_pkt);
+            continue;
+        }
+        avcodec_send_packet(p->in_dec, p->in_pkt);
+        av_packet_unref(p->in_pkt);
+        while (avcodec_receive_frame(p->in_dec, p->in_frame) == 0) {
+            if (p->in_resume_pending) {
+                p->in_resume_pending = 0;
+                AVRational tb = p->in_fmt->streams[p->in_sidx]->time_base;
+                double t0 = p->in_frame->pts != AV_NOPTS_VALUE
+                    ? (double)p->in_frame->pts * av_q2d(tb)
+                    : p->in_resume_target;
+                double ahead = p->in_resume_target - t0;
+                p->in_discard_frames = ahead > 0
+                    ? (size_t)(ahead * NS_AUDIO_DEVICE_RATE) : 0;
+            }
+            int out_samples = swr_get_out_samples(p->in_swr,
+                                                  p->in_frame->nb_samples);
+            if (out_samples > 0) {
+                float *conv = malloc((size_t)out_samples * (size_t)p->in_ch *
+                                     sizeof(float));
+                if (conv) {
+                    uint8_t *dstp = (uint8_t *)conv;
+                    int got = swr_convert(
+                        p->in_swr, &dstp, out_samples,
+                        (const uint8_t **)p->in_frame->extended_data,
+                        p->in_frame->nb_samples);
+                    if (got > 0)
+                        SDL_AudioStreamPut(p->in_stream, conv,
+                                           got * p->in_ch * (int)sizeof(float));
+                    free(conv);
+                }
+            }
+            av_frame_unref(p->in_frame);
+            ain_drain_stream(p);
+        }
+    }
+    ain_drain_stream(p);
+}
 #endif /* NS_HAVE_LIBAV */
 
 static int
@@ -528,6 +756,7 @@ load_audio(ns_audio_player *p, const char *path)
     audio_lock();
     p->pcm = dev;
     p->frames = dev_frames;
+    p->pcm_cap = dev_frames * 2;
     p->cursor = 0;
     p->reached_end = 0;
     p->playing = 0;
@@ -633,6 +862,19 @@ local_path_for(const char *url, char **tmp_out)
     return url;
 }
 
+#ifdef NS_HAVE_LIBAV
+static void
+resume_if_grown(ns_audio_player *p)
+{
+    audio_lock();
+    if (p->reached_end && p->cursor < p->frames) {
+        p->reached_end = 0;
+        p->playing = 1;
+    }
+    audio_unlock();
+}
+#endif
+
 static void
 cmd_open(const char *token, const char *url)
 {
@@ -649,6 +891,15 @@ cmd_open(const char *token, const char *url)
     const char *path = local_path_for(url, &tmp);
     if (!path) { emit("error %s fetch-failed", token); return; }
     p->tmp_path = tmp;
+
+#ifdef NS_HAVE_LIBAV
+    if (file_is_container(path) && ain_open(p, path)) {
+        ain_pump(p);
+        emit("meta %s %.3f", token,
+             (double)p->frames / NS_AUDIO_DEVICE_RATE);
+        return;
+    }
+#endif
 
     if (!load_audio(p, path)) {
         emit("error %s decode-failed", token);
@@ -671,6 +922,60 @@ cmd_reload(const char *token, const char *url)
     char *tmp = NULL;
     const char *path = local_path_for(url, &tmp);
     if (!path) { emit("error %s fetch-failed", token); free(tmp); return; }
+
+#ifdef NS_HAVE_LIBAV
+    if (p->in_fmt && strcmp(path, p->in_path) == 0) {
+        if (tmp) { unlink(tmp); free(tmp); }
+        size_t before = p->frames;
+        ain_pump(p);
+        if (p->frames != before) {
+            resume_if_grown(p);
+            emit("meta %s %.3f", token,
+                 (double)p->frames / NS_AUDIO_DEVICE_RATE);
+        }
+        return;
+    }
+    if (file_is_container(path)) {
+        ns_audio_player fresh;
+        memset(&fresh, 0, sizeof fresh);
+        if (!ain_open(&fresh, path)) {
+            emit("error %s decode-failed", token);
+            if (tmp) { unlink(tmp); free(tmp); }
+            return;
+        }
+        ain_pump(&fresh);
+        audio_lock();
+        float *old_pcm = p->pcm;
+        char *old_tmp = p->tmp_path;
+        ain_close(p);
+        p->in_fmt = fresh.in_fmt;
+        p->in_dec = fresh.in_dec;
+        p->in_swr = fresh.in_swr;
+        p->in_pkt = fresh.in_pkt;
+        p->in_frame = fresh.in_frame;
+        p->in_stream = fresh.in_stream;
+        p->in_sidx = fresh.in_sidx;
+        p->in_rate = fresh.in_rate;
+        p->in_ch = fresh.in_ch;
+        p->in_known_size = fresh.in_known_size;
+        memcpy(p->in_path, fresh.in_path, sizeof p->in_path);
+        p->pcm = fresh.pcm;
+        p->frames = fresh.frames;
+        p->pcm_cap = fresh.pcm_cap;
+        if (p->cursor > p->frames) p->cursor = p->frames;
+        if (p->reached_end && p->cursor < p->frames) {
+            p->reached_end = 0;
+            p->playing = 1;
+        }
+        p->tmp_path = tmp;
+        audio_unlock();
+        free(old_pcm);
+        if (old_tmp) { unlink(old_tmp); free(old_tmp); }
+        emit("meta %s %.3f", token,
+             (double)p->frames / NS_AUDIO_DEVICE_RATE);
+        return;
+    }
+#endif
 
     struct stat st;
     long size_now = stat(path, &st) == 0 ? (long)st.st_size : -1;
@@ -700,6 +1005,7 @@ cmd_reload(const char *token, const char *url)
     char *old_tmp = p->tmp_path;
     p->pcm = fresh.pcm;
     p->frames = fresh.frames;
+    p->pcm_cap = fresh.frames * 2;
     if (p->cursor > p->frames) p->cursor = p->frames;
     if (p->reached_end && p->cursor < p->frames) {
         p->reached_end = 0;
@@ -847,6 +1153,9 @@ int
 main(void)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
+#ifdef NS_HAVE_LIBAV
+    av_log_set_level(AV_LOG_QUIET);
+#endif
     curl_global_init(CURL_GLOBAL_DEFAULT);
 
     SDL_SetMainReady();

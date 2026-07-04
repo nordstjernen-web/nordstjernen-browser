@@ -122,7 +122,21 @@ typedef struct {
     int       stream;
     AVRational tb;
     int       w, h;
+    int64_t   known_size;
 } ns_vdec;
+
+static int64_t
+file_size_of(const char *path)
+{
+    struct stat st;
+    return stat(path, &st) == 0 ? (int64_t)st.st_size : -1;
+}
+
+static int
+vdec_file_grew(ns_vdec *d, const char *path)
+{
+    return file_size_of(path) > d->known_size;
+}
 
 static void
 vdec_close(ns_vdec *d)
@@ -164,6 +178,7 @@ vdec_open(ns_vdec *d, const char *path, double *out_dur)
     d->pkt = av_packet_alloc();
     d->frame = av_frame_alloc();
     if (!d->pkt || !d->frame) { vdec_close(d); return 0; }
+    d->known_size = file_size_of(path);
     if (out_dur) {
         *out_dur = 0.0;
         if (d->fmt->duration > 0)
@@ -326,33 +341,39 @@ player_thread(void *ud)
         while (!got) {
             int rr = av_read_frame(d.fmt, d.pkt);
             if (rr < 0) {
-                avcodec_send_packet(d.dec, NULL);
-                while (avcodec_receive_frame(d.dec, d.frame) == 0) {
-                    pts = d.frame->pts != AV_NOPTS_VALUE
-                          ? (double)d.frame->pts * av_q2d(d.tb) : p->cur;
-                    if (pts >= clock - 0.25) { got = 1; break; }
+                if (vdec_file_grew(&d, local_path_for(path))) {
+                    pthread_mutex_lock(&p->lock);
+                    p->want_reopen = 1;
+                    pthread_mutex_unlock(&p->lock);
+                    eof_since = 0;
+                    break;
                 }
-                if (!got) {
-                    struct stat st;
-                    if (stat(local_path_for(path), &st) == 0 &&
-                        !eof_since)
-                        eof_since = now_us();
-                    if (eof_since && now_us() - eof_since > 500000) {
+                int at_end = p->duration > 0.0 &&
+                             p->cur >= p->duration - 0.5;
+                if (at_end) {
+                    avcodec_send_packet(d.dec, NULL);
+                    while (avcodec_receive_frame(d.dec, d.frame) == 0) {
+                        pts = d.frame->pts != AV_NOPTS_VALUE
+                              ? (double)d.frame->pts * av_q2d(d.tb) : p->cur;
+                        if (pts >= clock - 0.25) { got = 1; break; }
+                    }
+                    if (!got) {
+                        emit("ended %s", p->token);
                         pthread_mutex_lock(&p->lock);
-                        p->want_reopen = 1;
+                        p->playing = 0;
                         pthread_mutex_unlock(&p->lock);
                         eof_since = 0;
-                        if (p->duration > 0.0 &&
-                            p->cur >= p->duration - 0.25) {
-                            emit("ended %s", p->token);
-                            pthread_mutex_lock(&p->lock);
-                            p->playing = 0;
-                            p->want_reopen = 0;
-                            pthread_mutex_unlock(&p->lock);
-                        }
                     }
-                    msleep(50);
+                    break;
                 }
+                if (!eof_since) eof_since = now_us();
+                if (now_us() - eof_since > 10000000) {
+                    pthread_mutex_lock(&p->lock);
+                    p->want_reopen = 1;
+                    pthread_mutex_unlock(&p->lock);
+                    eof_since = 0;
+                }
+                msleep(50);
                 break;
             }
             if (d.pkt->stream_index != d.stream) {
