@@ -239,6 +239,8 @@ static JSValue ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 static JSValue ns_target_removeEventListener(JSContext *ctx, JSValueConst this_val,
                                              int argc, JSValueConst *argv);
+static JSValue ns_element_dispatchEvent(JSContext *ctx, JSValueConst this_val,
+                                        int argc, JSValueConst *argv);
 static JSValue ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv);
 static void ns_js_purge_subtree_rafs(ns_js *js, ns_node *root);
@@ -12338,6 +12340,8 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
+    if (ns_unwrap_element(this_val))
+        return ns_element_dispatchEvent(ctx, this_val, argc, argv);
     JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
     if (JS_IsException(guard)) return guard;
     JSValue tv = JS_GetPropertyStr(ctx, argv[0], "type");
@@ -35446,6 +35450,11 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         static const char *et_src =
             "(function(){"
             "  var ET = EventTarget.prototype;"
+            "  var NP = typeof Node !== 'undefined' && Node.prototype;"
+            "  var nAdd = NP && Object.prototype.hasOwnProperty.call(NP,'addEventListener') ? NP.addEventListener : null;"
+            "  var nRem = NP && Object.prototype.hasOwnProperty.call(NP,'removeEventListener') ? NP.removeEventListener : null;"
+            "  var nDisp = NP && Object.prototype.hasOwnProperty.call(NP,'dispatchEvent') ? NP.dispatchEvent : null;"
+            "  function isNode(o){ return o && typeof o.nodeType === 'number'; }"
             "  var K = '__nd_et_listeners';"
             "  function reg(self){"
             "    var m = self[K];"
@@ -35454,6 +35463,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    return m;"
             "  }"
             "  ET.addEventListener = function(type, cb, opts){"
+            "    if(nAdd && isNode(this)) return nAdd.call(this, type, cb, opts);"
             "    var signal = (opts && typeof opts === 'object' && opts.signal !== undefined) ? opts.signal : undefined;"
             "    if(signal !== undefined && (signal === null || typeof signal !== 'object'))"
             "      throw new TypeError('signal must be an AbortSignal');"
@@ -35471,12 +35481,14 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    }"
             "  };"
             "  ET.removeEventListener = function(type, cb, opts){"
+            "    if(nRem && isNode(this)) return nRem.call(this, type, cb, opts);"
             "    var m = this[K]; if(!m) return;"
             "    var capture = !!(opts === true || (opts && typeof opts === 'object' && opts.capture));"
             "    var list = m[String(type)]; if(!list) return;"
             "    for(var i=0;i<list.length;i++){ if(list[i].cb===cb && list[i].capture===capture){ list[i].removed = true; list.splice(i,1); return; } }"
             "  };"
             "  ET.dispatchEvent = function(ev){"
+            "    if(nDisp && isNode(this)) return nDisp.call(this, ev);"
             "    if(!ev) return true;"
             "    try { Object.defineProperty(ev,'target',{value:this,configurable:true}); } catch(e){}"
             "    try { Object.defineProperty(ev,'currentTarget',{value:this,configurable:true}); } catch(e){}"
