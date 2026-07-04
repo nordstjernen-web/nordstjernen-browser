@@ -59,13 +59,25 @@ jobs:
           # bundle and modern TLS curves work as designed.
           echo "PKG_CONFIG_PATH=$(brew --prefix curl)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
 
+      - name: Cache LGPL FFmpeg
+        id: ffcache
+        uses: actions/cache@v5
+        with:
+          path: ~/ffmpeg-lgpl
+          key: ffmpeg-lgpl-macos-${{ matrix.macos }}-${{ hashFiles('scripts/build-ffmpeg-lgpl.sh') }}
+
       - name: Build LGPL FFmpeg (inline WebM)
         run: |
           # Stock Homebrew FFmpeg is GPL (x264/x265); build a minimal LGPL one
           # (VP9/VP8 + Opus/Vorbis only) so it can be vendored into the .app
           # without GPL obligations. dylibbundler then bundles its dylibs.
-          scripts/build-ffmpeg-lgpl.sh "$HOME/ffmpeg-lgpl" \
-            || { echo "macos: LGPL FFmpeg build failed; WebM skipped"; exit 0; }
+          # Built once into a cached prefix (keyed on the build script).
+          if [ ! -f "$HOME/ffmpeg-lgpl/lib/pkgconfig/libavcodec.pc" ]; then
+            scripts/build-ffmpeg-lgpl.sh "$HOME/ffmpeg-lgpl" \
+              || { echo "macos: LGPL FFmpeg build failed; WebM skipped"; exit 0; }
+          else
+            echo "using cached LGPL FFmpeg at $HOME/ffmpeg-lgpl"
+          fi
           echo "PKG_CONFIG_PATH=$HOME/ffmpeg-lgpl/lib/pkgconfig:${PKG_CONFIG_PATH:-}" >> "$GITHUB_ENV"
 
       - name: Restore ccache

@@ -58,7 +58,7 @@ cd "$SRC"
     --disable-static --enable-shared \
     --disable-programs --disable-doc --disable-htmlpages --disable-manpages \
     --disable-debug --enable-pic \
-    --disable-network --disable-avdevice --disable-avfilter --disable-postproc \
+    --disable-network --disable-avdevice --disable-avfilter \
     --disable-everything \
     --enable-avformat --enable-avcodec --enable-avutil \
     --enable-swscale --enable-swresample \

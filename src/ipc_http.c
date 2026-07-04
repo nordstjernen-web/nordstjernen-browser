@@ -14,6 +14,10 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <fcntl.h>
+#ifndef MSG_CMSG_CLOEXEC
+#define MSG_CMSG_CLOEXEC 0
+#endif
 #endif
 
 void
@@ -122,6 +126,7 @@ http_recv_fd(int sock)
         return -1;
     int fd;
     memcpy(&fd, CMSG_DATA(c), sizeof(int));
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
     return fd;
 }
 
