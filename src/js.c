@@ -10345,7 +10345,7 @@ ns_window_matchMedia(JSContext *ctx, JSValueConst this_val,
     return mql;
 }
 
-void
+static void
 ns_js_media_queries_reeval(ns_js *js)
 {
     if (!js || !js->ctx || !js->media_query_lists) return;
