@@ -231,6 +231,44 @@ pixbuf_supported_mimes_set(void)
 #endif /* NS_HAVE_GDK_PIXBUF */
 
 #ifdef NS_HAVE_GDK_PIXBUF
+
+#define NS_PIXBUF_MAX_DIM    16384
+#define NS_PIXBUF_MAX_PIXELS (64 * 1024 * 1024)
+
+static void
+ns_image_pixbuf_size_prepared(GdkPixbufLoader *loader, gint width, gint height,
+                              gpointer user)
+{
+    gboolean *too_big = user;
+    if (width <= 0 || height <= 0 ||
+        width > NS_PIXBUF_MAX_DIM || height > NS_PIXBUF_MAX_DIM ||
+        (gint64)width * (gint64)height > NS_PIXBUF_MAX_PIXELS) {
+        *too_big = TRUE;
+        gdk_pixbuf_loader_set_size(loader, 1, 1);
+    }
+}
+
+static GdkPixbuf *
+ns_image_pixbuf_decode_capped(const guint8 *data, gsize len,
+                              GdkPixbufLoader **out_loader)
+{
+    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+    gboolean too_big = FALSE;
+    gulong sid = g_signal_connect(loader, "size-prepared",
+                                  G_CALLBACK(ns_image_pixbuf_size_prepared),
+                                  &too_big);
+    GError *err = NULL;
+    gboolean ok = gdk_pixbuf_loader_write(loader, data, len, &err);
+    g_clear_error(&err);
+    if (!gdk_pixbuf_loader_close(loader, &err)) ok = FALSE;
+    g_clear_error(&err);
+    g_signal_handler_disconnect(loader, sid);
+    GdkPixbuf *pixbuf = (ok && !too_big)
+        ? gdk_pixbuf_loader_get_pixbuf(loader) : NULL;
+    *out_loader = loader;
+    return pixbuf;
+}
+
 static guint8 *
 ns_image_pixbuf_to_bgra(GdkPixbuf *pixbuf,
                         int *out_w, int *out_h,
@@ -483,13 +521,8 @@ ns_image_decode_bytes(const guchar *data, gsize len, int *out_w, int *out_h)
 #endif
 
 #ifdef NS_HAVE_GDK_PIXBUF
-    GError *err = NULL;
-    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
-    gboolean ok = gdk_pixbuf_loader_write(loader, data, len, &err);
-    g_clear_error(&err);
-    if (!gdk_pixbuf_loader_close(loader, &err)) ok = FALSE;
-    g_clear_error(&err);
-    GdkPixbuf *pixbuf = ok ? gdk_pixbuf_loader_get_pixbuf(loader) : NULL;
+    GdkPixbufLoader *loader = NULL;
+    GdkPixbuf *pixbuf = ns_image_pixbuf_decode_capped(data, len, &loader);
     int w = 0, h = 0;
     gsize stride = 0, buf_len = 0;
     guint8 *bgra = ns_image_pixbuf_to_bgra(pixbuf, &w, &h, &stride, &buf_len);
@@ -592,13 +625,8 @@ ns_image_decode_bytes_to_pixels(const guchar *data, gsize len,
 #endif
 
 #ifdef NS_HAVE_GDK_PIXBUF
-    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
-    GError *err = NULL;
-    gboolean ok = gdk_pixbuf_loader_write(loader, data, len, &err);
-    g_clear_error(&err);
-    if (!gdk_pixbuf_loader_close(loader, &err)) ok = FALSE;
-    g_clear_error(&err);
-    GdkPixbuf *pixbuf = ok ? gdk_pixbuf_loader_get_pixbuf(loader) : NULL;
+    GdkPixbufLoader *loader = NULL;
+    GdkPixbuf *pixbuf = ns_image_pixbuf_decode_capped(data, len, &loader);
     guint8 *pix = ns_image_pixbuf_to_bgra(pixbuf, out_w, out_h,
                                           out_stride, out_buf_len);
     g_object_unref(loader);
