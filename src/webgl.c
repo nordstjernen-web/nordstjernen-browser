@@ -22,6 +22,10 @@
 #define NS_CONTEXT_LOST_WEBGL               0x9242
 #define NS_UNPACK_COLORSPACE_CONVERSION_WEBGL 0x9243
 #define NS_BROWSER_DEFAULT_WEBGL            0x9244
+#define NS_UNMASKED_VENDOR_WEBGL           0x9245
+#define NS_UNMASKED_RENDERER_WEBGL         0x9246
+#define NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT  0x84FF
+#define NS_TEXTURE_MAX_ANISOTROPY_EXT      0x84FE
 
 typedef struct ns_webgl {
     ns_js         *js;
@@ -1088,8 +1092,10 @@ wgl_getParameter(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *
     GLenum pname = (GLenum)argi(ctx, argc, argv, 0);
     switch (pname) {
     case GL_VENDOR:
+    case NS_UNMASKED_VENDOR_WEBGL:
         return JS_NewString(ctx, "Nordstjernen");
     case GL_RENDERER:
+    case NS_UNMASKED_RENDERER_WEBGL:
         return JS_NewString(ctx, "Nordstjernen WebGL");
     case GL_VERSION:
         return JS_NewString(ctx, g->version >= 2 ? "WebGL 2.0" : "WebGL 1.0");
@@ -1192,18 +1198,47 @@ wgl_isContextLost(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
     return JS_NewBool(ctx, FALSE);
 }
 
+static void set_const(JSContext *ctx, JSValueConst obj, const char *name,
+                      int value);
+
+static const char *const wgl_supported_extensions[] = {
+    "WEBGL_debug_renderer_info",
+    "EXT_texture_filter_anisotropic",
+    NULL,
+};
+
 static JSValue
 wgl_getSupportedExtensions(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
-    return JS_NewArray(ctx);
+    JSValue arr = JS_NewArray(ctx);
+    for (int i = 0; wgl_supported_extensions[i]; i++)
+        JS_SetPropertyUint32(ctx, arr, (uint32_t)i,
+                             JS_NewString(ctx, wgl_supported_extensions[i]));
+    return arr;
 }
 
 static JSValue
 wgl_getExtension(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    (void)ctx; (void)this_val; (void)argc; (void)argv;
-    return JS_NULL;
+    (void)this_val;
+    if (argc < 1) return JS_NULL;
+    const char *name = JS_ToCString(ctx, argv[0]);
+    if (!name) return JS_NULL;
+    JSValue ext = JS_NULL;
+    if (g_ascii_strcasecmp(name, "WEBGL_debug_renderer_info") == 0) {
+        ext = JS_NewObject(ctx);
+        set_const(ctx, ext, "UNMASKED_VENDOR_WEBGL", NS_UNMASKED_VENDOR_WEBGL);
+        set_const(ctx, ext, "UNMASKED_RENDERER_WEBGL", NS_UNMASKED_RENDERER_WEBGL);
+    } else if (g_ascii_strcasecmp(name, "EXT_texture_filter_anisotropic") == 0) {
+        ext = JS_NewObject(ctx);
+        set_const(ctx, ext, "MAX_TEXTURE_MAX_ANISOTROPY_EXT",
+                  NS_MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+        set_const(ctx, ext, "TEXTURE_MAX_ANISOTROPY_EXT",
+                  NS_TEXTURE_MAX_ANISOTROPY_EXT);
+    }
+    JS_FreeCString(ctx, name);
+    return ext;
 }
 
 static JSValue
