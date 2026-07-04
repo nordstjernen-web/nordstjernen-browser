@@ -9,6 +9,7 @@
 #include <cairo.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "css.h"
 #include "debuglog.h"
@@ -803,6 +804,16 @@ ns_engine_write_pdf(const ns_box *root, const char *path)
         cairo_surface_destroy(surf);
         fprintf(stderr, "engine: failed to create PDF surface\n");
         return 2;
+    }
+    cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATOR,
+                                   "Nordstjernen");
+    time_t now = time(NULL);
+    struct tm tm_utc;
+    if (gmtime_r(&now, &tm_utc)) {
+        char iso[32];
+        if (strftime(iso, sizeof iso, "%Y-%m-%dT%H:%M:%SZ", &tm_utc) > 0)
+            cairo_pdf_surface_set_metadata(surf, CAIRO_PDF_METADATA_CREATE_DATE,
+                                           iso);
     }
     cairo_t *cr = cairo_create(surf);
     ns_paint(cr, root, NULL);
