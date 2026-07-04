@@ -10238,6 +10238,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                 paint_parent = anc;
         }
 
+        int pp_depth = 0;
+        for (const ns_box *p = paint_parent; p; p = p->parent)
+            if (++pp_depth >= NS_LAYOUT_MAX_DEPTH) break;
+        if (pp_depth >= NS_LAYOUT_MAX_DEPTH) continue;
+
         ns_box *abox;
         if (e.pseudo) {
             abox = box_new(NS_BOX_BLOCK);
