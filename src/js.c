@@ -8839,9 +8839,10 @@ static JSValue
 ns_audio_create_mediastream_source(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)this_val;
     JSValue n = ns_audio_make_node(ctx, "mediastreamsource");
-    JS_SetPropertyStr(ctx, n, "_micSrc", JS_TRUE);
+    if (argc >= 1 && JS_IsObject(argv[0]))
+        JS_SetPropertyStr(ctx, n, "_micSrc", JS_TRUE);
     return n;
 }
 
