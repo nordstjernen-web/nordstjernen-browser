@@ -15,6 +15,8 @@ ns_wamr_find_export_table(wasm_module_inst_t inst, const char *export_name,
 
     if (!module_inst || module_inst->module_type != Wasm_Module_Bytecode)
         return NULL;
+    if (!export_name)
+        return NULL;
 
     module = module_inst->module;
     for (i = 0; i < module->export_count; i++) {

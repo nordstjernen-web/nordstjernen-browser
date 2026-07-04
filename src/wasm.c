@@ -749,6 +749,10 @@ ns_wasm_table_opaque(JSContext *ctx, JSValueConst this_val,
         JS_ThrowTypeError(ctx, "wasm instance is gone");
         return NULL;
     }
+    if (!t->name) {
+        JS_ThrowTypeError(ctx, "wasm table is gone");
+        return NULL;
+    }
     *out_wi = wi;
     return t;
 }
