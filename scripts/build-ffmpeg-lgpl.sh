@@ -13,14 +13,14 @@
 # Prints the prefix on success; point pkg-config at "<prefix>/lib/pkgconfig".
 #
 # Env:
-#   FFMPEG_VERSION   release tag without the leading n (default 7.1)
+#   FFMPEG_VERSION   release tag without the leading n (default 8.1.1)
 #   NS_FFMPEG_NOASM  set to 1 to configure --disable-x86asm (no nasm needed)
 #   NS_FFMPEG_HOST   cross prefix passed as --cross-prefix (e.g. for mingw)
 #   FFMPEG_EXTRA_CONFIGURE  extra configure flags (target-os/arch on cross)
 set -euo pipefail
 
 PREFIX=${1:?usage: build-ffmpeg-lgpl.sh <install-prefix>}
-VER=${FFMPEG_VERSION:-7.1}
+VER=${FFMPEG_VERSION:-8.1.1}
 JOBS=${NS_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

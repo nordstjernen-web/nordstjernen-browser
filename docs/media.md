@@ -24,7 +24,7 @@ renderer's existing animation tick, honouring the `autoplay`, `loop`, `muted`,
 is the one always-on codec, by design — small, patent-free, and decoded in pure
 portable C.
 
-### WebM — VP9/VP8 (required on Windows)
+### WebM — VP9/VP8 (required on Linux and Windows)
 
 `.webm` plays inline too when **FFmpeg's libav\*** (`libavformat` /
 `libavcodec` / `libavutil` / `libswscale` / `libswresample`) is present at build
@@ -36,11 +36,13 @@ whose `libav.org` domain is unrelated despite the shared library-name prefix.
 libav demuxes the Matroska container
 and decodes **VP9/VP8** frames, which are scaled to BGRA and served through the
 same off-tick frame loop as the MPEG-1 path — both royalty-free codecs. It is
-**required on Windows** (`meson setup` fails without it) because YouTube and
-most modern sites serve VP9/WebM and the poster-and-overlay fallback there is
-unacceptable; on **Linux/macOS** it is auto-detected, and a build without the
-FFmpeg libraries carries no libav symbol or dependency and falls back to the
-poster-and-overlay path.
+**required on Linux and Windows** (`meson setup` fails without it, or with a
+pre-8.0 FFmpeg) because YouTube and most modern sites serve VP9/WebM and the
+poster-and-overlay fallback there is unacceptable; on **macOS** it is
+auto-detected, and a build without the FFmpeg libraries carries no libav symbol
+or dependency and falls back to the poster-and-overlay path. The minimum is
+**FFmpeg 8.0** (library sonames libavcodec ≥ 62, libavformat ≥ 62, libavutil ≥
+60, libswscale ≥ 9, libswresample ≥ 6).
 
 How libav is obtained differs by platform, to keep it redistributable:
 

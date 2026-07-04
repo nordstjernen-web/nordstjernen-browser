@@ -65,14 +65,15 @@ nothing imported.
   **VP9/VP8 video** (libav demux+decode → swscale → texture, in
   `src/video_decode.c`) and **Opus/Vorbis audio** (decoded in the helper,
   `src/audio/main.c`) for `.webm`/`.opus`/`.ogg` sources. It is **required on
-  Windows** (`libav_required` in `meson.build` — YouTube and most modern
-  sites serve VP9/WebM, so the external-player fallback there is
+  Linux and Windows** (`libav_required` in `meson.build` — YouTube and most
+  modern sites serve VP9/WebM, so the external-player fallback there is
   unacceptable; the Windows CI/packaging builds a minimal LGPL FFmpeg via
   `scripts/build-ffmpeg-lgpl.sh` and the `--werror` build fails without it)
-  and **auto-detected on Linux/macOS** (a stock build on a machine without
-  libav there carries no libav symbol or dependency and behaves exactly as
-  before). Android stays on the external-player path — its dependency
-  sysroot does not cross-build FFmpeg. Other `<audio>` and other `<video>`
+  and **auto-detected on macOS** (a stock build there without libav carries no
+  libav symbol or dependency and behaves exactly as before). The version floor
+  is FFmpeg 8.0's library sonames (libavcodec ≥ 62, libavutil ≥ 60, …). Android
+  stays on the external-player path — its dependency sysroot does not
+  cross-build FFmpeg. Other `<audio>` and other `<video>`
   codecs render a
   poster and play overlay; clicking resolves the media URL in the renderer
   (`ns_browser_media_at`) and reports it over the renderer protocol for
@@ -233,9 +234,10 @@ The FFmpeg libav\* dev packages (Debian/Ubuntu `libavformat-dev
 libavcodec-dev libavutil-dev libswscale-dev libswresample-dev`;
 MSYS2 `mingw-w64-x86_64-ffmpeg`, or the LGPL build from
 `scripts/build-ffmpeg-lgpl.sh`) enable inline WebM playback (VP9/VP8 video
-+ Opus/Vorbis audio). **Required on Windows** (`meson setup` fails without
-them); auto-detected on Linux/macOS, where without them the build carries
-no libav dependency and WebM falls back to the external-player path.
++ Opus/Vorbis audio). **Required on Linux and Windows** (`meson setup` fails
+without them, or with a pre-8.0 FFmpeg); auto-detected on macOS, where without
+them the build carries no libav dependency and WebM falls back to the
+external-player path. FFmpeg 8.0 or newer is required.
 
 On Fedora/RHEL:
 
