@@ -4139,22 +4139,6 @@ static const char k_about_settings_html[] =
 "</script></body></html>";
 
 static char *
-about_query_param(const char *url, const char *key)
-{
-    const char *qs = strchr(url, '?');
-    if (!qs) return NULL;
-    GHashTable *q = g_uri_parse_params(qs + 1, -1, "&",
-                                       G_URI_PARAMS_WWW_FORM, NULL);
-    char *val = NULL;
-    if (q) {
-        const char *raw = g_hash_table_lookup(q, key);
-        if (raw) val = g_strdup(raw);
-        g_hash_table_destroy(q);
-    }
-    return val;
-}
-
-static char *
 about_request_form(const char *url, const char *method,
                    const void *body, gsize body_len)
 {
