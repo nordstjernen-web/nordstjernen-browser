@@ -3536,9 +3536,13 @@ ns_element_get_tabIndex(JSContext *ctx, JSValueConst this_val)
     const char *v = ns_element_get_attr(n, "tabindex");
     if (!v) {
         static const char *const focusable[] = {
-            "a", "area", "button", "input", "select", "textarea", NULL,
+            "a", "area", "button", "frame", "iframe", "input", "object",
+            "select", "textarea", NULL,
         };
-        return JS_NewInt32(ctx, ns_node_name_is_any_of(n, focusable) ? 0 : -1);
+        gboolean zero = ns_node_name_is_any_of(n, focusable);
+        if (!zero && ns_node_is_element_named(n, "summary"))
+            zero = n->parent && ns_node_is_element_named(n->parent, "details");
+        return JS_NewInt32(ctx, zero ? 0 : -1);
     }
     return JS_NewInt32(ctx, ns_parse_int(v, 0, G_MININT, G_MAXINT));
 }
@@ -21308,6 +21312,15 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
     }
     gboolean adjacent_to_self = (g_ascii_strcasecmp(pos, "beforebegin") == 0 ||
                                  g_ascii_strcasecmp(pos, "afterend") == 0);
+    if (adjacent_to_self &&
+        (!self->parent ||
+         (self->parent->kind == NS_NODE_DOCUMENT &&
+          !(self->parent->flags & NS_NODE_FRAGMENT)))) {
+        JS_FreeCString(ctx, pos);
+        JS_FreeCString(ctx, html);
+        return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
+            "insertAdjacentHTML: the element has no parent element");
+    }
     const char *ctx_tag = adjacent_to_self
         ? ((self->parent && self->parent->kind == NS_NODE_ELEMENT)
            ? self->parent->name : NULL)
@@ -25000,6 +25013,19 @@ ns_js_form_first_invalid(const ns_node *form, const ns_node *scan,
     return NULL;
 }
 
+static void
+ns_js_form_collect_invalid(const ns_node *form, const ns_node *scan,
+                           const ns_node *doc, int depth, GPtrArray *out)
+{
+    if (!form || !scan || depth >= 512) return;
+    if (scan->kind == NS_NODE_ELEMENT &&
+        ns_form_owner(scan, doc) == form &&
+        !ns_js_element_valid(scan))
+        g_ptr_array_add(out, (gpointer)scan);
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        ns_js_form_collect_invalid(form, c, doc, depth + 1, out);
+}
+
 static JSValue
 ns_element_get_validity(JSContext *ctx, JSValueConst this_val)
 {
@@ -25032,11 +25058,16 @@ ns_element_check_validity(JSContext *ctx, JSValueConst this_val,
     const ns_node *n = ns_unwrap_element(this_val);
     if (ns_node_is_element_named(n, "form")) {
         const ns_node *doc = ns_node_root(n);
-        const ns_node *bad = ns_js_form_first_invalid(n, doc ? doc : n,
-                                                       doc ? doc : n, 0);
-        if (bad && js_from_ctx(ctx)) ns_js_dispatch_event(js_from_ctx(ctx),
-                                                          bad, "invalid", NULL);
-        return JS_NewBool(ctx, bad == NULL);
+        GPtrArray *bad = g_ptr_array_new();
+        ns_js_form_collect_invalid(n, doc ? doc : n, doc ? doc : n, 0, bad);
+        ns_js *js = js_from_ctx(ctx);
+        if (js)
+            for (guint i = 0; i < bad->len; i++)
+                ns_js_dispatch_event(js, g_ptr_array_index(bad, i),
+                                     "invalid", NULL);
+        gboolean ok = bad->len == 0;
+        g_ptr_array_free(bad, TRUE);
+        return JS_NewBool(ctx, ok);
     }
     gboolean ce = ns_node_has_custom_error(n);
     gboolean vm = FALSE, tm = FALSE, pm = FALSE;
@@ -25214,6 +25245,12 @@ ns_element_get_default_value(JSContext *ctx, JSValueConst this_val)
         g_free(t);
         return v;
     }
+    if (ns_node_is_element_named(n, "textarea")) {
+        char *t = ns_node_collect_text(n);
+        JSValue v = JS_NewString(ctx, t ? t : "");
+        g_free(t);
+        return v;
+    }
     return ns_element_reflect_str_get(ctx, this_val, "value", FALSE);
 }
 
@@ -25231,6 +25268,15 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
             if (s && *s)
                 ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         }
+        if (s) JS_FreeCString(ctx, s);
+        if (_j) _j->mutated = TRUE;
+        return JS_UNDEFINED;
+    }
+    if (ns_node_is_element_named(el, "textarea")) {
+        ns_js *_j = js_from_ctx(ctx);
+        ns_js_clear_children(_j, el);
+        if (s && *s)
+            ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
         if (_j) _j->mutated = TRUE;
         return JS_UNDEFINED;
@@ -25891,21 +25937,26 @@ ns_element_attachShadow(JSContext *ctx, JSValueConst this_val,
     ns_node *host = ns_unwrap_element_mut(this_val);
     if (!host || host->kind != NS_NODE_ELEMENT)
         return JS_ThrowTypeError(ctx, "attachShadow requires an Element host");
+    if (ns_element_find_shadow_child(host))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "attachShadow: the element already hosts a shadow root");
+    if (argc < 1 || !JS_IsObject(argv[0]))
+        return JS_ThrowTypeError(ctx,
+            "attachShadow: argument 1 is not a dictionary");
+    const char *mode;
     {
-        ns_node *existing = ns_element_find_shadow_child(host);
-        if (existing) {
-            JSValue w = ns_make_element(ctx, existing);
-            ns_shadow_root_define_props(ctx, w);
-            return w;
-        }
-    }
-    const char *mode = "open";
-    if (argc >= 1 && JS_IsObject(argv[0])) {
         JSValue m = JS_GetPropertyStr(ctx, argv[0], "mode");
         const char *s = JS_ToCString(ctx, m);
-        if (s) { mode = (strcmp(s, "closed") == 0) ? "closed" : "open"; }
-        if (s) JS_FreeCString(ctx, s);
         JS_FreeValue(ctx, m);
+        if (!s) return JS_EXCEPTION;
+        if (strcmp(s, "open") == 0) mode = "open";
+        else if (strcmp(s, "closed") == 0) mode = "closed";
+        else {
+            JS_FreeCString(ctx, s);
+            return JS_ThrowTypeError(ctx,
+                "attachShadow: mode must be 'open' or 'closed'");
+        }
+        JS_FreeCString(ctx, s);
     }
     ns_node *root = ns_node_new_element(g_strdup("div"));
     if (!root) return JS_ThrowOutOfMemory(ctx);
@@ -27601,18 +27652,27 @@ ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
     JSValue arr = JS_NewArray(ctx);
     if (!tbl) return arr;
     uint32_t idx = 0;
-    GQueue q = G_QUEUE_INIT;
-    g_queue_push_tail(&q, (ns_node *)tbl);
-    while (!g_queue_is_empty(&q)) {
-        ns_node *n = g_queue_pop_head(&q);
-        for (ns_node *c = n->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "tr"))
-                JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
-            else
-                g_queue_push_tail(&q, c);
-        }
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "thead"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling) {
+        if (ns_node_is_element_named(c, "tr"))
+            JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
+        else if (ns_node_is_element_named(c, "tbody"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
     }
-    g_queue_clear(&q);
+    for (const ns_node *c = tbl->first_child; c; c = c->next_sibling)
+        if (ns_node_is_element_named(c, "tfoot"))
+            for (const ns_node *r = c->first_child; r; r = r->next_sibling)
+                if (ns_node_is_element_named(r, "tr"))
+                    JS_SetPropertyUint32(ctx, arr, idx++,
+                                         ns_make_element(ctx, r));
     return arr;
 }
 
