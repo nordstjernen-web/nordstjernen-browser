@@ -276,11 +276,12 @@ endif
 # Android, whose dependency sysroot (android/scripts/build-deps.sh) does not
 # cross-build FFmpeg, so WebM there stays on the external-player path.
 #
-# The version floors are the library sonames of FFmpeg 8.0 (2025) — a recent
-# major-version baseline satisfied by the bundled LGPL build
-# (scripts/build-ffmpeg-lgpl.sh, which tracks 8.x) and by current distro/MSYS2
-# packages. An older system FFmpeg simply fails the version check: WebM disables
-# on Linux/macOS, and the required build fails on Windows.
+# The version floors are the library sonames of FFmpeg 8.0 (2025), the version
+# shipped by Ubuntu 26.04 LTS (libavcodec 62.11) and current MSYS2/distro
+# packages — so a stock Linux build links the system FFmpeg with no source
+# build. The macOS/Windows packages bundle a minimal LGPL FFmpeg 8 built by
+# scripts/build-ffmpeg-lgpl.sh. Below 8.0 the required build fails on
+# Linux/Windows and WebM disables on macOS.
 libav_required = host_machine.system() == 'windows' or host_machine.system() == 'linux'
 libavformat = dependency('libavformat', version: '>=62', required: libav_required)
 libavcodec = dependency('libavcodec', version: '>=62', required: libav_required)

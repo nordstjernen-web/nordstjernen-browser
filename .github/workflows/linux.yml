@@ -48,7 +48,8 @@ jobs:
             ccache clang gcc g++ make cmake pkg-config meson ninja-build \
             libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
             libuchardet-dev librsvg2-dev libpsl-dev libsqlite3-dev \
-            libwebp-dev libsdl2-dev libseccomp-dev ca-certificates
+            libwebp-dev libsdl2-dev libseccomp-dev ca-certificates \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libswresample-dev
 
       - name: Restore ccache
         uses: actions/cache@v5
@@ -81,6 +82,7 @@ jobs:
           ninja --version
           pkg-config --modversion gtk4
           pkg-config --modversion libcurl
+          pkg-config --modversion libavcodec
 
       # Build step is wired up the moment a meson.build (or Makefile)
       # lands in the tree. Until then this job exists to (a) verify the
