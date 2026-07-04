@@ -4,6 +4,9 @@ How Nordstjernen plays `<video>` and `<audio>`. The engine ships a tiny,
 in-tree decoder set plus one optional WebM extension; anything else is handed
 to an external player.
 
+The video process handles video, the audio process handles audio 
+and the html process renders html.
+
 ## Inline video
 
 ### MPEG-1 (always on)
@@ -83,21 +86,7 @@ before. The renderer always keeps the demuxer state that backs
 either way; audio stays in `nordstjernen-audio`, cued by the same
 play/pause/seek commands so both clocks anchor identically.
 
-## Other media → external player
 
-Beyond MPEG-1/MP2, MP3, and the optional WebM (VP9/VP8 + Opus/Vorbis) path,
-Nordstjernen ships no media codecs. Other `<audio>` and other `<video>` codecs
-render a poster and a play overlay; clicking it resolves the source URL inside
-the sandboxed renderer process and the UI shell hands it to an external player —
-`mpv`, `VLC`, `celluloid`, `totem`, `mplayer` or `ffplay` on Linux, otherwise
-the desktop's default handler for the media type (found via `GAppInfo`, so
-Flatpak players work too), the default app via `open` on macOS, and the
-registered handler on Windows. If none is found, a status-bar hint suggests
-installing [mpv](https://mpv.io). A media player is therefore a *recommended
-runtime dependency*, not a build dependency: the `.deb` and `.rpm` packages
-`Recommend` one (defaulting to `mpv`) so playback works out of the box, while
-source builds need none. The player is launched from the UI shell, never from
-the page's untrusted renderer.
 
 Streaming sites (YouTube and friends) drive `<video>` through MSE/`blob:` with no
 plain file URL. For those, clicking hands the **page URL** to the player instead,
