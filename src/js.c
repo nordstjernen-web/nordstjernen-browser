@@ -26218,10 +26218,23 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_element_get_scrollHeight(JSContext *ctx, JSValueConst this_val)
 {
+    const ns_node *n = ns_unwrap_element(this_val);
+    gboolean is_root = n && n->name &&
+        (strcmp(n->name, "html") == 0 || strcmp(n->name, "body") == 0);
     const ns_box *b = ns_box_for_this(ctx, this_val);
-    if (!b) return JS_NewInt32(ctx, 0);
+    if (!b) {
+        if (is_root) return JS_NewInt32(ctx, (int)(ns_css_viewport_h() + 0.5));
+        return JS_NewInt32(ctx, 0);
+    }
     double h = b->content_height + b->padding.top + b->padding.bottom
              + (b->scroll_max_y > 0 ? b->scroll_max_y : 0);
+    if (is_root) {
+        ns_js *js = js_from_ctx(ctx);
+        if (js && js->layout_root)
+            h = ns_box_max_bottom(js->layout_root, h);
+        double vh = ns_css_viewport_h();
+        if (h < vh) h = vh;
+    }
     if (h < 0) h = 0;
     return JS_NewInt32(ctx, (int)(h + 0.5));
 }
