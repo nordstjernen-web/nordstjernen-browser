@@ -33408,6 +33408,7 @@ ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
 static void
 ns_ce_upgrade_subtree_named(ns_js *js, ns_node *root, const char *target_name)
 {
+    if (!ns_ce_node_connected(js, root)) return;
     ns_ce_upgrade_subtree_named_rec(js, root, target_name, 0);
 }
 
@@ -33431,6 +33432,7 @@ ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth)
 static void
 ns_ce_upgrade_subtree_all(ns_js *js, ns_node *root)
 {
+    if (!ns_ce_node_connected(js, root)) return;
     ns_ce_upgrade_subtree_all_rec(js, root, 0);
 }
 
@@ -33622,7 +33624,7 @@ ns_ce_upgrade(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     ns_node *root = ns_unwrap_element_mut(argv[0]);
     if (!root) return JS_UNDEFINED;
     ns_js *js = js_from_ctx(ctx);
-    ns_ce_upgrade_subtree_all(js, root);
+    ns_ce_upgrade_subtree_all_rec(js, root, 0);
     return JS_UNDEFINED;
 }
 
