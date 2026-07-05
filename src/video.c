@@ -301,7 +301,8 @@ ns_video_helper_flush_rect(ns_video_cache *cache, ns_video *v, gint64 now_us)
 gboolean
 ns_video_helper_composited(const ns_video *v)
 {
-    return v && v->video_opened && ns_video_helper_enabled();
+    return v && ns_video_helper_enabled() &&
+           (v->video_opened || v->mse_id != 0);
 }
 
 void
