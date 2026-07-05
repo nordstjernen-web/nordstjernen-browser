@@ -89,9 +89,10 @@ so large players no longer force full-page repaints per frame, decode jank
 never blocks the renderer main loop, and attacker-controlled codec bytes are
 parsed in a small self-sandboxed process (Landlock on Linux) that can reach
 only its shm ring and temp files. The helper is optional: it is built when
-libav is available (not on Windows yet), and when the binary is missing —
-or in headless mode — the renderer decodes frames in-process exactly as
-before. The renderer always keeps the demuxer state that backs
+libav is available — including on Windows, where the shared-memory ring is a
+named file mapping (`CreateFileMapping`/`MapViewOfFile`) rather than POSIX
+`shm_open` — and when the binary is missing, or in headless mode, the renderer
+decodes frames in-process exactly as before. The renderer always keeps the demuxer state that backs
 `buffered`/`duration`/`currentTime`, so page JS sees the same element state
 either way; audio stays in `nordstjernen-audio`, cued by the same
 play/pause/seek commands so both clocks anchor identically.
