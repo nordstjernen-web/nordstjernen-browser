@@ -28,6 +28,7 @@ typedef struct {
     size_t cap;
 } ns_thread_buf;
 
+__attribute__((format(printf, 2, 3)))
 static void
 ns_thread_buf_addf(ns_thread_buf *b, const char *fmt, ...)
 {
