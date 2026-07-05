@@ -4468,14 +4468,19 @@ build_block_impl(const ns_node *n, GHashTable *styles)
         return vb;
     }
 
-    if (node_has_media_metadata(n) &&
-        ns_element_get_attr(n, NS_MEDIA_SRC_ATTR)) {
-        ns_box *vb = build_video_box(n);
-        if (vb) {
-            vb->style = s;
-            collect_box_bg_image(vb, s);
+    if (node_has_media_metadata(n)) {
+        gboolean has_src = ns_element_get_attr(n, NS_MEDIA_SRC_ATTR) != NULL;
+        gboolean empty_skeleton = TRUE;
+        for (const ns_node *mc = n->first_child; mc; mc = mc->next_sibling)
+            if (mc->kind == NS_NODE_ELEMENT) { empty_skeleton = FALSE; break; }
+        if (has_src || empty_skeleton) {
+            ns_box *vb = build_video_box(n);
+            if (vb) {
+                vb->style = s;
+                collect_box_bg_image(vb, s);
+            }
+            return vb;
         }
-        return vb;
     }
 
     if (is_table_box(n, styles))
