@@ -1136,7 +1136,55 @@ typedef struct {
     ProcWindow *pw;
     GtkWidget  *list;
     guint       timer;
+    GHashTable *cpu_hist;
+    gint64      now_us;
+    guint       tick;
+    int         ncpu;
 } NsTaskMgr;
+
+typedef struct {
+    double base_cpu;
+    gint64 base_us;
+    double pct;
+    guint  tick;
+} NsCpuHist;
+
+static double
+task_mgr_cpu_pct(NsTaskMgr *tm, int pid, double cpu_now)
+{
+    if (pid <= 0 || cpu_now < 0) return -1.0;
+    NsCpuHist *h = g_hash_table_lookup(tm->cpu_hist, GINT_TO_POINTER(pid));
+    if (!h) {
+        h = g_new0(NsCpuHist, 1);
+        h->base_cpu = cpu_now;
+        h->base_us = tm->now_us;
+        h->pct = -1.0;
+        h->tick = tm->tick;
+        g_hash_table_insert(tm->cpu_hist, GINT_TO_POINTER(pid), h);
+        return -1.0;
+    }
+    if (h->tick == tm->tick) return h->pct;
+    double dt = (double)(tm->now_us - h->base_us) / 1e6;
+    double pct = -1.0;
+    if (dt >= 0.1 && cpu_now >= h->base_cpu) {
+        pct = (cpu_now - h->base_cpu) / dt * 100.0;
+        double cap = tm->ncpu > 0 ? tm->ncpu * 100.0 : 100.0;
+        if (pct > cap) pct = cap;
+        if (pct < 0.0) pct = 0.0;
+    }
+    h->base_cpu = cpu_now;
+    h->base_us = tm->now_us;
+    h->pct = pct;
+    h->tick = tm->tick;
+    return pct;
+}
+
+static gboolean
+task_mgr_hist_stale(gpointer key, gpointer val, gpointer data)
+{
+    (void)key;
+    return ((NsCpuHist *)val)->tick != ((NsTaskMgr *)data)->tick;
+}
 
 static GtkWidget *
 task_mgr_header_label(const char *text, int width, gfloat xalign, gboolean expand)
@@ -1192,10 +1240,19 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_label_set_width_chars(GTK_LABEL(l_time), 9);
     gtk_label_set_xalign(GTK_LABEL(l_time), 1);
 
+    char pctbuf[24];
+    double pct = task_mgr_cpu_pct(tm, pid, cpu);
+    if (pct < 0) g_strlcpy(pctbuf, "—", sizeof pctbuf);
+    else         g_snprintf(pctbuf, sizeof pctbuf, "%.1f %%", pct);
+    GtkWidget *l_pct = gtk_label_new(pctbuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_pct), 7);
+    gtk_label_set_xalign(GTK_LABEL(l_pct), 1);
+
     gtk_box_append(GTK_BOX(box), l_name);
     gtk_box_append(GTK_BOX(box), l_pid);
     gtk_box_append(GTK_BOX(box), l_state);
     gtk_box_append(GTK_BOX(box), l_mem);
+    gtk_box_append(GTK_BOX(box), l_pct);
     gtk_box_append(GTK_BOX(box), l_time);
 
     GtkWidget *row = gtk_list_box_row_new();
@@ -1208,6 +1265,9 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
 static void
 task_mgr_refresh(NsTaskMgr *tm)
 {
+    tm->tick++;
+    tm->now_us = g_get_monotonic_time();
+
     GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(tm->list));
     int selected_pid = sel
         ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sel), "ns-pid")) : 0;
@@ -1284,6 +1344,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             }
         }
     }
+
+    g_hash_table_foreach_remove(tm->cpu_hist, task_mgr_hist_stale, tm);
 }
 
 static gboolean
@@ -1344,6 +1406,7 @@ task_mgr_destroyed(GtkWidget *win, gpointer data)
     (void)win;
     NsTaskMgr *tm = data;
     if (tm->timer) g_source_remove(tm->timer);
+    if (tm->cpu_hist) g_hash_table_destroy(tm->cpu_hist);
     if (tm->pw->task_mgr_win) tm->pw->task_mgr_win = NULL;
     g_free(tm);
 }
@@ -1371,10 +1434,13 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_window_set_title(GTK_WINDOW(win), tm_title);
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
-    gtk_window_set_default_size(GTK_WINDOW(win), 560, 380);
+    gtk_window_set_default_size(GTK_WINDOW(win), 640, 380);
 
     NsTaskMgr *tm = g_new0(NsTaskMgr, 1);
     tm->pw = pw;
+    tm->cpu_hist = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                         NULL, g_free);
+    tm->ncpu = (int)g_get_num_processors();
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
@@ -1387,6 +1453,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Process ID"), 8, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("State"), 11, 0, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Memory"), 10, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU %"), 7, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU time"), 9, 1, FALSE));
 
     GtkWidget *scroll = gtk_scrolled_window_new();
