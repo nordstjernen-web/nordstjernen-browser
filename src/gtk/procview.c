@@ -12,6 +12,9 @@
 #include <glib/gstdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef G_OS_WIN32
+#include <windows.h>
+#endif
 
 #ifndef G_OS_WIN32
 #include <sys/mman.h>
@@ -147,6 +150,7 @@ struct NsProcView {
     GOutputStream    *video_in;
     GDataInputStream *video_out;
     void             *vring;
+    void             *vring_map;
     gsize             vring_bytes;
     char              vid_token[64];
     char              vid_shm[64];
@@ -684,7 +688,6 @@ pv_audio_shutdown(NsProcView *v)
     v->audio_in = NULL;
 }
 
-#ifndef G_OS_WIN32
 typedef struct {
     guint32 magic;
     guint32 width;
@@ -698,7 +701,6 @@ typedef struct {
 } ns_vring_hdr;
 
 #define NS_VRING_MAGIC 0x4e535646u
-#endif
 
 static char *
 ns_proc_video_helper_path(void)
@@ -731,9 +733,6 @@ ns_proc_video_helper_path(void)
 gboolean
 ns_proc_video_helper_available(void)
 {
-#ifdef G_OS_WIN32
-    return FALSE;
-#else
     char *path = ns_proc_video_helper_path();
     gboolean ok = g_path_is_absolute(path)
         ? g_file_test(path, G_FILE_TEST_IS_EXECUTABLE)
@@ -745,13 +744,16 @@ ns_proc_video_helper_available(void)
     }
     g_free(path);
     return ok;
-#endif
 }
 
 static void
 pv_vring_unmap(NsProcView *v)
 {
-#ifndef G_OS_WIN32
+#ifdef G_OS_WIN32
+    if (v->vring) UnmapViewOfFile(v->vring);
+    if (v->vring_map) CloseHandle(v->vring_map);
+    v->vring_map = NULL;
+#else
     if (v->vring) munmap(v->vring, v->vring_bytes);
 #endif
     v->vring = NULL;
@@ -799,7 +801,26 @@ pv_video_handle_line(NsProcView *v, const char *line)
             g_printerr("[shm-reject] line-tok=%s cur-tok=%s\n",
                        tok[1], v->vid_token);
     } else if (n >= 6 && strcmp(tok[0], "shm") == 0) {
-#ifndef G_OS_WIN32
+#ifdef G_OS_WIN32
+        pv_vring_unmap(v);
+        HANDLE hm = OpenFileMappingA(FILE_MAP_READ, FALSE, tok[2]);
+        if (hm) {
+            void *map = MapViewOfFile(hm, FILE_MAP_READ, 0, 0, 0);
+            if (map && ((ns_vring_hdr *)map)->magic == NS_VRING_MAGIC) {
+                ns_vring_hdr *hdr = map;
+                v->vring = map;
+                v->vring_map = hm;
+                v->vring_bytes = sizeof(ns_vring_hdr) +
+                                 (gsize)hdr->frame_bytes * hdr->nslots;
+                g_strlcpy(v->vid_shm, tok[2], sizeof v->vid_shm);
+                g_strlcpy(v->vid_token, tok[1], sizeof v->vid_token);
+            } else {
+                if (map) UnmapViewOfFile(map);
+                CloseHandle(hm);
+            }
+        }
+        pv_video_ensure_tick(v);
+#else
         if (g_getenv("NS_DBG_AUDIO"))
             g_printerr("[shm-adopt] %s %s\n", tok[1], tok[2]);
         pv_vring_unmap(v);
