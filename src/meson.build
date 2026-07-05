@@ -329,6 +329,7 @@ if not is_android
     dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,
     c_args: ns_lib_c_args,
     link_args: nordstjernen_exe_link_args,
+    win_subsystem: 'windows',
     install: true,
   )
 
@@ -379,6 +380,7 @@ if not is_android
       include_directories: include_directories('audio', '.'),
       link_with: libminimp3,
       dependencies: audio_deps + audio_lib_deps,
+      win_subsystem: 'windows',
       install: true,
     )
   else
@@ -402,6 +404,7 @@ if not is_android
       videoproc_sources,
       include_directories: include_directories('.'),
       dependencies: videoproc_deps + [cc.find_library('m', required: false)],
+      win_subsystem: 'windows',
       install: true,
     )
   endif
