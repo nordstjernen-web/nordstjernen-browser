@@ -1403,7 +1403,7 @@ ns_rproc_http_dump_threads(int pid, const char *label)
     int n = 0;
     while ((ent = readdir(d))) {
         if (ent->d_name[0] == '.') continue;
-        char sp[128];
+        char sp[320];
         snprintf(sp, sizeof sp, "/proc/%d/task/%s/stat", pid, ent->d_name);
         FILE *f = fopen(sp, "r");
         char st = '?', comm[64] = "";
