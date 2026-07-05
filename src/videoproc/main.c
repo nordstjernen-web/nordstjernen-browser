@@ -543,6 +543,23 @@ cmd_seek(const char *token, double seconds)
 }
 
 static void
+cmd_resync(const char *token, double seconds)
+{
+    if (seconds < 0) return;
+    ns_video_player *p = player_find(token);
+    if (!p) return;
+    pthread_mutex_lock(&p->lock);
+    if (p->playing) {
+        double clock = (double)(now_us() - p->base_us) / 1e6;
+        double drift = seconds - clock;
+        double ad = drift < 0 ? -drift : drift;
+        if (ad < 0.75)
+            p->base_us = now_us() - (int64_t)(seconds * 1e6);
+    }
+    pthread_mutex_unlock(&p->lock);
+}
+
+static void
 cmd_stop(const char *token)
 {
     ns_video_player *p = player_find(token);
@@ -620,6 +637,9 @@ main(void)
         } else if (strcmp(op, "seek") == 0) {
             char *v = next_token(&cur);
             cmd_seek(token, v ? atof(v) : 0.0);
+        } else if (strcmp(op, "resync") == 0) {
+            char *v = next_token(&cur);
+            cmd_resync(token, v ? atof(v) : 0.0);
         } else if (strcmp(op, "stop") == 0) {
             cmd_stop(token);
         }

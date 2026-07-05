@@ -159,6 +159,7 @@ struct NsProcView {
     gboolean          vid_playing;
     guint             vid_tick_id;
     guint             vid_tick_count;
+    gint64            vid_resync_us;
 
     NsProcNotify notify;
     gpointer     notify_ud;
@@ -612,21 +613,39 @@ ns_proc_audio_apply_proxy_env(GSubprocessLauncher *launcher)
         g_subprocess_launcher_setenv(launcher, "CURL_CA_BUNDLE", ca, TRUE);
 }
 
+static void pv_video_send(NsProcView *v, const char *cmd);
+
 static void
 pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
 {
-    (void)user_data;
+    NsProcView *v = user_data;
     GDataInputStream *in = G_DATA_INPUT_STREAM(src);
     char *line = g_data_input_stream_read_line_finish(in, res, NULL, NULL);
     if (!line) {
         g_object_unref(in);
+        if (v) pv_unref(v);
         return;
     }
     if (g_str_has_prefix(line, "error ") || g_getenv("NS_DBG_AUDIO"))
         g_printerr("[audio-helper] %s\n", line);
+    if (v && v->video_proc && v->vid_playing && v->vid_token[0] &&
+        g_str_has_prefix(line, "pos ")) {
+        char tok[64];
+        double sec = -1.0;
+        if (sscanf(line + 4, "%63s %lf", tok, &sec) == 2 && sec >= 0.0 &&
+            strcmp(tok, v->vid_token) == 0) {
+            gint64 nowu = g_get_monotonic_time();
+            if (nowu - v->vid_resync_us > 950000) {
+                v->vid_resync_us = nowu;
+                char cmd[96];
+                g_snprintf(cmd, sizeof cmd, "resync %s %.3f", tok, sec);
+                pv_video_send(v, cmd);
+            }
+        }
+    }
     g_free(line);
     g_data_input_stream_read_line_async(in, G_PRIORITY_DEFAULT, NULL,
-                                        pv_audio_feedback_line, NULL);
+                                        pv_audio_feedback_line, v);
 }
 
 static void
@@ -657,7 +676,7 @@ pv_audio_pump(NsProcView *v, const char *commands)
         if (feedback)
             g_data_input_stream_read_line_async(
                 g_data_input_stream_new(feedback), G_PRIORITY_DEFAULT, NULL,
-                pv_audio_feedback_line, NULL);
+                pv_audio_feedback_line, pv_ref(v));
     }
     if (!v->audio_in) return;
 
@@ -777,6 +796,10 @@ pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     gtk_widget_queue_draw(widget);
     if (++v->vid_tick_count % 15 == 0)
         request_render(v);
+    if (v->vid_tick_count % 60 == 0 && v->audio_in) {
+        g_output_stream_write_all(v->audio_in, "poll\n", 5, NULL, NULL, NULL);
+        g_output_stream_flush(v->audio_in, NULL, NULL);
+    }
     return G_SOURCE_CONTINUE;
 }
 
