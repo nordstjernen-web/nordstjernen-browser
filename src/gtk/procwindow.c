@@ -19,6 +19,7 @@
 #include "macos_dock.h"
 #endif
 
+#include <stdlib.h>
 #include <string.h>
 
 #define NS_PROC_APP_ID "org.nordstjernen.WebBrowser"
@@ -1136,6 +1137,8 @@ static void on_bookmarks_clicked(GtkButton *button, gpointer user_data);
 typedef struct {
     ProcWindow *pw;
     GtkWidget  *list;
+    GtkWidget  *dump_win;
+    GtkWidget  *dump_view;
     guint       timer;
     GHashTable *cpu_hist;
     gint64      now_us;
@@ -1276,6 +1279,7 @@ task_mgr_add_row(NsTaskMgr *tm, const char *icon_name, const char *name,
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     if (v) g_object_set_data(G_OBJECT(row), "ns-view", v);
     g_object_set_data(G_OBJECT(row), "ns-pid", GINT_TO_POINTER(pid));
+    g_object_set_data_full(G_OBJECT(row), "ns-name", g_strdup(name), g_free);
     gtk_list_box_append(GTK_LIST_BOX(tm->list), row);
 }
 
@@ -1416,21 +1420,76 @@ task_mgr_refresh_clicked(GtkButton *button, gpointer data)
 }
 
 static void
+task_mgr_dump_win_destroyed(GtkWidget *win, gpointer data)
+{
+    (void)win;
+    NsTaskMgr *tm = data;
+    tm->dump_win = NULL;
+    tm->dump_view = NULL;
+}
+
+static void
+task_mgr_show_dump(NsTaskMgr *tm, const char *text)
+{
+    if (!tm->dump_win) {
+        GtkWidget *win = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(win), ns_i18n("Thread dump"));
+        gtk_window_set_transient_for(GTK_WINDOW(win),
+                                     GTK_WINDOW(tm->pw->window));
+        gtk_window_set_default_size(GTK_WINDOW(win), 680, 480);
+
+        GtkWidget *scroll = gtk_scrolled_window_new();
+        gtk_widget_set_vexpand(scroll, TRUE);
+        GtkWidget *view = gtk_text_view_new();
+        gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
+        gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(view), FALSE);
+        gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);
+        gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), GTK_WRAP_NONE);
+        gtk_widget_set_margin_start(view, 8);
+        gtk_widget_set_margin_end(view, 8);
+        gtk_widget_set_margin_top(view, 8);
+        gtk_widget_set_margin_bottom(view, 8);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), view);
+        gtk_window_set_child(GTK_WINDOW(win), scroll);
+
+        tm->dump_win = win;
+        tm->dump_view = view;
+        g_signal_connect(win, "destroy",
+                         G_CALLBACK(task_mgr_dump_win_destroyed), tm);
+    }
+
+    GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tm->dump_view));
+    char *valid = g_utf8_make_valid(text, -1);
+    gtk_text_buffer_set_text(buf, valid, -1);
+    g_free(valid);
+    gtk_window_present(GTK_WINDOW(tm->dump_win));
+}
+
+static void
 task_mgr_thread_dump(GtkButton *button, gpointer data)
 {
     (void)button;
     NsTaskMgr *tm = data;
+    GString *out = g_string_new(NULL);
     int dumped = 0;
     for (GtkWidget *r = gtk_widget_get_first_child(tm->list);
          r; r = gtk_widget_get_next_sibling(r)) {
         int pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "ns-pid"));
-        if (pid > 0) {
-            ns_rproc_http_dump_threads(pid, "nordstjernen process");
-            dumped++;
-        }
+        if (pid <= 0) continue;
+        const char *nm = g_object_get_data(G_OBJECT(r), "ns-name");
+        char *text = ns_rproc_http_threads_text(pid, nm ? nm : "process");
+        if (!text) continue;
+        fputs(text, stderr);
+        if (dumped) g_string_append_c(out, '\n');
+        g_string_append(out, text);
+        free(text);
+        dumped++;
     }
+    fflush(stderr);
     if (!dumped)
-        g_printerr("thread dump: no processes to dump\n");
+        g_string_append(out, ns_i18n("No processes to dump."));
+    task_mgr_show_dump(tm, out->str);
+    g_string_free(out, TRUE);
 }
 
 static void
@@ -1440,6 +1499,7 @@ task_mgr_destroyed(GtkWidget *win, gpointer data)
     NsTaskMgr *tm = data;
     if (tm->timer) g_source_remove(tm->timer);
     if (tm->cpu_hist) g_hash_table_destroy(tm->cpu_hist);
+    if (tm->dump_win) gtk_window_destroy(GTK_WINDOW(tm->dump_win));
     if (tm->pw->task_mgr_win) tm->pw->task_mgr_win = NULL;
     g_free(tm);
 }
