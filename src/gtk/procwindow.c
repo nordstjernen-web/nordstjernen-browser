@@ -6,6 +6,7 @@
 #include "i18n.h"
 #include "rproc_http.h"
 #include "rproc_inproc.h"
+#include "threaddump.h"
 #include "watchdog.h"
 #include "bookmarks.h"
 #include "cache.h"
@@ -1477,7 +1478,7 @@ task_mgr_thread_dump(GtkButton *button, gpointer data)
         int pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "ns-pid"));
         if (pid <= 0) continue;
         const char *nm = g_object_get_data(G_OBJECT(r), "ns-name");
-        char *text = ns_rproc_http_threads_text(pid, nm ? nm : "process");
+        char *text = ns_thread_dump_text(pid, nm ? nm : "process");
         if (!text) continue;
         fputs(text, stderr);
         if (dumped) g_string_append_c(out, '\n');
