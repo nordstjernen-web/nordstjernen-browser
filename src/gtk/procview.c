@@ -630,15 +630,17 @@ pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
         g_printerr("[audio-helper] %s\n", line);
     if (v && v->video_proc && v->vid_playing && v->vid_token[0] &&
         g_str_has_prefix(line, "pos ")) {
-        char tok[64];
-        double sec = -1.0;
-        if (sscanf(line + 4, "%63s %lf", tok, &sec) == 2 && sec >= 0.0 &&
+        char tok[64], valstr[64];
+        if (sscanf(line + 4, "%63s %63s", tok, valstr) == 2 &&
             strcmp(tok, v->vid_token) == 0) {
+            double sec = g_ascii_strtod(valstr, NULL);
             gint64 nowu = g_get_monotonic_time();
-            if (nowu - v->vid_resync_us > 950000) {
+            if (sec >= 0.0 && nowu - v->vid_resync_us > 950000) {
                 v->vid_resync_us = nowu;
+                char valbuf[G_ASCII_DTOSTR_BUF_SIZE];
+                g_ascii_formatd(valbuf, sizeof valbuf, "%.3f", sec);
                 char cmd[96];
-                g_snprintf(cmd, sizeof cmd, "resync %s %.3f", tok, sec);
+                g_snprintf(cmd, sizeof cmd, "resync %s %s", tok, valbuf);
                 pv_video_send(v, cmd);
             }
         }

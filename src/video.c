@@ -820,6 +820,8 @@ ns_video_materialize_audio(ns_video_cache *cache, ns_video *v,
     }
     if (v->audio_opened) {
         ns_video_emit_audio(cache, "reload %s %s", v->token, v->audio_file);
+        if (v->playing && !v->muted)
+            ns_video_emit_audio(cache, "play %s", v->token);
     } else if (v->playing && !v->muted) {
         ns_video_audio_start(cache, v);
         if (v->audio_opened && v->cur_time > 0)
