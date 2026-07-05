@@ -333,9 +333,13 @@ Updates ship only through the store — no self-update.
   `dylibbundler` rewrites every dependency to
   `@executable_path/../Frameworks`, so no `DYLD_LIBRARY_PATH` shim is
   needed and the whole `.app` can be code-signed. The renderer
-  (`nordstjernen-renderer`) and the audio helper (`nordstjernen-audio`,
-  present whenever SDL2 was found at build time) ship beside it and are
-  run through `dylibbundler` too. Beyond the dylibs, the bundle carries
+  (`nordstjernen-renderer`), the audio helper (`nordstjernen-audio`,
+  present whenever SDL2 was found at build time) and the MSE video-decode
+  helper (`nordstjernen-video`, present whenever libav/FFmpeg was found)
+  ship beside it and are run through `dylibbundler` (and the same
+  rpath-dedup and inside-out code-signing) too — without `nordstjernen-video`
+  in the bundle the shell can't spawn it, so MSE video would fall back to
+  in-process decoding in the renderer. Beyond the dylibs, the bundle carries
   the data GTK 4 reads at runtime so the `.dmg` works on a Mac with no
   Homebrew: the app's own SVG toolbar icons under
   `Contents/Resources/share/icons`, the GdkPixbuf loader modules plus a
