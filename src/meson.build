@@ -385,7 +385,7 @@ if not is_android
     message('SDL2 not found — audio playback helper (nordstjernen-audio) disabled')
   endif
 
-  if have_libav and host_machine.system() != 'windows'
+  if have_libav
     videoproc_deps = [libavformat, libavcodec, libavutil, libswscale,
                       dependency('threads')]
     videoproc_sources = files('videoproc/main.c')

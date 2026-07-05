@@ -12,7 +12,11 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <pthread.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/mman.h>
+#endif
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -57,6 +61,7 @@ typedef struct {
     ns_vring_hdr *ring;
     size_t     ring_bytes;
     int        shm_fd;
+    void      *shm_map;
     pthread_t  thread;
     pthread_mutex_t lock;
 } ns_video_player;
@@ -198,6 +203,15 @@ ring_create(ns_video_player *p, int w, int h)
                    (size_t)frame_bytes * NS_VIDEO_RING_SLOTS;
     snprintf(p->shm_name, sizeof p->shm_name, "/nsvid-%d-%u",
              (int)getpid(), ++g_next_shm);
+#ifdef _WIN32
+    HANDLE hmap = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
+                                     (DWORD)((uint64_t)total >> 32),
+                                     (DWORD)(total & 0xffffffffu), p->shm_name);
+    if (!hmap) return 0;
+    void *map = MapViewOfFile(hmap, FILE_MAP_ALL_ACCESS, 0, 0, total);
+    if (!map) { CloseHandle(hmap); return 0; }
+    p->shm_map = hmap;
+#else
     int fd = shm_open(p->shm_name, O_CREAT | O_EXCL | O_RDWR, 0600);
     if (fd < 0) return 0;
     if (ftruncate(fd, (off_t)total) != 0) {
@@ -212,6 +226,7 @@ ring_create(ns_video_player *p, int w, int h)
         return 0;
     }
     p->shm_fd = fd;
+#endif
     p->ring = map;
     p->ring_bytes = total;
     memset(p->ring, 0, sizeof(ns_vring_hdr));
@@ -228,11 +243,17 @@ ring_create(ns_video_player *p, int w, int h)
 static void
 ring_destroy(ns_video_player *p)
 {
+#ifdef _WIN32
+    if (p->ring) UnmapViewOfFile(p->ring);
+    if (p->shm_map) CloseHandle(p->shm_map);
+    p->shm_map = NULL;
+#else
     if (p->ring) munmap(p->ring, p->ring_bytes);
     if (p->shm_fd >= 0) close(p->shm_fd);
     if (p->shm_name[0]) shm_unlink(p->shm_name);
-    p->ring = NULL;
     p->shm_fd = -1;
+#endif
+    p->ring = NULL;
     p->shm_name[0] = '\0';
 }
 
