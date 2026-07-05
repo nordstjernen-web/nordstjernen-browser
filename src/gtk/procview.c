@@ -1044,7 +1044,6 @@ pv_append_media_process_stats(NsProcView *v, GString *out)
                                rss >= 0 ? rss / 1024.0 : 0.0);
         pv_append_proc_threads(out, procs[i].pid);
     }
-#ifndef G_OS_WIN32
     if (any && v->vring) {
         ns_vring_hdr *r = v->vring;
         g_string_append_printf(out,
@@ -1054,7 +1053,6 @@ pv_append_media_process_stats(NsProcView *v, GString *out)
                                r->latest < G_N_ELEMENTS(r->pts) ? r->pts[r->latest]
                                                                 : 0.0);
     }
-#endif
 }
 
 static void
@@ -2541,7 +2539,6 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         cairo_rectangle(cr, 0, 0, width, height);
         cairo_fill(cr);
     }
-#ifndef G_OS_WIN32
     if (v->vring && v->vid_rect_valid) {
         gboolean frame_drawn = FALSE;
         ns_vring_hdr *r = v->vring;
@@ -2594,7 +2591,6 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             }
         }
     }
-#endif
     if (v->frame) {
         cairo_set_source_surface(cr, v->frame, 0, 0);
         cairo_paint(cr);
