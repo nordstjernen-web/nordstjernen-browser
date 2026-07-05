@@ -1399,6 +1399,8 @@ ns_rproc_http_dump_threads(int pid, const char *label)
         fprintf(stderr, "  (no /proc/%d/task)\n", pid);
         return;
     }
+    long tick = sysconf(_SC_CLK_TCK);
+    if (tick <= 0) tick = 100;
     struct dirent *ent;
     int n = 0;
     while ((ent = readdir(d))) {
@@ -1407,12 +1409,34 @@ ns_rproc_http_dump_threads(int pid, const char *label)
         snprintf(sp, sizeof sp, "/proc/%d/task/%s/stat", pid, ent->d_name);
         FILE *f = fopen(sp, "r");
         char st = '?', comm[64] = "";
-        int tid = 0;
+        double cpu = -1.0;
         if (f) {
-            if (fscanf(f, "%d (%63[^)]) %c", &tid, comm, &st) < 3) st = '?';
+            char line[1024];
+            if (fgets(line, sizeof line, f)) {
+                char *lp = strchr(line, '(');
+                char *rp = strrchr(line, ')');
+                if (lp && rp && rp > lp + 1) {
+                    size_t clen = (size_t)(rp - lp - 1);
+                    if (clen >= sizeof comm) clen = sizeof comm - 1;
+                    memcpy(comm, lp + 1, clen);
+                    comm[clen] = '\0';
+                }
+                if (rp && rp[1] && rp[2]) {
+                    st = rp[2];
+                    long utime = 0, stime = 0;
+                    int idx = 0;
+                    for (char *tok = strtok(rp + 2, " "); tok;
+                         tok = strtok(NULL, " "), idx++) {
+                        if (idx == 11) utime = atol(tok);
+                        else if (idx == 12) { stime = atol(tok); break; }
+                    }
+                    cpu = (double)(utime + stime) / (double)tick;
+                }
+            }
             fclose(f);
         }
-        fprintf(stderr, "  thread %-6s  state %c  %s\n", ent->d_name, st, comm);
+        fprintf(stderr, "  thread %-6s  state %c  cpu %8.3fs  %s\n",
+                ent->d_name, st, cpu, comm);
         n++;
     }
     closedir(d);
