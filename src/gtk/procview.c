@@ -2580,14 +2580,17 @@ on_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
         }
         if (g_getenv("NS_DBG_COMPOSITE")) {
             static gint64 last_us;
+            static int cdrawn, cblack;
+            if (frame_drawn) cdrawn++; else cblack++;
             gint64 nowu = g_get_monotonic_time();
             if (nowu - last_us > 1000000) {
                 last_us = nowu;
-                g_printerr("[composite] drawn=%d slot=%u magic=%s %ux%u "
-                           "rect=%.0f,%.0f %.0fx%.0f\n",
-                           frame_drawn, slot,
+                g_printerr("[composite] drawn=%d/s black=%d/s slot=%u magic=%s "
+                           "%ux%u rect=%.0f,%.0f %.0fx%.0f\n",
+                           cdrawn, cblack, slot,
                            magic == NS_VRING_MAGIC ? "ok" : "BAD",
                            fw, fh, v->vid_x, v->vid_y, v->vid_w, v->vid_h);
+                cdrawn = 0; cblack = 0;
             }
         }
     }
