@@ -7083,7 +7083,9 @@ estimate_natural_width(const ns_box *b, double cap)
             double cw_child = estimate_natural_width(c, cap);
             int fside = float_side_of(c->style);
             if (fside >= 0 && cw_child < 60) cw_child = 60;
-            if (c->style) {
+            if (c->style &&
+                (c->style->values[NS_CSS_MARGIN_LEFT] ||
+                 c->style->values[NS_CSS_MARGIN_RIGHT])) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
                 edges_from_style(c->style, 0, &m, &pd, &bd);
                 cw_child += m.left + m.right;
@@ -7106,9 +7108,14 @@ estimate_natural_width(const ns_box *b, double cap)
         }
     }
     if (b->style) {
-        ns_edges bm = {0}, bpd = {0}, bbd = {0};
-        edges_from_style(b->style, cap, &bm, &bpd, &bbd);
-        w += bpd.left + bpd.right + bbd.left + bbd.right;
+        if (b->style->values[NS_CSS_PADDING_LEFT] ||
+            b->style->values[NS_CSS_PADDING_RIGHT] ||
+            b->style->values[NS_CSS_BORDER_LEFT_WIDTH] ||
+            b->style->values[NS_CSS_BORDER_RIGHT_WIDTH]) {
+            ns_edges bm = {0}, bpd = {0}, bbd = {0};
+            edges_from_style(b->style, cap, &bm, &bpd, &bbd);
+            w += bpd.left + bpd.right + bbd.left + bbd.right;
+        }
     } else {
         w += b->padding.left + b->padding.right +
              b->border.left  + b->border.right;
