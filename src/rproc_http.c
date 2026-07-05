@@ -1353,6 +1353,47 @@ ns_rproc_http_proc_cpu(int pid)
 #endif
 }
 
+int
+ns_rproc_http_proc_threads(int pid)
+{
+    if (pid <= 0) return -1;
+#if defined(__linux__)
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/stat", pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    char buf[1024];
+    int threads = -1;
+    if (fgets(buf, sizeof buf, f)) {
+        char *rp = strrchr(buf, ')');
+        if (rp && rp[1]) {
+            int idx = 0;
+            for (char *tok = strtok(rp + 2, " "); tok;
+                 tok = strtok(NULL, " "), idx++) {
+                if (idx == 17) { threads = atoi(tok); break; }
+            }
+        }
+    }
+    fclose(f);
+    return threads;
+#elif defined(_WIN32)
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return -1;
+    THREADENTRY32 te;
+    te.dwSize = sizeof te;
+    int n = 0;
+    if (Thread32First(snap, &te)) {
+        do {
+            if (te.th32OwnerProcessID == (DWORD)pid) n++;
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+    return n;
+#else
+    return -1;
+#endif
+}
+
 void
 ns_rproc_http_dump_threads(int pid, const char *label)
 {

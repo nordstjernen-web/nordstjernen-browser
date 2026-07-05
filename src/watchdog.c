@@ -15,6 +15,7 @@
 
 #ifdef G_OS_WIN32
 #include <windows.h>
+#include <tlhelp32.h>
 #else
 #include <glib-unix.h>
 #include <signal.h>
@@ -78,13 +79,43 @@ ns_watchdog_hang_thread(gpointer user_data)
     return NULL;
 }
 
+static gboolean g_watchdog_child;
+
 void
 ns_watchdog_child_guard_parent_death(void)
 {
+    g_watchdog_child = TRUE;
 #ifdef __linux__
     prctl(PR_SET_PDEATHSIG, SIGTERM);
     if (getppid() == 1)
         _Exit(0);
+#endif
+}
+
+int
+ns_watchdog_supervisor_pid(void)
+{
+    if (!g_watchdog_child) return 0;
+#ifdef G_OS_WIN32
+    DWORD self = GetCurrentProcessId();
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof pe;
+    DWORD parent = 0;
+    if (Process32First(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID == self) {
+                parent = pe.th32ParentProcessID;
+                break;
+            }
+        } while (Process32Next(snap, &pe));
+    }
+    CloseHandle(snap);
+    return (int)parent;
+#else
+    pid_t p = getppid();
+    return p > 1 ? (int)p : 0;
 #endif
 }
 

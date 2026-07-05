@@ -144,6 +144,7 @@ int  ns_rproc_self_pid(void);
    Full data on Linux; liveness/state only elsewhere. */
 int  ns_rproc_http_proc_info(int pid, char *state, int state_sz, long *rss_kb);
 double ns_rproc_http_proc_cpu(int pid);
+int  ns_rproc_http_proc_threads(int pid);
 void ns_rproc_http_dump_threads(int pid, const char *label);
 
 #ifdef __cplusplus

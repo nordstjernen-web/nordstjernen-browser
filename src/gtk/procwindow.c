@@ -6,6 +6,7 @@
 #include "i18n.h"
 #include "rproc_http.h"
 #include "rproc_inproc.h"
+#include "watchdog.h"
 #include "bookmarks.h"
 #include "cache.h"
 #include "config.h"
@@ -1198,8 +1199,8 @@ task_mgr_header_label(const char *text, int width, gfloat xalign, gboolean expan
 }
 
 static void
-task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
-                 long rss, NsProcView *v)
+task_mgr_add_row(NsTaskMgr *tm, const char *icon_name, const char *name,
+                 int pid, const char *state, long rss, NsProcView *v)
 {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_margin_start(box, 10);
@@ -1207,10 +1208,17 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_widget_set_margin_top(box, 5);
     gtk_widget_set_margin_bottom(box, 5);
 
+    GtkWidget *l_title = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_hexpand(l_title, TRUE);
+    if (icon_name) {
+        GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
+        gtk_box_append(GTK_BOX(l_title), icon);
+    }
     GtkWidget *l_name = gtk_label_new(name);
     gtk_label_set_xalign(GTK_LABEL(l_name), 0);
     gtk_label_set_ellipsize(GTK_LABEL(l_name), PANGO_ELLIPSIZE_END);
     gtk_widget_set_hexpand(l_name, TRUE);
+    gtk_box_append(GTK_BOX(l_title), l_name);
 
     char pidbuf[24];
     if (pid > 0) g_snprintf(pidbuf, sizeof pidbuf, "%d", pid);
@@ -1218,6 +1226,14 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     GtkWidget *l_pid = gtk_label_new(pidbuf);
     gtk_label_set_width_chars(GTK_LABEL(l_pid), 8);
     gtk_label_set_xalign(GTK_LABEL(l_pid), 1);
+
+    char thrbuf[24];
+    int threads = pid > 0 ? ns_rproc_http_proc_threads(pid) : -1;
+    if (threads >= 0) g_snprintf(thrbuf, sizeof thrbuf, "%d", threads);
+    else              g_strlcpy(thrbuf, "—", sizeof thrbuf);
+    GtkWidget *l_thr = gtk_label_new(thrbuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_thr), 8);
+    gtk_label_set_xalign(GTK_LABEL(l_thr), 1);
 
     GtkWidget *l_state = gtk_label_new(state);
     gtk_label_set_width_chars(GTK_LABEL(l_state), 11);
@@ -1248,8 +1264,9 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_label_set_width_chars(GTK_LABEL(l_pct), 7);
     gtk_label_set_xalign(GTK_LABEL(l_pct), 1);
 
-    gtk_box_append(GTK_BOX(box), l_name);
+    gtk_box_append(GTK_BOX(box), l_title);
     gtk_box_append(GTK_BOX(box), l_pid);
+    gtk_box_append(GTK_BOX(box), l_thr);
     gtk_box_append(GTK_BOX(box), l_state);
     gtk_box_append(GTK_BOX(box), l_mem);
     gtk_box_append(GTK_BOX(box), l_pct);
@@ -1276,6 +1293,18 @@ task_mgr_refresh(NsTaskMgr *tm)
     while ((child = gtk_widget_get_first_child(tm->list)))
         gtk_list_box_remove(GTK_LIST_BOX(tm->list), child);
 
+    int wpid = ns_watchdog_supervisor_pid();
+    if (wpid > 0) {
+        char wstate[32] = "";
+        long wrss = -1;
+        ns_rproc_http_proc_info(wpid, wstate, sizeof wstate, &wrss);
+        char *wname = g_strdup_printf("%s (%s)", ns_i18n("Nordstjernen"),
+                                      ns_i18n("watchdog"));
+        task_mgr_add_row(tm, "applications-system-symbolic", wname, wpid,
+                         wstate, wrss, NULL);
+        g_free(wname);
+    }
+
     {
         int gpid = ns_rproc_self_pid();
         char gstate[32] = "";
@@ -1283,7 +1312,8 @@ task_mgr_refresh(NsTaskMgr *tm)
         ns_rproc_http_proc_info(gpid, gstate, sizeof gstate, &grss);
         char *gname = g_strdup_printf("%s (GTK frontend)",
                                       ns_i18n("Nordstjernen"));
-        task_mgr_add_row(tm, gname, gpid, gstate, grss, NULL);
+        task_mgr_add_row(tm, "web-browser-symbolic", gname, gpid, gstate,
+                         grss, NULL);
         g_free(gname);
     }
 
@@ -1310,7 +1340,8 @@ task_mgr_refresh(NsTaskMgr *tm)
                         : (url && *url)     ? url : ns_i18n("New Tab");
         char *name = g_strdup_printf("%s  —  %s", ns_i18n("HTML renderer"), tab);
 
-        task_mgr_add_row(tm, name, pid, state, rss, v);
+        task_mgr_add_row(tm, "text-x-generic-symbolic", name, pid, state,
+                         rss, v);
         g_free(name);
 
         int apid = ns_proc_view_audio_pid(v);
@@ -1319,7 +1350,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             long arss = -1;
             ns_rproc_http_proc_info(apid, astate, sizeof astate, &arss);
             char *aname = g_strdup_printf("   ⤷ %s", ns_i18n("Audio playback"));
-            task_mgr_add_row(tm, aname, apid, astate, arss, v);
+            task_mgr_add_row(tm, "audio-volume-high-symbolic", aname, apid,
+                             astate, arss, v);
             g_free(aname);
         }
         int vpid = ns_proc_view_video_pid(v);
@@ -1328,7 +1360,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             long vrss = -1;
             ns_rproc_http_proc_info(vpid, vstate, sizeof vstate, &vrss);
             char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
-            task_mgr_add_row(tm, vname, vpid, vstate, vrss, v);
+            task_mgr_add_row(tm, "video-x-generic-symbolic", vname, vpid,
+                             vstate, vrss, v);
             g_free(vname);
         }
     }
@@ -1434,7 +1467,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_window_set_title(GTK_WINDOW(win), tm_title);
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
-    gtk_window_set_default_size(GTK_WINDOW(win), 640, 380);
+    gtk_window_set_default_size(GTK_WINDOW(win), 720, 380);
 
     NsTaskMgr *tm = g_new0(NsTaskMgr, 1);
     tm->pw = pw;
@@ -1451,6 +1484,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_set_margin_bottom(hdr, 4);
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Task"), 0, 0, TRUE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Process ID"), 8, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Threads"), 8, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("State"), 11, 0, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Memory"), 10, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU %"), 7, 1, FALSE));
