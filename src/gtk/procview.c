@@ -796,7 +796,7 @@ pv_video_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer data)
         return G_SOURCE_REMOVE;
     }
     gtk_widget_queue_draw(widget);
-    if (++v->vid_tick_count % 15 == 0)
+    if (++v->vid_tick_count % 60 == 0)
         request_render(v);
     if (v->vid_tick_count % 60 == 0 && v->audio_in) {
         g_output_stream_write_all(v->audio_in, "poll\n", 5, NULL, NULL, NULL);
