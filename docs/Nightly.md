@@ -51,7 +51,7 @@ current build (a platform that didn't build simply has no link):
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.exe`
 - `https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg` (Apple Silicon)
-- `https://www.nordstjernen.org/nightly/nordstjernen-macos-x86_64`
+- `https://www.nordstjernen.org/nightly/nordstjernen-macos-arm64` (Apple Silicon, unbundled binary)
 - `https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb`
 - `https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb`
 - `https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm`

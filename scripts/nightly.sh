@@ -511,7 +511,7 @@ stage_stable_links() {
     link_stable nordstjernen-windows-x86_64.msix 'windows/*/*.msix'
     link_stable nordstjernen-windows-x86_64.exe  'windows/*/nordstjernen.exe'
     link_stable nordstjernen-macos.dmg           'macos/*/*.dmg'
-    link_stable nordstjernen-macos-x86_64        'macos/*/nordstjernen'
+    link_stable nordstjernen-macos-arm64         'macos/*/nordstjernen'
     link_stable nordstjernen-debian-amd64.deb    'linux/debian/*.deb'
     link_stable nordstjernen-ubuntu-amd64.deb    'linux/ubuntu/*.deb'
     link_stable nordstjernen-opensuse-x86_64.rpm 'linux/opensuse/*.rpm'
