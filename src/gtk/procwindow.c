@@ -1182,10 +1182,21 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_label_set_width_chars(GTK_LABEL(l_mem), 10);
     gtk_label_set_xalign(GTK_LABEL(l_mem), 1);
 
+    char timebuf[24];
+    double cpu = pid > 0 ? ns_rproc_http_proc_cpu(pid) : -1.0;
+    if (cpu < 0)        g_strlcpy(timebuf, "—", sizeof timebuf);
+    else if (cpu >= 60) g_snprintf(timebuf, sizeof timebuf, "%d:%04.1f",
+                                   (int)cpu / 60, cpu - (int)(cpu / 60) * 60);
+    else                g_snprintf(timebuf, sizeof timebuf, "%.1f s", cpu);
+    GtkWidget *l_time = gtk_label_new(timebuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_time), 9);
+    gtk_label_set_xalign(GTK_LABEL(l_time), 1);
+
     gtk_box_append(GTK_BOX(box), l_name);
     gtk_box_append(GTK_BOX(box), l_pid);
     gtk_box_append(GTK_BOX(box), l_state);
     gtk_box_append(GTK_BOX(box), l_mem);
+    gtk_box_append(GTK_BOX(box), l_time);
 
     GtkWidget *row = gtk_list_box_row_new();
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
@@ -1310,6 +1321,24 @@ task_mgr_refresh_clicked(GtkButton *button, gpointer data)
 }
 
 static void
+task_mgr_thread_dump(GtkButton *button, gpointer data)
+{
+    (void)button;
+    NsTaskMgr *tm = data;
+    int dumped = 0;
+    for (GtkWidget *r = gtk_widget_get_first_child(tm->list);
+         r; r = gtk_widget_get_next_sibling(r)) {
+        int pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "ns-pid"));
+        if (pid > 0) {
+            ns_rproc_http_dump_threads(pid, "nordstjernen process");
+            dumped++;
+        }
+    }
+    if (!dumped)
+        g_printerr("thread dump: no processes to dump\n");
+}
+
+static void
 task_mgr_destroyed(GtkWidget *win, gpointer data)
 {
     (void)win;
@@ -1358,6 +1387,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Process ID"), 8, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("State"), 11, 0, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Memory"), 10, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU time"), 9, 1, FALSE));
 
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_widget_set_vexpand(scroll, TRUE);
@@ -1372,6 +1402,9 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_set_margin_bottom(bar, 8);
     GtkWidget *spacer = gtk_label_new("");
     gtk_widget_set_hexpand(spacer, TRUE);
+    GtkWidget *dump_btn = gtk_button_new_with_label(ns_i18n("Thread dump"));
+    g_signal_connect(dump_btn, "clicked",
+                     G_CALLBACK(task_mgr_thread_dump), tm);
     GtkWidget *refresh_btn = gtk_button_new_with_label(ns_i18n("Refresh"));
     g_signal_connect(refresh_btn, "clicked",
                      G_CALLBACK(task_mgr_refresh_clicked), tm);
@@ -1379,6 +1412,7 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_add_css_class(end_btn, "destructive-action");
     g_signal_connect(end_btn, "clicked", G_CALLBACK(task_mgr_end_task), tm);
     gtk_box_append(GTK_BOX(bar), spacer);
+    gtk_box_append(GTK_BOX(bar), dump_btn);
     gtk_box_append(GTK_BOX(bar), refresh_btn);
     gtk_box_append(GTK_BOX(bar), end_btn);
 

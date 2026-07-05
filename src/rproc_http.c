@@ -14,7 +14,10 @@
 #include <fcntl.h>
 #include <io.h>
 #include <windows.h>
+#include <psapi.h>
+#include <tlhelp32.h>
 #else
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -1286,6 +1289,11 @@ ns_rproc_http_proc_info(int pid, char *state, int state_sz, long *rss_kb)
     }
     DWORD code = 0;
     int alive = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE;
+    if (rss_kb) {
+        PROCESS_MEMORY_COUNTERS pmc;
+        if (GetProcessMemoryInfo(h, &pmc, sizeof pmc))
+            *rss_kb = (long)(pmc.WorkingSetSize / 1024);
+    }
     CloseHandle(h);
     if (!alive && state && state_sz > 0)
         snprintf(state, (size_t)state_sz, "%s", "terminated");
@@ -1298,6 +1306,121 @@ ns_rproc_http_proc_info(int pid, char *state, int state_sz, long *rss_kb)
     }
     return 1;
 #endif
+}
+
+double
+ns_rproc_http_proc_cpu(int pid)
+{
+    if (pid <= 0) return -1.0;
+#if defined(_WIN32)
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!h) return -1.0;
+    FILETIME cre, ex, ker, usr;
+    double sec = -1.0;
+    if (GetProcessTimes(h, &cre, &ex, &ker, &usr)) {
+        ULONGLONG k = ((ULONGLONG)ker.dwHighDateTime << 32) | ker.dwLowDateTime;
+        ULONGLONG u = ((ULONGLONG)usr.dwHighDateTime << 32) | usr.dwLowDateTime;
+        sec = (double)(k + u) / 1e7;
+    }
+    CloseHandle(h);
+    return sec;
+#elif defined(__linux__)
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%d/stat", pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1.0;
+    char buf[1024];
+    double sec = -1.0;
+    if (fgets(buf, sizeof buf, f)) {
+        char *rp = strrchr(buf, ')');
+        if (rp && rp[1]) {
+            long tick = sysconf(_SC_CLK_TCK);
+            if (tick <= 0) tick = 100;
+            long utime = 0, stime = 0;
+            int idx = 0;
+            for (char *tok = strtok(rp + 2, " "); tok;
+                 tok = strtok(NULL, " "), idx++) {
+                if (idx == 11) utime = atol(tok);
+                else if (idx == 12) { stime = atol(tok); break; }
+            }
+            sec = (double)(utime + stime) / (double)tick;
+        }
+    }
+    fclose(f);
+    return sec;
+#else
+    return -1.0;
+#endif
+}
+
+void
+ns_rproc_http_dump_threads(int pid, const char *label)
+{
+    fprintf(stderr, "===== thread dump: %s (pid %d) =====\n",
+            label ? label : "process", pid);
+#if defined(_WIN32)
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "  (thread snapshot failed)\n");
+        return;
+    }
+    THREADENTRY32 te;
+    te.dwSize = sizeof te;
+    int n = 0;
+    if (Thread32First(snap, &te)) {
+        do {
+            if (te.th32OwnerProcessID != (DWORD)pid) continue;
+            double cpu = -1.0;
+            HANDLE th = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE,
+                                   te.th32ThreadID);
+            if (th) {
+                FILETIME c, e, k, u;
+                if (GetThreadTimes(th, &c, &e, &k, &u)) {
+                    ULONGLONG kk = ((ULONGLONG)k.dwHighDateTime << 32)
+                                   | k.dwLowDateTime;
+                    ULONGLONG uu = ((ULONGLONG)u.dwHighDateTime << 32)
+                                   | u.dwLowDateTime;
+                    cpu = (double)(kk + uu) / 1e7;
+                }
+                CloseHandle(th);
+            }
+            fprintf(stderr, "  thread %-6lu  cpu %8.3fs  base-pri %ld\n",
+                    (unsigned long)te.th32ThreadID, cpu, (long)te.tpBasePri);
+            n++;
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+    fprintf(stderr, "  (%d threads)\n", n);
+#elif defined(__linux__)
+    char dir[64];
+    snprintf(dir, sizeof dir, "/proc/%d/task", pid);
+    DIR *d = opendir(dir);
+    if (!d) {
+        fprintf(stderr, "  (no /proc/%d/task)\n", pid);
+        return;
+    }
+    struct dirent *ent;
+    int n = 0;
+    while ((ent = readdir(d))) {
+        if (ent->d_name[0] == '.') continue;
+        char sp[128];
+        snprintf(sp, sizeof sp, "/proc/%d/task/%s/stat", pid, ent->d_name);
+        FILE *f = fopen(sp, "r");
+        char st = '?', comm[64] = "";
+        int tid = 0;
+        if (f) {
+            if (fscanf(f, "%d (%63[^)]) %c", &tid, comm, &st) < 3) st = '?';
+            fclose(f);
+        }
+        fprintf(stderr, "  thread %-6s  state %c  %s\n", ent->d_name, st, comm);
+        n++;
+    }
+    closedir(d);
+    fprintf(stderr, "  (%d threads)\n", n);
+#else
+    fprintf(stderr, "  (thread dump not supported on this platform)\n");
+#endif
+    fflush(stderr);
 }
 
 void
