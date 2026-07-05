@@ -14493,6 +14493,8 @@ static GHashTable    *g_struct_keys;
 static GHashTable    *g_struct_anc_keys;
 static GHashTable    *g_sib_keys;
 static GHashTable    *g_sib_attrs;
+static GHashTable    *g_has_cq_keys;
+static gboolean       g_has_cq_loose;
 static gboolean       g_struct_loose;
 static gboolean       g_sib_loose;
 static guint64        g_struct_sig;
@@ -14852,18 +14854,24 @@ incr_selector_uses_has(const ns_css_selector *sel)
     return FALSE;
 }
 
-static gboolean
-incr_sheet_uses_has(const ns_css_stylesheet *sh)
+static void
+incr_collect_has_cq_keys(const ns_css_stylesheet *sh)
 {
-    if (!sh || !sh->rules) return FALSE;
+    if (!sh || !sh->rules) return;
     for (guint ri = 0; ri < sh->rules->len; ri++) {
         const ns_css_rule *r = g_ptr_array_index(sh->rules, ri);
         if (!r || !r->selectors) continue;
-        for (guint si = 0; si < r->selectors->len; si++)
-            if (incr_selector_uses_has(g_ptr_array_index(r->selectors, si)))
-                return TRUE;
+        gboolean cq = (r->container_condition != NULL);
+        for (guint si = 0; si < r->selectors->len; si++) {
+            const ns_css_selector *sel = g_ptr_array_index(r->selectors, si);
+            if (!sel || !sel->compounds || sel->compounds->len == 0) continue;
+            if (!cq && !incr_selector_uses_has(sel)) continue;
+            const ns_css_simple *subj =
+                g_ptr_array_index(sel->compounds, sel->compounds->len - 1);
+            if (!incr_add_compound_keys(g_has_cq_keys, subj))
+                g_has_cq_loose = TRUE;
+        }
     }
-    return FALSE;
 }
 
 static guint64
@@ -15041,7 +15049,9 @@ cascade_walk(ns_node *node,
     gboolean nd_recurse_dirty = under_dirty;
     if (node->kind == NS_NODE_ELEMENT) {
         gboolean nd_node_dirty = under_dirty ||
-            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
+            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node)) ||
+            (g_incr_pass_active && g_has_cq_keys &&
+             incr_node_matches_keys(node, g_has_cq_keys));
         ns_style *nd_prev =
             (g_incr_pass_active && !nd_node_dirty && g_incr_prev_styles)
             ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;
@@ -15757,12 +15767,14 @@ ns_css_compute(ns_node *doc,
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
     if (sig != g_incr_has_sig) {
-        gboolean ineligible = incr_sheet_uses_has(cached_ua)
-            || ns_css_stylesheet_has_container_rules(cached_ua);
-        for (gsize i = 0; i < n_sheets && !ineligible; i++)
-            ineligible = incr_sheet_uses_has(author_sheets[i])
-                || ns_css_stylesheet_has_container_rules(author_sheets[i]);
-        g_incr_eligible = !ineligible;
+        if (g_has_cq_keys) g_hash_table_remove_all(g_has_cq_keys);
+        else g_has_cq_keys = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                   g_free, NULL);
+        g_has_cq_loose = FALSE;
+        incr_collect_has_cq_keys(cached_ua);
+        for (gsize i = 0; i < n_sheets; i++)
+            incr_collect_has_cq_keys(author_sheets[i]);
+        g_incr_eligible = !g_has_cq_loose;
         g_incr_has_sig = sig;
     }
     gboolean incr_want = g_getenv("NS_NO_INCR_RESTYLE") == NULL
