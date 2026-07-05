@@ -974,6 +974,9 @@ ns_video_cache_mse_append(ns_video_cache *cache, guint stream_id, char kind,
     ns_video *sv = ns_video_for_mse_id(cache, stream_id);
 
     gboolean is_init = ns_mse_bytes_are_init_segment(data, len);
+    if (is_init && *init && (*dst)->len > 0 && (*init)->len == len &&
+        memcmp((*init)->data, data, len) == 0)
+        return TRUE;
     gboolean new_generation = (*dst)->len > 0 && is_init;
     if (new_generation) {
         g_byte_array_set_size(*dst, 0);
