@@ -1,7 +1,7 @@
 project(
   'nordstjernen',
   ['c', 'cpp'],
-  version: '1.0.18',
+  version: '1.0.19-dev',
   license: 'LicenseRef-NSL-1.0',
   default_options: [
     'c_std=gnu2x,c2x,gnu11,c11',
