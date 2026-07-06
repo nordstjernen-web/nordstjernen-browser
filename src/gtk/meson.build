@@ -7,6 +7,7 @@ nordstjernen_gtk_sources = files(
   '../rproc_http.c',
   '../rproc_inproc.c',
   '../ipc_http.c',
+  '../threaddump.c',
 )
 
 nordstjernen_gtk_deps = nordstjernen_deps + [gtk4_dep]

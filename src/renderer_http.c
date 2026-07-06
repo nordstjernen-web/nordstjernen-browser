@@ -13,6 +13,7 @@
 #include "ipc_http.h"
 #include "libnordstjernen.h"
 #include "renderer_serve.h"
+#include "threaddump.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -149,6 +150,8 @@ main(int argc, char **argv)
         return 0;
     renderer_watch_parent_death();
 #endif
+
+    ns_thread_dump_install_signal("nordstjernen-renderer");
 
     int shm_mode = argc > 3 && strcmp(argv[3], "shm") == 0;
     int stdio_mode = argc > 3 && strcmp(argv[3], "stdio") == 0;

@@ -38,6 +38,7 @@
 #include "procwindow.h"
 #include "rproc_inproc.h"
 #include "security.h"
+#include "threaddump.h"
 #include "watchdog.h"
 
 static char *g_self_exe;
@@ -480,6 +481,7 @@ main(int argc, char **argv)
     init_self_exe(argc > 0 ? argv[0] : NULL);
     ns_i18n_init(g_self_exe);
     ns_config_init();
+    ns_thread_dump_install_signal("nordstjernen");
 
     gboolean proc_mode = ns_proc_mode_wanted(argc, argv);
 

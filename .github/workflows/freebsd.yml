@@ -33,7 +33,7 @@ jobs:
           copyback: true
           prepare: |
             pkg install -y \
-              meson ninja pkgconf bash zip ccache \
+              meson ninja pkgconf bash zip ccache bzip2 \
               gtk4 libepoxy curl uchardet librsvg2 webp sdl2 \
               sqlite3 libpsl
           run: |

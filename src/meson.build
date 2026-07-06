@@ -323,7 +323,7 @@ if not is_android
 
   executable(
     'nordstjernen-renderer',
-    files('renderer_http.c', 'renderer_serve.c', 'ipc_http.c'),
+    files('renderer_http.c', 'renderer_serve.c', 'ipc_http.c', 'threaddump.c'),
     link_with: libnordstjernen_static,
     include_directories: include_directories('.'),
     dependencies: nordstjernen_deps + ns_sdl_deps + rproc_deps,

@@ -6,6 +6,8 @@
 #include "i18n.h"
 #include "rproc_http.h"
 #include "rproc_inproc.h"
+#include "threaddump.h"
+#include "watchdog.h"
 #include "bookmarks.h"
 #include "cache.h"
 #include "config.h"
@@ -18,6 +20,7 @@
 #include "macos_dock.h"
 #endif
 
+#include <stdlib.h>
 #include <string.h>
 
 #define NS_PROC_APP_ID "org.nordstjernen.WebBrowser"
@@ -1135,8 +1138,58 @@ static void on_bookmarks_clicked(GtkButton *button, gpointer user_data);
 typedef struct {
     ProcWindow *pw;
     GtkWidget  *list;
+    GtkWidget  *dump_win;
+    GtkWidget  *dump_view;
     guint       timer;
+    GHashTable *cpu_hist;
+    gint64      now_us;
+    guint       tick;
+    int         ncpu;
 } NsTaskMgr;
+
+typedef struct {
+    double base_cpu;
+    gint64 base_us;
+    double pct;
+    guint  tick;
+} NsCpuHist;
+
+static double
+task_mgr_cpu_pct(NsTaskMgr *tm, int pid, double cpu_now)
+{
+    if (pid <= 0 || cpu_now < 0) return -1.0;
+    NsCpuHist *h = g_hash_table_lookup(tm->cpu_hist, GINT_TO_POINTER(pid));
+    if (!h) {
+        h = g_new0(NsCpuHist, 1);
+        h->base_cpu = cpu_now;
+        h->base_us = tm->now_us;
+        h->pct = -1.0;
+        h->tick = tm->tick;
+        g_hash_table_insert(tm->cpu_hist, GINT_TO_POINTER(pid), h);
+        return -1.0;
+    }
+    if (h->tick == tm->tick) return h->pct;
+    double dt = (double)(tm->now_us - h->base_us) / 1e6;
+    double pct = -1.0;
+    if (dt >= 0.1 && cpu_now >= h->base_cpu) {
+        pct = (cpu_now - h->base_cpu) / dt * 100.0;
+        double cap = tm->ncpu > 0 ? tm->ncpu * 100.0 : 100.0;
+        if (pct > cap) pct = cap;
+        if (pct < 0.0) pct = 0.0;
+    }
+    h->base_cpu = cpu_now;
+    h->base_us = tm->now_us;
+    h->pct = pct;
+    h->tick = tm->tick;
+    return pct;
+}
+
+static gboolean
+task_mgr_hist_stale(gpointer key, gpointer val, gpointer data)
+{
+    (void)key;
+    return ((NsCpuHist *)val)->tick != ((NsTaskMgr *)data)->tick;
+}
 
 static GtkWidget *
 task_mgr_header_label(const char *text, int width, gfloat xalign, gboolean expand)
@@ -1150,8 +1203,8 @@ task_mgr_header_label(const char *text, int width, gfloat xalign, gboolean expan
 }
 
 static void
-task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
-                 long rss, NsProcView *v)
+task_mgr_add_row(NsTaskMgr *tm, const char *icon_name, const char *name,
+                 int pid, const char *state, long rss, NsProcView *v)
 {
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_set_margin_start(box, 10);
@@ -1159,10 +1212,17 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_widget_set_margin_top(box, 5);
     gtk_widget_set_margin_bottom(box, 5);
 
+    GtkWidget *l_title = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_hexpand(l_title, TRUE);
+    if (icon_name) {
+        GtkWidget *icon = gtk_image_new_from_icon_name(icon_name);
+        gtk_box_append(GTK_BOX(l_title), icon);
+    }
     GtkWidget *l_name = gtk_label_new(name);
     gtk_label_set_xalign(GTK_LABEL(l_name), 0);
     gtk_label_set_ellipsize(GTK_LABEL(l_name), PANGO_ELLIPSIZE_END);
     gtk_widget_set_hexpand(l_name, TRUE);
+    gtk_box_append(GTK_BOX(l_title), l_name);
 
     char pidbuf[24];
     if (pid > 0) g_snprintf(pidbuf, sizeof pidbuf, "%d", pid);
@@ -1170,6 +1230,14 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     GtkWidget *l_pid = gtk_label_new(pidbuf);
     gtk_label_set_width_chars(GTK_LABEL(l_pid), 8);
     gtk_label_set_xalign(GTK_LABEL(l_pid), 1);
+
+    char thrbuf[24];
+    int threads = pid > 0 ? ns_rproc_http_proc_threads(pid) : -1;
+    if (threads >= 0) g_snprintf(thrbuf, sizeof thrbuf, "%d", threads);
+    else              g_strlcpy(thrbuf, "—", sizeof thrbuf);
+    GtkWidget *l_thr = gtk_label_new(thrbuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_thr), 8);
+    gtk_label_set_xalign(GTK_LABEL(l_thr), 1);
 
     GtkWidget *l_state = gtk_label_new(state);
     gtk_label_set_width_chars(GTK_LABEL(l_state), 11);
@@ -1192,22 +1260,36 @@ task_mgr_add_row(NsTaskMgr *tm, const char *name, int pid, const char *state,
     gtk_label_set_width_chars(GTK_LABEL(l_time), 9);
     gtk_label_set_xalign(GTK_LABEL(l_time), 1);
 
-    gtk_box_append(GTK_BOX(box), l_name);
+    char pctbuf[24];
+    double pct = task_mgr_cpu_pct(tm, pid, cpu);
+    if (pct < 0) g_strlcpy(pctbuf, "—", sizeof pctbuf);
+    else         g_snprintf(pctbuf, sizeof pctbuf, "%.1f %%", pct);
+    GtkWidget *l_pct = gtk_label_new(pctbuf);
+    gtk_label_set_width_chars(GTK_LABEL(l_pct), 7);
+    gtk_label_set_xalign(GTK_LABEL(l_pct), 1);
+
+    gtk_box_append(GTK_BOX(box), l_title);
     gtk_box_append(GTK_BOX(box), l_pid);
+    gtk_box_append(GTK_BOX(box), l_thr);
     gtk_box_append(GTK_BOX(box), l_state);
     gtk_box_append(GTK_BOX(box), l_mem);
+    gtk_box_append(GTK_BOX(box), l_pct);
     gtk_box_append(GTK_BOX(box), l_time);
 
     GtkWidget *row = gtk_list_box_row_new();
     gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
     if (v) g_object_set_data(G_OBJECT(row), "ns-view", v);
     g_object_set_data(G_OBJECT(row), "ns-pid", GINT_TO_POINTER(pid));
+    g_object_set_data_full(G_OBJECT(row), "ns-name", g_strdup(name), g_free);
     gtk_list_box_append(GTK_LIST_BOX(tm->list), row);
 }
 
 static void
 task_mgr_refresh(NsTaskMgr *tm)
 {
+    tm->tick++;
+    tm->now_us = g_get_monotonic_time();
+
     GtkListBoxRow *sel = gtk_list_box_get_selected_row(GTK_LIST_BOX(tm->list));
     int selected_pid = sel
         ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sel), "ns-pid")) : 0;
@@ -1216,6 +1298,18 @@ task_mgr_refresh(NsTaskMgr *tm)
     while ((child = gtk_widget_get_first_child(tm->list)))
         gtk_list_box_remove(GTK_LIST_BOX(tm->list), child);
 
+    int wpid = ns_watchdog_supervisor_pid();
+    if (wpid > 0) {
+        char wstate[32] = "";
+        long wrss = -1;
+        ns_rproc_http_proc_info(wpid, wstate, sizeof wstate, &wrss);
+        char *wname = g_strdup_printf("%s (%s)", ns_i18n("Nordstjernen"),
+                                      ns_i18n("watchdog"));
+        task_mgr_add_row(tm, "applications-system-symbolic", wname, wpid,
+                         wstate, wrss, NULL);
+        g_free(wname);
+    }
+
     {
         int gpid = ns_rproc_self_pid();
         char gstate[32] = "";
@@ -1223,7 +1317,8 @@ task_mgr_refresh(NsTaskMgr *tm)
         ns_rproc_http_proc_info(gpid, gstate, sizeof gstate, &grss);
         char *gname = g_strdup_printf("%s (GTK frontend)",
                                       ns_i18n("Nordstjernen"));
-        task_mgr_add_row(tm, gname, gpid, gstate, grss, NULL);
+        task_mgr_add_row(tm, "web-browser-symbolic", gname, gpid, gstate,
+                         grss, NULL);
         g_free(gname);
     }
 
@@ -1250,7 +1345,8 @@ task_mgr_refresh(NsTaskMgr *tm)
                         : (url && *url)     ? url : ns_i18n("New Tab");
         char *name = g_strdup_printf("%s  —  %s", ns_i18n("HTML renderer"), tab);
 
-        task_mgr_add_row(tm, name, pid, state, rss, v);
+        task_mgr_add_row(tm, "text-x-generic-symbolic", name, pid, state,
+                         rss, v);
         g_free(name);
 
         int apid = ns_proc_view_audio_pid(v);
@@ -1259,7 +1355,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             long arss = -1;
             ns_rproc_http_proc_info(apid, astate, sizeof astate, &arss);
             char *aname = g_strdup_printf("   ⤷ %s", ns_i18n("Audio playback"));
-            task_mgr_add_row(tm, aname, apid, astate, arss, v);
+            task_mgr_add_row(tm, "audio-volume-high-symbolic", aname, apid,
+                             astate, arss, v);
             g_free(aname);
         }
         int vpid = ns_proc_view_video_pid(v);
@@ -1268,7 +1365,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             long vrss = -1;
             ns_rproc_http_proc_info(vpid, vstate, sizeof vstate, &vrss);
             char *vname = g_strdup_printf("   ⤷ %s", ns_i18n("Video decoder"));
-            task_mgr_add_row(tm, vname, vpid, vstate, vrss, v);
+            task_mgr_add_row(tm, "video-x-generic-symbolic", vname, vpid,
+                             vstate, vrss, v);
             g_free(vname);
         }
     }
@@ -1284,6 +1382,8 @@ task_mgr_refresh(NsTaskMgr *tm)
             }
         }
     }
+
+    g_hash_table_foreach_remove(tm->cpu_hist, task_mgr_hist_stale, tm);
 }
 
 static gboolean
@@ -1321,21 +1421,76 @@ task_mgr_refresh_clicked(GtkButton *button, gpointer data)
 }
 
 static void
+task_mgr_dump_win_destroyed(GtkWidget *win, gpointer data)
+{
+    (void)win;
+    NsTaskMgr *tm = data;
+    tm->dump_win = NULL;
+    tm->dump_view = NULL;
+}
+
+static void
+task_mgr_show_dump(NsTaskMgr *tm, const char *text)
+{
+    if (!tm->dump_win) {
+        GtkWidget *win = gtk_window_new();
+        gtk_window_set_title(GTK_WINDOW(win), ns_i18n("Thread dump"));
+        gtk_window_set_transient_for(GTK_WINDOW(win),
+                                     GTK_WINDOW(tm->pw->window));
+        gtk_window_set_default_size(GTK_WINDOW(win), 680, 480);
+
+        GtkWidget *scroll = gtk_scrolled_window_new();
+        gtk_widget_set_vexpand(scroll, TRUE);
+        GtkWidget *view = gtk_text_view_new();
+        gtk_text_view_set_editable(GTK_TEXT_VIEW(view), FALSE);
+        gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(view), FALSE);
+        gtk_text_view_set_monospace(GTK_TEXT_VIEW(view), TRUE);
+        gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), GTK_WRAP_NONE);
+        gtk_widget_set_margin_start(view, 8);
+        gtk_widget_set_margin_end(view, 8);
+        gtk_widget_set_margin_top(view, 8);
+        gtk_widget_set_margin_bottom(view, 8);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), view);
+        gtk_window_set_child(GTK_WINDOW(win), scroll);
+
+        tm->dump_win = win;
+        tm->dump_view = view;
+        g_signal_connect(win, "destroy",
+                         G_CALLBACK(task_mgr_dump_win_destroyed), tm);
+    }
+
+    GtkTextBuffer *buf = gtk_text_view_get_buffer(GTK_TEXT_VIEW(tm->dump_view));
+    char *valid = g_utf8_make_valid(text, -1);
+    gtk_text_buffer_set_text(buf, valid, -1);
+    g_free(valid);
+    gtk_window_present(GTK_WINDOW(tm->dump_win));
+}
+
+static void
 task_mgr_thread_dump(GtkButton *button, gpointer data)
 {
     (void)button;
     NsTaskMgr *tm = data;
+    GString *out = g_string_new(NULL);
     int dumped = 0;
     for (GtkWidget *r = gtk_widget_get_first_child(tm->list);
          r; r = gtk_widget_get_next_sibling(r)) {
         int pid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "ns-pid"));
-        if (pid > 0) {
-            ns_rproc_http_dump_threads(pid, "nordstjernen process");
-            dumped++;
-        }
+        if (pid <= 0) continue;
+        const char *nm = g_object_get_data(G_OBJECT(r), "ns-name");
+        char *text = ns_thread_dump_text(pid, nm ? nm : "process");
+        if (!text) continue;
+        fputs(text, stderr);
+        if (dumped) g_string_append_c(out, '\n');
+        g_string_append(out, text);
+        free(text);
+        dumped++;
     }
+    fflush(stderr);
     if (!dumped)
-        g_printerr("thread dump: no processes to dump\n");
+        g_string_append(out, ns_i18n("No processes to dump."));
+    task_mgr_show_dump(tm, out->str);
+    g_string_free(out, TRUE);
 }
 
 static void
@@ -1344,6 +1499,8 @@ task_mgr_destroyed(GtkWidget *win, gpointer data)
     (void)win;
     NsTaskMgr *tm = data;
     if (tm->timer) g_source_remove(tm->timer);
+    if (tm->cpu_hist) g_hash_table_destroy(tm->cpu_hist);
+    if (tm->dump_win) gtk_window_destroy(GTK_WINDOW(tm->dump_win));
     if (tm->pw->task_mgr_win) tm->pw->task_mgr_win = NULL;
     g_free(tm);
 }
@@ -1371,10 +1528,13 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_window_set_title(GTK_WINDOW(win), tm_title);
     g_free(tm_title);
     gtk_window_set_transient_for(GTK_WINDOW(win), GTK_WINDOW(pw->window));
-    gtk_window_set_default_size(GTK_WINDOW(win), 560, 380);
+    gtk_window_set_default_size(GTK_WINDOW(win), 720, 380);
 
     NsTaskMgr *tm = g_new0(NsTaskMgr, 1);
     tm->pw = pw;
+    tm->cpu_hist = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                         NULL, g_free);
+    tm->ncpu = (int)g_get_num_processors();
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
@@ -1385,8 +1545,10 @@ act_task_manager(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     gtk_widget_set_margin_bottom(hdr, 4);
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Task"), 0, 0, TRUE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Process ID"), 8, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Threads"), 8, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("State"), 11, 0, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("Memory"), 10, 1, FALSE));
+    gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU %"), 7, 1, FALSE));
     gtk_box_append(GTK_BOX(hdr), task_mgr_header_label(ns_i18n("CPU time"), 9, 1, FALSE));
 
     GtkWidget *scroll = gtk_scrolled_window_new();
