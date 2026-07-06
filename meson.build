@@ -276,18 +276,19 @@ endif
 # Android, whose dependency sysroot (android/scripts/build-deps.sh) does not
 # cross-build FFmpeg, so WebM there stays on the external-player path.
 #
-# The version floors are the library sonames of FFmpeg 8.0 (2025), the version
-# shipped by Ubuntu 26.04 LTS (libavcodec 62.11) and current MSYS2/distro
-# packages — so a stock Linux build links the system FFmpeg with no source
-# build. The macOS/Windows packages bundle a minimal LGPL FFmpeg 8 built by
-# scripts/build-ffmpeg-lgpl.sh. Below 8.0 the required build fails on
+# The version floors are the library sonames of FFmpeg 6.0 (2023) — the oldest
+# release carrying the new AVChannelLayout API this code uses — so a stock Linux
+# build links the system FFmpeg (Ubuntu 24.04 ships 6.1, and every later FFmpeg
+# through 8.0 also satisfies these floors) with no source build. The
+# macOS/Windows packages bundle a minimal LGPL FFmpeg built by
+# scripts/build-ffmpeg-lgpl.sh. Below 6.0 the required build fails on
 # Linux/Windows and WebM disables on macOS.
 libav_required = host_machine.system() == 'windows' or host_machine.system() == 'linux'
-libavformat = dependency('libavformat', version: '>=62', required: libav_required)
-libavcodec = dependency('libavcodec', version: '>=62', required: libav_required)
-libavutil = dependency('libavutil', version: '>=60', required: libav_required)
-libswscale = dependency('libswscale', version: '>=9', required: libav_required)
-libswresample = dependency('libswresample', version: '>=6', required: libav_required)
+libavformat = dependency('libavformat', version: '>=60', required: libav_required)
+libavcodec = dependency('libavcodec', version: '>=60', required: libav_required)
+libavutil = dependency('libavutil', version: '>=58', required: libav_required)
+libswscale = dependency('libswscale', version: '>=7', required: libav_required)
+libswresample = dependency('libswresample', version: '>=4', required: libav_required)
 have_libav = libavformat.found() and libavcodec.found() and libavutil.found() \
   and libswscale.found() and libswresample.found() and not is_android
 if have_libav
