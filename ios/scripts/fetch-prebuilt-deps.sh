@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Download the prebuilt iOS dependency sysroot published by the nordstjernen-
-# android repo's "build-ios-deps" workflow as a public GitHub Release, and lay
-# it out so ios/scripts/build-engine.sh can consume it via
-# $NORDSTJERNEN_IOS_SYSROOT.
+# Download the prebuilt iOS dependency sysroot published by the
+# nordstjernen-dependencies-build repo's "build-ios-deps" workflow as a public
+# GitHub Release, and lay it out so ios/scripts/build-engine.sh can consume it
+# via $NORDSTJERNEN_IOS_SYSROOT.
 #
 # Release assets (under the rolling tag, default 'ios-sysroot-latest'):
 #   nordstjernen-ios-sysroot-<platform>.tar.gz   # each contains a top-level <platform>/
@@ -42,11 +42,37 @@ command -v sha256sum >/dev/null 2>&1 || { echo "sha256sum is required" >&2; exit
 
 BASE_URL="https://github.com/${REPO}/releases/download/${TAG}"
 mkdir -p "${SYSROOT_BASE}"
+SYSROOT_BASE="$(cd "${SYSROOT_BASE}" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
 UA="nordstjernen-ios-deps/1.0 (+https://github.com/${REPO})"
 dl() { curl -fsSL --retry 4 --retry-delay 2 -A "${UA}" -o "$2" "$1"; }
+
+# The published sysroot's pkg-config files bake in the dependency-build repo's
+# build-time absolute prefix (…/sysroot/<platform>), which does not exist on the
+# consumer runner. Rewrite each .pc file's prefix to the local unpack path so
+# pkg-config resolves the relocated headers and libraries — derived from each
+# file's own prefix= line, so it holds regardless of the workspace (or repo
+# name) the sysroot was built in.
+relocate_pkgconfig_prefixes() {
+  local prefix_dir="$1"
+  [ -d "${prefix_dir}/lib/pkgconfig" ] || return 0
+  local pc
+  for pc in "${prefix_dir}"/lib/pkgconfig/*.pc; do
+    [ -e "${pc}" ] || continue
+    python3 - "${pc}" "${prefix_dir}" <<'PY'
+import re, sys
+path, local = sys.argv[1], sys.argv[2]
+text = open(path).read()
+m = re.search(r'(?m)^prefix=(.*)$', text)
+if m:
+    old = m.group(1).strip()
+    if old and old != local:
+        open(path, 'w').write(text.replace(old, local))
+PY
+  done
+}
 
 echo "Downloading checksum manifest from ${TAG}"
 dl "${BASE_URL}/SHA256SUMS" "${tmp}/SHA256SUMS" \
@@ -66,6 +92,7 @@ for platform in "${PLATFORMS[@]}"; do
   rm -rf "${SYSROOT_BASE:?}/${platform}"
   tar -xzf "${tmp}/${asset}" -C "${SYSROOT_BASE}"
   [ -d "${SYSROOT_BASE}/${platform}/lib" ] || { echo "unexpected archive layout for ${platform}" >&2; exit 1; }
+  relocate_pkgconfig_prefixes "${SYSROOT_BASE}/${platform}"
   echo "Installed ${platform} -> ${SYSROOT_BASE}/${platform}"
 done
 
