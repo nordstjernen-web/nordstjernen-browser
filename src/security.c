@@ -30,6 +30,10 @@
 #endif
 #endif
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #if defined(__APPLE__) || defined(__FreeBSD__) || \
     defined(__NetBSD__) || defined(__DragonFly__)
 #include <sys/random.h>
@@ -754,7 +758,7 @@ ns_security_seccomp_init(void)
 #endif
 }
 
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !TARGET_OS_IPHONE
 
 #include <limits.h>
 #include <sandbox.h>
