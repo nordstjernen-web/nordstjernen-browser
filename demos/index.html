@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nordstjernen — feature demos</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 780px; margin: 0 auto; padding: 3rem 1.5rem 4rem;
+    color: #17202a; background: #f6f8fb;
+  }
+  header { text-align: center; margin-bottom: 2.5rem; }
+  header .star { font-size: 2.6rem; }
+  h1 { font-size: 2.1rem; margin: .3rem 0 .2rem; }
+  header p { color: #55606e; margin: 0; }
+  a.card {
+    display: block; text-decoration: none; color: inherit;
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+    padding: 1.4rem 1.6rem; margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(16,24,40,.06);
+    transition: border-color .15s ease, transform .08s ease;
+  }
+  a.card:hover { border-color: #2b6ef2; transform: translateY(-1px); }
+  a.card h2 { margin: 0 0 .3rem; font-size: 1.2rem; }
+  a.card h2 .tag { font-size:.7rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.04em; padding:.12rem .45rem; border-radius:5px; margin-left:.5rem;
+    background:#e7effe; color:#1b4fbf; vertical-align:middle; }
+  a.card p { margin: 0; color: #55606e; font-size: .92rem; }
+  footer { margin-top: 2.5rem; text-align:center; color:#8592a3; font-size:.85rem; }
+  code { font-family: ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="star">★</div>
+    <h1>Nordstjernen — feature demos</h1>
+    <p>Standards features added and fixed in this browser, each shown running live.</p>
+  </header>
+
+  <a class="card" href="customized-builtin-elements.html">
+    <h2>Customized built-in elements <span class="tag">new</span></h2>
+    <p><code>customElements.define(name, ctor, {extends})</code> and
+       <code>&lt;button is="…"&gt;</code> — a real button enhanced through the
+       full custom-element lifecycle.</p>
+  </a>
+
+  <a class="card" href="navigation-api.html">
+    <h2>Navigation API <span class="tag">new</span></h2>
+    <p><code>window.navigation</code> single-page routing with a cancelable
+       <code>navigate</code> event and <code>intercept()</code> — no full
+       reloads, real history entries.</p>
+  </a>
+
+  <a class="card" href="css-improvements.html">
+    <h2>CSS parsing fixes</h2>
+    <p>Conic-gradient colour stops, the <code>background</code> shorthand's
+       <code>/</code> size branch, and the <code>animation</code> iteration
+       count — corrected to the spec.</p>
+  </a>
+
+  <footer>Nordstjernen Web Navigator · clean-room browser in C · GTK 4 + libcurl</footer>
+</body>
+</html>

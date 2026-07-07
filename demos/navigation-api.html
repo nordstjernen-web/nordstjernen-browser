@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Navigation API — Nordstjernen</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 860px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem;
+    color: #17202a; background: #f6f8fb;
+  }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+  .lede { color: #55606e; margin: 0 0 2rem; }
+  .pill { display:inline-block; font-size:.75rem; font-weight:700; letter-spacing:.03em;
+    text-transform:uppercase; padding:.15rem .5rem; border-radius:6px;
+    background:#e7effe; color:#1b4fbf; margin-left:.4rem; vertical-align:middle; }
+  nav { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  nav a {
+    text-decoration: none; font-weight: 600; font-size: .95rem;
+    padding: .5rem 1rem; border-radius: 999px; color: #2b3a55;
+    background: #fff; border: 1px solid #dbe3ee;
+  }
+  nav a.active { background: #2b6ef2; color: #fff; border-color: #2b6ef2; }
+  .layout { display: grid; grid-template-columns: 1fr 300px; gap: 1.25rem; align-items: start; }
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+  .view {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+    padding: 1.5rem 1.75rem; min-height: 190px;
+    box-shadow: 0 1px 3px rgba(16,24,40,.06);
+  }
+  .view h2 { margin: 0 0 .5rem; font-size: 1.3rem; }
+  .side {
+    background: #0f1729; color: #cdd9ee; border-radius: 14px; padding: 1.1rem 1.25rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .8rem;
+  }
+  .side h3 { margin: 0 0 .6rem; font: 700 .72rem/1 system-ui; letter-spacing: .06em;
+    text-transform: uppercase; color: #8fa6cf; }
+  .side .log div { padding: .12rem 0; border-bottom: 1px solid #1e2b45; white-space: pre-wrap; }
+  .side .cur { color: #7fe0a3; }
+  .meta { margin-top: 1rem; font-size: .85rem; color: #55606e; }
+  code { font-family: ui-monospace, Menlo, monospace; background:#eef2f8; padding:.05rem .3rem; border-radius:4px; }
+  .controls { margin-top: 1rem; display:flex; gap:.5rem; }
+  .controls button {
+    font: inherit; font-size:.9rem; padding:.4rem .9rem; border-radius:8px; cursor:pointer;
+    border:1px solid #cfd8e6; background:#fff; color:#2b3a55;
+  }
+  .controls button:disabled { opacity:.45; cursor:default; }
+</style>
+</head>
+<body>
+  <h1>Navigation API <span class="pill">new</span></h1>
+  <p class="lede">
+    A single-page router with no full reloads. Each link calls
+    <code>navigation.navigate()</code>; a single <code>navigate</code> listener
+    calls <code>event.intercept()</code> and renders the view. History, state
+    and the <code>currententrychange</code> / <code>navigatesuccess</code>
+    events are all driven by <code>window.navigation</code>.
+  </p>
+
+  <nav id="menu">
+    <a href="#/home"    data-route="home">Home</a>
+    <a href="#/fjords"  data-route="fjords">Fjords</a>
+    <a href="#/aurora"  data-route="aurora">Aurora</a>
+    <a href="#/about"   data-route="about">About</a>
+  </nav>
+
+  <div class="layout">
+    <div>
+      <div class="view" id="view"><h2>…</h2></div>
+      <div class="controls">
+        <button id="back">◀ navigation.back()</button>
+        <button id="fwd">navigation.forward() ▶</button>
+      </div>
+      <p class="meta" id="meta"></p>
+    </div>
+    <div class="side">
+      <h3>navigate events</h3>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+<script>
+const routes = {
+  home:   { title: 'Welcome', body: 'A tiny SPA served from a single document. Notice the address stays put and the page never reloads — the Navigation API commits each route in place.' },
+  fjords: { title: 'Fjords', body: 'Geiranger, Nærøyfjord, Lysefjord. navigation.currentEntry.getState() carries the structured-cloned state you passed to navigate().' },
+  aurora: { title: 'Aurora', body: 'The navigate handler can be async; navigatesuccess and the finished promise fire only after it resolves.' },
+  about:  { title: 'About', body: 'Built to demonstrate window.navigation: navigate(), intercept(), entries(), canGoBack/canGoForward, back()/forward() and updateCurrentEntry().' },
+};
+
+const log = document.getElementById('log');
+function note(text, cur) {
+  const d = document.createElement('div');
+  if (cur) d.className = 'cur';
+  d.textContent = text;
+  log.appendChild(d);
+}
+
+function routeOf(url) {
+  const m = (url.split('#/')[1] || 'home');
+  return routes[m] ? m : 'home';
+}
+
+function render(name) {
+  const r = routes[name];
+  document.getElementById('view').innerHTML =
+    '<h2>' + r.title + '</h2><p>' + r.body + '</p>';
+  document.querySelectorAll('#menu a').forEach(a =>
+    a.classList.toggle('active', a.dataset.route === name));
+  document.getElementById('back').disabled = !navigation.canGoBack;
+  document.getElementById('fwd').disabled = !navigation.canGoForward;
+  document.getElementById('meta').textContent =
+    'history entry ' + (navigation.currentEntry.index + 1) +
+    ' of ' + navigation.entries().length +
+    ' · state=' + JSON.stringify(navigation.currentEntry.getState());
+}
+
+navigation.addEventListener('navigate', (e) => {
+  if (!e.canIntercept) return;
+  const name = routeOf(e.destination.url);
+  note('navigate → ' + name + '  (' + e.navigationType + ')');
+  e.intercept({ handler: () => render(name) });
+});
+navigation.addEventListener('currententrychange', (e) =>
+  note('  currententrychange: ' + (e.navigationType || 'update'), true));
+navigation.addEventListener('navigatesuccess', () => note('  navigatesuccess ✓', true));
+
+document.querySelectorAll('#menu a').forEach(a =>
+  a.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    navigation.navigate(a.getAttribute('href'), { state: { route: a.dataset.route } });
+  }));
+document.getElementById('back').addEventListener('click', () => navigation.back());
+document.getElementById('fwd').addEventListener('click', () => navigation.forward());
+
+render('home');
+note('ready — window.navigation is ' + typeof navigation);
+</script>
+</body>
+</html>
