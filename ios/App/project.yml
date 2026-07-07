@@ -36,5 +36,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ENABLE_BITCODE: NO
         CLANG_ENABLE_MODULES: YES
+        # The engine and its dependency sysroot are cross-compiled arm64-only
+        # (build-engine.sh, for both device and simulator), so restrict the
+        # simulator build to arm64. An Intel-simulator (x86_64) slice has no
+        # objects to link and fails with undefined engine symbols.
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
         # HEADER_SEARCH_PATHS, LIBRARY_SEARCH_PATHS and OTHER_LDFLAGS come from
         # the generated vendor/nordstjernen.xcconfig (see build-engine.sh).
