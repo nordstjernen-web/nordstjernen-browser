@@ -1,71 +1,109 @@
 # Nordstjernen for iOS
 
-iOS support is at the **engine-portability stage**. The clean-room browser
-engine — HTML parsing (lexbor), CSS cascade + layout, JavaScript (QuickJS),
-image decoding (Wuffs) and cairo painting — is the same `libnordstjernen`
-embedding library (`src/libnordstjernen.h`) the desktop and Android builds use.
-iOS is architecturally an **Android-style port, not a macOS one**: the macOS
-build ships the full GTK 4 desktop app, but GTK 4 does not run on iOS, so iOS
-drives the GTK-free engine from a native (UIKit/Swift) shell the same way
-Android drives it from a Kotlin/JNI shell.
+An iOS host app that drives the Nordstjernen browser engine through its C
+embedding API (`src/libnordstjernen.h`). The engine — HTML parsing (lexbor),
+CSS cascade + layout, JavaScript (QuickJS), image decoding (Wuffs) and cairo
+painting — is the same clean-room code used on the desktop and Android. iOS is
+architecturally an **Android-style port, not a macOS one**: the macOS build
+ships the full GTK 4 desktop app, but GTK 4 does not run on iOS, so iOS drives
+the GTK-free engine (`libnordstjernen`) from a thin UIKit/Swift shell the same
+way Android drives it from a Kotlin/JNI shell.
 
-## Architecture (planned, mirrors Android)
+## Architecture
 
 ```
- UIKit/Swift UI  (URL bar + scrolling render surface)
-        │  C embedding API (src/libnordstjernen.h)
+ UIKit/Swift UI  (URL bar, toolbar, scrolling PageView)
+        │  C embedding API (src/libnordstjernen.h + ios/App/Bridge/ns_ios.h)
  libnordstjernen  (engine: net, dom, css, layout, js, paint)
         │
-        └─► glib · gobject · gio · cairo · pango · pangocairo ·
-            harfbuzz · freetype · fontconfig · libcurl · sqlite3 ·
-            uchardet · libpsl   (cross-compiled for iOS)
+        └─► glib · gobject · gio · cairo · pango · pangocairo · harfbuzz ·
+            freetype · fontconfig · libcurl · sqlite3 · uchardet · libpsl
+            (cross-compiled for iOS, static)
 ```
 
-As on Android, iOS drops **GTK 4, librsvg and gdk-pixbuf**: `GdkTexture` is
-replaced by the `ns_texture` abstraction (`src/texture.c`), the SVG / fallback
-image decoders are gated out, and `ns_browser_render_argb32()` /
-`ns_browser_render_rgba()` paint a viewport region straight into a bitmap. The
-engine already builds GTK-free (the Android and renderer-only configurations
-prove it), and its Darwin-specific paths (`getentropy`, `_NSGetExecutablePath`,
-`sys/xattr.h`, `sandbox.h`) are the same on iOS as on macOS.
+As on Android, iOS drops **GTK 4, librsvg and gdk-pixbuf** (`meson.build`'s
+`is_mobile`): `GdkTexture` is replaced by the `ns_texture` abstraction
+(`src/texture.c`), the SVG / fallback image decoders are gated out, and
+`ns_browser_render_argb32()` paints a viewport region straight into a buffer the
+`PageView` wraps as a `CGImage`. The engine's Darwin paths (`getentropy`,
+`_NSGetExecutablePath`, `sys/xattr.h`) are the same on iOS as on macOS; the one
+macOS-desktop-only path, the Seatbelt sandbox, is guarded off for iOS
+(`TARGET_OS_IPHONE`).
 
-## What exists today
+## Layout
 
-* **Engine iOS-portability CI** — `.github/workflows/ios.yml` runs on every
-  push and PR. It builds the GTK-free desktop engine on a macOS runner (for
-  `compile_commands.json` and the generated headers), then cross-checks **every
-  engine translation unit against the real iOS SDK** — both device
-  (`arm64-apple-ios`) and simulator (`arm64-apple-ios-simulator`) — via
-  `ios/scripts/check-ios-sources.sh`. This is the iOS analogue of
-  `android/scripts/check-android-sources.sh`: it catches iOS source regressions
-  in the engine early, without needing a cross-compiled dependency sysroot.
+```
+ios/
+  App/
+    project.yml                 XcodeGen project (app target, iOS 15+)
+    Sources/
+      AppDelegate.swift         window + root view controller
+      BrowserViewController.swift  URL bar, toolbar, history
+      PageView.swift            scrolling render surface (engine → CGImage)
+      BrowserEngine.swift       Swift wrapper over the C embedding API
+    Bridge/
+      ns_ios.h / ns_ios.c       C bridge: engine init (data dir + CA bundle)
+      Nordstjernen-Bridging-Header.h
+    Resources/
+      Info.plist
+    vendor/                     staged by build-engine.sh (git-ignored)
+  scripts/
+    check-ios-sources.sh        cross-check engine sources against the iOS SDK
+    build-engine.sh             cross-compile libnordstjernen.a + write xcconfig
+    fetch-prebuilt-deps.sh      download the prebuilt iOS dependency sysroot
+```
 
-## What a full .ipa still needs
-
-The CI above verifies the engine's **own C** is iOS-clean. Producing an
-installable app additionally requires, none of which exists yet:
-
-1. **An iOS dependency sysroot** — glib/gobject/gio, cairo, pango/pangocairo,
-   harfbuzz, freetype, fontconfig, libcurl, sqlite3, uchardet and libpsl
-   cross-compiled for `arm64-apple-ios` (device) and the simulator. The Android
-   equivalent is produced by a separate repository and published as a prebuilt
-   sysroot; iOS wants the same.
-2. **A meson iOS cross file** driving the engine build against that sysroot,
-   plus a UIKit/Swift host app (URL bar + a `PageView`-style render surface
-   over the engine's ARGB output), the way `android/` hosts the Kotlin shell.
-3. **Signing / provisioning** for on-device installs and TestFlight.
-
-Until (1) and (2) land there is no `.ipa`; the workflow here is the foundation
-that keeps the engine iOS-ready while the rest of the port is built.
-
-## Running the check locally
-
-Requires macOS with the Xcode command-line tools (for the iOS SDK) and the
-desktop build dependencies (see `docs/macOS.md`):
+## Building the app
 
 ```sh
-meson setup builddir -Dgtk=disabled -Dai=disabled
-meson compile -C builddir
-ios/scripts/check-ios-sources.sh device builddir      # arm64-apple-ios
-ios/scripts/check-ios-sources.sh simulator builddir   # arm64 simulator
+# 1. Fetch the prebuilt iOS dependency sysroot (device + simulator):
+export NORDSTJERNEN_IOS_SYSROOT="$HOME/.cache/nordstjernen-ios-sysroot"
+ios/scripts/fetch-prebuilt-deps.sh --sysroot "$NORDSTJERNEN_IOS_SYSROOT"
+
+# 2. Cross-compile the engine against it (writes ios/App/vendor + the xcconfig):
+ios/scripts/build-engine.sh device
+ios/scripts/build-engine.sh simulator
+
+# 3. Generate and build the Xcode project:
+cd ios/App
+xcodegen generate
+xcodebuild -project Nordstjernen.xcodeproj -scheme Nordstjernen \
+    -sdk iphonesimulator -configuration Release CODE_SIGNING_ALLOWED=NO build
 ```
+
+Requires macOS with Xcode, `meson`/`ninja`, and `xcodegen`. On-device builds
+additionally need a signing identity + provisioning profile.
+
+The **dependency sysroot** (glib/cairo/pango/curl/sqlite/… cross-compiled for
+iOS) is produced and published by the `nordstjernen-android` repo's
+`build-ios-deps` workflow (`ios-sysroot-latest` release), mirroring how the
+Android sysroot is produced. Building that sysroot is the bulk of the porting
+work; `build-engine.sh` and the app consume it.
+
+## CI
+
+`.github/workflows/ios.yml` has two jobs:
+
+* **engine-portability** — builds the GTK-free desktop engine on a macOS runner
+  (for `compile_commands.json` and generated headers) and cross-checks **every
+  engine translation unit against the real iOS SDK** — device and simulator —
+  via `ios/scripts/check-ios-sources.sh`. This is the iOS analogue of
+  `android/scripts/check-android-sources.sh` and needs no dependency sysroot.
+* **app** — fetches the prebuilt sysroot, cross-compiles the engine and
+  assembles the UIKit app for the simulator. It skips with a notice until the
+  sysroot release is published.
+
+## Status
+
+* **Done & verified on Linux:** the engine builds GTK-free for the iOS
+  configuration — `meson.build`'s `is_mobile` predicate produces an
+  engine-library-only build (no GTK shell, renderer, audio/video helpers),
+  confirmed by configuring `-Dios=true` and by a clean desktop build after the
+  refactor. The macOS-Seatbelt-sandbox `TARGET_OS_IPHONE` guard is in place.
+* **Wired, runs in CI:** the engine iOS-portability check (device + simulator)
+  on every push via `ios.yml`.
+* **Authored, pending first macOS/iOS build:** the UIKit/Swift app, the C
+  bridge, the XcodeGen project, `build-engine.sh` and `fetch-prebuilt-deps.sh`,
+  and the iOS dependency-sysroot build in `nordstjernen-android`. These have not
+  yet completed a green build on a macOS runner — the sysroot must be published
+  first — so treat them as the foundation to iterate on, not verified binaries.

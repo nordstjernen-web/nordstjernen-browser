@@ -23,12 +23,17 @@ permissions:
   contents: read
 
 # iOS runs the same clean-room, GTK-free engine (libnordstjernen) Android does,
-# driven from a native shell rather than GTK 4. A full .ipa additionally needs
-# an iOS-cross-compiled dependency sysroot and a UIKit host app (see ios/
-# README.md) — neither exists yet. This job is the iOS analogue of the Android
-# source check: it cross-checks every engine translation unit against the real
-# iOS SDK (device + simulator) on the macOS runner, catching iOS portability
-# regressions in the engine long before the rest of the port lands.
+# driven from the UIKit host app in ios/App/ rather than GTK 4.
+#
+# Two jobs:
+#   engine-portability — the iOS analogue of the Android source check:
+#     cross-check every engine translation unit against the real iOS SDK
+#     (device + simulator), catching iOS portability regressions early. Always
+#     runs; needs no dependency sysroot.
+#   app — cross-compile the engine against the prebuilt iOS dependency sysroot
+#     and assemble the UIKit app for the simulator. Skips with a notice until
+#     the sysroot is published by nordstjernen-android's build-ios-deps
+#     workflow (ios-sysroot-latest); see ios/README.md.
 jobs:
   engine-portability:
     name: engine iOS source check on macos-${{ matrix.macos }}
@@ -132,5 +137,93 @@ jobs:
         with:
           name: build-log-ios-${{ matrix.macos }}
           path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  app:
+    name: assemble UIKit app (simulator)
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
+      # Where fetch-prebuilt-deps.sh lays out the sysroot.
+      NORDSTJERNEN_IOS_SYSROOT: ${{ github.workspace }}/.ios-sysroot
+      SYSROOT_REPO: nordstjernen-web/nordstjernen-android
+      SYSROOT_TAG: ios-sysroot-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The dependency sysroot is produced by a separate repo. Until its first
+      # release is published, assemble-the-app is a no-op with a loud notice
+      # rather than a red build; the engine-portability job above is the gate
+      # that always runs.
+      - name: Check for a published iOS sysroot
+        id: sysroot
+        run: |
+          url="https://github.com/${SYSROOT_REPO}/releases/download/${SYSROOT_TAG}/SHA256SUMS"
+          if curl -fsSL -I "$url" >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::iOS dependency sysroot (${SYSROOT_TAG}) is not published yet — skipping app assembly. Run nordstjernen-android's build-ios-deps workflow first."
+          fi
+
+      - name: Install build tools (Homebrew)
+        if: steps.sysroot.outputs.available == 'true'
+        run: brew install meson ninja pkg-config xcodegen
+
+      - name: Fetch prebuilt iOS dependency sysroot
+        if: steps.sysroot.outputs.available == 'true'
+        run: ios/scripts/fetch-prebuilt-deps.sh --sysroot "$NORDSTJERNEN_IOS_SYSROOT"
+
+      - name: Cross-compile the engine (device + simulator)
+        if: steps.sysroot.outputs.available == 'true'
+        run: |
+          ios/scripts/build-engine.sh device
+          # Build the simulator engine last so vendor/nordstjernen.xcconfig
+          # points at the simulator libraries for the xcodebuild below.
+          ios/scripts/build-engine.sh simulator
+
+      - name: Generate the Xcode project
+        if: steps.sysroot.outputs.available == 'true'
+        working-directory: ios/App
+        run: xcodegen generate
+
+      - name: Build the app for the iOS Simulator (unsigned)
+        if: steps.sysroot.outputs.available == 'true'
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Nordstjernen.xcodeproj \
+            -scheme Nordstjernen \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee xcodebuild.log
+
+      - name: Upload the built .app
+        if: steps.sysroot.outputs.available == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: nordstjernen-ios-simulator-app
+          path: ios/App/build/**/*.app
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload xcodebuild log
+        if: always() && hashFiles('ios/App/xcodebuild.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcodebuild-log
+          path: ios/App/xcodebuild.log
           if-no-files-found: ignore
           retention-days: 14
