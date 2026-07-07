@@ -19,7 +19,7 @@ references them.
 Snapshot: **1.0.16**, 2026-06-27 (rev 28).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
-implemented · 29 🟡 partial · 2 ❌ absent · 7 🚫 absent by design**.
+implemented · 30 🟡 partial · 1 ❌ absent · 7 🚫 absent by design**.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -329,7 +329,7 @@ surface).
 | Session history & navigation | ✅ | back/forward |
 | History API (`pushState`/`replaceState`/`popstate`) | ✅ | same-origin checked, `popstate` dispatched |
 | `location` (all members) | ✅ | `href`/`protocol`/`host`/`hostname`/`port`/`pathname`/`search`/`hash` |
-| `Navigation` API (`navigation.navigate`) | ❌ | not implemented |
+| `Navigation` API (`navigation.navigate`) | 🟡 | `window.navigation` is a live `EventTarget` backed by the same-document history stack (`src/js.c`): `currentEntry` / `entries()` expose `NavigationHistoryEntry` objects (`url`, stable `key`/`id`, `index`, `sameDocument`, `getState()` returning a structured clone), and `canGoBack`/`canGoForward` reflect the stack position. `navigate(url, {state, history, info})` fires a cancelable `navigate` event carrying `navigationType`, `canIntercept` (true for a same-origin destination — scheme/host/port compared), a `destination` with `getState()`, and a working `intercept({handler})`: an intercepted same-origin navigation commits synchronously (pushes/replaces the entry, updates `currentEntry`, fires `currententrychange`) and resolves `committed`, then awaits the handlers via `Promise.all` before firing `navigatesuccess`/`navigateerror` and settling `finished`; a non-intercepted navigation falls back to a real load. `reload()`, `back()`, `forward()`, `traverseTo(key)` and `updateCurrentEntry({state})` all drive the stack and fire `currententrychange`; `onnavigate`/`onnavigatesuccess`/`onnavigateerror`/`oncurrententrychange` are honoured. Not yet: `NavigationHistoryEntry` identity caching / `dispose`, `NavigateEvent.signal`/`formData`/`downloadRequest`, and `navigation.activation`/`transition` |
 | `BroadcastChannel` | ✅ | `new BroadcastChannel(name)` (name required, else `TypeError`; `name` read-only; `instanceof` via the real prototype), `postMessage`, `close`, `onmessage`/`addEventListener`. A posted message is `structuredClone`d and delivered asynchronously (microtask) as a `MessageEvent` (`data`, page `origin`, `source:null`, empty `ports`) to every *other* open channel with the same name, excluding the sender and closed channels (`ns_broadcast_post_message` in `src/js.c`). Cross-document reach is bounded by the shared single-runtime model — channels in one runtime see each other, matching the per-origin contract within a page |
 | Application cache / offline | 🚫 | obsolete; not implemented |
 

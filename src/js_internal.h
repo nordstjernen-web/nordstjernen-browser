@@ -99,6 +99,8 @@ struct ns_js {
     int           history_length;
     GPtrArray    *history_entries;
     int           history_pos;
+    guint64       nav_key_seq;
+    JSValue       navigation;
     char         *current_url;
     ns_node       *current_doc;
     ns_node       *current_script;
