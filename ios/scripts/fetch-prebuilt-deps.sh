@@ -51,25 +51,29 @@ dl() { curl -fsSL --retry 4 --retry-delay 2 -A "${UA}" -o "$2" "$1"; }
 
 # The published sysroot's pkg-config files bake in the dependency-build repo's
 # build-time absolute prefix (…/sysroot/<platform>), which does not exist on the
-# consumer runner. Rewrite each .pc file's prefix to the local unpack path so
-# pkg-config resolves the relocated headers and libraries — derived from each
-# file's own prefix= line, so it holds regardless of the workspace (or repo
-# name) the sysroot was built in.
+# consumer runner. Rewrite every baked path ending in /sysroot/<platform> to the
+# local unpack path so pkg-config resolves the relocated headers and libraries.
+# Matching by that shape (rather than a prefix= line or a fixed repo name) holds
+# for CMake-generated .pc files that hardcode includedir/libdir with no prefix=
+# line — uchardet is one — and regardless of the workspace the sysroot was built
+# in. It is idempotent: the local path has no literal /sysroot/<platform>
+# segment, so an already-relocated file never re-matches.
 relocate_pkgconfig_prefixes() {
   local prefix_dir="$1"
+  local platform
+  platform="$(basename "${prefix_dir}")"
   [ -d "${prefix_dir}/lib/pkgconfig" ] || return 0
   local pc
   for pc in "${prefix_dir}"/lib/pkgconfig/*.pc; do
     [ -e "${pc}" ] || continue
-    python3 - "${pc}" "${prefix_dir}" <<'PY'
+    python3 - "${pc}" "${prefix_dir}" "${platform}" <<'PY'
 import re, sys
-path, local = sys.argv[1], sys.argv[2]
+path, local, platform = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(path).read()
-m = re.search(r'(?m)^prefix=(.*)$', text)
-if m:
-    old = m.group(1).strip()
-    if old and old != local:
-        open(path, 'w').write(text.replace(old, local))
+pat = re.compile(r'/[^\s:="\']*?/sysroot/' + re.escape(platform) + r'(?=[/\s:"\']|$)')
+new = pat.sub(lambda m: local, text)
+if new != text:
+    open(path, "w").write(new)
 PY
   done
 }
