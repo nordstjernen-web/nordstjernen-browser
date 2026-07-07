@@ -39369,7 +39369,10 @@ ns_js_seed_cookies_from_jar(ns_js *js)
         const char *eq = strchr(pairs[i], '=');
         if (!eq) continue;
         gsize nlen = (gsize)(eq - pairs[i]);
-        if (ns_cookie_jar_has_name(merged->str, pairs[i], nlen)) continue;
+        char *name = g_strndup(pairs[i], nlen);
+        gboolean dup = ns_cookie_jar_has_name(merged->str, name, nlen);
+        g_free(name);
+        if (dup) continue;
         g_string_append(merged, "; ");
         g_string_append(merged, pairs[i]);
     }

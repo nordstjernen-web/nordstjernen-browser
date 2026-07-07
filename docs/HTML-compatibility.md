@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-06-27 (rev 28).
+Snapshot: **1.0.16**, 2026-07-07 (rev 29).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
 implemented · 30 🟡 partial · 1 ❌ absent · 7 🚫 absent by design**.

@@ -240,6 +240,17 @@ ns_renderer_session_free(ns_renderer_session *s)
     free(s);
 }
 
+static int
+serve_append_hdr(char *buf, int pos, size_t cap, const char *name,
+                 const char *value, int maxval)
+{
+    if (!value || !*value || pos < 0 || (size_t)pos >= cap) return pos;
+    int need = snprintf(NULL, 0, "%s: %.*s\r\n", name, maxval, value);
+    if (need <= 0 || (size_t)pos + (size_t)need >= cap) return pos;
+    return pos + snprintf(buf + pos, cap - (size_t)pos, "%s: %.*s\r\n",
+                          name, maxval, value);
+}
+
 int
 ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                            const char *body)
@@ -417,21 +428,12 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                  vw, vh, stride, ns_browser_animating(s->cur) ? 1 : 0,
                  page_w, page_h,
                  render_rc, unchanged ? "X-Unchanged: 1\r\n" : "");
-        if (nav && *nav && hn > 0 && (size_t)hn < sizeof hdrs)
-            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                           "X-Nav: %.2000s\r\n", nav);
-        if (webgl && *webgl && hn > 0 && (size_t)hn < sizeof hdrs)
-            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                     "X-WebGL: %.2000s\r\n", webgl);
-        if (camera && *camera && hn > 0 && (size_t)hn < sizeof hdrs)
-            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                     "X-Camera: %.2000s\r\n", camera);
-        if (download && *download && hn > 0 && (size_t)hn < sizeof hdrs)
-            hn += snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                     "X-Download: %.3000s\r\n", download);
-        if (audio && *audio && hn > 0 && (size_t)hn < sizeof hdrs)
-            snprintf(hdrs + hn, sizeof hdrs - (size_t)hn,
-                     "X-Audio: %.16000s\r\n", audio);
+        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Nav", nav, 2000);
+        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-WebGL", webgl, 2000);
+        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Camera", camera, 2000);
+        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Download", download,
+                              3000);
+        hn = serve_append_hdr(hdrs, hn, sizeof hdrs, "X-Audio", audio, 16000);
         free(nav);
         free(webgl);
         free(camera);

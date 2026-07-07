@@ -1159,7 +1159,9 @@ tmp_duration_from(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
                     char *end;
                     double val = g_ascii_strtod(p, &end);
                     if (end == p) break;
-                    char unit = *end; p = end + 1;
+                    char unit = *end;
+                    if (!unit) break;
+                    p = end + 1;
                     int64_t iv = (int64_t)(sign * val);
                     if (!in_time) {
                         if (unit == 'Y' || unit == 'y') t->dur[0] = iv;

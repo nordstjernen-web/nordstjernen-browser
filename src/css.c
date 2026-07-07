@@ -4110,9 +4110,22 @@ parse_conic_gradient(const char *text)
         return NULL;
     }
     int ns = v->u.gradient.n_stops;
-    for (int i = 0; i < ns; i++)
-        if (!v->u.gradient.stops[i].has_pos)
-            v->u.gradient.stops[i].pos = (ns > 1) ? (double)i / (ns - 1) : 0;
+    ns_css_gradient_stop *st = v->u.gradient.stops;
+    if (!st[0].has_pos) { st[0].pos = 0.0; st[0].has_pos = TRUE; }
+    if (!st[ns - 1].has_pos) { st[ns - 1].pos = 1.0; st[ns - 1].has_pos = TRUE; }
+    for (int i = 1; i < ns; i++)
+        if (st[i].has_pos && st[i].pos < st[i - 1].pos)
+            st[i].pos = st[i - 1].pos;
+    for (int i = 0; i < ns; ) {
+        if (st[i].has_pos) { i++; continue; }
+        int j = i;
+        while (j < ns && !st[j].has_pos) j++;
+        double lo = st[i - 1].pos;
+        double hi = st[j].pos;
+        for (int k = i; k < j; k++)
+            st[k].pos = lo + (hi - lo) * (double)(k - i + 1) / (double)(j - i + 1);
+        i = j;
+    }
     return v;
 }
 
@@ -6775,6 +6788,7 @@ parse_declaration_block(const char **pp, const char *end,
                             bg_size_text = g_strdup(tokens[i + 1]);
                             bg_size_skip = i + 1;
                         }
+                        i = bg_size_skip;
                     }
                     continue;
                 }

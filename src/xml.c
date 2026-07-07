@@ -61,14 +61,14 @@ xml_read_name(xml_parser *xp)
 }
 
 static void
-xml_append_codepoint(GString *out, gunichar cp)
+xml_append_codepoint(GString *out, guint64 cp)
 {
     if (cp == 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
         g_string_append(out, "\xEF\xBF\xBD");
         return;
     }
     char buf[6];
-    gint nb = g_unichar_to_utf8(cp, buf);
+    gint nb = g_unichar_to_utf8((gunichar)cp, buf);
     g_string_append_len(out, buf, nb);
 }
 
@@ -85,11 +85,11 @@ xml_decode_text(const char *s, gsize len)
         const char *e = p + 1;
         if (elen == 0) { g_string_append_c(out, *p++); continue; }
         if (*e == '#') {
-            gunichar cp = 0;
+            guint64 cp = 0;
             if (elen >= 2 && (e[1] == 'x' || e[1] == 'X'))
-                cp = (gunichar)g_ascii_strtoull(e + 2, NULL, 16);
+                cp = g_ascii_strtoull(e + 2, NULL, 16);
             else
-                cp = (gunichar)g_ascii_strtoull(e + 1, NULL, 10);
+                cp = g_ascii_strtoull(e + 1, NULL, 10);
             xml_append_codepoint(out, cp);
             p = semi + 1;
             continue;

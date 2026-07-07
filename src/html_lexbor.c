@@ -493,8 +493,8 @@ ns_media_extract_standard(const ns_node *root)
     poster = first_nonempty(poster,
                             meta_property_content(root, "twitter:image"));
 
-    gboolean has_video = direct || og_video || tw_player ||
-                         jsonld_videoobject_url(root, "\"embedUrl\"", 0) != NULL;
+    char *embed = jsonld_videoobject_url(root, "\"embedUrl\"", 0);
+    gboolean has_video = direct || og_video || tw_player || embed;
     if (has_video) {
         if (direct)
             ns_element_set_attr(target, NS_MEDIA_SRC_ATTR, direct);
@@ -509,6 +509,7 @@ ns_media_extract_standard(const ns_node *root)
     g_free(og_video);
     g_free(tw_player);
     g_free(poster);
+    g_free(embed);
 }
 
 static void

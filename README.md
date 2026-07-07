@@ -25,8 +25,8 @@ Nordstjernen is measured against the **spec text**, section by section,
 not against any other browser. The section-by-section walk-through of
 the in-scope WHATWG HTML standard (§1–§16) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) currently
-records **139 spec rows fully implemented, 29 partial, and 3 absent**
-(June 2026), besides a handful that are non-goals by design, such as
+records **140 spec rows fully implemented, 30 partial, and 1 absent**
+(July 2026), besides a handful that are non-goals by design, such as
 in-process media codecs. Highlights:
 
 | Spec area | Status |
@@ -35,9 +35,9 @@ in-process media codecs. Highlights:
 | §3–§4 Semantics, document structure & tabular content | ✅ |
 | §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM and MSE/`blob:` streams when FFmpeg libav is present); other codecs and `<audio>` render a poster and play overlay | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
-| §4.12–§4.13 Scripting, custom elements | ✅ |
+| §4.12–§4.13 Scripting, custom elements — autonomous **and customized built-in** elements (`is=` / `{extends}`) | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
-| §7–§8 Loading pages, web application APIs — `fetch`, `XHR`, timers, observers | ✅ |
+| §7–§8 Loading pages, web application APIs — `fetch`, `XHR`, timers, observers, `history`, and the `Navigation` API (`navigation.navigate` with `intercept()`) | ✅ |
 | §9 Communication — `WebSocket`, `EventSource`, `postMessage` | ✅ |
 | §10 Web workers — dedicated workers (`fetch`, `crypto.subtle`, transferable `ArrayBuffer`s), Service Workers with `FetchEvent` interception, Cache API (Shared/module workers & worklets aside) | ✅ |
 | §12 Web storage — `localStorage` / `sessionStorage` | ✅ |
@@ -54,6 +54,17 @@ The full section-by-section walk-through lives in
 - **JavaScript** on the QuickJS interpreter — DOM, Shadow DOM, observer
   APIs, Canvas 2D (`Path2D`, `ImageBitmap`, `DOMMatrix`), WebCrypto
   (`crypto.subtle` over OpenSSL).
+- **Custom elements** — autonomous elements and **customized built-in
+  elements**: `customElements.define(name, ctor, {extends})` plus
+  `<button is="…">` upgrade the built-in through the full reaction
+  lifecycle (`connectedCallback`, `attributeChangedCallback`,
+  `observedAttributes`), keeping the built-in's own behaviour and members.
+- **Navigation API** — `window.navigation` for single-page routing: a
+  cancelable `navigate` event with `intercept({handler})`, a
+  `NavigationHistoryEntry` model (`currentEntry`, `entries()`,
+  `canGoBack`/`canGoForward`, `getState()`), `navigate`/`reload`/`back`/
+  `forward`/`traverseTo`/`updateCurrentEntry`, and the
+  `currententrychange`/`navigatesuccess`/`navigateerror` events.
 - **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked
   libcurl provides it — HSTS, CSP, subresource-integrity (SRI) checks,
   partitioned cookies.

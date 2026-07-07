@@ -831,12 +831,14 @@ pv_video_handle_line(NsProcView *v, const char *line)
         HANDLE hm = OpenFileMappingA(FILE_MAP_READ, FALSE, tok[2]);
         if (hm) {
             void *map = MapViewOfFile(hm, FILE_MAP_READ, 0, 0, 0);
-            if (map && ((ns_vring_hdr *)map)->magic == NS_VRING_MAGIC) {
-                ns_vring_hdr *hdr = map;
+            MEMORY_BASIC_INFORMATION mbi;
+            gsize view_bytes = (map && VirtualQuery(map, &mbi, sizeof mbi))
+                                   ? (gsize)mbi.RegionSize : 0;
+            if (map && view_bytes > sizeof(ns_vring_hdr) &&
+                ((ns_vring_hdr *)map)->magic == NS_VRING_MAGIC) {
                 v->vring = map;
                 v->vring_map = hm;
-                v->vring_bytes = sizeof(ns_vring_hdr) +
-                                 (gsize)hdr->frame_bytes * hdr->nslots;
+                v->vring_bytes = view_bytes;
                 g_strlcpy(v->vid_shm, tok[2], sizeof v->vid_shm);
                 g_strlcpy(v->vid_token, tok[1], sizeof v->vid_token);
             } else {
