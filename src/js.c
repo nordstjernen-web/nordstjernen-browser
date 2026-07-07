@@ -33877,6 +33877,40 @@ ns_ce_disconnect_subtree(ns_js *js, ns_node *root)
     ns_ce_disconnect_subtree_rec(js, root, 0);
 }
 
+static JSValue
+ns_ce_class_for_node(ns_js *js, const ns_node *node)
+{
+    if (!js || !js->ce_registry || !js->ctx || !node ||
+        node->kind != NS_NODE_ELEMENT || !node->name)
+        return JS_UNDEFINED;
+    JSContext *ctx = js->ctx;
+    if (strchr(node->name, '-')) {
+        char *lower = g_ascii_strdown(node->name, -1);
+        JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
+        g_free(lower);
+        if (!slot) return JS_UNDEFINED;
+        JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
+        gboolean builtin = JS_IsString(ext);
+        JS_FreeValue(ctx, ext);
+        return builtin ? JS_UNDEFINED : *slot;
+    }
+    const char *is = ns_element_get_attr(node, "is");
+    if (!is || !*is) return JS_UNDEFINED;
+    char *lower = g_ascii_strdown(is, -1);
+    JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
+    g_free(lower);
+    if (!slot) return JS_UNDEFINED;
+    JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
+    JSValue result = JS_UNDEFINED;
+    if (JS_IsString(ext)) {
+        const char *e = JS_ToCString(ctx, ext);
+        if (e && g_ascii_strcasecmp(e, node->name) == 0) result = *slot;
+        if (e) JS_FreeCString(ctx, e);
+    }
+    JS_FreeValue(ctx, ext);
+    return result;
+}
+
 static void
 ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
                                 const char *target_name, int depth)
@@ -33884,10 +33918,12 @@ ns_ce_upgrade_subtree_named_rec(ns_js *js, ns_node *root,
     if (!js || !root || !target_name || depth >= 512) return;
     if (js->ce_defer_upgrades > 0 || js->ce_constructing > 0) return;
     if (ns_node_in_template_content(root)) return;
-    if (root->kind == NS_NODE_ELEMENT && root->name &&
-        g_ascii_strcasecmp(root->name, target_name) == 0) {
-        JSValue *slot = g_hash_table_lookup(js->ce_registry, target_name);
-        if (slot) ns_ce_upgrade_element_with(js, root, *slot);
+    if (root->kind == NS_NODE_ELEMENT && root->name) {
+        JSValue *tslot = g_hash_table_lookup(js->ce_registry, target_name);
+        JSValue klass = ns_ce_class_for_node(js, root);
+        if (tslot && JS_IsObject(klass) &&
+            JS_VALUE_GET_PTR(klass) == JS_VALUE_GET_PTR(*tslot))
+            ns_ce_upgrade_element_with(js, root, klass);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_ce_upgrade_subtree_named_rec(js, c, target_name, depth + 1);
@@ -33907,11 +33943,9 @@ ns_ce_upgrade_subtree_all_rec(ns_js *js, ns_node *root, int depth)
     if (g_hash_table_size(js->ce_registry) == 0) return;
     if (js->ce_defer_upgrades > 0 || js->ce_constructing > 0) return;
     if (ns_node_in_template_content(root)) return;
-    if (root->kind == NS_NODE_ELEMENT && root->name && strchr(root->name, '-')) {
-        char *lower = g_ascii_strdown(root->name, -1);
-        JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
-        if (slot) ns_ce_upgrade_element_with(js, root, *slot);
-        g_free(lower);
+    if (root->kind == NS_NODE_ELEMENT && root->name) {
+        JSValue klass = ns_ce_class_for_node(js, root);
+        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, root, klass);
     }
     for (ns_node *c = root->first_child; c; c = c->next_sibling)
         ns_ce_upgrade_subtree_all_rec(js, c, depth + 1);
@@ -33991,6 +34025,28 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     JS_FreeCString(ctx, raw);
     ns_js *js = js_from_ctx(ctx);
     if (!js) { g_free(name); return JS_UNDEFINED; }
+    if (argc >= 3 && JS_IsObject(argv[2])) {
+        JSValue ext = JS_GetPropertyStr(ctx, argv[2], "extends");
+        if (JS_IsString(ext)) {
+            const char *e = JS_ToCString(ctx, ext);
+            if (e && *e) {
+                if (ns_ce_name_valid(e)) {
+                    JS_FreeCString(ctx, e);
+                    JS_FreeValue(ctx, ext);
+                    g_free(name);
+                    return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+                        "customElements.define: cannot extend a custom element name");
+                }
+                char *elow = g_ascii_strdown(e, -1);
+                JS_DefinePropertyValueStr(ctx, argv[1], "__nd_ce_extends",
+                                          JS_NewString(ctx, elow),
+                                          JS_PROP_CONFIGURABLE);
+                g_free(elow);
+            }
+            if (e) JS_FreeCString(ctx, e);
+        }
+        JS_FreeValue(ctx, ext);
+    }
     if (!js->ce_registry)
         js->ce_registry = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                 g_free, ns_ce_value_free);
@@ -35071,6 +35127,24 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     if (JS_IsObject(chardata_proto))
         ns_proto_define_getset(ctx, chardata_proto, "data",
                                ns_element_get_data, ns_element_set_data);
+
+    for (gsize i = 0; i < G_N_ELEMENTS(ns_instof_table); i++) {
+        const ns_instof_def *d = &ns_instof_table[i];
+        if (d->special != NS_INSTOF_TAG || !d->tags) continue;
+        JSValue ctor = JS_GetPropertyStr(ctx, global, d->ctor);
+        JSValue proto = JS_IsObject(ctor)
+            ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+        JS_FreeValue(ctx, ctor);
+        if (JS_IsObject(proto)) {
+            char *first = g_strdup(d->tags);
+            char *sp = strchr(first, ' ');
+            if (sp) *sp = '\0';
+            JSValue *pt = g_hash_table_lookup(js->per_tag_protos, first);
+            JS_SetPrototype(ctx, proto, pt ? *pt : htmlelem_proto);
+            g_free(first);
+        }
+        JS_FreeValue(ctx, proto);
+    }
 
     js->dom_protos_set    = 1;
 
@@ -36489,12 +36563,21 @@ ns_document_createElement(JSContext *ctx, JSValueConst this_val,
         if (!html_ns) el->flags |= NS_NODE_FOREIGN_NS;
     }
     ns_js *js = js_from_ctx(ctx);
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        JSValue isv = JS_GetPropertyStr(ctx, argv[1], "is");
+        if (JS_IsString(isv)) {
+            const char *isstr = JS_ToCString(ctx, isv);
+            if (isstr && *isstr) ns_element_set_attr(el, "is", isstr);
+            if (isstr) JS_FreeCString(ctx, isstr);
+        }
+        JS_FreeValue(ctx, isv);
+    }
     g_hash_table_add(js->orphan_nodes, el);
     JSValue wrapper = ns_make_element(ctx, el);
     ns_tag_owner_document(ctx, this_val, wrapper);
-    if (js->ce_registry && strchr(el->name, '-')) {
-        JSValue *slot = g_hash_table_lookup(js->ce_registry, el->name);
-        if (slot) ns_ce_upgrade_element_with(js, el, *slot);
+    if (js->ce_registry) {
+        JSValue klass = ns_ce_class_for_node(js, el);
+        if (JS_IsObject(klass)) ns_ce_upgrade_element_with(js, el, klass);
     }
     return wrapper;
 }

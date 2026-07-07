@@ -18,8 +18,8 @@ references them.
 
 Snapshot: **1.0.16**, 2026-06-27 (rev 28).
 
-§1–§16 row tally (counted across the section tables below): **139 ✅
-implemented · 29 🟡 partial · 3 ❌ absent · 7 🚫 absent by design**.
+§1–§16 row tally (counted across the section tables below): **140 ✅
+implemented · 29 🟡 partial · 2 ❌ absent · 7 🚫 absent by design**.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -270,7 +270,7 @@ validation.
 |-------|:--:|------|
 | `customElements.define` / `get` | ✅ | `src/js.c`; `define()` upgrades already-connected matching elements **synchronously**, so `connectedCallback` runs before the next statement (an in-construction deferral counter keeps the explicit upgrade from being suppressed during the initial inline-script run) |
 | Autonomous custom elements | ✅ | name validation (hyphen required); `customElements.define(name, ctor)` |
-| Customized built-in elements (`define(..., {extends})` / `is=`) | ❌ | the `options`/`extends` argument is ignored and there is no `is=` upgrade path (`ns_ce_define` in `src/js.c`) |
+| Customized built-in elements (`define(..., {extends})` / `is=`) | ✅ | `customElements.define(name, ctor, {extends})` records the extended local name; a matching `<button is="…">` — from markup or `document.createElement("button", {is})` — is upgraded through the same reaction machinery as autonomous elements: constructor/`super()` adoption, `connectedCallback`/`disconnectedCallback`, `observedAttributes` + `attributeChangedCallback`, and `instanceof` against both the custom class and the extended interface. An `extends` that is itself a valid custom-element name throws `NotSupportedError` (`ns_ce_class_for_node` / `ns_ce_define` in `src/js.c`). The built-in interface prototypes (`HTMLButtonElement.prototype` …) are chained into the DOM prototype hierarchy, so a customized built-in keeps the extended element's own members (`value`, …) alongside every `Element`/`Node` method |
 | Lifecycle (`connected`/`disconnected`/`adopted`/`attributeChanged`) callbacks | ✅ | |
 | `observedAttributes` | ✅ | |
 | Shadow DOM (`attachShadow`, slots) | 🟡 | see §4.12 |
