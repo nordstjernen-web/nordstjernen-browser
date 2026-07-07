@@ -84,8 +84,8 @@ strip      = '${STRIP}'
 pkg-config = 'pkg-config'
 
 [built-in options]
-c_args         = ios_args
-cpp_args       = ios_args
+c_args         = ios_args + ['-D_DARWIN_C_SOURCE']
+cpp_args       = ios_args + ['-D_DARWIN_C_SOURCE']
 c_link_args    = ios_args
 cpp_link_args  = ios_args
 default_library = 'static'
