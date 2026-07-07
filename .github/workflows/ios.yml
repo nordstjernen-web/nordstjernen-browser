@@ -1,0 +1,136 @@
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# iOS runs the same clean-room, GTK-free engine (libnordstjernen) Android does,
+# driven from a native shell rather than GTK 4. A full .ipa additionally needs
+# an iOS-cross-compiled dependency sysroot and a UIKit host app (see ios/
+# README.md) — neither exists yet. This job is the iOS analogue of the Android
+# source check: it cross-checks every engine translation unit against the real
+# iOS SDK (device + simulator) on the macOS runner, catching iOS portability
+# regressions in the engine long before the rest of the port lands.
+jobs:
+  engine-portability:
+    name: engine iOS source check on macos-${{ matrix.macos }}
+    runs-on: macos-${{ matrix.macos }}
+    timeout-minutes: 45
+
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        macos: ['26']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies (Homebrew)
+        run: |
+          brew install meson ninja pkg-config gtk4 libepoxy curl ccache \
+              uchardet librsvg libpsl sqlite webp sdl2
+          # Homebrew curl is keg-only; put it on PKG_CONFIG_PATH so the desktop
+          # configure resolves this OpenSSL libcurl (as the macOS job does).
+          echo "PKG_CONFIG_PATH=$(brew --prefix curl)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-ios-${{ matrix.macos }}-${{ github.sha }}
+          restore-keys: |
+            ccache-ios-${{ matrix.macos }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=200M
+          ccache --zero-stats
+
+      - name: Show toolchain versions
+        run: |
+          clang --version
+          meson --version
+          ninja --version
+          xcodebuild -version || true
+          echo "iphoneos SDK:        $(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "iphonesimulator SDK: $(xcrun --sdk iphonesimulator --show-sdk-path)"
+
+      # meson setup + compile give us the engine's compile_commands.json plus the
+      # generated headers (polyfills.h, wpt_hook.h) the engine translation units
+      # include. The GTK shell and AI are left out — the iOS check only needs the
+      # GTK-free engine sources. --werror keeps the desktop build honest too.
+      - name: Build desktop engine (for compile_commands + generated headers)
+        id: build
+        if: hashFiles('meson.build') != ''
+        shell: bash
+        run: |
+          set -o pipefail
+          export CC="ccache clang"
+          meson setup builddir --werror -Dgtk=disabled -Dai=disabled 2>&1 | tee build.log
+          meson compile -C builddir 2>&1 | tee -a build.log
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Engine iOS source check (device / arm64-apple-ios)
+        if: hashFiles('builddir/compile_commands.json') != ''
+        run: ios/scripts/check-ios-sources.sh device builddir
+
+      - name: Engine iOS source check (simulator / arm64-apple-ios-simulator)
+        if: hashFiles('builddir/compile_commands.json') != ''
+        run: ios/scripts/check-ios-sources.sh simulator builddir
+
+      - name: Publish build log on failure
+        if: failure() && hashFiles('build.log') != ''
+        shell: bash
+        run: |
+          {
+            echo '## iOS job build log (last 200 lines)'
+            echo
+            echo '```'
+            tail -200 build.log
+            echo '```'
+            if [ -f builddir/meson-logs/meson-log.txt ]; then
+              echo
+              echo '## meson-log.txt (last 200 lines)'
+              echo
+              echo '```'
+              tail -200 builddir/meson-logs/meson-log.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log
+        if: always() && hashFiles('build.log') != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log-ios-${{ matrix.macos }}
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 14
