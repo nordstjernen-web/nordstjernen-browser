@@ -73,7 +73,7 @@ openssl, nghttp2, brotli), sqlite3, uchardet, libpsl and libwebp for iOS —
 `arm64` device and `arm64` simulator, static.
 
 This mirrors the Android sysroot exactly, and is produced the same way: the
-[`nordstjernen-android`](https://github.com/nordstjernen-web/nordstjernen-android)
+[`nordstjernen-dependencies-build`](https://github.com/nordstjernen-web/nordstjernen-dependencies-build)
 repo's `build-ios-deps` workflow cross-compiles the whole stack on a macOS
 runner and publishes it as the rolling `ios-sysroot-latest` release, which
 `fetch-prebuilt-deps.sh` downloads and verifies.

@@ -2,7 +2,7 @@
 
 param(
     [string]$Sysroot = "$env:USERPROFILE\.cache\nordstjernen-android-sysroot",
-    [string]$Repo = "nordstjernen-web/nordstjernen-android",
+    [string]$Repo = "nordstjernen-web/nordstjernen-dependencies-build",
     [string]$Tag = "sysroot-latest",
     [string[]]$Abi = @("arm64-v8a", "x86_64"),
     [string]$Token = ""
@@ -89,7 +89,7 @@ try {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item -Recurse -Force -Path (Join-Path $source "*") -Destination $dest
         $localPrefix = $destFull.Replace("\", "/")
-        $ciPrefix = "/home/runner/work/nordstjernen-android/nordstjernen-android/sysroot/$item"
+        $ciPrefix = "/home/runner/work/nordstjernen-dependencies-build/nordstjernen-dependencies-build/sysroot/$item"
         $metadata = Get-ChildItem -Path $dest -Recurse -File -Include *.pc,*.cmake,*.la,*.pri
         foreach ($file in $metadata) {
             $text = [System.IO.File]::ReadAllText($file.FullName)

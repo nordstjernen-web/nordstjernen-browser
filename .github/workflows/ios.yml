@@ -32,7 +32,7 @@ permissions:
 #     runs; needs no dependency sysroot.
 #   app — cross-compile the engine against the prebuilt iOS dependency sysroot
 #     and assemble the UIKit app for the simulator. Skips with a notice until
-#     the sysroot is published by nordstjernen-android's build-ios-deps
+#     the sysroot is published by nordstjernen-dependencies-build's build-ios-deps
 #     workflow (ios-sysroot-latest); see ios/README.md.
 jobs:
   engine-portability:
@@ -151,7 +151,7 @@ jobs:
       HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
       # Where fetch-prebuilt-deps.sh lays out the sysroot.
       NORDSTJERNEN_IOS_SYSROOT: ${{ github.workspace }}/.ios-sysroot
-      SYSROOT_REPO: nordstjernen-web/nordstjernen-android
+      SYSROOT_REPO: nordstjernen-web/nordstjernen-dependencies-build
       SYSROOT_TAG: ios-sysroot-latest
 
     steps:
@@ -170,7 +170,7 @@ jobs:
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::iOS dependency sysroot (${SYSROOT_TAG}) is not published yet — skipping app assembly. Run nordstjernen-android's build-ios-deps workflow first."
+            echo "::warning::iOS dependency sysroot (${SYSROOT_TAG}) is not published yet — skipping app assembly. Run nordstjernen-dependencies-build's build-ios-deps workflow first."
           fi
 
       - name: Install build tools (Homebrew)

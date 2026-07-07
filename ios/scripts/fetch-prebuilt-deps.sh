@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-REPO="nordstjernen-web/nordstjernen-android"
+REPO="nordstjernen-web/nordstjernen-dependencies-build"
 TAG="ios-sysroot-latest"
 SYSROOT_BASE="${NORDSTJERNEN_IOS_SYSROOT:-$HOME/.cache/nordstjernen-ios-sysroot}"
 PLATFORMS=(device simulator)

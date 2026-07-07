@@ -96,7 +96,7 @@ builds and runs (engine reported unavailable); once present, the real bridge is
 linked and pages render.
 
 The dependency sysroot is built by
-`nordstjernen-web/nordstjernen-android` and published as the public
+`nordstjernen-web/nordstjernen-dependencies-build` and published as the public
 `sysroot-latest` release. `android/scripts/fetch-prebuilt-deps.ps1` downloads
 those release assets and verifies them against `SHA256SUMS`.
 

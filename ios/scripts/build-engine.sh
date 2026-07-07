@@ -16,7 +16,7 @@
 #     for the platform, with working .pc files. Point NORDSTJERNEN_IOS_SYSROOT
 #     at it (base dir containing <platform>/lib/pkgconfig, or one platform
 #     prefix directly). The sysroot is produced and published by the
-#     nordstjernen-android repo's ios/ build (fetch it with
+#     nordstjernen-dependencies-build repo's ios/ build (fetch it with
 #     ios/scripts/fetch-prebuilt-deps.sh). The required set mirrors Android:
 #       glib-2.0, gobject-2.0, gio-2.0, gmodule-2.0, cairo, pango, pangocairo
 #       (+ harfbuzz, freetype2, fontconfig, pixman, fribidi, libffi, pcre2,

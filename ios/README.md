@@ -75,7 +75,7 @@ Requires macOS with Xcode, `meson`/`ninja`, and `xcodegen`. On-device builds
 additionally need a signing identity + provisioning profile.
 
 The **dependency sysroot** (glib/cairo/pango/curl/sqlite/… cross-compiled for
-iOS) is produced and published by the `nordstjernen-android` repo's
+iOS) is produced and published by the `nordstjernen-dependencies-build` repo's
 `build-ios-deps` workflow (`ios-sysroot-latest` release), mirroring how the
 Android sysroot is produced. Building that sysroot is the bulk of the porting
 work; `build-engine.sh` and the app consume it.
@@ -104,6 +104,6 @@ work; `build-engine.sh` and the app consume it.
   on every push via `ios.yml`.
 * **Authored, pending first macOS/iOS build:** the UIKit/Swift app, the C
   bridge, the XcodeGen project, `build-engine.sh` and `fetch-prebuilt-deps.sh`,
-  and the iOS dependency-sysroot build in `nordstjernen-android`. These have not
+  and the iOS dependency-sysroot build in `nordstjernen-dependencies-build`. These have not
   yet completed a green build on a macOS runner — the sysroot must be published
   first — so treat them as the foundation to iterate on, not verified binaries.
