@@ -4046,8 +4046,13 @@ parse_conic_gradient(const char *text)
             double d = g_ascii_strtod(first + 5, &endp);
             if (endp && endp != first + 5) from_deg = (int)(d + 0.5);
             start_i = 1;
-        } else if (!parse_color(first, &dummy_r, &dummy_g, &dummy_b, &dummy_a)) {
-            start_i = 1;
+        } else {
+            char *ftoks[4] = {0};
+            int fnt = split_ws(first, ftoks);
+            gboolean first_is_color = fnt >= 1 &&
+                parse_color(ftoks[0], &dummy_r, &dummy_g, &dummy_b, &dummy_a);
+            for (int k = 0; k < fnt; k++) g_free(ftoks[k]);
+            if (!first_is_color) start_i = 1;
         }
     }
 
@@ -4853,6 +4858,13 @@ parse_anim_value(const char *text, gboolean is_animation)
         for (int j = 0; toks[j]; j++) {
             char *tok = g_strstrip(toks[j]);
             if (!*tok) continue;
+            char *endp = NULL;
+            double num = g_ascii_strtod(tok, &endp);
+            gboolean bare_number = endp != tok && (*endp == '\0' || *endp == ' ');
+            if (bare_number && is_animation && got_dur) {
+                e->iter_count = num <= 0 ? 0 : (int)num;
+                continue;
+            }
             double ms;
             if (parse_time_ms(tok, &ms)) {
                 if (!got_dur) { e->duration_ms = ms; got_dur = TRUE; }
@@ -4861,12 +4873,6 @@ parse_anim_value(const char *text, gboolean is_animation)
             }
             if (g_ascii_strcasecmp(tok, "infinite") == 0) {
                 e->iter_count = -1;
-                continue;
-            }
-            char *endp = NULL;
-            double n = g_ascii_strtod(tok, &endp);
-            if (endp != tok && (*endp == '\0' || *endp == ' ') && is_animation && got_dur) {
-                e->iter_count = n <= 0 ? 0 : (int)n;
                 continue;
             }
             if (timing_keyword_matches(tok)) {

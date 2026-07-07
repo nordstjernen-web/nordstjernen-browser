@@ -117,7 +117,7 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
                              g_ascii_strcasecmp(type, "image") == 0)) {
                     if (n == submitter) {
                         const char *v = ns_element_get_attr(n, "value");
-                        ns_form_urlencoded_append_pair(query, first, name, v ? v : "Submit");
+                        ns_form_urlencoded_append_pair(query, first, name, v ? v : "");
                     }
                     goto recurse;
                 }
@@ -149,13 +149,7 @@ ns_form_collect_inputs_depth(const ns_node *form, const ns_node *n,
                 gboolean acts_as_submit = !type || g_ascii_strcasecmp(type, "submit") == 0;
                 if (acts_as_submit && n == submitter) {
                     const char *v = ns_element_get_attr(n, "value");
-                    if (!v) {
-                        char *text = ns_node_collect_text(n);
-                        ns_form_urlencoded_append_pair(query, first, name, text ? text : "");
-                        g_free(text);
-                    } else {
-                        ns_form_urlencoded_append_pair(query, first, name, v);
-                    }
+                    ns_form_urlencoded_append_pair(query, first, name, v ? v : "");
                 }
                 goto recurse;
             }

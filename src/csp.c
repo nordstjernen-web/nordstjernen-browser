@@ -55,7 +55,7 @@ policy_parse(const char *policy_text)
         char **toks = g_strsplit_set(clause, " \t", -1);
         if (!toks || !toks[0]) { g_strfreev(toks); continue; }
         ns_csp_kind k = directive_kind(toks[0]);
-        if (k == NS_CSP_KIND_COUNT) { g_strfreev(toks); continue; }
+        if (k == NS_CSP_KIND_COUNT || p->set[k]) { g_strfreev(toks); continue; }
         p->set[k] = TRUE;
         if (!p->sources[k])
             p->sources[k] = g_ptr_array_new_with_free_func(g_free);
@@ -130,6 +130,17 @@ url_scheme_matches(const char *url, const char *scheme_with_colon)
 }
 
 static gboolean
+scheme_part_matches(const char *scheme, gsize n, const char *url)
+{
+    if (g_ascii_strncasecmp(url, scheme, n) == 0 && url[n] == ':') return TRUE;
+    if (n == 4 && g_ascii_strncasecmp(scheme, "http", 4) == 0)
+        return g_ascii_strncasecmp(url, "https:", 6) == 0;
+    if (n == 2 && g_ascii_strncasecmp(scheme, "ws", 2) == 0)
+        return g_ascii_strncasecmp(url, "wss:", 4) == 0;
+    return FALSE;
+}
+
+static gboolean
 is_network_scheme_url(const char *url)
 {
     static const char *const ok[] = {
@@ -156,19 +167,18 @@ default_port_for_scheme(const char *scheme)
 }
 
 static gboolean
-csp_port_matches(const char *src_port, const char *src_scheme,
-                 const char *res_port, const char *res_scheme)
+csp_port_matches(const char *src_port, const char *res_port,
+                 const char *res_scheme)
 {
     if (src_port && strcmp(src_port, "*") == 0) return TRUE;
-    const char *sp = (src_port && *src_port)
-                     ? src_port
-                     : (src_scheme && *src_scheme
-                          ? default_port_for_scheme(src_scheme)
-                          : default_port_for_scheme(res_scheme));
+    if (!src_port || !*src_port) {
+        if (!res_port || !*res_port) return TRUE;
+        const char *d = default_port_for_scheme(res_scheme);
+        return *d && strcmp(res_port, d) == 0;
+    }
     const char *rp = (res_port && *res_port)
                      ? res_port : default_port_for_scheme(res_scheme);
-    if (!*sp || !*rp) return FALSE;
-    return strcmp(sp, rp) == 0;
+    return *rp && strcmp(src_port, rp) == 0;
 }
 
 static gboolean
@@ -205,13 +215,10 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
 
     const char *scheme_sep = strstr(src, "://");
     const char *src_host_start = scheme_sep ? scheme_sep + 3 : src;
-    g_autofree char *src_scheme = NULL;
     if (scheme_sep) {
         gsize scheme_len = (gsize)(scheme_sep - src);
-        if (g_ascii_strncasecmp(resource_url, src, scheme_len) != 0 ||
-            resource_url[scheme_len] != ':')
+        if (!scheme_part_matches(src, scheme_len, resource_url))
             return FALSE;
-        src_scheme = g_ascii_strdown(src, scheme_len);
     }
 
     g_autoptr(ns_url_parts) res = ns_url_parts_new(resource_url);
@@ -260,7 +267,7 @@ source_matches(const char *src, const char *resource_url, const char *doc_url)
         const char *pe = path_p ? path_p : src + strlen(src);
         src_port = g_strndup(port_p + 1, (gsize)(pe - port_p - 1));
     }
-    if (!csp_port_matches(src_port, src_scheme, res->port, res_scheme))
+    if (!csp_port_matches(src_port, res->port, res_scheme))
         return FALSE;
 
     const char *src_path = path_p ? path_p : NULL;
