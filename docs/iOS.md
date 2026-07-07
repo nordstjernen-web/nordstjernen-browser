@@ -86,20 +86,27 @@ runner and publishes it as the rolling `ios-sysroot-latest` release, which
   the real iOS SDK (device + simulator) on every push, catching iOS-portability
   regressions early. Needs no sysroot; the iOS analogue of the Android source
   check.
-- **app** — fetches the sysroot, cross-compiles the engine and assembles the
-  UIKit app for the simulator. Skips with a notice until the sysroot is
-  published.
+- **app** — fetches the published sysroot, cross-compiles the engine for device
+  and simulator, and assembles the unsigned UIKit app for the iOS Simulator,
+  uploading the resulting `.app` as the `nordstjernen-ios-simulator-app`
+  artifact. (It still skips with a notice if the sysroot release is ever
+  unavailable.)
 
 ## Status
 
+- **Builds end-to-end in CI (macOS):** the published iOS dependency sysroot is
+  fetched and relocated to the runner, the engine cross-compiles to
+  `libnordstjernen.a` for both device and simulator, and `xcodebuild` assembles
+  the unsigned UIKit app for the iOS Simulator — uploaded as the
+  `nordstjernen-ios-simulator-app` artifact. The engine iOS-portability source
+  check (device + simulator) also runs on every push.
 - **Verified (Linux):** the GTK-free `is_mobile` engine build (engine library
   only under `-Dios=true`); the desktop build is unchanged by the refactor; the
   `TARGET_OS_IPHONE` sandbox guard.
-- **Runs in CI:** the engine iOS-portability source check.
-- **Authored, pending first macOS/iOS build:** the UIKit app, the cross-compile
-  tooling, and the sysroot build. The app cannot link until the sysroot release
-  exists; that is the next milestone. Treat these as the scaffolding to iterate
-  on, not shipped binaries.
+- **Not yet done:** a signed on-device build (needs a signing identity and a
+  provisioning profile); booting and driving the app in a simulator, and
+  real-world browsing validation (CI builds the app but does not run it); App
+  Store submission.
 
 ## Distribution (future)
 

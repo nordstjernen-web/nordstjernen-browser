@@ -89,12 +89,21 @@ work; `build-engine.sh` and the app consume it.
   engine translation unit against the real iOS SDK** — device and simulator —
   via `ios/scripts/check-ios-sources.sh`. This is the iOS analogue of
   `android/scripts/check-android-sources.sh` and needs no dependency sysroot.
-* **app** — fetches the prebuilt sysroot, cross-compiles the engine and
-  assembles the UIKit app for the simulator. It skips with a notice until the
-  sysroot release is published.
+* **app** — fetches the prebuilt sysroot, cross-compiles the engine for device
+  and simulator, and assembles the unsigned UIKit app for the iOS Simulator,
+  uploading the built `.app` as the `nordstjernen-ios-simulator-app` artifact.
+  (It skips with a notice only if the sysroot release is unavailable.)
 
 ## Status
 
+* **Builds end-to-end in CI (macOS):** on every push, `ios.yml` fetches the
+  published dependency sysroot, cross-compiles the engine to `libnordstjernen.a`
+  for device and simulator, and assembles the unsigned UIKit app for the iOS
+  Simulator with `xcodebuild` — uploaded as the `nordstjernen-ios-simulator-app`
+  artifact. The UIKit/Swift app, the C bridge, the XcodeGen project,
+  `build-engine.sh`, `fetch-prebuilt-deps.sh`, and the iOS dependency-sysroot
+  build in `nordstjernen-dependencies-build` are all exercised by this green
+  build.
 * **Done & verified on Linux:** the engine builds GTK-free for the iOS
   configuration — `meson.build`'s `is_mobile` predicate produces an
   engine-library-only build (no GTK shell, renderer, audio/video helpers),
@@ -102,8 +111,7 @@ work; `build-engine.sh` and the app consume it.
   refactor. The macOS-Seatbelt-sandbox `TARGET_OS_IPHONE` guard is in place.
 * **Wired, runs in CI:** the engine iOS-portability check (device + simulator)
   on every push via `ios.yml`.
-* **Authored, pending first macOS/iOS build:** the UIKit/Swift app, the C
-  bridge, the XcodeGen project, `build-engine.sh` and `fetch-prebuilt-deps.sh`,
-  and the iOS dependency-sysroot build in `nordstjernen-dependencies-build`. These have not
-  yet completed a green build on a macOS runner — the sysroot must be published
-  first — so treat them as the foundation to iterate on, not verified binaries.
+* **Not yet done:** a signed on-device build (needs a signing identity +
+  provisioning profile); booting and driving the app in a simulator and
+  real-world browsing validation (CI builds but does not run the app); App Store
+  submission.
