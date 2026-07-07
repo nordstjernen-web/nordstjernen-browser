@@ -89,11 +89,22 @@ try {
         New-Item -ItemType Directory -Force -Path $dest | Out-Null
         Copy-Item -Recurse -Force -Path (Join-Path $source "*") -Destination $dest
         $localPrefix = $destFull.Replace("\", "/")
-        $ciPrefix = "/home/runner/work/nordstjernen-dependencies-build/nordstjernen-dependencies-build/sysroot/$item"
+        # The published sysroot's pkg-config / cmake metadata bakes in an absolute
+        # prefix from the dependency-build repo's CI workspace
+        # (/home/runner/work/<owner>/<repo>/sysroot/<abi>); rewrite it to the local
+        # unpack path. Sysroots published before the dependency repo was renamed
+        # carry the former nordstjernen-android workspace path, so rewrite both.
+        $ciPrefixes = @(
+            "/home/runner/work/nordstjernen-dependencies-build/nordstjernen-dependencies-build/sysroot/$item",
+            "/home/runner/work/nordstjernen-android/nordstjernen-android/sysroot/$item"
+        )
         $metadata = Get-ChildItem -Path $dest -Recurse -File -Include *.pc,*.cmake,*.la,*.pri
         foreach ($file in $metadata) {
             $text = [System.IO.File]::ReadAllText($file.FullName)
-            $updated = $text.Replace($ciPrefix, $localPrefix)
+            $updated = $text
+            foreach ($ciPrefix in $ciPrefixes) {
+                $updated = $updated.Replace($ciPrefix, $localPrefix)
+            }
             if ($updated -ne $text) {
                 $utf8 = [System.Text.UTF8Encoding]::new($false)
                 [System.IO.File]::WriteAllText($file.FullName, $updated, $utf8)
