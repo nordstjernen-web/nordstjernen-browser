@@ -104,6 +104,12 @@ message('nordstjernen build profile: ' +
                        : 'development (debug symbols + frame pointer + hardened)'))
 
 is_android = host_machine.system() == 'android'
+# iOS (set by the ios/ meson cross file) cross-compiles the same GTK-free
+# embeddable engine as Android, driven by a UIKit host app instead of GTK 4.
+# is_mobile gathers the two: both drop GTK 4, gdk-pixbuf, librsvg, epoxy/WebGL
+# and the desktop-only helper executables, building only libnordstjernen.
+is_ios = get_option('ios')
+is_mobile = is_android or is_ios
 
 # Android builds only the embeddable engine library, driven by the JNI host app
 # in android/. It links the GLib/cairo/pango graphics stack directly instead of
@@ -118,7 +124,7 @@ is_android = host_machine.system() == 'android'
 # renderer-only build that needs no GTK 4 at all.
 gtk_feature = get_option('gtk')
 
-if is_android
+if is_mobile
   glib       = dependency('glib-2.0')
   gobject    = dependency('gobject-2.0')
   gio        = dependency('gio-2.0')
@@ -141,7 +147,7 @@ else
 endif
 
 have_gtk = false
-if not is_android and gtk_feature.allowed()
+if not is_mobile and gtk_feature.allowed()
   gtk4_min = host_machine.system() == 'windows' ? '>=4.22.1' : '>=4.14'
   gtk4 = dependency('gtk4', version: gtk4_min, required: gtk_feature)
   if gtk4.found()
@@ -172,18 +178,18 @@ sqlite3 = dependency('sqlite3')
 
 # gdk-pixbuf (image fallback decoder) and librsvg (SVG) are desktop-only; on
 # Android, Wuffs handles PNG/JPEG/GIF/BMP and other formats degrade gracefully.
-librsvg = dependency('librsvg-2.0', version: '>=2.54', required: not is_android)
-have_librsvg = librsvg.found() and not is_android
+librsvg = dependency('librsvg-2.0', version: '>=2.54', required: not is_mobile)
+have_librsvg = librsvg.found() and not is_mobile
 if have_librsvg
   add_project_arguments('-DNS_HAVE_LIBRSVG=1', language: 'c')
 endif
 
-have_gdk_pixbuf = not is_android
+have_gdk_pixbuf = not is_mobile
 if have_gdk_pixbuf
   add_project_arguments('-DNS_HAVE_GDK_PIXBUF=1', language: 'c')
 endif
 
-if not is_android
+if not is_mobile
   add_project_arguments('-DNS_ENABLE_WEBGL=1', language: 'c')
   # The offscreen GL context (src/glctx.c) has three backends: WGL on Windows,
   # CGL on macOS (which has no EGL — its epoxy dispatches to the OpenGL
@@ -208,7 +214,7 @@ endif
 have_webgpu = false
 webgpu_dep = declare_dependency()
 webgpu_feature = get_option('webgpu')
-if not webgpu_feature.disabled() and not is_android
+if not webgpu_feature.disabled() and not is_mobile
   wgpu_lib = dependency('wgpu_native', required: false)
   wgpu_root = get_option('wgpu_native_root')
   if not wgpu_lib.found() and wgpu_root != ''
@@ -238,7 +244,7 @@ if not webgpu_feature.disabled() and not is_android
 endif
 
 libpoppler = dependency('poppler-glib', required: false)
-have_poppler = libpoppler.found() and not is_android
+have_poppler = libpoppler.found() and not is_mobile
 if have_poppler
   add_project_arguments('-DNS_HAVE_POPPLER=1', language: 'c')
 endif
@@ -264,7 +270,7 @@ libwebp = dependency('libwebp')
 libwebpdemux = dependency('libwebpdemux')
 
 libavif = dependency('libavif', required: false)
-have_avif = libavif.found() and not is_android
+have_avif = libavif.found() and not is_mobile
 if have_avif
   add_project_arguments('-DNS_HAVE_AVIF=1', language: 'c')
 endif
@@ -290,13 +296,13 @@ libavutil = dependency('libavutil', version: '>=58', required: libav_required)
 libswscale = dependency('libswscale', version: '>=7', required: libav_required)
 libswresample = dependency('libswresample', version: '>=4', required: libav_required)
 have_libav = libavformat.found() and libavcodec.found() and libavutil.found() \
-  and libswscale.found() and libswresample.found() and not is_android
+  and libswscale.found() and libswresample.found() and not is_mobile
 if have_libav
   add_project_arguments('-DNS_HAVE_LIBAV=1', language: 'c')
 endif
 
 libenchant = dependency('enchant-2', required: false)
-have_enchant = libenchant.found() and not is_android
+have_enchant = libenchant.found() and not is_mobile
 if have_enchant
   add_project_arguments('-DNS_HAVE_ENCHANT=1', language: 'c')
 endif
@@ -305,7 +311,7 @@ libseccomp = dependency(
   'libseccomp',
   required: host_machine.system() == 'linux',
 )
-have_seccomp = libseccomp.found() and not is_android
+have_seccomp = libseccomp.found() and not is_mobile
 if have_seccomp
   add_project_arguments('-DNS_HAVE_SECCOMP=1', language: 'c')
 endif
@@ -442,7 +448,7 @@ ai_gpu_feature = get_option('ai_gpu')
 ai_deps = []
 have_ai = false
 ai_gpu_backend = 'none'
-if not is_android and ai_feature.allowed()
+if not is_mobile and ai_feature.allowed()
   cmake = import('cmake')
 
   use_metal = false

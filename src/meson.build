@@ -118,7 +118,7 @@ if host_machine.system() == 'windows'
   )
 endif
 
-if is_android
+if is_mobile
   nordstjernen_deps = [
     glib,
     gobject,
@@ -205,8 +205,9 @@ nordstjernen_deps += [libpsl]
 
 # macOS WebGL: src/glctx.c creates the offscreen GL context through CGL, whose
 # symbols live in the OpenGL framework. Unused targets drop it via
-# -dead_strip_dylibs.
-if host_machine.system() == 'darwin'
+# -dead_strip_dylibs. iOS has no OpenGL framework (and WebGL is off there, like
+# Android), so it is desktop-macOS only.
+if host_machine.system() == 'darwin' and not is_ios
   nordstjernen_deps += [dependency('appleframeworks', modules: ['OpenGL'])]
 endif
 
@@ -314,8 +315,9 @@ install_headers('libnordstjernen.h', subdir: 'nordstjernen')
 
 # Out-of-process renderer (step 1 of the process-per-tab direction): a small
 # executable that drives libnordstjernen over an IPC control channel + shared
-# memory framebuffer (src/rproc.*), plus a proof-of-concept client.
-if not is_android
+# memory framebuffer (src/rproc.*), plus a proof-of-concept client. The mobile
+# builds ship only the embeddable library — no standalone executables.
+if not is_mobile
   rproc_deps = []
   if host_machine.system() != 'windows'
     rproc_deps += [cc.find_library('rt', required: false)]
@@ -410,11 +412,11 @@ if not is_android
   endif
 endif
 
-if not is_android and have_gtk
+if not is_mobile and have_gtk
   subdir('gtk')
 endif
 
-if not is_android and not have_gtk
+if not is_mobile and not have_gtk
   message('GTK 4 shell disabled — building the engine, out-of-process renderer' +
           ' and embeddable library without GTK. WebGL is unavailable in this' +
           ' configuration (its GL context is GTK-backed).')
