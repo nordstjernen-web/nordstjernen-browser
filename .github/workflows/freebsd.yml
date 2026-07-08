@@ -36,6 +36,23 @@ jobs:
               meson ninja pkgconf bash zip ccache bzip2 \
               gtk4 libepoxy curl uchardet librsvg2 webp sdl2 \
               sqlite3 libpsl
+            # FreeBSD's freetype2.pc lists 'bzip2' in Requires.private, but
+            # neither the base system nor the bzip2 package ships a bzip2.pc,
+            # so cairo's pkg-config lookup (which pulls in freetype2) aborts
+            # meson setup. libbz2 lives in the base system; drop a matching
+            # .pc into the pkgconf search path so the dependency resolves.
+            mkdir -p /usr/local/libdata/pkgconfig
+            printf '%s\n' \
+              'prefix=/usr' \
+              'libdir=${prefix}/lib' \
+              'includedir=${prefix}/include' \
+              '' \
+              'Name: bzip2' \
+              'Description: bzip2 compression library' \
+              'Version: 1.0.8' \
+              'Libs: -L${libdir} -lbz2' \
+              'Cflags: -I${includedir}' \
+              > /usr/local/libdata/pkgconfig/bzip2.pc
           run: |
             set -e
             export CC="ccache cc"
