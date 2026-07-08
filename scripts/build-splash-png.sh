@@ -445,17 +445,22 @@ convert "$w/scene0.png" "$w/lwash.png" -compose over -composite "$w/scene.png"
 
 # text labels — rendered at 2x, downscale crisp; over the open left sky
 P() { echo $(( $1 * S )); }
-convert -background none -font "$fr" -pointsize $(P 54) -kerning $((1*S)) -fill '#2f3d5e' label:'Nordstjernen ' "$w/t1.png"
-convert -background none -font "$fr" -pointsize $(P 54) -fill '#d4862a' label:"$ver" "$w/t2.png"
-convert -background none -font "$fr" -pointsize $(P 25) -fill '#3f6f8f' label:'Nordstjernen Web Browser' "$w/ts.png"
-convert -background none -font "$fr" -pointsize $(P 23) -kerning $((3*S)) -fill '#d4862a' label:"$codename" "$w/tc.png"
-convert -background none -font "$fr" -pointsize $(P 20) -fill '#4a6076' \
+convert -background none -font "$fr" -pointsize $(P 54) -kerning $((1*S)) -fill '#28344f' label:'Nordstjernen ' "$w/t1.png"
+convert -background none -font "$fr" -pointsize $(P 54) -fill '#b96a12' label:"$ver" "$w/t2.png"
+convert -background none -font "$fr" -pointsize $(P 25) -fill '#295169' label:'Nordstjernen Web Browser' "$w/ts.png"
+convert -background none -font "$fr" -pointsize $(P 23) -kerning $((3*S)) -fill '#b96a12' label:"$codename" "$w/tc.png"
+convert -background none -font "$fr" -pointsize $(P 20) -fill '#2c3f54' \
     label:'Étoile du Nord — the legendary web browser' "$w/t3.png"
 
-# a faint pale glow behind the lower lines keeps them legible over the scene
+# a soft light plate behind each line keeps it legible over the scene;
+# the lower lines cross the busier foreground, so their plate is denser
+for n in t1 t2; do
+    convert "$w/$n.png" -channel A -blur 0x$((4*S)) -level 0,60% +channel \
+        -fill '#f6f1e4' -colorize 100 -channel A -evaluate multiply 0.55 +channel "$w/${n}g.png"
+done
 for n in ts tc t3; do
-    convert "$w/$n.png" -channel A -blur 0x$((3*S)) +channel \
-        -fill '#fbf7ec' -colorize 100 -channel A -evaluate multiply 0.9 +channel "$w/${n}g.png"
+    convert "$w/$n.png" -channel A -blur 0x$((4*S)) -level 0,42% +channel \
+        -fill '#f8f3e7' -colorize 100 "$w/${n}g.png"
 done
 
 w1=$(identify -format '%w' "$w/t1.png"); h1=$(identify -format '%h' "$w/t1.png")
@@ -465,8 +470,11 @@ ty=$((46*S)); textleft=$((80*S))
 sy=$((ty + h1 + g1)); cy=$((sy + hs + g2)); gy=$((cy + hc + g3))
 
 convert "$w/scene.png" \
+    "$w/t1g.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
+    "$w/t2g.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/tsg.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
     "$w/tcg.png" -gravity NorthWest -geometry +${textleft}+${cy} -compose over -composite \
+    "$w/t3g.png" -gravity NorthWest -geometry +${textleft}+${gy} -compose over -composite \
     "$w/t3g.png" -gravity NorthWest -geometry +${textleft}+${gy} -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
