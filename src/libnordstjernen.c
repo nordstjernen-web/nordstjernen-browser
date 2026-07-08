@@ -78,6 +78,7 @@ struct ns_browser {
     ns_selection    selection;
     const ns_node  *hover_node;
     const ns_node  *open_select;
+    gboolean        datalist_suppressed;
     const ns_node  *press_node;
     int             press_x;
     int             press_y;
@@ -167,6 +168,13 @@ browser_relayout(ns_browser *b)
     if (b->js && b->styles) ns_js_set_style_table(b->js, NULL);
     if (b->styles) { g_hash_table_destroy(b->styles); b->styles = NULL; }
     ns_layout_set_open_select(b->open_select);
+    {
+        const ns_node *fn = b->js ? ns_js_focused_node(b->js) : NULL;
+        gboolean dl_open = !b->datalist_suppressed && fn &&
+                           ns_node_is_element_named(fn, "input") &&
+                           ns_element_get_attr(fn, "list") != NULL;
+        ns_layout_set_datalist_open(dl_open);
+    }
     gint64 relayout_t0 = g_get_monotonic_time();
     b->styles = ns_engine_relayout(b->doc, b->base_url, b->vw, b->vh,
                                    b->images, b->anim, b->js,
@@ -2150,7 +2158,10 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
-    if (browser->js) {
+    gboolean in_datalist = FALSE;
+    for (const ns_node *a = node; a; a = a->parent)
+        if (ns_node_is_element_named(a, "datalist")) { in_datalist = TRUE; break; }
+    if (browser->js && !in_datalist) {
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
             if (ns_node_is_focusable(a)) { focus = a; break; }
@@ -2158,6 +2169,9 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         const char *val = focus ? ns_node_editable_value(focus) : NULL;
         browser->caret_byte = val ? strlen(val) : 0;
         browser->sel_anchor_byte = browser->caret_byte;
+        browser->datalist_suppressed =
+            !(focus && ns_node_is_element_named(focus, "input") &&
+              ns_element_get_attr(focus, "list") != NULL);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
 
@@ -2185,9 +2199,39 @@ ns_is_dropdown_select(const ns_node *n)
     return TRUE;
 }
 
+static void browser_input_replace(ns_browser *b, ns_node *node, gsize del_start,
+                                  gsize del_end, const char *insert);
+
+static gboolean
+browser_datalist_click(ns_browser *browser, const ns_node *node)
+{
+    const ns_node *option = NULL, *dl = NULL;
+    for (const ns_node *a = node; a; a = a->parent) {
+        if (!option && ns_node_is_element_named(a, "option")) option = a;
+        if (ns_node_is_element_named(a, "datalist")) { dl = a; break; }
+        if (ns_node_is_element_named(a, "select")) return FALSE;
+    }
+    if (!option || !dl || !browser->js) return FALSE;
+    ns_node *inp = (ns_node *)ns_js_focused_node(browser->js);
+    if (!inp || !ns_node_is_element_named(inp, "input")) return FALSE;
+    const char *ov = ns_element_get_attr(option, "value");
+    char *val = (ov && *ov) ? g_strdup(ov) : ns_option_label_dup(option);
+    const char *cur = ns_node_editable_value(inp);
+    browser_input_replace(browser, inp, 0, cur ? strlen(cur) : 0,
+                          val ? val : "");
+    gboolean p = FALSE;
+    ns_js_dispatch_event(browser->js, inp, "change", &p);
+    ns_js_consume_mutated(browser->js);
+    g_free(val);
+    browser->datalist_suppressed = TRUE;
+    browser->dirty = TRUE;
+    return TRUE;
+}
+
 static gboolean
 browser_dropdown_click(ns_browser *browser, const ns_node *node)
 {
+    if (browser_datalist_click(browser, node)) return TRUE;
     const ns_node *option = NULL, *select = NULL;
     for (const ns_node *a = node; a; a = a->parent) {
         if (!option && ns_node_is_element_named(a, "option")) option = a;
@@ -2590,6 +2634,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             gsize hi = browser->sel_anchor_byte < browser->caret_byte
                        ? browser->caret_byte : browser->sel_anchor_byte;
             browser_input_replace(browser, (ns_node *)f, lo, hi, key);
+            browser->datalist_suppressed = FALSE;
             browser->dirty = TRUE;
         }
     } else {
@@ -2644,7 +2689,14 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             }
         } else if (!prevented && kind == 0) {
             const ns_node *f = ns_js_focused_node(browser->js);
-            if (f && ns_node_is_element_named(f, "select") &&
+            if (f && ns_node_is_element_named(f, "input") &&
+                !browser->datalist_suppressed && key &&
+                strcmp(key, "Escape") == 0 &&
+                ns_element_get_attr(f, "list") != NULL) {
+                browser->datalist_suppressed = TRUE;
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && ns_node_is_element_named(f, "select") &&
                 !ns_element_get_attr(f, "disabled") &&
                 browser_select_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;

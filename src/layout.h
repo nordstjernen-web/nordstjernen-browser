@@ -190,6 +190,7 @@ ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
                         const char *base_url);
 
 void ns_layout_set_open_select(const ns_node *select);
+void ns_layout_set_datalist_open(gboolean open);
 
 void ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes);
 void ns_layout_collect_videos(const ns_box *root, GPtrArray *out_boxes);

@@ -913,11 +913,18 @@ static const ns_node *g_open_select_for_layout;
 static gboolean       g_focused_is_contenteditable_for_layout;
 static gsize          g_focused_caret_byte_for_layout;
 static gsize          g_focused_sel_anchor_byte_for_layout;
+static gboolean       g_datalist_open_for_layout;
 
 void
 ns_layout_set_open_select(const ns_node *select)
 {
     g_open_select_for_layout = select;
+}
+
+void
+ns_layout_set_datalist_open(gboolean open)
+{
+    g_datalist_open_for_layout = open;
 }
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
@@ -2353,6 +2360,69 @@ emit_listbox_option(collector_ctx *ctx, const ns_node *option, gboolean first)
                          start, ctx->out->len, option, ctx->styles);
 }
 
+static const ns_node *
+find_datalist_by_id(const ns_node *node, const char *id)
+{
+    if (!node || !id) return NULL;
+    if (node->kind == NS_NODE_ELEMENT && node->name &&
+        strcmp(node->name, "datalist") == 0) {
+        const char *did = ns_element_get_attr(node, "id");
+        if (did && strcmp(did, id) == 0) return node;
+    }
+    for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
+        const ns_node *m = find_datalist_by_id(c, id);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+static char *
+datalist_option_value(const ns_node *option)
+{
+    const char *v = ns_element_get_attr(option, "value");
+    if (v && *v) return g_strdup(v);
+    return ns_option_label_dup(option);
+}
+
+static void
+emit_datalist_suggestions(collector_ctx *ctx, const ns_node *input)
+{
+    const char *list_id = ns_element_get_attr(input, "list");
+    if (!list_id || !*list_id) return;
+    const ns_node *root = input;
+    while (root->parent) root = root->parent;
+    const ns_node *dl = find_datalist_by_id(root, list_id);
+    if (!dl) return;
+
+    const char *cur = ns_input_used_value(input);
+    char *needle = (cur && *cur) ? g_utf8_casefold(cur, -1) : NULL;
+    int shown = 0;
+    for (const ns_node *o = dl->first_child; o && shown < 8; o = o->next_sibling) {
+        if (!ns_node_is_element_named(o, "option")) continue;
+        char *val = datalist_option_value(o);
+        if (!val || !*val) { g_free(val); continue; }
+        gboolean match = TRUE;
+        if (needle) {
+            char *vl = g_utf8_casefold(val, -1);
+            match = strstr(vl, needle) != NULL &&
+                    g_ascii_strcasecmp(vl, needle) != 0;
+            g_free(vl);
+        }
+        if (match) {
+            g_string_append(ctx->out, "\xe2\x80\xa8");
+            gsize start = ctx->out->len;
+            g_string_append(ctx->out, "\xc2\xa0");
+            g_string_append(ctx->out, val);
+            g_string_append(ctx->out, "\xc2\xa0");
+            emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
+                                 start, ctx->out->len, o, ctx->styles);
+            shown++;
+        }
+        g_free(val);
+    }
+    g_free(needle);
+}
+
 static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
@@ -2636,6 +2706,8 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                 }
                 emit_attr(ctx->attrs, NS_INLINE_CARET, caret_pos, caret_pos + 1);
             }
+            if (focused && g_datalist_open_for_layout)
+                emit_datalist_suggestions(ctx, n);
         } else if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                             g_ascii_strcasecmp(type, "button") == 0 ||
                             g_ascii_strcasecmp(type, "reset") == 0)) {
