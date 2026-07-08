@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Nordstjernen dev helper: smoke-tests reading-list.txt through the headless engine.
+# Nordstjernen dev helper: smoke-tests a built-in list of local fixtures through
+# the headless engine.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=${NS_BIN:-$ROOT/builddir/src/gtk/nordstjernen}
 export NS_ALLOW_ROOT=${NS_ALLOW_ROOT:-1}
-LIST=${NS_LIST:-$ROOT/reading-list.txt}
 BASE=${NS_BASE:-$ROOT/data/baseline}
 
 cd "$ROOT"
@@ -18,10 +18,10 @@ Commands:
   build              Run 'meson setup builddir' (only if needed) and
                      'meson compile -C builddir'. Picks up ccache
                      automatically when installed.
-  smoke              For each target in $LIST, render headless and diff
-                     against its baseline. Reports drift.
+  smoke              For each built-in fixture target, render headless and
+                     diff against its baseline. Reports drift.
   baseline <target>  Render one target and (re)write its baseline.
-  baselines          Refresh baselines from every target in $LIST.
+  baselines          Refresh baselines from every built-in fixture target.
 
 Each target in the list is '[mode ]url', where mode is text (default),
 layout, or dom. text/dom baselines are <slug>.txt/<slug>.dom.txt;
@@ -30,8 +30,26 @@ geometry (text-free, fixed-size fixtures) so the diff is font-stable.
 
 Env:
   NS_BIN   path to nordstjernen binary (default: $BIN)
-  NS_LIST  reading-list path           (default: $LIST)
   NS_BASE  baseline dir                (default: $BASE)
+EOF
+}
+
+# Built-in headless smoke targets (formerly reading-list.txt): local fixtures,
+# so the regression net is deterministic and offline — it detects drift from
+# code changes, not network/remote-site churn. One '[mode ]url' per line; mode
+# is text (default), layout, or dom. Refresh baselines after an intended change
+# with './scripts/dev.sh baselines'.
+smoke_targets() {
+    cat <<'EOF'
+data/fixtures/basics.html
+data/fixtures/flex-order.html
+data/fixtures/grid-order.html
+data/fixtures/table.html
+data/fixtures/js-dom.html
+layout data/fixtures/geo-flex.html
+layout data/fixtures/geo-grid.html
+layout data/fixtures/geo-position.html
+layout data/fixtures/geo-box.html
 EOF
 }
 
@@ -92,7 +110,7 @@ cmd_smoke() {
             diff "$base" "$tmp" | head -8 | sed 's/^/      /'
             fail=1
         fi
-    done < "$LIST"
+    done < <(smoke_targets)
     return $fail
 }
 
@@ -111,7 +129,7 @@ cmd_baselines() {
         spec=$(trim "$line")
         [ -z "$spec" ] && continue
         cmd_baseline "$spec"
-    done < "$LIST"
+    done < <(smoke_targets)
 }
 
 cmd_build() {
