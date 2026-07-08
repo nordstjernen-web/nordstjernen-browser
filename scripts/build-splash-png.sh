@@ -29,48 +29,24 @@ trap 'rm -rf "$w"' EXIT
 S=2
 W=$((940 * S)); H=$((320 * S))
 
-# summer sky: blue to warm pale at the horizon, with a soft sun glow
-convert -size ${W}x${H} gradient:'#4ea7e6'-'#e3f4f7' "$w/sky.png"
-convert -size ${W}x${H} gradient:none-'#fcf3c6' "$w/warm.png"
+# golden-age sky: deep blue at the top warming to pale gold at the horizon
+convert -size ${W}x${H} gradient:'#2f74b4'-'#f4ead0' "$w/sky.png"
+convert -size ${W}x${H} gradient:none-'#fbeecb' "$w/warm.png"
 convert "$w/sky.png" "$w/warm.png" -compose over -composite "$w/sky1.png"
-convert -size ${W}x${H} xc:none -fill '#fff3c8' \
-    -draw "ellipse $((800*S)),$((72*S)) $((250*S)),$((170*S)) 0,360" -blur 0x$((80*S)) "$w/glow.png"
+
+# a soft warm halo behind the world globe (upper right)
+convert -size ${W}x${H} xc:none -fill '#cfe9ff' \
+    -draw "ellipse $((760*S)),$((72*S)) $((150*S)),$((120*S)) 0,360" -blur 0x$((70*S)) "$w/glow.png"
 convert "$w/sky1.png" "$w/glow.png" -compose screen -composite "$w/sky2.png"
 
-# soft clouds
-convert "$w/sky2.png" -fill 'rgba(255,255,255,0.85)' \
-    -draw "ellipse $((250*S)),$((70*S)) $((46*S)),$((16*S)) 0,360 ellipse $((300*S)),$((76*S)) $((40*S)),$((18*S)) 0,360 ellipse $((210*S)),$((80*S)) $((30*S)),$((12*S)) 0,360" \
-    -draw "ellipse $((560*S)),$((52*S)) $((38*S)),$((13*S)) 0,360 ellipse $((600*S)),$((58*S)) $((30*S)),$((12*S)) 0,360" \
-    -draw "ellipse $((430*S)),$((44*S)) $((34*S)),$((12*S)) 0,360 ellipse $((466*S)),$((50*S)) $((26*S)),$((10*S)) 0,360" \
+# soft clouds drifting across the horizon
+convert "$w/sky2.png" -fill 'rgba(255,255,255,0.82)' \
+    -draw "ellipse $((250*S)),$((104*S)) $((50*S)),$((16*S)) 0,360 ellipse $((300*S)),$((110*S)) $((42*S)),$((18*S)) 0,360 ellipse $((205*S)),$((114*S)) $((30*S)),$((12*S)) 0,360" \
+    -draw "ellipse $((560*S)),$((56*S)) $((40*S)),$((13*S)) 0,360 ellipse $((602*S)),$((62*S)) $((30*S)),$((12*S)) 0,360" \
+    -draw "ellipse $((150*S)),$((150*S)) $((36*S)),$((12*S)) 0,360 ellipse $((190*S)),$((156*S)) $((28*S)),$((11*S)) 0,360" \
     -blur 0x$((2*S)) "$w/sky3.png"
 
-# the sun: warm disc + corona + rays
-python3 - "$S" > "$w/sun.txt" <<'PY'
-import math, sys
-S = float(sys.argv[1])
-cx, cy, R = 800*S, 72*S, 40*S
-out = []
-for k in range(20):
-    a = 2*math.pi*k/20
-    r0, r1, wdt = R*1.32, R*2.25, 0.10
-    p1 = (cx+r0*math.cos(a-wdt), cy+r0*math.sin(a-wdt))
-    p2 = (cx+r1*math.cos(a), cy+r1*math.sin(a))
-    p3 = (cx+r0*math.cos(a+wdt), cy+r0*math.sin(a+wdt))
-    out.append("fill #ffd84a stroke none polygon %.2f,%.2f %.2f,%.2f %.2f,%.2f" % (p1[0],p1[1],p2[0],p2[1],p3[0],p3[1]))
-print(" ".join(out))
-PY
-rays=$(cat "$w/sun.txt")
-convert -size ${W}x${H} xc:none -draw "$rays" -blur 0x$((1*S)) "$w/rays.png"
-convert -size ${W}x${H} xc:none -fill '#ffdf6a' \
-    -draw "circle $((800*S)),$((72*S)) $((800*S)),$((112*S))" -blur 0x$((9*S)) "$w/scorona.png"
-convert "$w/sky3.png" "$w/rays.png" -compose screen -composite \
-        "$w/scorona.png" -compose screen -composite "$w/sky4.png"
-convert "$w/sky4.png" \
-    -fill '#ffd23e' -draw "circle $((800*S)),$((72*S)) $((800*S)),$((108*S))" \
-    -fill '#ffe277' -draw "circle $((792*S)),$((64*S)) $((792*S)),$((86*S))" \
-    -fill '#fff2b8' -draw "circle $((788*S)),$((60*S)) $((788*S)),$((72*S))" "$w/sky5.png"
-
-# sky decorations: hot-air balloons, kites, a V of birds
+# the world globe + air traffic: airliner with contrail, biplane, balloon, rocket, birds
 skydraw=$(python3 - "$W" "$H" "$S" <<'PY'
 import sys, math
 W, H = int(sys.argv[1]), int(sys.argv[2])
@@ -82,15 +58,66 @@ def dk(c, f=0.8): return tuple(max(0, int(v*f)) for v in c)
 def lt(c, f=1.15): return tuple(min(255, int(v*f)) for v in c)
 def poly(col, pts):
     out.append("fill %s stroke none polygon %s" % (hx(col), " ".join("%.2f,%.2f" % p for p in pts)))
+def rgba_poly(rgba, pts):
+    out.append("fill %s stroke none polygon %s" % (rgba, " ".join("%.2f,%.2f" % p for p in pts)))
 def ell(col, cx, cy, rx, ry):
     out.append("fill %s stroke none ellipse %.2f,%.2f %.2f,%.2f 0,360" % (hx(col), cx, cy, rx, ry))
+def rgba_ell(rgba, cx, cy, rx, ry, a0=0, a1=360):
+    out.append("fill %s stroke none ellipse %.2f,%.2f %.2f,%.2f %d,%d" % (rgba, cx, cy, rx, ry, a0, a1))
+def arc(col, wid, cx, cy, rx, ry, a0, a1):
+    out.append("fill none stroke %s stroke-width %.2f ellipse %.2f,%.2f %.2f,%.2f %d,%d" % (col, wid, cx, cy, rx, ry, a0, a1))
+    out.append("stroke none")
 def line(col, wid, a, b):
     out.append("stroke %s stroke-width %.2f stroke-linecap round line %.2f,%.2f %.2f,%.2f" % (hx(col), wid, a[0], a[1], b[0], b[1]))
     out.append("stroke none")
-def bird(cx, cy, s):
-    w = s
-    line((58,72,92), max(1.0,1.6*S), (cx-w, cy+w*0.34), (cx, cy))
-    line((58,72,92), max(1.0,1.6*S), (cx, cy), (cx+w, cy+w*0.34))
+
+def globe(cx, cy, R):
+    rgba_ell("rgba(20,60,110,0.35)", cx+R*0.10, cy+R*0.12, R*1.02, R*1.02)
+    ell((44,116,176), cx, cy, R, R)
+    ell((66,150,206), cx-R*0.16, cy-R*0.18, R*0.84, R*0.84)
+    land = (86,170,96)
+    conts = [(-0.34,-0.30,0.30,0.24),(-0.10,-0.05,0.26,0.34),(-0.22,0.38,0.20,0.22),
+             (0.30,-0.28,0.26,0.20),(0.40,0.16,0.22,0.30),(0.06,0.52,0.14,0.12),
+             (-0.52,0.10,0.13,0.20)]
+    for dx,dy,rx,ry in conts:
+        d = math.hypot(dx, dy)
+        if d+max(rx,ry)*0.5 > 0.98: continue
+        ell(dk(land,0.9), cx+dx*R+R*0.03, cy+dy*R+R*0.03, rx*R, ry*R)
+    for dx,dy,rx,ry in conts:
+        d = math.hypot(dx, dy)
+        if d+max(rx,ry)*0.5 > 0.98: continue
+        ell(land, cx+dx*R, cy+dy*R, rx*R, ry*R)
+    grat = "rgba(255,255,255,0.22)"
+    for k in (0.85, 0.55, 0.0):
+        arc(grat, max(1.0,1.0*S), cx, cy, R*0.985, R*0.985*k, 0, 360)
+    for k in (0.9, 0.5):
+        arc(grat, max(1.0,1.0*S), cx, cy, R*0.985*k, R*0.985, 0, 360)
+    rgba_ell("rgba(6,30,66,0.30)", cx, cy, R*0.985, R*0.985, 292, 68)
+    rgba_ell("rgba(255,255,255,0.60)", cx-R*0.40, cy-R*0.42, R*0.22, R*0.16)
+    arc("rgba(210,236,255,0.55)", max(1.0,1.4*S), cx, cy, R*0.97, R*0.97, 150, 250)
+
+def airliner(cx, cy, s):
+    body = (238,241,247); trim = (70,120,210); dark = (52,62,86)
+    poly(dk(body,0.9), [(cx-s*2.0, cy+s*0.20), (cx+s*1.5, cy+s*0.24), (cx+s*2.05, cy), (cx+s*1.5, cy-s*0.16)])
+    ell(body, cx, cy, s*1.9, s*0.34)
+    poly(body, [(cx+s*1.4, cy), (cx+s*2.35, cy-s*0.05), (cx+s*1.5, cy+s*0.05)])
+    poly(dk(body,0.82), [(cx-s*1.7, cy-s*0.10), (cx-s*2.5, cy-s*0.72), (cx-s*2.05, cy-s*0.72), (cx-s*1.15, cy-s*0.08)])
+    poly(dk(body,0.86), [(cx+s*0.55, cy+s*0.14), (cx-s*0.35, cy+s*1.05), (cx-s*0.95, cy+s*1.05), (cx-s*0.30, cy+s*0.18)])
+    poly(lt(body,1.02), [(cx+s*0.7, cy-s*0.12), (cx-s*0.2, cy-s*0.98), (cx-s*0.75, cy-s*0.98), (cx-s*0.1, cy-s*0.16)])
+    out.append("fill %s stroke none rectangle %.2f,%.2f %.2f,%.2f" % (hx(trim), cx-s*1.6, cy-s*0.06, cx+s*1.4, cy+s*0.04))
+    for i in range(6):
+        ell(dark, cx+s*(1.0-i*0.42), cy-s*0.02, s*0.06, s*0.06)
+
+def biplane(cx, cy, s):
+    body = (226,86,72); cream = (240,228,196); dark = (58,44,40)
+    line(dark, max(1.0,1.2*S), (cx-s*1.2, cy-s*0.55), (cx-s*1.2, cy+s*0.55))
+    line(dark, max(1.0,1.2*S), (cx-s*0.5, cy-s*0.55), (cx-s*0.5, cy+s*0.55))
+    poly(cream, [(cx-s*1.9, cy-s*0.62), (cx+s*0.6, cy-s*0.62), (cx+s*0.6, cy-s*0.48), (cx-s*1.9, cy-s*0.48)])
+    ell(body, cx, cy, s*1.5, s*0.3)
+    poly(cream, [(cx-s*1.9, cy+s*0.48), (cx+s*0.6, cy+s*0.48), (cx+s*0.6, cy+s*0.62), (cx-s*1.9, cy+s*0.62)])
+    poly(body, [(cx-s*1.35, cy-s*0.06), (cx-s*2.0, cy-s*0.5), (cx-s*1.75, cy-s*0.5), (cx-s*1.0, cy-s*0.04)])
+    line(dark, max(1.4,1.8*S), (cx+s*1.45, cy-s*0.42), (cx+s*1.45, cy+s*0.42))
+    ell(lt(cream,1.05), cx-s*0.2, cy-s*0.05, s*0.28, s*0.16)
 
 def balloon(cx, cy, r, c1, c2):
     poly(dk(c1,0.9), [(cx-r*0.55, cy+r*0.55), (cx+r*0.55, cy+r*0.55), (cx+r*0.16, cy+r*1.05), (cx-r*0.16, cy+r*1.05)])
@@ -98,42 +125,54 @@ def balloon(cx, cy, r, c1, c2):
     ell(c2, cx-r*0.33, cy, r*0.34, r*1.12)
     ell(c2, cx+r*0.33, cy, r*0.34, r*1.12)
     ell(lt(c1,1.18), cx-r*0.30, cy-r*0.45, r*0.22, r*0.30)
-    bw = r*0.28
-    line((90,64,40), max(1.0,1.2*S), (cx-r*0.32, cy+r*1.05), (cx-bw*0.6, cy+r*1.45))
-    line((90,64,40), max(1.0,1.2*S), (cx+r*0.32, cy+r*1.05), (cx+bw*0.6, cy+r*1.45))
-    poly((120,84,48), [(cx-bw*0.6, cy+r*1.45), (cx+bw*0.6, cy+r*1.45), (cx+bw*0.5, cy+r*1.62), (cx-bw*0.5, cy+r*1.62)])
+    line((90,64,40), max(1.0,1.2*S), (cx-r*0.32, cy+r*1.05), (cx-r*0.18, cy+r*1.45))
+    line((90,64,40), max(1.0,1.2*S), (cx+r*0.32, cy+r*1.05), (cx+r*0.18, cy+r*1.45))
+    poly((120,84,48), [(cx-r*0.20, cy+r*1.45), (cx+r*0.20, cy+r*1.45), (cx+r*0.16, cy+r*1.66), (cx-r*0.16, cy+r*1.66)])
 
-balloon(W*0.735, H*0.235, H*0.070, (228,86,86), (250,224,120))
-balloon(W*0.815, H*0.345, H*0.050, (78,142,210), (244,244,248))
+def rocket(cx, by, s):
+    body = (238,240,246); nose = (220,72,66); fin = (70,120,210)
+    for i in range(7):
+        rgba_ell("rgba(236,240,248,%.2f)" % (0.5 - i*0.06), cx+math.sin(i*1.1)*s*0.5, by+s*1.8+i*s*1.5, s*(0.7+i*0.16), s*(0.5+i*0.14))
+    poly((255,196,74), [(cx-s*0.30, by+s*1.6), (cx+s*0.30, by+s*1.6), (cx, by+s*3.0)])
+    poly((255,140,52), [(cx-s*0.18, by+s*1.6), (cx+s*0.18, by+s*1.6), (cx, by+s*2.4)])
+    poly(fin, [(cx-s*0.42, by+s*1.7), (cx-s*0.42, by+s*1.0), (cx-s*0.18, by+s*1.55)])
+    poly(fin, [(cx+s*0.42, by+s*1.7), (cx+s*0.42, by+s*1.0), (cx+s*0.18, by+s*1.55)])
+    out.append("fill %s stroke none path 'M %.2f,%.2f L %.2f,%.2f Q %.2f,%.2f %.2f,%.2f Q %.2f,%.2f %.2f,%.2f Z'" % (
+        hx(body), cx-s*0.28, by+s*1.7, cx-s*0.28, by+s*0.55,
+        cx-s*0.28, by-s*0.5, cx, by-s*0.5,
+        cx+s*0.28, by-s*0.5, cx+s*0.28, by+s*0.55, ))
+    poly(nose, [(cx-s*0.28, by+s*0.4), (cx+s*0.28, by+s*0.4), (cx+s*0.28, by+s*0.62), (cx-s*0.28, by+s*0.62)])
+    ell((120,170,220), cx, by+s*0.95, s*0.14, s*0.14)
 
-def kite(cx, cy, s, c1, c2, tail_dir):
-    top=(cx, cy-s); rgt=(cx+s*0.7, cy); bot=(cx, cy+s*1.25); lft=(cx-s*0.7, cy)
-    poly(c1, [top, rgt, (cx,cy)]); poly(dk(c1,0.85),[rgt,bot,(cx,cy)])
-    poly(c2, [top, lft, (cx,cy)]); poly(dk(c2,0.85),[lft,bot,(cx,cy)])
-    line((40,52,70), max(0.8,1.0*S), top, bot); line((40,52,70), max(0.8,1.0*S), lft, rgt)
-    tx, ty = bot
-    for i in range(6):
-        nx = tx + tail_dir*(i+1)*s*0.16 + math.sin(i*1.3)*s*0.10
-        ny = ty + (i+1)*s*0.20
-        line((110,120,140), max(0.8,1.0*S), (tx,ty), (nx,ny))
-        if i%2==0:
-            ell(c2 if i%4 else c1, nx, ny, s*0.10, s*0.07)
-        tx, ty = nx, ny
+def bird(cx, cy, s):
+    line((58,72,92), max(1.0,1.6*S), (cx-s, cy+s*0.34), (cx, cy))
+    line((58,72,92), max(1.0,1.6*S), (cx, cy), (cx+s, cy+s*0.34))
 
-kite(W*0.665, H*0.110, H*0.050, (245,180,52), (228,74,74), +1)
-kite(W*0.72, H*0.072, H*0.042, (92,190,98), (70,120,212), -1)
+globe(W*0.80, H*0.235, H*0.185)
 
-bx, by = W*0.62, H*0.085
-for i in range(4):
-    bird(bx + i*W*0.020, by + i*H*0.016, H*0.016)
-    bird(bx - i*W*0.020, by + i*H*0.016, H*0.016)
+ax, ay = W*0.285, H*0.078
+for i in range(15):
+    t = i/14.0
+    px = ax + (W*0.30)*t
+    py = ay - math.sin(t*math.pi)*H*0.022 + t*H*0.010
+    rgba_ell("rgba(255,255,255,%.2f)" % (0.08+0.40*t), px, py, W*0.012*(0.4+t), H*0.010*(0.4+t))
+airliner(W*0.590, H*0.088, H*0.032)
+
+biplane(W*0.625, H*0.150, H*0.031)
+
+rocket(W*0.955, H*0.150, H*0.030)
+
+bx, by = W*0.360, H*0.120
+for i in range(3):
+    bird(bx + i*W*0.018, by + i*H*0.013, H*0.013)
+    bird(bx - i*W*0.018, by + i*H*0.013, H*0.013)
 
 sys.stdout.write(" ".join(out))
 PY
 )
-convert "$w/sky5.png" -draw "$skydraw" "$w/sky6.png"
+convert "$w/sky3.png" -draw "$skydraw" "$w/sky6.png"
 
-# land + crowd + trees + winding path + pond + picnic + flowers
+# civilization panorama: coast of world wonders, a shore road with cars, ships at sea
 scene=$(python3 - "$W" "$H" "$S" <<'PY'
 import sys, random, math
 W, H = int(sys.argv[1]), int(sys.argv[2])
@@ -146,198 +185,263 @@ def dk(c, f=0.8): return tuple(max(0, int(v*f)) for v in c)
 def lt(c, f=1.15): return tuple(min(255, int(v*f)) for v in c)
 def poly(col, pts):
     out.append("fill %s stroke none polygon %s" % (hx(col), " ".join("%.2f,%.2f" % p for p in pts)))
+def rgba_poly(rgba, pts):
+    out.append("fill %s stroke none polygon %s" % (rgba, " ".join("%.2f,%.2f" % p for p in pts)))
 def ell(col, cx, cy, rx, ry):
     out.append("fill %s stroke none ellipse %.2f,%.2f %.2f,%.2f 0,360" % (hx(col), cx, cy, rx, ry))
+def rgba_ell(rgba, cx, cy, rx, ry, a0=0, a1=360):
+    out.append("fill %s stroke none ellipse %.2f,%.2f %.2f,%.2f %d,%d" % (rgba, cx, cy, rx, ry, a0, a1))
+def arc(col, wid, cx, cy, rx, ry, a0, a1):
+    out.append("fill none stroke %s stroke-width %.2f ellipse %.2f,%.2f %.2f,%.2f %d,%d" % (col, wid, cx, cy, rx, ry, a0, a1))
+    out.append("stroke none")
 def line(col, wid, a, b):
     out.append("stroke %s stroke-width %.2f stroke-linecap round line %.2f,%.2f %.2f,%.2f" % (hx(col), wid, a[0], a[1], b[0], b[1]))
     out.append("stroke none")
-def quad(col, a, b, wa, wb):
-    dx, dy = b[0]-a[0], b[1]-a[1]; L = math.hypot(dx, dy) or 1.0
-    nx, ny = -dy/L, dx/L
-    poly(col, [(a[0]+nx*wa, a[1]+ny*wa), (b[0]+nx*wb, b[1]+ny*wb),
-               (b[0]-nx*wb, b[1]-ny*wb), (a[0]-nx*wa, a[1]-ny*wa)])
+def rect(col, x0, y0, x1, y1):
+    out.append("fill %s stroke none rectangle %.2f,%.2f %.2f,%.2f" % (hx(col), x0, y0, x1, y1))
 
-def ascale(x):
-    t = (x - W*0.40) / (W*0.22)
-    return max(0.10, min(1.0, 0.10 + 0.90*t))
+WL = H*0.705
 
-def land(base_y, color, amp, seed, drop):
+# distant blue hills behind the wonders
+def ridge(base_y, color, amp, seed, x0):
     random.seed(seed)
-    def eb(x): return base_y + (1 - ascale(x)) * drop
-    pts = [(-30*S, H), (-30*S, eb(-30*S))]
-    x = -30*S
+    pts = [(x0, H), (x0, base_y)]
+    x = x0
     while x < W + 30*S:
-        y = eb(x) - random.uniform(amp*0.2, amp) * ascale(x)
-        pts.append((x, y)); x += (58 + random.uniform(-14, 14))*S
-    pts += [(W+30*S, eb(W+30*S)), (W+30*S, H)]
-    out.append("fill %s stroke none polygon %s" % (hx(color), " ".join("%.2f,%.2f" % p for p in pts)))
-    return eb
+        y = base_y - random.uniform(amp*0.3, amp)
+        pts.append((x, y)); x += (70 + random.uniform(-18, 18))*S
+    pts += [(W+30*S, base_y), (W+30*S, H)]
+    poly(color, pts)
 
-SKIN = [(244,201,166),(232,182,142),(206,156,116),(170,122,86),(142,100,70)]
-HAIR = [(38,28,26),(78,52,36),(150,102,52),(212,180,96),(30,30,36),(110,70,44)]
-SHIRT = [(228,74,74),(245,170,52),(248,212,72),(92,190,98),(70,172,182),
-         (70,120,212),(150,92,196),(232,112,162),(240,132,60),(60,180,150)]
-PANTS = [(58,70,96),(92,70,54),(52,92,122),(120,62,72),(70,102,150),(64,64,74)]
+ridge(H*0.50, (150,178,196), H*0.09, 3, W*0.30)
+ridge(H*0.56, (128,168,150), H*0.08, 6, W*0.28)
 
-def person(cx, fy, h, pose):
-    shirt = random.choice(SHIRT); skin = random.choice(SKIN); hair = random.choice(HAIR)
-    dress = random.random() < 0.4
-    pants = shirt if dress else random.choice(PANTS)
-    sh_y = fy - h*0.62; hip_y = fy - h*0.32; head_cy = fy - h*0.84; hr = h*0.15
-    if dress:
-        poly(dk(shirt,0.82), [(cx-h*0.12, sh_y), (cx+h*0.12, sh_y), (cx+h*0.205, fy+1*S), (cx-h*0.205, fy+1*S)])
-        poly(shirt, [(cx-h*0.12, sh_y), (cx+h*0.12, sh_y), (cx+h*0.20, fy), (cx-h*0.20, fy)])
-    else:
-        lw = h*0.075
-        poly(pants, [(cx-h*0.11, hip_y), (cx-h*0.11+2*lw, hip_y), (cx-h*0.11+1.6*lw, fy), (cx-h*0.11+0.2*lw, fy)])
-        poly(pants, [(cx+h*0.11-2*lw, hip_y), (cx+h*0.11, hip_y), (cx+h*0.11-0.2*lw, fy), (cx+h*0.11-1.6*lw, fy)])
-        poly(dk(shirt,0.86), [(cx-h*0.14, sh_y), (cx+h*0.14, sh_y), (cx+h*0.12, hip_y+h*0.02), (cx-h*0.12, hip_y+h*0.02)])
-        poly(shirt, [(cx-h*0.14, sh_y), (cx+h*0.115, sh_y), (cx+h*0.10, hip_y+h*0.01), (cx-h*0.12, hip_y+h*0.01)])
-    aw = h*0.05
-    sL = (cx-h*0.12, sh_y+h*0.02); sR = (cx+h*0.12, sh_y+h*0.02)
-    if pose == "up":
-        hLp = (cx-h*0.26, sh_y-h*0.40); hRp = (cx+h*0.26, sh_y-h*0.40)
-    elif pose == "oneup":
-        hLp = (cx-h*0.28, sh_y-h*0.40); hRp = (cx+h*0.16, hip_y)
-    else:
-        hLp = (cx-h*0.30, sh_y-h*0.04); hRp = (cx+h*0.30, sh_y-h*0.04)
-    quad(skin, sL, hLp, aw, aw*0.8); quad(skin, sR, hRp, aw, aw*0.8)
-    ell(skin, hLp[0], hLp[1], aw*0.9, aw*0.9); ell(skin, hRp[0], hRp[1], aw*0.9, aw*0.9)
-    ell(hair, cx, head_cy-hr*0.18, hr*1.04, hr*1.04)
-    ell(skin, cx, head_cy, hr*0.86, hr)
-    ell(lt(skin,1.08), cx-hr*0.28, head_cy-hr*0.10, hr*0.30, hr*0.34)
+# the land: a promontory that meets the sea along the waterline on the right
+land_pts = [(W*0.285, WL), (W*0.34, H*0.66), (W*0.42, H*0.615), (W*0.52, H*0.60),
+            (W*0.60, H*0.58), (W*0.70, H*0.585), (W*0.80, H*0.55),
+            (W*0.90, H*0.505), (W, H*0.47), (W, WL)]
+poly((150,196,120), land_pts)
+poly(dk((150,196,120),0.94), [(W*0.285, WL), (W*0.34, H*0.66), (W*0.42, H*0.615),
+    (W*0.52, H*0.60), (W*0.60, H*0.58), (W*0.60, WL)])
 
-land(H*0.60, (150,200,112), H*0.10, 4, H*0.34)
-land(H*0.70, (118,186,92),  H*0.11, 8, H*0.36)
-mtop = land(H*0.78, (92,170,74), H*0.09, 15, H*0.40)
+# a sandy desert patch under the pyramids
+poly((236,214,160), [(W*0.36, WL), (W*0.585, WL), (W*0.55, H*0.63), (W*0.40, H*0.645)])
 
-pcx, pcy = W*0.62, H*0.90
-prx, pry = W*0.085, H*0.052
-ell((70,150,120), pcx, pcy+1.6*S, prx*1.03, pry*1.05)
-ell((86,176,210), pcx, pcy, prx, pry)
-ell((150,206,228), pcx, pcy-pry*0.30, prx*0.86, pry*0.55)
-ell((255,240,170), pcx+prx*0.42, pcy+pry*0.10, prx*0.20, pry*0.28)
-for i in range(3):
-    ww = prx*(0.55-0.12*i)
-    yy = pcy+pry*(0.18+0.22*i)
-    line((220,238,246), max(1.0, 1.4*S), (pcx-ww, yy), (pcx+ww*0.7, yy))
+# ---- wonders (left -> right along the coast) ----
+def pyramid(cx, by, hw, hh):
+    lit=(236,212,158); shd=(200,172,116)
+    apex=(cx, by-hh)
+    poly(lit, [apex, (cx-hw, by), (cx, by)])
+    poly(shd, [apex, (cx, by), (cx+hw, by)])
+    for k in (0.3,0.55,0.78):
+        y=by-hh*k
+        line(dk(lit,0.9), max(0.8,0.9*S), (cx-hw*(1-k), y), (cx, y))
+        line(dk(shd,0.9), max(0.8,0.9*S), (cx, y), (cx+hw*(1-k), y))
 
-random.seed(7)
-path_pts = []
-n = 26
-for i in range(n+1):
-    t = i/n
-    x = W*0.30 + (W*0.55)*t + math.sin(t*math.pi*2.1)*W*0.045
-    y = H*0.995 - (H*0.30)*t + math.cos(t*math.pi*1.6)*H*0.012
-    path_pts.append((x, y))
-for i in range(len(path_pts)-1):
-    t = i/(len(path_pts)-1)
-    wPath = (4.0 + 16.0*t) * S
-    quad((226,210,160), path_pts[i], path_pts[i+1], wPath*0.5, (4.0+16.0*((i+1)/(len(path_pts)-1)))*S*0.5)
-for i in range(len(path_pts)-1):
-    t = i/(len(path_pts)-1)
-    wPath = (4.0 + 16.0*t) * S
-    quad((240,228,186), path_pts[i], path_pts[i+1], wPath*0.28, (4.0+16.0*((i+1)/(len(path_pts)-1)))*S*0.28)
+def palm(bx, by, h):
+    line((120,86,52), max(1.4,2.0*S), (bx, by), (bx-h*0.06, by-h))
+    top=(bx-h*0.06, by-h)
+    for a in (-0.9,-0.4,0.1,0.6,1.1):
+        ex=top[0]+math.cos(a)*h*0.5; ey=top[1]-abs(math.sin(a+0.4))*h*0.10 - h*0.02 + (a)*h*0.06
+        poly((70,150,80), [top, (top[0]+math.cos(a-0.12)*h*0.5, ey), (ex+math.cos(a)*h*0.04, ey+h*0.05)])
 
-def tree_round(bx, by, h):
-    trunk_w = h*0.10
-    poly((110,78,48), [(bx-trunk_w*0.5, by), (bx+trunk_w*0.5, by),
-                       (bx+trunk_w*0.35, by-h*0.45), (bx-trunk_w*0.35, by-h*0.45)])
-    cy = by - h*0.62; r = h*0.42
-    ell(dk((58,138,66),0.86), bx+r*0.18, cy+r*0.16, r*0.96, r*0.92)
-    ell((72,158,78), bx, cy, r, r*0.95)
-    ell((104,190,104), bx-r*0.32, cy-r*0.30, r*0.45, r*0.40)
-def tree_blob(bx, by, h):
-    trunk_w = h*0.10
-    poly((104,72,44), [(bx-trunk_w*0.5, by), (bx+trunk_w*0.5, by),
-                       (bx+trunk_w*0.32, by-h*0.40), (bx-trunk_w*0.32, by-h*0.40)])
-    base = (66,150,72)
-    blobs = [(-0.30,-0.55,0.34),(0.30,-0.52,0.32),(0.0,-0.78,0.36),(-0.05,-0.50,0.40)]
-    for dx,dy,r in blobs:
-        ell(dk(base,0.9), bx+dx*h+r*h*0.12, by+dy*h+r*h*0.10, r*h, r*h*0.94)
-    for dx,dy,r in blobs:
-        ell(base, bx+dx*h, by+dy*h, r*h, r*h*0.94)
-    ell(lt(base,1.18), bx-0.18*h, by-0.78*h, 0.18*h, 0.16*h)
-def tree_pine(bx, by, h):
-    trunk_w = h*0.08
-    poly((100,68,42), [(bx-trunk_w*0.5, by), (bx+trunk_w*0.5, by),
-                       (bx+trunk_w*0.4, by-h*0.22), (bx-trunk_w*0.4, by-h*0.22)])
-    base = (54,134,76)
-    tiers = [(by-h*0.18, h*0.34, by-h*0.50),
-             (by-h*0.42, h*0.27, by-h*0.72),
-             (by-h*0.64, h*0.18, by-h*0.92)]
-    for i,(yb, half, yt) in enumerate(tiers):
-        col = lt(base, 1.0+0.06*i)
-        poly(dk(col,0.88), [(bx-half+1.5*S, yb), (bx+half+1.5*S, yb), (bx+1.5*S, yt)])
-        poly(col, [(bx-half, yb), (bx+half, yb), (bx, yt)])
+pyramid(W*0.470, WL, H*0.085, H*0.150)
+pyramid(W*0.420, WL, H*0.058, H*0.098)
+pyramid(W*0.520, WL, H*0.045, H*0.078)
+palm(W*0.392, WL, H*0.115)
 
-tree_pine(W*0.405, mtop(W*0.405)+H*0.10, H*0.30)
-tree_round(W*0.515, mtop(W*0.515)+H*0.06, H*0.25)
-tree_blob(W*0.955, mtop(W*0.955)+H*0.05, H*0.34)
-tree_round(W*0.835, mtop(W*0.835)+H*0.03, H*0.22)
-
-def blanket(cx, cy, wdt, hgt, c1, c2):
-    skew = wdt*0.32
-    p = [(cx-wdt*0.5, cy), (cx-wdt*0.5+skew, cy-hgt), (cx+wdt*0.5+skew, cy-hgt), (cx+wdt*0.5, cy)]
-    poly(dk(c1,0.85), [(p[0][0],p[0][1]+1.6*S),(p[1][0],p[1][1]+1.6*S),(p[2][0],p[2][1]+1.6*S),(p[3][0],p[3][1]+1.6*S)])
-    poly(c1, p)
-    for gx in range(-2,3):
-        for gy in range(0,4):
-            if (gx+gy)%2: continue
-            fx = cx + gx*wdt*0.16 + gy*skew*0.25
-            fy = cy - gy*hgt*0.25 - hgt*0.12
-            poly(c2, [(fx-wdt*0.075, fy), (fx-wdt*0.075+skew*0.2, fy-hgt*0.16),
-                      (fx+wdt*0.075+skew*0.2, fy-hgt*0.16), (fx+wdt*0.075, fy)])
-blanket(W*0.555, H*0.985, W*0.085, H*0.060, (220,84,84), (244,224,150))
-blanket(W*0.70, H*0.965, W*0.072, H*0.052, (74,128,200), (210,228,248))
-
-random.seed(33)
-FLOW = [(252,222,84),(252,252,252),(244,128,168),(180,140,236),(244,168,72)]
-for _ in range(46):
-    fx = random.uniform(W*0.40, W*0.99)
-    fy = random.uniform(mtop(fx)+H*0.04, H-4*S)
-    if fy <= mtop(fx)+H*0.02: continue
-    stem_h = random.uniform(7,14)*S * ascale(fx)
-    col = random.choice(FLOW)
-    line((70,150,72), max(0.9, 1.3*S*ascale(fx)), (fx, fy), (fx, fy-stem_h))
-    cy = fy - stem_h
-    pr = random.uniform(2.6, 4.2)*S * (0.6+0.6*ascale(fx))
-    shape = random.random()
-    if shape < 0.5:
-        for k in range(5):
-            a = 2*math.pi*k/5 - math.pi/2
-            ell(col, fx+math.cos(a)*pr, cy+math.sin(a)*pr, pr*0.6, pr*0.6)
-        ell((250,196,70), fx, cy, pr*0.55, pr*0.55)
-    else:
-        ell(col, fx, cy, pr, pr)
-        ell(dk(col,0.78), fx, cy, pr*0.42, pr*0.42)
-
-random.seed(91)
-for _ in range(40):
-    gx = random.uniform(W*0.40, W*0.99)
-    gy = random.uniform(H*0.86, H-3*S)
-    gh = random.uniform(4,8)*S
-    line(dk((92,170,74),0.92), max(0.8,1.0*S), (gx, gy), (gx+random.uniform(-2,2)*S, gy-gh))
-    line((110,190,96), max(0.8,1.0*S), (gx+2*S, gy), (gx+2*S+random.uniform(-2,2)*S, gy-gh*0.8))
-
-people = []
-rows = [(H*0.80, 34, 7), (H*0.875, 44, 7), (H*0.95, 56, 6)]
-for ry, ph, n in rows:
+def temple(cx, by, wd, ht):
+    marble=(236,232,218); shade=(206,200,182); roof=(224,218,200)
+    rect(dk(marble,0.9), cx-wd*0.58, by-ht*0.05, cx+wd*0.58, by)
+    rect(marble, cx-wd*0.52, by-ht*0.11, cx+wd*0.52, by-ht*0.05)
+    n=6
     for i in range(n):
-        px = W*0.42 + (W*0.56) * (i + random.uniform(-0.35, 0.35)) / (n-1)
-        if px < W*0.40: continue
-        pose = random.choices(["up", "oneup", "out"], weights=[5, 3, 2])[0]
-        people.append((px, ry + random.uniform(-4, 4)*S, ph*S * random.uniform(0.9, 1.1), pose))
-people.sort(key=lambda p: p[1])
-for px, py, ph, pose in people:
-    ell((64,138,66), px, py+ph*0.02, ph*0.26, ph*0.06)
-for px, py, ph, pose in people:
-    person(px, py, ph, pose)
+        x=cx-wd*0.44 + (wd*0.88)*i/(n-1)
+        rect(marble, x-wd*0.035, by-ht*0.72, x+wd*0.035, by-ht*0.11)
+        rect(shade, x+wd*0.012, by-ht*0.72, x+wd*0.035, by-ht*0.11)
+    rect(dk(marble,0.94), cx-wd*0.52, by-ht*0.86, cx+wd*0.52, by-ht*0.72)
+    poly(roof, [(cx-wd*0.56, by-ht*0.86), (cx+wd*0.56, by-ht*0.86), (cx, by-ht*1.14)])
+    poly(dk(roof,0.9), [(cx, by-ht*0.86), (cx+wd*0.56, by-ht*0.86), (cx, by-ht*1.14)])
+
+temple(W*0.560, H*0.62, H*0.150, H*0.20)
+
+def eiffel(cx, by, ht):
+    iron=(116,92,64); irl=(146,120,86); ird=(92,72,50)
+    def side(y): return ht*(0.20 - 0.185*((by-y)/ht)**0.65)
+    y1=by-ht*0.30; y2=by-ht*0.60; y3=by-ht*0.90; y4=by-ht
+    w0=ht*0.185; w1=ht*0.095; w2=ht*0.048; w3=ht*0.020
+    poly(iron, [(cx-w0, by), (cx-w0*0.55, y1), (cx-w1, y1), (cx-w0*0.55, by)])
+    poly(iron, [(cx+w0, by), (cx+w0*0.55, y1), (cx+w1, y1), (cx+w0*0.55, by)])
+    out.append("fill none stroke %s stroke-width %.2f path 'M %.2f,%.2f Q %.2f,%.2f %.2f,%.2f'" % (
+        hx(iron), max(2.0,3.0*S), cx-w0*0.80, by-ht*0.02, cx, by-ht*0.16, cx+w0*0.80, by-ht*0.02))
+    out.append("stroke none")
+    rect(ird, cx-w1*1.15, y1-ht*0.02, cx+w1*1.15, y1+ht*0.01)
+    poly(iron, [(cx-w1, y1), (cx-w2, y2), (cx+w2, y2), (cx+w1, y1)])
+    rect(ird, cx-w2*1.25, y2-ht*0.015, cx+w2*1.25, y2+ht*0.008)
+    poly(iron, [(cx-w2, y2), (cx-w3, y3), (cx+w3, y3), (cx+w2, y2)])
+    poly(iron, [(cx-w3, y3), (cx-ht*0.006, y4), (cx+ht*0.006, y4), (cx+w3, y3)])
+    line(ird, max(1.0,1.4*S), (cx, y3), (cx, y4))
+    for (ya,wa,yb,wb) in [(by,w0*0.7,y1,w1*0.8),(y1,w1,y2,w2),(y2,w2,y3,w3)]:
+        for t0,t1 in [(0,1),(1,0)]:
+            line(irl, max(0.8,0.9*S), (cx-wa+2*wa*t0, ya), (cx-wb+2*wb*t1, yb))
+
+eiffel(W*0.640, WL, H*0.44)
+
+def colosseum(cx, by, wd, ht):
+    stone=(224,208,170); shd=(198,180,140); dark=(120,104,80)
+    ell(stone, cx, by-ht*0.5, wd, ht*0.5)
+    rect(stone, cx-wd, by-ht*0.5, cx+wd, by-ht*0.02)
+    ell(dk(stone,0.86), cx, by-ht*0.02, wd, ht*0.22)
+    ell((150,182,120), cx, by-ht*0.5, wd*0.66, ht*0.32)
+    rect((150,182,120), cx-wd*0.66, by-ht*0.5, cx+wd*0.66, by-ht*0.1)
+    poly(stone, [(cx-wd, by-ht*0.5), (cx-wd*0.66, by-ht*0.5), (cx-wd*0.66, by-ht*0.05), (cx-wd, by-ht*0.05)])
+    poly(shd, [(cx+wd, by-ht*0.5), (cx+wd*0.66, by-ht*0.5), (cx+wd*0.66, by-ht*0.05), (cx+wd, by-ht*0.05)])
+    for ya,yb in [(by-ht*0.44, by-ht*0.28),(by-ht*0.24, by-ht*0.08)]:
+        for i in range(9):
+            t=i/8.0
+            ax=cx-wd*0.92+wd*1.84*t
+            aw=wd*0.06*(1-abs(t-0.5)*0.6)
+            if aw<=0.4*S: continue
+            rect(dark, ax-aw, ya+(yb-ya)*0.35, ax+aw, yb)
+            rgba_ell("rgba(120,104,80,1.0)", ax, ya+(yb-ya)*0.35, aw, (yb-ya)*0.35, 180, 360)
+
+colosseum(W*0.720, WL, H*0.052, H*0.150)
+
+def pagoda(cx, by, wd, ht):
+    red=(198,74,60); rdk=(150,52,44); roof=(120,66,58); gold=(240,200,90); wood=(150,96,60)
+    tiers=[(0.0,0.30,1.00),(0.28,0.26,0.80),(0.52,0.22,0.62),(0.72,0.0,0.42)]
+    for i,(yb,bh,rw) in enumerate(tiers):
+        y0=by-ht*yb
+        if bh>0:
+            rect(red, cx-wd*rw*0.5, y0-ht*bh, cx+wd*rw*0.5, y0)
+            rect(rdk, cx+wd*rw*0.18, y0-ht*bh, cx+wd*rw*0.5, y0)
+            rect(wood, cx-wd*rw*0.08, y0-ht*bh, cx+wd*rw*0.08, y0)
+        ry=y0-ht*bh
+        out.append("fill %s stroke none path 'M %.2f,%.2f Q %.2f,%.2f %.2f,%.2f L %.2f,%.2f Q %.2f,%.2f %.2f,%.2f Z'" % (
+            hx(roof), cx-wd*rw*0.72, ry, cx-wd*rw*0.30, ry-ht*0.10, cx, ry-ht*0.085,
+            cx+wd*rw*0.30, ry-ht*0.10, cx+wd*rw*0.72, ry, cx, ry+ht*0.02))
+        line(gold, max(0.8,1.0*S), (cx-wd*rw*0.72, ry), (cx+wd*rw*0.72, ry))
+    line(gold, max(1.4,2.0*S), (cx, by-ht*1.02), (cx, by-ht*1.16))
+    ell(gold, cx, by-ht*1.16, wd*0.05, wd*0.05)
+
+pagoda(W*0.820, H*0.585, H*0.115, H*0.185)
+
+# a great-wall segment marching over the far ridge on the right
+def great_wall():
+    stone=(196,180,150); shd=(168,152,124); top=(214,200,172)
+    pts=[(W*0.86, H*0.505),(W*0.90, H*0.470),(W*0.935, H*0.500),(W*0.965, H*0.455),(W, H*0.478)]
+    for i in range(len(pts)-1):
+        a,b=pts[i],pts[i+1]
+        dx,dy=b[0]-a[0],b[1]-a[1]; L=math.hypot(dx,dy) or 1
+        nx,ny=-dy/L,dx/L; th=H*0.055
+        poly(stone, [(a[0],a[1]),(b[0],b[1]),(b[0]+nx*th,b[1]+ny*th),(a[0]+nx*th,a[1]+ny*th)])
+        line(top, max(1.4,2.0*S), a, b)
+        m=int(L/(10*S))+1
+        for k in range(m):
+            t=k/max(1,m-1)
+            mx=a[0]+dx*t; my=a[1]+dy*t
+            rect(top, mx-2*S, my-4*S, mx+2*S, my)
+    for tx,ty in [(W*0.90, H*0.470),(W*0.965, H*0.455)]:
+        rect(stone, tx-4*S, ty-H*0.05, tx+4*S, ty+H*0.02)
+        rect(shd, tx+1*S, ty-H*0.05, tx+4*S, ty+H*0.02)
+        rect(top, tx-5*S, ty-H*0.06, tx+5*S, ty-H*0.05)
+
+great_wall()
+
+# ---- shore road with cars, running along the waterfront ----
+road_y = WL - H*0.028
+poly((92,94,104), [(W*0.30, WL+H*0.004), (W, WL-H*0.02), (W, road_y-H*0.030), (W*0.315, road_y-H*0.010)])
+for i in range(11):
+    t=i/10.0
+    x=W*0.34+ (W*0.62)*t
+    y=road_y-H*0.016 - t*H*0.006
+    rect((236,214,120), x-6*S, y-1.4*S, x+6*S, y+1.4*S)
+
+def car(cx, by, L, col, kind="coupe"):
+    dark=(40,44,54); glass=(150,196,224); tire=(38,38,44); hub=(150,150,158)
+    h=L*0.42
+    if kind=="bus":
+        h=L*0.62
+        rect(dk(col,0.9), cx-L*0.5, by-h, cx+L*0.5, by-L*0.14)
+        rect(col, cx-L*0.5, by-h, cx+L*0.5, by-h*0.5)
+        for i in range(4):
+            x=cx-L*0.4+ i*L*0.24
+            rect(glass, x, by-h*0.86, x+L*0.14, by-h*0.55)
+    else:
+        rect(col, cx-L*0.5, by-h*0.55, cx+L*0.5, by-L*0.14)
+        out.append("fill %s stroke none path 'M %.2f,%.2f Q %.2f,%.2f %.2f,%.2f L %.2f,%.2f Q %.2f,%.2f %.2f,%.2f Z'" % (
+            hx(col), cx-L*0.24, by-h*0.55, cx-L*0.16, by-h, cx+L*0.06, by-h,
+            cx+L*0.30, by-h, cx+L*0.30, by-h*0.55, cx-L*0.24, by-h*0.55))
+        rect(glass, cx-L*0.18, by-h*0.92, cx+L*0.02, by-h*0.6)
+        rect(glass, cx+L*0.05, by-h*0.92, cx+L*0.26, by-h*0.6)
+        rect((250,232,150), cx+L*0.46, by-h*0.42, cx+L*0.5, by-h*0.24)
+    for wx in (cx-L*0.30, cx+L*0.30):
+        ell(tire, wx, by-L*0.10, L*0.14, L*0.14)
+        ell(hub, wx, by-L*0.10, L*0.06, L*0.06)
+
+car(W*0.415, road_y-H*0.012, H*0.052, (216,72,66), "coupe")
+car(W*0.560, road_y-H*0.020, H*0.048, (244,196,72), "coupe")
+car(W*0.720, road_y-H*0.028, H*0.058, (74,150,196), "bus")
+car(W*0.870, road_y-H*0.036, H*0.050, (90,182,120), "coupe")
+
+# ---- the sea ----
+poly((60,132,182), [(W*0.285, WL), (W, WL), (W, H), (-30*S, H), (-30*S, WL+H*0.03)])
+rgba_poly("rgba(150,198,224,0.55)", [(-30*S, WL+H*0.03), (W, WL), (W, WL+H*0.03), (-30*S, WL+H*0.06)])
+random.seed(51)
+for _ in range(26):
+    sx=random.uniform(0, W); sy=random.uniform(WL+H*0.05, H-4*S)
+    sw=random.uniform(14,40)*S*(0.5+(sy-WL)/(H-WL))
+    rgba_ell("rgba(210,234,246,0.35)", sx, sy, sw, max(1.0,1.2*S))
+
+def galleon(cx, wl, s):
+    hull=(120,80,48); hdk=(92,60,36); sail=(244,240,230); sdk=(214,208,192); flag=(212,72,66)
+    poly(hull, [(cx-s*1.3, wl), (cx+s*1.35, wl), (cx+s*1.0, wl+s*0.42), (cx-s*0.95, wl+s*0.42)])
+    poly(hdk, [(cx-s*1.3, wl), (cx+s*1.35, wl), (cx+s*1.2, wl+s*0.16), (cx-s*1.15, wl+s*0.16)])
+    poly((236,224,196), [(cx-s*1.3, wl-s*0.24), (cx+s*1.35, wl-s*0.24), (cx+s*1.35, wl), (cx-s*1.3, wl)])
+    for mx,mh in [(cx-s*0.6, s*1.9),(cx+s*0.15, s*2.3),(cx+s*0.82, s*1.7)]:
+        line((70,50,34), max(1.2,1.6*S), (mx, wl-s*0.24), (mx, wl-s*0.24-mh))
+        top=wl-s*0.24-mh
+        poly(sail, [(mx-s*0.5, top+mh*0.18), (mx+s*0.5, top+mh*0.18), (mx+s*0.42, top+mh*0.52), (mx-s*0.42, top+mh*0.52)])
+        poly(sdk, [(mx-s*0.44, top+mh*0.56), (mx+s*0.44, top+mh*0.56), (mx+s*0.34, top+mh*0.88), (mx-s*0.34, top+mh*0.88)])
+        poly(flag, [(mx, top), (mx+s*0.42, top+s*0.10), (mx, top+s*0.20)])
+    rgba_poly("rgba(60,44,30,0.30)", [(cx-s*1.1, wl+s*0.42), (cx+s*1.1, wl+s*0.42), (cx+s*0.7, wl+s*0.72), (cx-s*0.7, wl+s*0.72)])
+
+def steamer(cx, wl, s):
+    hull=(58,72,96); hdk=(40,52,72); cabin=(238,236,230); stack=(196,80,64); dark=(52,54,62)
+    poly(hull, [(cx-s*1.7, wl), (cx+s*1.7, wl), (cx+s*1.3, wl+s*0.5), (cx-s*1.5, wl+s*0.5)])
+    poly(hdk, [(cx-s*1.7, wl), (cx+s*1.7, wl), (cx+s*1.55, wl+s*0.18), (cx-s*1.6, wl+s*0.18)])
+    rect(cabin, cx-s*1.0, wl-s*0.7, cx+s*0.9, wl)
+    rect(dk(cabin,0.9), cx+s*0.2, wl-s*0.7, cx+s*0.9, wl)
+    for i in range(5):
+        ell(dark, cx-s*0.8+ i*s*0.4, wl-s*0.35, s*0.08, s*0.08)
+    rect(stack, cx-s*0.15, wl-s*1.5, cx+s*0.28, wl-s*0.7)
+    rect(dark, cx-s*0.15, wl-s*1.5, cx+s*0.28, wl-s*1.4)
+    for i in range(5):
+        rgba_ell("rgba(120,124,134,%.2f)" % (0.5-i*0.08), cx+s*0.05+i*s*0.28, wl-s*1.7-i*s*0.5, s*(0.3+i*0.14), s*(0.26+i*0.12))
+
+def sailboat(cx, wl, s):
+    hull=(120,80,48); sail=(244,240,230)
+    poly(hull, [(cx-s*0.8, wl), (cx+s*0.8, wl), (cx+s*0.55, wl+s*0.34), (cx-s*0.55, wl+s*0.34)])
+    line((70,50,34), max(1.0,1.2*S), (cx, wl), (cx, wl-s*1.5))
+    poly(sail, [(cx+s*0.06, wl-s*1.45), (cx+s*0.06, wl-s*0.1), (cx+s*0.7, wl-s*0.1)])
+    poly(dk(sail,0.92), [(cx-s*0.06, wl-s*1.2), (cx-s*0.06, wl-s*0.1), (cx-s*0.55, wl-s*0.1)])
+
+galleon(W*0.470, WL+H*0.085, H*0.062)
+steamer(W*0.700, WL+H*0.150, H*0.052)
+sailboat(W*0.230, WL+H*0.120, H*0.050)
+sailboat(W*0.880, WL+H*0.210, H*0.044)
 
 sys.stdout.write(" ".join(out))
 PY
 )
-convert "$w/sky6.png" -draw "$scene" "$w/scene.png"
+convert "$w/sky6.png" -draw "$scene" "$w/scene0.png"
+
+# a soft light wash on the left keeps the wordmark legible over the panorama
+convert -size ${H}x${W} gradient:black-white -rotate 90 \
+    -evaluate pow 2.0 -evaluate multiply 0.46 "$w/lmask.png"
+convert -size ${W}x${H} xc:'#f8f2e4' "$w/lmask.png" \
+    -alpha off -compose CopyOpacity -composite "$w/lwash.png"
+convert "$w/scene0.png" "$w/lwash.png" -compose over -composite "$w/scene.png"
 
 # text labels — rendered at 2x, downscale crisp; over the open left sky
 P() { echo $(( $1 * S )); }
@@ -345,8 +449,14 @@ convert -background none -font "$fr" -pointsize $(P 54) -kerning $((1*S)) -fill 
 convert -background none -font "$fr" -pointsize $(P 54) -fill '#d4862a' label:"$ver" "$w/t2.png"
 convert -background none -font "$fr" -pointsize $(P 25) -fill '#3f6f8f' label:'Nordstjernen Web Browser' "$w/ts.png"
 convert -background none -font "$fr" -pointsize $(P 23) -kerning $((3*S)) -fill '#d4862a' label:"$codename" "$w/tc.png"
-convert -background none -font "$fr" -pointsize $(P 20) -fill '#5a7088' \
+convert -background none -font "$fr" -pointsize $(P 20) -fill '#4a6076' \
     label:'Étoile du Nord — the legendary web browser' "$w/t3.png"
+
+# a faint pale glow behind the lower lines keeps them legible over the scene
+for n in ts tc t3; do
+    convert "$w/$n.png" -channel A -blur 0x$((3*S)) +channel \
+        -fill '#fbf7ec' -colorize 100 -channel A -evaluate multiply 0.9 +channel "$w/${n}g.png"
+done
 
 w1=$(identify -format '%w' "$w/t1.png"); h1=$(identify -format '%h' "$w/t1.png")
 hs=$(identify -format '%h' "$w/ts.png"); hc=$(identify -format '%h' "$w/tc.png")
@@ -355,6 +465,9 @@ ty=$((46*S)); textleft=$((80*S))
 sy=$((ty + h1 + g1)); cy=$((sy + hs + g2)); gy=$((cy + hc + g3))
 
 convert "$w/scene.png" \
+    "$w/tsg.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
+    "$w/tcg.png" -gravity NorthWest -geometry +${textleft}+${cy} -compose over -composite \
+    "$w/t3g.png" -gravity NorthWest -geometry +${textleft}+${gy} -compose over -composite \
     "$w/t1.png" -gravity NorthWest -geometry +${textleft}+${ty} -compose over -composite \
     "$w/t2.png" -gravity NorthWest -geometry +$((textleft + w1))+${ty} -compose over -composite \
     "$w/ts.png" -gravity NorthWest -geometry +${textleft}+${sy} -compose over -composite \
