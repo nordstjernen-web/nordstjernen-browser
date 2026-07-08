@@ -182,6 +182,7 @@ typedef enum ns_css_prop {
     NS_CSS_CLIP,
     NS_CSS_CONTENT_VISIBILITY,
     NS_CSS_WRITING_MODE,
+    NS_CSS_TEXT_ORIENTATION,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -711,6 +712,7 @@ typedef struct ns_style {
 } ns_style;
 
 int ns_css_writing_mode(const ns_style *s);
+int ns_css_text_orientation(const ns_style *s);
 
 const char *ns_var_map_lookup(const struct ns_var_map *m, const char *name);
 

@@ -926,6 +926,20 @@ ns_layout_set_datalist_open(gboolean open)
 {
     g_datalist_open_for_layout = open;
 }
+
+char *
+ns_vertical_stack_text(const char *text)
+{
+    if (!text) return g_strdup("");
+    GString *out = g_string_new(NULL);
+    for (const char *p = text; *p; ) {
+        const char *next = g_utf8_next_char(p);
+        if (out->len) g_string_append_c(out, '\n');
+        g_string_append_len(out, p, (gssize)(next - p));
+        p = next;
+    }
+    return g_string_free(out, FALSE);
+}
 static struct ns_image_cache *g_image_cache_for_layout;
 static const char    *g_base_url_for_layout;
 static GHashTable    *g_counters_for_layout;
@@ -5306,24 +5320,37 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
 
     box->vertical_wm = 0;
+    box->text_orient = 0;
     if (ns_css_writing_mode(parent_style) &&
         !(box->inline_atomics && box->inline_atomics->len > 0)) {
         box->vertical_wm = ns_css_writing_mode(parent_style);
+        box->text_orient = ns_css_text_orientation(parent_style);
         PangoLayout *layout = make_pango_layout(parent_style);
-        pango_layout_set_width(layout, -1);
-        ns_paint_apply_css_line_spacing(layout, parent_style);
-        PangoAttrList *i18n = pango_attr_list_new();
-        ns_paint_apply_i18n(layout, i18n, box);
-        ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
-        apply_inline_spacing(i18n, parent_style, box->text);
-        ns_inline_layout_set_attrs(layout, i18n, box);
-        pango_attr_list_unref(i18n);
-        pango_layout_set_text(layout, box->text, -1);
         int pw = 0, ph = 0;
-        pango_layout_get_pixel_size(layout, &pw, &ph);
+        if (box->text_orient == 1) {
+            char *stacked = ns_vertical_stack_text(box->text);
+            pango_layout_set_width(layout, -1);
+            pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+            pango_layout_set_text(layout, stacked, -1);
+            g_free(stacked);
+            pango_layout_get_pixel_size(layout, &pw, &ph);
+            box->content_width  = pw;
+            box->content_height = ph;
+        } else {
+            pango_layout_set_width(layout, -1);
+            ns_paint_apply_css_line_spacing(layout, parent_style);
+            PangoAttrList *i18n = pango_attr_list_new();
+            ns_paint_apply_i18n(layout, i18n, box);
+            ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
+            apply_inline_spacing(i18n, parent_style, box->text);
+            ns_inline_layout_set_attrs(layout, i18n, box);
+            pango_attr_list_unref(i18n);
+            pango_layout_set_text(layout, box->text, -1);
+            pango_layout_get_pixel_size(layout, &pw, &ph);
+            box->content_width  = ph;
+            box->content_height = pw;
+        }
         g_object_unref(layout);
-        box->content_width  = ph;
-        box->content_height = pw;
         box->inline_layout_cache_valid = FALSE;
         return;
     }

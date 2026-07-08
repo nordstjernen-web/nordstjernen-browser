@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-07-08 (rev 34).
+Snapshot: **1.0.16**, 2026-07-08 (rev 35).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
 implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
@@ -653,17 +653,22 @@ CSS support (abridged):
   isolate) so fribidi performs real UAX#9 isolation/override. The residual
   gap is exposing the computed *used* direction of `dir=auto` elements to
   `:dir()`.
-- 🟡 Writing modes: `writing-mode` is parsed and inherited (`ns_css_writing_mode`
-  in `src/css.c`); a block/inline-block container in `vertical-rl` / `vertical-lr`
-  (and the `sideways-*` aliases) lays its text out in vertical columns — measured
-  with the inline and block axes swapped (`inline_layout` in `src/layout.c`) and
-  painted per line (`paint_inline` in `src/paint.c`): each line becomes a column,
-  its glyphs rotated 90° **clockwise** so horizontal-script (Latin) runs are set
-  sideways and read top-to-bottom, matching the default `text-orientation: mixed`;
-  columns progress right-to-left for `vertical-rl` and left-to-right for
-  `vertical-lr`. Remaining: automatic wrapping into columns at the block height
-  (columns currently form only at explicit line breaks), upright CJK
-  (`text-orientation: upright`), and vertical layout of form/replaced boxes.
+- 🟡 Writing modes: `writing-mode` and `text-orientation` are parsed and inherited
+  (`ns_css_writing_mode` / `ns_css_text_orientation` in `src/css.c`); a
+  block/inline-block container in `vertical-rl` / `vertical-lr` (and the
+  `sideways-*` aliases) lays its text out in vertical columns — measured with the
+  inline and block axes swapped (`inline_layout` in `src/layout.c`) and painted in
+  `paint_inline` (`src/paint.c`). Two orientations render:
+  `text-orientation: mixed` (the default) and `sideways` set each column's glyphs
+  rotated 90° **clockwise** (per line, so horizontal-script/Latin runs read
+  top-to-bottom by turning the page clockwise — the spec-correct default); columns
+  progress right-to-left for `vertical-rl` and left-to-right for `vertical-lr`.
+  `text-orientation: upright` stacks every character upright (grapheme per row).
+  Remaining: under `mixed`, upright scripts (CJK) are not yet kept upright while
+  Latin rotates — the whole run rotates, so `mixed` currently matches `sideways`
+  for mixed-script text; plus automatic wrapping into columns at the block height
+  (columns form only at explicit line breaks) and vertical layout of
+  form/replaced boxes.
 
 Replaced elements (`img`/`video`/`canvas`) are sized via the media-box
 path in `src/layout.h`.

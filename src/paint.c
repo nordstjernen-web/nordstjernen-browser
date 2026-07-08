@@ -2280,6 +2280,22 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                            0.07, 0.07, 0.07, 1);
 
     if (b->vertical_wm) {
+        if (b->text_orient == 1) {
+            char *stacked = ns_vertical_stack_text(b->text);
+            PangoLayout *layout = paint_inline_make_layout(b, s, highlight);
+            pango_layout_set_attributes(layout, NULL);
+            pango_layout_set_width(layout, -1);
+            pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+            pango_layout_set_text(layout, stacked, -1);
+            g_free(stacked);
+            cairo_save(cr);
+            set_source_rgba(cr, color);
+            cairo_move_to(cr, b->x, b->y);
+            pango_cairo_show_layout(cr, layout);
+            cairo_restore(cr);
+            g_object_unref(layout);
+            return;
+        }
         PangoLayout *layout = paint_inline_make_layout(b, s, highlight);
         pango_layout_set_width(layout, -1);
         set_source_rgba(cr, color);

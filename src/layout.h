@@ -140,6 +140,7 @@ typedef struct ns_box {
     double inline_layout_cache_height;
     gboolean inline_layout_cache_valid;
     int vertical_wm;
+    int text_orient;
     const ns_style *inline_natural_cache_style;
     double inline_natural_cache_width;
     gboolean inline_natural_cache_valid;
@@ -192,6 +193,7 @@ ns_box *ns_layout_build(const ns_node *doc, GHashTable *styles,
 
 void ns_layout_set_open_select(const ns_node *select);
 void ns_layout_set_datalist_open(gboolean open);
+char *ns_vertical_stack_text(const char *text);
 
 void ns_layout_collect_images(const ns_box *root, GPtrArray *out_boxes);
 void ns_layout_collect_videos(const ns_box *root, GPtrArray *out_boxes);
