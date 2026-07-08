@@ -33569,6 +33569,41 @@ ns_set_tostring_tag(JSContext *ctx, JSValueConst obj, const char *tag)
 }
 
 static JSValue
+ns_tw_currentnode_get(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return JS_GetPropertyStr(ctx, this_val, "\xff" "cur");
+}
+
+static JSValue
+ns_tw_currentnode_set(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    JSValueConst val = argc > 0 ? argv[0] : JS_UNDEFINED;
+    if (!ns_unwrap_element_mut(val))
+        return JS_ThrowTypeError(ctx, "Failed to set the 'currentNode' property "
+            "on 'TreeWalker': The provided value is not of type 'Node'.");
+    JS_SetPropertyStr(ctx, this_val, "\xff" "cur", JS_DupValue(ctx, val));
+    return JS_UNDEFINED;
+}
+
+static void
+ns_tw_define_current(JSContext *ctx, JSValueConst tw, JSValueConst node)
+{
+    JS_DefinePropertyValueStr(ctx, tw, "\xff" "cur", JS_DupValue(ctx, node),
+                              JS_PROP_WRITABLE);
+    JSValue getter = JS_NewCFunction2(ctx, ns_tw_currentnode_get,
+                                      "get", 0, JS_CFUNC_generic, 0);
+    JSValue setter = JS_NewCFunction2(ctx, ns_tw_currentnode_set,
+                                      "set", 1, JS_CFUNC_generic, 0);
+    JSAtom atom = JS_NewAtom(ctx, "currentNode");
+    JS_DefinePropertyGetSet(ctx, tw, atom, getter, setter,
+                            JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, atom);
+}
+
+static JSValue
 ns_document_create_tree_walker(JSContext *ctx, JSValueConst this_val,
                                int argc, JSValueConst *argv)
 {
@@ -33578,7 +33613,7 @@ ns_document_create_tree_walker(JSContext *ctx, JSValueConst this_val,
             "'Document': parameter 1 is not of type 'Node'.");
     JSValue tw = JS_NewObject(ctx);
     ns_def_ro(ctx, tw, "root",                JS_DupValue(ctx, argv[0]));
-    JS_SetPropertyStr(ctx, tw, "currentNode", JS_DupValue(ctx, argv[0]));
+    ns_tw_define_current(ctx, tw, argv[0]);
     ns_traversal_init_common(ctx, tw, argc, argv);
     ns_set_tostring_tag(ctx, tw, "TreeWalker");
     ns_bind_fn(ctx, tw, "parentNode",      ns_tw_parentNode,      0);
