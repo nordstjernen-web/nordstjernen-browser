@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-07-08 (rev 32).
+Snapshot: **1.0.16**, 2026-07-08 (rev 33).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
 implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
@@ -653,7 +653,15 @@ CSS support (abridged):
   isolate) so fribidi performs real UAX#9 isolation/override. The residual
   gap is exposing the computed *used* direction of `dir=auto` elements to
   `:dir()`.
-- ❌ Writing modes (vertical `writing-mode`).
+- 🟡 Writing modes: `writing-mode` is parsed and inherited (`ns_css_writing_mode`
+  in `src/css.c`); a block/inline-block container in `vertical-rl` / `vertical-lr`
+  (and the `sideways-*` aliases) lays its text out as a vertical column — measured
+  with the inline and block axes swapped (`inline_layout` in `src/layout.c`) and
+  painted by rotating the text run 90° so Latin glyphs are set sideways and read
+  top-to-bottom (`paint_inline` in `src/paint.c`). Single-column text is correct;
+  multi-column wrapping at the block height, the right-to-left vs left-to-right
+  column-progression difference, upright CJK (`text-orientation`), and vertical
+  form/replaced-box layout are not wired yet.
 
 Replaced elements (`img`/`video`/`canvas`) are sized via the media-box
 path in `src/layout.h`.

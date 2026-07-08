@@ -48,21 +48,17 @@ The full section-by-section walk-through lives in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md).
 
 **What's absent.** No element or API row in §1–§16 is fully absent any
-more — every one is implemented, partial, or a deliberate non-goal. The
-remaining gaps are:
-
-- **One CSS rendering feature** — vertical `writing-mode`. Text lays out
-  horizontally only; vertical Japanese/Chinese/Mongolian flow is not
-  supported yet.
-- **By-design non-goals**, which are absent on purpose and will not be
-  added: `embed` / `object` plugins (no NPAPI/PPAPI), `frame` / `frameset`,
-  and the obsolete `applet` / `marquee` elements. Nordstjernen also
-  deliberately ships no telemetry and no AI-style web APIs.
+more — every one is implemented, partial, or a deliberate non-goal. The only
+features that never will be added are **by-design non-goals**, absent on
+purpose: `embed` / `object` plugins (no NPAPI/PPAPI), `frame` / `frameset`,
+and the obsolete `applet` / `marquee` elements. Nordstjernen also deliberately
+ships no telemetry and no AI-style web APIs.
 
 Everything else that is not yet complete is tracked as **partial** (🟡) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) rather than absent —
-for example `iframe` `srcdoc` rendering, quirks-mode layout deltas, and
-native date/time pickers.
+for example vertical `writing-mode` (single-column vertical text works;
+multi-column wrapping and upright CJK do not), `iframe` `srcdoc` rendering,
+quirks-mode layout deltas, and native date/time pickers.
 
 ## Browser features
 

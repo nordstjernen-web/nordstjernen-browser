@@ -139,6 +139,7 @@ typedef struct ns_box {
     double inline_layout_cache_width;
     double inline_layout_cache_height;
     gboolean inline_layout_cache_valid;
+    int vertical_wm;
     const ns_style *inline_natural_cache_style;
     double inline_natural_cache_width;
     gboolean inline_natural_cache_valid;

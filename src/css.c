@@ -281,6 +281,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_BORDER_SPACING]       = "border-spacing",
     [NS_CSS_CONTAINER_TYPE]       = "container-type",
     [NS_CSS_CONTAINER_NAME]       = "container-name",
+    [NS_CSS_WRITING_MODE]         = "writing-mode",
     [NS_CSS_CARET_COLOR]          = "caret-color",
     [NS_CSS_TAB_SIZE]             = "tab-size",
     [NS_CSS_JUSTIFY_ITEMS]        = "justify-items",
@@ -319,6 +320,7 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_WHITE_SPACE:
     case NS_CSS_HYPHENS:
     case NS_CSS_DIRECTION:
+    case NS_CSS_WRITING_MODE:
     case NS_CSS_CAPTION_SIDE:
     case NS_CSS_BORDER_COLLAPSE:
     case NS_CSS_BORDER_SPACING:
@@ -344,6 +346,20 @@ prop_inherits(ns_css_prop p)
     default:
         return FALSE;
     }
+}
+
+int
+ns_css_writing_mode(const ns_style *s)
+{
+    const ns_css_value *v = s ? s->values[NS_CSS_WRITING_MODE] : NULL;
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return 0;
+    const char *k = v->u.keyword;
+    if (strcmp(k, "vertical-rl") == 0 || strcmp(k, "sideways-rl") == 0 ||
+        strcmp(k, "tb-rl") == 0 || strcmp(k, "tb") == 0)
+        return 1;
+    if (strcmp(k, "vertical-lr") == 0 || strcmp(k, "sideways-lr") == 0)
+        return 2;
+    return 0;
 }
 
 static gboolean

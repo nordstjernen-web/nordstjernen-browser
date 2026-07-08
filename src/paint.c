@@ -2279,6 +2279,20 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                            s ? s->values[NS_CSS_COLOR] : NULL,
                            0.07, 0.07, 0.07, 1);
 
+    if (b->vertical_wm) {
+        PangoLayout *layout = paint_inline_make_layout(b, s, highlight);
+        pango_layout_set_width(layout, -1);
+        cairo_save(cr);
+        cairo_translate(cr, b->x + b->content_width, b->y);
+        cairo_rotate(cr, G_PI / 2.0);
+        set_source_rgba(cr, color);
+        cairo_move_to(cr, 0, 0);
+        pango_cairo_show_layout(cr, layout);
+        cairo_restore(cr);
+        g_object_unref(layout);
+        return;
+    }
+
     double text_x = b->x;
     {
         double ti = ns_text_indent_px(s, b->content_width);

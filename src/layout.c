@@ -5305,6 +5305,29 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         return;
     }
 
+    box->vertical_wm = 0;
+    if (ns_css_writing_mode(parent_style) &&
+        !(box->inline_atomics && box->inline_atomics->len > 0)) {
+        box->vertical_wm = ns_css_writing_mode(parent_style);
+        PangoLayout *layout = make_pango_layout(parent_style);
+        pango_layout_set_width(layout, -1);
+        ns_paint_apply_css_line_spacing(layout, parent_style);
+        PangoAttrList *i18n = pango_attr_list_new();
+        ns_paint_apply_i18n(layout, i18n, box);
+        ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
+        apply_inline_spacing(i18n, parent_style, box->text);
+        ns_inline_layout_set_attrs(layout, i18n, box);
+        pango_attr_list_unref(i18n);
+        pango_layout_set_text(layout, box->text, -1);
+        int pw = 0, ph = 0;
+        pango_layout_get_pixel_size(layout, &pw, &ph);
+        g_object_unref(layout);
+        box->content_width  = ph;
+        box->content_height = pw;
+        box->inline_layout_cache_valid = FALSE;
+        return;
+    }
+
     if (box->inline_atomics) {
         for (guint i = 0; i < box->inline_atomics->len; i++) {
             ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
