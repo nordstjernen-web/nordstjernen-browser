@@ -39,12 +39,29 @@ convert -size ${W}x${H} xc:none -fill '#cfe9ff' \
     -draw "ellipse $((760*S)),$((72*S)) $((150*S)),$((120*S)) 0,360" -blur 0x$((70*S)) "$w/glow.png"
 convert "$w/sky1.png" "$w/glow.png" -compose screen -composite "$w/sky2.png"
 
-# soft clouds drifting across the horizon
-convert "$w/sky2.png" -fill 'rgba(255,255,255,0.82)' \
-    -draw "ellipse $((250*S)),$((104*S)) $((50*S)),$((16*S)) 0,360 ellipse $((300*S)),$((110*S)) $((42*S)),$((18*S)) 0,360 ellipse $((205*S)),$((114*S)) $((30*S)),$((12*S)) 0,360" \
-    -draw "ellipse $((560*S)),$((56*S)) $((40*S)),$((13*S)) 0,360 ellipse $((602*S)),$((62*S)) $((30*S)),$((12*S)) 0,360" \
-    -draw "ellipse $((150*S)),$((150*S)) $((36*S)),$((12*S)) 0,360 ellipse $((190*S)),$((156*S)) $((28*S)),$((11*S)) 0,360" \
-    -blur 0x$((2*S)) "$w/sky3.png"
+# soft, voluminous clouds with shaded undersides and sunlit tops
+clouddraw=$(python3 - "$W" "$H" "$S" <<'PY'
+import sys
+W,H=int(sys.argv[1]),int(sys.argv[2]); S=float(sys.argv[3])
+out=[]
+def ell(rgba,cx,cy,rx,ry): out.append("fill %s stroke none ellipse %.2f,%.2f %.2f,%.2f 0,360"%(rgba,cx,cy,rx,ry))
+def cloud(cx,cy,sc):
+    puffs=[(-1.05,0.06,0.46),(-0.55,-0.10,0.66),(0.05,-0.20,0.82),(0.62,-0.08,0.66),(1.12,0.08,0.44),(0.15,0.14,0.95)]
+    ell("rgba(206,218,232,0.85)", cx+0.10*sc, cy+sc*0.30, 1.55*sc, sc*0.34)
+    for dx,dy,r in puffs:
+        ell("rgba(196,210,226,0.85)", cx+dx*sc, cy+dy*sc+sc*0.20, r*sc, r*sc*0.72)
+    for dx,dy,r in puffs:
+        ell("rgba(255,255,255,0.96)", cx+dx*sc, cy+dy*sc, r*sc, r*sc*0.74)
+    for dx,dy,r in puffs[:4]:
+        ell("rgba(255,255,255,0.9)", cx+dx*sc-r*sc*0.2, cy+dy*sc-r*sc*0.32, r*sc*0.5, r*sc*0.34)
+cloud(W*0.305, H*0.095, H*0.050)
+cloud(W*0.605, H*0.070, H*0.044)
+cloud(W*0.175, H*0.335, H*0.040)
+cloud(W*0.470, H*0.320, H*0.034)
+sys.stdout.write(" ".join(out))
+PY
+)
+convert "$w/sky2.png" -draw "$clouddraw" -blur 0x$((1*S)) "$w/sky3.png"
 
 # the world globe + air traffic: airliner with contrail, biplane, balloon, rocket, birds
 skydraw=$(python3 - "$W" "$H" "$S" <<'PY'
@@ -315,6 +332,58 @@ bg_tholos(W*0.955, land_top(0.955)+H*0.028, H*0.058, H*0.095)
 # a sandy desert patch under the pyramids
 poly((236,214,160), [(W*0.36, WL), (W*0.585, WL), (W*0.55, H*0.63), (W*0.40, H*0.645)])
 
+# sunlit warm band across the upper slope + cool shade toward the shore
+rgba_poly("rgba(250,236,150,0.16)", [(W*0.30, WL), (W, H*0.475), (W, H*0.545),
+    (W*0.60, H*0.62), (W*0.42, H*0.65), (W*0.30, WL)])
+rgba_poly("rgba(30,70,60,0.10)", [(W*0.285, WL), (W, WL-H*0.02), (W, WL), (W*0.285, WL)])
+
+# ---- Mediterranean vegetation on the hillside, behind the monuments ----
+def cypress(bx, by, h):
+    c1=(52,104,64); c2=(72,132,80)
+    gshadow(bx+h*0.12, by, h*0.22, h*0.05, 0.16)
+    line((104,78,50), max(1.0,1.2*S), (bx, by), (bx, by-h*0.14))
+    poly(dk(c1,0.9), [(bx,by-h),(bx+h*0.13,by-h*0.04),(bx-h*0.11,by-h*0.04)])
+    poly(c1, [(bx-h*0.01,by-h*0.99),(bx+h*0.10,by-h*0.05),(bx-h*0.10,by-h*0.05)])
+    poly(c2, [(bx-h*0.03,by-h*0.9),(bx+h*0.03,by-h*0.2),(bx-h*0.06,by-h*0.2)])
+
+def pine(bx, by, h):
+    base=(58,122,66)
+    gshadow(bx+h*0.14, by, h*0.4, h*0.06, 0.16)
+    line((116,84,54), max(1.2,1.6*S), (bx, by), (bx, by-h*0.66))
+    ell(dk(base,0.86), bx+h*0.10, by-h*0.70, h*0.36, h*0.20)
+    ell(base, bx, by-h*0.78, h*0.38, h*0.23)
+    ell(lt(base,1.14), bx-h*0.12, by-h*0.86, h*0.16, h*0.10)
+
+def olive(bx, by, h):
+    base=(126,156,102)
+    gshadow(bx+h*0.10, by, h*0.34, h*0.05, 0.16)
+    line((126,108,82), max(1.0,1.3*S), (bx, by), (bx, by-h*0.46))
+    blobs=[(-0.17,-0.58,0.24),(0.18,-0.55,0.23),(0.0,-0.74,0.26)]
+    for dx,dy,r in blobs:
+        ell(dk(base,0.88), bx+dx*h+r*h*0.12, by+dy*h+r*h*0.10, r*h, r*h*0.9)
+    for dx,dy,r in blobs:
+        ell(base, bx+dx*h, by+dy*h, r*h, r*h*0.9)
+    ell(lt(base,1.12), bx-0.14*h, by-0.78*h, 0.12*h, 0.09*h)
+
+def place_tree(fn, xf, sf, h):
+    ty0=land_top(xf); by=ty0+(WL-ty0)*sf
+    fn(W*xf, by, h)
+
+for kind,xf,sf,hh in [
+    (cypress,0.355,0.55,0.090),(pine,0.500,0.62,0.086),(olive,0.535,0.74,0.070),
+    (cypress,0.605,0.5,0.096),(cypress,0.628,0.62,0.082),(pine,0.688,0.66,0.088),
+    (olive,0.742,0.55,0.072),(cypress,0.772,0.72,0.078),(pine,0.862,0.5,0.090),
+    (cypress,0.905,0.42,0.092),(olive,0.952,0.66,0.070),(cypress,0.978,0.5,0.082)]:
+    place_tree(kind, xf, sf, H*hh)
+
+random.seed(63)
+for _ in range(60):
+    gx=random.uniform(W*0.30, W); gt=land_top(gx/W)
+    gy=random.uniform(gt+H*0.02, WL-2*S)
+    gh=random.uniform(3,7)*S
+    line(dk((92,168,84),0.92), max(0.7,0.9*S), (gx, gy), (gx+random.uniform(-2,2)*S, gy-gh))
+    line((120,192,100), max(0.7,0.9*S), (gx+1.6*S, gy), (gx+1.6*S+random.uniform(-2,2)*S, gy-gh*0.8))
+
 # ---- wonders (left -> right along the coast) ----
 def pyramid(cx, by, hw, hh):
     gshadow(cx+hw*0.35, by, hw*1.2, hh*0.05, 0.20)
@@ -413,13 +482,14 @@ def colosseum(cx, by, wd, ht):
     litc=(238,224,188); stone=(220,204,164); shd=(190,172,132); dark=(112,96,72); grass=(150,182,120)
     gshadow(cx, by, wd*1.15, ht*0.06, 0.20)
     top=by-ht
-    ell(stone, cx, top+ht*0.16, wd, ht*0.16)
-    ell(grass, cx, top+ht*0.15, wd*0.62, ht*0.10)
-    rect(stone, cx-wd, top+ht*0.16, cx+wd, by)
-    poly(litc, [(cx-wd, top+ht*0.16),(cx-wd*0.46, top+ht*0.16),(cx-wd*0.46, by),(cx-wd,by)])
-    poly(shd, [(cx+wd, top+ht*0.16),(cx+wd*0.5, top+ht*0.16),(cx+wd*0.5, by),(cx+wd,by)])
-    ell(shd, cx, by, wd, ht*0.13)
-    ell(stone, cx, by-ht*0.05, wd*0.99, ht*0.11)
+    ell(stone, cx, top+ht*0.20, wd, ht*0.20)
+    ell(dk(stone,0.9), cx, top+ht*0.18, wd*0.72, ht*0.15)
+    ell(grass, cx, top+ht*0.17, wd*0.66, ht*0.12)
+    rect(stone, cx-wd, top+ht*0.19, cx+wd, by)
+    poly(litc, [(cx-wd, top+ht*0.19),(cx-wd*0.46, top+ht*0.19),(cx-wd*0.46, by),(cx-wd,by)])
+    poly(shd, [(cx+wd, top+ht*0.19),(cx+wd*0.5, top+ht*0.19),(cx+wd*0.5, by),(cx+wd,by)])
+    ell(shd, cx, by, wd, ht*0.15)
+    ell(stone, cx, by-ht*0.055, wd*0.99, ht*0.12)
     na=9
     for i in range(na):
         t=i/(na-1.0)
@@ -437,7 +507,7 @@ def colosseum(cx, by, wd, ht):
     line(dk(stone,0.9), max(0.5,0.6*S), (cx-wd, top+ht*0.32), (cx+wd, top+ht*0.32))
     line(dk(stone,0.9), max(0.5,0.6*S), (cx-wd, top+ht*0.575), (cx+wd, top+ht*0.575))
 
-colosseum(W*0.720, WL, H*0.056, H*0.155)
+colosseum(W*0.718, WL, H*0.072, H*0.140)
 
 def pagoda(cx, by, wd, ht):
     red=(198,74,60); rdk=(150,52,44); roof=(120,66,58); gold=(240,200,90); wood=(150,96,60)
@@ -524,14 +594,35 @@ car(W*0.560, road_y-H*0.020, H*0.048, (244,196,72), "coupe")
 car(W*0.720, road_y-H*0.028, H*0.058, (74,150,196), "bus")
 car(W*0.870, road_y-H*0.036, H*0.050, (90,182,120), "coupe")
 
-# ---- the sea ----
-poly((60,132,182), [(W*0.285, WL), (W, WL), (W, H), (-30*S, H), (-30*S, WL+H*0.03)])
-rgba_poly("rgba(150,198,224,0.55)", [(-30*S, WL+H*0.03), (W, WL), (W, WL+H*0.03), (-30*S, WL+H*0.06)])
+# ---- the sea: depth gradient, sun-glitter, wave crests, shoreline foam ----
+seaT=(108,176,208); seaB=(34,92,146)
+NB=18
+for i in range(NB):
+    t0=i/NB; t1=(i+1)/NB
+    y0=WL+(H-WL)*t0; y1=WL+(H-WL)*t1
+    tm=((t0+t1)/2)**0.85
+    c=tuple(int(round(seaT[k]+(seaB[k]-seaT[k])*tm)) for k in range(3))
+    poly(c, [(-30*S, y0), (W+30*S, y0), (W+30*S, y1), (-30*S, y1)])
+rgba_poly("rgba(214,236,238,0.55)", [(-30*S, WL), (W+30*S, WL), (W+30*S, WL+H*0.018), (-30*S, WL+H*0.018)])
+random.seed(77)
+gx=W*0.775
+for i in range(30):
+    t=i/30.0
+    yy=WL+H*0.02+(H-WL)*t
+    spread=(8+70*t)*S
+    rgba_ell("rgba(255,246,212,%.2f)"%(0.30*(1-t*0.55)), gx+random.uniform(-spread,spread), yy, random.uniform(4,11)*S, max(1.0,1.1*S))
 random.seed(51)
-for _ in range(26):
-    sx=random.uniform(0, W); sy=random.uniform(WL+H*0.05, H-4*S)
-    sw=random.uniform(14,40)*S*(0.5+(sy-WL)/(H-WL))
-    rgba_ell("rgba(210,234,246,0.35)", sx, sy, sw, max(1.0,1.2*S))
+for _ in range(78):
+    t=random.random()
+    sy=WL+H*0.02+(H-WL)*t
+    sx=random.uniform(-20*S, W+20*S)
+    sw=(4+30*t)*S
+    rgba_ell("rgba(214,238,246,%.2f)"%(0.14+0.22*t), sx, sy, sw, max(0.8,1.0*S))
+random.seed(9)
+fx=W*0.285
+while fx<W+10*S:
+    rgba_ell("rgba(242,249,250,0.55)", fx, WL+random.uniform(-1.0,2.0)*S, random.uniform(7,13)*S, max(1.2,1.5*S))
+    fx+=random.uniform(11,19)*S
 
 def galleon(cx, wl, s):
     hull=(120,80,48); hdk=(92,60,36); sail=(246,242,232); sdk=(216,210,194); flag=(212,72,66); rig=(74,54,38)
@@ -593,12 +684,21 @@ PY
 )
 convert "$w/sky6.png" -draw "$scene" "$w/scene0.png"
 
+# unify the lighting: a soft warm sun glow high in the sky, and deepen the
+# foreground water for atmosphere
+convert -size ${W}x${H} xc:black -fill '#f4d590' \
+    -draw "ellipse $((820*S)),$((26*S)) $((190*S)),$((130*S)) 0,360" -blur 0x$((80*S)) \
+    -evaluate multiply 0.42 "$w/sunwarm.png"
+convert "$w/scene0.png" "$w/sunwarm.png" -compose screen -composite "$w/scene0b.png"
+convert -size ${W}x${H} gradient:'rgba(255,255,255,0)'-'rgba(18,38,66,0.15)' "$w/botshade.png"
+convert "$w/scene0b.png" "$w/botshade.png" -compose over -composite "$w/scene0c.png"
+
 # a soft light wash on the left keeps the wordmark legible over the panorama
 convert -size ${H}x${W} gradient:black-white -rotate 90 \
     -evaluate pow 2.0 -evaluate multiply 0.46 "$w/lmask.png"
 convert -size ${W}x${H} xc:'#f8f2e4' "$w/lmask.png" \
     -alpha off -compose CopyOpacity -composite "$w/lwash.png"
-convert "$w/scene0.png" "$w/lwash.png" -compose over -composite "$w/scene.png"
+convert "$w/scene0c.png" "$w/lwash.png" -compose over -composite "$w/scene.png"
 
 # text labels — rendered at 2x, downscale crisp; over the open left sky
 P() { echo $(( $1 * S )); }
