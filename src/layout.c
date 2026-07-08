@@ -5310,6 +5310,39 @@ measure_inline_ascii_min_width(ns_box *box, const ns_style *parent_style)
 static void shift_box_tree(ns_box *b, double dx, double dy);
 
 static void
+ns_vertical_measure(ns_box *box, const ns_style *ps,
+                    double *thickness, double *length)
+{
+    int orient = ns_css_text_orientation(ps);
+    PangoLayout *layout = make_pango_layout(ps);
+    int pw = 0, ph = 0;
+    if (orient == 1) {
+        char *stacked = ns_vertical_stack_text(box->text);
+        pango_layout_set_width(layout, -1);
+        pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
+        pango_layout_set_text(layout, stacked, -1);
+        g_free(stacked);
+        pango_layout_get_pixel_size(layout, &pw, &ph);
+        *thickness = pw;
+        *length = ph;
+    } else {
+        pango_layout_set_width(layout, -1);
+        ns_paint_apply_css_line_spacing(layout, ps);
+        PangoAttrList *i18n = pango_attr_list_new();
+        ns_paint_apply_i18n(layout, i18n, box);
+        ns_paint_apply_font_features(i18n, ps, 0, G_MAXUINT);
+        apply_inline_spacing(i18n, ps, box->text);
+        ns_inline_layout_set_attrs(layout, i18n, box);
+        pango_attr_list_unref(i18n);
+        pango_layout_set_text(layout, box->text, -1);
+        pango_layout_get_pixel_size(layout, &pw, &ph);
+        *thickness = ph;
+        *length = pw;
+    }
+    g_object_unref(layout);
+}
+
+static void
 inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
 {
     g_assert(box->kind == NS_BOX_INLINE);
@@ -5325,32 +5358,10 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         !(box->inline_atomics && box->inline_atomics->len > 0)) {
         box->vertical_wm = ns_css_writing_mode(parent_style);
         box->text_orient = ns_css_text_orientation(parent_style);
-        PangoLayout *layout = make_pango_layout(parent_style);
-        int pw = 0, ph = 0;
-        if (box->text_orient == 1) {
-            char *stacked = ns_vertical_stack_text(box->text);
-            pango_layout_set_width(layout, -1);
-            pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
-            pango_layout_set_text(layout, stacked, -1);
-            g_free(stacked);
-            pango_layout_get_pixel_size(layout, &pw, &ph);
-            box->content_width  = pw;
-            box->content_height = ph;
-        } else {
-            pango_layout_set_width(layout, -1);
-            ns_paint_apply_css_line_spacing(layout, parent_style);
-            PangoAttrList *i18n = pango_attr_list_new();
-            ns_paint_apply_i18n(layout, i18n, box);
-            ns_paint_apply_font_features(i18n, parent_style, 0, G_MAXUINT);
-            apply_inline_spacing(i18n, parent_style, box->text);
-            ns_inline_layout_set_attrs(layout, i18n, box);
-            pango_attr_list_unref(i18n);
-            pango_layout_set_text(layout, box->text, -1);
-            pango_layout_get_pixel_size(layout, &pw, &ph);
-            box->content_width  = ph;
-            box->content_height = pw;
-        }
-        g_object_unref(layout);
+        double thickness = 0, length = 0;
+        ns_vertical_measure(box, parent_style, &thickness, &length);
+        box->content_width  = thickness;
+        box->content_height = length;
         box->inline_layout_cache_valid = FALSE;
         return;
     }
@@ -6238,6 +6249,12 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
+        if (box->text && *box->text && ns_css_writing_mode(parent_style) &&
+            !(box->inline_atomics && box->inline_atomics->len > 0)) {
+            double thickness = 0, length = 0;
+            ns_vertical_measure(box, parent_style, &thickness, &length);
+            return thickness;
+        }
         if (!box->text || !*box->text) {
             if (!box->inline_atomics || box->inline_atomics->len == 0)
                 return 0;
@@ -6353,6 +6370,12 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
     if (!box) return 0;
     if (box->kind == NS_BOX_INLINE) {
         if (!box->text || !*box->text) return 0;
+        if (ns_css_writing_mode(parent_style) &&
+            !(box->inline_atomics && box->inline_atomics->len > 0)) {
+            double thickness = 0, length = 0;
+            ns_vertical_measure(box, parent_style, &thickness, &length);
+            return thickness;
+        }
         gboolean cacheable = inline_box_measure_cacheable(box);
         if (cacheable && box->inline_min_cache_valid &&
             box->inline_min_cache_style == parent_style)
