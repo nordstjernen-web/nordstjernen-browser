@@ -8,7 +8,7 @@ top-level [README.md](../README.md); the development plan is
 ## Using the browser
 
 - [Controls.md](Controls.md) — keyboard, mouse, and touch controls.
-- [media.md](media.md) — how `<video>`/`<audio>` play (MPEG-1, optional WebM, the audio helper, external-player fallback).
+- [media.md](media.md) — how `<video>`/`<audio>` play (MPEG-1, optional WebM, the audio helper, WebVTT `<track>` captions, external-player fallback).
 - [ai.md](ai.md) — the local AI start page (`about:start`), on-device via llama.cpp.
 - [Proxy.md](Proxy.md) — proxies and VPNs.
 - [privacy-policy.md](privacy-policy.md) — what the browser does and does not collect.

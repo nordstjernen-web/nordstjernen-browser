@@ -33,7 +33,7 @@ in-process media codecs. Highlights:
 |-----------|:------:|
 | §2 Common infrastructure — WHATWG URL, IDN, origins, encodings | ✅ |
 | §3–§4 Semantics, document structure & tabular content | ✅ |
-| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM and MSE/`blob:` streams when FFmpeg libav is present); other codecs and `<audio>` render a poster and play overlay | 🟡 |
+| §4.8 Embedded content — images, SVG, `iframe`, minimalist MathML presentation layout; `<video>` decodes and plays inline (MPEG-1 always; VP9/VP8 WebM and MSE/`blob:` streams when FFmpeg libav is present) with WebVTT `<track>` captions rendered over the video; other codecs and `<audio>` render a poster and play overlay | 🟡 |
 | §4.10 Forms — controls, validation, `valueAs*` | ✅ |
 | §4.12–§4.13 Scripting, custom elements — autonomous **and customized built-in** elements (`is=` / `{extends}`) | ✅ |
 | §6 User interaction — focus, `inert`, `contenteditable`, `hidden`/`content-visibility`, drag-and-drop incl. native file drops | ✅ |
@@ -79,8 +79,9 @@ The full section-by-section walk-through lives in
   MPEG-1 (decoded in-tree by [pl_mpeg](https://github.com/phoboslab/pl_mpeg),
   MIT) and, when FFmpeg's libav is present at build time, **WebM** (VP9/VP8 +
   Opus/Vorbis), with `autoplay`/`loop`/click-to-play; MSE/`blob:` streaming
-  plays inline through the `nordstjernen-video` helper; other codecs render
-  a poster and play overlay. See
+  plays inline through the `nordstjernen-video` helper. A `<track default>`
+  WebVTT subtitle/caption file is parsed into timed cues and drawn over the
+  video. Other codecs render a poster and play overlay. See
   [docs/media.md](docs/media.md).
 - **MathML** — a minimalist presentation-MathML renderer (`src/mathml.c`)
   covering `mrow`, `mi`/`mn`/`mo`/`mtext`, `msup`/`msub`/`msubsup`,
@@ -255,9 +256,11 @@ and Windows. Audio (MP2/MP3, and Opus/Vorbis for WebM) plays through the
 unsandboxed `nordstjernen-audio` helper over SDL2. Streaming sites that use
 MSE/`blob:` also play inline: the `nordstjernen-video` helper
 (`src/videoproc/main.c`, built when libav\* is present) decodes the stream
-and the shell composites its frames over the page. Every other codec renders
-a poster and a play overlay. Full details, including the licensing split
-and the helper protocol, are in [docs/media.md](docs/media.md).
+and the shell composites its frames over the page. A default `<track>` of
+WebVTT subtitles/captions is fetched, parsed into timed cues, and painted
+over the bottom of the video. Every other codec renders a poster and a play
+overlay. Full details, including the licensing split and the helper
+protocol, are in [docs/media.md](docs/media.md).
 
 ## License
 

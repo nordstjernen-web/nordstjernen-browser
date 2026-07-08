@@ -69,6 +69,32 @@ itself. The inline player drives the helper — `open`/`play`/`pause`/`seek`/`st
 ride the renderer→shell render channel, and looping re-syncs the audio at each
 wrap.
 
+## Captions and subtitles (`<track>`)
+
+A `<video>` may carry a `<track>` child pointing at a
+[WebVTT](https://www.w3.org/TR/webvtt1/) file. When one is marked `default`
+and its `kind` is `subtitles`/`captions` (or omitted — the missing-value
+default), the renderer fetches it during video discovery
+(`ns_video_discover_track` in `src/video.c`) and parses it into timed cues
+(`ns_vtt_parse`): it reads `[HH:]MM:SS.mmm` start/end timestamps, skips the
+`WEBVTT` header, `NOTE` comments, cue identifiers and the cue-setting suffix
+after the end timestamp, strips inline `<…>` tags, decodes the common HTML
+entities, and keeps multi-line cue text. Only the `default` track shows,
+which is the spec's initial text-track mode; scripted `TextTrack.mode`
+switching and cue positioning settings (`line`/`position`/`align`) are not
+wired.
+
+The cue active at the video's current time is drawn by `paint_video_caption`
+(`src/paint.c`) as centred, white-on-translucent-black lines across the
+bottom of the video box. The captions are painted into the **html page
+surface**, after the video rectangle is punched out — and because the shell
+composites the page surface *last, over* the video-process frame (see the
+helper section below), the caption pixels land on top of the video in both
+decode paths: the in-process frame texture and the helper's shared-memory
+frames. Playback-time (`v->cur_time`) and the parsed cues are tracked
+renderer-side either way, so the same captions appear regardless of who
+decodes the picture.
+
 ## The video helper process (`nordstjernen-video`)
 
 MSE streams (YouTube-style playback) decode in a **third process** that sits
