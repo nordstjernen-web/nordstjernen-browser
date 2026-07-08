@@ -2193,6 +2193,20 @@ browser_dropdown_click(ns_browser *browser, const ns_node *node)
         if (!option && ns_node_is_element_named(a, "option")) option = a;
         if (ns_node_is_element_named(a, "select")) { select = a; break; }
     }
+    if (select && option && !ns_is_dropdown_select(select) &&
+        !ns_element_get_attr(select, "disabled")) {
+        gboolean multiple = ns_element_get_attr(select, "multiple") != NULL;
+        gboolean toggle = multiple && (browser->press_mods & 2) != 0;
+        if (browser->js) {
+            if (toggle)
+                ns_js_select_toggle_option(browser->js, (ns_node *)option);
+            else
+                ns_js_select_choose_option(browser->js, (ns_node *)option);
+            ns_js_consume_mutated(browser->js);
+        }
+        browser->dirty = TRUE;
+        return TRUE;
+    }
     if (browser->open_select && option && select == browser->open_select) {
         if (browser->js &&
             ns_js_select_choose_option(browser->js, (ns_node *)option)) {
@@ -2516,6 +2530,36 @@ browser_find_accesskey(const ns_node *n, const char *key, int depth)
     return NULL;
 }
 
+static gboolean
+browser_select_key(ns_browser *browser, ns_node *select, const char *key,
+                   int mods)
+{
+    if (!key || !*key || !browser->js) return FALSE;
+    gboolean dropdown = ns_is_dropdown_select(select);
+    if (strcmp(key, "ArrowDown") == 0)
+        return ns_js_select_step(browser->js, select, +1);
+    if (strcmp(key, "ArrowUp") == 0)
+        return ns_js_select_step(browser->js, select, -1);
+    if (strcmp(key, "Home") == 0)
+        return ns_js_select_edge(browser->js, select, FALSE);
+    if (strcmp(key, "End") == 0)
+        return ns_js_select_edge(browser->js, select, TRUE);
+    if (dropdown && (strcmp(key, "Enter") == 0 || strcmp(key, " ") == 0)) {
+        browser->open_select = (browser->open_select == select) ? NULL : select;
+        return TRUE;
+    }
+    if (dropdown && strcmp(key, "Escape") == 0 &&
+        browser->open_select == select) {
+        browser->open_select = NULL;
+        return TRUE;
+    }
+    if ((mods & (2 | 4 | 8)) == 0 && g_utf8_validate(key, -1, NULL) &&
+        g_utf8_strlen(key, -1) == 1 && key[0] != ' ' &&
+        g_unichar_isprint(g_utf8_get_char(key)))
+        return ns_js_select_typeahead(browser->js, select, key);
+    return FALSE;
+}
+
 char *
 ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                     const char *code, int keycode, int mods,
@@ -2600,7 +2644,12 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
             }
         } else if (!prevented && kind == 0) {
             const ns_node *f = ns_js_focused_node(browser->js);
-            if (f && ns_node_editable_value(f) &&
+            if (f && ns_node_is_element_named(f, "select") &&
+                !ns_element_get_attr(f, "disabled") &&
+                browser_select_key(browser, (ns_node *)f, key, mods)) {
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods))
                 browser->dirty = TRUE;
         }

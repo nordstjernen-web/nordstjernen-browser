@@ -90,6 +90,10 @@ gboolean ns_js_dispatch_event(ns_js *js, const ns_node *target, const char *type
 gboolean ns_js_click_activate(ns_js *js, const ns_node *node);
 gboolean ns_js_node_has_click_handler(ns_js *js, const ns_node *target);
 gboolean ns_js_select_choose_option(ns_js *js, ns_node *option);
+gboolean ns_js_select_toggle_option(ns_js *js, ns_node *option);
+gboolean ns_js_select_step(ns_js *js, ns_node *select, int dir);
+gboolean ns_js_select_edge(ns_js *js, ns_node *select, gboolean last);
+gboolean ns_js_select_typeahead(ns_js *js, ns_node *select, const char *key);
 void     ns_js_activate_element(ns_js *js, const ns_node *el);
 gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,

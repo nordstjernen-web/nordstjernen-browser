@@ -2337,6 +2337,23 @@ emit_open_select_option(collector_ctx *ctx, const ns_node *option)
 }
 
 static void
+emit_listbox_option(collector_ctx *ctx, const ns_node *option, gboolean first)
+{
+    if (!option) return;
+    if (!first) g_string_append(ctx->out, "\xe2\x80\xa8");
+    gsize start = ctx->out->len;
+    gboolean sel = ns_element_get_attr(option, "selected") != NULL;
+    g_string_append(ctx->out, "\xc2\xa0");
+    g_string_append(ctx->out, sel ? "\xe2\x96\xb8\xc2\xa0" : "\xc2\xa0\xc2\xa0");
+    char *t = ns_option_label_dup(option);
+    if (t && *t) g_string_append(ctx->out, t);
+    g_free(t);
+    g_string_append(ctx->out, "\xc2\xa0");
+    emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
+                         start, ctx->out->len, option, ctx->styles);
+}
+
+static void
 collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
 {
     if (!n || depth >= NS_LAYOUT_MAX_DEPTH) return;
@@ -2770,45 +2787,38 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         int size_n = size_attr ? ns_parse_int(size_attr, 0, 0, 1000) : 0;
         gboolean listbox = multi || size_n > 1;
         if (listbox) {
-            gsize start = ctx->out->len;
-            g_string_append(ctx->out, "\xc2\xa0");
             int shown = 0;
             int cap = size_n > 0 ? size_n : 6;
+            gboolean first = TRUE;
             for (const ns_node *c = n->first_child; c && shown < cap; c = c->next_sibling) {
                 if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
                 if (strcmp(c->name, "optgroup") == 0) {
                     const char *gl = ns_element_get_attr(c, "label");
                     if (gl && *gl) {
-                        if (shown > 0) g_string_append(ctx->out, "\xe2\x80\xa8");
-                        g_string_append_printf(ctx->out, "  %s", gl);
+                        if (!first) g_string_append(ctx->out, "\xe2\x80\xa8");
+                        g_string_append_printf(ctx->out, "\xc2\xa0%s\xc2\xa0", gl);
+                        first = FALSE;
                         shown++;
                     }
                     for (const ns_node *opt = c->first_child;
                          opt && shown < cap; opt = opt->next_sibling) {
-                        if (opt->kind != NS_NODE_ELEMENT || !opt->name ||
-                            strcmp(opt->name, "option") != 0) continue;
-                        if (shown > 0) g_string_append(ctx->out, "\xe2\x80\xa8");
-                        gboolean sel = ns_element_get_attr(opt, "selected") != NULL;
-                        char *t = ns_option_label_dup(opt);
-                        g_string_append(ctx->out, sel ? "\xe2\x96\xb8 " : "    ");
-                        g_string_append(ctx->out, t ? t : "");
-                        g_free(t);
+                        if (!ns_node_is_element_named(opt, "option")) continue;
+                        emit_listbox_option(ctx, opt, first);
+                        first = FALSE;
                         shown++;
                     }
                 } else if (strcmp(c->name, "option") == 0) {
-                    if (shown > 0) g_string_append(ctx->out, "\xe2\x80\xa8");
-                    gboolean sel = ns_element_get_attr(c, "selected") != NULL;
-                    char *t = ns_option_label_dup(c);
-                    g_string_append(ctx->out, sel ? "\xe2\x96\xb8 " : "  ");
-                    g_string_append(ctx->out, t ? t : "");
-                    g_free(t);
+                    emit_listbox_option(ctx, c, first);
+                    first = FALSE;
                     shown++;
                 }
             }
-            if (shown == 0) g_string_append(ctx->out, "  ");
-            g_string_append(ctx->out, "\xc2\xa0");
-            emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
-                                 start, ctx->out->len, n, ctx->styles);
+            if (shown == 0) {
+                gsize start = ctx->out->len;
+                g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
+                emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
+                                     start, ctx->out->len, n, ctx->styles);
+            }
             return;
         }
         const ns_node *chosen = ns_select_chosen_option(n);

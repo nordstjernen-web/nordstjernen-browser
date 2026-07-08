@@ -29888,6 +29888,130 @@ ns_js_select_choose_option(ns_js *js, ns_node *option)
     return TRUE;
 }
 
+gboolean
+ns_js_select_toggle_option(ns_js *js, ns_node *option)
+{
+    if (!js || !option) return FALSE;
+    ns_node *select = option->parent;
+    if (select && ns_node_is_element_named(select, "optgroup"))
+        select = select->parent;
+    if (!select || !ns_node_is_element_named(select, "select")) return FALSE;
+    if (ns_node_is_disabled_form_control(option)) return FALSE;
+    if (ns_element_get_attr(option, "selected"))
+        ns_element_remove_attr(option, "selected");
+    else
+        ns_element_set_attr(option, "selected", "");
+    gboolean p = FALSE;
+    ns_js_dispatch_event(js, select, "input",  &p);
+    ns_js_dispatch_event(js, select, "change", &p);
+    js->mutated = TRUE;
+    return TRUE;
+}
+
+static void
+ns_select_collect_options(ns_node *select, GPtrArray *out)
+{
+    for (ns_node *c = select->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        if (strcmp(c->name, "option") == 0) {
+            g_ptr_array_add(out, c);
+        } else if (strcmp(c->name, "optgroup") == 0) {
+            for (ns_node *o = c->first_child; o; o = o->next_sibling)
+                if (ns_node_is_element_named(o, "option"))
+                    g_ptr_array_add(out, o);
+        }
+    }
+}
+
+static int
+ns_select_current_index(ns_node *select, GPtrArray *opts)
+{
+    int cur = -1;
+    for (guint i = 0; i < opts->len; i++)
+        if (ns_element_get_attr(g_ptr_array_index(opts, i), "selected"))
+            cur = (int)i;
+    if (cur < 0) {
+        const ns_node *chosen = ns_select_chosen_option(select);
+        if (chosen)
+            for (guint i = 0; i < opts->len; i++)
+                if (g_ptr_array_index(opts, i) == chosen) { cur = (int)i; break; }
+    }
+    return cur;
+}
+
+gboolean
+ns_js_select_step(ns_js *js, ns_node *select, int dir)
+{
+    if (!js || !select || !ns_node_is_element_named(select, "select")) return FALSE;
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    gboolean done = FALSE;
+    if (opts->len > 0) {
+        int cur = ns_select_current_index(select, opts);
+        int idx = cur < 0 ? (dir > 0 ? -1 : (int)opts->len) : cur;
+        for (guint step = 0; step < opts->len; step++) {
+            idx += (dir > 0 ? 1 : -1);
+            if (idx < 0 || idx >= (int)opts->len) break;
+            ns_node *o = g_ptr_array_index(opts, idx);
+            if (!ns_node_is_disabled_form_control(o)) {
+                done = ns_js_select_choose_option(js, o);
+                break;
+            }
+        }
+    }
+    g_ptr_array_free(opts, TRUE);
+    return done;
+}
+
+gboolean
+ns_js_select_edge(ns_js *js, ns_node *select, gboolean last)
+{
+    if (!js || !select || !ns_node_is_element_named(select, "select")) return FALSE;
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    gboolean done = FALSE;
+    for (guint k = 0; k < opts->len; k++) {
+        guint i = last ? opts->len - 1 - k : k;
+        ns_node *o = g_ptr_array_index(opts, i);
+        if (!ns_node_is_disabled_form_control(o)) {
+            done = ns_js_select_choose_option(js, o);
+            break;
+        }
+    }
+    g_ptr_array_free(opts, TRUE);
+    return done;
+}
+
+gboolean
+ns_js_select_typeahead(ns_js *js, ns_node *select, const char *key)
+{
+    if (!js || !select || !key || !*key ||
+        !ns_node_is_element_named(select, "select")) return FALSE;
+    GPtrArray *opts = g_ptr_array_new();
+    ns_select_collect_options(select, opts);
+    gboolean done = FALSE;
+    if (opts->len > 0) {
+        int cur = ns_select_current_index(select, opts);
+        char *kl = g_utf8_casefold(key, -1);
+        for (guint n = 1; n <= opts->len; n++) {
+            guint i = (guint)(((cur < 0 ? -1 : cur) + (int)n) % (int)opts->len);
+            ns_node *o = g_ptr_array_index(opts, i);
+            if (ns_node_is_disabled_form_control(o)) continue;
+            char *t = ns_option_label_dup(o);
+            if (t) {
+                char *tl = g_utf8_casefold(t, -1);
+                gboolean match = g_str_has_prefix(tl, kl);
+                g_free(tl);
+                g_free(t);
+                if (match) { done = ns_js_select_choose_option(js, o); break; }
+            }
+        }
+        g_free(kl);
+    }
+    g_ptr_array_free(opts, TRUE);
+    return done;
+}
+
 static JSValue
 ns_element_form_requestSubmit(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
