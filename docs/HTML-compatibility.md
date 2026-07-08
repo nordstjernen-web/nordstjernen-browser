@@ -16,10 +16,10 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-07-07 (rev 29).
+Snapshot: **1.0.16**, 2026-07-08 (rev 30).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
-implemented · 30 🟡 partial · 1 ❌ absent · 7 🚫 absent by design**.
+implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
 
 **Legend:** ✅ implemented · 🟡 partial / stubbed · ❌ absent ·
 🚫 absent by design (a project non-goal — see
@@ -186,7 +186,7 @@ elements (`head title meta link style script noscript template`) to
 | `embed` / `object` | 🚫 | no NPAPI/PPAPI plugin dispatch |
 | `video` | 🟡 | plays **inline** for MPEG-1 (`.mpg`/`.mpeg`/`.m1v`, always) and for VP9/VP8 WebM (`.webm`, when FFmpeg libav is built in) — decoded in the sandboxed renderer (`src/video_decode.c`), honouring `autoplay`/`loop`/`muted`/`poster` and click-to-play/pause. Other codecs render a poster + play overlay; click hands the source URL to the system media player (`ns_media_try_launch`). Streaming `<video>` (MSE/`blob:`, no file URL) hands the *page* URL instead, resolved by mpv/VLC + yt-dlp. **Navigating to a recognised video-page URL** (YouTube `watch`/`shorts`/`embed`/`live`, `youtu.be`, `music.youtube.com` — `ns_media_is_video_page` in `src/media.c`) hands off to the external player automatically *before* loading the page, so the browser plays the video without rendering (or crashing on) the site's heavy player app; if no player is installed it falls back to loading the page. See [media.md](media.md) |
 | `audio` | 🟡 | MP3 (always) and, when FFmpeg libav is built in, Opus/Vorbis (`.opus`/`.webm`/`.ogg`) play via the unsandboxed `nordstjernen-audio` helper; other codecs hand the source URL to the system media player. See [media.md](media.md) |
-| `track` (captions) | ❌ | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path; not rendered |
+| `track` (captions) | 🟡 | parsed; `kind`/`src`/`srclang`/`label`/`default` reflected via the standard typed-reflection path. **Rendered**: a `<track default>` whose `kind` is `subtitles`/`captions` (the missing-value default) is fetched, its WebVTT parsed into timed cues (`ns_vtt_parse` in `src/video.c` — `[HH:]MM:SS.mmm` timings, cue-setting/identifier/`NOTE` skipping, `<…>` tag and entity stripping), and the cue active at the video's current time is painted as centred captions over the bottom of the inline video (`paint_video_caption` in `src/paint.c`). Only the `default` track auto-shows (per the spec's initial mode); JS `TextTrack.mode` switching and cue positioning settings (`line`/`position`/`align`) are not wired |
 | `map` / `area` (client-side image maps) | ✅ | `<img usemap>` clicks are hit-tested against the referenced `<map>`'s `<area>` elements — `rect`/`circle`/`poly`/`default` shapes in image-local coordinates — and the first matching area's `href` is navigated (`ns_image_map_resolve` in `src/dom.c`, wired into the GUI and headless click paths) |
 | `img ismap` (server-side image maps) | ✅ | clicking an `<img ismap>` nested in an `<a href>` appends the click position relative to the image's top-left corner as a `?x,y` suffix to the link URL before navigating (GUI path in `src/libnordstjernen.c`, headless click path in `src/headless.c`); coordinates are clamped to non-negative |
 | MathML | ✅ | presentation MathML is laid out and painted over Pango/Cairo (`src/mathml.c`), embedded inline on the surrounding text baseline through the replaced-element media-box path (`src/layout.c`, `src/paint.c`): `mrow`, the token elements `mi`/`mn`/`mo`/`ms`/`mtext` (with `mi` auto-italicising single letters and `mo` operator spacing), `msup`/`msub`/`msubsup`, `mfrac` (with rule), `msqrt`/`mroot` (drawn radical), `munder`/`mover`/`munderover`, `mtable`/`mtr`/`mtd`, `mspace`, `mphantom` (reserves its contents' metrics without painting), `mfenced` (synthesises the `open`/`close` fences and `separators`), and `semantics` (renders its first presentation child). Content MathML and `annotation`/`annotation-xml` payloads are not rendered |

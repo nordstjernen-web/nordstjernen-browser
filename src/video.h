@@ -62,6 +62,8 @@ typedef struct ns_video {
     double       prev_tick_time;
     double       last_emit_time;
     double       duration;
+    GPtrArray   *cues;
+    gboolean     track_requested;
 } ns_video;
 
 typedef struct ns_video_cache ns_video_cache;
@@ -108,6 +110,7 @@ void     ns_video_pause(ns_video *v, gint64 now_us);
 void     ns_video_note_paint_rect(ns_video *v, double x, double y,
                                   double w, double h);
 gboolean ns_video_helper_composited(const ns_video *v);
+const char *ns_video_active_cue_text(const ns_video *v);
 
 G_END_DECLS
 

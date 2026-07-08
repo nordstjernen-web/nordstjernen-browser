@@ -22,6 +22,143 @@
 
 #define NS_VIDEO_MAX_BYTES (256u * 1024u * 1024u)
 
+typedef struct ns_vtt_cue {
+    double start;
+    double end;
+    char  *text;
+} ns_vtt_cue;
+
+static void
+ns_vtt_cue_free(gpointer p)
+{
+    ns_vtt_cue *c = p;
+    if (!c) return;
+    g_free(c->text);
+    g_free(c);
+}
+
+static gboolean
+ns_vtt_read_uint(const char **pp, long *out)
+{
+    const char *p = *pp;
+    if (!g_ascii_isdigit(*p)) return FALSE;
+    long v = 0;
+    while (g_ascii_isdigit(*p)) { v = v * 10 + (*p - '0'); p++; }
+    *out = v;
+    *pp = p;
+    return TRUE;
+}
+
+static double
+ns_vtt_parse_ts(const char *s)
+{
+    while (*s == ' ' || *s == '\t') s++;
+    long a, b, c;
+    if (!ns_vtt_read_uint(&s, &a)) return -1.0;
+    if (*s != ':') return -1.0;
+    s++;
+    if (!ns_vtt_read_uint(&s, &b)) return -1.0;
+    long hours = 0, mins, secs;
+    if (*s == ':') {
+        s++;
+        if (!ns_vtt_read_uint(&s, &c)) return -1.0;
+        hours = a; mins = b; secs = c;
+    } else {
+        mins = a; secs = b;
+    }
+    long ms = 0;
+    if (*s == '.' || *s == ',') {
+        s++;
+        long f = 0;
+        int nd = 0;
+        while (g_ascii_isdigit(*s)) { f = f * 10 + (*s - '0'); s++; nd++; }
+        while (nd < 3) { f *= 10; nd++; }
+        while (nd > 3) { f /= 10; nd--; }
+        ms = f;
+    }
+    return (double)hours * 3600.0 + (double)mins * 60.0 + (double)secs
+         + (double)ms / 1000.0;
+}
+
+static char *
+ns_vtt_clean_text(const char *raw)
+{
+    GString *out = g_string_new(NULL);
+    for (const char *p = raw; *p; ) {
+        if (*p == '<') {
+            const char *e = strchr(p, '>');
+            if (!e) break;
+            p = e + 1;
+            continue;
+        }
+        if (*p == '&') {
+            if (g_str_has_prefix(p, "&amp;"))  { g_string_append_c(out, '&'); p += 5; continue; }
+            if (g_str_has_prefix(p, "&lt;"))   { g_string_append_c(out, '<'); p += 4; continue; }
+            if (g_str_has_prefix(p, "&gt;"))   { g_string_append_c(out, '>'); p += 4; continue; }
+            if (g_str_has_prefix(p, "&nbsp;")) { g_string_append_c(out, ' '); p += 6; continue; }
+            if (g_str_has_prefix(p, "&lrm;"))  { p += 5; continue; }
+            if (g_str_has_prefix(p, "&rlm;"))  { p += 5; continue; }
+        }
+        g_string_append_c(out, *p);
+        p++;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static GPtrArray *
+ns_vtt_parse(const char *text)
+{
+    GPtrArray *cues = g_ptr_array_new_with_free_func(ns_vtt_cue_free);
+    char **lines = g_strsplit(text, "\n", -1);
+    guint n = g_strv_length(lines);
+    for (guint i = 0; i < n; ) {
+        char *line = lines[i];
+        gsize ll = strlen(line);
+        if (ll && line[ll - 1] == '\r') line[--ll] = '\0';
+        const char *arrow = strstr(line, "-->");
+        if (!arrow) { i++; continue; }
+
+        double start = ns_vtt_parse_ts(line);
+        double end = ns_vtt_parse_ts(arrow + 3);
+        i++;
+        GString *txt = g_string_new(NULL);
+        while (i < n) {
+            char *tl = lines[i];
+            gsize tll = strlen(tl);
+            if (tll && tl[tll - 1] == '\r') tl[--tll] = '\0';
+            if (tll == 0) { i++; break; }
+            if (txt->len) g_string_append_c(txt, '\n');
+            char *clean = ns_vtt_clean_text(tl);
+            g_string_append(txt, clean);
+            g_free(clean);
+            i++;
+        }
+        if (start >= 0.0 && end > start && txt->len > 0) {
+            ns_vtt_cue *cue = g_new0(ns_vtt_cue, 1);
+            cue->start = start;
+            cue->end = end;
+            cue->text = g_string_free(txt, FALSE);
+            g_ptr_array_add(cues, cue);
+        } else {
+            g_string_free(txt, TRUE);
+        }
+    }
+    g_strfreev(lines);
+    return cues;
+}
+
+const char *
+ns_video_active_cue_text(const ns_video *v)
+{
+    if (!v || !v->cues) return NULL;
+    double t = v->cur_time;
+    for (guint i = 0; i < v->cues->len; i++) {
+        const ns_vtt_cue *c = g_ptr_array_index(v->cues, i);
+        if (t >= c->start && t < c->end) return c->text;
+    }
+    return NULL;
+}
+
 struct ns_video_cache {
     GHashTable       *by_url;
     GHashTable       *requested;
@@ -123,6 +260,7 @@ ns_video_free(gpointer p)
         g_free(v->video_file);
     }
     g_free(v->token);
+    if (v->cues) g_ptr_array_free(v->cues, TRUE);
     ns_texture_unref(v->poster_texture);
     ns_texture_unref(v->frame_texture);
     ns_video_player_free(v->player);
@@ -1109,6 +1247,70 @@ on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
     g_free(pending);
 }
 
+static void
+on_track_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
+{
+    (void)src;
+    ns_pending *pending = user_data;
+    GError *err = NULL;
+    ns_response *resp = ns_net_fetch_finish(result, &err);
+    if (pending->dead) {
+        ns_response_free(resp);
+        g_clear_error(&err);
+        g_free(pending);
+        return;
+    }
+    ns_video *v = pending->video;
+    if (resp && !resp->error && resp->body && resp->body->len > 0 &&
+        resp->body->len <= NS_VIDEO_MAX_BYTES) {
+        char *text = g_strndup((const char *)resp->body->data, resp->body->len);
+        GPtrArray *cues = ns_vtt_parse(text);
+        g_free(text);
+        if (v->cues) g_ptr_array_free(v->cues, TRUE);
+        v->cues = cues;
+    }
+    g_clear_error(&err);
+    ns_response_free(resp);
+    g_ptr_array_remove_fast(pending->cache->pending, pending);
+    g_free(pending);
+}
+
+static const ns_node *
+ns_video_pick_track(const ns_node *dom)
+{
+    for (const ns_node *c = dom->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
+        if (strcmp(c->name, "track") != 0) continue;
+        if (!ns_element_get_attr(c, "default")) continue;
+        const char *kind = ns_element_get_attr(c, "kind");
+        if (kind && *kind &&
+            g_ascii_strcasecmp(kind, "subtitles") != 0 &&
+            g_ascii_strcasecmp(kind, "captions") != 0)
+            continue;
+        const char *tsrc = ns_element_get_attr(c, "src");
+        if (tsrc && *tsrc) return c;
+    }
+    return NULL;
+}
+
+static void
+ns_video_discover_track(ns_video_cache *cache, ns_video *v, const ns_node *dom)
+{
+    if (!v || !dom || v->track_requested) return;
+    const ns_node *track = ns_video_pick_track(dom);
+    if (!track) return;
+    const char *tsrc = ns_element_get_attr(track, "src");
+    char *abs = ns_url_resolve(cache->base_url, tsrc);
+    if (!abs) return;
+    v->track_requested = TRUE;
+    ns_pending *pt = g_new0(ns_pending, 1);
+    pt->video = v;
+    pt->cache = cache;
+    g_ptr_array_add(cache->pending, pt);
+    ns_net_fetch_async(abs, cache->base_url, NULL, on_track_fetched, pt);
+    g_free(abs);
+}
+
 static gboolean
 attr_present(const ns_node *n, const char *name)
 {
@@ -1175,6 +1377,7 @@ ns_video_cache_start(ns_video_cache *cache, const ns_node *dom, ns_box *box,
     g_hash_table_insert(cache->by_url, key, v);
     if (box) box->media->video = v;
     if (dom) ns_video_apply_node_state(cache, v, dom);
+    if (dom) ns_video_discover_track(cache, v, dom);
 
     if (mse_id) {
         ns_mse_stream *s = g_hash_table_lookup(cache->mse_streams,
@@ -1232,6 +1435,7 @@ ns_video_discover_dom(ns_video_cache *cache, const ns_node *node)
                 if (existing) {
                     existing->dom_node = node;
                     ns_video_apply_node_state(cache, existing, node);
+                    ns_video_discover_track(cache, existing, node);
                     ns_video_note_stream_version(cache, existing, node, abs);
                 } else if (!g_hash_table_contains(cache->requested, abs)) {
                     g_hash_table_add(cache->requested, g_strdup(abs));
@@ -1301,6 +1505,7 @@ ns_video_cache_discover(ns_video_cache *cache, const ns_box *root,
             if (box->dom) {
                 existing->dom_node = box->dom;
                 ns_video_apply_node_state(cache, existing, box->dom);
+                ns_video_discover_track(cache, existing, box->dom);
             }
             ns_video_note_stream_version(cache, existing, box->dom, abs);
         } else if (!g_hash_table_contains(cache->requested, abs)) {

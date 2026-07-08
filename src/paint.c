@@ -3508,6 +3508,56 @@ paint_image(cairo_t *cr, const ns_box *b)
 }
 
 static void
+paint_video_caption(cairo_t *cr, const ns_box *b, const char *text)
+{
+    char **lines = g_strsplit(text, "\n", -1);
+    guint nl = g_strv_length(lines);
+    if (nl == 0) { g_strfreev(lines); return; }
+
+    int fs = (int)(b->content_height * 0.07 + 0.5);
+    if (fs < 11) fs = 11;
+    if (fs > 26) fs = 26;
+    PangoFontDescription *fd = pango_font_description_from_string("sans");
+    pango_font_description_set_size(fd, fs * PANGO_SCALE);
+    pango_font_description_set_weight(fd, PANGO_WEIGHT_MEDIUM);
+
+    PangoLayout **lays = g_new0(PangoLayout *, nl);
+    int *lw = g_new0(int, nl);
+    int *lh = g_new0(int, nl);
+    double pad = 3.0, gap = 1.0, total = 0;
+    for (guint i = 0; i < nl; i++) {
+        PangoLayout *layout = paint_create_layout();
+        pango_layout_set_font_description(layout, fd);
+        pango_layout_set_text(layout, lines[i][0] ? lines[i] : " ", -1);
+        pango_layout_get_pixel_size(layout, &lw[i], &lh[i]);
+        lays[i] = layout;
+        total += lh[i] + 2 * pad + (i ? gap : 0);
+    }
+    double y = b->y + b->content_height - b->content_height * 0.05 - total;
+    if (y < b->y + 2) y = b->y + 2;
+    cairo_save(cr);
+    for (guint i = 0; i < nl; i++) {
+        double bw = lw[i] + 2 * pad;
+        double bx = b->x + (b->content_width - bw) / 2.0;
+        if (bx < b->x) bx = b->x;
+        cairo_set_source_rgba(cr, 0, 0, 0, 0.6);
+        cairo_rectangle(cr, bx, y, bw, lh[i] + 2 * pad);
+        cairo_fill(cr);
+        cairo_move_to(cr, bx + pad, y + pad);
+        cairo_set_source_rgb(cr, 1, 1, 1);
+        pango_cairo_show_layout(cr, lays[i]);
+        y += lh[i] + 2 * pad + gap;
+        g_object_unref(lays[i]);
+    }
+    cairo_restore(cr);
+    pango_font_description_free(fd);
+    g_free(lays);
+    g_free(lw);
+    g_free(lh);
+    g_strfreev(lines);
+}
+
+static void
 paint_video(cairo_t *cr, const ns_box *b)
 {
     if (b->media && b->media->video_audio_src && !b->media->video_src) {
@@ -3625,6 +3675,10 @@ paint_video(cairo_t *cr, const ns_box *b)
         cairo_fill(cr);
     }
     cairo_restore(cr);
+
+    const char *cue = ns_video_active_cue_text(v);
+    if (cue && *cue && b->content_width > 24 && b->content_height > 24)
+        paint_video_caption(cr, b, cue);
 }
 
 static void
