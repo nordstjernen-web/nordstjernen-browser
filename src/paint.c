@@ -2294,6 +2294,9 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     double y_origin = b->y + y_offset;
 
     if (b->attrs) {
+        double opt_minx = 1e9, opt_maxx = -1e9, opt_miny = 1e9, opt_maxy = -1e9;
+        int opt_count = 0, opt_nsel = 0;
+        struct { double x0, y0, x1, y1; } opt_sel[64];
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *r = &g_array_index(b->attrs, ns_inline_attr, i);
             if (r->kind != NS_INLINE_INPUT_FIELD &&
@@ -2304,6 +2307,23 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             pango_layout_index_to_pos(layout, (int)r->start, &r0);
             pango_layout_index_to_pos(layout,
                 (int)(r->len > 0 ? r->start + r->len - 1 : r->start), &r1);
+            if (r->dom && r->dom->name && strcmp(r->dom->name, "option") == 0) {
+                double rx0 = text_x + (double)r0.x / PANGO_SCALE;
+                double rx1 = text_x + (double)(r1.x + r1.width) / PANGO_SCALE;
+                double ry0 = y_origin + (double)r0.y / PANGO_SCALE;
+                double ry1 = y_origin + (double)(r0.y + r0.height) / PANGO_SCALE;
+                if (rx0 < opt_minx) opt_minx = rx0;
+                if (rx1 > opt_maxx) opt_maxx = rx1;
+                if (ry0 < opt_miny) opt_miny = ry0;
+                if (ry1 > opt_maxy) opt_maxy = ry1;
+                opt_count++;
+                if (ns_element_get_attr(r->dom, "selected") && opt_nsel < 64) {
+                    opt_sel[opt_nsel].x0 = rx0; opt_sel[opt_nsel].y0 = ry0;
+                    opt_sel[opt_nsel].x1 = rx1; opt_sel[opt_nsel].y1 = ry1;
+                    opt_nsel++;
+                }
+                continue;
+            }
             double bleed_x = r->box_w > 0 || r->box_h > 0 ? 0 : 10;
             double bleed_y = r->box_w > 0 || r->box_h > 0 ? 0 : 5;
             double x0 = text_x + (double)r0.x / PANGO_SCALE - bleed_x;
@@ -2405,6 +2425,31 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
                 cairo_stroke(cr);
                 cairo_restore(cr);
             }
+        }
+        if (opt_count > 0 && opt_maxx > opt_minx) {
+            double px = opt_minx - 6.0;
+            double pw = (opt_maxx - opt_minx) + 12.0;
+            double py = opt_miny;
+            double ph = opt_maxy - opt_miny;
+            corner_radii pr = { 3, 3, 3, 3 };
+            cairo_save(cr);
+            rounded_rect_path(cr, px + 0.5, py + 1.5, pw, ph, pr);
+            cairo_set_source_rgba(cr, 0, 0, 0, 0.12);
+            cairo_fill(cr);
+            rounded_rect_path(cr, px, py, pw, ph, pr);
+            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            cairo_fill(cr);
+            for (int k = 0; k < opt_nsel; k++) {
+                cairo_rectangle(cr, px, opt_sel[k].y0, pw,
+                                opt_sel[k].y1 - opt_sel[k].y0);
+                cairo_set_source_rgb(cr, 0.816, 0.886, 0.988);
+                cairo_fill(cr);
+            }
+            rounded_rect_path(cr, px + 0.5, py + 0.5, pw - 1, ph - 1, pr);
+            cairo_set_source_rgb(cr, 0.70, 0.72, 0.75);
+            cairo_set_line_width(cr, 1.0);
+            cairo_stroke(cr);
+            cairo_restore(cr);
         }
     }
 

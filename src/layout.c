@@ -2332,13 +2332,11 @@ emit_open_select_option(collector_ctx *ctx, const ns_node *option)
     if (!option) return;
     g_string_append(ctx->out, "\xe2\x80\xa8");
     gsize start = ctx->out->len;
-    gboolean sel = ns_element_get_attr(option, "selected") != NULL;
-    g_string_append(ctx->out, "\xc2\xa0");
-    g_string_append(ctx->out, sel ? "\xe2\x9c\x93\xc2\xa0" : "\xc2\xa0\xc2\xa0");
+    g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
     char *t = ns_option_label_dup(option);
     if (t && *t) g_string_append(ctx->out, t);
     g_free(t);
-    g_string_append(ctx->out, "\xc2\xa0");
+    g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
     emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
                          start, ctx->out->len, option, ctx->styles);
 }
@@ -2349,13 +2347,11 @@ emit_listbox_option(collector_ctx *ctx, const ns_node *option, gboolean first)
     if (!option) return;
     if (!first) g_string_append(ctx->out, "\xe2\x80\xa8");
     gsize start = ctx->out->len;
-    gboolean sel = ns_element_get_attr(option, "selected") != NULL;
-    g_string_append(ctx->out, "\xc2\xa0");
-    g_string_append(ctx->out, sel ? "\xe2\x96\xb8\xc2\xa0" : "\xc2\xa0\xc2\xa0");
+    g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
     char *t = ns_option_label_dup(option);
     if (t && *t) g_string_append(ctx->out, t);
     g_free(t);
-    g_string_append(ctx->out, "\xc2\xa0");
+    g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
     emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
                          start, ctx->out->len, option, ctx->styles);
 }
@@ -2411,9 +2407,9 @@ emit_datalist_suggestions(collector_ctx *ctx, const ns_node *input)
         if (match) {
             g_string_append(ctx->out, "\xe2\x80\xa8");
             gsize start = ctx->out->len;
-            g_string_append(ctx->out, "\xc2\xa0");
+            g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
             g_string_append(ctx->out, val);
-            g_string_append(ctx->out, "\xc2\xa0");
+            g_string_append(ctx->out, "\xc2\xa0\xc2\xa0");
             emit_form_attr_sized(ctx->attrs, NS_INLINE_INPUT_FIELD,
                                  start, ctx->out->len, o, ctx->styles);
             shown++;

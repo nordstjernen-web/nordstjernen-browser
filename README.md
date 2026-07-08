@@ -7,7 +7,7 @@ Nordstjernen is built in Norway.
 
 Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , MacOS, Linux, Android, Java, iOS. FreeBSD and NetBSD.  
 
-**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 139 spec rows fully implemented, 29 partial, 3 absent as of June 2026. 
+**HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 140 spec rows fully implemented, 31 partial, and 0 absent across §1–§16 (July 2026), aside from a few features that are non-goals by design. 
 
 **Security:** each tab's engine runs in its own sandboxed process (seccomp + Landlock on Linux) behind an IPC + shared-memory-framebuffer boundary · no JIT.
 
@@ -25,7 +25,7 @@ Nordstjernen is measured against the **spec text**, section by section,
 not against any other browser. The section-by-section walk-through of
 the in-scope WHATWG HTML standard (§1–§16) in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md) currently
-records **140 spec rows fully implemented, 30 partial, and 1 absent**
+records **140 spec rows fully implemented, 31 partial, and 0 absent**
 (July 2026), besides a handful that are non-goals by design, such as
 in-process media codecs. Highlights:
 
@@ -46,6 +46,23 @@ in-process media codecs. Highlights:
 
 The full section-by-section walk-through lives in
 [docs/HTML-compatibility.md](docs/HTML-compatibility.md).
+
+**What's absent.** No element or API row in §1–§16 is fully absent any
+more — every one is implemented, partial, or a deliberate non-goal. The
+remaining gaps are:
+
+- **One CSS rendering feature** — vertical `writing-mode`. Text lays out
+  horizontally only; vertical Japanese/Chinese/Mongolian flow is not
+  supported yet.
+- **By-design non-goals**, which are absent on purpose and will not be
+  added: `embed` / `object` plugins (no NPAPI/PPAPI), `frame` / `frameset`,
+  and the obsolete `applet` / `marquee` elements. Nordstjernen also
+  deliberately ships no telemetry and no AI-style web APIs.
+
+Everything else that is not yet complete is tracked as **partial** (🟡) in
+[docs/HTML-compatibility.md](docs/HTML-compatibility.md) rather than absent —
+for example `iframe` `srcdoc` rendering, quirks-mode layout deltas, and
+native date/time pickers.
 
 ## Browser features
 
