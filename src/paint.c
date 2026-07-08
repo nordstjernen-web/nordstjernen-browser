@@ -2282,13 +2282,28 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
     if (b->vertical_wm) {
         PangoLayout *layout = paint_inline_make_layout(b, s, highlight);
         pango_layout_set_width(layout, -1);
-        cairo_save(cr);
-        cairo_translate(cr, b->x + b->content_width, b->y);
-        cairo_rotate(cr, G_PI / 2.0);
         set_source_rgba(cr, color);
-        cairo_move_to(cr, 0, 0);
-        pango_cairo_show_layout(cr, layout);
-        cairo_restore(cr);
+        PangoLayoutIter *it = pango_layout_get_iter(layout);
+        double acc = 0;
+        do {
+            PangoLayoutLine *line = pango_layout_iter_get_line_readonly(it);
+            PangoRectangle logical;
+            pango_layout_iter_get_line_extents(it, NULL, &logical);
+            int baseline = pango_layout_iter_get_baseline(it);
+            double line_h = (double)logical.height / PANGO_SCALE;
+            double ascent = (double)(baseline - logical.y) / PANGO_SCALE;
+            double col_left = (b->vertical_wm == 2)
+                ? b->x + acc
+                : b->x + b->content_width - acc - line_h;
+            cairo_save(cr);
+            cairo_translate(cr, col_left + line_h, b->y);
+            cairo_rotate(cr, G_PI / 2.0);
+            cairo_move_to(cr, 0, ascent);
+            pango_cairo_show_layout_line(cr, line);
+            cairo_restore(cr);
+            acc += line_h;
+        } while (pango_layout_iter_next_line(it));
+        pango_layout_iter_free(it);
         g_object_unref(layout);
         return;
     }

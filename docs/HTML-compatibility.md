@@ -16,7 +16,7 @@ This document focuses on the HTML spec proper and summarises adjacent
 CSS, DOM, networking, media, and security surfaces where the spec
 references them.
 
-Snapshot: **1.0.16**, 2026-07-08 (rev 33).
+Snapshot: **1.0.16**, 2026-07-08 (rev 34).
 
 §1–§16 row tally (counted across the section tables below): **140 ✅
 implemented · 31 🟡 partial · 0 ❌ absent · 7 🚫 absent by design**.
@@ -655,13 +655,15 @@ CSS support (abridged):
   `:dir()`.
 - 🟡 Writing modes: `writing-mode` is parsed and inherited (`ns_css_writing_mode`
   in `src/css.c`); a block/inline-block container in `vertical-rl` / `vertical-lr`
-  (and the `sideways-*` aliases) lays its text out as a vertical column — measured
+  (and the `sideways-*` aliases) lays its text out in vertical columns — measured
   with the inline and block axes swapped (`inline_layout` in `src/layout.c`) and
-  painted by rotating the text run 90° so Latin glyphs are set sideways and read
-  top-to-bottom (`paint_inline` in `src/paint.c`). Single-column text is correct;
-  multi-column wrapping at the block height, the right-to-left vs left-to-right
-  column-progression difference, upright CJK (`text-orientation`), and vertical
-  form/replaced-box layout are not wired yet.
+  painted per line (`paint_inline` in `src/paint.c`): each line becomes a column,
+  its glyphs rotated 90° **clockwise** so horizontal-script (Latin) runs are set
+  sideways and read top-to-bottom, matching the default `text-orientation: mixed`;
+  columns progress right-to-left for `vertical-rl` and left-to-right for
+  `vertical-lr`. Remaining: automatic wrapping into columns at the block height
+  (columns currently form only at explicit line breaks), upright CJK
+  (`text-orientation: upright`), and vertical layout of form/replaced boxes.
 
 Replaced elements (`img`/`video`/`canvas`) are sized via the media-box
 path in `src/layout.h`.
