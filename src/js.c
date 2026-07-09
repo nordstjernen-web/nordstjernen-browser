@@ -38104,6 +38104,15 @@ ns_realmdoc_getElementById(JSContext *ctx, JSValueConst this_val,
     return found ? ns_make_element(ctx, found) : JS_NULL;
 }
 
+static JSValue ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv);
+static JSValue ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv);
+static JSValue ns_realmdoc_write(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv);
+static JSValue ns_realmdoc_writeln(JSContext *ctx, JSValueConst this_val,
+                                   int argc, JSValueConst *argv);
+
 static JSValue
 ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
                        const char *charset, const char *content_type,
@@ -38168,6 +38177,20 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_bind_fn(ctx, w, "importNode",         ns_document_import_node, 2);
     ns_bind_fn(ctx, w, "adoptNode",          ns_document_adopt_node, 1);
     ns_bind_fn(ctx, w, "getElementById",     ns_realmdoc_getElementById, 1);
+    if (!inert) {
+        JS_DefinePropertyValueStr(ctx, w, "open",
+            JS_NewCFunction(ctx, ns_realmdoc_open, "open", 0),
+            JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, w, "close",
+            JS_NewCFunction(ctx, ns_realmdoc_close, "close", 0),
+            JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, w, "write",
+            JS_NewCFunction(ctx, ns_realmdoc_write, "write", 1),
+            JS_PROP_C_W_E);
+        JS_DefinePropertyValueStr(ctx, w, "writeln",
+            JS_NewCFunction(ctx, ns_realmdoc_writeln, "writeln", 1),
+            JS_PROP_C_W_E);
+    }
     ns_bind_fn(ctx, w, "querySelector",      ns_element_querySelector, 1);
     ns_bind_fn(ctx, w, "querySelectorAll",   ns_element_querySelectorAll, 1);
     ns_bind_fn(ctx, w, "getElementsByTagName",
@@ -39032,6 +39055,96 @@ ns_document_writeln(JSContext *ctx, JSValueConst this_val,
 {
     (void)this_val;
     return ns_document_write_common(ctx, argc, argv, TRUE);
+}
+
+static JSValue
+ns_realmdoc_open(JSContext *ctx, JSValueConst this_val,
+                 int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (js && doc) {
+        ns_js_clear_children(js, doc);
+        JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, ""));
+        js->mutated = TRUE;
+    }
+    return JS_DupValue(ctx, this_val);
+}
+
+static void
+ns_realmdoc_append_write(JSContext *ctx, JSValueConst this_val, int argc,
+                         JSValueConst *argv, gboolean newline)
+{
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (!js || !doc) return;
+    JSValue cur = JS_GetPropertyStr(ctx, this_val, "\xff" "wbuf");
+    GString *buf = g_string_new(NULL);
+    if (JS_IsString(cur)) {
+        const char *c = JS_ToCString(ctx, cur);
+        if (c) { g_string_append(buf, c); JS_FreeCString(ctx, c); }
+    } else {
+        ns_js_clear_children(js, doc);
+    }
+    JS_FreeValue(ctx, cur);
+    for (int i = 0; i < argc; i++) {
+        const char *s = JS_ToCString(ctx, argv[i]);
+        if (s) { g_string_append(buf, s); JS_FreeCString(ctx, s); }
+    }
+    if (newline) g_string_append_c(buf, '\n');
+    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_NewString(ctx, buf->str));
+    g_string_free(buf, TRUE);
+}
+
+static JSValue
+ns_realmdoc_write(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    ns_realmdoc_append_write(ctx, this_val, argc, argv, FALSE);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_realmdoc_writeln(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    ns_realmdoc_append_write(ctx, this_val, argc, argv, TRUE);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_realmdoc_close(JSContext *ctx, JSValueConst this_val,
+                  int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (!js || !doc) return JS_UNDEFINED;
+    JSValue cur = JS_GetPropertyStr(ctx, this_val, "\xff" "wbuf");
+    if (!JS_IsString(cur)) { JS_FreeValue(ctx, cur); return JS_UNDEFINED; }
+    const char *buf = JS_ToCString(ctx, cur);
+    JS_FreeValue(ctx, cur);
+    if (buf) {
+        ns_node *parsed = ns_html_parse(buf, -1);
+        JS_FreeCString(ctx, buf);
+        if (parsed) {
+            ns_js_clear_children(js, doc);
+            ns_node *c = parsed->first_child;
+            while (c) {
+                ns_node *next = c->next_sibling;
+                ns_node_own_strings_deep(c);
+                ns_node_remove(c);
+                ns_node_append_child(doc, c);
+                ns_js_index_child_change(js, doc, c, NULL);
+                c = next;
+            }
+            ns_node_free(parsed);
+            js->mutated = TRUE;
+        }
+    }
+    JS_SetPropertyStr(ctx, this_val, "\xff" "wbuf", JS_UNDEFINED);
+    return JS_UNDEFINED;
 }
 
 static JSValue
