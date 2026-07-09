@@ -1368,7 +1368,7 @@
                         closed: true
                     };
                 });
-                if (!Object.getOwnPropertyDescriptor(elementProto, 'dataset')) {
+                if (!('dataset' in probe)) {
                     Object.defineProperty(elementProto, 'dataset', {
                         configurable: true,
                         get: function () {
