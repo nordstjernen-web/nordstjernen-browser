@@ -89,6 +89,7 @@ nordstjernen_engine_sources = files(
   'wasm.c',
   'webcrypto.c',
   'webgl.c',
+  'webm_demux.c',
   'ws.c',
   'html_lexbor.c',
   'xml.c',
@@ -202,7 +203,7 @@ if have_freetype
   nordstjernen_deps += [libfreetype]
 endif
 
-nordstjernen_deps += [libpsl]
+nordstjernen_deps += [libpsl, libnestegg]
 
 if have_media_codecs
   nordstjernen_deps += media_codec_deps

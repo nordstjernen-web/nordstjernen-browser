@@ -379,6 +379,10 @@ endif
 
 libwuffs = dependency('wuffs', fallback: ['wuffs', 'wuffs_dep'])
 libplmpeg = dependency('plmpeg', fallback: ['plmpeg', 'plmpeg_dep'])
+# nestegg: the vendored WebM/Matroska demuxer (src/webm_demux.c wraps it). It is
+# the container-parsing foundation for native mobile WebM playback, where FFmpeg
+# is unavailable; on desktop libav still demuxes WebM.
+libnestegg = dependency('nestegg', fallback: ['nestegg', 'nestegg_dep'])
 zlib = dependency('zlib')
 
 fs = import('fs')
