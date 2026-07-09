@@ -35684,6 +35684,30 @@ ns_define_element_unscopables(JSContext *ctx, JSValue proto)
 }
 
 static JSValue
+ns_own_data_props_toJSON(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue out = JS_NewObject(ctx);
+    if (JS_IsException(out)) return out;
+    JSPropertyEnum *tab = NULL;
+    uint32_t n = 0;
+    if (JS_GetOwnPropertyNames(ctx, &tab, &n, this_val,
+                               JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) < 0)
+        return out;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue pv = JS_GetProperty(ctx, this_val, tab[i].atom);
+        if (JS_IsException(pv) || JS_IsFunction(ctx, pv)) {
+            JS_FreeValue(ctx, pv);
+            continue;
+        }
+        JS_DefinePropertyValue(ctx, out, tab[i].atom, pv, JS_PROP_C_W_E);
+    }
+    JS_FreePropertyEnum(ctx, tab, n);
+    return out;
+}
+
+static JSValue
 ns_window_performance_toJSON(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -36380,11 +36404,13 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     for (gsize i = 0; i < G_N_ELEMENTS(timing_keys); i++)
         JS_SetPropertyStr(ctx, perf_timing, timing_keys[i],
                           JS_NewFloat64(ctx, js->time_origin_real_ms));
+    ns_bind_fn(ctx, perf_timing, "toJSON", ns_own_data_props_toJSON, 0);
     JS_SetPropertyStr(ctx, performance, "timing", perf_timing);
 
     JSValue perf_nav = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, perf_nav, "type",         JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, perf_nav, "redirectCount", JS_NewInt32(ctx, 0));
+    ns_bind_fn(ctx, perf_nav, "toJSON", ns_own_data_props_toJSON, 0);
     JS_SetPropertyStr(ctx, performance, "navigation", perf_nav);
 
     {
