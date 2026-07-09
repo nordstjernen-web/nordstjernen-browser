@@ -5268,15 +5268,16 @@
         }
 
         try {
-            Object.defineProperty(document, 'styleSheets', {
+            var styleSheetsDef = {
                 configurable: true,
                 get: function () {
+                    var self = this || document;
                     var nodes;
                     try {
-                        nodes = document.querySelectorAll(
+                        nodes = self.querySelectorAll(
                             'style, link[rel~="stylesheet"]');
                     } catch (e) {
-                        try { nodes = document.getElementsByTagName('style'); }
+                        try { nodes = self.getElementsByTagName('style'); }
                         catch (e2) { nodes = []; }
                     }
                     var slist = [];
@@ -5287,7 +5288,11 @@
                     slist.item = function (i) { return this[i] || null; };
                     return slist;
                 }
-            });
+            };
+            if (global.Document && global.Document.prototype)
+                Object.defineProperty(global.Document.prototype,
+                                      'styleSheets', styleSheetsDef);
+            Object.defineProperty(document, 'styleSheets', styleSheetsDef);
         } catch (e) {}
     })();
 

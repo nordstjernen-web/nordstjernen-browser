@@ -3500,6 +3500,15 @@ ns_make_svg_animated_length(JSContext *ctx, const ns_node *n, const char *attr)
     return o;
 }
 
+static const struct ns_box *ns_box_for_this(JSContext *ctx,
+                                            JSValueConst this_val);
+static void ns_box_border_box(const struct ns_box *b,
+                              double *x, double *y, double *w, double *h);
+static JSValue ns_element_img_natural_width(JSContext *ctx,
+                                            JSValueConst this_val);
+static JSValue ns_element_img_natural_height(JSContext *ctx,
+                                             JSValueConst this_val);
+
 static JSValue
 ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
 {
@@ -3507,6 +3516,20 @@ ns_element_dimension_getter(JSContext *ctx, JSValueConst this_val, int magic)
     if (n && (n->flags & NS_NODE_SVG_NS))
         return ns_make_svg_animated_length(ctx, n, magic == 8 ? "width"
                                                               : "height");
+    if (n && n->name && strcmp(n->name, "img") == 0) {
+        const struct ns_box *b = ns_box_for_this(ctx, this_val);
+        if (b) {
+            double x, y, w, h;
+            ns_box_border_box(b, &x, &y, &w, &h);
+            return JS_NewInt32(ctx, (int)((magic == 8 ? w : h) + 0.5));
+        }
+        const char *attr = ns_element_get_attr(n, magic == 8 ? "width"
+                                                             : "height");
+        if (attr && *attr)
+            return ns_element_int_attr_getter(ctx, this_val, magic);
+        return magic == 8 ? ns_element_img_natural_width(ctx, this_val)
+                          : ns_element_img_natural_height(ctx, this_val);
+    }
     return ns_element_int_attr_getter(ctx, this_val, magic);
 }
 
@@ -18791,9 +18814,6 @@ ns_window_observer_ctor(JSContext *ctx, JSValueConst this_val,
     return obj;
 }
 
-static const struct ns_box *ns_box_for_this(JSContext *ctx, JSValueConst this_val);
-static void ns_box_border_box(const struct ns_box *b,
-                              double *x, double *y, double *w, double *h);
 
 static JSValue
 ns_resize_observer_build_entry(JSContext *ctx, JSValueConst target,
@@ -38071,6 +38091,14 @@ ns_synthdoc_get_forms(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_synthdoc_get_images(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    return ns_make_live(ctx, this_val, NS_LIVE_DOC_TAG, "img");
+}
+
+static JSValue
 ns_realmdoc_empty_cookie_get(JSContext *ctx, JSValueConst this_val,
                             int argc, JSValueConst *argv)
 {
@@ -38160,6 +38188,7 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     ns_synthdoc_define_getter(ctx, w, "head", ns_synthdoc_get_head);
     ns_synthdoc_define_getter(ctx, w, "title", ns_synthdoc_get_title);
     ns_synthdoc_define_getter(ctx, w, "forms", ns_synthdoc_get_forms);
+    ns_synthdoc_define_getter(ctx, w, "images", ns_synthdoc_get_images);
     ns_document_define_implementation_getter(ctx, w);
     ns_bind_fn(ctx, w, "createElement",      ns_document_createElement, 1);
     ns_bind_fn(ctx, w, "createElementNS",    ns_document_createElementNS, 2);
