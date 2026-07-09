@@ -37060,6 +37060,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JSValue css_obj = JS_NewObject(ctx);
     ns_bind_fn(ctx, css_obj, "supports", ns_css_supports, 2);
     ns_bind_fn(ctx, css_obj, "escape",   ns_css_escape,   1);
+    ns_set_tostring_tag(ctx, css_obj, "CSS");
     JS_SetPropertyStr(ctx, global, "CSS", css_obj);
 
     if (!ns_cryptokey_class_id) JS_NewClassID(js->rt, &ns_cryptokey_class_id);
