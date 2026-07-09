@@ -3030,6 +3030,12 @@ static const char *const ns_reflected_attr_names[] = {
     "popovertargetaction", "autocapitalize", "enterkeyhint",
     "low", "high", "optimum",
     "poster", "preload", "wrap", "scope", "cite", "media", "download",
+    "ping", "rev", "as", "align", "valign", "char", "charoff", "bgcolor",
+    "background", "link", "vlink", "alink", "color", "clear", "summary",
+    "frame", "rules", "border", "cellpadding", "cellspacing", "axis", "abbr",
+    "headers", "scheme", "standby", "codetype", "codebase", "code", "archive",
+    "scrolling", "frameborder", "marginwidth", "marginheight", "longdesc",
+    "lowsrc", "version", "event", "valuetype", "srclang", "dirname",
 };
 
 static gboolean ns_reflected_attr_is_global(const char *name);
@@ -3055,7 +3061,8 @@ ns_element_attr_getter(JSContext *ctx, JSValueConst this_val, int magic)
         return JS_NewString(ctx, js && js->current_url ? js->current_url : "");
     }
     gboolean is_url_attr = (magic == 3 || magic == 9 || magic == 39 ||
-                            magic == 87);
+                            magic == 87 || magic == 98 || magic == 116 ||
+                            magic == 123 || magic == 124);
     if (is_url_attr) {
         if (!v || !*v) return JS_NewString(ctx, "");
         ns_js *js = js_from_ctx(ctx);
@@ -32629,6 +32636,47 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("integrity",      ns_element_attr_getter, ns_element_attr_setter, 43),
     JS_CGETSET_MAGIC_DEF("kind",           ns_element_attr_getter, ns_element_attr_setter, 44),
     JS_CGETSET_MAGIC_DEF("hreflang",       ns_element_attr_getter, ns_element_attr_setter, 46),
+    JS_CGETSET_MAGIC_DEF("charset",        ns_element_attr_getter, ns_element_attr_setter, 47),
+    JS_CGETSET_MAGIC_DEF("ping",           ns_element_attr_getter, ns_element_attr_setter, 90),
+    JS_CGETSET_MAGIC_DEF("rev",            ns_element_attr_getter, ns_element_attr_setter, 91),
+    JS_CGETSET_MAGIC_DEF("as",             ns_element_attr_getter, ns_element_attr_setter, 92),
+    JS_CGETSET_MAGIC_DEF("align",          ns_element_attr_getter, ns_element_attr_setter, 93),
+    JS_CGETSET_MAGIC_DEF("vAlign",         ns_element_attr_getter, ns_element_attr_setter, 94),
+    JS_CGETSET_MAGIC_DEF("ch",             ns_element_attr_getter, ns_element_attr_setter, 95),
+    JS_CGETSET_MAGIC_DEF("chOff",          ns_element_attr_getter, ns_element_attr_setter, 96),
+    JS_CGETSET_MAGIC_DEF("bgColor",        ns_element_attr_getter, ns_element_attr_setter, 97),
+    JS_CGETSET_MAGIC_DEF("background",     ns_element_attr_getter, ns_element_attr_setter, 98),
+    JS_CGETSET_MAGIC_DEF("link",           ns_element_attr_getter, ns_element_attr_setter, 99),
+    JS_CGETSET_MAGIC_DEF("vLink",          ns_element_attr_getter, ns_element_attr_setter, 100),
+    JS_CGETSET_MAGIC_DEF("aLink",          ns_element_attr_getter, ns_element_attr_setter, 101),
+    JS_CGETSET_MAGIC_DEF("color",          ns_element_attr_getter, ns_element_attr_setter, 102),
+    JS_CGETSET_MAGIC_DEF("clear",          ns_element_attr_getter, ns_element_attr_setter, 103),
+    JS_CGETSET_MAGIC_DEF("summary",        ns_element_attr_getter, ns_element_attr_setter, 104),
+    JS_CGETSET_MAGIC_DEF("frame",          ns_element_attr_getter, ns_element_attr_setter, 105),
+    JS_CGETSET_MAGIC_DEF("rules",          ns_element_attr_getter, ns_element_attr_setter, 106),
+    JS_CGETSET_MAGIC_DEF("border",         ns_element_attr_getter, ns_element_attr_setter, 107),
+    JS_CGETSET_MAGIC_DEF("cellPadding",    ns_element_attr_getter, ns_element_attr_setter, 108),
+    JS_CGETSET_MAGIC_DEF("cellSpacing",    ns_element_attr_getter, ns_element_attr_setter, 109),
+    JS_CGETSET_MAGIC_DEF("axis",           ns_element_attr_getter, ns_element_attr_setter, 110),
+    JS_CGETSET_MAGIC_DEF("abbr",           ns_element_attr_getter, ns_element_attr_setter, 111),
+    JS_CGETSET_MAGIC_DEF("headers",        ns_element_attr_getter, ns_element_attr_setter, 112),
+    JS_CGETSET_MAGIC_DEF("scheme",         ns_element_attr_getter, ns_element_attr_setter, 113),
+    JS_CGETSET_MAGIC_DEF("standby",        ns_element_attr_getter, ns_element_attr_setter, 114),
+    JS_CGETSET_MAGIC_DEF("codeType",       ns_element_attr_getter, ns_element_attr_setter, 115),
+    JS_CGETSET_MAGIC_DEF("codeBase",       ns_element_attr_getter, ns_element_attr_setter, 116),
+    JS_CGETSET_MAGIC_DEF("code",           ns_element_attr_getter, ns_element_attr_setter, 117),
+    JS_CGETSET_MAGIC_DEF("archive",        ns_element_attr_getter, ns_element_attr_setter, 118),
+    JS_CGETSET_MAGIC_DEF("scrolling",      ns_element_attr_getter, ns_element_attr_setter, 119),
+    JS_CGETSET_MAGIC_DEF("frameBorder",    ns_element_attr_getter, ns_element_attr_setter, 120),
+    JS_CGETSET_MAGIC_DEF("marginWidth",    ns_element_attr_getter, ns_element_attr_setter, 121),
+    JS_CGETSET_MAGIC_DEF("marginHeight",   ns_element_attr_getter, ns_element_attr_setter, 122),
+    JS_CGETSET_MAGIC_DEF("longDesc",       ns_element_attr_getter, ns_element_attr_setter, 123),
+    JS_CGETSET_MAGIC_DEF("lowsrc",         ns_element_attr_getter, ns_element_attr_setter, 124),
+    JS_CGETSET_MAGIC_DEF("version",        ns_element_attr_getter, ns_element_attr_setter, 125),
+    JS_CGETSET_MAGIC_DEF("event",          ns_element_attr_getter, ns_element_attr_setter, 126),
+    JS_CGETSET_MAGIC_DEF("valueType",      ns_element_attr_getter, ns_element_attr_setter, 127),
+    JS_CGETSET_MAGIC_DEF("srclang",        ns_element_attr_getter, ns_element_attr_setter, 128),
+    JS_CGETSET_MAGIC_DEF("dirName",        ns_element_attr_getter, ns_element_attr_setter, 129),
     JS_CGETSET_MAGIC_DEF("httpEquiv",      ns_element_attr_getter, ns_element_attr_setter, 49),
     JS_CGETSET_MAGIC_DEF("contentEditable", ns_element_attr_getter, ns_element_attr_setter, 50),
     JS_CGETSET_MAGIC_DEF("slot",           ns_element_attr_getter, ns_element_attr_setter, 51),
