@@ -5016,6 +5016,31 @@
             return rules;
         }
 
+        function serializeDeclBlock(block) {
+            var s = String(block), out = [], buf = '', depth = 0, quote = 0;
+            for (var i = 0; i < s.length; i++) {
+                var c = s.charAt(i);
+                if (quote) {
+                    buf += c;
+                    if (c === quote && s.charAt(i - 1) !== '\\') quote = 0;
+                    continue;
+                }
+                if (c === '"' || c === "'") { quote = c; buf += c; continue; }
+                if (c === '(') { depth++; buf += c; continue; }
+                if (c === ')') { if (depth) depth--; buf += c; continue; }
+                if (c === ';' && depth === 0) {
+                    var d = buf.replace(/\s+/g, ' ').replace(/^ | $/g, '');
+                    if (d) out.push(d + ';');
+                    buf = '';
+                    continue;
+                }
+                buf += c;
+            }
+            var last = buf.replace(/\s+/g, ' ').replace(/^ | $/g, '');
+            if (last) out.push(last + ';');
+            return out.join(' ');
+        }
+
         function makeAtStatement(prelude, sheet, parentRule) {
             var kw = atKeyword(prelude), rule = Object.create(CSSRule.prototype);
             rule.__parentStyleSheet = sheet || null;
@@ -5055,7 +5080,9 @@
                 ar.__type = kw === 'font-face' ? 5 : kw === 'page' ? 6 :
                             kw === 'keyframes' || kw === '-webkit-keyframes' ? 7 :
                             kw === 'counter-style' ? 11 : 0;
-                var raw = prelude + ' { ' + block.replace(/^\s+|\s+$/g, '') + ' }';
+                var head = prelude.replace(/\s+/g, ' ').replace(/^ | $/g, '');
+                var body = serializeDeclBlock(block);
+                var raw = head + (body ? ' { ' + body + ' }' : ' { }');
                 ar.__cssText = function () { return raw; };
                 return ar;
             }
