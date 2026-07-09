@@ -29561,6 +29561,11 @@ ns_js_request_submit_form(JSContext *ctx, const ns_node *form,
 {
     ns_js *js = js_from_ctx(ctx);
     if (!form || !js) return JS_UNDEFINED;
+    gboolean form_connected = FALSE;
+    for (const ns_node *p = form; p; p = p->parent)
+        if (p == js->current_doc) { form_connected = TRUE; break; }
+    if (!form_connected)
+        return JS_UNDEFINED;
     if (!ns_js_form_validation_allows_submit(ctx, form, submitter))
         return JS_UNDEFINED;
     gboolean submit_prevented = FALSE;
