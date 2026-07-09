@@ -142,10 +142,6 @@ if is_mobile
     sqlite3,
     zlib,
   ]
-
-  if have_media_codecs
-    nordstjernen_deps += media_codec_deps
-  endif
 else
   nordstjernen_deps = [
     glib,
@@ -207,6 +203,10 @@ if have_freetype
 endif
 
 nordstjernen_deps += [libpsl]
+
+if have_media_codecs
+  nordstjernen_deps += media_codec_deps
+endif
 
 # macOS WebGL: src/glctx.c creates the offscreen GL context through CGL, whose
 # symbols live in the OpenGL framework. Unused targets drop it via

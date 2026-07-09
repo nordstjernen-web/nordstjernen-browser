@@ -56,10 +56,17 @@ How libav is obtained differs by platform, to keep it redistributable:
   unavailable. Instead the mobile dependency sysroot
   ([nordstjernen-dependencies-build](https://github.com/nordstjernen-web/nordstjernen-dependencies-build))
   cross-builds the standalone open-media decoders — **dav1d** (AV1), **libvpx**
-  (VP8/VP9), **opus** and **vorbis** — which the engine build detects and links
-  when present (`NS_HAVE_MEDIA_CODECS`; availability is queried through
-  `src/media_codecs.c`). Until the native mobile decode path is wired onto that
-  seam, WebM on mobile still falls back to the external-player route.
+  (VP8/VP9), **opus** and **vorbis**.
+
+Those same standalone decoders are detected on **every** platform — mobile from
+the sysroot above, desktop from system packages (`libdav1d-dev` / `libvpx-dev` /
+`libopus-dev` / `libvorbis-dev`; Homebrew `dav1d`/`libvpx`/`opus`/`libvorbis`) —
+and linked whenever present (`NS_HAVE_MEDIA_CODECS`; availability is queried
+through `src/media_codecs.c`). So the **desktop** build benefits too: they
+complement FFmpeg and give a native decode path where FFmpeg is absent (e.g. a
+stock macOS build, whose WebM otherwise falls back to the external player). Until
+the decode implementation is wired onto that seam, a build without libav still
+uses the external-player route.
 
 ## Audio
 
