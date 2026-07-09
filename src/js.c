@@ -42533,6 +42533,23 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             }
         }
     }
+    gboolean is_plaintext = resp && resp->content_type &&
+        g_ascii_strncasecmp(resp->content_type, "text/plain", 10) == 0;
+    if (!content_doc && decoded && is_plaintext) {
+        content_doc = ns_node_new_document();
+        ns_node *html = ns_node_new_element(g_strdup("html"));
+        ns_node *head = ns_node_new_element(g_strdup("head"));
+        ns_node *body = ns_node_new_element(g_strdup("body"));
+        ns_node *pre  = ns_node_new_element(g_strdup("pre"));
+        ns_node_append_child(pre, ns_node_new_text(g_strdup(decoded)));
+        ns_node_append_child(body, pre);
+        ns_node_append_child(html, head);
+        ns_node_append_child(html, body);
+        ns_node_append_child(content_doc, html);
+        content_root = html;
+        ns_node_own_strings_deep(content_doc);
+        ns_node_append_child(iframe, content_doc);
+    }
     if (!content_doc && decoded) {
         if (malformed_xml) {
             g_free(decoded);
