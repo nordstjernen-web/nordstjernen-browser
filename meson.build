@@ -301,6 +301,42 @@ if have_libav
   add_project_arguments('-DNS_HAVE_LIBAV=1', language: 'c')
 endif
 
+# Native open-media decoders for the mobile build, taken from the prebuilt
+# dependency sysroot (github.com/nordstjernen-web/nordstjernen-dependencies-build):
+# dav1d (AV1), libvpx (VP8/VP9), and opus + vorbis (audio). On desktop the same
+# WebM/Ogg formats are handled by FFmpeg (have_libav), so these are detected only
+# on mobile, where FFmpeg is not cross-built. Each is optional so a partial
+# sysroot still configures; the per-codec NS_HAVE_* macros gate the native decode
+# seam in src/media_codecs.c. The Ogg/WebM demux libraries (libogg, vorbisfile)
+# join this list with the decode implementation that consumes them.
+media_codec_deps = []
+if is_mobile
+  libdav1d  = dependency('dav1d',  required: false)
+  libvpx    = dependency('vpx',    required: false)
+  libopus   = dependency('opus',   required: false)
+  libvorbis = dependency('vorbis', required: false)
+  if libdav1d.found()
+    media_codec_deps += [libdav1d]
+    add_project_arguments('-DNS_HAVE_DAV1D=1', language: 'c')
+  endif
+  if libvpx.found()
+    media_codec_deps += [libvpx]
+    add_project_arguments('-DNS_HAVE_VPX=1', language: 'c')
+  endif
+  if libopus.found()
+    media_codec_deps += [libopus]
+    add_project_arguments('-DNS_HAVE_OPUS=1', language: 'c')
+  endif
+  if libvorbis.found()
+    media_codec_deps += [libvorbis]
+    add_project_arguments('-DNS_HAVE_VORBIS=1', language: 'c')
+  endif
+endif
+have_media_codecs = media_codec_deps.length() > 0
+if have_media_codecs
+  add_project_arguments('-DNS_HAVE_MEDIA_CODECS=1', language: 'c')
+endif
+
 libenchant = dependency('enchant-2', required: false)
 have_enchant = libenchant.found() and not is_mobile
 if have_enchant

@@ -52,8 +52,14 @@ How libav is obtained differs by platform, to keep it redistributable:
   (`scripts/build-ffmpeg-lgpl.sh`), carrying just the matroska/ogg demuxers and
   the native VP8/VP9/Opus/Vorbis decoders — no GPL parts, no external codec
   libraries.
-- **Android** stays WebM-free (its NDK dependency sysroot does not cross-build
-  FFmpeg).
+- **Android / iOS** do not cross-build FFmpeg, so the desktop libav path is
+  unavailable. Instead the mobile dependency sysroot
+  ([nordstjernen-dependencies-build](https://github.com/nordstjernen-web/nordstjernen-dependencies-build))
+  cross-builds the standalone open-media decoders — **dav1d** (AV1), **libvpx**
+  (VP8/VP9), **opus** and **vorbis** — which the engine build detects and links
+  when present (`NS_HAVE_MEDIA_CODECS`; availability is queried through
+  `src/media_codecs.c`). Until the native mobile decode path is wired onto that
+  seam, WebM on mobile still falls back to the external-player route.
 
 ## Audio
 

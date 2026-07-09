@@ -71,6 +71,7 @@ nordstjernen_engine_sources = files(
   'js_realm.c',
   'layout.c',
   'mathml.c',
+  'media_codecs.c',
   'mobile.c',
   'net.c',
   'netutil.c',
@@ -141,6 +142,10 @@ if is_mobile
     sqlite3,
     zlib,
   ]
+
+  if have_media_codecs
+    nordstjernen_deps += media_codec_deps
+  endif
 else
   nordstjernen_deps = [
     glib,
