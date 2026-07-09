@@ -5,7 +5,7 @@ Nordstjernen is a web browser, written from scratch in C.
 Focused on supporting the HTML and CSS standards.  
 Nordstjernen is built in Norway. 
 
-Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , MacOS, Linux, Android, Java, iOS. FreeBSD and NetBSD.  
+Runs on the platforms [Windows](https://apps.microsoft.com/detail/9nw8t7w5z4pl)  , MacOS, Linux, [Android](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser), Java, iOS. FreeBSD and NetBSD.  
 
 **HTML Standards:** Behaviour is measured against the spec text, section by section, not against another browser — 140 spec rows fully implemented, 31 partial, and 0 absent across §1–§16 (July 2026), aside from a few features that are non-goals by design. 
 
@@ -142,6 +142,7 @@ latest build — bleeding edge, expect rough edges.
 |----------|----------|
 | Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) - [`nordstjernen-windows-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip) - [`nordstjernen-windows-x86_64.msix`](https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.msix)  |
 | macOS (Apple Silicon) | [`nordstjernen-macos.dmg`](https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg) — unsigned, see [first-launch note](docs/macOS.md#opening-an-unsigned-build) |
+| Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
 | Debian | [`nordstjernen-debian-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb) |
 | Ubuntu | [`nordstjernen-ubuntu-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb) |
 | openSUSE | [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm) |
@@ -184,6 +185,12 @@ source. Install, troubleshooting, and packaging are in
 DirectComposition (`dcomp.dll`), so the build will not start on Windows 7
 (and GTK 4 targets Windows 10 anyway). There is no older-Windows
 build.
+
+**Android.** Nordstjernen is on the
+[Google Play Store](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser)
+— free, ad-free, and with no telemetry, the same clean-room engine as the
+desktop build with a thin Kotlin shell. Install, build, and release details
+are in [docs/Android.md](docs/Android.md).
 
 **Java (JVM).** A Java binding embeds the engine on the JVM (requires
 JDK 21): `org.nordstjernen.Nordstjernen` drives fetch / parse / layout /

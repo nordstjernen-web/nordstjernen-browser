@@ -1,5 +1,8 @@
 # Nordstjernen for Android
 
+Available on the [Google Play Store](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser).
+See [`docs/Android.md`](../docs/Android.md) for the build, signing, and release guide.
+
 An Android host app that drives the Nordstjernen browser engine through its C
 embedding API (`src/libnordstjernen.h`). The engine — HTML parsing (lexbor),
 CSS cascade + layout, JavaScript (QuickJS), image decoding (Wuffs), and cairo

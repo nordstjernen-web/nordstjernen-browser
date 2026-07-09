@@ -1,5 +1,9 @@
 # Nordstjernen on Android — build & Google Play release
 
+Nordstjernen is **live on the Google Play Store**:
+<https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser>
+— free, ad-free, no telemetry.
+
 The Android port lives in [`android/`](../android). This document is the
 **release** guide: how to build, sign, and ship to the Google Play Store.
 For the engineering architecture, see [`android/README.md`](../android/README.md).
@@ -26,14 +30,16 @@ the free binary only. Treat Play as reach and reputation.
   **arm64-v8a** + **x86_64**.
   AGP 8.11.1, Gradle 8.14.5, NDK r27, JDK 17.
 
-## Remaining Play Store steps
+## Play Store release checklist
 
-As of **14 June 2026**, the Android code path is close to publishable:
-`targetSdk 36`, `minSdk 35`, `arm64-v8a` + `x86_64`, 16 KB page-size linker
-flags, edge-to-edge handling, Play upload-key wiring, a manual release AAB
-workflow, and the minimal `INTERNET` / `ACCESS_NETWORK_STATE` permissions are
-already in-tree. The remaining work is mostly Play Console setup and release
-paperwork:
+Nordstjernen is now **published on Google Play** at
+<https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser>.
+The code path — `targetSdk 36`, `minSdk 35`, `arm64-v8a` + `x86_64`, 16 KB
+page-size linker flags, edge-to-edge handling, Play upload-key wiring, a manual
+release AAB workflow, and the minimal `INTERNET` / `ACCESS_NETWORK_STATE`
+permissions — is all in-tree. The checklist below records the Play Console setup
+and release paperwork that took the app to production, and is the reference for
+each subsequent release:
 
 1. **Finish developer account verification.** Decide personal vs organisation
    account. Organisation accounts need D-U-N-S-backed business details; personal

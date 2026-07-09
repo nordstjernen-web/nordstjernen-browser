@@ -60,7 +60,8 @@ and constraint validation; `overflow` boxes scroll. The full
 (`src/wasm.c`), and an opt-in, per-site-gated WebGL 1 / 2 maps onto
 OpenGL ES (`src/webgl.c`). Painting skips off-screen boxes (viewport
 culling). Runs on Linux, Windows (MSYS2) and macOS, with an Android
-port in progress; CI builds the desktop three plus musl and
+port [published on Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser);
+CI builds the desktop three plus musl and
 the Java binding on every push (the BSDs run nightly / on dispatch).
 The GTK frontend is a tabbed, **process-per-tab** browser:
 each tab drives its own sandboxed renderer process over the engine and
@@ -104,9 +105,10 @@ toolkit-agnostic:
   renderer's HTTP/JSON protocol. `org.nordstjernen.app.Browser` is a
   standalone Swing browser app built on that client with GTK-shell-style
   chrome. See `java/README.md`.
-- **`android/` — Android port (in progress).** A Kotlin shell
+- **`android/` — Android port (on Google Play).** A Kotlin shell
   (`MainActivity`, `PageView`, `NativeBrowser`) over the same engine via
-  JNI; see `docs/Android.md`.
+  JNI, [published on the Play Store](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser);
+  see `docs/Android.md`.
 
 **Process-per-tab renderer boundary — shipped.** Each tab runs in its own
 sandboxed *process* that runs the engine and produces a rendered surface;
