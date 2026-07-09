@@ -32,6 +32,10 @@
 #include <libswresample/swresample.h>
 #endif
 
+#ifdef NS_HAVE_VORBISFILE
+#include <vorbis/vorbisfile.h>
+#endif
+
 #define NS_AUDIO_MAX_PLAYERS 16
 #define NS_AUDIO_MAX_SECONDS 1800
 #define NS_AUDIO_DEVICE_RATE 44100
@@ -334,6 +338,103 @@ decode_mp3(const unsigned char *bytes, size_t n,
     *out_ch = ch;
     return 1;
 }
+
+#ifdef NS_HAVE_VORBISFILE
+typedef struct { const unsigned char *data; size_t size; size_t pos; } ns_ogg_mem;
+
+static size_t
+ns_ogg_read(void *ptr, size_t size, size_t nmemb, void *src)
+{
+    ns_ogg_mem *m = src;
+    size_t want = size * nmemb;
+    size_t avail = m->size - m->pos;
+    if (want > avail) want = avail;
+    memcpy(ptr, m->data + m->pos, want);
+    m->pos += want;
+    return (size != 0) ? want / size : 0;
+}
+
+static int
+ns_ogg_seek(void *src, ogg_int64_t offset, int whence)
+{
+    ns_ogg_mem *m = src;
+    ogg_int64_t base;
+    if (whence == SEEK_SET) base = 0;
+    else if (whence == SEEK_CUR) base = (ogg_int64_t)m->pos;
+    else if (whence == SEEK_END) base = (ogg_int64_t)m->size;
+    else return -1;
+    ogg_int64_t np = base + offset;
+    if (np < 0 || np > (ogg_int64_t)m->size) return -1;
+    m->pos = (size_t)np;
+    return 0;
+}
+
+static long
+ns_ogg_tell(void *src)
+{
+    ns_ogg_mem *m = src;
+    return (long)m->pos;
+}
+
+static int
+bytes_are_ogg(const unsigned char *b, size_t n)
+{
+    return n >= 4 && b[0] == 'O' && b[1] == 'g' && b[2] == 'g' && b[3] == 'S';
+}
+
+static int
+decode_vorbis(const unsigned char *bytes, size_t n,
+              float **out_pcm, size_t *out_frames, int *out_rate, int *out_ch)
+{
+    ns_ogg_mem mem = { bytes, n, 0 };
+    ov_callbacks cb = { ns_ogg_read, ns_ogg_seek, NULL, ns_ogg_tell };
+    OggVorbis_File vf;
+    if (ov_open_callbacks(&mem, &vf, NULL, 0, cb) < 0) return 0;
+
+    vorbis_info *vi = ov_info(&vf, -1);
+    if (!vi || vi->rate <= 0 || vi->channels < 1) { ov_clear(&vf); return 0; }
+    int rate = (int)vi->rate;
+    int ch = vi->channels;
+
+    size_t max_floats = (size_t)rate * (size_t)ch * NS_AUDIO_MAX_SECONDS;
+    if (max_floats > NS_AUDIO_MAX_FLOATS) max_floats = NS_AUDIO_MAX_FLOATS;
+
+    float *pcm = NULL;
+    size_t cap = 0, len = 0;
+    int bitstream = 0;
+    for (;;) {
+        float **chans = NULL;
+        long got = ov_read_float(&vf, &chans, 4096, &bitstream);
+        if (got == 0) break;
+        if (got < 0) continue;
+        size_t add = (size_t)got * (size_t)ch;
+        if (len + add > cap) {
+            size_t want = cap ? cap : (size_t)rate * (size_t)ch;
+            while (len + add > want) {
+                if (want > SIZE_MAX / (2u * sizeof(float))) { free(pcm); ov_clear(&vf); return 0; }
+                want *= 2;
+            }
+            float *grown = realloc(pcm, want * sizeof(float));
+            if (!grown) { free(pcm); ov_clear(&vf); return 0; }
+            pcm = grown;
+            cap = want;
+        }
+        for (long i = 0; i < got; i++)
+            for (int c = 0; c < ch; c++)
+                pcm[len + (size_t)i * (size_t)ch + (size_t)c] = chans[c][i];
+        len += add;
+        if (len >= max_floats) break;
+    }
+    ov_clear(&vf);
+
+    if (len == 0) { free(pcm); return 0; }
+    *out_pcm = pcm;
+    *out_frames = len / (size_t)ch;
+    *out_rate = rate;
+    *out_ch = ch;
+    return 1;
+}
+#endif
 
 #ifdef NS_HAVE_LIBAV
 static int
@@ -745,6 +846,10 @@ load_audio(ns_audio_player *p, const char *path)
 #ifdef NS_HAVE_LIBAV
     if (!ok)
         ok = decode_libav(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#endif
+#ifdef NS_HAVE_VORBISFILE
+    if (!ok && bytes_are_ogg(bytes, n))
+        ok = decode_vorbis(bytes, n, &src, &src_frames, &src_rate, &src_ch);
 #endif
     free(bytes);
     if (!ok) return 0;

@@ -313,10 +313,16 @@ endif
 # libraries (libogg, vorbisfile) join this list with the decode implementation
 # that consumes them.
 media_codec_deps = []
-libdav1d  = dependency('dav1d',  required: false)
-libvpx    = dependency('vpx',    required: false)
-libopus   = dependency('opus',   required: false)
-libvorbis = dependency('vorbis', required: false)
+libdav1d      = dependency('dav1d',      required: false)
+libvpx        = dependency('vpx',        required: false)
+libopus       = dependency('opus',       required: false)
+libvorbis     = dependency('vorbis',     required: false)
+# vorbisfile is the ov_* high-level decode API over libvorbis, used by the audio
+# helper (src/audio/main.c) to decode Ogg/Vorbis natively where FFmpeg is absent.
+libvorbisfile = dependency('vorbisfile', required: false)
+if libvorbisfile.found()
+  add_project_arguments('-DNS_HAVE_VORBISFILE=1', language: 'c')
+endif
 if libdav1d.found()
   media_codec_deps += [libdav1d]
   add_project_arguments('-DNS_HAVE_DAV1D=1', language: 'c')
