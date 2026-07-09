@@ -36,6 +36,10 @@
 #include <vorbis/vorbisfile.h>
 #endif
 
+#ifdef NS_HAVE_OPUSFILE
+#include <opusfile.h>
+#endif
+
 #define NS_AUDIO_MAX_PLAYERS 16
 #define NS_AUDIO_MAX_SECONDS 1800
 #define NS_AUDIO_DEVICE_RATE 44100
@@ -426,6 +430,60 @@ decode_vorbis(const unsigned char *bytes, size_t n,
         if (len >= max_floats) break;
     }
     ov_clear(&vf);
+
+    if (len == 0) { free(pcm); return 0; }
+    *out_pcm = pcm;
+    *out_frames = len / (size_t)ch;
+    *out_rate = rate;
+    *out_ch = ch;
+    return 1;
+}
+#endif
+
+#ifdef NS_HAVE_OPUSFILE
+static int
+decode_opus(const unsigned char *bytes, size_t n,
+            float **out_pcm, size_t *out_frames, int *out_rate, int *out_ch)
+{
+    OggOpusFile *of = op_open_memory(bytes, n, NULL);
+    if (!of) return 0;
+    int ch = op_channel_count(of, -1);
+    if (ch < 1 || ch > 8) { op_free(of); return 0; }
+    int rate = 48000;
+
+    size_t max_floats = (size_t)rate * (size_t)ch * NS_AUDIO_MAX_SECONDS;
+    if (max_floats > NS_AUDIO_MAX_FLOATS) max_floats = NS_AUDIO_MAX_FLOATS;
+
+    int frame_cap = 5760 * ch;
+    float *frame = malloc((size_t)frame_cap * sizeof(float));
+    if (!frame) { op_free(of); return 0; }
+
+    float *pcm = NULL;
+    size_t cap = 0, len = 0;
+    for (;;) {
+        int got = op_read_float(of, frame, frame_cap, NULL);
+        if (got == 0) break;
+        if (got < 0) { free(frame); free(pcm); op_free(of); return 0; }
+        size_t add = (size_t)got * (size_t)ch;
+        if (len + add > cap) {
+            size_t want = cap ? cap : (size_t)rate * (size_t)ch;
+            while (len + add > want) {
+                if (want > SIZE_MAX / (2u * sizeof(float))) {
+                    free(frame); free(pcm); op_free(of); return 0;
+                }
+                want *= 2;
+            }
+            float *grown = realloc(pcm, want * sizeof(float));
+            if (!grown) { free(frame); free(pcm); op_free(of); return 0; }
+            pcm = grown;
+            cap = want;
+        }
+        memcpy(pcm + len, frame, add * sizeof(float));
+        len += add;
+        if (len >= max_floats) break;
+    }
+    free(frame);
+    op_free(of);
 
     if (len == 0) { free(pcm); return 0; }
     *out_pcm = pcm;
@@ -850,6 +908,10 @@ load_audio(ns_audio_player *p, const char *path)
 #ifdef NS_HAVE_VORBISFILE
     if (!ok && bytes_are_ogg(bytes, n))
         ok = decode_vorbis(bytes, n, &src, &src_frames, &src_rate, &src_ch);
+#endif
+#ifdef NS_HAVE_OPUSFILE
+    if (!ok)
+        ok = decode_opus(bytes, n, &src, &src_frames, &src_rate, &src_ch);
 #endif
     free(bytes);
     if (!ok) return 0;

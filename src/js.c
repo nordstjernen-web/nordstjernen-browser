@@ -31015,11 +31015,25 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
 #else
     gboolean libav = FALSE;
 #endif
+#ifdef NS_AUDIO_NATIVE_VORBIS
+    gboolean native_vorbis = TRUE;
+#else
+    gboolean native_vorbis = FALSE;
+#endif
+#ifdef NS_AUDIO_NATIVE_OPUS
+    gboolean native_opus = TRUE;
+#else
+    gboolean native_opus = FALSE;
+#endif
+    gboolean native_ogg = native_vorbis || native_opus;
 
     gboolean container_ok =
         strcmp(container, "audio/mpeg") == 0 ||
         strcmp(container, "audio/mp3") == 0 ||
         strcmp(container, "video/mpeg") == 0 ||
+        (native_ogg && (strcmp(container, "audio/ogg") == 0 ||
+                        strcmp(container, "application/ogg") == 0)) ||
+        (native_opus && strcmp(container, "audio/opus") == 0) ||
         (libav && (strcmp(container, "video/webm") == 0 ||
                    strcmp(container, "audio/webm") == 0 ||
                    strcmp(container, "video/mp4") == 0 ||
@@ -31053,6 +31067,8 @@ ns_media_canPlayType(JSContext *ctx, JSValueConst this_val,
                     strstr(cd, "mp3") != NULL ||
                     g_str_has_prefix(cd, "mp4a.69") ||
                     g_str_has_prefix(cd, "mp4a.6b") ||
+                    (native_vorbis && strstr(cd, "vorbis") != NULL) ||
+                    (native_opus && strstr(cd, "opus") != NULL) ||
                     (libav && ns_video_codec_available(cd));
                 if (!ok) all_ok = FALSE;
             }
