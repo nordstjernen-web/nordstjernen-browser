@@ -41637,14 +41637,18 @@ ns_js_iframe_clear_content(ns_js *js, ns_node *iframe)
 {
     ns_js_purge_frame_rafs(js, iframe);
     ns_js_scrub_iframe_globals(js, iframe);
-    while (iframe->first_child) {
-        ns_node *c = iframe->first_child;
-        ns_node *saved_prev = c->prev_sibling;
-        ns_node *saved_next = c->next_sibling;
-        ns_node_remove(c);
-        ns_js_unpin_subtree(js, c);
-        if (js->orphan_nodes) g_hash_table_add(js->orphan_nodes, c);
-        ns_js_record_child_change(js, iframe, NULL, c, saved_prev, saved_next);
+    ns_node *c = iframe->first_child;
+    while (c) {
+        ns_node *next = c->next_sibling;
+        if (c->kind == NS_NODE_DOCUMENT) {
+            ns_node *saved_prev = c->prev_sibling;
+            ns_node *saved_next = c->next_sibling;
+            ns_node_remove(c);
+            ns_js_unpin_subtree(js, c);
+            if (js->orphan_nodes) g_hash_table_add(js->orphan_nodes, c);
+            ns_js_record_child_change(js, iframe, NULL, c, saved_prev, saved_next);
+        }
+        c = next;
     }
 }
 
