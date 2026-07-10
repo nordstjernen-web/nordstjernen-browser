@@ -191,17 +191,47 @@ ns_security_refuse_root(void)
 #elif defined(G_OS_WIN32)
     if (!ns_win_is_elevated()) return TRUE;
     if (g_getenv("NS_ALLOW_ROOT")) {
-        g_warning("nordstjernen: running elevated because NS_ALLOW_ROOT is set");
+        g_warning("nordstjernen: running as Administrator because "
+                  "NS_ALLOW_ROOT is set");
         return TRUE;
     }
+
     const char *msg =
-        "Nordstjernen refuses to run as Administrator.\n\n"
-        "Web browsers process untrusted content; running with elevated\n"
-        "privileges exposes the whole system if the renderer is compromised.\n\n"
-        "Re-launch as a normal user, or set the NS_ALLOW_ROOT environment\n"
-        "variable to 1 to override.";
+        "Nordstjernen is running as administrator.\n"
+        "\n"
+        "You do not need administrator rights to browse the web, and it is much "
+        "safer without them. A web browser constantly opens pages, images and "
+        "downloads from the internet - content you do not control. If one of "
+        "those pages managed to exploit a flaw in the browser while it has "
+        "administrator rights, it could take over your whole PC: install "
+        "programs, read or delete any of your files, or change Windows "
+        "settings. Without administrator rights, the same flaw stays confined "
+        "to your own user account.\n"
+        "\n"
+        "How to start Nordstjernen normally:\n"
+        "  -  Close this window, then open Nordstjernen with a normal click on "
+        "its Start-menu or desktop icon. Do not choose \"Run as "
+        "administrator\".\n"
+        "  -  If you started it from a Command Prompt or PowerShell, use an "
+        "ordinary window that is not marked \"Administrator\".\n"
+        "  -  If a shortcut keeps starting it elevated, right-click the "
+        "shortcut, choose Properties, then Advanced, and turn off \"Run as "
+        "administrator\".\n"
+        "\n"
+        "Do you want to run as administrator anyway?\n"
+        "  -  No (recommended): quit, then reopen Nordstjernen normally.\n"
+        "  -  Yes: run as administrator this once, at your own risk.";
     fprintf(stderr, "nordstjernen: %s\n", msg);
-    MessageBoxA(NULL, msg, "Nordstjernen", MB_OK | MB_ICONERROR);
+
+    int choice = MessageBoxA(NULL, msg,
+        "Nordstjernen - running as administrator",
+        MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 |
+        MB_SETFOREGROUND | MB_TOPMOST);
+    if (choice == IDYES) {
+        g_warning("nordstjernen: running as Administrator at the user's "
+                  "request");
+        return TRUE;
+    }
     return FALSE;
 #else
     return TRUE;
