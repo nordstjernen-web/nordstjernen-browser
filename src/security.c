@@ -171,6 +171,61 @@ ns_win_is_elevated(void)
     FreeSid(admins_sid);
     return is_member ? TRUE : FALSE;
 }
+
+static gboolean
+ns_win_relaunch_deelevated(void)
+{
+    HWND shell = GetShellWindow();
+    if (!shell) return FALSE;
+    DWORD shell_pid = 0;
+    GetWindowThreadProcessId(shell, &shell_pid);
+    if (!shell_pid) return FALSE;
+
+    HANDLE shell_proc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, shell_pid);
+    if (!shell_proc) return FALSE;
+
+    HANDLE shell_tok = NULL;
+    gboolean relaunched = FALSE;
+    if (OpenProcessToken(shell_proc, TOKEN_DUPLICATE, &shell_tok)) {
+        HANDLE user_tok = NULL;
+        DWORD access = TOKEN_QUERY | TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE |
+                       TOKEN_ADJUST_DEFAULT | TOKEN_ADJUST_SESSIONID;
+        if (DuplicateTokenEx(shell_tok, access, NULL, SecurityImpersonation,
+                             TokenPrimary, &user_tok)) {
+            TOKEN_ELEVATION elev;
+            DWORD got = 0;
+            gboolean shell_elevated =
+                GetTokenInformation(user_tok, TokenElevation, &elev,
+                                    sizeof elev, &got) && elev.TokenIsElevated;
+            if (!shell_elevated) {
+                wchar_t exe[4096];
+                DWORD n = GetModuleFileNameW(NULL, exe, G_N_ELEMENTS(exe));
+                LPWSTR app = (n > 0 && n < G_N_ELEMENTS(exe)) ? exe : NULL;
+                LPWSTR src = GetCommandLineW();
+                gsize bytes = ((gsize)lstrlenW(src) + 1) * sizeof(wchar_t);
+                LPWSTR cmd = g_malloc(bytes);
+                memcpy(cmd, src, bytes);
+                SetEnvironmentVariableW(L"NS_DEELEVATED", L"1");
+                STARTUPINFOW si;
+                memset(&si, 0, sizeof si);
+                si.cb = sizeof si;
+                PROCESS_INFORMATION pi;
+                memset(&pi, 0, sizeof pi);
+                if (CreateProcessWithTokenW(user_tok, 0, app, cmd, 0,
+                                            NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    relaunched = TRUE;
+                }
+                g_free(cmd);
+            }
+            CloseHandle(user_tok);
+        }
+        CloseHandle(shell_tok);
+    }
+    CloseHandle(shell_proc);
+    return relaunched;
+}
 #endif
 
 gboolean
@@ -195,18 +250,20 @@ ns_security_refuse_root(void)
                   "NS_ALLOW_ROOT is set");
         return TRUE;
     }
+    if (!g_getenv("NS_DEELEVATED") && ns_win_relaunch_deelevated()) {
+        g_warning("nordstjernen: dropped Administrator rights by relaunching "
+                  "as the current desktop user");
+        return FALSE;
+    }
 
     const char *msg =
         "Nordstjernen is running as administrator.\n"
         "\n"
-        "You do not need administrator rights to browse the web, and it is much "
-        "safer without them. A web browser constantly opens pages, images and "
-        "downloads from the internet - content you do not control. If one of "
-        "those pages managed to exploit a flaw in the browser while it has "
-        "administrator rights, it could take over your whole PC: install "
-        "programs, read or delete any of your files, or change Windows "
-        "settings. Without administrator rights, the same flaw stays confined "
-        "to your own user account.\n"
+        "Nordstjernen tried to restart itself without administrator rights but "
+        "could not. You do not need administrator rights to browse the web, and "
+        "it is much safer without them: if a web page exploited a flaw in the "
+        "browser while it has administrator rights, it could take over your "
+        "whole PC instead of being limited to your own user account.\n"
         "\n"
         "How to start Nordstjernen normally:\n"
         "  -  Close this window, then open Nordstjernen with a normal click on "
