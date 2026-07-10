@@ -17,7 +17,7 @@ Nordstjernen has no JIT so it is much more secure, and can still be fast enough.
 
 ![Nordstjernen's about:start start page — the Manifest Destiny splash](docs/screenshot.png)   
 
-<img src="docs/nordstjernen-now.png" alt="Nordstjernen Now!" width="140">
+<img src="docs/nordstjernen-now.gif" alt="Nordstjernen Now!" width="140">
 
 ## Standards compliance  
 
