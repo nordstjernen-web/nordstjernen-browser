@@ -71,9 +71,9 @@ for Nordstjernen:
 - Clean per-user install/uninstall managed by Windows (policy 10.2.7
   satisfied by construction), automatic updates, no ARP/registry
   writes of our own.
-- Per-user by design, which matches the browser's
-  refuse-to-run-elevated policy
-  (`src/security.c::ns_security_refuse_root`).
+- Per-user by design, which matches the browser's policy of never
+  running with Administrator rights — it drops them if it is launched
+  elevated (`src/security.c::ns_security_refuse_root`).
 
 [Package requirements](https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/app-package-requirements)
 that shaped the manifest:
@@ -301,8 +301,8 @@ inside the package), and uninstall from Start removes it cleanly.
 >   no update pinger, no accounts. Nordstjernen never phones home;
 >   the only servers it talks to are the sites you visit.
 > - **Secure by default.** Every tab renders in its own isolated
->   process. WebGL is off until you trust a site. The browser
->   refuses to run with administrator rights.
+>   process. WebGL is off until you trust a site. If it is launched
+>   with administrator rights, the browser drops them.
 > - **Modern web, no bloat.** HTML5, modern CSS and JavaScript,
 >   WebAssembly, WebCrypto and opt-in WebGL — without WebGPU, ad
 >   tech, or AI surface area. Audio and video hand off to the

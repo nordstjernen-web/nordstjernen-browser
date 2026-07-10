@@ -68,8 +68,17 @@ work without writable executable pages.
 
 ### Privilege drop (`src/security.c`)
 
-- Refuses to start as root (Linux/macOS) or Administrator (Windows).
-  Override with `NS_ALLOW_ROOT=1` if you really mean it.
+- Linux/macOS: refuses to start as root — prints a diagnostic and exits
+  before any page is loaded.
+- Windows: when launched elevated it *drops* Administrator rights by
+  relaunching itself with the desktop shell's medium-integrity token
+  (`CreateProcessWithTokenW`) and exiting the elevated instance, so the
+  browsing session runs unprivileged. It verifies the shell token is not
+  itself elevated first, so a fully elevated session cannot loop. When
+  de-elevation is impossible it falls back to a plain-language dialog
+  offering to quit (default) or run as Administrator anyway.
+- `NS_ALLOW_ROOT=1` overrides on every platform — keep the elevated
+  process and skip the de-elevation and the prompt.
 - Sets `PR_SET_NO_NEW_PRIVS` before installing the seccomp filter, so
   setuid binaries cannot be used to gain privileges after a compromise.
 
@@ -224,10 +233,14 @@ integration we don't have yet. The closest equivalents — Low
 Integrity Level drop and AppContainer — are tracked as future
 work.
 
-Plus the same `ns_security_refuse_root` as Linux: refuses to
-launch as Administrator (`CheckTokenMembership` against the
-Built-in Administrators SID), with a `MessageBox` and a `stderr`
-diagnostic.
+Plus `ns_security_refuse_root`: elevation is detected with
+`CheckTokenMembership` against the Built-in Administrators SID.
+Unlike the Linux path it does not merely refuse — it relaunches the
+browser under the desktop shell's token (`CreateProcessWithTokenW`)
+and exits the elevated instance, so the session ends up unprivileged.
+A `MessageBox` with a run-anyway option and a `stderr` diagnostic are
+the fallback when de-elevation cannot be done; `NS_ALLOW_ROOT=1` skips
+both.
 
 The whole mitigation suite can be disabled for debugging with
 `NS_NO_WIN32_MITIGATIONS=1`. Don't use that in normal operation.

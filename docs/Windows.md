@@ -197,9 +197,9 @@ The installer is intentionally **per-user**:
 
 - `RequestExecutionLevel user` — no UAC prompt, no Administrator
   rights. This matches `src/security.c::ns_security_refuse_root`:
-  the browser exits 77 if launched with elevated tokens, so a
-  Program-Files install would only put the binary somewhere the
-  process refuses to run from anyway.
+  if the browser is launched with an elevated token it drops it by
+  relaunching de-elevated (see below), so it never keeps running in an
+  Administrator context and a Program-Files install would buy nothing.
 - Default install dir: `%LOCALAPPDATA%\Programs\Nordstjernen`.
   Overridable in the wizard (Directory page) or with `/D=<path>`
   for silent installs.
@@ -339,12 +339,17 @@ so we don't ship a bundled copy there.
   syscalls behind `#ifdef __linux__`; on Windows the sandbox init
   is a no-op. The intentional analogue (AppContainer / Job Object)
   is not yet implemented.
-- **Refuses to run as Administrator.** Mirrors the Linux refuse-root
-  check (`src/security.c::ns_security_refuse_root`). Elevation is
-  detected via `CheckTokenMembership` against the builtin
-  Administrators SID; if the token is a member, the process prints a
-  warning to stderr and exits 77. `NS_ALLOW_ROOT=1` bypasses, same
-  as Linux.
+- **Drops Administrator rights.** Elevation is detected via
+  `CheckTokenMembership` against the builtin Administrators SID
+  (`src/security.c::ns_security_refuse_root`). Instead of the Linux
+  refuse-and-exit, the Windows build relaunches itself with the desktop
+  shell's medium-integrity token (`CreateProcessWithTokenW`) and lets
+  the elevated instance exit, so the browsing session runs unprivileged.
+  It first checks the shell token is not itself elevated, so a fully
+  elevated session cannot loop. When de-elevation is not possible it
+  falls back to a plain-language `MessageBox` offering to quit (default)
+  or run as Administrator anyway. `NS_ALLOW_ROOT=1` bypasses all of
+  this, same as Linux.
 - **Self-exe path** is resolved via `GetModuleFileNameW`, so
   Ctrl+N / target=_blank / middle-click correctly re-spawn the same
   binary path (no `/proc/self/exe` equivalent needed).
