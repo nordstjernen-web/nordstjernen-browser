@@ -223,6 +223,15 @@ gboolean ns_input_value_to_number(const char *type, const char *value, double *o
 gboolean ns_input_value_range_state(const ns_node *input, const char *value,
                                     gboolean *underflow, gboolean *overflow);
 gboolean ns_input_value_step_mismatch(const ns_node *input, const char *value);
+
+enum {
+    NS_STEP_OK = 0,
+    NS_STEP_NOT_APPLICABLE,
+    NS_STEP_NO_STEP,
+    NS_STEP_UNCHANGED,
+};
+int ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
+                        gsize buflen);
 gboolean ns_form_control_value_missing(const ns_node *control,
                                        const char *value,
                                        const ns_node *doc);

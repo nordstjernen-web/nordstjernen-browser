@@ -258,6 +258,144 @@ ns_form_default_step(ns_form_input_kind kind)
     }
 }
 
+static void
+ns_form_serialize_time(GString *out, int ms)
+{
+    int h = ms / 3600000;
+    int mi = (ms / 60000) % 60;
+    int s = (ms / 1000) % 60;
+    int frac = ms % 1000;
+    g_string_append_printf(out, "%02d:%02d", h, mi);
+    if (s || frac) g_string_append_printf(out, ":%02d", s);
+    if (frac) g_string_append_printf(out, ".%03d", frac);
+}
+
+static gboolean
+ns_input_number_to_value(ns_form_input_kind kind, double v, char *buf,
+                         gsize buflen)
+{
+    if (!isfinite(v)) return FALSE;
+    GString *out = g_string_new(NULL);
+    gboolean ok = TRUE;
+    int y, m, d;
+    switch (kind) {
+    case NS_FORM_INPUT_NUMBER:
+    case NS_FORM_INPUT_RANGE: {
+        char num[G_ASCII_DTOSTR_BUF_SIZE];
+        g_ascii_dtostr(num, sizeof num, v == 0 ? 0 : v);
+        g_string_append(out, num);
+        break;
+    }
+    case NS_FORM_INPUT_DATE: {
+        double days = floor(v / 86400000.0 + 0.5);
+        ns_dt_civil_from_days((long)days, &y, &m, &d);
+        ok = y >= 1 && y <= NS_DT_MAX_YEAR;
+        if (ok) g_string_append_printf(out, "%04d-%02d-%02d", y, m, d);
+        break;
+    }
+    case NS_FORM_INPUT_MONTH: {
+        long months = (long)floor(v + 0.5);
+        y = 1970 + (int)(months >= 0 ? months / 12
+                                     : -((-months + 11) / 12));
+        m = (int)ns_dt_floormod(months, 12) + 1;
+        ok = y >= 1 && y <= NS_DT_MAX_YEAR;
+        if (ok) g_string_append_printf(out, "%04d-%02d", y, m);
+        break;
+    }
+    case NS_FORM_INPUT_WEEK: {
+        long monday = (long)floor(v / 604800000.0 + 0.5) * 7 - 3;
+        ns_dt_civil_from_days(monday + 3, &y, &m, &d);
+        long week1 = ns_dt_iso_week1_monday(y);
+        int w = (int)((monday - week1) / 7) + 1;
+        ok = y >= 1 && y <= NS_DT_MAX_YEAR &&
+             w >= 1 && w <= ns_dt_iso_weeks_in_year(y);
+        if (ok) g_string_append_printf(out, "%04d-W%02d", y, w);
+        break;
+    }
+    case NS_FORM_INPUT_TIME: {
+        long ms = (long)floor(v + 0.5);
+        ms = ns_dt_floormod(ms, 86400000L);
+        ns_form_serialize_time(out, (int)ms);
+        break;
+    }
+    case NS_FORM_INPUT_DATETIME: {
+        double total = floor(v + 0.5);
+        long days = (long)floor(total / 86400000.0);
+        long ms = (long)(total - (double)days * 86400000.0);
+        ns_dt_civil_from_days(days, &y, &m, &d);
+        ok = y >= 1 && y <= NS_DT_MAX_YEAR;
+        if (ok) {
+            g_string_append_printf(out, "%04d-%02d-%02dT", y, m, d);
+            ns_form_serialize_time(out, (int)ms);
+        }
+        break;
+    }
+    default:
+        ok = FALSE;
+        break;
+    }
+    ok = ok && out->len < buflen;
+    if (ok) memcpy(buf, out->str, out->len + 1);
+    g_string_free(out, TRUE);
+    return ok;
+}
+
+int
+ns_input_step_apply(const ns_node *input, int sign, double n, char *buf,
+                    gsize buflen)
+{
+    if (!input || !ns_node_is_element_named(input, "input"))
+        return NS_STEP_NOT_APPLICABLE;
+    const char *type = ns_element_get_attr(input, "type");
+    ns_form_input_kind kind = ns_form_input_kind_of_type(type);
+    if (kind == NS_FORM_INPUT_OTHER)
+        return NS_STEP_NOT_APPLICABLE;
+    const char *step_attr = ns_element_get_attr(input, "step");
+    if (step_attr && g_ascii_strcasecmp(step_attr, "any") == 0)
+        return NS_STEP_NO_STEP;
+    double step_value = ns_form_default_step(kind);
+    double parsed;
+    if (ns_form_parse_finite_double(step_attr, &parsed) && parsed > 0)
+        step_value = parsed;
+    double step = step_value * ns_form_step_scale(kind);
+    if (step <= 0 || !isfinite(step))
+        return NS_STEP_NO_STEP;
+    double minv, maxv;
+    gboolean has_min = ns_input_value_to_number(
+        type, ns_element_get_attr(input, "min"), &minv);
+    gboolean has_max = ns_input_value_to_number(
+        type, ns_element_get_attr(input, "max"), &maxv);
+    if (has_min && has_max && minv > maxv)
+        return NS_STEP_UNCHANGED;
+    double value = 0;
+    if (!ns_input_value_to_number(type, ns_input_used_value(input), &value))
+        value = 0;
+    double before = value;
+    double base = kind == NS_FORM_INPUT_WEEK ? -259200000.0 : 0.0;
+    if (ns_input_value_to_number(type, ns_element_get_attr(input, "min"),
+                                 &parsed))
+        base = parsed;
+    double q = (value - base) / step;
+    double nearest = round(q);
+    double tolerance = 1e-7 * (fabs(q) > 1.0 ? fabs(q) : 1.0);
+    if (fabs(q - nearest) > tolerance)
+        value = base + (sign > 0 ? ceil(q) : floor(q)) * step;
+    else
+        value += (double)sign * n * step;
+    double bound;
+    if (ns_input_value_to_number(type, ns_element_get_attr(input, "min"),
+                                 &bound) && value < bound)
+        value = base + ceil((bound - base) / step) * step;
+    if (ns_input_value_to_number(type, ns_element_get_attr(input, "max"),
+                                 &bound) && value > bound)
+        value = base + floor((bound - base) / step) * step;
+    if ((sign > 0 && value < before) || (sign < 0 && value > before))
+        return NS_STEP_UNCHANGED;
+    if (!ns_input_number_to_value(kind, value, buf, buflen))
+        return NS_STEP_UNCHANGED;
+    return NS_STEP_OK;
+}
+
 gboolean
 ns_input_value_step_mismatch(const ns_node *input, const char *value)
 {

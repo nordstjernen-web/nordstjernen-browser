@@ -12,6 +12,26 @@ Changelog:
 * Added view-source: — Ctrl+U / "Page Source" in the menu shows the current
   page's HTML with classic syntax highlighting. Only chrome-initiated
   navigations can use the scheme; web content is refused.
+* input.showPicker() and select.showPicker() are implemented per spec:
+  InvalidStateError on disabled or readonly controls, NotAllowedError
+  without a user gesture, and a successful call consumes the activation.
+  WPT show-picker suites pass 129/129.
+* stepUp()/stepDown() follow the spec: they throw InvalidStateError on
+  non-numeric input types and step="any", honor the per-type default
+  step and scale, round to the step grid, clamp to min/max, and
+  serialize date, month, week, time and datetime-local values back to
+  their canonical strings. WPT input-stepup 53/53 and time 32/32.
+* The color input sanitizes through the CSS color parser: keywords,
+  rgb() and #rgb shorthand normalize to lowercase six-digit hex, and
+  surrounding whitespace is stripped.
+* Label association follows the spec: label.control resolves the for
+  attribute against the label's own tree to the first element with that
+  id (null when it is not labelable or the attribute is empty),
+  label.form returns the associated control's form owner, and .labels
+  is a live NodeList.
+* The WPT harness's testdriver bridge grants real user activation for
+  simulated gestures, and the __nsWpt* hooks are inert outside the
+  harness.
 * Form constraint validation follows the HTML spec much more closely:
   ValidityState flags are computed for disabled and readonly controls
   (bars from validation affect willValidate, not the flags), valueMissing
