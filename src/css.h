@@ -1119,6 +1119,7 @@ const char *ns_css_alignment_base(const char *keyword);
 char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
+char *ns_css_content_canonical(const char *text);
 double ns_css_gradient_angle(const ns_css_gradient *gr, double w, double h);
 void ns_css_gradient_radii(const ns_css_gradient *gr, double w, double h,
                            double cx, double cy, double *rx, double *ry);
