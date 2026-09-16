@@ -32009,10 +32009,10 @@ ns_element_get_offsetTop(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         double x, y, w, h;
         if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)(y - origin_y + 0.5));
+            return JS_NewInt32(ctx, (int)floor(y - origin_y + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    return JS_NewInt32(ctx, (int)(b->y + b->margin.top - origin_y + 0.5));
+    return JS_NewInt32(ctx, (int)floor(b->y + b->margin.top - origin_y + 0.5));
 }
 
 static JSValue
@@ -32024,10 +32024,10 @@ ns_element_get_offsetLeft(JSContext *ctx, JSValueConst this_val)
     if (!b) {
         double x, y, w, h;
         if (ns_inline_rect_for_this(ctx, this_val, &x, &y, &w, &h))
-            return JS_NewInt32(ctx, (int)(x - origin_x + 0.5));
+            return JS_NewInt32(ctx, (int)floor(x - origin_x + 0.5));
         return JS_NewInt32(ctx, 0);
     }
-    return JS_NewInt32(ctx, (int)(b->x + b->margin.left - origin_x + 0.5));
+    return JS_NewInt32(ctx, (int)floor(b->x + b->margin.left - origin_x + 0.5));
 }
 
 static JSValue
@@ -32088,6 +32088,7 @@ ns_offset_parent_origin(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     const ns_node *n = ns_unwrap_element(this_val);
     if (!js || !n || n->kind != NS_NODE_ELEMENT) return;
+    ns_js_flush_layout(js);
     const ns_style *own = js->style_table
                         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (own && ns_css_keyword_is(own->values[NS_CSS_POSITION], "fixed"))
@@ -34120,7 +34121,7 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
 
 static void
 ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
-                            int depth)
+                            double *min_l, int depth)
 {
     if (!b || depth > 512) return;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
@@ -34134,6 +34135,7 @@ ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
         if (w > 0 || h > 0) {
             if (x + w > *max_r) *max_r = x + w;
             if (y + h > *max_btm) *max_btm = y + h;
+            if (x < *min_l) *min_l = x;
         }
         gboolean clips = FALSE;
         if (c->style) {
@@ -34147,7 +34149,7 @@ ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
             }
         }
         if (!clips)
-            ns_scrollable_overflow_walk(c, max_r, max_btm, depth + 1);
+            ns_scrollable_overflow_walk(c, max_r, max_btm, min_l, depth + 1);
     }
 }
 
@@ -34160,9 +34162,20 @@ ns_scrollable_overflow_size(const ns_box *b, double *out_w, double *out_h)
     double pad_top = by + b->border.top;
     double pad_w = b->content_width + b->padding.left + b->padding.right;
     double pad_h = b->content_height + b->padding.top + b->padding.bottom;
-    double max_r = pad_left + pad_w;
-    double max_btm = pad_top + pad_h;
-    ns_scrollable_overflow_walk(b, &max_r, &max_btm, 0);
+    double max_r = pad_left;
+    double max_btm = pad_top;
+    double min_l = pad_left + pad_w;
+    ns_scrollable_overflow_walk(b, &max_r, &max_btm, &min_l, 0);
+    if (max_r > pad_left) max_r += b->padding.right;
+    if (max_btm > pad_top) max_btm += b->padding.bottom;
+    if (max_r < pad_left + pad_w) max_r = pad_left + pad_w;
+    if (max_btm < pad_top + pad_h) max_btm = pad_top + pad_h;
+    gboolean rtl = b->style &&
+        ns_css_keyword_is(b->style->values[NS_CSS_DIRECTION], "rtl");
+    if (rtl && min_l < pad_left + pad_w) {
+        min_l -= b->padding.left;
+        if (min_l < pad_left) pad_left = min_l;
+    }
     double w = max_r - pad_left;
     double h = max_btm - pad_top;
     double legacy_w = pad_w + (b->scroll_max_x > 0 ? b->scroll_max_x : 0);

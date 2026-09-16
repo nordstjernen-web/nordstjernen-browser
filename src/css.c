@@ -7119,6 +7119,39 @@ parse_keyword_choice(const char *text, const char *choices)
     return v;
 }
 
+static ns_css_value *
+parse_alignment_keyword(const char *text, const char *choices)
+{
+    char *kw = ascii_lower(text, strlen(text));
+    g_strstrip(kw);
+    for (char *q = kw; *q; q++)
+        if (g_ascii_isspace(*q)) *q = ' ';
+    ns_css_value *v = NULL;
+    if (strcmp(kw, "last baseline") == 0 || strcmp(kw, "last  baseline") == 0) {
+        if (strstr(choices, "baseline")) {
+            v = g_new0(ns_css_value, 1);
+            v->kind = NS_CSS_V_KEYWORD;
+            v->u.keyword = g_strdup("last baseline");
+        }
+    } else if (g_str_has_prefix(kw, "first ")) {
+        const char *rest = kw + 6;
+        while (*rest == ' ') rest++;
+        if (strcmp(rest, "baseline") == 0)
+            v = parse_keyword_choice("baseline", choices);
+    } else if (g_str_has_prefix(kw, "safe ") || g_str_has_prefix(kw, "unsafe ")) {
+        const char *rest = strchr(kw, ' ') + 1;
+        while (*rest == ' ') rest++;
+        if (!strstr(rest, "baseline") && !g_str_has_prefix(rest, "space-") &&
+            strcmp(rest, "normal") != 0 && strcmp(rest, "stretch") != 0 &&
+            strcmp(rest, "auto") != 0)
+            v = parse_keyword_choice(rest, choices);
+    } else {
+        v = parse_keyword_choice(kw, choices);
+    }
+    g_free(kw);
+    return v;
+}
+
 static gboolean
 prop_accepts_auto(ns_css_prop prop)
 {
@@ -7709,32 +7742,32 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t, "none capitalize uppercase lowercase");
         break;
     case NS_CSS_JUSTIFY_CONTENT:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "normal stretch center start end flex-start flex-end left right "
             "space-between space-around space-evenly");
         break;
     case NS_CSS_ALIGN_ITEMS:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "normal stretch center start end self-start self-end flex-start "
             "flex-end baseline");
         break;
     case NS_CSS_ALIGN_SELF:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "auto normal stretch center start end self-start self-end "
             "flex-start flex-end baseline");
         break;
     case NS_CSS_ALIGN_CONTENT:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "normal stretch center start end flex-start flex-end baseline "
             "space-between space-around space-evenly");
         break;
     case NS_CSS_JUSTIFY_ITEMS:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "normal stretch center start end self-start self-end flex-start "
             "flex-end left right baseline legacy");
         break;
     case NS_CSS_JUSTIFY_SELF:
-        v = parse_keyword_choice(t,
+        v = parse_alignment_keyword(t,
             "auto normal stretch center start end self-start self-end "
             "flex-start flex-end left right baseline");
         break;
