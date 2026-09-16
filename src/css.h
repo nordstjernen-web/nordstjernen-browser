@@ -418,8 +418,6 @@ typedef struct ns_css_areas {
     ns_css_area_rect rects[NS_CSS_AREAS_MAX];
 } ns_css_areas;
 
-#define NS_CSS_GRADIENT_STOPS_MAX 6
-
 typedef struct ns_css_shadow {
     double x, y, blur, spread;
     guint8 r, g, b, a;
@@ -434,22 +432,53 @@ typedef struct ns_css_shadow_list {
     ns_css_shadow s[NS_CSS_SHADOWS_MAX];
 } ns_css_shadow_list;
 
+#define NS_CSS_GRADIENT_STOPS_MAX 32
+#define NS_CSS_GRADIENT_INTERP_MAX 32
+
 typedef struct ns_css_gradient_stop {
     guint8 r, g, b, a;
     double pos;
+    double pos_px;
     gboolean has_pos;
-    gboolean pos_is_px;
+    gboolean pos_is_angle;
+    gboolean is_hint;
+    gboolean pair_with_prev;
 } ns_css_gradient_stop;
 
+typedef enum ns_css_gradient_size {
+    NS_CSS_GRADIENT_FARTHEST_CORNER,
+    NS_CSS_GRADIENT_CLOSEST_SIDE,
+    NS_CSS_GRADIENT_FARTHEST_SIDE,
+    NS_CSS_GRADIENT_CLOSEST_CORNER,
+    NS_CSS_GRADIENT_EXPLICIT_SIZE,
+} ns_css_gradient_size;
+
+enum {
+    NS_CSS_GRADIENT_TO_TOP    = 1,
+    NS_CSS_GRADIENT_TO_BOTTOM = 2,
+    NS_CSS_GRADIENT_TO_LEFT   = 4,
+    NS_CSS_GRADIENT_TO_RIGHT  = 8,
+};
+
 typedef struct ns_css_gradient {
-    int angle_deg;
+    double angle_deg;
+    int to_side;
+    gboolean has_angle;
     int n_stops;
     gboolean radial;
     gboolean conic;
     gboolean repeating;
-    int from_deg;
+    gboolean circle;
+    gboolean shape_explicit;
+    ns_css_gradient_size size;
+    double size_x, size_y;
+    double size_x_pct, size_y_pct;
+    double from_deg;
+    gboolean has_from;
     double center_x, center_y;
+    double center_x_px, center_y_px;
     gboolean has_center;
+    char interp[NS_CSS_GRADIENT_INTERP_MAX];
     ns_css_gradient_stop stops[NS_CSS_GRADIENT_STOPS_MAX];
 } ns_css_gradient;
 
@@ -1089,6 +1118,10 @@ const char *ns_style_overflow_keyword(const ns_style *s, ns_css_prop axis);
 const char *ns_css_alignment_base(const char *keyword);
 char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
+char *ns_css_image_value_canonical(const char *text);
+double ns_css_gradient_angle(const ns_css_gradient *gr, double w, double h);
+void ns_css_gradient_radii(const ns_css_gradient *gr, double w, double h,
+                           double cx, double cy, double *rx, double *ry);
 
 int ns_css_used_column_count(const ns_style *s, double avail_w,
                              double *out_gap);

@@ -4577,7 +4577,7 @@ static gboolean is_font_stretch_keyword(const char *s);
 static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
 
 static int
-font_tokens_split(const char *text, char **out, int max)
+split_ws_paren(const char *text, char **out, int max)
 {
     int n = 0;
     const char *p = text, *end = text + strlen(text);
@@ -4690,7 +4690,7 @@ ns_css_font_shorthand_canonical(const char *text)
 {
     if (!text) return NULL;
     char *tokens[24] = {0};
-    int n = font_tokens_split(text, tokens, 24);
+    int n = split_ws_paren(text, tokens, 24);
     char *result = NULL;
     const char *style = NULL, *variant = NULL, *weight = NULL, *stretch = NULL;
     int prefix = 0;
@@ -5334,343 +5334,937 @@ parse_box_shadow(const char *text)
     return v;
 }
 
+static gboolean position_is_h_edge(const char *t);
+static gboolean position_is_v_edge(const char *t);
+static gboolean math_text_mixes_angle_and_length(const char *t);
+static void position_split(const char *text, char **out_x, char **out_y);
+static double parse_angle_deg(const char *s);
+static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a);
+
+typedef struct ns_gradient_parse {
+    ns_css_gradient gr;
+    char *angle_text;
+    char *size_text;
+    char *position_text;
+    gboolean interp_explicit;
+    gboolean all_legacy;
+    GPtrArray *stop_texts;
+} ns_gradient_parse;
+
 static void
-gradient_add_stop(ns_css_gradient *gr, guint8 r, guint8 g, guint8 b, guint8 a,
-                  gboolean has_pos, gboolean is_px, double pos)
+gradient_parse_clear(ns_gradient_parse *gp)
 {
-    if (gr->n_stops >= NS_CSS_GRADIENT_STOPS_MAX) return;
-    ns_css_gradient_stop *s = &gr->stops[gr->n_stops++];
-    s->r = r; s->g = g; s->b = b; s->a = a;
-    s->has_pos = has_pos;
-    s->pos_is_px = is_px;
-    s->pos = pos;
+    g_free(gp->angle_text);
+    g_free(gp->size_text);
+    g_free(gp->position_text);
+    if (gp->stop_texts) g_ptr_array_free(gp->stop_texts, TRUE);
+    memset(gp, 0, sizeof *gp);
 }
 
 static gboolean
-parse_stop_pos(const char *tok, gboolean *is_px, double *out)
+token_eq(const char *t, const char *kw)
 {
-    char *endp = NULL;
-    double val = g_ascii_strtod(tok, &endp);
-    if (!endp || endp == tok) return FALSE;
-    while (*endp == ' ' || *endp == '\t') endp++;
-    if (*endp == '%') { *is_px = FALSE; *out = val / 100.0; return TRUE; }
-    if (g_ascii_strncasecmp(endp, "px", 2) == 0) { *is_px = TRUE; *out = val; return TRUE; }
-    return FALSE;
+    return g_ascii_strcasecmp(t, kw) == 0;
+}
+
+static gboolean
+token_is_math_fn(const char *t)
+{
+    return g_ascii_strncasecmp(t, "calc(", 5) == 0 ||
+           g_ascii_strncasecmp(t, "min(", 4) == 0 ||
+           g_ascii_strncasecmp(t, "max(", 4) == 0 ||
+           g_ascii_strncasecmp(t, "clamp(", 6) == 0;
+}
+
+static gboolean
+token_is_length_pct(const char *t)
+{
+    if (token_is_math_fn(t)) {
+        ns_css_value *cv = parse_calc(t);
+        if (!cv) return FALSE;
+        gboolean ok = cv->kind == NS_CSS_V_CALC || cv->kind == NS_CSS_V_LENGTH;
+        ns_css_value_free(cv);
+        return ok;
+    }
+    double v; ns_css_unit u;
+    if (!parse_length(t, &v, &u)) return FALSE;
+    return u != NS_CSS_UNIT_NUMBER || v == 0;
+}
+
+static gboolean
+token_is_angle(const char *t)
+{
+    if (token_is_math_fn(t)) {
+        char *lower = g_ascii_strdown(t, -1);
+        gboolean ok = strstr(lower, "deg") || strstr(lower, "rad") ||
+                      strstr(lower, "turn") || strstr(lower, "grad");
+        g_free(lower);
+        return ok;
+    }
+    if (strcmp(t, "0") == 0) return TRUE;
+    char *end = NULL;
+    double v = g_ascii_strtod(t, &end);
+    (void)v;
+    if (!end || end == t) return FALSE;
+    return token_eq(end, "deg") || token_eq(end, "grad") ||
+           token_eq(end, "rad") || token_eq(end, "turn");
+}
+
+static gboolean
+color_text_is_legacy(const char *t)
+{
+    if (t[0] == '#') return TRUE;
+    if (!strchr(t, '(')) return TRUE;
+    return g_ascii_strncasecmp(t, "rgb(", 4) == 0 ||
+           g_ascii_strncasecmp(t, "rgba(", 5) == 0 ||
+           g_ascii_strncasecmp(t, "hsl(", 4) == 0 ||
+           g_ascii_strncasecmp(t, "hsla(", 5) == 0;
+}
+
+static int
+gradient_interp_parse(char **tok, int n, char out[NS_CSS_GRADIENT_INTERP_MAX])
+{
+    if (n < 1) return 0;
+    static const char *rect[] = {
+        "srgb", "srgb-linear", "display-p3", "a98-rgb", "prophoto-rgb",
+        "rec2020", "lab", "oklab", "xyz", "xyz-d50", "xyz-d65",
+    };
+    static const char *polar[] = { "hsl", "hwb", "lch", "oklch" };
+    char *space = g_ascii_strdown(tok[0], -1);
+    gboolean is_rect = FALSE, is_polar = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(rect); i++)
+        if (strcmp(space, rect[i]) == 0) is_rect = TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(polar); i++)
+        if (strcmp(space, polar[i]) == 0) is_polar = TRUE;
+    if (!is_rect && !is_polar) { g_free(space); return 0; }
+    if (strcmp(space, "xyz") == 0) { g_free(space); space = g_strdup("xyz-d65"); }
+    int used = 1;
+    const char *hue = NULL;
+    if (is_polar && n >= 3 && token_eq(tok[2], "hue")) {
+        if (token_eq(tok[1], "shorter")) hue = NULL;
+        else if (token_eq(tok[1], "longer")) hue = "longer";
+        else if (token_eq(tok[1], "increasing")) hue = "increasing";
+        else if (token_eq(tok[1], "decreasing")) hue = "decreasing";
+        else { g_free(space); return 0; }
+        used = 3;
+    } else if (n >= 2 && (token_eq(tok[1], "hue") || token_eq(tok[1], "shorter") ||
+                          token_eq(tok[1], "longer") || token_eq(tok[1], "increasing") ||
+                          token_eq(tok[1], "decreasing"))) {
+        g_free(space);
+        return 0;
+    }
+    if (hue) g_snprintf(out, NS_CSS_GRADIENT_INTERP_MAX, "%s %s hue", space, hue);
+    else g_strlcpy(out, space, NS_CSS_GRADIENT_INTERP_MAX);
+    g_free(space);
+    return used;
+}
+
+static char *
+position_canonical_ex(const char *text, gboolean expand_single,
+                      gboolean allow_three)
+{
+    char *tok[8] = {0};
+    int m = split_ws_paren(text, tok, 8);
+    char *spec = NULL;
+    if (m == 0 || m > 4 || (m == 3 && !allow_three)) goto done;
+    gboolean h0 = position_is_h_edge(tok[0]), v0 = position_is_v_edge(tok[0]);
+    gboolean c0 = token_eq(tok[0], "center");
+    if (m == 1) {
+        if (!(h0 || v0 || c0 || token_is_length_pct(tok[0]))) goto done;
+        if (!expand_single) spec = g_strdup(tok[0]);
+        else if (v0) spec = g_strdup_printf("center %s", tok[0]);
+        else spec = g_strdup_printf("%s center", tok[0]);
+    } else if (m == 3) {
+        gboolean off_after_first = token_is_length_pct(tok[1]);
+        const char *ek = off_after_first ? tok[0] : tok[1];
+        const char *off = off_after_first ? tok[1] : tok[2];
+        const char *other = off_after_first ? tok[2] : tok[0];
+        gboolean eh = position_is_h_edge(ek), ev = position_is_v_edge(ek);
+        gboolean oh = position_is_h_edge(other), ov = position_is_v_edge(other);
+        gboolean oc = token_eq(other, "center");
+        if (!(eh || ev) || !token_is_length_pct(off) || !(oh || ov || oc))
+            goto done;
+        if ((eh && oh) || (ev && ov)) goto done;
+        if (eh) spec = g_strdup_printf("%s %s %s", ek, off, other);
+        else spec = g_strdup_printf("%s %s %s", other, ek, off);
+    } else if (m == 2) {
+        gboolean h1 = position_is_h_edge(tok[1]), v1 = position_is_v_edge(tok[1]);
+        gboolean c1 = token_eq(tok[1], "center");
+        gboolean k0 = h0 || v0 || c0, k1 = h1 || v1 || c1;
+        if (k0 && k1) {
+            if ((h0 && h1) || (v0 && v1)) goto done;
+            if ((v0 && (h1 || c1) && !(c0 && c1)) || (c0 && h1))
+                spec = g_strdup_printf("%s %s", tok[1], tok[0]);
+            else
+                spec = g_strdup_printf("%s %s", tok[0], tok[1]);
+        } else if (k0 && !k1) {
+            if (!v0 && token_is_length_pct(tok[1]))
+                spec = g_strdup_printf("%s %s", tok[0], tok[1]);
+        } else if (!k0 && k1) {
+            if (!h1 && token_is_length_pct(tok[0]))
+                spec = g_strdup_printf("%s %s", tok[0], tok[1]);
+        } else if (token_is_length_pct(tok[0]) && token_is_length_pct(tok[1])) {
+            spec = g_strdup_printf("%s %s", tok[0], tok[1]);
+        }
+    } else {
+        gboolean h2 = position_is_h_edge(tok[2]), v2 = position_is_v_edge(tok[2]);
+        if (!token_is_length_pct(tok[1]) || !token_is_length_pct(tok[3]))
+            goto done;
+        if (h0 && v2)
+            spec = g_strdup_printf("%s %s %s %s", tok[0], tok[1], tok[2], tok[3]);
+        else if (v0 && h2)
+            spec = g_strdup_printf("%s %s %s %s", tok[2], tok[3], tok[0], tok[1]);
+    }
+done:
+    for (int k = 0; k < m; k++) g_free(tok[k]);
+    return spec;
+}
+
+static char *
+position_canonical(const char *text)
+{
+    return position_canonical_ex(text, FALSE, FALSE);
+}
+
+static int
+gradient_position_parse(char **tok, int n, ns_gradient_parse *gp)
+{
+    int m = 0;
+    while (m < n && m < 4 && !token_eq(tok[m], "in")) m++;
+    if (m == 0) return 0;
+    GString *joined = g_string_new(NULL);
+    for (int k = 0; k < m; k++) {
+        if (k) g_string_append_c(joined, ' ');
+        g_string_append(joined, tok[k]);
+    }
+    char *spec = position_canonical(joined->str);
+    g_string_free(joined, TRUE);
+    if (!spec) return 0;
+    char *xs = NULL, *ys = NULL;
+    position_split(spec, &xs, &ys);
+    double px = 0, pct = 0;
+    if (resolve_to_px_pct(xs, strlen(xs), &px, &pct)) {
+        gp->gr.center_x = pct / 100.0;
+        gp->gr.center_x_px = px;
+    }
+    if (resolve_to_px_pct(ys, strlen(ys), &px, &pct)) {
+        gp->gr.center_y = pct / 100.0;
+        gp->gr.center_y_px = px;
+    }
+    g_free(xs);
+    g_free(ys);
+    gp->gr.has_center = !(gp->gr.center_x == 0.5 && gp->gr.center_x_px == 0 &&
+                          gp->gr.center_y == 0.5 && gp->gr.center_y_px == 0);
+    g_free(gp->position_text);
+    gp->position_text = spec;
+    return m;
+}
+
+static gboolean
+gradient_parse_prelude(ns_gradient_parse *gp, char **tok, int n)
+{
+    ns_css_gradient *gr = &gp->gr;
+    gboolean seen_dir = FALSE, seen_shape = FALSE, seen_size = FALSE;
+    gboolean seen_at = FALSE, seen_in = FALSE, seen_from = FALSE;
+    int explicit_lengths = 0;
+    int i = 0;
+    while (i < n) {
+        const char *t = tok[i];
+        if (token_eq(t, "in")) {
+            if (seen_in) return FALSE;
+            int used = gradient_interp_parse(tok + i + 1, n - i - 1, gr->interp);
+            if (!used) return FALSE;
+            seen_in = TRUE;
+            gp->interp_explicit = TRUE;
+            i += 1 + used;
+            continue;
+        }
+        if (!gr->radial && !gr->conic) {
+            if (token_eq(t, "to")) {
+                if (seen_dir) return FALSE;
+                int sides = 0;
+                for (int k = i + 1; k < n && k <= i + 2; k++) {
+                    int bit = 0;
+                    if (token_eq(tok[k], "top")) bit = NS_CSS_GRADIENT_TO_TOP;
+                    else if (token_eq(tok[k], "bottom")) bit = NS_CSS_GRADIENT_TO_BOTTOM;
+                    else if (token_eq(tok[k], "left")) bit = NS_CSS_GRADIENT_TO_LEFT;
+                    else if (token_eq(tok[k], "right")) bit = NS_CSS_GRADIENT_TO_RIGHT;
+                    if (!bit) break;
+                    if (gr->to_side & bit) return FALSE;
+                    gr->to_side |= bit;
+                    sides++;
+                }
+                if (!sides) return FALSE;
+                if ((gr->to_side & (NS_CSS_GRADIENT_TO_TOP | NS_CSS_GRADIENT_TO_BOTTOM)) ==
+                    (NS_CSS_GRADIENT_TO_TOP | NS_CSS_GRADIENT_TO_BOTTOM))
+                    return FALSE;
+                if ((gr->to_side & (NS_CSS_GRADIENT_TO_LEFT | NS_CSS_GRADIENT_TO_RIGHT)) ==
+                    (NS_CSS_GRADIENT_TO_LEFT | NS_CSS_GRADIENT_TO_RIGHT))
+                    return FALSE;
+                seen_dir = TRUE;
+                i += 1 + sides;
+                continue;
+            }
+            if (token_is_angle(t)) {
+                if (seen_dir) return FALSE;
+                gr->has_angle = TRUE;
+                gr->angle_deg = parse_angle_deg(t);
+                g_free(gp->angle_text);
+                gp->angle_text = g_ascii_strdown(t, -1);
+                seen_dir = TRUE;
+                i++;
+                continue;
+            }
+            return FALSE;
+        }
+        if (token_eq(t, "at")) {
+            if (seen_at) return FALSE;
+            int used = gradient_position_parse(tok + i + 1, n - i - 1, gp);
+            if (!used) return FALSE;
+            seen_at = TRUE;
+            i += 1 + used;
+            continue;
+        }
+        if (gr->conic) {
+            if (token_eq(t, "from")) {
+                if (seen_from || i + 1 >= n || !token_is_angle(tok[i + 1]) ||
+                    strchr(tok[i + 1], '%') ||
+                    math_text_mixes_angle_and_length(tok[i + 1]))
+                    return FALSE;
+                gr->has_from = TRUE;
+                gr->from_deg = parse_angle_deg(tok[i + 1]);
+                g_free(gp->angle_text);
+                gp->angle_text = g_ascii_strdown(tok[i + 1], -1);
+                seen_from = TRUE;
+                i += 2;
+                continue;
+            }
+            return FALSE;
+        }
+        if (token_eq(t, "circle") || token_eq(t, "ellipse")) {
+            if (seen_shape) return FALSE;
+            gr->circle = token_eq(t, "circle");
+            gr->shape_explicit = TRUE;
+            seen_shape = TRUE;
+            i++;
+            continue;
+        }
+        static const struct { const char *kw; ns_css_gradient_size size; } sizes[] = {
+            { "closest-side", NS_CSS_GRADIENT_CLOSEST_SIDE },
+            { "farthest-side", NS_CSS_GRADIENT_FARTHEST_SIDE },
+            { "closest-corner", NS_CSS_GRADIENT_CLOSEST_CORNER },
+            { "farthest-corner", NS_CSS_GRADIENT_FARTHEST_CORNER },
+        };
+        gboolean size_kw = FALSE;
+        for (gsize k = 0; k < G_N_ELEMENTS(sizes); k++) {
+            if (!token_eq(t, sizes[k].kw)) continue;
+            if (seen_size) return FALSE;
+            gr->size = sizes[k].size;
+            seen_size = TRUE;
+            size_kw = TRUE;
+        }
+        if (size_kw) { i++; continue; }
+        if (token_is_length_pct(t)) {
+            if (seen_size) return FALSE;
+            int j = 0;
+            double px[2] = { 0, 0 }, pct[2] = { 0, 0 };
+            while (i + j < n && j < 2 && token_is_length_pct(tok[i + j])) {
+                resolve_to_px_pct(tok[i + j], strlen(tok[i + j]), &px[j], &pct[j]);
+                if (px[j] < 0 || pct[j] < 0) return FALSE;
+                j++;
+            }
+            if (i + j < n && token_is_length_pct(tok[i + j])) return FALSE;
+            gr->size = NS_CSS_GRADIENT_EXPLICIT_SIZE;
+            gr->size_x = px[0];
+            gr->size_x_pct = pct[0];
+            gr->size_y = j == 2 ? px[1] : px[0];
+            gr->size_y_pct = j == 2 ? pct[1] : pct[0];
+            explicit_lengths = j;
+            if (j == 1 && strchr(tok[i], '%')) return FALSE;
+            g_free(gp->size_text);
+            gp->size_text = j == 2 ? g_strdup_printf("%s %s", tok[i], tok[i + 1])
+                                   : g_strdup(tok[i]);
+            seen_size = TRUE;
+            i += j;
+            continue;
+        }
+        return FALSE;
+    }
+    if (explicit_lengths) {
+        if (seen_shape && gr->circle != (explicit_lengths == 1)) return FALSE;
+        gr->circle = explicit_lengths == 1;
+    }
+    return TRUE;
+}
+
+static gboolean
+math_text_has_unit(const char *t, const char *const *units, gsize n_units)
+{
+    char *lower = g_ascii_strdown(t, -1);
+    gboolean found = FALSE;
+    for (const char *p = lower; *p && !found; p++) {
+        if (!g_ascii_isdigit((guchar)*p) && *p != '.') continue;
+        while (g_ascii_isdigit((guchar)*p) || *p == '.') p++;
+        for (gsize k = 0; k < n_units && !found; k++) {
+            gsize len = strlen(units[k]);
+            if (g_ascii_strncasecmp(p, units[k], len) == 0 &&
+                !g_ascii_isalpha((guchar)p[len]))
+                found = TRUE;
+        }
+        if (!*p) break;
+    }
+    g_free(lower);
+    return found;
+}
+
+static gboolean
+math_text_mixes_angle_and_length(const char *t)
+{
+    static const char *const angles[] = { "deg", "grad", "rad", "turn" };
+    static const char *const lengths[] = { "px", "em", "rem", "vw", "vh",
+                                           "vmin", "vmax", "ch", "ex", "cm",
+                                           "mm", "in", "pt", "pc", "lh" };
+    return math_text_has_unit(t, angles, G_N_ELEMENTS(angles)) &&
+           math_text_has_unit(t, lengths, G_N_ELEMENTS(lengths));
+}
+
+static char *
+conic_calc_canonical(const char *t)
+{
+    if (g_ascii_strncasecmp(t, "calc(", 5) != 0) return g_strdup(t);
+    gsize len = strlen(t);
+    if (len < 7 || t[len - 1] != ')') return g_strdup(t);
+    char *inner = g_strndup(t + 5, len - 6);
+    char *plus = strstr(inner, " + ");
+    char *out = NULL;
+    if (plus && !strchr(inner, '(')) {
+        *plus = '\0';
+        char *a = g_strstrip(inner), *b = g_strstrip(plus + 3);
+        gboolean a_angle = !strchr(a, '%'), b_pct = strchr(b, '%') != NULL;
+        if (a_angle && b_pct) out = g_strdup_printf("calc(%s + %s)", b, a);
+    }
+    g_free(inner);
+    return out ? out : g_strdup(t);
+}
+
+static gboolean
+gradient_stop_pos_parse(const char *t, gboolean conic, ns_css_gradient_stop *st)
+{
+    st->pos = 0;
+    st->pos_px = 0;
+    st->pos_is_angle = FALSE;
+    if (token_is_math_fn(t)) {
+        static const char *const angles[] = { "deg", "grad", "rad", "turn" };
+        static const char *const lengths[] = { "px", "em", "rem", "vw", "vh",
+                                               "vmin", "vmax", "ch", "ex",
+                                               "cm", "mm", "in", "pt", "pc",
+                                               "lh" };
+        gboolean has_angle = math_text_has_unit(t, angles, G_N_ELEMENTS(angles));
+        gboolean has_len = math_text_has_unit(t, lengths, G_N_ELEMENTS(lengths));
+        if (conic ? has_len : has_angle) return FALSE;
+        if (conic && !has_angle && !strchr(t, '%')) return FALSE;
+    }
+    if (conic) {
+        if (token_is_angle(t)) {
+            st->pos = parse_angle_deg(t) / 360.0;
+            st->pos_is_angle = TRUE;
+            st->has_pos = TRUE;
+            return TRUE;
+        }
+        if (token_is_math_fn(t)) {
+            double px = 0, pct = 0;
+            if (!resolve_to_px_pct(t, strlen(t), &px, &pct)) return FALSE;
+            st->pos = pct / 100.0;
+            st->has_pos = TRUE;
+            return TRUE;
+        }
+        double v; ns_css_unit u;
+        if (parse_length(t, &v, &u) && u == NS_CSS_UNIT_PERCENT) {
+            st->pos = v / 100.0;
+            st->has_pos = TRUE;
+            return TRUE;
+        }
+        return FALSE;
+    }
+    if (!token_is_length_pct(t)) return FALSE;
+    double px = 0, pct = 0;
+    resolve_to_px_pct(t, strlen(t), &px, &pct);
+    st->pos = pct / 100.0;
+    st->pos_px = px;
+    st->has_pos = TRUE;
+    return TRUE;
+}
+
+static gboolean
+gradient_stop_parse(ns_gradient_parse *gp, const char *seg, gboolean *is_hint)
+{
+    char *tok[8] = {0};
+    int n = split_ws_paren(seg, tok, 8);
+    gboolean ok = FALSE;
+    gboolean conic = gp->gr.conic;
+    ns_css_gradient *gr = &gp->gr;
+    *is_hint = FALSE;
+    if (n < 1) goto done;
+    guint8 r, g, b, a;
+    if (parse_color(tok[0], &r, &g, &b, &a)) {
+        if (n > 3) goto done;
+        ns_css_gradient_stop first = { .r = r, .g = g, .b = b, .a = a };
+        ns_css_gradient_stop second = first;
+        if (n >= 2 && !gradient_stop_pos_parse(tok[1], conic, &first)) goto done;
+        if (n == 3 && !gradient_stop_pos_parse(tok[2], conic, &second)) goto done;
+        if (!color_text_is_legacy(tok[0])) gp->all_legacy = FALSE;
+        if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX)
+            gr->stops[gr->n_stops++] = first;
+        if (n == 3 && gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX) {
+            second.pair_with_prev = TRUE;
+            gr->stops[gr->n_stops++] = second;
+        }
+        if (gp->stop_texts) {
+            GString *s = g_string_new(NULL);
+            if (strchr(tok[0], '(')) g_string_append(s, tok[0]);
+            else { char *l = g_ascii_strdown(tok[0], -1); g_string_append(s, l); g_free(l); }
+            for (int k = 1; k < n; k++) {
+                g_string_append_c(s, ' ');
+                char *pos_text = conic ? conic_calc_canonical(tok[k]) : g_strdup(tok[k]);
+                g_string_append(s, pos_text);
+                g_free(pos_text);
+            }
+            g_ptr_array_add(gp->stop_texts, g_string_free(s, FALSE));
+        }
+        ok = TRUE;
+        goto done;
+    }
+    if (n != 1) goto done;
+    ns_css_gradient_stop hint = { .is_hint = TRUE };
+    if (!gradient_stop_pos_parse(tok[0], conic, &hint)) goto done;
+    if (gr->n_stops < NS_CSS_GRADIENT_STOPS_MAX)
+        gr->stops[gr->n_stops++] = hint;
+    if (gp->stop_texts)
+        g_ptr_array_add(gp->stop_texts,
+                        conic ? conic_calc_canonical(tok[0]) : g_strdup(tok[0]));
+    *is_hint = TRUE;
+    ok = TRUE;
+done:
+    for (int k = 0; k < n; k++) g_free(tok[k]);
+    return ok;
 }
 
 static void
-parse_gradient_stop_seg(ns_css_gradient *gr, const char *seg)
+gradient_finish_stops(ns_css_gradient *gr)
 {
-    char *tokens[4] = {0};
-    int nt = split_ws(seg, tokens);
-    if (nt >= 1) {
-        guint8 r, g, b, a;
-        if (parse_color(tokens[0], &r, &g, &b, &a)) {
-            gboolean is_px = FALSE; double pos = 0; gboolean hp = FALSE;
-            if (nt >= 2 && parse_stop_pos(tokens[1], &is_px, &pos)) hp = TRUE;
-            gradient_add_stop(gr, r, g, b, a, hp, is_px, pos);
-            if (nt >= 3) {
-                gboolean is_px2 = FALSE; double pos2 = 0;
-                if (parse_stop_pos(tokens[2], &is_px2, &pos2))
-                    gradient_add_stop(gr, r, g, b, a, TRUE, is_px2, pos2);
-            }
-        }
-    }
-    for (int k = 0; k < nt; k++) g_free(tokens[k]);
-}
-
-static void
-parse_gradient_at(const char *prelude, double *cx, double *cy, gboolean *has)
-{
-    if (!prelude) return;
-    char **toks = g_strsplit_set(prelude, " \t", -1);
-    int n = 0;
-    while (toks[n]) n++;
-    int ai = -1;
-    for (int i = 0; i < n; i++)
-        if (g_ascii_strcasecmp(g_strstrip(toks[i]), "at") == 0) { ai = i; break; }
-    if (ai >= 0) {
-        gboolean setx = FALSE, sety = FALSE;
-        for (int i = ai + 1; i < n; i++) {
-            char *t = g_strstrip(toks[i]);
-            if (!*t) continue;
-            if (g_ascii_strcasecmp(t, "left") == 0)        { *cx = 0;   setx = TRUE; }
-            else if (g_ascii_strcasecmp(t, "right") == 0)  { *cx = 1;   setx = TRUE; }
-            else if (g_ascii_strcasecmp(t, "top") == 0)    { *cy = 0;   sety = TRUE; }
-            else if (g_ascii_strcasecmp(t, "bottom") == 0) { *cy = 1;   sety = TRUE; }
-            else if (g_ascii_strcasecmp(t, "center") == 0) { /* axis-neutral */ }
-            else {
-                char *e = NULL;
-                double pv = g_ascii_strtod(t, &e);
-                if (e && e != t && *e == '%') {
-                    if (!setx) { *cx = pv / 100.0; setx = TRUE; }
-                    else       { *cy = pv / 100.0; sety = TRUE; }
-                }
-            }
-        }
-        if (setx || sety) *has = TRUE;
-    }
-    g_strfreev(toks);
-}
-
-static ns_css_value *
-parse_linear_gradient(const char *text)
-{
-    while (*text && is_ws(*text)) text++;
-    if (g_ascii_strncasecmp(text, "linear-gradient", 15) != 0) return NULL;
-    text += 15;
-    while (*text && is_ws(*text)) text++;
-    if (*text != '(') return NULL;
-    text++;
-    const char *end = strrchr(text, ')');
-    if (!end) return NULL;
-
-    char *body = g_strndup(text, end - text);
-    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
-    int depth = 0;
-    const char *seg = body;
-    for (const char *p = body; ; p++) {
-        if (*p == '(') depth++;
-        else if (*p == ')') depth--;
-        if ((*p == ',' && depth == 0) || *p == '\0') {
-            gsize len = (gsize)(p - seg);
-            char *piece = g_strndup(seg, len);
-            g_strstrip(piece);
-            g_ptr_array_add(parts, piece);
-            if (*p == '\0') break;
-            seg = p + 1;
-        }
-    }
-    g_free(body);
-
-    int angle = 180;
-    int start_i = 0;
-    if (parts->len > 0) {
-        const char *first = parts->pdata[0];
-        if (g_ascii_strncasecmp(first, "to ", 3) == 0) {
-            const char *dir = first + 3;
-            while (*dir && is_ws(*dir)) dir++;
-            if (g_ascii_strncasecmp(dir, "bottom", 6) == 0) angle = 180;
-            else if (g_ascii_strncasecmp(dir, "top", 3) == 0) angle = 0;
-            else if (g_ascii_strncasecmp(dir, "left", 4) == 0) angle = 270;
-            else if (g_ascii_strncasecmp(dir, "right", 5) == 0) angle = 90;
-            start_i = 1;
-        } else {
-            char *endp = NULL;
-            double a = g_ascii_strtod(first, &endp);
-            if (endp && endp != first &&
-                (g_ascii_strncasecmp(endp, "deg", 3) == 0 || *endp == '\0')) {
-                angle = (int)a;
-                start_i = 1;
-            }
-        }
-    }
-
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_GRADIENT;
-    v->u.gradient.angle_deg = angle;
-    v->u.gradient.n_stops = 0;
-    for (guint i = (guint)start_i;
-         i < parts->len && v->u.gradient.n_stops < NS_CSS_GRADIENT_STOPS_MAX;
-         i++)
-        parse_gradient_stop_seg(&v->u.gradient, parts->pdata[i]);
-    g_ptr_array_free(parts, TRUE);
-    if (v->u.gradient.n_stops < 2) {
-        g_free(v);
-        return NULL;
-    }
-    int n = v->u.gradient.n_stops;
-    for (int i = 0; i < n; i++)
-        if (!v->u.gradient.stops[i].has_pos)
-            v->u.gradient.stops[i].pos = (n > 1) ? (double)i / (n - 1) : 0;
-    return v;
-}
-
-static ns_css_value *
-parse_radial_gradient(const char *text)
-{
-    while (*text && is_ws(*text)) text++;
-    if (g_ascii_strncasecmp(text, "radial-gradient", 15) != 0) return NULL;
-    text += 15;
-    while (*text && is_ws(*text)) text++;
-    if (*text != '(') return NULL;
-    text++;
-    const char *end = strrchr(text, ')');
-    if (!end) return NULL;
-
-    char *body = g_strndup(text, end - text);
-    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
-    int depth = 0;
-    const char *seg = body;
-    for (const char *p = body; ; p++) {
-        if (*p == '(') depth++;
-        else if (*p == ')') depth--;
-        if ((*p == ',' && depth == 0) || *p == '\0') {
-            gsize len = (gsize)(p - seg);
-            char *piece = g_strndup(seg, len);
-            g_strstrip(piece);
-            g_ptr_array_add(parts, piece);
-            if (*p == '\0') break;
-            seg = p + 1;
-        }
-    }
-    g_free(body);
-
-    int start_i = 0;
-    if (parts->len > 0) {
-        const char *first = parts->pdata[0];
-        guint8 dummy_r, dummy_g, dummy_b, dummy_a;
-        if (!parse_color(first, &dummy_r, &dummy_g, &dummy_b, &dummy_a))
-            start_i = 1;
-    }
-
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_GRADIENT;
-    v->u.gradient.angle_deg = 0;
-    v->u.gradient.radial = TRUE;
-    v->u.gradient.n_stops = 0;
-    v->u.gradient.center_x = 0.5;
-    v->u.gradient.center_y = 0.5;
-    if (start_i == 1 && parts->len > 0)
-        parse_gradient_at(parts->pdata[0], &v->u.gradient.center_x,
-                          &v->u.gradient.center_y, &v->u.gradient.has_center);
-    for (guint i = (guint)start_i;
-         i < parts->len && v->u.gradient.n_stops < NS_CSS_GRADIENT_STOPS_MAX;
-         i++)
-        parse_gradient_stop_seg(&v->u.gradient, parts->pdata[i]);
-    g_ptr_array_free(parts, TRUE);
-    if (v->u.gradient.n_stops < 2) {
-        g_free(v);
-        return NULL;
-    }
-    int n = v->u.gradient.n_stops;
-    for (int i = 0; i < n; i++)
-        if (!v->u.gradient.stops[i].has_pos)
-            v->u.gradient.stops[i].pos = (n > 1) ? (double)i / (n - 1) : 0;
-    return v;
-}
-
-static ns_css_value *
-parse_conic_gradient(const char *text)
-{
-    while (*text && is_ws(*text)) text++;
-    if (g_ascii_strncasecmp(text, "conic-gradient", 14) != 0) return NULL;
-    text += 14;
-    while (*text && is_ws(*text)) text++;
-    if (*text != '(') return NULL;
-    text++;
-    const char *end = strrchr(text, ')');
-    if (!end) return NULL;
-
-    char *body = g_strndup(text, end - text);
-    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
-    int depth = 0;
-    const char *seg = body;
-    for (const char *p = body; ; p++) {
-        if (*p == '(') depth++;
-        else if (*p == ')') depth--;
-        if ((*p == ',' && depth == 0) || *p == '\0') {
-            gsize len = (gsize)(p - seg);
-            char *piece = g_strndup(seg, len);
-            g_strstrip(piece);
-            g_ptr_array_add(parts, piece);
-            if (*p == '\0') break;
-            seg = p + 1;
-        }
-    }
-    g_free(body);
-
-    int from_deg = 0;
-    int start_i = 0;
-    if (parts->len > 0) {
-        const char *first = parts->pdata[0];
-        guint8 dummy_r, dummy_g, dummy_b, dummy_a;
-        if (g_ascii_strncasecmp(first, "from ", 5) == 0) {
-            char *endp = NULL;
-            double d = g_ascii_strtod(first + 5, &endp);
-            if (endp && endp != first + 5) from_deg = (int)(d + 0.5);
-            start_i = 1;
-        } else {
-            char *ftoks[4] = {0};
-            int fnt = split_ws(first, ftoks);
-            gboolean first_is_color = fnt >= 1 &&
-                parse_color(ftoks[0], &dummy_r, &dummy_g, &dummy_b, &dummy_a);
-            for (int k = 0; k < fnt; k++) g_free(ftoks[k]);
-            if (!first_is_color) start_i = 1;
-        }
-    }
-
-    ns_css_value *v = g_new0(ns_css_value, 1);
-    v->kind = NS_CSS_V_GRADIENT;
-    v->u.gradient.angle_deg = 0;
-    v->u.gradient.radial = FALSE;
-    v->u.gradient.conic = TRUE;
-    v->u.gradient.from_deg = from_deg;
-    v->u.gradient.n_stops = 0;
-    v->u.gradient.center_x = 0.5;
-    v->u.gradient.center_y = 0.5;
-    if (start_i == 1 && parts->len > 0)
-        parse_gradient_at(parts->pdata[0], &v->u.gradient.center_x,
-                          &v->u.gradient.center_y, &v->u.gradient.has_center);
-    for (guint i = (guint)start_i;
-         i < parts->len && v->u.gradient.n_stops < NS_CSS_GRADIENT_STOPS_MAX;
-         i++) {
-        const char *stop_text = parts->pdata[i];
-        char *tokens[4] = {0};
-        int nt = split_ws(stop_text, tokens);
-        if (nt < 1) { for (int k = 0; k < nt; k++) g_free(tokens[k]); continue; }
-        guint8 r, g, b, a;
-        if (parse_color(tokens[0], &r, &g, &b, &a)) {
-            ns_css_gradient_stop *s =
-                &v->u.gradient.stops[v->u.gradient.n_stops++];
-            s->r = r; s->g = g; s->b = b; s->a = a;
-            s->has_pos = FALSE;
-            if (nt >= 2) {
-                char *pos = tokens[1];
-                char *pcend = strchr(pos, '%');
-                if (pcend) {
-                    char *endp = NULL;
-                    double pct = g_ascii_strtod(pos, &endp);
-                    if (endp && endp != pos) {
-                        s->pos = pct / 100.0;
-                        s->has_pos = TRUE;
-                    }
-                } else {
-                    char *endp = NULL;
-                    double deg = g_ascii_strtod(pos, &endp);
-                    if (endp && endp != pos &&
-                        g_ascii_strncasecmp(endp, "deg", 3) == 0) {
-                        s->pos = deg / 360.0;
-                        s->has_pos = TRUE;
-                    }
-                }
-            }
-        }
-        for (int k = 0; k < nt; k++) g_free(tokens[k]);
-    }
-    g_ptr_array_free(parts, TRUE);
-    if (v->u.gradient.n_stops < 2) {
-        g_free(v);
-        return NULL;
-    }
-    int ns = v->u.gradient.n_stops;
-    ns_css_gradient_stop *st = v->u.gradient.stops;
-    if (!st[0].has_pos) { st[0].pos = 0.0; st[0].has_pos = TRUE; }
-    if (!st[ns - 1].has_pos) { st[ns - 1].pos = 1.0; st[ns - 1].has_pos = TRUE; }
-    for (int i = 1; i < ns; i++)
-        if (st[i].has_pos && st[i].pos < st[i - 1].pos)
+    int n = MIN(gr->n_stops, NS_CSS_GRADIENT_STOPS_MAX);
+    if (n == 0) return;
+    ns_css_gradient_stop *st = gr->stops;
+    gboolean fixed[NS_CSS_GRADIENT_STOPS_MAX] = { FALSE };
+    for (int i = 0; i < n; i++) fixed[i] = st[i].has_pos;
+    if (!fixed[0]) { st[0].pos = 0; st[0].pos_px = 0; fixed[0] = TRUE; }
+    if (!fixed[n - 1]) { st[n - 1].pos = 1; st[n - 1].pos_px = 0; fixed[n - 1] = TRUE; }
+    for (int i = 1; i < n; i++)
+        if (fixed[i] && fixed[i - 1] && st[i].pos_px == 0 &&
+            st[i - 1].pos_px == 0 && st[i].pos < st[i - 1].pos)
             st[i].pos = st[i - 1].pos;
-    for (int i = 0; i < ns; ) {
-        if (st[i].has_pos) { i++; continue; }
+    for (int i = 0; i < n; ) {
+        if (fixed[i]) { i++; continue; }
         int j = i;
-        while (j < ns && !st[j].has_pos) j++;
-        double lo = st[i - 1].pos;
-        double hi = st[j].pos;
-        for (int k = i; k < j; k++)
+        while (j < n && !fixed[j]) j++;
+        double lo = st[i - 1].pos, hi = st[j].pos;
+        for (int k = i; k < j; k++) {
             st[k].pos = lo + (hi - lo) * (double)(k - i + 1) / (double)(j - i + 1);
+            st[k].pos_px = 0;
+        }
         i = j;
     }
-    return v;
+    for (int i = 1; i + 1 < n; i++) {
+        if (!st[i].is_hint) continue;
+        st[i].r = (guint8)((st[i - 1].r + st[i + 1].r) / 2);
+        st[i].g = (guint8)((st[i - 1].g + st[i + 1].g) / 2);
+        st[i].b = (guint8)((st[i - 1].b + st[i + 1].b) / 2);
+        st[i].a = (guint8)((st[i - 1].a + st[i + 1].a) / 2);
+    }
+}
+
+static gboolean
+gradient_parse(const char *text, ns_gradient_parse *gp, const char **out_end,
+               gboolean keep_texts)
+{
+    memset(gp, 0, sizeof *gp);
+    const char *p = text;
+    while (*p && is_ws(*p)) p++;
+    if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) {
+        gp->gr.repeating = TRUE;
+        p += 10;
+    }
+    if (g_ascii_strncasecmp(p, "linear-gradient", 15) == 0) p += 15;
+    else if (g_ascii_strncasecmp(p, "radial-gradient", 15) == 0) { gp->gr.radial = TRUE; p += 15; }
+    else if (g_ascii_strncasecmp(p, "conic-gradient", 14) == 0) { gp->gr.conic = TRUE; p += 14; }
+    else return FALSE;
+    while (*p && is_ws(*p)) p++;
+    if (*p != '(') return FALSE;
+    p++;
+    const char *body_start = p;
+    int depth = 0;
+    const char *end = NULL;
+    for (const char *q = p; *q; q++) {
+        if (*q == '(') depth++;
+        else if (*q == ')') {
+            if (depth == 0) { end = q; break; }
+            depth--;
+        }
+    }
+    if (!end) return FALSE;
+    if (out_end) *out_end = end + 1;
+    gp->gr.center_x = 0.5;
+    gp->gr.center_y = 0.5;
+    gp->all_legacy = TRUE;
+    if (keep_texts) gp->stop_texts = g_ptr_array_new_with_free_func(g_free);
+
+    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
+    const char *seg = body_start;
+    depth = 0;
+    for (const char *q = body_start; ; q++) {
+        if (*q == '(') depth++;
+        else if (*q == ')' && depth > 0) depth--;
+        if ((*q == ',' && depth == 0) || q == end) {
+            char *piece = g_strndup(seg, (gsize)(q - seg));
+            g_strstrip(piece);
+            g_ptr_array_add(parts, piece);
+            if (q == end) break;
+            seg = q + 1;
+        }
+    }
+    gboolean ok = TRUE;
+    for (guint i = 0; i < parts->len && ok; i++)
+        if (!*(char *)parts->pdata[i]) ok = FALSE;
+    guint start = 0;
+    if (ok && parts->len > 0) {
+        char *tok[24] = {0};
+        int n = split_ws_paren(parts->pdata[0], tok, 24);
+        ns_css_gradient saved = gp->gr;
+        gboolean saved_explicit = gp->interp_explicit;
+        if (n > 0 && gradient_parse_prelude(gp, tok, n)) {
+            start = 1;
+        } else {
+            gp->gr = saved;
+            gp->interp_explicit = saved_explicit;
+            g_free(gp->angle_text); gp->angle_text = NULL;
+            g_free(gp->size_text); gp->size_text = NULL;
+            g_free(gp->position_text); gp->position_text = NULL;
+        }
+        for (int k = 0; k < n; k++) g_free(tok[k]);
+    }
+    if (ok && start >= parts->len) ok = FALSE;
+    gboolean prev_hint = TRUE;
+    int color_stops = 0;
+    for (guint i = start; i < parts->len && ok; i++) {
+        gboolean hint = FALSE;
+        if (!gradient_stop_parse(gp, parts->pdata[i], &hint)) { ok = FALSE; break; }
+        if (hint && prev_hint) { ok = FALSE; break; }
+        if (!hint) color_stops++;
+        prev_hint = hint;
+    }
+    if (ok && (prev_hint || color_stops < 1)) ok = FALSE;
+    g_ptr_array_free(parts, TRUE);
+    if (!ok) {
+        gradient_parse_clear(gp);
+        return FALSE;
+    }
+    if (gp->interp_explicit) {
+        const char *def = gp->all_legacy ? "srgb" : "oklab";
+        if (strcmp(gp->gr.interp, def) == 0) gp->gr.interp[0] = '\0';
+    }
+    gradient_finish_stops(&gp->gr);
+    return TRUE;
+}
+
+static void
+gradient_append_stop_pos(GString *s, const ns_css_gradient_stop *st)
+{
+    if (st->pos_is_angle) {
+        g_string_append_printf(s, "%gdeg", st->pos * 360.0);
+    } else if (st->pos_px == 0) {
+        g_string_append_printf(s, "%g%%", st->pos * 100.0);
+    } else if (st->pos == 0) {
+        g_string_append_printf(s, "%gpx", st->pos_px);
+    } else {
+        g_string_append_printf(s, "calc(%g%% %c %gpx)", st->pos * 100.0,
+                               st->pos_px < 0 ? '-' : '+', fabs(st->pos_px));
+    }
+}
+
+static void
+gradient_append_center_coord(GString *s, double frac, double px)
+{
+    if (px == 0) g_string_append_printf(s, "%g%%", frac * 100.0);
+    else if (frac == 0) g_string_append_printf(s, "%gpx", px);
+    else g_string_append_printf(s, "calc(%g%% %c %gpx)", frac * 100.0,
+                                px < 0 ? '-' : '+', fabs(px));
+}
+
+static void
+gradient_append_to_side(GString *s, int to_side)
+{
+    g_string_append(s, "to");
+    if (to_side & NS_CSS_GRADIENT_TO_LEFT) g_string_append(s, " left");
+    if (to_side & NS_CSS_GRADIENT_TO_RIGHT) g_string_append(s, " right");
+    if (to_side & NS_CSS_GRADIENT_TO_TOP) g_string_append(s, " top");
+    if (to_side & NS_CSS_GRADIENT_TO_BOTTOM) g_string_append(s, " bottom");
+}
+
+static void
+gradient_append_name(GString *s, const ns_css_gradient *gr)
+{
+    if (gr->repeating) g_string_append(s, "repeating-");
+    g_string_append(s, gr->conic ? "conic-gradient(" :
+                       gr->radial ? "radial-gradient(" : "linear-gradient(");
+}
+
+static void
+gradient_append_prelude_part(GString *prelude, const char *part)
+{
+    if (prelude->len) g_string_append_c(prelude, ' ');
+    g_string_append(prelude, part);
+}
+
+static void
+gradient_serialize_computed(GString *s, const ns_css_gradient *gr)
+{
+    gradient_append_name(s, gr);
+    GString *pre = g_string_new(NULL);
+    if (gr->conic) {
+        if (gr->has_from) {
+            char *t = g_strdup_printf("from %gdeg", gr->from_deg);
+            gradient_append_prelude_part(pre, t);
+            g_free(t);
+        }
+    } else if (gr->radial) {
+        if (gr->size == NS_CSS_GRADIENT_EXPLICIT_SIZE) {
+            GString *sz = g_string_new(NULL);
+            gradient_append_center_coord(sz, gr->size_x_pct / 100.0, gr->size_x);
+            if (!gr->circle) {
+                g_string_append_c(sz, ' ');
+                gradient_append_center_coord(sz, gr->size_y_pct / 100.0, gr->size_y);
+            }
+            gradient_append_prelude_part(pre, sz->str);
+            g_string_free(sz, TRUE);
+        } else {
+            if (gr->circle) gradient_append_prelude_part(pre, "circle");
+            static const char *kws[] = { NULL, "closest-side", "farthest-side",
+                                         "closest-corner", NULL };
+            if (kws[gr->size]) gradient_append_prelude_part(pre, kws[gr->size]);
+        }
+    } else {
+        if (gr->has_angle) {
+            char *t = g_strdup_printf("%gdeg", gr->angle_deg);
+            gradient_append_prelude_part(pre, t);
+            g_free(t);
+        } else if (gr->to_side && gr->to_side != NS_CSS_GRADIENT_TO_BOTTOM) {
+            GString *t = g_string_new(NULL);
+            gradient_append_to_side(t, gr->to_side);
+            gradient_append_prelude_part(pre, t->str);
+            g_string_free(t, TRUE);
+        }
+    }
+    if ((gr->radial || gr->conic) && gr->has_center) {
+        GString *at = g_string_new("at ");
+        gradient_append_center_coord(at, gr->center_x, gr->center_x_px);
+        g_string_append_c(at, ' ');
+        gradient_append_center_coord(at, gr->center_y, gr->center_y_px);
+        gradient_append_prelude_part(pre, at->str);
+        g_string_free(at, TRUE);
+    }
+    if (gr->interp[0]) {
+        char *t = g_strdup_printf("in %s", gr->interp);
+        gradient_append_prelude_part(pre, t);
+        g_free(t);
+    }
+    if (pre->len) {
+        g_string_append(s, pre->str);
+        g_string_append(s, ", ");
+    }
+    g_string_free(pre, TRUE);
+    for (int i = 0; i < gr->n_stops; i++) {
+        const ns_css_gradient_stop *st = &gr->stops[i];
+        if (st->pair_with_prev) {
+            g_string_append_c(s, ' ');
+            gradient_append_stop_pos(s, st);
+            continue;
+        }
+        if (i > 0) g_string_append(s, ", ");
+        if (st->is_hint) {
+            gradient_append_stop_pos(s, st);
+            continue;
+        }
+        ns_css_append_color(s, st->r, st->g, st->b, st->a);
+        if (st->has_pos) {
+            g_string_append_c(s, ' ');
+            gradient_append_stop_pos(s, st);
+        }
+    }
+    g_string_append_c(s, ')');
+}
+
+static char *
+gradient_serialize_specified(const ns_gradient_parse *gp)
+{
+    const ns_css_gradient *gr = &gp->gr;
+    GString *s = g_string_new(NULL);
+    gradient_append_name(s, gr);
+    GString *pre = g_string_new(NULL);
+    if (gr->conic) {
+        if (gr->has_from) {
+            char *t = g_strdup_printf("from %s", gp->angle_text);
+            gradient_append_prelude_part(pre, t);
+            g_free(t);
+        }
+    } else if (gr->radial) {
+        if (gr->size == NS_CSS_GRADIENT_EXPLICIT_SIZE) {
+            gradient_append_prelude_part(pre, gp->size_text);
+        } else {
+            if (gr->circle) gradient_append_prelude_part(pre, "circle");
+            static const char *kws[] = { NULL, "closest-side", "farthest-side",
+                                         "closest-corner", NULL };
+            if (kws[gr->size]) gradient_append_prelude_part(pre, kws[gr->size]);
+        }
+    } else {
+        if (gr->has_angle) {
+            gradient_append_prelude_part(pre, gp->angle_text);
+        } else if (gr->to_side && gr->to_side != NS_CSS_GRADIENT_TO_BOTTOM) {
+            GString *t = g_string_new(NULL);
+            gradient_append_to_side(t, gr->to_side);
+            gradient_append_prelude_part(pre, t->str);
+            g_string_free(t, TRUE);
+        }
+    }
+    if ((gr->radial || gr->conic) && gp->position_text &&
+        g_ascii_strcasecmp(gp->position_text, "center") != 0 &&
+        g_ascii_strcasecmp(gp->position_text, "center center") != 0) {
+        char *t = g_strdup_printf("at %s", gp->position_text);
+        gradient_append_prelude_part(pre, t);
+        g_free(t);
+    }
+    if (gr->interp[0]) {
+        char *t = g_strdup_printf("in %s", gr->interp);
+        gradient_append_prelude_part(pre, t);
+        g_free(t);
+    }
+    if (pre->len) {
+        g_string_append(s, pre->str);
+        g_string_append(s, ", ");
+    }
+    g_string_free(pre, TRUE);
+    for (guint i = 0; gp->stop_texts && i < gp->stop_texts->len; i++) {
+        if (i > 0) g_string_append(s, ", ");
+        g_string_append(s, gp->stop_texts->pdata[i]);
+    }
+    g_string_append_c(s, ')');
+    return g_string_free(s, FALSE);
+}
+
+static gboolean
+text_starts_gradient(const char *p)
+{
+    while (*p && is_ws(*p)) p++;
+    if (g_ascii_strncasecmp(p, "repeating-", 10) == 0) p += 10;
+    return g_ascii_strncasecmp(p, "linear-gradient", 15) == 0 ||
+           g_ascii_strncasecmp(p, "radial-gradient", 15) == 0 ||
+           g_ascii_strncasecmp(p, "conic-gradient", 14) == 0;
+}
+
+char *
+ns_css_image_value_canonical(const char *text)
+{
+    if (!text) return NULL;
+    GString *out = g_string_new(NULL);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    gboolean first = TRUE;
+    while (p < end) {
+        char term = 0;
+        const char *seg_end = css_scan_until(p, end, ",", &term);
+        char *layer = css_trim_dup_range(p, seg_end);
+        char *canon = NULL;
+        if (text_starts_gradient(layer)) {
+            ns_gradient_parse gp;
+            const char *gend = NULL;
+            if (gradient_parse(layer, &gp, &gend, TRUE)) {
+                while (gend && *gend && is_ws(*gend)) gend++;
+                if (!gend || !*gend) canon = gradient_serialize_specified(&gp);
+                gradient_parse_clear(&gp);
+            }
+            if (!canon) {
+                g_free(layer);
+                g_string_free(out, TRUE);
+                return NULL;
+            }
+        }
+        if (!first) g_string_append(out, ", ");
+        first = FALSE;
+        g_string_append(out, canon ? canon : layer);
+        g_free(canon);
+        g_free(layer);
+        p = term == ',' ? seg_end + 1 : seg_end;
+    }
+    return g_string_free(out, FALSE);
+}
+
+double
+ns_css_gradient_angle(const ns_css_gradient *gr, double w, double h)
+{
+    if (gr->has_angle) return gr->angle_deg;
+    int side = gr->to_side ? gr->to_side : NS_CSS_GRADIENT_TO_BOTTOM;
+    gboolean horiz = side & (NS_CSS_GRADIENT_TO_LEFT | NS_CSS_GRADIENT_TO_RIGHT);
+    gboolean vert = side & (NS_CSS_GRADIENT_TO_TOP | NS_CSS_GRADIENT_TO_BOTTOM);
+    if (!horiz) return side & NS_CSS_GRADIENT_TO_TOP ? 0 : 180;
+    if (!vert) return side & NS_CSS_GRADIENT_TO_LEFT ? 270 : 90;
+    double corner = w > 0 && h > 0 ? atan2(w, h) * 180.0 / G_PI : 45.0;
+    gboolean right = side & NS_CSS_GRADIENT_TO_RIGHT;
+    gboolean top = side & NS_CSS_GRADIENT_TO_TOP;
+    if (right && top) return corner;
+    if (right) return 180.0 - corner;
+    if (top) return 360.0 - corner;
+    return 180.0 + corner;
+}
+
+void
+ns_css_gradient_radii(const ns_css_gradient *gr, double w, double h,
+                      double cx, double cy, double *rx, double *ry)
+{
+    double dl = fabs(cx), dr = fabs(w - cx), dt = fabs(cy), db = fabs(h - cy);
+    switch (gr->size) {
+    case NS_CSS_GRADIENT_EXPLICIT_SIZE:
+        *rx = gr->size_x + gr->size_x_pct / 100.0 * w;
+        *ry = gr->circle ? *rx : gr->size_y + gr->size_y_pct / 100.0 * h;
+        break;
+    case NS_CSS_GRADIENT_CLOSEST_SIDE:
+        *rx = MIN(dl, dr);
+        *ry = MIN(dt, db);
+        if (gr->circle) *rx = *ry = MIN(*rx, *ry);
+        break;
+    case NS_CSS_GRADIENT_FARTHEST_SIDE:
+        *rx = MAX(dl, dr);
+        *ry = MAX(dt, db);
+        if (gr->circle) *rx = *ry = MAX(*rx, *ry);
+        break;
+    case NS_CSS_GRADIENT_CLOSEST_CORNER:
+        if (gr->circle) {
+            *rx = *ry = sqrt(MIN(dl, dr) * MIN(dl, dr) + MIN(dt, db) * MIN(dt, db));
+        } else {
+            *rx = MIN(dl, dr) * G_SQRT2;
+            *ry = MIN(dt, db) * G_SQRT2;
+        }
+        break;
+    case NS_CSS_GRADIENT_FARTHEST_CORNER:
+    default:
+        if (gr->circle) {
+            *rx = *ry = sqrt(MAX(dl, dr) * MAX(dl, dr) + MAX(dt, db) * MAX(dt, db));
+        } else {
+            *rx = MAX(dl, dr) * G_SQRT2;
+            *ry = MAX(dt, db) * G_SQRT2;
+        }
+        break;
+    }
+    if (*rx <= 0) *rx = 1;
+    if (*ry <= 0) *ry = 1;
 }
 
 static const char *
@@ -5750,17 +6344,27 @@ pick_image_set_url(const char *t)
 }
 
 static ns_css_value *
+parse_gradient_text(const char *t, gboolean allow_trailing)
+{
+    ns_gradient_parse gp;
+    const char *gend = NULL;
+    if (!gradient_parse(t, &gp, &gend, FALSE)) return NULL;
+    while (gend && *gend && is_ws(*gend)) gend++;
+    if (!allow_trailing && gend && *gend) {
+        gradient_parse_clear(&gp);
+        return NULL;
+    }
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_GRADIENT;
+    v->u.gradient = gp.gr;
+    gradient_parse_clear(&gp);
+    return v;
+}
+
+static ns_css_value *
 parse_any_gradient(const char *t)
 {
-    const char *p = t;
-    while (*p && is_ws(*p)) p++;
-    gboolean rep = g_ascii_strncasecmp(p, "repeating-", 10) == 0;
-    const char *g = rep ? p + 10 : p;
-    ns_css_value *v = parse_linear_gradient(g);
-    if (!v) v = parse_radial_gradient(g);
-    if (!v) v = parse_conic_gradient(g);
-    if (v && v->kind == NS_CSS_V_GRADIENT) v->u.gradient.repeating = rep;
-    return v;
+    return parse_gradient_text(t, FALSE);
 }
 
 static double
@@ -8845,6 +9449,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_LIST_STYLE_IMAGE:
     case NS_CSS_BACKGROUND_IMAGE: {
         v = parse_image_reference(t);
+        if (!v && text_starts_gradient(t)) break;
         if (!v) {
             char *kw = ascii_lower(t, strlen(t));
             v = g_new0(ns_css_value, 1);
@@ -9416,6 +10021,80 @@ static int
 split_ws(const char *s, char *out[4])
 {
     return split_ws_limit(s, out, 4);
+}
+
+static gboolean
+position_is_h_edge(const char *t)
+{
+    return g_ascii_strcasecmp(t, "left") == 0 ||
+           g_ascii_strcasecmp(t, "right") == 0;
+}
+
+static gboolean
+position_is_v_edge(const char *t)
+{
+    return g_ascii_strcasecmp(t, "top") == 0 ||
+           g_ascii_strcasecmp(t, "bottom") == 0;
+}
+
+static gboolean
+position_is_keyword(const char *t)
+{
+    return position_is_h_edge(t) || position_is_v_edge(t) ||
+           g_ascii_strcasecmp(t, "center") == 0;
+}
+
+static char *
+position_from_edge(const char *edge, const char *offset)
+{
+    gboolean far = g_ascii_strcasecmp(edge, "right") == 0 ||
+                   g_ascii_strcasecmp(edge, "bottom") == 0;
+    if (!offset) return g_strdup(far ? "100%" : "0%");
+    if (!far) return g_strdup(offset);
+    char *unit = NULL;
+    double v = g_ascii_strtod(offset, &unit);
+    if (unit && g_strcmp0(unit, "%") == 0)
+        return g_strdup_printf("%g%%", 100.0 - v);
+    return g_strdup_printf("calc(100%% - %s)", offset);
+}
+
+static void
+position_split(const char *text, char **out_x, char **out_y)
+{
+    char *tok[4] = {0};
+    int n = split_ws_limit(text, tok, 4);
+    char *x = NULL, *y = NULL;
+    gboolean used[4] = { FALSE, FALSE, FALSE, FALSE };
+
+    for (int i = 0; i < n; i++) {
+        if (used[i] || !position_is_h_edge(tok[i])) continue;
+        const char *off = (n >= 3 && i + 1 < n && !position_is_keyword(tok[i + 1]))
+                          ? tok[i + 1] : NULL;
+        g_free(x);
+        x = position_from_edge(tok[i], off);
+        used[i] = TRUE;
+        if (off) used[i + 1] = TRUE;
+    }
+    for (int i = 0; i < n; i++) {
+        if (used[i] || !position_is_v_edge(tok[i])) continue;
+        const char *off = (n >= 3 && i + 1 < n && !position_is_keyword(tok[i + 1]))
+                          ? tok[i + 1] : NULL;
+        g_free(y);
+        y = position_from_edge(tok[i], off);
+        used[i] = TRUE;
+        if (off) used[i + 1] = TRUE;
+    }
+    for (int i = 0; i < n; i++) {
+        if (used[i]) continue;
+        gboolean center = g_ascii_strcasecmp(tok[i], "center") == 0;
+        char *v = g_strdup(center ? "50%" : tok[i]);
+        if (!x) x = v;
+        else if (!y) y = v;
+        else g_free(v);
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    *out_x = x ? x : g_strdup("50%");
+    *out_y = y ? y : g_strdup("50%");
 }
 
 static char *
@@ -10508,7 +11187,7 @@ parse_declaration_block(const char **pp, const char *end,
             if (has_linear || has_radial || has_conic) {
                 const char *gtext = vtext;
                 while (*gtext && is_ws(*gtext)) gtext++;
-                ns_css_value *gv = parse_any_gradient(gtext);
+                ns_css_value *gv = parse_gradient_text(gtext, TRUE);
                 if (gv) {
                     ns_css_decl d = {
                         .prop = NS_CSS_BACKGROUND_IMAGE,
@@ -10782,30 +11461,17 @@ parse_declaration_block(const char **pp, const char *end,
                 const char *sseg = css_scan_until(sp, send, ",", &sterm);
                 char *layer = css_trim_dup_range(sp, sseg);
                 sp = sterm == ',' ? sseg + 1 : sseg;
-                char *tokens[4] = {0};
-                int n = split_ws(layer, tokens);
-                const char *xs = NULL, *ys = NULL;
-                if (n == 1) {
-                    xs = tokens[0];
-                    ys = (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                          g_ascii_strcasecmp(tokens[0], "bottom") == 0) ? tokens[0] : "center";
-                    if (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                        g_ascii_strcasecmp(tokens[0], "bottom") == 0) xs = "center";
-                } else if (n >= 2) {
-                    xs = tokens[0];
-                    ys = tokens[1];
-                    gboolean first_is_v =
-                        g_ascii_strcasecmp(xs, "top") == 0 ||
-                        g_ascii_strcasecmp(xs, "bottom") == 0;
-                    gboolean second_is_h =
-                        g_ascii_strcasecmp(ys, "left") == 0 ||
-                        g_ascii_strcasecmp(ys, "right") == 0;
-                    if (first_is_v && second_is_h) {
-                        const char *tmp = xs;
-                        xs = ys;
-                        ys = tmp;
-                    }
+                char *layer_canon = position_canonical_ex(layer, TRUE, TRUE);
+                if (!layer_canon) {
+                    g_free(layer);
+                    ns_css_value_free(vx_head);
+                    ns_css_value_free(vy_head);
+                    vx_head = vy_head = NULL;
+                    break;
                 }
+                g_free(layer_canon);
+                char *xs = NULL, *ys = NULL;
+                position_split(layer, &xs, &ys);
                 if (xs) {
                     ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_X, xs);
                     if (v) {
@@ -10822,7 +11488,8 @@ parse_declaration_block(const char **pp, const char *end,
                         vy_tail = v;
                     }
                 }
-                for (int i = 0; i < n; i++) g_free(tokens[i]);
+                g_free(xs);
+                g_free(ys);
                 g_free(layer);
             }
             if (vx_head) {
@@ -10840,30 +11507,10 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "object-position") == 0) {
-            char *tokens[4] = {0};
-            int n = split_ws(vtext, tokens);
-            const char *xs = NULL, *ys = NULL;
-            if (n == 1) {
-                xs = tokens[0];
-                ys = (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                      g_ascii_strcasecmp(tokens[0], "bottom") == 0) ? tokens[0] : "center";
-                if (g_ascii_strcasecmp(tokens[0], "top") == 0 ||
-                    g_ascii_strcasecmp(tokens[0], "bottom") == 0) xs = "center";
-            } else if (n >= 2) {
-                xs = tokens[0];
-                ys = tokens[1];
-                gboolean first_is_v =
-                    g_ascii_strcasecmp(xs, "top") == 0 ||
-                    g_ascii_strcasecmp(xs, "bottom") == 0;
-                gboolean second_is_h =
-                    g_ascii_strcasecmp(ys, "left") == 0 ||
-                    g_ascii_strcasecmp(ys, "right") == 0;
-                if (first_is_v && second_is_h) {
-                    const char *tmp = xs;
-                    xs = ys;
-                    ys = tmp;
-                }
-            }
+            char *xs = NULL, *ys = NULL;
+            char *canon = position_canonical_ex(vtext, TRUE, FALSE);
+            if (canon) position_split(vtext, &xs, &ys);
+            g_free(canon);
             if (xs) {
                 ns_css_value *v = parse_value_for(NS_CSS_OBJECT_POSITION_X, xs);
                 if (v) {
@@ -10878,7 +11525,8 @@ parse_declaration_block(const char **pp, const char *end,
                     g_array_append_val(decls_out, d);
                 }
             }
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            g_free(xs);
+            g_free(ys);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -11372,7 +12020,7 @@ parse_declaration_block(const char **pp, const char *end,
                 g_free(canon);
             }
             char *tokens[24] = {0};
-            int n = font_tokens_split(vtext, tokens, (int)G_N_ELEMENTS(tokens));
+            int n = split_ws_paren(vtext, tokens, (int)G_N_ELEMENTS(tokens));
             char *family_buf = NULL;
             int size_idx = -1;
             for (int i = 0; i < n; i++) {
@@ -16697,6 +17345,43 @@ css_inline_value_canonical(const char *prop, char *value)
             g_free(value);
             value = canon;
         }
+    } else if (strcmp(prop, "object-position") == 0 ||
+               strcmp(prop, "background-position") == 0) {
+        GString *out = g_string_new(NULL);
+        const char *p = value;
+        const char *end = value + strlen(value);
+        gboolean ok = TRUE;
+        while (p < end && ok) {
+            char term = 0;
+            const char *seg_end = css_scan_until(p, end, ",", &term);
+            char *layer = css_trim_dup_range(p, seg_end);
+            char *canon = position_canonical_ex(
+                layer, TRUE, strcmp(prop, "background-position") == 0);
+            if (canon) {
+                if (out->len) g_string_append(out, ", ");
+                g_string_append(out, canon);
+            } else {
+                ok = FALSE;
+            }
+            g_free(canon);
+            g_free(layer);
+            p = term == ',' ? seg_end + 1 : seg_end;
+        }
+        if (ok) {
+            g_free(value);
+            value = g_string_free(out, FALSE);
+        } else {
+            g_string_free(out, TRUE);
+        }
+    } else if (strcmp(prop, "background-image") == 0 ||
+               strcmp(prop, "mask-image") == 0 ||
+               strcmp(prop, "list-style-image") == 0 ||
+               strcmp(prop, "border-image-source") == 0) {
+        char *canon = ns_css_image_value_canonical(value);
+        if (canon) {
+            g_free(value);
+            value = canon;
+        }
     } else if (strcmp(prop, "content") == 0) {
         GRegex *counter = g_regex_new(
             "counter\\(([-_a-zA-Z0-9]+),[ \\t]*decimal\\)", 0, 0, NULL);
@@ -17915,27 +18600,7 @@ ns_css_value_serialize(const ns_css_value *v)
     }
     case NS_CSS_V_GRADIENT: {
         GString *s = g_string_new(NULL);
-        if (v->u.gradient.conic) {
-            g_string_append_printf(s, "conic-gradient(from %ddeg",
-                                   v->u.gradient.from_deg);
-        } else if (v->u.gradient.radial) {
-            g_string_append(s, "radial-gradient(circle");
-        } else {
-            g_string_append_printf(s, "linear-gradient(%ddeg",
-                                   v->u.gradient.angle_deg);
-        }
-        for (int i = 0; i < v->u.gradient.n_stops; i++) {
-            const ns_css_gradient_stop *st = &v->u.gradient.stops[i];
-            g_string_append(s, ", ");
-            ns_css_append_color(s, st->r, st->g, st->b, st->a);
-            if (st->has_pos) {
-                if (st->pos_is_px)
-                    g_string_append_printf(s, " %gpx", st->pos);
-                else
-                    g_string_append_printf(s, " %g%%", st->pos * 100.0);
-            }
-        }
-        g_string_append_c(s, ')');
+        gradient_serialize_computed(s, &v->u.gradient);
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_TRACKS: {
