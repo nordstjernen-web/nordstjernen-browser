@@ -157,6 +157,7 @@ clamp_height_minmax_px(const ns_style *s, double h)
 static double
 containing_block_definite_height(const ns_box *box)
 {
+    if (box && box->cb_height_override > 0) return box->cb_height_override;
     const ns_box *p = box ? box->parent : NULL;
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
@@ -9499,9 +9500,12 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
 }
 
 static ns_css_tracks
-expand_auto_repeat(const ns_css_tracks *tr, double available_main, double gap)
+expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap,
+                      int *fit_start, int *fit_count)
 {
     ns_css_tracks out = *tr;
+    if (fit_start) *fit_start = 0;
+    if (fit_count) *fit_count = 0;
     if (tr->auto_repeat == NS_CSS_AUTO_REPEAT_NONE) return out;
     if (tr->auto_repeat_count <= 0) return out;
 
@@ -9546,7 +9550,17 @@ expand_auto_repeat(const ns_css_tracks *tr, double available_main, double gap)
     for (int i = 0; i < suffix_count && out.n < NS_CSS_TRACKS_MAX; i++)
         out.tracks[out.n++] = tr->tracks[suffix_start + i];
     out.auto_repeat = NS_CSS_AUTO_REPEAT_NONE;
+    if (tr->auto_repeat == NS_CSS_AUTO_REPEAT_FIT) {
+        if (fit_start) *fit_start = prefix;
+        if (fit_count) *fit_count = repeats * tr->auto_repeat_count;
+    }
     return out;
+}
+
+static ns_css_tracks
+expand_auto_repeat(const ns_css_tracks *tr, double available_main, double gap)
+{
+    return expand_auto_repeat_ex(tr, available_main, gap, NULL, NULL);
 }
 
 typedef struct grid_lines {
@@ -10217,7 +10231,9 @@ layout_grid(ns_box *box, double cw,
         row_basis > 0 ? row_basis : 0);
     if (rows_subgrid) row_gap = sgr->gap;
 
-    ns_css_tracks cols_buf = expand_auto_repeat(cols_src, cw, col_gap);
+    int fit_start = 0, fit_count = 0;
+    ns_css_tracks cols_buf = expand_auto_repeat_ex(cols_src, cw, col_gap,
+                                                   &fit_start, &fit_count);
     const ns_css_tracks *cols = &cols_buf;
     int n_cols = cols->n > 0 ? cols->n : 1;
     int explicit_cols = n_cols;
@@ -10431,6 +10447,37 @@ layout_grid(ns_box *box, double cw,
     }
     if (n_rows > NS_CSS_TRACKS_MAX) n_rows = NS_CSS_TRACKS_MAX;
 
+    gboolean col_collapsed[NS_CSS_TRACKS_MAX] = {0};
+    double col_gap_after[NS_CSS_TRACKS_MAX + 1] = {0};
+    if (fit_count > 0 && !cols_subgrid) {
+        gboolean used[NS_CSS_TRACKS_MAX] = {0};
+        for (guint k = 0; k < placed_cols->len; k++) {
+            int c0 = g_array_index(placed_cols, int, k);
+            int sp = k < col_spans->len ? g_array_index(col_spans, int, k) : 1;
+            for (int j = 0; j < sp && c0 + j < n_cols; j++)
+                if (c0 + j >= 0) used[c0 + j] = TRUE;
+        }
+        for (int t = fit_start; t < fit_start + fit_count && t < n_cols; t++) {
+            if (used[t]) continue;
+            col_collapsed[t] = TRUE;
+            cols_buf.tracks[t].kind = NS_CSS_TRACK_PX;
+            cols_buf.tracks[t].v = 0;
+            cols_buf.tracks[t].has_min = FALSE;
+        }
+    }
+    {
+        double gaps_total = 0;
+        for (int t = 0; t < n_cols; t++) {
+            gboolean later = FALSE;
+            for (int u = t + 1; u < n_cols; u++)
+                if (!col_collapsed[u]) { later = TRUE; break; }
+            col_gap_after[t] = (!col_collapsed[t] && later) ? col_gap : 0;
+            gaps_total += col_gap_after[t];
+        }
+        avail = cw - gaps_total;
+        if (avail < 0) avail = 0;
+    }
+
     double col_content[NS_CSS_TRACKS_MAX] = {0};
     double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
@@ -10465,7 +10512,7 @@ layout_grid(ns_box *box, double cw,
     double col_x[NS_CSS_TRACKS_MAX + 1];
     col_x[0] = inner_x;
     for (int i = 0; i < n_cols; i++)
-        col_x[i + 1] = col_x[i] + col_sizes[i] + col_gap;
+        col_x[i + 1] = col_x[i] + col_sizes[i] + col_gap_after[i];
 
     if (cols_subgrid) {
         n_cols = sg->n;
@@ -10478,7 +10525,7 @@ layout_grid(ns_box *box, double cw,
     } else {
         double used_w = 0;
         for (int t = 0; t < n_cols; t++) used_w += col_sizes[t];
-        used_w += n_cols > 1 ? col_gap * (n_cols - 1) : 0;
+        for (int t = 0; t < n_cols; t++) used_w += col_gap_after[t];
         double free_w = cw - used_w;
         if (free_w > 0.5) {
             const char *jc = keyword_or(box->style, NS_CSS_JUSTIFY_CONTENT,
@@ -10501,9 +10548,16 @@ layout_grid(ns_box *box, double cw,
             if (off != 0 || extra_gap != 0) {
                 col_x[0] = inner_x + off;
                 for (int t = 0; t < n_cols; t++)
-                    col_x[t + 1] = col_x[t] + col_sizes[t] + col_gap + extra_gap;
+                    col_x[t + 1] = col_x[t] + col_sizes[t] + col_gap_after[t] + extra_gap;
             }
         }
+    }
+    gboolean grid_rtl = !cols_subgrid &&
+        strcmp(keyword_or(box->style, NS_CSS_DIRECTION, "ltr"), "rtl") == 0;
+    if (grid_rtl) {
+        double right = inner_x + cw;
+        for (int t = 0; t < n_cols; t++)
+            col_x[t] = right - (col_x[t] - inner_x) - col_sizes[t];
     }
 
     double base_row_height[NS_CSS_TRACKS_MAX] = {0};
@@ -10540,11 +10594,11 @@ layout_grid(ns_box *box, double cw,
 
         double w = 0;
         for (int k = 0; k < sp; k++)
-            w += col_sizes[chosen + k] + (k > 0 ? col_gap : 0);
+            w += col_sizes[chosen + k] + (k > 0 ? col_gap_after[chosen + k - 1] : 0);
         edges_from_style(c->style, w, &c->margin, &c->padding, &c->border);
         double cw_for_item = w - c->margin.left - c->margin.right;
         if (cw_for_item < 0) cw_for_item = 0;
-        c->x = col_x[chosen];
+        c->x = grid_rtl ? col_x[chosen + sp - 1] : col_x[chosen];
         c->y = inner_y;
 
         const char *jself = c->style
@@ -10598,6 +10652,12 @@ layout_grid(ns_box *box, double cw,
                 g_pending_subgrid_rows = &subrowctx;
             }
         }
+        double area_h = 0;
+        for (int k = 0; k < rs && placed_row + k < NS_CSS_TRACKS_MAX; k++) {
+            if (base_row_height[placed_row + k] <= 0) { area_h = 0; break; }
+            area_h += base_row_height[placed_row + k] + (k > 0 ? base_gap : 0);
+        }
+        c->cb_height_override = area_h;
         layout_box(c, item_w, child_inherited);
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
@@ -12150,22 +12210,33 @@ grid_abs_containing_block(const ns_box *cb, const ns_style *st,
     g_grid_lines = &row_lines;
     grid_abs_axis_lines(st, TRUE, cb->grid_explicit_rows, &rs, &re);
     g_grid_lines = NULL;
-    if (!cs && !ce && !rs && !re) return FALSE;
     double pad_x0 = cb->x + cb->margin.left + cb->border.left;
     double pad_y0 = cb->y + cb->margin.top + cb->border.top;
     double pad_x1 = pad_x0 + cb->content_width + cb->padding.left + cb->padding.right;
     double pad_y1 = pad_y0 + cb->content_height + cb->padding.top + cb->padding.bottom;
     const GArray *ct = cb->grid_col_tracks, *rt = cb->grid_row_tracks;
+    gboolean rtl = cb->style &&
+        ns_css_keyword_is(cb->style->values[NS_CSS_DIRECTION], "rtl");
     double x0 = pad_x0, x1 = pad_x1, y0 = pad_y0, y1 = pad_y1;
-    if (cs && ct->len > 0) {
-        x0 = cs <= (int)ct->len
-            ? g_array_index(ct, ns_grid_track_edges, cs - 1).start
-            : g_array_index(ct, ns_grid_track_edges, ct->len - 1).end;
-    }
-    if (ce && ct->len > 0) {
-        x1 = ce >= 2
-            ? g_array_index(ct, ns_grid_track_edges, MIN(ce - 2, (int)ct->len - 1)).end
-            : g_array_index(ct, ns_grid_track_edges, 0).start;
+    if (ct->len > 0 && (cs || ce)) {
+        int n = (int)ct->len;
+        double s_edge = rtl ? pad_x1 : pad_x0;
+        double e_edge = rtl ? pad_x0 : pad_x1;
+        if (cs) {
+            const ns_grid_track_edges *t =
+                &g_array_index(ct, ns_grid_track_edges, MIN(cs, n) - 1);
+            s_edge = cs <= n ? (rtl ? t->end : t->start)
+                             : (rtl ? t->start : t->end);
+        }
+        if (ce) {
+            const ns_grid_track_edges *t =
+                &g_array_index(ct, ns_grid_track_edges,
+                               ce >= 2 ? MIN(ce - 2, n - 1) : 0);
+            e_edge = ce >= 2 ? (rtl ? t->start : t->end)
+                             : (rtl ? t->end : t->start);
+        }
+        x0 = MIN(s_edge, e_edge);
+        x1 = MAX(s_edge, e_edge);
     }
     if (rs && rt->len > 0) {
         y0 = rs <= (int)rt->len
@@ -12187,6 +12258,49 @@ grid_abs_containing_block(const ns_box *cb, const ns_style *st,
 static void
 position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
                          double cb_w, double cb_h);
+
+static double
+grid_static_align_offset(const char *align, double free_space, gboolean flip)
+{
+    if (!align || strcmp(align, "auto") == 0) return 0;
+    gboolean at_end = strcmp(align, "end") == 0 || strcmp(align, "flex-end") == 0 ||
+                      strcmp(align, "self-end") == 0 || strcmp(align, "last baseline") == 0;
+    gboolean at_start = strcmp(align, "start") == 0 || strcmp(align, "flex-start") == 0 ||
+                        strcmp(align, "self-start") == 0 || strcmp(align, "baseline") == 0;
+    if (strcmp(align, "center") == 0) return free_space / 2;
+    if (strcmp(align, "left") == 0) return flip ? free_space : 0;
+    if (strcmp(align, "right") == 0) return flip ? 0 : free_space;
+    if (at_end) return flip ? 0 : free_space;
+    if (at_start) return flip ? free_space : 0;
+    return flip ? free_space : 0;
+}
+
+static void
+grid_static_position(ns_box *abox, const ns_box *cb,
+                     double area_x, double area_y, double area_w, double area_h,
+                     gboolean static_x, gboolean static_y)
+{
+    gboolean rtl = cb->style &&
+        ns_css_keyword_is(cb->style->values[NS_CSS_DIRECTION], "rtl");
+    double outer_w = abox->content_width + abox->padding.left + abox->padding.right +
+                     abox->border.left + abox->border.right +
+                     abox->margin.left + abox->margin.right;
+    double outer_h = abox->content_height + abox->padding.top + abox->padding.bottom +
+                     abox->border.top + abox->border.bottom +
+                     abox->margin.top + abox->margin.bottom;
+    if (static_x) {
+        const char *js = abox->style ? ns_style_keyword(abox->style, NS_CSS_JUSTIFY_SELF) : NULL;
+        if (!js || strcmp(js, "auto") == 0)
+            js = keyword_or(cb->style, NS_CSS_JUSTIFY_ITEMS, "normal");
+        abox->x = area_x + grid_static_align_offset(js, area_w - outer_w, rtl);
+    }
+    if (static_y) {
+        const char *as = abox->style ? ns_style_keyword(abox->style, NS_CSS_ALIGN_SELF) : NULL;
+        if (!as || strcmp(as, "auto") == 0)
+            as = keyword_or(cb->style, NS_CSS_ALIGN_ITEMS, "normal");
+        abox->y = area_y + grid_static_align_offset(as, area_h - outer_h, FALSE);
+    }
+}
 
 static void
 position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
@@ -12540,6 +12654,9 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (static_x) abox->x = flex_x;
             if (static_y) abox->y = flex_y;
         }
+        if (grid_cb && flex_parent == cb && (static_x || static_y))
+            grid_static_position(abox, cb, grid_x, grid_y, grid_w, grid_h,
+                                 static_x, static_y);
         apply_position_offsets(abox, avail, cb_h);
         if (grid_cb)
             position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h);
