@@ -3,6 +3,10 @@ Changelog:
 
 1.0.24:
 ======
+* about:start wears a new splash: the same night scene, painted in an
+  impressionist hand with a gilded frame, rendered by
+  scripts/build-splash-art.py from the version in meson.build so a
+  release regenerates the artwork with two scripts and no image editor.
 * Flex layout resolves flexible lengths the way css-flexbox-1 §9.7
   describes: one implementation shared by row, wrapping-row and column
   containers distributes free space with the item freezing loop, so flex

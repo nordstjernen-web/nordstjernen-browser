@@ -15,8 +15,8 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parent.parent
 WIDTH = 940
 HEIGHT = 320
-FRAME_COUNT = int(os.environ.get("NS_SPLASH_FRAMES", "32"))
-FRAME_DELAY = int(os.environ.get("NS_SPLASH_DELAY", "80"))
+FRAME_COUNT = int(os.environ.get("NS_SPLASH_FRAMES", "16"))
+FRAME_DELAY = int(os.environ.get("NS_SPLASH_DELAY", "150"))
 CRAFT_SS = 4
 CRUISER_LEN = 42.0
 CRUISER_Y = 161.0
@@ -364,7 +364,7 @@ def indexed_frames(frames: list[Image.Image]) -> list[Image.Image]:
         )
     palette = sample.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
     return [
-        frame.quantize(palette=palette, dither=Image.Dither.FLOYDSTEINBERG)
+        frame.quantize(palette=palette, dither=Image.Dither.NONE)
         for frame in frames
     ]
 
