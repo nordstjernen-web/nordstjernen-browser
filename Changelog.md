@@ -28,6 +28,11 @@ Changelog:
   Object.keys listing only indices; moveBefore() is ParentNode-only;
   replaceChildren() queues a single mutation record; Node.isConnected is
   true for any node whose root is a document.
+* Popup blocking, in the Firefox 1 tradition: window.open only navigates
+  when called within five seconds of a real user gesture (click, key
+  press, touch), consumes that activation, and logs blocked attempts to
+  the console. navigator.userActivation now reports the live activation
+  state instead of constants.
 * Ctrl+D bookmarks the current page, with a matching "Bookmark This Page"
   menu entry, in the classic browser tradition.
 * about:book — every browser of the lineage carries its Book.
