@@ -3,6 +3,43 @@ Changelog:
 
 1.0.24:
 ======
+* Flex layout resolves flexible lengths the way css-flexbox-1 §9.7
+  describes: one implementation shared by row, wrapping-row and column
+  containers distributes free space with the item freezing loop, so flex
+  factors below one scale the free space, flex-shrink is weighted by the
+  flex base size, and min/max violations are frozen and re-distributed.
+  The automatic minimum size of a flex item is min(content size,
+  specified size) rather than the specified size, so width: 200px in a
+  100px container shrinks as browsers do; min-content and max-content
+  minimums are honoured, and a percentage size on a replaced element or
+  text control counts as zero for the specified size suggestion.
+* Column flex containers wrap: flex-wrap: wrap and wrap-reverse break
+  items into lines against the definite main size, align-content places
+  the lines (start/end resolve in the inline axis; space-around and
+  space-evenly fall back to start when the lines overflow), a wrapping
+  container with a single line is still multi-line, rtl mirrors the
+  cross axis, column-reverse packs from the main end, auto margins in
+  the main axis absorb free space, and an indefinite-height column sizes
+  itself from its items' content contributions so flex: 1 items no
+  longer collapse.
+* Negative free space overflows in the right direction: space-between,
+  space-around and space-evenly fall back to start, flex-end and center
+  overflow the start edge, and a scroll container packs overflowing
+  content toward its start so it stays reachable; row wrap-reverse
+  mirrors lines against the container's definite height.
+* scrollWidth and scrollHeight include the scroll container's end
+  padding and, in rtl, overflow to the left. offsetTop and offsetLeft
+  round negative values to nearest and flush pending layout before
+  locating the offset parent.
+* The static position of an absolutely positioned flex child honours
+  start, end, left and right on justify-content and align-self as
+  writing-mode-relative keywords, self-start/self-end use the child's
+  own direction, and last baseline aligns to the cross end.
+* align-items, align-self, align-content, justify-content, justify-items
+  and justify-self parse first baseline, last baseline and the safe and
+  unsafe prefixes.
+* WPT css/css-flexbox: 1465 -> 1997 of 3670 subtests on a 2026-09
+  checkout of the horizontal-writing-mode suites.
 * Fixed a use-after-free of the session URL: timer, event-dispatch and
   requestAnimationFrame callbacks saved the current URL pointer and restored
   it unconditionally after the callback, so a handler that navigated (a

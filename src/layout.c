@@ -8065,8 +8065,13 @@ flex_item_is_replaced_like(const ns_box *c)
         return TRUE;
     const ns_node *n = c->dom;
     if (!n || n->kind != NS_NODE_ELEMENT || !n->name) return FALSE;
-    return strcmp(n->name, "input") == 0 || strcmp(n->name, "select") == 0 ||
-           strcmp(n->name, "textarea") == 0 || strcmp(n->name, "button") == 0 ||
+    if (strcmp(n->name, "input") == 0) {
+        const char *type = ns_element_get_attr(n, "type");
+        return !type || (g_ascii_strcasecmp(type, "button") != 0 &&
+                         g_ascii_strcasecmp(type, "submit") != 0 &&
+                         g_ascii_strcasecmp(type, "reset") != 0);
+    }
+    return strcmp(n->name, "select") == 0 || strcmp(n->name, "textarea") == 0 ||
            strcmp(n->name, "meter") == 0 || strcmp(n->name, "progress") == 0;
 }
 
