@@ -115,7 +115,7 @@ typedef struct {
 } ns_wasm_func;
 
 typedef struct {
-    JSContext *ctx;
+    JSRuntime *rt;
     JSValue v;
 } ns_wasm_ref;
 
@@ -304,7 +304,7 @@ static ns_wasm_ref *
 ns_wasm_ref_box(JSContext *ctx, JSValueConst v)
 {
     ns_wasm_ref *r = g_new0(ns_wasm_ref, 1);
-    r->ctx = ctx;
+    r->rt = JS_GetRuntime(ctx);
     r->v = JS_DupValue(ctx, v);
     return r;
 }
@@ -313,7 +313,7 @@ static void
 ns_wasm_ref_cleanup(void *p)
 {
     ns_wasm_ref *r = p;
-    JS_FreeValue(r->ctx, r->v);
+    JS_FreeValueRT(r->rt, r->v);
     g_free(r);
 }
 
