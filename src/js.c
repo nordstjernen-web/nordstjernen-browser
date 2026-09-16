@@ -1669,6 +1669,13 @@ ns_style_get_own_property(JSContext *ctx, JSPropertyDescriptor *desc,
     }
     char *css = camel_to_kebab(name);
     JS_FreeCString(ctx, name);
+    if (!(css[0] == '-' && css[1] == '-') &&
+        strcmp(css, "css-text") != 0 && strcmp(css, "length") != 0 &&
+        strcmp(css, "css-float") != 0 &&
+        !ns_css_named_property_supported(css)) {
+        g_free(css);
+        return 0;
+    }
     const char *style = ns_element_get_attr(n, "style");
     char *val = ns_inline_style_get(style, css);
     if (val) ns_inline_value_strip_important(val);
