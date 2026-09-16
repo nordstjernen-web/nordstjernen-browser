@@ -1510,6 +1510,7 @@ typedef enum {
     NS_LIVE_LINKS,
     NS_LIVE_RADIO_NODE_LIST,
     NS_LIVE_ATTRIBUTES,
+    NS_LIVE_LABELS,
 } ns_live_kind;
 
 typedef struct {
@@ -26441,7 +26442,7 @@ ns_wpt_wheel(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || argc < 5) return JS_UNDEFINED;
+    if (!js || !js->early_inject_src || argc < 5) return JS_UNDEFINED;
     const ns_node *target = ns_unwrap_element(argv[0]);
     if (!target) target = js->current_doc;
     if (!target) return JS_UNDEFINED;
@@ -26476,11 +26477,24 @@ ns_js_dispatch_touch_type(ns_js *js, const ns_node *target, const char *type,
 }
 
 static JSValue
+ns_wpt_activate(JSContext *ctx, JSValueConst this_val, int argc,
+                JSValueConst *argv)
+{
+    (void)this_val;
+    (void)argc;
+    (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->early_inject_src)
+        ns_js_note_user_activation(js);
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_wpt_touch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
     (void)this_val;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || argc < 2) return JS_UNDEFINED;
+    if (!js || !js->early_inject_src || argc < 2) return JS_UNDEFINED;
     const ns_node *target = ns_unwrap_element(argv[0]);
     if (!target) target = js->current_doc;
     if (!target) return JS_UNDEFINED;
@@ -32635,8 +32649,9 @@ ns_element_get_label_control(JSContext *ctx, JSValueConst this_val)
     const ns_node *label = ns_unwrap_element(this_val);
     if (!ns_node_is_element_named(label, "label")) return JS_NULL;
     const char *forv = ns_element_get_attr(label, "for");
-    if (forv && *forv && js_from_ctx(ctx) && js_from_ctx(ctx)->current_doc) {
-        const ns_node *target = ns_node_find_by_id(js_from_ctx(ctx)->current_doc, forv);
+    if (forv) {
+        const ns_node *target =
+            ns_node_find_by_id(ns_node_root(label), forv);
         if (ns_js_node_is_labelable(target)) return ns_make_element(ctx, target);
         return JS_NULL;
     }
@@ -32644,31 +32659,36 @@ ns_element_get_label_control(JSContext *ctx, JSValueConst this_val)
     return target ? ns_make_element(ctx, target) : JS_NULL;
 }
 
+static const ns_node *
+ns_label_associated_control(const ns_node *label)
+{
+    const char *forv = ns_element_get_attr(label, "for");
+    if (forv) {
+        const ns_node *target =
+            ns_node_find_by_id(ns_node_root(label), forv);
+        return ns_js_node_is_labelable(target) ? target : NULL;
+    }
+    return ns_js_first_labelable_descendant(label, 0);
+}
+
+static void
+ns_collect_labels_for(JSContext *ctx, const ns_node *scan, const ns_node *n,
+                      JSValue arr, uint32_t *idx, int depth)
+{
+    if (!scan || depth >= 512) return;
+    if (ns_node_is_element_named(scan, "label") &&
+        ns_label_associated_control(scan) == n)
+        JS_SetPropertyUint32(ctx, arr, (*idx)++, ns_make_element(ctx, scan));
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        ns_collect_labels_for(ctx, c, n, arr, idx, depth + 1);
+}
+
 static JSValue
 ns_element_get_labels(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *n = ns_unwrap_element(this_val);
-    JSValue arr = JS_NewArray(ctx);
-    if (!ns_js_node_is_labelable(n)) return arr;
-    const char *id = ns_element_get_attr(n, "id");
-    if (!js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc) return arr;
-    uint32_t idx = 0;
-    GQueue q = G_QUEUE_INIT;
-    g_queue_push_tail(&q, js_from_ctx(ctx)->current_doc);
-    while (!g_queue_is_empty(&q)) {
-        ns_node *cur = g_queue_pop_head(&q);
-        for (ns_node *c = cur->first_child; c; c = c->next_sibling) {
-            if (ns_node_is_element_named(c, "label")) {
-                const char *forv = ns_element_get_attr(c, "for");
-                if ((forv && id && *id && strcmp(forv, id) == 0) ||
-                    (!forv && ns_js_first_labelable_descendant(c, 0) == n))
-                    JS_SetPropertyUint32(ctx, arr, idx++, ns_make_element(ctx, c));
-            }
-            g_queue_push_tail(&q, c);
-        }
-    }
-    g_queue_clear(&q);
-    return arr;
+    if (!ns_js_node_is_labelable(n)) return JS_NULL;
+    return ns_make_live(ctx, this_val, NS_LIVE_LABELS, NULL);
 }
 
 static JSValue
@@ -34763,8 +34783,18 @@ ns_input_sanitize_value(const ns_node *el, const char *value)
         else if (v > hi) v = hi;
         out = g_strdup_printf("%g", v);
     } else if (!strcmp(type, "color")) {
-        out = ns_is_simple_color(value) ? g_ascii_strdown(value, -1)
-                                        : g_strdup("#000000");
+        char *trimmed = g_strstrip(g_strdup(value));
+        if (ns_is_simple_color(trimmed)) {
+            out = g_ascii_strdown(trimmed, -1);
+        } else {
+            guint8 r = 0, g = 0, b = 0, a = 0;
+            out = *trimmed &&
+                  g_ascii_strcasecmp(trimmed, "currentcolor") != 0 &&
+                  ns_css_parse_color(trimmed, &r, &g, &b, &a) && a == 255
+                      ? g_strdup_printf("#%02x%02x%02x", r, g, b)
+                      : g_strdup("#000000");
+        }
+        g_free(trimmed);
     } else if (!strcmp(type, "date") || !strcmp(type, "month") ||
                !strcmp(type, "week") || !strcmp(type, "time") ||
                !strcmp(type, "datetime-local")) {
@@ -35171,6 +35201,9 @@ ns_live_build(JSContext *ctx, ns_live_back *b)
                 JS_SetPropertyUint32(ctx, arr, i++,
                                      ns_attr_to_js(ctx, b->owner, a, FALSE));
         break;
+    case NS_LIVE_LABELS:
+        ns_collect_labels_for(ctx, ns_node_root(root), root, arr, &i, 0);
+        break;
     }
     return arr;
 }
@@ -35569,7 +35602,8 @@ ns_make_live2(JSContext *ctx, JSValueConst owner, ns_live_kind kind,
     b->html_collection = kind != NS_LIVE_CHILDNODES &&
                          kind != NS_LIVE_BY_NAME &&
                          kind != NS_LIVE_ATTRIBUTES &&
-                         kind != NS_LIVE_RADIO_NODE_LIST;
+                         kind != NS_LIVE_RADIO_NODE_LIST &&
+                         kind != NS_LIVE_LABELS;
     b->cache           = JS_UNDEFINED;
     b->has_cache       = FALSE;
     JS_SetOpaque(obj, b);
@@ -35949,6 +35983,9 @@ static JSValue
 ns_element_get_form(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
+    if (!el) return JS_NULL;
+    if (ns_node_is_element_named(el, "label"))
+        el = ns_label_associated_control(el);
     if (!el) return JS_NULL;
     ns_js *_j = js_from_ctx(ctx);
     const ns_node *form = ns_form_owner(el, _j ? _j->current_doc : NULL);
@@ -38646,45 +38683,54 @@ ns_input_setSelectionRange(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
-static double
-ns_input_step_default(const ns_node *el)
-{
-    if (!el) return 1.0;
-    const char *type = ns_element_get_attr(el, "type");
-    if (type && g_ascii_strcasecmp(type, "range") == 0) return 1.0;
-    return 1.0;
-}
-
 static JSValue
 ns_input_step(JSContext *ctx, JSValueConst this_val,
               int argc, JSValueConst *argv, int sign)
 {
-    int32_t n = 1;
-    if (argc >= 1) JS_ToInt32(ctx, &n, argv[0]);
-    JSValue cur_v = JS_GetPropertyStr(ctx, this_val, "value");
-    double cur = 0;
-    if (JS_IsString(cur_v)) {
-        const char *s = JS_ToCString(ctx, cur_v);
-        if (s) { cur = g_ascii_strtod(s, NULL); JS_FreeCString(ctx, s); }
-    }
-    JS_FreeValue(ctx, cur_v);
     const ns_node *el = ns_unwrap_element(this_val);
-    double step = ns_input_step_default(el);
-    if (el) {
-        const char *sa = ns_element_get_attr(el, "step");
-        if (sa && *sa) { double v = g_ascii_strtod(sa, NULL);
-                          if (v > 0) step = v; }
+    if (!el || !ns_node_is_element_named(el, "input"))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    int32_t n = 1;
+    if (argc >= 1 && JS_ToInt32(ctx, &n, argv[0]))
+        return JS_EXCEPTION;
+    char buf[96];
+    int rc = ns_input_step_apply(el, sign, (double)n, buf, sizeof buf);
+    if (rc == NS_STEP_NOT_APPLICABLE)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "stepUp/stepDown does not apply to this input type");
+    if (rc == NS_STEP_NO_STEP)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "the input has no allowed value step");
+    if (rc == NS_STEP_OK) {
+        JSValue s = JS_NewString(ctx, buf);
+        ns_element_set_value_prop(ctx, this_val, s);
+        JS_FreeValue(ctx, s);
     }
-    double next = cur + sign * step * (double)n;
-    char buf[64];
-    g_ascii_dtostr(buf, sizeof buf, next);
-    JSValue s = JS_NewString(ctx, buf);
-    ns_element_set_value_prop(ctx, this_val, s);
-    JS_FreeValue(ctx, s);
-    if (el) {
-        ns_js_dispatch_event(js_from_ctx(ctx), el, "input",  NULL);
-        ns_js_dispatch_event(js_from_ctx(ctx), el, "change", NULL);
-    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_show_picker(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)argc;
+    (void)argv;
+    const ns_node *n = ns_unwrap_element(this_val);
+    if (!n || (!ns_node_is_element_named(n, "input") &&
+               !ns_node_is_element_named(n, "select")))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    gboolean readonly_applies =
+        ns_node_is_element_named(n, "input") &&
+        ns_element_get_attr(n, "readonly") != NULL &&
+        ns_input_type_supports_readonly(ns_element_get_attr(n, "type"));
+    if (ns_element_effectively_disabled(n) || readonly_applies)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "showPicker() cannot be used on immutable controls");
+    ns_js *js = js_from_ctx(ctx);
+    if (!ns_js_has_transient_activation(js))
+        return ns_throw_dom_exception(ctx, "NotAllowedError", 0,
+            "showPicker() requires a user gesture");
+    ns_js_consume_user_activation(js);
     return JS_UNDEFINED;
 }
 
@@ -40883,6 +40929,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("setRangeText",        1, ns_input_setRangeText),
     JS_CFUNC_DEF("stepUp",              0, ns_input_stepUp),
     JS_CFUNC_DEF("stepDown",            0, ns_input_stepDown),
+    JS_CFUNC_DEF("showPicker",          0, ns_element_show_picker),
     JS_CFUNC_DEF("play",                0, ns_media_play),
     JS_CFUNC_DEF("pause",               0, ns_media_pause),
     JS_CFUNC_DEF("load",                0, ns_media_load),
@@ -45927,6 +45974,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "cancelAnimationFrame",  ns_window_cancelAnimationFrame,   1);
     ns_bind_fn(ctx, global, "__nsWptWheel",          ns_wpt_wheel,                     5);
     ns_bind_fn(ctx, global, "__nsWptTouch",          ns_wpt_touch,                     4);
+    ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);
     ns_bind_fn(ctx, global, "__ndUrlParts",          ns_window_url_parts_internal,     1);

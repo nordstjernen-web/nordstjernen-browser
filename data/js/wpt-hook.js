@@ -279,21 +279,31 @@
         else Promise.resolve().then(resolve);
     }
 
+    function noteActivation() {
+        try {
+            if (typeof global.__nsWptActivate === 'function')
+                global.__nsWptActivate();
+        } catch (e) {}
+    }
+
     var bridge = {
         click: function (element) {
             return new Promise(function (resolve) {
+                noteActivation();
                 try { realClick(element); } catch (e) {}
                 settle(resolve);
             });
         },
         send_keys: function (element, keys) {
             return new Promise(function (resolve) {
+                noteActivation();
                 try { sendKeysTo(element, keys); } catch (e) {}
                 settle(resolve);
             });
         },
         action_sequence: function (actions) {
             return new Promise(function (resolve) {
+                noteActivation();
                 try { runActions(actions); } catch (e) {}
                 settle(resolve);
             });
