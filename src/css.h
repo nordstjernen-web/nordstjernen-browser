@@ -1088,6 +1088,7 @@ const char *ns_style_keyword(const ns_style *s, ns_css_prop p);
 const char *ns_style_overflow_keyword(const ns_style *s, ns_css_prop axis);
 const char *ns_css_alignment_base(const char *keyword);
 char *ns_css_font_family_canonical(const char *text);
+char *ns_css_font_shorthand_canonical(const char *text);
 
 int ns_css_used_column_count(const ns_style *s, double avail_w,
                              double *out_gap);

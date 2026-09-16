@@ -3007,42 +3007,6 @@ font_size_keyword_px(const char *t)
     return -1;
 }
 
-static gboolean
-parse_font_size_token(const char *text, double *out_v, ns_css_unit *out_unit,
-                      double *out_lh, ns_css_unit *out_lh_unit,
-                      gboolean *out_has_lh)
-{
-    if (out_has_lh) *out_has_lh = FALSE;
-    if (!text || !*text) return FALSE;
-    char *s = g_strdup(text);
-    char *slash = strchr(s, '/');
-    if (slash) *slash = '\0';
-    double kw = font_size_keyword_px(g_strstrip(s));
-    gboolean ok;
-    if (kw > 0) {
-        *out_v = kw;
-        *out_unit = NS_CSS_UNIT_PX;
-        ok = TRUE;
-    } else if (g_ascii_strcasecmp(s, "larger") == 0 ||
-               g_ascii_strcasecmp(s, "smaller") == 0) {
-        *out_v = g_ascii_strcasecmp(s, "larger") == 0 ? 1.2 : 0.833333333333;
-        *out_unit = NS_CSS_UNIT_EM;
-        ok = TRUE;
-    } else {
-        ok = parse_length(s, out_v, out_unit) &&
-             *out_unit != NS_CSS_UNIT_NUMBER && *out_v >= 0;
-    }
-    if (ok && slash && slash[1] && out_lh && out_lh_unit &&
-        parse_length(slash + 1, out_lh, out_lh_unit)) {
-        if (*out_lh < 0)
-            ok = FALSE;
-        else if (out_has_lh)
-            *out_has_lh = TRUE;
-    }
-    g_free(s);
-    return ok;
-}
-
 static ns_css_value *parse_calc(const char *text);
 static ns_css_value *parse_calc_inner(const char *text);
 static char *angle_expr_rewrite(const char *s, gboolean to_radians);
@@ -4609,6 +4573,242 @@ font_family_is_generic(const char *tok, gsize len)
     return FALSE;
 }
 
+static gboolean is_font_stretch_keyword(const char *s);
+static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
+
+static int
+font_tokens_split(const char *text, char **out, int max)
+{
+    int n = 0;
+    const char *p = text, *end = text + strlen(text);
+    while (p < end && n < max) {
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end) break;
+        const char *start = p;
+        int depth = 0;
+        char quote = 0;
+        while (p < end) {
+            char c = *p;
+            if (quote) { if (c == quote) quote = 0; p++; continue; }
+            if (c == '"' || c == '\'') { quote = c; p++; continue; }
+            if (c == '(') depth++;
+            else if (c == ')') { if (depth) depth--; }
+            else if (is_ws(c) && depth == 0) break;
+            p++;
+        }
+        out[n++] = g_strndup(start, (gsize)(p - start));
+    }
+    return n;
+}
+
+static gboolean
+font_size_token_valid(const char *tok)
+{
+    if (font_size_keyword_px(tok) > 0) return TRUE;
+    if (g_ascii_strcasecmp(tok, "larger") == 0 ||
+        g_ascii_strcasecmp(tok, "smaller") == 0)
+        return TRUE;
+    if (g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
+        g_ascii_strncasecmp(tok, "min(", 4) == 0 ||
+        g_ascii_strncasecmp(tok, "max(", 4) == 0 ||
+        g_ascii_strncasecmp(tok, "clamp(", 6) == 0) {
+        ns_css_value *cv = parse_calc(tok);
+        if (!cv) return FALSE;
+        ns_css_value_free(cv);
+        return TRUE;
+    }
+    double v; ns_css_unit u;
+    return parse_length(tok, &v, &u) && u != NS_CSS_UNIT_NUMBER && v >= 0;
+}
+
+static gboolean
+font_line_height_token_valid(const char *tok)
+{
+    if (g_ascii_strcasecmp(tok, "normal") == 0) return TRUE;
+    if (g_ascii_strncasecmp(tok, "calc(", 5) == 0 ||
+        g_ascii_strncasecmp(tok, "min(", 4) == 0 ||
+        g_ascii_strncasecmp(tok, "max(", 4) == 0 ||
+        g_ascii_strncasecmp(tok, "clamp(", 6) == 0) {
+        ns_css_value *cv = parse_calc(tok);
+        if (!cv) return FALSE;
+        ns_css_value_free(cv);
+        return TRUE;
+    }
+    double v; ns_css_unit u;
+    return parse_length(tok, &v, &u) && v >= 0;
+}
+
+static char *
+font_shorthand_slash(char *tok)
+{
+    int depth = 0;
+    for (char *q = tok; *q; q++) {
+        if (*q == '(') depth++;
+        else if (*q == ')') { if (depth) depth--; }
+        else if (*q == '/' && depth == 0) return q;
+    }
+    return NULL;
+}
+
+static gboolean
+font_shorthand_is_size_token(const char *tok)
+{
+    char *copy = g_strdup(tok);
+    char *slash = font_shorthand_slash(copy);
+    if (slash) *slash = '\0';
+    gboolean ok = *copy && font_size_token_valid(copy) &&
+                  !(g_ascii_isdigit((guchar)copy[0]) &&
+                    strspn(copy, "0123456789.") == strlen(copy));
+    g_free(copy);
+    return ok;
+}
+
+static ns_css_value *
+font_shorthand_size_value(const char *size_only)
+{
+    double kw = font_size_keyword_px(size_only);
+    ns_css_value *v = NULL;
+    if (kw > 0 || g_ascii_strcasecmp(size_only, "larger") == 0 ||
+        g_ascii_strcasecmp(size_only, "smaller") == 0) {
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_LENGTH;
+        if (kw > 0) {
+            v->u.length.v = kw;
+            v->u.length.unit = NS_CSS_UNIT_PX;
+        } else {
+            v->u.length.v = g_ascii_strcasecmp(size_only, "larger") == 0
+                ? 1.2 : 0.833333333333;
+            v->u.length.unit = NS_CSS_UNIT_EM;
+        }
+        return v;
+    }
+    return parse_value_for(NS_CSS_FONT_SIZE, size_only);
+}
+
+char *
+ns_css_font_shorthand_canonical(const char *text)
+{
+    if (!text) return NULL;
+    char *tokens[24] = {0};
+    int n = font_tokens_split(text, tokens, 24);
+    char *result = NULL;
+    const char *style = NULL, *variant = NULL, *weight = NULL, *stretch = NULL;
+    int prefix = 0;
+    int i = 0;
+    for (; i < n && prefix < 4; i++) {
+        const char *t = tokens[i];
+        if (g_ascii_strcasecmp(t, "normal") == 0) { prefix++; continue; }
+        if (g_ascii_strcasecmp(t, "italic") == 0 ||
+            g_ascii_strcasecmp(t, "oblique") == 0) {
+            if (style) goto done;
+            style = t; prefix++; continue;
+        }
+        if (g_ascii_strcasecmp(t, "small-caps") == 0) {
+            if (variant) goto done;
+            variant = t; prefix++; continue;
+        }
+        if (g_ascii_strcasecmp(t, "bold") == 0 ||
+            g_ascii_strcasecmp(t, "bolder") == 0 ||
+            g_ascii_strcasecmp(t, "lighter") == 0) {
+            if (weight) goto done;
+            weight = t; prefix++; continue;
+        }
+        if (g_ascii_isdigit((guchar)t[0])) {
+            char *endp = NULL;
+            double w = g_ascii_strtod(t, &endp);
+            if (endp && *endp == '\0' && w >= 1 && w <= 1000 &&
+                !(i + 1 < n && FALSE)) {
+                if (weight) goto done;
+                weight = t; prefix++; continue;
+            }
+        }
+        if (is_font_stretch_keyword(t)) {
+            if (stretch) goto done;
+            stretch = t; prefix++; continue;
+        }
+        break;
+    }
+    if (i >= n) goto done;
+    char *size_tok = tokens[i];
+    char *lh_tok = NULL;
+    char *slash = NULL;
+    {
+        int depth = 0;
+        for (char *q = size_tok; *q; q++) {
+            if (*q == '(') depth++;
+            else if (*q == ')') { if (depth) depth--; }
+            else if (*q == '/' && depth == 0) { slash = q; break; }
+        }
+    }
+    char *size_only = slash ? g_strndup(size_tok, (gsize)(slash - size_tok))
+                            : g_strdup(size_tok);
+    int fam_start = i + 1;
+    if (slash) {
+        if (slash[1]) lh_tok = g_strdup(slash + 1);
+        else if (fam_start < n) lh_tok = g_strdup(tokens[fam_start++]);
+        else { g_free(size_only); goto done; }
+    } else if (fam_start < n && tokens[fam_start][0] == '/') {
+        if (tokens[fam_start][1]) lh_tok = g_strdup(tokens[fam_start] + 1);
+        else if (fam_start + 1 < n) { lh_tok = g_strdup(tokens[fam_start + 1]); fam_start++; }
+        fam_start++;
+    }
+    if (!*size_only || !font_size_token_valid(size_only) ||
+        (lh_tok && !font_line_height_token_valid(lh_tok)) || fam_start >= n) {
+        g_free(size_only);
+        g_free(lh_tok);
+        goto done;
+    }
+    GString *fam = g_string_new(NULL);
+    for (int j = fam_start; j < n; j++) {
+        if (j > fam_start) g_string_append_c(fam, ' ');
+        g_string_append(fam, tokens[j]);
+    }
+    char *family = ns_css_font_family_canonical(fam->str);
+    g_string_free(fam, TRUE);
+    if (!family) {
+        g_free(size_only);
+        g_free(lh_tok);
+        goto done;
+    }
+    GString *out = g_string_new(NULL);
+    if (style) { g_string_append(out, g_ascii_strcasecmp(style, "italic") == 0 ? "italic" : "oblique"); }
+    if (variant) { if (out->len) g_string_append_c(out, ' '); g_string_append(out, "small-caps"); }
+    if (weight) {
+        if (out->len) g_string_append_c(out, ' ');
+        char *lw = g_ascii_strdown(weight, -1);
+        g_string_append(out, lw);
+        g_free(lw);
+    }
+    if (stretch) {
+        if (out->len) g_string_append_c(out, ' ');
+        char *ls = g_ascii_strdown(stretch, -1);
+        g_string_append(out, ls);
+        g_free(ls);
+    }
+    if (out->len) g_string_append_c(out, ' ');
+    {
+        char *ls = font_size_keyword_px(size_only) > 0 ||
+                   g_ascii_strcasecmp(size_only, "larger") == 0 ||
+                   g_ascii_strcasecmp(size_only, "smaller") == 0
+            ? g_ascii_strdown(size_only, -1) : g_strdup(size_only);
+        g_string_append(out, ls);
+        g_free(ls);
+    }
+    if (lh_tok && g_ascii_strcasecmp(lh_tok, "normal") != 0) {
+        g_string_append(out, " / ");
+        g_string_append(out, lh_tok);
+    }
+    g_string_append_c(out, ' ');
+    g_string_append(out, family);
+    g_free(family);
+    g_free(size_only);
+    g_free(lh_tok);
+    result = g_string_free(out, FALSE);
+done:
+    for (int k = 0; k < n; k++) g_free(tokens[k]);
+    return result;
+}
+
 char *
 ns_css_font_family_canonical(const char *text)
 {
@@ -4671,6 +4871,18 @@ ns_css_font_family_canonical(const char *text)
         } else {
             const char *q = item_start, *qend = item_start + ilen;
             gboolean first = TRUE;
+            {
+                static const char *const reserved[] = {
+                    "inherit", "initial", "unset", "revert", "revert-layer",
+                    "default",
+                };
+                for (gsize k = 0; k < G_N_ELEMENTS(reserved); k++)
+                    if (strlen(reserved[k]) == ilen &&
+                        g_ascii_strncasecmp(item_start, reserved[k], ilen) == 0) {
+                        g_string_free(out, TRUE);
+                        return NULL;
+                    }
+            }
             while (q < qend) {
                 while (q < qend && is_ws(*q)) q++;
                 const char *tok = q;
@@ -6861,8 +7073,6 @@ ns_css_specified_canonical(const char *prop, const char *value)
     return ns_css_math_canonical(value);
 }
 
-static ns_css_value *parse_value_for(ns_css_prop prop, const char *text);
-static gboolean is_font_stretch_keyword(const char *s);
 static gboolean is_font_ligatures_value(const char *s);
 static gboolean is_font_feature_settings_value(const char *s);
 static gboolean is_font_variation_settings_value(const char *s);
@@ -11111,19 +11321,77 @@ parse_declaration_block(const char **pp, const char *end,
                 if (p < end && *p == ';') p++;
                 continue;
             }
-            char *tokens[16] = {0};
-            int n = split_ws_limit(vtext, tokens, (int)G_N_ELEMENTS(tokens));
+            guint font_decls_before = decls_out->len;
+            {
+                char *lower = g_ascii_strdown(g_strstrip(vtext), -1);
+                gboolean system_font =
+                    strcmp(lower, "caption") == 0 || strcmp(lower, "icon") == 0 ||
+                    strcmp(lower, "menu") == 0 || strcmp(lower, "message-box") == 0 ||
+                    strcmp(lower, "small-caption") == 0 ||
+                    strcmp(lower, "status-bar") == 0;
+                g_free(lower);
+                if (system_font) {
+                    static const struct { ns_css_prop prop; const char *value; }
+                    sys_props[] = {
+                        { NS_CSS_FONT_STYLE, "normal" },
+                        { NS_CSS_FONT_VARIANT, "normal" },
+                        { NS_CSS_FONT_WEIGHT, "normal" },
+                        { NS_CSS_FONT_STRETCH, "normal" },
+                        { NS_CSS_LINE_HEIGHT, "normal" },
+                        { NS_CSS_FONT_FAMILY, "system-ui" },
+                    };
+                    for (gsize j = 0; j < G_N_ELEMENTS(sys_props); j++) {
+                        ns_css_value *sv = g_new0(ns_css_value, 1);
+                        sv->kind = NS_CSS_V_KEYWORD;
+                        sv->u.keyword = g_strdup(sys_props[j].value);
+                        ns_css_decl sd = { .prop = sys_props[j].prop, .value = sv,
+                                           .important = important };
+                        g_array_append_val(decls_out, sd);
+                    }
+                    ns_css_value *sz = g_new0(ns_css_value, 1);
+                    sz->kind = NS_CSS_V_LENGTH;
+                    sz->u.length.v = 13.3333;
+                    sz->u.length.unit = NS_CSS_UNIT_PX;
+                    ns_css_decl szd = { .prop = NS_CSS_FONT_SIZE, .value = sz,
+                                        .important = important };
+                    g_array_append_val(decls_out, szd);
+                    g_free(pname);
+                    g_free(vtext);
+                    if (p < end && *p == ';') p++;
+                    continue;
+                }
+            }
+            {
+                char *canon = ns_css_font_shorthand_canonical(vtext);
+                if (!canon) {
+                    g_free(pname);
+                    g_free(vtext);
+                    if (p < end && *p == ';') p++;
+                    continue;
+                }
+                g_free(canon);
+            }
+            char *tokens[24] = {0};
+            int n = font_tokens_split(vtext, tokens, (int)G_N_ELEMENTS(tokens));
             char *family_buf = NULL;
             int size_idx = -1;
             for (int i = 0; i < n; i++) {
-                double num, lh;
-                ns_css_unit u, lu;
-                gboolean has_lh = FALSE;
-                if (parse_font_size_token(tokens[i], &num, &u,
-                                          &lh, &lu, &has_lh)) {
+                if (font_shorthand_is_size_token(tokens[i])) {
                     size_idx = i;
                     break;
                 }
+            }
+            static const ns_css_prop font_reset_props[] = {
+                NS_CSS_FONT_STYLE, NS_CSS_FONT_VARIANT, NS_CSS_FONT_WEIGHT,
+                NS_CSS_FONT_STRETCH, NS_CSS_LINE_HEIGHT,
+            };
+            for (gsize j = 0; j < G_N_ELEMENTS(font_reset_props); j++) {
+                ns_css_value *rv = g_new0(ns_css_value, 1);
+                rv->kind = NS_CSS_V_KEYWORD;
+                rv->u.keyword = g_strdup("normal");
+                ns_css_decl rd = { .prop = font_reset_props[j], .value = rv,
+                                   .important = important };
+                g_array_append_val(decls_out, rd);
             }
             int prefix_end = size_idx >= 0 ? size_idx : 0;
             for (int i = 0; i < prefix_end; i++) {
@@ -11141,7 +11409,7 @@ parse_declaration_block(const char **pp, const char *end,
                     double num; ns_css_unit u;
                     if (parse_length(t, &num, &u) &&
                         u == NS_CSS_UNIT_NUMBER &&
-                        num >= 100 && num <= 900) {
+                        num >= 1 && num <= 1000) {
                         prop = NS_CSS_FONT_WEIGHT; kw = t;
                     }
                 } else if (g_ascii_strcasecmp(t, "small-caps") == 0) {
@@ -11161,55 +11429,47 @@ parse_declaration_block(const char **pp, const char *end,
             }
             if (size_idx >= 0) {
                 char *size_tok = tokens[size_idx];
-                double num = 0, lh = 0;
-                ns_css_unit u = NS_CSS_UNIT_PX, lu = NS_CSS_UNIT_NUMBER;
-                gboolean has_lh = FALSE;
-                parse_font_size_token(size_tok, &num, &u, &lh, &lu, &has_lh);
+                char *slash = font_shorthand_slash(size_tok);
+                char *size_only = slash
+                    ? g_strndup(size_tok, (gsize)(slash - size_tok))
+                    : g_strdup(size_tok);
+                char *lh_text = NULL;
                 int family_start = size_idx + 1;
-                char *slash = strchr(size_tok, '/');
-                if (!has_lh && slash && !slash[1] && size_idx + 1 < n) {
-                    if (parse_length(tokens[size_idx + 1], &lh, &lu) &&
-                        lh >= 0) {
-                        has_lh = TRUE;
-                        family_start = size_idx + 2;
-                    }
-                } else if (!has_lh && size_idx + 1 < n &&
-                           tokens[size_idx + 1][0] == '/') {
-                    const char *lh_text = tokens[size_idx + 1] + 1;
-                    if (*lh_text && parse_length(lh_text, &lh, &lu) &&
-                        lh >= 0) {
-                        has_lh = TRUE;
-                        family_start = size_idx + 2;
-                    } else if (!*lh_text && size_idx + 2 < n &&
-                               parse_length(tokens[size_idx + 2], &lh, &lu) &&
-                               lh >= 0) {
-                        has_lh = TRUE;
-                        family_start = size_idx + 3;
-                    }
-                } else if (has_lh) {
-                    family_start = size_idx + 1;
+                if (slash) {
+                    if (slash[1]) lh_text = g_strdup(slash + 1);
+                    else if (family_start < n) lh_text = g_strdup(tokens[family_start++]);
+                } else if (family_start < n && tokens[family_start][0] == '/') {
+                    if (tokens[family_start][1])
+                        lh_text = g_strdup(tokens[family_start] + 1);
+                    else if (family_start + 1 < n)
+                        lh_text = g_strdup(tokens[++family_start]);
+                    family_start++;
                 }
-                ns_css_value *v = g_new0(ns_css_value, 1);
-                v->kind = NS_CSS_V_LENGTH;
-                v->u.length.v = num;
-                v->u.length.unit = u;
-                ns_css_decl d = {
-                    .prop = NS_CSS_FONT_SIZE, .value = v,
-                    .important = important
-                };
-                g_array_append_val(decls_out, d);
-                if (has_lh) {
-                    ns_css_value *lv = g_new0(ns_css_value, 1);
-                    lv->kind = NS_CSS_V_LENGTH;
-                    lv->u.length.v = lh;
-                    lv->u.length.unit = lu;
-                    ns_css_decl lhd = {
-                        .prop = NS_CSS_LINE_HEIGHT,
-                        .value = lv,
+                ns_css_value *v = font_shorthand_size_value(size_only);
+                g_free(size_only);
+                if (v) {
+                    ns_css_decl d = {
+                        .prop = NS_CSS_FONT_SIZE, .value = v,
                         .important = important
                     };
-                    g_array_append_val(decls_out, lhd);
+                    g_array_append_val(decls_out, d);
+                } else {
+                    size_idx = -1;
                 }
+                if (lh_text && g_ascii_strcasecmp(lh_text, "normal") != 0) {
+                    ns_css_value *lv = parse_value_for(NS_CSS_LINE_HEIGHT, lh_text);
+                    if (lv) {
+                        ns_css_decl lhd = {
+                            .prop = NS_CSS_LINE_HEIGHT,
+                            .value = lv,
+                            .important = important
+                        };
+                        g_array_append_val(decls_out, lhd);
+                    } else {
+                        size_idx = -1;
+                    }
+                }
+                g_free(lh_text);
                 if (family_start < n) {
                     GString *fam = g_string_new(NULL);
                     for (int j = family_start; j < n; j++) {
@@ -11240,14 +11500,24 @@ parse_declaration_block(const char **pp, const char *end,
                     };
                     g_array_append_val(decls_out, rd);
                 }
-                ns_css_value *fv = g_new0(ns_css_value, 1);
-                fv->kind = NS_CSS_V_KEYWORD;
-                fv->u.keyword = family_buf;
-                ns_css_decl fd = {
-                    .prop = NS_CSS_FONT_FAMILY, .value = fv,
-                    .important = important
-                };
-                g_array_append_val(decls_out, fd);
+                char *canon_family = ns_css_font_family_canonical(family_buf);
+                g_free(family_buf);
+                family_buf = canon_family;
+                if (family_buf) {
+                    ns_css_value *fv = g_new0(ns_css_value, 1);
+                    fv->kind = NS_CSS_V_KEYWORD;
+                    fv->u.keyword = family_buf;
+                    ns_css_decl fd = {
+                        .prop = NS_CSS_FONT_FAMILY, .value = fv,
+                        .important = important
+                    };
+                    g_array_append_val(decls_out, fd);
+                }
+            }
+            if (!family_buf || size_idx < 0) {
+                for (guint k = font_decls_before; k < decls_out->len; k++)
+                    ns_css_value_free(g_array_index(decls_out, ns_css_decl, k).value);
+                g_array_set_size(decls_out, font_decls_before);
             }
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
@@ -16417,6 +16687,12 @@ css_inline_value_canonical(const char *prop, char *value)
         value[len - 1] = '"';
     } else if (strcmp(prop, "font-family") == 0) {
         char *canon = ns_css_font_family_canonical(value);
+        if (canon) {
+            g_free(value);
+            value = canon;
+        }
+    } else if (strcmp(prop, "font") == 0) {
+        char *canon = ns_css_font_shorthand_canonical(value);
         if (canon) {
             g_free(value);
             value = canon;
