@@ -4655,6 +4655,179 @@ synthesize_about_response(const char *url, const char *top_url,
     return TRUE;
 }
 
+static void
+view_source_append_span(GString *out, const char *cls,
+                        const char *s, gsize len)
+{
+    if (!len) return;
+    g_autofree char *chunk = g_strndup(s, len);
+    g_string_append_printf(out, "<span class=\"%s\">", cls);
+    ns_html_escape_append(out, chunk, FALSE);
+    g_string_append(out, "</span>");
+}
+
+static void
+view_source_append_plain(GString *out, const char *s, gsize len)
+{
+    if (!len) return;
+    g_autofree char *chunk = g_strndup(s, len);
+    ns_html_escape_append(out, chunk, FALSE);
+}
+
+static const char *
+view_source_highlight_tag(GString *out, const char *p)
+{
+    const char *q = p + 1;
+    if (*q == '/') q++;
+    while (g_ascii_isalnum(*q) || *q == '-' || *q == ':') q++;
+    view_source_append_span(out, "vs-tag", p, (gsize)(q - p));
+    while (*q && *q != '>') {
+        if (g_ascii_isspace(*q) || *q == '/' || *q == '=') {
+            const char *ws = q;
+            while (g_ascii_isspace(*q) || *q == '/' || *q == '=') q++;
+            view_source_append_plain(out, ws, (gsize)(q - ws));
+        } else if (*q == '"' || *q == '\'') {
+            char quote = *q;
+            const char *v = q++;
+            while (*q && *q != quote) q++;
+            if (*q == quote) q++;
+            view_source_append_span(out, "vs-val", v, (gsize)(q - v));
+        } else {
+            const char *n = q;
+            while (*q && *q != '>' && *q != '=' && *q != '/' &&
+                   !g_ascii_isspace(*q))
+                q++;
+            gboolean is_value = FALSE;
+            for (const char *b = n - 1; b > p; b--) {
+                if (g_ascii_isspace(*b)) continue;
+                is_value = (*b == '=');
+                break;
+            }
+            view_source_append_span(out, is_value ? "vs-val" : "vs-attr",
+                                    n, (gsize)(q - n));
+        }
+    }
+    if (*q == '>') {
+        view_source_append_span(out, "vs-tag", q, 1);
+        q++;
+    }
+    return q;
+}
+
+static char *
+view_source_document(const char *inner_url, const char *text)
+{
+    GString *out = g_string_new(NULL);
+    g_string_append(out, "<!doctype html><html><head>"
+                         "<meta charset=\"utf-8\"><title>");
+    g_autofree char *esc_url = ns_html_escape_text(inner_url);
+    g_string_append_printf(out, "Source of: %s</title><style>"
+        "body{background:#fff;color:#000;margin:0}"
+        "pre{margin:0;padding:8px;font-family:monospace;font-size:13px;"
+        "line-height:1.3;tab-size:4}"
+        ".vs-tag{color:#800080;font-weight:bold}"
+        ".vs-attr{color:#000000;font-weight:bold}"
+        ".vs-val{color:#0000c0}"
+        ".vs-comment{color:#008000;font-style:italic}"
+        ".vs-doctype{color:#708090}"
+        "</style></head><body><pre>", esc_url);
+    const char *p = text;
+    while (*p) {
+        if (p[0] == '<' && p[1] == '!' && p[2] == '-' && p[3] == '-') {
+            const char *end = strstr(p + 4, "-->");
+            end = end ? end + 3 : p + strlen(p);
+            view_source_append_span(out, "vs-comment", p, (gsize)(end - p));
+            p = end;
+        } else if (p[0] == '<' && (p[1] == '!' || p[1] == '?')) {
+            const char *end = strchr(p, '>');
+            end = end ? end + 1 : p + strlen(p);
+            view_source_append_span(out, "vs-doctype", p, (gsize)(end - p));
+            p = end;
+        } else if (p[0] == '<' &&
+                   (g_ascii_isalpha(p[1]) ||
+                    (p[1] == '/' && g_ascii_isalpha(p[2])))) {
+            p = view_source_highlight_tag(out, p);
+        } else {
+            const char *next = strchr(p + 1, '<');
+            next = next ? next : p + strlen(p);
+            view_source_append_plain(out, p, (gsize)(next - p));
+            p = next;
+        }
+    }
+    g_string_append(out, "</pre></body></html>");
+    return g_string_free(out, FALSE);
+}
+
+static void
+view_source_emit_error(ns_response *resp, const char *inner_url,
+                       const char *message)
+{
+    resp->status = 200;
+    resp->content_type = g_strdup("text/html; charset=utf-8");
+    GString *out = g_string_new(
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<title>Source unavailable</title></head><body><p>");
+    g_autofree char *esc_url = ns_html_escape_text(inner_url);
+    g_autofree char *esc_msg = ns_html_escape_text(message);
+    g_string_append_printf(out, "Could not load the source of %s: %s",
+                           esc_url, esc_msg);
+    g_string_append(out, "</p></body></html>");
+    gsize len = out->len;
+    g_byte_array_append(resp->body, (const guint8 *)out->str, (guint)len);
+    g_string_free(out, TRUE);
+}
+
+static gboolean
+synthesize_view_source_response(const char *url, const char *top_url,
+                                GCancellable *cancellable, ns_response *resp)
+{
+    static const char prefix[] = "view-source:";
+    if (!g_str_has_prefix(url, prefix)) return FALSE;
+    const char *inner = url + sizeof prefix - 1;
+    resp->final_url = g_strdup(url);
+    gboolean from_chrome = !top_url || !*top_url ||
+        g_str_has_prefix(top_url, prefix) ||
+        g_str_has_prefix(top_url, "about:");
+    gboolean inner_allowed =
+        g_str_has_prefix(inner, "http:") ||
+        g_str_has_prefix(inner, "https:") ||
+        g_str_has_prefix(inner, "file:") ||
+        g_str_has_prefix(inner, "about:") ||
+        g_str_has_prefix(inner, "data:");
+    if (!from_chrome || !inner_allowed) {
+        resp->status = 403;
+        resp->content_type = g_strdup("text/plain; charset=utf-8");
+        const char *body = "view-source: is not available here";
+        g_byte_array_append(resp->body, (const guint8 *)body,
+                            (guint)strlen(body));
+        return TRUE;
+    }
+    GError *err = NULL;
+    ns_response *in = ns_net_request_blocking(inner, NULL, "GET", NULL, 0,
+                                              NULL, NULL, cancellable, &err);
+    if (!in || in->error || (in->status != 0 && in->status >= 400 &&
+                             (!in->body || in->body->len == 0))) {
+        const char *msg = in && in->error ? in->error
+                        : err ? err->message : "request failed";
+        if (in && !in->error && in->status >= 400)
+            msg = "the server returned an error";
+        view_source_emit_error(resp, inner, msg);
+        if (in) ns_response_free(in);
+        g_clear_error(&err);
+        return TRUE;
+    }
+    g_clear_error(&err);
+    g_autofree char *text = ns_html_decode_body_full(
+        (const char *)in->body->data, in->body->len, in->content_type, NULL);
+    g_autofree char *doc = view_source_document(inner, text ? text : "");
+    resp->status = 200;
+    resp->content_type = g_strdup("text/html; charset=utf-8");
+    g_byte_array_append(resp->body, (const guint8 *)doc,
+                        (guint)strlen(doc));
+    ns_response_free(in);
+    return TRUE;
+}
+
 static gboolean
 is_simple_get(const char *method)
 {
@@ -5057,6 +5230,8 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     }
 
     if (synthesize_about_response(url, top_url, method, body, body_len, resp))
+        return resp;
+    if (synthesize_view_source_response(url, top_url, cancellable, resp))
         return resp;
     if (synthesize_data_response(url, resp))
         return resp;

@@ -3,6 +3,16 @@ Changelog:
 
 1.0.24:
 ======
+* Fixed a use-after-free of the session URL: timer, event-dispatch and
+  requestAnimationFrame callbacks saved the current URL pointer and restored
+  it unconditionally after the callback, so a handler that navigated (a
+  fragment click, location.hash =, history.pushState) left the engine
+  reading and double-freeing a freed URL. The URL is now restored only when
+  it was actually swapped for an iframe realm.
+* Added view-source: — Ctrl+U / "Page Source" in the menu shows the current
+  page's HTML with classic syntax highlighting. Only chrome-initiated
+  navigations can use the scheme; web content is refused.
+* Updated the ns-pango subproject pin to the latest upstream commit.
 * Optimized event dispatch throughput by lazily evaluating composedPath()
   arrays on demand using active dispatch paths.
 * Added node-level listener filtering with NS_NODE_HAS_LISTENERS flag, skipping
