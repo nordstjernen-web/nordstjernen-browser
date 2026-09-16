@@ -226,7 +226,8 @@ normalize_url(const char *input)
         return trimmed;
     if (g_str_has_prefix(trimmed, "about:") ||
         g_str_has_prefix(trimmed, "file:") ||
-        g_str_has_prefix(trimmed, "data:") || strstr(trimmed, "://"))
+        g_str_has_prefix(trimmed, "data:") ||
+        g_str_has_prefix(trimmed, "view-source:") || strstr(trimmed, "://"))
         return trimmed;
     char *local = ns_url_from_local_path(trimmed);
     if (local) {
@@ -1198,6 +1199,21 @@ act_console(GSimpleAction *a, GVariant *p, gpointer ud)
 }
 
 static void
+act_view_source(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    NsProcView *v = current_view(ud);
+    if (!v) return;
+    const char *url = ns_proc_view_url(v);
+    if (!url || !*url || g_str_has_prefix(url, "view-source:"))
+        return;
+    char *src_url = g_strconcat("view-source:", url, NULL);
+    ns_proc_view_load(v, src_url);
+    g_free(src_url);
+}
+
+static void
 act_home(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a;
@@ -1836,6 +1852,8 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl>f", NULL });
     install_action(pw, "console", G_CALLBACK(act_console),
                    (const char *[]){ "<Ctrl><Shift>j", "F12", NULL });
+    install_action(pw, "view-source", G_CALLBACK(act_view_source),
+                   (const char *[]){ "<Ctrl>u", NULL });
     install_action(pw, "home", G_CALLBACK(act_home),
                    (const char *[]){ "<Alt>Home", NULL });
     install_action(pw, "new-tab", G_CALLBACK(act_new_tab),
@@ -2063,6 +2081,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_page));
     g_object_unref(sec_page);
     GMenu *sec_tools = g_menu_new();
+    menu_append_accel(sec_tools, ns_i18n("Page Source"), "win.view-source",
+                      "<Ctrl>u");
     menu_append_accel(sec_tools, ns_i18n("JavaScript Console"), "win.console",
                       "<Ctrl><Shift>j");
     menu_append_accel(sec_tools, ns_i18n("Task Manager"), "win.task-manager",
