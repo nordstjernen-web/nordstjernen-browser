@@ -60,6 +60,21 @@
   </branding>
 
   <releases>
+    <release version="1.0.24" date="2026-09-16">
+      <description>
+        <p>Layout, CSS and forms compliance release.</p>
+        <ul>
+          <li>Flex layout resolves flexible lengths as css-flexbox-1 §9.7 describes, column containers wrap, and negative free space overflows in the right direction; WPT css-flexbox rises from 1465 to 1997 passing subtests.</li>
+          <li>Grid: rtl columns, repeat(auto-fit) track collapsing, grid-placed containing blocks for absolutely positioned boxes, resolved track sizes in getComputedStyle, and em, calc() and fr tracks sized per the specification.</li>
+          <li>CSS parsing: gradients, the font shorthand, font-family lists, the content property and alignment keywords are validated against their grammars and serialize canonically; a parser hang on at-rules inside declaration lists is fixed.</li>
+          <li>Forms follow the HTML constraint-validation specification for ValidityState and pattern, stepUp() and stepDown() follow the stepping algorithm, showPicker() exists, and control.labels is live.</li>
+          <li>Live collections, moveBefore(), replaceChildren() and isConnected follow the DOM specification; document.fonts.ready waits for web fonts.</li>
+          <li>The user decides what runs: an Enable JavaScript switch in Settings, popup blocking gated on user activation, view-source: with Ctrl+U, Ctrl+D bookmarking, Ctrl+Enter address completion and a cache-bypassing hard reload.</li>
+          <li>Fixed use-after-free bugs in the MutationObserver drain, in callbacks that navigate, and in Web Audio and canvas paths that read page-owned ArrayBuffers.</li>
+          <li>A new impressionist about:start splash.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.23" date="2026-08-08">
       <description>
         <p>Printing, layout and packaging release.</p>
