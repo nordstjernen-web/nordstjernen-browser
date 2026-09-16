@@ -4331,6 +4331,8 @@ static const char k_about_settings_html[] =
 "<section class=\"card\"><h2>Content</h2>"
 "<label class=\"toggle\"><input type=\"checkbox\" id=\"images_enabled\">"
 "Load images</label>"
+"<label class=\"toggle\"><input type=\"checkbox\" id=\"javascript_enabled\">"
+"Enable JavaScript</label>"
 "<label class=\"toggle\"><input type=\"checkbox\" id=\"webgl_enabled\">"
 "Enable WebGL</label>"
 "<label class=\"toggle\"><input type=\"checkbox\" id=\"local_storage_enabled\">"
@@ -4371,7 +4373,8 @@ static const char k_about_settings_html[] =
 "$('search_engine').value=c.search_engine||'';buildPick(c.search_engine||'');"
 "$('cookie_policy').value=''+(c.cookie_policy||0);"
 "['do_not_track','global_privacy_control','strip_tracking_params',"
-"'https_first','images_enabled','webgl_enabled','local_storage_enabled',"
+"'https_first','images_enabled','javascript_enabled','webgl_enabled',"
+"'local_storage_enabled',"
 "'cache_enabled'].forEach(function(k){$(k).checked=!!c[k];});});}\n"
 "function bv(id){return $(id).checked?'1':'0';}\n"
 "function save(){var se=$('search_pick').value;"
@@ -4383,6 +4386,7 @@ static const char k_about_settings_html[] =
 "global_privacy_control:bv('global_privacy_control'),"
 "strip_tracking_params:bv('strip_tracking_params'),"
 "https_first:bv('https_first'),images_enabled:bv('images_enabled'),"
+"javascript_enabled:bv('javascript_enabled'),"
 "webgl_enabled:bv('webgl_enabled'),"
 "local_storage_enabled:bv('local_storage_enabled'),"
 "cache_enabled:bv('cache_enabled')})}).then(function(){"
@@ -4436,7 +4440,8 @@ about_settings_json(void)
         "{\"home_url\":\"%s\",\"search_engine\":\"%s\",\"cookie_policy\":%d,"
         "\"do_not_track\":%s,\"global_privacy_control\":%s,"
         "\"strip_tracking_params\":%s,\"https_first\":%s,"
-        "\"images_enabled\":%s,\"webgl_enabled\":%s,"
+        "\"images_enabled\":%s,\"javascript_enabled\":%s,"
+        "\"webgl_enabled\":%s,"
         "\"local_storage_enabled\":%s,\"cache_enabled\":%s}",
         home, eng, c ? (int)c->cookie_policy : 1,
         (c && c->do_not_track) ? "true" : "false",
@@ -4444,6 +4449,7 @@ about_settings_json(void)
         (c && c->strip_tracking_params) ? "true" : "false",
         (c && c->https_first) ? "true" : "false",
         (c && c->images_enabled) ? "true" : "false",
+        (c && c->javascript_enabled) ? "true" : "false",
         (c && c->webgl_enabled) ? "true" : "false",
         (c && c->local_storage_enabled) ? "true" : "false",
         (c && c->cache_enabled) ? "true" : "false");
@@ -4480,6 +4486,8 @@ about_settings_save(const char *form)
         c->https_first = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "images_enabled")))
         c->images_enabled = atoi(v) != 0;
+    if ((v = g_hash_table_lookup(q, "javascript_enabled")))
+        c->javascript_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "webgl_enabled")))
         c->webgl_enabled = atoi(v) != 0;
     if ((v = g_hash_table_lookup(q, "local_storage_enabled")))
@@ -4527,6 +4535,7 @@ synthesize_about_response(const char *url, const char *top_url,
     if (!g_str_has_prefix(url, "about:")) return FALSE;
     const char *what = url + strlen("about:");
     if ((g_str_has_prefix(what, "ai") || g_str_equal(what, "history") ||
+         g_str_equal(what, "config") ||
          g_str_has_prefix(what, "settings")) &&
         !about_request_from_chrome(top_url)) {
         resp->status = 403;
@@ -4621,6 +4630,23 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
+    } else if (g_str_equal(what, "mozilla")) {
+        const char *body =
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            "<title>The Book of Mozilla, 11:9</title><style>"
+            "body{background:maroon;color:#fff;margin:0;height:100vh;"
+            "display:flex;align-items:center;justify-content:center}"
+            "p{font-family:serif;font-style:italic;font-size:1.3em;"
+            "max-width:34em;text-align:center;padding:0 1em}"
+            "</style></head><body><p>"
+            "And the beast begat a bird of fire, and the bird flew out among "
+            "the people and gave the web back to them. Those who came after "
+            "walked by its light, and kindled fires of their own, so that no "
+            "one power should ever again hold the roads alone."
+            "<br><br>from <strong>The Book of Mozilla,</strong> 11:9"
+            "</p></body></html>";
+        g_byte_array_append(resp->body, (const guint8 *)body,
+                            (guint)strlen(body));
     } else if (g_str_equal(what, "book")) {
         const char *body =
             "<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -4652,7 +4678,8 @@ synthesize_about_response(const char *url, const char *top_url,
         char *body = ns_history_html_page();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
-    } else if (g_str_equal(what, "settings")) {
+    } else if (g_str_equal(what, "settings") ||
+               g_str_equal(what, "config")) {
         g_byte_array_append(resp->body, (const guint8 *)k_about_settings_html,
                             (guint)strlen(k_about_settings_html));
     } else if (g_str_has_prefix(what, "settings-data")) {

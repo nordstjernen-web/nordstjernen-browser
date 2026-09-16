@@ -854,10 +854,16 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         if (text && *text)
             proc_window_add_tab(pw, text, FALSE);
         break;
-    case NS_PROC_EVT_LOADING:
-        if (is_current)
-            set_loading_ui(pw, text && *text == '1');
+    case NS_PROC_EVT_LOADING: {
+        gboolean loading = text && *text == '1';
+        if (is_current) {
+            gboolean was_loading = gtk_widget_get_visible(pw->spinner);
+            set_loading_ui(pw, loading);
+            if (was_loading && !loading)
+                pw_set_status(pw, ns_i18n("Done"));
+        }
         break;
+    }
     case NS_PROC_EVT_ZOOM:
         if (is_current)
             update_zoom_indicator(pw, v);

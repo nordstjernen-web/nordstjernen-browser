@@ -18467,7 +18467,7 @@ static const char *kUa =
     "border-bottom-style: inset; border-left-style: inset; "
     "border-top-color: #767676; border-right-color: #767676; "
     "border-bottom-color: #767676; border-left-color: #767676; }\n"
-    "head, script, style, title, meta, link, noscript { display: none; }\n"
+    "head, script, style, title, meta, link { display: none; }\n"
     "[data-nd-shadow-root] { display: block; }\n"
     "input[type=\"hidden\"] { display: none; }\n"
     "video { display: inline; }\n"

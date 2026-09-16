@@ -1203,7 +1203,9 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
         ns_js_set_window_action_cb(b->js, browser_js_window_action, b);
         ns_js_add_csp_header(b->js, csp_header);
         browser_apply_meta_csp(b->js, doc, 0);
-        ns_js_run_scripts_in_doc(b->js, doc, base);
+        const ns_config *run_cfg = ns_config_get();
+        if (!run_cfg || run_cfg->javascript_enabled)
+            ns_js_run_scripts_in_doc(b->js, doc, base);
     }
     g_free(csp_header);
     if (b->videos) {
@@ -1390,8 +1392,14 @@ browser_open_common(const char *url, int viewport_width, double viewport_height,
                                              resp->body->len,
                                              resp->content_type,
                                              &doc_charset);
-    ns_node *doc = ns_html_parse(decoded ? decoded : "",
-                                 decoded ? (gssize)strlen(decoded) : 0);
+    const ns_config *parse_cfg = ns_config_get();
+    gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
+    ns_node *doc = scripting_on
+        ? ns_html_parse(decoded ? decoded : "",
+                        decoded ? (gssize)strlen(decoded) : 0)
+        : ns_html_parse_with_scripting(decoded ? decoded : "",
+                                       decoded ? (gssize)strlen(decoded) : 0,
+                                       FALSE);
     g_free(decoded);
     int sec = resp->security;
     if (sec == NS_SEC_NONE) {

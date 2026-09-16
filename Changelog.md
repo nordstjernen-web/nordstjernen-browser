@@ -48,6 +48,14 @@ Changelog:
   Object.keys listing only indices; moveBefore() is ParentNode-only;
   replaceChildren() queues a single mutation record; Node.isConnected is
   true for any node whose root is a document.
+* JavaScript can be turned off: an "Enable JavaScript" toggle in
+  Settings (and the NS_NO_JAVASCRIPT=1 environment variable) parses
+  pages with scripting disabled, so noscript content renders, and skips
+  script execution entirely.
+* about:mozilla shows the maroon page every browser of this lineage
+  owes its readers, and about:config opens the settings page.
+* The status bar reads "Done" for a moment when a page finishes
+  loading, as it always did.
 * Popup blocking, in the Firefox 1 tradition: window.open only navigates
   when called within five seconds of a real user gesture (click, key
   press, touch), consumes that activation, and logs blocked attempts to

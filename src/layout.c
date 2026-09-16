@@ -672,6 +672,7 @@ node_has_media_metadata(const ns_node *n)
 #define NS_TABLE_MAX_COLS 4096
 
 static gboolean tag_is_non_rendering(const char *name);
+static gboolean node_is_non_rendering(const ns_node *n);
 
 static gboolean
 node_is_frame_fallback(const ns_node *n)
@@ -691,7 +692,7 @@ contains_block_media_depth(const ns_node *n, GHashTable *styles, int depth)
         return FALSE;
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->kind != NS_NODE_ELEMENT || !c->name) continue;
-        if (tag_is_non_rendering(c->name)) continue;
+        if (node_is_non_rendering(c)) continue;
         if (node_has_media_metadata(c) ||
             (is_replaced_block_tag(c->name) &&
              !is_inline_level_replaced(c, styles)) ||
@@ -1634,6 +1635,18 @@ tag_is_non_rendering(const char *name)
         "script", "source", "style", "template", "title", "track", NULL,
     };
     return name_in(name, set);
+}
+
+static gboolean
+node_is_non_rendering(const ns_node *n)
+{
+    if (!n || !tag_is_non_rendering(n->name)) return FALSE;
+    if (n->name && g_ascii_strcasecmp(n->name, "noscript") == 0) {
+        const ns_node *root = ns_node_root(n);
+        if (root && (root->flags & NS_NODE_SCRIPTING_DISABLED))
+            return FALSE;
+    }
+    return TRUE;
 }
 
 static void
@@ -2732,7 +2745,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
         return;
     }
     if (n->kind != NS_NODE_ELEMENT) return;
-    if (tag_is_non_rendering(n->name)) return;
+    if (node_is_non_rendering(n)) return;
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
     if (s && style_is_absolute_or_fixed(s)) {
