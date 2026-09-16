@@ -46,6 +46,56 @@ static char              *g_cache_dir;
 static ns_font_loaded_cb  g_loaded_cb;
 static gpointer           g_loaded_ud;
 
+typedef struct ns_font_idle_waiter {
+    ns_font_idle_cb cb;
+    gpointer        ud;
+} ns_font_idle_waiter;
+
+static GArray *g_idle_waiters;
+
+guint
+ns_font_pending_count(void)
+{
+    return g_pending_by_url ? g_hash_table_size(g_pending_by_url) : 0;
+}
+
+void
+ns_font_add_idle_cb(ns_font_idle_cb cb, gpointer user_data)
+{
+    if (!cb) return;
+    if (!g_idle_waiters)
+        g_idle_waiters = g_array_new(FALSE, FALSE, sizeof(ns_font_idle_waiter));
+    ns_font_idle_waiter w = { cb, user_data };
+    g_array_append_val(g_idle_waiters, w);
+}
+
+void
+ns_font_remove_idle_cb(ns_font_idle_cb cb, gpointer user_data)
+{
+    if (!g_idle_waiters) return;
+    for (guint i = 0; i < g_idle_waiters->len; ) {
+        ns_font_idle_waiter *w = &g_array_index(g_idle_waiters, ns_font_idle_waiter, i);
+        if (w->cb == cb && w->ud == user_data)
+            g_array_remove_index(g_idle_waiters, i);
+        else
+            i++;
+    }
+}
+
+static void
+ns_font_notify_idle(void)
+{
+    if (!g_idle_waiters || g_idle_waiters->len == 0) return;
+    if (ns_font_pending_count() > 0) return;
+    GArray *waiters = g_idle_waiters;
+    g_idle_waiters = NULL;
+    for (guint i = 0; i < waiters->len; i++) {
+        ns_font_idle_waiter *w = &g_array_index(waiters, ns_font_idle_waiter, i);
+        w->cb(w->ud);
+    }
+    g_array_free(waiters, TRUE);
+}
+
 static void
 ns_font_pending_free(gpointer data)
 {
@@ -418,6 +468,7 @@ ns_font_on_fetched(GObject *src, GAsyncResult *res, gpointer user_data)
     g_clear_error(&err);
     g_free(ctx->url);
     g_free(ctx);
+    ns_font_notify_idle();
 }
 
 void

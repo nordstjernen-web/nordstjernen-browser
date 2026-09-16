@@ -71,6 +71,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "ws.h"
 
 #include "js_internal.h"
+#include "font.h"
 
 #undef JS_CFUNC_DEF
 #define JS_CFUNC_DEF(name, length, func1) \
@@ -41727,19 +41728,49 @@ ns_document_get_applets(JSContext *ctx, JSValueConst this_val)
     return JS_NewArray(ctx);
 }
 
+static void
+ns_js_fonts_idle(gpointer user_data)
+{
+    ns_js *js = user_data;
+    if (!js || !js->font_ready_resolvers) return;
+    js->mutated = TRUE;
+    GArray *resolvers = js->font_ready_resolvers;
+    js->font_ready_resolvers = NULL;
+    for (guint i = 0; i < resolvers->len; i++) {
+        JSValue fn = g_array_index(resolvers, JSValue, i);
+        JSValue r = JS_Call(js->ctx, fn, JS_UNDEFINED, 1,
+                            (JSValueConst[]){ JS_UNDEFINED });
+        JS_FreeValue(js->ctx, r);
+        JS_FreeValue(js->ctx, fn);
+    }
+    g_array_free(resolvers, TRUE);
+    ns_drain_microtasks(js);
+}
+
 static JSValue
 ns_document_get_fonts(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (js && ns_font_pending_count() == 0) ns_js_flush_layout(js);
     JSValue fs = JS_NewObject(ctx);
     JSValue resolvers[2];
     JSValue ready = JS_NewPromiseCapability(ctx, resolvers);
     if (JS_IsException(ready)) { JS_FreeValue(ctx, fs); return ready; }
-    JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, (JSValueConst[]){fs});
-    JS_FreeValue(ctx, resolvers[0]);
+    gboolean loading = ns_font_pending_count() > 0 && js;
+    if (loading) {
+        if (!js->font_ready_resolvers)
+            js->font_ready_resolvers = g_array_new(FALSE, FALSE, sizeof(JSValue));
+        g_array_append_val(js->font_ready_resolvers, resolvers[0]);
+        ns_font_add_idle_cb(ns_js_fonts_idle, js);
+    } else {
+        JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, (JSValueConst[]){fs});
+        JS_FreeValue(ctx, resolvers[0]);
+    }
     JS_FreeValue(ctx, resolvers[1]);
     JS_SetPropertyStr(ctx, fs, "ready",  ready);
-    JS_SetPropertyStr(ctx, fs, "status", JS_NewString(ctx, "loaded"));
+    JS_SetPropertyStr(ctx, fs, "status",
+                      JS_NewString(ctx, loading ? "loading" : "loaded"));
     ns_bind_fn(ctx, fs, "check", ns_event_true,                    1);
     ns_bind_fn(ctx, fs, "load",  ns_returns_resolved_undefined,    2);
     ns_bind_fn(ctx, fs, "add",   ns_event_noop,                    1);
@@ -50172,6 +50203,13 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_font_remove_idle_cb(ns_js_fonts_idle, js);
+    if (js->font_ready_resolvers) {
+        for (guint i = 0; i < js->font_ready_resolvers->len; i++)
+            JS_FreeValue(js->ctx, g_array_index(js->font_ready_resolvers, JSValue, i));
+        g_array_free(js->font_ready_resolvers, TRUE);
+        js->font_ready_resolvers = NULL;
+    }
     if (js->lifecycle_source) {
         ns_js_source_remove(js, js->lifecycle_source);
         js->lifecycle_source = 0;

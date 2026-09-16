@@ -730,6 +730,31 @@ contains_block_media(const ns_node *n, GHashTable *styles)
     return has_media;
 }
 
+static gboolean is_inline_dom(const ns_node *n, GHashTable *styles);
+
+static gboolean
+abs_joins_inline_run(const ns_node *n, const ns_style *s, GHashTable *styles)
+{
+    if (!s || !s->specified_inline || !n->parent) return FALSE;
+    const ns_style *parent = g_hash_table_lookup(styles, n->parent);
+    if (parent && (style_is_flex_container(parent) ||
+                   style_is_grid_container(parent)))
+        return FALSE;
+    for (const ns_node *p = n->prev_sibling; p; p = p->prev_sibling) {
+        if (p->kind == NS_NODE_TEXT) {
+            for (const char *t = p->text; t && *t; t++)
+                if (!g_ascii_isspace(*t)) return TRUE;
+            continue;
+        }
+        if (p->kind != NS_NODE_ELEMENT) continue;
+        const ns_style *ps = g_hash_table_lookup(styles, p);
+        if (ps && (style_is_none(ps) || style_is_absolute_or_fixed(ps)))
+            continue;
+        return is_inline_dom(p, styles);
+    }
+    return FALSE;
+}
+
 static gboolean
 is_inline_dom(const ns_node *n, GHashTable *styles)
 {
@@ -746,13 +771,14 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
         if (strcmp(n->name, "table") == 0) return FALSE;
         const ns_style *rs = g_hash_table_lookup(styles, n);
         if (rs && style_is_none(rs)) return FALSE;
-        if (rs && style_is_absolute_or_fixed(rs)) return FALSE;
+        if (rs && style_is_absolute_or_fixed(rs))
+            return abs_joins_inline_run(n, rs, styles);
         return is_inline_level_replaced(n, styles);
     }
     const ns_style *s = g_hash_table_lookup(styles, n);
     if (!s) return n->name && strchr(n->name, '-') != NULL;
     if (style_is_none(s)) return FALSE;
-    if (style_is_absolute_or_fixed(s)) return FALSE;
+    if (style_is_absolute_or_fixed(s)) return abs_joins_inline_run(n, s, styles);
     ns_display d = ns_css_display_of(s);
     if (ns_display_is_table_internal(d)) return FALSE;
     if (ns_display_is_flex_container(d) || ns_display_is_grid_container(d)) {
@@ -889,6 +915,8 @@ static void layout_box(ns_box *box, double parent_content_width,
 static ns_box *build_inline_run(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
 static void translate_subtree(ns_box *box, double dx, double dy);
 static ns_box *build_inline_run_no_abs_placeholders(const ns_node *first, const ns_node *last_excl, GHashTable *styles);
+static gboolean inline_atomic_needs_layout(const ns_box *ab);
+static double pango_layout_line_top(NsPangoLayout *layout, int line_index);
 static ns_box *build_pseudo_inline_for(const ns_style *ps, const ns_node *host);
 static ns_box *build_pseudo_block_for(const ns_style *ps, const ns_node *host);
 static void register_abs_pseudo(const ns_node *host, const ns_style *ps);
@@ -5374,7 +5402,7 @@ inline_layout_atomics_prepare(ns_box *box, const ns_style *parent_style)
     for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
         ns_box *ab =
             g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-        if (ab)
+        if (inline_atomic_needs_layout(ab))
             layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
     }
 }
@@ -5729,7 +5757,8 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (box->inline_atomics) {
         for (guint i = 0; i < box->inline_atomics->len; i++) {
             ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, i).box;
-            if (ab) layout_box(ab, content_width, parent_style);
+            if (ab && !(g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab)))
+                layout_box(ab, content_width, parent_style);
         }
     }
 
@@ -5796,10 +5825,13 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
             if (!dom) continue;
             NsPangoRectangle pos;
             ns_pango_layout_index_to_pos(layout, (int)a->byte_off, &pos);
+            int line_index = 0;
+            ns_pango_layout_index_to_line_x(layout, (int)a->byte_off, FALSE,
+                                            &line_index, NULL);
             ns_abs_static *st = g_new0(ns_abs_static, 1);
             st->run   = box;
             st->rel_x = indent + (double)pos.x / NS_PANGO_SCALE;
-            st->rel_y = (double)pos.y / NS_PANGO_SCALE;
+            st->rel_y = pango_layout_line_top(layout, line_index);
             g_hash_table_insert(g_abs_static, (gpointer)dom, st);
         }
     }
@@ -6740,6 +6772,28 @@ layout_image(ns_box *box, double parent_content_width)
 }
 
 static double
+pango_layout_line_top(NsPangoLayout *layout, int line_index)
+{
+    NsPangoLayoutIter *iter = ns_pango_layout_get_iter(layout);
+    double top = 0;
+    for (int j = 0; ; j++) {
+        NsPangoRectangle logical;
+        ns_pango_layout_iter_get_line_extents(iter, NULL, &logical);
+        top = (double)logical.y / NS_PANGO_SCALE;
+        if (j >= line_index || !ns_pango_layout_iter_next_line(iter)) break;
+    }
+    ns_pango_layout_iter_free(iter);
+    return top;
+}
+
+static gboolean
+inline_atomic_needs_layout(const ns_box *ab)
+{
+    if (!ab) return FALSE;
+    return !(g_abs_ph_set && g_hash_table_contains(g_abs_ph_set, ab));
+}
+
+static double
 inline_atomic_measure_basis(const ns_box *box)
 {
     double basis = ns_css_container_w();
@@ -6828,7 +6882,9 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 ns_box *ab = g_array_index(box->inline_atomics,
                                            ns_inline_atomic, ai).box;
                 if (!ab) continue;
-                layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
+                if (inline_atomic_needs_layout(ab))
+                    layout_box(ab, inline_atomic_measure_basis(ab),
+                               parent_style);
                 sum += ab->content_width +
                        ab->margin.left + ab->margin.right +
                        ab->padding.left + ab->padding.right +
@@ -6845,7 +6901,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (ab)
+                if (inline_atomic_needs_layout(ab))
                     layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
             }
         }
@@ -6989,7 +7045,7 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
         if (box->inline_atomics) {
             for (guint ai = 0; ai < box->inline_atomics->len; ai++) {
                 ns_box *ab = g_array_index(box->inline_atomics, ns_inline_atomic, ai).box;
-                if (ab)
+                if (inline_atomic_needs_layout(ab))
                     layout_box(ab, inline_atomic_measure_basis(ab), parent_style);
             }
         }

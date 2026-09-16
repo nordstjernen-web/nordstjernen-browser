@@ -897,6 +897,7 @@ typedef struct ns_display {
 typedef struct ns_style {
     ns_css_value *values[NS_CSS_PROP_COUNT];
     ns_display display;
+    guint8 specified_inline;
     struct ns_style *before;
     struct ns_style *after;
     struct ns_style *first_letter;
