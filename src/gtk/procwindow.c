@@ -1068,6 +1068,41 @@ on_address_activate(GtkEntry *entry, gpointer user_data)
     g_free(resolved);
 }
 
+static gboolean
+on_address_key_pressed(GtkEventControllerKey *controller, guint keyval,
+                       guint keycode, GdkModifierType state, gpointer ud)
+{
+    (void)controller;
+    (void)keycode;
+    ProcWindow *pw = ud;
+    if (keyval != GDK_KEY_Return && keyval != GDK_KEY_KP_Enter)
+        return FALSE;
+    gboolean ctrl  = (state & GDK_CONTROL_MASK) != 0;
+    gboolean shift = (state & GDK_SHIFT_MASK) != 0;
+    if (!ctrl && !shift)
+        return FALSE;
+    char *text =
+        g_strstrip(g_strdup(gtk_editable_get_text(GTK_EDITABLE(pw->address))));
+    if (!*text || strstr(text, "://") || strchr(text, ' ') ||
+        g_str_has_prefix(text, "about:") ||
+        g_str_has_prefix(text, "file:") ||
+        g_str_has_prefix(text, "data:") ||
+        g_str_has_prefix(text, "view-source:")) {
+        g_free(text);
+        return FALSE;
+    }
+    const char *suffix = ctrl && shift ? ".org" : shift ? ".net" : ".com";
+    const char *prefix = g_str_has_prefix(text, "www.") ? "" : "www.";
+    char *host = g_str_has_suffix(text, suffix)
+        ? g_strconcat(prefix, text, NULL)
+        : g_strconcat(prefix, text, suffix, NULL);
+    g_free(text);
+    gtk_editable_set_text(GTK_EDITABLE(pw->address), host);
+    g_free(host);
+    on_address_activate(GTK_ENTRY(pw->address), pw);
+    return TRUE;
+}
+
 static void
 on_back_clicked(GtkButton *b, gpointer ud)
 {
@@ -1176,6 +1211,17 @@ act_reload(GSimpleAction *a, GVariant *p, gpointer ud)
     NsProcView *v = current_view(ud);
     if (v)
         ns_proc_view_reload(v);
+}
+
+static void
+act_hard_reload(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    NsProcView *v = current_view(ud);
+    if (!v) return;
+    ns_cache_clear();
+    ns_proc_view_reload(v);
 }
 
 static void
@@ -1870,6 +1916,8 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Alt>Right", NULL });
     install_action(pw, "reload", G_CALLBACK(act_reload),
                    (const char *[]){ "<Ctrl>r", "F5", NULL });
+    install_action(pw, "hard-reload", G_CALLBACK(act_hard_reload),
+                   (const char *[]){ "<Ctrl><Shift>r", "<Ctrl>F5", NULL });
     install_action(pw, "find", G_CALLBACK(act_find),
                    (const char *[]){ "<Ctrl>f", NULL });
     install_action(pw, "console", G_CALLBACK(act_console),
@@ -2060,6 +2108,11 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_signal_connect(addr_focus, "enter",
                      G_CALLBACK(on_address_focus_enter), pw);
     gtk_widget_add_controller(pw->address, addr_focus);
+    GtkEventController *addr_keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(addr_keys, GTK_PHASE_CAPTURE);
+    g_signal_connect(addr_keys, "key-pressed",
+                     G_CALLBACK(on_address_key_pressed), pw);
+    gtk_widget_add_controller(pw->address, addr_keys);
 
     pw->zoom_button = gtk_button_new_with_label("100%");
     gtk_button_set_has_frame(GTK_BUTTON(pw->zoom_button), FALSE);
