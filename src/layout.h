@@ -124,6 +124,10 @@ typedef struct ns_box_media {
     gboolean intrinsic_ratio_only;
 } ns_box_media;
 
+typedef struct ns_grid_track_edges {
+    double start, end;
+} ns_grid_track_edges;
+
 typedef struct ns_box {
     ns_box_kind kind;
     const ns_node  *dom;
@@ -165,6 +169,10 @@ typedef struct ns_box {
     GArray *attrs;
     GArray *inline_atomics;
     GArray *table_col_hints;
+    GArray *grid_col_tracks;
+    GArray *grid_row_tracks;
+    int grid_explicit_cols;
+    int grid_explicit_rows;
 
     ns_box_media *media;
     GHashTable   *svg_styles;
