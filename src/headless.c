@@ -17,6 +17,7 @@
 
 #include "anim.h"
 #include "cache.h"
+#include "config.h"
 #include "css.h"
 #include "debuglog.h"
 #include "dom.h"
@@ -1938,8 +1939,14 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
     char *decoded = ns_html_decode_body_full(raw, raw_len,
                                              resp->content_type,
                                              &g_headless_doc_charset);
-    ns_node *doc = ns_html_parse(decoded ? decoded : "",
-                                 decoded ? (gssize)strlen(decoded) : 0);
+    const ns_config *parse_cfg = ns_config_get();
+    gboolean scripting_on = !parse_cfg || parse_cfg->javascript_enabled;
+    ns_node *doc = scripting_on
+        ? ns_html_parse(decoded ? decoded : "",
+                        decoded ? (gssize)strlen(decoded) : 0)
+        : ns_html_parse_with_scripting(decoded ? decoded : "",
+                                       decoded ? (gssize)strlen(decoded) : 0,
+                                       FALSE);
     const char *page_url = resp->final_url ? resp->final_url : opts->url;
 
     ns_print_setup_default(&g_headless_print_setup);
@@ -2007,7 +2014,8 @@ ns_headless_run_one(const ns_headless_opts *opts, const char *fetch_url, int hop
         ns_video_cache_set_js_cb(video_cache, headless_video_event, js);
         ns_video_cache_set_base(video_cache, flush_base);
         if (opts->wpt) ns_js_set_early_inject_src(js, ns_wpt_hook_src);
-        ns_js_run_scripts_in_doc(js, doc, resp->final_url);
+        if (scripting_on)
+            ns_js_run_scripts_in_doc(js, doc, resp->final_url);
     }
 
     if (opts->settle_ms > 0) settle_main_loop(opts->settle_ms, &flush_ctx);

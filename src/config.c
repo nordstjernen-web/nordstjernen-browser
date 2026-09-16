@@ -155,6 +155,7 @@ static const cfg_field cfg_fields[] = {
     FB(speculative_preload,   TRUE),
     FB(async_image_decode,    TRUE),
     FB(images_enabled,        TRUE),
+    FB(javascript_enabled,    TRUE),
     FB(webgl_enabled,         TRUE),
     FB(camera_enabled,        FALSE),
     FB(microphone_enabled,    FALSE),
@@ -245,6 +246,7 @@ static const struct { const char *env; const char *key; } env_disable[] = {
     { "NS_NO_CACHE",         "cache_enabled"         },
     { "NS_NO_LOCAL_STORAGE", "local_storage_enabled" },
     { "NS_NO_IMAGES",        "images_enabled"        },
+    { "NS_NO_JAVASCRIPT",    "javascript_enabled"    },
     { "NS_NO_WATCHDOG",      "watchdog_enabled"      },
     { "NS_NO_HTTPS_FIRST",   "https_first"           },
     { "NS_NO_HARDEN_ALLOC",  "harden_allocator"      },
@@ -498,6 +500,7 @@ ns_config_dump(void)
     g_string_append_printf(s, "speculative_preload   = %s\n", c->speculative_preload ? "true" : "false");
     g_string_append_printf(s, "async_image_decode    = %s\n", c->async_image_decode ? "true" : "false");
     g_string_append_printf(s, "images_enabled        = %s\n", c->images_enabled ? "true" : "false");
+    g_string_append_printf(s, "javascript_enabled    = %s\n", c->javascript_enabled ? "true" : "false");
     g_string_append_printf(s, "webgl_enabled         = %s\n", c->webgl_enabled ? "true" : "false");
     g_string_append_printf(s, "camera_enabled        = %s\n", c->camera_enabled ? "true" : "false");
     g_string_append_printf(s, "microphone_enabled    = %s\n", c->microphone_enabled ? "true" : "false");
