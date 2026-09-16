@@ -14760,6 +14760,13 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         ? g_hash_table_lookup(js->style_table, n) : NULL;
     if (!computed && lbox) computed = lbox->style;
 
+    if (lbox && (strcmp(name, "grid-template-columns") == 0 ||
+                 strcmp(name, "grid-template-rows") == 0)) {
+        char *tracks = ns_layout_grid_resolved_tracks(
+            lbox, strcmp(name, "grid-template-columns") == 0);
+        if (tracks) return tracks;
+    }
+
     if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0) {
         if (lbox) {
             double v = (name[0] == 'w') ? lbox->content_width

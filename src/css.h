@@ -371,8 +371,10 @@ typedef enum ns_css_track_kind {
 typedef struct ns_css_track {
     ns_css_track_kind kind;
     double v;
+    double em, rem, pct;
     ns_css_track_kind min_kind;
     double min_v;
+    double min_em, min_rem, min_pct;
     gboolean has_min;
 } ns_css_track;
 
