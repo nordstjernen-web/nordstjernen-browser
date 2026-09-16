@@ -565,6 +565,7 @@ ns_node_set_editable_value(ns_node *n, const char *value)
         char *normalized = ns_textarea_normalized_value_dup(value);
         ns_element_set_attr(n, "data-nd-value", normalized);
         ns_element_set_attr(n, "data-nd-vdirty", "1");
+        ns_element_set_attr(n, "data-nd-user-edited", "1");
         g_free(normalized);
     } else if (ns_node_is_contenteditable_host(n)) {
         ns_node *doc = (ns_node *)ns_node_root(n);
@@ -582,6 +583,7 @@ ns_node_set_editable_value(ns_node *n, const char *value)
         ns_node_append_child(n, ns_node_new_text(g_strdup(value ? value : "")));
     } else if (ns_input_value_is_dirty_mode(n)) {
         ns_element_set_attr(n, "data-nd-value", value ? value : "");
+        ns_element_set_attr(n, "data-nd-user-edited", "1");
     } else {
         ns_element_set_attr(n, "value", value ? value : "");
     }
@@ -2059,6 +2061,7 @@ ns_form_reset_control(ns_node *n)
         }
         ns_element_remove_attr(n, "data-nd-value");
         ns_element_remove_attr(n, "data-nd-vdirty");
+        ns_element_remove_attr(n, "data-nd-user-edited");
     } else if (strcmp(n->name, "select") == 0) {
         ns_element_remove_attr(n, "data-nd-noselect");
         for (ns_node *o = n->first_child; o; o = o->next_sibling) {
