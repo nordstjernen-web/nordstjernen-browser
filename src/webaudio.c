@@ -10,9 +10,15 @@
 #include <glib.h>
 
 #define NS_WA_MAX_DEPTH 32
+#define NS_WA_MAX_NODE_RENDERS 4096
+
+typedef struct ns_wa_walk {
+    int  depth;
+    guint renders_left;
+} ns_wa_walk;
 
 static void ns_wa_render(JSContext *ctx, JSValueConst node, uint32_t frames,
-                         double rate, float *out, int depth);
+                         double rate, float *out, ns_wa_walk *walk);
 
 static double
 ns_wa_num(JSContext *ctx, JSValueConst obj, const char *name, double dflt)
@@ -148,22 +154,24 @@ ns_wa_buffer_source(JSContext *ctx, JSValueConst node, uint32_t frames,
 
 static void
 ns_wa_sum_inputs(JSContext *ctx, JSValueConst node, uint32_t frames,
-                 double rate, float *out, int depth)
+                 double rate, float *out, ns_wa_walk *walk)
 {
     JSValue ins = JS_GetPropertyStr(ctx, node, "_inputs");
     if (!JS_IsObject(ins)) { JS_FreeValue(ctx, ins); return; }
     uint32_t n = ns_js_array_length(ctx, ins);
     if (!n) { JS_FreeValue(ctx, ins); return; }
     float *tmp = g_new0(float, frames);
-    for (uint32_t i = 0; i < n; i++) {
+    walk->depth++;
+    for (uint32_t i = 0; i < n && walk->renders_left > 0; i++) {
         JSValue src = JS_GetPropertyUint32(ctx, ins, i);
         if (JS_IsObject(src)) {
             memset(tmp, 0, frames * sizeof(float));
-            ns_wa_render(ctx, src, frames, rate, tmp, depth + 1);
+            ns_wa_render(ctx, src, frames, rate, tmp, walk);
             for (uint32_t j = 0; j < frames; j++) out[j] += tmp[j];
         }
         JS_FreeValue(ctx, src);
     }
+    walk->depth--;
     g_free(tmp);
     JS_FreeValue(ctx, ins);
 }
@@ -285,9 +293,12 @@ ns_wa_waveshaper(JSContext *ctx, JSValueConst node, uint32_t frames,
 
 static void
 ns_wa_render(JSContext *ctx, JSValueConst node, uint32_t frames,
-             double rate, float *out, int depth)
+             double rate, float *out, ns_wa_walk *walk)
 {
-    if (depth > NS_WA_MAX_DEPTH || !JS_IsObject(node)) return;
+    if (walk->depth > NS_WA_MAX_DEPTH || walk->renders_left == 0 ||
+        !JS_IsObject(node))
+        return;
+    walk->renders_left--;
     char *kind = ns_wa_str(ctx, node, "_kind");
 
     if (strcmp(kind, "oscillator") == 0) {
@@ -300,7 +311,7 @@ ns_wa_render(JSContext *ctx, JSValueConst node, uint32_t frames,
         ns_wa_window(ctx, node, frames, rate, &first, &last);
         for (uint32_t i = first; i < last; i++) out[i] = (float)v;
     } else {
-        ns_wa_sum_inputs(ctx, node, frames, rate, out, depth);
+        ns_wa_sum_inputs(ctx, node, frames, rate, out, walk);
         if (strcmp(kind, "gain") == 0) {
             double g = ns_wa_param(ctx, node, "gain", 1.0);
             for (uint32_t i = 0; i < frames; i++) out[i] = (float)(out[i] * g);
@@ -328,7 +339,8 @@ ns_webaudio_render_offline(JSContext *ctx, JSValueConst destination,
     if (!ctx || !out || !frames || !(rate > 0)) return FALSE;
     memset(out, 0, frames * sizeof(float));
     if (!JS_IsObject(destination)) return FALSE;
-    ns_wa_render(ctx, destination, frames, rate, out, 0);
+    ns_wa_walk walk = { 0, NS_WA_MAX_NODE_RENDERS };
+    ns_wa_render(ctx, destination, frames, rate, out, &walk);
     for (uint32_t i = 0; i < frames; i++) {
         if (out[i] > 1.0f) out[i] = 1.0f;
         else if (out[i] < -1.0f) out[i] = -1.0f;
