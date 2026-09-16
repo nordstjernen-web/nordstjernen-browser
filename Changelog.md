@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.25:
+======
+
 1.0.24:
 ======
 * about:start wears a new splash: the same night scene, painted in an
