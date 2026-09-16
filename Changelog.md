@@ -33,6 +33,10 @@ Changelog:
   press, touch), consumes that activation, and logs blocked attempts to
   the console. navigator.userActivation now reports the live activation
   state instead of constants.
+* Ctrl+Enter in the address bar completes a bare name to www.name.com,
+  Shift+Enter to .net and Ctrl+Shift+Enter to .org, as in classic
+  Firefox.
+* Ctrl+Shift+R and Ctrl+F5 reload the page bypassing the HTTP cache.
 * Ctrl+D bookmarks the current page, with a matching "Bookmark This Page"
   menu entry, in the classic browser tradition.
 * about:book — every browser of the lineage carries its Book.
