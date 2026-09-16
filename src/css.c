@@ -6267,6 +6267,365 @@ ns_css_gradient_radii(const ns_css_gradient *gr, double w, double h,
     if (*ry <= 0) *ry = 1;
 }
 
+typedef enum {
+    CONTENT_TOK_STRING,
+    CONTENT_TOK_IDENT,
+    CONTENT_TOK_FUNC,
+    CONTENT_TOK_SLASH,
+} content_tok_kind;
+
+typedef struct {
+    content_tok_kind kind;
+    char *text;
+    char *args;
+} content_tok;
+
+static void
+content_tok_clear(gpointer data)
+{
+    content_tok *t = data;
+    g_free(t->text);
+    g_free(t->args);
+}
+
+static char *
+content_string_canonical(const char *raw, gsize len)
+{
+    GString *decoded = g_string_new(NULL);
+    char *inner = g_strndup(raw, len);
+    for (const char *p = inner; *p; )
+        ns_css_append_unescaped(decoded, &p);
+    g_free(inner);
+    GString *out = g_string_new("\"");
+    for (const char *p = decoded->str; *p; p++) {
+        if (*p == '"' || *p == '\\') g_string_append_c(out, '\\');
+        g_string_append_c(out, *p);
+    }
+    g_string_append_c(out, '"');
+    g_string_free(decoded, TRUE);
+    return g_string_free(out, FALSE);
+}
+
+static const char *
+content_scan_string_end(const char *p)
+{
+    char q = *p++;
+    while (*p) {
+        if (*p == '\\' && p[1]) { p += 2; continue; }
+        if (*p == q) return p;
+        p++;
+    }
+    return NULL;
+}
+
+static GArray *
+content_tokenize(const char *text)
+{
+    GArray *toks = g_array_new(FALSE, TRUE, sizeof(content_tok));
+    g_array_set_clear_func(toks, content_tok_clear);
+    const char *p = text;
+    while (*p) {
+        if (is_ws(*p)) { p++; continue; }
+        content_tok t = { 0 };
+        if (*p == '"' || *p == '\'') {
+            const char *e = content_scan_string_end(p);
+            if (!e) goto fail;
+            t.kind = CONTENT_TOK_STRING;
+            t.text = content_string_canonical(p + 1, (gsize)(e - p - 1));
+            p = e + 1;
+        } else if (*p == '/') {
+            t.kind = CONTENT_TOK_SLASH;
+            t.text = g_strdup("/");
+            p++;
+        } else if (g_ascii_isalpha((guchar)*p) || *p == '-' || *p == '_' ||
+                   *p == '\\' || (guchar)*p >= 0x80) {
+            const char *s = p;
+            while (*p && (g_ascii_isalnum((guchar)*p) || *p == '-' ||
+                          *p == '_' || (guchar)*p >= 0x80 || *p == '\\')) {
+                if (*p == '\\' && p[1]) p += 2;
+                else p++;
+            }
+            t.text = g_strndup(s, (gsize)(p - s));
+            if (*p == '(') {
+                int depth = 0;
+                const char *a = p + 1;
+                const char *q = p;
+                for (; *q; q++) {
+                    if (*q == '"' || *q == '\'') {
+                        q = content_scan_string_end(q);
+                        if (!q) break;
+                        continue;
+                    }
+                    if (*q == '(') depth++;
+                    else if (*q == ')' && --depth == 0) break;
+                }
+                if (!q || *q != ')') { g_free(t.text); goto fail; }
+                t.kind = CONTENT_TOK_FUNC;
+                t.args = g_strndup(a, (gsize)(q - a));
+                g_strstrip(t.args);
+                char *lower = g_ascii_strdown(t.text, -1);
+                g_free(t.text);
+                t.text = lower;
+                p = q + 1;
+            } else {
+                t.kind = CONTENT_TOK_IDENT;
+            }
+        } else {
+            goto fail;
+        }
+        g_array_append_val(toks, t);
+    }
+    return toks;
+fail:
+    g_array_free(toks, TRUE);
+    return NULL;
+}
+
+static GPtrArray *
+content_split_args(const char *args)
+{
+    GPtrArray *out = g_ptr_array_new_with_free_func(g_free);
+    const char *seg = args;
+    int depth = 0;
+    for (const char *q = args; ; q++) {
+        if (*q == '"' || *q == '\'') {
+            const char *e = content_scan_string_end(q);
+            if (!e) { g_ptr_array_free(out, TRUE); return NULL; }
+            q = e;
+            continue;
+        }
+        if (*q == '(') depth++;
+        else if (*q == ')' && depth > 0) depth--;
+        if ((*q == ',' && depth == 0) || !*q) {
+            char *piece = g_strndup(seg, (gsize)(q - seg));
+            g_strstrip(piece);
+            g_ptr_array_add(out, piece);
+            if (!*q) break;
+            seg = q + 1;
+        }
+    }
+    return out;
+}
+
+static gboolean
+content_ident_valid(const char *s)
+{
+    if (!s || !*s) return FALSE;
+    if (g_ascii_isdigit((guchar)s[0])) return FALSE;
+    for (const char *p = s; *p; p++) {
+        if (*p == '\\') { if (!p[1]) return FALSE; p++; continue; }
+        if (!(g_ascii_isalnum((guchar)*p) || *p == '-' || *p == '_' ||
+              (guchar)*p >= 0x80))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+content_is_string_token(const char *s)
+{
+    if (!s || (s[0] != '"' && s[0] != '\'')) return FALSE;
+    const char *e = content_scan_string_end(s);
+    return e && e[1] == '\0';
+}
+
+static char *
+content_symbols_canonical(const char *args)
+{
+    GArray *toks = content_tokenize(args);
+    if (!toks) return NULL;
+    const char *system = NULL;
+    guint i = 0;
+    if (toks->len > 0) {
+        content_tok *t = &g_array_index(toks, content_tok, 0);
+        if (t->kind == CONTENT_TOK_IDENT) {
+            static const char *systems[] = { "cyclic", "numeric", "alphabetic",
+                                             "symbolic", "additive", "fixed" };
+            for (gsize k = 0; k < G_N_ELEMENTS(systems); k++)
+                if (g_ascii_strcasecmp(t->text, systems[k]) == 0)
+                    system = systems[k];
+            if (!system) { g_array_free(toks, TRUE); return NULL; }
+            i = 1;
+        }
+    }
+    GString *out = g_string_new(NULL);
+    if (system && strcmp(system, "symbolic") != 0) g_string_append(out, system);
+    int n_symbols = 0;
+    for (; i < toks->len; i++) {
+        content_tok *t = &g_array_index(toks, content_tok, i);
+        gboolean image = t->kind == CONTENT_TOK_FUNC &&
+                         (strcmp(t->text, "url") == 0 ||
+                          strcmp(t->text, "image") == 0 ||
+                          strstr(t->text, "gradient"));
+        if (t->kind != CONTENT_TOK_STRING && !image) {
+            g_string_free(out, TRUE);
+            g_array_free(toks, TRUE);
+            return NULL;
+        }
+        if (out->len) g_string_append_c(out, ' ');
+        if (image) g_string_append_printf(out, "%s(%s)", t->text, t->args);
+        else g_string_append(out, t->text);
+        n_symbols++;
+    }
+    g_array_free(toks, TRUE);
+    gboolean ok = n_symbols >= 1;
+    if (system && (strcmp(system, "numeric") == 0 ||
+                   strcmp(system, "alphabetic") == 0) && n_symbols < 2)
+        ok = FALSE;
+    if (system && strcmp(system, "additive") == 0) ok = FALSE;
+    if (!ok) { g_string_free(out, TRUE); return NULL; }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+content_counter_style_canonical(const char *style)
+{
+    if (g_ascii_strncasecmp(style, "symbols(", 8) == 0 &&
+        style[strlen(style) - 1] == ')') {
+        char *inner = g_strndup(style + 8, strlen(style) - 9);
+        char *canon = content_symbols_canonical(inner);
+        g_free(inner);
+        if (!canon) return NULL;
+        char *res = g_strdup_printf("symbols(%s)", canon);
+        g_free(canon);
+        return res;
+    }
+    if (!content_ident_valid(style)) return NULL;
+    if (g_ascii_strcasecmp(style, "decimal") == 0) return g_strdup("");
+    return g_strdup(style);
+}
+
+static char *
+content_counter_canonical(const content_tok *t)
+{
+    gboolean counters = strcmp(t->text, "counters") == 0;
+    GPtrArray *args = content_split_args(t->args);
+    if (!args) return NULL;
+    guint min_args = counters ? 2 : 1, max_args = counters ? 3 : 2;
+    char *res = NULL;
+    if (args->len < min_args || args->len > max_args) goto done;
+    const char *name = args->pdata[0];
+    if (!content_ident_valid(name) || g_ascii_strcasecmp(name, "none") == 0)
+        goto done;
+    char *sep = NULL;
+    if (counters) {
+        const char *s = args->pdata[1];
+        if (!content_is_string_token(s)) goto done;
+        sep = content_string_canonical(s + 1, strlen(s) - 2);
+    }
+    char *style = NULL;
+    if (args->len == max_args) {
+        style = content_counter_style_canonical(args->pdata[max_args - 1]);
+        if (!style) { g_free(sep); goto done; }
+    }
+    GString *out = g_string_new(t->text);
+    g_string_append_c(out, '(');
+    g_string_append(out, name);
+    if (sep) { g_string_append(out, ", "); g_string_append(out, sep); }
+    if (style && *style) { g_string_append(out, ", "); g_string_append(out, style); }
+    g_string_append_c(out, ')');
+    g_free(sep);
+    g_free(style);
+    res = g_string_free(out, FALSE);
+done:
+    g_ptr_array_free(args, TRUE);
+    return res;
+}
+
+static gboolean
+content_func_is_image(const content_tok *t)
+{
+    return strcmp(t->text, "url") == 0 || strcmp(t->text, "image") == 0 ||
+           strcmp(t->text, "image-set") == 0 ||
+           strcmp(t->text, "cross-fade") == 0 ||
+           strcmp(t->text, "element") == 0 ||
+           g_str_has_suffix(t->text, "-gradient");
+}
+
+static char *
+content_item_canonical(const content_tok *t, gboolean alt)
+{
+    if (t->kind == CONTENT_TOK_STRING) return g_strdup(t->text);
+    if (t->kind == CONTENT_TOK_IDENT) {
+        if (alt) return NULL;
+        static const char *kws[] = { "open-quote", "close-quote",
+                                     "no-open-quote", "no-close-quote",
+                                     "contents" };
+        for (gsize k = 0; k < G_N_ELEMENTS(kws); k++)
+            if (g_ascii_strcasecmp(t->text, kws[k]) == 0)
+                return g_strdup(kws[k]);
+        return NULL;
+    }
+    if (t->kind != CONTENT_TOK_FUNC) return NULL;
+    if (strcmp(t->text, "counter") == 0 || strcmp(t->text, "counters") == 0)
+        return content_counter_canonical(t);
+    if (strcmp(t->text, "attr") == 0) {
+        GPtrArray *args = content_split_args(t->args);
+        gboolean ok = args && args->len >= 1 && args->len <= 2 &&
+                      *(char *)args->pdata[0];
+        if (ok) {
+            char *first = g_strdup(args->pdata[0]);
+            char *sp = strpbrk(first, " \t");
+            if (sp) *sp = '\0';
+            ok = content_ident_valid(first);
+            g_free(first);
+        }
+        if (args) g_ptr_array_free(args, TRUE);
+        return ok ? g_strdup_printf("attr(%s)", t->args) : NULL;
+    }
+    if (alt) return NULL;
+    if (content_func_is_image(t) || strcmp(t->text, "leader") == 0 ||
+        g_str_has_prefix(t->text, "target-") || strcmp(t->text, "var") == 0 ||
+        strcmp(t->text, "string") == 0 || strcmp(t->text, "content") == 0)
+        return g_strdup_printf("%s(%s)", t->text, t->args);
+    return NULL;
+}
+
+char *
+ns_css_content_canonical(const char *text)
+{
+    if (!text) return NULL;
+    GArray *toks = content_tokenize(text);
+    if (!toks || toks->len == 0) {
+        if (toks) g_array_free(toks, TRUE);
+        return NULL;
+    }
+    if (toks->len == 1) {
+        content_tok *t = &g_array_index(toks, content_tok, 0);
+        if (t->kind == CONTENT_TOK_IDENT &&
+            (g_ascii_strcasecmp(t->text, "normal") == 0 ||
+             g_ascii_strcasecmp(t->text, "none") == 0)) {
+            char *r = g_ascii_strdown(t->text, -1);
+            g_array_free(toks, TRUE);
+            return r;
+        }
+    }
+    GString *out = g_string_new(NULL);
+    gboolean alt = FALSE, ok = TRUE;
+    int main_items = 0, alt_items = 0;
+    for (guint i = 0; i < toks->len && ok; i++) {
+        content_tok *t = &g_array_index(toks, content_tok, i);
+        if (t->kind == CONTENT_TOK_SLASH) {
+            if (alt || main_items == 0) { ok = FALSE; break; }
+            alt = TRUE;
+            g_string_append(out, " /");
+            continue;
+        }
+        char *item = content_item_canonical(t, alt);
+        if (!item) { ok = FALSE; break; }
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, item);
+        g_free(item);
+        if (alt) alt_items++; else main_items++;
+    }
+    g_array_free(toks, TRUE);
+    if (!ok || main_items == 0 || (alt && alt_items == 0)) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static const char *
 css_quoted_end(const char *u, char quote)
 {
@@ -9375,40 +9734,12 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_CONTENT: {
-        gsize tl = strlen(t);
-        gboolean single_string = FALSE;
-        if (tl >= 2 && (t[0] == '"' || t[0] == '\'')) {
-            char q = t[0];
-            gsize i = 1;
-            while (i < tl) {
-                if (t[i] == '\\' && i + 1 < tl) { i += 2; continue; }
-                if (t[i] == q) break;
-                i++;
-            }
-            single_string = (i == tl - 1);
-        }
-        if (single_string) {
-            char *raw = g_strndup(t + 1, tl - 2);
-            GString *s = g_string_new(NULL);
-            for (const char *p = raw; *p; )
-                ns_css_append_unescaped(s, &p);
-            g_free(raw);
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
-            v->u.keyword = g_string_free(s, FALSE);
-        } else if (g_str_has_prefix(t, "counter(") ||
-                   g_str_has_prefix(t, "counters(") ||
-                   g_str_has_prefix(t, "attr(") ||
-                   strchr(t, '"') || strchr(t, '\'')) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
-            v->u.keyword = g_strdup(t);
-        } else {
-            char *kw = ascii_lower(t, strlen(t));
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
-            v->u.keyword = kw;
-        }
+        char *canon = strstr(t, "var(") ? g_strdup(t)
+                                        : ns_css_content_canonical(t);
+        if (!canon) break;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
         break;
     }
     case NS_CSS_COUNTER_RESET:
@@ -17328,11 +17659,12 @@ css_inline_value_canonical(const char *prop, char *value)
     value = css_add_leading_zeros(value);
     value = css_normalize_negative_zero(value);
     value = css_serialize_urls(value);
-    gsize len = strlen(value);
-    if (strcmp(prop, "content") == 0 && len >= 2 &&
-        value[0] == '\'' && value[len - 1] == '\'') {
-        value[0] = '"';
-        value[len - 1] = '"';
+    if (strcmp(prop, "content") == 0) {
+        char *canon = ns_css_content_canonical(value);
+        if (canon) {
+            g_free(value);
+            value = canon;
+        }
     } else if (strcmp(prop, "font-family") == 0) {
         char *canon = ns_css_font_family_canonical(value);
         if (canon) {
@@ -17382,14 +17714,6 @@ css_inline_value_canonical(const char *prop, char *value)
             g_free(value);
             value = canon;
         }
-    } else if (strcmp(prop, "content") == 0) {
-        GRegex *counter = g_regex_new(
-            "counter\\(([-_a-zA-Z0-9]+),[ \\t]*decimal\\)", 0, 0, NULL);
-        char *shorter = g_regex_replace(counter, value, -1, 0,
-                                        "counter(\\1)", 0, NULL);
-        g_regex_unref(counter);
-        g_free(value);
-        value = shorter;
     }
     return value;
 }
