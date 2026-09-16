@@ -146,6 +146,8 @@ struct ns_js {
     double         last_mouse_x[2];
     double         last_mouse_y[2];
     gboolean       has_last_mouse[2];
+    gint64         user_activation_us;
+    gboolean       user_ever_activated;
     GHashTable   *canvas_states;
     ns_image_cache *image_cache;
     GHashTable   *js_image_loads;

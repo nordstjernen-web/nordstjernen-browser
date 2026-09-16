@@ -161,6 +161,30 @@ ns_set_active_js(ns_js *js)
     g_private_set(&g_active_js_key, js);
 }
 
+#define NS_TRANSIENT_ACTIVATION_US (5 * G_USEC_PER_SEC)
+
+static void
+ns_js_note_user_activation(ns_js *js)
+{
+    if (!js) return;
+    js->user_activation_us = g_get_monotonic_time();
+    js->user_ever_activated = TRUE;
+}
+
+static gboolean
+ns_js_has_transient_activation(ns_js *js)
+{
+    return js && js->user_activation_us != 0 &&
+           g_get_monotonic_time() - js->user_activation_us <=
+               NS_TRANSIENT_ACTIVATION_US;
+}
+
+static void
+ns_js_consume_user_activation(ns_js *js)
+{
+    if (js) js->user_activation_us = 0;
+}
+
 static char *ns_js_module_normalize(JSContext *ctx, const char *base_name,
                                     const char *name, void *opaque);
 static void ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin);
@@ -15482,15 +15506,28 @@ ns_window_open_method(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
 {
     (void)this_val;
-    if (argc < 1 || !js_from_ctx(ctx) || !js_from_ctx(ctx)->nav_cb) return JS_NULL;
+    ns_js *js = js_from_ctx(ctx);
+    if (argc < 1 || !js || !js->nav_cb) return JS_NULL;
     const char *url = JS_ToCString(ctx, argv[0]);
     if (url) {
-        if (*url && !ns_js_url_parses(js_from_ctx(ctx), url)) {
+        if (*url && !ns_js_url_parses(js, url)) {
             JS_FreeCString(ctx, url);
             return ns_throw_dom_exception(ctx, "SyntaxError", 12,
                                           "window.open: invalid URL");
         }
-        js_from_ctx(ctx)->nav_cb(url, FALSE, js_from_ctx(ctx)->nav_user_data);
+        if (!ns_js_has_transient_activation(js)) {
+            if (js->log_cb) {
+                char *line = g_strdup_printf(
+                    "Blocked a popup: window.open(%.256s) was called "
+                    "without user interaction", *url ? url : "about:blank");
+                js->log_cb(line, js->log_user_data);
+                g_free(line);
+            }
+            JS_FreeCString(ctx, url);
+            return JS_NULL;
+        }
+        ns_js_consume_user_activation(js);
+        js->nav_cb(url, FALSE, js->nav_user_data);
         JS_FreeCString(ctx, url);
     }
     return JS_DupValue(ctx, this_val);
@@ -26422,6 +26459,8 @@ ns_js_dispatch_touch_type(ns_js *js, const ns_node *target, const char *type,
                           double x, double y)
 {
     JSContext *ctx = js->ctx;
+    if (strcmp(type, "touchstart") == 0 || strcmp(type, "touchend") == 0)
+        ns_js_note_user_activation(js);
     JSValue event = ns_make_event(ctx, type, target);
     gboolean cancelable = ns_path_has_active_listener(js, target, type);
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
@@ -27048,6 +27087,9 @@ ns_js_dispatch_key_event_full(ns_js *js, const ns_node *target, const char *type
     if (default_prevented) *default_prevented = FALSE;
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
+    if (strcmp(type, "keydown") == 0 &&
+        (!key || strcmp(key, "Escape") != 0))
+        ns_js_note_user_activation(js);
     JSValue event = ns_make_event(js->ctx, type, target);
     JS_SetPropertyStr(js->ctx, event, "key",     JS_NewString(js->ctx, key  ? key  : ""));
     JS_SetPropertyStr(js->ctx, event, "code",    JS_NewString(js->ctx, code ? code : ""));
@@ -27084,6 +27126,10 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     if (default_prevented) *default_prevented = FALSE;
     if (!js || !target || !type) return FALSE;
     if (js->halted || js->in_pump) return FALSE;
+    if (strcmp(type, "mousedown") == 0 || strcmp(type, "pointerdown") == 0 ||
+        strcmp(type, "mouseup") == 0 || strcmp(type, "pointerup") == 0 ||
+        strcmp(type, "click") == 0 || strcmp(type, "dblclick") == 0)
+        ns_js_note_user_activation(js);
     JSContext *ctx = js->ctx;
     JSValue event = ns_make_event(ctx, type, target);
     if (g_str_has_suffix(type, "enter") || g_str_has_suffix(type, "leave")) {
@@ -44889,6 +44935,21 @@ static const char *const ns_parent_query_methods[] = {
     "querySelector", "querySelectorAll",
 };
 
+static JSValue
+ns_user_activation_get_is_active(JSContext *ctx, JSValueConst this_val)
+{
+    (void)this_val;
+    return JS_NewBool(ctx, ns_js_has_transient_activation(js_from_ctx(ctx)));
+}
+
+static JSValue
+ns_user_activation_get_has_been_active(JSContext *ctx, JSValueConst this_val)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    return JS_NewBool(ctx, js && js->user_ever_activated);
+}
+
 static void
 ns_proto_define_getset(JSContext *ctx, JSValueConst proto, const char *name,
                        JSValue (*getter)(JSContext *, JSValueConst),
@@ -45741,8 +45802,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, navigator, "vendorSub", JS_NewString(ctx, ""));
 
     JSValue user_activation = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, user_activation, "hasBeenActive", JS_TRUE);
-    JS_SetPropertyStr(ctx, user_activation, "isActive", JS_FALSE);
+    ns_proto_define_getset(ctx, user_activation, "hasBeenActive",
+                           ns_user_activation_get_has_been_active, NULL);
+    ns_proto_define_getset(ctx, user_activation, "isActive",
+                           ns_user_activation_get_is_active, NULL);
     JS_SetPropertyStr(ctx, navigator, "userActivation", user_activation);
 
     JSValue storage = JS_NewObject(ctx);
