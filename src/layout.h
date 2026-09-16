@@ -283,6 +283,8 @@ guint ns_box_match_ordinal(const ns_box *root,
                            const ns_box *target,
                            gboolean case_sensitive);
 
+char *ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns);
+
 G_END_DECLS
 
 #endif
