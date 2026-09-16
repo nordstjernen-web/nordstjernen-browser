@@ -7198,6 +7198,9 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             }
         }
     }
+    GPtrArray *original = g_ptr_array_new();
+    for (ns_node *orig = self->first_child; orig; orig = orig->next_sibling)
+        g_ptr_array_add(original, orig);
     GPtrArray *added = g_ptr_array_new();
     for (int i = 0; i < argc; i++) {
         ns_node *child = ns_unwrap_element_mut(argv[i]);
@@ -7217,7 +7220,8 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
             } else {
                 if (_j) {
                     ns_ce_disconnect_subtree(_j, child);
-                    ns_js_record_move_removal(_j, child);
+                    if (child->parent != self)
+                        ns_js_record_move_removal(_j, child);
                     g_hash_table_remove(_j->orphan_nodes, child);
                 }
                 ns_node_remove(child);
@@ -7254,14 +7258,15 @@ ns_element_replaceChildren(JSContext *ctx, JSValueConst this_val,
         if (_j) ns_js_index_child_change(_j, self, a, NULL);
     }
     if (_j) {
-        if (added->len > 0 || removed->len > 0)
+        if (added->len > 0 || original->len > 0)
             ns_mut_record_emit_child_list_arrays(_j, self,
-                added->len ? added : NULL, removed->len ? removed : NULL,
+                added->len ? added : NULL, original->len ? original : NULL,
                 NULL, NULL);
         _j->mutated = TRUE;
     }
     g_ptr_array_free(added, FALSE);
     g_ptr_array_free(removed, FALSE);
+    g_ptr_array_free(original, FALSE);
     return JS_UNDEFINED;
 }
 
@@ -30056,10 +30061,14 @@ ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len)
         static const char *helper_src =
             "(function(nl){"
             " var Aproto = Array.prototype;"
-            " nl[Symbol.iterator] = Aproto[Symbol.iterator];"
-            " nl.entries = Aproto.entries;"
-            " nl.keys    = Aproto.keys;"
-            " nl.values  = Aproto.values;"
+            " function def(k, v){"
+            "   Object.defineProperty(nl, k,"
+            "     { value: v, writable: true, configurable: true });"
+            " }"
+            " def(Symbol.iterator, Aproto[Symbol.iterator]);"
+            " def('entries', Aproto.entries);"
+            " def('keys',    Aproto.keys);"
+            " def('values',  Aproto.values);"
             " try { Object.defineProperty(nl, Symbol.toStringTag,"
             "   { value: 'NodeList', configurable: true }); } catch(e){}"
             " return nl;"
@@ -33039,10 +33048,11 @@ ns_element_get_isConnected(JSContext *ctx, JSValueConst this_val)
 {
     (void)ctx;
     const ns_node *n = ns_unwrap_element(this_val);
-    if (!n || !js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc) return JS_FALSE;
-    for (const ns_node *p = n; p; p = p->parent)
-        if (p == js_from_ctx(ctx)->current_doc) return JS_TRUE;
-    return JS_FALSE;
+    if (!n) return JS_FALSE;
+    const ns_node *root = n;
+    while (root->parent) root = root->parent;
+    return root->kind == NS_NODE_DOCUMENT && !(root->flags & NS_NODE_FRAGMENT)
+        ? JS_TRUE : JS_FALSE;
 }
 
 static JSValue
@@ -35354,7 +35364,7 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
             }
             JS_FreeCString(ctx, name);
             if (reject) {
-                if (flags & (JS_PROP_THROW | JS_PROP_THROW_STRICT)) {
+                if (flags & JS_PROP_THROW) {
                     JS_ThrowTypeError(ctx, "Cannot define property on this object");
                     return -1;
                 }
@@ -35366,26 +35376,6 @@ ns_live_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
                              flags | JS_PROP_NO_EXOTIC);
 }
 
-static int
-ns_live_set_property(JSContext *ctx, JSValueConst this_obj, JSAtom prop,
-                     JSValueConst val, JSValueConst receiver, int flags)
-{
-    (void)receiver;
-    ns_live_back *b = JS_GetOpaque(this_obj, ns_live_class_id);
-    if (b) {
-        uint32_t idx = 0;
-        if (JS_AtomIsArrayIndex(ctx, &idx, prop)) {
-            if (flags & (JS_PROP_THROW | JS_PROP_THROW_STRICT)) {
-                JS_ThrowTypeError(ctx, "Index properties cannot be set on this object");
-                return -1;
-            }
-            return FALSE;
-        }
-    }
-    return JS_DefinePropertyValue(ctx, this_obj, prop, JS_DupValue(ctx, val),
-                                 JS_PROP_CONFIGURABLE | JS_PROP_WRITABLE | JS_PROP_ENUMERABLE);
-}
-
 static JSValue
 ns_live_length_get(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
@@ -35393,7 +35383,7 @@ ns_live_length_get(JSContext *ctx, JSValueConst this_val,
     (void)argc;
     (void)argv;
     ns_live_back *b = JS_GetOpaque(this_val, ns_live_class_id);
-    if (!b) return JS_NewInt32(ctx, 0);
+    if (!b) return JS_ThrowTypeError(ctx, "Illegal invocation");
     JSValue snap = ns_live_snapshot(ctx, b);
     return JS_NewInt64(ctx, ns_js_array_length(ctx, snap));
 }
@@ -35422,7 +35412,6 @@ ns_live_gc_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
 static JSClassExoticMethods ns_live_exotic = {
     .get_own_property       = ns_live_get_own,
     .get_own_property_names = ns_live_get_own_names,
-    .set_property           = ns_live_set_property,
     .delete_property        = ns_live_delete_property,
     .define_own_property    = ns_live_define_own_property,
 };
@@ -44924,6 +44913,24 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
         ns_proto_delete_names(ctx, p, ns_element_only_methods,
                               G_N_ELEMENTS(ns_element_only_methods));
         JS_FreeValue(ctx, p);
+    }
+
+    {
+        JSValue move_before = JS_GetPropertyStr(ctx, node_proto, "moveBefore");
+        if (JS_IsFunction(ctx, move_before)) {
+            for (gsize i = 0; i < G_N_ELEMENTS(doc_like); i++) {
+                JSValue p = ns_proto_of(ctx, global, doc_like[i]);
+                if (JS_IsObject(p))
+                    JS_DefinePropertyValueStr(ctx, p, "moveBefore",
+                                              JS_DupValue(ctx, move_before),
+                                              JS_PROP_C_W_E);
+                JS_FreeValue(ctx, p);
+            }
+        }
+        JS_FreeValue(ctx, move_before);
+        static const char *const parentnode_only_methods[] = { "moveBefore" };
+        ns_proto_delete_names(ctx, node_proto, parentnode_only_methods,
+                              G_N_ELEMENTS(parentnode_only_methods));
     }
 
     ns_set_ctor_proto(ctx, global, "Node", node_proto);
