@@ -12,6 +12,22 @@ Changelog:
 * Added view-source: — Ctrl+U / "Page Source" in the menu shows the current
   page's HTML with classic syntax highlighting. Only chrome-initiated
   navigations can use the scheme; web content is refused.
+* Form constraint validation follows the HTML spec much more closely:
+  ValidityState flags are computed for disabled and readonly controls
+  (bars from validation affect willValidate, not the flags), valueMissing
+  is suppressed on disabled/readonly controls, the pattern attribute
+  compiles as a JavaScript regular expression with the v flag (invalid
+  patterns are ignored) and applies to each address of a multiple email
+  input, tooLong/tooShort fire only after a user edit as the spec's dirty
+  value flag requires, and willValidate is false inside a datalist.
+  WPT form-validation: patternMismatch, tooLong, tooShort, typeMismatch
+  and badInput suites now fully pass.
+* Live HTMLCollection/NodeList property semantics follow WebIDL: silent
+  sloppy-mode failures and strict TypeErrors for read-only indexed and
+  named properties, spec-compliant descriptors, expando support, and
+  Object.keys listing only indices; moveBefore() is ParentNode-only;
+  replaceChildren() queues a single mutation record; Node.isConnected is
+  true for any node whose root is a document.
 * Ctrl+D bookmarks the current page, with a matching "Bookmark This Page"
   menu entry, in the classic browser tradition.
 * about:book — every browser of the lineage carries its Book.

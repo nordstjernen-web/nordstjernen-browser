@@ -32189,6 +32189,53 @@ ns_js_value_matches_pattern(const char *v, const char *pat)
     if (!pat || !*pat) return TRUE;
     if (strlen(pat) > NS_JS_PATTERN_MAX_LEN) return FALSE;
     if (v && strlen(v) > NS_JS_PATTERN_VALUE_MAX_LEN) return FALSE;
+    ns_js *js = ns_active_js();
+    JSContext *ctx = js ? (js->main_realm_ctx ? js->main_realm_ctx : js->ctx)
+                        : NULL;
+    if (ctx) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue ctor = JS_GetPropertyStr(ctx, global, "RegExp");
+        JS_FreeValue(ctx, global);
+        if (JS_IsFunction(ctx, ctor)) {
+            JSValue src = JS_NewString(ctx, pat);
+            JSValue flags = JS_NewString(ctx, "v");
+            JSValue bare = JS_CallConstructor(ctx, ctor, 2,
+                                              (JSValueConst[]){ src, flags });
+            JS_FreeValue(ctx, src);
+            if (JS_IsException(bare)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                JS_FreeValue(ctx, flags);
+                JS_FreeValue(ctx, ctor);
+                return TRUE;
+            }
+            JS_FreeValue(ctx, bare);
+            g_autofree char *anchored = g_strdup_printf("^(?:%s)$", pat);
+            JSValue asrc = JS_NewString(ctx, anchored);
+            JSValue re = JS_CallConstructor(ctx, ctor, 2,
+                                            (JSValueConst[]){ asrc, flags });
+            JS_FreeValue(ctx, asrc);
+            JS_FreeValue(ctx, flags);
+            JS_FreeValue(ctx, ctor);
+            if (JS_IsException(re)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                return TRUE;
+            }
+            JSValue test = JS_GetPropertyStr(ctx, re, "test");
+            JSValue sv = JS_NewString(ctx, v ? v : "");
+            JSValue r = JS_Call(ctx, test, re, 1, (JSValueConst[]){ sv });
+            JS_FreeValue(ctx, sv);
+            JS_FreeValue(ctx, test);
+            JS_FreeValue(ctx, re);
+            if (JS_IsException(r)) {
+                JS_FreeValue(ctx, JS_GetException(ctx));
+                return TRUE;
+            }
+            int ok = JS_ToBool(ctx, r);
+            JS_FreeValue(ctx, r);
+            return ok > 0;
+        }
+        JS_FreeValue(ctx, ctor);
+    }
     char *a = g_strdup_printf("^(?:%s)$", pat);
     GError *err = NULL;
     GRegex *re = g_regex_new(a, 0, 0, &err);
@@ -32218,8 +32265,6 @@ ns_js_compute_validity(const ns_node *n,
     gboolean is_textarea = strcmp(n->name, "textarea") == 0;
     gboolean is_select   = strcmp(n->name, "select") == 0;
     if (!is_input && !is_textarea && !is_select) return;
-    if (ns_element_effectively_disabled(n)) return;
-    if (ns_form_control_readonly_bars_validation(n)) return;
     const char *type = is_input ? ns_element_get_attr(n, "type") : NULL;
     if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                  g_ascii_strcasecmp(type, "button") == 0 ||
@@ -32242,7 +32287,9 @@ ns_js_compute_validity(const ns_node *n,
         if (!value) value = "";
     }
     gboolean required = ns_form_control_supports_required(n) &&
-                        ns_element_get_attr(n, "required") != NULL;
+                        ns_element_get_attr(n, "required") != NULL &&
+                        !ns_element_effectively_disabled(n) &&
+                        !ns_form_control_readonly_bars_validation(n);
     if (required && ns_form_control_value_missing(n, value, ns_node_root(n))) {
         *value_missing = TRUE;
         g_free(owned_value);
@@ -32262,10 +32309,26 @@ ns_js_compute_validity(const ns_node *n,
             *type_mismatch = TRUE;
     }
     const char *pat = ns_element_get_attr(n, "pattern");
-    if (is_input && ns_input_type_supports_text_constraints(type) &&
-        pat && !ns_js_value_matches_pattern(value, pat))
-        *pattern_mismatch = TRUE;
-    if (ns_form_control_length_limits_apply(n)) {
+    if (is_input && ns_input_type_supports_text_constraints(type) && pat) {
+        gboolean split_email = type &&
+            g_ascii_strcasecmp(type, "email") == 0 &&
+            ns_element_get_attr(n, "multiple") != NULL;
+        if (split_email) {
+            char **parts = g_strsplit(value, ",", -1);
+            for (int pi = 0; parts && parts[pi]; pi++) {
+                char *item = g_strstrip(parts[pi]);
+                if (!ns_js_value_matches_pattern(item, pat)) {
+                    *pattern_mismatch = TRUE;
+                    break;
+                }
+            }
+            g_strfreev(parts);
+        } else if (!ns_js_value_matches_pattern(value, pat)) {
+            *pattern_mismatch = TRUE;
+        }
+    }
+    if (ns_form_control_length_limits_apply(n) &&
+        ns_element_get_attr(n, "data-nd-user-edited")) {
         const char *minlen = ns_element_get_attr(n, "minlength");
         const char *maxlen = ns_element_get_attr(n, "maxlength");
         glong vlen = (glong)g_utf8_strlen(value, -1);
@@ -32465,6 +32528,8 @@ ns_node_will_validate(const ns_node *n)
     if (!is_input && !is_textarea && !is_select) return FALSE;
     if (ns_element_effectively_disabled(n)) return FALSE;
     if (ns_form_control_readonly_bars_validation(n)) return FALSE;
+    for (const ns_node *p = n->parent; p; p = p->parent)
+        if (ns_node_is_element_named(p, "datalist")) return FALSE;
     const char *type = is_input ? ns_element_get_attr(n, "type") : NULL;
     if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
                  g_ascii_strcasecmp(type, "button") == 0 ||
@@ -32928,6 +32993,7 @@ ns_js_set_input_used_value(ns_js *js, ns_node *n, const char *s)
 {
     ns_element_set_attr(n, ns_input_value_is_dirty_mode(n) ? "data-nd-value"
                                                            : "value", s ? s : "");
+    ns_element_remove_attr(n, "data-nd-user-edited");
     if (js) js->mutated = TRUE;
 }
 
@@ -34786,6 +34852,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     if (el->name && strcmp(el->name, "textarea") == 0) {
         ns_js *_j = js_from_ctx(ctx);
         ns_node_set_editable_value(el, s);
+        ns_element_remove_attr(el, "data-nd-user-edited");
         if (!null_to_empty) JS_FreeCString(ctx, s);
         ns_text_selection_value_changed(ctx, this_val, old_value);
         JS_FreeValue(ctx, old_value);
@@ -34806,6 +34873,7 @@ ns_element_set_value_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
     char *sanitized = ns_input_sanitize_value(el, s);
     ns_element_set_attr(el, ns_input_value_is_dirty_mode(el) ? "data-nd-value"
                                                              : "value", sanitized);
+    ns_element_remove_attr(el, "data-nd-user-edited");
     if (el->name && strcmp(el->name, "input") == 0)
         ns_element_set_attr(el, "data-nd-vdirty", "1");
     g_free(sanitized);
