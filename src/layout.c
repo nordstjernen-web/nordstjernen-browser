@@ -10670,30 +10670,38 @@ layout_grid(ns_box *box, double cw,
         layout_box(c, item_w, child_inherited);
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
-        if (!j_stretch) {
+        gboolean auto_h_margin = c->style &&
+            (keyword_is(c->style->values[NS_CSS_MARGIN_LEFT], "auto") ||
+             keyword_is(c->style->values[NS_CSS_MARGIN_RIGHT], "auto"));
+        if ((!j_stretch || i_has_w) && !auto_h_margin) {
             double used_w = c->content_width +
                             c->padding.left + c->padding.right +
                             c->border.left + c->border.right;
             double free_w = cw_for_item - used_w;
             double dx = 0;
-            if (free_w > 0) {
-                gboolean item_rtl = c->style &&
-                    ns_css_keyword_is(c->style->values[NS_CSS_DIRECTION], "rtl");
-                gboolean at_right = FALSE;
-                if (strcmp(j_eff, "center") == 0)
-                    dx = free_w / 2.0;
-                else if (strcmp(j_eff, "end") == 0 || strcmp(j_eff, "flex-end") == 0)
-                    at_right = !grid_rtl;
-                else if (strcmp(j_eff, "start") == 0 || strcmp(j_eff, "flex-start") == 0)
-                    at_right = grid_rtl;
-                else if (strcmp(j_eff, "self-end") == 0)
-                    at_right = !item_rtl;
-                else if (strcmp(j_eff, "self-start") == 0)
-                    at_right = item_rtl;
-                else if (strcmp(j_eff, "right") == 0)
-                    at_right = TRUE;
-                if (at_right) dx = free_w;
+            const ns_css_value *jraw = c->style
+                ? c->style->values[NS_CSS_JUSTIFY_SELF] : NULL;
+            gboolean j_safe = jraw && jraw->kind == NS_CSS_V_KEYWORD &&
+                jraw->u.keyword && g_str_has_prefix(jraw->u.keyword, "safe ");
+            const char *j_kw = j_stretch || (j_safe && free_w < 0)
+                ? "start" : j_eff;
+            gboolean item_rtl = c->style &&
+                ns_css_keyword_is(c->style->values[NS_CSS_DIRECTION], "rtl");
+            gboolean at_right = FALSE;
+            if (strcmp(j_kw, "center") == 0) {
+                if (free_w > 0) dx = free_w / 2.0;
+            } else if (strcmp(j_kw, "end") == 0 || strcmp(j_kw, "flex-end") == 0) {
+                at_right = !grid_rtl;
+            } else if (strcmp(j_kw, "start") == 0 || strcmp(j_kw, "flex-start") == 0) {
+                at_right = grid_rtl;
+            } else if (strcmp(j_kw, "self-end") == 0) {
+                at_right = !item_rtl;
+            } else if (strcmp(j_kw, "self-start") == 0) {
+                at_right = item_rtl;
+            } else if (strcmp(j_kw, "right") == 0) {
+                at_right = TRUE;
             }
+            if (at_right && free_w != 0) dx = free_w;
             if (dx != 0) shift_box_tree(c, dx, 0);
         }
         double item_outer = c->content_height +
@@ -11400,6 +11408,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->x = inner_x + left_off;
             c->y = cursor_y - mt;
             layout_box(c, cw_avail, child_inherited);
+            if (keyword_is(box->style ? box->style->values[NS_CSS_DIRECTION]
+                                      : NULL, "rtl")) {
+                double outer = c->margin.left + c->margin.right +
+                               c->content_width + c->padding.left +
+                               c->padding.right + c->border.left +
+                               c->border.right;
+                if (fabs(outer - cw_avail) > 0.01) c->x += cw_avail - outer;
+            }
             collect_escaping_floats(c, floats, 0);
             if (empty_block_collapses_through(c, clr)) {
                 cursor_y -= gap;
@@ -11573,17 +11589,23 @@ flex_done: ;
             box->scroll_max_y = measured - box->content_height;
     }
     if (overflow_scrolls_x) {
-        double max_right = inner_x;
+        double content_right = inner_x + box->content_width;
+        double padding_right = content_right + box->padding.right;
+        double max_right = padding_right;
         for (const ns_box *c = box->first_child; c; c = c->next_sibling) {
+            if (style_is_absolute_or_fixed(c->style)) continue;
             double right = c->x + c->margin.left + c->content_width +
                            c->padding.left + c->padding.right +
                            c->border.left + c->border.right;
+            double flow_right = MIN(right + c->margin.right,
+                                    MAX(right, content_right)) +
+                                box->padding.right;
             if (right > max_right) max_right = right;
+            if (flow_right > max_right) max_right = flow_right;
         }
-        double measured_w = max_right - inner_x;
-        if (measured_w > box->content_width + 1.0) {
+        if (max_right > padding_right + 1.0) {
             box->scrolls = TRUE;
-            box->scroll_max_x = measured_w - box->content_width;
+            box->scroll_max_x = max_right - padding_right;
         }
     }
     if (style_content_visibility_hidden(box->style)) {

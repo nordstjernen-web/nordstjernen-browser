@@ -15417,8 +15417,9 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
     if (jsx && !jsx->computed_style_proxy_set) {
         static const char *helper_src =
             "(function(t){"
-            " function kebab(k){ return (k.indexOf('-') >= 0) ? k"
-            "  : k.replace(/[A-Z]/g, function(m){ return '-' + m.toLowerCase(); }); }"
+            " function kebab(k){ if (k.indexOf('-') >= 0) return k;"
+            "  var s = k.replace(/[A-Z]/g, function(m){ return '-' + m.toLowerCase(); });"
+            "  return /^webkit-/.test(s) ? '-' + s : s; }"
             " return new Proxy(t, {"
             "  get: function(o, k) {"
             "   if (typeof k !== 'string') return Reflect.get(o, k);"
@@ -34173,7 +34174,7 @@ ns_element_get_scrollLeft(JSContext *ctx, JSValueConst this_val)
 
 static void
 ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
-                            double *min_l, int depth)
+                            double *min_l, double *min_t, int depth)
 {
     if (!b || depth > 512) return;
     for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
@@ -34188,6 +34189,7 @@ ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
             if (x + w > *max_r) *max_r = x + w;
             if (y + h > *max_btm) *max_btm = y + h;
             if (x < *min_l) *min_l = x;
+            if (y < *min_t) *min_t = y;
         }
         gboolean clips = FALSE;
         if (c->style) {
@@ -34201,7 +34203,8 @@ ns_scrollable_overflow_walk(const ns_box *b, double *max_r, double *max_btm,
             }
         }
         if (!clips)
-            ns_scrollable_overflow_walk(c, max_r, max_btm, min_l, depth + 1);
+            ns_scrollable_overflow_walk(c, max_r, max_btm, min_l, min_t,
+                                        depth + 1);
     }
 }
 
@@ -34217,16 +34220,59 @@ ns_scrollable_overflow_size(const ns_box *b, double *out_w, double *out_h)
     double max_r = pad_left;
     double max_btm = pad_top;
     double min_l = pad_left + pad_w;
-    ns_scrollable_overflow_walk(b, &max_r, &max_btm, &min_l, 0);
-    if (max_r > pad_left) max_r += b->padding.right;
-    if (max_btm > pad_top) max_btm += b->padding.bottom;
+    double min_t = pad_top + pad_h;
+    ns_scrollable_overflow_walk(b, &max_r, &max_btm, &min_l, &min_t, 0);
+    double flow_r = pad_left, flow_btm = pad_top, flow_l = pad_left + pad_w;
+    double flow_t = pad_top + pad_h;
+    double content_r = pad_left + b->padding.left + b->content_width;
+    double content_btm = pad_top + b->padding.top + b->content_height;
+    for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
+        const ns_css_value *pv = c->style
+            ? c->style->values[NS_CSS_POSITION] : NULL;
+        if (pv && (ns_css_keyword_is(pv, "absolute") ||
+                   ns_css_keyword_is(pv, "fixed")))
+            continue;
+        double x, y, w, h;
+        ns_box_border_box(c, &x, &y, &w, &h);
+        if (w <= 0 && h <= 0) continue;
+        double mr = MIN(x + w + c->margin.right, MAX(x + w, content_r));
+        double mb = MIN(y + h + c->margin.bottom, MAX(y + h, content_btm));
+        if (mr > flow_r) flow_r = mr;
+        if (mb > flow_btm) flow_btm = mb;
+        if (x - c->margin.left < flow_l) flow_l = x - c->margin.left;
+        if (y - c->margin.top < flow_t) flow_t = y - c->margin.top;
+    }
+    if (flow_r + b->padding.right > max_r) max_r = flow_r + b->padding.right;
+    if (flow_btm + b->padding.bottom > max_btm)
+        max_btm = flow_btm + b->padding.bottom;
     if (max_r < pad_left + pad_w) max_r = pad_left + pad_w;
     if (max_btm < pad_top + pad_h) max_btm = pad_top + pad_h;
-    gboolean rtl = b->style &&
+    gboolean flip_x = b->style &&
         ns_css_keyword_is(b->style->values[NS_CSS_DIRECTION], "rtl");
-    if (rtl && min_l < pad_left + pad_w) {
-        min_l -= b->padding.left;
+    gboolean flip_y = FALSE;
+    const ns_css_value *dv = b->style ? b->style->values[NS_CSS_DISPLAY] : NULL;
+    if (dv && (ns_css_keyword_is(dv, "flex") ||
+               ns_css_keyword_is(dv, "inline-flex"))) {
+        const ns_css_value *fd = b->style->values[NS_CSS_FLEX_DIRECTION];
+        const ns_css_value *fw = b->style->values[NS_CSS_FLEX_WRAP];
+        gboolean column = fd && (ns_css_keyword_is(fd, "column") ||
+                                 ns_css_keyword_is(fd, "column-reverse"));
+        gboolean wrap_reverse = fw && ns_css_keyword_is(fw, "wrap-reverse");
+        if (column) {
+            if (wrap_reverse) flip_x = !flip_x;
+        } else {
+            if (wrap_reverse) flip_y = !flip_y;
+        }
+    }
+    if (flip_x) {
+        max_r = pad_left + pad_w;
+        if (flow_l - b->padding.left < min_l) min_l = flow_l - b->padding.left;
         if (min_l < pad_left) pad_left = min_l;
+    }
+    if (flip_y) {
+        max_btm = pad_top + pad_h;
+        if (flow_t - b->padding.top < min_t) min_t = flow_t - b->padding.top;
+        if (min_t < pad_top) pad_top = min_t;
     }
     double w = max_r - pad_left;
     double h = max_btm - pad_top;
