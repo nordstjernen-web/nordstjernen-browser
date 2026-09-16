@@ -14703,6 +14703,43 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (strcmp(name, "css-float") == 0 || strcmp(name, "cssFloat") == 0)
         name = "float";
 
+    if (strcmp(name, "font") == 0) {
+        char *fstyle = ns_computed_lookup(ctx, n, "font-style");
+        char *fvariant = ns_computed_lookup(ctx, n, "font-variant");
+        char *fweight = ns_computed_lookup(ctx, n, "font-weight");
+        char *fstretch = ns_computed_lookup(ctx, n, "font-stretch");
+        char *fsize = ns_computed_lookup(ctx, n, "font-size");
+        char *flh = ns_computed_lookup(ctx, n, "line-height");
+        char *ffamily = ns_computed_lookup(ctx, n, "font-family");
+        GString *out = g_string_new(NULL);
+        if (fstyle && *fstyle && strcmp(fstyle, "normal") != 0)
+            g_string_append(out, fstyle);
+        if (fvariant && strcmp(fvariant, "small-caps") == 0) {
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, fvariant);
+        }
+        if (fweight && *fweight && strcmp(fweight, "normal") != 0 &&
+            strcmp(fweight, "400") != 0) {
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, fweight);
+        }
+        if (fstretch && *fstretch && strcmp(fstretch, "normal") != 0 &&
+            strcmp(fstretch, "100%") != 0) {
+            if (out->len) g_string_append_c(out, ' ');
+            g_string_append(out, fstretch);
+        }
+        if (out->len) g_string_append_c(out, ' ');
+        g_string_append(out, fsize && *fsize ? fsize : "16px");
+        if (flh && *flh && strcmp(flh, "normal") != 0) {
+            g_string_append(out, " / ");
+            g_string_append(out, flh);
+        }
+        g_string_append_c(out, ' ');
+        g_string_append(out, ffamily && *ffamily ? ffamily : "serif");
+        g_free(fstyle); g_free(fvariant); g_free(fweight); g_free(fstretch);
+        g_free(fsize); g_free(flh); g_free(ffamily);
+        return g_string_free(out, FALSE);
+    }
     if (strcmp(name, "margin") == 0)
         return ns_computed_box_shorthand(ctx, n, "margin-top", "margin-right",
                                          "margin-bottom", "margin-left");
