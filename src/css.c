@@ -18977,6 +18977,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         ns_display d = { .outer = NS_DISPLAY_OUTER_INLINE };
         if (disp && disp->kind == NS_CSS_V_KEYWORD && disp->u.keyword)
             d = ns_css_display_from_keyword(disp->u.keyword);
+        out->specified_inline = d.box == NS_DISPLAY_BOX_NORMAL &&
+                                d.outer == NS_DISPLAY_OUTER_INLINE;
         ns_display used =
             display_after_blockification(d, out, layout_parent, is_root);
         if (memcmp(&d, &used, sizeof d) != 0) {

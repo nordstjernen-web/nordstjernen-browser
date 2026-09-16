@@ -23,6 +23,12 @@ gboolean ns_font_family_loaded(const char *family);
 void     ns_font_request(const char *family, const char *src_url,
                          const char *base_url);
 
+guint    ns_font_pending_count(void);
+
+typedef void (*ns_font_idle_cb)(gpointer user_data);
+void     ns_font_add_idle_cb(ns_font_idle_cb cb, gpointer user_data);
+void     ns_font_remove_idle_cb(ns_font_idle_cb cb, gpointer user_data);
+
 G_END_DECLS
 
 #endif
