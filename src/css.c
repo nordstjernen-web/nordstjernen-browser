@@ -7119,6 +7119,18 @@ parse_keyword_choice(const char *text, const char *choices)
     return v;
 }
 
+static gboolean
+alignment_is_position_keyword(const char *kw)
+{
+    static const char *const positions[] = {
+        "center", "start", "end", "self-start", "self-end",
+        "flex-start", "flex-end", "left", "right", NULL,
+    };
+    for (int i = 0; positions[i]; i++)
+        if (strcmp(kw, positions[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 static ns_css_value *
 parse_alignment_keyword(const char *text, const char *choices)
 {
@@ -7126,30 +7138,59 @@ parse_alignment_keyword(const char *text, const char *choices)
     g_strstrip(kw);
     for (char *q = kw; *q; q++)
         if (g_ascii_isspace(*q)) *q = ' ';
+    char *tokens[4] = {0};
+    int n = split_ws(kw, tokens);
     ns_css_value *v = NULL;
-    if (strcmp(kw, "last baseline") == 0 || strcmp(kw, "last  baseline") == 0) {
-        if (strstr(choices, "baseline")) {
-            v = g_new0(ns_css_value, 1);
-            v->kind = NS_CSS_V_KEYWORD;
-            v->u.keyword = g_strdup("last baseline");
+    char *full = NULL;
+    if (n == 1) {
+        v = parse_keyword_choice(tokens[0], choices);
+    } else if (n == 2) {
+        const char *first = tokens[0], *second = tokens[1];
+        if (strcmp(second, "baseline") == 0 && strstr(choices, "baseline")) {
+            if (strcmp(first, "first") == 0) v = parse_keyword_choice("baseline", choices);
+            else if (strcmp(first, "last") == 0) full = g_strdup("last baseline");
+        } else if ((strcmp(first, "safe") == 0 || strcmp(first, "unsafe") == 0) &&
+                   alignment_is_position_keyword(second)) {
+            ns_css_value *base = parse_keyword_choice(second, choices);
+            if (base) {
+                full = g_strdup_printf("%s %s", first, second);
+                ns_css_value_free(base);
+            }
+        } else if (strstr(choices, "legacy")) {
+            const char *pos = NULL;
+            if (strcmp(first, "legacy") == 0) pos = second;
+            else if (strcmp(second, "legacy") == 0) pos = first;
+            if (pos && (strcmp(pos, "left") == 0 || strcmp(pos, "center") == 0 ||
+                        strcmp(pos, "right") == 0))
+                full = g_strdup_printf("legacy %s", pos);
         }
-    } else if (g_str_has_prefix(kw, "first ")) {
-        const char *rest = kw + 6;
-        while (*rest == ' ') rest++;
-        if (strcmp(rest, "baseline") == 0)
-            v = parse_keyword_choice("baseline", choices);
-    } else if (g_str_has_prefix(kw, "safe ") || g_str_has_prefix(kw, "unsafe ")) {
-        const char *rest = strchr(kw, ' ') + 1;
-        while (*rest == ' ') rest++;
-        if (!strstr(rest, "baseline") && !g_str_has_prefix(rest, "space-") &&
-            strcmp(rest, "normal") != 0 && strcmp(rest, "stretch") != 0 &&
-            strcmp(rest, "auto") != 0)
-            v = parse_keyword_choice(rest, choices);
-    } else {
-        v = parse_keyword_choice(kw, choices);
     }
+    if (full) {
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = full;
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
     g_free(kw);
     return v;
+}
+
+const char *
+ns_css_alignment_base(const char *kw)
+{
+    if (!kw) return NULL;
+    if (g_str_has_prefix(kw, "safe ")) return kw + 5;
+    if (g_str_has_prefix(kw, "unsafe ")) return kw + 7;
+    if (g_str_has_prefix(kw, "legacy ")) return kw + 7;
+    return kw;
+}
+
+static gboolean
+prop_is_alignment(ns_css_prop p)
+{
+    return p == NS_CSS_JUSTIFY_CONTENT || p == NS_CSS_ALIGN_ITEMS ||
+           p == NS_CSS_ALIGN_SELF || p == NS_CSS_ALIGN_CONTENT ||
+           p == NS_CSS_JUSTIFY_ITEMS || p == NS_CSS_JUSTIFY_SELF;
 }
 
 static gboolean
@@ -10602,42 +10643,40 @@ parse_declaration_block(const char **pp, const char *end,
             strcmp(pname, "place-content") == 0) {
             char *tokens[4] = {0};
             int n = split_ws(vtext, tokens);
-            const char *first  = n >= 1 ? tokens[0] : NULL;
-            const char *second = n >= 2 ? tokens[1] : first;
-            if (strcmp(pname, "place-content") == 0) {
-                if (first) {
-                    ns_css_value *v = parse_value_for(NS_CSS_ALIGN_CONTENT, first);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_ALIGN_CONTENT, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
-                if (second) {
-                    ns_css_value *v = parse_value_for(NS_CSS_JUSTIFY_CONTENT, second);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_JUSTIFY_CONTENT, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
-            } else {
-                gboolean is_items = (strcmp(pname, "place-items") == 0);
-                ns_css_prop ap = is_items ? NS_CSS_ALIGN_ITEMS : NS_CSS_ALIGN_SELF;
-                ns_css_prop jp = is_items ? NS_CSS_JUSTIFY_ITEMS
-                                          : NS_CSS_JUSTIFY_SELF;
-                if (first) {
-                    ns_css_value *v = parse_value_for(ap, first);
-                    if (v) {
-                        ns_css_decl d = { .prop = ap, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
-                if (second) {
-                    ns_css_value *v = parse_value_for(jp, second);
-                    if (v) {
-                        ns_css_decl d = { .prop = jp, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                }
+            ns_css_prop ap = NS_CSS_ALIGN_CONTENT, jp = NS_CSS_JUSTIFY_CONTENT;
+            if (strcmp(pname, "place-items") == 0) {
+                ap = NS_CSS_ALIGN_ITEMS;
+                jp = NS_CSS_JUSTIFY_ITEMS;
+            } else if (strcmp(pname, "place-self") == 0) {
+                ap = NS_CSS_ALIGN_SELF;
+                jp = NS_CSS_JUSTIFY_SELF;
+            }
+            ns_css_value *av = NULL, *jv = NULL;
+            static const int splits[5][2] = {
+                {0, 0}, {1, 0}, {2, 1}, {1, 2}, {2, 0},
+            };
+            for (int si = 0; si < 2 && n >= 1 && n <= 4; si++) {
+                int k = splits[n][si];
+                if (k == 0) break;
+                char *first = k == 2 ? g_strdup_printf("%s %s", tokens[0], tokens[1])
+                                     : g_strdup(tokens[0]);
+                char *second;
+                if (k >= n) second = g_strdup(first);
+                else if (n - k == 2) second = g_strdup_printf("%s %s", tokens[k], tokens[k + 1]);
+                else second = g_strdup(tokens[k]);
+                av = parse_value_for(ap, first);
+                jv = av ? parse_value_for(jp, second) : NULL;
+                g_free(first);
+                g_free(second);
+                if (av && jv) break;
+                if (av) ns_css_value_free(av);
+                av = NULL;
+            }
+            if (av && jv) {
+                ns_css_decl d = { .prop = ap, .value = av, .important = important };
+                g_array_append_val(decls_out, d);
+                ns_css_decl d2 = { .prop = jp, .value = jv, .important = important };
+                g_array_append_val(decls_out, d2);
             }
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
@@ -16032,6 +16071,48 @@ css_serialize_urls(char *value)
 }
 
 static char *
+place_shorthand_canonical(const char *prop, char *value)
+{
+    ns_css_prop ap = NS_CSS_ALIGN_CONTENT, jp = NS_CSS_JUSTIFY_CONTENT;
+    if (strcmp(prop, "place-items") == 0) {
+        ap = NS_CSS_ALIGN_ITEMS;
+        jp = NS_CSS_JUSTIFY_ITEMS;
+    } else if (strcmp(prop, "place-self") == 0) {
+        ap = NS_CSS_ALIGN_SELF;
+        jp = NS_CSS_JUSTIFY_SELF;
+    }
+    char *tokens[4] = {0};
+    int n = split_ws(value, tokens);
+    static const int splits[5][2] = { {0, 0}, {1, 0}, {2, 1}, {1, 2}, {2, 0} };
+    char *result = NULL;
+    for (int si = 0; si < 2 && n >= 1 && n <= 4 && !result; si++) {
+        int k = splits[n][si];
+        if (k == 0) break;
+        char *first = k == 2 ? g_strdup_printf("%s %s", tokens[0], tokens[1])
+                             : g_strdup(tokens[0]);
+        char *second;
+        if (k >= n) second = g_strdup(first);
+        else if (n - k == 2) second = g_strdup_printf("%s %s", tokens[k], tokens[k + 1]);
+        else second = g_strdup(tokens[k]);
+        ns_css_value *av = parse_value_for(ap, first);
+        ns_css_value *jv = av ? parse_value_for(jp, second) : NULL;
+        if (av && jv && av->kind == NS_CSS_V_KEYWORD && jv->kind == NS_CSS_V_KEYWORD) {
+            result = strcmp(av->u.keyword, jv->u.keyword) == 0
+                ? g_strdup(av->u.keyword)
+                : g_strdup_printf("%s %s", av->u.keyword, jv->u.keyword);
+        }
+        if (av) ns_css_value_free(av);
+        if (jv) ns_css_value_free(jv);
+        g_free(first);
+        g_free(second);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    if (!result) return value;
+    g_free(value);
+    return result;
+}
+
+static char *
 css_inline_value_canonical(const char *prop, char *value)
 {
     if (!value) return g_strdup("");
@@ -16052,6 +16133,9 @@ css_inline_value_canonical(const char *prop, char *value)
     default:
         break;
     }
+    if (strcmp(prop, "place-self") == 0 || strcmp(prop, "place-items") == 0 ||
+        strcmp(prop, "place-content") == 0)
+        value = place_shorthand_canonical(prop, value);
     value = css_add_leading_zeros(value);
     value = css_normalize_negative_zero(value);
     value = css_serialize_urls(value);
@@ -17071,7 +17155,8 @@ ns_style_keyword(const ns_style *s, ns_css_prop p)
     if (!s) return NULL;
     ns_css_value *v = s->values[p];
     if (!v || v->kind != NS_CSS_V_KEYWORD) return NULL;
-    return v->u.keyword;
+    return prop_is_alignment(p) ? ns_css_alignment_base(v->u.keyword)
+                                : v->u.keyword;
 }
 
 const char *

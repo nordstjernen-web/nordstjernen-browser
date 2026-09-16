@@ -275,7 +275,7 @@ keyword_or(const ns_style *s, ns_css_prop p, const char *fallback)
     if (!s || !s->values[p]) return fallback;
     const ns_css_value *v = s->values[p];
     if (v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return fallback;
-    return v->u.keyword;
+    return ns_css_alignment_base(v->u.keyword);
 }
 
 static double
@@ -570,6 +570,8 @@ ns_box_free(ns_box *box)
         if (cur->links) g_array_free(cur->links, TRUE);
         if (cur->attrs) g_array_free(cur->attrs, TRUE);
         if (cur->table_col_hints) g_array_free(cur->table_col_hints, TRUE);
+        if (cur->grid_col_tracks) g_array_free(cur->grid_col_tracks, TRUE);
+        if (cur->grid_row_tracks) g_array_free(cur->grid_row_tracks, TRUE);
         if (cur->inline_atomics) {
             for (guint i = 0; i < cur->inline_atomics->len; i++) {
                 ns_inline_atomic *ia = &g_array_index(cur->inline_atomics,
@@ -10162,6 +10164,7 @@ layout_grid(ns_box *box, double cw,
     ns_css_tracks cols_buf = expand_auto_repeat(cols_src, cw, col_gap);
     const ns_css_tracks *cols = &cols_buf;
     int n_cols = cols->n > 0 ? cols->n : 1;
+    int explicit_cols = n_cols;
     int row_line_tracks = rows_subgrid ? sgr->n :
         ((rows_v && rows_v->kind == NS_CSS_V_TRACKS) ? rows_v->u.tracks.n : 1);
     if (row_line_tracks < 1) row_line_tracks = 1;
@@ -10630,8 +10633,31 @@ layout_grid(ns_box *box, double cw,
     const char *acont = keyword_or(box->style, NS_CSS_ALIGN_CONTENT, "stretch");
     gboolean ac_stretch = !acont || strcmp(acont, "stretch") == 0 ||
                           strcmp(acont, "normal") == 0;
-    double per_row_extra = (ac_stretch && grid_rows->len > 0)
-        ? total_extra / grid_rows->len : 0;
+    double row_extra[NS_CSS_TRACKS_MAX + 1] = {0};
+    double row_extra_before[NS_CSS_TRACKS_MAX + 1] = {0};
+    if (ac_stretch && grid_rows->len > 0 && total_extra > 0) {
+        int stretchable = 0;
+        gboolean row_auto[NS_CSS_TRACKS_MAX + 1] = {0};
+        for (guint r = 0; r < grid_rows->len && r < NS_CSS_TRACKS_MAX; r++) {
+            const ns_css_track *tk = NULL;
+            if (rows_subgrid) tk = NULL;
+            else if (rows_tracks && (int)r < rows_tracks->n) tk = &rows_tracks->tracks[r];
+            else if (auto_rows_tracks && auto_rows_tracks->n > 0)
+                tk = &auto_rows_tracks->tracks[((int)r - explicit_rows) % auto_rows_tracks->n];
+            row_auto[r] = rows_subgrid ? FALSE
+                        : (!tk || tk->kind == NS_CSS_TRACK_AUTO);
+            if (row_auto[r]) stretchable++;
+        }
+        if (stretchable > 0) {
+            double share = total_extra / stretchable;
+            double before = 0;
+            for (guint r = 0; r < grid_rows->len && r < NS_CSS_TRACKS_MAX; r++) {
+                row_extra_before[r] = before;
+                row_extra[r] = row_auto[r] ? share : 0;
+                before += row_extra[r];
+            }
+        }
+    }
     double group_off = 0, row_between = 0;
     if (!ac_stretch && total_extra > 0) {
         guint n = grid_rows->len;
@@ -10658,7 +10684,7 @@ layout_grid(ns_box *box, double cw,
         double row_h = 0;
         for (int k = 0; k < span && r + k < (int)grid_rows->len; k++) {
             grid_row *gk = &g_array_index(grid_rows, grid_row, r + k);
-            row_h += gk->height + per_row_extra;
+            row_h += gk->height + row_extra[r + k];
             if (k > 0) row_h += row_gap + row_between;
         }
         const char *aself = c->style
@@ -10695,13 +10721,30 @@ layout_grid(ns_box *box, double cw,
             dy_align = free_h;
         }
         grid_row *gr = &g_array_index(grid_rows, grid_row, r);
-        double row_top = gr->top + per_row_extra * r +
+        double row_top = gr->top + row_extra_before[r] +
                          group_off + row_between * r;
         double target_y = row_top + dy_align;
         double dy = target_y - c->y;
         if (dy != 0) shift_box_tree(c, 0, dy);
     }
     if (total_extra > 0) cursor_y += total_extra;
+
+    if (box->grid_col_tracks) g_array_free(box->grid_col_tracks, TRUE);
+    if (box->grid_row_tracks) g_array_free(box->grid_row_tracks, TRUE);
+    box->grid_col_tracks = g_array_new(FALSE, FALSE, sizeof(ns_grid_track_edges));
+    box->grid_row_tracks = g_array_new(FALSE, FALSE, sizeof(ns_grid_track_edges));
+    for (int t = 0; t < n_cols; t++) {
+        ns_grid_track_edges e = { col_x[t], col_x[t] + col_sizes[t] };
+        g_array_append_val(box->grid_col_tracks, e);
+    }
+    for (guint r = 0; r < grid_rows->len; r++) {
+        const grid_row *gr = &g_array_index(grid_rows, grid_row, r);
+        double top = gr->top + row_extra_before[r] + group_off + row_between * r;
+        ns_grid_track_edges e = { top, top + gr->height + row_extra[r] };
+        g_array_append_val(box->grid_row_tracks, e);
+    }
+    box->grid_explicit_cols = explicit_cols;
+    box->grid_explicit_rows = row_line_tracks;
 
     *cursor_y_out = cursor_y;
     g_ptr_array_free(items, TRUE);
@@ -11949,17 +11992,164 @@ find_abs_containing_block_dom(const ns_node *n, GHashTable *styles)
     return NULL;
 }
 
+static int
+grid_abs_line(const char *tok, int explicit_tracks)
+{
+    if (!tok) return 0;
+    while (*tok == ' ') tok++;
+    if (!*tok || strcmp(tok, "auto") == 0 || g_str_has_prefix(tok, "span "))
+        return 0;
+    int before_start = -1;
+    int past_end = explicit_tracks + 2;
+    char *end = NULL;
+    long n = strtol(tok, &end, 10);
+    if (end != tok) {
+        while (*end == ' ') end++;
+        if (*end || n == 0) return 0;
+        if (n < 0) n = explicit_tracks + 2 + n;
+        if (n < 1) return before_start;
+        if (n > explicit_tracks + 1) return past_end;
+        return (int)n;
+    }
+    int named = grid_resolve_line_from(tok, explicit_tracks, 0);
+    if (named < 1) return past_end;
+    if (named > explicit_tracks + 1) return past_end;
+    return named;
+}
+
+static void
+grid_abs_axis_lines(const ns_style *st, gboolean row_axis, int explicit_tracks,
+                    int *out_start, int *out_end)
+{
+    *out_start = 0;
+    *out_end = 0;
+    if (!st) return;
+    char *start_tok = NULL, *end_tok = NULL;
+    const ns_css_value *area = st->values[NS_CSS_GRID_AREA];
+    if (area && area->kind == NS_CSS_V_KEYWORD && area->u.keyword) {
+        char **parts = g_strsplit(area->u.keyword, "/", -1);
+        int n = 0;
+        while (parts[n]) n++;
+        int si = row_axis ? 0 : 1, ei = row_axis ? 2 : 3;
+        if (si < n) start_tok = g_strstrip(g_strdup(parts[si]));
+        if (ei < n) end_tok = g_strstrip(g_strdup(parts[ei]));
+        g_strfreev(parts);
+    }
+    const ns_css_value *sh =
+        st->values[row_axis ? NS_CSS_GRID_ROW : NS_CSS_GRID_COLUMN];
+    if (sh && sh->kind == NS_CSS_V_KEYWORD && sh->u.keyword) {
+        g_free(start_tok);
+        g_free(end_tok);
+        start_tok = NULL;
+        end_tok = NULL;
+        const char *slash = strchr(sh->u.keyword, '/');
+        if (slash) {
+            start_tok = g_strstrip(g_strndup(sh->u.keyword, slash - sh->u.keyword));
+            end_tok = g_strstrip(g_strdup(slash + 1));
+        } else {
+            start_tok = g_strstrip(g_strdup(sh->u.keyword));
+        }
+    }
+    const ns_css_value *sv =
+        st->values[row_axis ? NS_CSS_GRID_ROW_START : NS_CSS_GRID_COLUMN_START];
+    const ns_css_value *ev =
+        st->values[row_axis ? NS_CSS_GRID_ROW_END : NS_CSS_GRID_COLUMN_END];
+    if (sv && sv->kind == NS_CSS_V_KEYWORD && sv->u.keyword) {
+        g_free(start_tok);
+        start_tok = g_strdup(sv->u.keyword);
+    }
+    if (ev && ev->kind == NS_CSS_V_KEYWORD && ev->u.keyword) {
+        g_free(end_tok);
+        end_tok = g_strdup(ev->u.keyword);
+    }
+    int s0 = grid_abs_line(start_tok, explicit_tracks);
+    int e0 = grid_abs_line(end_tok, explicit_tracks);
+    if (s0 && e0 && s0 > e0) { int t = s0; s0 = e0; e0 = t; }
+    if (s0 && e0 && s0 == e0) e0 = 0;
+    if (s0 == -1 || s0 >= explicit_tracks + 2) s0 = 0;
+    if (e0 == -1 || e0 >= explicit_tracks + 2) e0 = 0;
+    *out_start = s0;
+    *out_end = e0;
+    g_free(start_tok);
+    g_free(end_tok);
+}
+
+static gboolean
+grid_abs_containing_block(const ns_box *cb, const ns_style *st,
+                          double *x, double *y, double *w, double *h)
+{
+    if (!cb || !cb->grid_col_tracks || !cb->grid_row_tracks || !st)
+        return FALSE;
+    int cs, ce, rs, re;
+    const ns_css_value *cols_v = cb->style
+        ? cb->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS] : NULL;
+    const ns_css_value *rows_v = cb->style
+        ? cb->style->values[NS_CSS_GRID_TEMPLATE_ROWS] : NULL;
+    grid_lines col_lines = { cols_v && cols_v->kind == NS_CSS_V_TRACKS
+                             ? &cols_v->u.tracks : NULL, NULL, FALSE };
+    grid_lines row_lines = { rows_v && rows_v->kind == NS_CSS_V_TRACKS
+                             ? &rows_v->u.tracks : NULL, NULL, TRUE };
+    g_grid_lines = &col_lines;
+    grid_abs_axis_lines(st, FALSE, cb->grid_explicit_cols, &cs, &ce);
+    g_grid_lines = &row_lines;
+    grid_abs_axis_lines(st, TRUE, cb->grid_explicit_rows, &rs, &re);
+    g_grid_lines = NULL;
+    if (!cs && !ce && !rs && !re) return FALSE;
+    double pad_x0 = cb->x + cb->margin.left + cb->border.left;
+    double pad_y0 = cb->y + cb->margin.top + cb->border.top;
+    double pad_x1 = pad_x0 + cb->content_width + cb->padding.left + cb->padding.right;
+    double pad_y1 = pad_y0 + cb->content_height + cb->padding.top + cb->padding.bottom;
+    const GArray *ct = cb->grid_col_tracks, *rt = cb->grid_row_tracks;
+    double x0 = pad_x0, x1 = pad_x1, y0 = pad_y0, y1 = pad_y1;
+    if (cs && ct->len > 0) {
+        x0 = cs <= (int)ct->len
+            ? g_array_index(ct, ns_grid_track_edges, cs - 1).start
+            : g_array_index(ct, ns_grid_track_edges, ct->len - 1).end;
+    }
+    if (ce && ct->len > 0) {
+        x1 = ce >= 2
+            ? g_array_index(ct, ns_grid_track_edges, MIN(ce - 2, (int)ct->len - 1)).end
+            : g_array_index(ct, ns_grid_track_edges, 0).start;
+    }
+    if (rs && rt->len > 0) {
+        y0 = rs <= (int)rt->len
+            ? g_array_index(rt, ns_grid_track_edges, rs - 1).start
+            : g_array_index(rt, ns_grid_track_edges, rt->len - 1).end;
+    }
+    if (re && rt->len > 0) {
+        y1 = re >= 2
+            ? g_array_index(rt, ns_grid_track_edges, MIN(re - 2, (int)rt->len - 1)).end
+            : g_array_index(rt, ns_grid_track_edges, 0).start;
+    }
+    *x = x0;
+    *y = y0;
+    *w = MAX(x1 - x0, 0);
+    *h = MAX(y1 - y0, 0);
+    return TRUE;
+}
+
+static void
+position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
+                         double cb_w, double cb_h);
+
 static void
 position_absolute_box(ns_box *abox, ns_box *cb, gboolean cb_is_icb)
 {
     if (!abox || !cb) return;
-    const ns_style *s = abox->style;
     double cb_w = cb_is_icb ? ns_css_viewport_w()
                             : cb->content_width + cb->padding.left + cb->padding.right;
     double cb_h = cb_is_icb ? ns_css_viewport_h()
                             : cb->content_height + cb->padding.top + cb->padding.bottom;
     double cb_inner_x = cb->x + cb->margin.left + cb->border.left;
     double cb_inner_y = cb->y + cb->margin.top  + cb->border.top;
+    position_absolute_box_in(abox, cb_inner_x, cb_inner_y, cb_w, cb_h);
+}
+
+static void
+position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
+                         double cb_w, double cb_h)
+{
+    const ns_style *s = abox->style;
 
     const ns_css_value *lv = s ? s->values[NS_CSS_LEFT]   : NULL;
     const ns_css_value *rv = s ? s->values[NS_CSS_RIGHT]  : NULL;
@@ -12170,6 +12360,14 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                                  : (cb_pad_w > 0 ? cb_pad_w : viewport_width);
         double cb_h = cb_is_icb ? ns_css_viewport_h() : cb_pad_h;
         const ns_style *cs = cb->style;
+        double grid_x = 0, grid_y = 0, grid_w = 0, grid_h = 0;
+        gboolean grid_cb = !cb_is_icb && !e.pseudo &&
+            grid_abs_containing_block(cb, abox->style,
+                                      &grid_x, &grid_y, &grid_w, &grid_h);
+        if (grid_cb) {
+            avail = grid_w;
+            cb_h = grid_h;
+        }
         ns_abs_static *st = (g_abs_static && !e.pseudo)
             ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
         const ns_box *flex_parent = e.pseudo ? NULL
@@ -12230,6 +12428,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             double floor_w = measure_min_width(abox, cs);
             if (fit < floor_w) fit = floor_w;
             if (fit >= 0 && fit < avail) layout_box(abox, fit, cs);
+            else if (floor_w > avail) layout_box(abox, floor_w, cs);
         }
         if (has_explicit_height) {
             double explicit_h = resolve_height_with_basis(ahv, avail,
@@ -12286,7 +12485,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             if (static_y) abox->y = flex_y;
         }
         apply_position_offsets(abox, avail, cb_h);
-        position_absolute_box(abox, cb, cb_is_icb);
+        if (grid_cb)
+            position_absolute_box_in(abox, grid_x, grid_y, grid_w, grid_h);
+        else
+            position_absolute_box(abox, cb, cb_is_icb);
     }
     g_free(batch_y);
     g_free(batch_resolved);
