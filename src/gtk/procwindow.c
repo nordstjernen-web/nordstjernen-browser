@@ -1199,6 +1199,28 @@ act_console(GSimpleAction *a, GVariant *p, gpointer ud)
 }
 
 static void
+act_bookmark_page(GSimpleAction *a, GVariant *p, gpointer ud)
+{
+    (void)a;
+    (void)p;
+    ProcWindow *pw = ud;
+    NsProcView *v = current_view(pw);
+    if (!v || !pw->bookmarks)
+        return;
+    const char *url = ns_proc_view_url(v);
+    if (!url || !*url)
+        return;
+    if (ns_bookmarks_contains(pw->bookmarks, url)) {
+        ns_bookmarks_remove(pw->bookmarks, url);
+        pw_set_status(pw, ns_i18n("Bookmark removed"));
+    } else {
+        ns_bookmarks_add(pw->bookmarks, url, ns_proc_view_title(v));
+        pw_set_status(pw, ns_i18n("Bookmark added"));
+    }
+    update_bookmark_indicator(pw);
+}
+
+static void
 act_view_source(GSimpleAction *a, GVariant *p, gpointer ud)
 {
     (void)a;
@@ -1854,6 +1876,8 @@ install_shortcuts(ProcWindow *pw)
                    (const char *[]){ "<Ctrl><Shift>j", "F12", NULL });
     install_action(pw, "view-source", G_CALLBACK(act_view_source),
                    (const char *[]){ "<Ctrl>u", NULL });
+    install_action(pw, "bookmark-page", G_CALLBACK(act_bookmark_page),
+                   (const char *[]){ "<Ctrl>d", NULL });
     install_action(pw, "home", G_CALLBACK(act_home),
                    (const char *[]){ "<Alt>Home", NULL });
     install_action(pw, "new-tab", G_CALLBACK(act_new_tab),
@@ -2071,6 +2095,8 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(sec_view));
     g_object_unref(sec_view);
     GMenu *sec_page = g_menu_new();
+    menu_append_accel(sec_page, ns_i18n("Bookmark This Page"),
+                      "win.bookmark-page", "<Ctrl>d");
     menu_append_accel(sec_page, ns_i18n("History"), "win.history", NULL);
     menu_append_accel(sec_page, ns_i18n("Downloads"), "win.downloads", NULL);
     menu_append_accel(sec_page, ns_i18n("Print…"), "win.print", "<Ctrl>P");

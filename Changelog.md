@@ -12,6 +12,9 @@ Changelog:
 * Added view-source: — Ctrl+U / "Page Source" in the menu shows the current
   page's HTML with classic syntax highlighting. Only chrome-initiated
   navigations can use the scheme; web content is refused.
+* Ctrl+D bookmarks the current page, with a matching "Bookmark This Page"
+  menu entry, in the classic browser tradition.
+* about:book — every browser of the lineage carries its Book.
 * Updated the ns-pango subproject pin to the latest upstream commit.
 * Optimized event dispatch throughput by lazily evaluating composedPath()
   arrays on demand using active dispatch paths.

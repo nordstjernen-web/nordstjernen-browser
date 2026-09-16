@@ -4621,6 +4621,23 @@ synthesize_about_response(const char *url, const char *top_url,
         g_free(with_logo);
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
         g_free(body);
+    } else if (g_str_equal(what, "book")) {
+        const char *body =
+            "<!doctype html><html><head><meta charset=\"utf-8\">"
+            "<title>The Book of Nordstjernen</title><style>"
+            "body{background:#fff;color:#7a0000;margin:0;height:100vh;"
+            "display:flex;align-items:center;justify-content:center}"
+            "p{font-family:serif;font-style:italic;font-size:1.3em;"
+            "max-width:34em;text-align:center;padding:0 1em}"
+            "</style></head><body><p>"
+            "And when the great engines had grown vast beyond all reckoning, "
+            "a small light rose in the north, written by hand and beholden "
+            "to no one. It asked for nothing, reported to nowhere, and "
+            "carried the travellers over the wire by the old free roads."
+            "<br><br>from <strong>The Book of Nordstjernen,</strong> 1:1"
+            "</p></body></html>";
+        g_byte_array_append(resp->body, (const guint8 *)body,
+                            (guint)strlen(body));
     } else if (g_str_equal(what, "license") || g_str_equal(what, "licence")) {
         char *body = build_about_license();
         g_byte_array_append(resp->body, (const guint8 *)body, (guint)strlen(body));
