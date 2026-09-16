@@ -123,20 +123,20 @@ ns_wa_buffer_source(JSContext *ctx, JSValueConst node, uint32_t frames,
 {
     JSValue buf = JS_GetPropertyStr(ctx, node, "buffer");
     if (!JS_IsObject(buf)) { JS_FreeValue(ctx, buf); return; }
+    double ratio = ns_wa_param(ctx, node, "playbackRate", 1.0);
+    double brate = ns_wa_num(ctx, buf, "sampleRate", rate);
+    if (!(ratio > 0)) ratio = 1.0;
+    double step = ratio * (brate > 0 ? brate / rate : 1.0);
+    JSValue loop_v = JS_GetPropertyStr(ctx, node, "loop");
+    gboolean loop = JS_ToBool(ctx, loop_v);
+    JS_FreeValue(ctx, loop_v);
+    uint32_t first, last;
+    ns_wa_window(ctx, node, frames, rate, &first, &last);
     JSValue chans = JS_GetPropertyStr(ctx, buf, "_chans");
     JSValue ch0 = JS_GetPropertyUint32(ctx, chans, 0);
     uint32_t n = 0;
     const float *src = ns_wa_float32(ctx, ch0, &n);
     if (src && n) {
-        double ratio = ns_wa_param(ctx, node, "playbackRate", 1.0);
-        double brate = ns_wa_num(ctx, buf, "sampleRate", rate);
-        if (!(ratio > 0)) ratio = 1.0;
-        double step = ratio * (brate > 0 ? brate / rate : 1.0);
-        JSValue loop_v = JS_GetPropertyStr(ctx, node, "loop");
-        gboolean loop = JS_ToBool(ctx, loop_v);
-        JS_FreeValue(ctx, loop_v);
-        uint32_t first, last;
-        ns_wa_window(ctx, node, frames, rate, &first, &last);
         double pos = 0.0;
         for (uint32_t i = first; i < last; i++) {
             if (pos >= n) {
