@@ -746,8 +746,8 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
                        double clip_w, double clip_h,
                        corner_radii radii)
 {
-    double cx = border_x + gr->center_x * border_w;
-    double cy = border_y + gr->center_y * border_h;
+    double cx = border_x + gr->center_x * border_w + gr->center_x_px;
+    double cy = border_y + gr->center_y * border_h + gr->center_y_px;
     if (gr->conic && gr->n_stops > 0) {
         enum { CONIC_BASE = 24, CONIC_CAP = 96 };
         double bnd[CONIC_CAP];
@@ -802,23 +802,14 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         cairo_restore(cr);
     } else {
         cairo_pattern_t *pat;
-        double dxh = 0, dyh = 0, r_outer = 1, line_len;
+        double dxh = 0, dyh = 0, r_outer = 1, r_outer_y = 1, line_len;
         if (gr->radial) {
-            double corners[4][2] = {
-                { border_x, border_y },
-                { border_x + border_w, border_y },
-                { border_x, border_y + border_h },
-                { border_x + border_w, border_y + border_h },
-            };
-            r_outer = 1;
-            for (int k = 0; k < 4; k++) {
-                double ddx = corners[k][0] - cx, ddy = corners[k][1] - cy;
-                double dd = sqrt(ddx * ddx + ddy * ddy);
-                if (dd > r_outer) r_outer = dd;
-            }
+            ns_css_gradient_radii(gr, border_w, border_h, cx - border_x,
+                                  cy - border_y, &r_outer, &r_outer_y);
             line_len = r_outer;
         } else {
-            double rad = gr->angle_deg * G_PI / 180.0;
+            double rad = ns_css_gradient_angle(gr, border_w, border_h) *
+                         G_PI / 180.0;
             double dx = sin(rad), dy = -cos(rad);
             double half = (fabs(dx) * border_w + fabs(dy) * border_h) / 2.0;
             dxh = dx * half;
@@ -828,15 +819,16 @@ paint_bg_gradient_core(cairo_t *cr, const ns_css_gradient *gr,
         if (line_len <= 0) line_len = 1;
         double frac[NS_CSS_GRADIENT_STOPS_MAX];
         for (int i = 0; i < gr->n_stops; i++)
-            frac[i] = gr->stops[i].pos_is_px
-                ? gr->stops[i].pos / line_len : gr->stops[i].pos;
+            frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
         double period = (gr->repeating && gr->n_stops > 0)
             ? frac[gr->n_stops - 1] : 1.0;
         if (period <= 0) period = 1.0;
         if (gr->radial) {
-            double r_tile = r_outer * period;
-            if (r_tile <= 0) r_tile = 1;
-            pat = cairo_pattern_create_radial(cx, cy, 0, cx, cy, r_tile);
+            pat = cairo_pattern_create_radial(0, 0, 0, 0, 0, period);
+            cairo_matrix_t m;
+            cairo_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
+            cairo_matrix_translate(&m, -cx, -cy);
+            cairo_pattern_set_matrix(pat, &m);
         } else {
             double x0 = cx - dxh, y0 = cy - dyh;
             double x1 = cx + dxh, y1 = cy + dyh;
@@ -5421,22 +5413,14 @@ mask_gradient_pattern(const ns_css_gradient *gr,
                       double bx, double by, double bw, double bh)
 {
     if (!gr || gr->conic || gr->n_stops < 1) return NULL;
-    double cx = bx + gr->center_x * bw;
-    double cy = by + gr->center_y * bh;
-    double dxh = 0, dyh = 0, r_outer = 1, line_len;
+    double cx = bx + gr->center_x * bw + gr->center_x_px;
+    double cy = by + gr->center_y * bh + gr->center_y_px;
+    double dxh = 0, dyh = 0, r_outer = 1, r_outer_y = 1, line_len;
     if (gr->radial) {
-        double corners[4][2] = {
-            { bx, by }, { bx + bw, by }, { bx, by + bh }, { bx + bw, by + bh },
-        };
-        r_outer = 1;
-        for (int k = 0; k < 4; k++) {
-            double ddx = corners[k][0] - cx, ddy = corners[k][1] - cy;
-            double dd = sqrt(ddx * ddx + ddy * ddy);
-            if (dd > r_outer) r_outer = dd;
-        }
+        ns_css_gradient_radii(gr, bw, bh, cx - bx, cy - by, &r_outer, &r_outer_y);
         line_len = r_outer;
     } else {
-        double rad = gr->angle_deg * G_PI / 180.0;
+        double rad = ns_css_gradient_angle(gr, bw, bh) * G_PI / 180.0;
         double dx = sin(rad), dy = -cos(rad);
         double half = (fabs(dx) * bw + fabs(dy) * bh) / 2.0;
         dxh = dx * half; dyh = dy * half;
@@ -5445,15 +5429,16 @@ mask_gradient_pattern(const ns_css_gradient *gr,
     if (line_len <= 0) line_len = 1;
     double frac[NS_CSS_GRADIENT_STOPS_MAX];
     for (int i = 0; i < gr->n_stops; i++)
-        frac[i] = gr->stops[i].pos_is_px ? gr->stops[i].pos / line_len
-                                         : gr->stops[i].pos;
+        frac[i] = gr->stops[i].pos + gr->stops[i].pos_px / line_len;
     double period = (gr->repeating && gr->n_stops > 0) ? frac[gr->n_stops - 1] : 1.0;
     if (period <= 0) period = 1.0;
     cairo_pattern_t *pat;
     if (gr->radial) {
-        double r_tile = r_outer * period;
-        if (r_tile <= 0) r_tile = 1;
-        pat = cairo_pattern_create_radial(cx, cy, 0, cx, cy, r_tile);
+        pat = cairo_pattern_create_radial(0, 0, 0, 0, 0, period);
+        cairo_matrix_t m;
+        cairo_matrix_init_scale(&m, 1.0 / r_outer, 1.0 / r_outer_y);
+        cairo_matrix_translate(&m, -cx, -cy);
+        cairo_pattern_set_matrix(pat, &m);
     } else {
         double x0 = cx - dxh, y0 = cy - dyh;
         pat = cairo_pattern_create_linear(x0, y0,
