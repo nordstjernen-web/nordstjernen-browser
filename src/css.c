@@ -3023,6 +3023,11 @@ parse_font_size_token(const char *text, double *out_v, ns_css_unit *out_unit,
         *out_v = kw;
         *out_unit = NS_CSS_UNIT_PX;
         ok = TRUE;
+    } else if (g_ascii_strcasecmp(s, "larger") == 0 ||
+               g_ascii_strcasecmp(s, "smaller") == 0) {
+        *out_v = g_ascii_strcasecmp(s, "larger") == 0 ? 1.2 : 0.833333333333;
+        *out_unit = NS_CSS_UNIT_EM;
+        ok = TRUE;
     } else {
         ok = parse_length(s, out_v, out_unit) &&
              *out_unit != NS_CSS_UNIT_NUMBER && *out_v >= 0;
@@ -4563,6 +4568,136 @@ split_tracks_top(const char *text, gsize len, const char **starts, gsize *lens, 
         if (p < end && *p == ',') p++;
     }
     return n;
+}
+
+static gboolean
+font_family_ident_valid(const char *tok, gsize len)
+{
+    if (len == 0) return FALSE;
+    gsize i = 0;
+    if (tok[0] == '-') {
+        i = 1;
+        if (len == 1) return FALSE;
+        if (tok[1] == '-') i = 2;
+    }
+    if (i >= len) return FALSE;
+    unsigned char first = (unsigned char)tok[i];
+    if (!(g_ascii_isalpha(first) || first == '_' || first >= 0x80 || first == '\\'))
+        return FALSE;
+    for (gsize k = i; k < len; k++) {
+        unsigned char c = (unsigned char)tok[k];
+        if (c == '\\') { k++; continue; }
+        if (!(g_ascii_isalnum(c) || c == '-' || c == '_' || c >= 0x80))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+font_family_is_generic(const char *tok, gsize len)
+{
+    static const char *const generic[] = {
+        "serif", "sans-serif", "cursive", "fantasy", "monospace",
+        "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace",
+        "ui-rounded", "math", "emoji", "fangsong", "inherit", "initial",
+        "unset", "revert", "revert-layer", "default",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(generic); i++)
+        if (strlen(generic[i]) == len &&
+            g_ascii_strncasecmp(tok, generic[i], len) == 0)
+            return TRUE;
+    return FALSE;
+}
+
+char *
+ns_css_font_family_canonical(const char *text)
+{
+    if (!text) return NULL;
+    GString *out = g_string_new(NULL);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    gboolean any = FALSE;
+    while (p <= end) {
+        while (p < end && is_ws(*p)) p++;
+        const char *item_start = p;
+        char term = 0;
+        const char *item_end = css_scan_until(p, end, ",", &term);
+        gsize ilen = (gsize)(item_end - item_start);
+        while (ilen > 0 && is_ws(item_start[ilen - 1])) ilen--;
+        if (ilen == 0) { g_string_free(out, TRUE); return NULL; }
+        if (any) g_string_append(out, ", ");
+        any = TRUE;
+        if (item_start[0] == '"' || item_start[0] == '\'') {
+            char q = item_start[0];
+            if (ilen < 2 || item_start[ilen - 1] != q) {
+                g_string_free(out, TRUE);
+                return NULL;
+            }
+            const char *body = item_start + 1;
+            gsize blen = ilen - 2;
+            gboolean ident_like = blen > 0 && !is_ws(body[0]) &&
+                                  !is_ws(body[blen - 1]) &&
+                                  !memchr(body, '\\', blen);
+            if (ident_like) {
+                const char *w = body, *wend = body + blen;
+                while (w < wend && ident_like) {
+                    const char *tok = w;
+                    while (w < wend && !is_ws(*w)) w++;
+                    gsize tlen = (gsize)(w - tok);
+                    if (!font_family_ident_valid(tok, tlen) ||
+                        font_family_is_generic(tok, tlen))
+                        ident_like = FALSE;
+                    if (w < wend && (w + 1 >= wend || is_ws(w[1])))
+                        ident_like = FALSE;
+                    w++;
+                }
+            }
+            if (ident_like) {
+                g_string_append_len(out, body, (gssize)blen);
+            } else {
+                g_string_append_c(out, '"');
+                for (gsize k = 0; k < blen; k++) {
+                    char c = body[k];
+                    if (c == '\\' && k + 1 < blen) {
+                        g_string_append_c(out, c);
+                        g_string_append_c(out, body[++k]);
+                        continue;
+                    }
+                    if (c == '"') g_string_append_c(out, '\\');
+                    g_string_append_c(out, c);
+                }
+                g_string_append_c(out, '"');
+            }
+        } else {
+            const char *q = item_start, *qend = item_start + ilen;
+            gboolean first = TRUE;
+            while (q < qend) {
+                while (q < qend && is_ws(*q)) q++;
+                const char *tok = q;
+                while (q < qend && !is_ws(*q)) q++;
+                gsize tlen = (gsize)(q - tok);
+                if (tlen == 0) break;
+                if (!font_family_ident_valid(tok, tlen)) {
+                    g_string_free(out, TRUE);
+                    return NULL;
+                }
+                if (!first) g_string_append_c(out, ' ');
+                if (first && q >= qend && font_family_is_generic(tok, tlen)) {
+                    char *lower = g_ascii_strdown(tok, (gssize)tlen);
+                    g_string_append(out, lower);
+                    g_free(lower);
+                } else {
+                    g_string_append_len(out, tok, (gssize)tlen);
+                }
+                first = FALSE;
+            }
+        }
+        if (term != ',') break;
+        p = item_end + 1;
+        if (p >= end) { g_string_free(out, TRUE); return NULL; }
+    }
+    if (!any) { g_string_free(out, TRUE); return NULL; }
+    return g_string_free(out, FALSE);
 }
 
 static gboolean
@@ -8853,9 +8988,11 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_FONT_FAMILY: {
+        char *canon = ns_css_font_family_canonical(t);
+        if (!canon) break;
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
-        v->u.keyword = g_strstrip(g_strdup(t));
+        v->u.keyword = canon;
         break;
     }
     default: {
@@ -9723,9 +9860,15 @@ parse_declaration_block(const char **pp, const char *end,
         char *name = read_css_ident(&p, end);
         if (!name || !*name) {
             g_free(name);
+            const char *before = p;
             char term = 0;
             const char *skip_to = css_scan_segment(p, end, &term);
-            p = term == ';' ? skip_to + 1 : skip_to;
+            if (term == '{') {
+                p = css_skip_to_block_end(skip_to, end);
+            } else {
+                p = term == ';' ? skip_to + 1 : skip_to;
+            }
+            if (p <= before) p = before + 1;
             continue;
         }
         char *pname;
@@ -16272,11 +16415,12 @@ css_inline_value_canonical(const char *prop, char *value)
         value[0] == '\'' && value[len - 1] == '\'') {
         value[0] = '"';
         value[len - 1] = '"';
-    } else if (strcmp(prop, "font-family") == 0 && len >= 2 &&
-               ((value[0] == '\'' && value[len - 1] == '\'') ||
-                (value[0] == '"' && value[len - 1] == '"'))) {
-        memmove(value, value + 1, len - 2);
-        value[len - 2] = '\0';
+    } else if (strcmp(prop, "font-family") == 0) {
+        char *canon = ns_css_font_family_canonical(value);
+        if (canon) {
+            g_free(value);
+            value = canon;
+        }
     } else if (strcmp(prop, "content") == 0) {
         GRegex *counter = g_regex_new(
             "counter\\(([-_a-zA-Z0-9]+),[ \\t]*decimal\\)", 0, 0, NULL);
@@ -16323,6 +16467,16 @@ inline_property_is_all_covered(const char *name)
            ns_css_named_property_supported(name);
 }
 
+static const char *
+inline_skip_at_rule(const char *p, const char *end)
+{
+    char term = 0;
+    const char *stop = css_scan_segment(p, end, &term);
+    if (term == '{') return css_skip_to_block_end(stop, end);
+    if (term == ';') return stop + 1;
+    return stop > p ? stop : p + 1;
+}
+
 static char *
 inline_all_value_for(const char *style, const char *prefix)
 {
@@ -16334,6 +16488,10 @@ inline_all_value_for(const char *style, const char *prefix)
         p = css_skip_ws_comments(p, end);
         while (p < end && *p == ';') p = css_skip_ws_comments(p + 1, end);
         if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
         char term = 0;
         const char *kend = css_scan_until(p, end, ":;", &term);
         char *name = css_trim_dup_range(p, kend);
@@ -16563,6 +16721,10 @@ ns_inline_style_get(const char *style, const char *prop)
             p = css_skip_ws_comments(p, end);
         }
         if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
         const char *kstart = p;
         char term = 0;
         const char *kend = css_scan_until(p, end, ":;", &term);
@@ -16654,6 +16816,10 @@ ns_inline_style_serialize(const char *style)
             p = css_skip_ws_comments(p, end);
         }
         if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
         const char *kstart = p;
         char term = 0;
         const char *kend = css_scan_until(p, end, ":;", &term);
@@ -16906,6 +17072,54 @@ ns_inline_value_strip_important(char *value)
     return important;
 }
 
+static gboolean
+inline_shorthand_follows(const char *style, const char *prop, int prop_id)
+{
+    if (!style || !*style) return FALSE;
+    const char *p = style;
+    const char *end = p + strlen(p);
+    gboolean seen_prop = FALSE;
+    while (p < end) {
+        p = css_skip_ws_comments(p, end);
+        while (p < end && *p == ';') {
+            p++;
+            p = css_skip_ws_comments(p, end);
+        }
+        if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
+        char term = 0;
+        const char *kend = css_scan_until(p, end, ":;", &term);
+        char *key = css_trim_dup_range(p, kend);
+        if (term != ':') {
+            g_free(key);
+            p = term == ';' ? kend + 1 : kend;
+            continue;
+        }
+        p = css_skip_ws_comments(kend + 1, end);
+        const char *vend = css_scan_declaration_value(p, end, &term);
+        if (g_ascii_strcasecmp(key, prop) == 0) {
+            seen_prop = TRUE;
+        } else if (seen_prop && ns_css_prop_id(key) < 0) {
+            char *value = css_trim_dup_range(p, vend);
+            gboolean important = FALSE;
+            char *expanded = inline_expanded_value(key, value, prop_id,
+                                                   &important);
+            g_free(value);
+            if (expanded) {
+                g_free(expanded);
+                g_free(key);
+                return TRUE;
+            }
+        }
+        g_free(key);
+        p = term == ';' ? vend + 1 : vend;
+    }
+    return FALSE;
+}
+
 char *
 ns_inline_style_set(const char *style, const char *prop, const char *value)
 {
@@ -16923,6 +17137,9 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         ? inline_all_value(style) : NULL;
     gboolean append_after_all = active_all != NULL;
     g_free(active_all);
+    int set_prop_id = ns_css_prop_id(prop);
+    gboolean append_after_shorthand = set_prop_id >= 0 &&
+        inline_shorthand_follows(style, prop, set_prop_id);
     gsize plen = prop ? strlen(prop) : 0;
     const char *p = style ? style : "";
     const char *end = p + strlen(p);
@@ -16933,6 +17150,10 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
             p = css_skip_ws_comments(p, end);
         }
         if (p >= end) break;
+        if (*p == '@') {
+            p = inline_skip_at_rule(p, end);
+            continue;
+        }
         const char *kstart = p;
         char term = 0;
         const char *kend = css_scan_until(p, end, ":;", &term);
@@ -16960,7 +17181,7 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
             p = term == ';' ? vend + 1 : vend;
             continue;
         }
-        if (append_after_all && match) {
+        if ((append_after_all || append_after_shorthand) && match) {
             found = TRUE;
             g_free(key);
             g_free(old_value);
@@ -16990,7 +17211,8 @@ ns_inline_style_set(const char *style, const char *prop, const char *value)
         g_free(old_value);
         p = term == ';' ? vend + 1 : vend;
     }
-    if ((set_all || append_after_all || !found) && value && *value) {
+    if ((set_all || append_after_all || append_after_shorthand || !found) &&
+        value && *value) {
         if (out->len > 0) g_string_append(out, "; ");
         g_string_append(out, prop);
         g_string_append(out, ": ");

@@ -40,6 +40,65 @@ Changelog:
   unsafe prefixes.
 * WPT css/css-flexbox: 1465 -> 1997 of 3670 subtests on a 2026-09
   checkout of the horizontal-writing-mode suites.
+* An absolutely positioned box whose containing block is a grid
+  container takes that block from its grid-column and grid-row lines,
+  as css-grid-1 §9 requires: a line inside the explicit grid resolves to
+  the edge of the adjacent track, a line outside it, an unknown name or
+  a span resolves to the padding edge after the start/end swap, and
+  offsets, percentages and shrink-to-fit sizes resolve against that
+  area. A shrink-to-fit abspos box no longer squeezes below its
+  min-content width when the area is narrower than its content.
+* align-content: stretch on a grid container distributes free block
+  space only to rows whose max track size is auto; fixed-length rows
+  kept their length.
+* An absolutely positioned element with an inline-level display that
+  follows inline content takes its static position from the line it
+  would have occupied, after the preceding text, instead of the top of
+  the block.
+* document.fonts.ready waits for the web fonts the page needs: it
+  flushes style so pending @font-face loads are requested, resolves
+  once the loader is idle and marks the document for relayout;
+  fonts.status reports loading meanwhile.
+* Alignment properties keep their full specified keyword: safe and
+  unsafe prefixes, legacy left/center/right, first baseline (computed
+  as baseline) and last baseline parse and serialize, and the
+  place-self, place-items and place-content shorthands split two-word
+  values and serialize a repeated value once.
+* offsetTop/offsetLeft flush pending layout before locating the offset
+  parent, so a first read during parsing no longer returns viewport
+  coordinates.
+* Grid containers with direction: rtl lay their columns out from the
+  right, and grid-placed absolutely positioned boxes mirror with them.
+* repeat(auto-fit, ...) collapses the repeated tracks that no in-flow
+  item occupies, so a card grid with fewer cards than columns stretches
+  the remaining fr tracks as browsers do.
+* A grid item's percentage height resolves against its grid area when
+  the rows it spans have definite track sizes, and an absolutely
+  positioned child of a grid container with auto offsets takes its
+  static position from its grid area, aligned by justify-self and
+  align-self.
+* getComputedStyle on a grid container returns the used track sizes for
+  grid-template-columns and grid-template-rows, with explicit line names
+  in place, as CSSOM requires.
+* Track lists resolve em against the element's own font size and calc()
+  percentages against the track axis; an auto track grows to its
+  max-content contribution before fr tracks share the remainder, fr rows
+  fill a definite container height, over-constrained minmax() rows
+  shrink toward their minimum, percentage rows in an indefinite-height
+  grid re-resolve against the final height, and an auto column measures
+  its content with real text metrics.
+* The grid track-list parser rejects negative sizes, stray commas,
+  consecutive or trailing-only line-name lists, reserved words as line
+  names, a second auto-repeat and non-fixed tracks beside one, and
+  supports line names inside repeat().
+* JavaScript can be turned off: an "Enable JavaScript" toggle in
+  Settings parses pages with scripting disabled (so noscript content
+  renders) and skips script execution entirely — the user decides what
+  runs, in the old Mozilla tradition.
+* about:mozilla shows the maroon page every browser of this lineage
+  owes its readers, and about:config opens the settings page.
+* The status bar reads "Done" for a moment when a page finishes
+  loading, as it always did.
 * Fixed a use-after-free of the session URL: timer, event-dispatch and
   requestAnimationFrame callbacks saved the current URL pointer and restored
   it unconditionally after the callback, so a handler that navigated (a

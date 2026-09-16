@@ -6720,6 +6720,14 @@ layout_image(ns_box *box, double parent_content_width)
         if (svg_size.has_ratio && svg_size.ratio > 0)
             intrinsic_ratio = svg_size.ratio;
     }
+    {
+        const ns_css_value *arv = box->style
+            ? box->style->values[NS_CSS_ASPECT_RATIO] : NULL;
+        if (arv && arv->kind == NS_CSS_V_LENGTH &&
+            arv->u.length.unit == NS_CSS_UNIT_NUMBER && arv->u.length.v > 0 &&
+            !(w < 0 && h < 0 && nat_w > 0 && nat_h > 0))
+            intrinsic_ratio = arv->u.length.v;
+    }
     if (box->media)
         box->media->size_independent_of_image =
             (w >= 0 && h >= 0) || declared_size || placeholder_size;
@@ -9382,12 +9390,13 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
         double fixed = 0;
         switch (t->kind) {
         case NS_CSS_TRACK_PX:
-            fixed = t->v + t->pct * available_main / 100.0;
-            fixed_px[i] = fixed;
-            total_fixed += fixed;
-            break;
         case NS_CSS_TRACK_PERCENT:
-            fixed = t->v * available_main / 100.0;
+            fixed = t->kind == NS_CSS_TRACK_PX
+                ? t->v + t->pct * available_main / 100.0
+                : t->v * available_main / 100.0;
+            if (t->has_min && track_is_intrinsic(t->min_kind) &&
+                content_min && content_min[i] > fixed)
+                fixed = content_min[i];
             fixed_px[i] = fixed;
             total_fixed += fixed;
             break;
@@ -10476,7 +10485,10 @@ layout_grid(ns_box *box, double cw,
     double col_min[NS_CSS_TRACKS_MAX] = {0};
     gboolean any_auto_content = FALSE;
     for (int t = 0; t < n_cols; t++) {
-        if (!track_is_intrinsic(cols->tracks[t].kind)) continue;
+        if (!track_is_intrinsic(cols->tracks[t].kind) &&
+            !(cols->tracks[t].has_min &&
+              track_is_intrinsic(cols->tracks[t].min_kind)))
+            continue;
         for (guint k = 0; k < items->len; k++) {
             int item_col = k < placed_cols->len
                 ? g_array_index(placed_cols, int, k) : -1;
@@ -10665,12 +10677,22 @@ layout_grid(ns_box *box, double cw,
             double free_w = cw_for_item - used_w;
             double dx = 0;
             if (free_w > 0) {
+                gboolean item_rtl = c->style &&
+                    ns_css_keyword_is(c->style->values[NS_CSS_DIRECTION], "rtl");
+                gboolean at_right = FALSE;
                 if (strcmp(j_eff, "center") == 0)
                     dx = free_w / 2.0;
-                else if (strcmp(j_eff, "end") == 0 ||
-                         strcmp(j_eff, "right") == 0 ||
-                         strcmp(j_eff, "flex-end") == 0)
-                    dx = free_w;
+                else if (strcmp(j_eff, "end") == 0 || strcmp(j_eff, "flex-end") == 0)
+                    at_right = !grid_rtl;
+                else if (strcmp(j_eff, "start") == 0 || strcmp(j_eff, "flex-start") == 0)
+                    at_right = grid_rtl;
+                else if (strcmp(j_eff, "self-end") == 0)
+                    at_right = !item_rtl;
+                else if (strcmp(j_eff, "self-start") == 0)
+                    at_right = item_rtl;
+                else if (strcmp(j_eff, "right") == 0)
+                    at_right = TRUE;
+                if (at_right) dx = free_w;
             }
             if (dx != 0) shift_box_tree(c, dx, 0);
         }
@@ -10927,7 +10949,9 @@ layout_grid(ns_box *box, double cw,
         } else if (free_h > 0.5 && strcmp(a_eff, "center") == 0) {
             dy_align = free_h / 2.0;
         } else if (free_h > 0.5 && (strcmp(a_eff, "end") == 0 ||
-                                    strcmp(a_eff, "flex-end") == 0)) {
+                                    strcmp(a_eff, "flex-end") == 0 ||
+                                    strcmp(a_eff, "self-end") == 0 ||
+                                    strcmp(a_eff, "last baseline") == 0)) {
             dy_align = free_h;
         }
         grid_row *gr = &g_array_index(grid_rows, grid_row, r);
@@ -11014,6 +11038,25 @@ text_input_intrinsic_width(const ns_box *box)
     double font_size = length_or(box->style
         ? box->style->values[NS_CSS_FONT_SIZE] : NULL, 16);
     return size * font_size * 0.75;
+}
+
+static double
+intrinsic_keyword_width(ns_box *box, const char *kw, const ns_style *mi,
+                        double avail)
+{
+    if (!kw) return -1;
+    if (avail < 0) avail = 0;
+    if (strcmp(kw, "min-content") == 0)
+        return measure_min_width(box, mi);
+    if (strcmp(kw, "max-content") == 0)
+        return measure_natural_width(box, mi);
+    if (strcmp(kw, "fit-content") == 0) {
+        double mn = measure_min_width(box, mi);
+        double mx = measure_natural_width(box, mi);
+        double w = mx < avail ? mx : avail;
+        return w < mn ? mn : w;
+    }
+    return -1;
 }
 
 static void
@@ -11120,11 +11163,23 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         if (cw < 0) cw = 0;
     }
     double max_cw = length_resolve(mxw, pct_width_base, -1);
+    if (max_cw < 0 && mxw && mxw->kind == NS_CSS_V_KEYWORD) {
+        max_cw = intrinsic_keyword_width(box, mxw->u.keyword,
+                                         inherited_style ? inherited_style : box->style,
+                                         parent_content_width - horiz_total);
+        if (max_cw >= 0 && border_box) max_cw += horiz_extras;
+    }
     if (max_cw >= 0) {
         if (border_box) max_cw -= horiz_extras;
         if (max_cw >= 0 && cw > max_cw) { cw = max_cw; explicit_width = TRUE; }
     }
     double min_cw = length_resolve(mnw, pct_width_base, -1);
+    if (min_cw < 0 && mnw && mnw->kind == NS_CSS_V_KEYWORD) {
+        min_cw = intrinsic_keyword_width(box, mnw->u.keyword,
+                                         inherited_style ? inherited_style : box->style,
+                                         parent_content_width - horiz_total);
+        if (min_cw >= 0 && border_box) min_cw += horiz_extras;
+    }
     if (min_cw >= 0) {
         if (border_box) min_cw -= horiz_extras;
         if (min_cw >= 0 && cw < min_cw) { cw = min_cw; explicit_width = TRUE; }
