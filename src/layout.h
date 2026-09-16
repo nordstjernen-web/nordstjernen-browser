@@ -139,6 +139,7 @@ typedef struct ns_box {
     double first_baseline;
     double definite_height;
     double measured_content_height;
+    double cb_height_override;
     double flex_main_size;
     gboolean has_flex_main;
     double paint_top, paint_bottom;
