@@ -1345,8 +1345,10 @@ ns_timer_fire(gpointer data)
     }
     JS_FreeValue(callback_ctx, ret);
     ns_drain_mutations(js);
-    if (timer_frame) g_free(js->current_url);
-    js->current_url = previous_url;
+    if (timer_frame) {
+        g_free(js->current_url);
+        js->current_url = previous_url;
+    }
     js->raf_frame_ctx = previous_frame;
     js->current_doc = previous_doc;
     js->ctx = previous_ctx;
@@ -26312,8 +26314,10 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
         ns_storage_schedule_flush(js);
     }
     ns_js_budget_pop(js, &bg);
-    if (target_frame) g_free(js->current_url);
-    js->current_url = saved_url;
+    if (target_frame) {
+        g_free(js->current_url);
+        js->current_url = saved_url;
+    }
     js->raf_frame_ctx = saved_frame;
     js->current_doc = saved_doc;
     js->ctx = saved_ctx;
@@ -26620,8 +26624,10 @@ ns_js_run_animation_frame(ns_js *js)
         JS_FreeValue(callback_ctx, arg);
         JS_FreeValue(callback_ctx, e->cb);
         ns_drain_microtasks(js);
-        if (e->frame) g_free(js->current_url);
-        js->current_url = previous_url;
+        if (e->frame) {
+            g_free(js->current_url);
+            js->current_url = previous_url;
+        }
         js->raf_frame_ctx = previous_frame;
         js->current_doc = previous_doc;
         js->ctx = previous_ctx;
