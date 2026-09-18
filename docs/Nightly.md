@@ -10,9 +10,13 @@ recipe around them.
 
 One run of `scripts/nightly.sh` writes straight into `$NIGHTLY_ROOT`
 (default `/var/www/html/nightly`, so the artifacts are served from the
-web server's document root). There is no per-date directory — each run
-clears the previous one and overwrites it, so the directory always holds
-exactly the latest build. It contains:
+web server's document root). There is no per-date directory — each stage
+builds into a scratch directory and replaces its published directory
+(`source/`, `linux/<distro>/`, `windows/`, …) only once it holds
+artifacts, so a stage that fails leaves the previous night's files in
+place, with the failed `build.log` beside them, and the stable links
+below keep resolving. `MANIFEST.txt` records the failure and that those
+files are stale. The root contains:
 
 | Artifact | Built by | Where |
 | --- | --- | --- |
@@ -46,7 +50,10 @@ file sizes), and `nightly.log`.
 
 The artifact filenames embed the build version, but each run also drops
 version-less symlinks beside them, so these URLs always resolve to the
-current build (a platform that didn't build simply has no link):
+newest successful build of that platform. A link is removed only when
+nothing is left to point it at, which is a platform that has never
+built. The portable Linux zip is taken from the Ubuntu build and falls
+back to the Debian and then the openSUSE build:
 
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip`
 - `https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.exe`

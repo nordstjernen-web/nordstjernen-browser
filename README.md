@@ -53,7 +53,15 @@ for the GPL-licensed sibling project.
 | Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |
 
 These are nightly builds, rebuilt from `main` each night — bleeding edge,
-expect rough edges. Versioned source is on the
+expect rough edges. Every link above points at the newest build of that
+platform that succeeded: when a night's build of one platform fails, its
+link keeps serving the previous night's file, and a link only goes
+missing while that platform has never built. The
+[manifest](https://www.nordstjernen.org/nightly/MANIFEST.txt) shows each
+platform's build status and which files are stale, and the
+[directory listing](https://www.nordstjernen.org/nightly/) shows what is
+actually there — the Debian and Ubuntu packages and the portable Linux
+zip live under `linux/`. Versioned source is on the
 [release tags](https://github.com/nordstjernen-web/nordstjernen-browser/tags).
 [Checksums](https://www.nordstjernen.org/nightly/SHA256SUMS) ·
 [all nightly files](https://www.nordstjernen.org/nightly/)

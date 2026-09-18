@@ -3,6 +3,16 @@ Changelog:
 
 1.0.25:
 ======
+* The nightly download links no longer 404 when one platform's build
+  fails: scripts/nightly.sh publishes a stage's directory only once it
+  holds artifacts and otherwise keeps the previous night's files, a
+  container that fails after pack-linux.sh still ships its portable zip,
+  the Linux zip link falls back from the Ubuntu build to the Debian or
+  openSUSE one, dangling stable links are removed instead of left to
+  404, and MANIFEST.txt records why a stage failed and that its files
+  are stale.
+* The .deb no longer bundles the dynamic loader: pack-deb.sh's core
+  runtime deny list matched ld-linux only when a dot followed the name.
 
 1.0.24:
 ======
