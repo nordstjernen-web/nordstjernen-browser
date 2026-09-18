@@ -39,38 +39,13 @@ for the GPL-licensed sibling project.
 
 | Platform | Download |
 |----------|----------|
-| Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) - [`nordstjernen-windows-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.zip) - [`nordstjernen-windows-x86_64.msix`](https://www.nordstjernen.org/nightly/nordstjernen-windows-x86_64.msix)  |
-| macOS (Apple Silicon) | [`nordstjernen-macos.dmg`](https://www.nordstjernen.org/nightly/nordstjernen-macos.dmg) — see [first-launch note](docs/macOS.md) |
+| Windows | [Windows store](https://apps.microsoft.com/detail/9nw8t7w5z4pl) |
 | Android | [Google Play](https://play.google.com/store/apps/details?id=org.nordstjernen.WebBrowser) |
-| Debian | [`nordstjernen-debian-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-debian-amd64.deb) |
-| Ubuntu | [`nordstjernen-ubuntu-amd64.deb`](https://www.nordstjernen.org/nightly/nordstjernen-ubuntu-amd64.deb) |
-| openSUSE | [`nordstjernen-opensuse-x86_64.rpm`](https://www.nordstjernen.org/nightly/nordstjernen-opensuse-x86_64.rpm) |
-| Linux (portable GTK+) | [`nordstjernen-linux-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-linux-x86_64.zip) |
-| Alpine (musl) | [`nordstjernen-alpine-x86_64.apk`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.apk) (`apk add`) · [`.zip`](https://www.nordstjernen.org/nightly/nordstjernen-alpine-x86_64.zip) (portable) |
-| FreeBSD (portable) | [`nordstjernen-freebsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-freebsd-x86_64.zip) |
-| NetBSD (portable) | [`nordstjernen-netbsd-x86_64.zip`](https://www.nordstjernen.org/nightly/nordstjernen-netbsd-x86_64.zip) |
-| Java browser + API (JDK 21) | [`nordstjernen-java.jar`](https://www.nordstjernen.org/nightly/nordstjernen-java.jar) (runnable fat jar: `java -jar`) · [sources](https://www.nordstjernen.org/nightly/nordstjernen-java-sources.jar) · [javadoc](https://www.nordstjernen.org/nightly/nordstjernen-java-javadoc.jar) · [API docs](https://www.nordstjernen.org/nightly/java/apidocs/) |
-| Source | [`nordstjernen-src.tar.xz`](https://www.nordstjernen.org/nightly/nordstjernen-src.tar.xz) |
+| Source | [release tags](https://github.com/nordstjernen-web/nordstjernen-browser/tags) |
 
-These are nightly builds, rebuilt from `main` each night — bleeding edge,
-expect rough edges. Every link above points at the newest build of that
-platform that succeeded: when a night's build of one platform fails, its
-link keeps serving the previous night's file, and a link only goes
-missing while that platform has never built. The
-[manifest](https://www.nordstjernen.org/nightly/MANIFEST.txt) shows each
-platform's build status and which files are stale, and the
-[directory listing](https://www.nordstjernen.org/nightly/) shows what is
-actually there — the Debian and Ubuntu packages and the portable Linux
-zip live under `linux/`. Versioned source is on the
-[release tags](https://github.com/nordstjernen-web/nordstjernen-browser/tags).
-[Checksums](https://www.nordstjernen.org/nightly/SHA256SUMS) ·
-[all nightly files](https://www.nordstjernen.org/nightly/)
-
-The macOS `.dmg` is Apple Silicon (M1 or newer, macOS 11+) and unsigned, so
-clear the download quarantine once:
-`xattr -dr com.apple.quarantine /Applications/Nordstjernen.app` — details in
-[docs/macOS.md](docs/macOS.md). Windows 10 or later is required (the GTK 4
-frontend links DirectComposition). Per-platform install notes live in
+Windows 10 or later is required (the GTK 4 frontend links
+DirectComposition). Every other platform builds from source — see
+"Build" below and the per-platform install notes in
 [docs/](docs/README.md).
 
 ## Browser features
@@ -138,7 +113,7 @@ frontend links DirectComposition). Per-platform install notes live in
 - **Java/JVM** — `org.nordstjernen.Nordstjernen` drives fetch / parse / layout
   / script / render from Java over a JNI bridge, or `RemoteBrowser` /
   `RemotePage` drive a separate renderer process so an engine crash can't take
-  down the JVM. The nightly fat jar is both the embedding library and a
+  down the JVM. The fat jar is both the embedding library and a
   standalone Swing browser (`java -jar nordstjernen-java.jar <url>`). See
   [java/README.md](java/README.md).
 

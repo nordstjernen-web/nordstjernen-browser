@@ -11,6 +11,9 @@ Changelog:
   openSUSE one, dangling stable links are removed instead of left to
   404, and MANIFEST.txt records why a stage failed and that its files
   are stale.
+* The README's download table lists the Windows Store and Google Play
+  listings and the source release tags; the nightly build links are
+  gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
 
