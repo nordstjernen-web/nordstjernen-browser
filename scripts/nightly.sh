@@ -63,6 +63,10 @@ The Windows/macOS GitHub Actions runs are dispatched before the local
 container builds start, so the remote builds proceed while the containers
 compile; their artifacts are collected afterwards.
 
+A stage replaces its published directory only once it has produced
+artifacts; a stage that fails keeps the previous run's files (and the
+stable download links to them) and the manifest says so.
+
 Before building, the script fast-forwards its own checkout to
 origin/\$NIGHTLY_PULL_BRANCH (default main) and re-runs itself if that
 moved nightly.sh, so a plain cron invocation always builds the latest
@@ -129,11 +133,9 @@ NVERSION="${MESON_VERSION}+nightly.${DATESTAMP}.g${COMMIT}"
 OUTDIR="$NIGHTLY_ROOT"
 WORK=$(mktemp -d)
 STATUSDIR="$WORK/status"
-mkdir -p "$OUTDIR" "$STATUSDIR"
-rm -rf "$OUTDIR/source" "$OUTDIR/linux" "$OUTDIR/windows" "$OUTDIR/macos" "$OUTDIR/java" \
-       "$OUTDIR/freebsd" "$OUTDIR/netbsd"
-rm -f "$OUTDIR"/SHA256SUMS "$OUTDIR"/MANIFEST.txt "$OUTDIR"/nightly.log \
-      "$OUTDIR"/nordstjernen-*
+STAGEOUT="$WORK/out"
+mkdir -p "$OUTDIR" "$STATUSDIR" "$STAGEOUT"
+rm -f "$OUTDIR"/SHA256SUMS "$OUTDIR"/MANIFEST.txt "$OUTDIR"/nightly.log
 LOG="$OUTDIR/nightly.log"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -143,6 +145,33 @@ exec > >(tee -a "$LOG") 2>&1
 # in-memory array so that background (parallel) stages report their outcome
 # back to this process. Each file holds a tab-separated "<state>\t<message>".
 set_status() { printf '%s\t%s\n' "$2" "${3:-}" > "$STATUSDIR/$1"; }
+
+# Every stage builds into its own directory under $STAGEOUT and publishes it
+# into $OUTDIR only once it holds at least one artifact. A stage that produced
+# nothing leaves last night's published artifacts in place (with the new
+# build.log beside them, so the failure is visible), because a stable download
+# link that keeps serving yesterday's build beats one that 404s until someone
+# notices. The manifest records which stages are stale.
+has_artifacts() { [ -n "$(find "$1" -type f ! -name build.log 2>/dev/null | head -n 1)" ]; }
+publish_stage() {
+    local src="$1" dst="$2"
+    if has_artifacts "$src"; then
+        rm -rf "$dst"
+        mkdir -p "$(dirname "$dst")"
+        mv "$src" "$dst"
+        return 0
+    fi
+    if has_artifacts "$dst"; then
+        [ -f "$src/build.log" ] && cp "$src/build.log" "$dst/build.log"
+        printf 'keeping previous artifacts in %s\n' "$dst"
+        rm -rf "$src"
+        return 1
+    fi
+    rm -rf "$dst"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+    return 1
+}
 
 log()  { printf '\n=== %s ===\n' "$*"; }
 ok()   { set_status "$1" ok;      printf '[ ok ]   %s\n' "$1"; }
@@ -188,16 +217,22 @@ archive_to() {
 
 stage_tarball() {
     log "Stage: source tarball"
-    local dst="$OUTDIR/source"
+    local dst="$STAGEOUT/source"
     mkdir -p "$dst"
     local base="nordstjernen-${NVERSION}"
     if git archive --format=tar --prefix="${base}/" "$NIGHTLY_REF" \
            | gzip -9 > "$dst/${base}.tar.gz" \
        && git archive --format=tar --prefix="${base}/" "$NIGHTLY_REF" \
            | xz -9 > "$dst/${base}.tar.xz"; then
+        publish_stage "$dst" "$OUTDIR/source"
         ok "source-tarball"
     else
-        fail "source-tarball" "git archive failed"
+        rm -f "$dst/${base}.tar.gz" "$dst/${base}.tar.xz"
+        if publish_stage "$dst" "$OUTDIR/source"; then
+            fail "source-tarball" "git archive failed"
+        else
+            fail "source-tarball" "git archive failed; previous tarball kept"
+        fi
     fi
 }
 
@@ -212,7 +247,7 @@ stage_distro() {
     mkdir -p "$src"
     archive_to "$src"
     local tree="$src/nordstjernen-${NVERSION}"
-    local dst="$OUTDIR/linux/$distro"
+    local dst="$STAGEOUT/linux/$distro"
     mkdir -p "$dst"
     local -a dargs=( --rm -v "$tree:/build:z" -w /build
         -e "VERSION=$version" -e "NS_BUILD_DATE=$DATE" )
@@ -222,17 +257,34 @@ stage_distro() {
     # force it on/off (NS_WEBGPU) or pin a different wgpu-native release.
     [ -n "${NS_WEBGPU:-}" ] && dargs+=( -e "NS_WEBGPU=$NS_WEBGPU" )
     [ -n "${WGPU_NATIVE_VERSION:-}" ] && dargs+=( -e "WGPU_NATIVE_VERSION=$WGPU_NATIVE_VERSION" )
+    local built=0
     if $DOCKER run "${dargs[@]}" "$image" \
         sh -c 'command -v bash >/dev/null 2>&1 || apk add --no-cache bash >/dev/null 2>&1 || true; exec bash scripts/nightly-distro-build.sh "$1"' sh "$distro" 2>&1 | tee "$dst/build.log"; then
-        local n=0
-        shopt -s nullglob
-        for f in "$tree"/dist/*.zip "$tree"/dist/*.deb "$tree"/dist/*.rpm "$tree"/dist/*.apk; do
-            cp "$f" "$dst/" && n=$((n+1))
-        done
-        shopt -u nullglob
-        if [ "$n" -gt 0 ]; then ok "$key"; else fail "$key" "no artifacts produced (see $dst/build.log)"; fi
+        built=1
+    fi
+    # pack-linux.sh finishes and verifies the portable zip before the native
+    # packaging step runs, so a container that failed only in pack-deb/rpm/apk
+    # still leaves a complete portable build worth publishing. A native
+    # package is taken only from a container that exited cleanly, because a
+    # packaging tool that died mid-write can leave a truncated file behind.
+    local n=0
+    shopt -s nullglob
+    local -a produced=( "$tree"/dist/*.zip )
+    [ "$built" = 1 ] && produced+=( "$tree"/dist/*.deb "$tree"/dist/*.rpm "$tree"/dist/*.apk )
+    for f in ${produced[@]+"${produced[@]}"}; do
+        cp "$f" "$dst/" && n=$((n+1))
+    done
+    shopt -u nullglob
+    local published="$OUTDIR/linux/$distro" kept=""
+    publish_stage "$dst" "$published" || kept="; previous artifacts kept"
+    if [ "$built" = 1 ] && [ "$n" -gt 0 ]; then
+        ok "$key"
+    elif [ "$built" = 1 ]; then
+        fail "$key" "no artifacts produced (see $published/build.log)$kept"
+    elif [ "$n" -gt 0 ]; then
+        fail "$key" "container build failed after the portable zip (see $published/build.log); zip published, native package not"
     else
-        fail "$key" "container build failed (see $dst/build.log)"
+        fail "$key" "container build failed (see $published/build.log)$kept"
     fi
     rm -rf "$src"
 }
@@ -381,13 +433,19 @@ gha_collect() {
         sleep 20
     done
     conclusion=$(gh run view "$rid" --json conclusion --jq '.conclusion' 2>/dev/null || echo unknown)
-    local dst="$OUTDIR/$plat"
+    local dst="$STAGEOUT/$plat"
     mkdir -p "$dst"
     retry "$NIGHTLY_GH_RETRIES" gh run download "$rid" -D "$dst" 2>/dev/null || true
-    if [ "$conclusion" = success ] && [ -n "$(find "$dst" -type f 2>/dev/null)" ]; then
+    if [ "$conclusion" = success ] && has_artifacts "$dst"; then
+        publish_stage "$dst" "$OUTDIR/$plat"
         ok "$key"
+    elif [ "$conclusion" = success ]; then
+        publish_stage "$dst" "$OUTDIR/$plat" \
+            && fail "$key" "run $rid succeeded but produced no artifacts" \
+            || fail "$key" "run $rid succeeded but produced no artifacts; previous artifacts kept"
     else
-        fail "$key" "conclusion=$conclusion (artifacts may be partial)"
+        rm -rf "$dst"
+        fail "$key" "conclusion=$conclusion; previous artifacts kept"
     fi
 }
 
@@ -402,7 +460,7 @@ stage_java() {
         fail "$key" "JDK not found (JAVA_HOME='${JAVA_HOME:-}', no usable javac on PATH); install openjdk-21-jdk or set JAVA_HOME"
         return
     fi
-    local dst="$OUTDIR/java"
+    local dst="$STAGEOUT/java"
     mkdir -p "$dst"
     local blog="$dst/build.log"
     local work="$WORK/javabuild"
@@ -447,14 +505,14 @@ stage_java() {
     fi
     if [ "$nativeok" != 1 ]; then
         dump_tail "$blog"
-        fail "$key" "native build failed (engine + JNI bridge) — see $blog"
+        java_fail "native build failed (engine + JNI bridge)"
         return
     fi
     log "Java: javac"
     if ! "$jhome/bin/javac" -d "$work/classes" \
             $(find "$ROOT/java/src/main/java" -name '*.java') >> "$blog" 2>&1; then
         dump_tail "$blog"
-        fail "$key" "javac failed — see $blog"
+        java_fail "javac failed"
         return
     fi
 
@@ -472,7 +530,8 @@ stage_java() {
        || ! "$jhome/bin/jar" --create --file "$dst/${base}-sources.jar" \
              -C "$ROOT/java/src/main/java" . >> "$blog" 2>&1; then
         dump_tail "$blog"
-        fail "$key" "jar failed — see $blog"
+        rm -f "$dst"/*.jar
+        java_fail "jar failed"
         return
     fi
 
@@ -484,24 +543,45 @@ stage_java() {
         cp -r "$work/doc" "$dst/apidocs"
     else
         dump_tail "$blog"
-        fail "$key" "javadoc failed — see $blog"
+        rm -f "$dst"/*.jar
+        java_fail "javadoc failed"
         return
     fi
 
+    publish_stage "$dst" "$OUTDIR/java"
     ln -sfn "java/${base}.jar"         "$OUTDIR/nordstjernen-java.jar"
     ln -sfn "java/${base}-sources.jar" "$OUTDIR/nordstjernen-java-sources.jar"
     ln -sfn "java/${base}-javadoc.jar" "$OUTDIR/nordstjernen-java-javadoc.jar"
     ok "$key"
 }
 
+java_fail() {
+    local why="$1"
+    if publish_stage "$STAGEOUT/java" "$OUTDIR/java"; then
+        fail "java" "$why — see $OUTDIR/java/build.log"
+    else
+        fail "java" "$why — see $OUTDIR/java/build.log; previous jars kept"
+    fi
+}
+
+# Point $OUTDIR/<name> at the first file matching any of the patterns, tried
+# in order, so a link with several candidate sources falls back to the next
+# one when the preferred build is missing.
 link_stable() {
-    local name="$1" pattern="$2" matches
+    local name="$1" pattern matches=()
+    shift
     shopt -s nullglob
-    matches=( "$OUTDIR"/$pattern )
+    for pattern in "$@"; do
+        matches=( "$OUTDIR"/$pattern )
+        [ "${#matches[@]}" -gt 0 ] && break
+    done
     shopt -u nullglob
     if [ "${#matches[@]}" -gt 0 ]; then
         ln -sfn "${matches[0]#"$OUTDIR"/}" "$OUTDIR/$name"
         printf '  %-32s -> %s\n' "$name" "${matches[0]#"$OUTDIR"/}"
+    else
+        rm -f "$OUTDIR/$name"
+        printf '  %-32s    (no build to link)\n' "$name"
     fi
 }
 
@@ -515,13 +595,16 @@ stage_stable_links() {
     link_stable nordstjernen-debian-amd64.deb    'linux/debian/*.deb'
     link_stable nordstjernen-ubuntu-amd64.deb    'linux/ubuntu/*.deb'
     link_stable nordstjernen-opensuse-x86_64.rpm 'linux/opensuse/*.rpm'
-    link_stable nordstjernen-linux-x86_64.zip    'linux/ubuntu/*-linux-x86_64.zip'
+    link_stable nordstjernen-linux-x86_64.zip    'linux/ubuntu/*-linux-x86_64.zip' \
+                                                 'linux/debian/*-linux-x86_64.zip' \
+                                                 'linux/opensuse/*-linux-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.zip   'linux/alpine/*-linux-x86_64.zip'
     link_stable nordstjernen-alpine-x86_64.apk   'linux/alpine/*.apk'
     link_stable nordstjernen-freebsd-x86_64.zip  'freebsd/*/*-freebsd-x86_64.zip'
     link_stable nordstjernen-netbsd-x86_64.zip   'netbsd/*/*-netbsd-x86_64.zip'
     link_stable nordstjernen-src.tar.xz          'source/*.tar.xz'
     link_stable nordstjernen-src.tar.gz          'source/*.tar.gz'
+    find "$OUTDIR" -maxdepth 1 -name 'nordstjernen-*' -xtype l -delete
 }
 
 # Dispatch the remote (Windows/macOS) builds first so they run on GitHub's
@@ -569,6 +652,7 @@ log "Checksums"
     -exec sha256sum {} + > SHA256SUMS ) && ok "checksums" || fail "checksums"
 
 status_state() { cut -f1 "$STATUSDIR/$1" 2>/dev/null; }
+status_msg()   { cut -f2 "$STATUSDIR/$1" 2>/dev/null; }
 status_keys()  { ls -1 "$STATUSDIR" 2>/dev/null | sort; }
 
 log "Manifest"
@@ -580,9 +664,9 @@ log "Manifest"
     echo "version: $NVERSION"
     echo "built:   $(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo
-    echo "Stage status:"
+    echo "Stage status (a failed stage keeps the previous night's files):"
     for k in $(status_keys); do
-        printf '  %-18s %s\n' "$k" "$(status_state "$k")"
+        printf '  %-18s %-8s %s\n' "$k" "$(status_state "$k")" "$(status_msg "$k")"
     done
     echo
     echo "Artifacts:"
@@ -595,7 +679,7 @@ log "Summary"
 rc=0
 for k in $(status_keys); do
     st=$(status_state "$k")
-    printf '  %-18s %s\n' "$k" "$st"
+    printf '  %-18s %-8s %s\n' "$k" "$st" "$(status_msg "$k")"
     [ "$st" = FAILED ] && rc=1
 done
 printf '\nOutput: %s\n' "$OUTDIR"
