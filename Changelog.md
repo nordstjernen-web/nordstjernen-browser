@@ -176,6 +176,12 @@ Changelog:
   longer animated along with it. A transition on a property paint does
   not read live (box-shadow, filter, border colours, visibility) now
   restyles the page each frame instead of showing the stale value.
+* A frame's parent.postMessage() reaches the listeners the top document
+  added with addEventListener: the message used to be dispatched
+  against the frame's own document, so only window.onmessage saw it.
+* Setting style.borderTopLeftRadius (or another corner) on an element
+  whose inline style carries a later border-radius appends the corner
+  after the shorthand, so the new value wins as the CSSOM requires.
 * When several options of a single-choice <select> carry the selected
   attribute, the last one wins, as the HTML selectedness setting
   algorithm requires. HTMLOptionsCollection exposes selectedIndex, and
