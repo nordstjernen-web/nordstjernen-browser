@@ -2111,17 +2111,24 @@ const ns_node *
 ns_select_first_selected_option(const ns_node *select)
 {
     if (!select) return NULL;
+    gboolean last_wins = !ns_element_get_attr(select, "multiple");
+    const ns_node *found = NULL;
     for (const ns_node *c = select->first_child; c; c = c->next_sibling) {
         if (ns_node_is_element_named(c, "optgroup")) {
             for (const ns_node *cc = c->first_child; cc; cc = cc->next_sibling) {
-                if (ns_node_is_element_named(cc, "option"))
-                    if (ns_element_get_attr(cc, "selected")) return cc;
+                if (ns_node_is_element_named(cc, "option") &&
+                    ns_element_get_attr(cc, "selected")) {
+                    if (!last_wins) return cc;
+                    found = cc;
+                }
             }
-        } else if (ns_node_is_element_named(c, "option")) {
-            if (ns_element_get_attr(c, "selected")) return c;
+        } else if (ns_node_is_element_named(c, "option") &&
+                   ns_element_get_attr(c, "selected")) {
+            if (!last_wins) return c;
+            found = c;
         }
     }
-    return NULL;
+    return found;
 }
 
 const ns_node *
