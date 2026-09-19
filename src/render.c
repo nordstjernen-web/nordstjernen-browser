@@ -220,15 +220,7 @@ render_feed_animations(const ns_render_ctx *c, GHashTable *styles)
     if (!c->anim) return;
     for (guint i = 0; i < c->n_sheets; i++)
         if (c->sheets[i]) ns_anim_load_from_stylesheet(c->anim, c->sheets[i]);
-    gint64 now_us = g_get_monotonic_time();
-    GHashTableIter it;
-    gpointer key, val;
-    g_hash_table_iter_init(&it, styles);
-    while (g_hash_table_iter_next(&it, &key, &val))
-        ns_anim_observe(c->anim, (const ns_node *)key,
-                        (const ns_style *)val, now_us);
-    ns_anim_prune(c->anim, styles);
-    ns_anim_apply(c->anim, styles);
+    ns_anim_observe_all(c->anim, styles, g_get_monotonic_time());
 }
 
 static void

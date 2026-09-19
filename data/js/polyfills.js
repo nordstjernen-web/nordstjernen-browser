@@ -9116,40 +9116,72 @@
             Object.defineProperty(this, '__anim', { value: anim, writable: true });
         }
         AnimationEffect.prototype.getTiming = function () {
-            var q = this.__anim.__query() || {};
-            var isTransition = this.__anim.__prop !== null;
+            var q = (this.__anim && this.__anim.__query()) || {};
+            var isTransition = this.__anim && this.__anim.__kind === 'transition';
+            var o = this.__options || {};
+            if (typeof o === 'number') o = { duration: o };
             return {
-                delay: q.delayMs || 0,
-                endDelay: 0,
-                fill: isTransition ? 'backwards' : this.__anim.__fill || 'none',
-                iterationStart: 0,
-                iterations: q.iterations === undefined ? 1 : q.iterations,
-                duration: q.durationMs || 0,
-                direction: 'normal',
-                easing: 'linear'
+                delay: q.delayMs !== undefined ? q.delayMs : (o.delay || 0),
+                endDelay: o.endDelay || 0,
+                fill: isTransition ? 'backwards' : (q.fill || o.fill || 'none'),
+                iterationStart: o.iterationStart || 0,
+                iterations: q.iterations !== undefined ? q.iterations
+                            : (o.iterations === undefined ? 1 : o.iterations),
+                duration: q.durationMs !== undefined ? q.durationMs
+                          : (typeof o.duration === 'number' ? o.duration : 0),
+                direction: isTransition ? 'normal' : (q.direction || o.direction || 'normal'),
+                easing: o.easing || 'linear'
             };
         };
         AnimationEffect.prototype.getComputedTiming = function () {
             var t = this.getTiming();
-            var q = this.__anim.__query();
-            var iterations = isFinite(t.iterations) ? t.iterations : Infinity;
+            var q = this.__anim ? this.__anim.__query() : null;
+            var iterations = t.iterations;
             var active = t.duration * iterations;
+            if (t.duration === 0 || iterations === 0) active = 0;
             var local = q ? q.currentMs : null;
             var progress = null, iter = null;
             if (local !== null) {
                 var el = local - t.delay;
-                if (el >= 0 && t.duration > 0) {
-                    var raw = Math.min(el / t.duration, iterations);
-                    iter = Math.min(Math.floor(raw), isFinite(iterations) ? Math.max(iterations - 1, 0) : raw);
-                    progress = el >= active ? 1 : raw - Math.floor(raw);
-                    if (el >= active && isFinite(active)) progress = 1;
-                } else if (el < 0 && t.fill !== 'none') {
-                    progress = 0; iter = 0;
+                var fillsBack = t.fill === 'backwards' || t.fill === 'both';
+                var fillsFwd = t.fill === 'forwards' || t.fill === 'both';
+                var overall = null;
+                if (el < 0) {
+                    if (fillsBack) overall = 0;
+                } else if (el >= active) {
+                    if (fillsFwd || (q && q.active)) overall = isFinite(active) ? active : el;
+                } else {
+                    overall = el;
+                }
+                if (overall !== null) {
+                    if (t.duration > 0) {
+                        var raw = overall / t.duration;
+                        iter = Math.floor(raw);
+                        var simple = raw - iter;
+                        var atEnd = isFinite(iterations) && overall >= active && active > 0;
+                        if (atEnd) {
+                            iter = Math.max(Math.ceil(iterations) - 1, 0);
+                            simple = iterations - iter;
+                            if (simple > 1) simple = 1;
+                        }
+                        if (simple === 0 && iter > 0 && overall >= active && !atEnd) {
+                            iter -= 1; simple = 1;
+                        }
+                        progress = simple;
+                    } else {
+                        iter = isFinite(iterations) ? Math.max(Math.ceil(iterations) - 1, 0) : Infinity;
+                        if (el < 0) { progress = 0; iter = 0; }
+                        else progress = isFinite(iterations) ? Math.min(iterations - iter, 1) : 1;
+                    }
+                    var reversed = t.direction === 'reverse' ||
+                        (t.direction === 'alternate' && (iter % 2) === 1) ||
+                        (t.direction === 'alternate-reverse' && (iter % 2) === 0);
+                    if (reversed) progress = 1 - progress;
                 }
             }
             return Object.assign(t, {
                 activeDuration: active,
-                endTime: t.delay + active + t.endDelay,
+                endTime: Math.max(t.delay + active + t.endDelay, 0),
                 localTime: local,
                 progress: progress,
                 currentIteration: iter
@@ -9162,18 +9194,124 @@
         Object.defineProperty(AnimationEffect.prototype, 'pseudoElement', {
             get: function () { return null; }, configurable: true
         });
+        function kebab(name) {
+            if (name === 'cssFloat') return 'float';
+            if (name === 'cssOffset') return 'offset';
+            return name.replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); });
+        }
+        function normalizeKeyframes(input) {
+            var frames = [];
+            if (input === null || input === undefined) return frames;
+            var isArrayLike = Array.isArray(input) ||
+                (typeof input === 'object' && typeof input[Symbol.iterator] === 'function');
+            if (isArrayLike) {
+                var list = Array.from(input);
+                for (var i = 0; i < list.length; i++) {
+                    var kf = list[i];
+                    if (kf === null || typeof kf !== 'object') throw new TypeError('Keyframe must be an object');
+                    var frame = { offset: null, easing: 'linear', composite: 'auto', __props: {} };
+                    for (var k in kf) {
+                        if (!Object.prototype.hasOwnProperty.call(kf, k)) continue;
+                        if (k === 'offset') {
+                            if (kf.offset !== null && kf.offset !== undefined) {
+                                var o = Number(kf.offset);
+                                if (!(o >= 0 && o <= 1)) throw new TypeError('Keyframe offset out of range');
+                                frame.offset = o;
+                            }
+                        } else if (k === 'easing') frame.easing = String(kf.easing);
+                        else if (k === 'composite') frame.composite = String(kf.composite);
+                        else frame.__props[kebab(k)] = String(kf[k]);
+                    }
+                    frames.push(frame);
+                }
+            } else if (typeof input === 'object') {
+                var propMax = 0, names = [];
+                for (var p in input) {
+                    if (!Object.prototype.hasOwnProperty.call(input, p) ||
+                        p === 'offset' || p === 'easing' || p === 'composite') continue;
+                    names.push(p);
+                    var v = input[p];
+                    propMax = Math.max(propMax, Array.isArray(v) ? v.length : 1);
+                }
+                if (propMax < 2) propMax = 2;
+                var byOffset = {};
+                names.forEach(function (p) {
+                    var v = input[p];
+                    var vals = Array.isArray(v) ? v : [v];
+                    if (vals.length === 1) {
+                        byOffset[1] = byOffset[1] || {};
+                        byOffset[1][kebab(p)] = String(vals[0]);
+                        return;
+                    }
+                    for (var i = 0; i < vals.length; i++) {
+                        var off = vals.length === 1 ? 1 : i / (vals.length - 1);
+                        byOffset[off] = byOffset[off] || {};
+                        byOffset[off][kebab(p)] = String(vals[i]);
+                    }
+                });
+                Object.keys(byOffset).map(Number).sort(function (a, b) { return a - b; })
+                    .forEach(function (off) {
+                        frames.push({ offset: off, easing: typeof input.easing === 'string' ? input.easing : 'linear',
+                                      composite: 'auto', __props: byOffset[off] });
+                    });
+            }
+            var last = -1;
+            for (var j = 0; j < frames.length; j++) {
+                if (frames[j].offset !== null) {
+                    if (frames[j].offset < last) throw new TypeError('Keyframe offsets must be monotonically increasing');
+                    last = frames[j].offset;
+                }
+            }
+            if (frames.length > 0) {
+                if (frames[0].offset === null) frames[0].offset = 0;
+                if (frames[frames.length - 1].offset === null) frames[frames.length - 1].offset = 1;
+                var i0 = 0;
+                while (i0 < frames.length) {
+                    if (frames[i0].offset !== null) { i0++; continue; }
+                    var i1 = i0;
+                    while (frames[i1].offset === null) i1++;
+                    var a = frames[i0 - 1].offset, b = frames[i1].offset, n = i1 - i0 + 1;
+                    for (var m = i0; m < i1; m++) frames[m].offset = a + (b - a) * (m - i0 + 1) / n;
+                    i0 = i1;
+                }
+            }
+            return frames;
+        }
+        function frameToCss(frame) {
+            var out = [];
+            for (var p in frame.__props) out.push(p + ': ' + frame.__props[p]);
+            return out.join('; ');
+        }
         function KeyframeEffect(target, keyframes, options) {
             AnimationEffect.call(this, null);
+            if (target instanceof KeyframeEffect) {
+                this.__target = target.__target;
+                this.__frames = target.__frames.slice();
+                this.__options = Object.assign({}, target.__options);
+                return;
+            }
             this.__target = target || null;
-            this.__keyframes = keyframes || [];
-            this.__options = options || {};
+            this.__frames = normalizeKeyframes(keyframes);
+            this.__options = typeof options === 'number' ? { duration: options } : (options || {});
         }
         KeyframeEffect.prototype = Object.create(AnimationEffect.prototype);
         KeyframeEffect.prototype.constructor = KeyframeEffect;
         KeyframeEffect.prototype.getKeyframes = function () {
-            return Array.isArray(this.__keyframes) ? this.__keyframes.slice() : [];
+            return this.__frames.map(function (f) {
+                var o = { offset: f.offset, computedOffset: f.offset, easing: f.easing, composite: f.composite };
+                for (var p in f.__props) {
+                    var camel = p.replace(/-([a-z])/g, function (m, c) { return c.toUpperCase(); });
+                    o[p === 'float' ? 'cssFloat' : camel] = f.__props[p];
+                }
+                return o;
+            });
         };
-        KeyframeEffect.prototype.setKeyframes = function (k) { this.__keyframes = k || []; };
+        KeyframeEffect.prototype.setKeyframes = function (k) { this.__frames = normalizeKeyframes(k); };
+        Object.defineProperty(KeyframeEffect.prototype, 'target', {
+            get: function () { return this.__target; },
+            set: function (v) { this.__target = v; },
+            configurable: true
+        });
         Object.defineProperty(KeyframeEffect.prototype, 'composite', {
             get: function () { return 'replace'; }, set: function () {}, configurable: true
         });
@@ -9181,12 +9319,15 @@
         global.KeyframeEffect = KeyframeEffect;
 
         function Animation(effect, timeline) {
+            if (effect !== undefined && effect !== null && !(effect instanceof AnimationEffect))
+                throw new TypeError('Animation effect must be an AnimationEffect');
             this.__el = effect && effect.__target ? effect.__target : null;
             this.__prop = null;
             this.__kind = 'generic';
             this.__gen = 0;
             this.__name = null;
             this.__effectObj = effect || null;
+            if (effect) effect.__anim = this;
             this.__timeline = timeline || (typeof document !== 'undefined' ? document.timeline : null);
             this.id = '';
             this.onfinish = null;
@@ -9216,7 +9357,9 @@
         Object.defineProperty(Animation.prototype, 'currentTime', {
             get: function () {
                 var q = this.__query();
-                return q ? q.currentMs : (this.__kind === 'generic' ? 0 : null);
+                if (q) return q.currentMs;
+                if (this.__kind === 'generic') return 0;
+                return this.__lastTime === undefined ? null : this.__lastTime;
             },
             set: function (v) {
                 if (v === null || !this.__el || this.__kind === 'generic') return;
@@ -9277,6 +9420,7 @@
         });
         Animation.prototype.__settle = function (finished) {
             var q = this.__query();
+            if (q) this.__lastTime = q.currentMs;
             if (finished) {
                 if (this.__resolveFinished) this.__resolveFinished(this);
                 var ev = { type: 'finish', target: this, currentTime: q ? q.currentMs : null, timelineTime: this.__timeline.currentTime };
@@ -9312,8 +9456,38 @@
             if (i >= 0) ls.splice(i, 1);
         };
         Animation.prototype.dispatchEvent = function (ev) { this.__dispatch(ev.type, ev); return true; };
+        Animation.prototype.__startScript = function () {
+            var effect = this.__effectObj;
+            if (!effect || !(effect instanceof KeyframeEffect) || !effect.__target ||
+                typeof global.__ns_anim_animate !== 'function') return false;
+            var stops = effect.__frames.map(function (f) { return { offset: f.offset, css: frameToCss(f) }; });
+            var o = effect.__options || {};
+            var timing = {
+                duration: typeof o.duration === 'number' ? o.duration : 0,
+                delay: o.delay || 0,
+                iterations: o.iterations === undefined ? 1 : o.iterations,
+                direction: o.direction || 'normal',
+                fill: (o.fill && o.fill !== 'auto') ? o.fill : 'none',
+                easing: o.easing || 'linear'
+            };
+            var r = global.__ns_anim_animate(effect.__target, stops, timing);
+            if (!r) return false;
+            this.__el = effect.__target;
+            this.__prop = '@' + r.run;
+            this.__gen = r.generation;
+            this.__kind = 'script';
+            this.__finished = null;
+            var map = registry.get(this.__el);
+            if (!map) { map = Object.create(null); registry.set(this.__el, map); }
+            map['@' + r.run + ':' + r.generation] = this;
+            return true;
+        };
         Animation.prototype.play = function () {
-            if (this.__el && this.__kind !== 'generic') global.__ns_anim_control(this.__el, this.__prop, 'play');
+            if (this.__kind === 'generic') { this.__startScript(); return; }
+            if (this.__el) {
+                global.__ns_anim_control(this.__el, this.__prop, 'play');
+                this.__finished = null;
+            }
         };
         Animation.prototype.pause = function () {
             if (this.__el && this.__kind !== 'generic') global.__ns_anim_control(this.__el, this.__prop, 'pause');
@@ -9323,7 +9497,9 @@
         };
         Animation.prototype.cancel = function () {
             if (this.__el && this.__kind !== 'generic') {
+                this.__cancelling = true;
                 global.__ns_anim_control(this.__el, this.__prop, 'cancel');
+                this.__cancelling = false;
                 this.__settle(false);
             }
         };
@@ -9332,6 +9508,14 @@
         Animation.prototype.commitStyles = function () {};
         Animation.prototype.persist = function () {};
         global.Animation = Animation;
+        function tag(ctor, name) {
+            if (typeof Symbol !== 'undefined' && Symbol.toStringTag)
+                Object.defineProperty(ctor.prototype, Symbol.toStringTag, { value: name, configurable: true });
+        }
+        tag(Animation, 'Animation');
+        tag(AnimationEffect, 'AnimationEffect');
+        tag(KeyframeEffect, 'KeyframeEffect');
+        tag(DocumentTimeline, 'DocumentTimeline');
 
         function CSSTransition() { Animation.apply(this, arguments); }
         CSSTransition.prototype = Object.create(Animation.prototype);
@@ -9339,6 +9523,7 @@
         Object.defineProperty(CSSTransition.prototype, 'transitionProperty', {
             get: function () { return this.__prop; }, configurable: true
         });
+        tag(CSSTransition, 'CSSTransition');
         global.CSSTransition = CSSTransition;
 
         function CSSAnimation() { Animation.apply(this, arguments); }
@@ -9347,11 +9532,12 @@
         Object.defineProperty(CSSAnimation.prototype, 'animationName', {
             get: function () { return this.__name; }, configurable: true
         });
+        tag(CSSAnimation, 'CSSAnimation');
         global.CSSAnimation = CSSAnimation;
 
         function attachEndListeners(anim) {
             var el = anim.__el;
-            var isTransition = anim.__prop !== null;
+            var isTransition = anim.__kind === 'transition';
             var endType = isTransition ? 'transitionend' : 'animationend';
             var cancelType = isTransition ? 'transitioncancel' : 'animationcancel';
             function matches(e) {
@@ -9378,15 +9564,19 @@
             var el = entry.el;
             var map = registry.get(el);
             if (!map) { map = Object.create(null); registry.set(el, map); }
-            var key = (entry.prop === null ? '@' + entry.name : entry.prop) + ':' + entry.generation;
+            var isAnim = entry.prop === null;
+            var isScript = isAnim && entry.run >= 1000;
+            var key = isScript ? '@' + entry.run + ':' + entry.generation
+                    : (isAnim ? '@' + entry.run + ':' + entry.name : entry.prop) + ':' + entry.generation;
             var existing = map[key];
             if (existing) return existing;
-            var anim = entry.prop === null ? new CSSAnimation() : new CSSTransition();
+            if (isScript) return null;
+            var anim = isAnim ? new CSSAnimation() : new CSSTransition();
             anim.__el = el;
-            anim.__prop = entry.prop;
+            anim.__prop = isAnim ? '@' + entry.run : entry.prop;
             anim.__name = entry.name;
             anim.__gen = entry.generation;
-            anim.__kind = entry.prop === null ? 'animation' : 'transition';
+            anim.__kind = isAnim ? 'animation' : 'transition';
             attachEndListeners(anim);
             map[key] = anim;
             return anim;
@@ -9395,10 +9585,18 @@
         function collect(el) {
             var entries = global.__ns_anim_list(el || null);
             var out = [];
-            for (var i = 0; i < entries.length; i++) out.push(objectFor(entries[i]));
+            for (var i = 0; i < entries.length; i++) {
+                var obj = objectFor(entries[i]);
+                if (obj) out.push(obj);
+            }
             out.sort(function (a, b) {
+                var rank = { transition: 0, animation: 1, script: 2 };
+                if (a.__kind === 'script' || b.__kind === 'script') {
+                    if (a.__kind !== b.__kind) return rank[a.__kind] - rank[b.__kind];
+                    return a.__gen - b.__gen;
+                }
                 if (a.__el === b.__el) {
-                    if (a.__kind !== b.__kind) return a.__kind === 'animation' ? -1 : 1;
+                    if (a.__kind !== b.__kind) return rank[a.__kind] - rank[b.__kind];
                     return 0;
                 }
                 var pos = a.__el.compareDocumentPosition(b.__el);
@@ -9407,6 +9605,31 @@
             return out;
         }
 
+        global.__ns_anim_script_event = function (el, run, kind) {
+            var map = registry.get(el);
+            if (!map) return;
+            var prefix = '@' + run + ':';
+            for (var key in map) {
+                if (key.indexOf(prefix) !== 0) continue;
+                var anim = map[key];
+                if (kind === 'finish') anim.__settle(true);
+                else if (kind === 'cancel' && !anim.__cancelling) anim.__settle(false);
+            }
+        };
+        function elementAnimate(keyframes, options) {
+            var effect = new KeyframeEffect(this, keyframes, options);
+            var anim = new Animation(effect, typeof document !== 'undefined' ? document.timeline : null);
+            if (options && typeof options === 'object' && options.id !== undefined) anim.id = String(options.id);
+            anim.play();
+            return anim;
+        }
+        try {
+            if (global.Element) {
+                Object.defineProperty(global.Element.prototype, 'animate', {
+                    value: elementAnimate, writable: true, configurable: true
+                });
+            }
+        } catch (e) {}
         function elementGetAnimations(options) {
             var self = this;
             if (options && options.subtree) {

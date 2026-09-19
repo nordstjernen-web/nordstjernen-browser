@@ -14,6 +14,7 @@ void     ns_anim_free(ns_anim *a);
 void     ns_anim_load_from_stylesheet(ns_anim *a, const ns_css_stylesheet *sh);
 void     ns_anim_observe(ns_anim *a, const ns_node *dom,
                          const ns_style *style, gint64 now_us);
+void     ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us);
 void     ns_anim_apply(ns_anim *a, GHashTable *styles);
 gboolean ns_anim_tick(ns_anim *a, gint64 now_us);
 gboolean ns_anim_has_active(const ns_anim *a);
@@ -34,7 +35,11 @@ gboolean                 ns_anim_get_color     (ns_anim *a,
 typedef struct ns_anim_info {
     const ns_node *node;
     int            prop;
+    int            run;
     const char    *name;
+    const char    *fill;
+    const char    *direction;
+    char           easing[96];
     double         current_ms;
     double         duration_ms;
     double         delay_ms;
@@ -52,6 +57,18 @@ gboolean ns_anim_info_for(ns_anim *a, const ns_node *node, int prop,
 gboolean ns_anim_seek(ns_anim *a, const ns_node *node, int prop, double ms);
 gboolean ns_anim_control(ns_anim *a, const ns_node *node, int prop,
                          const char *op);
+typedef struct ns_anim_script_timing {
+    double      duration_ms;
+    double      delay_ms;
+    double      iterations;
+    const char *direction;
+    const char *fill;
+    const char *easing;
+} ns_anim_script_timing;
+gboolean ns_anim_script_start(ns_anim *a, const ns_node *node,
+                              const char *const *stop_css, const double *stop_pct,
+                              int n_stops, const ns_anim_script_timing *t,
+                              int *out_prop, guint *out_generation);
 void     ns_anim_prune(ns_anim *a, GHashTable *live);
 void     ns_anim_rebase(ns_anim *a, gint64 base_us);
 G_END_DECLS

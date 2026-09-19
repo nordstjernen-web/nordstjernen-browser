@@ -662,7 +662,7 @@ ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
 
 GHashTable *
 ns_engine_compute_cascade(ns_node *doc, const char *base_url,
-                          GHashTable *css_cache)
+                          GHashTable *css_cache, ns_anim *anim)
 {
     ns_css_set_frame_viewport_cb(frame_viewport_measured);
     ns_css_relayout_enter();
@@ -670,6 +670,9 @@ ns_engine_compute_cascade(ns_node *doc, const char *base_url,
     ns_css_style_element_cache_begin();
     GPtrArray *page_sheets = g_ptr_array_new();
     ns_engine_collect_stylesheets(doc, base_url, page_sheets, css_cache);
+    if (anim)
+        for (guint i = 0; i < page_sheets->len; i++)
+            ns_anim_load_from_stylesheet(anim, g_ptr_array_index(page_sheets, i));
     GHashTable *styles = ns_css_compute(doc,
         (const ns_css_stylesheet *const *)page_sheets->pdata,
         page_sheets->len);
@@ -789,14 +792,7 @@ ns_engine_load_keyframes(ns_anim *anim, ns_node *doc, const char *base_url,
 void
 ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us)
 {
-    if (!anim || !styles) return;
-    GHashTableIter it;
-    gpointer key, val;
-    g_hash_table_iter_init(&it, styles);
-    while (g_hash_table_iter_next(&it, &key, &val))
-        ns_anim_observe(anim, (const ns_node *)key, (const ns_style *)val, now_us);
-    ns_anim_prune(anim, styles);
-    ns_anim_apply(anim, styles);
+    ns_anim_observe_all(anim, styles, now_us);
 }
 
 typedef struct {
