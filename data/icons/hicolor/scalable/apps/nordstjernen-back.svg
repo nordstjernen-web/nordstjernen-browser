@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="g" x1="12" y1="2.8" x2="12" y2="21.2" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#a9e3a4"/>
-      <stop offset="0.48" stop-color="#5fb765"/>
-      <stop offset="1" stop-color="#2f8a3e"/>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c2f2b0"/>
+      <stop offset="0.5" stop-color="#5fbf62"/>
+      <stop offset="1" stop-color="#2c8a3c"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <path d="M3.6 12 L11 5 L11 9.2 L19.6 9.2 L19.6 14.8 L11 14.8 L11 19 Z"
-        fill="none" stroke="#142033" stroke-width="0.62"
-        stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M3.6 12 L11 5 L11 9.2 L19.6 9.2 L19.6 14.8 L11 14.8 L11 19 Z"
-        fill="url(#g)" stroke="#1f3149" stroke-width="0.18"
-        stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M3.5 12 L10.5 5 L10.5 9 L20 9 L20 15 L10.5 15 L10.5 19 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M3.5 12 L10.5 5 L10.5 9 L20 9 L20 15 L10.5 15 L10.5 19 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M4.6 11.8 L10.5 5.9 L10.5 9.5 L19.5 9.5 L19.5 12 L4.9 12 Z" fill="url(#gloss)"/>
 </svg>

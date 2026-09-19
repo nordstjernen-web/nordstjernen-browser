@@ -3,6 +3,18 @@ Changelog:
 
 1.0.25:
 ======
+* The toolbar takes the classic look of the Northstar web browser: a
+  raised, softly shaded bar with labelled colour buttons for Back,
+  Forward, Reload, Stop, Home, Print and Downloads, bevelled hover and
+  pressed states, etched separators, an inset address field that shows
+  a page icon when there is no certificate state to report, labelled
+  Bookmarks and Menu buttons, and the Nordstjernen logo on a dark tile
+  at the far right. Stop stays in place and greys out when nothing is
+  loading instead of disappearing, Print and Downloads have their own
+  toolbar buttons, the Go button is gone (Enter and the address bar do
+  the same thing), and the bookmark button uses the bookmark icon, which
+  fills in with a gold star when the current page is saved. The README
+  screenshot shows the new toolbar.
 * Fullscreen mode is announced: when a page calls requestFullscreen the
   shell overlays a notice at the top of the page naming the site's host
   and saying it is now full screen and that Esc exits, in the style of

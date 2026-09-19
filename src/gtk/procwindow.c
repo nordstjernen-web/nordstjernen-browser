@@ -163,11 +163,102 @@ install_status_css(void)
         "  min-width: 26px;"
         "  padding: 0;"
         "}"
-        ".ns-toolbar button, .ns-toolbar entry {"
-        "  min-height: 26px;"
+        ".ns-toolbar {"
+        "  background-image: linear-gradient(to bottom, #fdfdfe 0%, #f1f3f7 45%, #e2e6ee 100%);"
+        "  border-top: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #9aa5b8;"
+        "  box-shadow: 0 1px 0 #6b778c;"
+        "  padding: 1px 3px;"
         "}"
-        ".ns-toolbar entry { padding-top: 2px; padding-bottom: 2px; }"
-        ".ns-address image.left { margin-right: 4px; }"
+        ".ns-toolbar-separator {"
+        "  min-width: 2px;"
+        "  margin: 3px 5px;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  background: none;"
+        "}"
+        ".ns-toolbar button, .ns-toolbar menubutton > button {"
+        "  min-height: 24px;"
+        "  min-width: 24px;"
+        "  padding: 1px 4px;"
+        "  border: 1px solid transparent;"
+        "  border-radius: 0;"
+        "  background: transparent;"
+        "  color: #000000;"
+        "  box-shadow: none;"
+        "  text-shadow: none;"
+        "}"
+        ".ns-toolbar button.ns-nav-button, .ns-toolbar menubutton > button {"
+        "  min-width: 40px;"
+        "  min-height: 34px;"
+        "  padding: 2px 5px 1px 5px;"
+        "}"
+        ".ns-toolbar button:hover, .ns-toolbar menubutton > button:hover {"
+        "  border-top: 1px solid #ffffff;"
+        "  border-left: 1px solid #ffffff;"
+        "  border-right: 1px solid #6b778c;"
+        "  border-bottom: 1px solid #6b778c;"
+        "  box-shadow: inset -1px -1px 0 #9aa5b8;"
+        "  background-color: #e6eaf1;"
+        "}"
+        ".ns-toolbar button:active, .ns-toolbar button:checked,"
+        " .ns-toolbar menubutton > button:active,"
+        " .ns-toolbar menubutton > button:checked {"
+        "  border-top: 1px solid #6b778c;"
+        "  border-left: 1px solid #6b778c;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #9aa5b8;"
+        "  background-color: #d3d9e3;"
+        "  padding: 2px 3px 0 5px;"
+        "}"
+        ".ns-toolbar button.ns-nav-button:active, .ns-toolbar button.ns-nav-button:checked,"
+        " .ns-toolbar menubutton > button:active,"
+        " .ns-toolbar menubutton > button:checked {"
+        "  padding: 3px 4px 0 6px;"
+        "}"
+        ".ns-toolbar button:disabled {"
+        "  border: 1px solid transparent;"
+        "  background: transparent;"
+        "  box-shadow: none;"
+        "  -gtk-icon-filter: opacity(0.35) grayscale(1);"
+        "}"
+        ".ns-toolbar button:disabled .ns-toolbar-label {"
+        "  color: #9aa5b8;"
+        "  text-shadow: 1px 1px 0 #ffffff;"
+        "}"
+        ".ns-toolbar-label {"
+        "  font-size: 10px;"
+        "  font-weight: normal;"
+        "  color: #000000;"
+        "  margin-top: 0;"
+        "  margin-bottom: 0;"
+        "}"
+        ".ns-toolbar entry.ns-address {"
+        "  min-height: 20px;"
+        "  padding: 1px 4px;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #6b778c, inset -1px -1px 0 #e6eaf1;"
+        "  background-color: #ffffff;"
+        "  color: #000000;"
+        "  border-radius: 0;"
+        "  font-size: 12px;"
+        "}"
+        ".ns-toolbar entry.ns-address > text {"
+        "  min-height: 0;"
+        "  padding: 0;"
+        "}"
+        ".ns-toolbar entry.ns-address > image {"
+        "  margin-top: 0;"
+        "  margin-bottom: 0;"
+        "}"
+        ".ns-toolbar entry.ns-address:focus {"
+        "  box-shadow: inset 1px 1px 0 #000000, inset -1px -1px 0 #e6eaf1;"
+        "}"
+        ".ns-address image.left { margin-right: 5px; }"
         ".ns-tabstrip { padding: 0; }"
         ".ns-tab { padding: 0; }"
         ".ns-tab button { min-height: 0; padding: 2px 4px; }"
@@ -183,7 +274,33 @@ install_status_css(void)
         "  font-weight: bold;"
         "}"
         ".ns-newtab { min-height: 0; padding: 2px 6px; }"
-        ".ns-zoom { font-size: smaller; padding: 0 6px; min-width: 0; }");
+        ".ns-zoom {"
+        "  font-size: smaller;"
+        "  padding: 0 5px;"
+        "  min-width: 0;"
+        "  border: 1px solid transparent;"
+        "}"
+        ".ns-throbber {"
+        "  min-width: 26px;"
+        "  min-height: 26px;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #6b778c;"
+        "  background-color: #080e22;"
+        "  border-radius: 0;"
+        "  padding: 1px;"
+        "  margin: 1px 1px 1px 5px;"
+        "}"
+        ".ns-throbber:hover {"
+        "  background-color: #121c3c;"
+        "  border-top: 1px solid #9aa5b8;"
+        "  border-left: 1px solid #9aa5b8;"
+        "  border-right: 1px solid #ffffff;"
+        "  border-bottom: 1px solid #ffffff;"
+        "  box-shadow: inset 1px 1px 0 #6b778c;"
+        "}");
     gtk_style_context_add_provider_for_display(
         display, GTK_STYLE_PROVIDER(p),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -197,20 +314,38 @@ set_accessible_label(GtkWidget *w, const char *label)
                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label, -1);
 }
 
-static void
-toolbar_button_icon_size(GtkWidget *button, int pixels)
+static GtkImage *
+toolbar_button_image(GtkWidget *button)
 {
     GtkWidget *child = gtk_button_get_child(GTK_BUTTON(button));
-    if (GTK_IS_IMAGE(child))
-        gtk_image_set_pixel_size(GTK_IMAGE(child), pixels);
+    if (GTK_IS_BOX(child))
+        child = gtk_widget_get_first_child(child);
+    return GTK_IS_IMAGE(child) ? GTK_IMAGE(child) : NULL;
 }
 
 static GtkWidget *
-toolbar_button(const char *icon, const char *tooltip, GCallback cb,
-               gpointer data)
+toolbar_labelled_child(const char *icon, const char *label)
 {
-    GtkWidget *b = gtk_button_new_from_icon_name(icon);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
+    GtkWidget *img = gtk_image_new_from_icon_name(icon);
+    gtk_image_set_pixel_size(GTK_IMAGE(img), 20);
+    GtkWidget *lbl = gtk_label_new(label);
+    gtk_widget_add_css_class(lbl, "ns-toolbar-label");
+    gtk_box_append(GTK_BOX(box), img);
+    gtk_box_append(GTK_BOX(box), lbl);
+    return box;
+}
+
+static GtkWidget *
+toolbar_button(const char *icon, const char *label, const char *tooltip,
+               GCallback cb, gpointer data)
+{
+    GtkWidget *b = gtk_button_new();
     gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+    gtk_button_set_child(GTK_BUTTON(b), toolbar_labelled_child(icon, label));
+    gtk_widget_add_css_class(b, "ns-nav-button");
     gtk_widget_set_tooltip_text(b, tooltip);
     set_accessible_label(b, tooltip);
     g_signal_connect(b, "clicked", cb, data);
@@ -265,7 +400,7 @@ set_loading_ui(ProcWindow *pw, gboolean loading)
     gtk_widget_set_visible(pw->spinner, loading);
     gtk_spinner_set_spinning(GTK_SPINNER(pw->spinner), loading);
     if (pw->stop)
-        gtk_widget_set_visible(pw->stop, loading);
+        gtk_widget_set_sensitive(pw->stop, loading);
 }
 
 static char *
@@ -327,7 +462,11 @@ update_security_indicator(ProcWindow *pw, NsProcView *v)
         break;
     }
     if (!icon_name || !url || !*url) {
-        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, NULL);
+        gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY,
+                                          "nordstjernen-bookmarks");
+        gtk_entry_set_icon_activatable(entry, GTK_ENTRY_ICON_PRIMARY, FALSE);
+        gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_PRIMARY,
+                                        ns_i18n("Page location"));
         return;
     }
     gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_PRIMARY, icon_name);
@@ -429,9 +568,10 @@ update_bookmark_indicator(ProcWindow *pw)
     if (!pw->bookmarks_button)
         return;
     gboolean saved = current_page_bookmarked(pw);
-    gtk_button_set_icon_name(GTK_BUTTON(pw->bookmarks_button),
-                             saved ? "starred-symbolic"
-                                   : "non-starred-symbolic");
+    GtkImage *img = toolbar_button_image(pw->bookmarks_button);
+    if (img)
+        gtk_image_set_from_icon_name(img, saved ? "nordstjernen-bookmarks-saved"
+                                                : "nordstjernen-bookmarks");
     gtk_widget_set_tooltip_text(pw->bookmarks_button,
                                 saved ? ns_i18n("Bookmarked — open bookmarks")
                                       : ns_i18n("Bookmarks"));
@@ -1239,11 +1379,17 @@ on_logo_clicked(GtkButton *b, gpointer ud)
 }
 
 static void
-on_go_clicked(GtkButton *b, gpointer ud)
+on_print_clicked(GtkButton *b, gpointer ud)
 {
     (void)b;
-    ProcWindow *pw = ud;
-    on_address_activate(GTK_ENTRY(pw->address), pw);
+    ns_proc_view_print(current_view(ud));
+}
+
+static void
+on_downloads_clicked(GtkButton *b, gpointer ud)
+{
+    (void)b;
+    show_downloads_window(ud);
 }
 
 static void
@@ -2149,27 +2295,36 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
     pw->toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
     gtk_widget_add_css_class(pw->toolbar, "ns-toolbar");
-    gtk_widget_set_margin_top(pw->toolbar, 2);
-    gtk_widget_set_margin_bottom(pw->toolbar, 2);
+    gtk_widget_set_margin_top(pw->toolbar, 1);
+    gtk_widget_set_margin_bottom(pw->toolbar, 1);
     gtk_widget_set_margin_start(pw->toolbar, 4);
     gtk_widget_set_margin_end(pw->toolbar, 4);
 
     pw->back = toolbar_button("nordstjernen-back", ns_i18n("Back"),
+                              ns_i18n("Go back one page"),
                               G_CALLBACK(on_back_clicked), pw);
     pw->forward = toolbar_button("nordstjernen-forward", ns_i18n("Forward"),
+                                 ns_i18n("Go forward one page"),
                                  G_CALLBACK(on_forward_clicked), pw);
     pw->reload = toolbar_button("nordstjernen-reload", ns_i18n("Reload"),
+                                ns_i18n("Reload this page"),
                                 G_CALLBACK(on_reload_clicked), pw);
     pw->stop = toolbar_button("nordstjernen-stop", ns_i18n("Stop"),
+                              ns_i18n("Stop loading this page"),
                               G_CALLBACK(on_stop_clicked), pw);
-    gtk_widget_set_visible(pw->stop, FALSE);
+    gtk_widget_set_sensitive(pw->stop, FALSE);
     GtkWidget *home = toolbar_button("nordstjernen-home", ns_i18n("Home"),
+                                     ns_i18n("Go to the home page"),
                                      G_CALLBACK(on_home_clicked), pw);
-    gtk_widget_set_margin_end(home, 24);
-    toolbar_button_icon_size(pw->back, 20);
-    toolbar_button_icon_size(pw->forward, 20);
-    toolbar_button_icon_size(pw->stop, 20);
-    toolbar_button_icon_size(home, 20);
+    GtkWidget *print = toolbar_button("nordstjernen-print", ns_i18n("Print"),
+                                      ns_i18n("Print this page"),
+                                      G_CALLBACK(on_print_clicked), pw);
+    GtkWidget *downloads = toolbar_button("nordstjernen-downloads",
+                                          ns_i18n("Downloads"),
+                                          ns_i18n("Show downloads"),
+                                          G_CALLBACK(on_downloads_clicked), pw);
+    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_widget_add_css_class(sep, "ns-toolbar-separator");
 
     pw->spinner = gtk_spinner_new();
     gtk_widget_set_tooltip_text(pw->spinner, ns_i18n("Loading"));
@@ -2178,7 +2333,14 @@ proc_window_new(GtkApplication *app, const char *home_url)
 
     pw->address = gtk_entry_new();
     gtk_widget_set_hexpand(pw->address, TRUE);
+    gtk_widget_set_valign(pw->address, GTK_ALIGN_CENTER);
     gtk_widget_add_css_class(pw->address, "ns-address");
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(pw->address),
+                                      GTK_ENTRY_ICON_PRIMARY,
+                                      "nordstjernen-bookmarks");
+    gtk_entry_set_icon_tooltip_text(GTK_ENTRY(pw->address),
+                                    GTK_ENTRY_ICON_PRIMARY,
+                                    ns_i18n("Page location"));
     gtk_entry_set_placeholder_text(GTK_ENTRY(pw->address),
                                    ns_i18n("Search or enter a URL"));
     set_accessible_label(pw->address, ns_i18n("Address and search bar"));
@@ -2204,9 +2366,10 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_signal_connect(pw->zoom_button, "clicked",
                      G_CALLBACK(on_zoom_indicator_clicked), pw);
 
-    GtkWidget *go = toolbar_button("nordstjernen-go", ns_i18n("Go"),
-                                   G_CALLBACK(on_go_clicked), pw);
-    pw->bookmarks_button = toolbar_button("non-starred-symbolic",
+    GtkWidget *sep2 = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
+    gtk_widget_add_css_class(sep2, "ns-toolbar-separator");
+    pw->bookmarks_button = toolbar_button("nordstjernen-bookmarks",
+                                          ns_i18n("Bookmarks"),
                                           ns_i18n("Bookmarks"),
                                           G_CALLBACK(on_bookmarks_clicked), pw);
     GMenu *appmenu = g_menu_new();
@@ -2254,8 +2417,10 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_menu_append_section(appmenu, NULL, G_MENU_MODEL(appmenu_about));
     g_object_unref(appmenu_about);
     GtkWidget *menu_button = gtk_menu_button_new();
-    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(menu_button),
-                                  "open-menu-symbolic");
+    gtk_menu_button_set_child(GTK_MENU_BUTTON(menu_button),
+                              toolbar_labelled_child("open-menu-symbolic",
+                                                     ns_i18n("Menu")));
+    gtk_widget_set_valign(menu_button, GTK_ALIGN_CENTER);
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(menu_button),
                                    G_MENU_MODEL(appmenu));
     ns_popover_menu_fit(GTK_WIDGET(gtk_menu_button_get_popover(
@@ -2265,10 +2430,11 @@ proc_window_new(GtkApplication *app, const char *home_url)
     g_object_unref(appmenu);
 
     GtkWidget *logo = gtk_image_new_from_icon_name("nordstjernen");
-    gtk_image_set_pixel_size(GTK_IMAGE(logo), 28);
+    gtk_image_set_pixel_size(GTK_IMAGE(logo), 22);
     GtkWidget *logo_button = gtk_button_new();
     gtk_button_set_child(GTK_BUTTON(logo_button), logo);
     gtk_button_set_has_frame(GTK_BUTTON(logo_button), FALSE);
+    gtk_widget_add_css_class(logo_button, "ns-throbber");
     gtk_widget_set_tooltip_text(logo_button, ns_i18n("Visit nordstjernen.org"));
     set_accessible_label(logo_button, ns_i18n("Visit nordstjernen.org"));
     g_signal_connect(logo_button, "clicked", G_CALLBACK(on_logo_clicked), pw);
@@ -2278,10 +2444,13 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_box_append(GTK_BOX(pw->toolbar), pw->reload);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->stop);
     gtk_box_append(GTK_BOX(pw->toolbar), home);
+    gtk_box_append(GTK_BOX(pw->toolbar), print);
+    gtk_box_append(GTK_BOX(pw->toolbar), downloads);
+    gtk_box_append(GTK_BOX(pw->toolbar), sep);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->spinner);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->address);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->zoom_button);
-    gtk_box_append(GTK_BOX(pw->toolbar), go);
+    gtk_box_append(GTK_BOX(pw->toolbar), sep2);
     gtk_box_append(GTK_BOX(pw->toolbar), pw->bookmarks_button);
     gtk_box_append(GTK_BOX(pw->toolbar), menu_button);
     gtk_box_append(GTK_BOX(pw->toolbar), logo_button);
