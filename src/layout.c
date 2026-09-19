@@ -86,6 +86,32 @@ length_is_auto(const ns_css_value *v)
            strcmp(v->u.keyword, "auto") == 0;
 }
 
+static const char *
+abs_self_alignment(const ns_box *abox, ns_css_prop prop)
+{
+    const char *k = abox->style ? ns_style_keyword(abox->style, prop) : NULL;
+    if (!k || strcmp(k, "auto") == 0) k = "normal";
+    if (g_str_has_prefix(k, "safe ")) k += 5;
+    else if (g_str_has_prefix(k, "unsafe ")) k += 7;
+    if (strcmp(k, "normal") == 0) {
+        gboolean replaced = abox->kind == NS_BOX_IMAGE ||
+                            abox->kind == NS_BOX_VIDEO || abox->kind == NS_BOX_SVG;
+        k = replaced ? "start" : "stretch";
+    }
+    return k;
+}
+
+static double
+aspect_ratio_number(const ns_css_value *v, gboolean *with_auto)
+{
+    if (with_auto) *with_auto = FALSE;
+    if (!v || v->kind != NS_CSS_V_SIZE || v->u.size.w_unit != NS_CSS_UNIT_NUMBER ||
+        v->u.size.h_unit != NS_CSS_UNIT_NUMBER)
+        return -1;
+    if (with_auto) *with_auto = v->u.size.w_auto;
+    return v->u.size.w > 0 && v->u.size.h > 0 ? v->u.size.w / v->u.size.h : -1;
+}
+
 static gboolean
 height_is_percent(const ns_css_value *v)
 {
@@ -181,11 +207,9 @@ containing_block_definite_height(const ns_box *box)
             bottom && !length_is_auto(bottom) &&
             p->content_height > 0)
             return p->content_height;
-        const ns_css_value *arv = p->style->values[NS_CSS_ASPECT_RATIO];
-        if (arv && arv->kind == NS_CSS_V_LENGTH &&
-            arv->u.length.unit == NS_CSS_UNIT_NUMBER &&
-            arv->u.length.v > 0 && p->content_width > 0)
-            return p->content_width / arv->u.length.v;
+        double ratio = aspect_ratio_number(p->style->values[NS_CSS_ASPECT_RATIO], NULL);
+        if (ratio > 0 && p->content_width > 0)
+            return p->content_width / ratio;
         return -1;
     }
     if (height_is_percent(h)) {
@@ -6747,8 +6771,10 @@ layout_image(ns_box *box, double parent_content_width)
                    ? (double)img->natural_width  : -1;
     double nat_h = (img && img->loaded && img->natural_height > 0)
                    ? (double)img->natural_height : -1;
-    if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
-    if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
+    if (declared_size) {
+        if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
+        if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
+    }
     double intrinsic_ratio = nat_w > 0 && nat_h > 0 ? nat_w / nat_h : -1;
     if (box->kind == NS_BOX_SVG && box->dom) {
         ns_svg_size svg_size;
@@ -6756,20 +6782,20 @@ layout_image(ns_box *box, double parent_content_width)
         if (svg_size.has_ratio && svg_size.ratio > 0)
             intrinsic_ratio = svg_size.ratio;
     }
-    {
-        const ns_css_value *arv = box->style
-            ? box->style->values[NS_CSS_ASPECT_RATIO] : NULL;
-        if (arv && arv->kind == NS_CSS_V_LENGTH &&
-            arv->u.length.unit == NS_CSS_UNIT_NUMBER && arv->u.length.v > 0 &&
-            !(w < 0 && h < 0 && nat_w > 0 && nat_h > 0))
-            intrinsic_ratio = arv->u.length.v;
-    }
+    gboolean ratio_with_auto = FALSE;
+    double specified_ratio = box->style
+        ? aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], &ratio_with_auto) : -1;
+    gboolean ratio_overrides = specified_ratio > 0 &&
+        (!ratio_with_auto || intrinsic_ratio <= 0);
+    if (ratio_overrides) intrinsic_ratio = specified_ratio;
     if (box->media)
         box->media->size_independent_of_image =
             (w >= 0 && h >= 0) || declared_size || placeholder_size;
 
     gboolean metadata_video =
         box->kind == NS_BOX_VIDEO && node_has_media_metadata(box->dom);
+    if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
+    if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
     gboolean ratio_only = box->media && box->media->intrinsic_ratio_only;
     gboolean w_specified = w >= 0;
@@ -6784,8 +6810,10 @@ layout_image(ns_box *box, double parent_content_width)
             } else if (parent_content_width > 0) {
                 w = parent_content_width; h = w / intrinsic_ratio;
             } else { w = 0; h = 0; }
-        } else if (nat_w > 0 && nat_h > 0) { w = nat_w; h = nat_h; }
-        else { w = 0; h = 0; }
+        } else if (nat_w > 0 && nat_h > 0) {
+            w = nat_w;
+            h = ratio_overrides && !ratio_with_auto ? w / intrinsic_ratio : nat_h;
+        } else { w = 0; h = 0; }
     } else if (w < 0) {
         w = intrinsic_ratio > 0 ? h * intrinsic_ratio : h;
     } else if (h < 0) {
@@ -9137,11 +9165,9 @@ layout_flex_column(ns_box *box, double cw,
         (hv || (box->style->values[NS_CSS_TOP] && box->style->values[NS_CSS_BOTTOM])))
         explicit_h = box->content_height;
     if (explicit_h < 0 && box->style) {
-        const ns_css_value *arv = box->style->values[NS_CSS_ASPECT_RATIO];
-        if (arv && arv->kind == NS_CSS_V_LENGTH &&
-            arv->u.length.unit == NS_CSS_UNIT_NUMBER &&
-            arv->u.length.v > 0 && cw > 0)
-            explicit_h = cw / arv->u.length.v;
+        double ratio = aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL);
+        if (ratio > 0 && cw > 0)
+            explicit_h = cw / ratio;
     }
     if (explicit_h < 0 && box->definite_height > 0)
         explicit_h = box->definite_height;
@@ -11633,12 +11659,10 @@ flex_done: ;
         }
         box->content_height = explicit_h;
     } else {
-        const ns_css_value *ar = box->style
-            ? box->style->values[NS_CSS_ASPECT_RATIO] : NULL;
-        if (ar && ar->kind == NS_CSS_V_LENGTH &&
-            ar->u.length.unit == NS_CSS_UNIT_NUMBER &&
-            ar->u.length.v > 0 && box->content_width > 0) {
-            double aspect_h = box->content_width / ar->u.length.v;
+        double ratio = box->style
+            ? aspect_ratio_number(box->style->values[NS_CSS_ASPECT_RATIO], NULL) : -1;
+        if (ratio > 0 && box->content_width > 0) {
+            double aspect_h = box->content_width / ratio;
             box->content_height = aspect_h > measured ? aspect_h : measured;
         } else {
             box->content_height = measured;
@@ -12689,6 +12713,11 @@ position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
         else
             ml = 0;
         final_x = cb_inner_x + left + ml;
+    } else if (!l_auto && !r_auto) {
+        double remaining = cb_w - left - right - box_outer_w;
+        final_x = cb_inner_x + left +
+            grid_static_align_offset(abs_self_alignment(abox, NS_CSS_JUSTIFY_SELF),
+                                     remaining, FALSE);
     } else if (!l_auto) {
         final_x = cb_inner_x + left;
     } else if (!r_auto) {
@@ -12706,6 +12735,11 @@ position_absolute_box_in(ns_box *abox, double cb_inner_x, double cb_inner_y,
         else
             mt = 0;
         final_y = cb_inner_y + top + mt;
+    } else if (!t_auto && !b_auto) {
+        double remaining = cb_h - top - bottom - box_outer_h;
+        final_y = cb_inner_y + top +
+            grid_static_align_offset(abs_self_alignment(abox, NS_CSS_ALIGN_SELF),
+                                     remaining, FALSE);
     } else if (!t_auto) {
         final_y = cb_inner_y + top;
     } else if (!b_auto) {
@@ -12899,9 +12933,18 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             (alv->kind == NS_CSS_V_LENGTH || alv->kind == NS_CSS_V_CALC);
         gboolean r_set = arv && !length_is_auto(arv) &&
             (arv->kind == NS_CSS_V_LENGTH || arv->kind == NS_CSS_V_CALC);
+        gboolean js_stretch = strcmp(abs_self_alignment(abox, NS_CSS_JUSTIFY_SELF),
+                                     "stretch") == 0;
+        gboolean as_stretch = strcmp(abs_self_alignment(abox, NS_CSS_ALIGN_SELF),
+                                     "stretch") == 0;
         gboolean stretch_w = !has_explicit_width &&
-            ((l_set && r_set) || height_keyword_stretches(awv));
+            ((l_set && r_set && js_stretch) || height_keyword_stretches(awv));
         double layout_w = avail;
+        double inset_w = avail;
+        if (l_set && r_set) {
+            inset_w = avail - length_resolve(alv, avail, 0) - length_resolve(arv, avail, 0);
+            if (inset_w < 0) inset_w = 0;
+        }
         if (stretch_w) {
             double l = l_set ? length_resolve(alv, avail, 0) : 0;
             double r = r_set ? length_resolve(arv, avail, 0) : 0;
@@ -12930,11 +12973,12 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         layout_box(abox, layout_w, cs);
         if (!stretch_w && !has_explicit_width && abox->kind == NS_BOX_BLOCK) {
             double fit = measure_natural_width(abox, cs);
-            if (!(fit > 0)) fit = estimate_natural_width(abox, avail);
+            if (!(fit > 0)) fit = estimate_natural_width(abox, inset_w);
             double floor_w = measure_min_width(abox, cs);
             if (fit < floor_w) fit = floor_w;
-            if (fit >= 0 && fit < avail) layout_box(abox, fit, cs);
-            else if (floor_w > avail) layout_box(abox, floor_w, cs);
+            if (fit >= 0 && fit < inset_w) layout_box(abox, fit, cs);
+            else if (floor_w > inset_w) layout_box(abox, floor_w, cs);
+            else if (inset_w < avail) layout_box(abox, inset_w, cs);
         }
         if (has_explicit_height) {
             double explicit_h = resolve_height_with_basis(ahv, avail,
@@ -12965,7 +13009,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
              strcmp(ahv->u.keyword, "max-content") == 0);
         double stretched_h = -1;
         if (!has_explicit_height && !intrinsic_height &&
-            t_set && b_set && cb_h > 0) {
+            t_set && b_set && cb_h > 0 && as_stretch) {
             double t = length_resolve(atv, cb_h, 0);
             double bb = length_resolve(abv, cb_h, 0);
             double h = cb_h - t - bb
