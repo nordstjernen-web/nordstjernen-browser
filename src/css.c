@@ -10322,9 +10322,8 @@ css_time_product(const char **pp, const char *e)
             else if (acc == TVT_TIME && rhs == TVT_NUMBER) acc = TVT_TIME;
             else { *pp = r; return TVT_INVALID; }
         } else {
-            if (rhs == TVT_NUMBER) { /* acc unchanged */ }
-            else if (acc == TVT_TIME && rhs == TVT_TIME) acc = TVT_NUMBER;
-            else { *pp = r; return TVT_INVALID; }
+            if (acc == TVT_TIME && rhs == TVT_TIME) acc = TVT_NUMBER;
+            else if (rhs != TVT_NUMBER) { *pp = r; return TVT_INVALID; }
         }
         p = r;
     }
