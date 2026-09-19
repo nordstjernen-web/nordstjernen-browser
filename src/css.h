@@ -564,6 +564,7 @@ typedef struct ns_css_value {
         ns_css_anim_list anim;
         struct { double v[4]; ns_css_unit unit[4]; gboolean is_auto[4]; } rect;
     } u;
+    char *image_set_text;
     struct ns_css_value *next_layer;
 } ns_css_value;
 
@@ -1120,6 +1121,7 @@ char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
 char *ns_css_content_canonical(const char *text);
+char *ns_css_unicode_range_canonical(const char *text);
 char *ns_css_container_condition_canonical(const char *cond);
 char *ns_css_container_name_canonical(const char *text);
 char *ns_css_container_shorthand_canonical(const char *text);
