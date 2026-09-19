@@ -6603,6 +6603,8 @@
                     i++;
                     continue;
                 }
+                var declHead = /^\s*(--[^\s:]+|[A-Za-z_-][\w-]*)\s*:([\s\S]*)$/.exec(s.slice(start, i));
+                var braceStart = i;
                 var bdepth = 0, q2 = 0;
                 while (i < n) {
                     var c2 = s.charAt(i);
@@ -6615,6 +6617,32 @@
                     if (c2 === '{') bdepth++;
                     else if (c2 === '}') { bdepth--; if (bdepth === 0) { i++; break; } }
                     i++;
+                }
+                if (declHead) {
+                    var j = i, q3 = 0, pdepth = 0;
+                    while (j < n) {
+                        var c3 = s.charAt(j);
+                        if (q3) {
+                            if (c3 === '\\') j++;
+                            else if (c3 === q3) q3 = 0;
+                            j++; continue;
+                        }
+                        if (c3 === '"' || c3 === "'") { q3 = c3; j++; continue; }
+                        if (c3 === '(' || c3 === '[') pdepth++;
+                        else if (c3 === ')' || c3 === ']') { if (pdepth) pdepth--; }
+                        else if (!pdepth && (c3 === ';' || c3 === '{')) break;
+                        j++;
+                    }
+                    var tail = s.slice(i, j);
+                    var isCustom = declHead[1].slice(0, 2) === '--';
+                    var wholeBlock = declHead[2].replace(/\s+/g, '') === '' &&
+                                     tail.replace(/\s+/g, '') === '';
+                    if (s.charAt(j) !== '{' && (isCustom || wholeBlock)) {
+                        var value = (declHead[2] + s.slice(braceStart, i) + tail).replace(/^\s+|\s+$/g, '');
+                        decls += declHead[1] + ': ' + value + '; ';
+                        i = j + 1;
+                        continue;
+                    }
                 }
                 nested += s.slice(start, i) + '\n';
             }
