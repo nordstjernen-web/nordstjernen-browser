@@ -25332,6 +25332,23 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
                              ns_event_get_src_element, NULL);
 }
 
+static gboolean
+ns_event_type_is_composed(const char *type)
+{
+    static const char *const composed_types[] = {
+        "auxclick", "beforeinput", "blur", "click", "compositionend",
+        "compositionstart", "compositionupdate", "contextmenu", "dblclick",
+        "focus", "focusin", "focusout", "input", "keydown", "keypress",
+        "keyup", "mousedown", "mousemove", "mouseout", "mouseover",
+        "mouseup", "pointercancel", "pointerdown", "pointermove",
+        "pointerout", "pointerover", "pointerup", "touchcancel",
+        "touchend", "touchmove", "touchstart", "wheel",
+    };
+    for (gsize i = 0; type && i < G_N_ELEMENTS(composed_types); i++)
+        if (strcmp(type, composed_types[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 static JSValue
 ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
 {
@@ -25341,6 +25358,8 @@ ns_make_event(JSContext *ctx, const char *type, const ns_node *target)
     JS_SetPropertyStr(ctx, event, "defaultPrevented", JS_FALSE);
     JS_SetPropertyStr(ctx, event, "bubbles", JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "composed",
+                      JS_NewBool(ctx, ns_event_type_is_composed(type)));
     JS_SetPropertyStr(ctx, event, "eventPhase", JS_NewInt32(ctx, 0));
     ns_bind_fn(ctx, event, "preventDefault",           ns_event_prevent_default, 0);
     ns_bind_fn(ctx, event, "stopPropagation",          ns_event_stop_propagation, 0);
@@ -36913,6 +36932,25 @@ ns_element_define_own_property(JSContext *ctx, JSValueConst this_obj, JSAtom pro
 }
 
 static JSValue
+ns_options_get_selectedIndex(JSContext *ctx, JSValueConst this_val)
+{
+    JSValue sel = JS_GetPropertyStr(ctx, this_val, "__ns_select");
+    JSValue r = ns_element_get_selectedIndex(ctx, sel);
+    JS_FreeValue(ctx, sel);
+    return r;
+}
+
+static JSValue
+ns_options_set_selectedIndex(JSContext *ctx, JSValueConst this_val,
+                             JSValueConst val)
+{
+    JSValue sel = JS_GetPropertyStr(ctx, this_val, "__ns_select");
+    JSValue r = ns_element_set_selectedIndex(ctx, sel, val);
+    JS_FreeValue(ctx, sel);
+    return r;
+}
+
+static JSValue
 ns_element_get_options(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *el = ns_unwrap_element(this_val);
@@ -36934,6 +36972,16 @@ bind:
         JS_NewCFunction(ctx, ns_array_item,      "item",      1), 0);
     JS_DefinePropertyValueStr(ctx, arr, "namedItem",
         JS_NewCFunction(ctx, ns_array_namedItem, "namedItem", 1), 0);
+    if (el) {
+        JS_DefinePropertyValueStr(ctx, arr, "__ns_select",
+                                  ns_make_element(ctx, el), 0);
+        static const JSCFunctionListEntry options_props[] = {
+            JS_CGETSET_DEF("selectedIndex", ns_options_get_selectedIndex,
+                           ns_options_set_selectedIndex),
+        };
+        JS_SetPropertyFunctionList(ctx, arr, options_props,
+                                   G_N_ELEMENTS(options_props));
+    }
     return arr;
 }
 
