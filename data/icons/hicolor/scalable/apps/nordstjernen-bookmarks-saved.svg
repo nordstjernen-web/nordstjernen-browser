@@ -19,5 +19,5 @@
   <path d="M6 3 H18 V21 L12 16.4 L6 21 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
   <path d="M6 3 H18 V21 L12 16.4 L6 21 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
   <path d="M6.6 3.6 H17.4 V9.6 H6.6 Z" fill="url(#gloss)"/>
-  <path d="M12.00 5.90 L13.00 8.42 L15.71 8.59 L13.62 10.33 L14.29 12.96 L12.00 11.50 L9.71 12.96 L10.38 10.33 L8.29 8.59 L11.00 8.42 Z" fill="none" stroke="#7a5208" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M12.00 5.90 L13.00 8.42 L15.71 8.59 L13.62 10.33 L14.29 12.96 L12.00 11.50 L9.71 12.96 L10.38 10.33 L8.29 8.59 L11.00 8.42 Z" fill="url(#s)" stroke="#7a5208" stroke-width="0.7" stroke-linejoin="round"/>
 </svg>

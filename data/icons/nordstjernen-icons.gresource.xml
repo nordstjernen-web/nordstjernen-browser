@@ -7,8 +7,10 @@
     <file alias="nordstjernen-home.svg">hicolor/scalable/apps/nordstjernen-home.svg</file>
     <file alias="nordstjernen-reload.svg">hicolor/scalable/apps/nordstjernen-reload.svg</file>
     <file alias="nordstjernen-stop.svg">hicolor/scalable/apps/nordstjernen-stop.svg</file>
-    <file alias="nordstjernen-go.svg">hicolor/scalable/apps/nordstjernen-go.svg</file>
+    <file alias="nordstjernen-print.svg">hicolor/scalable/apps/nordstjernen-print.svg</file>
+    <file alias="nordstjernen-downloads.svg">hicolor/scalable/apps/nordstjernen-downloads.svg</file>
     <file alias="nordstjernen-bookmarks.svg">hicolor/scalable/apps/nordstjernen-bookmarks.svg</file>
+    <file alias="nordstjernen-bookmarks-saved.svg">hicolor/scalable/apps/nordstjernen-bookmarks-saved.svg</file>
     <file alias="nordstjernen-console.svg">hicolor/scalable/apps/nordstjernen-console.svg</file>
     <file alias="nordstjernen-settings.svg">hicolor/scalable/apps/nordstjernen-settings.svg</file>
     <file alias="nordstjernen-about.svg">hicolor/scalable/apps/nordstjernen-about.svg</file>

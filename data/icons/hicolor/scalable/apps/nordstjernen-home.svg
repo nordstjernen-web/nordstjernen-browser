@@ -1,16 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="g" x1="12" y1="2.8" x2="12" y2="21.2" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="0.5" stop-color="#eef5fb"/>
-      <stop offset="1" stop-color="#c9d7e7"/>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9c8f4"/>
+      <stop offset="0.5" stop-color="#4a80d9"/>
+      <stop offset="1" stop-color="#26509c"/>
+    </linearGradient>
+    <linearGradient id="w" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffdf6"/>
+      <stop offset="1" stop-color="#e0dcd0"/>
+    </linearGradient>
+    <linearGradient id="d" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a80d9"/>
+      <stop offset="1" stop-color="#223f7c"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <path d="M2.5 12.4 L12 3.2 L21.5 12.4 L19.6 12.4 L19.6 20 L19.6 20 Q 19.6 21 18.6 21 L 14.3 21 L 14.3 14.6 L 9.7 14.6 L 9.7 21 L 5.4 21 Q 4.4 21 4.4 20 L 4.4 12.4 Z"
-        fill="none" stroke="#142033" stroke-width="0.95"
-        stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M2.5 12.4 L12 3.2 L21.5 12.4 L19.6 12.4 L19.6 20 L19.6 20 Q 19.6 21 18.6 21 L 14.3 21 L 14.3 14.6 L 9.7 14.6 L 9.7 21 L 5.4 21 Q 4.4 21 4.4 20 L 4.4 12.4 Z"
-        fill="url(#g)" stroke="#1f3149" stroke-width="0.32"
-        stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12 3 L2.6 12.2 H5.4 V20.5 H18.6 V12.2 H21.4 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M15.6 4.8 H17.9 V9.2 H15.6 Z" fill="#a04a3c" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M5.4 11.6 H18.6 V20.5 H5.4 Z" fill="url(#w)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M12 3 L2.6 12.2 H21.4 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M12 3.9 L5.2 10.5 L12 10.5 L19.2 10.5 L12.4 4 Z" fill="url(#gloss)"/>
+  <path d="M10.3 14.6 H13.7 V20.5 H10.3 Z" fill="url(#d)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <circle cx="13" cy="17.7" r="0.4" fill="#ffe28a"/>
+  <path d="M6.9 13.9 H9.2 V16.4 H6.9 Z" fill="#bfe0ff" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M14.8 13.9 H17.1 V16.4 H14.8 Z" fill="#bfe0ff" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
 </svg>

@@ -1,16 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="g" x1="12" y1="2.8" x2="12" y2="21.2" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffaaa8"/>
-      <stop offset="0.5" stop-color="#e87573"/>
-      <stop offset="1" stop-color="#b64648"/>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb0a8"/>
+      <stop offset="0.5" stop-color="#e5463c"/>
+      <stop offset="1" stop-color="#a51f18"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <rect x="3" y="3" width="18" height="18" rx="4.6"
-        fill="none" stroke="#142033" stroke-width="0.95"/>
-  <rect x="3" y="3" width="18" height="18" rx="4.6"
-        fill="url(#g)" stroke="#1f3149" stroke-width="0.32"/>
-  <path d="M 8.6 8.6 L 15.4 15.4 M 15.4 8.6 L 8.6 15.4"
-        stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M7 3.5 H17 A3.5 3.5 0 0 1 20.5 7 V17 A3.5 3.5 0 0 1 17 20.5 H7 A3.5 3.5 0 0 1 3.5 17 V7 A3.5 3.5 0 0 1 7 3.5 Z" fill="#000000" opacity="0.18" transform="translate(0.7 0.9)"/>
+  <path d="M7 3.5 H17 A3.5 3.5 0 0 1 20.5 7 V17 A3.5 3.5 0 0 1 17 20.5 H7 A3.5 3.5 0 0 1 3.5 17 V7 A3.5 3.5 0 0 1 7 3.5 Z" fill="url(#g)" stroke="#1f3149" stroke-width="0.7" stroke-linejoin="round"/>
+  <path d="M7 4.2 H17 A2.8 2.8 0 0 1 19.8 7 V11.5 H4.2 V7 A2.8 2.8 0 0 1 7 4.2 Z" fill="url(#gloss)"/>
+  <path d="M8.3 8.3 L15.7 15.7 M15.7 8.3 L8.3 15.7" stroke="#7a130e" stroke-width="3.4" stroke-linecap="round" opacity="0.55"/>
+  <path d="M8 8 L16 16 M16 8 L8 16" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
 </svg>
