@@ -792,6 +792,7 @@ settle_raf_tick(gpointer user_data)
     if (g_headless_layout_dirty) s->pending_mutation = TRUE;
     if (s->pending_mutation && now - s->last_flush_us >= 200000) {
         g_headless_layout_dirty = FALSE;
+        g_headless_styles_stale = FALSE;
         headless_relayout(fc);
         s->pending_mutation = FALSE;
         s->last_flush_us = g_get_monotonic_time();

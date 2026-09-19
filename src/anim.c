@@ -1056,8 +1056,7 @@ apply_propagate(GHashTable *styles, const ns_node *node, int prop,
     for (const ns_node *c = node->first_child; c; c = c->next_sibling) {
         ns_style *st = g_hash_table_lookup(styles, c);
         if (!st) continue;
-        const ns_css_value *v = st->values[prop];
-        if (v != base && !(v && base && ns_css_value_equal(v, base))) continue;
+        if (st->values[prop] != base) continue;
         style_set_value(st, prop, current);
         apply_propagate(styles, c, prop, base, current);
     }
@@ -1077,7 +1076,8 @@ apply_animated_value(GHashTable *styles, ns_anim_state *s, ns_style *st,
         g_hash_table_insert(s->base_values, GINT_TO_POINTER(prop),
                             base ? ns_css_value_dup(base) : g_new0(ns_css_value, 1));
     st->values[prop] = ns_css_value_dup(current);
-    if (base) apply_propagate(styles, s->node, prop, base, current);
+    if (base && ns_css_prop_inherits(prop))
+        apply_propagate(styles, s->node, prop, base, current);
     ns_css_value_free(base);
 }
 
@@ -1272,9 +1272,6 @@ run_sample_at(ns_anim_run *r, double progress)
                 if (c->pct <= pct) prev = c;
                 if (c->pct > pct && !next) next = c;
             }
-            if (!next && prev && prev->pct < 100.0 - 1e-9 && pct >= 100.0 - 1e-9) {
-                next = NULL;
-            }
             ns_css_value *out = NULL;
             if (prev && next && prev != next) {
                 double range = next->pct - prev->pct;
@@ -1421,7 +1418,6 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
     double start_el = MAX(MIN(-r->delay_ms, isfinite(active) ? active : -r->delay_ms), 0.0);
     double end_el = isfinite(active) ? active : el;
     if (old != cur) {
-        gboolean was_active_or_idle = old == NS_ANIM_PHASE_IDLE;
         if (cur == NS_ANIM_PHASE_ACTIVE) {
             anim_emit(a, s->node, "animationstart", r->name,
                       old == NS_ANIM_PHASE_AFTER ? end_el : start_el);
@@ -1436,7 +1432,7 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
         } else if (cur == NS_ANIM_PHASE_BEFORE) {
             if (old == NS_ANIM_PHASE_AFTER)
                 anim_emit(a, s->node, "animationstart", r->name, end_el);
-            if (old != NS_ANIM_PHASE_IDLE || was_active_or_idle == FALSE)
+            if (old != NS_ANIM_PHASE_IDLE)
                 anim_emit(a, s->node, "animationend", r->name, 0.0);
             r->started = FALSE;
         }
@@ -1502,6 +1498,13 @@ ns_anim_has_active(const ns_anim *a)
     return a && a->active && g_hash_table_size(a->active) > 0;
 }
 
+static gboolean
+anim_prop_needs_relayout(int prop)
+{
+    return prop != NS_CSS_OPACITY && prop != NS_CSS_TRANSFORM &&
+           prop != NS_CSS_COLOR && prop != NS_CSS_BACKGROUND_COLOR;
+}
+
 gboolean
 ns_anim_needs_layout(const ns_anim *a)
 {
@@ -1514,7 +1517,7 @@ ns_anim_needs_layout(const ns_anim *a)
         if (s->chans)
             for (guint i = 0; i < s->chans->len; i++) {
                 const ns_anim_chan *ch = s->chans->pdata[i];
-                if (ch->active && ns_css_prop_affects_layout(ch->prop))
+                if (ch->active && anim_prop_needs_relayout(ch->prop))
                     return TRUE;
             }
         for (int w = 0; w < 2; w++) {
@@ -1527,12 +1530,12 @@ ns_anim_needs_layout(const ns_anim *a)
                 if (r->partials) {
                     g_hash_table_iter_init(&vit, r->partials);
                     while (g_hash_table_iter_next(&vit, &vk, &vv))
-                        if (ns_css_prop_affects_layout(GPOINTER_TO_INT(vk))) return TRUE;
+                        if (anim_prop_needs_relayout(GPOINTER_TO_INT(vk))) return TRUE;
                 }
                 if (!r->values) continue;
                 g_hash_table_iter_init(&vit, r->values);
                 while (g_hash_table_iter_next(&vit, &vk, &vv))
-                    if (ns_css_prop_affects_layout(GPOINTER_TO_INT(vk))) return TRUE;
+                    if (anim_prop_needs_relayout(GPOINTER_TO_INT(vk))) return TRUE;
             }
         }
     }

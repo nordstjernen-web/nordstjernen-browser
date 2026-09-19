@@ -11264,6 +11264,47 @@ parse_value_for(ns_css_prop prop, const char *text)
         return v;
     }
 
+    if (prop == NS_CSS_BORDER_TOP_LEFT_RADIUS ||
+        prop == NS_CSS_BORDER_TOP_RIGHT_RADIUS ||
+        prop == NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS ||
+        prop == NS_CSS_BORDER_BOTTOM_LEFT_RADIUS) {
+        char *pair[3] = {0};
+        int nt = split_ws_limit(t, pair, G_N_ELEMENTS(pair));
+        gboolean collapsed = FALSE;
+        gboolean negative = FALSE;
+        if (nt == 1) {
+            double num;
+            ns_css_unit unit;
+            negative = parse_length(pair[0], &num, &unit) && num < 0;
+        } else if (nt == 2) {
+            double num[2];
+            ns_css_unit unit[2];
+            gboolean ok = TRUE;
+            for (int k = 0; k < 2 && ok; k++) {
+                ok = parse_length(pair[k], &num[k], &unit[k]) && num[k] >= 0 &&
+                     (unit[k] != NS_CSS_UNIT_NUMBER || num[k] == 0);
+                if (ok && unit[k] == NS_CSS_UNIT_NUMBER) unit[k] = NS_CSS_UNIT_PX;
+            }
+            if (ok && num[0] == num[1] && unit[0] == unit[1]) {
+                g_free(t);
+                t = g_strdup(pair[0]);
+                collapsed = TRUE;
+            } else if (ok) {
+                v = g_new0(ns_css_value, 1);
+                v->kind = NS_CSS_V_SIZE;
+                v->u.size.w = num[0];
+                v->u.size.h = num[1];
+                v->u.size.w_unit = unit[0];
+                v->u.size.h_unit = unit[1];
+            }
+        }
+        for (int k = 0; k < nt; k++) g_free(pair[k]);
+        if (negative || (nt != 1 && !collapsed)) {
+            g_free(t);
+            return v;
+        }
+    }
+
     switch (prop) {
     case NS_CSS_DISPLAY: {
         char *norm = normalize_display_value(t);
@@ -12551,6 +12592,13 @@ prop_id(const char *name)
             if (g_ascii_strcasecmp(phys, kProp[i]) == 0) return i;
     }
     return -1;
+}
+
+gboolean
+ns_css_prop_inherits(int prop)
+{
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT &&
+           prop_inherits((ns_css_prop)prop);
 }
 
 const char *
@@ -16034,31 +16082,44 @@ parse_declaration_block(const char **pp, const char *end,
             char *slash = strchr(vtext_main, '/');
             if (slash) *slash = '\0';
             char *tokens[4] = {0};
+            char *vtokens[4] = {0};
             int n = split_ws(vtext_main, tokens);
+            int nv = slash ? split_ws(slash + 1, vtokens) : 0;
             if (n > 0) {
-                const char *tl = tokens[0];
-                const char *tr = n >= 2 ? tokens[1] : tl;
-                const char *br = n >= 3 ? tokens[2] : tl;
-                const char *bl = n >= 4 ? tokens[3] : tr;
-                const struct { ns_css_prop p; const char *v; } map[] = {
-                    { NS_CSS_BORDER_TOP_LEFT_RADIUS,     tl },
-                    { NS_CSS_BORDER_TOP_RIGHT_RADIUS,    tr },
-                    { NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS, br },
-                    { NS_CSS_BORDER_BOTTOM_LEFT_RADIUS,  bl },
+                const char *h[4] = {
+                    tokens[0],
+                    n >= 2 ? tokens[1] : tokens[0],
+                    n >= 3 ? tokens[2] : tokens[0],
+                    n >= 4 ? tokens[3] : (n >= 2 ? tokens[1] : tokens[0]),
+                };
+                const char *vert[4] = {
+                    nv >= 1 ? vtokens[0] : NULL,
+                    nv >= 2 ? vtokens[1] : (nv >= 1 ? vtokens[0] : NULL),
+                    nv >= 3 ? vtokens[2] : (nv >= 1 ? vtokens[0] : NULL),
+                    nv >= 4 ? vtokens[3]
+                            : (nv >= 2 ? vtokens[1] : (nv >= 1 ? vtokens[0] : NULL)),
+                };
+                static const ns_css_prop corners[4] = {
+                    NS_CSS_BORDER_TOP_LEFT_RADIUS, NS_CSS_BORDER_TOP_RIGHT_RADIUS,
+                    NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS, NS_CSS_BORDER_BOTTOM_LEFT_RADIUS,
                 };
                 for (int i = 0; i < 4; i++) {
-                    ns_css_value *vv = parse_value_for(map[i].p, map[i].v);
+                    char *text = vert[i] ? g_strdup_printf("%s %s", h[i], vert[i])
+                                         : g_strdup(h[i]);
+                    ns_css_value *vv = parse_value_for(corners[i], text);
+                    g_free(text);
                     if (!vv) continue;
-                    ns_css_decl d = { .prop = map[i].p, .value = vv, .important = important };
+                    ns_css_decl d = { .prop = corners[i], .value = vv, .important = important };
                     g_array_append_val(decls_out, d);
                 }
-                ns_css_value *legacy = parse_value_for(NS_CSS_BORDER_RADIUS, tl);
+                ns_css_value *legacy = parse_value_for(NS_CSS_BORDER_RADIUS, h[0]);
                 if (legacy) {
                     ns_css_decl d = { .prop = NS_CSS_BORDER_RADIUS, .value = legacy, .important = important };
                     g_array_append_val(decls_out, d);
                 }
             }
             for (int i = 0; i < n; i++) g_free(tokens[i]);
+            for (int i = 0; i < nv; i++) g_free(vtokens[i]);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -23166,8 +23227,10 @@ keyword_lerp(const char *ka, const char *kb, double t, char **out)
 static ns_css_value *
 transform_identity_like(const ns_css_value *src)
 {
-    ns_css_value *v = ns_css_value_dup(src);
-    if (!v) return NULL;
+    if (!src || src->kind != NS_CSS_V_TRANSFORM) return NULL;
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_TRANSFORM;
+    v->u.transform = src->u.transform;
     for (int i = 0; i < v->u.transform.n_ops; i++) {
         ns_css_transform_op *op = &v->u.transform.ops[i];
         switch (op->kind) {
@@ -25297,6 +25360,23 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                             v->u.calc.rem * root_px;
             v->u.calc.em = 0;
             v->u.calc.rem = 0;
+            continue;
+        }
+        if (v->kind == NS_CSS_V_SIZE && !v->u.size.w_auto && !v->u.size.h_auto) {
+            gboolean needs = v->u.size.w_unit == NS_CSS_UNIT_EM ||
+                             v->u.size.w_unit == NS_CSS_UNIT_REM ||
+                             v->u.size.h_unit == NS_CSS_UNIT_EM ||
+                             v->u.size.h_unit == NS_CSS_UNIT_REM;
+            if (!needs) continue;
+            v = ns_css_value_cow(out, i);
+            if (v->u.size.w_unit == NS_CSS_UNIT_EM || v->u.size.w_unit == NS_CSS_UNIT_REM) {
+                v->u.size.w *= v->u.size.w_unit == NS_CSS_UNIT_EM ? my_font_px : root_px;
+                v->u.size.w_unit = NS_CSS_UNIT_PX;
+            }
+            if (v->u.size.h_unit == NS_CSS_UNIT_EM || v->u.size.h_unit == NS_CSS_UNIT_REM) {
+                v->u.size.h *= v->u.size.h_unit == NS_CSS_UNIT_EM ? my_font_px : root_px;
+                v->u.size.h_unit = NS_CSS_UNIT_PX;
+            }
             continue;
         }
         if (v->kind != NS_CSS_V_LENGTH) continue;
