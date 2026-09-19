@@ -9305,7 +9305,72 @@
         }
         KeyframeEffect.prototype = Object.create(AnimationEffect.prototype);
         KeyframeEffect.prototype.constructor = KeyframeEffect;
+        function cssKeyframes(anim) {
+            var raw = global.__ns_anim_keyframes(anim.__el, anim.__prop) || [];
+            var merged = [];
+            raw.forEach(function (f) {
+                if (f.count === 0) return;
+                var last = merged[merged.length - 1];
+                var target = null;
+                for (var i = merged.length - 1; i >= 0; i--) {
+                    if (merged[i].offset === f.offset && merged[i].easing === f.easing &&
+                        merged[i].composite === f.composite) { target = merged[i]; break; }
+                    if (merged[i].offset !== f.offset) break;
+                }
+                if (!target) {
+                    target = { offset: f.offset, computedOffset: f.offset, easing: f.easing,
+                               composite: f.composite, __props: {} };
+                    merged.push(target);
+                }
+                for (var p in f.props) target.__props[p] = f.props[p];
+            });
+            merged.sort(function (a, b) { return a.offset - b.offset; });
+            var allProps = {};
+            merged.forEach(function (m) { for (var p in m.__props) allProps[p] = true; });
+            var runEasing = raw.length && raw[0].runEasing ? raw[0].runEasing : 'ease';
+            var cs = null;
+            [0, 1].forEach(function (end) {
+                var missing = [];
+                for (var p in allProps) {
+                    var has = merged.some(function (m) { return m.offset === end && p in m.__props; });
+                    if (!has) missing.push(p);
+                }
+                if (!missing.length) return;
+                if (!cs) cs = getComputedStyle(anim.__el);
+                var existing = null;
+                for (var i = merged.length - 1; i >= 0; i--)
+                    if (merged[i].offset === end) { existing = merged[i]; break; }
+                var target = existing || { offset: end, computedOffset: end, easing: runEasing,
+                                           composite: 'replace', __props: {} };
+                missing.forEach(function (p) {
+                    var base = typeof global.__ns_anim_base_value === 'function'
+                        ? global.__ns_anim_base_value(anim.__el, p) : null;
+                    target.__props[p] = base !== null && base !== undefined ? base : cs.getPropertyValue(p);
+                });
+                if (!existing) {
+                    if (end === 0) merged.unshift(target); else merged.push(target);
+                }
+            });
+            return merged.map(function (m) {
+                var o = { offset: m.offset, computedOffset: m.computedOffset,
+                          easing: m.easing, composite: m.composite };
+                for (var p in m.__props) {
+                    var camel = p.replace(/-([a-z])/g, function (x, c) { return c.toUpperCase(); });
+                    o[p === 'float' ? 'cssFloat' : camel] = m.__props[p];
+                }
+                return o;
+            });
+        }
+        AnimationEffect.prototype.getKeyframes = function () {
+            if (this.__anim && this.__anim.__kind === 'animation' &&
+                typeof global.__ns_anim_keyframes === 'function')
+                return cssKeyframes(this.__anim);
+            return [];
+        };
         KeyframeEffect.prototype.getKeyframes = function () {
+            if (this.__anim && this.__anim.__kind === 'animation' &&
+                typeof global.__ns_anim_keyframes === 'function')
+                return cssKeyframes(this.__anim);
             return this.__frames.map(function (f) {
                 var o = { offset: f.offset, computedOffset: f.offset, easing: f.easing, composite: f.composite };
                 for (var p in f.__props) {
@@ -9360,9 +9425,21 @@
         });
         Object.defineProperty(Animation.prototype, 'timeline', {
             get: function () { return this.__timeline; },
-            set: function (v) { this.__timeline = v; },
+            set: function (v) {
+                var had = this.__timeline;
+                this.__timeline = v;
+                if (v === null && had && this.__el && this.__kind !== 'generic') {
+                    this.__cancelling = true;
+                    global.__ns_anim_control(this.__el, this.__prop, 'cancel');
+                    this.__cancelling = false;
+                    this.__settle(false);
+                }
+            },
             configurable: true
         });
+        function timelineNow(anim) {
+            return anim.__timeline ? anim.__timeline.currentTime : null;
+        }
         Object.defineProperty(Animation.prototype, 'currentTime', {
             get: function () {
                 var q = this.__query();
@@ -9371,7 +9448,8 @@
                 return this.__lastTime === undefined ? null : this.__lastTime;
             },
             set: function (v) {
-                if (v === null || !this.__el || this.__kind === 'generic') return;
+                if (v === null) throw new TypeError('currentTime may not be set to null');
+                if (!this.__el || this.__kind === 'generic') return;
                 global.__ns_anim_seek(this.__el, this.__prop, Number(v));
             },
             configurable: true
@@ -9379,13 +9457,21 @@
         Object.defineProperty(Animation.prototype, 'startTime', {
             get: function () {
                 var q = this.__query();
-                if (!q || q.paused) return null;
-                return this.__timeline.currentTime - q.currentMs;
+                var now = timelineNow(this);
+                if (!q || q.paused || now === null) return null;
+                return now - q.currentMs;
             },
             set: function (v) {
-                if (v === null || !this.__el) return;
-                global.__ns_anim_seek(this.__el, this.__prop,
-                                      this.__timeline.currentTime - Number(v));
+                if (!this.__el || this.__kind === 'generic') return;
+                if (v === null) {
+                    global.__ns_anim_control(this.__el, this.__prop, 'pause');
+                    return;
+                }
+                var now = timelineNow(this);
+                if (now === null) return;
+                var q = this.__query();
+                if (q && q.paused) global.__ns_anim_control(this.__el, this.__prop, 'play');
+                global.__ns_anim_seek(this.__el, this.__prop, now - Number(v));
             },
             configurable: true
         });
@@ -9432,7 +9518,7 @@
             if (q) this.__lastTime = q.currentMs;
             if (finished) {
                 if (this.__resolveFinished) this.__resolveFinished(this);
-                var ev = { type: 'finish', target: this, currentTime: q ? q.currentMs : null, timelineTime: this.__timeline.currentTime };
+                var ev = { type: 'finish', target: this, currentTime: q ? q.currentMs : null, timelineTime: timelineNow(this) };
                 if (typeof this.onfinish === 'function') this.onfinish(ev);
                 this.__dispatch('finish', ev);
             } else {
@@ -9441,7 +9527,7 @@
                     this.__rejectFinished(err);
                 }
                 this.__finished = null;
-                var cev = { type: 'cancel', target: this, currentTime: null, timelineTime: this.__timeline.currentTime };
+                var cev = { type: 'cancel', target: this, currentTime: null, timelineTime: timelineNow(this) };
                 if (typeof this.oncancel === 'function') this.oncancel(cev);
                 this.__dispatch('cancel', cev);
             }

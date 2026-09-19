@@ -14155,97 +14155,7 @@ ns_make_navigation(JSContext *ctx, ns_js *js)
 static const char *
 ns_computed_initial_value(const char *name)
 {
-    if (!name) return NULL;
-    if (strcmp(name, "padding-top") == 0 ||
-        strcmp(name, "padding-right") == 0 ||
-        strcmp(name, "padding-bottom") == 0 ||
-        strcmp(name, "padding-left") == 0 ||
-        strcmp(name, "margin-top") == 0 ||
-        strcmp(name, "margin-right") == 0 ||
-        strcmp(name, "margin-bottom") == 0 ||
-        strcmp(name, "margin-left") == 0 ||
-        strcmp(name, "border-top-width") == 0 ||
-        strcmp(name, "border-right-width") == 0 ||
-        strcmp(name, "border-bottom-width") == 0 ||
-        strcmp(name, "border-left-width") == 0)
-        return "0px";
-    if (strcmp(name, "scroll-margin-top") == 0 ||
-        strcmp(name, "scroll-margin-right") == 0 ||
-        strcmp(name, "scroll-margin-bottom") == 0 ||
-        strcmp(name, "scroll-margin-left") == 0)
-        return "0px";
-    if (strcmp(name, "break-before") == 0 ||
-        strcmp(name, "break-after") == 0 ||
-        strcmp(name, "break-inside") == 0 ||
-        strcmp(name, "scroll-padding-top") == 0 ||
-        strcmp(name, "scroll-padding-right") == 0 ||
-        strcmp(name, "scroll-padding-bottom") == 0 ||
-        strcmp(name, "scroll-padding-left") == 0)
-        return "auto";
-    if (strcmp(name, "scroll-snap-type") == 0)
-        return "none";
-    if (strcmp(name, "scroll-snap-align") == 0)
-        return "none none";
-    if (strcmp(name, "scroll-snap-stop") == 0)
-        return "normal";
-    if (strcmp(name, "top") == 0 ||
-        strcmp(name, "right") == 0 ||
-        strcmp(name, "bottom") == 0 ||
-        strcmp(name, "left") == 0)
-        return "auto";
-    if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0)
-        return "auto";
-    if (strcmp(name, "box-sizing") == 0) return "content-box";
-    if (strcmp(name, "display") == 0) return "inline";
-    if (strcmp(name, "position") == 0) return "static";
-    if (strcmp(name, "opacity") == 0) return "1";
-    if (strcmp(name, "transform") == 0 ||
-        strcmp(name, "filter") == 0 ||
-        strcmp(name, "background-image") == 0 ||
-        strcmp(name, "box-shadow") == 0 ||
-        strcmp(name, "text-decoration-line") == 0 ||
-        strcmp(name, "text-transform") == 0 ||
-        strcmp(name, "float") == 0 ||
-        strcmp(name, "clear") == 0)
-        return "none";
-    if (strcmp(name, "visibility") == 0) return "visible";
-    if (strcmp(name, "white-space") == 0) return "normal";
-    if (strcmp(name, "hyphens") == 0) return "manual";
-    if (strcmp(name, "overflow") == 0 ||
-        strcmp(name, "overflow-x") == 0 ||
-        strcmp(name, "overflow-y") == 0)
-        return "visible";
-    if (strcmp(name, "cursor") == 0 ||
-        strcmp(name, "z-index") == 0 ||
-        strcmp(name, "pointer-events") == 0)
-        return "auto";
-    if (strcmp(name, "flex-direction") == 0) return "row";
-    if (strcmp(name, "font-weight") == 0) return "400";
-    if (strcmp(name, "font-stretch") == 0) return "normal";
-    if (strcmp(name, "font-kerning") == 0) return "auto";
-    if (strcmp(name, "font-variant-ligatures") == 0) return "normal";
-    if (strcmp(name, "font-feature-settings") == 0) return "normal";
-    if (strcmp(name, "font-variation-settings") == 0) return "normal";
-    if (strcmp(name, "letter-spacing") == 0 ||
-        strcmp(name, "word-spacing") == 0)
-        return "normal";
-    if (strcmp(name, "text-align") == 0) return "start";
-    if (strcmp(name, "list-style-type") == 0) return "disc";
-    if (strcmp(name, "vertical-align") == 0) return "baseline";
-    if (strcmp(name, "table-layout") == 0) return "auto";
-    if (strcmp(name, "border-collapse") == 0) return "separate";
-    if (strcmp(name, "background-color") == 0) return "rgba(0, 0, 0, 0)";
-    if (strcmp(name, "border-top-style") == 0 ||
-        strcmp(name, "border-right-style") == 0 ||
-        strcmp(name, "border-bottom-style") == 0 ||
-        strcmp(name, "border-left-style") == 0)
-        return "none";
-    if (strcmp(name, "border-image-source") == 0) return "none";
-    if (strcmp(name, "border-image-slice") == 0) return "100%";
-    if (strcmp(name, "border-image-width") == 0) return "1";
-    if (strcmp(name, "border-image-outset") == 0) return "0";
-    if (strcmp(name, "border-image-repeat") == 0) return "stretch";
-    return NULL;
+    return ns_css_initial_value_text(name);
 }
 
 static char *
@@ -15622,6 +15532,99 @@ ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, op);
     if (ok) js->mutated = TRUE;
     return JS_NewBool(ctx, ok);
+}
+
+typedef struct {
+    JSContext  *ctx;
+    JSValue     arr;
+    guint       n;
+    const char *run_easing;
+} ns_anim_kf_ctx;
+
+static void
+ns_anim_keyframe_visit(double offset, const char *easing, const GArray *decls,
+                       gpointer user)
+{
+    ns_anim_kf_ctx *kc = user;
+    JSValue run_easing = JS_NewString(kc->ctx, kc->run_easing ? kc->run_easing : "ease");
+    JSContext *ctx = kc->ctx;
+    JSValue frame = JS_NewObject(ctx);
+    JSValue props = JS_NewObject(ctx);
+    const char *composite = "auto";
+    int n_props = 0;
+    if (decls)
+        for (guint i = 0; i < decls->len; i++) {
+            const ns_css_decl *d = &g_array_index(decls, ns_css_decl, i);
+            const char *name = ns_css_prop_name(d->prop);
+            if (!name || !d->value) continue;
+            if (d->prop == NS_CSS_ANIMATION_COMPOSITION &&
+                d->value->kind == NS_CSS_V_KEYWORD && d->value->u.keyword) {
+                composite = d->value->u.keyword;
+                continue;
+            }
+            if (g_str_has_prefix(name, "animation") || g_str_has_prefix(name, "transition"))
+                continue;
+            char *text = ns_css_value_serialize(d->value);
+            if (text && *text) {
+                JS_SetPropertyStr(ctx, props, name, JS_NewString(ctx, text));
+                n_props++;
+            }
+            g_free(text);
+        }
+    JS_SetPropertyStr(ctx, frame, "offset", JS_NewFloat64(ctx, offset));
+    JS_SetPropertyStr(ctx, frame, "easing", JS_NewString(ctx, easing ? easing : "linear"));
+    JS_SetPropertyStr(ctx, frame, "composite", JS_NewString(ctx, composite));
+    JS_SetPropertyStr(ctx, frame, "count", JS_NewInt32(ctx, n_props));
+    JS_SetPropertyStr(ctx, frame, "props", props);
+    JS_SetPropertyStr(ctx, frame, "runEasing", run_easing);
+    JS_SetPropertyUint32(ctx, kc->arr, kc->n++, frame);
+}
+
+static JSValue
+ns_anim_base_value_native(JSContext *ctx, JSValueConst this_val,
+                          int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 2) return JS_NULL;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    const char *name = JS_ToCString(ctx, argv[1]);
+    if (!node || !name) {
+        if (name) JS_FreeCString(ctx, name);
+        return JS_NULL;
+    }
+    int prop = ns_css_prop_id(name);
+    JS_FreeCString(ctx, name);
+    if (prop < 0) return JS_NULL;
+    ns_js_flush_style(js);
+    const ns_css_value *v = ns_anim_base_value(js->anim, node, prop);
+    if (!v) {
+        const char *init = ns_css_initial_value_text(ns_css_prop_name(prop));
+        return init ? JS_NewString(ctx, init) : JS_NULL;
+    }
+    char *text = ns_css_value_serialize(v);
+    JSValue r = JS_NewString(ctx, text ? text : "");
+    g_free(text);
+    return r;
+}
+
+static JSValue
+ns_anim_keyframes_native(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue arr = JS_NewArray(ctx);
+    if (!js || !js->anim || argc < 2) return arr;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    int prop = ns_anim_prop_arg(ctx, argv[1]);
+    if (!node || prop >= 0 || prop == -2) return arr;
+    ns_js_flush_style(js);
+    ns_anim_info info;
+    gboolean have = ns_anim_info_for(js->anim, node, prop, &info);
+    ns_anim_kf_ctx kc = { ctx, arr, 0, have ? info.easing : NULL };
+    ns_anim_keyframes_visit(js->anim, node, prop, ns_anim_keyframe_visit, &kc);
+    return arr;
 }
 
 static JSValue
@@ -24974,6 +24977,8 @@ ns_window_request_idle_callback(JSContext *ctx, JSValueConst this_val,
     return JS_NewInt32(ctx, t->id);
 }
 
+static gboolean ns_js_run_animation_frame_internal(ns_js *js);
+
 static gboolean
 ns_raf_tick_timer(gpointer data)
 {
@@ -24989,7 +24994,11 @@ ns_raf_tick_timer(gpointer data)
         js->raf_tick_source = 0;
         return G_SOURCE_REMOVE;
     }
-    ns_js_run_animation_frame(js);
+    if (js->raf_host_driven) {
+        js->raf_tick_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    ns_js_run_animation_frame_internal(js);
     if (js->raf_pending && js->raf_pending->len > 0)
         return G_SOURCE_CONTINUE;
     js->raf_tick_source = 0;
@@ -24999,7 +25008,8 @@ ns_raf_tick_timer(gpointer data)
 static void
 ns_raf_schedule_tick(ns_js *js)
 {
-    if (!js || !js->ctx || js->worker_host || js->raf_tick_source) return;
+    if (!js || !js->ctx || js->worker_host || js->raf_tick_source ||
+        js->raf_host_driven) return;
     js->raf_tick_source = g_timeout_add(16, ns_raf_tick_timer, js);
 }
 
@@ -27058,6 +27068,14 @@ ns_js_flush_scrollend(ns_js *js)
 
 gboolean
 ns_js_run_animation_frame(ns_js *js)
+{
+    if (!js) return FALSE;
+    js->raf_host_us = g_get_monotonic_time();
+    return ns_js_run_animation_frame_internal(js);
+}
+
+static gboolean
+ns_js_run_animation_frame_internal(ns_js *js)
 {
     if (!js || js->halted || js->in_pump) return FALSE;
     ns_js_flush_scrollend(js);
@@ -32654,7 +32672,9 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
 void
 ns_js_set_anim(ns_js *js, struct ns_anim *anim)
 {
-    if (js) js->anim = anim;
+    if (!js) return;
+    js->anim = anim;
+    js->raf_host_driven = TRUE;
 }
 
 void
@@ -46578,6 +46598,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_NewCFunction(ctx, ns_anim_control_native, "__ns_anim_control", 3), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_animate",
         JS_NewCFunction(ctx, ns_anim_animate_native, "__ns_anim_animate", 3), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_keyframes",
+        JS_NewCFunction(ctx, ns_anim_keyframes_native, "__ns_anim_keyframes", 2), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_base_value",
+        JS_NewCFunction(ctx, ns_anim_base_value_native, "__ns_anim_base_value", 2), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_container_query_canonical",
         JS_NewCFunction(ctx, ns_container_query_canonical,
                         "__ns_container_query_canonical", 1),

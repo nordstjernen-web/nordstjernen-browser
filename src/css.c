@@ -387,6 +387,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_ANIMATION_TIMELINE]   = "animation-timeline",
     [NS_CSS_ANIMATION_RANGE_START] = "animation-range-start",
     [NS_CSS_ANIMATION_RANGE_END]  = "animation-range-end",
+    [NS_CSS_ANIMATION_COMPOSITION] = "animation-composition",
     [NS_CSS_ORPHANS]              = "orphans",
     [NS_CSS_WIDOWS]               = "widows",
     [NS_CSS_MAX_LINES]            = "max-lines",
@@ -8089,6 +8090,10 @@ anim_longhand_item_valid(ns_css_prop prop, const char *item)
     case NS_CSS_ANIMATION_PLAY_STATE:
         return g_ascii_strcasecmp(item, "running") == 0 ||
                g_ascii_strcasecmp(item, "paused") == 0;
+    case NS_CSS_ANIMATION_COMPOSITION:
+        return g_ascii_strcasecmp(item, "replace") == 0 ||
+               g_ascii_strcasecmp(item, "add") == 0 ||
+               g_ascii_strcasecmp(item, "accumulate") == 0;
     case NS_CSS_ANIMATION_TIMELINE:
         if (g_ascii_strcasecmp(item, "auto") == 0 ||
             g_ascii_strcasecmp(item, "none") == 0) return TRUE;
@@ -8597,6 +8602,261 @@ ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation)
     return r;
 }
 
+const char *
+ns_css_initial_value_text(const char *name)
+{
+    static const struct { const char *name; const char *value; } initials[] = {
+        { "padding-top",                "0px" },
+        { "scroll-margin-top",          "0px" },
+        { "scroll-margin-right",        "0px" },
+        { "scroll-margin-bottom",       "0px" },
+        { "scroll-margin-left",         "0px" },
+        { "scroll-padding-top",         "auto" },
+        { "scroll-padding-right",       "auto" },
+        { "scroll-padding-bottom",      "auto" },
+        { "scroll-padding-left",        "auto" },
+        { "break-before",               "auto" },
+        { "break-after",                "auto" },
+        { "break-inside",               "auto" },
+        { "scroll-snap-type",           "none" },
+        { "scroll-snap-align",          "none none" },
+        { "scroll-snap-stop",           "normal" },
+        { "border-image-source",        "none" },
+        { "border-image-slice",         "100%" },
+        { "border-image-width",         "1" },
+        { "border-image-outset",        "0" },
+        { "border-image-repeat",        "stretch" },
+        { "padding-right",              "0px" },
+        { "padding-bottom",             "0px" },
+        { "padding-left",               "0px" },
+        { "margin-top",                 "0px" },
+        { "margin-right",               "0px" },
+        { "margin-bottom",              "0px" },
+        { "margin-left",                "0px" },
+        { "border-top-width",           "0px" },
+        { "border-right-width",         "0px" },
+        { "border-bottom-width",        "0px" },
+        { "border-left-width",          "0px" },
+        { "top",                        "auto" },
+        { "right",                      "auto" },
+        { "bottom",                     "auto" },
+        { "left",                       "auto" },
+        { "width",                      "auto" },
+        { "height",                     "auto" },
+        { "box-sizing",                 "content-box" },
+        { "display",                    "inline" },
+        { "position",                   "static" },
+        { "opacity",                    "1" },
+        { "transform",                  "none" },
+        { "filter",                     "none" },
+        { "background-image",           "none" },
+        { "box-shadow",                 "none" },
+        { "text-decoration-line",       "none" },
+        { "text-transform",             "none" },
+        { "float",                      "none" },
+        { "clear",                      "none" },
+        { "visibility",                 "visible" },
+        { "white-space",                "normal" },
+        { "hyphens",                    "manual" },
+        { "overflow",                   "visible" },
+        { "overflow-x",                 "visible" },
+        { "overflow-y",                 "visible" },
+        { "cursor",                     "auto" },
+        { "z-index",                    "auto" },
+        { "pointer-events",             "auto" },
+        { "flex-direction",             "row" },
+        { "font-weight",                "400" },
+        { "font-stretch",               "normal" },
+        { "font-kerning",               "auto" },
+        { "font-variant-ligatures",     "normal" },
+        { "font-feature-settings",      "normal" },
+        { "font-variation-settings",    "normal" },
+        { "letter-spacing",             "normal" },
+        { "word-spacing",               "normal" },
+        { "text-align",                 "start" },
+        { "list-style-type",            "disc" },
+        { "vertical-align",             "baseline" },
+        { "table-layout",               "auto" },
+        { "border-collapse",            "separate" },
+        { "background-color",           "rgba(0, 0, 0, 0)" },
+        { "border-top-style",           "none" },
+        { "border-right-style",         "none" },
+        { "border-bottom-style",        "none" },
+        { "border-left-style",          "none" },
+        { "accent-color",               "auto" },
+        { "border-spacing",             "0px 0px" },
+        { "caption-side",               "top" },
+        { "caret-color",                "auto" },
+        { "clip-rule",                  "nonzero" },
+        { "dominant-baseline",          "auto" },
+        { "fill",                       "rgb(0, 0, 0)" },
+        { "fill-opacity",               "1" },
+        { "fill-rule",                  "nonzero" },
+        { "font-style",                 "normal" },
+        { "image-rendering",            "auto" },
+        { "list-style-image",           "none" },
+        { "list-style-position",        "outside" },
+        { "orphans",                    "2" },
+        { "overflow-wrap",              "normal" },
+        { "paint-order",                "normal" },
+        { "quotes",                     "auto" },
+        { "scrollbar-color",            "auto" },
+        { "shape-rendering",            "auto" },
+        { "stroke",                     "none" },
+        { "stroke-dasharray",           "none" },
+        { "stroke-dashoffset",          "0px" },
+        { "stroke-linecap",             "butt" },
+        { "stroke-linejoin",            "miter" },
+        { "stroke-miterlimit",          "4" },
+        { "stroke-opacity",             "1" },
+        { "stroke-width",               "1px" },
+        { "tab-size",                   "8" },
+        { "text-anchor",                "start" },
+        { "text-indent",                "0px" },
+        { "text-shadow",                "none" },
+        { "text-wrap-mode",             "wrap" },
+        { "widows",                     "2" },
+        { "word-break",                 "normal" },
+        { "writing-mode",               "horizontal-tb" },
+        { "align-content",              "normal" },
+        { "align-items",                "normal" },
+        { "align-self",                 "auto" },
+        { "animation-play-state",       "running" },
+        { "appearance",                 "none" },
+        { "aspect-ratio",               "auto" },
+        { "background-clip",            "border-box" },
+        { "background-origin",          "padding-box" },
+        { "background-position-x",      "0%" },
+        { "background-position-y",      "0%" },
+        { "background-repeat",          "repeat" },
+        { "background-size",            "auto" },
+        { "border-bottom-left-radius",  "0px" },
+        { "border-bottom-right-radius", "0px" },
+        { "border-top-left-radius",     "0px" },
+        { "border-top-right-radius",    "0px" },
+        { "border-end-end-radius",      "0px" },
+        { "border-end-start-radius",    "0px" },
+        { "border-start-end-radius",    "0px" },
+        { "border-start-start-radius",  "0px" },
+        { "clip",                       "auto" },
+        { "clip-path",                  "none" },
+        { "column-count",               "auto" },
+        { "column-gap",                 "normal" },
+        { "column-span",                "none" },
+        { "column-width",               "auto" },
+        { "break-before",               "auto" },
+        { "break-after",                "auto" },
+        { "break-inside",               "auto" },
+        { "scroll-snap-type",           "none" },
+        { "scroll-snap-align",          "none none" },
+        { "scroll-snap-stop",           "normal" },
+        { "scroll-padding-top",         "auto" },
+        { "scroll-padding-right",       "auto" },
+        { "scroll-padding-bottom",      "auto" },
+        { "scroll-padding-left",        "auto" },
+        { "scroll-margin-top",          "0px" },
+        { "scroll-margin-right",        "0px" },
+        { "scroll-margin-bottom",       "0px" },
+        { "scroll-margin-left",         "0px" },
+        { "container-name",             "none" },
+        { "container-type",             "normal" },
+        { "content",                    "normal" },
+        { "content-visibility",         "visible" },
+        { "counter-increment",          "none" },
+        { "counter-reset",              "none" },
+        { "cx",                         "0px" },
+        { "cy",                         "0px" },
+        { "x",                          "0px" },
+        { "y",                          "0px" },
+        { "r",                          "0px" },
+        { "rx",                         "auto" },
+        { "ry",                         "auto" },
+        { "flex-basis",                 "auto" },
+        { "flex-grow",                  "0" },
+        { "flex-shrink",                "1" },
+        { "flex-wrap",                  "nowrap" },
+        { "grid-auto-columns",          "auto" },
+        { "grid-auto-flow",             "row" },
+        { "grid-auto-rows",             "auto" },
+        { "grid-column-end",            "auto" },
+        { "grid-column-start",          "auto" },
+        { "grid-row-end",               "auto" },
+        { "grid-row-start",             "auto" },
+        { "grid-template-areas",        "none" },
+        { "grid-template-columns",      "none" },
+        { "grid-template-rows",         "none" },
+        { "justify-content",            "normal" },
+        { "justify-items",              "normal" },
+        { "justify-self",               "auto" },
+        { "mask-image",                 "none" },
+        { "max-block-size",             "none" },
+        { "max-height",                 "none" },
+        { "max-inline-size",            "none" },
+        { "max-width",                  "none" },
+        { "min-block-size",             "auto" },
+        { "min-height",                 "auto" },
+        { "min-inline-size",            "auto" },
+        { "min-width",                  "auto" },
+        { "mix-blend-mode",             "normal" },
+        { "object-fit",                 "fill" },
+        { "object-position",            "50% 50%" },
+        { "object-position-x",          "50%" },
+        { "object-position-y",          "50%" },
+        { "background-position",        "0% 0%" },
+        { "order",                      "0" },
+        { "outline-offset",             "0px" },
+        { "outline-style",              "none" },
+        { "outline-width",              "0px" },
+        { "perspective",                "none" },
+        { "perspective-origin",         "50% 50%" },
+        { "row-gap",                    "normal" },
+        { "scrollbar-width",            "auto" },
+        { "stop-color",                 "rgb(0, 0, 0)" },
+        { "stop-opacity",               "1" },
+        { "text-decoration-style",      "solid" },
+        { "text-overflow",              "clip" },
+        { "transform-origin",           "50% 50%" },
+        { "transform-style",            "flat" },
+        { "unicode-bidi",               "normal" },
+        { "user-select",                "auto" },
+        { "vector-effect",              "none" },
+        { "line-height",                "normal" },
+        { "direction",                  "ltr" },
+        { "text-orientation",           "mixed" },
+        { "animation-delay",            "0s" },
+        { "animation-duration",         "0s" },
+        { "transition-delay",           "0s" },
+        { "transition-duration",        "0s" },
+        { "backface-visibility",        "visible" },
+        { "column-rule-style",          "none" },
+        { "column-rule-width",          "0px" },
+        { "line-clamp",                 "none" },
+        { "text-decoration",            "none" },
+        { "font-variant",               "normal" },
+        { "border-radius",              "0px" },
+        { "gap",                        "normal" },
+        { "color",                      "rgb(26, 26, 26)" },
+        { "font-family",                "serif" },
+        { "font-size",                  "16px" },
+        { "text-wrap-style",            "auto" },
+        { "text-decoration-thickness",  "auto" },
+        { "text-underline-offset",      "auto" },
+        { "text-underline-position",    "auto" },
+        { "font-optical-sizing",        "auto" },
+        { "isolation",                  "auto" },
+        { "resize",                     "none" },
+        { "empty-cells",                "show" },
+        { "border-image-source",        "none" },
+        { "will-change",                "auto" },
+        { "touch-action",               "auto" },
+        { "scroll-behavior",            "auto" },
+    };
+    if (!name) return NULL;
+    for (gsize i = 0; i < G_N_ELEMENTS(initials); i++)
+        if (strcmp(name, initials[i].name) == 0) return initials[i].value;
+    return NULL;
+}
+
 char *
 ns_css_timing_serialize(const ns_css_timing *t)
 {
@@ -8767,7 +9027,7 @@ parse_anim_value(const char *text, gboolean is_animation)
                 if (g_ascii_strcasecmp(tok, "both") == 0 && !got_fill) {
                     e->fill = NS_CSS_ANIM_FILL_BOTH; got_fill = TRUE; continue;
                 }
-                if (g_ascii_strcasecmp(tok, "none") == 0 && !got_fill && !got_name) {
+                if (g_ascii_strcasecmp(tok, "none") == 0 && !got_fill) {
                     e->fill = NS_CSS_ANIM_FILL_NONE; got_fill = TRUE; continue;
                 }
                 if (got_name) { valid = FALSE; break; }
@@ -11117,6 +11377,7 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_ANIMATION_TIMELINE:
     case NS_CSS_ANIMATION_RANGE_START:
     case NS_CSS_ANIMATION_RANGE_END:
+    case NS_CSS_ANIMATION_COMPOSITION:
         v = parse_anim_longhand(prop, t);
         break;
     case NS_CSS_ASPECT_RATIO: {
@@ -21181,10 +21442,39 @@ keyword_number(const char *kw, double *out, gboolean *is_int)
     return TRUE;
 }
 
+static gboolean keyword_lerp(const char *ka, const char *kb, double t, char **out);
+
+static gboolean
+keyword_lerp_list(const char *ka, const char *kb, double t, char **out)
+{
+    char **pa = g_strsplit(ka, " ", -1);
+    char **pb = g_strsplit(kb, " ", -1);
+    guint na = g_strv_length(pa), nb = g_strv_length(pb);
+    gboolean ok = na == nb && na > 1;
+    GString *res = g_string_new(NULL);
+    for (guint i = 0; i < na && ok; i++) {
+        char *part = NULL;
+        if (!*pa[i] || !*pb[i]) { ok = *pa[i] == *pb[i]; if (ok) continue; break; }
+        if (!keyword_lerp(pa[i], pb[i], t, &part)) { ok = FALSE; break; }
+        if (res->len) g_string_append_c(res, ' ');
+        g_string_append(res, part);
+        g_free(part);
+    }
+    g_strfreev(pa);
+    g_strfreev(pb);
+    if (!ok) {
+        g_string_free(res, TRUE);
+        return FALSE;
+    }
+    *out = g_string_free(res, FALSE);
+    return TRUE;
+}
+
 static gboolean
 keyword_lerp(const char *ka, const char *kb, double t, char **out)
 {
     if (!ka || !kb) return FALSE;
+    if (strchr(ka, ' ') || strchr(kb, ' ')) return keyword_lerp_list(ka, kb, t, out);
     double na, nb;
     gboolean ia, ib;
     if (keyword_number(ka, &na, &ia) && keyword_number(kb, &nb, &ib)) {
@@ -21206,10 +21496,56 @@ keyword_lerp(const char *ka, const char *kb, double t, char **out)
     return FALSE;
 }
 
+static ns_css_value *
+transform_identity_like(const ns_css_value *src)
+{
+    ns_css_value *v = ns_css_value_dup(src);
+    if (!v) return NULL;
+    for (int i = 0; i < v->u.transform.n_ops; i++) {
+        ns_css_transform_op *op = &v->u.transform.ops[i];
+        switch (op->kind) {
+        case NS_CSS_TFN_TRANSLATE: op->a = op->b = op->c = 0; break;
+        case NS_CSS_TFN_ROTATE:    op->a = 0; break;
+        case NS_CSS_TFN_ROTATE3D:  op->d = 0; break;
+        case NS_CSS_TFN_SCALE:     op->a = op->b = op->c = 1; break;
+        case NS_CSS_TFN_SKEW:      op->a = op->b = 0; break;
+        case NS_CSS_TFN_MATRIX:
+            op->a = 1; op->b = 0; op->c = 0; op->d = 1; op->e = 0; op->f = 0;
+            break;
+        case NS_CSS_TFN_MATRIX3D:
+            for (int k = 0; k < 16; k++) op->m3d[k] = (k % 5 == 0) ? 1 : 0;
+            break;
+        default:
+            ns_css_value_free(v);
+            return NULL;
+        }
+    }
+    return v;
+}
+
+static gboolean
+value_is_none_keyword(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           strcmp(v->u.keyword, "none") == 0;
+}
+
 ns_css_value *
 ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
 {
     if (!a || !b) return NULL;
+    if (value_is_none_keyword(a) && b->kind == NS_CSS_V_TRANSFORM) {
+        ns_css_value *ida = transform_identity_like(b);
+        ns_css_value *r = ida ? ns_css_value_interpolate(ida, b, t) : NULL;
+        ns_css_value_free(ida);
+        return r;
+    }
+    if (value_is_none_keyword(b) && a->kind == NS_CSS_V_TRANSFORM) {
+        ns_css_value *idb = transform_identity_like(a);
+        ns_css_value *r = idb ? ns_css_value_interpolate(a, idb, t) : NULL;
+        ns_css_value_free(idb);
+        return r;
+    }
     ns_css_value *out = g_new0(ns_css_value, 1);
     if (value_lerp_lengths(a, b, t, out)) return out;
     if (a->kind != b->kind) { g_free(out); return NULL; }
@@ -23624,6 +23960,14 @@ cascade_walk(ns_node *node,
              gboolean under_dirty);
 
 static GHashTable    *g_incr_prev_styles;
+static GHashTable    *g_incr_before_styles;
+
+const ns_style *
+ns_css_style_before_change(const void *node)
+{
+    if (!node || !g_incr_before_styles) return NULL;
+    return g_hash_table_lookup(g_incr_before_styles, node);
+}
 static ns_node       *g_incr_prev_doc;
 static guint64        g_incr_prev_sig;
 static const ns_node *g_incr_prev_focus;
@@ -25742,7 +26086,8 @@ ns_css_compute(ns_node *doc,
             ((ns_style *)pv)->ref++;
             g_hash_table_insert(new_prev, pk, pv);
         }
-        if (g_incr_prev_styles) g_hash_table_destroy(g_incr_prev_styles);
+        if (g_incr_before_styles) g_hash_table_destroy(g_incr_before_styles);
+        g_incr_before_styles = g_incr_prev_styles;
         g_incr_prev_styles = new_prev;
         g_incr_prev_doc = doc;
         g_incr_prev_sig = sig;
@@ -25757,6 +26102,8 @@ ns_css_compute(ns_node *doc,
         g_hash_table_destroy(g_incr_prev_styles);
         g_incr_prev_styles = NULL;
         g_incr_prev_doc = NULL;
+        if (g_incr_before_styles) g_hash_table_destroy(g_incr_before_styles);
+        g_incr_before_styles = NULL;
     }
     if (g_incr_dirty) g_hash_table_remove_all(g_incr_dirty);
 
