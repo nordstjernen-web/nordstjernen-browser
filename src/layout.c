@@ -11409,12 +11409,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->y = cursor_y - mt;
             layout_box(c, cw_avail, child_inherited);
             if (keyword_is(box->style ? box->style->values[NS_CSS_DIRECTION]
-                                      : NULL, "rtl")) {
+                                      : NULL, "rtl") &&
+                !style_is_absolute_or_fixed(c->style)) {
                 double outer = c->margin.left + c->margin.right +
                                c->content_width + c->padding.left +
                                c->padding.right + c->border.left +
                                c->border.right;
-                if (fabs(outer - cw_avail) > 0.01) c->x += cw_avail - outer;
+                if (fabs(outer - cw_avail) > 0.01)
+                    shift_box_tree(c, cw_avail - outer, 0);
             }
             collect_escaping_floats(c, floats, 0);
             if (empty_block_collapses_through(c, clr)) {
@@ -11997,10 +11999,15 @@ static_abs_y_walk(const ns_box *b, const ns_node *target, double *out)
 
 static double
 static_abs_x_from_ancestors(const ns_box *cb, const ns_node *target,
-                            GHashTable *box_map, double fallback)
+                            GHashTable *box_map, double fallback,
+                            gboolean *out_rtl, double *out_right)
 {
     double best = fallback;
     guint best_depth = 0;
+    *out_rtl = cb && cb->style &&
+        ns_css_keyword_is(cb->style->values[NS_CSS_DIRECTION], "rtl");
+    *out_right = cb ? cb->x + cb->margin.left + cb->border.left +
+                      cb->padding.left + cb->content_width : fallback;
     for (const ns_node *p = target ? target->parent : NULL; p; p = p->parent) {
         if (p->kind != NS_NODE_ELEMENT) continue;
         const ns_box *pb = g_hash_table_lookup(box_map, p);
@@ -12016,6 +12023,9 @@ static_abs_x_from_ancestors(const ns_box *cb, const ns_node *target,
         for (const ns_node *q = target; q && q != p; q = q->parent) depth++;
         if (best_depth == 0 || depth < best_depth) {
             best = pb->x + pb->margin.left + pb->border.left + pb->padding.left;
+            *out_right = best + pb->content_width;
+            *out_rtl = pb->style &&
+                ns_css_keyword_is(pb->style->values[NS_CSS_DIRECTION], "rtl");
             best_depth = depth;
         }
         if (pb == cb) break;
@@ -12763,6 +12773,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             ? g_hash_table_lookup(g_abs_static, e.dom) : NULL;
         const ns_box *flex_parent = e.pseudo ? NULL
             : abs_flex_parent_box(e.dom, box_map);
+        gboolean static_rtl = FALSE;
+        double static_right = 0;
         if (st && st->run) {
             abox->x = st->run->x + st->rel_x;
             abox->y = st->run->y + st->rel_y;
@@ -12774,7 +12786,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                 static_abs_y_walk(cb, e.dom, &static_y);
             double base_x = cb->x + cb->margin.left + cb->border.left +
                             cb->padding.left;
-            abox->x = static_abs_x_from_ancestors(cb, e.dom, box_map, base_x);
+            abox->x = static_abs_x_from_ancestors(cb, e.dom, box_map, base_x,
+                                                   &static_rtl, &static_right);
             abox->y = static_y;
         }
         const ns_css_value *awv = abox->style
@@ -12869,6 +12882,11 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                             (!arv || length_is_auto(arv));
         gboolean static_y = (!atv || length_is_auto(atv)) &&
                             (!abv || length_is_auto(abv));
+        if (static_x && static_rtl && !(st && st->run))
+            abox->x = static_right - (abox->margin.left + abox->border.left +
+                                      abox->padding.left + abox->content_width +
+                                      abox->padding.right + abox->border.right +
+                                      abox->margin.right);
         double flex_x = 0, flex_y = 0;
         if (flex_parent && (static_x || static_y) &&
             flex_static_position(abox, flex_parent, &flex_x, &flex_y)) {
