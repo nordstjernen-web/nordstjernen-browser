@@ -219,7 +219,7 @@ def letter(pen: Pen, text: str, x: float, y: float, size: float, spacing: float 
             if len(pts) == 2 and math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]) < 0.6 * unit:
                 pen.dot(pts[0][0], pts[0][1], stroke_w * 0.55, fill=fill)
                 continue
-            pen.stroke(pts, width=stroke_w, amp=0.28 * unit ** 0.5, fill=fill)
+            pen.stroke(pts, width=stroke_w, amp=0.0, fill=fill)
         cursor += (advance + 3.2 + spacing) * unit
     return cursor
 
@@ -245,7 +245,7 @@ def title(pen: Pen, version: str) -> None:
 
 def panel(pen: Pen) -> None:
     pen.stroke([(6, 6), (WIDTH - 6, 6), (WIDTH - 6, HEIGHT - 6), (6, HEIGHT - 6)],
-               width=1.6, amp=0.8, closed=True)
+               width=1.6, amp=0.0, closed=True)
 
 
 def sun(pen: Pen, cx: float, cy: float, r: float, t: float) -> None:
@@ -401,15 +401,19 @@ def elephant(pen: Pen, x: float, g: float, s: float) -> None:
     body_w, body_h = 40 * s, 24 * s
     by = g - 20 * s
     pen.ellipse(x, by, body_w / 2, body_h / 2, fill=grey)
-    pen.legs(x - body_w * 0.33, x + body_w * 0.33, by + body_h * 0.25, g, w=LINE * 1.6, swing=2.0 * s)
+    pen.legs(x - body_w * 0.33, x + body_w * 0.33, by + body_h * 0.25, g, w=LINE * 1.6, swing=2.2 * s)
     hx, hy = x + body_w * 0.55, by - body_h * 0.28
     pen.ellipse(hx, hy, 9 * s, 8 * s, fill=grey)
-    pen.ellipse(hx - 4 * s, hy, 6 * s, 7 * s, fill=(170, 170, 178))
-    pen.stroke([(hx + 7 * s, hy + 2 * s), (hx + 12 * s, hy + 10 * s), (hx + 9 * s, hy + 20 * s),
-                (hx + 13 * s, hy + 24 * s)], width=LINE * 1.3, amp=0.8)
+    ear_flap = 1.2 * math.sin(TAU * pen.gait)
+    pen.ellipse(hx - 4 * s + ear_flap, hy, 6 * s, 7 * s, fill=(170, 170, 178))
+    t_swing = 4.0 * s * math.sin(TAU * pen.gait)
+    pen.stroke([(hx + 7 * s, hy + 2 * s), (hx + 12 * s, hy + 10 * s),
+                (hx + 9 * s + t_swing * 0.5, hy + 19 * s),
+                (hx + 13 * s + t_swing, hy + 22 * s - abs(t_swing) * 0.4)], width=LINE * 1.4, amp=0.6)
     pen.stroke([(hx + 6 * s, hy + 6 * s), (hx + 11 * s, hy + 9 * s)], width=1.3, fill=(240, 240, 230))
     pen.dot(hx + 3 * s, hy - 2 * s, 1.2 * s)
-    pen.stroke([(x - body_w * 0.5, by - 2 * s), (x - body_w * 0.62, by + 8 * s)], width=1.3)
+    tail_wag = 2.0 * s * math.sin(TAU * pen.gait * 2)
+    pen.stroke([(x - body_w * 0.5, by - 2 * s), (x - body_w * 0.62, by + 8 * s + tail_wag)], width=1.3)
 
 
 def lion(pen: Pen, x: float, g: float, s: float) -> None:
@@ -424,9 +428,10 @@ def lion(pen: Pen, x: float, g: float, s: float) -> None:
     pen.dot(hx - 2 * s, hy - 1 * s, 1.0 * s)
     pen.dot(hx + 2 * s, hy - 1 * s, 1.0 * s)
     pen.stroke([(hx - 1.5 * s, hy + 2 * s), (hx + 1.5 * s, hy + 2 * s)], width=1.1)
-    pen.stroke([(x - body_w * 0.5, by - 3 * s), (x - body_w * 0.7, by - 10 * s),
-                (x - body_w * 0.8, by - 4 * s)], width=1.3, amp=0.8)
-    pen.scribble(x - body_w * 0.8, by - 3 * s, 2.5 * s, 2.5 * s, turns=2, width=1.0)
+    tail_wag = 3.5 * s * math.sin(TAU * pen.gait)
+    pen.stroke([(x - body_w * 0.5, by - 3 * s), (x - body_w * 0.7, by - 10 * s + tail_wag),
+                (x - body_w * 0.8, by - 4 * s + tail_wag)], width=1.3, amp=0.6)
+    pen.scribble(x - body_w * 0.8, by - 3 * s + tail_wag, 2.5 * s, 2.5 * s, turns=2, width=1.0)
 
 
 def zebra(pen: Pen, x: float, g: float, s: float) -> None:
@@ -442,18 +447,24 @@ def zebra(pen: Pen, x: float, g: float, s: float) -> None:
     for k in range(6):
         px = x - body_w * 0.4 + k * body_w * 0.15
         pen.stroke([(px, by - body_h * 0.45), (px + 2 * s, by + body_h * 0.45)], width=1.6 * s, amp=0.4)
-    pen.stroke([(x - body_w * 0.5, by - 2 * s), (x - body_w * 0.62, by + 8 * s)], width=1.3)
+    tail_wag = 2.0 * s * math.sin(TAU * pen.gait * 2)
+    pen.stroke([(x - body_w * 0.5, by - 2 * s), (x - body_w * 0.62, by + 8 * s + tail_wag)], width=1.3)
 
 
 def penguin(pen: Pen, x: float, g: float, s: float) -> None:
-    by = g - 11 * s
-    pen.ellipse(x, by, 7 * s, 11 * s, fill=INK)
-    pen.ellipse(x + 0.5 * s, by + 2 * s, 4 * s, 7 * s, width=1.0, fill=PAPER)
-    pen.ellipse(x, by - 9 * s, 4 * s, 4 * s, fill=INK)
+    waddle = 7.0 * math.sin(TAU * pen.gait)
+    bob = abs(math.sin(TAU * pen.gait)) * 1.5 * s
+    by = g - 12 * s - bob
+    pen.ellipse(x, by, 7 * s, 11 * s, fill=INK, rot=waddle)
+    pen.ellipse(x + 0.5 * s, by + 2 * s, 4 * s, 7 * s, width=1.0, fill=PAPER, rot=waddle)
+    pen.ellipse(x + 0.8 * s * math.sin(math.radians(waddle)), by - 9 * s, 4 * s, 4 * s, fill=INK)
     pen.shape([(x + 3 * s, by - 10 * s), (x + 8 * s, by - 8.5 * s), (x + 3 * s, by - 7 * s)], fill=(230, 150, 40), width=1.0)
-    pen.stroke([(x - 6 * s, by - 3 * s), (x - 10 * s + 2 * s * math.sin(TAU * pen.gait), by + 4 * s)], width=1.6)
-    pen.stroke([(x - 3 * s, g), (x + 1 * s, g)], width=1.4, fill=(230, 150, 40))
-    pen.stroke([(x + 1 * s, g), (x + 5 * s, g)], width=1.4, fill=(230, 150, 40))
+    wing_flap = 4 * s * math.sin(TAU * pen.gait)
+    pen.stroke([(x - 6 * s, by - 3 * s), (x - 11 * s, by + 2 * s + wing_flap)], width=1.6)
+    pen.stroke([(x + 6 * s, by - 3 * s), (x + 10 * s, by + 2 * s - wing_flap)], width=1.6)
+    step_l = 2 * s * math.sin(TAU * pen.gait)
+    pen.stroke([(x - 3 * s, g - 1 * s), (x - 1 * s + step_l, g)], width=1.4, fill=(230, 150, 40))
+    pen.stroke([(x + 1 * s, g - 1 * s), (x + 5 * s - step_l, g)], width=1.4, fill=(230, 150, 40))
 
 
 def snake(pen: Pen, x: float, g: float, s: float) -> None:
@@ -468,26 +479,30 @@ def snake(pen: Pen, x: float, g: float, s: float) -> None:
 
 def rabbit(pen: Pen, x: float, g: float, s: float) -> None:
     fur = (210, 200, 190)
-    by = g - 7 * s
+    hop = abs(math.sin(TAU * pen.gait * 2)) * 2.0 * s
+    by = g - 7 * s - hop
     pen.ellipse(x, by, 8 * s, 6.5 * s, fill=fur)
     pen.ellipse(x + 8 * s, by - 5 * s, 4 * s, 4 * s, fill=fur)
-    pen.ellipse(x + 8 * s, by - 13 * s, 1.6 * s, 5 * s, fill=fur, rot=-12)
-    pen.ellipse(x + 11 * s, by - 12.5 * s, 1.6 * s, 5 * s, fill=fur, rot=8)
+    ear_tilt = 4.0 * math.sin(TAU * pen.gait * 2)
+    pen.ellipse(x + 8 * s, by - 13 * s, 1.6 * s, 5 * s, fill=fur, rot=-12 + ear_tilt)
+    pen.ellipse(x + 11 * s, by - 12.5 * s, 1.6 * s, 5 * s, fill=fur, rot=8 + ear_tilt)
     pen.dot(x + 10 * s, by - 6 * s, 0.9 * s)
     pen.scribble(x - 8 * s, by - 1 * s, 2 * s, 2 * s, turns=2, width=1.0, fill=PAPER)
-    pen.stroke([(x + 3 * s, by + 5 * s), (x + 5 * s + 2 * s * math.sin(TAU * pen.gait), g)], width=1.2)
+    pen.stroke([(x + 3 * s, by + 5 * s), (x + 6 * s, g)], width=1.2)
 
 
 def turtle(pen: Pen, x: float, g: float, s: float) -> None:
     shell = (120, 160, 90)
     pen.ellipse(x, g - 4 * s, 11 * s, 7 * s, start=180, end=360, fill=shell)
     pen.stroke([(x - 11 * s, g - 4 * s), (x + 11 * s, g - 4 * s)], width=LINE)
-    pen.ellipse(x + 13 * s, g - 5 * s, 3.5 * s, 2.6 * s, fill=(150, 180, 110))
-    pen.dot(x + 14 * s, g - 5.6 * s, 0.7 * s)
+    head_bob = 1.5 * s * math.sin(TAU * pen.gait)
+    pen.ellipse(x + 13 * s + head_bob, g - 5 * s, 3.5 * s, 2.6 * s, fill=(150, 180, 110))
+    pen.dot(x + 14 * s + head_bob, g - 5.6 * s, 0.7 * s)
     for k in (-7, -2, 3):
         pen.stroke([(x + k * s, g - 10 * s), (x + k * s + 4 * s, g - 10 * s), (x + k * s + 2 * s, g - 5 * s)], width=0.9, amp=0.3)
-    pen.stroke([(x - 7 * s, g - 4 * s), (x - 9 * s, g)], width=1.3)
-    pen.stroke([(x + 7 * s, g - 4 * s), (x + 9 * s, g)], width=1.3)
+    step = 2.0 * s * math.sin(TAU * pen.gait)
+    pen.stroke([(x - 7 * s, g - 4 * s), (x - 9 * s - step, g)], width=1.3)
+    pen.stroke([(x + 7 * s, g - 4 * s), (x + 9 * s + step, g)], width=1.3)
 
 
 def monkey(pen: Pen, x: float, g: float, s: float) -> None:
@@ -533,10 +548,12 @@ def camel(pen: Pen, x: float, g: float, s: float) -> None:
     pen.ellipse(x - 7 * s, by - 6 * s, 6 * s, 6 * s, start=180, end=360, fill=tan)
     pen.ellipse(x + 6 * s, by - 6 * s, 6 * s, 6 * s, start=180, end=360, fill=tan)
     pen.legs(x - body_w * 0.35, x + body_w * 0.35, by + body_h * 0.3, g, swing=2.5 * s)
+    head_bob = 2.0 * s * math.sin(TAU * pen.gait)
     nx = x + body_w * 0.45
-    pen.stroke([(nx, by - 2 * s), (nx + 5 * s, by - 16 * s), (nx + 10 * s, by - 18 * s)], width=LINE * 1.3, amp=0.7)
-    pen.ellipse(nx + 12 * s, by - 18 * s, 5 * s, 3 * s, fill=tan)
-    pen.dot(nx + 13 * s, by - 19 * s, 0.8 * s)
+    pen.stroke([(nx, by - 2 * s), (nx + 5 * s + head_bob * 0.5, by - 16 * s + head_bob),
+                (nx + 10 * s + head_bob, by - 18 * s + head_bob)], width=LINE * 1.3, amp=0.6)
+    pen.ellipse(nx + 12 * s + head_bob, by - 18 * s + head_bob, 5 * s, 3 * s, fill=tan)
+    pen.dot(nx + 13 * s + head_bob, by - 19 * s + head_bob, 0.8 * s)
     pen.stroke([(x - body_w * 0.5, by), (x - body_w * 0.6, by + 9 * s)], width=1.2)
 
 
@@ -557,9 +574,10 @@ def hippo(pen: Pen, x: float, g: float, s: float) -> None:
 def sheep(pen: Pen, x: float, g: float, s: float) -> None:
     by = g - 12 * s
     pen.scribble(x, by, 14 * s, 9 * s, turns=6, width=1.1, fill=PAPER)
-    pen.legs(x - 8 * s, x + 8 * s, by + 6 * s, g, w=1.4, swing=2.0 * s)
+    pen.legs(x - 8 * s, x + 8 * s, by + 6 * s, g, w=1.4, swing=2.2 * s)
     pen.ellipse(x + 14 * s, by - 2 * s, 4.5 * s, 3.5 * s, fill=INK)
     pen.dot(x + 15 * s, by - 3 * s, 0.9 * s, fill=PAPER)
+    pen.stroke([(x - 14 * s, by - 1 * s), (x - 17 * s, by - 3 * s + 2 * s * math.sin(TAU * pen.gait * 3))], width=1.2)
 
 
 def crocodile(pen: Pen, x: float, g: float, s: float) -> None:
@@ -617,7 +635,8 @@ def dog(pen: Pen, x: float, g: float, s: float) -> None:
     pen.stroke([(x + 9 * s, by - 8 * s), (x + 7 * s, by - 2 * s)], width=1.3)
     pen.dot(x + 16 * s, by - 5.5 * s, 0.9 * s)
     pen.dot(x + 13 * s, by - 6 * s, 0.7 * s)
-    pen.stroke([(x - 11 * s, by - 2 * s), (x - 16 * s, by - 9 * s + 2 * s * math.sin(TAU * pen.gait * 2))], width=1.3)
+    wag = 4.0 * s * math.sin(TAU * pen.gait * 3)
+    pen.stroke([(x - 11 * s, by - 2 * s), (x - 17 * s, by - 8 * s + wag)], width=1.4)
 
 
 def cat(pen: Pen, x: float, g: float, s: float) -> None:
@@ -673,7 +692,8 @@ def mouse(pen: Pen, x: float, g: float, s: float) -> None:
     pen.ellipse(x, g - 3 * s, 5 * s, 3 * s, fill=(200, 200, 205))
     pen.ellipse(x + 5 * s, g - 5 * s, 1.5 * s, 1.5 * s, width=0.9, fill=(200, 200, 205))
     pen.dot(x + 5 * s, g - 3.6 * s, 0.5 * s)
-    pen.stroke([(x - 5 * s, g - 3 * s), (x - 12 * s, g - 1 * s + 1.5 * s * math.sin(TAU * pen.gait))], width=1.0, amp=0.4)
+    tail_flick = 2.5 * s * math.sin(TAU * pen.gait * 2)
+    pen.stroke([(x - 5 * s, g - 3 * s), (x - 10 * s, g - 5 * s + tail_flick), (x - 14 * s, g - 2 * s + tail_flick)], width=1.0, amp=0.3)
 
 
 def dove(pen: Pen, x: float, y: float, s: float, t: float) -> None:
@@ -733,8 +753,9 @@ def ark(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
     pen.stroke([(flag_x, flag_y), (flag_x, flag_y - 20 * s)], width=1.2, amp=0.2)
     flut = math.sin(TAU * t * 2) * 2 * s
     pen.shape([(flag_x, flag_y - 20 * s), (flag_x + 18 * s, flag_y - 15 * s + flut), (flag_x, flag_y - 10 * s)], fill=PAPER, width=1.0, amp=0.3)
-    giraffe_head(pen, x + 42 * s, deck_y - 40 * s, s * 0.85)
-    giraffe_head(pen, x + 55 * s, deck_y - 40 * s, s * 0.70)
+    g_sway = 1.5 * s * math.sin(TAU * t + 0.4)
+    giraffe_head(pen, x + 42 * s + g_sway, deck_y - 40 * s, s * 0.85)
+    giraffe_head(pen, x + 55 * s - g_sway, deck_y - 40 * s, s * 0.70)
     stick_figure(pen, x - 72 * s, deck_y + 1 * s, h=28 * s, beard=True, staff=True, wave=True, facing=-1, wave_phase=t * 2)
     pen.stroke([(568, GROUND_Y), (x - 72 * s, deck_y + 4 * s)], width=1.5, amp=0.5)
     pen.stroke([(568, GROUND_Y + 5), (x - 72 * s, deck_y + 9 * s)], width=1.5, amp=0.5)
@@ -743,6 +764,8 @@ def ark(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
         gx = 568 + (x - 72 * s - 568) * tt
         gy = GROUND_Y + (deck_y + 4 * s - GROUND_Y) * tt
         pen.stroke([(gx, gy), (gx + 2, gy + 5)], width=1.0, amp=0.2)
+    pen.stroke([(x - 98 * s, ay + 6 * s), (x - 70 * s, ay + 12 * s)], width=0.8, amp=0.2)
+    pen.stroke([(x + 72 * s, ay + 12 * s), (x + 104 * s, ay + 6 * s)], width=0.8, amp=0.2)
 
 
 def queue(pen: Pen, t: float) -> None:
@@ -752,11 +775,11 @@ def queue(pen: Pen, t: float) -> None:
         ("rabbit", 450, 1.10),
         ("turtle", 405, 1.10),
         ("sheep", 355, 1.05),
-        ("zebra", 295, 1.00),
-        ("lion", 230, 1.00),
-        ("camel", 160, 1.00),
-        ("elephant", 90, 0.95),
-        ("dog", 28, 1.00),
+        ("zebra", 298, 1.00),
+        ("lion", 238, 1.00),
+        ("camel", 172, 1.00),
+        ("elephant", 104, 0.95),
+        ("dog", 42, 1.00),
     ]
     for i, (name, x, scale) in enumerate(pairs):
         fn, _ = ANIMALS[name]
@@ -779,7 +802,7 @@ def speech(pen: Pen, x: float, y: float, tail_to, lines, size: float = 10.0) -> 
     tx, ty = tail_to
     bottom = y + (len(lines) - 1) * size * 1.45 + 4
     sx = x + (widest / 2 - 4) * (1 if tx > x else -1)
-    pen.stroke([(sx, bottom - size * 0.6), (tx, ty)], width=0.9, amp=0.3)
+    pen.stroke([(sx, bottom - size * 0.6), (tx, ty)], width=0.9, amp=0.0)
 
 
 def seal(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
@@ -902,10 +925,13 @@ def lighthouse(pen: Pen, x: float, y: float, s: float = 1.0, t: float = 0.0) -> 
 def draw_frame(version: str, t: float, boil: int) -> Image.Image:
     image = Image.new("RGB", (WIDTH * SS, HEIGHT * SS), PAPER)
     pen = Pen(image, SEED + boil)
+    static_pen = Pen(image, SEED)
     sun(pen, 826, 52, 21, t)
     mountains(pen)
-    cloud(pen, 340, 105, 95, 20, bumps=4)
-    cloud(pen, 580, 115, 80, 16, bumps=4)
+    c1_x = 340 + math.sin(TAU * t * 0.5) * 8
+    c2_x = 580 + math.sin(TAU * t * 0.5 + 1.0) * 8
+    cloud(pen, c1_x, 105, 95, 20, bumps=4)
+    cloud(pen, c2_x, 115, 80, 16, bumps=4)
     cloud(pen, 715, 36, 130, 28, bumps=6, dark=True)
     rain(pen, 715, 36, 120, 52, 54, t)
     shore_and_water(pen, t)
@@ -913,13 +939,13 @@ def draw_frame(version: str, t: float, boil: int) -> Image.Image:
     lighthouse(pen, 890, 255, 0.95, t)
     queue(pen, t)
     stick_figure(pen, 555, GROUND_Y, h=30, facing=-1, clipboard=True)
-    speech(pen, 460, 78, (635, 170), ["Two of everything.", "Yes. Even the mosquitoes."])
-    speech(pen, 455, 180, (555, 234), ["The unicorns said", "they'd catch the next one."], size=9.0)
+    speech(static_pen, 460, 78, (654, 210), ["Two of everything.", "Yes. Even the mosquitoes."])
+    speech(static_pen, 455, 180, (555, 234), ["The unicorns said", "they'd catch the next one."], size=9.0)
     flying_pig(pen, 120 + 6 * math.sin(TAU * t), 125 + 4 * math.sin(TAU * t * 2), 1.25, t)
     dove(pen, 520 - ((t + 0.10) % 1.0) * 600, 136 + 4 * math.sin(TAU * t * 2), 1.5, t)
     dove(pen, 520 - ((t + 0.18) % 1.0) * 600, 142 + 4 * math.sin(TAU * t * 2 + 1), 1.1, t + 0.1)
-    title(pen, version)
-    panel(pen)
+    title(static_pen, version)
+    panel(static_pen)
     return image.resize((int(WIDTH * OUT_SCALE), int(HEIGHT * OUT_SCALE)), Image.Resampling.LANCZOS)
 
 
