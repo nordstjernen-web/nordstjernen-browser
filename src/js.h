@@ -190,6 +190,8 @@ cairo_surface_t *ns_js_canvas_surface(ns_js *js, const ns_node *n);
 void ns_js_request_repaint(ns_js *js);
 
 struct ns_image_cache;
+struct ns_anim;
+void ns_js_set_anim(ns_js *js, struct ns_anim *anim);
 struct ns_image;
 void ns_js_set_image_cache(ns_js *js, struct ns_image_cache *cache);
 const struct ns_image *ns_js_image_for_node(ns_js *js, const ns_node *el);

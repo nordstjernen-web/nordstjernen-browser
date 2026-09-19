@@ -73,6 +73,7 @@ struct ns_browser {
     guint           image_arrivals_since_layout;
     GHashTable     *img_requested;
     gboolean        dirty;
+    gboolean        cascade_dirty;
     gboolean        relaying;
     char           *pending_nav;
     char           *pending_download;
@@ -237,6 +238,7 @@ browser_relayout(ns_browser *b)
 {
     if (b->relaying) { b->dirty = TRUE; return; }
     b->relaying = TRUE;
+    b->cascade_dirty = FALSE;
     if (b->js)
         (void)ns_js_consume_mutated(b->js);
     b->image_arrivals_since_layout = 0;
@@ -444,7 +446,7 @@ browser_flush(gpointer user_data)
     if (!b || !b->js) return;
     if (ns_js_consume_mutated(b->js))
         b->dirty = TRUE;
-    if (!b->layout || b->dirty) {
+    if (!b->layout || b->dirty || b->cascade_dirty) {
         browser_relayout(b);
         b->dirty = FALSE;
     }
@@ -643,7 +645,10 @@ settle_tick_cb(gpointer user_data)
                                    b->cur_scroll_y, b->cur_scale);
         ns_video_cache_tick(b->videos, now);
     }
-    if (b->anim) ns_anim_tick(b->anim, now);
+    if (b->anim && ns_anim_tick(b->anim, now)) {
+        b->cascade_dirty = TRUE;
+        if (ns_anim_needs_layout(b->anim)) b->dirty = TRUE;
+    }
     if (b->anim && b->js) ns_js_dispatch_anim_events(b->js, b->anim);
     if (b->js) ns_js_run_animation_frame(b->js);
     if (b->js && ns_js_consume_mutated(b->js))
@@ -1183,6 +1188,7 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
     if (b->js) {
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_image_cache(b->js, b->images);
+        ns_js_set_anim(b->js, b->anim);
         ns_js_set_form_submit_cb(b->js, browser_js_form_submit, b);
         ns_js_set_layout_flush_cb(b->js, browser_flush, b);
         ns_js_set_scroll_to_cb(b->js, browser_js_scroll_to, b);
@@ -1718,6 +1724,8 @@ ns_browser_tick(ns_browser *browser, int budget_ms)
         if (browser->anim && ns_anim_tick(browser->anim, now)) {
             changed = TRUE;
             other_changed = TRUE;
+            browser->cascade_dirty = TRUE;
+            if (ns_anim_needs_layout(browser->anim)) browser->dirty = TRUE;
         }
         if (browser->anim && browser->js)
             ns_js_dispatch_anim_events(browser->js, browser->anim);

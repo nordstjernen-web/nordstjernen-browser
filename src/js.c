@@ -243,6 +243,7 @@ static void ns_sw_post_fetch_request(ns_worker_host *host, guint id,
                                      const guint8 *body, gsize body_len);
 static void ns_js_flush_document_write(ns_js *js);
 static void ns_js_flush_layout(ns_js *js);
+static void ns_js_flush_style(ns_js *js);
 static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
@@ -15346,6 +15347,121 @@ ns_container_query_canonical(JSContext *ctx, JSValueConst this_val,
     JSValue r = JS_NewString(ctx, canon);
     g_free(canon);
     return r;
+}
+
+static int
+ns_anim_prop_arg(JSContext *ctx, JSValueConst v)
+{
+    if (JS_IsNull(v) || JS_IsUndefined(v)) return -1;
+    const char *name = JS_ToCString(ctx, v);
+    if (!name) return -2;
+    int prop = ns_css_prop_id(name);
+    JS_FreeCString(ctx, name);
+    return prop < 0 ? -2 : prop;
+}
+
+static JSValue
+ns_anim_info_to_js(JSContext *ctx, const ns_anim_info *info)
+{
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "currentMs", JS_NewFloat64(ctx, info->current_ms));
+    JS_SetPropertyStr(ctx, o, "durationMs", JS_NewFloat64(ctx, info->duration_ms));
+    JS_SetPropertyStr(ctx, o, "delayMs", JS_NewFloat64(ctx, info->delay_ms));
+    JS_SetPropertyStr(ctx, o, "iterations", JS_NewFloat64(ctx, info->iterations));
+    JS_SetPropertyStr(ctx, o, "active", JS_NewBool(ctx, info->active));
+    JS_SetPropertyStr(ctx, o, "paused", JS_NewBool(ctx, info->paused));
+    JS_SetPropertyStr(ctx, o, "finished", JS_NewBool(ctx, info->finished));
+    JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)info->generation));
+    JS_SetPropertyStr(ctx, o, "name",
+                      info->name ? JS_NewString(ctx, info->name) : JS_NULL);
+    JS_SetPropertyStr(ctx, o, "prop", info->prop >= 0
+                      ? JS_NewString(ctx, ns_css_prop_name(info->prop)) : JS_NULL);
+    return o;
+}
+
+typedef struct {
+    JSContext *ctx;
+    JSValue    arr;
+    guint      n;
+} ns_anim_list_ctx;
+
+static void
+ns_anim_list_visit(const ns_anim_info *info, gpointer user)
+{
+    ns_anim_list_ctx *lc = user;
+    JSValue o = ns_anim_info_to_js(lc->ctx, info);
+    JS_SetPropertyStr(lc->ctx, o, "el", ns_make_element(lc->ctx, info->node));
+    JS_SetPropertyUint32(lc->ctx, lc->arr, lc->n++, o);
+}
+
+static JSValue
+ns_anim_list_native(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    JSValue arr = JS_NewArray(ctx);
+    if (!js || !js->anim) return arr;
+    ns_js_flush_style(js);
+    const ns_node *node = argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0])
+        ? ns_unwrap_element(argv[0]) : NULL;
+    if (argc >= 1 && !JS_IsNull(argv[0]) && !JS_IsUndefined(argv[0]) && !node)
+        return arr;
+    ns_anim_list_ctx lc = { ctx, arr, 0 };
+    ns_anim_visit(js->anim, node, ns_anim_list_visit, &lc);
+    return arr;
+}
+
+static JSValue
+ns_anim_query_native(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 2) return JS_NULL;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    int prop = ns_anim_prop_arg(ctx, argv[1]);
+    if (!node || prop == -2) return JS_NULL;
+    ns_js_flush_style(js);
+    ns_anim_info info;
+    if (!ns_anim_info_for(js->anim, node, prop, &info)) return JS_NULL;
+    return ns_anim_info_to_js(ctx, &info);
+}
+
+static JSValue
+ns_anim_seek_native(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 3) return JS_FALSE;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    int prop = ns_anim_prop_arg(ctx, argv[1]);
+    double ms = 0;
+    if (!node || prop == -2 || JS_ToFloat64(ctx, &ms, argv[2]) != 0) return JS_FALSE;
+    gboolean ok = ns_anim_seek(js->anim, node, prop, ms);
+    if (ok) js->mutated = TRUE;
+    return JS_NewBool(ctx, ok);
+}
+
+static JSValue
+ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 3) return JS_FALSE;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    int prop = ns_anim_prop_arg(ctx, argv[1]);
+    const char *op = JS_ToCString(ctx, argv[2]);
+    if (!node || prop == -2 || !op) {
+        if (op) JS_FreeCString(ctx, op);
+        return JS_FALSE;
+    }
+    gboolean ok = ns_anim_control(js->anim, node, prop, op);
+    JS_FreeCString(ctx, op);
+    if (ok) js->mutated = TRUE;
+    return JS_NewBool(ctx, ok);
 }
 
 static JSValue
@@ -32227,6 +32343,12 @@ ns_js_set_layout_root(ns_js *js, const struct ns_box *root)
 }
 
 void
+ns_js_set_anim(ns_js *js, struct ns_anim *anim)
+{
+    if (js) js->anim = anim;
+}
+
+void
 ns_js_set_image_cache(ns_js *js, struct ns_image_cache *cache)
 {
     if (!js) return;
@@ -46137,6 +46259,14 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_DefinePropertyValueStr(ctx, global, "__ns_linked_css",
         JS_NewCFunction(ctx, ns_linked_css_text, "__ns_linked_css", 1),
         0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_list",
+        JS_NewCFunction(ctx, ns_anim_list_native, "__ns_anim_list", 1), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_query",
+        JS_NewCFunction(ctx, ns_anim_query_native, "__ns_anim_query", 2), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_seek",
+        JS_NewCFunction(ctx, ns_anim_seek_native, "__ns_anim_seek", 3), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_control",
+        JS_NewCFunction(ctx, ns_anim_control_native, "__ns_anim_control", 3), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_container_query_canonical",
         JS_NewCFunction(ctx, ns_container_query_canonical,
                         "__ns_container_query_canonical", 1),
@@ -54152,6 +54282,12 @@ ns_js_flush_layout(ns_js *js)
     js->in_layout_flush = TRUE;
     js->layout_flush_cb(js->layout_flush_user_data);
     js->in_layout_flush = FALSE;
+}
+
+static void
+ns_js_flush_style(ns_js *js)
+{
+    ns_js_flush_layout(js);
 }
 
 

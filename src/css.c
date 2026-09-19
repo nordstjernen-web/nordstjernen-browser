@@ -741,7 +741,7 @@ parse_css_wide_keyword(const char *text)
     return v;
 }
 
-static ns_css_value *
+ns_css_value *
 ns_css_value_dup(const ns_css_value *v)
 {
     if (!v) return NULL;
@@ -749,7 +749,7 @@ ns_css_value_dup(const ns_css_value *v)
     return (ns_css_value *)v;
 }
 
-static void
+void
 ns_css_value_free(ns_css_value *v)
 {
     while (v) {
@@ -10686,6 +10686,13 @@ prop_id(const char *name)
     return -1;
 }
 
+const char *
+ns_css_prop_name(int prop)
+{
+    return prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? kProp[prop] : NULL;
+}
+
 int
 ns_css_prop_id(const char *name)
 {
@@ -13946,7 +13953,7 @@ ns_css_keyframes_resolve(const ns_css_keyframes *kf,
             if (tv) ns_css_value_free(tv);
         }
         g_strfreev(decls);
-        g_free(resolved);
+        s->raw_props = resolved;
         ns_css_transform merged = ind;
         for (int k = 0; k < list.n_ops &&
                         merged.n_ops < NS_CSS_TRANSFORM_OPS_MAX; k++)
@@ -16021,10 +16028,10 @@ parse_rules_until(const char **pp, const char *end,
                                 g_ascii_strcasecmp(prop, "translate") == 0 ||
                                 g_ascii_strcasecmp(prop, "rotate") == 0 ||
                                 g_ascii_strcasecmp(prop, "scale") == 0;
+                            if (!raw) raw = g_string_new(NULL);
+                            if (raw->len) g_string_append_c(raw, ';');
+                            g_string_append_printf(raw, "%s:%s", prop, val);
                             if (tf_prop && strstr(val, "var(")) {
-                                if (!raw) raw = g_string_new(NULL);
-                                if (raw->len) g_string_append_c(raw, ';');
-                                g_string_append_printf(raw, "%s:%s", prop, val);
                             } else if (g_ascii_strcasecmp(prop, "opacity") == 0) {
                                 op = g_ascii_strtod(val, NULL);
                                 has_op = TRUE;
@@ -19879,6 +19886,198 @@ ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a)
     }
 }
 
+static gboolean
+value_lerp_lengths(const ns_css_value *a, const ns_css_value *b, double t,
+                   ns_css_value *out)
+{
+    if (a->kind == NS_CSS_V_LENGTH && b->kind == NS_CSS_V_LENGTH) {
+        if (a->u.length.unit != b->u.length.unit) {
+            if (a->u.length.v == 0 && a->u.length.unit != NS_CSS_UNIT_PERCENT &&
+                b->u.length.unit != NS_CSS_UNIT_NUMBER && b->u.length.unit != NS_CSS_UNIT_PERCENT) {
+                out->kind = NS_CSS_V_LENGTH;
+                out->u.length.unit = b->u.length.unit;
+                out->u.length.v = b->u.length.v * t;
+                return TRUE;
+            }
+            if (b->u.length.v == 0 && b->u.length.unit != NS_CSS_UNIT_PERCENT &&
+                a->u.length.unit != NS_CSS_UNIT_NUMBER && a->u.length.unit != NS_CSS_UNIT_PERCENT) {
+                out->kind = NS_CSS_V_LENGTH;
+                out->u.length.unit = a->u.length.unit;
+                out->u.length.v = a->u.length.v * (1 - t);
+                return TRUE;
+            }
+            return FALSE;
+        }
+        out->kind = NS_CSS_V_LENGTH;
+        out->u.length.unit = a->u.length.unit;
+        out->u.length.v = a->u.length.v + (b->u.length.v - a->u.length.v) * t;
+        return TRUE;
+    }
+    if ((a->kind == NS_CSS_V_LENGTH || a->kind == NS_CSS_V_CALC) &&
+        (b->kind == NS_CSS_V_LENGTH || b->kind == NS_CSS_V_CALC)) {
+        double apx = 0, apct = 0, aem = 0, bpx = 0, bpct = 0, bem = 0;
+        if (a->kind == NS_CSS_V_CALC) { apx = a->u.calc.px; apct = a->u.calc.pct; aem = a->u.calc.em; if (a->u.calc.fn) return FALSE; }
+        else if (a->u.length.unit == NS_CSS_UNIT_PX) apx = a->u.length.v;
+        else if (a->u.length.unit == NS_CSS_UNIT_PERCENT) apct = a->u.length.v;
+        else if (a->u.length.unit == NS_CSS_UNIT_EM) aem = a->u.length.v;
+        else return FALSE;
+        if (b->kind == NS_CSS_V_CALC) { bpx = b->u.calc.px; bpct = b->u.calc.pct; bem = b->u.calc.em; if (b->u.calc.fn) return FALSE; }
+        else if (b->u.length.unit == NS_CSS_UNIT_PX) bpx = b->u.length.v;
+        else if (b->u.length.unit == NS_CSS_UNIT_PERCENT) bpct = b->u.length.v;
+        else if (b->u.length.unit == NS_CSS_UNIT_EM) bem = b->u.length.v;
+        else return FALSE;
+        out->kind = NS_CSS_V_CALC;
+        out->u.calc.px = apx + (bpx - apx) * t;
+        out->u.calc.pct = apct + (bpct - apct) * t;
+        out->u.calc.em = aem + (bem - aem) * t;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static guint8
+lerp_channel(guint8 a, guint8 b, double t)
+{
+    double v = a + ((double)b - a) * t;
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    return (guint8)(v + 0.5);
+}
+
+ns_css_value *
+ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t)
+{
+    if (!a || !b) return NULL;
+    ns_css_value *out = g_new0(ns_css_value, 1);
+    if (value_lerp_lengths(a, b, t, out)) return out;
+    if (a->kind != b->kind) { g_free(out); return NULL; }
+    switch (a->kind) {
+    case NS_CSS_V_COLOR:
+        out->kind = NS_CSS_V_COLOR;
+        out->u.color.r = lerp_channel(a->u.color.r, b->u.color.r, t);
+        out->u.color.g = lerp_channel(a->u.color.g, b->u.color.g, t);
+        out->u.color.b = lerp_channel(a->u.color.b, b->u.color.b, t);
+        out->u.color.a = lerp_channel(a->u.color.a, b->u.color.a, t);
+        return out;
+    case NS_CSS_V_SHADOW: {
+        const ns_css_shadow_list *sa = &a->u.shadow, *sb = &b->u.shadow;
+        if (sa->n != sb->n || sa->is_text != sb->is_text) break;
+        for (int i = 0; i < sa->n; i++)
+            if (sa->s[i].inset != sb->s[i].inset) { g_free(out); return NULL; }
+        out->kind = NS_CSS_V_SHADOW;
+        out->u.shadow.n = sa->n;
+        out->u.shadow.is_text = sa->is_text;
+        for (int i = 0; i < sa->n; i++) {
+            const ns_css_shadow *x = &sa->s[i], *y = &sb->s[i];
+            ns_css_shadow *o = &out->u.shadow.s[i];
+            o->x = x->x + (y->x - x->x) * t;
+            o->y = x->y + (y->y - x->y) * t;
+            o->blur = x->blur + (y->blur - x->blur) * t;
+            o->spread = x->spread + (y->spread - x->spread) * t;
+            o->r = lerp_channel(x->r, y->r, t);
+            o->g = lerp_channel(x->g, y->g, t);
+            o->b = lerp_channel(x->b, y->b, t);
+            o->a = lerp_channel(x->a, y->a, t);
+            o->inset = x->inset;
+        }
+        return out;
+    }
+    case NS_CSS_V_TRANSFORM: {
+        const ns_css_transform *ta = &a->u.transform, *tb = &b->u.transform;
+        if (ta->n_ops != tb->n_ops) break;
+        for (int i = 0; i < ta->n_ops; i++)
+            if (ta->ops[i].kind != tb->ops[i].kind) { g_free(out); return NULL; }
+        out->kind = NS_CSS_V_TRANSFORM;
+        out->u.transform.n_ops = ta->n_ops;
+        for (int i = 0; i < ta->n_ops; i++) {
+            const ns_css_transform_op *x = &ta->ops[i], *y = &tb->ops[i];
+            ns_css_transform_op *o = &out->u.transform.ops[i];
+            *o = *x;
+            o->a = x->a + (y->a - x->a) * t;
+            o->b = x->b + (y->b - x->b) * t;
+            o->c = x->c + (y->c - x->c) * t;
+            o->d = x->d + (y->d - x->d) * t;
+            o->e = x->e + (y->e - x->e) * t;
+            o->f = x->f + (y->f - x->f) * t;
+            for (int k = 0; k < 16; k++)
+                o->m3d[k] = x->m3d[k] + (y->m3d[k] - x->m3d[k]) * t;
+        }
+        return out;
+    }
+    default:
+        break;
+    }
+    g_free(out);
+    return NULL;
+}
+
+gboolean
+ns_css_value_equal(const ns_css_value *a, const ns_css_value *b)
+{
+    if (a == b) return TRUE;
+    if (!a || !b) return FALSE;
+    char *sa = ns_css_value_serialize(a);
+    char *sb = ns_css_value_serialize(b);
+    gboolean eq = g_strcmp0(sa, sb) == 0;
+    g_free(sa);
+    g_free(sb);
+    return eq;
+}
+
+GArray *
+ns_css_parse_declarations(const char *text)
+{
+    GArray *decls = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
+    if (!text) return decls;
+    const char *p = text;
+    parse_declaration_block(&p, text + strlen(text), decls, NULL);
+    return decls;
+}
+
+void
+ns_css_declarations_free(GArray *decls)
+{
+    if (!decls) return;
+    for (guint i = 0; i < decls->len; i++)
+        ns_css_value_free(g_array_index(decls, ns_css_decl, i).value);
+    g_array_free(decls, TRUE);
+}
+
+static GHashTable *g_incr_exclude;
+
+void
+ns_css_incremental_exclude(const void *node, gboolean exclude)
+{
+    if (!node) return;
+    if (!g_incr_exclude)
+        g_incr_exclude = g_hash_table_new(g_direct_hash, g_direct_equal);
+    if (exclude) g_hash_table_add(g_incr_exclude, (gpointer)node);
+    else g_hash_table_remove(g_incr_exclude, node);
+}
+
+gboolean
+ns_css_prop_affects_layout(int prop)
+{
+    switch (prop) {
+    case NS_CSS_OPACITY:
+    case NS_CSS_COLOR:
+    case NS_CSS_BACKGROUND_COLOR:
+    case NS_CSS_TRANSFORM:
+    case NS_CSS_VISIBILITY:
+    case NS_CSS_BOX_SHADOW:
+    case NS_CSS_TEXT_SHADOW:
+    case NS_CSS_FILTER:
+    case NS_CSS_BORDER_TOP_COLOR:
+    case NS_CSS_BORDER_RIGHT_COLOR:
+    case NS_CSS_BORDER_BOTTOM_COLOR:
+    case NS_CSS_BORDER_LEFT_COLOR:
+    case NS_CSS_OUTLINE_COLOR:
+        return FALSE;
+    default:
+        return TRUE;
+    }
+}
+
 char *
 ns_css_value_serialize(const ns_css_value *v)
 {
@@ -23292,7 +23491,8 @@ cascade_walk(ns_node *node,
     gboolean nd_recurse_dirty = under_dirty;
     if (node->kind == NS_NODE_ELEMENT) {
         gboolean nd_node_dirty = under_dirty ||
-            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node));
+            (g_incr_dirty && g_hash_table_contains(g_incr_dirty, node)) ||
+            (g_incr_exclude && g_hash_table_contains(g_incr_exclude, node));
         ns_style *nd_prev =
             (g_incr_pass_active && !nd_node_dirty && g_incr_prev_styles)
             ? g_hash_table_lookup(g_incr_prev_styles, node) : NULL;

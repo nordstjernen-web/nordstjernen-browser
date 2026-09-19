@@ -796,6 +796,7 @@ ns_engine_anim_observe(ns_anim *anim, GHashTable *styles, gint64 now_us)
     while (g_hash_table_iter_next(&it, &key, &val))
         ns_anim_observe(anim, (const ns_node *)key, (const ns_style *)val, now_us);
     ns_anim_prune(anim, styles);
+    ns_anim_apply(anim, styles);
 }
 
 typedef struct {

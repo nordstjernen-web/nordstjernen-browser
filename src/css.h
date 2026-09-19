@@ -242,6 +242,7 @@ typedef enum ns_css_prop {
 } ns_css_prop;
 
 int         ns_css_prop_id(const char *name);
+const char *ns_css_prop_name(int prop);
 gboolean    ns_css_declaration_valid(int prop, const char *text);
 gboolean    ns_css_named_property_supported(const char *name);
 gboolean    ns_css_named_declaration_valid(const char *name, const char *text);
@@ -1121,6 +1122,14 @@ char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
 char *ns_css_content_canonical(const char *text);
+ns_css_value *ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t);
+gboolean ns_css_value_equal(const ns_css_value *a, const ns_css_value *b);
+ns_css_value *ns_css_value_dup(const ns_css_value *v);
+void ns_css_value_free(ns_css_value *v);
+GArray *ns_css_parse_declarations(const char *text);
+void ns_css_declarations_free(GArray *decls);
+gboolean ns_css_prop_affects_layout(int prop);
+void ns_css_incremental_exclude(const void *node, gboolean exclude);
 char *ns_css_unicode_range_canonical(const char *text);
 char *ns_css_container_condition_canonical(const char *cond);
 char *ns_css_container_name_canonical(const char *text);
