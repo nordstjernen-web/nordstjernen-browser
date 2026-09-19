@@ -6462,6 +6462,15 @@
                 nr.__cssText = function () { return nraw; };
                 return nr;
             }
+            if (kw === 'keyframes' || kw === '-webkit-keyframes') {
+                var kfName = prelude.replace(/^@[\w-]+\s*/, '').replace(/^\s+|\s+$/g, '');
+                var quoted = /^"([^"\\]|\\.)*"$|^'([^'\\]|\\.)*'$/.test(kfName);
+                var reserved = /^(none|default|initial|inherit|unset|revert|revert-layer)$/i;
+                if (!kfName || (quoted && kfName.length === 2)) return null;
+                if (!quoted && (!identValid(kfName) || reserved.test(kfName) ||
+                                /^-?\d/.test(kfName)))
+                    return null;
+            }
             if (kw) {
                 var atType = kw === 'font-face' ? 5 : kw === 'page' ? 6 :
                              kw === 'keyframes' || kw === '-webkit-keyframes' ? 7 : 0;

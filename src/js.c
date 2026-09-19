@@ -14614,8 +14614,10 @@ ns_computed_anim_longhand(const ns_css_anim_list *list, const char *sub)
     for (int i = 0; i < list->n; i++) {
         const ns_css_anim_entry *e = &list->entries[i];
         if (i) g_string_append(out, ", ");
-        if (strcmp(sub, "duration") == 0)
-            g_string_append_printf(out, "%gs", e->duration_ms / 1000.0);
+        if (strcmp(sub, "duration") == 0) {
+            if (e->duration_auto) g_string_append(out, "auto");
+            else g_string_append_printf(out, "%gs", e->duration_ms / 1000.0);
+        }
         else if (strcmp(sub, "delay") == 0)
             g_string_append_printf(out, "%gs", e->delay_ms / 1000.0);
         else if (strcmp(sub, "property") == 0)
@@ -14659,9 +14661,77 @@ ns_computed_anim_longhand(const ns_css_anim_list *list, const char *sub)
 }
 
 static char *
+ns_computed_range_list(ns_js *js, const ns_node *n, const char *text)
+{
+    if (!text) return NULL;
+    double font_px = ns_computed_font_px(js->ctx, n);
+    GString *out = g_string_new(NULL);
+    char **items = g_strsplit(text, ",", -1);
+    for (int i = 0; items[i]; i++) {
+        char *item = g_strstrip(items[i]);
+        if (i) g_string_append(out, ", ");
+        char *sp = strrchr(item, ' ');
+        const char *lp = sp ? sp + 1 : item;
+        char *converted = NULL;
+        char *end = NULL;
+        g_ascii_strtod(lp, &end);
+        if (end && end != lp && *end && strcmp(end, "px") != 0 && strcmp(end, "%") != 0 &&
+            g_ascii_isalpha((guchar)*end)) {
+            ns_css_value *lv = NULL;
+            char *decl_text = g_strdup_printf("left: %s", lp);
+            GArray *decls = ns_css_parse_declarations(decl_text);
+            g_free(decl_text);
+            if (decls && decls->len > 0)
+                lv = g_array_index(decls, ns_css_decl, 0).value;
+            if (lv && lv->kind == NS_CSS_V_LENGTH && lv->u.length.unit != NS_CSS_UNIT_PERCENT) {
+                double px = ns_css_dimension_px(lv, font_px, 0);
+                char *num = g_strdup_printf("%g", px);
+                converted = g_strconcat(num, "px", NULL);
+                g_free(num);
+            }
+            ns_css_declarations_free(decls);
+        }
+        if (converted) {
+            if (sp) {
+                *sp = '\0';
+                g_string_append(out, item);
+                g_string_append_c(out, ' ');
+            }
+            g_string_append(out, converted);
+            g_free(converted);
+        } else {
+            g_string_append(out, item);
+        }
+    }
+    g_strfreev(items);
+    return g_string_free(out, FALSE);
+}
+
+static char *
 ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
 {
     gboolean is_anim = name[0] == 'a';
+    if (strcmp(name, "animation") == 0 || strcmp(name, "transition") == 0) {
+        const ns_style *s = js && js->style_table
+            ? g_hash_table_lookup(js->style_table, n) : NULL;
+        ns_css_anim_list list;
+        gboolean mismatch = FALSE;
+        ns_css_anim_lists(s, is_anim, &list, &mismatch);
+        char *r = mismatch ? g_strdup("")
+                : list.n == 0 ? g_strdup(is_anim ? "none" : "all")
+                : ns_css_anim_shorthand_serialize(&list, is_anim);
+        ns_css_anim_list_clear(&list);
+        return r;
+    }
+    if (strcmp(name, "animation-range") == 0) {
+        char *st = ns_computed_anim_lookup(js, n, "animation-range-start");
+        char *en = ns_computed_anim_lookup(js, n, "animation-range-end");
+        char *r = ns_css_animation_range_serialize(st, en);
+        g_free(st);
+        g_free(en);
+        return r;
+    }
+    if (name[is_anim ? 9 : 10] != '-') return NULL;
     const char *sub = name + (is_anim ? 10 : 11);
     const char *key = NULL;
     int lhp = -1;
@@ -14693,6 +14763,18 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     } else if (strcmp(sub, "play-state") == 0 && is_anim) {
         key = "play-state";
         lhp = NS_CSS_ANIMATION_PLAY_STATE;
+    } else if (strcmp(sub, "timeline") == 0 && is_anim) {
+        key = "timeline";
+        lhp = NS_CSS_ANIMATION_TIMELINE;
+    } else if (strcmp(sub, "range-start") == 0 && is_anim) {
+        key = "range-start";
+        lhp = NS_CSS_ANIMATION_RANGE_START;
+    } else if (strcmp(sub, "range-end") == 0 && is_anim) {
+        key = "range-end";
+        lhp = NS_CSS_ANIMATION_RANGE_END;
+    } else if (strcmp(sub, "behavior") == 0 && !is_anim) {
+        key = "behavior";
+        lhp = NS_CSS_TRANSITION_BEHAVIOR;
     }
     if (!key) return NULL;
     if (js && js->style_table) {
@@ -14700,9 +14782,31 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
         const ns_css_value *lv = s ? s->values[lhp] : NULL;
         if (lv && lv->kind == NS_CSS_V_KEYWORD && lv->u.keyword) {
             if (strcmp(key, "duration") == 0 || strcmp(key, "delay") == 0) {
+                if (strstr(lv->u.keyword, "auto")) {
+                    const ns_css_value *tl = s->values[NS_CSS_ANIMATION_TIMELINE];
+                    gboolean auto_timeline = !tl || (tl->kind == NS_CSS_V_KEYWORD &&
+                        tl->u.keyword && strcmp(tl->u.keyword, "auto") == 0);
+                    if (!auto_timeline) return g_strdup(lv->u.keyword);
+                    GString *out = g_string_new(NULL);
+                    char **parts = g_strsplit(lv->u.keyword, ",", -1);
+                    for (int i = 0; parts[i]; i++) {
+                        char *item = g_strstrip(parts[i]);
+                        if (i) g_string_append(out, ", ");
+                        if (strcmp(item, "auto") == 0) g_string_append(out, "0s");
+                        else {
+                            char *one = ns_css_time_computed(item);
+                            g_string_append(out, one ? one : item);
+                            g_free(one);
+                        }
+                    }
+                    g_strfreev(parts);
+                    return g_string_free(out, FALSE);
+                }
                 char *r = ns_css_time_computed(lv->u.keyword);
                 if (r) return r;
             }
+            if (strcmp(key, "range-start") == 0 || strcmp(key, "range-end") == 0)
+                return ns_computed_range_list(js, n, lv->u.keyword);
             if (strcmp(key, "timing") == 0) {
                 ns_css_anim_list list;
                 ns_css_anim_effective(s, is_anim, &list);
@@ -14744,6 +14848,10 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     if (strcmp(key, "direction") == 0) return g_strdup("normal");
     if (strcmp(key, "fill") == 0)      return g_strdup("none");
     if (strcmp(key, "play-state") == 0) return g_strdup("running");
+    if (strcmp(key, "timeline") == 0)  return g_strdup("auto");
+    if (strcmp(key, "range-start") == 0 || strcmp(key, "range-end") == 0)
+        return g_strdup("normal");
+    if (strcmp(key, "behavior") == 0)  return g_strdup("normal");
     return NULL;
 }
 
@@ -14930,8 +15038,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         return NULL;
     }
 
-    if ((g_str_has_prefix(name, "transition-") ||
-         g_str_has_prefix(name, "animation-"))) {
+    if (g_str_has_prefix(name, "transition") || g_str_has_prefix(name, "animation")) {
         char *anim_val = ns_computed_anim_lookup(js, n, name);
         if (anim_val) return anim_val;
     }
