@@ -14770,6 +14770,53 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     return NULL;
 }
 
+static void
+ns_radius_corner_axes(const char *value, char **horizontal, char **vertical)
+{
+    char **parts = g_strsplit(value && *value ? value : "0px", " ", 2);
+    *horizontal = g_strdup(parts[0] ? parts[0] : "0px");
+    *vertical = g_strdup(parts[0] && parts[1] ? parts[1] : *horizontal);
+    g_strfreev(parts);
+}
+
+static char *
+ns_radius_axis_list(char *const corner[4])
+{
+    if (strcmp(corner[0], corner[1]) == 0 &&
+        strcmp(corner[1], corner[2]) == 0 &&
+        strcmp(corner[2], corner[3]) == 0)
+        return g_strdup(corner[0]);
+    if (strcmp(corner[0], corner[2]) == 0 && strcmp(corner[1], corner[3]) == 0)
+        return g_strdup_printf("%s %s", corner[0], corner[1]);
+    if (strcmp(corner[1], corner[3]) == 0)
+        return g_strdup_printf("%s %s %s", corner[0], corner[1], corner[2]);
+    return g_strdup_printf("%s %s %s %s", corner[0], corner[1], corner[2],
+                           corner[3]);
+}
+
+static char *
+ns_computed_radius_shorthand(JSContext *ctx, const ns_node *n)
+{
+    static const char *const corners[4] = {
+        "border-top-left-radius", "border-top-right-radius",
+        "border-bottom-right-radius", "border-bottom-left-radius",
+    };
+    char *h[4], *v[4];
+    for (int i = 0; i < 4; i++) {
+        char *value = ns_computed_lookup(ctx, n, corners[i]);
+        ns_radius_corner_axes(value, &h[i], &v[i]);
+        g_free(value);
+    }
+    char *hl = ns_radius_axis_list(h);
+    char *vl = ns_radius_axis_list(v);
+    char *out = strcmp(hl, vl) == 0 ? g_strdup(hl)
+                                    : g_strdup_printf("%s / %s", hl, vl);
+    for (int i = 0; i < 4; i++) { g_free(h[i]); g_free(v[i]); }
+    g_free(hl);
+    g_free(vl);
+    return out;
+}
+
 static char *
 ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
 {
@@ -14855,6 +14902,23 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(width);
         g_free(outset);
         g_free(repeat);
+        return out;
+    }
+    if (strcmp(name, "border-radius") == 0)
+        return ns_computed_radius_shorthand(ctx, n);
+    if (strcmp(name, "object-position") == 0 ||
+        strcmp(name, "background-position") == 0) {
+        gboolean is_bg = name[0] == 'b';
+        char *x = ns_computed_lookup(ctx, n,
+            is_bg ? "background-position-x" : "object-position-x");
+        char *y = ns_computed_lookup(ctx, n,
+            is_bg ? "background-position-y" : "object-position-y");
+        char *out = ns_css_background_position_join(x && *x ? x : "50%",
+                                                    y && *y ? y : "50%");
+        if (!out) out = g_strdup_printf("%s %s", x && *x ? x : "50%",
+                                                 y && *y ? y : "50%");
+        g_free(x);
+        g_free(y);
         return out;
     }
     if (strcmp(name, "gap") == 0 || strcmp(name, "grid-gap") == 0) {

@@ -390,6 +390,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_ANIMATION_COMPOSITION] = "animation-composition",
     [NS_CSS_COUNTER_SET]          = "counter-set",
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = "overflow-clip-margin",
+    [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
     [NS_CSS_ORPHANS]              = "orphans",
     [NS_CSS_WIDOWS]               = "widows",
     [NS_CSS_MAX_LINES]            = "max-lines",
@@ -1351,6 +1352,27 @@ named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
         { "visitedtext",     85,  26,  139 },
         { "window",          255, 255, 255 },
         { "windowtext",      0,   0,   0   },
+        { "activeborder",    140, 140, 140 },
+        { "activecaption",   255, 255, 255 },
+        { "appworkspace",    255, 255, 255 },
+        { "background",      255, 255, 255 },
+        { "buttonhighlight", 240, 240, 240 },
+        { "buttonshadow",    240, 240, 240 },
+        { "captiontext",     0,   0,   0   },
+        { "inactiveborder",  140, 140, 140 },
+        { "inactivecaption", 255, 255, 255 },
+        { "inactivecaptiontext", 128, 128, 128 },
+        { "infobackground",  255, 255, 255 },
+        { "infotext",        0,   0,   0   },
+        { "menu",            255, 255, 255 },
+        { "menutext",        0,   0,   0   },
+        { "scrollbar",       255, 255, 255 },
+        { "threeddarkshadow",140, 140, 140 },
+        { "threedface",      240, 240, 240 },
+        { "threedhighlight", 140, 140, 140 },
+        { "threedlightshadow",140, 140, 140 },
+        { "threedshadow",    140, 140, 140 },
+        { "windowframe",     140, 140, 140 },
         { NULL, 0, 0, 0 },
     };
     for (int i = 0; table[i].n; i++) {
@@ -5391,6 +5413,12 @@ parse_areas(const char *text)
 }
 
 static gboolean text_is_ident(const char *t);
+static gboolean bg_repeat_token(const char *tok, gboolean allow_axis);
+static char *bg_repeat_canonical(const char *a, const char *b);
+static char *bg_position_zip(const char *xs, const char *ys);
+static gboolean bg_token_is_box(const char *tok);
+static gboolean inline_css_wide_value(const char *value);
+static char *bg_clip_canonical(const char *text);
 static char *css_add_leading_zeros(char *v);
 static char *css_normalize_negative_zero(char *value);
 static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a);
@@ -8890,6 +8918,7 @@ ns_css_initial_value_text(const char *name)
         { "aspect-ratio",               "auto" },
         { "background-clip",            "border-box" },
         { "background-origin",          "padding-box" },
+        { "background-attachment",      "scroll" },
         { "background-position-x",      "0%" },
         { "background-position-y",      "0%" },
         { "background-repeat",          "repeat" },
@@ -9901,6 +9930,23 @@ ns_css_transform_canonical(const char *value)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+prop_name_is_color(const char *prop)
+{
+    static const char *const names[] = {
+        "color", "background-color", "border-top-color", "border-right-color",
+        "border-bottom-color", "border-left-color", "border-color",
+        "outline-color", "text-decoration-color", "column-rule-color",
+        "caret-color", "accent-color", "fill", "stroke", "stop-color",
+        "flood-color", "lighting-color", "text-emphasis-color",
+        "border-block-start-color", "border-block-end-color",
+        "border-inline-start-color", "border-inline-end-color",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        if (strcmp(prop, names[i]) == 0) return TRUE;
+    return FALSE;
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
@@ -9936,6 +9982,36 @@ ns_css_specified_canonical(const char *prop, const char *value)
             return r;
         }
         ns_css_value_free(v);
+    }
+    if (prop && value && prop_name_is_color(prop)) {
+        guint8 r, g, b, a;
+        if (text_is_ident(value)) {
+            if (parse_color(value, &r, &g, &b, &a) ||
+                g_ascii_strcasecmp(value, "currentcolor") == 0)
+                return g_ascii_strdown(value, -1);
+        } else if ((value[0] == '#' ||
+                    g_ascii_strncasecmp(value, "rgb", 3) == 0 ||
+                    g_ascii_strncasecmp(value, "hsl", 3) == 0 ||
+                    g_ascii_strncasecmp(value, "hwb(", 4) == 0) &&
+                   !strstr(value, "var(") && !strstr(value, "calc(") &&
+                   !strstr(value, "none") &&
+                   parse_color(value, &r, &g, &b, &a)) {
+            GString *out = g_string_new(NULL);
+            ns_css_append_color(out, r, g, b, a);
+            return g_string_free(out, FALSE);
+        }
+    }
+    if (prop && (strcmp(prop, "background-clip") == 0 ||
+                 strcmp(prop, "background-origin") == 0 ||
+                 strcmp(prop, "background-attachment") == 0 ||
+                 strcmp(prop, "background-repeat") == 0)) {
+        int pid = prop_id(prop);
+        ns_css_value *v = pid >= 0 ? parse_value_for((ns_css_prop)pid, value) : NULL;
+        if (v) {
+            char *r = ns_css_value_serialize(v);
+            ns_css_value_free(v);
+            return r;
+        }
     }
     if (prop && (strcmp(prop, "box-shadow") == 0 ||
                  strcmp(prop, "text-shadow") == 0)) {
@@ -10378,7 +10454,10 @@ prop_is_bg_layered(ns_css_prop prop)
            prop == NS_CSS_BACKGROUND_REPEAT ||
            prop == NS_CSS_BACKGROUND_SIZE ||
            prop == NS_CSS_BACKGROUND_POSITION_X ||
-           prop == NS_CSS_BACKGROUND_POSITION_Y;
+           prop == NS_CSS_BACKGROUND_POSITION_Y ||
+           prop == NS_CSS_BACKGROUND_CLIP ||
+           prop == NS_CSS_BACKGROUND_ORIGIN ||
+           prop == NS_CSS_BACKGROUND_ATTACHMENT;
 }
 
 static gboolean
@@ -10729,11 +10808,13 @@ parse_value_layer_list(ns_css_prop prop, const char *t)
             char *part = g_strndup(seg, (gsize)(p - seg));
             ns_css_value *lv = parse_value_for(prop, part);
             g_free(part);
-            if (lv) {
-                if (tail) tail->next_layer = lv;
-                else head = lv;
-                tail = lv;
+            if (!lv) {
+                ns_css_value_free(head);
+                return NULL;
             }
+            if (tail) tail->next_layer = lv;
+            else head = lv;
+            tail = lv;
             if (!*p) break;
             seg = p + 1;
         }
@@ -11122,9 +11203,19 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_keyword_choice(t,
             "none hidden dotted dashed solid double groove ridge inset outset");
         break;
-    case NS_CSS_BACKGROUND_CLIP:
+    case NS_CSS_BACKGROUND_CLIP: {
+        char *canon = bg_clip_canonical(t);
+        if (!canon) break;
+        v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = canon;
+        break;
+    }
     case NS_CSS_BACKGROUND_ORIGIN:
         v = parse_keyword_choice(t, "border-box padding-box content-box");
+        break;
+    case NS_CSS_BACKGROUND_ATTACHMENT:
+        v = parse_keyword_choice(t, "scroll fixed local");
         break;
     case NS_CSS_SCROLLBAR_WIDTH:
         v = parse_keyword_choice(t, "auto thin none");
@@ -11702,7 +11793,15 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_BACKGROUND_REPEAT: {
-        char *kw = ascii_lower(t, strlen(t));
+        char *pair[3] = {0};
+        int nt = split_ws_limit(t, pair, G_N_ELEMENTS(pair));
+        char *kw = nt == 1 && bg_repeat_token(pair[0], TRUE)
+            ? g_ascii_strdown(pair[0], -1)
+            : nt == 2 && bg_repeat_token(pair[0], FALSE) &&
+              bg_repeat_token(pair[1], FALSE)
+                ? bg_repeat_canonical(pair[0], pair[1]) : NULL;
+        for (int i = 0; i < nt; i++) g_free(pair[i]);
+        if (!kw) break;
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
         v->u.keyword = kw;
@@ -11793,6 +11892,9 @@ parse_value_for(ns_css_prop prop, const char *text)
                 iset_computed = NULL;
             }
         }
+        if (!v && !iset_computed && text_is_ident(t) &&
+            g_ascii_strcasecmp(t, "none") != 0)
+            break;
         if (!v) {
             char *kw = iset_computed ? g_strdup(iset_computed)
                                      : ascii_lower(t, strlen(t));
@@ -12510,6 +12612,30 @@ position_split(const char *text, char **out_x, char **out_y)
     for (int i = 0; i < n; i++) g_free(tok[i]);
     *out_x = x ? x : g_strdup("50%");
     *out_y = y ? y : g_strdup("50%");
+}
+
+static void
+position_split_specified(const char *canon, char **out_x, char **out_y)
+{
+    char *tok[4] = {0};
+    int n = split_ws_limit(canon, tok, 4);
+    if (n == 4) {
+        *out_x = g_strdup_printf("%s %s", tok[0], tok[1]);
+        *out_y = g_strdup_printf("%s %s", tok[2], tok[3]);
+    } else if (n == 3) {
+        gboolean off_after_first = !position_is_keyword(tok[1]);
+        *out_x = off_after_first ? g_strdup_printf("%s %s", tok[0], tok[1])
+                                 : g_strdup(tok[0]);
+        *out_y = off_after_first ? g_strdup(tok[2])
+                                 : g_strdup_printf("%s %s", tok[1], tok[2]);
+    } else if (n == 2) {
+        *out_x = g_strdup(tok[0]);
+        *out_y = g_strdup(tok[1]);
+    } else {
+        *out_x = g_strdup(n == 1 ? tok[0] : "center");
+        *out_y = g_strdup("center");
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
 }
 
 static char *
@@ -13375,6 +13501,496 @@ ns_css_animation_range_serialize(const char *start_list, const char *end_list)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+bg_repeat_token(const char *tok, gboolean allow_axis)
+{
+    return g_ascii_strcasecmp(tok, "repeat") == 0 ||
+           g_ascii_strcasecmp(tok, "no-repeat") == 0 ||
+           g_ascii_strcasecmp(tok, "space") == 0 ||
+           g_ascii_strcasecmp(tok, "round") == 0 ||
+           (allow_axis && (g_ascii_strcasecmp(tok, "repeat-x") == 0 ||
+                           g_ascii_strcasecmp(tok, "repeat-y") == 0));
+}
+
+static char *
+bg_repeat_canonical(const char *a, const char *b)
+{
+    char *la = g_ascii_strdown(a, -1);
+    if (!b) return la;
+    char *lb = g_ascii_strdown(b, -1);
+    char *r;
+    if (strcmp(la, lb) == 0)
+        r = g_strdup(la);
+    else if (strcmp(la, "repeat") == 0 && strcmp(lb, "no-repeat") == 0)
+        r = g_strdup("repeat-x");
+    else if (strcmp(la, "no-repeat") == 0 && strcmp(lb, "repeat") == 0)
+        r = g_strdup("repeat-y");
+    else
+        r = g_strdup_printf("%s %s", la, lb);
+    g_free(la);
+    g_free(lb);
+    return r;
+}
+
+static GPtrArray *
+css_split_top_level_commas(const char *text)
+{
+    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    while (p <= end) {
+        char term = 0;
+        const char *seg_end = css_scan_until(p, end, ",", &term);
+        g_ptr_array_add(parts, css_trim_dup_range(p, seg_end));
+        if (term != ',') break;
+        p = seg_end + 1;
+    }
+    return parts;
+}
+
+char *
+ns_css_background_position_join(const char *xs, const char *ys)
+{
+    return bg_position_zip(xs, ys);
+}
+
+static char *
+bg_position_zip(const char *xs, const char *ys)
+{
+    char *x = g_strdup(xs), *y = g_strdup(ys);
+    gboolean xi = ns_inline_value_strip_important(x);
+    gboolean yi = ns_inline_value_strip_important(y);
+    GPtrArray *xl = css_split_top_level_commas(x);
+    GPtrArray *yl = css_split_top_level_commas(y);
+    char *r = NULL;
+    if (xi == yi && xl->len == 1 && yl->len == 1 &&
+        inline_css_wide_value(g_ptr_array_index(xl, 0)) &&
+        strcmp(g_ptr_array_index(xl, 0), g_ptr_array_index(yl, 0)) == 0) {
+        r = g_strdup(g_ptr_array_index(xl, 0));
+        if (xi) {
+            char *with = g_strconcat(r, " !important", NULL);
+            g_free(r);
+            r = with;
+        }
+    } else if (xi == yi && xl->len == yl->len) {
+        GString *out = g_string_new(NULL);
+        for (guint i = 0; i < xl->len; i++) {
+            if (i) g_string_append(out, ", ");
+            g_string_append(out, g_ptr_array_index(xl, i));
+            g_string_append_c(out, ' ');
+            g_string_append(out, g_ptr_array_index(yl, i));
+        }
+        if (xi) g_string_append(out, " !important");
+        r = g_string_free(out, FALSE);
+    }
+    g_ptr_array_free(xl, TRUE);
+    g_ptr_array_free(yl, TRUE);
+    g_free(x);
+    g_free(y);
+    return r;
+}
+
+static char *
+bg_clip_canonical(const char *text)
+{
+    char *tok[3] = {0};
+    int n = split_ws_limit(text, tok, G_N_ELEMENTS(tok));
+    char *r = NULL;
+    if (n == 1) {
+        if (bg_token_is_box(tok[0]) ||
+            g_ascii_strcasecmp(tok[0], "text") == 0 ||
+            g_ascii_strcasecmp(tok[0], "border-area") == 0)
+            r = g_ascii_strdown(tok[0], -1);
+    } else if (n == 2) {
+        gboolean area_text =
+            g_ascii_strcasecmp(tok[0], "border-area") == 0 &&
+            g_ascii_strcasecmp(tok[1], "text") == 0;
+        gboolean text_area =
+            g_ascii_strcasecmp(tok[0], "text") == 0 &&
+            g_ascii_strcasecmp(tok[1], "border-area") == 0;
+        if (area_text || text_area) r = g_strdup("border-area text");
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    return r;
+}
+
+char *
+ns_css_background_shorthand_serialize(const char *image, const char *position,
+                                      const char *size, const char *repeat,
+                                      const char *attachment,
+                                      const char *origin, const char *clip,
+                                      const char *color)
+{
+    const char *texts[7] = { image, position, size, repeat, attachment,
+                             origin, clip };
+    GPtrArray *lists[7];
+    guint n = 0;
+    gboolean ok = TRUE;
+    for (int k = 0; k < 7; k++) {
+        lists[k] = css_split_top_level_commas(texts[k] ? texts[k] : "");
+        if (k == 0) n = lists[k]->len;
+        else if (lists[k]->len != n) ok = FALSE;
+    }
+    GString *out = g_string_new(NULL);
+    for (guint i = 0; ok && i < n; i++) {
+        const char *img = g_ptr_array_index(lists[0], i);
+        const char *pos = g_ptr_array_index(lists[1], i);
+        const char *sz = g_ptr_array_index(lists[2], i);
+        const char *rep = g_ptr_array_index(lists[3], i);
+        const char *att = g_ptr_array_index(lists[4], i);
+        const char *org = g_ptr_array_index(lists[5], i);
+        const char *clp = g_ptr_array_index(lists[6], i);
+        GString *layer = g_string_new(NULL);
+        if (g_ascii_strcasecmp(img, "none") != 0) g_string_append(layer, img);
+        gboolean size_set = g_ascii_strcasecmp(sz, "auto") != 0 &&
+                            g_ascii_strcasecmp(sz, "auto auto") != 0;
+        if (size_set || strcmp(pos, "0% 0%") != 0) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, pos);
+            if (size_set) {
+                g_string_append(layer, " / ");
+                g_string_append(layer, sz);
+                if (!strchr(sz, ' ') && g_ascii_strcasecmp(sz, "cover") != 0 &&
+                    g_ascii_strcasecmp(sz, "contain") != 0)
+                    g_string_append(layer, " auto");
+            }
+        }
+        if (g_ascii_strcasecmp(rep, "repeat") != 0) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, rep);
+        }
+        if (g_ascii_strcasecmp(att, "scroll") != 0) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, att);
+        }
+        gboolean clip_only = !bg_token_is_box(clp);
+        if (clip_only) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            if (g_ascii_strcasecmp(org, "border-box") != 0) {
+                g_string_append(layer, org);
+                g_string_append_c(layer, ' ');
+            }
+            g_string_append(layer, clp);
+        } else if (g_ascii_strcasecmp(org, clp) == 0) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, org);
+        } else if (!(g_ascii_strcasecmp(org, "padding-box") == 0 &&
+                     g_ascii_strcasecmp(clp, "border-box") == 0)) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, org);
+            g_string_append_c(layer, ' ');
+            g_string_append(layer, clp);
+        }
+        if (i + 1 == n && color && g_ascii_strcasecmp(color, "transparent") != 0) {
+            if (layer->len) g_string_append_c(layer, ' ');
+            g_string_append(layer, color);
+        }
+        if (layer->len == 0) g_string_append(layer, "none");
+        if (out->len) g_string_append(out, ", ");
+        g_string_append(out, layer->str);
+        g_string_free(layer, TRUE);
+    }
+    for (int k = 0; k < 7; k++) g_ptr_array_free(lists[k], TRUE);
+    if (!ok || n == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+typedef struct {
+    char *image, *pos_x, *pos_y, *size, *repeat, *attachment, *origin, *clip;
+} bg_layer_text;
+
+static void
+bg_layer_text_clear(bg_layer_text *l)
+{
+    g_free(l->image);
+    g_free(l->pos_x);
+    g_free(l->pos_y);
+    g_free(l->size);
+    g_free(l->repeat);
+    g_free(l->attachment);
+    g_free(l->origin);
+    g_free(l->clip);
+    memset(l, 0, sizeof *l);
+}
+
+static gboolean
+bg_token_is_length_like(const char *tok, gboolean nonnegative)
+{
+    double num;
+    ns_css_unit unit;
+    if (parse_length(tok, &num, &unit))
+        return (unit != NS_CSS_UNIT_NUMBER || num == 0) &&
+               (!nonnegative || num >= 0);
+    ns_css_value *c = parse_calc(tok);
+    gboolean ok = c != NULL;
+    ns_css_value_free(c);
+    return ok;
+}
+
+static gboolean
+bg_token_is_position(const char *tok)
+{
+    return g_ascii_strcasecmp(tok, "left") == 0 ||
+           g_ascii_strcasecmp(tok, "center") == 0 ||
+           g_ascii_strcasecmp(tok, "right") == 0 ||
+           g_ascii_strcasecmp(tok, "top") == 0 ||
+           g_ascii_strcasecmp(tok, "bottom") == 0 ||
+           bg_token_is_length_like(tok, FALSE);
+}
+
+static gboolean
+bg_token_is_box(const char *tok)
+{
+    return g_ascii_strcasecmp(tok, "border-box") == 0 ||
+           g_ascii_strcasecmp(tok, "padding-box") == 0 ||
+           g_ascii_strcasecmp(tok, "content-box") == 0;
+}
+
+static gboolean
+bg_token_is_image(const char *tok)
+{
+    return g_ascii_strcasecmp(tok, "none") == 0 ||
+           g_ascii_strncasecmp(tok, "url(", 4) == 0 ||
+           text_starts_gradient(tok) || text_starts_image_set(tok);
+}
+
+static gboolean
+bg_layer_parse(const char *text, gboolean final_layer, bg_layer_text *out,
+               char **color_out)
+{
+    char *raw[24] = {0};
+    int nraw = split_ws_limit(text, raw, G_N_ELEMENTS(raw));
+    GPtrArray *toks = g_ptr_array_new_with_free_func(g_free);
+    for (int i = 0; i < nraw; i++) {
+        const char *t = raw[i];
+        const char *slash = strchr(t, '(') ? NULL : strchr(t, '/');
+        if (!slash) {
+            g_ptr_array_add(toks, g_strdup(t));
+        } else {
+            if (slash > t) g_ptr_array_add(toks, g_strndup(t, (gsize)(slash - t)));
+            g_ptr_array_add(toks, g_strdup("/"));
+            if (slash[1]) g_ptr_array_add(toks, g_strdup(slash + 1));
+        }
+        g_free(raw[i]);
+    }
+    gboolean ok = toks->len > 0;
+    const char *repeat_a = NULL, *repeat_b = NULL;
+    int n_repeat = 0, n_box = 0, n_pos = 0;
+    gboolean pos_closed = FALSE;
+    GString *pos = NULL, *size = NULL;
+    char *clip_only = NULL;
+    for (guint i = 0; ok && i < toks->len; i++) {
+        const char *tok = g_ptr_array_index(toks, i);
+        guint8 r, g, b, a;
+        if (strcmp(tok, "/") == 0) {
+            if (!pos || pos_closed || size) { ok = FALSE; break; }
+            pos_closed = TRUE;
+            size = g_string_new(NULL);
+            int n_size = 0;
+            while (i + 1 < toks->len) {
+                const char *nx = g_ptr_array_index(toks, i + 1);
+                if (n_size == 0 && (g_ascii_strcasecmp(nx, "cover") == 0 ||
+                                    g_ascii_strcasecmp(nx, "contain") == 0)) {
+                    char *lower = g_ascii_strdown(nx, -1);
+                    g_string_append(size, lower);
+                    g_free(lower);
+                    i++;
+                    n_size = 2;
+                    break;
+                }
+                if (n_size < 2 && (g_ascii_strcasecmp(nx, "auto") == 0 ||
+                                   bg_token_is_length_like(nx, TRUE))) {
+                    if (size->len) g_string_append_c(size, ' ');
+                    g_string_append(size, nx);
+                    i++;
+                    n_size++;
+                    continue;
+                }
+                break;
+            }
+            if (n_size == 0) ok = FALSE;
+            continue;
+        }
+        if (bg_token_is_position(tok)) {
+            if (pos_closed || n_pos >= 4) { ok = FALSE; break; }
+            if (!pos) pos = g_string_new(NULL);
+            if (pos->len) g_string_append_c(pos, ' ');
+            g_string_append(pos, tok);
+            n_pos++;
+            continue;
+        }
+        if (pos) pos_closed = TRUE;
+        if (bg_token_is_image(tok)) {
+            if (out->image) { ok = FALSE; break; }
+            out->image = g_strdup(tok);
+        } else if (bg_repeat_token(tok, TRUE)) {
+            gboolean axis = g_ascii_strncasecmp(tok, "repeat-", 7) == 0;
+            if (n_repeat >= 2 || (n_repeat == 1 && (axis ||
+                g_ascii_strncasecmp(repeat_a, "repeat-", 7) == 0))) {
+                ok = FALSE;
+                break;
+            }
+            if (n_repeat == 0) repeat_a = tok;
+            else repeat_b = tok;
+            n_repeat++;
+        } else if (g_ascii_strcasecmp(tok, "scroll") == 0 ||
+                   g_ascii_strcasecmp(tok, "fixed") == 0 ||
+                   g_ascii_strcasecmp(tok, "local") == 0) {
+            if (out->attachment) { ok = FALSE; break; }
+            out->attachment = g_ascii_strdown(tok, -1);
+        } else if (bg_token_is_box(tok)) {
+            if (n_box >= 2) { ok = FALSE; break; }
+            if (n_box == 0) {
+                out->origin = g_ascii_strdown(tok, -1);
+                g_free(out->clip);
+                out->clip = g_ascii_strdown(tok, -1);
+            } else {
+                g_free(out->clip);
+                out->clip = g_ascii_strdown(tok, -1);
+            }
+            n_box++;
+        } else if (g_ascii_strcasecmp(tok, "text") == 0 ||
+                   g_ascii_strcasecmp(tok, "border-area") == 0) {
+            if (n_box >= 2 || (clip_only && strstr(clip_only, " "))) {
+                ok = FALSE;
+                break;
+            }
+            char *lower = g_ascii_strdown(tok, -1);
+            char *joined = clip_only
+                ? g_strdup_printf("%s %s", clip_only, lower) : g_strdup(lower);
+            g_free(clip_only);
+            clip_only = bg_clip_canonical(joined);
+            g_free(joined);
+            g_free(lower);
+            if (!clip_only) { ok = FALSE; break; }
+        } else if (parse_color(tok, &r, &g, &b, &a) ||
+                   g_ascii_strcasecmp(tok, "currentcolor") == 0) {
+            if (!final_layer || *color_out) { ok = FALSE; break; }
+            *color_out = g_strdup(tok);
+        } else {
+            ok = FALSE;
+        }
+    }
+    if (ok && pos) {
+        char *canon = position_canonical_ex(pos->str, TRUE, TRUE);
+        if (canon) {
+            position_split_specified(canon, &out->pos_x, &out->pos_y);
+            g_free(canon);
+        } else {
+            ok = FALSE;
+        }
+    }
+    if (ok && size) {
+        ns_css_value *sv = parse_value_for(NS_CSS_BACKGROUND_SIZE, size->str);
+        if (sv) out->size = css_add_leading_zeros(g_strdup(size->str));
+        else ok = FALSE;
+        ns_css_value_free(sv);
+    }
+    if (ok && n_repeat) out->repeat = bg_repeat_canonical(repeat_a, repeat_b);
+    if (ok && clip_only) {
+        g_free(out->clip);
+        out->clip = clip_only;
+        clip_only = NULL;
+        if (!out->origin) out->origin = g_strdup("border-box");
+    }
+    g_free(clip_only);
+    if (ok && out->image) {
+        char *canon = ns_css_image_value_canonical(out->image);
+        if (canon) {
+            g_free(out->image);
+            out->image = canon;
+        } else if (g_ascii_strcasecmp(out->image, "none") != 0) {
+            ok = FALSE;
+        }
+    }
+    if (pos) g_string_free(pos, TRUE);
+    if (size) g_string_free(size, TRUE);
+    g_ptr_array_free(toks, TRUE);
+    return ok;
+}
+
+static gboolean
+parse_background_shorthand(const char *vtext, gboolean important,
+                           GArray *decls_out)
+{
+    static const struct { ns_css_prop prop; size_t off; const char *initial; }
+        fields[] = {
+        { NS_CSS_BACKGROUND_IMAGE, offsetof(bg_layer_text, image), "none" },
+        { NS_CSS_BACKGROUND_POSITION_X, offsetof(bg_layer_text, pos_x), "0%" },
+        { NS_CSS_BACKGROUND_POSITION_Y, offsetof(bg_layer_text, pos_y), "0%" },
+        { NS_CSS_BACKGROUND_SIZE, offsetof(bg_layer_text, size), "auto" },
+        { NS_CSS_BACKGROUND_REPEAT, offsetof(bg_layer_text, repeat), "repeat" },
+        { NS_CSS_BACKGROUND_ATTACHMENT, offsetof(bg_layer_text, attachment),
+          "scroll" },
+        { NS_CSS_BACKGROUND_ORIGIN, offsetof(bg_layer_text, origin),
+          "padding-box" },
+        { NS_CSS_BACKGROUND_CLIP, offsetof(bg_layer_text, clip), "border-box" },
+    };
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    if (wide) {
+        for (gsize f = 0; f <= G_N_ELEMENTS(fields); f++) {
+            ns_css_prop prop = f < G_N_ELEMENTS(fields)
+                ? fields[f].prop : NS_CSS_BACKGROUND_COLOR;
+            ns_css_decl d = { .prop = prop,
+                              .value = f ? ns_css_value_dup(wide) : wide,
+                              .important = important };
+            g_array_append_val(decls_out, d);
+        }
+        return TRUE;
+    }
+    GPtrArray *layers = css_split_top_level_commas(vtext);
+    GArray *parsed = g_array_new(FALSE, TRUE, sizeof(bg_layer_text));
+    g_array_set_size(parsed, layers->len);
+    char *color = NULL;
+    gboolean ok = layers->len > 0;
+    for (guint i = 0; ok && i < layers->len; i++)
+        ok = bg_layer_parse(g_ptr_array_index(layers, i),
+                            i + 1 == layers->len,
+                            &g_array_index(parsed, bg_layer_text, i), &color);
+    if (ok) {
+        for (gsize f = 0; ok && f < G_N_ELEMENTS(fields); f++) {
+            ns_css_value *head = NULL, *tail = NULL;
+            for (guint i = 0; ok && i < parsed->len; i++) {
+                bg_layer_text *l = &g_array_index(parsed, bg_layer_text, i);
+                const char *text = *(char **)((char *)l + fields[f].off);
+                if (!text) text = fields[f].initial;
+                ns_css_value *v = parse_value_for(fields[f].prop, text);
+                if (!v) { ok = FALSE; break; }
+                g_free(v->specified);
+                v->specified = g_strdup(text);
+                if (tail) tail->next_layer = v;
+                else head = v;
+                tail = v;
+            }
+            if (!ok) {
+                ns_css_value_free(head);
+                break;
+            }
+            ns_css_decl d = { .prop = fields[f].prop, .value = head,
+                              .important = important };
+            g_array_append_val(decls_out, d);
+        }
+        if (ok) {
+            ns_css_value *cv = parse_value_for(NS_CSS_BACKGROUND_COLOR,
+                                               color ? color : "transparent");
+            if (cv) {
+                ns_css_decl d = { .prop = NS_CSS_BACKGROUND_COLOR, .value = cv,
+                                  .important = important };
+                g_array_append_val(decls_out, d);
+            }
+        }
+    }
+    for (guint i = 0; i < parsed->len; i++)
+        bg_layer_text_clear(&g_array_index(parsed, bg_layer_text, i));
+    g_array_free(parsed, TRUE);
+    g_ptr_array_free(layers, TRUE);
+    g_free(color);
+    return ok;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
@@ -13828,272 +14444,7 @@ parse_declaration_block(const char **pp, const char *end,
         }
 
         if (strcmp(pname, "background") == 0) {
-            char *vlower_grad = g_ascii_strdown(vtext, -1);
-            gboolean has_linear = strstr(vlower_grad, "linear-gradient") != NULL;
-            gboolean has_radial = strstr(vlower_grad, "radial-gradient") != NULL;
-            gboolean has_conic  = strstr(vlower_grad, "conic-gradient")  != NULL;
-            g_free(vlower_grad);
-            if (has_linear || has_radial || has_conic) {
-                const char *gtext = vtext;
-                while (*gtext && is_ws(*gtext)) gtext++;
-                ns_css_value *gv = parse_gradient_text(gtext, TRUE);
-                if (gv) {
-                    ns_css_decl d = {
-                        .prop = NS_CSS_BACKGROUND_IMAGE,
-                        .value = gv,
-                        .important = important,
-                    };
-                    g_array_append_val(decls_out, d);
-                }
-            } else {
-                char *vlower = g_ascii_strdown(vtext, -1);
-                const char *u = strstr(vlower, "url(");
-                if (u) {
-                    const char *vu = vtext + (u - vlower);
-                    ns_css_value *uv = parse_value_for(NS_CSS_BACKGROUND_IMAGE, vu);
-                    if (uv && uv->kind == NS_CSS_V_URL) {
-                        ns_css_decl d = {
-                            .prop = NS_CSS_BACKGROUND_IMAGE,
-                            .value = uv,
-                            .important = important,
-                        };
-                        g_array_append_val(decls_out, d);
-                    } else {
-                        ns_css_value_free(uv);
-                    }
-                }
-                g_free(vlower);
-            }
-            if (has_linear || has_radial || has_conic) {
-                int depth = 0;
-                const char *last_comma = NULL;
-                for (const char *q = vtext; *q; q++) {
-                    if (*q == '(') depth++;
-                    else if (*q == ')') { if (depth > 0) depth--; }
-                    else if (*q == ',' && depth == 0) last_comma = q;
-                }
-                if (last_comma) {
-                    const char *seg = last_comma + 1;
-                    while (*seg && is_ws(*seg)) seg++;
-                    char *segdup = g_strchomp(g_strdup(seg));
-                    guint8 r, g, b, a;
-                    if (parse_color(segdup, &r, &g, &b, &a)) {
-                        ns_css_value *v = g_new0(ns_css_value, 1);
-                        v->kind = NS_CSS_V_COLOR;
-                        v->u.color.r = r; v->u.color.g = g;
-                        v->u.color.b = b; v->u.color.a = a;
-                        ns_css_decl d = { .prop = NS_CSS_BACKGROUND_COLOR,
-                                          .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                    g_free(segdup);
-                }
-            }
-            char *tokens[16] = {0};
-            int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
-            for (int i = 0; i < n; i++) {
-                guint8 r, g, b, a;
-                if (parse_color(tokens[i], &r, &g, &b, &a)) {
-                    ns_css_value *v = g_new0(ns_css_value, 1);
-                    v->kind = NS_CSS_V_COLOR;
-                    v->u.color.r = r; v->u.color.g = g;
-                    v->u.color.b = b; v->u.color.a = a;
-                    ns_css_decl decl = {
-                        .prop = NS_CSS_BACKGROUND_COLOR,
-                        .value = v,
-                        .important = important,
-                    };
-                    g_array_append_val(decls_out, decl);
-                    break;
-                }
-                if (is_color_keyword(tokens[i])) {
-                    ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_COLOR, tokens[i]);
-                    if (v) {
-                        ns_css_decl decl = {
-                            .prop = NS_CSS_BACKGROUND_COLOR,
-                            .value = v,
-                            .important = important,
-                        };
-                        g_array_append_val(decls_out, decl);
-                    }
-                    break;
-                }
-            }
-            const char *pos_x = NULL;
-            const char *pos_y = NULL;
-            char *pos_x_owned = NULL;
-            char *pos_y_owned = NULL;
-            char *bg_size_text = NULL;
-            int bg_size_skip = -1;
-            for (int i = 0; i < n; i++) {
-                const char *tk = tokens[i];
-                if (!tk) continue;
-                if (i == bg_size_skip) continue;
-                if (g_ascii_strncasecmp(tk, "url(", 4) == 0 ||
-                    g_ascii_strncasecmp(tk, "linear-gradient(", 16) == 0 ||
-                    g_ascii_strncasecmp(tk, "radial-gradient(", 16) == 0 ||
-                    g_ascii_strncasecmp(tk, "conic-gradient(", 15) == 0)
-                    continue;
-                if (strcmp(tk, "/") == 0) {
-                    g_free(bg_size_text);
-                    bg_size_text = NULL;
-                    if (i + 1 < n) {
-                        char *pair = NULL;
-                        ns_css_value *pv = NULL;
-                        if (i + 2 < n) {
-                            pair = g_strdup_printf("%s %s", tokens[i + 1], tokens[i + 2]);
-                            pv = parse_value_for(NS_CSS_BACKGROUND_SIZE, pair);
-                        }
-                        if (pv) {
-                            ns_css_value_free(pv);
-                            bg_size_text = pair;
-                            bg_size_skip = i + 2;
-                        } else {
-                            g_free(pair);
-                            bg_size_text = g_strdup(tokens[i + 1]);
-                            bg_size_skip = i + 1;
-                        }
-                        i = bg_size_skip;
-                    }
-                    continue;
-                }
-                const char *slash = strchr(tk, '/');
-                if (slash) {
-                    if (slash > tk) {
-                        const char *before = NULL;
-                        gsize blen = (gsize)(slash - tk);
-                        if (blen == 6 && g_ascii_strncasecmp(tk, "center", blen) == 0)
-                            before = "center";
-                        else if (blen == 4 && g_ascii_strncasecmp(tk, "left", blen) == 0)
-                            before = "left";
-                        else if (blen == 5 && g_ascii_strncasecmp(tk, "right", blen) == 0)
-                            before = "right";
-                        else if (blen == 3 && g_ascii_strncasecmp(tk, "top", blen) == 0)
-                            before = "top";
-                        else if (blen == 6 && g_ascii_strncasecmp(tk, "bottom", blen) == 0)
-                            before = "bottom";
-                        if (before) {
-                            if (!pos_x) pos_x = before;
-                            else if (!pos_y) pos_y = before;
-                        } else {
-                            char *pre = g_strndup(tk, blen);
-                            ns_css_value *v = parse_value_for(
-                                pos_x ? NS_CSS_BACKGROUND_POSITION_Y
-                                      : NS_CSS_BACKGROUND_POSITION_X,
-                                pre);
-                            if (v && v->kind == NS_CSS_V_LENGTH) {
-                                if (!pos_x) {
-                                    pos_x = pre;
-                                    pos_x_owned = pre;
-                                } else if (!pos_y) {
-                                    pos_y = pre;
-                                    pos_y_owned = pre;
-                                } else {
-                                    g_free(pre);
-                                }
-                            } else {
-                                g_free(pre);
-                            }
-                            ns_css_value_free(v);
-                        }
-                    }
-                    const char *after = slash + 1;
-                    if (*after) {
-                        g_free(bg_size_text);
-                        if (i + 1 < n) {
-                            bg_size_text = g_strdup_printf("%s %s", after, tokens[i + 1]);
-                            bg_size_skip = i + 1;
-                        } else {
-                            bg_size_text = g_strdup(after);
-                        }
-                    }
-                    continue;
-                }
-                if (g_ascii_strcasecmp(tk, "no-repeat") == 0 ||
-                    g_ascii_strcasecmp(tk, "repeat") == 0 ||
-                    g_ascii_strcasecmp(tk, "repeat-x") == 0 ||
-                    g_ascii_strcasecmp(tk, "repeat-y") == 0 ||
-                    g_ascii_strcasecmp(tk, "space") == 0 ||
-                    g_ascii_strcasecmp(tk, "round") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_REPEAT, tk);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_BACKGROUND_REPEAT, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                } else if (g_ascii_strcasecmp(tk, "cover") == 0 ||
-                           g_ascii_strcasecmp(tk, "contain") == 0) {
-                    ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_SIZE, tk);
-                    if (v) {
-                        ns_css_decl d = { .prop = NS_CSS_BACKGROUND_SIZE, .value = v, .important = important };
-                        g_array_append_val(decls_out, d);
-                    }
-                } else if (g_ascii_strcasecmp(tk, "center") == 0 ||
-                           g_ascii_strcasecmp(tk, "left")   == 0 ||
-                           g_ascii_strcasecmp(tk, "right")  == 0 ||
-                           g_ascii_strcasecmp(tk, "top")    == 0 ||
-                           g_ascii_strcasecmp(tk, "bottom") == 0) {
-                    if (!pos_x) pos_x = tk;
-                    else if (!pos_y) pos_y = tk;
-                } else {
-                    ns_css_value *v = parse_value_for(
-                        pos_x ? NS_CSS_BACKGROUND_POSITION_Y
-                              : NS_CSS_BACKGROUND_POSITION_X,
-                        tk);
-                    if (v && v->kind == NS_CSS_V_LENGTH) {
-                        if (!pos_x) pos_x = tk;
-                        else if (!pos_y) pos_y = tk;
-                    }
-                    ns_css_value_free(v);
-                }
-            }
-            if (bg_size_text) {
-                ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_SIZE, bg_size_text);
-                if (v) {
-                    ns_css_decl d = { .prop = NS_CSS_BACKGROUND_SIZE, .value = v, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                g_free(bg_size_text);
-            }
-            if (pos_x) {
-                if (!pos_y) {
-                    if (g_ascii_strcasecmp(pos_x, "top") == 0 ||
-                        g_ascii_strcasecmp(pos_x, "bottom") == 0) {
-                        pos_y = pos_x;
-                        pos_x = "center";
-                    } else {
-                        pos_y = "center";
-                    }
-                } else {
-                    gboolean first_is_v =
-                        g_ascii_strcasecmp(pos_x, "top") == 0 ||
-                        g_ascii_strcasecmp(pos_x, "bottom") == 0;
-                    gboolean second_is_h =
-                        g_ascii_strcasecmp(pos_y, "left") == 0 ||
-                        g_ascii_strcasecmp(pos_y, "right") == 0;
-                    if (first_is_v && second_is_h) {
-                        const char *tmp = pos_x;
-                        pos_x = pos_y;
-                        pos_y = tmp;
-                    }
-                }
-                ns_css_value *vx =
-                    parse_value_for(NS_CSS_BACKGROUND_POSITION_X, pos_x);
-                if (vx) {
-                    ns_css_decl d = { .prop = NS_CSS_BACKGROUND_POSITION_X,
-                                      .value = vx, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-                ns_css_value *vy =
-                    parse_value_for(NS_CSS_BACKGROUND_POSITION_Y, pos_y);
-                if (vy) {
-                    ns_css_decl d = { .prop = NS_CSS_BACKGROUND_POSITION_Y,
-                                      .value = vy, .important = important };
-                    g_array_append_val(decls_out, d);
-                }
-            }
-            g_free(pos_x_owned);
-            g_free(pos_y_owned);
-            for (int i = 0; i < n; i++) g_free(tokens[i]);
+            parse_background_shorthand(vtext, important, decls_out);
             g_free(pname);
             g_free(vtext);
             if (p < end && *p == ';') p++;
@@ -14138,12 +14489,16 @@ parse_declaration_block(const char **pp, const char *end,
                     vx_head = vy_head = NULL;
                     break;
                 }
-                g_free(layer_canon);
-                char *xs = NULL, *ys = NULL;
+                char *xs = NULL, *ys = NULL, *sx = NULL, *sy = NULL;
                 position_split(layer, &xs, &ys);
+                position_split_specified(layer_canon, &sx, &sy);
+                g_free(layer_canon);
                 if (xs) {
                     ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_X, xs);
                     if (v) {
+                        g_free(v->specified);
+                        v->specified = sx;
+                        sx = NULL;
                         if (vx_tail) vx_tail->next_layer = v;
                         else vx_head = v;
                         vx_tail = v;
@@ -14152,6 +14507,9 @@ parse_declaration_block(const char **pp, const char *end,
                 if (ys) {
                     ns_css_value *v = parse_value_for(NS_CSS_BACKGROUND_POSITION_Y, ys);
                     if (v) {
+                        g_free(v->specified);
+                        v->specified = sy;
+                        sy = NULL;
                         if (vy_tail) vy_tail->next_layer = v;
                         else vy_head = v;
                         vy_tail = v;
@@ -14159,6 +14517,8 @@ parse_declaration_block(const char **pp, const char *end,
                 }
                 g_free(xs);
                 g_free(ys);
+                g_free(sx);
+                g_free(sy);
                 g_free(layer);
             }
             if (vx_head) {
@@ -20926,6 +21286,44 @@ inline_anim_shorthand_value(const char *style, gboolean is_animation)
     return r;
 }
 
+static char *
+inline_background_value(const char *style, gboolean *important_out)
+{
+    static const char *const names[] = {
+        "background-image", "background-position", "background-size",
+        "background-repeat", "background-attachment", "background-origin",
+        "background-clip", "background-color",
+    };
+    char *values[G_N_ELEMENTS(names)] = { NULL };
+    gboolean important[G_N_ELEMENTS(names)] = { FALSE };
+    gboolean ok = TRUE;
+    for (gsize i = 0; i < G_N_ELEMENTS(names) && ok; i++) {
+        values[i] = ns_inline_style_get(style, names[i]);
+        if (!values[i] || !*values[i]) ok = FALSE;
+        else important[i] = ns_inline_value_strip_important(values[i]);
+        if (ok && i > 0 && important[i] != important[0]) ok = FALSE;
+    }
+    char *r = NULL;
+    gboolean all_wide = ok && inline_css_wide_value(values[0]);
+    for (gsize i = 1; all_wide && i < G_N_ELEMENTS(names); i++)
+        if (strcmp(values[i], values[0]) != 0) all_wide = FALSE;
+    if (all_wide) {
+        r = g_strdup(values[0]);
+    } else if (ok) {
+        r = ns_css_background_shorthand_serialize(values[0], values[1],
+                values[2], values[3], values[4], values[5], values[6],
+                values[7]);
+    }
+    if (r && important[0]) {
+        char *with = g_strconcat(r, " !important", NULL);
+        g_free(r);
+        r = with;
+    }
+    if (r && important_out) *important_out = important[0];
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++) g_free(values[i]);
+    return r;
+}
+
 char *
 ns_inline_style_get(const char *style, const char *prop)
 {
@@ -20948,7 +21346,12 @@ ns_inline_style_get(const char *style, const char *prop)
         char *type = ns_inline_style_get(style, "list-style-type");
         char *pos = ns_inline_style_get(style, "list-style-position");
         char *img = ns_inline_style_get(style, "list-style-image");
-        char *r = type && pos && img ? ns_css_list_style_serialize(type, pos, img) : NULL;
+        char *r = NULL;
+        if (type && pos && img && inline_css_wide_value(type) &&
+            strcmp(type, pos) == 0 && strcmp(pos, img) == 0)
+            r = g_strdup(type);
+        else if (type && pos && img)
+            r = ns_css_list_style_serialize(type, pos, img);
         g_free(type);
         g_free(pos);
         g_free(img);
@@ -20961,6 +21364,18 @@ ns_inline_style_get(const char *style, const char *prop)
         g_free(st);
         g_free(en);
         return r;
+    }
+    if (g_ascii_strcasecmp(prop, "background") == 0) {
+        char *r = inline_background_value(style, NULL);
+        if (r) return r;
+    }
+    if (g_ascii_strcasecmp(prop, "background-position") == 0) {
+        char *xs = ns_inline_style_get(style, "background-position-x");
+        char *ys = ns_inline_style_get(style, "background-position-y");
+        char *r = xs && ys ? bg_position_zip(xs, ys) : NULL;
+        g_free(xs);
+        g_free(ys);
+        if (r) return r;
     }
     if (ns_css_prop_id(prop) < 0 && ns_css_named_property_supported(prop)) {
         char *all = inline_all_value(style);
@@ -21238,10 +21653,42 @@ ns_inline_style_serialize(const char *style)
                               list_parts[1]->value, list_parts[2]->value);
     }
     gboolean list_emitted = FALSE;
+    static const char *const background_names[] = {
+        "background-image", "background-position-x", "background-position-y",
+        "background-size", "background-repeat", "background-attachment",
+        "background-origin", "background-clip", "background-color",
+    };
+    gboolean background_complete = TRUE;
+    gboolean background_important = FALSE;
+    for (gsize i = 0; i < G_N_ELEMENTS(background_names); i++) {
+        ns_inline_decl *part = inline_decl_find(decls, background_names[i]);
+        if (!part || (i > 0 && part->important != background_important))
+            background_complete = FALSE;
+        else if (i == 0)
+            background_important = part->important;
+    }
+    char *background_value = background_complete
+        ? inline_background_value(style, NULL) : NULL;
+    if (background_value) ns_inline_value_strip_important(background_value);
+    gboolean background_emitted = FALSE;
     GString *out = g_string_new(NULL);
     for (guint i = 0; i < decls->len; i++) {
         ns_inline_decl *decl = g_ptr_array_index(decls, i);
         gboolean collapsed = FALSE;
+        gboolean background_member = FALSE;
+        for (gsize part = 0; part < G_N_ELEMENTS(background_names); part++)
+            if (strcmp(decl->name, background_names[part]) == 0)
+                background_member = TRUE;
+        if (background_value && background_member) {
+            if (!background_emitted) {
+                if (out->len) g_string_append_c(out, ' ');
+                g_string_append_printf(out, "background: %s", background_value);
+                if (background_important) g_string_append(out, " !important");
+                g_string_append_c(out, ';');
+                background_emitted = TRUE;
+            }
+            continue;
+        }
         for (gsize q = 0; q < G_N_ELEMENTS(quad_names); q++) {
             if (!quad_values[q]) continue;
             const int *ids = inline_quad_ids(quad_names[q]);
@@ -21318,6 +21765,7 @@ ns_inline_style_serialize(const char *style)
     g_free(overflow_value);
     g_free(outline_value);
     g_free(list_value);
+    g_free(background_value);
     g_ptr_array_free(decls, TRUE);
     return g_string_free(out, FALSE);
 }

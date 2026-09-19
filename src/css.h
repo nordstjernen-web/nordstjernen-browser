@@ -107,6 +107,7 @@ typedef enum ns_css_prop {
     NS_CSS_BACKGROUND_SIZE,
     NS_CSS_BACKGROUND_CLIP,
     NS_CSS_BACKGROUND_ORIGIN,
+    NS_CSS_BACKGROUND_ATTACHMENT,
     NS_CSS_SCROLLBAR_WIDTH,
     NS_CSS_SCROLLBAR_COLOR,
     NS_CSS_IMAGE_RENDERING,
@@ -1167,6 +1168,12 @@ const char *ns_css_alignment_base(const char *keyword);
 char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
+char *ns_css_background_position_join(const char *xs, const char *ys);
+char *ns_css_background_shorthand_serialize(const char *image, const char *position,
+                                            const char *size, const char *repeat,
+                                            const char *attachment,
+                                            const char *origin, const char *clip,
+                                            const char *color);
 char *ns_css_content_canonical(const char *text);
 ns_css_value *ns_css_value_interpolate(const ns_css_value *a, const ns_css_value *b, double t);
 gboolean ns_css_value_equal(const ns_css_value *a, const ns_css_value *b);
