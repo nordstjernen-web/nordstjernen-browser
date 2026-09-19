@@ -456,8 +456,10 @@ typedef struct ns_css_areas {
 
 typedef struct ns_css_shadow {
     double x, y, blur, spread;
+    double em[4], rem[4];
     guint8 r, g, b, a;
     gboolean inset;
+    gboolean currentcolor;
 } ns_css_shadow;
 
 #define NS_CSS_SHADOWS_MAX 8
@@ -601,6 +603,7 @@ typedef struct ns_css_value {
         struct { double v[4]; ns_css_unit unit[4]; gboolean is_auto[4]; } rect;
     } u;
     char *image_set_text;
+    char *specified;
     struct ns_css_value *next_layer;
 } ns_css_value;
 
@@ -1185,6 +1188,7 @@ int ns_css_used_column_count(const ns_style *s, double avail_w,
                              double *out_gap);
 
 char *ns_css_value_serialize(const ns_css_value *v);
+char *ns_css_value_serialize_specified(const ns_css_value *v);
 char *ns_css_individual_transform_serialize(const ns_css_value *v, int prop);
 char *ns_css_math_canonical(const char *value);
 char *ns_css_transform_canonical(const char *value);

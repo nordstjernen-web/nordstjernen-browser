@@ -782,6 +782,7 @@ ns_css_value_free(ns_css_value *v)
                 g_free(v->u.anim.entries[i].name);
         }
         g_free(v->image_set_text);
+        g_free(v->specified);
         ns_css_value *next = v->next_layer;
         g_free(v);
         v = next;
@@ -5389,57 +5390,187 @@ parse_areas(const char *text)
     return v;
 }
 
+static gboolean text_is_ident(const char *t);
+static char *css_add_leading_zeros(char *v);
+static char *css_normalize_negative_zero(char *value);
+static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a);
+
+static gboolean
+shadow_length_token(const char *tok, gboolean allow_negative, GString *out)
+{
+    double num;
+    ns_css_unit unit;
+    if (parse_length(tok, &num, &unit)) {
+        if (unit == NS_CSS_UNIT_PERCENT) return FALSE;
+        if (unit == NS_CSS_UNIT_NUMBER && num != 0) return FALSE;
+        if (!allow_negative && num < 0) return FALSE;
+        if (num == 0) {
+            g_string_append(out, "0px");
+            return TRUE;
+        }
+        char *canon = css_normalize_negative_zero(
+            css_add_leading_zeros(g_strdup(tok)));
+        char *suffix = canon + strlen(canon);
+        while (suffix > canon && g_ascii_isalpha((guchar)suffix[-1]))
+            suffix--;
+        for (char *c = suffix; *c; c++) *c = g_ascii_tolower((guchar)*c);
+        g_string_append(out, canon);
+        g_free(canon);
+        return TRUE;
+    }
+    ns_css_value *calc = parse_calc(tok);
+    if (!calc) return FALSE;
+    gboolean ok = (calc->kind == NS_CSS_V_CALC && calc->u.calc.pct == 0) ||
+                  (calc->kind == NS_CSS_V_LENGTH &&
+                   calc->u.length.unit != NS_CSS_UNIT_PERCENT &&
+                   calc->u.length.unit != NS_CSS_UNIT_NUMBER);
+    ns_css_value_free(calc);
+    if (!ok) return FALSE;
+    char *canon = ns_css_math_canonical(tok);
+    if (!canon) canon = css_add_leading_zeros(g_strdup(tok));
+    g_string_append(out, canon);
+    g_free(canon);
+    return TRUE;
+}
+
+static gboolean
+shadow_specified_one(const char *text, gboolean is_text, GString *out)
+{
+    char *tokens[8] = {0};
+    int n = split_ws_limit(text, tokens, G_N_ELEMENTS(tokens));
+    GString *color = NULL;
+    GString *lengths = g_string_new(NULL);
+    int n_lengths = 0;
+    gboolean lengths_closed = FALSE;
+    gboolean inset = FALSE, ok = n > 0;
+    for (int i = 0; ok && i < n; i++) {
+        const char *tok = tokens[i];
+        guint8 r, g, b, a;
+        if (g_ascii_strcasecmp(tok, "inset") == 0) {
+            if (is_text || inset) ok = FALSE;
+            inset = TRUE;
+            if (n_lengths) lengths_closed = TRUE;
+            continue;
+        }
+        if (parse_color(tok, &r, &g, &b, &a) ||
+            g_ascii_strcasecmp(tok, "currentcolor") == 0) {
+            if (color) {
+                ok = FALSE;
+                continue;
+            }
+            color = g_string_new(NULL);
+            if (text_is_ident(tok)) {
+                char *lower = g_ascii_strdown(tok, -1);
+                g_string_append(color, lower);
+                g_free(lower);
+            } else {
+                ns_css_append_color(color, r, g, b, a);
+            }
+            if (n_lengths) lengths_closed = TRUE;
+            continue;
+        }
+        if (lengths_closed || n_lengths >= (is_text ? 3 : 4)) {
+            ok = FALSE;
+            continue;
+        }
+        if (lengths->len) g_string_append_c(lengths, ' ');
+        if (!shadow_length_token(tok, n_lengths != 2, lengths)) ok = FALSE;
+        n_lengths++;
+    }
+    if (n_lengths < 2) ok = FALSE;
+    if (ok) {
+        if (color) {
+            g_string_append(out, color->str);
+            g_string_append_c(out, ' ');
+        }
+        g_string_append(out, lengths->str);
+        if (inset) g_string_append(out, " inset");
+    }
+    if (color) g_string_free(color, TRUE);
+    g_string_free(lengths, TRUE);
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    return ok;
+}
+
+static char *
+shadow_specified_canonical(const char *value, gboolean is_text)
+{
+    if (!value) return NULL;
+    while (*value && is_ws(*value)) value++;
+    if (!*value || strstr(value, "var(")) return NULL;
+    if (g_ascii_strcasecmp(value, "none") == 0) return g_strdup("none");
+    GString *out = g_string_new(NULL);
+    const char *end = value + strlen(value);
+    const char *p = value;
+    gboolean ok = TRUE;
+    while (ok && p < end) {
+        char term = 0;
+        const char *seg_end = css_scan_until(p, end, ",", &term);
+        char *layer = css_trim_dup_range(p, seg_end);
+        if (out->len) g_string_append(out, ", ");
+        ok = shadow_specified_one(layer, is_text, out);
+        g_free(layer);
+        p = term == ',' ? seg_end + 1 : seg_end;
+        if (term == ',' && p >= end) ok = FALSE;
+    }
+    if (!ok) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 parse_one_shadow(const char *text, ns_css_shadow *out)
 {
-    const char *p = text;
-    while (*p && is_ws(*p)) p++;
+    char *tokens[8] = {0};
+    int n = split_ws_limit(text, tokens, G_N_ELEMENTS(tokens));
     gboolean inset = FALSE;
     guint8 cr = 0, cg = 0, cb = 0, ca = 255;
     gboolean has_color = FALSE;
-    double lens[4] = {0};
+    double lens[4] = {0}, ems[4] = {0}, rems[4] = {0};
     int n_lens = 0;
-    while (*p) {
-        while (*p && is_ws(*p)) p++;
-        if (!*p) break;
-        const char *start = p;
-        if (*p == '(') {
-            int depth = 1;
-            p++;
-            while (*p && depth > 0) {
-                if (*p == '(') depth++;
-                else if (*p == ')') depth--;
-                p++;
-            }
-        } else {
-            while (*p && !is_ws(*p)) p++;
-        }
-        gsize len = (gsize)(p - start);
-        char *tok = g_strndup(start, len);
+    for (int i = 0; i < n; i++) {
+        const char *tok = tokens[i];
         guint8 r, g, b, a;
         double num;
         ns_css_unit u;
         if (parse_color(tok, &r, &g, &b, &a)) {
             cr = r; cg = g; cb = b; ca = a; has_color = TRUE;
-        } else if (parse_length(tok, &num, &u) && n_lens < 4) {
-            if (u == NS_CSS_UNIT_EM)   num *= 16;
-            if (u == NS_CSS_UNIT_REM)  num *= 16;
-            if (u == NS_CSS_UNIT_EX || u == NS_CSS_UNIT_CH) num *= 8;
-            if (u == NS_CSS_UNIT_CAP)  num *= 11.2;
-            if (u == NS_CSS_UNIT_IC)   num *= 16;
+        } else if (n_lens < 4 && parse_length(tok, &num, &u)) {
+            if (u == NS_CSS_UNIT_EM) { ems[n_lens] = num; num = 0; }
+            else if (u == NS_CSS_UNIT_REM) { rems[n_lens] = num; num = 0; }
+            else if (u == NS_CSS_UNIT_EX || u == NS_CSS_UNIT_CH) num *= 8;
+            else if (u == NS_CSS_UNIT_CAP) num *= 11.2;
+            else if (u == NS_CSS_UNIT_IC) num *= 16;
             lens[n_lens++] = num;
+        } else if (n_lens < 4 && g_ascii_strncasecmp(tok, "calc(", 5) == 0) {
+            ns_css_value *cv = parse_calc(tok);
+            if (cv && cv->kind == NS_CSS_V_CALC) {
+                lens[n_lens] = cv->u.calc.px;
+                ems[n_lens] = cv->u.calc.em;
+                rems[n_lens] = cv->u.calc.rem;
+                n_lens++;
+            }
+            ns_css_value_free(cv);
         } else if (g_ascii_strcasecmp(tok, "inset") == 0) {
             inset = TRUE;
         }
-        g_free(tok);
     }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
     if (n_lens < 2) return FALSE;
+    memset(out, 0, sizeof *out);
     out->x = lens[0];
     out->y = lens[1];
     out->blur   = n_lens >= 3 ? CLAMP(lens[2], 0.0, 1000.0) : 0;
     out->spread = n_lens >= 4 ? CLAMP(lens[3], -1000.0, 1000.0) : 0;
+    for (int k = 0; k < 4; k++) {
+        out->em[k] = ems[k];
+        out->rem[k] = rems[k];
+    }
     out->r = cr; out->g = cg; out->b = cb;
-    out->a = has_color ? ca : 128;
+    out->a = ca;
+    out->currentcolor = !has_color;
     out->inset = inset;
     return TRUE;
 }
@@ -5480,7 +5611,6 @@ static gboolean position_is_v_edge(const char *t);
 static gboolean math_text_mixes_angle_and_length(const char *t);
 static void position_split(const char *text, char **out_x, char **out_y);
 static double parse_angle_deg(const char *s);
-static void ns_css_append_color(GString *s, guint8 r, guint8 g, guint8 b, guint8 a);
 
 typedef struct ns_gradient_parse {
     ns_css_gradient gr;
@@ -7944,8 +8074,6 @@ timing_keyword_matches(const char *kw)
            g_ascii_strcasecmp(kw, "step-end") == 0;
 }
 
-
-
 static gboolean
 parse_time_ms(const char *tok, double *out_ms)
 {
@@ -9809,6 +9937,11 @@ ns_css_specified_canonical(const char *prop, const char *value)
         }
         ns_css_value_free(v);
     }
+    if (prop && (strcmp(prop, "box-shadow") == 0 ||
+                 strcmp(prop, "text-shadow") == 0)) {
+        char *sh = shadow_specified_canonical(value, prop[0] == 't');
+        if (sh) return sh;
+    }
     if (prop && strcmp(prop, "aspect-ratio") == 0) {
         ns_css_value *v = parse_value_for(NS_CSS_ASPECT_RATIO, value);
         if (!v) return NULL;
@@ -10545,6 +10678,42 @@ numeric_value_valid_for_prop(ns_css_prop prop, const ns_css_value *v)
         return v->u.calc.px == 0 && v->u.calc.em == 0 &&
                v->u.calc.rem == 0;
     return TRUE;
+}
+
+static gboolean
+text_is_ident(const char *t)
+{
+    if (!t || !*t || g_ascii_isdigit((guchar)*t)) return FALSE;
+    for (const char *p = t; *p; p++)
+        if (!g_ascii_isalnum((guchar)*p) && *p != '-' && *p != '_')
+            return FALSE;
+    return TRUE;
+}
+
+static gboolean
+prop_is_border_width(ns_css_prop prop)
+{
+    return prop == NS_CSS_BORDER_TOP_WIDTH ||
+           prop == NS_CSS_BORDER_RIGHT_WIDTH ||
+           prop == NS_CSS_BORDER_BOTTOM_WIDTH ||
+           prop == NS_CSS_BORDER_LEFT_WIDTH ||
+           prop == NS_CSS_OUTLINE_WIDTH ||
+           prop == NS_CSS_COLUMN_RULE_WIDTH;
+}
+
+static void
+value_record_specified_keyword(ns_css_value *v, ns_css_prop prop,
+                               const char *t)
+{
+    if (v->kind == NS_CSS_V_COLOR) {
+        if (text_is_ident(t)) v->specified = ascii_lower(t, strlen(t));
+        return;
+    }
+    if (v->kind == NS_CSS_V_LENGTH && prop_is_border_width(prop) &&
+        (g_ascii_strcasecmp(t, "thin") == 0 ||
+         g_ascii_strcasecmp(t, "medium") == 0 ||
+         g_ascii_strcasecmp(t, "thick") == 0))
+        v->specified = ascii_lower(t, strlen(t));
 }
 
 static ns_css_value *
@@ -11416,10 +11585,13 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_TEXT_SHADOW: {
         if (g_ascii_strcasecmp(t, "none") == 0) {
             v = parse_keyword_choice(t, "none");
-        } else {
-            v = parse_box_shadow(t);
-            if (v) v->u.shadow.is_text = (prop == NS_CSS_TEXT_SHADOW);
+            break;
         }
+        char *canon = shadow_specified_canonical(t, prop == NS_CSS_TEXT_SHADOW);
+        if (!canon && !strstr(t, "var(")) break;
+        g_free(canon);
+        v = parse_box_shadow(t);
+        if (v) v->u.shadow.is_text = (prop == NS_CSS_TEXT_SHADOW);
         break;
     }
     case NS_CSS_GRID_TEMPLATE_COLUMNS:
@@ -12031,6 +12203,8 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     }
+    if (v && !v->next_layer)
+        value_record_specified_keyword(v, prop, t);
     g_free(t);
     return v;
 }
@@ -20194,7 +20368,6 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
     return TRUE;
 }
 
-
 static char *
 css_add_leading_zeros(char *v)
 {
@@ -20474,7 +20647,7 @@ inline_expanded_value(const char *name, const char *value, int prop,
                                                    ns_css_decl, di);
                 if ((int)decl->prop != prop) continue;
                 g_free(result);
-                result = ns_css_value_serialize(decl->value);
+                result = ns_css_value_serialize_specified(decl->value);
                 *important = decl->important;
             }
         }
@@ -20622,7 +20795,7 @@ inline_quad_value(const char *style, const char *prop,
                         (priorities[side] && !decl->important))
                         continue;
                     g_free(values[side]);
-                    values[side] = ns_css_value_serialize(decl->value);
+                    values[side] = ns_css_value_serialize_specified(decl->value);
                     priorities[side] = decl->important;
                 }
             }
@@ -20677,7 +20850,7 @@ inline_pair_value(const char *style, int first_id, int second_id,
                 if ((int)decl->prop == NS_CSS_OVERFLOW &&
                     first_id == NS_CSS_OVERFLOW_X &&
                     second_id == NS_CSS_OVERFLOW_Y) {
-                    char *serialized = ns_css_value_serialize(decl->value);
+                    char *serialized = ns_css_value_serialize_specified(decl->value);
                     for (int index = 0; index < 2; index++) {
                         if (priorities[index] && !decl->important) continue;
                         g_free(values[index]);
@@ -20692,7 +20865,7 @@ inline_pair_value(const char *style, int first_id, int second_id,
                 if (index < 0 || (priorities[index] && !decl->important))
                     continue;
                 g_free(values[index]);
-                values[index] = ns_css_value_serialize(decl->value);
+                values[index] = ns_css_value_serialize_specified(decl->value);
                 priorities[index] = decl->important;
             }
         }
@@ -22083,8 +22256,8 @@ ns_css_prop_affects_layout(int prop)
     }
 }
 
-char *
-ns_css_value_serialize(const ns_css_value *v)
+static char *
+value_serialize_one(const ns_css_value *v)
 {
     if (!v) return g_strdup("");
     switch (v->kind) {
@@ -22290,6 +22463,38 @@ ns_css_value_serialize(const ns_css_value *v)
     }
     }
     return g_strdup("");
+}
+
+static char *
+value_serialize_layers(const ns_css_value *v, gboolean specified)
+{
+    if (!v) return g_strdup("");
+    if (!v->next_layer && !(specified && v->specified))
+        return value_serialize_one(v);
+    GString *s = g_string_new(NULL);
+    for (const ns_css_value *l = v; l; l = l->next_layer) {
+        if (s->len) g_string_append(s, ", ");
+        if (specified && l->specified) {
+            g_string_append(s, l->specified);
+            continue;
+        }
+        char *one = value_serialize_one(l);
+        g_string_append(s, one);
+        g_free(one);
+    }
+    return g_string_free(s, FALSE);
+}
+
+char *
+ns_css_value_serialize(const ns_css_value *v)
+{
+    return value_serialize_layers(v, FALSE);
+}
+
+char *
+ns_css_value_serialize_specified(const ns_css_value *v)
+{
+    return value_serialize_layers(v, TRUE);
 }
 
 typedef enum ns_css_origin {
@@ -23857,6 +24062,8 @@ ns_css_value_cow(ns_style *out, int prop)
     ns_css_value *copy = g_new0(ns_css_value, 1);
     *copy = *v;
     copy->ref = 0;
+    copy->image_set_text = g_strdup(v->image_set_text);
+    copy->specified = g_strdup(v->specified);
     if (copy->next_layer) copy->next_layer->ref++;
     v->ref--;
     out->values[prop] = copy;
@@ -23912,6 +24119,27 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         if (i == NS_CSS_FONT_SIZE) continue;
         ns_css_value *v = out->values[i];
         if (!v) continue;
+        if (v->kind == NS_CSS_V_SHADOW) {
+            gboolean needs = FALSE;
+            for (int k = 0; k < v->u.shadow.n && !needs; k++)
+                for (int m = 0; m < 4; m++)
+                    if (v->u.shadow.s[k].em[m] != 0 ||
+                        v->u.shadow.s[k].rem[m] != 0)
+                        needs = TRUE;
+            if (!needs) continue;
+            v = ns_css_value_cow(out, i);
+            for (int k = 0; k < v->u.shadow.n; k++) {
+                ns_css_shadow *sh = &v->u.shadow.s[k];
+                double *fields[4] = { &sh->x, &sh->y, &sh->blur, &sh->spread };
+                for (int m = 0; m < 4; m++) {
+                    *fields[m] += sh->em[m] * my_font_px + sh->rem[m] * root_px;
+                    sh->em[m] = 0;
+                    sh->rem[m] = 0;
+                }
+                sh->blur = CLAMP(sh->blur, 0.0, 1000.0);
+            }
+            continue;
+        }
         if (v->kind == NS_CSS_V_TRACKS) {
             gboolean needs = FALSE;
             for (int k = 0; k < v->u.tracks.n && !needs; k++) {
@@ -24180,6 +24408,31 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                 t->u.color.r = t->u.color.g = t->u.color.b = 0;
                 t->u.color.a = 0;
                 out->values[color_props[i]] = t;
+            }
+        }
+        const ns_css_prop shadow_props[] = { NS_CSS_BOX_SHADOW, NS_CSS_TEXT_SHADOW };
+        const ns_css_value *cur = out->values[NS_CSS_COLOR];
+        for (gsize i = 0; i < G_N_ELEMENTS(shadow_props); i++) {
+            ns_css_value *v = out->values[shadow_props[i]];
+            if (!v || v->kind != NS_CSS_V_SHADOW) continue;
+            gboolean needs = FALSE;
+            for (int k = 0; k < v->u.shadow.n; k++)
+                if (v->u.shadow.s[k].currentcolor) needs = TRUE;
+            if (!needs) continue;
+            v = ns_css_value_cow(out, shadow_props[i]);
+            for (int k = 0; k < v->u.shadow.n; k++) {
+                ns_css_shadow *sh = &v->u.shadow.s[k];
+                if (!sh->currentcolor) continue;
+                sh->currentcolor = FALSE;
+                if (cur && cur->kind == NS_CSS_V_COLOR) {
+                    sh->r = cur->u.color.r;
+                    sh->g = cur->u.color.g;
+                    sh->b = cur->u.color.b;
+                    sh->a = cur->u.color.a;
+                } else {
+                    sh->r = sh->g = sh->b = 0;
+                    sh->a = 255;
+                }
             }
         }
     }
