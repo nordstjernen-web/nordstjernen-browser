@@ -391,6 +391,7 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_COUNTER_SET]          = "counter-set",
     [NS_CSS_OVERFLOW_CLIP_MARGIN] = "overflow-clip-margin",
     [NS_CSS_BACKGROUND_ATTACHMENT] = "background-attachment",
+    [NS_CSS_TRANSFORM_BOX]        = "transform-box",
     [NS_CSS_ORPHANS]              = "orphans",
     [NS_CSS_WIDOWS]               = "widows",
     [NS_CSS_MAX_LINES]            = "max-lines",
@@ -5417,6 +5418,11 @@ static gboolean bg_repeat_token(const char *tok, gboolean allow_axis);
 static char *bg_repeat_canonical(const char *a, const char *b);
 static char *bg_position_zip(const char *xs, const char *ys);
 static gboolean bg_token_is_box(const char *tok);
+static char *position_from_edge(const char *edge, const char *offset);
+static int css_ws_token_count(const char *s);
+static char *transform_list_canonical(const char *value);
+static char *individual_transform_canonical(const char *value, ns_css_prop prop);
+static char *transform_origin_canonical(const char *value, gboolean two_only);
 static gboolean inline_css_wide_value(const char *value);
 static char *bg_clip_canonical(const char *text);
 static char *css_add_leading_zeros(char *v);
@@ -7707,6 +7713,29 @@ static ns_css_value *
 parse_transform_origin(const char *text)
 {
     if (!text || !*text) return NULL;
+    char *edge_canon = css_ws_token_count(text) >= 3 &&
+                       position_canonical_ex(text, TRUE, FALSE)
+        ? position_canonical_ex(text, TRUE, FALSE) : NULL;
+    if (edge_canon) {
+        char *xs = NULL, *ys = NULL;
+        position_split(edge_canon, &xs, &ys);
+        g_free(edge_canon);
+        ns_css_transform tf;
+        memset(&tf, 0, sizeof(tf));
+        tf.n_ops = 1;
+        ns_css_transform_op *op = &tf.ops[0];
+        op->kind = NS_CSS_TFN_TRANSLATE;
+        op->a = 50; op->b = 50; op->c = 0;
+        op->a_is_percent = TRUE; op->b_is_percent = TRUE;
+        if (xs) parse_origin_axis(xs, FALSE, &op->a, &op->a_is_percent);
+        if (ys) parse_origin_axis(ys, TRUE, &op->b, &op->b_is_percent);
+        g_free(xs);
+        g_free(ys);
+        ns_css_value *v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_TRANSFORM;
+        v->u.transform = tf;
+        return v;
+    }
     char *toks[4] = {0};
     int nt = split_ws_limit(text, toks, 3);
     char *a = nt >= 1 ? toks[0] : NULL;
@@ -9002,6 +9031,7 @@ ns_css_initial_value_text(const char *name)
         { "outline-width",              "0px" },
         { "perspective",                "none" },
         { "perspective-origin",         "50% 50%" },
+        { "transform-box",              "view-box" },
         { "row-gap",                    "normal" },
         { "scrollbar-width",            "auto" },
         { "stop-color",                 "rgb(0, 0, 0)" },
@@ -10033,7 +10063,21 @@ ns_css_specified_canonical(const char *prop, const char *value)
         if (d) return d;
     }
     if (prop && strcmp(prop, "transform") == 0) {
-        char *t = ns_css_transform_canonical(value);
+        char *t = transform_list_canonical(value);
+        if (t) return t;
+        t = ns_css_transform_canonical(value);
+        if (t) return t;
+    }
+    if (prop && (strcmp(prop, "scale") == 0 || strcmp(prop, "rotate") == 0 ||
+                 strcmp(prop, "translate") == 0)) {
+        char *t = individual_transform_canonical(value,
+            prop[0] == 's' ? NS_CSS_SCALE : prop[0] == 'r' ? NS_CSS_ROTATE
+                                                          : NS_CSS_TRANSLATE);
+        if (t) return t;
+    }
+    if (prop && (strcmp(prop, "transform-origin") == 0 ||
+                 strcmp(prop, "perspective-origin") == 0)) {
+        char *t = transform_origin_canonical(value, prop[0] == 'p');
         if (t) return t;
     }
     if (prop && (strcmp(prop, "border-radius") == 0 ||
@@ -11989,6 +12033,11 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_TRANSFORM: {
+        if (g_ascii_strcasecmp(t, "none") != 0 && !strstr(t, "var(")) {
+            char *canon = transform_list_canonical(t);
+            if (!canon) break;
+            g_free(canon);
+        }
         v = parse_transform(t);
         if (!v) {
             char *lc = g_ascii_strdown(t, -1);
@@ -12002,24 +12051,39 @@ parse_value_for(ns_css_prop prop, const char *text)
         }
         break;
     }
+    case NS_CSS_TRANSFORM_BOX:
+        v = parse_keyword_choice(t, "content-box border-box fill-box stroke-box view-box");
+        break;
     case NS_CSS_TRANSFORM_ORIGIN:
     case NS_CSS_PERSPECTIVE_ORIGIN: {
+        char *canon = transform_origin_canonical(t, prop == NS_CSS_PERSPECTIVE_ORIGIN);
+        if (!canon && !strstr(t, "var(")) break;
+        g_free(canon);
         v = parse_transform_origin(t);
         break;
     }
     case NS_CSS_TRANSLATE: {
+        char *canon = individual_transform_canonical(t, NS_CSS_TRANSLATE);
+        if (!canon && !strstr(t, "var(")) break;
+        g_free(canon);
         v = parse_translate_prop(t);
         if (!v && g_ascii_strcasecmp(t, "none") == 0)
             v = parse_keyword_choice(t, "none");
         break;
     }
     case NS_CSS_ROTATE: {
-        v = parse_rotate_prop(t);
+        char *canon = individual_transform_canonical(t, NS_CSS_ROTATE);
+        if (!canon && !strstr(t, "var(")) break;
+        v = parse_rotate_prop(canon ? canon : t);
+        g_free(canon);
         if (!v && g_ascii_strcasecmp(t, "none") == 0)
             v = parse_keyword_choice(t, "none");
         break;
     }
     case NS_CSS_SCALE: {
+        char *canon = individual_transform_canonical(t, NS_CSS_SCALE);
+        if (!canon && !strstr(t, "var(")) break;
+        g_free(canon);
         v = parse_scale_prop(t);
         if (!v && g_ascii_strcasecmp(t, "none") == 0)
             v = parse_keyword_choice(t, "none");
@@ -12027,6 +12091,11 @@ parse_value_for(ns_css_prop prop, const char *text)
     }
     case NS_CSS_PERSPECTIVE: {
         double px = 0, pct = 0;
+        double plain;
+        ns_css_unit plain_unit;
+        if (parse_length(t, &plain, &plain_unit) &&
+            plain_unit == NS_CSS_UNIT_NUMBER && plain != 0)
+            break;
         if (resolve_to_px_pct(t, strlen(t), &px, &pct) && px > 0 && pct == 0) {
             v = g_new0(ns_css_value, 1);
             v->kind = NS_CSS_V_LENGTH;
@@ -14082,6 +14151,401 @@ parse_background_shorthand(const char *vtext, gboolean important,
     g_ptr_array_free(layers, TRUE);
     g_free(color);
     return ok;
+}
+
+enum { TX_NUMBER = 1, TX_PERCENT = 2, TX_LENGTH = 4, TX_ANGLE = 8, TX_ZERO = 16 };
+
+static char *
+transform_arg_canonical(const char *arg, int want, gboolean scale_percent)
+{
+    double num;
+    ns_css_unit unit;
+    char *end = NULL;
+    if (is_math_fn_start(arg)) {
+        if (scale_percent && (want & TX_NUMBER)) {
+            double n = 0, px = 0, pct = 0;
+            if (eval_calc_number(arg, &n)) return serialize_calc_number(n);
+            if (resolve_to_px_pct(arg, strlen(arg), &px, &pct) && px == 0) {
+                char *canon = ns_css_math_canonical(arg);
+                return canon ? canon : css_add_leading_zeros(g_strdup(arg));
+            }
+            return NULL;
+        }
+        ns_css_value *c = parse_calc(arg);
+        double deg;
+        if (c) {
+            gboolean pct = c->kind == NS_CSS_V_CALC && c->u.calc.pct != 0;
+            gboolean number = c->kind == NS_CSS_V_LENGTH &&
+                              c->u.length.unit == NS_CSS_UNIT_NUMBER;
+            ns_css_value_free(c);
+            if ((want & TX_LENGTH) || (want & TX_PERCENT) ||
+                ((want & TX_NUMBER) && number)) {
+                if (pct && !(want & TX_PERCENT)) return NULL;
+                char *canon = ns_css_math_canonical(arg);
+                return canon ? canon : css_add_leading_zeros(g_strdup(arg));
+            }
+        }
+        if ((want & TX_ANGLE) && parse_angle_any(arg, &deg)) {
+            char *canon = ns_css_math_canonical(arg);
+            return canon ? canon : css_add_leading_zeros(g_strdup(arg));
+        }
+        if (want & TX_NUMBER) {
+            double n = 0;
+            if (eval_calc_number(arg, &n)) return serialize_calc_number(n);
+        }
+        return NULL;
+    }
+    if (want & TX_ANGLE) {
+        num = g_ascii_strtod(arg, &end);
+        if (end && end != arg && (!*end || g_ascii_strcasecmp(end, "deg") == 0 ||
+                                  g_ascii_strcasecmp(end, "grad") == 0 ||
+                                  g_ascii_strcasecmp(end, "rad") == 0 ||
+                                  g_ascii_strcasecmp(end, "turn") == 0)) {
+            if (!*end && num != 0) return NULL;
+            char *canon = css_normalize_negative_zero(
+                css_add_leading_zeros(g_strdup(arg)));
+            if (!*end) {
+                g_free(canon);
+                return g_strdup("0deg");
+            }
+            for (char *c = canon; *c; c++) *c = g_ascii_tolower((guchar)*c);
+            return canon;
+        }
+        if (!(want & ~TX_ANGLE)) return NULL;
+    }
+    if (!parse_length(arg, &num, &unit)) return NULL;
+    if (unit == NS_CSS_UNIT_NUMBER) {
+        if (want & TX_NUMBER) {
+            char *n = ns_css_number_str(num);
+            return n;
+        }
+        if (num == 0 && (want & TX_LENGTH)) return g_strdup("0px");
+        return NULL;
+    }
+    if (unit == NS_CSS_UNIT_PERCENT) {
+        if (scale_percent && (want & TX_NUMBER)) return ns_css_number_str(num / 100.0);
+        if (!(want & TX_PERCENT)) return NULL;
+    } else if (!(want & TX_LENGTH)) {
+        return NULL;
+    }
+    char *canon = css_normalize_negative_zero(css_add_leading_zeros(g_strdup(arg)));
+    char *suffix = canon + strlen(canon);
+    while (suffix > canon && g_ascii_isalpha((guchar)suffix[-1])) suffix--;
+    for (char *c = suffix; *c; c++) *c = g_ascii_tolower((guchar)*c);
+    return canon;
+}
+
+static char *
+transform_function_canonical(const char *fn_lc, char *const args[], int n)
+{
+    typedef struct { const char *name; int min, max; int types[16]; } transform_fn_spec;
+    const transform_fn_spec *spec = NULL;
+    static const transform_fn_spec specs[] = {
+        { "translate", 1, 2, { TX_LENGTH | TX_PERCENT, TX_LENGTH | TX_PERCENT } },
+        { "translatex", 1, 1, { TX_LENGTH | TX_PERCENT } },
+        { "translatey", 1, 1, { TX_LENGTH | TX_PERCENT } },
+        { "translatez", 1, 1, { TX_LENGTH } },
+        { "translate3d", 3, 3, { TX_LENGTH | TX_PERCENT, TX_LENGTH | TX_PERCENT, TX_LENGTH } },
+        { "scale", 1, 2, { TX_NUMBER, TX_NUMBER } },
+        { "scalex", 1, 1, { TX_NUMBER } },
+        { "scaley", 1, 1, { TX_NUMBER } },
+        { "scalez", 1, 1, { TX_NUMBER } },
+        { "scale3d", 3, 3, { TX_NUMBER, TX_NUMBER, TX_NUMBER } },
+        { "rotate", 1, 1, { TX_ANGLE } },
+        { "rotatex", 1, 1, { TX_ANGLE } },
+        { "rotatey", 1, 1, { TX_ANGLE } },
+        { "rotatez", 1, 1, { TX_ANGLE } },
+        { "rotate3d", 4, 4, { TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_ANGLE } },
+        { "skew", 1, 2, { TX_ANGLE, TX_ANGLE } },
+        { "skewx", 1, 1, { TX_ANGLE } },
+        { "skewy", 1, 1, { TX_ANGLE } },
+        { "matrix", 6, 6, { TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER } },
+        { "matrix3d", 16, 16, { TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER,
+                                TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER,
+                                TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER,
+                                TX_NUMBER, TX_NUMBER, TX_NUMBER, TX_NUMBER } },
+        { "perspective", 1, 1, { TX_LENGTH } },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(specs); i++)
+        if (strcmp(specs[i].name, fn_lc) == 0) spec = &specs[i];
+    if (!spec || n < spec->min || n > spec->max) return NULL;
+    GString *out = g_string_new(fn_lc);
+    g_string_append_c(out, '(');
+    gboolean scale = g_str_has_prefix(fn_lc, "scale");
+    for (int i = 0; i < n; i++) {
+        char *canon = NULL;
+        if (strcmp(fn_lc, "perspective") == 0 &&
+            g_ascii_strcasecmp(args[i], "none") == 0)
+            canon = g_strdup("none");
+        else
+            canon = transform_arg_canonical(args[i], spec->types[i], scale);
+        if (!canon) {
+            g_string_free(out, TRUE);
+            return NULL;
+        }
+        if (i) g_string_append(out, ", ");
+        g_string_append(out, canon);
+        g_free(canon);
+    }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
+}
+
+static int
+css_ws_token_count(const char *s)
+{
+    int n = 0;
+    const char *p = s;
+    const char *end = s + strlen(s);
+    while (p < end) {
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end) break;
+        char term = 0;
+        p = css_scan_until(p, end, " \t\n\r\f", &term);
+        n++;
+    }
+    return n;
+}
+
+static char *
+transform_list_canonical(const char *value)
+{
+    if (!value) return NULL;
+    const char *p = value;
+    while (*p && is_ws(*p)) p++;
+    if (!*p) return NULL;
+    if (g_ascii_strcasecmp(p, "none") == 0) return g_strdup("none");
+    GString *out = g_string_new(NULL);
+    gboolean ok = TRUE;
+    while (ok && *p) {
+        while (*p && is_ws(*p)) p++;
+        if (!*p) break;
+        const char *name_start = p;
+        while (*p && (g_ascii_isalnum((guchar)*p) || *p == '-' || *p == '_')) p++;
+        if (*p != '(' || p == name_start) { ok = FALSE; break; }
+        char *fn_lc = g_ascii_strdown(name_start, p - name_start);
+        char *fn_as_written = g_strndup(name_start, (gsize)(p - name_start));
+        p++;
+        const char *args_start = p;
+        int depth = 1;
+        while (*p && depth > 0) {
+            if (*p == '(') depth++;
+            else if (*p == ')') depth--;
+            if (depth > 0) p++;
+        }
+        if (depth != 0) { g_free(fn_lc); g_free(fn_as_written); ok = FALSE; break; }
+        char *args = g_strndup(args_start, (gsize)(p - args_start));
+        p++;
+        GPtrArray *parts = css_split_top_level_commas(args);
+        int n = (int)parts->len;
+        if (n == 1 && !*(char *)g_ptr_array_index(parts, 0)) n = 0;
+        char *canon = transform_function_canonical(fn_lc, (char **)parts->pdata, n);
+        if (!canon) ok = FALSE;
+        else {
+            if (out->len) g_string_append_c(out, ' ');
+            if (g_str_has_prefix(fn_lc, "translate")) {
+                g_string_append(out, fn_as_written);
+                g_string_append(out, canon + strlen(fn_lc));
+            } else {
+                g_string_append(out, canon);
+            }
+            g_free(canon);
+        }
+        g_free(fn_as_written);
+        g_ptr_array_free(parts, TRUE);
+        g_free(args);
+        g_free(fn_lc);
+        while (*p && is_ws(*p)) p++;
+        if (*p == ',') ok = FALSE;
+    }
+    if (!ok || out->len == 0) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
+static char *
+individual_transform_canonical(const char *value, ns_css_prop prop)
+{
+    if (!value) return NULL;
+    while (*value && is_ws(*value)) value++;
+    if (g_ascii_strcasecmp(value, "none") == 0) return g_strdup("none");
+    char *tokens[5] = {0};
+    int n = split_ws_limit(value, tokens, G_N_ELEMENTS(tokens));
+    char *r = NULL;
+    if (prop == NS_CSS_TRANSLATE && n >= 1 && n <= 3) {
+        char *c[3] = { NULL };
+        gboolean ok = TRUE;
+        for (int i = 0; ok && i < n; i++) {
+            c[i] = transform_arg_canonical(tokens[i],
+                i == 2 ? TX_LENGTH : TX_LENGTH | TX_PERCENT, FALSE);
+            if (!c[i]) ok = FALSE;
+        }
+        if (ok) {
+            int keep = n;
+            if (keep == 3 && strcmp(c[2], "0px") == 0) keep = 2;
+            if (keep == 2 && strcmp(c[1], "0px") == 0) keep = 1;
+            GString *out = g_string_new(NULL);
+            for (int i = 0; i < keep; i++) {
+                if (i) g_string_append_c(out, ' ');
+                g_string_append(out, c[i]);
+            }
+            r = g_string_free(out, FALSE);
+        }
+        for (int i = 0; i < 3; i++) g_free(c[i]);
+    } else if (prop == NS_CSS_SCALE && n >= 1 && n <= 3) {
+        char *c[3] = { NULL };
+        gboolean ok = TRUE;
+        for (int i = 0; ok && i < n; i++) {
+            c[i] = transform_arg_canonical(tokens[i], TX_NUMBER, TRUE);
+            if (!c[i]) ok = FALSE;
+        }
+        if (ok) {
+            int keep = n;
+            if (keep == 3 && strcmp(c[2], "1") == 0) keep = 2;
+            if (keep == 2 && strcmp(c[0], c[1]) == 0) keep = 1;
+            GString *out = g_string_new(NULL);
+            for (int i = 0; i < keep; i++) {
+                if (i) g_string_append_c(out, ' ');
+                g_string_append(out, c[i]);
+            }
+            r = g_string_free(out, FALSE);
+        }
+        for (int i = 0; i < 3; i++) g_free(c[i]);
+    } else if (prop == NS_CSS_ROTATE && (n == 1 || n == 2 || n == 4)) {
+        char *angle = NULL;
+        const char *axis_kw = NULL;
+        double vec[3] = { 0, 0, 1 };
+        int n_vec = 0;
+        gboolean ok = TRUE, have_vec = FALSE;
+        for (int i = 0; ok && i < n; i++) {
+            const char *tok = tokens[i];
+            char *end = NULL;
+            if (n == 2 && (g_ascii_strcasecmp(tok, "x") == 0 ||
+                           g_ascii_strcasecmp(tok, "y") == 0 ||
+                           g_ascii_strcasecmp(tok, "z") == 0)) {
+                if (axis_kw) { ok = FALSE; break; }
+                axis_kw = tok;
+                continue;
+            }
+            if (n == 4 && n_vec < 3 && (i == 0 || n_vec > 0 || angle)) {
+                double num = g_ascii_strtod(tok, &end);
+                if (end && end != tok && !*end) {
+                    vec[n_vec++] = num;
+                    if (n_vec == 3) have_vec = TRUE;
+                    continue;
+                }
+            }
+            char *a = angle ? NULL : transform_arg_canonical(tok, TX_ANGLE, FALSE);
+            if (!a) { ok = FALSE; break; }
+            angle = a;
+        }
+        if (ok && !angle) ok = FALSE;
+        if (ok && n == 2 && !axis_kw) ok = FALSE;
+        if (ok && n == 4 && !have_vec) ok = FALSE;
+        if (ok) {
+            const char *axis = NULL;
+            gboolean flip = FALSE, numeric = FALSE;
+            if (axis_kw) {
+                char c = g_ascii_tolower((guchar)axis_kw[0]);
+                axis = c == 'x' ? "x" : c == 'y' ? "y" : NULL;
+            } else if (have_vec) {
+                if (vec[1] == 0 && vec[2] == 0 && vec[0] != 0) { axis = "x"; flip = vec[0] < 0; }
+                else if (vec[0] == 0 && vec[2] == 0 && vec[1] != 0) { axis = "y"; flip = vec[1] < 0; }
+                else if (vec[0] == 0 && vec[1] == 0 && vec[2] != 0) { flip = vec[2] < 0; }
+                else numeric = TRUE;
+            }
+            GString *out = g_string_new(NULL);
+            if (numeric) {
+                for (int k = 0; k < 3; k++) {
+                    char *num = ns_css_number_str(vec[k]);
+                    g_string_append(out, num);
+                    g_string_append_c(out, ' ');
+                    g_free(num);
+                }
+            } else if (axis) {
+                g_string_append(out, axis);
+                g_string_append_c(out, ' ');
+            }
+            if (flip && strcmp(angle, "0deg") != 0) {
+                if (angle[0] == '-') g_string_append(out, angle + 1);
+                else {
+                    g_string_append_c(out, '-');
+                    g_string_append(out, angle);
+                }
+            } else {
+                g_string_append(out, angle);
+            }
+            r = g_string_free(out, FALSE);
+        }
+        g_free(angle);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    return r;
+}
+
+static char *
+transform_origin_canonical(const char *value, gboolean two_only)
+{
+    if (!value) return NULL;
+    char *tokens[5] = {0};
+    int n = split_ws_limit(value, tokens, G_N_ELEMENTS(tokens));
+    char *r = NULL;
+    if (two_only && (n == 3 || n == 4)) {
+        r = position_canonical_ex(value, TRUE, FALSE);
+    } else if (n >= 1 && n <= (two_only ? 2 : 3)) {
+        const char *x = NULL, *y = NULL;
+        char *xc = NULL, *yc = NULL, *zc = NULL;
+        gboolean ok = TRUE;
+        gboolean a_h = position_is_h_edge(tokens[0]);
+        gboolean a_v = position_is_v_edge(tokens[0]);
+        gboolean a_c = g_ascii_strcasecmp(tokens[0], "center") == 0;
+        if (n == 1) {
+            if (a_v) { x = "center"; y = tokens[0]; }
+            else if (a_h || a_c) { x = tokens[0]; y = "center"; }
+            else { x = tokens[0]; y = "center"; }
+        } else {
+            gboolean b_h = position_is_h_edge(tokens[1]);
+            gboolean b_v = position_is_v_edge(tokens[1]);
+            gboolean b_c = g_ascii_strcasecmp(tokens[1], "center") == 0;
+            gboolean a_kw = a_h || a_v || a_c, b_kw = b_h || b_v || b_c;
+            if (a_kw && b_kw) {
+                if ((a_h && b_h) || (a_v && b_v)) ok = FALSE;
+                else if (a_v || (a_c && b_h)) { x = tokens[1]; y = tokens[0]; }
+                else { x = tokens[0]; y = tokens[1]; }
+            } else if (a_kw) {
+                if (a_v) ok = FALSE;
+                else { x = tokens[0]; y = tokens[1]; }
+            } else if (b_kw) {
+                if (b_h) ok = FALSE;
+                else { x = tokens[0]; y = tokens[1]; }
+            } else {
+                x = tokens[0]; y = tokens[1];
+            }
+        }
+        if (ok) {
+            xc = position_is_h_edge(x) || g_ascii_strcasecmp(x, "center") == 0
+                ? g_ascii_strdown(x, -1)
+                : transform_arg_canonical(x, TX_LENGTH | TX_PERCENT, FALSE);
+            yc = position_is_v_edge(y) || g_ascii_strcasecmp(y, "center") == 0
+                ? g_ascii_strdown(y, -1)
+                : transform_arg_canonical(y, TX_LENGTH | TX_PERCENT, FALSE);
+            if (!xc || !yc) ok = FALSE;
+        }
+        if (ok && n == 3) {
+            zc = transform_arg_canonical(tokens[2], TX_LENGTH, FALSE);
+            if (!zc) ok = FALSE;
+        }
+        if (ok)
+            r = zc ? g_strdup_printf("%s %s %s", xc, yc, zc)
+                   : g_strdup_printf("%s %s", xc, yc);
+        g_free(xc);
+        g_free(yc);
+        g_free(zc);
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    return r;
 }
 
 static void
