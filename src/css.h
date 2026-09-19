@@ -250,6 +250,8 @@ typedef enum ns_css_prop {
     NS_CSS_ANIMATION_RANGE_START,
     NS_CSS_ANIMATION_RANGE_END,
     NS_CSS_ANIMATION_COMPOSITION,
+    NS_CSS_COUNTER_SET,
+    NS_CSS_OVERFLOW_CLIP_MARGIN,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -356,6 +358,8 @@ char *ns_css_anim_shorthand_serialize(const ns_css_anim_list *list,
                                       gboolean is_animation);
 char *ns_css_animation_shorthand_canonical(const char *text, gboolean is_animation);
 char *ns_css_ident_serialize(const char *name);
+char *ns_css_list_style_serialize(const char *type, const char *position,
+                                  const char *image);
 char *ns_css_animation_range_serialize(const char *start_list, const char *end_list);
 char *ns_css_timing_serialize(const ns_css_timing *t);
 const char *ns_css_initial_value_text(const char *name);
@@ -973,8 +977,11 @@ typedef struct ns_style {
     struct ns_style *file_selector_button;
     guint share_id;
     int   ref;
+    guint32 currentcolor_bits;
     struct ns_var_map *vars;
 } ns_style;
+
+gboolean ns_style_prop_from_currentcolor(const ns_style *s, int prop);
 
 void   ns_style_free(ns_style *s);
 double ns_css_dimension_px(const ns_css_value *v, double font_size,

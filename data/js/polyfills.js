@@ -5585,6 +5585,12 @@
                 try { Object.setPrototypeOf(ctor.prototype, parentProto); }
                 catch (e) {}
             }
+            if (parentProto && parentProto.constructor &&
+                parentProto.constructor !== Object &&
+                Object.getPrototypeOf(ctor) !== parentProto.constructor) {
+                try { Object.setPrototypeOf(ctor, parentProto.constructor); }
+                catch (e) {}
+            }
             try {
                 Object.defineProperty(ctor.prototype, Symbol.toStringTag, {
                     value: name, configurable: true
@@ -5617,8 +5623,8 @@
         }
 
         var CSSRule = ctorFor('CSSRule', Object.prototype);
-        var CSSStyleRule = ctorFor('CSSStyleRule', CSSRule.prototype);
         var CSSGroupingRule = ctorFor('CSSGroupingRule', CSSRule.prototype);
+        var CSSStyleRule = ctorFor('CSSStyleRule', CSSGroupingRule.prototype);
         var CSSConditionRule = ctorFor('CSSConditionRule', CSSGroupingRule.prototype);
         var CSSMediaRule = ctorFor('CSSMediaRule', CSSConditionRule.prototype);
         var CSSSupportsRule = ctorFor('CSSSupportsRule', CSSConditionRule.prototype);
@@ -5814,6 +5820,8 @@
             return true;
         }
         function selectorLooksNested(sel) {
+            if (/&(?:[a-zA-Z_]|\\|-[a-zA-Z_])/.test(sel.replace(/"[^"]*"|'[^']*'/g, '')))
+                return false;
             if (sel.indexOf('&') !== -1 || /^\s*[>+~]/.test(sel)) return true;
             var bare = sel.replace(/"[^"]*"|'[^']*'/g, '');
             return /[|]/.test(bare.replace(/\|\||\|=/g, ''));
@@ -5884,13 +5892,18 @@
         }
         accessor(CSSStyleRule.prototype, 'selectorText',
             function () {
-                return canonSelector(this.__selector || '', this.__namespaces);
+                var text = canonSelector(this.__selector || '', this.__namespaces);
+                return nestedInStyleRule(this) ? nestedSelectorText(text) : text;
             },
             function (v) {
                 v = String(v);
                 if (/^\s*-\s*$/.test(v)) return;
-                try { document.querySelectorAll(v); }
-                catch (e) { return; }
+                if (nestedInStyleRule(this)) {
+                    if (!preludeSelectorValid(v)) return;
+                } else {
+                    try { document.querySelectorAll(v); }
+                    catch (e) { return; }
+                }
                 this.__selector = v.replace(/^\s+|\s+$/g, '');
                 notify(this);
             });
@@ -5927,7 +5940,16 @@
         }
         method(CSSStyleRule.prototype, '__cssText', function () {
             var d = declText(this);
-            return this.__selector + (d ? ' { ' + d + ' }' : ' { }');
+            var sel = nestedInStyleRule(this)
+                ? nestedSelectorText(canonSelector(this.__selector || '', this.__namespaces))
+                : this.__selector;
+            if (this.__rules && this.__rules.length) {
+                var lines = [];
+                if (d) lines.push('  ' + d);
+                this.__rules.forEach(function (r) { lines.push('  ' + r.cssText); });
+                return sel + ' {\n' + lines.join('\n') + '\n}';
+            }
+            return sel + (d ? ' { ' + d + ' }' : ' { }');
         });
         method(CSSFontFaceRule.prototype, '__cssText', function () {
             var d = declText(this);
@@ -6507,8 +6529,12 @@
             r.__type = 1;
             r.__selector = prelude;
             r.__namespaces = namespaces;
+            var split = splitStyleBlock(block);
+            r.__rules = split.nested ? parseRuleList(split.nested, sheet, r, namespaces) : [];
+            r.__ruleList = makeList();
+            syncList(r.__ruleList, r.__rules);
             var holder = document.createElement('span');
-            try { holder.style.cssText = block; } catch (e) {}
+            try { holder.style.cssText = split.decls; } catch (e) {}
             r.__holder = holder;
             r.__style = holder.style;
             try {
@@ -6545,6 +6571,71 @@
                 });
             }
             return r;
+        }
+
+        function splitStyleBlock(block) {
+            var s = String(block), decls = '', nested = '';
+            var i = 0, n = s.length;
+            while (i < n) {
+                var start = i, quote = 0, depth = 0, sawBrace = false;
+                while (i < n) {
+                    var c = s.charAt(i);
+                    if (quote) {
+                        if (c === '\\') i++;
+                        else if (c === quote) quote = 0;
+                        i++; continue;
+                    }
+                    if (c === '"' || c === "'") { quote = c; i++; continue; }
+                    if (c === '/' && s.charAt(i + 1) === '*') {
+                        i += 2;
+                        while (i + 1 < n && !(s.charAt(i) === '*' && s.charAt(i + 1) === '/')) i++;
+                        i += 2; continue;
+                    }
+                    if (c === '(' || c === '[') { depth++; i++; continue; }
+                    if (c === ')' || c === ']') { if (depth) depth--; i++; continue; }
+                    if (!depth && c === '{') { sawBrace = true; break; }
+                    if (!depth && c === ';') break;
+                    i++;
+                }
+                if (!sawBrace) {
+                    var d = s.slice(start, i).replace(/^\s+|\s+$/g, '');
+                    if (d) decls += d + '; ';
+                    i++;
+                    continue;
+                }
+                var bdepth = 0, q2 = 0;
+                while (i < n) {
+                    var c2 = s.charAt(i);
+                    if (q2) {
+                        if (c2 === '\\') i++;
+                        else if (c2 === q2) q2 = 0;
+                        i++; continue;
+                    }
+                    if (c2 === '"' || c2 === "'") { q2 = c2; i++; continue; }
+                    if (c2 === '{') bdepth++;
+                    else if (c2 === '}') { bdepth--; if (bdepth === 0) { i++; break; } }
+                    i++;
+                }
+                nested += s.slice(start, i) + '\n';
+            }
+            return { decls: decls, nested: nested.replace(/^\s+|\s+$/g, '') };
+        }
+
+        function nestedInStyleRule(rule) {
+            for (var p = rule.__parentRule; p; p = p.__parentRule)
+                if (p.__type === 1) return true;
+            return false;
+        }
+
+        function nestedSelectorText(sel) {
+            var parts = splitTopLevel(sel, ',');
+            return parts.map(function (part) {
+                var t = part.replace(/^\s+|\s+$/g, '');
+                if (!t) return t;
+                var bare = t.replace(/"[^"]*"|'[^']*'/g, '');
+                if (/^[>+~]/.test(t) || bare.indexOf('&') < 0) return '& ' + t;
+                return t;
+            }).join(', ');
         }
 
         function parseOne(text, sheet, parentRule) {
@@ -9458,7 +9549,7 @@
             get: function () {
                 var q = this.__query();
                 var now = timelineNow(this);
-                if (!q || q.paused || now === null) return null;
+                if (!q || q.paused || q.pending || now === null) return null;
                 return now - q.currentMs;
             },
             set: function (v) {
@@ -9486,7 +9577,8 @@
             configurable: true
         });
         Object.defineProperty(Animation.prototype, 'pending', {
-            get: function () { return false; }, configurable: true
+            get: function () { var q = this.__query(); return !!(q && q.pending); },
+            configurable: true
         });
         Object.defineProperty(Animation.prototype, 'replaceState', {
             get: function () { return 'active'; }, configurable: true

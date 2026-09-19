@@ -110,6 +110,7 @@ box_is_doc_root(const ns_box *b)
 
 static double containing_block_definite_height(const ns_box *box);
 static gboolean style_is_absolute_or_fixed(const ns_style *s);
+static gboolean height_keyword_stretches(const ns_css_value *v);
 
 static double
 resolve_used_height(const ns_box *box, const ns_css_value *hv,
@@ -163,6 +164,15 @@ containing_block_definite_height(const ns_box *box)
     if (!p) return -1;
     if (p->definite_height > 0) return p->definite_height;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
+    if (height_keyword_stretches(h)) {
+        double base = containing_block_definite_height(p);
+        if (base < 0) return -1;
+        double inner = base - p->margin.top - p->margin.bottom
+                     - p->border.top - p->border.bottom
+                     - p->padding.top - p->padding.bottom;
+        return clamp_height_minmax_px(p->style, inner > 0 ? inner : 0);
+    }
+    if (h && h->kind == NS_CSS_V_KEYWORD) h = NULL;
     if (!h) {
         const ns_css_value *top = p->style->values[NS_CSS_TOP];
         const ns_css_value *bottom = p->style->values[NS_CSS_BOTTOM];
@@ -6669,6 +6679,15 @@ floats_advance_to_readable_width(const GArray *floats, double cw,
     }
 }
 
+static gboolean
+replaced_size_keyword(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "fit-content") == 0 ||
+            strcmp(v->u.keyword, "min-content") == 0 ||
+            strcmp(v->u.keyword, "max-content") == 0);
+}
+
 static void
 layout_image(ns_box *box, double parent_content_width)
 {
@@ -6695,6 +6714,13 @@ layout_image(ns_box *box, double parent_content_width)
     double w = -1, h = -1;
     if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC))
         w = length_resolve(wv, pct_width_base, -1);
+    else if (height_keyword_stretches(wv)) {
+        w = parent_content_width
+          - box->margin.left - box->margin.right
+          - box->padding.left - box->padding.right
+          - box->border.left - box->border.right;
+        if (w < 0) w = 0;
+    }
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC)) {
         if (height_is_percent(hv)) {
             double cb_h = containing_block_definite_height(box);
@@ -6706,6 +6732,14 @@ layout_image(ns_box *box, double parent_content_width)
         } else {
             h = resolve_used_height(box, hv, parent_content_width, -1);
         }
+    } else if (height_keyword_stretches(hv)) {
+        double cb_h = containing_block_definite_height(box);
+        if (cb_h >= 0) {
+            h = cb_h - box->margin.top - box->margin.bottom
+              - box->padding.top - box->padding.bottom
+              - box->border.top - box->border.bottom;
+            if (h < 0) h = 0;
+        }
     }
 
     const ns_image *img = box->media ? (const ns_image *)box->media->image : NULL;
@@ -6713,6 +6747,8 @@ layout_image(ns_box *box, double parent_content_width)
                    ? (double)img->natural_width  : -1;
     double nat_h = (img && img->loaded && img->natural_height > 0)
                    ? (double)img->natural_height : -1;
+    if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
+    if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
     double intrinsic_ratio = nat_w > 0 && nat_h > 0 ? nat_w / nat_h : -1;
     if (box->kind == NS_BOX_SVG && box->dom) {
         ns_svg_size svg_size;
@@ -6734,10 +6770,10 @@ layout_image(ns_box *box, double parent_content_width)
 
     gboolean metadata_video =
         box->kind == NS_BOX_VIDEO && node_has_media_metadata(box->dom);
-    if (nat_w < 0 && box->content_width  > 0) nat_w = box->content_width;
-    if (nat_h < 0 && box->content_height > 0) nat_h = box->content_height;
 
     gboolean ratio_only = box->media && box->media->intrinsic_ratio_only;
+    gboolean w_specified = w >= 0;
+    gboolean h_specified = h >= 0;
     if (w < 0 && h < 0) {
         if (ratio_only && intrinsic_ratio > 0) {
             double cb_h = containing_block_definite_height(box);
@@ -6764,17 +6800,26 @@ layout_image(ns_box *box, double parent_content_width)
     double max_h = resolve_used_height(box, mxh, parent_content_width, -1);
     double min_w = length_resolve(mnw, pct_width_base, -1);
     double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
+    double keyword_w = intrinsic_ratio > 0 && h_specified ? h * intrinsic_ratio : nat_w;
+    if (max_w < 0 && replaced_size_keyword(mxw) && keyword_w >= 0) max_w = keyword_w;
+    if (min_w < 0 && replaced_size_keyword(mnw) && keyword_w >= 0) min_w = keyword_w;
 
     if (max_w >= 0 && w > max_w) {
-        if (h > 0 && w > 0) h *= max_w / w;
+        if (h > 0 && w > 0 && !h_specified) h *= max_w / w;
         w = max_w;
     }
     if (max_h >= 0 && h > max_h) {
-        if (w > 0 && h > 0) w *= max_h / h;
+        if (w > 0 && h > 0 && !w_specified) w *= max_h / h;
         h = max_h;
     }
-    if (min_w >= 0 && w < min_w) w = min_w;
-    if (min_h >= 0 && h < min_h) h = min_h;
+    if (min_w >= 0 && w < min_w) {
+        if (h > 0 && w > 0 && !h_specified && intrinsic_ratio > 0) h = min_w / intrinsic_ratio;
+        w = min_w;
+    }
+    if (min_h >= 0 && h < min_h) {
+        if (w > 0 && h > 0 && !w_specified && intrinsic_ratio > 0) w = min_h * intrinsic_ratio;
+        h = min_h;
+    }
 
     box->content_width = w;
     box->content_height = h;
@@ -7952,6 +7997,13 @@ flex_main_basis_explicit(const ns_box *c, double cw, double *out)
     const ns_css_value *w = s->values[NS_CSS_WIDTH];
     if (w && (w->kind == NS_CSS_V_LENGTH || w->kind == NS_CSS_V_CALC)) {
         *out = flex_border_box_to_content(c, length_resolve(w, cw, 0));
+        return TRUE;
+    }
+    if (height_keyword_stretches(w)) {
+        double inner = cw - c->margin.left - c->margin.right
+                     - c->padding.left - c->padding.right
+                     - c->border.left - c->border.right;
+        *out = inner > 0 ? inner : 0;
         return TRUE;
     }
     return FALSE;
@@ -10667,7 +10719,7 @@ layout_grid(ns_box *box, double cw,
             area_h += base_row_height[placed_row + k] + (k > 0 ? base_gap : 0);
         }
         c->cb_height_override = area_h;
-        layout_box(c, item_w, child_inherited);
+        layout_box(c, item_w + c->margin.left + c->margin.right, child_inherited);
         g_pending_subgrid_cols = NULL;
         g_pending_subgrid_rows = NULL;
         gboolean auto_h_margin = c->style &&
@@ -11067,6 +11119,15 @@ intrinsic_keyword_width(ns_box *box, const char *kw, const ns_style *mi,
     return -1;
 }
 
+static gboolean
+height_keyword_stretches(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "stretch") == 0 ||
+            strcmp(v->u.keyword, "-webkit-fill-available") == 0 ||
+            strcmp(v->u.keyword, "-moz-available") == 0);
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -11127,6 +11188,14 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         cw = length_resolve(wv, pct_width_base, 0);
         explicit_width = TRUE;
     } else if (wv && wv->kind == NS_CSS_V_KEYWORD && wv->u.keyword &&
+               (strcmp(wv->u.keyword, "stretch") == 0 ||
+                strcmp(wv->u.keyword, "-webkit-fill-available") == 0 ||
+                strcmp(wv->u.keyword, "-moz-available") == 0)) {
+        cw = parent_content_width - horiz_total;
+        if (cw < 0) cw = 0;
+        explicit_width = TRUE;
+        intrinsic_width = TRUE;
+    } else if (wv && wv->kind == NS_CSS_V_KEYWORD && wv->u.keyword &&
                (strcmp(wv->u.keyword, "max-content") == 0 ||
                 strcmp(wv->u.keyword, "min-content") == 0 ||
                 strcmp(wv->u.keyword, "fit-content") == 0)) {
@@ -11149,13 +11218,19 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     } else if (!flex_col_item_stretch &&
                display_is_atomic_inline_container(
                    ns_css_display_of(box->style))) {
-        double natural = measure_natural_width(box,
-                                               inherited_style ? inherited_style : box->style);
-        double input_width = text_input_intrinsic_width(box);
-        if (natural < input_width) natural = input_width;
         double avail = parent_content_width - horiz_total;
         if (avail < 0) avail = 0;
-        cw = natural < avail ? natural : avail;
+        if (height_keyword_stretches(wv)) {
+            cw = avail;
+            explicit_width = TRUE;
+            intrinsic_width = TRUE;
+        } else {
+            double natural = measure_natural_width(box,
+                                                   inherited_style ? inherited_style : box->style);
+            double input_width = text_input_intrinsic_width(box);
+            if (natural < input_width) natural = input_width;
+            cw = natural < avail ? natural : avail;
+        }
         if (cw < 0) cw = 0;
     } else {
         cw = parent_content_width - horiz_total;
@@ -11295,12 +11370,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             if (wv2 && (wv2->kind == NS_CSS_V_LENGTH || wv2->kind == NS_CSS_V_CALC)) {
                 cw_for_float = length_resolve(wv2, cw, 0);
             } else {
-                cw_for_float = measure_natural_width(c, child_inherited);
                 double cap = float_max_w
                     - c->padding.left - c->padding.right
                     - c->border.left - c->border.right
                     - c->margin.left - c->margin.right;
                 if (cap < 0) cap = 0;
+                cw_for_float = height_keyword_stretches(wv2)
+                    ? cap : measure_natural_width(c, child_inherited);
                 if (cw_for_float > cap) cw_for_float = cap;
                 if (cw_for_float < 0) cw_for_float = 0;
             }
@@ -11535,6 +11611,21 @@ flex_done: ;
     double explicit_h = -1;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
         explicit_h = resolve_used_height(box, hv, parent_content_width, -1);
+    double stretch_h = -1;
+    if (height_keyword_stretches(hv) || height_keyword_stretches(mnh) ||
+        height_keyword_stretches(mxh)) {
+        double cb_h = containing_block_definite_height(box);
+        if (cb_h >= 0) {
+            stretch_h = cb_h - box->margin.top - box->margin.bottom
+                      - box->border.top - box->border.bottom
+                      - box->padding.top - box->padding.bottom;
+            if (stretch_h < 0) stretch_h = 0;
+        }
+    }
+    if (explicit_h < 0 && stretch_h >= 0 && height_keyword_stretches(hv)) {
+        explicit_h = stretch_h;
+        if (border_box) explicit_h += vert_extras;
+    }
     if (explicit_h >= 0) {
         if (border_box) {
             explicit_h -= vert_extras;
@@ -11558,9 +11649,13 @@ flex_done: ;
         max_h -= vert_extras;
         if (max_h < 0) max_h = 0;
     }
+    if (max_h < 0 && stretch_h >= 0 && height_keyword_stretches(mxh))
+        max_h = stretch_h;
     if (max_h >= 0 && box->content_height > max_h)
         box->content_height = max_h;
     double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
+    if (min_h < 0 && stretch_h >= 0 && height_keyword_stretches(mnh))
+        min_h = stretch_h + (border_box ? vert_extras : 0);
     if (border_box && min_h >= 0) {
         min_h -= vert_extras;
         if (min_h < 0) min_h = 0;
@@ -11838,7 +11933,9 @@ relative_pct_cb_height(const ns_box *box)
     while (p && !p->style) p = p->parent;
     if (!p) return -1;
     const ns_css_value *h = p->style->values[NS_CSS_HEIGHT];
-    if (!h || length_is_auto(h)) return -1;
+    if (h && h->kind == NS_CSS_V_KEYWORD)
+        return height_keyword_stretches(h) ? containing_block_definite_height(box) : -1;
+    if (!h) return -1;
     if (height_is_percent(h)) {
         double base;
         if (p->dom && p->dom->name && strcmp(p->dom->name, "html") == 0)
@@ -12802,11 +12899,16 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
             (alv->kind == NS_CSS_V_LENGTH || alv->kind == NS_CSS_V_CALC);
         gboolean r_set = arv && !length_is_auto(arv) &&
             (arv->kind == NS_CSS_V_LENGTH || arv->kind == NS_CSS_V_CALC);
-        gboolean stretch_w = !has_explicit_width && l_set && r_set;
+        gboolean stretch_w = !has_explicit_width &&
+            ((l_set && r_set) || height_keyword_stretches(awv));
         double layout_w = avail;
         if (stretch_w) {
-            double l = length_resolve(alv, avail, 0);
-            double r = length_resolve(arv, avail, 0);
+            double l = l_set ? length_resolve(alv, avail, 0) : 0;
+            double r = r_set ? length_resolve(arv, avail, 0) : 0;
+            if (!l_set && !r_set && !grid_cb) {
+                double origin = cb->x + cb->margin.left + cb->border.left;
+                if (abox->x > origin) l = abox->x - origin;
+            }
             layout_w = avail - l - r
                      - abox->margin.left - abox->margin.right
                      - abox->border.left - abox->border.right
