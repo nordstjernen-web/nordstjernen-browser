@@ -14162,8 +14162,26 @@ transform_arg_canonical(const char *arg, int want, gboolean scale_percent)
     ns_css_unit unit;
     char *end = NULL;
     if (is_math_fn_start(arg)) {
+        int legacy = (want & TX_ANGLE) ? TF_ARG_ANGLE
+                   : (want & TX_LENGTH) ? TF_ARG_LENGTH
+                   : (want & TX_NUMBER) && !scale_percent ? TF_ARG_NUMBER
+                   : TF_ARG_NONE;
+        if (legacy != TF_ARG_NONE) {
+            char *canon = canonicalize_transform_arg(arg, legacy);
+            if (canon) return canon;
+            if (!(want & TX_PERCENT) || (want & TX_ANGLE)) {
+                ns_css_value *probe = parse_calc(arg);
+                double deg;
+                gboolean angle_ok = (want & TX_ANGLE) && parse_angle_any(arg, &deg);
+                if (!probe && !angle_ok) return NULL;
+                ns_css_value_free(probe);
+                return css_add_leading_zeros(g_strdup(arg));
+            }
+        }
         if (scale_percent && (want & TX_NUMBER)) {
             double n = 0, px = 0, pct = 0;
+            if (ns_value_has_relative_unit(arg))
+                return css_add_leading_zeros(g_strdup(arg));
             if (eval_calc_number(arg, &n)) return serialize_calc_number(n);
             if (resolve_to_px_pct(arg, strlen(arg), &px, &pct) && px == 0) {
                 char *canon = ns_css_math_canonical(arg);
