@@ -151,6 +151,7 @@ struct ns_js {
     gboolean       user_ever_activated;
     GHashTable   *canvas_states;
     ns_image_cache *image_cache;
+    struct ns_anim *anim;
     GHashTable   *js_image_loads;
     GHashTable   *orphan_nodes;
     GPtrArray    *listeners;

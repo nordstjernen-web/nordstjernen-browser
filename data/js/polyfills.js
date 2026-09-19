@@ -9086,4 +9086,348 @@
         });
     })();
 
+    (function () {
+        if (typeof global.__ns_anim_list !== 'function') return;
+        var registry = new WeakMap();
+        var timelineStart = (typeof performance !== 'undefined' && performance.now) ? 0 : 0;
+        function now() {
+            return (typeof performance !== 'undefined' && performance.now)
+                ? performance.now() : Date.now();
+        }
+        function DocumentTimeline() {}
+        Object.defineProperty(DocumentTimeline.prototype, 'currentTime', {
+            get: function () { return now() - timelineStart; },
+            configurable: true
+        });
+        if (!global.DocumentTimeline) global.DocumentTimeline = DocumentTimeline;
+        if (typeof document !== 'undefined' && !('timeline' in document)) {
+            var tl = new DocumentTimeline();
+            Object.defineProperty(document, 'timeline', {
+                get: function () { return tl; }, configurable: true
+            });
+        }
+
+        function listeners(obj) {
+            if (!obj.__listeners) obj.__listeners = Object.create(null);
+            return obj.__listeners;
+        }
+
+        function AnimationEffect(anim) {
+            Object.defineProperty(this, '__anim', { value: anim, writable: true });
+        }
+        AnimationEffect.prototype.getTiming = function () {
+            var q = this.__anim.__query() || {};
+            var isTransition = this.__anim.__prop !== null;
+            return {
+                delay: q.delayMs || 0,
+                endDelay: 0,
+                fill: isTransition ? 'backwards' : this.__anim.__fill || 'none',
+                iterationStart: 0,
+                iterations: q.iterations === undefined ? 1 : q.iterations,
+                duration: q.durationMs || 0,
+                direction: 'normal',
+                easing: 'linear'
+            };
+        };
+        AnimationEffect.prototype.getComputedTiming = function () {
+            var t = this.getTiming();
+            var q = this.__anim.__query();
+            var iterations = isFinite(t.iterations) ? t.iterations : Infinity;
+            var active = t.duration * iterations;
+            var local = q ? q.currentMs : null;
+            var progress = null, iter = null;
+            if (local !== null) {
+                var el = local - t.delay;
+                if (el >= 0 && t.duration > 0) {
+                    var raw = Math.min(el / t.duration, iterations);
+                    iter = Math.min(Math.floor(raw), isFinite(iterations) ? Math.max(iterations - 1, 0) : raw);
+                    progress = el >= active ? 1 : raw - Math.floor(raw);
+                    if (el >= active && isFinite(active)) progress = 1;
+                } else if (el < 0 && t.fill !== 'none') {
+                    progress = 0; iter = 0;
+                }
+            }
+            return Object.assign(t, {
+                activeDuration: active,
+                endTime: t.delay + active + t.endDelay,
+                localTime: local,
+                progress: progress,
+                currentIteration: iter
+            });
+        };
+        AnimationEffect.prototype.updateTiming = function () {};
+        Object.defineProperty(AnimationEffect.prototype, 'target', {
+            get: function () { return this.__anim.__el; }, configurable: true
+        });
+        Object.defineProperty(AnimationEffect.prototype, 'pseudoElement', {
+            get: function () { return null; }, configurable: true
+        });
+        function KeyframeEffect(target, keyframes, options) {
+            AnimationEffect.call(this, null);
+            this.__target = target || null;
+            this.__keyframes = keyframes || [];
+            this.__options = options || {};
+        }
+        KeyframeEffect.prototype = Object.create(AnimationEffect.prototype);
+        KeyframeEffect.prototype.constructor = KeyframeEffect;
+        KeyframeEffect.prototype.getKeyframes = function () {
+            return Array.isArray(this.__keyframes) ? this.__keyframes.slice() : [];
+        };
+        KeyframeEffect.prototype.setKeyframes = function (k) { this.__keyframes = k || []; };
+        Object.defineProperty(KeyframeEffect.prototype, 'composite', {
+            get: function () { return 'replace'; }, set: function () {}, configurable: true
+        });
+        global.AnimationEffect = AnimationEffect;
+        global.KeyframeEffect = KeyframeEffect;
+
+        function Animation(effect, timeline) {
+            this.__el = effect && effect.__target ? effect.__target : null;
+            this.__prop = null;
+            this.__kind = 'generic';
+            this.__gen = 0;
+            this.__name = null;
+            this.__effectObj = effect || null;
+            this.__timeline = timeline || (typeof document !== 'undefined' ? document.timeline : null);
+            this.id = '';
+            this.onfinish = null;
+            this.oncancel = null;
+            this.onremove = null;
+            this.__playbackRate = 1;
+        }
+        Animation.prototype.__query = function () {
+            if (!this.__el || this.__kind === 'generic') return null;
+            var q = global.__ns_anim_query(this.__el, this.__prop);
+            if (!q || q.generation !== this.__gen) return null;
+            return q;
+        };
+        Object.defineProperty(Animation.prototype, 'effect', {
+            get: function () {
+                if (!this.__effectObj) this.__effectObj = new AnimationEffect(this);
+                return this.__effectObj;
+            },
+            set: function (v) { this.__effectObj = v; },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'timeline', {
+            get: function () { return this.__timeline; },
+            set: function (v) { this.__timeline = v; },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'currentTime', {
+            get: function () {
+                var q = this.__query();
+                return q ? q.currentMs : (this.__kind === 'generic' ? 0 : null);
+            },
+            set: function (v) {
+                if (v === null || !this.__el || this.__kind === 'generic') return;
+                global.__ns_anim_seek(this.__el, this.__prop, Number(v));
+            },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'startTime', {
+            get: function () {
+                var q = this.__query();
+                if (!q || q.paused) return null;
+                return this.__timeline.currentTime - q.currentMs;
+            },
+            set: function (v) {
+                if (v === null || !this.__el) return;
+                global.__ns_anim_seek(this.__el, this.__prop,
+                                      this.__timeline.currentTime - Number(v));
+            },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'playState', {
+            get: function () {
+                var q = this.__query();
+                if (!q) return this.__kind === 'generic' ? 'finished' : 'idle';
+                if (q.finished) return 'finished';
+                if (q.paused) return 'paused';
+                return 'running';
+            },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'pending', {
+            get: function () { return false; }, configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'replaceState', {
+            get: function () { return 'active'; }, configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'playbackRate', {
+            get: function () { return this.__playbackRate; },
+            set: function (v) { this.__playbackRate = Number(v); },
+            configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'ready', {
+            get: function () { return Promise.resolve(this); }, configurable: true
+        });
+        Object.defineProperty(Animation.prototype, 'finished', {
+            get: function () {
+                if (this.__finished) return this.__finished;
+                var self = this;
+                this.__finished = new Promise(function (resolve, reject) {
+                    var q = self.__query();
+                    if (!q || q.finished) { resolve(self); return; }
+                    self.__resolveFinished = resolve;
+                    self.__rejectFinished = reject;
+                });
+                return this.__finished;
+            },
+            configurable: true
+        });
+        Animation.prototype.__settle = function (finished) {
+            var q = this.__query();
+            if (finished) {
+                if (this.__resolveFinished) this.__resolveFinished(this);
+                var ev = { type: 'finish', target: this, currentTime: q ? q.currentMs : null, timelineTime: this.__timeline.currentTime };
+                if (typeof this.onfinish === 'function') this.onfinish(ev);
+                this.__dispatch('finish', ev);
+            } else {
+                if (this.__rejectFinished) {
+                    var err = new DOMException('The user aborted a request.', 'AbortError');
+                    this.__rejectFinished(err);
+                }
+                this.__finished = null;
+                var cev = { type: 'cancel', target: this, currentTime: null, timelineTime: this.__timeline.currentTime };
+                if (typeof this.oncancel === 'function') this.oncancel(cev);
+                this.__dispatch('cancel', cev);
+            }
+            this.__resolveFinished = null;
+            this.__rejectFinished = null;
+        };
+        Animation.prototype.__dispatch = function (type, ev) {
+            var ls = listeners(this)[type];
+            if (!ls) return;
+            ls.slice().forEach(function (fn) { try { fn.call(this, ev); } catch (e) {} }, this);
+        };
+        Animation.prototype.addEventListener = function (type, fn) {
+            if (typeof fn !== 'function') return;
+            var ls = listeners(this);
+            (ls[type] = ls[type] || []).push(fn);
+        };
+        Animation.prototype.removeEventListener = function (type, fn) {
+            var ls = listeners(this)[type];
+            if (!ls) return;
+            var i = ls.indexOf(fn);
+            if (i >= 0) ls.splice(i, 1);
+        };
+        Animation.prototype.dispatchEvent = function (ev) { this.__dispatch(ev.type, ev); return true; };
+        Animation.prototype.play = function () {
+            if (this.__el && this.__kind !== 'generic') global.__ns_anim_control(this.__el, this.__prop, 'play');
+        };
+        Animation.prototype.pause = function () {
+            if (this.__el && this.__kind !== 'generic') global.__ns_anim_control(this.__el, this.__prop, 'pause');
+        };
+        Animation.prototype.finish = function () {
+            if (this.__el && this.__kind !== 'generic') global.__ns_anim_control(this.__el, this.__prop, 'finish');
+        };
+        Animation.prototype.cancel = function () {
+            if (this.__el && this.__kind !== 'generic') {
+                global.__ns_anim_control(this.__el, this.__prop, 'cancel');
+                this.__settle(false);
+            }
+        };
+        Animation.prototype.reverse = function () {};
+        Animation.prototype.updatePlaybackRate = function (r) { this.__playbackRate = Number(r); };
+        Animation.prototype.commitStyles = function () {};
+        Animation.prototype.persist = function () {};
+        global.Animation = Animation;
+
+        function CSSTransition() { Animation.apply(this, arguments); }
+        CSSTransition.prototype = Object.create(Animation.prototype);
+        CSSTransition.prototype.constructor = CSSTransition;
+        Object.defineProperty(CSSTransition.prototype, 'transitionProperty', {
+            get: function () { return this.__prop; }, configurable: true
+        });
+        global.CSSTransition = CSSTransition;
+
+        function CSSAnimation() { Animation.apply(this, arguments); }
+        CSSAnimation.prototype = Object.create(Animation.prototype);
+        CSSAnimation.prototype.constructor = CSSAnimation;
+        Object.defineProperty(CSSAnimation.prototype, 'animationName', {
+            get: function () { return this.__name; }, configurable: true
+        });
+        global.CSSAnimation = CSSAnimation;
+
+        function attachEndListeners(anim) {
+            var el = anim.__el;
+            var isTransition = anim.__prop !== null;
+            var endType = isTransition ? 'transitionend' : 'animationend';
+            var cancelType = isTransition ? 'transitioncancel' : 'animationcancel';
+            function matches(e) {
+                return isTransition ? e.propertyName === anim.__prop
+                                    : e.animationName === anim.__name;
+            }
+            function onEnd(e) {
+                if (!matches(e)) return;
+                el.removeEventListener(endType, onEnd);
+                el.removeEventListener(cancelType, onCancel);
+                anim.__settle(true);
+            }
+            function onCancel(e) {
+                if (!matches(e)) return;
+                el.removeEventListener(endType, onEnd);
+                el.removeEventListener(cancelType, onCancel);
+                anim.__settle(false);
+            }
+            el.addEventListener(endType, onEnd);
+            el.addEventListener(cancelType, onCancel);
+        }
+
+        function objectFor(entry) {
+            var el = entry.el;
+            var map = registry.get(el);
+            if (!map) { map = Object.create(null); registry.set(el, map); }
+            var key = (entry.prop === null ? '@' + entry.name : entry.prop) + ':' + entry.generation;
+            var existing = map[key];
+            if (existing) return existing;
+            var anim = entry.prop === null ? new CSSAnimation() : new CSSTransition();
+            anim.__el = el;
+            anim.__prop = entry.prop;
+            anim.__name = entry.name;
+            anim.__gen = entry.generation;
+            anim.__kind = entry.prop === null ? 'animation' : 'transition';
+            attachEndListeners(anim);
+            map[key] = anim;
+            return anim;
+        }
+
+        function collect(el) {
+            var entries = global.__ns_anim_list(el || null);
+            var out = [];
+            for (var i = 0; i < entries.length; i++) out.push(objectFor(entries[i]));
+            out.sort(function (a, b) {
+                if (a.__el === b.__el) {
+                    if (a.__kind !== b.__kind) return a.__kind === 'animation' ? -1 : 1;
+                    return 0;
+                }
+                var pos = a.__el.compareDocumentPosition(b.__el);
+                return (pos & 4) ? -1 : (pos & 2) ? 1 : 0;
+            });
+            return out;
+        }
+
+        function elementGetAnimations(options) {
+            var self = this;
+            if (options && options.subtree) {
+                return collect(null).filter(function (a) {
+                    return a.__el === self || (self.contains && self.contains(a.__el));
+                });
+            }
+            return collect(this);
+        }
+        try {
+            if (global.Element) {
+                Object.defineProperty(global.Element.prototype, 'getAnimations', {
+                    value: elementGetAnimations, writable: true, configurable: true
+                });
+            }
+            if (typeof document !== 'undefined') {
+                Object.defineProperty(Object.getPrototypeOf(document) || document, 'getAnimations', {
+                    value: function () { return collect(null); }, writable: true, configurable: true
+                });
+            }
+        } catch (e) {}
+    })();
+
 })(typeof globalThis !== 'undefined' ? globalThis : this);

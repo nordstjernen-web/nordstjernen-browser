@@ -228,6 +228,7 @@ render_feed_animations(const ns_render_ctx *c, GHashTable *styles)
         ns_anim_observe(c->anim, (const ns_node *)key,
                         (const ns_style *)val, now_us);
     ns_anim_prune(c->anim, styles);
+    ns_anim_apply(c->anim, styles);
 }
 
 static void
