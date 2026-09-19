@@ -40646,11 +40646,54 @@ ns_fullscreen_transition_promise(JSContext *ctx)
 }
 
 static JSValue
+ns_fullscreen_error_job(JSContext *ctx, int argc, JSValueConst *argv)
+{
+    ns_js *js = js_from_ctx(ctx);
+    const ns_node *target = argc > 0 ? ns_unwrap_element_mut(argv[0]) : NULL;
+    if (js && js->current_doc) {
+        if (!target) target = js->current_doc;
+        ns_js_dispatch_event(js, target, "fullscreenerror", NULL);
+        ns_js_dispatch_event(js, target, "webkitfullscreenerror", NULL);
+    }
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_fullscreen_rejected_without_activation(JSContext *ctx,
+                                          JSValueConst element)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->log_cb)
+        js->log_cb("Blocked requestFullscreen(): the page has no recent "
+                   "user interaction", js->log_user_data);
+    JSValueConst args[1] = { element };
+    JS_EnqueueJob(ctx, ns_fullscreen_error_job, 1, args);
+    JSValue resolving[2];
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) return promise;
+    JSValue err = JS_NewError(ctx);
+    JS_SetPropertyStr(ctx, err, "name", JS_NewString(ctx, "TypeError"));
+    JS_SetPropertyStr(ctx, err, "message",
+                      JS_NewString(ctx, "Fullscreen request denied: "
+                                        "no transient user activation"));
+    JSValue r = JS_Call(ctx, resolving[1], JS_UNDEFINED, 1,
+                        (JSValueConst[]){ err });
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, err);
+    JS_FreeValue(ctx, resolving[0]);
+    JS_FreeValue(ctx, resolving[1]);
+    return promise;
+}
+
+static JSValue
 ns_element_request_fullscreen(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
     (void)argc;
     (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    if (!ns_js_has_transient_activation(js))
+        return ns_fullscreen_rejected_without_activation(ctx, this_val);
     ns_set_fullscreen_element(ctx, this_val, "fullscreen-enter");
     return ns_fullscreen_transition_promise(ctx);
 }
