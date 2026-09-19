@@ -5278,18 +5278,17 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
     if (entries != entries_buf) g_free(entries);
 }
 
-static gboolean
-sticky_length(const ns_css_value *v, double *out)
-{
-    if (!v || v->kind != NS_CSS_V_LENGTH) return FALSE;
-    if (v->u.length.unit != NS_CSS_UNIT_PX &&
-        v->u.length.unit != NS_CSS_UNIT_NUMBER) return FALSE;
-    *out = v->u.length.v;
-    return TRUE;
-}
-
 static gboolean g_paint_have_viewport;
-static double g_paint_vp_x0, g_paint_vp_y0, g_paint_vp_x1, g_paint_vp_y1;
+static double g_paint_vp_x0, g_paint_vp_y0;
+static double g_paint_anchor_dx, g_paint_anchor_dy;
+
+static void
+paint_anchor_leave(cairo_t *cr, double saved_dx, double saved_dy)
+{
+    cairo_restore(cr);
+    g_paint_anchor_dx = saved_dx;
+    g_paint_anchor_dy = saved_dy;
+}
 
 static void
 compute_sticky_offset(const ns_box *b, cairo_t *cr,
@@ -5298,82 +5297,18 @@ compute_sticky_offset(const ns_box *b, cairo_t *cr,
     *out_dx = 0;
     *out_dy = 0;
     if (!b || !b->style) return;
+    if (ns_box_is_fixed(b)) {
+        if (g_paint_have_viewport) {
+            *out_dx = g_paint_vp_x0;
+            *out_dy = g_paint_vp_y0;
+        }
+        return;
+    }
     if (!keyword_is(b->style->values[NS_CSS_POSITION], "sticky")) return;
-
     double clip_x1, clip_y1, clip_x2, clip_y2;
     cairo_clip_extents(cr, &clip_x1, &clip_y1, &clip_x2, &clip_y2);
-    if (g_paint_have_viewport) {
-        clip_x1 = g_paint_vp_x0;
-        clip_y1 = g_paint_vp_y0;
-        clip_x2 = g_paint_vp_x1;
-        clip_y2 = g_paint_vp_y1;
-    }
-
-    double box_top = b->y;
-    double box_h = b->margin.top + b->border.top + b->padding.top +
-                   b->content_height +
-                   b->padding.bottom + b->border.bottom + b->margin.bottom;
-    double box_left = b->x;
-    double box_w = b->margin.left + b->border.left + b->padding.left +
-                   b->content_width +
-                   b->padding.right + b->border.right + b->margin.right;
-
-    double cb_top, cb_bot, cb_left, cb_right;
-    const ns_box *p = b->parent;
-    if (p) {
-        cb_left = p->x + p->margin.left + p->border.left + p->padding.left;
-        cb_top  = p->y + p->margin.top  + p->border.top  + p->padding.top;
-        cb_right = cb_left + p->content_width;
-        cb_bot   = cb_top  + p->content_height;
-    } else {
-        cb_left = clip_x1; cb_top = 0;
-        cb_right = clip_x2; cb_bot = G_MAXDOUBLE / 2;
-    }
-
-    double tval = 0, bval = 0, lval = 0, rval = 0;
-    gboolean has_top    = sticky_length(b->style->values[NS_CSS_TOP],    &tval);
-    gboolean has_bot    = sticky_length(b->style->values[NS_CSS_BOTTOM], &bval);
-    gboolean has_left   = sticky_length(b->style->values[NS_CSS_LEFT],   &lval);
-    gboolean has_right  = sticky_length(b->style->values[NS_CSS_RIGHT],  &rval);
-
-    if (has_top) {
-        double target = clip_y1 + tval;
-        if (box_top < target) {
-            double want = target - box_top;
-            double cap  = cb_bot - (box_top + box_h);
-            if (cap < 0) cap = 0;
-            *out_dy = want < cap ? want : cap;
-        }
-    }
-    if (has_bot && *out_dy == 0) {
-        double target = clip_y2 - bval;
-        double box_bot = box_top + box_h;
-        if (box_bot > target) {
-            double want = target - box_bot;
-            double cap  = cb_top - box_top;
-            if (cap > 0) cap = 0;
-            *out_dy = want > cap ? want : cap;
-        }
-    }
-    if (has_left) {
-        double target = clip_x1 + lval;
-        if (box_left < target) {
-            double want = target - box_left;
-            double cap  = cb_right - (box_left + box_w);
-            if (cap < 0) cap = 0;
-            *out_dx = want < cap ? want : cap;
-        }
-    }
-    if (has_right && *out_dx == 0) {
-        double target = clip_x2 - rval;
-        double box_right = box_left + box_w;
-        if (box_right > target) {
-            double want = target - box_right;
-            double cap  = cb_left - box_left;
-            if (cap > 0) cap = 0;
-            *out_dx = want > cap ? want : cap;
-        }
-    }
+    ns_box_sticky_offset(b, clip_x1, clip_y1, clip_x2, clip_y2,
+                         out_dx, out_dy);
 }
 
 static cairo_operator_t
@@ -5460,6 +5395,12 @@ paint_cache_clip(cairo_t *cr)
     double x0, x1;
     cairo_clip_extents(cr, &x0, &g_paint_clip_y0, &x1, &g_paint_clip_y1);
     g_paint_have_clip = TRUE;
+    g_paint_vp_x0 = x0;
+    g_paint_vp_y0 = g_paint_clip_y0;
+    g_paint_have_viewport = isfinite(x0) && isfinite(g_paint_clip_y0) &&
+                            (x0 != 0 || g_paint_clip_y0 != 0);
+    g_paint_anchor_dx = 0;
+    g_paint_anchor_dy = 0;
 }
 
 static const ns_box *g_paint_tex_root;
@@ -6243,8 +6184,10 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
     }
     if (!g_paint_no_cull && g_paint_have_clip &&
         b->paint_bottom > b->paint_top) {
-        if (b->paint_bottom < g_paint_clip_y0 - g_paint_cull_margin ||
-            b->paint_top > g_paint_clip_y1 + g_paint_cull_margin) {
+        double top = b->paint_top + g_paint_anchor_dy;
+        double bottom = b->paint_bottom + g_paint_anchor_dy;
+        if (bottom < g_paint_clip_y0 - g_paint_cull_margin ||
+            top > g_paint_clip_y1 + g_paint_cull_margin) {
             if (g_paint_collect_stats) g_paint_stats.culled_bounds++;
             return;
         }
@@ -6269,9 +6212,13 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         sticky_dx = sticky_dy = 0;
     }
     gboolean has_sticky = (sticky_dx != 0 || sticky_dy != 0);
+    double saved_anchor_dx = g_paint_anchor_dx;
+    double saved_anchor_dy = g_paint_anchor_dy;
     if (has_sticky) {
         cairo_save(cr);
         cairo_translate(cr, sticky_dx, sticky_dy);
+        g_paint_anchor_dx += sticky_dx;
+        g_paint_anchor_dy += sticky_dy;
     }
     const ns_css_transform *anim_tf =
         g_paint_anim ? ns_anim_get_transform(g_paint_anim, b->dom) : NULL;
@@ -6303,7 +6250,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
                                          ?: "")
                                   : "");
         }
-        if (has_sticky) cairo_restore(cr);
+        if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
         return;
     }
 
@@ -6313,7 +6260,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         gboolean is_fixed = posv && posv->kind == NS_CSS_V_KEYWORD &&
                             posv->u.keyword && strcmp(posv->u.keyword, "fixed") == 0;
         if (!is_fixed) {
-            double by = b->y + b->margin.top;
+            double by = b->y + b->margin.top + g_paint_anchor_dy;
             double bh = b->content_height + b->padding.top + b->padding.bottom +
                         b->border.top + b->border.bottom;
             if (g_paint_have_clip &&
@@ -6352,7 +6299,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
             cairo_restore(cr);
             if (grouped)
                 cairo_pattern_destroy(cairo_pop_group(cr));
-            if (has_sticky) cairo_restore(cr);
+            if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
             return;
         } else {
             cairo_translate(cr, ox, oy);
@@ -6746,7 +6693,7 @@ paint_walk(cairo_t *cr, const ns_box *b, const char *highlight)
         cairo_pattern_destroy(group_source);
     }
 
-    if (has_sticky) cairo_restore(cr);
+    if (has_sticky) paint_anchor_leave(cr, saved_anchor_dx, saved_anchor_dy);
     if (g_dbg_paint_x >= 0) {
         double q0, q1, q2, q3;
         cairo_clip_extents(cr, &q0, &q1, &q2, &q3);
@@ -6869,6 +6816,7 @@ ns_paint(cairo_t *cr, const ns_box *root, const char *highlight_query)
     paint_top_layer(cr, root, highlight_query);
     g_paint_have_clip = FALSE;
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
+    g_paint_have_viewport = FALSE;
 }
 
 void
@@ -6892,4 +6840,5 @@ ns_paint_with_selection(cairo_t *cr, const ns_box *root,
     g_clear_pointer(&g_paint_sel_runs, g_hash_table_destroy);
     g_paint_have_clip = FALSE;
     if (g_paint_video_holes) g_array_set_size(g_paint_video_holes, 0);
+    g_paint_have_viewport = FALSE;
 }

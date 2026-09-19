@@ -1976,6 +1976,7 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
     browser->cur_scroll_y = (double)scroll_y;
     browser->cur_scale = scale;
     browser->cur_viewport_h = (double)height / scale;
+    ns_box_set_hit_viewport(browser->cur_scroll_x, browser->cur_scroll_y);
     browser_ensure_images(browser);
     if (browser->videos && browser->layout) {
         gint64 now = g_get_monotonic_time();
@@ -2175,10 +2176,14 @@ browser_hover_dispatch(ns_browser *b, const ns_node *target, int x, int y,
                        const ns_node *related)
 {
     if (!b->js || !target) return;
-    ns_js_dispatch_mouse_event(b->js, target, ptr_type, (double)x, (double)y,
+    ns_js_dispatch_mouse_event(b->js, target, ptr_type,
+                               (double)x - b->cur_scroll_x,
+                               (double)y - b->cur_scroll_y,
                                (double)x, (double)y, 0, 0,
                                FALSE, FALSE, FALSE, FALSE, related, NULL);
-    ns_js_dispatch_mouse_event(b->js, target, mouse_type, (double)x, (double)y,
+    ns_js_dispatch_mouse_event(b->js, target, mouse_type,
+                               (double)x - b->cur_scroll_x,
+                               (double)y - b->cur_scroll_y,
                                (double)x, (double)y, 0, 0,
                                FALSE, FALSE, FALSE, FALSE, related, NULL);
 }
@@ -2464,7 +2469,9 @@ ns_browser_contextmenu(ns_browser *browser, int x, int y)
     if (!node) return 0;
     gboolean prevented = FALSE;
     ns_js_dispatch_mouse_event(browser->js, node, "contextmenu",
-                               (double)x, (double)y, (double)x, (double)y,
+                               (double)x - browser->cur_scroll_x,
+                               (double)y - browser->cur_scroll_y,
+                               (double)x, (double)y,
                                2, 0, FALSE, FALSE, FALSE, FALSE, NULL,
                                &prevented);
     if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
@@ -2796,10 +2803,14 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
         gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
         ns_js_dispatch_mouse_event(browser->js, node, "pointerdown",
-                                   (double)x, (double)y, (double)x, (double)y,
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
                                    0, 1, sh, ct, al, me, NULL, NULL);
         ns_js_dispatch_mouse_event(browser->js, node, "mousedown",
-                                   (double)x, (double)y, (double)x, (double)y,
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
                                    0, 1, sh, ct, al, me, NULL, NULL);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
     }
@@ -2948,14 +2959,19 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
         gboolean sh = (mods & 1) != 0, ct = (mods & 2) != 0;
         gboolean al = (mods & 4) != 0, me = (mods & 8) != 0;
         ns_js_dispatch_mouse_event(browser->js, node, "pointerup",
-                                   (double)x, (double)y, (double)x, (double)y,
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
                                    0, 0, sh, ct, al, me, NULL, NULL);
         ns_js_dispatch_mouse_event(browser->js, node, "mouseup",
-                                   (double)x, (double)y, (double)x, (double)y,
+                                   (double)x - browser->cur_scroll_x,
+                                   (double)y - browser->cur_scroll_y,
+                                   (double)x, (double)y,
                                    0, 0, sh, ct, al, me, NULL, NULL);
         if (!drag_selected)
             ns_js_dispatch_mouse_event(browser->js, node, "click",
-                                       (double)x, (double)y,
+                                       (double)x - browser->cur_scroll_x,
+                                       (double)y - browser->cur_scroll_y,
                                        (double)x, (double)y,
                                        0, 0, sh, ct, al, me, NULL, &prevented);
         if (ns_js_consume_mutated(browser->js)) browser->dirty = TRUE;
