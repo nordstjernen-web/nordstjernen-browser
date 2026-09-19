@@ -6796,6 +6796,13 @@ ns_js_dispatch_anim_events(ns_js *js, ns_anim *anim)
 }
 
 void
+ns_js_set_anim(ns_js *js, struct ns_anim *anim)
+{
+    (void)js;
+    (void)anim;
+}
+
+void
 ns_js_set_style_table(ns_js *js, GHashTable *styles)
 {
     if (js) js->styles = styles;
