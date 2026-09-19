@@ -88,3 +88,4 @@ Thumbs.db
 /.claude/
 perf.data
 /builddir-stock/
+__pycache__/
