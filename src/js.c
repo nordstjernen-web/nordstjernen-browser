@@ -31778,87 +31778,10 @@ ns_box_transform_origin_2d(const ns_box *b, double bx, double by,
     }
 }
 
-static gboolean
-ns_box_sticky_length(const ns_css_value *value, double *out)
-{
-    if (!value || value->kind != NS_CSS_V_LENGTH) return FALSE;
-    if (value->u.length.unit != NS_CSS_UNIT_PX &&
-        value->u.length.unit != NS_CSS_UNIT_NUMBER)
-        return FALSE;
-    *out = value->u.length.v;
-    return TRUE;
-}
-
 static void
-ns_box_sticky_offset(const ns_box *box, double *out_x, double *out_y)
+ns_js_box_sticky_offset(const ns_box *box, double *out_x, double *out_y)
 {
-    *out_x = 0;
-    *out_y = 0;
-    if (!box || !box->style ||
-        !ns_css_keyword_is(box->style->values[NS_CSS_POSITION], "sticky"))
-        return;
-    ns_js *js = ns_active_js();
-    double viewport_left = js && js->ctx
-        ? ns_window_scroll_prop(js->ctx, "scrollX") : 0;
-    double viewport_top = js && js->ctx
-        ? ns_window_scroll_prop(js->ctx, "scrollY") : 0;
-    double viewport_right = viewport_left + ns_css_viewport_w();
-    double viewport_bottom = viewport_top + ns_css_viewport_h();
-    double box_top = box->y;
-    double box_height = box->margin.top + box->border.top + box->padding.top +
-                        box->content_height + box->padding.bottom +
-                        box->border.bottom + box->margin.bottom;
-    double box_left = box->x;
-    double box_width = box->margin.left + box->border.left + box->padding.left +
-                       box->content_width + box->padding.right +
-                       box->border.right + box->margin.right;
-    double containing_top, containing_bottom;
-    double containing_left, containing_right;
-    if (box->parent) {
-        const ns_box *parent = box->parent;
-        containing_left = parent->x + parent->margin.left +
-                          parent->border.left + parent->padding.left;
-        containing_top = parent->y + parent->margin.top +
-                         parent->border.top + parent->padding.top;
-        containing_right = containing_left + parent->content_width;
-        containing_bottom = containing_top + parent->content_height;
-    } else {
-        containing_left = viewport_left;
-        containing_top = 0;
-        containing_right = viewport_right;
-        containing_bottom = G_MAXDOUBLE / 2;
-    }
-    double top = 0, bottom = 0, left = 0, right = 0;
-    gboolean has_top = ns_box_sticky_length(
-        box->style->values[NS_CSS_TOP], &top);
-    gboolean has_bottom = ns_box_sticky_length(
-        box->style->values[NS_CSS_BOTTOM], &bottom);
-    gboolean has_left = ns_box_sticky_length(
-        box->style->values[NS_CSS_LEFT], &left);
-    gboolean has_right = ns_box_sticky_length(
-        box->style->values[NS_CSS_RIGHT], &right);
-    if (has_top && box_top < viewport_top + top) {
-        double wanted = viewport_top + top - box_top;
-        double cap = containing_bottom - (box_top + box_height);
-        if (cap < 0) cap = 0;
-        *out_y = wanted < cap ? wanted : cap;
-    } else if (has_bottom && box_top + box_height > viewport_bottom - bottom) {
-        double wanted = viewport_bottom - bottom - (box_top + box_height);
-        double cap = containing_top - box_top;
-        if (cap > 0) cap = 0;
-        *out_y = wanted > cap ? wanted : cap;
-    }
-    if (has_left && box_left < viewport_left + left) {
-        double wanted = viewport_left + left - box_left;
-        double cap = containing_right - (box_left + box_width);
-        if (cap < 0) cap = 0;
-        *out_x = wanted < cap ? wanted : cap;
-    } else if (has_right && box_left + box_width > viewport_right - right) {
-        double wanted = viewport_right - right - (box_left + box_width);
-        double cap = containing_left - box_left;
-        if (cap > 0) cap = 0;
-        *out_x = wanted > cap ? wanted : cap;
-    }
+    ns_box_hit_offset(box, out_x, out_y);
 }
 
 static gboolean
@@ -31896,7 +31819,7 @@ ns_box_accumulate_transform(const ns_box *box, ns_mat4 *out)
             local = TRUE;
         }
         double sticky_x, sticky_y;
-        ns_box_sticky_offset(b, &sticky_x, &sticky_y);
+        ns_js_box_sticky_offset(b, &sticky_x, &sticky_y);
         if (sticky_x != 0 || sticky_y != 0) {
             ns_mat4 sticky;
             ns_mat4_identity(&sticky);
@@ -44624,6 +44547,7 @@ ns_js_note_viewport_scroll(ns_js *js, double x, double y)
     if (ns_window_scroll_prop(ctx, "scrollX") != x ||
         ns_window_scroll_prop(ctx, "scrollY") != y)
         js->pending_scrollend_doc = TRUE;
+    ns_box_set_hit_viewport(x, y);
     JSValue global = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, global, "scrollX", JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, global, "scrollY", JS_NewFloat64(ctx, y));

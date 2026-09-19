@@ -19,6 +19,8 @@
 
 #define length_or ns_css_length_or
 
+static void hit_enter_box(const ns_box *b, double *x, double *y);
+
 static double
 length_resolve(const ns_css_value *v, double basis, double fallback)
 {
@@ -6472,6 +6474,7 @@ ns_form_hit_walk(const ns_box *box, double x, double y,
                  const ns_style *inherited)
 {
     if (!box) return NULL;
+    hit_enter_box(box, &x, &y);
     if (!box_hit_untransform_point(box, &x, &y)) return NULL;
     const ns_style *child_inherited = box->style ? box->style : inherited;
     const ns_node *self_hit = NULL;
@@ -13423,6 +13426,7 @@ ns_box *
 ns_box_hit_scrollable(ns_box *root, double x, double y)
 {
     if (!root) return NULL;
+    hit_enter_box(root, &x, &y);
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->paint_bottom > root->paint_top &&
         (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
@@ -13651,6 +13655,7 @@ ns_box *
 ns_box_hit_scrollbar(ns_box *root, double x, double y, double *lx, double *ly)
 {
     if (!root) return NULL;
+    hit_enter_box(root, &x, &y);
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->paint_bottom > root->paint_top &&
         (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
@@ -13693,6 +13698,161 @@ typedef struct {
 static __thread GArray       *g_hit_deferred;
 static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
+static double g_hit_vp_x, g_hit_vp_y;
+
+void
+ns_box_set_hit_viewport(double scroll_x, double scroll_y)
+{
+    g_hit_vp_x = isfinite(scroll_x) ? scroll_x : 0;
+    g_hit_vp_y = isfinite(scroll_y) ? scroll_y : 0;
+}
+
+gboolean
+ns_box_is_fixed(const ns_box *b)
+{
+    return b && b->style &&
+           keyword_is(b->style->values[NS_CSS_POSITION], "fixed");
+}
+
+static void
+sticky_inset(const ns_css_value *v, double basis, gboolean *set, double *out)
+{
+    *set = FALSE;
+    *out = 0;
+    if (!v || length_is_auto(v)) return;
+    if (v->kind != NS_CSS_V_LENGTH && v->kind != NS_CSS_V_CALC) return;
+    *out = length_resolve(v, basis, 0);
+    *set = isfinite(*out);
+}
+
+void
+ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
+                        double sp_x1, double sp_y1,
+                        double *out_dx, double *out_dy)
+{
+    *out_dx = 0;
+    *out_dy = 0;
+    if (!b || !b->style ||
+        !keyword_is(b->style->values[NS_CSS_POSITION], "sticky"))
+        return;
+    double box_top = b->y;
+    double box_h = b->margin.top + b->border.top + b->padding.top +
+                   b->content_height +
+                   b->padding.bottom + b->border.bottom + b->margin.bottom;
+    double box_left = b->x;
+    double box_w = b->margin.left + b->border.left + b->padding.left +
+                   b->content_width +
+                   b->padding.right + b->border.right + b->margin.right;
+    double cb_top, cb_bot, cb_left, cb_right;
+    const ns_box *p = b->parent;
+    if (p) {
+        cb_left = p->x + p->margin.left + p->border.left + p->padding.left;
+        cb_top  = p->y + p->margin.top  + p->border.top  + p->padding.top;
+        cb_right = cb_left + p->content_width;
+        cb_bot   = cb_top  + p->content_height;
+    } else {
+        cb_left = sp_x0; cb_top = 0;
+        cb_right = sp_x1; cb_bot = G_MAXDOUBLE / 2;
+    }
+    double sp_w = sp_x1 - sp_x0, sp_h = sp_y1 - sp_y0;
+    gboolean has_top, has_bot, has_left, has_right;
+    double tval, bval, lval, rval;
+    sticky_inset(b->style->values[NS_CSS_TOP],    sp_h, &has_top,   &tval);
+    sticky_inset(b->style->values[NS_CSS_BOTTOM], sp_h, &has_bot,   &bval);
+    sticky_inset(b->style->values[NS_CSS_LEFT],   sp_w, &has_left,  &lval);
+    sticky_inset(b->style->values[NS_CSS_RIGHT],  sp_w, &has_right, &rval);
+    if (has_top) {
+        double target = sp_y0 + tval;
+        if (box_top < target) {
+            double want = target - box_top;
+            double cap  = cb_bot - (box_top + box_h);
+            if (cap < 0) cap = 0;
+            *out_dy = want < cap ? want : cap;
+        }
+    }
+    if (has_bot && *out_dy == 0) {
+        double target = sp_y1 - bval;
+        double box_bot = box_top + box_h;
+        if (box_bot > target) {
+            double want = target - box_bot;
+            double cap  = cb_top - box_top;
+            if (cap > 0) cap = 0;
+            *out_dy = want > cap ? want : cap;
+        }
+    }
+    if (has_left) {
+        double target = sp_x0 + lval;
+        if (box_left < target) {
+            double want = target - box_left;
+            double cap  = cb_right - (box_left + box_w);
+            if (cap < 0) cap = 0;
+            *out_dx = want < cap ? want : cap;
+        }
+    }
+    if (has_right && *out_dx == 0) {
+        double target = sp_x1 - rval;
+        double box_right = box_left + box_w;
+        if (box_right > target) {
+            double want = target - box_right;
+            double cap  = cb_left - box_left;
+            if (cap > 0) cap = 0;
+            *out_dx = want > cap ? want : cap;
+        }
+    }
+    if (!isfinite(*out_dx)) *out_dx = 0;
+    if (!isfinite(*out_dy)) *out_dy = 0;
+}
+
+static gboolean
+box_scrollport_for(const ns_box *b, double *x0, double *y0,
+                   double *x1, double *y1)
+{
+    for (const ns_box *a = b ? b->parent : NULL; a; a = a->parent) {
+        if (!a->scrolls) continue;
+        *x0 = a->x + a->margin.left + a->border.left + a->scroll_x;
+        *y0 = a->y + a->margin.top + a->border.top + a->scroll_y;
+        *x1 = *x0 + a->padding.left + a->content_width + a->padding.right;
+        *y1 = *y0 + a->padding.top + a->content_height + a->padding.bottom;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+void
+ns_box_sticky_offset(const ns_box *b, double vp_x0, double vp_y0,
+                     double vp_x1, double vp_y1, double *dx, double *dy)
+{
+    double x0 = vp_x0, y0 = vp_y0, x1 = vp_x1, y1 = vp_y1;
+    box_scrollport_for(b, &x0, &y0, &x1, &y1);
+    ns_box_sticky_offset_in(b, x0, y0, x1, y1, dx, dy);
+}
+
+void
+ns_box_hit_offset(const ns_box *b, double *dx, double *dy)
+{
+    *dx = 0;
+    *dy = 0;
+    if (!b || !b->style) return;
+    const ns_css_value *pv = b->style->values[NS_CSS_POSITION];
+    if (!pv || pv->kind != NS_CSS_V_KEYWORD || !pv->u.keyword) return;
+    if (strcmp(pv->u.keyword, "fixed") == 0) {
+        *dx = g_hit_vp_x;
+        *dy = g_hit_vp_y;
+    } else if (strcmp(pv->u.keyword, "sticky") == 0) {
+        ns_box_sticky_offset(b, g_hit_vp_x, g_hit_vp_y,
+                             g_hit_vp_x + ns_css_viewport_w(),
+                             g_hit_vp_y + ns_css_viewport_h(), dx, dy);
+    }
+}
+
+static void
+hit_enter_box(const ns_box *b, double *x, double *y)
+{
+    double dx, dy;
+    ns_box_hit_offset(b, &dx, &dy);
+    *x -= dx;
+    *y -= dy;
+}
 
 static gboolean
 box_defers_hit_layer(const ns_box *b, int *out_z)
@@ -13777,6 +13937,7 @@ box_hit_test_tree(const ns_box *root, double x, double y)
         g_array_append_val(g_hit_deferred, d);
         return NULL;
     }
+    hit_enter_box(root, &x, &y);
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->paint_bottom > root->paint_top &&
         (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
@@ -14000,6 +14161,7 @@ const ns_node *
 ns_box_hit_inline_dom(const ns_box *root, double x, double y)
 {
     if (!root) return NULL;
+    hit_enter_box(root, &x, &y);
     if (!box_hit_untransform_point(root, &x, &y)) return NULL;
     if (root->paint_bottom > root->paint_top &&
         (y < root->paint_top - 1.0 || y > root->paint_bottom + 1.0))
