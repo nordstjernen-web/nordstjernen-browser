@@ -4810,6 +4810,69 @@ done:
     return result;
 }
 
+static gboolean
+font_family_random_item_valid(const char *item, gsize ilen)
+{
+    const char *open = memchr(item, '(', ilen);
+    if (!open || item[ilen - 1] != ')') return FALSE;
+    char *body = g_strndup(open + 1, (gsize)(item + ilen - 1 - (open + 1)));
+    GPtrArray *args = g_ptr_array_new_with_free_func(g_free);
+    const char *seg = body;
+    int depth = 0;
+    for (const char *q = body; ; q++) {
+        if (*q == '(' || *q == '{' || *q == '[') depth++;
+        else if ((*q == ')' || *q == '}' || *q == ']') && depth > 0) depth--;
+        if ((*q == ',' && depth == 0) || !*q) {
+            char *piece = g_strndup(seg, (gsize)(q - seg));
+            g_strstrip(piece);
+            g_ptr_array_add(args, piece);
+            if (!*q) break;
+            seg = q + 1;
+        }
+    }
+    g_free(body);
+    gboolean ok = args->len >= 2;
+    if (ok) {
+        const char *first = args->pdata[0];
+        char *tok[3] = {0};
+        int n = split_ws_limit(first, tok, 3);
+        ok = n >= 1 && n <= 2;
+        for (int i = 0; i < n && ok; i++) {
+            const char *t = tok[i];
+            if (i == 1 && g_ascii_strcasecmp(tok[0], "fixed") == 0) {
+                char *endp = NULL;
+                g_ascii_strtod(t, &endp);
+                ok = endp && *endp == '\0';
+            } else {
+                ok = font_family_ident_valid(t, strlen(t)) ||
+                     (g_str_has_prefix(t, "--") && t[2]);
+            }
+        }
+        for (int i = 0; i < n; i++) g_free(tok[i]);
+    }
+    for (guint i = 1; i < args->len && ok; i++) {
+        const char *a = args->pdata[i];
+        gsize alen = strlen(a);
+        if (!alen) continue;
+        char *inner = NULL;
+        if (a[0] == '{') {
+            if (a[alen - 1] != '}') { ok = FALSE; break; }
+            inner = g_strndup(a + 1, alen - 2);
+        } else if (memchr(a, '{', alen) || memchr(a, '}', alen)) {
+            ok = FALSE;
+            break;
+        } else {
+            inner = g_strdup(a);
+        }
+        char *canon = ns_css_font_family_canonical(inner);
+        ok = canon != NULL;
+        g_free(canon);
+        g_free(inner);
+    }
+    g_ptr_array_free(args, TRUE);
+    return ok;
+}
+
 char *
 ns_css_font_family_canonical(const char *text)
 {
@@ -4872,6 +4935,11 @@ ns_css_font_family_canonical(const char *text)
         } else if (item_start[ilen - 1] == ')' &&
                    (g_ascii_strncasecmp(item_start, "random-item(", 12) == 0 ||
                     g_ascii_strncasecmp(item_start, "-webkit-generic(", 16) == 0)) {
+            if (g_ascii_strncasecmp(item_start, "random-item(", 12) == 0 &&
+                !font_family_random_item_valid(item_start, ilen)) {
+                g_string_free(out, TRUE);
+                return NULL;
+            }
             g_string_append_len(out, item_start, (gssize)ilen);
         } else {
             const char *q = item_start, *qend = item_start + ilen;
@@ -4894,7 +4962,16 @@ ns_css_font_family_canonical(const char *text)
                 while (q < qend && !is_ws(*q)) q++;
                 gsize tlen = (gsize)(q - tok);
                 if (tlen == 0) break;
-                if (!font_family_ident_valid(tok, tlen)) {
+                static const char *const strict_generic[] = {
+                    "serif", "sans-serif", "cursive", "fantasy", "monospace",
+                };
+                gboolean strict = FALSE;
+                for (gsize k = 0; k < G_N_ELEMENTS(strict_generic); k++)
+                    if (strlen(strict_generic[k]) == tlen &&
+                        g_ascii_strncasecmp(tok, strict_generic[k], tlen) == 0)
+                        strict = TRUE;
+                if (!font_family_ident_valid(tok, tlen) ||
+                    ((!first || q < qend) && strict)) {
                     g_string_free(out, TRUE);
                     return NULL;
                 }
