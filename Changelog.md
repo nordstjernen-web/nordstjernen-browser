@@ -16,6 +16,17 @@ Changelog:
   gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
+* about:start wears a new splash: an xkcd-style comic of Noah's ark,
+  drawn in black ink on white by scripts/build-splash-art.py with hand-
+  lettered captions ("Yet another web browser"), a wobbly panel border,
+  and perspective depth from two lanes of animal pairs walking up to the
+  gangplank, Noah waving from the deck, giraffes through the roof, a
+  flying pig, doves, a rain cloud and a sun. scripts/build-splash-gif.py
+  animates 36 frames (walking gaits, a rocking ark, drifting waves,
+  falling rain, pulsing sun rays and a gentle line boil) at 1.5x
+  resolution into the embedded 256-colour GIF, which is smaller than the
+  painted one it replaces. The version restamp script is gone since the
+  generator draws the version itself.
 * Container queries evaluate the full condition grammar: not/and/or
   with nesting, size features in plain, boolean and range form
   (double-sided ranges and math functions included), aspect-ratio and
