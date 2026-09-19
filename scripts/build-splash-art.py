@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,28 +26,12 @@ LINE = 1.5
 HORIZON = 148.0
 MONO = True
 
-FONTS = (
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    "/Library/Fonts/DejaVuSans.ttf",
-    "C:/Windows/Fonts/arial.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-)
-
-
 def project_version() -> str:
     text = (ROOT / "meson.build").read_text(encoding="utf-8")
     match = re.search(r"^\s*version:\s*'([^']+)'", text, re.MULTILINE)
     if match is None:
         raise RuntimeError("could not read version from meson.build")
     return match.group(1).split("-", 1)[0]
-
-
-def load_font(size: int) -> ImageFont.FreeTypeFont:
-    for path in FONTS:
-        if Path(path).is_file():
-            return ImageFont.truetype(path, size)
-    raise FileNotFoundError("no bold sans font found for the splash lettering")
 
 
 class Pen:
@@ -150,39 +134,111 @@ class Pen:
             self.stroke([(lx, top), (lx + dx, ground)], width=w, amp=0.4)
 
 
+GLYPHS = {
+    "A": (9, [[(0, 0), (4.5, 14), (9, 0)], [(2, 5), (7, 5)]]),
+    "B": (9, [[(0, 0), (0, 14), (6, 14), (8, 12.5), (8, 9.5), (6, 8), (0, 8)],
+              [(6, 8), (8.5, 6), (8.5, 2), (6, 0), (0, 0)]]),
+    "C": (9, [[(8.5, 11), (7, 13.3), (4.5, 14), (2, 13), (0.5, 10.5), (0.5, 3.5), (2, 1),
+               (4.5, 0), (7, 0.7), (8.5, 3)]]),
+    "D": (9, [[(0, 0), (0, 14), (4.5, 14), (7.5, 12.5), (9, 9), (9, 5), (7.5, 1.5), (4.5, 0), (0, 0)]]),
+    "E": (8, [[(8, 14), (0, 14), (0, 0), (8, 0)], [(0, 7), (6, 7)]]),
+    "F": (8, [[(8, 14), (0, 14), (0, 0)], [(0, 7), (6, 7)]]),
+    "G": (9, [[(8.5, 11), (7, 13.3), (4.5, 14), (2, 13), (0.5, 10.5), (0.5, 3.5), (2, 1),
+               (4.5, 0), (7, 0.7), (8.5, 3), (8.5, 6), (5, 6)]]),
+    "H": (9, [[(0, 0), (0, 14)], [(9, 0), (9, 14)], [(0, 7), (9, 7)]]),
+    "I": (4, [[(0, 14), (4, 14)], [(2, 14), (2, 0)], [(0, 0), (4, 0)]]),
+    "J": (7, [[(7, 14), (7, 3), (5.5, 0.5), (3, 0), (1, 1), (0, 3.5)]]),
+    "K": (9, [[(0, 0), (0, 14)], [(8, 14), (0, 5)], [(3, 8), (8.5, 0)]]),
+    "L": (8, [[(0, 14), (0, 0), (8, 0)]]),
+    "M": (11, [[(0, 0), (0, 14), (5.5, 3), (11, 14), (11, 0)]]),
+    "N": (9, [[(0, 0), (0, 14), (9, 0), (9, 14)]]),
+    "O": (9, [[(4.5, 14), (1.8, 12.8), (0.4, 10), (0.4, 4), (1.8, 1.2), (4.5, 0), (7.2, 1.2),
+               (8.6, 4), (8.6, 10), (7.2, 12.8), (4.5, 14)]]),
+    "P": (9, [[(0, 0), (0, 14), (6, 14), (8.5, 12.5), (8.5, 9), (6, 7.5), (0, 7.5)]]),
+    "Q": (9, [[(4.5, 14), (1.8, 12.8), (0.4, 10), (0.4, 4), (1.8, 1.2), (4.5, 0), (7.2, 1.2),
+               (8.6, 4), (8.6, 10), (7.2, 12.8), (4.5, 14)], [(6, 3), (9.5, -1)]]),
+    "R": (9, [[(0, 0), (0, 14), (6, 14), (8.5, 12.5), (8.5, 9), (6, 7.5), (0, 7.5)], [(4.5, 7.5), (9, 0)]]),
+    "S": (9, [[(8.5, 11.5), (7, 13.5), (4.5, 14), (2, 13), (0.8, 11), (1.2, 9), (3, 7.5), (6, 6.5),
+               (8, 5), (8.6, 3), (7.5, 1), (5, 0), (2, 0.4), (0.4, 2.5)]]),
+    "T": (9, [[(0, 14), (9, 14)], [(4.5, 14), (4.5, 0)]]),
+    "U": (9, [[(0, 14), (0, 4), (1.2, 1.2), (4.5, 0), (7.8, 1.2), (9, 4), (9, 14)]]),
+    "V": (9, [[(0, 14), (4.5, 0), (9, 14)]]),
+    "W": (12, [[(0, 14), (3, 0), (6, 10), (9, 0), (12, 14)]]),
+    "X": (9, [[(0, 14), (9, 0)], [(0, 0), (9, 14)]]),
+    "Y": (9, [[(0, 14), (4.5, 7), (9, 14)], [(4.5, 7), (4.5, 0)]]),
+    "Z": (9, [[(0, 14), (9, 14), (0, 0), (9, 0)]]),
+    "0": (9, [[(4.5, 14), (2, 13), (0.6, 10), (0.6, 4), (2, 1), (4.5, 0), (7, 1), (8.4, 4),
+               (8.4, 10), (7, 13), (4.5, 14)]]),
+    "1": (5, [[(0, 11), (2.5, 14), (2.5, 0)]]),
+    "2": (9, [[(0.8, 11), (2, 13.2), (4.5, 14), (7, 13), (8, 11), (7.5, 8.5), (0.5, 0), (8.5, 0)]]),
+    "3": (9, [[(0.8, 12.5), (3, 14), (6, 14), (8, 12), (8, 9.5), (6, 7.5), (3.5, 7.5)],
+              [(6, 7.5), (8.5, 5.5), (8.5, 2.5), (6.5, 0), (3, 0), (0.5, 1.5)]]),
+    "4": (9, [[(7, 0), (7, 14), (0, 4), (9, 4)]]),
+    "5": (9, [[(8, 14), (1.5, 14), (0.8, 7.5), (3.5, 8.5), (6, 8.5), (8.5, 6.5), (8.5, 2.5),
+               (6.5, 0), (3, 0), (0.5, 1.5)]]),
+    "6": (9, [[(7.8, 12), (5.5, 14), (3, 13.5), (1, 11), (0.5, 7), (0.8, 3), (2.5, 0.5), (5, 0),
+               (7.5, 1), (8.5, 3.5), (8, 6), (6, 7.5), (3.5, 7.5), (1.2, 6.2)]]),
+    "7": (9, [[(0.5, 14), (9, 14), (3.5, 0)]]),
+    "8": (9, [[(4.5, 7.5), (2, 8.5), (1, 10.5), (1.5, 13), (4.5, 14), (7.5, 13), (8, 10.5),
+               (7, 8.5), (4.5, 7.5), (1.5, 6), (0.8, 3), (2, 0.7), (4.5, 0), (7, 0.7), (8.2, 3),
+               (7.5, 6), (4.5, 7.5)]]),
+    "9": (9, [[(1.2, 2), (3.5, 0), (6, 0.5), (8, 3), (8.5, 7), (8.2, 11), (6.5, 13.5), (4, 14),
+               (1.5, 13), (0.5, 10.5), (1, 8), (3, 6.5), (5.5, 6.5), (7.8, 7.8)]]),
+    ".": (2, [[(1, 0.6), (1.2, 0.3)]]),
+    ",": (2, [[(1.4, 1.2), (0.6, -1.8)]]),
+    "'": (2, [[(1.2, 14), (0.8, 11)]]),
+    "?": (9, [[(0.8, 11.5), (2, 13.5), (4.5, 14), (7, 13), (8, 11), (7, 8.5), (4.5, 7), (4.5, 4)],
+              [(4.5, 0.8), (4.6, 0.4)]]),
+    "!": (2, [[(1, 14), (1, 4)], [(1, 0.8), (1.1, 0.4)]]),
+    "-": (7, [[(0.5, 6.5), (6.5, 6.5)]]),
+    ":": (2, [[(1, 9), (1.1, 8.6)], [(1, 1), (1.1, 0.6)]]),
+}
+
+
 def letter(pen: Pen, text: str, x: float, y: float, size: float, spacing: float = 0.0,
-           fill=INK) -> float:
-    font = load_font(int(size * SS))
-    rng = np.random.default_rng(hash(text) & 0xFFFF)
-    cursor = x * SS
+           fill=INK, width: float = 0.0) -> float:
+    rng = np.random.default_rng((hash(text) & 0xFFFF) + 11)
+    unit = size / 14.0
+    cursor = x
+    stroke_w = width or max(1.0, size * 0.105)
     for ch in text.upper():
         if ch == " ":
-            cursor += size * SS * 0.42
+            cursor += 6.5 * unit
             continue
-        box = font.getbbox(ch)
-        w = box[2] - box[0] + 6 * SS
-        h = box[3] - box[1] + 6 * SS
-        glyph = Image.new("L", (w, h), 0)
-        ImageDraw.Draw(glyph).text((3 * SS - box[0], 3 * SS - box[1]), ch, font=font, fill=255)
-        if size >= 20:
-            glyph = glyph.filter(ImageFilter.MaxFilter(3))
-        glyph = glyph.filter(ImageFilter.GaussianBlur(0.3 * SS))
-        punctuation = ch in ".,'"
-        angle = 0.0 if punctuation else rng.uniform(-3.5, 3.5)
-        stretch = 1.0 if punctuation else rng.uniform(0.95, 1.06)
-        glyph = glyph.resize((glyph.width, max(1, int(glyph.height * stretch))), Image.Resampling.BICUBIC)
-        glyph = glyph.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True)
-        dy = 0.0 if punctuation else rng.uniform(-1.2, 1.2) * SS
-        dx = rng.uniform(-0.5, 0.5) * SS
-        pen.image.paste(fill, (int(cursor + dx), int(y * SS + dy - 3 * SS + box[1])), glyph)
-        cursor += (box[2] - box[0]) + (1.6 + spacing) * SS + rng.uniform(-0.3, 0.3) * SS
-    return cursor / SS
+        if ch not in GLYPHS:
+            cursor += 6 * unit
+            continue
+        advance, strokes = GLYPHS[ch]
+        tilt = rng.uniform(-0.06, 0.06)
+        lift = rng.uniform(-0.35, 0.35) * unit
+        scale = rng.uniform(0.96, 1.05)
+        for stroke in strokes:
+            pts = [(cursor + (gx + gy * tilt) * unit * scale, y - gy * unit * scale + lift) for gx, gy in stroke]
+            if len(pts) == 2 and math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]) < 0.6 * unit:
+                pen.dot(pts[0][0], pts[0][1], stroke_w * 0.55, fill=fill)
+                continue
+            pen.stroke(pts, width=stroke_w, amp=0.28 * unit ** 0.5, fill=fill)
+        cursor += (advance + 3.2 + spacing) * unit
+    return cursor
+
+
+def text_width(text: str, size: float, spacing: float = 0.0) -> float:
+    unit = size / 14.0
+    total = 0.0
+    for ch in text.upper():
+        if ch == " ":
+            total += 6.5 * unit
+        elif ch in GLYPHS:
+            total += (GLYPHS[ch][0] + 3.2 + spacing) * unit
+        else:
+            total += 6 * unit
+    return total
 
 
 def title(pen: Pen, version: str) -> None:
-    letter(pen, "Yet another web browser", 34, 24, 31, spacing=1.0)
-    end = letter(pen, "Nordstjernen", 38, 72, 13, spacing=0.6)
-    letter(pen, version, end + 8, 72, 13, spacing=0.6)
+    letter(pen, "Yet another web browser", 34, 58, 30, spacing=0.6)
+    end = letter(pen, "Nordstjernen", 36, 88, 12, spacing=0.4)
+    letter(pen, version, end + 9, 88, 12, spacing=0.4)
 
 
 def panel(pen: Pen) -> None:
@@ -778,18 +834,15 @@ def queue(pen: Pen, t: float) -> None:
     pen.gait = 0.0
 
 
-def speech(pen: Pen, x: float, y: float, w: float, h: float, tail_to, lines) -> None:
-    pen.ellipse(x, y, w / 2, h / 2, fill=PAPER, amp=1.2)
-    tx, ty = tail_to
-    pen.shape([(x - w * 0.12, y + h * 0.42), (tx, ty), (x + w * 0.02, y + h * 0.46)], fill=PAPER, width=1.2, amp=0.4)
-    pen.draw.polygon([((x - w * 0.10) * SS, (y + h * 0.36) * SS), ((x + w * 0.0) * SS, (y + h * 0.36) * SS),
-                      ((x + w * 0.01) * SS, (y + h * 0.44) * SS), ((x - w * 0.11) * SS, (y + h * 0.42) * SS)], fill=PAPER)
-    size = 10.5 if len(lines) > 2 else 9.5
-    font = load_font(int(size * SS))
+def speech(pen: Pen, x: float, y: float, tail_to, lines, size: float = 10.0) -> None:
+    widest = max(text_width(line, size) for line in lines)
     for i, text in enumerate(lines):
-        tw = sum(font.getbbox(c)[2] - font.getbbox(c)[0] + 1.8 * SS for c in text.upper() if c != " ")
-        tw += sum(size * SS * 0.42 for c in text if c == " ")
-        letter(pen, text, x - tw / SS / 2, y - h * 0.34 + i * (size + 4.0), size, spacing=0.2)
+        w = text_width(text, size)
+        letter(pen, text, x - w / 2, y + i * (size * 1.45), size)
+    tx, ty = tail_to
+    bottom = y + (len(lines) - 1) * size * 1.45 + 4
+    sx = x + (widest / 2 - 4) * (1 if tx > x else -1)
+    pen.stroke([(sx, bottom - size * 0.6), (tx, ty)], width=0.9, amp=0.3)
 
 
 def draw_frame(version: str, t: float, boil: int) -> Image.Image:
@@ -812,8 +865,8 @@ def draw_frame(version: str, t: float, boil: int) -> Image.Image:
     gangplank(pen, px0, py0, plank_x1, plank_y1)
     queue(pen, t)
     stick_figure(pen, px0 + 14, py0 + 4, h=30, facing=-1, clipboard=True)
-    speech(pen, 468, 98, 214, 60, (612, 150), ["Two of everything.", "Yes. Even the", "mosquitoes."])
-    speech(pen, 300, 186, 200, 42, (546, 218), ["The unicorns said", "they'd catch the next one."])
+    speech(pen, 470, 80, (612, 152), ["Two of everything.", "Yes. Even the mosquitoes."])
+    speech(pen, 462, 172, (544, 218), ["The unicorns said", "they'd catch the next one."], size=9.0)
     flying_pig(pen, 118 + 6 * math.sin(TAU * t), 122 + 4 * math.sin(TAU * t * 2), 1.2, t)
     dove(pen, 520 - ((t + 0.10) % 1.0) * 600, 136 + 4 * math.sin(TAU * t * 2), 1.5, t)
     dove(pen, 520 - ((t + 0.18) % 1.0) * 600, 142 + 4 * math.sin(TAU * t * 2 + 1), 1.1, t + 0.1)
