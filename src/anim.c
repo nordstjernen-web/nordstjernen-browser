@@ -178,6 +178,7 @@ ns_anim_keyframes_free(gpointer data)
 }
 
 static gboolean advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us);
+static gboolean advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us);
 static void run_emit_script(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
                             const char *type);
 
@@ -529,6 +530,7 @@ chan_start(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
     ch->generation++;
     a->active_count++;
     anim_emit(a, s->node, "transitionrun", ns_css_prop_name(ch->prop), 0.0);
+    if (ch->delay_ms < 0) advance_chan(a, s, ch, now_us);
 }
 
 static void
@@ -582,7 +584,7 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
             if (ch->active) chan_cancel(a, s, ch, now_us);
         } else if (interpolable) {
             chan_start(a, s, ch, from, cur, e, now_us, FALSE);
-        } else if (prop_discretely_animatable(prop)) {
+        } else if (prop_discretely_animatable(prop) || e->allow_discrete) {
             chan_start(a, s, ch, from, cur, e, now_us, TRUE);
         } else if (ch->active) {
             chan_cancel(a, s, ch, now_us);
@@ -725,7 +727,7 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     r->kf = gkf ? ns_css_keyframes_resolve(gkf, style->vars) : NULL;
     r->stops = anim_stops_build(r->kf ? r->kf : gkf);
     if (r->values) g_hash_table_remove_all(r->values);
-    if (r->paused) advance_run(a, r, now_us);
+    advance_run(a, r, now_us);
 }
 
 static void
