@@ -618,7 +618,9 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
                 engine_remember_linked_css(abs, bytes);
-                if (css_has_viewport_media(data)) cc->media_seen = TRUE;
+                char *terminated = g_strndup(data, len);
+                if (css_has_viewport_media(terminated)) cc->media_seen = TRUE;
+                g_free(terminated);
                 ns_css_stylesheet *sh =
                     ns_css_stylesheet_parse_url_cached(abs, data, (gssize)len);
                 if (sh) {

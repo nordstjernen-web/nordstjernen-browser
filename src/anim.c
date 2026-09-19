@@ -121,6 +121,7 @@ anim_emit(ns_anim *a, const ns_node *node, const char *type,
     if (!a || !node) return;
     if (!a->events)
         a->events = g_array_new(FALSE, FALSE, sizeof(ns_anim_event));
+    if (elapsed_ms == 0) elapsed_ms = 0.0;
     ns_anim_event e = { node, type, g_strdup(name ? name : ""), elapsed_ms };
     g_array_append_val(a->events, e);
 }

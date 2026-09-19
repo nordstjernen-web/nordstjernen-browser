@@ -8991,7 +8991,9 @@ counter_list_canonical(const char *text, ns_css_prop prop)
         char *decoded = anim_ident_decode(name);
         g_free(name);
         if (!decoded || css_wide_keyword_or_default(decoded) ||
-            g_ascii_strcasecmp(decoded, "none") == 0) {
+            g_ascii_strcasecmp(decoded, "none") == 0 ||
+            g_ascii_isdigit((guchar)decoded[0]) ||
+            (decoded[0] == '-' && (g_ascii_isdigit((guchar)decoded[1]) || !decoded[1]))) {
             g_free(decoded);
             ok = FALSE;
             break;
@@ -9806,6 +9808,13 @@ ns_css_specified_canonical(const char *prop, const char *value)
             return r;
         }
         ns_css_value_free(v);
+    }
+    if (prop && strcmp(prop, "aspect-ratio") == 0) {
+        ns_css_value *v = parse_value_for(NS_CSS_ASPECT_RATIO, value);
+        if (!v) return NULL;
+        char *r = ns_css_value_serialize(v);
+        ns_css_value_free(v);
+        return r;
     }
     if (prop && strcmp(prop, "animation-range") == 0) {
         char *st = NULL, *en = NULL;
@@ -11692,28 +11701,51 @@ parse_value_for(ns_css_prop prop, const char *text)
         v = parse_anim_longhand(prop, t);
         break;
     case NS_CSS_ASPECT_RATIO: {
-        if (g_ascii_strcasecmp(t, "auto") == 0) {
-            v = g_new0(ns_css_value, 1);
+        const char *rp = t;
+        const char *rend = t + strlen(t);
+        gboolean with_auto = FALSE, has_ratio = FALSE, bad = FALSE;
+        double a = 1, b = 1;
+        while (rp < rend && !bad) {
+            while (rp < rend && is_ws(*rp)) rp++;
+            if (rp >= rend) break;
+            if (g_ascii_strncasecmp(rp, "auto", 4) == 0 &&
+                (rp + 4 == rend || is_ws(rp[4]))) {
+                if (with_auto) bad = TRUE;
+                with_auto = TRUE;
+                rp += 4;
+                continue;
+            }
+            if (has_ratio) { bad = TRUE; break; }
+            char *ea = NULL;
+            a = g_ascii_strtod(rp, &ea);
+            if (!ea || ea == rp || a < 0 || !isfinite(a) ||
+                (ea < rend && !is_ws(*ea) && *ea != '/')) { bad = TRUE; break; }
+            rp = ea;
+            while (rp < rend && is_ws(*rp)) rp++;
+            if (rp < rend && *rp == '/') {
+                rp++;
+                while (rp < rend && is_ws(*rp)) rp++;
+                char *eb = NULL;
+                b = g_ascii_strtod(rp, &eb);
+                if (!eb || eb == rp || b < 0 || !isfinite(b) ||
+                    (eb < rend && !is_ws(*eb))) { bad = TRUE; break; }
+                rp = eb;
+            }
+            has_ratio = TRUE;
+        }
+        if (bad || (!with_auto && !has_ratio)) break;
+        v = g_new0(ns_css_value, 1);
+        if (!has_ratio) {
             v->kind = NS_CSS_V_KEYWORD;
             v->u.keyword = g_strdup("auto");
             break;
         }
-        char *slash = strchr(t, '/');
-        char *end_a = NULL;
-        double a = g_ascii_strtod(t, &end_a);
-        if (!end_a || end_a == t || a <= 0) break;
-        double b = 1.0;
-        if (slash) {
-            char *end_b = NULL;
-            const char *after = slash + 1;
-            while (*after && is_ws(*after)) after++;
-            b = g_ascii_strtod(after, &end_b);
-            if (!end_b || end_b == after || b <= 0) break;
-        }
-        v = g_new0(ns_css_value, 1);
-        v->kind = NS_CSS_V_LENGTH;
-        v->u.length.v = a / b;
-        v->u.length.unit = NS_CSS_UNIT_NUMBER;
+        v->kind = NS_CSS_V_SIZE;
+        v->u.size.w = a;
+        v->u.size.h = b;
+        v->u.size.w_unit = NS_CSS_UNIT_NUMBER;
+        v->u.size.h_unit = NS_CSS_UNIT_NUMBER;
+        v->u.size.w_auto = with_auto;
         break;
     }
     case NS_CSS_CONTAINER_NAME: {
@@ -22073,6 +22105,10 @@ ns_css_value_serialize(const ns_css_value *v)
         return g_strdup_printf("%g%s", v->u.length.v, unit);
     }
     case NS_CSS_V_SIZE: {
+        if (v->u.size.w_unit == NS_CSS_UNIT_NUMBER &&
+            v->u.size.h_unit == NS_CSS_UNIT_NUMBER && !v->u.size.h_auto)
+            return g_strdup_printf(v->u.size.w_auto ? "auto %g / %g" : "%g / %g",
+                                   v->u.size.w, v->u.size.h);
         GString *s = g_string_new(NULL);
         if (v->u.size.w_auto) {
             g_string_append(s, "auto");
@@ -23294,7 +23330,8 @@ attr_unit_ident_valid(const char *unit)
     return FALSE;
 }
 
-static char *substitute_attrs(const char *text, const ns_node *node, int depth);
+static char *substitute_attrs(const char *text, const ns_node *node, int depth,
+                              gboolean *tainted);
 
 static char *
 attr_function_value(const char *args, const ns_node *node, int depth,
@@ -23375,7 +23412,7 @@ attr_function_value(const char *args, const ns_node *node, int depth,
     }
     if (syntax) ns_css_syntax_def_free(syntax);
     if (!result) {
-        if (fallback && depth < 8) result = substitute_attrs(fallback, node, depth + 1);
+        if (fallback && depth < 8) result = substitute_attrs(fallback, node, depth + 1, NULL);
         else if (!fallback && kind == ATTR_STRING) result = g_strdup("\"\"");
         if (!result) *invalid = TRUE;
     }
@@ -23386,14 +23423,31 @@ done:
     return result;
 }
 
+static gboolean
+url_function_at(const char *text, const char *open_paren)
+{
+    const char *q = open_paren;
+    while (q > text && (is_ident(q[-1]) || q[-1] == '-')) q--;
+    gsize len = (gsize)(open_paren - q);
+    return (len == 3 && g_ascii_strncasecmp(q, "url", 3) == 0) ||
+           (len == 3 && g_ascii_strncasecmp(q, "src", 3) == 0) ||
+           (len == 5 && g_ascii_strncasecmp(q, "image", 5) == 0) ||
+           (len == 9 && g_ascii_strncasecmp(q, "image-set", 9) == 0) ||
+           (len == 17 && g_ascii_strncasecmp(q, "-webkit-image-set", 17) == 0);
+}
+
 static char *
-substitute_attrs(const char *text, const ns_node *node, int depth)
+substitute_attrs(const char *text, const ns_node *node, int depth,
+                 gboolean *tainted)
 {
     if (!text) return NULL;
     if (!strstr(text, "attr(")) return g_strdup(text);
     GString *out = g_string_new(NULL);
     const char *p = text;
     const char *end = text + strlen(text);
+    int url_depth = 0;
+    int depth_stack[64];
+    int stack_n = 0;
     while (p < end) {
         if (*p == '"' || *p == '\'') {
             const char *q = css_quoted_end(p + 1, *p);
@@ -23402,8 +23456,15 @@ substitute_attrs(const char *text, const ns_node *node, int depth)
             p = q + 1;
             continue;
         }
+        if (*p == '(' && stack_n < 64) {
+            depth_stack[stack_n++] = url_function_at(text, p);
+            if (depth_stack[stack_n - 1]) url_depth++;
+        } else if (*p == ')' && stack_n > 0) {
+            if (depth_stack[--stack_n]) url_depth--;
+        }
         if (g_ascii_strncasecmp(p, "attr(", 5) == 0 &&
             (p == text || !is_ident(p[-1]))) {
+            if (url_depth > 0 && tainted) *tainted = TRUE;
             int d = 1;
             const char *q = p + 5;
             while (q < end && d > 0) {
@@ -23427,6 +23488,9 @@ substitute_attrs(const char *text, const ns_node *node, int depth)
                 g_string_free(out, TRUE);
                 return NULL;
             }
+            if (tainted && (strstr(val, "url(") || strstr(val, "src(") ||
+                            strstr(val, "image-set(")))
+                *tainted = TRUE;
             g_string_append(out, val);
             g_free(val);
             p = q + 1;
@@ -23536,9 +23600,14 @@ resolve_pending_into_matches(GArray *pending_matches,
         char *substituted = substitute_vars_with(pm->pd->raw_vtext, vars, 0);
         if (!substituted) continue;
         if (strstr(substituted, "attr(")) {
-            char *with_attrs = substitute_attrs(substituted, node, 0);
+            gboolean tainted = FALSE;
+            char *with_attrs = substitute_attrs(substituted, node, 0, &tainted);
             g_free(substituted);
             if (!with_attrs) continue;
+            if (tainted && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-')) {
+                g_free(with_attrs);
+                continue;
+            }
             substituted = with_attrs;
         }
         gboolean ignored_important = FALSE;
