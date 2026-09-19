@@ -6522,6 +6522,8 @@ static double
 measure_min_width(ns_box *box, const ns_style *parent_style);
 static double
 measure_min_content_width(ns_box *box, const ns_style *parent_style);
+static void
+table_border_spacing(const ns_style *s, double *hsp, double *vsp);
 
 static int
 float_side_of(const ns_style *s)
@@ -6945,6 +6947,98 @@ grid_natural_width(ns_box *box, const ns_style *child_style)
     return sum;
 }
 
+static guint
+table_column_count(const ns_box *box)
+{
+    guint max_cols = 0;
+    for (ns_box *row = box->first_child; row; row = row->next_sibling) {
+        if (row->kind != NS_BOX_TABLE_ROW) continue;
+        guint c = 0;
+        for (ns_box *cell = row->first_child; cell; cell = cell->next_sibling) {
+            c += cell->colspan > 0 ? (guint)cell->colspan : 1;
+            if (c > NS_TABLE_MAX_COLS) { c = NS_TABLE_MAX_COLS; break; }
+        }
+        if (c > max_cols) max_cols = c;
+    }
+    return max_cols;
+}
+
+static void
+table_widen_columns(double *cols, guint max_cols, guint col, int span,
+                    double outer)
+{
+    if (span < 1) span = 1;
+    double per = outer / (double)span;
+    for (int i = 0; i < span && col + (guint)i < max_cols; i++)
+        if (per > cols[col + (guint)i]) cols[col + (guint)i] = per;
+}
+
+static double
+table_intrinsic_width(ns_box *box, const ns_style *inherited, gboolean min)
+{
+    double captions = 0;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_TABLE_CAPTION) continue;
+        const ns_style *cs = c->style ? c->style : inherited;
+        double w = min ? measure_min_width(c, cs) : measure_natural_width(c, cs);
+        ns_edges m = {0}, pd = {0}, bd = {0};
+        edges_from_style(c->style, 0, &m, &pd, &bd);
+        w += m.left + m.right + pd.left + pd.right + bd.left + bd.right;
+        if (w > captions) captions = w;
+    }
+    guint max_cols = table_column_count(box);
+    if (max_cols == 0) return captions;
+    double *cols = g_new0(double, max_cols);
+    for (ns_box *row = box->first_child; row; row = row->next_sibling) {
+        if (row->kind != NS_BOX_TABLE_ROW) continue;
+        guint col = 0;
+        for (ns_box *cell = row->first_child; cell && col < max_cols;
+             cell = cell->next_sibling) {
+            int span = cell->colspan > 0 ? cell->colspan : 1;
+            const ns_style *cs = cell->style ? cell->style : inherited;
+            ns_edges m = {0}, pd = {0}, bd = {0};
+            edges_from_style(cell->style, 0, &m, &pd, &bd);
+            double extra = m.left + m.right + pd.left + pd.right +
+                           bd.left + bd.right;
+            double w = min ? measure_min_width(cell, cs)
+                           : measure_natural_width(cell, cs);
+            const ns_css_value *wv = cell->style
+                ? cell->style->values[NS_CSS_WIDTH] : NULL;
+            if (wv && (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC) &&
+                !(wv->kind == NS_CSS_V_LENGTH &&
+                  wv->u.length.unit == NS_CSS_UNIT_PERCENT)) {
+                double e = length_resolve(wv, 0, -1);
+                double floor_w = min ? w : measure_min_width(cell, cs);
+                if (e >= 0) w = e > floor_w ? e : floor_w;
+            }
+            table_widen_columns(cols, max_cols, col, span, w + extra);
+            col += (guint)span;
+        }
+    }
+    if (box->table_col_hints) {
+        guint col = 0;
+        for (guint i = 0; i < box->table_col_hints->len && col < max_cols; i++) {
+            ns_table_col_hint *hint =
+                &g_array_index(box->table_col_hints, ns_table_col_hint, i);
+            int hspan = hint->span > 0 ? hint->span : 1;
+            const ns_css_value *wv = hint->style
+                ? hint->style->values[NS_CSS_WIDTH] : NULL;
+            if (wv && wv->kind == NS_CSS_V_LENGTH &&
+                wv->u.length.unit != NS_CSS_UNIT_PERCENT) {
+                double w = length_resolve(wv, 0, -1);
+                if (w >= 0) table_widen_columns(cols, max_cols, col, hspan, w);
+            }
+            col += (guint)hspan;
+        }
+    }
+    double hsp = 0, vsp = 0;
+    table_border_spacing(box->style, &hsp, &vsp);
+    double sum = (double)(max_cols + 1) * hsp;
+    for (guint i = 0; i < max_cols; i++) sum += cols[i];
+    g_free(cols);
+    return sum > captions ? sum : captions;
+}
+
 static double
 measure_natural_width(ns_box *box, const ns_style *parent_style)
 {
@@ -7048,6 +7142,8 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     }
     if (style_contains_inline_size(box->style)) return 0;
     const ns_style *child_style = box->style ? box->style : parent_style;
+    if (box->kind == NS_BOX_TABLE)
+        return table_intrinsic_width(box, child_style, FALSE);
     if (box->style && style_is_grid_container(box->style)) {
         double gw = grid_natural_width(box, child_style);
         if (gw > 0) return gw;
@@ -7201,6 +7297,9 @@ measure_min_content_width(ns_box *box, const ns_style *parent_style)
         box->kind == NS_BOX_TEXT)
         return measure_min_width(box, parent_style);
     if (style_contains_inline_size(box->style)) return 0;
+    if (box->kind == NS_BOX_TABLE)
+        return table_intrinsic_width(
+            box, box->style ? box->style : parent_style, TRUE);
     if (box->style && style_is_grid_container(box->style)) {
         const ns_css_value *cv =
             box->style->values[NS_CSS_GRID_TEMPLATE_COLUMNS];
@@ -7486,16 +7585,7 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
     if (cw < 0) cw = 0;
     box->content_width = cw;
 
-    guint max_cols = 0;
-    for (ns_box *row = box->first_child; row; row = row->next_sibling) {
-        if (row->kind != NS_BOX_TABLE_ROW) continue;
-        guint c = 0;
-        for (ns_box *cell = row->first_child; cell; cell = cell->next_sibling) {
-            c += cell->colspan > 0 ? (guint)cell->colspan : 1;
-            if (c > NS_TABLE_MAX_COLS) { c = NS_TABLE_MAX_COLS; break; }
-        }
-        if (c > max_cols) max_cols = c;
-    }
+    guint max_cols = table_column_count(box);
     if (max_cols == 0) {
         double inner_x = box->x + box->margin.left + box->border.left + box->padding.left;
         double inner_y = box->y + box->margin.top  + box->border.top  + box->padding.top;
