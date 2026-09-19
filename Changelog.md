@@ -16,6 +16,165 @@ Changelog:
   gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
+* Container queries evaluate the full condition grammar: not/and/or
+  with nesting, size features in plain, boolean and range form
+  (double-sided ranges and math functions included), aspect-ratio and
+  orientation, unknown features that make the enclosing condition
+  false, comma-separated condition lists, name-only rules and vertical
+  writing-mode containers. Invalid preludes are dropped from the engine
+  and the CSSOM, conditionText serializes canonically, container-name
+  and the container shorthand validate their values, and
+  CSSContainerRule exposes containerName, containerQuery and
+  conditions.
+* image-set() is validated against the CSS Images 4 grammar (url and
+  string images, gradients, resolutions in x, dppx, dpi and dpcm, a
+  type() hint, no duplicate or missing options) and serializes
+  canonically; unicode-range validates and canonicalizes its ranges
+  (U+26, u+0-7F, U+4?? read back U+26, U+0-7F, U+400-4FF).
+* An absolutely positioned box whose static position comes from an rtl
+  ancestor sits at that ancestor's content-right edge, and the used
+  values of auto insets are reported physically. font-family keeps
+  random-item() and -webkit-generic() items, validates random-item()'s
+  arguments and rejects a generic family inside a multi-word name; the
+  background-position and object-position shorthands accept CSS-wide
+  keywords; specified grid track lists serialize their line names.
+* Transitions and animations run for every property. The animation
+  engine keeps one channel per (element, property): a transition starts
+  whenever a property named by transition-property (or "all") computes
+  to a different interpolable value, lengths, percentages, calc()
+  mixes, numbers, colours, shadow lists and op-compatible transform
+  lists interpolate, visibility flips discretely, and keyframe
+  animations sample every declared property between the surrounding
+  keyframes, so margins, sizes and colours animate, not just opacity
+  and transform. Interpolated values are written into the computed
+  style after each cascade, so layout, paint and getComputedStyle see
+  the in-flight value; a frame whose animated properties affect layout
+  marks the page for relayout.
+* The Web Animations surface: document.getAnimations() and
+  element.getAnimations() return CSSTransition and CSSAnimation
+  objects (stable identity per element, property and run) with
+  currentTime and startTime that seek the engine, playState, pending,
+  the ready and finished promises, play/pause/finish/cancel, the finish
+  and cancel events, transitionProperty/animationName and an
+  AnimationEffect whose target, getTiming() and getComputedTiming()
+  describe the run. Element.animate() builds a keyframe animation from
+  a keyframe list or a property-indexed object with duration, delay,
+  iterations, direction, fill and easing.
+* Several CSS animations run on one element, one per animation-name
+  entry, each with its own duration, delay, timing function, iteration
+  count, direction, fill mode and play state from the animation
+  longhands; animation-timing-function, animation-iteration-count,
+  animation-direction, animation-fill-mode, animation-name,
+  transition-property and transition-timing-function are real
+  longhands that parse, cascade and serialize on their own, and
+  AnimationEvent and TransitionEvent are constructible.
+* The animation and transition shorthands parse per comma-separated
+  item against their full grammar (a time is a duration before it is
+  a delay, an easing keyword, steps() or cubic-bezier(), a
+  transition-behavior keyword, "auto" and "none" where allowed),
+  expand into their longhands with the omitted ones reset, and
+  style.animation, style.transition and getComputedStyle rebuild the
+  shorthand from the longhands in canonical order. animation-timeline,
+  animation-range-start, animation-range-end, animation-composition and
+  transition-behavior are properties.
+* Animation and transition events fire by phase: animationstart at
+  the end of the delay, animationiteration on every iteration boundary,
+  animationend once, transitionrun when the transition is created,
+  transitionstart after its delay, transitionend when it completes,
+  and the cancel events when a run is interrupted; elapsedTime and
+  pseudoElement are filled in. A transition can start from an unset
+  value (the property's initial value) and a keyframe that leaves a
+  property out fills it from the base style.
+* attr() is substituted at cascade time, so content: attr(data-x)
+  and attr() in other properties follow attribute changes; an attr()
+  URL is tainted. Boxes honour width: stretch and height: stretch,
+  grid item margins are resolved against the grid area, a canvas
+  takes its width and height attributes as dimension hints, and the
+  specified style serializes shorthands from their longhands.
+* aspect-ratio keeps its numerator and denominator (16 / 9 reads back
+  16 / 9), an absolutely positioned box with both insets set is
+  aligned inside them by justify-self and align-self rather than
+  stretched unconditionally, and a shrink-to-fit abspos box measures
+  against the inset width.
+* A declaration whose value is exactly one {}-block is a declaration
+  rather than a nested style rule when the CSSOM splits a style block,
+  and a custom property keeps a {}-block anywhere in its value.
+* A table's max-content and min-content widths are measured column by
+  column, as css-tables-3 requires: each column takes the widest cell
+  it holds, the columns are summed once with the border spacing, and
+  captions widen the result. They used to be the sum of every row, so
+  a table in a flex or grid item, a floated infobox and a table nested
+  in a cell reported several times their real width.
+* position: fixed elements stay anchored to the viewport while the
+  page scrolls: paint offsets a fixed box by the viewport origin,
+  hit-testing applies the same offset so clicks land on the fixed
+  element, getBoundingClientRect reports its viewport position, and
+  mouse events carry viewport-relative clientX/clientY with document
+  coordinates in pageX/pageY. position: sticky boxes are hit-tested
+  where they paint through one shared ns_box_sticky_offset that
+  resolves percentage and calc() insets against the scrollport and
+  measures a sticky box inside an overflow container against that
+  container's padding box.
+* box-shadow and text-shadow serialize their specified value in
+  canonical order (colour, offsets, blur, spread, inset) with 0
+  written as 0px, and reject the forms the grammar excludes: a lone
+  length, a fifth length, two colours, inset twice, a negative blur,
+  a percentage, or a colour splitting the lengths. A shadow without a
+  colour takes currentcolor from the computed color, and rgb(0, 255,
+  0) with spaces inside the parentheses no longer splits into tokens.
+  A colour keyword keeps its lowercase spelling in the specified style
+  and the deprecated CSS2 system colours map to their CSS Color 4
+  replacements.
+* The background shorthand is parsed layer by layer against the
+  css-backgrounds grammar: every comma-separated layer sets all eight
+  longhands (image, position, size after the slash, repeat,
+  attachment, origin and clip, with the colour on the final layer) and
+  a longhand the layer leaves out resets to its initial value, so
+  background: red no longer keeps an earlier background-image.
+  background-attachment is a property, background-clip,
+  background-origin and background-attachment take comma-separated
+  lists, paint resolves origin and clip per layer, clips the colour by
+  the last layer's clip and positions a background-attachment: fixed
+  layer against the viewport, background-position keeps the keywords
+  it was written with, background-position-x/-y accept x-start,
+  y-end and an edge with an offset, and getComputedStyle composes
+  border-radius and background-position from their longhands.
+* -webkit-border-radius and the -webkit-border-*-radius corners are
+  aliases of the unprefixed properties, and the border-radius
+  shorthand is validated before any corner is written: a fifth value,
+  a negative radius or a second slash rejects the declaration, and the
+  specified value collapses each half as a quad.
+* transform is validated function by function against css-transforms:
+  each function checks its argument count and types, so translate(1px,
+  2px, 3px), scale(6, 7, 8) and skewX(0, 0) are rejected, and the
+  specified value serializes canonically (percentages in scale()
+  become numbers, rotate(0) reads rotate(0deg), 0 lengths read 0px,
+  function names are lowercased). The scale, rotate and translate
+  properties get the same treatment, transform-origin and
+  perspective-origin follow the position grammar, perspective: 1000
+  without a unit is rejected, and transform-box is a property.
+* The border, border-top/right/bottom/left, border-block-*,
+  border-inline-*, outline and column-rule shorthands are validated
+  against their grammar before any longhand is written: a second
+  width, style or colour, a negative or percentage width, a unitless
+  number other than zero or an unknown keyword rejects the whole
+  declaration instead of leaving a partial expansion behind, and the
+  outline and column-rule shorthands reset the longhands they leave
+  out. outline-style accepts auto.
+* When several options of a single-choice <select> carry the selected
+  attribute, the last one wins, as the HTML selectedness setting
+  algorithm requires. HTMLOptionsCollection exposes selectedIndex, and
+  every event the engine dispatches carries a composed flag.
+* quickjs-ng is at v0.16.2: bytecode constant pools are 8-byte
+  aligned, proxy traps consult IsExtensible() on the target so a
+  nested proxy's trap is observable, ownKeys must return an object,
+  the array iteration builtins poll for interrupts so a long loop
+  stays interruptible, TypedArray.prototype.with converts through
+  ToBigInt on the 64-bit arrays, and the regexp parser rejects the
+  identity escapes that are invalid in unicode mode outside a class.
+  WAMR is at 2.4.5: the constant-expression loader rejects an invalid
+  reference type in ref.null and the fast-interpreter constant table
+  can no longer desynchronise its two passes.
 
 1.0.24:
 ======

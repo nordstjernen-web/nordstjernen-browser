@@ -11325,10 +11325,13 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_BORDER_RIGHT_STYLE:
     case NS_CSS_BORDER_BOTTOM_STYLE:
     case NS_CSS_BORDER_LEFT_STYLE:
-    case NS_CSS_OUTLINE_STYLE:
     case NS_CSS_COLUMN_RULE_STYLE:
         v = parse_keyword_choice(t,
             "none hidden dotted dashed solid double groove ridge inset outset");
+        break;
+    case NS_CSS_OUTLINE_STYLE:
+        v = parse_keyword_choice(t,
+            "auto none hidden dotted dashed solid double groove ridge inset outset");
         break;
     case NS_CSS_BACKGROUND_CLIP: {
         char *canon = bg_clip_canonical(t);
@@ -14567,6 +14570,53 @@ transform_origin_canonical(const char *value, gboolean two_only)
     return r;
 }
 
+static gboolean
+border_shorthand_valid(const char *vtext, ns_css_prop style_prop)
+{
+    ns_css_value *wide = parse_css_wide_keyword(vtext);
+    if (wide) {
+        ns_css_value_free(wide);
+        return TRUE;
+    }
+    char *tokens[5] = {0};
+    int n = split_ws_limit(vtext, tokens, G_N_ELEMENTS(tokens));
+    gboolean ok = n >= 1 && n <= 3;
+    gboolean saw_color = FALSE, saw_width = FALSE, saw_style = FALSE;
+    for (int i = 0; ok && i < n; i++) {
+        const char *tok = tokens[i];
+        guint8 r, g, b, a;
+        double num;
+        ns_css_unit unit;
+        if (parse_color(tok, &r, &g, &b, &a) || is_color_keyword(tok)) {
+            ok = !saw_color;
+            saw_color = TRUE;
+        } else if (g_ascii_strcasecmp(tok, "thin") == 0 ||
+                   g_ascii_strcasecmp(tok, "medium") == 0 ||
+                   g_ascii_strcasecmp(tok, "thick") == 0) {
+            ok = !saw_width;
+            saw_width = TRUE;
+        } else if (parse_length(tok, &num, &unit)) {
+            ok = !saw_width && num >= 0 && unit != NS_CSS_UNIT_PERCENT &&
+                 (unit != NS_CSS_UNIT_NUMBER || num == 0);
+            saw_width = TRUE;
+        } else {
+            ns_css_value *calc = parse_calc(tok);
+            if (calc) {
+                ns_css_value_free(calc);
+                ok = !saw_width;
+                saw_width = TRUE;
+                continue;
+            }
+            ns_css_value *style = parse_value_for(style_prop, tok);
+            ok = !saw_style && style != NULL;
+            ns_css_value_free(style);
+            saw_style = TRUE;
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(tokens[i]);
+    return ok;
+}
+
 static void
 parse_declaration_block(const char **pp, const char *end,
                         GArray *decls_out, ns_css_rule *capture)
@@ -14750,6 +14800,14 @@ parse_declaration_block(const char **pp, const char *end,
             if (strcmp(pname, border_sides[i].name) == 0) {
                 is_border_side = TRUE; side_idx = i; break;
             }
+        }
+        if ((strcmp(pname, "border") == 0 || is_border_side) &&
+            !strstr(vtext, "var(") &&
+            !border_shorthand_valid(vtext, NS_CSS_BORDER_TOP_STYLE)) {
+            g_free(pname);
+            g_free(vtext);
+            if (p < end && *p == ';') p++;
+            continue;
         }
         if (strcmp(pname, "border") == 0 || is_border_side) {
             char *tokens[4] = {0};
@@ -15454,31 +15512,61 @@ parse_declaration_block(const char **pp, const char *end,
             ns_css_prop p_w = is_outline ? NS_CSS_OUTLINE_WIDTH : NS_CSS_COLUMN_RULE_WIDTH;
             ns_css_prop p_s = is_outline ? NS_CSS_OUTLINE_STYLE : NS_CSS_COLUMN_RULE_STYLE;
             ns_css_prop p_c = is_outline ? NS_CSS_OUTLINE_COLOR : NS_CSS_COLUMN_RULE_COLOR;
+            if (!strstr(vtext, "var(") && !border_shorthand_valid(vtext, p_s)) {
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
             char *tokens[8] = {0};
             int n = split_ws(vtext, tokens);
+            gboolean saw_c = FALSE, saw_w = FALSE, saw_s = FALSE;
             for (int i = 0; i < n; i++) {
                 guint8 r, g, b, a;
                 double num; ns_css_unit u;
-                if (parse_color(tokens[i], &r, &g, &b, &a)) {
+                if (parse_color(tokens[i], &r, &g, &b, &a) ||
+                    is_color_keyword(tokens[i])) {
                     ns_css_value *v = parse_value_for(p_c, tokens[i]);
                     if (v) {
                         ns_css_decl d = { .prop = p_c, .value = v, .important = important };
                         g_array_append_val(decls_out, d);
+                        saw_c = TRUE;
                     }
-                } else if (parse_length(tokens[i], &num, &u)) {
+                } else if (parse_length(tokens[i], &num, &u) ||
+                           g_ascii_strcasecmp(tokens[i], "thin") == 0 ||
+                           g_ascii_strcasecmp(tokens[i], "medium") == 0 ||
+                           g_ascii_strcasecmp(tokens[i], "thick") == 0) {
                     ns_css_value *v = parse_value_for(p_w, tokens[i]);
                     if (v) {
                         ns_css_decl d = { .prop = p_w, .value = v, .important = important };
                         g_array_append_val(decls_out, d);
+                        saw_w = TRUE;
                     }
                 } else {
                     ns_css_value *v = parse_value_for(p_s, tokens[i]);
                     if (v) {
                         ns_css_decl d = { .prop = p_s, .value = v, .important = important };
                         g_array_append_val(decls_out, d);
+                        saw_s = TRUE;
                     }
                 }
             }
+            ns_css_value *wide = n == 1 ? parse_css_wide_keyword(tokens[0]) : NULL;
+            if (n > 0 && !wide) {
+                const struct { ns_css_prop prop; const char *def; gboolean seen; } rest[3] = {
+                    { p_c, "currentcolor", saw_c },
+                    { p_w, "medium", saw_w },
+                    { p_s, "none", saw_s },
+                };
+                for (int k = 0; k < 3; k++) {
+                    if (rest[k].seen) continue;
+                    ns_css_value *v = parse_value_for(rest[k].prop, rest[k].def);
+                    if (!v) continue;
+                    ns_css_decl d = { .prop = rest[k].prop, .value = v, .important = important };
+                    g_array_append_val(decls_out, d);
+                }
+            }
+            ns_css_value_free(wide);
             for (int i = 0; i < n; i++) g_free(tokens[i]);
             g_free(pname);
             g_free(vtext);
