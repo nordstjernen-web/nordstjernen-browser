@@ -12215,13 +12215,26 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         JS_FreeValue(ctx, r);
         ns_js_budget_pop(js, &bg);
     } else if (js && js->ctx) {
-        JSValue main_global = JS_GetGlobalObject(js->ctx);
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+        JSValue main_global = JS_GetGlobalObject(main_ctx);
         gboolean is_main =
             JS_VALUE_GET_PTR(main_global) == JS_VALUE_GET_PTR(target);
-        JS_FreeValue(js->ctx, main_global);
+        JS_FreeValue(main_ctx, main_global);
         if (is_main) {
-            ns_js_dispatch_window_only_event(js, js->current_doc, "message",
+            ns_node *main_doc = js->current_doc;
+            while (main_doc && main_doc->parent) {
+                main_doc = main_doc->parent;
+                while (main_doc && main_doc->kind != NS_NODE_DOCUMENT)
+                    main_doc = main_doc->parent;
+            }
+            JSContext *saved_ctx = js->ctx;
+            ns_node *saved_doc = js->current_doc;
+            js->ctx = main_ctx;
+            js->current_doc = main_doc;
+            ns_js_dispatch_window_only_event(js, main_doc, "message",
                                              JS_DupValue(ctx, ev), NULL);
+            js->ctx = saved_ctx;
+            js->current_doc = saved_doc;
         } else {
             ns_budget_guard bg = {0};
             ns_js_budget_push(js, &bg);
