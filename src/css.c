@@ -9947,6 +9947,84 @@ prop_name_is_color(const char *prop)
     return FALSE;
 }
 
+static char *
+quad_text_collapse(char *const v[4])
+{
+    if (strcmp(v[0], v[1]) == 0 && strcmp(v[1], v[2]) == 0 &&
+        strcmp(v[2], v[3]) == 0)
+        return g_strdup(v[0]);
+    if (strcmp(v[0], v[2]) == 0 && strcmp(v[1], v[3]) == 0)
+        return g_strdup_printf("%s %s", v[0], v[1]);
+    if (strcmp(v[1], v[3]) == 0)
+        return g_strdup_printf("%s %s %s", v[0], v[1], v[2]);
+    return g_strdup_printf("%s %s %s %s", v[0], v[1], v[2], v[3]);
+}
+
+static char *
+border_radius_half_canonical(const char *text)
+{
+    char *tokens[5] = {0};
+    int n = split_ws_limit(text, tokens, G_N_ELEMENTS(tokens));
+    char *vals[5] = { NULL };
+    gboolean ok = n >= 1 && n <= 4;
+    for (int i = 0; ok && i < n; i++) {
+        double num;
+        ns_css_unit unit;
+        if (parse_length(tokens[i], &num, &unit)) {
+            ok = num >= 0 && (unit != NS_CSS_UNIT_NUMBER || num == 0);
+            vals[i] = ok ? css_add_leading_zeros(g_strdup(tokens[i])) : NULL;
+        } else {
+            ns_css_value *c = parse_calc(tokens[i]);
+            ok = c != NULL;
+            ns_css_value_free(c);
+            if (ok) {
+                vals[i] = ns_css_math_canonical(tokens[i]);
+                if (!vals[i]) vals[i] = css_add_leading_zeros(g_strdup(tokens[i]));
+            }
+        }
+    }
+    char *r = NULL;
+    if (ok) {
+        char *quad[4] = {
+            vals[0],
+            n >= 2 ? vals[1] : vals[0],
+            n >= 3 ? vals[2] : vals[0],
+            n >= 4 ? vals[3] : (n >= 2 ? vals[1] : vals[0]),
+        };
+        r = quad_text_collapse(quad);
+    }
+    for (int i = 0; i < n; i++) {
+        g_free(tokens[i]);
+        g_free(vals[i]);
+    }
+    return r;
+}
+
+static char *
+border_radius_canonical(const char *value)
+{
+    if (!value || strstr(value, "var(")) return NULL;
+    const char *slash = strchr(value, '/');
+    if (slash && strchr(slash + 1, '/')) return NULL;
+    char *first = slash ? g_strndup(value, (gsize)(slash - value)) : g_strdup(value);
+    char *h = border_radius_half_canonical(g_strstrip(first));
+    char *v = NULL;
+    gboolean ok = h != NULL;
+    if (ok && slash) {
+        char *second = g_strdup(slash + 1);
+        v = border_radius_half_canonical(g_strstrip(second));
+        g_free(second);
+        ok = v != NULL;
+    }
+    char *r = NULL;
+    if (ok) r = v && strcmp(h, v) != 0 ? g_strdup_printf("%s / %s", h, v)
+                                       : g_strdup(h);
+    g_free(first);
+    g_free(h);
+    g_free(v);
+    return r;
+}
+
 char *
 ns_css_specified_canonical(const char *prop, const char *value)
 {
@@ -9957,6 +10035,11 @@ ns_css_specified_canonical(const char *prop, const char *value)
     if (prop && strcmp(prop, "transform") == 0) {
         char *t = ns_css_transform_canonical(value);
         if (t) return t;
+    }
+    if (prop && (strcmp(prop, "border-radius") == 0 ||
+                 strcmp(prop, "-webkit-border-radius") == 0)) {
+        char *r = border_radius_canonical(value);
+        if (r) return r;
     }
     if (prop && (strcmp(prop, "animation") == 0 || strcmp(prop, "transition") == 0)) {
         char *a = ns_css_animation_shorthand_canonical(value, prop[0] == 'a');
@@ -12378,6 +12461,16 @@ prop_id(const char *name)
         return NS_CSS_MASK_IMAGE;
     if (g_ascii_strcasecmp(name, "-webkit-background-clip") == 0)
         return NS_CSS_BACKGROUND_CLIP;
+    if (g_ascii_strcasecmp(name, "-webkit-border-radius") == 0)
+        return NS_CSS_BORDER_RADIUS;
+    if (g_ascii_strcasecmp(name, "-webkit-border-top-left-radius") == 0)
+        return NS_CSS_BORDER_TOP_LEFT_RADIUS;
+    if (g_ascii_strcasecmp(name, "-webkit-border-top-right-radius") == 0)
+        return NS_CSS_BORDER_TOP_RIGHT_RADIUS;
+    if (g_ascii_strcasecmp(name, "-webkit-border-bottom-right-radius") == 0)
+        return NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS;
+    if (g_ascii_strcasecmp(name, "-webkit-border-bottom-left-radius") == 0)
+        return NS_CSS_BORDER_BOTTOM_LEFT_RADIUS;
     if (g_ascii_strcasecmp(name, "-webkit-appearance") == 0 ||
         g_ascii_strcasecmp(name, "-moz-appearance") == 0)
         return NS_CSS_APPEARANCE;
@@ -14025,6 +14118,12 @@ parse_declaration_block(const char **pp, const char *end,
         } else {
             pname = ascii_lower(name, strlen(name));
             g_free(name);
+            if (g_str_has_prefix(pname, "-webkit-border-") &&
+                g_str_has_suffix(pname, "-radius")) {
+                char *plain = g_strdup(pname + 8);
+                g_free(pname);
+                pname = plain;
+            }
         }
         p = css_skip_ws_comments(p, end);
         if (p >= end || *p != ':') { g_free(pname);
@@ -15347,6 +15446,19 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
+        if (strcmp(pname, "border-radius") == 0 && !strstr(vtext, "var(")) {
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            char *radius_canon = wide ? g_strdup(vtext)
+                                      : border_radius_canonical(vtext);
+            ns_css_value_free(wide);
+            if (!radius_canon) {
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
+            g_free(radius_canon);
+        }
         if (strcmp(pname, "border-radius") == 0) {
             char *vtext_main = vtext;
             char *slash = strchr(vtext_main, '/');
