@@ -620,6 +620,7 @@ static gboolean
 browser_settle_quiet(ns_browser *b)
 {
     if (b->dirty) return FALSE;
+    if (b->anim && ns_anim_has_active(b->anim)) return FALSE;
     if (b->js && ns_js_has_pending_work(b->js)) return FALSE;
     if (b->js && ns_js_has_pending_animation_frame(b->js)) return FALSE;
     if (b->images && ns_image_cache_has_pending(b->images)) return FALSE;
