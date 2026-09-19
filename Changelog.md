@@ -20,10 +20,13 @@ Changelog:
   drawn in black ink on white by scripts/build-splash-art.py with hand-
   lettered captions ("Yet another web browser"), a wobbly panel border,
   and perspective depth from two lanes of animal pairs walking up to the
-  gangplank, Noah waving from the deck, giraffes through the roof, a
-  flying pig, doves, a rain cloud and a sun. scripts/build-splash-gif.py
-  animates 36 frames (walking gaits, a rocking ark, drifting waves,
-  falling rain, pulsing sun rays and a gentle line boil) at 1.5x
+  gangplank behind a rope-and-stanchion queue line, Noah waving from
+  the deck, a stick figure with a clipboard checking the animals in
+  ("The unicorns said they'd catch the next one"), giraffes through the
+  roof, a flying pig, doves, a rain cloud and a sun. scripts/build-splash-gif.py
+  animates 36 frames (walking gaits, a rocking ark, Noah's wave, a
+  fluttering flag, drifting wavy water, falling rain, pulsing sun rays
+  and a gentle line boil) at 1.5x
   resolution into the embedded 256-colour GIF, which is smaller than the
   painted one it replaces. The version restamp script is gone since the
   generator draws the version itself.
