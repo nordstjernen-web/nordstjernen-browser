@@ -1145,6 +1145,67 @@ paint_border_image(cairo_t *cr, const ns_box *b, const ns_style *s,
     return TRUE;
 }
 
+static gboolean g_paint_have_viewport;
+static double g_paint_vp_x0, g_paint_vp_y0;
+
+static const char *
+bg_layer_keyword(const ns_style *s, ns_css_prop prop, int li)
+{
+    const ns_css_value *v = s ? ns_css_value_layer(s->values[prop], li) : NULL;
+    return v && v->kind == NS_CSS_V_KEYWORD ? v->u.keyword : NULL;
+}
+
+static void
+bg_layer_clip_area(const ns_box *b, int li,
+                   double bx, double by, double bw, double bh,
+                   double *x, double *y, double *w, double *h)
+{
+    const char *k = bg_layer_keyword(b->style, NS_CSS_BACKGROUND_CLIP, li);
+    *x = bx; *y = by; *w = bw; *h = bh;
+    if (k && strcmp(k, "padding-box") == 0) {
+        *x += b->border.left; *y += b->border.top;
+        *w -= b->border.left + b->border.right;
+        *h -= b->border.top + b->border.bottom;
+    } else if (k && strcmp(k, "content-box") == 0) {
+        *x += b->border.left + b->padding.left;
+        *y += b->border.top + b->padding.top;
+        *w -= b->border.left + b->border.right + b->padding.left + b->padding.right;
+        *h -= b->border.top + b->border.bottom + b->padding.top + b->padding.bottom;
+    }
+    if (*w < 0) *w = 0;
+    if (*h < 0) *h = 0;
+}
+
+static void
+bg_layer_origin_area(const ns_box *b, int li,
+                     double bx, double by, double bw, double bh,
+                     double *x, double *y, double *w, double *h)
+{
+    const char *att = bg_layer_keyword(b->style, NS_CSS_BACKGROUND_ATTACHMENT, li);
+    if (att && strcmp(att, "fixed") == 0) {
+        *x = g_paint_have_viewport ? g_paint_vp_x0 : 0;
+        *y = g_paint_have_viewport ? g_paint_vp_y0 : 0;
+        *w = MAX(ns_css_viewport_w(), 1);
+        *h = MAX(ns_css_viewport_h(), 1);
+        return;
+    }
+    const char *k = bg_layer_keyword(b->style, NS_CSS_BACKGROUND_ORIGIN, li);
+    *x = bx + b->border.left;
+    *y = by + b->border.top;
+    *w = bw - b->border.left - b->border.right;
+    *h = bh - b->border.top - b->border.bottom;
+    if (k && strcmp(k, "border-box") == 0) {
+        *x = bx; *y = by; *w = bw; *h = bh;
+    } else if (k && strcmp(k, "content-box") == 0) {
+        *x += b->padding.left;
+        *y += b->padding.top;
+        *w -= b->padding.left + b->padding.right;
+        *h -= b->padding.top + b->padding.bottom;
+    }
+    if (*w < 1) *w = 1;
+    if (*h < 1) *h = 1;
+}
+
 static void
 paint_block(cairo_t *cr, const ns_box *b)
 {
@@ -1160,44 +1221,15 @@ paint_block(cairo_t *cr, const ns_box *b)
     const ns_style *s = b->style;
     corner_radii radii = box_border_radii(b);
 
-    double clip_x = border_x, clip_y = border_y;
-    double clip_w = border_w, clip_h = border_h;
-    {
-        const ns_css_value *bcl = s ? s->values[NS_CSS_BACKGROUND_CLIP] : NULL;
-        const char *bk = (bcl && bcl->kind == NS_CSS_V_KEYWORD) ? bcl->u.keyword : NULL;
-        if (bk && strcmp(bk, "padding-box") == 0) {
-            clip_x += b->border.left; clip_y += b->border.top;
-            clip_w -= b->border.left + b->border.right;
-            clip_h -= b->border.top + b->border.bottom;
-        } else if (bk && strcmp(bk, "content-box") == 0) {
-            clip_x += b->border.left + b->padding.left;
-            clip_y += b->border.top + b->padding.top;
-            clip_w -= b->border.left + b->border.right + b->padding.left + b->padding.right;
-            clip_h -= b->border.top + b->border.bottom + b->padding.top + b->padding.bottom;
-        }
-        if (clip_w < 0) clip_w = 0;
-        if (clip_h < 0) clip_h = 0;
-    }
-
-    double pos_x = border_x + b->border.left;
-    double pos_y = border_y + b->border.top;
-    double pos_w = border_w - b->border.left - b->border.right;
-    double pos_h = border_h - b->border.top - b->border.bottom;
-    {
-        const ns_css_value *bor = s ? s->values[NS_CSS_BACKGROUND_ORIGIN] : NULL;
-        const char *ok = (bor && bor->kind == NS_CSS_V_KEYWORD) ? bor->u.keyword : NULL;
-        if (ok && strcmp(ok, "border-box") == 0) {
-            pos_x = border_x; pos_y = border_y;
-            pos_w = border_w; pos_h = border_h;
-        } else if (ok && strcmp(ok, "content-box") == 0) {
-            pos_x += b->padding.left;
-            pos_y += b->padding.top;
-            pos_w -= b->padding.left + b->padding.right;
-            pos_h -= b->padding.top + b->padding.bottom;
-        }
-        if (pos_w < 1) pos_w = 1;
-        if (pos_h < 1) pos_h = 1;
-    }
+    const ns_css_value *bg_head = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
+    int n_bg_layers = ns_css_value_layer_count(bg_head);
+    int last_bg_layer = n_bg_layers > 0 ? n_bg_layers - 1 : 0;
+    double clip_x, clip_y, clip_w, clip_h;
+    bg_layer_clip_area(b, last_bg_layer, border_x, border_y, border_w, border_h,
+                       &clip_x, &clip_y, &clip_w, &clip_h);
+    double pos_x, pos_y, pos_w, pos_h;
+    bg_layer_origin_area(b, last_bg_layer, border_x, border_y, border_w, border_h,
+                         &pos_x, &pos_y, &pos_w, &pos_h);
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
         s->values[NS_CSS_BOX_SHADOW]->kind == NS_CSS_V_SHADOW) {
@@ -1271,7 +1303,6 @@ paint_block(cairo_t *cr, const ns_box *b)
         }
     }
 
-    const ns_css_value *bg_head = s ? s->values[NS_CSS_BACKGROUND_IMAGE] : NULL;
     gboolean bg_has_url = FALSE;
     for (const ns_css_value *l = bg_head; l; l = l->next_layer)
         if (l->kind == NS_CSS_V_URL) { bg_has_url = TRUE; break; }
@@ -1287,13 +1318,18 @@ paint_block(cairo_t *cr, const ns_box *b)
             clip_x, clip_y, clip_w, clip_h, radii);
     }
 
-    int n_bg_layers = ns_css_value_layer_count(bg_head);
     for (int li = n_bg_layers - 1; li >= 0; li--) {
         const ns_css_value *lv = ns_css_value_layer(bg_head, li);
+        double lclip_x, lclip_y, lclip_w, lclip_h;
+        double lpos_x, lpos_y, lpos_w, lpos_h;
+        bg_layer_clip_area(b, li, border_x, border_y, border_w, border_h,
+                           &lclip_x, &lclip_y, &lclip_w, &lclip_h);
+        bg_layer_origin_area(b, li, border_x, border_y, border_w, border_h,
+                             &lpos_x, &lpos_y, &lpos_w, &lpos_h);
         if (lv->kind == NS_CSS_V_GRADIENT) {
             paint_bg_gradient_core(cr, &lv->u.gradient,
-                border_x, border_y, border_w, border_h,
-                clip_x, clip_y, clip_w, clip_h, radii);
+                lpos_x, lpos_y, lpos_w, lpos_h,
+                lclip_x, lclip_y, lclip_w, lclip_h, radii);
             continue;
         }
         if (lv->kind != NS_CSS_V_URL) continue;
@@ -1310,8 +1346,8 @@ paint_block(cairo_t *cr, const ns_box *b)
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_X], li),
             ns_css_value_layer(s->values[NS_CSS_BACKGROUND_POSITION_Y], li),
             style_pixelated(s),
-            pos_x, pos_y, pos_w, pos_h,
-            clip_x, clip_y, clip_w, clip_h, radii);
+            lpos_x, lpos_y, lpos_w, lpos_h,
+            lclip_x, lclip_y, lclip_w, lclip_h, radii);
     }
 
     if (s && s->values[NS_CSS_BOX_SHADOW] &&
@@ -5278,8 +5314,6 @@ paint_flush_deferred(cairo_t *cr, GPtrArray *list, const char *highlight)
     if (entries != entries_buf) g_free(entries);
 }
 
-static gboolean g_paint_have_viewport;
-static double g_paint_vp_x0, g_paint_vp_y0;
 static double g_paint_anchor_dx, g_paint_anchor_dy;
 
 static void
