@@ -22551,7 +22551,8 @@ inline_shorthand_follows(const char *style, const char *prop, int prop_id)
         const char *vend = css_scan_declaration_value(p, end, &term);
         if (g_ascii_strcasecmp(key, prop) == 0) {
             seen_prop = TRUE;
-        } else if (seen_prop && ns_css_prop_id(key) < 0) {
+        } else if (seen_prop && (ns_css_prop_id(key) < 0 ||
+                                 ns_css_prop_id(key) == NS_CSS_BORDER_RADIUS)) {
             char *value = css_trim_dup_range(p, vend);
             gboolean important = FALSE;
             char *expanded = inline_expanded_value(key, value, prop_id,
