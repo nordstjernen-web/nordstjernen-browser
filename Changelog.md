@@ -17,8 +17,10 @@ Changelog:
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
 * about:start wears a new splash: an xkcd-style comic of Noah's ark,
-  drawn in black ink on white by scripts/build-splash-art.py with hand-
-  lettered captions ("Yet another web browser"), a wobbly panel border,
+  drawn in black ink on white by scripts/build-splash-art.py with
+  captions in a hand-designed single-stroke printing alphabet ("Yet
+  another web browser"), dialogue that floats beside its speaker with a
+  thin pointer line, a wobbly panel border,
   and perspective depth from two lanes of animal pairs walking up to the
   gangplank behind a rope-and-stanchion queue line, Noah waving from
   the deck, a stick figure with a clipboard checking the animals in
