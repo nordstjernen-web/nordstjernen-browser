@@ -3,6 +3,20 @@ Changelog:
 
 1.0.25:
 ======
+* Fullscreen mode is announced: when a page calls requestFullscreen the
+  shell overlays a notice at the top of the page naming the site's host
+  and saying it is now full screen and that Esc exits, in the style of
+  Chrome and Firefox, so a page can't hide the address bar and paint a
+  spoofed one without the user being told. The notice stays for five
+  seconds and can't be covered by page content. Element fullscreen now
+  also ends by itself when the fullscreen tab navigates to a new
+  document, when another tab is switched to, or when the tab is closed —
+  the header and toolbar used to stay hidden across all three. And per
+  the Fullscreen API, requestFullscreen() now needs transient user
+  activation: called from a timer or on load without a recent click,
+  tap or key press it rejects with a TypeError, fires fullscreenerror
+  and logs to the console instead of taking over the screen.
+  (Reported by Muhammad Wishal.)
 * The nightly download links no longer 404 when one platform's build
   fails: scripts/nightly.sh publishes a stage's directory only once it
   holds artifacts and otherwise keeps the previous night's files, a

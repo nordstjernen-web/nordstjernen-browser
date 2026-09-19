@@ -25,6 +25,7 @@
 #include <string.h>
 
 #define NS_PROC_APP_ID "org.nordstjernen.WebBrowser"
+#define NS_FULLSCREEN_NOTICE_SECONDS 5
 
 static int g_initial_win_w;
 static int g_initial_win_h;
@@ -57,6 +58,9 @@ typedef struct {
     gulong          theme_watch[2];
     gboolean        webgl_active;
     gboolean        element_fullscreen;
+    NsProcView     *fullscreen_view;
+    GtkWidget      *fullscreen_notice;
+    guint           fullscreen_notice_timer;
     GtkWidget      *bookmarks_button;
     char           *home_url;
     ns_bookmarks   *bookmarks;
@@ -85,6 +89,8 @@ procwindow_free(gpointer data)
         g_source_remove(pw->session_timer);
     if (pw->status_timer)
         g_source_remove(pw->status_timer);
+    if (pw->fullscreen_notice_timer)
+        g_source_remove(pw->fullscreen_notice_timer);
     GtkSettings *settings = gtk_settings_get_default();
     for (int i = 0; settings && i < 2; i++)
         if (pw->theme_watch[i])
@@ -139,6 +145,15 @@ install_status_css(void)
         "  border-top: 1px solid alpha(currentColor, 0.15);"
         "  border-right: 1px solid alpha(currentColor, 0.15);"
         "  font-size: smaller;"
+        "}"
+        ".ns-fullscreen-notice {"
+        "  margin-top: 28px;"
+        "  padding: 12px 24px;"
+        "  border-radius: 12px;"
+        "  background: alpha(black, 0.88);"
+        "  color: white;"
+        "  border: 1px solid alpha(white, 0.35);"
+        "  font-size: larger;"
         "}"
         "headerbar, headerbar > windowhandle {"
         "  min-height: 34px;"
@@ -780,18 +795,73 @@ pw_set_status(ProcWindow *pw, const char *text)
         ? g_timeout_add_seconds(5, pw_status_expire, pw) : 0;
 }
 
+static gboolean
+pw_fullscreen_notice_expire(gpointer data)
+{
+    ProcWindow *pw = data;
+    pw->fullscreen_notice_timer = 0;
+    gtk_widget_set_visible(pw->fullscreen_notice, FALSE);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+pw_hide_fullscreen_notice(ProcWindow *pw)
+{
+    if (pw->fullscreen_notice_timer) {
+        g_source_remove(pw->fullscreen_notice_timer);
+        pw->fullscreen_notice_timer = 0;
+    }
+    gtk_widget_set_visible(pw->fullscreen_notice, FALSE);
+}
+
+static void
+pw_show_fullscreen_notice(ProcWindow *pw, NsProcView *v)
+{
+    const char *url = v ? ns_proc_view_url(v) : NULL;
+    char *host = url ? ns_url_host_from(url) : NULL;
+    const char *site = host && *host ? host : ns_i18n("This page");
+    char *site_markup = g_markup_escape_text(site, -1);
+    char *hint = g_markup_escape_text(
+        ns_i18n("is now full screen — press Esc to exit"), -1);
+    char *markup = g_strdup_printf("<b>%s</b> %s", site_markup, hint);
+    gtk_label_set_markup(GTK_LABEL(pw->fullscreen_notice), markup);
+    g_free(markup);
+    g_free(hint);
+    g_free(site_markup);
+    g_free(host);
+    gtk_widget_set_visible(pw->fullscreen_notice, TRUE);
+    if (pw->fullscreen_notice_timer)
+        g_source_remove(pw->fullscreen_notice_timer);
+    pw->fullscreen_notice_timer =
+        g_timeout_add_seconds(NS_FULLSCREEN_NOTICE_SECONDS,
+                              pw_fullscreen_notice_expire, pw);
+}
+
 static void
 pw_set_element_fullscreen(ProcWindow *pw, gboolean active)
 {
     if (!pw || pw->element_fullscreen == active) return;
     pw->element_fullscreen = active;
+    pw->fullscreen_view = active ? current_view(pw) : NULL;
     gtk_widget_set_visible(pw->header, !active);
     gtk_widget_set_visible(pw->toolbar, !active);
     pw_render_status(pw);
-    if (active)
+    if (active) {
         gtk_window_fullscreen(GTK_WINDOW(pw->window));
-    else
+        pw_show_fullscreen_notice(pw, pw->fullscreen_view);
+    } else {
+        pw_hide_fullscreen_notice(pw);
         gtk_window_unfullscreen(GTK_WINDOW(pw->window));
+    }
+}
+
+static void
+pw_leave_element_fullscreen(ProcWindow *pw)
+{
+    if (!pw->element_fullscreen) return;
+    NsProcView *v = pw->fullscreen_view;
+    pw_set_element_fullscreen(pw, FALSE);
+    if (v) ns_proc_view_exit_fullscreen(v);
 }
 
 static void
@@ -823,6 +893,8 @@ on_view_notify(NsProcView *v, NsProcEvent evt, const char *text,
         break;
     }
     case NS_PROC_EVT_URL:
+        if (pw->element_fullscreen && v == pw->fullscreen_view)
+            pw_set_element_fullscreen(pw, FALSE);
         if (is_current) {
             set_address_text(pw, text);
             pw->webgl_active = FALSE;
@@ -934,6 +1006,8 @@ proc_window_close_page(ProcWindow *pw, GtkWidget *page)
 {
     GtkWidget *wrapper = g_object_get_data(G_OBJECT(page), "ns-strip-tab");
     int idx = gtk_notebook_page_num(GTK_NOTEBOOK(pw->notebook), page);
+    if (pw->element_fullscreen && view_for_page(page) == pw->fullscreen_view)
+        pw_set_element_fullscreen(pw, FALSE);
     if (idx >= 0)
         gtk_notebook_remove_page(GTK_NOTEBOOK(pw->notebook), idx);
     if (wrapper)
@@ -1183,10 +1257,12 @@ static void
 on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer ud)
 {
     (void)nb;
-    (void)page;
     (void)num;
-    update_active_tab(ud);
-    update_chrome(ud);
+    ProcWindow *pw = ud;
+    if (pw->element_fullscreen && view_for_page(page) != pw->fullscreen_view)
+        pw_leave_element_fullscreen(pw);
+    update_active_tab(pw);
+    update_chrome(pw);
 }
 
 static void
@@ -1995,9 +2071,7 @@ on_window_key_pressed(GtkEventControllerKey *controller, guint keyval,
     GtkWindow *win = GTK_WINDOW(pw->window);
     if (pw->element_fullscreen &&
         (keyval == GDK_KEY_F11 || keyval == GDK_KEY_Escape)) {
-        NsProcView *v = current_view(pw);
-        pw_set_element_fullscreen(pw, FALSE);
-        if (v) ns_proc_view_exit_fullscreen(v);
+        pw_leave_element_fullscreen(pw);
         return TRUE;
     }
     if (keyval == GDK_KEY_F11) {
@@ -2231,9 +2305,20 @@ proc_window_new(GtkApplication *app, const char *home_url)
     gtk_widget_set_can_target(pw->status, FALSE);
     gtk_widget_set_visible(pw->status, FALSE);
 
+    pw->fullscreen_notice = gtk_label_new("");
+    gtk_label_set_ellipsize(GTK_LABEL(pw->fullscreen_notice),
+                            PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(pw->fullscreen_notice), 90);
+    gtk_widget_add_css_class(pw->fullscreen_notice, "ns-fullscreen-notice");
+    gtk_widget_set_halign(pw->fullscreen_notice, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(pw->fullscreen_notice, GTK_ALIGN_START);
+    gtk_widget_set_can_target(pw->fullscreen_notice, FALSE);
+    gtk_widget_set_visible(pw->fullscreen_notice, FALSE);
+
     GtkWidget *page_overlay = gtk_overlay_new();
     gtk_overlay_set_child(GTK_OVERLAY(page_overlay), pw->notebook);
     gtk_overlay_add_overlay(GTK_OVERLAY(page_overlay), pw->status);
+    gtk_overlay_add_overlay(GTK_OVERLAY(page_overlay), pw->fullscreen_notice);
     gtk_widget_set_hexpand(page_overlay, TRUE);
     gtk_widget_set_vexpand(page_overlay, TRUE);
     gtk_box_append(GTK_BOX(vbox), page_overlay);
