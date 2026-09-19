@@ -46,6 +46,7 @@ typedef struct ns_anim_info {
     double         iterations;
     gboolean       active;
     gboolean       paused;
+    gboolean       pending;
     gboolean       finished;
     guint          generation;
 } ns_anim_info;

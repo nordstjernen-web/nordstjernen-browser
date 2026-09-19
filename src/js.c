@@ -14585,15 +14585,20 @@ ns_computed_range_list(ns_js *js, const ns_node *n, const char *text)
         char *converted = NULL;
         char *end = NULL;
         g_ascii_strtod(lp, &end);
-        if (end && end != lp && *end && strcmp(end, "px") != 0 && strcmp(end, "%") != 0 &&
-            g_ascii_isalpha((guchar)*end)) {
+        gboolean is_calc = g_str_has_prefix(lp, "calc(") || g_str_has_prefix(lp, "min(") ||
+                           g_str_has_prefix(lp, "max(") || g_str_has_prefix(lp, "clamp(");
+        if (is_calc || (end && end != lp && *end && strcmp(end, "px") != 0 &&
+                        strcmp(end, "%") != 0 && g_ascii_isalpha((guchar)*end))) {
             ns_css_value *lv = NULL;
             char *decl_text = g_strdup_printf("left: %s", lp);
             GArray *decls = ns_css_parse_declarations(decl_text);
             g_free(decl_text);
             if (decls && decls->len > 0)
                 lv = g_array_index(decls, ns_css_decl, 0).value;
-            if (lv && lv->kind == NS_CSS_V_LENGTH && lv->u.length.unit != NS_CSS_UNIT_PERCENT) {
+            gboolean plain_len = lv && lv->kind == NS_CSS_V_LENGTH &&
+                                 lv->u.length.unit != NS_CSS_UNIT_PERCENT;
+            gboolean calc_len = lv && lv->kind == NS_CSS_V_CALC && lv->u.calc.pct == 0;
+            if (plain_len || calc_len) {
                 double px = ns_css_dimension_px(lv, font_px, 0);
                 char *num = g_strdup_printf("%g", px);
                 converted = g_strconcat(num, "px", NULL);
@@ -14951,6 +14956,31 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
     if (g_str_has_prefix(name, "transition") || g_str_has_prefix(name, "animation")) {
         char *anim_val = ns_computed_anim_lookup(js, n, name);
         if (anim_val) return anim_val;
+    }
+    if (strcmp(name, "overflow") == 0) {
+        char *x = ns_computed_lookup(ctx, n, "overflow-x");
+        char *y = ns_computed_lookup(ctx, n, "overflow-y");
+        char *r = !x || !y ? NULL : strcmp(x, y) == 0 ? g_strdup(x)
+                : g_strconcat(x, " ", y, NULL);
+        g_free(x);
+        g_free(y);
+        if (r) return r;
+    }
+    if (strcmp(name, "overflow-clip-margin") == 0) {
+        const ns_style *s = js && js->style_table ? g_hash_table_lookup(js->style_table, n) : NULL;
+        const ns_css_value *v = s ? s->values[NS_CSS_OVERFLOW_CLIP_MARGIN] : NULL;
+        if (v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword)
+            return ns_computed_range_list(js, n, v->u.keyword);
+    }
+    if (strcmp(name, "list-style") == 0) {
+        char *type = ns_computed_lookup(ctx, n, "list-style-type");
+        char *pos = ns_computed_lookup(ctx, n, "list-style-position");
+        char *img = ns_computed_lookup(ctx, n, "list-style-image");
+        char *r = type && pos && img ? ns_css_list_style_serialize(type, pos, img) : NULL;
+        g_free(type);
+        g_free(pos);
+        g_free(img);
+        if (r) return r;
     }
 
     int pid = ns_css_prop_id(name);
@@ -15435,6 +15465,7 @@ ns_anim_info_to_js(JSContext *ctx, const ns_anim_info *info)
     JS_SetPropertyStr(ctx, o, "iterations", JS_NewFloat64(ctx, info->iterations));
     JS_SetPropertyStr(ctx, o, "active", JS_NewBool(ctx, info->active));
     JS_SetPropertyStr(ctx, o, "paused", JS_NewBool(ctx, info->paused));
+    JS_SetPropertyStr(ctx, o, "pending", JS_NewBool(ctx, info->pending));
     JS_SetPropertyStr(ctx, o, "finished", JS_NewBool(ctx, info->finished));
     JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)info->generation));
     JS_SetPropertyStr(ctx, o, "run", JS_NewInt32(ctx, info->run));

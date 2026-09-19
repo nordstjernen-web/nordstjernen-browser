@@ -18,9 +18,11 @@ typedef struct ns_anim_chan {
     ns_css_value *to;
     ns_css_value *current;
     gboolean      has_last;
+    gboolean      last_currentcolor;
     gboolean      active;
     gboolean      cancelled;
     gboolean      discrete;
+    gboolean      pending;
     int           phase;
     gboolean      started;
     gboolean      paused;
@@ -358,7 +360,7 @@ steps_apply(int n, ns_css_step_pos pos, double x)
     if (n < 1) n = 1;
     if (x < 0) x = 0;
     if (x > 1) x = 1;
-    int step = (int)floor(x * n);
+    int step = (int)floor(x * n + 1e-9);
     if (pos == NS_CSS_STEP_JUMP_START || pos == NS_CSS_STEP_JUMP_BOTH)
         step += 1;
     int jumps = n;
@@ -482,8 +484,42 @@ entry_prop(const ns_css_anim_entry *e)
 }
 
 static gboolean
+prop_animatable(int prop)
+{
+    switch (prop) {
+    case NS_CSS_TRANSITION:
+    case NS_CSS_TRANSITION_PROPERTY:
+    case NS_CSS_TRANSITION_DURATION:
+    case NS_CSS_TRANSITION_DELAY:
+    case NS_CSS_TRANSITION_TIMING_FUNCTION:
+    case NS_CSS_TRANSITION_BEHAVIOR:
+    case NS_CSS_ANIMATION:
+    case NS_CSS_ANIMATION_NAME:
+    case NS_CSS_ANIMATION_DURATION:
+    case NS_CSS_ANIMATION_DELAY:
+    case NS_CSS_ANIMATION_TIMING_FUNCTION:
+    case NS_CSS_ANIMATION_ITERATION_COUNT:
+    case NS_CSS_ANIMATION_DIRECTION:
+    case NS_CSS_ANIMATION_FILL_MODE:
+    case NS_CSS_ANIMATION_PLAY_STATE:
+    case NS_CSS_ANIMATION_COMPOSITION:
+    case NS_CSS_ANIMATION_TIMELINE:
+    case NS_CSS_ANIMATION_RANGE_START:
+    case NS_CSS_ANIMATION_RANGE_END:
+    case NS_CSS_CONTAINER_TYPE:
+    case NS_CSS_CONTAINER_NAME:
+    case NS_CSS_DIRECTION:
+    case NS_CSS_UNICODE_BIDI:
+        return FALSE;
+    default:
+        return prop >= 0 && prop < NS_CSS_PROP_COUNT;
+    }
+}
+
+static gboolean
 prop_transitionable(int prop)
 {
+    if (!prop_animatable(prop)) return FALSE;
     switch (prop) {
     case NS_CSS_TRANSITION:
     case NS_CSS_TRANSITION_PROPERTY:
@@ -516,9 +552,9 @@ prop_discretely_animatable(int prop)
 static double
 chan_elapsed_ms(const ns_anim_chan *ch, gint64 now_us)
 {
-    return ch->paused
-        ? ch->paused_elapsed_ms
-        : (now_us - ch->start_us) / 1000.0 - ch->delay_ms;
+    if (ch->paused) return ch->paused_elapsed_ms;
+    if (ch->pending) return -ch->delay_ms;
+    return (now_us - ch->start_us) / 1000.0 - ch->delay_ms;
 }
 
 static void
@@ -551,6 +587,7 @@ chan_start(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
     ch->paused = FALSE;
     ch->finished = FALSE;
     ch->cancelled = FALSE;
+    ch->pending = TRUE;
     ch->phase = NS_ANIM_PHASE_IDLE;
     ch->discrete = discrete;
     ch->start_us = now_us;
@@ -618,21 +655,33 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
     if (cur && ch->current && cur == ch->current) return;
     if (!ch->has_last && s->prev_style && s->prev_style != style) {
         ch->last = ns_css_value_dup(s->prev_style->values[prop]);
+        ch->last_currentcolor = ns_style_prop_from_currentcolor(s->prev_style, prop);
         ch->has_last = TRUE;
     }
     if (!ch->has_last) {
         const ns_style *before = ns_css_style_before_change(s->node);
         if (before && before != style) {
             ch->last = ns_css_value_dup(before->values[prop]);
+            ch->last_currentcolor = ns_style_prop_from_currentcolor(before, prop);
             ch->has_last = TRUE;
         }
     }
     if (!ch->has_last) {
         ch->last = ns_css_value_dup(cur);
+        ch->last_currentcolor = ns_style_prop_from_currentcolor(style, prop);
         ch->has_last = TRUE;
         return;
     }
-    if (ns_css_value_equal(cur, ch->last)) return;
+    gboolean cur_currentcolor = ns_style_prop_from_currentcolor(style, prop);
+    if (ns_css_value_equal(cur, ch->last) ||
+        (cur_currentcolor && ch->last_currentcolor)) {
+        ch->last_currentcolor = cur_currentcolor;
+        if (!ns_css_value_equal(cur, ch->last)) {
+            ns_css_value_free(ch->last);
+            ch->last = ns_css_value_dup(cur);
+        }
+        return;
+    }
     ns_css_value *cur_init = cur ? NULL : initial_value_for(prop);
     ns_css_value *last_init = ch->last ? NULL : initial_value_for(prop);
     const ns_css_value *cur_eff = cur ? cur : cur_init;
@@ -662,6 +711,7 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
     ns_css_value_free(last_init);
     ns_css_value_free(ch->last);
     ch->last = ns_css_value_dup(cur);
+    ch->last_currentcolor = cur_currentcolor;
 }
 
 static void
@@ -815,7 +865,7 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     r->finished = FALSE;
     r->phase = NS_ANIM_PHASE_IDLE;
     r->iters_emitted = 0;
-    r->elapsed_base_ms = 0;
+    r->elapsed_base_ms = -e->delay_ms;
     r->generation = ++s->run_generation;
     ns_css_keyframes_resolved_free(r->kf);
     anim_stops_free(r->stops);
@@ -824,6 +874,7 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     r->stops = anim_stops_build(r->kf ? r->kf : gkf);
     if (r->values) g_hash_table_remove_all(r->values);
     advance_run(a, r, now_us);
+    run_emit_progress(a, s, r, now_us);
 }
 
 static void
@@ -1212,12 +1263,16 @@ run_sample_at(ns_anim_run *r, double progress)
             int prop = (int)g_array_index(st->decls, ns_css_decl, d).prop;
             if (prop < 0 || prop >= NS_CSS_PROP_COUNT || seen[prop]) continue;
             seen[prop] = TRUE;
+            if (!prop_animatable(prop)) continue;
             const ns_anim_kf_stop *prev = NULL, *next = NULL;
             for (guint k = 0; k < r->stops->len; k++) {
                 const ns_anim_kf_stop *c = &g_array_index(r->stops, ns_anim_kf_stop, k);
                 if (!stop_value(c, prop)) continue;
                 if (c->pct <= pct) prev = c;
-                if (c->pct >= pct && !next) next = c;
+                if (c->pct > pct && !next) next = c;
+            }
+            if (!next && prev && prev->pct < 100.0 - 1e-9 && pct >= 100.0 - 1e-9) {
+                next = NULL;
             }
             ns_css_value *out = NULL;
             if (prev && next && prev != next) {
@@ -1391,10 +1446,10 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
         int reached = (int)MIN(el / r->duration_ms, 1e9);
         int last = run_last_iteration(r);
         if (isfinite(r->iterations) && reached > last) reached = last;
-        while (r->iters_emitted < reached) {
-            r->iters_emitted++;
+        if (r->iters_emitted < reached) {
+            r->iters_emitted = reached;
             anim_emit(a, s->node, "animationiteration", r->name,
-                      r->iters_emitted * r->duration_ms);
+                      reached * r->duration_ms);
         }
     }
 }
@@ -1414,8 +1469,12 @@ ns_anim_tick(ns_anim *a, gint64 now_us)
         if (s->chans)
             for (guint i = 0; i < s->chans->len; i++) {
                 ns_anim_chan *ch = s->chans->pdata[i];
-                if (ch->active && !ch->paused && advance_chan(a, s, ch, now_us))
-                    any = TRUE;
+                if (!ch->active || ch->paused) continue;
+                if (ch->pending) {
+                    ch->pending = FALSE;
+                    ch->start_us = now_us;
+                }
+                if (advance_chan(a, s, ch, now_us)) any = TRUE;
             }
         for (int w = 0; w < 2; w++) {
             GPtrArray *runs = state_runs(s, w);
@@ -1567,6 +1626,7 @@ chan_info(const ns_anim_state *s, const ns_anim_chan *ch, gint64 now_us,
     info_set_easing(out, &ch->timing);
     out->active = ch->active;
     out->paused = ch->paused;
+    out->pending = ch->pending;
     out->finished = ch->finished;
     out->generation = ch->generation;
     double el = chan_elapsed_ms(ch, now_us) + ch->delay_ms;
@@ -1613,6 +1673,7 @@ run_info(const ns_anim_state *s, const ns_anim_run *r, gint64 now_us,
     info_set_easing(out, &r->timing);
     out->active = r->active;
     out->paused = r->paused;
+    out->pending = r->pending;
     out->finished = r->finished;
     out->generation = r->generation;
     double el = run_elapsed_ms(r, now_us) + r->delay_ms;
@@ -1838,6 +1899,7 @@ ns_anim_seek(ns_anim *a, const ns_node *node, int prop, double ms)
     ns_anim_chan *ch = chan_find(s, prop);
     if (!ch || (!ch->active && !ch->finished)) return FALSE;
     double el = ms - ch->delay_ms;
+    ch->pending = FALSE;
     if (ch->paused) ch->paused_elapsed_ms = el;
     else ch->start_us = now - ms * 1000.0;
     if (!ch->active) {
@@ -1927,12 +1989,14 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
     if (ch->cancelled) return FALSE;
     if (strcmp(op, "pause") == 0 && !ch->paused) {
         ch->paused_elapsed_ms = chan_elapsed_ms(ch, now);
+        ch->pending = FALSE;
         ch->paused = TRUE;
     } else if (strcmp(op, "play") == 0 && ch->paused) {
         ch->start_us = now - (ch->paused_elapsed_ms + ch->delay_ms) * 1000.0;
         ch->paused = FALSE;
     } else if (strcmp(op, "finish") == 0) {
         ch->paused = FALSE;
+        ch->pending = FALSE;
         ch->start_us = now - (ch->delay_ms + ch->duration_ms) * 1000.0;
         if (ch->active) advance_chan(a, s, ch, now);
     } else if (strcmp(op, "cancel") == 0) {
