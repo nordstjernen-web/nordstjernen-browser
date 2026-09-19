@@ -4869,6 +4869,10 @@ ns_css_font_family_canonical(const char *text)
                 }
                 g_string_append_c(out, '"');
             }
+        } else if (item_start[ilen - 1] == ')' &&
+                   (g_ascii_strncasecmp(item_start, "random-item(", 12) == 0 ||
+                    g_ascii_strncasecmp(item_start, "-webkit-generic(", 16) == 0)) {
+            g_string_append_len(out, item_start, (gssize)ilen);
         } else {
             const char *q = item_start, *qend = item_start + ilen;
             gboolean first = TRUE;
@@ -12164,6 +12168,26 @@ parse_declaration_block(const char **pp, const char *end,
             continue;
         }
 
+        if (strcmp(pname, "background-position") == 0 ||
+            strcmp(pname, "object-position") == 0) {
+            ns_css_value *wide = parse_css_wide_keyword(vtext);
+            if (wide) {
+                gboolean bg = strcmp(pname, "background-position") == 0;
+                ns_css_decl dx = { .prop = bg ? NS_CSS_BACKGROUND_POSITION_X
+                                              : NS_CSS_OBJECT_POSITION_X,
+                                   .value = wide, .important = important };
+                ns_css_decl dy = { .prop = bg ? NS_CSS_BACKGROUND_POSITION_Y
+                                              : NS_CSS_OBJECT_POSITION_Y,
+                                   .value = ns_css_value_dup(wide),
+                                   .important = important };
+                g_array_append_val(decls_out, dx);
+                g_array_append_val(decls_out, dy);
+                g_free(pname);
+                g_free(vtext);
+                if (p < end && *p == ';') p++;
+                continue;
+            }
+        }
         if (strcmp(pname, "background-position") == 0) {
             ns_css_value *vx_head = NULL, *vx_tail = NULL;
             ns_css_value *vy_head = NULL, *vy_tail = NULL;
@@ -19864,8 +19888,17 @@ ns_css_value_serialize(const ns_css_value *v)
         GString *s = g_string_new(NULL);
         if (v->u.tracks.subgrid)
             return g_strdup("subgrid");
-        for (int i = 0; i < v->u.tracks.n; i++) {
-            if (i) g_string_append_c(s, ' ');
+        for (int i = 0; i <= v->u.tracks.n; i++) {
+            gboolean open = FALSE;
+            for (int k = 0; k < v->u.tracks.n_line_names; k++) {
+                if (v->u.tracks.line_names[k].line != i + 1) continue;
+                g_string_append(s, open ? " " : (s->len ? " [" : "["));
+                g_string_append(s, v->u.tracks.line_names[k].name);
+                open = TRUE;
+            }
+            if (open) g_string_append_c(s, ']');
+            if (i == v->u.tracks.n) break;
+            if (s->len) g_string_append_c(s, ' ');
             const ns_css_track *t = &v->u.tracks.tracks[i];
             switch (t->kind) {
             case NS_CSS_TRACK_PX:      g_string_append_printf(s, "%gpx", t->v); break;

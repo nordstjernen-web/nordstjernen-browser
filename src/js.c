@@ -14559,8 +14559,18 @@ ns_computed_inset_px(JSContext *ctx, const ns_node *n, const ns_box *b,
     double start_off = vertical ? b->y - cb_y : b->x - cb_x;
     const char *logical_start = ns_inset_logical_start(
         cb ? cb->style : NULL, vertical);
-    double used = strcmp(name, logical_start) == 0
-        ? start_off : basis - start_off;
+    const ns_css_value *cb_wm = cb && cb->style
+        ? cb->style->values[NS_CSS_WRITING_MODE] : NULL;
+    gboolean cb_vertical = cb_wm && cb_wm->kind == NS_CSS_V_KEYWORD &&
+        cb_wm->u.keyword && g_str_has_prefix(cb_wm->u.keyword, "vertical");
+    if (cb_vertical) {
+        double used = strcmp(name, logical_start) == 0
+            ? start_off : basis - start_off;
+        return g_strdup_printf("%.6gpx", used);
+    }
+    gboolean physical_start = strcmp(name, "left") == 0 ||
+                              strcmp(name, "top") == 0;
+    double used = physical_start ? start_off : basis - start_off - outer;
     return g_strdup_printf("%.6gpx", used);
 }
 
