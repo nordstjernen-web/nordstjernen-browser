@@ -373,6 +373,13 @@ static const char *kProp[NS_CSS_PROP_COUNT] = {
     [NS_CSS_TRANSITION_DURATION]  = "transition-duration",
     [NS_CSS_ANIMATION_DELAY]      = "animation-delay",
     [NS_CSS_ANIMATION_DURATION]   = "animation-duration",
+    [NS_CSS_ANIMATION_NAME]       = "animation-name",
+    [NS_CSS_ANIMATION_TIMING_FUNCTION] = "animation-timing-function",
+    [NS_CSS_ANIMATION_ITERATION_COUNT] = "animation-iteration-count",
+    [NS_CSS_ANIMATION_DIRECTION]  = "animation-direction",
+    [NS_CSS_ANIMATION_FILL_MODE]  = "animation-fill-mode",
+    [NS_CSS_TRANSITION_PROPERTY]  = "transition-property",
+    [NS_CSS_TRANSITION_TIMING_FUNCTION] = "transition-timing-function",
     [NS_CSS_ORPHANS]              = "orphans",
     [NS_CSS_WIDOWS]               = "widows",
     [NS_CSS_MAX_LINES]            = "max-lines",
@@ -7925,6 +7932,368 @@ parse_time_ms(const char *tok, double *out_ms)
     return TRUE;
 }
 
+static gboolean css_time_seconds(const char *s, const char *e, double *out);
+
+static int
+anim_list_split(const char *text, char *items[], int max)
+{
+    int n = 0;
+    if (!text) return 0;
+    const char *end = text + strlen(text);
+    const char *p = text;
+    while (p <= end && n < max) {
+        char term = 0;
+        const char *seg = css_scan_until(p, end, ",", &term);
+        items[n++] = css_trim_dup_range(p, seg);
+        if (term != ',') break;
+        p = seg + 1;
+    }
+    return n;
+}
+
+static gboolean timing_item_parse(const char *item, ns_css_timing *out);
+
+gboolean
+ns_css_timing_parse(const char *text, ns_css_timing *out)
+{
+    if (!text || !out) return FALSE;
+    char *t = g_strstrip(g_strdup(text));
+    gboolean ok = timing_item_parse(t, out);
+    g_free(t);
+    return ok;
+}
+
+static gboolean
+timing_item_parse(const char *item, ns_css_timing *out)
+{
+    if (!item || !*item) return FALSE;
+    if (timing_keyword_matches(item)) {
+        *out = parse_timing_keyword(item);
+        return TRUE;
+    }
+    if (g_ascii_strncasecmp(item, "linear(", 7) == 0 && item[strlen(item) - 1] == ')') {
+        *out = (ns_css_timing){ .kind = NS_CSS_TIMING_LINEAR };
+        return TRUE;
+    }
+    gboolean is_steps = g_ascii_strncasecmp(item, "steps(", 6) == 0;
+    gboolean is_cubic = g_ascii_strncasecmp(item, "cubic-bezier(", 13) == 0;
+    if ((!is_steps && !is_cubic) || item[strlen(item) - 1] != ')') return FALSE;
+    char *body = g_strndup(item + (is_steps ? 6 : 13), strlen(item) - (is_steps ? 7 : 14));
+    char **parts = g_strsplit(body, ",", -1);
+    guint np = g_strv_length(parts);
+    gboolean ok = FALSE;
+    if (is_steps && (np == 1 || np == 2)) {
+        char *e = NULL;
+        long n = strtol(g_strstrip(parts[0]), &e, 10);
+        if (e != parts[0] && *e == '\0' && n >= 1) {
+            ns_css_step_pos pos = NS_CSS_STEP_JUMP_END;
+            ok = TRUE;
+            if (np == 2) {
+                const char *k = g_strstrip(parts[1]);
+                if (g_ascii_strcasecmp(k, "jump-start") == 0 ||
+                    g_ascii_strcasecmp(k, "start") == 0) pos = NS_CSS_STEP_JUMP_START;
+                else if (g_ascii_strcasecmp(k, "jump-end") == 0 ||
+                         g_ascii_strcasecmp(k, "end") == 0) pos = NS_CSS_STEP_JUMP_END;
+                else if (g_ascii_strcasecmp(k, "jump-none") == 0) pos = NS_CSS_STEP_JUMP_NONE;
+                else if (g_ascii_strcasecmp(k, "jump-both") == 0) pos = NS_CSS_STEP_JUMP_BOTH;
+                else ok = FALSE;
+            }
+            if (ok && pos == NS_CSS_STEP_JUMP_NONE && n < 2) ok = FALSE;
+            if (ok) *out = (ns_css_timing){ .kind = NS_CSS_TIMING_STEPS,
+                                            .steps = (int)n, .step_pos = pos };
+        }
+    } else if (is_cubic && np == 4) {
+        double cb[4];
+        ok = TRUE;
+        for (int i = 0; i < 4 && ok; i++) {
+            char *e = NULL;
+            cb[i] = g_ascii_strtod(g_strstrip(parts[i]), &e);
+            if (e == parts[i] || *e != '\0') ok = FALSE;
+        }
+        if (ok && (cb[0] < 0 || cb[0] > 1 || cb[2] < 0 || cb[2] > 1)) ok = FALSE;
+        if (ok) {
+            *out = (ns_css_timing){ .kind = NS_CSS_TIMING_CUBIC };
+            memcpy(out->cb, cb, sizeof cb);
+        }
+    }
+    g_strfreev(parts);
+    g_free(body);
+    return ok;
+}
+
+static gboolean
+css_wide_keyword_or_default(const char *item)
+{
+    static const char *const words[] = { "initial", "inherit", "unset", "revert",
+                                         "revert-layer", "default" };
+    for (gsize i = 0; i < G_N_ELEMENTS(words); i++)
+        if (g_ascii_strcasecmp(item, words[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+anim_longhand_item_valid(ns_css_prop prop, const char *item)
+{
+    ns_css_timing tm;
+    char *e = NULL;
+    double num;
+    switch (prop) {
+    case NS_CSS_ANIMATION_NAME:
+        if (g_ascii_strcasecmp(item, "none") == 0) return TRUE;
+        if (item[0] == '"' || item[0] == '\'') return strlen(item) >= 3 &&
+            item[strlen(item) - 1] == item[0];
+        return content_ident_valid(item) && !css_wide_keyword_or_default(item);
+    case NS_CSS_ANIMATION_TIMING_FUNCTION:
+    case NS_CSS_TRANSITION_TIMING_FUNCTION:
+        return timing_item_parse(item, &tm);
+    case NS_CSS_ANIMATION_ITERATION_COUNT:
+        if (g_ascii_strcasecmp(item, "infinite") == 0) return TRUE;
+        num = g_ascii_strtod(item, &e);
+        return e != item && *e == '\0' && num >= 0;
+    case NS_CSS_ANIMATION_DIRECTION:
+        return g_ascii_strcasecmp(item, "normal") == 0 ||
+               g_ascii_strcasecmp(item, "reverse") == 0 ||
+               g_ascii_strcasecmp(item, "alternate") == 0 ||
+               g_ascii_strcasecmp(item, "alternate-reverse") == 0;
+    case NS_CSS_ANIMATION_FILL_MODE:
+        return g_ascii_strcasecmp(item, "none") == 0 ||
+               g_ascii_strcasecmp(item, "forwards") == 0 ||
+               g_ascii_strcasecmp(item, "backwards") == 0 ||
+               g_ascii_strcasecmp(item, "both") == 0;
+    case NS_CSS_TRANSITION_PROPERTY:
+        return g_ascii_strcasecmp(item, "none") == 0 ||
+               g_ascii_strcasecmp(item, "all") == 0 ||
+               (content_ident_valid(item) && !css_wide_keyword_or_default(item));
+    default:
+        return FALSE;
+    }
+}
+
+static ns_css_value *
+parse_anim_longhand(ns_css_prop prop, const char *t)
+{
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = anim_list_split(t, items, (int)G_N_ELEMENTS(items));
+    gboolean ok = n > 0;
+    gboolean lower = prop != NS_CSS_ANIMATION_NAME;
+    GString *canon = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (!*items[i] || !anim_longhand_item_valid(prop, items[i])) ok = FALSE;
+        if (ok && n > 1 && prop == NS_CSS_TRANSITION_PROPERTY &&
+            g_ascii_strcasecmp(items[i], "none") == 0) ok = FALSE;
+        if (ok) {
+            if (i) g_string_append(canon, ", ");
+            if (lower) {
+                char *l = g_ascii_strdown(items[i], -1);
+                g_string_append(canon, l);
+                g_free(l);
+            } else {
+                g_string_append(canon, items[i]);
+            }
+        }
+        g_free(items[i]);
+    }
+    if (!ok) {
+        g_string_free(canon, TRUE);
+        return NULL;
+    }
+    ns_css_value *v = g_new0(ns_css_value, 1);
+    v->kind = NS_CSS_V_KEYWORD;
+    v->u.keyword = g_string_free(canon, FALSE);
+    return v;
+}
+
+static void
+anim_entry_init(ns_css_anim_entry *e, gboolean is_animation)
+{
+    memset(e, 0, sizeof *e);
+    e->target = is_animation ? NS_CSS_ANIM_TARGET_ALL : NS_CSS_ANIM_TARGET_ALL;
+    e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
+    e->iter_count = 1;
+    e->iterations = 1;
+}
+
+static void
+anim_entry_set_target(ns_css_anim_entry *e, const char *tok, gboolean is_animation)
+{
+    g_free(e->name);
+    e->name = NULL;
+    if (is_animation) {
+        e->target = NS_CSS_ANIM_TARGET_ALL;
+        if (g_ascii_strcasecmp(tok, "none") != 0) {
+            if ((tok[0] == '"' || tok[0] == '\'') && strlen(tok) >= 2)
+                e->name = g_strndup(tok + 1, strlen(tok) - 2);
+            else
+                e->name = g_strdup(tok);
+        }
+        return;
+    }
+    if (g_ascii_strcasecmp(tok, "none") == 0) e->target = NS_CSS_ANIM_TARGET_NONE;
+    else if (g_ascii_strcasecmp(tok, "all") == 0) e->target = NS_CSS_ANIM_TARGET_ALL;
+    else if (g_ascii_strcasecmp(tok, "opacity") == 0) e->target = NS_CSS_ANIM_TARGET_OPACITY;
+    else if (g_ascii_strcasecmp(tok, "transform") == 0) e->target = NS_CSS_ANIM_TARGET_TRANSFORM;
+    else if (g_ascii_strcasecmp(tok, "color") == 0) e->target = NS_CSS_ANIM_TARGET_COLOR;
+    else if (g_ascii_strcasecmp(tok, "background-color") == 0 ||
+             g_ascii_strcasecmp(tok, "background") == 0)
+        e->target = NS_CSS_ANIM_TARGET_BG_COLOR;
+    else if (ns_css_prop_id(tok) >= 0) {
+        e->target = NS_CSS_ANIM_TARGET_OTHER;
+        e->name = ascii_lower(tok, strlen(tok));
+    } else {
+        e->target = NS_CSS_ANIM_TARGET_NONE;
+    }
+}
+
+static void
+anim_apply_longhand(ns_css_anim_list *out, const ns_css_value *v, ns_css_prop prop)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword || out->n == 0) return;
+    char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+    int n = anim_list_split(v->u.keyword, items, (int)G_N_ELEMENTS(items));
+    if (n == 0) return;
+    for (int i = 0; i < out->n; i++) {
+        ns_css_anim_entry *e = &out->entries[i];
+        const char *item = items[i % n];
+        double sec;
+        switch (prop) {
+        case NS_CSS_ANIMATION_DURATION:
+        case NS_CSS_TRANSITION_DURATION:
+            if (css_time_seconds(item, item + strlen(item), &sec) && isfinite(sec))
+                e->duration_ms = MAX(sec, 0.0) * 1000.0;
+            break;
+        case NS_CSS_ANIMATION_DELAY:
+        case NS_CSS_TRANSITION_DELAY:
+            if (css_time_seconds(item, item + strlen(item), &sec) && isfinite(sec))
+                e->delay_ms = sec * 1000.0;
+            break;
+        case NS_CSS_ANIMATION_TIMING_FUNCTION:
+        case NS_CSS_TRANSITION_TIMING_FUNCTION:
+            timing_item_parse(item, &e->timing);
+            break;
+        case NS_CSS_ANIMATION_ITERATION_COUNT:
+            if (g_ascii_strcasecmp(item, "infinite") == 0) {
+                e->iter_count = -1;
+                e->iterations = INFINITY;
+            } else {
+                double num = g_ascii_strtod(item, NULL);
+                e->iterations = num < 0 ? 0 : num;
+                e->iter_count = num <= 0 ? 0 : (int)num;
+            }
+            break;
+        case NS_CSS_ANIMATION_DIRECTION:
+            if (g_ascii_strcasecmp(item, "reverse") == 0) e->direction = NS_CSS_ANIM_DIR_REVERSE;
+            else if (g_ascii_strcasecmp(item, "alternate") == 0) e->direction = NS_CSS_ANIM_DIR_ALTERNATE;
+            else if (g_ascii_strcasecmp(item, "alternate-reverse") == 0)
+                e->direction = NS_CSS_ANIM_DIR_ALTERNATE_REVERSE;
+            else e->direction = NS_CSS_ANIM_DIR_NORMAL;
+            break;
+        case NS_CSS_ANIMATION_FILL_MODE:
+            if (g_ascii_strcasecmp(item, "forwards") == 0) e->fill = NS_CSS_ANIM_FILL_FORWARDS;
+            else if (g_ascii_strcasecmp(item, "backwards") == 0) e->fill = NS_CSS_ANIM_FILL_BACKWARDS;
+            else if (g_ascii_strcasecmp(item, "both") == 0) e->fill = NS_CSS_ANIM_FILL_BOTH;
+            else e->fill = NS_CSS_ANIM_FILL_NONE;
+            break;
+        case NS_CSS_ANIMATION_PLAY_STATE:
+            e->paused = g_ascii_strcasecmp(item, "paused") == 0;
+            break;
+        default:
+            break;
+        }
+    }
+    for (int i = 0; i < n; i++) g_free(items[i]);
+}
+
+void
+ns_css_anim_list_clear(ns_css_anim_list *list)
+{
+    if (!list) return;
+    for (int i = 0; i < list->n; i++) g_free(list->entries[i].name);
+    list->n = 0;
+}
+
+void
+ns_css_anim_effective(const ns_style *s, gboolean is_animation, ns_css_anim_list *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!s) return;
+    const ns_css_value *sh = s->values[is_animation ? NS_CSS_ANIMATION : NS_CSS_TRANSITION];
+    int sh_n = 0;
+    if (sh && sh->kind == NS_CSS_V_ANIM) {
+        sh_n = sh->u.anim.n;
+        for (int i = 0; i < sh_n; i++) {
+            out->entries[i] = sh->u.anim.entries[i];
+            out->entries[i].name = g_strdup(sh->u.anim.entries[i].name);
+        }
+        out->n = sh_n;
+    }
+    const ns_css_value *names =
+        s->values[is_animation ? NS_CSS_ANIMATION_NAME : NS_CSS_TRANSITION_PROPERTY];
+    if (names && names->kind == NS_CSS_V_KEYWORD && names->u.keyword) {
+        char *items[NS_CSS_ANIM_ENTRIES_MAX * 4];
+        int n = anim_list_split(names->u.keyword, items, (int)G_N_ELEMENTS(items));
+        int keep = MIN(n, NS_CSS_ANIM_ENTRIES_MAX);
+        for (int i = keep; i < out->n; i++) g_free(out->entries[i].name);
+        for (int i = 0; i < keep; i++) {
+            if (i >= out->n) {
+                if (sh_n > 0) {
+                    out->entries[i] = sh->u.anim.entries[i % sh_n];
+                    out->entries[i].name = NULL;
+                } else {
+                    anim_entry_init(&out->entries[i], is_animation);
+                }
+            }
+            anim_entry_set_target(&out->entries[i], items[i], is_animation);
+        }
+        out->n = keep;
+        for (int i = 0; i < n; i++) g_free(items[i]);
+    } else if (out->n == 0) {
+        return;
+    }
+    if (is_animation) {
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_DURATION], NS_CSS_ANIMATION_DURATION);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_DELAY], NS_CSS_ANIMATION_DELAY);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_TIMING_FUNCTION],
+                            NS_CSS_ANIMATION_TIMING_FUNCTION);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_ITERATION_COUNT],
+                            NS_CSS_ANIMATION_ITERATION_COUNT);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_DIRECTION], NS_CSS_ANIMATION_DIRECTION);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_FILL_MODE], NS_CSS_ANIMATION_FILL_MODE);
+        anim_apply_longhand(out, s->values[NS_CSS_ANIMATION_PLAY_STATE], NS_CSS_ANIMATION_PLAY_STATE);
+    } else {
+        anim_apply_longhand(out, s->values[NS_CSS_TRANSITION_DURATION], NS_CSS_TRANSITION_DURATION);
+        anim_apply_longhand(out, s->values[NS_CSS_TRANSITION_DELAY], NS_CSS_TRANSITION_DELAY);
+        anim_apply_longhand(out, s->values[NS_CSS_TRANSITION_TIMING_FUNCTION],
+                            NS_CSS_TRANSITION_TIMING_FUNCTION);
+    }
+}
+
+char *
+ns_css_timing_serialize(const ns_css_timing *t)
+{
+    if (!t) return g_strdup("ease");
+    switch (t->kind) {
+    case NS_CSS_TIMING_LINEAR:      return g_strdup("linear");
+    case NS_CSS_TIMING_EASE_IN:     return g_strdup("ease-in");
+    case NS_CSS_TIMING_EASE_OUT:    return g_strdup("ease-out");
+    case NS_CSS_TIMING_EASE_IN_OUT: return g_strdup("ease-in-out");
+    case NS_CSS_TIMING_STEPS:
+        switch (t->step_pos) {
+        case NS_CSS_STEP_JUMP_START: return g_strdup_printf("steps(%d, start)", t->steps);
+        case NS_CSS_STEP_JUMP_NONE:  return g_strdup_printf("steps(%d, jump-none)", t->steps);
+        case NS_CSS_STEP_JUMP_BOTH:  return g_strdup_printf("steps(%d, jump-both)", t->steps);
+        default:                     return g_strdup_printf("steps(%d)", t->steps);
+        }
+    case NS_CSS_TIMING_CUBIC: {
+        char *a = ns_css_number_str(t->cb[0]), *b = ns_css_number_str(t->cb[1]);
+        char *c = ns_css_number_str(t->cb[2]), *d = ns_css_number_str(t->cb[3]);
+        char *r = g_strdup_printf("cubic-bezier(%s, %s, %s, %s)", a, b, c, d);
+        g_free(a); g_free(b); g_free(c); g_free(d);
+        return r;
+    }
+    default:                        return g_strdup("ease");
+    }
+}
+
 static ns_css_value *
 parse_anim_value(const char *text, gboolean is_animation)
 {
@@ -7950,6 +8319,7 @@ parse_anim_value(const char *text, gboolean is_animation)
         e->delay_ms = 0;
         e->timing = (ns_css_timing){ .kind = NS_CSS_TIMING_EASE };
         e->iter_count = 1;
+        e->iterations = 1;
         e->direction = NS_CSS_ANIM_DIR_NORMAL;
         e->fill = NS_CSS_ANIM_FILL_NONE;
         gboolean got_dur = FALSE;
@@ -7965,6 +8335,7 @@ parse_anim_value(const char *text, gboolean is_animation)
             gboolean bare_number = endp != tok && (*endp == '\0' || *endp == ' ');
             if (bare_number && is_animation && got_dur) {
                 e->iter_count = num <= 0 ? 0 : (int)num;
+                e->iterations = num < 0 ? 0 : num;
                 continue;
             }
             double ms;
@@ -7975,6 +8346,7 @@ parse_anim_value(const char *text, gboolean is_animation)
             }
             if (g_ascii_strcasecmp(tok, "infinite") == 0) {
                 e->iter_count = -1;
+                e->iterations = INFINITY;
                 continue;
             }
             if (timing_keyword_matches(tok)) {
@@ -10296,6 +10668,15 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_ANIMATION:
         v = parse_anim_value(t, TRUE);
         break;
+    case NS_CSS_ANIMATION_NAME:
+    case NS_CSS_ANIMATION_TIMING_FUNCTION:
+    case NS_CSS_ANIMATION_ITERATION_COUNT:
+    case NS_CSS_ANIMATION_DIRECTION:
+    case NS_CSS_ANIMATION_FILL_MODE:
+    case NS_CSS_TRANSITION_PROPERTY:
+    case NS_CSS_TRANSITION_TIMING_FUNCTION:
+        v = parse_anim_longhand(prop, t);
+        break;
     case NS_CSS_ASPECT_RATIO: {
         if (g_ascii_strcasecmp(t, "auto") == 0) {
             v = g_new0(ns_css_value, 1);
@@ -11531,6 +11912,30 @@ expand_border_image(GArray *decls_out, const char *vtext, gboolean important)
     g_string_free(outset, TRUE);
     g_string_free(repeat, TRUE);
     g_ptr_array_free(toks, TRUE);
+}
+
+static void
+anim_shorthand_reset_longhands(GArray *decls, gboolean is_animation, gboolean important)
+{
+    static const ns_css_prop anim_lh[] = {
+        NS_CSS_ANIMATION_NAME, NS_CSS_ANIMATION_DURATION, NS_CSS_ANIMATION_DELAY,
+        NS_CSS_ANIMATION_TIMING_FUNCTION, NS_CSS_ANIMATION_ITERATION_COUNT,
+        NS_CSS_ANIMATION_DIRECTION, NS_CSS_ANIMATION_FILL_MODE,
+        NS_CSS_ANIMATION_PLAY_STATE,
+    };
+    static const ns_css_prop trans_lh[] = {
+        NS_CSS_TRANSITION_PROPERTY, NS_CSS_TRANSITION_DURATION,
+        NS_CSS_TRANSITION_DELAY, NS_CSS_TRANSITION_TIMING_FUNCTION,
+    };
+    const ns_css_prop *lh = is_animation ? anim_lh : trans_lh;
+    gsize n = is_animation ? G_N_ELEMENTS(anim_lh) : G_N_ELEMENTS(trans_lh);
+    for (gsize i = 0; i < n; i++) {
+        ns_css_value *v = g_new0(ns_css_value, 1);
+        v->kind = NS_CSS_V_KEYWORD;
+        v->u.keyword = g_strdup("initial");
+        ns_css_decl d = { .prop = lh[i], .value = v, .important = important };
+        g_array_append_val(decls, d);
+    }
 }
 
 static void
@@ -13388,6 +13793,9 @@ parse_declaration_block(const char **pp, const char *end,
                 if (vv) {
                     ns_css_decl d = { .prop = (ns_css_prop)pid, .value = vv, .important = important };
                     g_array_append_val(decls_out, d);
+                    if (pid == NS_CSS_ANIMATION || pid == NS_CSS_TRANSITION)
+                        anim_shorthand_reset_longhands(decls_out, pid == NS_CSS_ANIMATION,
+                                                       important);
                 }
             }
         }
@@ -16107,7 +16515,7 @@ parse_rules_until(const char **pp, const char *end,
                         if (raw) g_string_free(raw, TRUE);
                         g_free(sel);
                     }
-                    if (stops->len > 0 && kf_name && *kf_name) {
+                    if (kf_name && *kf_name) {
                         if (!sh->keyframes) {
                             sh->keyframes = g_array_new(FALSE, FALSE,
                                                         sizeof(ns_css_keyframes));
@@ -16117,9 +16525,11 @@ parse_rules_until(const char **pp, const char *end,
                         ns_css_keyframes kf = {
                             .name = g_strdup(kf_name),
                             .n_stops = (int)stops->len,
-                            .stops = (ns_css_keyframe_stop *)g_memdup2(
-                                stops->data,
-                                stops->len * sizeof(ns_css_keyframe_stop)),
+                            .stops = stops->len > 0
+                                ? (ns_css_keyframe_stop *)g_memdup2(
+                                    stops->data,
+                                    stops->len * sizeof(ns_css_keyframe_stop))
+                                : g_new0(ns_css_keyframe_stop, 1),
                         };
                         g_array_append_val(sh->keyframes, kf);
                     } else {
@@ -19802,7 +20212,7 @@ ns_style_alloc(void)
     return g_new0(ns_style, 1);
 }
 
-static void
+void
 ns_style_free(ns_style *s)
 {
     if (!s) return;

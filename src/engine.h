@@ -42,7 +42,7 @@ void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
 
 GHashTable *ns_engine_compute_cascade(ns_node *doc, const char *base_url,
-                                      GHashTable *css_cache);
+                                      GHashTable *css_cache, ns_anim *anim);
 
 GHashTable *ns_engine_relayout(ns_node *doc, const char *base_url,
                                int viewport_width, double viewport_height,

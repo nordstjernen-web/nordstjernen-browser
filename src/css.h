@@ -238,6 +238,13 @@ typedef enum ns_css_prop {
     NS_CSS_R,
     NS_CSS_RX,
     NS_CSS_RY,
+    NS_CSS_ANIMATION_NAME,
+    NS_CSS_ANIMATION_TIMING_FUNCTION,
+    NS_CSS_ANIMATION_ITERATION_COUNT,
+    NS_CSS_ANIMATION_DIRECTION,
+    NS_CSS_ANIMATION_FILL_MODE,
+    NS_CSS_TRANSITION_PROPERTY,
+    NS_CSS_TRANSITION_TIMING_FUNCTION,
     NS_CSS_PROP_COUNT,
 } ns_css_prop;
 
@@ -318,17 +325,25 @@ typedef struct ns_css_anim_entry {
     double        delay_ms;
     ns_css_timing timing;
     int           iter_count;
+    double        iterations;
     ns_css_anim_direction direction;
     ns_css_anim_fill      fill;
     gboolean      paused;
 } ns_css_anim_entry;
 
-#define NS_CSS_ANIM_ENTRIES_MAX 4
+#define NS_CSS_ANIM_ENTRIES_MAX 8
 
 typedef struct ns_css_anim_list {
     int n;
     ns_css_anim_entry entries[NS_CSS_ANIM_ENTRIES_MAX];
 } ns_css_anim_list;
+
+struct ns_style;
+void  ns_css_anim_effective(const struct ns_style *s, gboolean is_animation,
+                            ns_css_anim_list *out);
+void  ns_css_anim_list_clear(ns_css_anim_list *list);
+char *ns_css_timing_serialize(const ns_css_timing *t);
+gboolean ns_css_timing_parse(const char *text, ns_css_timing *out);
 
 typedef enum ns_css_transform_op_kind {
     NS_CSS_TFN_TRANSLATE,
@@ -944,6 +959,13 @@ typedef struct ns_style {
     int   ref;
     struct ns_var_map *vars;
 } ns_style;
+
+void   ns_style_free(ns_style *s);
+double ns_css_clamped_dimension_px(const ns_style *s,
+                                   ns_css_prop value_prop,
+                                   ns_css_prop min_prop,
+                                   ns_css_prop max_prop,
+                                   double font_size, double basis);
 
 ns_display ns_css_display_of(const ns_style *s);
 ns_display ns_css_display_from_keyword(const char *canonical);

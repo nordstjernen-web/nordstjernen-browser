@@ -14606,21 +14606,6 @@ ns_anim_target_property_name(ns_css_anim_target t)
     }
 }
 
-static const char *
-ns_timing_function_name(const ns_css_timing *t)
-{
-    switch (t->kind) {
-        case NS_CSS_TIMING_LINEAR:      return "linear";
-        case NS_CSS_TIMING_EASE:        return "ease";
-        case NS_CSS_TIMING_EASE_IN:     return "ease-in";
-        case NS_CSS_TIMING_EASE_OUT:    return "ease-out";
-        case NS_CSS_TIMING_EASE_IN_OUT: return "ease-in-out";
-        case NS_CSS_TIMING_STEPS:       return "steps(1)";
-        case NS_CSS_TIMING_CUBIC:       return "cubic-bezier(0.25, 0.1, 0.25, 1)";
-        default:                         return "ease";
-    }
-}
-
 static char *
 ns_computed_anim_longhand(const ns_css_anim_list *list, const char *sub)
 {
@@ -14634,14 +14619,25 @@ ns_computed_anim_longhand(const ns_css_anim_list *list, const char *sub)
         else if (strcmp(sub, "delay") == 0)
             g_string_append_printf(out, "%gs", e->delay_ms / 1000.0);
         else if (strcmp(sub, "property") == 0)
-            g_string_append(out, ns_anim_target_property_name(e->target));
+            g_string_append(out, e->target == NS_CSS_ANIM_TARGET_OTHER && e->name
+                            ? e->name
+                            : e->target == NS_CSS_ANIM_TARGET_NONE
+                            ? "none" : ns_anim_target_property_name(e->target));
         else if (strcmp(sub, "name") == 0)
             g_string_append(out, e->name && *e->name ? e->name : "none");
-        else if (strcmp(sub, "timing") == 0)
-            g_string_append(out, ns_timing_function_name(&e->timing));
-        else if (strcmp(sub, "iteration") == 0) {
-            if (e->iter_count < 0) g_string_append(out, "infinite");
-            else g_string_append_printf(out, "%d", e->iter_count);
+        else if (strcmp(sub, "timing") == 0) {
+            char *tf = ns_css_timing_serialize(&e->timing);
+            g_string_append(out, tf);
+            g_free(tf);
+        } else if (strcmp(sub, "iteration") == 0) {
+            if (!isfinite(e->iterations)) g_string_append(out, "infinite");
+            else {
+                char *num = g_strdup_printf("%g", e->iterations);
+                g_string_append(out, num);
+                g_free(num);
+            }
+        } else if (strcmp(sub, "play-state") == 0) {
+            g_string_append(out, e->paused ? "paused" : "running");
         } else if (strcmp(sub, "direction") == 0) {
             switch (e->direction) {
                 case NS_CSS_ANIM_DIR_REVERSE: g_string_append(out, "reverse"); break;
@@ -14668,31 +14664,74 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     gboolean is_anim = name[0] == 'a';
     const char *sub = name + (is_anim ? 10 : 11);
     const char *key = NULL;
-    if (strcmp(sub, "duration") == 0)             key = "duration";
-    else if (strcmp(sub, "delay") == 0)           key = "delay";
-    else if (strcmp(sub, "property") == 0)        key = "property";
-    else if (strcmp(sub, "name") == 0)            key = "name";
-    else if (strcmp(sub, "timing-function") == 0) key = "timing";
-    else if (strcmp(sub, "iteration-count") == 0) key = "iteration";
-    else if (strcmp(sub, "direction") == 0)       key = "direction";
-    else if (strcmp(sub, "fill-mode") == 0)       key = "fill";
-    if (!key) return NULL;
-
     int lhp = -1;
-    if (strcmp(key, "delay") == 0)
-        lhp = is_anim ? NS_CSS_ANIMATION_DELAY : NS_CSS_TRANSITION_DELAY;
-    else if (strcmp(key, "duration") == 0)
+    if (strcmp(sub, "duration") == 0) {
+        key = "duration";
         lhp = is_anim ? NS_CSS_ANIMATION_DURATION : NS_CSS_TRANSITION_DURATION;
-    int shp = is_anim ? NS_CSS_ANIMATION : NS_CSS_TRANSITION;
+    } else if (strcmp(sub, "delay") == 0) {
+        key = "delay";
+        lhp = is_anim ? NS_CSS_ANIMATION_DELAY : NS_CSS_TRANSITION_DELAY;
+    } else if (strcmp(sub, "property") == 0 && !is_anim) {
+        key = "property";
+        lhp = NS_CSS_TRANSITION_PROPERTY;
+    } else if (strcmp(sub, "name") == 0 && is_anim) {
+        key = "name";
+        lhp = NS_CSS_ANIMATION_NAME;
+    } else if (strcmp(sub, "timing-function") == 0) {
+        key = "timing";
+        lhp = is_anim ? NS_CSS_ANIMATION_TIMING_FUNCTION
+                      : NS_CSS_TRANSITION_TIMING_FUNCTION;
+    } else if (strcmp(sub, "iteration-count") == 0 && is_anim) {
+        key = "iteration";
+        lhp = NS_CSS_ANIMATION_ITERATION_COUNT;
+    } else if (strcmp(sub, "direction") == 0 && is_anim) {
+        key = "direction";
+        lhp = NS_CSS_ANIMATION_DIRECTION;
+    } else if (strcmp(sub, "fill-mode") == 0 && is_anim) {
+        key = "fill";
+        lhp = NS_CSS_ANIMATION_FILL_MODE;
+    } else if (strcmp(sub, "play-state") == 0 && is_anim) {
+        key = "play-state";
+        lhp = NS_CSS_ANIMATION_PLAY_STATE;
+    }
+    if (!key) return NULL;
     if (js && js->style_table) {
         const ns_style *s = g_hash_table_lookup(js->style_table, n);
-        if (lhp >= 0 && s && s->values[lhp] &&
-            s->values[lhp]->kind == NS_CSS_V_KEYWORD) {
-            char *r = ns_css_time_computed(s->values[lhp]->u.keyword);
-            if (r) return r;
+        const ns_css_value *lv = s ? s->values[lhp] : NULL;
+        if (lv && lv->kind == NS_CSS_V_KEYWORD && lv->u.keyword) {
+            if (strcmp(key, "duration") == 0 || strcmp(key, "delay") == 0) {
+                char *r = ns_css_time_computed(lv->u.keyword);
+                if (r) return r;
+            }
+            if (strcmp(key, "timing") == 0) {
+                ns_css_anim_list list;
+                ns_css_anim_effective(s, is_anim, &list);
+                if (list.n == 0) {
+                    char *items[NS_CSS_ANIM_ENTRIES_MAX];
+                    GString *out = g_string_new(NULL);
+                    char **parts = g_strsplit(lv->u.keyword, ",", -1);
+                    for (int i = 0; parts[i] && i < NS_CSS_ANIM_ENTRIES_MAX; i++) {
+                        ns_css_timing tm = { .kind = NS_CSS_TIMING_EASE };
+                        ns_css_timing_parse(parts[i], &tm);
+                        items[i] = ns_css_timing_serialize(&tm);
+                        if (i) g_string_append(out, ", ");
+                        g_string_append(out, items[i]);
+                        g_free(items[i]);
+                    }
+                    g_strfreev(parts);
+                    return g_string_free(out, FALSE);
+                }
+                char *r = ns_computed_anim_longhand(&list, key);
+                ns_css_anim_list_clear(&list);
+                if (r) return r;
+            }
+            return g_strdup(lv->u.keyword);
         }
-        if (s && s->values[shp]) {
-            char *r = ns_computed_anim_longhand(&s->values[shp]->u.anim, key);
+        if (s) {
+            ns_css_anim_list list;
+            ns_css_anim_effective(s, is_anim, &list);
+            char *r = list.n > 0 ? ns_computed_anim_longhand(&list, key) : NULL;
+            ns_css_anim_list_clear(&list);
             if (r) return r;
         }
     }
@@ -14704,6 +14743,7 @@ ns_computed_anim_lookup(ns_js *js, const ns_node *n, const char *name)
     if (strcmp(key, "iteration") == 0) return g_strdup("1");
     if (strcmp(key, "direction") == 0) return g_strdup("normal");
     if (strcmp(key, "fill") == 0)      return g_strdup("none");
+    if (strcmp(key, "play-state") == 0) return g_strdup("running");
     return NULL;
 }
 
@@ -15355,9 +15395,17 @@ ns_anim_prop_arg(JSContext *ctx, JSValueConst v)
     if (JS_IsNull(v) || JS_IsUndefined(v)) return -1;
     const char *name = JS_ToCString(ctx, v);
     if (!name) return -2;
-    int prop = ns_css_prop_id(name);
+    int prop;
+    if (name[0] == '@') {
+        char *end = NULL;
+        long idx = strtol(name + 1, &end, 10);
+        prop = (end != name + 1 && idx >= 0 && idx < 1024) ? (int)(-1 - idx) : -2;
+    } else {
+        prop = ns_css_prop_id(name);
+        if (prop < 0) prop = -2;
+    }
     JS_FreeCString(ctx, name);
-    return prop < 0 ? -2 : prop;
+    return prop;
 }
 
 static JSValue
@@ -15372,6 +15420,11 @@ ns_anim_info_to_js(JSContext *ctx, const ns_anim_info *info)
     JS_SetPropertyStr(ctx, o, "paused", JS_NewBool(ctx, info->paused));
     JS_SetPropertyStr(ctx, o, "finished", JS_NewBool(ctx, info->finished));
     JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)info->generation));
+    JS_SetPropertyStr(ctx, o, "run", JS_NewInt32(ctx, info->run));
+    JS_SetPropertyStr(ctx, o, "fill", JS_NewString(ctx, info->fill ? info->fill : "none"));
+    JS_SetPropertyStr(ctx, o, "direction",
+                      JS_NewString(ctx, info->direction ? info->direction : "normal"));
+    JS_SetPropertyStr(ctx, o, "easing", JS_NewString(ctx, info->easing));
     JS_SetPropertyStr(ctx, o, "name",
                       info->name ? JS_NewString(ctx, info->name) : JS_NULL);
     JS_SetPropertyStr(ctx, o, "prop", info->prop >= 0
@@ -15462,6 +15515,71 @@ ns_anim_control_native(JSContext *ctx, JSValueConst this_val,
     JS_FreeCString(ctx, op);
     if (ok) js->mutated = TRUE;
     return JS_NewBool(ctx, ok);
+}
+
+static JSValue
+ns_anim_animate_native(JSContext *ctx, JSValueConst this_val,
+                       int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->anim || argc < 3) return JS_NULL;
+    const ns_node *node = ns_unwrap_element(argv[0]);
+    if (!node || !JS_IsObject(argv[1]) || !JS_IsObject(argv[2])) return JS_NULL;
+    ns_js_flush_style(js);
+    JSValue len_v = JS_GetPropertyStr(ctx, argv[1], "length");
+    int n = 0;
+    JS_ToInt32(ctx, &n, len_v);
+    JS_FreeValue(ctx, len_v);
+    if (n < 0) n = 0;
+    if (n > 256) n = 256;
+    const char **css = g_new0(const char *, n > 0 ? n : 1);
+    double *pct = g_new0(double, n > 0 ? n : 1);
+    for (int i = 0; i < n; i++) {
+        JSValue st = JS_GetPropertyUint32(ctx, argv[1], (uint32_t)i);
+        JSValue cv = JS_GetPropertyStr(ctx, st, "css");
+        JSValue ov = JS_GetPropertyStr(ctx, st, "offset");
+        css[i] = JS_ToCString(ctx, cv);
+        JS_ToFloat64(ctx, &pct[i], ov);
+        JS_FreeValue(ctx, cv);
+        JS_FreeValue(ctx, ov);
+        JS_FreeValue(ctx, st);
+    }
+    ns_anim_script_timing t = { 0 };
+    JSValue dv = JS_GetPropertyStr(ctx, argv[2], "duration");
+    JSValue dl = JS_GetPropertyStr(ctx, argv[2], "delay");
+    JSValue it = JS_GetPropertyStr(ctx, argv[2], "iterations");
+    JSValue dir = JS_GetPropertyStr(ctx, argv[2], "direction");
+    JSValue fill = JS_GetPropertyStr(ctx, argv[2], "fill");
+    JSValue ease = JS_GetPropertyStr(ctx, argv[2], "easing");
+    JS_ToFloat64(ctx, &t.duration_ms, dv);
+    JS_ToFloat64(ctx, &t.delay_ms, dl);
+    t.iterations = 1;
+    JS_ToFloat64(ctx, &t.iterations, it);
+    if (isnan(t.iterations)) t.iterations = 1;
+    const char *dir_s = JS_IsString(dir) ? JS_ToCString(ctx, dir) : NULL;
+    const char *fill_s = JS_IsString(fill) ? JS_ToCString(ctx, fill) : NULL;
+    const char *ease_s = JS_IsString(ease) ? JS_ToCString(ctx, ease) : NULL;
+    t.direction = dir_s;
+    t.fill = fill_s;
+    t.easing = ease_s;
+    int prop = 0;
+    guint gen = 0;
+    gboolean ok = ns_anim_script_start(js->anim, node, css, pct, n, &t, &prop, &gen);
+    if (dir_s) JS_FreeCString(ctx, dir_s);
+    if (fill_s) JS_FreeCString(ctx, fill_s);
+    if (ease_s) JS_FreeCString(ctx, ease_s);
+    JS_FreeValue(ctx, dv); JS_FreeValue(ctx, dl); JS_FreeValue(ctx, it);
+    JS_FreeValue(ctx, dir); JS_FreeValue(ctx, fill); JS_FreeValue(ctx, ease);
+    for (int i = 0; i < n; i++) if (css[i]) JS_FreeCString(ctx, css[i]);
+    g_free(css);
+    g_free(pct);
+    if (!ok) return JS_NULL;
+    js->mutated = TRUE;
+    JSValue o = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, o, "run", JS_NewInt32(ctx, -1 - prop));
+    JS_SetPropertyStr(ctx, o, "generation", JS_NewInt32(ctx, (int)gen));
+    return o;
 }
 
 static JSValue
@@ -25180,6 +25298,72 @@ ns_cookie_change_event_ctor(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_timed_event_ctor(JSContext *ctx, JSValueConst this_val,
+                    int argc, JSValueConst *argv, const char *name_key)
+{
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    JSValue name = JS_UNDEFINED, elapsed = JS_UNDEFINED, pseudo = JS_UNDEFINED;
+    if (argc >= 2 && JS_IsObject(argv[1])) {
+        name = JS_GetPropertyStr(ctx, argv[1], name_key);
+        elapsed = JS_GetPropertyStr(ctx, argv[1], "elapsedTime");
+        pseudo = JS_GetPropertyStr(ctx, argv[1], "pseudoElement");
+    }
+    if (JS_IsUndefined(name)) name = JS_NewString(ctx, "");
+    else {
+        JSValue str = JS_ToString(ctx, name);
+        JS_FreeValue(ctx, name);
+        name = str;
+    }
+    double t = 0;
+    if (!JS_IsUndefined(elapsed)) {
+        int rc = JS_ToFloat64(ctx, &t, elapsed);
+        JS_FreeValue(ctx, elapsed);
+        if (rc != 0 || !isfinite(t)) {
+            JS_FreeValue(ctx, name);
+            JS_FreeValue(ctx, pseudo);
+            JS_FreeValue(ctx, ev);
+            if (rc == 0)
+                return JS_ThrowTypeError(ctx, "elapsedTime is not a finite number");
+            return JS_EXCEPTION;
+        }
+    }
+    if (JS_IsUndefined(pseudo)) pseudo = JS_NewString(ctx, "");
+    else {
+        JSValue str = JS_ToString(ctx, pseudo);
+        JS_FreeValue(ctx, pseudo);
+        pseudo = str;
+    }
+    JS_DefinePropertyValueStr(ctx, ev, name_key, name, JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, ev, "elapsedTime", JS_NewFloat64(ctx, t),
+                              JS_PROP_ENUMERABLE);
+    JS_DefinePropertyValueStr(ctx, ev, "pseudoElement", pseudo, JS_PROP_ENUMERABLE);
+    if (strcmp(name_key, "animationName") == 0) {
+        JSValue animation = JS_NULL;
+        if (argc >= 2 && JS_IsObject(argv[1])) {
+            animation = JS_GetPropertyStr(ctx, argv[1], "animation");
+            if (JS_IsUndefined(animation)) animation = JS_NULL;
+        }
+        JS_DefinePropertyValueStr(ctx, ev, "animation", animation, JS_PROP_ENUMERABLE);
+    }
+    return ev;
+}
+
+static JSValue
+ns_animation_event_ctor(JSContext *ctx, JSValueConst this_val,
+                        int argc, JSValueConst *argv)
+{
+    return ns_timed_event_ctor(ctx, this_val, argc, argv, "animationName");
+}
+
+static JSValue
+ns_transition_event_ctor(JSContext *ctx, JSValueConst this_val,
+                         int argc, JSValueConst *argv)
+{
+    return ns_timed_event_ctor(ctx, this_val, argc, argv, "propertyName");
+}
+
+static JSValue
 ns_submit_event_ctor(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
 {
@@ -27134,6 +27318,24 @@ ns_js_anim_event_cb(const ns_node *node, const char *type,
     ns_js *js = user;
     if (!js || !js->ctx || !node || js->halted) return;
     JSContext *ctx = js->ctx;
+    if (g_str_has_prefix(type, "__ns")) {
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue hook = JS_GetPropertyStr(ctx, global, "__ns_anim_script_event");
+        if (JS_IsFunction(ctx, hook)) {
+            JSValue args[3] = {
+                ns_make_element(ctx, node),
+                JS_NewInt32(ctx, name ? atoi(name) : -1),
+                JS_NewString(ctx, type + 4),
+            };
+            JSValue r = JS_Call(ctx, hook, JS_UNDEFINED, 3, args);
+            if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+            JS_FreeValue(ctx, r);
+            for (int i = 0; i < 3; i++) JS_FreeValue(ctx, args[i]);
+        }
+        JS_FreeValue(ctx, hook);
+        JS_FreeValue(ctx, global);
+        return;
+    }
     JSValue event = ns_make_event(ctx, type, node);
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", JS_FALSE);
@@ -46267,6 +46469,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         JS_NewCFunction(ctx, ns_anim_seek_native, "__ns_anim_seek", 3), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_anim_control",
         JS_NewCFunction(ctx, ns_anim_control_native, "__ns_anim_control", 3), 0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_anim_animate",
+        JS_NewCFunction(ctx, ns_anim_animate_native, "__ns_anim_animate", 3), 0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_container_query_canonical",
         JS_NewCFunction(ctx, ns_container_query_canonical,
                         "__ns_container_query_canonical", 1),
@@ -46470,6 +46674,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         ns_bind_ctor(ctx, global, event_subclasses[i], ns_event_ctor, 2);
     ns_bind_ctor(ctx, global, "CookieChangeEvent", ns_cookie_change_event_ctor, 2);
     ns_bind_ctor(ctx, global, "FocusEvent",       ns_focus_event_ctor,       2);
+    ns_bind_ctor(ctx, global, "AnimationEvent",   ns_animation_event_ctor,   2);
+    ns_bind_ctor(ctx, global, "TransitionEvent",  ns_transition_event_ctor,  2);
     ns_bind_ctor(ctx, global, "CompositionEvent",  ns_composition_event_ctor, 2);
     ns_bind_ctor(ctx, global, "TextEvent",         ns_ui_event_ctor,          2);
     ns_bind_ctor(ctx, global, "InputEvent",        ns_input_event_ctor,       2);
