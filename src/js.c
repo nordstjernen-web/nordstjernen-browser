@@ -15323,6 +15323,22 @@ ns_css_supported_property(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_container_query_canonical(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1) return JS_NULL;
+    const char *text = JS_ToCString(ctx, argv[0]);
+    if (!text) return JS_NULL;
+    char *canon = ns_css_container_condition_canonical(text);
+    JS_FreeCString(ctx, text);
+    if (!canon) return JS_NULL;
+    JSValue r = JS_NewString(ctx, canon);
+    g_free(canon);
+    return r;
+}
+
+static JSValue
 ns_linked_css_text(JSContext *ctx, JSValueConst this_val,
                    int argc, JSValueConst *argv)
 {
@@ -46110,6 +46126,10 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         0);
     JS_DefinePropertyValueStr(ctx, global, "__ns_linked_css",
         JS_NewCFunction(ctx, ns_linked_css_text, "__ns_linked_css", 1),
+        0);
+    JS_DefinePropertyValueStr(ctx, global, "__ns_container_query_canonical",
+        JS_NewCFunction(ctx, ns_container_query_canonical,
+                        "__ns_container_query_canonical", 1),
         0);
     ns_bind_fn(ctx, global, "requestAnimationFrame", ns_window_requestAnimationFrame,  1);
     ns_bind_fn(ctx, global, "cancelAnimationFrame",  ns_window_cancelAnimationFrame,   1);

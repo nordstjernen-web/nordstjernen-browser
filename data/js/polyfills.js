@@ -6087,6 +6087,8 @@
         method(CSSGroupingRule.prototype, '__header', function () {
             if (this.__at === 'media')
                 return '@media ' + serializeMediaList(this.__condition);
+            if (this.__at === 'container')
+                return '@container ' + this.__condition;
             return this.__prelude;
         });
         method(CSSGroupingRule.prototype, '__cssText', function () {
@@ -6105,6 +6107,43 @@
             function () {});
         accessor(CSSMediaRule.prototype, 'media',
             function () { return makeMediaListObject(this.__condition); },
+            function () {});
+        function containerSplit(cond) {
+            var s = String(cond || '');
+            if (/^\(|^not\s|^not\(/i.test(s)) return ['', s];
+            var m = /^([^\s(]+)(?:\s+([\s\S]*))?$/.exec(s);
+            if (m) return [m[1], m[2] || ''];
+            return ['', s];
+        }
+        function containerSingle(rule, index) {
+            var parts = containerParts(rule.__condition);
+            return parts.length === 1 ? (index ? parts[0].query : parts[0].name) : '';
+        }
+        function containerParts(cond) {
+            var s = String(cond || ''), out = [], depth = 0, start = 0;
+            for (var i = 0; i < s.length; i++) {
+                var c = s.charAt(i);
+                if (c === '(') depth++;
+                else if (c === ')') depth--;
+                else if (c === ',' && depth === 0) {
+                    out.push(s.slice(start, i).trim());
+                    start = i + 1;
+                }
+            }
+            out.push(s.slice(start).trim());
+            return out.map(function (part) {
+                var nq = containerSplit(part);
+                return { name: nq[0], query: nq[1] };
+            });
+        }
+        accessor(CSSContainerRule.prototype, 'conditions',
+            function () { return containerParts(this.__condition); },
+            function () {});
+        accessor(CSSContainerRule.prototype, 'containerName',
+            function () { return containerSingle(this, 0); },
+            function () {});
+        accessor(CSSContainerRule.prototype, 'containerQuery',
+            function () { return containerSingle(this, 1); },
             function () {});
 
         function makeList() {
@@ -6371,6 +6410,11 @@
                 g.__type = kw === 'media' ? 4 : kw === 'supports' ? 12 : 0;
                 var cond = prelude.replace(/^@[\w-]+\s*/, '')
                                   .replace(/^\s+|\s+$/g, '');
+                if (kw === 'container' &&
+                    typeof global.__ns_container_query_canonical === 'function') {
+                    cond = global.__ns_container_query_canonical(cond);
+                    if (cond === null) return null;
+                }
                 g.__condition = cond;
                 g.__namespaces = namespaces;
                 g.__rules = parseRuleList(block, sheet, g, namespaces);
