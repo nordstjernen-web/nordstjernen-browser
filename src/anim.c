@@ -17,8 +17,11 @@ typedef struct ns_anim_chan {
     ns_css_value *from;
     ns_css_value *to;
     ns_css_value *current;
+    gboolean      has_last;
     gboolean      active;
+    gboolean      cancelled;
     gboolean      discrete;
+    int           phase;
     gboolean      started;
     gboolean      paused;
     gboolean      finished;
@@ -44,9 +47,12 @@ typedef struct ns_anim_run {
     char    *cancelled_name;
     gboolean active;
     gboolean paused;
+    gboolean css_paused;
+    gboolean api_override;
     gboolean started;
     gboolean finished;
     gboolean pending;
+    int      phase;
     int      iters_emitted;
     double   elapsed_base_ms;
     ns_css_keyframes *kf;
@@ -60,13 +66,24 @@ typedef struct ns_anim_run {
     ns_css_timing timing;
     guint    generation;
     GHashTable *values;
+    GHashTable *partials;
 } ns_anim_run;
+
+typedef struct ns_anim_partial {
+    ns_css_value *from;
+    ns_css_value *to;
+    double        t;
+} ns_anim_partial;
+
+enum { NS_ANIM_PHASE_IDLE, NS_ANIM_PHASE_BEFORE, NS_ANIM_PHASE_ACTIVE,
+       NS_ANIM_PHASE_AFTER };
 
 typedef struct ns_anim_state {
     const ns_node *node;
     GPtrArray     *chans;
     GPtrArray     *runs;
     GPtrArray     *scripts;
+    GHashTable    *base_values;
     ns_style      *prev_style;
     gboolean       has_transition;
     guint          run_generation;
@@ -150,6 +167,7 @@ run_free(gpointer data)
     g_free(r->name);
     g_free(r->cancelled_name);
     if (r->values) g_hash_table_destroy(r->values);
+    if (r->partials) g_hash_table_destroy(r->partials);
     g_free(r);
 }
 
@@ -161,6 +179,7 @@ ns_anim_state_free(gpointer data)
     if (s->chans) g_ptr_array_free(s->chans, TRUE);
     if (s->runs) g_ptr_array_free(s->runs, TRUE);
     if (s->scripts) g_ptr_array_free(s->scripts, TRUE);
+    if (s->base_values) g_hash_table_destroy(s->base_values);
     ns_style_free(s->prev_style);
     g_free(s);
 }
@@ -178,7 +197,11 @@ ns_anim_keyframes_free(gpointer data)
 }
 
 static gboolean advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us);
+static void partial_free(gpointer data);
+static void chan_cancel(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us);
+static double run_active_ms(const ns_anim_run *r);
 static gboolean advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us);
+static void run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us);
 static void run_emit_script(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
                             const char *type);
 
@@ -503,12 +526,17 @@ chan_start(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
            const ns_css_value *from, const ns_css_value *to,
            const ns_css_anim_entry *e, gint64 now_us, gboolean discrete)
 {
-    if (ch->active) {
-        anim_emit(a, s->node, "transitioncancel",
-                  ns_css_prop_name(ch->prop),
-                  MAX(chan_elapsed_ms(ch, now_us), 0.0));
-        if (a->active_count > 0) a->active_count--;
+    double duration_ms = e->duration_ms;
+    double delay_ms = e->delay_ms;
+    if (ch->active && ch->to && ns_css_value_equal(to, ch->from)) {
+        double el = chan_elapsed_ms(ch, now_us);
+        double p = ch->duration_ms > 0 ? CLAMP(el / ch->duration_ms, 0.0, 1.0) : 1.0;
+        double factor = timing_apply(ch->timing, p);
+        if (el < 0) factor = 0;
+        duration_ms *= factor;
+        if (delay_ms < 0) delay_ms *= factor;
     }
+    if (ch->active) chan_cancel(a, s, ch, now_us);
     ns_css_value *new_from = ns_css_value_dup(from);
     ns_css_value *new_to = ns_css_value_dup(to);
     ns_css_value *new_current = ns_css_value_dup(from);
@@ -522,23 +550,26 @@ chan_start(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch,
     ch->started = FALSE;
     ch->paused = FALSE;
     ch->finished = FALSE;
+    ch->cancelled = FALSE;
+    ch->phase = NS_ANIM_PHASE_IDLE;
     ch->discrete = discrete;
     ch->start_us = now_us;
-    ch->duration_ms = e->duration_ms;
-    ch->delay_ms = e->delay_ms;
+    ch->duration_ms = duration_ms;
+    ch->delay_ms = delay_ms;
     ch->timing = e->timing;
     ch->generation++;
     a->active_count++;
     anim_emit(a, s->node, "transitionrun", ns_css_prop_name(ch->prop), 0.0);
-    if (ch->delay_ms < 0) advance_chan(a, s, ch, now_us);
+    advance_chan(a, s, ch, now_us);
 }
 
 static void
 chan_cancel(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
 {
-    anim_emit(a, s->node, "transitioncancel", ns_css_prop_name(ch->prop),
-              MAX(chan_elapsed_ms(ch, now_us), 0.0));
+    double el = CLAMP(chan_elapsed_ms(ch, now_us), 0.0, ch->duration_ms);
+    anim_emit(a, s->node, "transitioncancel", ns_css_prop_name(ch->prop), el);
     ch->active = FALSE;
+    ch->phase = NS_ANIM_PHASE_IDLE;
     if (a->active_count > 0) a->active_count--;
 }
 
@@ -557,6 +588,27 @@ ancestor_transitions_to(ns_anim *a, const ns_node *node, int prop,
     return FALSE;
 }
 
+static ns_css_value *
+initial_value_for(int prop)
+{
+    const char *name = ns_css_prop_name(prop);
+    const char *text = name ? ns_css_initial_value_text(name) : NULL;
+    if (!text) return NULL;
+    char *decl = g_strdup_printf("%s: %s", name, text);
+    GArray *decls = ns_css_parse_declarations(decl);
+    g_free(decl);
+    ns_css_value *v = NULL;
+    if (decls && decls->len > 0) {
+        ns_css_decl *d = &g_array_index(decls, ns_css_decl, 0);
+        if ((int)d->prop == prop) {
+            v = d->value;
+            d->value = NULL;
+        }
+    }
+    ns_css_declarations_free(decls);
+    return v;
+}
+
 static void
 observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
                         int prop, const ns_css_anim_entry *e, gint64 now_us)
@@ -564,34 +616,50 @@ observe_transition_prop(ns_anim *a, ns_anim_state *s, const ns_style *style,
     const ns_css_value *cur = style->values[prop];
     ns_anim_chan *ch = chan_ensure(s, prop);
     if (cur && ch->current && cur == ch->current) return;
-    if (!ch->last && s->prev_style && s->prev_style != style)
+    if (!ch->has_last && s->prev_style && s->prev_style != style) {
         ch->last = ns_css_value_dup(s->prev_style->values[prop]);
-    if (!ch->last) {
+        ch->has_last = TRUE;
+    }
+    if (!ch->has_last) {
+        const ns_style *before = ns_css_style_before_change(s->node);
+        if (before && before != style) {
+            ch->last = ns_css_value_dup(before->values[prop]);
+            ch->has_last = TRUE;
+        }
+    }
+    if (!ch->has_last) {
         ch->last = ns_css_value_dup(cur);
+        ch->has_last = TRUE;
         return;
     }
     if (ns_css_value_equal(cur, ch->last)) return;
-    gboolean can_run = e && cur && ch->last &&
+    ns_css_value *cur_init = cur ? NULL : initial_value_for(prop);
+    ns_css_value *last_init = ch->last ? NULL : initial_value_for(prop);
+    const ns_css_value *cur_eff = cur ? cur : cur_init;
+    const ns_css_value *last_eff = ch->last ? ch->last : last_init;
+    gboolean can_run = e && cur_eff && last_eff &&
                        e->duration_ms + e->delay_ms > 0 &&
                        e->duration_ms >= 0 && !should_skip_motion() &&
                        (ch->active || a->active_count < NS_ANIM_MAX_ACTIVE);
     if (can_run) {
-        const ns_css_value *from = ch->active ? ch->current : ch->last;
-        ns_css_value *probe = ns_css_value_interpolate(from, cur, 0.0);
+        const ns_css_value *from = ch->active ? ch->current : last_eff;
+        ns_css_value *probe = ns_css_value_interpolate(from, cur_eff, 0.0);
         gboolean interpolable = probe != NULL;
         ns_css_value_free(probe);
-        if (interpolable && ancestor_transitions_to(a, s->node, prop, cur)) {
+        if (interpolable && ancestor_transitions_to(a, s->node, prop, cur_eff)) {
             if (ch->active) chan_cancel(a, s, ch, now_us);
         } else if (interpolable) {
-            chan_start(a, s, ch, from, cur, e, now_us, FALSE);
+            chan_start(a, s, ch, from, cur_eff, e, now_us, FALSE);
         } else if (prop_discretely_animatable(prop) || e->allow_discrete) {
-            chan_start(a, s, ch, from, cur, e, now_us, TRUE);
+            chan_start(a, s, ch, from, cur_eff, e, now_us, TRUE);
         } else if (ch->active) {
             chan_cancel(a, s, ch, now_us);
         }
     } else if (ch->active) {
         chan_cancel(a, s, ch, now_us);
     }
+    ns_css_value_free(cur_init);
+    ns_css_value_free(last_init);
     ns_css_value_free(ch->last);
     ch->last = ns_css_value_dup(cur);
 }
@@ -629,8 +697,13 @@ observe_transition(ns_anim *a, ns_anim_state *s, const ns_style *style,
     if (s->chans) {
         for (guint i = 0; i < s->chans->len; i++) {
             ns_anim_chan *ch = s->chans->pdata[i];
-            if (ch->prop >= 0 && ch->prop < NS_CSS_PROP_COUNT && !touched[ch->prop])
-                observe_transition_prop(a, s, style, ch->prop, NULL, now_us);
+            if (ch->prop < 0 || ch->prop >= NS_CSS_PROP_COUNT || touched[ch->prop])
+                continue;
+            if (ch->active) {
+                chan_cancel(a, s, ch, now_us);
+                ch->cancelled = TRUE;
+            }
+            observe_transition_prop(a, s, style, ch->prop, NULL, now_us);
         }
     }
     g_array_free(order, TRUE);
@@ -644,6 +717,13 @@ anim_stops_build(const ns_css_keyframes *kf)
     for (int i = 0; i < kf->n_stops; i++) {
         ns_anim_kf_stop st = { kf->stops[i].pct,
                                ns_css_parse_declarations(kf->stops[i].raw_props) };
+        if (st.decls)
+            for (guint d = st.decls->len; d > 0; d--) {
+                ns_css_decl *decl = &g_array_index(st.decls, ns_css_decl, d - 1);
+                if (!decl->important) continue;
+                ns_css_value_free(decl->value);
+                g_array_remove_index(st.decls, d - 1);
+            }
         g_array_append_val(stops, st);
     }
     return stops;
@@ -661,7 +741,7 @@ static void
 run_set_paused(ns_anim_run *r, gboolean paused, gint64 now_us)
 {
     if (paused && !r->paused) {
-        r->elapsed_base_ms = MAX(run_elapsed_ms(r, now_us), 0.0);
+        r->elapsed_base_ms = run_elapsed_ms(r, now_us);
         r->paused = TRUE;
     } else if (!paused && r->paused) {
         r->start_us = now_us - (r->elapsed_base_ms + r->delay_ms) * 1000.0;
@@ -669,23 +749,36 @@ run_set_paused(ns_anim_run *r, gboolean paused, gint64 now_us)
     }
 }
 
+static double
+run_active_time(const ns_anim_run *r, double el)
+{
+    double active = run_active_ms(r);
+    if (el < 0) return 0;
+    if (isfinite(active) && el > active) return active;
+    return el;
+}
+
 static void
 run_cancel(ns_anim *a, ns_anim_state *s, ns_anim_run *r)
 {
+    double at = run_active_time(r, run_elapsed_ms(r, anim_now(a)));
     if (r->active) {
         r->active = FALSE;
         if (a->active_count > 0) a->active_count--;
     }
     if (r->name) {
         if (r->is_script) run_emit_script(a, s, r, "__nscancel");
-        else anim_emit(a, s->node, "animationcancel", r->name, 0.0);
+        else if (r->phase != NS_ANIM_PHASE_IDLE)
+            anim_emit(a, s->node, "animationcancel", r->name, at);
         g_free(r->name);
         r->name = NULL;
     }
     r->finished = FALSE;
     r->started = FALSE;
     r->pending = FALSE;
+    r->phase = NS_ANIM_PHASE_IDLE;
     if (r->values) g_hash_table_remove_all(r->values);
+    if (r->partials) g_hash_table_remove_all(r->partials);
 }
 
 static void
@@ -715,9 +808,12 @@ run_start(ns_anim *a, ns_anim_state *s, ns_anim_run *r,
     run_configure(r, e);
     r->active = TRUE;
     r->paused = e->paused;
+    r->css_paused = e->paused;
+    r->api_override = FALSE;
     r->pending = !e->paused;
     r->started = FALSE;
     r->finished = FALSE;
+    r->phase = NS_ANIM_PHASE_IDLE;
     r->iters_emitted = 0;
     r->elapsed_base_ms = 0;
     r->generation = ++s->run_generation;
@@ -761,7 +857,9 @@ observe_animation(ns_anim *a, ns_anim_state *s, const ns_style *style,
         }
         if (r->name && strcmp(r->name, e->name) == 0) {
             run_configure(r, e);
-            run_set_paused(r, e->paused, now_us);
+            if (e->paused != r->css_paused && !r->api_override)
+                run_set_paused(r, e->paused, now_us);
+            r->css_paused = e->paused;
             continue;
         }
         if (r->name) run_cancel(a, s, r);
@@ -780,9 +878,31 @@ observe_animation(ns_anim *a, ns_anim_state *s, const ns_style *style,
     }
 }
 
+static gboolean
+ancestor_hidden(GHashTable *styles, const ns_node *dom)
+{
+    if (!styles) return FALSE;
+    for (const ns_node *p = dom->parent; p; p = p->parent) {
+        const ns_style *ps = g_hash_table_lookup(styles, p);
+        if (ps && ns_display_is_none(ns_css_display_of(ps))) return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
+                 gint64 now_us, GHashTable *styles);
+
 void
 ns_anim_observe(ns_anim *a, const ns_node *dom,
                 const ns_style *style, gint64 now_us)
+{
+    anim_observe_one(a, dom, style, now_us, NULL);
+}
+
+static void
+anim_observe_one(ns_anim *a, const ns_node *dom, const ns_style *style,
+                 gint64 now_us, GHashTable *styles)
 {
     if (!a || !dom || !style) return;
     if (a->now_us == 0 || g_hash_table_size(a->active) == 0) a->now_us = now_us;
@@ -798,6 +918,19 @@ ns_anim_observe(ns_anim *a, const ns_node *dom,
             return;
         }
         s = state_for(a, dom);
+    }
+    if (ns_display_is_none(ns_css_display_of(style)) || ancestor_hidden(styles, dom)) {
+        ns_css_anim_list_clear(&tv);
+        ns_css_anim_list_clear(&av);
+        tv.n = 0;
+        av.n = 0;
+        if (s->chans)
+            for (guint i = 0; i < s->chans->len; i++) {
+                ns_anim_chan *ch = s->chans->pdata[i];
+                if (ch->active) chan_cancel(a, s, ch, now_us);
+                ch->finished = FALSE;
+                ch->cancelled = TRUE;
+            }
     }
     observe_transition(a, s, style, &tv, now_us);
     observe_animation(a, s, style, &av, now_us);
@@ -848,7 +981,7 @@ ns_anim_observe_all(ns_anim *a, GHashTable *styles, gint64 now_us)
     g_array_sort(items, observe_item_cmp);
     for (guint i = 0; i < items->len; i++) {
         const ns_anim_observe_item *item = &g_array_index(items, ns_anim_observe_item, i);
-        ns_anim_observe(a, item->node, item->style, now_us);
+        anim_observe_one(a, item->node, item->style, now_us, styles);
     }
     g_array_free(items, TRUE);
     ns_anim_prune(a, styles);
@@ -879,15 +1012,31 @@ apply_propagate(GHashTable *styles, const ns_node *node, int prop,
 }
 
 static void
-apply_animated_value(GHashTable *styles, const ns_node *node, ns_style *st,
+apply_animated_value(GHashTable *styles, ns_anim_state *s, ns_style *st,
                      int prop, ns_css_value *current)
 {
     if (prop < 0 || prop >= NS_CSS_PROP_COUNT || !current) return;
     ns_css_value *base = st->values[prop];
     if (base == current) return;
+    if (!s->base_values)
+        s->base_values = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                               (GDestroyNotify)ns_css_value_free);
+    if (!g_hash_table_contains(s->base_values, GINT_TO_POINTER(prop)))
+        g_hash_table_insert(s->base_values, GINT_TO_POINTER(prop),
+                            base ? ns_css_value_dup(base) : g_new0(ns_css_value, 1));
     st->values[prop] = ns_css_value_dup(current);
-    if (base) apply_propagate(styles, node, prop, base, current);
+    if (base) apply_propagate(styles, s->node, prop, base, current);
     ns_css_value_free(base);
+}
+
+const ns_css_value *
+ns_anim_base_value(ns_anim *a, const ns_node *node, int prop)
+{
+    if (!a || !node) return NULL;
+    ns_anim_state *s = g_hash_table_lookup(a->states, node);
+    if (!s || !s->base_values) return NULL;
+    const ns_css_value *v = g_hash_table_lookup(s->base_values, GINT_TO_POINTER(prop));
+    return v && v->kind == 0 && !v->u.keyword ? NULL : v;
 }
 
 void
@@ -901,51 +1050,104 @@ ns_anim_apply(ns_anim *a, GHashTable *styles)
         ns_anim_state *s = val;
         ns_style *st = g_hash_table_lookup(styles, key);
         if (!st) continue;
+        if (s->base_values) g_hash_table_remove_all(s->base_values);
         if (s->chans)
             for (guint i = 0; i < s->chans->len; i++) {
                 ns_anim_chan *ch = s->chans->pdata[i];
                 if (ch->active && ch->current)
-                    apply_animated_value(styles, key, st, ch->prop, ch->current);
+                    apply_animated_value(styles, s, st, ch->prop, ch->current);
             }
         for (int w = 0; w < 2; w++) {
             GPtrArray *runs = state_runs(s, w);
             if (!runs) continue;
             for (guint i = 0; i < runs->len; i++) {
                 ns_anim_run *r = runs->pdata[i];
+                if (r->partials && g_hash_table_size(r->partials) > 0) {
+                    GHashTableIter pit;
+                    gpointer pk, pv;
+                    g_hash_table_iter_init(&pit, r->partials);
+                    while (g_hash_table_iter_next(&pit, &pk, &pv)) {
+                        int prop = GPOINTER_TO_INT(pk);
+                        ns_anim_partial *pa = pv;
+                        const ns_css_value *base = s->base_values
+                            ? g_hash_table_lookup(s->base_values, pk) : NULL;
+                        if (base && base->kind == 0 && !base->u.keyword) base = NULL;
+                        if (!base) base = st->values[prop];
+                        ns_css_value *init = base ? NULL : initial_value_for(prop);
+                        const ns_css_value *from = pa->from ? pa->from : (base ? base : init);
+                        const ns_css_value *to = pa->to ? pa->to : (base ? base : init);
+                        ns_css_value *out = from && to
+                            ? ns_css_value_interpolate(from, to, pa->t) : NULL;
+                        if (!out && from && to)
+                            out = ns_css_value_dup(pa->t < 0.5 ? from : to);
+                        ns_css_value_free(init);
+                        if (out) g_hash_table_insert(r->values, pk, out);
+                    }
+                }
                 if (!r->values) continue;
                 GHashTableIter vit;
                 gpointer vk, vv;
                 g_hash_table_iter_init(&vit, r->values);
                 while (g_hash_table_iter_next(&vit, &vk, &vv))
-                    apply_animated_value(styles, key, st, GPOINTER_TO_INT(vk), vv);
+                    apply_animated_value(styles, s, st, GPOINTER_TO_INT(vk), vv);
             }
         }
     }
+}
+
+static int
+chan_phase_at(const ns_anim_chan *ch, double elapsed)
+{
+    if (elapsed < 0) return NS_ANIM_PHASE_BEFORE;
+    if (elapsed >= ch->duration_ms) return NS_ANIM_PHASE_AFTER;
+    return NS_ANIM_PHASE_ACTIVE;
+}
+
+static void
+chan_emit_phase(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, int cur)
+{
+    int old = ch->phase;
+    if (old == cur) return;
+    const char *name = ns_css_prop_name(ch->prop);
+    double start_el = MAX(MIN(-ch->delay_ms, ch->duration_ms), 0.0);
+    if (cur == NS_ANIM_PHASE_ACTIVE) {
+        anim_emit(a, s->node, "transitionstart", name,
+                  old == NS_ANIM_PHASE_AFTER ? ch->duration_ms : start_el);
+    } else if (cur == NS_ANIM_PHASE_AFTER) {
+        if (old != NS_ANIM_PHASE_ACTIVE)
+            anim_emit(a, s->node, "transitionstart", name, start_el);
+        anim_emit(a, s->node, "transitionend", name, ch->duration_ms);
+    } else if (cur == NS_ANIM_PHASE_BEFORE) {
+        if (old == NS_ANIM_PHASE_AFTER)
+            anim_emit(a, s->node, "transitionstart", name, ch->duration_ms);
+        if (old != NS_ANIM_PHASE_IDLE)
+            anim_emit(a, s->node, "transitionend", name, 0.0);
+    }
+    ch->phase = cur;
 }
 
 static gboolean
 advance_chan(ns_anim *a, ns_anim_state *s, ns_anim_chan *ch, gint64 now_us)
 {
     double elapsed = chan_elapsed_ms(ch, now_us);
-    if (elapsed < 0) {
+    int cur = chan_phase_at(ch, elapsed);
+    chan_emit_phase(a, s, ch, cur);
+    if (cur == NS_ANIM_PHASE_BEFORE) {
         if (ch->current != ch->from) {
             ns_css_value_free(ch->current);
             ch->current = ns_css_value_dup(ch->from);
         }
         return TRUE;
     }
-    if (!ch->started) {
-        ch->started = TRUE;
-        anim_emit(a, s->node, "transitionstart", ns_css_prop_name(ch->prop), 0.0);
-    }
-    if (elapsed >= ch->duration_ms) {
+    ch->started = TRUE;
+    if (cur == NS_ANIM_PHASE_AFTER) {
         ns_css_value_free(ch->current);
         ch->current = ns_css_value_dup(ch->to);
-        ch->active = FALSE;
-        ch->finished = TRUE;
-        if (a->active_count > 0) a->active_count--;
-        anim_emit(a, s->node, "transitionend", ns_css_prop_name(ch->prop),
-                  ch->duration_ms);
+        if (ch->active) {
+            ch->active = FALSE;
+            ch->finished = TRUE;
+            if (a->active_count > 0) a->active_count--;
+        }
         return TRUE;
     }
     double t = ch->duration_ms > 0 ? elapsed / ch->duration_ms : 1.0;
@@ -971,14 +1173,35 @@ stop_value(const ns_anim_kf_stop *st, int prop)
     return found;
 }
 
+static gboolean
+stop_timing(const ns_anim_kf_stop *st, ns_css_timing *out)
+{
+    const ns_css_value *v = stop_value(st, NS_CSS_ANIMATION_TIMING_FUNCTION);
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return FALSE;
+    return ns_css_timing_parse(v->u.keyword, out);
+}
+
+static void
+partial_free(gpointer data)
+{
+    ns_anim_partial *p = data;
+    ns_css_value_free(p->from);
+    ns_css_value_free(p->to);
+    g_free(p);
+}
+
 static void
 run_sample_at(ns_anim_run *r, double progress)
 {
-    double pct = timing_apply(r->timing, progress) * 100.0;
+    double pct = (r->is_script ? timing_apply(r->timing, progress) : progress) * 100.0;
     if (!r->values)
         r->values = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                           NULL, (GDestroyNotify)ns_css_value_free);
+    if (!r->partials)
+        r->partials = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                            NULL, partial_free);
     g_hash_table_remove_all(r->values);
+    g_hash_table_remove_all(r->partials);
     if (!r->stops) return;
     gboolean seen[NS_CSS_PROP_COUNT];
     memset(seen, 0, sizeof seen);
@@ -1000,13 +1223,36 @@ run_sample_at(ns_anim_run *r, double progress)
             if (prev && next && prev != next) {
                 double range = next->pct - prev->pct;
                 double t = range > 0 ? (pct - prev->pct) / range : 0;
+                if (!r->is_script) {
+                    ns_css_timing tm;
+                    if (!stop_timing(prev, &tm)) tm = r->timing;
+                    t = timing_apply(tm, t);
+                }
                 out = ns_css_value_interpolate(stop_value(prev, prop),
                                                stop_value(next, prop), t);
                 if (!out)
                     out = ns_css_value_dup(t < 0.5 ? stop_value(prev, prop)
                                                    : stop_value(next, prop));
+            } else if (prev && prev->pct >= 100.0 - 1e-9) {
+                out = ns_css_value_dup(stop_value(prev, prop));
+            } else if (next && next->pct <= 1e-9) {
+                out = ns_css_value_dup(stop_value(next, prop));
             } else if (prev || next) {
-                out = ns_css_value_dup(stop_value(prev ? prev : next, prop));
+                double lo = prev ? prev->pct : 0.0;
+                double hi = next ? next->pct : 100.0;
+                double t = hi > lo ? (pct - lo) / (hi - lo) : 0;
+                if (!r->is_script && prev) {
+                    ns_css_timing tm;
+                    if (!stop_timing(prev, &tm)) tm = r->timing;
+                    t = timing_apply(tm, t);
+                } else if (!r->is_script) {
+                    t = timing_apply(r->timing, t);
+                }
+                ns_anim_partial *pa = g_new0(ns_anim_partial, 1);
+                pa->from = prev ? ns_css_value_dup(stop_value(prev, prop)) : NULL;
+                pa->to = next ? ns_css_value_dup(stop_value(next, prop)) : NULL;
+                pa->t = t;
+                g_hash_table_insert(r->partials, GINT_TO_POINTER(prop), pa);
             }
             if (out) g_hash_table_insert(r->values, GINT_TO_POINTER(prop), out);
         }
@@ -1052,6 +1298,7 @@ advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
                              r->fill == NS_CSS_ANIM_FILL_BOTH;
         if (!fill_back) {
             if (r->values) g_hash_table_remove_all(r->values);
+            if (r->partials) g_hash_table_remove_all(r->partials);
             return FALSE;
         }
         run_sample_at(r, directed_progress(0, 0.0, r->direction));
@@ -1068,6 +1315,7 @@ advance_run(ns_anim *a, ns_anim_run *r, gint64 now_us)
                             r->fill == NS_CSS_ANIM_FILL_BOTH;
         if (!fill_fwd) {
             if (r->values) g_hash_table_remove_all(r->values);
+            if (r->partials) g_hash_table_remove_all(r->partials);
             return TRUE;
         }
         int last = run_last_iteration(r);
@@ -1093,6 +1341,15 @@ run_emit_script(ns_anim *a, ns_anim_state *s, ns_anim_run *r, const char *type)
     anim_emit(a, s->node, type, idx, 0.0);
 }
 
+static int
+run_phase_at(const ns_anim_run *r, double el)
+{
+    double active = run_active_ms(r);
+    if (el < 0) return NS_ANIM_PHASE_BEFORE;
+    if (isfinite(active) && el >= active) return NS_ANIM_PHASE_AFTER;
+    return NS_ANIM_PHASE_ACTIVE;
+}
+
 static void
 run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
 {
@@ -1100,13 +1357,37 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
         if (!r->active) run_emit_script(a, s, r, "__nsfinish");
         return;
     }
+    if (!r->name) return;
     double el = run_elapsed_ms(r, now_us);
-    if (!r->started && el >= 0) {
-        r->started = TRUE;
-        r->iters_emitted = 0;
-        anim_emit(a, s->node, "animationstart", r->name, 0.0);
+    int old = r->phase;
+    int cur = run_phase_at(r, el);
+    double active = run_active_ms(r);
+    double start_el = MAX(MIN(-r->delay_ms, isfinite(active) ? active : -r->delay_ms), 0.0);
+    double end_el = isfinite(active) ? active : el;
+    if (old != cur) {
+        gboolean was_active_or_idle = old == NS_ANIM_PHASE_IDLE;
+        if (cur == NS_ANIM_PHASE_ACTIVE) {
+            anim_emit(a, s->node, "animationstart", r->name,
+                      old == NS_ANIM_PHASE_AFTER ? end_el : start_el);
+            r->started = TRUE;
+            r->iters_emitted = (int)MIN(el / MAX(r->duration_ms, 1e-9), 1e9);
+            if (old == NS_ANIM_PHASE_AFTER) r->iters_emitted = run_last_iteration(r);
+        } else if (cur == NS_ANIM_PHASE_AFTER) {
+            if (old != NS_ANIM_PHASE_ACTIVE)
+                anim_emit(a, s->node, "animationstart", r->name, start_el);
+            anim_emit(a, s->node, "animationend", r->name, end_el);
+            r->started = FALSE;
+        } else if (cur == NS_ANIM_PHASE_BEFORE) {
+            if (old == NS_ANIM_PHASE_AFTER)
+                anim_emit(a, s->node, "animationstart", r->name, end_el);
+            if (old != NS_ANIM_PHASE_IDLE || was_active_or_idle == FALSE)
+                anim_emit(a, s->node, "animationend", r->name, 0.0);
+            r->started = FALSE;
+        }
+        r->phase = cur;
+        return;
     }
-    if (r->started && r->duration_ms > 0) {
+    if (cur == NS_ANIM_PHASE_ACTIVE && r->duration_ms > 0) {
         int reached = (int)MIN(el / r->duration_ms, 1e9);
         int last = run_last_iteration(r);
         if (isfinite(r->iterations) && reached > last) reached = last;
@@ -1115,13 +1396,6 @@ run_emit_progress(ns_anim *a, ns_anim_state *s, ns_anim_run *r, gint64 now_us)
             anim_emit(a, s->node, "animationiteration", r->name,
                       r->iters_emitted * r->duration_ms);
         }
-    }
-    if (!r->active) {
-        double active = run_active_ms(r);
-        anim_emit(a, s->node, "animationend", r->name,
-                  isfinite(active) ? active : r->duration_ms);
-        r->started = FALSE;
-        r->iters_emitted = 0;
     }
 }
 
@@ -1188,9 +1462,14 @@ ns_anim_needs_layout(const ns_anim *a)
             if (!runs) continue;
             for (guint i = 0; i < runs->len; i++) {
                 const ns_anim_run *r = runs->pdata[i];
-                if (!r->values) continue;
                 GHashTableIter vit;
                 gpointer vk, vv;
+                if (r->partials) {
+                    g_hash_table_iter_init(&vit, r->partials);
+                    while (g_hash_table_iter_next(&vit, &vk, &vv))
+                        if (ns_css_prop_affects_layout(GPOINTER_TO_INT(vk))) return TRUE;
+                }
+                if (!r->values) continue;
                 g_hash_table_iter_init(&vit, r->values);
                 while (g_hash_table_iter_next(&vit, &vk, &vv))
                     if (ns_css_prop_affects_layout(GPOINTER_TO_INT(vk))) return TRUE;
@@ -1480,6 +1759,25 @@ ns_anim_script_start(ns_anim *a, const ns_node *node,
     return TRUE;
 }
 
+void
+ns_anim_keyframes_visit(ns_anim *a, const ns_node *node, int prop,
+                        ns_anim_keyframe_cb cb, gpointer user)
+{
+    if (!a || !node || !cb) return;
+    ns_anim_state *s = g_hash_table_lookup(a->states, node);
+    if (!s) return;
+    ns_anim_run *r = run_for(s, prop);
+    if (!r || !r->name || !r->stops) return;
+    for (guint i = 0; i < r->stops->len; i++) {
+        const ns_anim_kf_stop *st = &g_array_index(r->stops, ns_anim_kf_stop, i);
+        ns_css_timing tm;
+        if (!stop_timing(st, &tm)) tm = r->timing;
+        char *easing = ns_css_timing_serialize(&tm);
+        cb(st->pct / 100.0, easing, st->decls, user);
+        g_free(easing);
+    }
+}
+
 gboolean
 ns_anim_info_for(ns_anim *a, const ns_node *node, int prop, ns_anim_info *out)
 {
@@ -1508,10 +1806,24 @@ ns_anim_seek(ns_anim *a, const ns_node *node, int prop, double ms)
     gint64 now = anim_now(a);
     if (prop < 0) {
         ns_anim_run *r = run_for(s, prop);
-        if (!r || !r->name) return FALSE;
+        if (!r) return FALSE;
+        if (!r->name) {
+            r->name = r->cancelled_name;
+            r->cancelled_name = NULL;
+            r->active = TRUE;
+            r->finished = FALSE;
+            r->paused = TRUE;
+            r->pending = FALSE;
+            r->elapsed_base_ms = ms - r->delay_ms;
+            a->active_count++;
+            advance_run(a, r, now);
+            run_emit_progress(a, s, r, now);
+            anim_track(a, s);
+            return TRUE;
+        }
         double el = ms - r->delay_ms;
         r->pending = FALSE;
-        if (r->paused) r->elapsed_base_ms = MAX(el, 0.0);
+        if (r->paused) r->elapsed_base_ms = el;
         else r->start_us = now - ms * 1000.0;
         if (!r->active && r->finished) {
             r->active = TRUE;
@@ -1519,6 +1831,7 @@ ns_anim_seek(ns_anim *a, const ns_node *node, int prop, double ms)
             a->active_count++;
         }
         advance_run(a, r, now);
+        run_emit_progress(a, s, r, now);
         anim_track(a, s);
         return TRUE;
     }
@@ -1551,7 +1864,9 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
             if (!r->name) return FALSE;
             if (r->pending) { r->pending = FALSE; r->start_us = now; }
             run_set_paused(r, TRUE, now);
+            r->api_override = TRUE;
         } else if (strcmp(op, "play") == 0) {
+            r->api_override = TRUE;
             if (!r->name) {
                 r->name = r->cancelled_name;
                 r->cancelled_name = NULL;
@@ -1559,9 +1874,10 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
                 r->finished = FALSE;
                 r->paused = FALSE;
                 r->pending = TRUE;
+                r->started = FALSE;
                 r->start_us = now;
                 a->active_count++;
-                if (r->values) g_hash_table_remove_all(r->values);
+                advance_run(a, r, now);
             } else {
                 run_set_paused(r, FALSE, now);
                 if (!r->active && r->finished) {
@@ -1579,6 +1895,7 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
             r->pending = FALSE;
             r->start_us = now - total * 1000.0;
             advance_run(a, r, now);
+            run_emit_progress(a, s, r, now);
         } else if (strcmp(op, "cancel") == 0) {
             if (!r->name) return FALSE;
             char *keep = g_strdup(r->name);
@@ -1590,7 +1907,24 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
         return TRUE;
     }
     ns_anim_chan *ch = chan_find(s, prop);
-    if (!ch || (!ch->active && !ch->finished)) return FALSE;
+    if (!ch || (!ch->active && !ch->finished && !ch->cancelled)) return FALSE;
+    if (ch->cancelled && strcmp(op, "play") == 0) {
+        ch->cancelled = FALSE;
+        ch->active = TRUE;
+        ch->finished = FALSE;
+        ch->paused = FALSE;
+        ch->started = FALSE;
+        ch->phase = NS_ANIM_PHASE_IDLE;
+        ch->start_us = now;
+        ns_css_value_free(ch->current);
+        ch->current = ns_css_value_dup(ch->from);
+        a->active_count++;
+        anim_emit(a, s->node, "transitionrun", ns_css_prop_name(ch->prop), 0.0);
+        advance_chan(a, s, ch, now);
+        anim_track(a, s);
+        return TRUE;
+    }
+    if (ch->cancelled) return FALSE;
     if (strcmp(op, "pause") == 0 && !ch->paused) {
         ch->paused_elapsed_ms = chan_elapsed_ms(ch, now);
         ch->paused = TRUE;
@@ -1604,6 +1938,7 @@ ns_anim_control(ns_anim *a, const ns_node *node, int prop, const char *op)
     } else if (strcmp(op, "cancel") == 0) {
         if (ch->active) chan_cancel(a, s, ch, now);
         ch->finished = FALSE;
+        ch->cancelled = TRUE;
     }
     anim_track(a, s);
     return TRUE;

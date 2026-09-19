@@ -54,7 +54,12 @@ void     ns_anim_visit(ns_anim *a, const ns_node *node, ns_anim_visit_cb cb,
                        gpointer user);
 gboolean ns_anim_info_for(ns_anim *a, const ns_node *node, int prop,
                           ns_anim_info *out);
+typedef void (*ns_anim_keyframe_cb)(double offset, const char *easing,
+                                    const GArray *decls, gpointer user);
+void     ns_anim_keyframes_visit(ns_anim *a, const ns_node *node, int prop,
+                                 ns_anim_keyframe_cb cb, gpointer user);
 gboolean ns_anim_seek(ns_anim *a, const ns_node *node, int prop, double ms);
+const ns_css_value *ns_anim_base_value(ns_anim *a, const ns_node *node, int prop);
 gboolean ns_anim_control(ns_anim *a, const ns_node *node, int prop,
                          const char *op);
 typedef struct ns_anim_script_timing {
