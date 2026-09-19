@@ -764,6 +764,7 @@ ns_css_value_free(ns_css_value *v)
             for (int i = 0; i < v->u.anim.n; i++)
                 g_free(v->u.anim.entries[i].name);
         }
+        g_free(v->image_set_text);
         ns_css_value *next = v->next_layer;
         g_free(v);
         v = next;
@@ -6170,6 +6171,10 @@ text_starts_gradient(const char *p)
            g_ascii_strncasecmp(p, "conic-gradient", 14) == 0;
 }
 
+static char *image_set_canonical(const char *text, gboolean computed);
+static gboolean text_starts_image_set(const char *p);
+static const char *cq_match_paren(const char *p, const char *end);
+
 char *
 ns_css_image_value_canonical(const char *text)
 {
@@ -6191,6 +6196,13 @@ ns_css_image_value_canonical(const char *text)
                 if (!gend || !*gend) canon = gradient_serialize_specified(&gp);
                 gradient_parse_clear(&gp);
             }
+            if (!canon) {
+                g_free(layer);
+                g_string_free(out, TRUE);
+                return NULL;
+            }
+        } else if (text_starts_image_set(layer)) {
+            canon = image_set_canonical(layer, FALSE);
             if (!canon) {
                 g_free(layer);
                 g_string_free(out, TRUE);
@@ -6574,6 +6586,12 @@ content_item_canonical(const content_tok *t, gboolean alt)
         return ok ? g_strdup_printf("attr(%s)", t->args) : NULL;
     }
     if (alt) return NULL;
+    if (strcmp(t->text, "image-set") == 0 || strcmp(t->text, "-webkit-image-set") == 0) {
+        char *raw = g_strdup_printf("%s(%s)", t->text, t->args);
+        char *canon = image_set_canonical(raw, FALSE);
+        g_free(raw);
+        return canon;
+    }
     if (content_func_is_image(t) || strcmp(t->text, "leader") == 0 ||
         g_str_has_prefix(t->text, "target-") || strcmp(t->text, "var") == 0 ||
         strcmp(t->text, "string") == 0 || strcmp(t->text, "content") == 0)
@@ -6623,6 +6641,344 @@ ns_css_content_canonical(const char *text)
         g_string_free(out, TRUE);
         return NULL;
     }
+    return g_string_free(out, FALSE);
+}
+
+static int
+image_set_split_ws(const char *text, char **out, int max)
+{
+    int n = 0;
+    const char *p = text;
+    while (*p && n < max) {
+        while (*p && is_ws(*p)) p++;
+        if (!*p) break;
+        const char *start = p;
+        int depth = 0;
+        while (*p) {
+            if (*p == '"' || *p == '\'') {
+                const char *e = content_scan_string_end(p);
+                if (!e) return -1;
+                p = e + 1;
+                continue;
+            }
+            if (*p == '(') depth++;
+            else if (*p == ')') { if (depth) depth--; }
+            else if (is_ws(*p) && depth == 0) break;
+            p++;
+        }
+        out[n++] = g_strndup(start, (gsize)(p - start));
+    }
+    return n;
+}
+
+typedef struct {
+    double value;
+    gboolean resolution;
+    gboolean known;
+} res_term;
+
+static gboolean
+res_unit_factor(const char *unit, double *factor)
+{
+    if (g_ascii_strcasecmp(unit, "x") == 0 || g_ascii_strcasecmp(unit, "dppx") == 0)
+        *factor = 1.0;
+    else if (g_ascii_strcasecmp(unit, "dpi") == 0)
+        *factor = 1.0 / 96.0;
+    else if (g_ascii_strcasecmp(unit, "dpcm") == 0)
+        *factor = 2.54 / 96.0;
+    else
+        return FALSE;
+    return TRUE;
+}
+
+static gboolean res_eval_sum(const char **pp, const char *end, res_term *out);
+
+static gboolean
+res_eval_atom(const char **pp, const char *end, res_term *out)
+{
+    const char *p = *pp;
+    while (p < end && is_ws(*p)) p++;
+    if (p >= end) return FALSE;
+    if (*p == '(') {
+        p++;
+        if (!res_eval_sum(&p, end, out)) return FALSE;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || *p != ')') return FALSE;
+        *pp = p + 1;
+        return TRUE;
+    }
+    if (g_ascii_isalpha((guchar)*p) || *p == '-') {
+        const char *s = p;
+        while (p < end && (g_ascii_isalnum((guchar)*p) || *p == '-')) p++;
+        if (p < end && *p == '(') {
+            const char *close = cq_match_paren(p, end);
+            if (!close) return FALSE;
+            char *name = g_strndup(s, (gsize)(p - s));
+            gboolean ok = g_ascii_strcasecmp(name, "calc") == 0 ||
+                          g_ascii_strcasecmp(name, "sign") == 0 ||
+                          g_ascii_strcasecmp(name, "sibling-index") == 0 ||
+                          g_ascii_strcasecmp(name, "sibling-count") == 0 ||
+                          g_ascii_strcasecmp(name, "min") == 0 ||
+                          g_ascii_strcasecmp(name, "max") == 0 ||
+                          g_ascii_strcasecmp(name, "clamp") == 0 ||
+                          g_ascii_strcasecmp(name, "abs") == 0;
+            if (g_ascii_strcasecmp(name, "calc") == 0) {
+                const char *inner = p + 1;
+                ok = res_eval_sum(&inner, close, out);
+            } else if (g_ascii_strcasecmp(name, "sign") == 0) {
+                char *arg = g_strndup(p + 1, (gsize)(close - p - 1));
+                double px = 0, pct = 0;
+                gboolean rel = ns_value_has_relative_unit(arg);
+                gboolean parsed = !rel && resolve_to_px_pct(arg, strlen(arg), &px, &pct);
+                out->resolution = FALSE;
+                out->known = parsed && pct == 0;
+                out->value = px > 0 ? 1 : px < 0 ? -1 : 0;
+                g_free(arg);
+            } else if (ok) {
+                out->resolution = FALSE;
+                out->known = FALSE;
+                out->value = 0;
+            }
+            g_free(name);
+            if (!ok) return FALSE;
+            *pp = close + 1;
+            return TRUE;
+        }
+        return FALSE;
+    }
+    char *endp = NULL;
+    double v = g_ascii_strtod(p, &endp);
+    if (!endp || endp == p) return FALSE;
+    p = endp;
+    const char *us = p;
+    while (p < end && g_ascii_isalpha((guchar)*p)) p++;
+    out->value = v;
+    out->known = TRUE;
+    out->resolution = FALSE;
+    if (p > us) {
+        char *unit = g_strndup(us, (gsize)(p - us));
+        double factor = 1;
+        gboolean ok = res_unit_factor(unit, &factor);
+        g_free(unit);
+        if (!ok) return FALSE;
+        out->value = v * factor;
+        out->resolution = TRUE;
+    }
+    *pp = p;
+    return TRUE;
+}
+
+static gboolean
+res_eval_product(const char **pp, const char *end, res_term *out)
+{
+    if (!res_eval_atom(pp, end, out)) return FALSE;
+    while (TRUE) {
+        const char *p = *pp;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || (*p != '*' && *p != '/')) break;
+        char op = *p++;
+        res_term rhs;
+        if (!res_eval_atom(&p, end, &rhs)) return FALSE;
+        if (op == '*') {
+            if (out->resolution && rhs.resolution) return FALSE;
+            out->resolution = out->resolution || rhs.resolution;
+            out->value *= rhs.value;
+        } else {
+            if (rhs.resolution) return FALSE;
+            if (rhs.known && rhs.value == 0) return FALSE;
+            out->value = rhs.value != 0 ? out->value / rhs.value : 0;
+        }
+        out->known = out->known && rhs.known;
+        *pp = p;
+    }
+    return TRUE;
+}
+
+static gboolean
+res_eval_sum(const char **pp, const char *end, res_term *out)
+{
+    if (!res_eval_product(pp, end, out)) return FALSE;
+    while (TRUE) {
+        const char *p = *pp;
+        while (p < end && is_ws(*p)) p++;
+        if (p >= end || (*p != '+' && *p != '-')) break;
+        char op = *p;
+        if (!(p + 1 < end && is_ws(p[1]))) return FALSE;
+        p++;
+        res_term rhs;
+        if (!res_eval_product(&p, end, &rhs)) return FALSE;
+        if (out->resolution != rhs.resolution) return FALSE;
+        out->value = op == '+' ? out->value + rhs.value : out->value - rhs.value;
+        out->known = out->known && rhs.known;
+        *pp = p;
+    }
+    return TRUE;
+}
+
+static char *
+image_set_resolution_canonical(const char *tok, gboolean computed)
+{
+    if (token_is_math_fn(tok)) {
+        const char *p = tok;
+        const char *end = tok + strlen(tok);
+        res_term t = { 0 };
+        if (!res_eval_atom(&p, end, &t) || !t.resolution) return NULL;
+        while (p < end && is_ws(*p)) p++;
+        if (p < end) return NULL;
+        if (!t.known) return g_strdup(tok);
+        return computed ? g_strdup_printf("%gdppx", t.value)
+                        : g_strdup_printf("calc(%gdppx)", t.value);
+    }
+    char *endp = NULL;
+    double v = g_ascii_strtod(tok, &endp);
+    if (!endp || endp == tok || !*endp) return NULL;
+    double factor = 1;
+    if (!res_unit_factor(endp, &factor) || v < 0) return NULL;
+    if (computed) return g_strdup_printf("%gdppx", v * factor);
+    char *unit = g_ascii_strdown(endp, -1);
+    char *res = g_strdup_printf("%g%s", v, unit);
+    g_free(unit);
+    return res;
+}
+
+static char *
+image_set_canonical(const char *text, gboolean computed)
+{
+    const char *p = text;
+    while (*p && is_ws(*p)) p++;
+    if (g_ascii_strncasecmp(p, "-webkit-image-set(", 18) == 0) p += 18;
+    else if (g_ascii_strncasecmp(p, "image-set(", 10) == 0) p += 10;
+    else return NULL;
+    const char *end = p + strlen(p);
+    const char *close = cq_match_paren(p - 1, end);
+    if (!close) return NULL;
+    const char *after = close + 1;
+    while (*after && is_ws(*after)) after++;
+    if (*after) return NULL;
+    char *body = g_strndup(p, (gsize)(close - p));
+    GPtrArray *options = content_split_args(body);
+    g_free(body);
+    if (!options) return NULL;
+    GString *out = g_string_new("image-set(");
+    gboolean ok = options->len > 0;
+    for (guint i = 0; i < options->len && ok; i++) {
+        char *tok[6] = {0};
+        int n = image_set_split_ws(options->pdata[i], tok, 6);
+        char *image = NULL, *res = NULL, *type = NULL;
+        if (n < 1) ok = FALSE;
+        for (int k = 0; k < n && ok; k++) {
+            const char *t = tok[k];
+            if (k == 0) {
+                if (content_is_string_token(t)) {
+                    char *inner = content_string_canonical(t + 1, strlen(t) - 2);
+                    image = g_strdup_printf("url(%s)", inner);
+                    g_free(inner);
+                } else if (g_ascii_strncasecmp(t, "url(", 4) == 0 ||
+                           g_ascii_strncasecmp(t, "src(", 4) == 0 ||
+                           g_ascii_strncasecmp(t, "image(", 6) == 0 ||
+                           g_ascii_strncasecmp(t, "cross-fade(", 11) == 0) {
+                    image = g_strdup(t);
+                } else if (text_starts_gradient(t)) {
+                    ns_gradient_parse gp;
+                    const char *gend = NULL;
+                    if (gradient_parse(t, &gp, &gend, TRUE)) {
+                        image = gradient_serialize_specified(&gp);
+                        gradient_parse_clear(&gp);
+                    }
+                    if (!image) ok = FALSE;
+                } else {
+                    ok = FALSE;
+                }
+            } else if (g_ascii_strncasecmp(t, "type(", 5) == 0) {
+                if (type) ok = FALSE;
+                else type = g_strdup(t);
+            } else {
+                if (res) ok = FALSE;
+                else res = image_set_resolution_canonical(t, computed);
+                if (!res) ok = FALSE;
+            }
+        }
+        if (ok) {
+            if (i) g_string_append(out, ", ");
+            g_string_append(out, image);
+            g_string_append_c(out, ' ');
+            g_string_append(out, res ? res : computed ? "1dppx" : "1x");
+            if (type) { g_string_append_c(out, ' '); g_string_append(out, type); }
+        }
+        g_free(image);
+        g_free(res);
+        g_free(type);
+        for (int k = 0; k < n; k++) g_free(tok[k]);
+    }
+    g_ptr_array_free(options, TRUE);
+    if (!ok) { g_string_free(out, TRUE); return NULL; }
+    g_string_append_c(out, ')');
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+text_starts_image_set(const char *p)
+{
+    while (*p && is_ws(*p)) p++;
+    return g_ascii_strncasecmp(p, "image-set(", 10) == 0 ||
+           g_ascii_strncasecmp(p, "-webkit-image-set(", 18) == 0;
+}
+
+char *
+ns_css_unicode_range_canonical(const char *text)
+{
+    if (!text) return NULL;
+    GString *clean = g_string_new(NULL);
+    for (const char *p = text; *p; ) {
+        if (p[0] == '/' && p[1] == '*') {
+            const char *e = strstr(p + 2, "*/");
+            if (!e) { g_string_free(clean, TRUE); return NULL; }
+            p = e + 2;
+            continue;
+        }
+        g_string_append_c(clean, *p++);
+    }
+    GString *out = g_string_new(NULL);
+    gboolean ok = TRUE;
+    char **parts = g_strsplit(clean->str, ",", -1);
+    for (int i = 0; parts[i] && ok; i++) {
+        char *r = g_strstrip(parts[i]);
+        if (!*r || (r[0] != 'u' && r[0] != 'U') || r[1] != '+') { ok = FALSE; break; }
+        const char *q = r + 2;
+        guint32 start = 0, endv = 0;
+        int hex = 0, wild = 0;
+        while (g_ascii_isxdigit((guchar)*q) && hex < 7) {
+            start = start * 16 + g_ascii_xdigit_value(*q);
+            hex++; q++;
+        }
+        while (*q == '?' && wild < 7) { wild++; q++; }
+        if (hex + wild == 0 || hex + wild > 6) { ok = FALSE; break; }
+        if (wild) {
+            if (*q) { ok = FALSE; break; }
+            endv = start;
+            for (int k = 0; k < wild; k++) { start *= 16; endv = endv * 16 + 15; }
+        } else if (*q == '-') {
+            q++;
+            int hex2 = 0;
+            while (g_ascii_isxdigit((guchar)*q) && hex2 < 7) {
+                endv = endv * 16 + g_ascii_xdigit_value(*q);
+                hex2++; q++;
+            }
+            if (hex2 == 0 || hex2 > 6 || *q) { ok = FALSE; break; }
+        } else if (*q) {
+            ok = FALSE;
+            break;
+        } else {
+            endv = start;
+        }
+        if (start > endv || endv > 0x10FFFF) { ok = FALSE; break; }
+        if (out->len) g_string_append(out, ", ");
+        if (start == endv) g_string_append_printf(out, "U+%X", start);
+        else g_string_append_printf(out, "U+%X-%X", start, endv);
+    }
+    g_strfreev(parts);
+    g_string_free(clean, TRUE);
+    if (!ok || out->len == 0) { g_string_free(out, TRUE); return NULL; }
     return g_string_free(out, FALSE);
 }
 
@@ -9781,12 +10137,27 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_BACKGROUND_IMAGE: {
         v = parse_image_reference(t);
         if (!v && text_starts_gradient(t)) break;
+        char *iset_computed = NULL;
+        if (text_starts_image_set(t)) {
+            iset_computed = image_set_canonical(t, TRUE);
+            if (!iset_computed) {
+                ns_css_value_free(v);
+                v = NULL;
+                break;
+            }
+            if (v) {
+                v->image_set_text = iset_computed;
+                iset_computed = NULL;
+            }
+        }
         if (!v) {
-            char *kw = ascii_lower(t, strlen(t));
+            char *kw = iset_computed ? g_strdup(iset_computed)
+                                     : ascii_lower(t, strlen(t));
             v = g_new0(ns_css_value, 1);
             v->kind = NS_CSS_V_KEYWORD;
             v->u.keyword = kw;
         }
+        g_free(iset_computed);
         break;
     }
     case NS_CSS_TRANSFORM: {
@@ -10272,8 +10643,17 @@ ns_css_named_declaration_valid(const char *name, const char *text)
         g_array_free(decls, TRUE);
         return valid;
     }
-    if (g_ascii_strcasecmp(name, "all") != 0)
-        return ns_css_declaration_valid(prop_id(name), text);
+    if (g_ascii_strcasecmp(name, "unicode-range") == 0) {
+        char *canon = ns_css_unicode_range_canonical(text);
+        gboolean ok = canon != NULL;
+        g_free(canon);
+        return ok;
+    }
+    if (g_ascii_strcasecmp(name, "all") != 0) {
+        int prop = prop_id(name);
+        if (prop >= 0 && ns_css_declaration_valid(prop, text)) return TRUE;
+        return ns_css_supports_declaration(name, text);
+    }
     if (strstr(text, "var(")) return TRUE;
     ns_css_value *wide = parse_css_wide_keyword(text);
     if (!wide) return FALSE;
@@ -13097,7 +13477,8 @@ ns_css_named_property_supported(const char *name)
     };
     if (!name || !*name) return FALSE;
     if (name[0] == '-' && name[1] == '-' && name[2]) return TRUE;
-    if (g_ascii_strcasecmp(name, "all") == 0 || prop_id(name) >= 0)
+    if (g_ascii_strcasecmp(name, "all") == 0 || prop_id(name) >= 0 ||
+        g_ascii_strcasecmp(name, "unicode-range") == 0)
         return TRUE;
     for (gsize i = 0; i < G_N_ELEMENTS(cssom_properties); i++)
         if (g_ascii_strcasecmp(name, cssom_properties[i]) == 0)
@@ -18191,6 +18572,14 @@ css_inline_value_canonical(const char *prop, char *value)
     default:
         break;
     }
+    if (strcmp(prop, "unicode-range") == 0) {
+        char *canon = ns_css_unicode_range_canonical(value);
+        if (canon) {
+            g_free(value);
+            return canon;
+        }
+        return value;
+    }
     if (strcmp(prop, "place-self") == 0 || strcmp(prop, "place-items") == 0 ||
         strcmp(prop, "place-content") == 0)
         value = place_shorthand_canonical(prop, value);
@@ -19492,6 +19881,7 @@ ns_css_value_serialize(const ns_css_value *v)
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_URL:
+        if (v->image_set_text) return g_strdup(v->image_set_text);
         return g_strdup_printf("url(\"%s\")", v->u.url ? v->u.url : "");
     case NS_CSS_V_AREAS: {
         GString *s = g_string_new(NULL);
