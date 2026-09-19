@@ -14078,18 +14078,15 @@ static gboolean
 parse_background_shorthand(const char *vtext, gboolean important,
                            GArray *decls_out)
 {
-    static const struct { ns_css_prop prop; size_t off; const char *initial; }
-        fields[] = {
-        { NS_CSS_BACKGROUND_IMAGE, offsetof(bg_layer_text, image), "none" },
-        { NS_CSS_BACKGROUND_POSITION_X, offsetof(bg_layer_text, pos_x), "0%" },
-        { NS_CSS_BACKGROUND_POSITION_Y, offsetof(bg_layer_text, pos_y), "0%" },
-        { NS_CSS_BACKGROUND_SIZE, offsetof(bg_layer_text, size), "auto" },
-        { NS_CSS_BACKGROUND_REPEAT, offsetof(bg_layer_text, repeat), "repeat" },
-        { NS_CSS_BACKGROUND_ATTACHMENT, offsetof(bg_layer_text, attachment),
-          "scroll" },
-        { NS_CSS_BACKGROUND_ORIGIN, offsetof(bg_layer_text, origin),
-          "padding-box" },
-        { NS_CSS_BACKGROUND_CLIP, offsetof(bg_layer_text, clip), "border-box" },
+    static const struct { ns_css_prop prop; const char *initial; } fields[] = {
+        { NS_CSS_BACKGROUND_IMAGE, "none" },
+        { NS_CSS_BACKGROUND_POSITION_X, "0%" },
+        { NS_CSS_BACKGROUND_POSITION_Y, "0%" },
+        { NS_CSS_BACKGROUND_SIZE, "auto" },
+        { NS_CSS_BACKGROUND_REPEAT, "repeat" },
+        { NS_CSS_BACKGROUND_ATTACHMENT, "scroll" },
+        { NS_CSS_BACKGROUND_ORIGIN, "padding-box" },
+        { NS_CSS_BACKGROUND_CLIP, "border-box" },
     };
     ns_css_value *wide = parse_css_wide_keyword(vtext);
     if (wide) {
@@ -14117,7 +14114,11 @@ parse_background_shorthand(const char *vtext, gboolean important,
             ns_css_value *head = NULL, *tail = NULL;
             for (guint i = 0; ok && i < parsed->len; i++) {
                 bg_layer_text *l = &g_array_index(parsed, bg_layer_text, i);
-                const char *text = *(char **)((char *)l + fields[f].off);
+                const char *layer_texts[8] = {
+                    l->image, l->pos_x, l->pos_y, l->size, l->repeat,
+                    l->attachment, l->origin, l->clip,
+                };
+                const char *text = layer_texts[f];
                 if (!text) text = fields[f].initial;
                 ns_css_value *v = parse_value_for(fields[f].prop, text);
                 if (!v) { ok = FALSE; break; }
