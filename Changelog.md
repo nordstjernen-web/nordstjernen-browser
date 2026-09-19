@@ -161,6 +161,21 @@ Changelog:
   declaration instead of leaving a partial expansion behind, and the
   outline and column-rule shorthands reset the longhands they leave
   out. outline-style accepts auto.
+* Percentage border radii resolve against the box (border-radius: 50%
+  on a 200x100 box is an ellipse, not a 50px circle), a corner takes a
+  horizontal and vertical radius pair (border-top-left-radius: 10px 5px)
+  and the border-radius shorthand honours the vertical radii after the
+  slash; paint draws elliptical corners and scales overlapping radii
+  down together as css-backgrounds requires, and em/rem pairs resolve
+  against the font size in the computed style.
+* A transition from transform: none no longer resets the target
+  transform to identity: the interpolation built its identity endpoint
+  on an alias of the target value and zeroed it in place. An animated
+  value propagates to descendants only for inherited properties, so a
+  child sharing the parent's opacity, width or transform value is no
+  longer animated along with it. A transition on a property paint does
+  not read live (box-shadow, filter, border colours, visibility) now
+  restyles the page each frame instead of showing the stale value.
 * When several options of a single-choice <select> carry the selected
   attribute, the last one wins, as the HTML selectedness setting
   algorithm requires. HTMLOptionsCollection exposes selectedIndex, and

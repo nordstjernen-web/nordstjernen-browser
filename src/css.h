@@ -259,6 +259,7 @@ typedef enum ns_css_prop {
 
 int         ns_css_prop_id(const char *name);
 const char *ns_css_prop_name(int prop);
+gboolean    ns_css_prop_inherits(int prop);
 gboolean    ns_css_declaration_valid(int prop, const char *text);
 gboolean    ns_css_named_property_supported(const char *name);
 gboolean    ns_css_named_declaration_valid(const char *name, const char *text);

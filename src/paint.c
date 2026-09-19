@@ -253,70 +253,134 @@ bg_size_px(double v, ns_css_unit unit, double basis)
 
 typedef struct corner_radii {
     double tl, tr, br, bl;
+    double tlv, trv, brv, blv;
 } corner_radii;
 
-static double
-positive_length(const ns_css_value *v)
+static corner_radii
+corner_radii_uniform(double r)
 {
-    if (!v || v->kind != NS_CSS_V_LENGTH) return -1;
-    double r = v->u.length.v;
-    return r > 0 ? r : 0;
+    corner_radii c = { r, r, r, r, r, r, r, r };
+    return c;
+}
+
+static void
+corner_radius_px(const ns_css_value *v, double basis_w, double basis_h,
+                 double *rh, double *rv)
+{
+    *rh = -1;
+    *rv = -1;
+    if (!v) return;
+    if (v->kind == NS_CSS_V_LENGTH) {
+        double r = v->u.length.v;
+        if (v->u.length.unit == NS_CSS_UNIT_PERCENT) {
+            *rh = r * basis_w / 100.0;
+            *rv = r * basis_h / 100.0;
+        } else {
+            *rh = r;
+            *rv = r;
+        }
+    } else if (v->kind == NS_CSS_V_SIZE) {
+        *rh = v->u.size.w_unit == NS_CSS_UNIT_PERCENT
+            ? v->u.size.w * basis_w / 100.0 : v->u.size.w;
+        *rv = v->u.size.h_unit == NS_CSS_UNIT_PERCENT
+            ? v->u.size.h * basis_h / 100.0 : v->u.size.h;
+    } else if (v->kind == NS_CSS_V_CALC) {
+        *rh = v->u.calc.px + v->u.calc.pct * basis_w / 100.0;
+        *rv = v->u.calc.px + v->u.calc.pct * basis_h / 100.0;
+    } else {
+        return;
+    }
+    if (!(*rh > 0)) *rh = 0;
+    if (!(*rv > 0)) *rv = 0;
 }
 
 static corner_radii
-style_border_radii(const ns_style *s)
+style_border_radii(const ns_style *s, double w, double h)
 {
     corner_radii c = {0};
     if (!s) return c;
-    double base = positive_length(s->values[NS_CSS_BORDER_RADIUS]);
-    if (base < 0) base = 0;
-    double tl = positive_length(s->values[NS_CSS_BORDER_TOP_LEFT_RADIUS]);
-    double tr = positive_length(s->values[NS_CSS_BORDER_TOP_RIGHT_RADIUS]);
-    double br = positive_length(s->values[NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS]);
-    double bl = positive_length(s->values[NS_CSS_BORDER_BOTTOM_LEFT_RADIUS]);
-    c.tl = tl >= 0 ? tl : base;
-    c.tr = tr >= 0 ? tr : base;
-    c.br = br >= 0 ? br : base;
-    c.bl = bl >= 0 ? bl : base;
+    double base_h, base_v;
+    corner_radius_px(s->values[NS_CSS_BORDER_RADIUS], w, h, &base_h, &base_v);
+    if (base_h < 0) base_h = 0;
+    if (base_v < 0) base_v = 0;
+    static const ns_css_prop corners[4] = {
+        NS_CSS_BORDER_TOP_LEFT_RADIUS, NS_CSS_BORDER_TOP_RIGHT_RADIUS,
+        NS_CSS_BORDER_BOTTOM_RIGHT_RADIUS, NS_CSS_BORDER_BOTTOM_LEFT_RADIUS,
+    };
+    double *hs[4] = { &c.tl, &c.tr, &c.br, &c.bl };
+    double *vs[4] = { &c.tlv, &c.trv, &c.brv, &c.blv };
+    for (int i = 0; i < 4; i++) {
+        double rh, rv;
+        corner_radius_px(s->values[corners[i]], w, h, &rh, &rv);
+        *hs[i] = rh >= 0 ? rh : base_h;
+        *vs[i] = rv >= 0 ? rv : base_v;
+    }
     return c;
 }
 
 static corner_radii
 box_border_radii(const ns_box *b)
 {
-    return style_border_radii(b ? b->style : NULL);
+    if (!b) return style_border_radii(NULL, 0, 0);
+    double w = b->content_width + b->padding.left + b->padding.right +
+               b->border.left + b->border.right;
+    double h = b->content_height + b->padding.top + b->padding.bottom +
+               b->border.top + b->border.bottom;
+    return style_border_radii(b->style, w, h);
 }
 
 static gboolean
 corner_radii_zero(corner_radii c)
 {
-    return c.tl <= 0 && c.tr <= 0 && c.br <= 0 && c.bl <= 0;
+    return (c.tl <= 0 || c.tlv <= 0) && (c.tr <= 0 || c.trv <= 0) &&
+           (c.br <= 0 || c.brv <= 0) && (c.bl <= 0 || c.blv <= 0);
+}
+
+static void
+corner_arc(cairo_t *cr, double cx, double cy, double rx, double ry,
+           double a0, double a1)
+{
+    cairo_save(cr);
+    cairo_translate(cr, cx, cy);
+    cairo_scale(cr, rx, ry);
+    cairo_arc(cr, 0, 0, 1, a0, a1);
+    cairo_restore(cr);
 }
 
 static void
 rounded_rect_path(cairo_t *cr, double x, double y, double w, double h,
                   corner_radii c)
 {
-    double half_w = w / 2.0;
-    double half_h = h / 2.0;
-    if (c.tl > half_w) c.tl = half_w;
-    if (c.tr > half_w) c.tr = half_w;
-    if (c.br > half_w) c.br = half_w;
-    if (c.bl > half_w) c.bl = half_w;
-    if (c.tl > half_h) c.tl = half_h;
-    if (c.tr > half_h) c.tr = half_h;
-    if (c.br > half_h) c.br = half_h;
-    if (c.bl > half_h) c.bl = half_h;
-    if (corner_radii_zero(c)) { cairo_rectangle(cr, x, y, w, h); return; }
+    if (corner_radii_zero(c) || !(w > 0) || !(h > 0)) {
+        cairo_rectangle(cr, x, y, w, h);
+        return;
+    }
+    double f = 1.0;
+    const double sums[4] = { c.tl + c.tr, c.trv + c.brv, c.br + c.bl, c.tlv + c.blv };
+    const double lens[4] = { w, h, w, h };
+    for (int i = 0; i < 4; i++)
+        if (sums[i] > 0 && lens[i] / sums[i] < f) f = lens[i] / sums[i];
+    if (f < 1.0) {
+        c.tl *= f; c.tr *= f; c.br *= f; c.bl *= f;
+        c.tlv *= f; c.trv *= f; c.brv *= f; c.blv *= f;
+    }
     cairo_new_sub_path(cr);
-    if (c.tr > 0) cairo_arc(cr, x + w - c.tr, y + c.tr,     c.tr, -G_PI_2,  0);
-    else          cairo_move_to(cr, x + w, y);
-    if (c.br > 0) cairo_arc(cr, x + w - c.br, y + h - c.br, c.br,  0,       G_PI_2);
-    else          cairo_line_to(cr, x + w, y + h);
-    if (c.bl > 0) cairo_arc(cr, x + c.bl,     y + h - c.bl, c.bl,  G_PI_2,  G_PI);
-    else          cairo_line_to(cr, x, y + h);
-    if (c.tl > 0) cairo_arc(cr, x + c.tl,     y + c.tl,     c.tl,  G_PI,    1.5 * G_PI);
-    else          cairo_line_to(cr, x, y);
+    if (c.tr > 0 && c.trv > 0)
+        corner_arc(cr, x + w - c.tr, y + c.trv, c.tr, c.trv, -G_PI_2, 0);
+    else
+        cairo_move_to(cr, x + w, y);
+    if (c.br > 0 && c.brv > 0)
+        corner_arc(cr, x + w - c.br, y + h - c.brv, c.br, c.brv, 0, G_PI_2);
+    else
+        cairo_line_to(cr, x + w, y + h);
+    if (c.bl > 0 && c.blv > 0)
+        corner_arc(cr, x + c.bl, y + h - c.blv, c.bl, c.blv, G_PI_2, G_PI);
+    else
+        cairo_line_to(cr, x, y + h);
+    if (c.tl > 0 && c.tlv > 0)
+        corner_arc(cr, x + c.tl, y + c.tlv, c.tl, c.tlv, G_PI, 1.5 * G_PI);
+    else
+        cairo_line_to(cr, x, y);
     cairo_close_path(cr);
 }
 
@@ -875,7 +939,7 @@ paint_inline_css_chrome(cairo_t *cr, const ns_inline_attr *r, double x, double y
 {
     const ns_style *s = r ? r->style : NULL;
     if (!style_has_inline_box_paint(s) || w <= 0 || h <= 0) return;
-    corner_radii radii = style_border_radii(s);
+    corner_radii radii = style_border_radii(s, w, h);
     cairo_save(cr);
     paint_inline_box_shadow(cr, s, x, y, w, h, radii);
     rgba bg = rgba_of(s->values[NS_CSS_BACKGROUND_COLOR], 0, 0, 0, 0);
@@ -1052,7 +1116,7 @@ paint_border_image(cairo_t *cr, const ns_box *b, const ns_style *s,
         owned = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
                                            (int)iw, (int)ih);
         cairo_t *gc = cairo_create(owned);
-        corner_radii square = { 0, 0, 0, 0 };
+        corner_radii square = {0};
         paint_bg_gradient_core(gc, &src->u.gradient, 0, 0, iw, ih,
                                0, 0, iw, ih, square);
         cairo_destroy(gc);
@@ -3138,7 +3202,7 @@ paint_inline(cairo_t *cr, const ns_box *b, const char *highlight)
             double pw = (opt_maxx - opt_minx) + 12.0;
             double py = opt_miny;
             double ph = opt_maxy - opt_miny;
-            corner_radii pr = { 3, 3, 3, 3 };
+            corner_radii pr = corner_radii_uniform(3);
             cairo_save(cr);
             rounded_rect_path(cr, px + 0.5, py + 1.5, pw, ph, pr);
             cairo_set_source_rgba(cr, 0, 0, 0, 0.12);
@@ -4495,7 +4559,7 @@ paint_video(cairo_t *cr, const ns_box *b)
         double x = b->x, y = b->y, w = b->content_width, h = b->content_height;
         if (!(w > 0) || !(h > 0)) return;
         cairo_save(cr);
-        corner_radii radii = { 4, 4, 4, 4 };
+        corner_radii radii = corner_radii_uniform(4);
         rounded_rect_path(cr, x, y, w, h, radii);
         cairo_set_source_rgb(cr, 0.96, 0.97, 0.98);
         cairo_fill_preserve(cr);
