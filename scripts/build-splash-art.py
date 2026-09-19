@@ -25,6 +25,8 @@ PINK = PAPER
 LINE = 1.5
 HORIZON = 148.0
 MONO = True
+GROUND_Y = 264.0
+WATER_Y = 266.0
 
 def project_version() -> str:
     text = (ROOT / "meson.build").read_text(encoding="utf-8")
@@ -236,9 +238,9 @@ def text_width(text: str, size: float, spacing: float = 0.0) -> float:
 
 
 def title(pen: Pen, version: str) -> None:
-    letter(pen, "Nordstjernen web browser", 34, 50, 24, spacing=0.5)
-    letter(pen, "Yet another web browser", 36, 74, 12.5, spacing=0.4)
-    letter(pen, f"Version {version}", 36, 94, 11, spacing=0.4)
+    letter(pen, "Nordstjernen web browser", 34, 48, 24, spacing=0.5)
+    letter(pen, "Yet another web browser", 36, 72, 12.5, spacing=0.4)
+    letter(pen, f"Version {version}", 36, 92, 11, spacing=0.4)
 
 
 def panel(pen: Pen) -> None:
@@ -287,78 +289,30 @@ def rain(pen: Pen, cx: float, cy: float, w: float, top: float, length: float, t:
 
 
 def mountains(pen: Pen) -> None:
-    pts = [(560, HORIZON), (610, HORIZON - 22), (650, HORIZON - 8), (700, HORIZON - 30),
-           (760, HORIZON - 12), (800, HORIZON - 26), (860, HORIZON - 4), (940, HORIZON - 14),
-           (940, HORIZON), (560, HORIZON)]
-    pen.shape(pts, fill=PAPER, width=1.4, amp=0.9)
-    pen.stroke([(690, HORIZON - 26), (700, HORIZON - 30), (712, HORIZON - 24)], width=1.0, amp=0.3)
+    mount = [(410, GROUND_Y), (470, 230), (540, 195), (620, 210), (700, 175), (780, 195), (840, 178), (934, 192), (934, GROUND_Y), (410, GROUND_Y)]
+    pen.shape(mount, fill=PAPER, width=1.3, amp=0.7)
+    pen.stroke(mount[:8], width=1.3, amp=0.7)
 
 
-def shore(pen: Pen) -> None:
-    pts = [(0, HORIZON), (580, HORIZON), (556, HORIZON + 14), (540, HORIZON + 34),
-           (546, HORIZON + 56), (500, HORIZON + 68), (470, HORIZON + 90), (462, HORIZON + 120),
-           (490, HORIZON + 150), (540, HORIZON + 172), (0, HORIZON + 172)]
-    pen.shape(pts, fill=PAPER, width=1.6, amp=1.2, outline=None)
-    pen.stroke(pts[1:10], width=1.6, amp=1.2)
-    pen.stroke([(8, HORIZON), (932, HORIZON)], width=1.3, amp=0.9)
-    for k in range(9):
-        x = 60 + k * 44
-        y = HORIZON + 30 + k * 3
-        pen.stroke([(x, y), (x + 5, y - 2), (x + 10, y)], width=1.0, amp=0.3)
-
-
-def waves(pen: Pen, t: float) -> None:
-    rng = np.random.default_rng(31)
-    rows = [(HORIZON + 10, 30, 0.7), (HORIZON + 24, 34, 0.9), (HORIZON + 42, 40, 1.1),
-            (HORIZON + 64, 48, 1.4), (HORIZON + 92, 56, 1.7), (HORIZON + 126, 66, 2.1),
-            (HORIZON + 160, 76, 2.5)]
-    for row, (y, gap, amp) in enumerate(rows):
-        drift = (t * gap * (1 if row % 2 else -1))
-        x = 396 + rng.uniform(0, gap) + row * 17 + drift
-        x = x % gap + 380
-        while x < 905:
-            phase = TAU * (t * 1.2 + row * 0.37)
-            pts = [(x + k * gap * 0.06, y + amp * math.sin(k * 0.95 + phase)) for k in range(8)]
-            pen.stroke(pts, width=0.9 + row * 0.1, amp=0.15)
-            x += gap
-        y += 0
-
-
-def ark(pen: Pen, x: float, y: float, s: float, roll: float, t: float = 0.0) -> None:
-    layer = Image.new("RGBA", pen.image.size, (0, 0, 0, 0))
-    lp = Pen(layer, 4242)
-    hull = [(x - 118 * s, y - 26 * s), (x - 128 * s, y - 4 * s), (x - 104 * s, y + 24 * s),
-            (x + 104 * s, y + 24 * s), (x + 138 * s, y - 4 * s), (x + 124 * s, y - 26 * s)]
-    lp.shape(hull, fill=PAPER, width=LINE * 1.3, amp=1.1)
-    for k in range(2):
-        yy = y - 10 * s + k * 14 * s
-        lp.stroke([(x - 116 * s + k * 6 * s, yy), (x + 122 * s - k * 6 * s, yy)], width=1.1, amp=0.7)
-    for k in range(7):
-        xx = x - 90 * s + k * 32 * s
-        lp.stroke([(xx, y - 22 * s), (xx + 2 * s, y + 20 * s)], width=0.9, amp=0.4)
-    deck = y - 28 * s
-    lp.stroke([(x - 118 * s, deck + 2 * s), (x + 124 * s, deck + 2 * s)], width=LINE * 1.2, amp=0.9)
-    house = [(x - 84 * s, deck), (x - 84 * s, deck - 44 * s), (x + 92 * s, deck - 44 * s), (x + 92 * s, deck)]
-    lp.shape(house, fill=PAPER, width=LINE * 1.2, amp=0.9)
-    roof = [(x - 98 * s, deck - 42 * s), (x + 4 * s, deck - 78 * s), (x + 106 * s, deck - 42 * s)]
-    lp.shape(roof + [(x + 4 * s, deck - 42 * s)], fill=PAPER, width=LINE * 1.3, amp=0.9, outline=None)
-    lp.stroke(roof, width=LINE * 1.3, amp=0.9)
-    for k in range(4):
-        wx = x - 66 * s + k * 42 * s
-        lp.stroke([(wx, deck - 12 * s), (wx, deck - 32 * s), (wx + 18 * s, deck - 32 * s),
-                   (wx + 18 * s, deck - 12 * s)], width=1.1, closed=True, amp=0.5)
-    lp.stroke([(x + 4 * s, deck - 78 * s), (x + 4 * s, deck - 100 * s)], width=1.2)
-    flutter = math.sin(TAU * t * 2)
-    lp.shape([(x + 4 * s, deck - 100 * s), (x + 24 * s, deck - 94 * s - 3 * s * flutter),
-              (x + 4 * s, deck - 88 * s)], fill=PAPER, width=1.1, amp=0.6)
-    stick_figure(lp, x - 100 * s, deck + 1 * s, h=30 * s, beard=True, staff=True, wave=True,
-                 facing=-1, wave_phase=t * 2)
-    giraffe_head(lp, x + 60 * s, deck - 44 * s, s * 0.9)
-    giraffe_head(lp, x + 82 * s, deck - 44 * s, s * 0.7)
-    for k, (ox, oy) in enumerate(((-50, -22), (-8, -22), (34, -22))):
-        peek(lp, x + ox * s + 9 * s, deck + oy * s, s, k)
-    rotated = layer.rotate(roll, resample=Image.Resampling.BICUBIC, center=(x * SS, y * SS))
-    pen.image.paste(rotated, (0, 0), rotated)
+def shore_and_water(pen: Pen, t: float) -> None:
+    shore_pts = [
+        (6, GROUND_Y),
+        (560, GROUND_Y),
+        (582, GROUND_Y + 12),
+        (592, GROUND_Y + 32),
+        (586, HEIGHT - 6),
+        (6, HEIGHT - 6),
+    ]
+    pen.shape(shore_pts, fill=PAPER, width=1.4, amp=0.6)
+    pen.stroke([(6, GROUND_Y), (560, GROUND_Y), (582, GROUND_Y + 12), (592, GROUND_Y + 32), (586, HEIGHT - 6)], width=1.5, amp=0.5)
+    for px in (45, 95, 150, 210, 280, 340, 410, 475, 530):
+        pen.stroke([(px, GROUND_Y + 1), (px + 3, GROUND_Y - 2), (px + 6, GROUND_Y + 1)], width=0.8, amp=0.2)
+    for row, wy in enumerate(range(int(WATER_Y), HEIGHT - 10, 11)):
+        drift = math.sin(TAU * t + row * 0.75) * 4.5
+        x0 = 582 + (12 if row % 2 else 0) + drift
+        while x0 < WIDTH - 14:
+            pen.stroke([(x0, wy), (x0 + 7, wy - 1.5), (x0 + 14, wy)], width=0.9, amp=0.15)
+            x0 += 26
 
 
 def peek(pen: Pen, x: float, y: float, s: float, kind: int) -> None:
@@ -738,99 +692,82 @@ ANIMALS = {
     "mouse": (mouse, 22),
 }
 
-QUEUE = ["elephant", "camel", "hippo", "zebra", "lion", "bear", "kangaroo", "ostrich",
-         "crocodile", "sheep", "pig", "dog", "flamingo", "monkey", "cat", "turtle",
-         "rabbit", "penguin", "snake", "mouse"]
-
-
-LANES = (
-    ((-30.0, 312.0), (380.0, 314.0), (540.0, HORIZON + 66)),
-    ((-30.0, 266.0), (340.0, 262.0), (536.0, HORIZON + 62)),
-)
-
-
-def path_point(u: float, lane: int = 0) -> tuple[float, float, float]:
-    (x0, y0), (cx, cy), (x1, y1) = LANES[lane]
-    v = 1.0 - u
-    x = v * v * x0 + 2 * v * u * cx + u * u * x1
-    y = v * v * y0 + 2 * v * u * cy + u * u * y1
-    depth = (y - HORIZON) / (312.0 - HORIZON)
-    scale = 0.36 + 0.66 * depth
-    return x, y, scale
-
-
-def path_length(lane: int) -> float:
-    total = 0.0
-    px, py, _ = path_point(0.0, lane)
-    for i in range(1, 201):
-        x, y, _ = path_point(i / 200, lane)
-        total += math.hypot(x - px, y - py)
-        px, py = x, y
-    return total
-
-
-PATH_LENGTHS = tuple(path_length(lane) for lane in range(len(LANES)))
-
-
-def gangplank(pen: Pen, x0: float, y0: float, x1: float, y1: float) -> None:
-    pen.stroke([(x0, y0), (x1, y1)], width=LINE * 1.2, amp=0.8)
-    pen.stroke([(x0 + 3, y0 + 5), (x1 + 3, y1 + 5)], width=LINE, amp=0.8)
-    for k in range(7):
-        t = (k + 0.5) / 7
-        x = x0 + (x1 - x0) * t
-        y = y0 + (y1 - y0) * t
-        pen.stroke([(x, y), (x + 3, y + 5)], width=0.9, amp=0.3)
-
-
-def stanchions(pen: Pen) -> None:
-    posts = []
-    for k in range(9):
-        u = 0.04 + k * 0.118
-        x, y, s = path_point(u, 0)
-        posts.append((x - 4 * s, y - 15 * s, s * 0.85))
-    for (x0, y0, s0), (x1, y1, s1) in zip(posts, posts[1:]):
-        mid = ((x0 + x1) / 2, (y0 + y1) / 2 - 8 * (s0 + s1) / 2 + 4 * (s0 + s1) / 2)
-        pts = [(x0, y0 - 12 * s0)]
-        for k in range(1, 8):
-            tt = k / 8
-            sag = math.sin(math.pi * tt) * 4 * (s0 + s1) / 2
-            pts.append((x0 + (x1 - x0) * tt, (y0 - 12 * s0) + ((y1 - 12 * s1) - (y0 - 12 * s0)) * tt + sag))
-        pts.append((x1, y1 - 12 * s1))
-        pen.stroke(pts, width=0.9, amp=0.2)
-    for x, y, s in posts:
-        pen.stroke([(x, y), (x, y - 13 * s)], width=1.3, amp=0.2)
-        pen.ellipse(x, y, 4 * s, 1.6 * s, fill=PAPER, width=1.0)
-        pen.dot(x, y - 13 * s, 1.4 * s)
+def ark(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
+    bob = 2.5 * math.sin(TAU * t)
+    ay = y + bob
+    hull = [
+        (x - 85 * s, ay - 16 * s),
+        (x - 95 * s, ay),
+        (x - 70 * s, ay + 32 * s),
+        (x + 70 * s, ay + 32 * s),
+        (x + 105 * s, ay),
+        (x + 95 * s, ay - 16 * s),
+    ]
+    pen.shape(hull, fill=PAPER, width=1.5, amp=0.8)
+    pen.stroke([(x - 88 * s, ay), (x + 98 * s, ay)], width=1.1, amp=0.5)
+    pen.stroke([(x - 78 * s, ay + 16 * s), (x + 82 * s, ay + 16 * s)], width=1.0, amp=0.4)
+    for k in range(6):
+        px = x - 60 * s + k * 26 * s
+        pen.stroke([(px, ay - 14 * s), (px + 2 * s, ay + 28 * s)], width=0.9, amp=0.3)
+    deck_y = ay - 18 * s
+    pen.stroke([(x - 86 * s, deck_y), (x + 96 * s, deck_y)], width=1.4, amp=0.6)
+    house = [
+        (x - 55 * s, deck_y),
+        (x - 55 * s, deck_y - 40 * s),
+        (x + 65 * s, deck_y - 40 * s),
+        (x + 65 * s, deck_y),
+    ]
+    pen.shape(house, fill=PAPER, width=1.3, amp=0.6)
+    roof = [
+        (x - 65 * s, deck_y - 38 * s),
+        (x + 5 * s, deck_y - 68 * s),
+        (x + 75 * s, deck_y - 38 * s),
+    ]
+    pen.shape(roof + [(x + 5 * s, deck_y - 38 * s)], fill=PAPER, width=1.4, amp=0.6, outline=None)
+    pen.stroke(roof, width=1.4, amp=0.6)
+    for k in range(3):
+        wx = x - 38 * s + k * 36 * s
+        pen.shape([(wx, deck_y - 12 * s), (wx, deck_y - 28 * s), (wx + 18 * s, deck_y - 28 * s), (wx + 18 * s, deck_y - 12 * s)], fill=PAPER, width=1.1, amp=0.3)
+        peek(pen, wx + 9 * s, deck_y - 20 * s, s * 0.9, k)
+    flag_x, flag_y = x + 5 * s, deck_y - 68 * s
+    pen.stroke([(flag_x, flag_y), (flag_x, flag_y - 20 * s)], width=1.2, amp=0.2)
+    flut = math.sin(TAU * t * 2) * 2 * s
+    pen.shape([(flag_x, flag_y - 20 * s), (flag_x + 18 * s, flag_y - 15 * s + flut), (flag_x, flag_y - 10 * s)], fill=PAPER, width=1.0, amp=0.3)
+    giraffe_head(pen, x + 42 * s, deck_y - 40 * s, s * 0.85)
+    giraffe_head(pen, x + 55 * s, deck_y - 40 * s, s * 0.70)
+    stick_figure(pen, x - 72 * s, deck_y + 1 * s, h=28 * s, beard=True, staff=True, wave=True, facing=-1, wave_phase=t * 2)
+    pen.stroke([(568, GROUND_Y), (x - 72 * s, deck_y + 4 * s)], width=1.5, amp=0.5)
+    pen.stroke([(568, GROUND_Y + 5), (x - 72 * s, deck_y + 9 * s)], width=1.5, amp=0.5)
+    for k in range(6):
+        tt = (k + 0.5) / 6
+        gx = 568 + (x - 72 * s - 568) * tt
+        gy = GROUND_Y + (deck_y + 4 * s - GROUND_Y) * tt
+        pen.stroke([(gx, gy), (gx + 2, gy + 5)], width=1.0, amp=0.2)
 
 
 def queue(pen: Pen, t: float) -> None:
-    placements = []
-    for lane in range(len(LANES)):
-        u = 0.985 - lane * 0.06
-        previous = 0.0
-        for name in reversed(QUEUE[lane::len(LANES)]):
-            fn, width = ANIMALS[name]
-            x, y, s = path_point(u, lane)
-            half = width * s * 0.55
-            u -= (previous + half) / PATH_LENGTHS[lane]
-            if u < -0.02:
-                break
-            x, y, s = path_point(u, lane)
-            placements.append((y, name, x, s))
-            previous = width * s * 0.55 + 6 * s
-    placements.sort(key=lambda p: p[0])
-    fence_drawn = False
-    for i, (y, name, x, s) in enumerate(placements):
-        if not fence_drawn and y >= 248:
-            stanchions(pen)
-            fence_drawn = True
-        fn, width = ANIMALS[name]
-        rng = np.random.default_rng(i * 7 + 3)
+    pairs = [
+        ("mouse", 535, 1.15),
+        ("penguin", 495, 1.10),
+        ("rabbit", 450, 1.10),
+        ("turtle", 405, 1.10),
+        ("sheep", 355, 1.05),
+        ("zebra", 295, 1.00),
+        ("lion", 230, 1.00),
+        ("camel", 160, 1.00),
+        ("elephant", 90, 0.95),
+        ("dog", 28, 1.00),
+    ]
+    for i, (name, x, scale) in enumerate(pairs):
+        fn, _ = ANIMALS[name]
+        rng = np.random.default_rng(i * 13 + 5)
         phase = rng.uniform(0, 1)
         pen.gait = (t * 2 + phase + 0.3) % 1.0
-        fn(pen, x + width * s * 0.36, y - 9 * s - abs(math.sin(TAU * pen.gait)) * 1.4 * s, s * 0.82)
+        bob1 = abs(math.sin(TAU * pen.gait)) * 1.5 * scale
+        fn(pen, x - 13 * scale, GROUND_Y - 4 * scale - bob1, scale * 0.88)
         pen.gait = (t * 2 + phase) % 1.0
-        fn(pen, x, y - abs(math.sin(TAU * pen.gait)) * 1.6 * s, s)
+        bob2 = abs(math.sin(TAU * pen.gait)) * 1.8 * scale
+        fn(pen, x, GROUND_Y - bob2, scale)
     pen.gait = 0.0
 
 
@@ -843,26 +780,6 @@ def speech(pen: Pen, x: float, y: float, tail_to, lines, size: float = 10.0) -> 
     bottom = y + (len(lines) - 1) * size * 1.45 + 4
     sx = x + (widest / 2 - 4) * (1 if tx > x else -1)
     pen.stroke([(sx, bottom - size * 0.6), (tx, ty)], width=0.9, amp=0.3)
-
-
-def draw_rock(pen: Pen, cx: float, cy: float, w: float, h: float) -> None:
-    pts = [
-        (cx - w * 0.5, cy + h * 0.2),
-        (cx - w * 0.45, cy - h * 0.2),
-        (cx - w * 0.3, cy - h * 0.5),
-        (cx - w * 0.1, cy - h * 0.45),
-        (cx + w * 0.15, cy - h * 0.52),
-        (cx + w * 0.38, cy - h * 0.25),
-        (cx + w * 0.5, cy + h * 0.15),
-        (cx + w * 0.4, cy + h * 0.5),
-        (cx - w * 0.35, cy + h * 0.48),
-    ]
-    pen.shape(pts, fill=PAPER, width=1.4, amp=0.8)
-    pen.stroke([(cx - w * 0.25, cy - h * 0.1), (cx - w * 0.1, cy + h * 0.2), (cx - w * 0.15, cy + h * 0.4)], width=0.9, amp=0.3)
-    pen.stroke([(cx + w * 0.05, cy - h * 0.2), (cx + w * 0.15, cy + h * 0.1), (cx + w * 0.1, cy + h * 0.35)], width=0.9, amp=0.3)
-    pen.stroke([(cx - w * 0.55, cy + h * 0.3), (cx - w * 0.3, cy + h * 0.35)], width=1.0, amp=0.2)
-    pen.stroke([(cx + w * 0.25, cy + h * 0.38), (cx + w * 0.55, cy + h * 0.32)], width=1.0, amp=0.2)
-    pen.stroke([(cx - w * 0.4, cy + h * 0.55), (cx + w * 0.4, cy + h * 0.55)], width=1.1, amp=0.2)
 
 
 def seal(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
@@ -887,98 +804,99 @@ def seal(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
 
 
 def lighthouse(pen: Pen, x: float, y: float, s: float = 1.0, t: float = 0.0) -> None:
-    draw_rock(pen, x - 2 * s, y + 14 * s, 68 * s, 26 * s)
-    seal(pen, x - 22 * s, y + 11 * s, s * 0.9, t)
-    base_w = 20 * s
-    top_w = 13 * s
-    tower_h = 60 * s
-    gallery_y = y - tower_h
-    lantern_h = 13 * s
-    roof_h = 10 * s
+    rock_pts = [
+        (x - 36 * s, y + 15 * s),
+        (x - 30 * s, y - 4 * s),
+        (x - 18 * s, y - 10 * s),
+        (x + 18 * s, y - 10 * s),
+        (x + 34 * s, y - 2 * s),
+        (x + 40 * s, y + 15 * s),
+        (x + 30 * s, HEIGHT - 6),
+        (x - 30 * s, HEIGHT - 6),
+    ]
+    pen.shape(rock_pts, fill=PAPER, width=1.5, amp=0.7)
+    pen.stroke([(x - 24 * s, y - 2 * s), (x - 12 * s, y + 8 * s)], width=0.9, amp=0.3)
+    pen.stroke([(x + 10 * s, y - 4 * s), (x + 22 * s, y + 6 * s)], width=0.9, amp=0.3)
+    seal(pen, x - 24 * s, y - 7 * s, s * 1.0, t)
+    base_w = 22 * s
+    top_w = 14 * s
+    tower_h = 75 * s
+    base_y = y - 10 * s
+    gal_y = base_y - tower_h
+    lan_h = 15 * s
+    roof_h = 12 * s
     tower_pts = [
-        (x - base_w / 2, y + 3 * s),
-        (x - top_w / 2, gallery_y),
-        (x + top_w / 2, gallery_y),
-        (x + base_w / 2, y + 3 * s),
+        (x - base_w / 2, base_y),
+        (x - top_w / 2, gal_y),
+        (x + top_w / 2, gal_y),
+        (x + base_w / 2, base_y),
     ]
-    pen.shape(tower_pts, fill=PAPER, width=1.4, amp=0.6)
-    n_bands = 4
-    for b in range(1, n_bands):
-        frac = b / n_bands
-        by = y + 3 * s - frac * (tower_h + 3 * s)
-        w_at_y = base_w - frac * (base_w - top_w)
-        pen.stroke([(x - w_at_y / 2, by), (x + w_at_y / 2, by)], width=1.1, amp=0.3)
+    pen.shape(tower_pts, fill=PAPER, width=1.5, amp=0.6)
+    for b in range(1, 4):
+        frac = b / 4.0
+        by = base_y - frac * tower_h
+        bw = base_w - frac * (base_w - top_w)
+        pen.stroke([(x - bw / 2, by), (x + bw / 2, by)], width=1.2, amp=0.3)
         if b % 2 == 1:
-            for hx in np.linspace(-w_at_y / 2 + 2 * s, w_at_y / 2 - 2 * s, 5):
-                pen.stroke([(x + hx, by), (x + hx + 3 * s, by - (tower_h / n_bands) * 0.85)], width=0.8, amp=0.2)
-    pen.shape([(x - 2.5 * s, y + 3 * s), (x - 2.5 * s, y - 4 * s), (x + 2.5 * s, y - 4 * s), (x + 2.5 * s, y + 3 * s)], fill=INK, width=0.9, amp=0.2)
-    for wy in (y - 18 * s, y - 36 * s):
-        pen.shape([(x - 1.8 * s, wy - 3 * s), (x + 1.8 * s, wy - 3 * s), (x + 1.8 * s, wy + 2 * s), (x - 1.8 * s, wy + 2 * s)], fill=PAPER, width=0.9, amp=0.2)
-        pen.stroke([(x, wy - 3 * s), (x, wy + 2 * s)], width=0.7, amp=0.1)
-    gal_w = top_w + 9 * s
-    pen.shape([(x - gal_w / 2, gallery_y), (x + gal_w / 2, gallery_y),
-               (x + gal_w / 2, gallery_y + 3 * s), (x - gal_w / 2, gallery_y + 3 * s)],
-              fill=PAPER, width=1.2, amp=0.3)
-    rail_h = 6 * s
-    pen.stroke([(x - gal_w / 2 + 1 * s, gallery_y - rail_h), (x + gal_w / 2 - 1 * s, gallery_y - rail_h)], width=1.0, amp=0.2)
+            for hx in np.linspace(-bw / 2 + 3 * s, bw / 2 - 3 * s, 5):
+                pen.stroke([(x + hx, by), (x + hx + 4 * s, by - (tower_h / 4) * 0.85)], width=0.8, amp=0.2)
+    pen.shape([(x - 3 * s, base_y), (x - 3 * s, base_y - 7 * s), (x + 3 * s, base_y - 7 * s), (x + 3 * s, base_y)], fill=INK, width=0.9, amp=0.2)
+    pen.shape([(x - 2 * s, base_y - 38 * s), (x + 2 * s, base_y - 38 * s), (x + 2 * s, base_y - 32 * s), (x - 2 * s, base_y - 32 * s)], fill=PAPER, width=0.9, amp=0.2)
+    pen.stroke([(x, base_y - 38 * s), (x, base_y - 32 * s)], width=0.7, amp=0.1)
+    gal_w = top_w + 10 * s
+    pen.shape([(x - gal_w / 2, gal_y), (x + gal_w / 2, gal_y), (x + gal_w / 2, gal_y + 3 * s), (x - gal_w / 2, gal_y + 3 * s)], fill=PAPER, width=1.2, amp=0.3)
+    pen.stroke([(x - gal_w / 2 + 1 * s, gal_y - 7 * s), (x + gal_w / 2 - 1 * s, gal_y - 7 * s)], width=1.0, amp=0.2)
     for rx in np.linspace(-gal_w / 2 + 2 * s, gal_w / 2 - 2 * s, 5):
-        pen.stroke([(x + rx, gallery_y), (x + rx, gallery_y - rail_h)], width=0.8, amp=0.1)
-    stick_figure(pen, x - gal_w / 2 + 3.5 * s, gallery_y, h=16 * s, facing=-1)
-    lantern_y = gallery_y
-    lantern_top = lantern_y - lantern_h
+        pen.stroke([(x + rx, gal_y), (x + rx, gal_y - 7 * s)], width=0.8, amp=0.1)
+    stick_figure(pen, x - gal_w / 2 + 4 * s, gal_y, h=18 * s, facing=-1)
     lan_w = top_w - 1 * s
-    pen.shape([(x - lan_w / 2, lantern_y), (x - lan_w / 2, lantern_top),
-               (x + lan_w / 2, lantern_top), (x + lan_w / 2, lantern_y)],
-              fill=PAPER, width=1.2, amp=0.3)
-    pen.stroke([(x - lan_w / 4, lantern_y), (x - lan_w / 4, lantern_top)], width=0.9, amp=0.2)
-    pen.stroke([(x + lan_w / 4, lantern_y), (x + lan_w / 4, lantern_top)], width=0.9, amp=0.2)
+    lan_top = gal_y - lan_h
+    pen.shape([(x - lan_w / 2, gal_y), (x - lan_w / 2, lan_top), (x + lan_w / 2, lan_top), (x + lan_w / 2, gal_y)], fill=PAPER, width=1.2, amp=0.3)
+    pen.stroke([(x - lan_w / 4, gal_y), (x - lan_w / 4, lan_top)], width=0.9, amp=0.2)
+    pen.stroke([(x + lan_w / 4, gal_y), (x + lan_w / 4, lan_top)], width=0.9, amp=0.2)
     roof_pts = [
-        (x - lan_w / 2 - 1.5 * s, lantern_top),
-        (x - lan_w * 0.3, lantern_top - roof_h * 0.7),
-        (x, lantern_top - roof_h),
-        (x + lan_w * 0.3, lantern_top - roof_h * 0.7),
-        (x + lan_w / 2 + 1.5 * s, lantern_top),
+        (x - lan_w / 2 - 2 * s, lan_top),
+        (x - lan_w * 0.3, lan_top - roof_h * 0.7),
+        (x, lan_top - roof_h),
+        (x + lan_w * 0.3, lan_top - roof_h * 0.7),
+        (x + lan_w / 2 + 2 * s, lan_top),
     ]
-    pen.shape(roof_pts, fill=PAPER, width=1.2, amp=0.4)
-    finial_y = lantern_top - roof_h
-    pen.stroke([(x, finial_y), (x, finial_y - 8 * s)], width=1.1, amp=0.2)
-    pen.dot(x, finial_y - 8 * s, 1.2 * s)
+    pen.shape(roof_pts, fill=PAPER, width=1.2, amp=0.3)
+    pen.stroke([(x, lan_top - roof_h), (x, lan_top - roof_h - 10 * s)], width=1.2, amp=0.2)
+    pen.dot(x, lan_top - roof_h - 10 * s, 1.4 * s)
+    beam_cy = lan_top + lan_h / 2
+    pen.dot(x, beam_cy, 2.2 * s, fill=INK)
     beam_angle = TAU * t
     beam_dx = math.cos(beam_angle)
-    beam_dy = 0.20 * math.sin(beam_angle)
-    light_cx = x
-    light_cy = lantern_top + lantern_h / 2
-    pen.dot(light_cx, light_cy, 2.0 * s, fill=INK)
-    spread = 0.20
-    max_x = WIDTH - 10
-    min_x = 10
+    beam_dy = 0.18 * math.sin(beam_angle)
     sin_val = math.sin(beam_angle)
     if sin_val > -0.65:
+        spread = 0.22
         if beam_dx < 0.15:
-            beam_len = 160 * s
-            rx1 = max(min_x, light_cx + beam_len * (beam_dx - spread * beam_dy))
-            ry1 = light_cy + beam_len * (beam_dy + spread * abs(beam_dx) * 0.3)
-            rx2 = max(min_x, light_cx + beam_len * (beam_dx + spread * beam_dy))
-            ry2 = light_cy + beam_len * (beam_dy - spread * abs(beam_dx) * 0.3)
-            pen.stroke([(light_cx, light_cy), (rx1, ry1)], width=1.1, amp=0.3)
-            pen.stroke([(light_cx, light_cy), (rx2, ry2)], width=1.1, amp=0.3)
-            pen.stroke([(light_cx, light_cy), (max(min_x, light_cx + beam_len * 0.85 * beam_dx), light_cy + beam_len * 0.85 * beam_dy)], width=0.8, amp=0.2)
+            blen = 175 * s
+            rx1 = max(10.0, x + blen * (beam_dx - spread * beam_dy))
+            ry1 = beam_cy + blen * (beam_dy + spread * abs(beam_dx) * 0.3)
+            rx2 = max(10.0, x + blen * (beam_dx + spread * beam_dy))
+            ry2 = beam_cy + blen * (beam_dy - spread * abs(beam_dx) * 0.3)
+            pen.stroke([(x, beam_cy), (rx1, ry1)], width=1.1, amp=0.3)
+            pen.stroke([(x, beam_cy), (rx2, ry2)], width=1.1, amp=0.3)
+            pen.stroke([(x, beam_cy), (max(10.0, x + blen * 0.85 * beam_dx), beam_cy + blen * 0.85 * beam_dy)], width=0.8, amp=0.2)
             for k in (0.35, 0.65):
-                pen.dot(light_cx + beam_len * k * beam_dx + 2 * s, light_cy + beam_len * k * beam_dy, 0.6 * s)
+                pen.dot(x + blen * k * beam_dx + 2 * s, beam_cy + blen * k * beam_dy, 0.7 * s)
         elif beam_dx > -0.15:
-            beam_len = min(60 * s, (max_x - light_cx) / max(0.01, beam_dx))
-            rx1 = min(max_x, light_cx + beam_len * (beam_dx - spread * beam_dy))
-            ry1 = light_cy + beam_len * (beam_dy + spread * abs(beam_dx) * 0.3)
-            rx2 = min(max_x, light_cx + beam_len * (beam_dx + spread * beam_dy))
-            ry2 = light_cy + beam_len * (beam_dy - spread * abs(beam_dx) * 0.3)
-            pen.stroke([(light_cx, light_cy), (rx1, ry1)], width=0.9, amp=0.2)
-            pen.stroke([(light_cx, light_cy), (rx2, ry2)], width=0.9, amp=0.2)
+            blen = min(50 * s, (WIDTH - 10 - x) / max(0.01, beam_dx))
+            rx1 = min(WIDTH - 10, x + blen * (beam_dx - spread * beam_dy))
+            ry1 = beam_cy + blen * (beam_dy + spread * abs(beam_dx) * 0.3)
+            rx2 = min(WIDTH - 10, x + blen * (beam_dx + spread * beam_dy))
+            ry2 = beam_cy + blen * (beam_dy - spread * abs(beam_dx) * 0.3)
+            pen.stroke([(x, beam_cy), (rx1, ry1)], width=0.9, amp=0.2)
+            pen.stroke([(x, beam_cy), (rx2, ry2)], width=0.9, amp=0.2)
     if abs(sin_val - 1.0) < 0.15:
-        fl = 3.5 * s
+        fl = 4.0 * s
         for a in (0, 45, 90, 135):
             rad = math.radians(a)
-            pen.stroke([(light_cx - fl * math.cos(rad), light_cy - fl * math.sin(rad)),
-                        (light_cx + fl * math.cos(rad), light_cy + fl * math.sin(rad))], width=0.8, amp=0.1)
+            pen.stroke([(x - fl * math.cos(rad), beam_cy - fl * math.sin(rad)),
+                        (x + fl * math.cos(rad), beam_cy + fl * math.sin(rad))], width=0.8, amp=0.1)
 
 
 def draw_frame(version: str, t: float, boil: int) -> Image.Image:
@@ -986,27 +904,20 @@ def draw_frame(version: str, t: float, boil: int) -> Image.Image:
     pen = Pen(image, SEED + boil)
     sun(pen, 826, 52, 21, t)
     mountains(pen)
-    cloud(pen, 330, 112, 100, 20, bumps=4)
-    cloud(pen, 590, 122, 80, 16, bumps=4)
-    cloud(pen, 720, 36, 140, 30, bumps=6, dark=True)
-    rain(pen, 720, 36, 130, 54, 56, t)
-    waves(pen, t)
-    shore(pen)
-    ark_x, ark_y = 690.0, HORIZON + 52
-    bob = 3.0 * math.sin(TAU * t)
-    roll = 1.6 * math.sin(TAU * t + 1.2)
-    ark(pen, ark_x, ark_y + bob, 0.60, roll, t)
-    plank_x1, plank_y1 = ark_x - 74, ark_y + bob - 18
-    px0, py0, _ = path_point(1.0, 0)
-    gangplank(pen, px0, py0, plank_x1, plank_y1)
+    cloud(pen, 340, 105, 95, 20, bumps=4)
+    cloud(pen, 580, 115, 80, 16, bumps=4)
+    cloud(pen, 715, 36, 130, 28, bumps=6, dark=True)
+    rain(pen, 715, 36, 120, 52, 54, t)
+    shore_and_water(pen, t)
+    ark(pen, 710, 252, 0.78, t)
+    lighthouse(pen, 890, 255, 0.95, t)
     queue(pen, t)
-    stick_figure(pen, px0 + 14, py0 + 4, h=30, facing=-1, clipboard=True)
-    speech(pen, 465, 80, (605, 152), ["Two of everything.", "Yes. Even the mosquitoes."])
-    speech(pen, 462, 172, (544, 218), ["The unicorns said", "they'd catch the next one."], size=9.0)
-    flying_pig(pen, 118 + 6 * math.sin(TAU * t), 122 + 4 * math.sin(TAU * t * 2), 1.2, t)
+    stick_figure(pen, 555, GROUND_Y, h=30, facing=-1, clipboard=True)
+    speech(pen, 460, 78, (635, 170), ["Two of everything.", "Yes. Even the mosquitoes."])
+    speech(pen, 455, 180, (555, 234), ["The unicorns said", "they'd catch the next one."], size=9.0)
+    flying_pig(pen, 120 + 6 * math.sin(TAU * t), 125 + 4 * math.sin(TAU * t * 2), 1.25, t)
     dove(pen, 520 - ((t + 0.10) % 1.0) * 600, 136 + 4 * math.sin(TAU * t * 2), 1.5, t)
     dove(pen, 520 - ((t + 0.18) % 1.0) * 600, 142 + 4 * math.sin(TAU * t * 2 + 1), 1.1, t + 0.1)
-    lighthouse(pen, 892, 176, 0.95, t)
     title(pen, version)
     panel(pen)
     return image.resize((int(WIDTH * OUT_SCALE), int(HEIGHT * OUT_SCALE)), Image.Resampling.LANCZOS)
