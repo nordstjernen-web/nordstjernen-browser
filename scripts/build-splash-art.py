@@ -236,9 +236,9 @@ def text_width(text: str, size: float, spacing: float = 0.0) -> float:
 
 
 def title(pen: Pen, version: str) -> None:
-    letter(pen, "Yet another web browser", 34, 58, 30, spacing=0.6)
-    end = letter(pen, "Nordstjernen", 36, 88, 12, spacing=0.4)
-    letter(pen, version, end + 9, 88, 12, spacing=0.4)
+    letter(pen, "Nordstjernen web browser", 34, 50, 24, spacing=0.5)
+    letter(pen, "Yet another web browser", 36, 74, 12.5, spacing=0.4)
+    letter(pen, f"Version {version}", 36, 94, 11, spacing=0.4)
 
 
 def panel(pen: Pen) -> None:
@@ -845,31 +845,168 @@ def speech(pen: Pen, x: float, y: float, tail_to, lines, size: float = 10.0) -> 
     pen.stroke([(sx, bottom - size * 0.6), (tx, ty)], width=0.9, amp=0.3)
 
 
+def draw_rock(pen: Pen, cx: float, cy: float, w: float, h: float) -> None:
+    pts = [
+        (cx - w * 0.5, cy + h * 0.2),
+        (cx - w * 0.45, cy - h * 0.2),
+        (cx - w * 0.3, cy - h * 0.5),
+        (cx - w * 0.1, cy - h * 0.45),
+        (cx + w * 0.15, cy - h * 0.52),
+        (cx + w * 0.38, cy - h * 0.25),
+        (cx + w * 0.5, cy + h * 0.15),
+        (cx + w * 0.4, cy + h * 0.5),
+        (cx - w * 0.35, cy + h * 0.48),
+    ]
+    pen.shape(pts, fill=PAPER, width=1.4, amp=0.8)
+    pen.stroke([(cx - w * 0.25, cy - h * 0.1), (cx - w * 0.1, cy + h * 0.2), (cx - w * 0.15, cy + h * 0.4)], width=0.9, amp=0.3)
+    pen.stroke([(cx + w * 0.05, cy - h * 0.2), (cx + w * 0.15, cy + h * 0.1), (cx + w * 0.1, cy + h * 0.35)], width=0.9, amp=0.3)
+    pen.stroke([(cx - w * 0.55, cy + h * 0.3), (cx - w * 0.3, cy + h * 0.35)], width=1.0, amp=0.2)
+    pen.stroke([(cx + w * 0.25, cy + h * 0.38), (cx + w * 0.55, cy + h * 0.32)], width=1.0, amp=0.2)
+    pen.stroke([(cx - w * 0.4, cy + h * 0.55), (cx + w * 0.4, cy + h * 0.55)], width=1.1, amp=0.2)
+
+
+def seal(pen: Pen, x: float, y: float, s: float, t: float = 0.0) -> None:
+    bob = 0.8 * math.sin(TAU * t * 2)
+    body = [
+        (x - 8 * s, y + 2 * s),
+        (x - 5 * s, y - 4 * s),
+        (x + 2 * s, y - 3 * s),
+        (x + 7 * s, y - 7 * s + bob),
+        (x + 10 * s, y - 6 * s + bob),
+        (x + 8 * s, y - 1 * s),
+        (x + 4 * s, y + 2 * s),
+        (x - 2 * s, y + 3 * s),
+    ]
+    pen.shape(body, fill=(180, 180, 185), width=1.1, amp=0.4)
+    pen.dot(x + 8 * s, y - 5 * s + bob, 0.7 * s)
+    pen.stroke([(x + 9 * s, y - 4 * s + bob), (x + 13 * s, y - 5 * s + bob)], width=0.6, amp=0.1)
+    pen.stroke([(x + 9 * s, y - 3.5 * s + bob), (x + 12 * s, y - 2.5 * s + bob)], width=0.6, amp=0.1)
+    pen.stroke([(x + 1 * s, y), (x + 2 * s, y + 3 * s + 0.5 * bob)], width=1.1, amp=0.2)
+    pen.stroke([(x - 8 * s, y + 2 * s), (x - 11 * s, y + 1 * s - 0.5 * bob)], width=1.0, amp=0.2)
+    pen.stroke([(x - 8 * s, y + 2 * s), (x - 11 * s, y + 4 * s + 0.5 * bob)], width=1.0, amp=0.2)
+
+
+def lighthouse(pen: Pen, x: float, y: float, s: float = 1.0, t: float = 0.0) -> None:
+    draw_rock(pen, x - 2 * s, y + 14 * s, 68 * s, 26 * s)
+    seal(pen, x - 22 * s, y + 11 * s, s * 0.9, t)
+    base_w = 20 * s
+    top_w = 13 * s
+    tower_h = 60 * s
+    gallery_y = y - tower_h
+    lantern_h = 13 * s
+    roof_h = 10 * s
+    tower_pts = [
+        (x - base_w / 2, y + 3 * s),
+        (x - top_w / 2, gallery_y),
+        (x + top_w / 2, gallery_y),
+        (x + base_w / 2, y + 3 * s),
+    ]
+    pen.shape(tower_pts, fill=PAPER, width=1.4, amp=0.6)
+    n_bands = 4
+    for b in range(1, n_bands):
+        frac = b / n_bands
+        by = y + 3 * s - frac * (tower_h + 3 * s)
+        w_at_y = base_w - frac * (base_w - top_w)
+        pen.stroke([(x - w_at_y / 2, by), (x + w_at_y / 2, by)], width=1.1, amp=0.3)
+        if b % 2 == 1:
+            for hx in np.linspace(-w_at_y / 2 + 2 * s, w_at_y / 2 - 2 * s, 5):
+                pen.stroke([(x + hx, by), (x + hx + 3 * s, by - (tower_h / n_bands) * 0.85)], width=0.8, amp=0.2)
+    pen.shape([(x - 2.5 * s, y + 3 * s), (x - 2.5 * s, y - 4 * s), (x + 2.5 * s, y - 4 * s), (x + 2.5 * s, y + 3 * s)], fill=INK, width=0.9, amp=0.2)
+    for wy in (y - 18 * s, y - 36 * s):
+        pen.shape([(x - 1.8 * s, wy - 3 * s), (x + 1.8 * s, wy - 3 * s), (x + 1.8 * s, wy + 2 * s), (x - 1.8 * s, wy + 2 * s)], fill=PAPER, width=0.9, amp=0.2)
+        pen.stroke([(x, wy - 3 * s), (x, wy + 2 * s)], width=0.7, amp=0.1)
+    gal_w = top_w + 9 * s
+    pen.shape([(x - gal_w / 2, gallery_y), (x + gal_w / 2, gallery_y),
+               (x + gal_w / 2, gallery_y + 3 * s), (x - gal_w / 2, gallery_y + 3 * s)],
+              fill=PAPER, width=1.2, amp=0.3)
+    rail_h = 6 * s
+    pen.stroke([(x - gal_w / 2 + 1 * s, gallery_y - rail_h), (x + gal_w / 2 - 1 * s, gallery_y - rail_h)], width=1.0, amp=0.2)
+    for rx in np.linspace(-gal_w / 2 + 2 * s, gal_w / 2 - 2 * s, 5):
+        pen.stroke([(x + rx, gallery_y), (x + rx, gallery_y - rail_h)], width=0.8, amp=0.1)
+    stick_figure(pen, x - gal_w / 2 + 3.5 * s, gallery_y, h=16 * s, facing=-1)
+    lantern_y = gallery_y
+    lantern_top = lantern_y - lantern_h
+    lan_w = top_w - 1 * s
+    pen.shape([(x - lan_w / 2, lantern_y), (x - lan_w / 2, lantern_top),
+               (x + lan_w / 2, lantern_top), (x + lan_w / 2, lantern_y)],
+              fill=PAPER, width=1.2, amp=0.3)
+    pen.stroke([(x - lan_w / 4, lantern_y), (x - lan_w / 4, lantern_top)], width=0.9, amp=0.2)
+    pen.stroke([(x + lan_w / 4, lantern_y), (x + lan_w / 4, lantern_top)], width=0.9, amp=0.2)
+    roof_pts = [
+        (x - lan_w / 2 - 1.5 * s, lantern_top),
+        (x - lan_w * 0.3, lantern_top - roof_h * 0.7),
+        (x, lantern_top - roof_h),
+        (x + lan_w * 0.3, lantern_top - roof_h * 0.7),
+        (x + lan_w / 2 + 1.5 * s, lantern_top),
+    ]
+    pen.shape(roof_pts, fill=PAPER, width=1.2, amp=0.4)
+    finial_y = lantern_top - roof_h
+    pen.stroke([(x, finial_y), (x, finial_y - 8 * s)], width=1.1, amp=0.2)
+    pen.dot(x, finial_y - 8 * s, 1.2 * s)
+    beam_angle = TAU * t
+    beam_dx = math.cos(beam_angle)
+    beam_dy = 0.20 * math.sin(beam_angle)
+    light_cx = x
+    light_cy = lantern_top + lantern_h / 2
+    pen.dot(light_cx, light_cy, 2.0 * s, fill=INK)
+    spread = 0.20
+    max_x = WIDTH - 10
+    min_x = 10
+    sin_val = math.sin(beam_angle)
+    if sin_val > -0.65:
+        if beam_dx < 0.15:
+            beam_len = 160 * s
+            rx1 = max(min_x, light_cx + beam_len * (beam_dx - spread * beam_dy))
+            ry1 = light_cy + beam_len * (beam_dy + spread * abs(beam_dx) * 0.3)
+            rx2 = max(min_x, light_cx + beam_len * (beam_dx + spread * beam_dy))
+            ry2 = light_cy + beam_len * (beam_dy - spread * abs(beam_dx) * 0.3)
+            pen.stroke([(light_cx, light_cy), (rx1, ry1)], width=1.1, amp=0.3)
+            pen.stroke([(light_cx, light_cy), (rx2, ry2)], width=1.1, amp=0.3)
+            pen.stroke([(light_cx, light_cy), (max(min_x, light_cx + beam_len * 0.85 * beam_dx), light_cy + beam_len * 0.85 * beam_dy)], width=0.8, amp=0.2)
+            for k in (0.35, 0.65):
+                pen.dot(light_cx + beam_len * k * beam_dx + 2 * s, light_cy + beam_len * k * beam_dy, 0.6 * s)
+        elif beam_dx > -0.15:
+            beam_len = min(60 * s, (max_x - light_cx) / max(0.01, beam_dx))
+            rx1 = min(max_x, light_cx + beam_len * (beam_dx - spread * beam_dy))
+            ry1 = light_cy + beam_len * (beam_dy + spread * abs(beam_dx) * 0.3)
+            rx2 = min(max_x, light_cx + beam_len * (beam_dx + spread * beam_dy))
+            ry2 = light_cy + beam_len * (beam_dy - spread * abs(beam_dx) * 0.3)
+            pen.stroke([(light_cx, light_cy), (rx1, ry1)], width=0.9, amp=0.2)
+            pen.stroke([(light_cx, light_cy), (rx2, ry2)], width=0.9, amp=0.2)
+    if abs(sin_val - 1.0) < 0.15:
+        fl = 3.5 * s
+        for a in (0, 45, 90, 135):
+            rad = math.radians(a)
+            pen.stroke([(light_cx - fl * math.cos(rad), light_cy - fl * math.sin(rad)),
+                        (light_cx + fl * math.cos(rad), light_cy + fl * math.sin(rad))], width=0.8, amp=0.1)
+
+
 def draw_frame(version: str, t: float, boil: int) -> Image.Image:
     image = Image.new("RGB", (WIDTH * SS, HEIGHT * SS), PAPER)
     pen = Pen(image, SEED + boil)
-    sun(pen, 838, 58, 22, t)
+    sun(pen, 826, 52, 21, t)
     mountains(pen)
     cloud(pen, 330, 112, 100, 20, bumps=4)
     cloud(pen, 590, 122, 80, 16, bumps=4)
-    cloud(pen, 730, 36, 150, 30, bumps=6, dark=True)
-    rain(pen, 730, 36, 140, 54, 56, t)
+    cloud(pen, 720, 36, 140, 30, bumps=6, dark=True)
+    rain(pen, 720, 36, 130, 54, 56, t)
     waves(pen, t)
     shore(pen)
-    ark_x, ark_y = 700.0, HORIZON + 52
+    ark_x, ark_y = 690.0, HORIZON + 52
     bob = 3.0 * math.sin(TAU * t)
     roll = 1.6 * math.sin(TAU * t + 1.2)
-    ark(pen, ark_x, ark_y + bob, 0.62, roll, t)
-    plank_x1, plank_y1 = ark_x - 76, ark_y + bob - 18
+    ark(pen, ark_x, ark_y + bob, 0.60, roll, t)
+    plank_x1, plank_y1 = ark_x - 74, ark_y + bob - 18
     px0, py0, _ = path_point(1.0, 0)
     gangplank(pen, px0, py0, plank_x1, plank_y1)
     queue(pen, t)
     stick_figure(pen, px0 + 14, py0 + 4, h=30, facing=-1, clipboard=True)
-    speech(pen, 470, 80, (612, 152), ["Two of everything.", "Yes. Even the mosquitoes."])
+    speech(pen, 465, 80, (605, 152), ["Two of everything.", "Yes. Even the mosquitoes."])
     speech(pen, 462, 172, (544, 218), ["The unicorns said", "they'd catch the next one."], size=9.0)
     flying_pig(pen, 118 + 6 * math.sin(TAU * t), 122 + 4 * math.sin(TAU * t * 2), 1.2, t)
     dove(pen, 520 - ((t + 0.10) % 1.0) * 600, 136 + 4 * math.sin(TAU * t * 2), 1.5, t)
     dove(pen, 520 - ((t + 0.18) % 1.0) * 600, 142 + 4 * math.sin(TAU * t * 2 + 1), 1.1, t + 0.1)
+    lighthouse(pen, 892, 176, 0.95, t)
     title(pen, version)
     panel(pen)
     return image.resize((int(WIDTH * OUT_SCALE), int(HEIGHT * OUT_SCALE)), Image.Resampling.LANCZOS)
