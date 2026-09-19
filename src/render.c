@@ -324,8 +324,12 @@ render_collect_containers(const ns_box *b, GHashTable *map, guint64 *sig)
             const ns_css_value *nm = b->style->values[NS_CSS_CONTAINER_NAME];
             const char *names = (nm && nm->kind == NS_CSS_V_KEYWORD)
                 ? nm->u.keyword : NULL;
+            const ns_css_value *wm = b->style->values[NS_CSS_WRITING_MODE];
+            gboolean vertical = wm && wm->kind == NS_CSS_V_KEYWORD &&
+                wm->u.keyword && g_str_has_prefix(wm->u.keyword, "vertical");
             ns_css_container_map_add(map, b->dom, ct->u.keyword, names,
-                                     b->content_width, b->content_height);
+                                     b->content_width, b->content_height,
+                                     vertical);
             if (sig) *sig += render_container_entry_sig(b, ct->u.keyword, names);
         }
     }

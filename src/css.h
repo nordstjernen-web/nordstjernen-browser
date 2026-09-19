@@ -1100,7 +1100,7 @@ gboolean ns_css_container_features_used(void);
 GHashTable *ns_css_container_map_new(void);
 void ns_css_container_map_add(GHashTable *map, const void *node,
                               const char *type_kw, const char *name_kw,
-                              double w, double h);
+                              double w, double h, gboolean vertical);
 
 void ns_css_set_target_fragment(const char *fragment);
 
@@ -1120,6 +1120,9 @@ char *ns_css_font_family_canonical(const char *text);
 char *ns_css_font_shorthand_canonical(const char *text);
 char *ns_css_image_value_canonical(const char *text);
 char *ns_css_content_canonical(const char *text);
+char *ns_css_container_condition_canonical(const char *cond);
+char *ns_css_container_name_canonical(const char *text);
+char *ns_css_container_shorthand_canonical(const char *text);
 double ns_css_gradient_angle(const ns_css_gradient *gr, double w, double h);
 void ns_css_gradient_radii(const ns_css_gradient *gr, double w, double h,
                            double cx, double cy, double *rx, double *ry);

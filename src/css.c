@@ -9870,9 +9870,11 @@ parse_value_for(ns_css_prop prop, const char *text)
         break;
     }
     case NS_CSS_CONTAINER_NAME: {
+        char *canon = ns_css_container_name_canonical(t);
+        if (!canon) break;
         v = g_new0(ns_css_value, 1);
         v->kind = NS_CSS_V_KEYWORD;
-        v->u.keyword = g_strdup(t);
+        v->u.keyword = canon;
         break;
     }
     case NS_CSS_FONT_STRETCH: {
@@ -12857,14 +12859,30 @@ parse_declaration_block(const char **pp, const char *end,
             char *name_part = slash ? g_strndup(vtext, (gsize)(slash - vtext))
                                     : g_strdup(vtext);
             g_strstrip(name_part);
-            ns_css_value *nv = parse_value_for(NS_CSS_CONTAINER_NAME, name_part);
+            gboolean type_ok = TRUE;
+            if (slash) {
+                char *type_part = g_strstrip(g_strdup(slash + 1));
+                ns_css_value *tv = *type_part
+                    ? parse_value_for(NS_CSS_CONTAINER_TYPE, type_part) : NULL;
+                type_ok = tv != NULL;
+                ns_css_value_free(tv);
+                g_free(type_part);
+            }
+            ns_css_value *nv = type_ok
+                ? parse_value_for(NS_CSS_CONTAINER_NAME, name_part) : NULL;
+            if (nv && !slash) {
+                ns_css_value *tv = parse_value_for(NS_CSS_CONTAINER_TYPE, "normal");
+                ns_css_decl d = { .prop = NS_CSS_CONTAINER_TYPE, .value = tv,
+                                  .important = important };
+                g_array_append_val(decls_out, d);
+            }
             if (nv) {
                 ns_css_decl d = { .prop = NS_CSS_CONTAINER_NAME, .value = nv,
                                   .important = important };
                 g_array_append_val(decls_out, d);
             }
             g_free(name_part);
-            if (slash) {
+            if (slash && nv) {
                 char *type_part = g_strstrip(g_strdup(slash + 1));
                 ns_css_value *tv = *type_part
                     ? parse_value_for(NS_CSS_CONTAINER_TYPE, type_part) : NULL;
@@ -13861,6 +13879,7 @@ typedef struct {
     double width;
     double height;
     int    type;    /* NS_CQ_TYPE_* */
+    gboolean vertical;
 } ns_cq_container;
 
 static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
@@ -13904,7 +13923,7 @@ ns_css_container_map_new(void)
 void
 ns_css_container_map_add(GHashTable *map, const void *node,
                          const char *type_kw, const char *name_kw,
-                         double w, double h)
+                         double w, double h, gboolean vertical)
 {
     if (!map || !node || !type_kw) return;
     int type = g_ascii_strcasecmp(type_kw, "size") == 0
@@ -13915,6 +13934,7 @@ ns_css_container_map_add(GHashTable *map, const void *node,
     c->width = w;
     c->height = h;
     c->type = type;
+    c->vertical = vertical;
     g_hash_table_insert(map, (gpointer)node, c);
 }
 
@@ -13934,24 +13954,6 @@ cq_names_contain(const char *names, const char *name, gsize nlen)
 }
 
 /* Resolve a length token (px/em/rem/% of container axis) to px; -1 on failure. */
-static double
-cq_length_px(const char *s, double pct_basis)
-{
-    char *end = NULL;
-    double v = g_ascii_strtod(s, &end);
-    if (end == s) return -1;
-    while (*end == ' ') end++;
-    if (g_ascii_strncasecmp(end, "px", 2) == 0) return v;
-    if (g_ascii_strncasecmp(end, "rem", 3) == 0 ||
-        g_ascii_strncasecmp(end, "em", 2) == 0)  return v * 16.0;
-    if (*end == '%') return v / 100.0 * pct_basis;
-    if (*end == '\0' || *end == ')') return v;
-    return -1;
-}
-
-/* Normalize a range expression so comparison operators are whitespace-delimited
- * tokens regardless of how the author spaced them, and tabs/newlines collapse to
- * spaces. "width>=400px" -> " width >= 400px ". */
 static char *
 cq_spacify(const char *s)
 {
@@ -13970,126 +13972,6 @@ cq_spacify(const char *s)
         }
     }
     return g_string_free(o, FALSE);
-}
-
-/* Evaluate "<feature> : <value>", "min-/max-<feature>: value", or
- * "<value> <op> <feature> <op> <value>" range syntax against the container. */
-static gboolean
-cq_feature_matches(const char *feat, const ns_cq_container *c)
-{
-    char *f = g_strstrip(g_strdup(feat));
-    gboolean result = FALSE;
-
-    if (strchr(f, ':')) {
-        char *colon = strchr(f, ':');
-        *colon = '\0';
-        char *name = g_strstrip(f);
-        gboolean is_min = g_str_has_prefix(name, "min-");
-        gboolean is_max = g_str_has_prefix(name, "max-");
-        const char *base = (is_min || is_max) ? name + 4 : name;
-        gboolean horiz = g_ascii_strcasecmp(base, "width") == 0 ||
-                         g_ascii_strcasecmp(base, "inline-size") == 0;
-        gboolean vert  = g_ascii_strcasecmp(base, "height") == 0 ||
-                         g_ascii_strcasecmp(base, "block-size") == 0;
-        if ((vert && c->type != NS_CQ_TYPE_SIZE) || (!horiz && !vert))
-            goto done;
-        double size = horiz ? c->width : c->height;
-        double val = cq_length_px(colon + 1, size);
-        if (val < 0) goto done;
-        if (is_min)      result = size >= val;
-        else if (is_max) result = size <= val;
-        else             result = (int)size == (int)val;
-        goto done;
-    }
-
-    {
-        char *norm = cq_spacify(f);
-        char **tok = g_strsplit(norm, " ", -1);
-        GPtrArray *parts = g_ptr_array_new();
-        for (int i = 0; tok[i]; i++)
-            if (*tok[i]) g_ptr_array_add(parts, tok[i]);
-        int fi = -1; gboolean horiz = FALSE, vert = FALSE;
-        for (guint i = 0; i < parts->len; i++) {
-            const char *t = g_ptr_array_index(parts, i);
-            if (g_ascii_strcasecmp(t, "width") == 0 ||
-                g_ascii_strcasecmp(t, "inline-size") == 0) { fi = (int)i; horiz = TRUE; }
-            else if (g_ascii_strcasecmp(t, "height") == 0 ||
-                     g_ascii_strcasecmp(t, "block-size") == 0) { fi = (int)i; vert = TRUE; }
-        }
-        if (fi >= 0 && !(vert && c->type != NS_CQ_TYPE_SIZE)) {
-            double size = horiz ? c->width : c->height;
-            gboolean ok = TRUE, had = FALSE;
-            if (fi >= 2) {
-                double v = cq_length_px(g_ptr_array_index(parts, fi - 2), size);
-                const char *op = g_ptr_array_index(parts, fi - 1);
-                if (v < 0) ok = FALSE;
-                else if (!strcmp(op, "<"))  { ok = ok && v <  size; had = TRUE; }
-                else if (!strcmp(op, "<=")) { ok = ok && v <= size; had = TRUE; }
-                else if (!strcmp(op, ">"))  { ok = ok && v >  size; had = TRUE; }
-                else if (!strcmp(op, ">=")) { ok = ok && v >= size; had = TRUE; }
-                else ok = FALSE;
-            }
-            if ((guint)fi + 2 < parts->len) {
-                const char *op = g_ptr_array_index(parts, fi + 1);
-                double v = cq_length_px(g_ptr_array_index(parts, fi + 2), size);
-                if (v < 0) ok = FALSE;
-                else if (!strcmp(op, "<"))  { ok = ok && size <  v; had = TRUE; }
-                else if (!strcmp(op, "<=")) { ok = ok && size <= v; had = TRUE; }
-                else if (!strcmp(op, ">"))  { ok = ok && size >  v; had = TRUE; }
-                else if (!strcmp(op, ">=")) { ok = ok && size >= v; had = TRUE; }
-                else ok = FALSE;
-            }
-            result = had ? ok : FALSE;
-        }
-        g_ptr_array_free(parts, TRUE);
-        g_strfreev(tok);
-        g_free(norm);
-    }
-done:
-    g_free(f);
-    return result;
-}
-
-/* Evaluate a container condition expression: parenthesized feature/range groups
- * joined by `and`/`or`, with optional `not`, and nested groups. */
-static gboolean
-cq_eval_expr(const char *q, const ns_cq_container *c, int rdepth)
-{
-    if (rdepth > 64) return FALSE;
-    gboolean have_or = FALSE, any = FALSE, pending_not = FALSE;
-    gboolean acc_and = TRUE, acc_or = FALSE;
-    const char *p = q;
-    while (*p) {
-        while (*p && is_ws(*p)) p++;
-        if (!*p) break;
-        if (*p == '(') {
-            int depth = 1;
-            const char *start = ++p;
-            while (*p && depth) {
-                if (*p == '(') depth++;
-                else if (*p == ')' && --depth == 0) break;
-                p++;
-            }
-            char *inner = g_strndup(start, (gsize)(p - start));
-            gboolean g = strchr(inner, '(')
-                ? cq_eval_expr(inner, c, rdepth + 1)
-                : cq_feature_matches(inner, c);
-            g_free(inner);
-            if (pending_not) { g = !g; pending_not = FALSE; }
-            if (!any) { acc_and = g; acc_or = g; any = TRUE; }
-            else { acc_and = acc_and && g; acc_or = acc_or || g; }
-            if (*p == ')') p++;
-        } else {
-            const char *w = p;
-            while (*p && !is_ws(*p) && *p != '(') p++;
-            gsize wl = (gsize)(p - w);
-            if (wl == 2 && g_ascii_strncasecmp(w, "or", 2) == 0) have_or = TRUE;
-            else if (wl == 3 && g_ascii_strncasecmp(w, "not", 3) == 0)
-                pending_not = !pending_not;
-        }
-    }
-    if (!any) return TRUE;
-    return have_or ? acc_or : acc_and;
 }
 
 /* Pick the query container for a query: nearest ancestor (innermost) that
@@ -14142,29 +14024,681 @@ container_unit_resolve(double v, ns_css_unit unit)
     }
 }
 
+typedef enum {
+    CQ_TRI_FALSE,
+    CQ_TRI_TRUE,
+    CQ_TRI_UNKNOWN,
+} cq_tri;
+
+typedef enum {
+    CQ_OP_NONE,
+    CQ_OP_LT,
+    CQ_OP_LE,
+    CQ_OP_EQ,
+    CQ_OP_GT,
+    CQ_OP_GE,
+} cq_op;
+
+typedef enum {
+    CQ_NODE_FEATURE,
+    CQ_NODE_GENERAL,
+    CQ_NODE_NOT,
+    CQ_NODE_AND,
+    CQ_NODE_OR,
+    CQ_NODE_GROUP,
+} cq_node_kind;
+
+typedef struct cq_node {
+    cq_node_kind kind;
+    char *name;
+    char *text;
+    char *val1;
+    char *val2;
+    cq_op op1;
+    cq_op op2;
+    gboolean is_min;
+    gboolean is_max;
+    GPtrArray *children;
+} cq_node;
+
+static void
+cq_node_free(cq_node *n)
+{
+    if (!n) return;
+    g_free(n->name);
+    g_free(n->text);
+    g_free(n->val1);
+    g_free(n->val2);
+    if (n->children) g_ptr_array_free(n->children, TRUE);
+    g_free(n);
+}
+
+static cq_node *
+cq_node_new(cq_node_kind kind)
+{
+    cq_node *n = g_new0(cq_node, 1);
+    n->kind = kind;
+    if (kind == CQ_NODE_AND || kind == CQ_NODE_OR || kind == CQ_NODE_NOT ||
+        kind == CQ_NODE_GROUP)
+        n->children = g_ptr_array_new_with_free_func((GDestroyNotify)cq_node_free);
+    return n;
+}
+
+static const char *
+cq_skip_ws(const char *p, const char *end)
+{
+    while (p < end && is_ws(*p)) p++;
+    return p;
+}
+
+static gboolean
+cq_word_at(const char *p, const char *end, const char *word)
+{
+    gsize len = strlen(word);
+    if ((gsize)(end - p) < len || g_ascii_strncasecmp(p, word, len) != 0)
+        return FALSE;
+    const char *after = p + len;
+    return after == end || is_ws(*after) || *after == '(';
+}
+
+static const char *
+cq_match_paren(const char *p, const char *end)
+{
+    int depth = 0;
+    for (const char *q = p; q < end; q++) {
+        if (*q == '"' || *q == '\'') {
+            char quote = *q++;
+            while (q < end && *q != quote) { if (*q == '\\' && q + 1 < end) q++; q++; }
+            continue;
+        }
+        if (*q == '(') depth++;
+        else if (*q == ')' && --depth == 0) return q;
+    }
+    return NULL;
+}
+
+static gboolean
+cq_feature_name_known(const char *name)
+{
+    static const char *names[] = { "width", "height", "inline-size",
+                                   "block-size", "aspect-ratio", "orientation" };
+    for (gsize i = 0; i < G_N_ELEMENTS(names); i++)
+        if (strcmp(name, names[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+cq_value_is_ratio(const char *v, double *out)
+{
+    char *s = g_strdup(v);
+    char *slash = strchr(s, '/');
+    double a = 0, b = 1;
+    char *e1 = NULL, *e2 = NULL;
+    gboolean ok;
+    if (slash) {
+        *slash = '\0';
+        a = g_ascii_strtod(g_strstrip(s), &e1);
+        b = g_ascii_strtod(g_strstrip(slash + 1), &e2);
+        ok = e1 && *e1 == '\0' && e2 && *e2 == '\0' && a >= 0 && b >= 0;
+    } else {
+        a = g_ascii_strtod(g_strstrip(s), &e1);
+        ok = e1 && *e1 == '\0' && a >= 0;
+    }
+    g_free(s);
+    if (ok && out) *out = b > 0 ? a / b : (a > 0 ? G_MAXDOUBLE : 0);
+    return ok;
+}
+
+static gboolean
+cq_value_is_length(const char *v)
+{
+    if (token_is_math_fn(v)) {
+        ns_css_value *cv = parse_calc(v);
+        if (!cv) return FALSE;
+        ns_css_value_free(cv);
+        return TRUE;
+    }
+    double n; ns_css_unit u;
+    if (!parse_length(v, &n, &u)) return FALSE;
+    return u != NS_CSS_UNIT_NUMBER || n == 0;
+}
+
+static gboolean
+cq_feature_value_valid(const char *name, const char *value, gboolean range)
+{
+    if (strcmp(name, "orientation") == 0)
+        return !range && (g_ascii_strcasecmp(value, "portrait") == 0 ||
+                          g_ascii_strcasecmp(value, "landscape") == 0);
+    if (strcmp(name, "aspect-ratio") == 0) return cq_value_is_ratio(value, NULL);
+    return cq_value_is_length(value);
+}
+
+static cq_op
+cq_op_parse(const char *t)
+{
+    if (strcmp(t, "<") == 0) return CQ_OP_LT;
+    if (strcmp(t, "<=") == 0) return CQ_OP_LE;
+    if (strcmp(t, "=") == 0) return CQ_OP_EQ;
+    if (strcmp(t, ">") == 0) return CQ_OP_GT;
+    if (strcmp(t, ">=") == 0) return CQ_OP_GE;
+    return CQ_OP_NONE;
+}
+
+static const char *
+cq_op_text(cq_op op)
+{
+    switch (op) {
+    case CQ_OP_LT: return "<";
+    case CQ_OP_LE: return "<=";
+    case CQ_OP_EQ: return "=";
+    case CQ_OP_GT: return ">";
+    case CQ_OP_GE: return ">=";
+    default: return "";
+    }
+}
+
+static cq_node *
+cq_parse_feature(const char *text)
+{
+    char *f = g_strstrip(g_strdup(text));
+    cq_node *n = NULL;
+    char *colon = strchr(f, ':');
+    if (colon) {
+        *colon = '\0';
+        char *name = g_ascii_strdown(g_strstrip(f), -1);
+        char *value = g_strstrip(g_strdup(colon + 1));
+        gboolean is_min = g_str_has_prefix(name, "min-");
+        gboolean is_max = g_str_has_prefix(name, "max-");
+        const char *base = (is_min || is_max) ? name + 4 : name;
+        if (cq_feature_name_known(base) && *value &&
+            !((is_min || is_max) && strcmp(base, "orientation") == 0) &&
+            cq_feature_value_valid(base, value, FALSE)) {
+            n = cq_node_new(CQ_NODE_FEATURE);
+            n->name = g_strdup(base);
+            n->is_min = is_min;
+            n->is_max = is_max;
+            n->val1 = value;
+            value = NULL;
+        }
+        g_free(name);
+        g_free(value);
+        g_free(f);
+        return n;
+    }
+    char *norm = cq_spacify(f);
+    char *tok[12] = {0};
+    int ntok = split_ws_paren(norm, tok, 12);
+    GPtrArray *parts = g_ptr_array_new();
+    for (int i = 0; i < ntok; i++)
+        if (*tok[i]) g_ptr_array_add(parts, tok[i]);
+    guint np = parts->len;
+    if (np == 1) {
+        char *name = g_ascii_strdown(parts->pdata[0], -1);
+        if (cq_feature_name_known(name)) {
+            n = cq_node_new(CQ_NODE_FEATURE);
+            n->name = name;
+            name = NULL;
+        }
+        g_free(name);
+    } else if (np == 3 || np == 5) {
+        int name_idx = -1;
+        for (guint i = 0; i < np; i++) {
+            char *lower = g_ascii_strdown(parts->pdata[i], -1);
+            if (cq_feature_name_known(lower) && strcmp(lower, "orientation") != 0)
+                name_idx = (int)i;
+            g_free(lower);
+        }
+        gboolean ok = FALSE;
+        cq_node *cand = cq_node_new(CQ_NODE_FEATURE);
+        if (np == 3 && (name_idx == 0 || name_idx == 2)) {
+            cand->name = g_ascii_strdown(parts->pdata[name_idx], -1);
+            const char *val = parts->pdata[name_idx == 0 ? 2 : 0];
+            cq_op op = cq_op_parse(parts->pdata[1]);
+            if (op != CQ_OP_NONE && cq_feature_value_valid(cand->name, val, TRUE)) {
+                if (name_idx == 0) { cand->op2 = op; cand->val2 = g_strdup(val); }
+                else { cand->op1 = op; cand->val1 = g_strdup(val); }
+                ok = TRUE;
+            }
+        } else if (np == 5 && name_idx == 2) {
+            cand->name = g_ascii_strdown(parts->pdata[2], -1);
+            cq_op op1 = cq_op_parse(parts->pdata[1]);
+            cq_op op2 = cq_op_parse(parts->pdata[3]);
+            gboolean asc = (op1 == CQ_OP_LT || op1 == CQ_OP_LE) &&
+                           (op2 == CQ_OP_LT || op2 == CQ_OP_LE);
+            gboolean desc = (op1 == CQ_OP_GT || op1 == CQ_OP_GE) &&
+                            (op2 == CQ_OP_GT || op2 == CQ_OP_GE);
+            if ((asc || desc) &&
+                cq_feature_value_valid(cand->name, parts->pdata[0], TRUE) &&
+                cq_feature_value_valid(cand->name, parts->pdata[4], TRUE)) {
+                cand->op1 = op1; cand->val1 = g_strdup(parts->pdata[0]);
+                cand->op2 = op2; cand->val2 = g_strdup(parts->pdata[4]);
+                ok = TRUE;
+            }
+        }
+        if (ok) n = cand;
+        else cq_node_free(cand);
+    }
+    g_ptr_array_free(parts, TRUE);
+    for (int i = 0; i < ntok; i++) g_free(tok[i]);
+    g_free(norm);
+    g_free(f);
+    return n;
+}
+
+static cq_node *cq_parse_query(const char *p, const char *end, gboolean *ok);
+
+static cq_node *
+cq_parse_in_parens(const char **pp, const char *end, gboolean *ok)
+{
+    const char *p = cq_skip_ws(*pp, end);
+    if (p < end && *p == '(') {
+        const char *close = cq_match_paren(p, end);
+        if (!close) { *ok = FALSE; return NULL; }
+        const char *inner = cq_skip_ws(p + 1, end);
+        const char *inner_end = close;
+        while (inner_end > inner && is_ws(inner_end[-1])) inner_end--;
+        *pp = close + 1;
+        if (inner >= inner_end) { *ok = FALSE; return NULL; }
+        if (*inner == '(' || cq_word_at(inner, inner_end, "not")) {
+            gboolean sub_ok = TRUE;
+            cq_node *q = cq_parse_query(inner, inner_end, &sub_ok);
+            if (q && sub_ok) {
+                cq_node *g = cq_node_new(CQ_NODE_GROUP);
+                g_ptr_array_add(g->children, q);
+                return g;
+            }
+            cq_node_free(q);
+        }
+        char *text = g_strndup(inner, (gsize)(inner_end - inner));
+        cq_node *f = cq_parse_feature(text);
+        if (!f) {
+            f = cq_node_new(CQ_NODE_GENERAL);
+            f->text = g_strdup_printf("(%s)", text);
+        }
+        g_free(text);
+        return f;
+    }
+    const char *s = p;
+    while (p < end && (g_ascii_isalnum((guchar)*p) || *p == '-' || *p == '_'))
+        p++;
+    if (p > s && p < end && *p == '(') {
+        const char *close = cq_match_paren(p, end);
+        if (!close) { *ok = FALSE; return NULL; }
+        cq_node *g = cq_node_new(CQ_NODE_GENERAL);
+        g->text = g_strndup(s, (gsize)(close + 1 - s));
+        *pp = close + 1;
+        return g;
+    }
+    *ok = FALSE;
+    return NULL;
+}
+
+static cq_node *
+cq_parse_query(const char *p, const char *end, gboolean *ok)
+{
+    p = cq_skip_ws(p, end);
+    if (cq_word_at(p, end, "not")) {
+        p += 3;
+        cq_node *child = cq_parse_in_parens(&p, end, ok);
+        if (!child) { *ok = FALSE; return NULL; }
+        p = cq_skip_ws(p, end);
+        if (p < end) { cq_node_free(child); *ok = FALSE; return NULL; }
+        cq_node *n = cq_node_new(CQ_NODE_NOT);
+        g_ptr_array_add(n->children, child);
+        return n;
+    }
+    cq_node *first = cq_parse_in_parens(&p, end, ok);
+    if (!first) { *ok = FALSE; return NULL; }
+    cq_node *list = NULL;
+    while (TRUE) {
+        p = cq_skip_ws(p, end);
+        if (p >= end) break;
+        cq_node_kind kind;
+        if (cq_word_at(p, end, "and")) { kind = CQ_NODE_AND; p += 3; }
+        else if (cq_word_at(p, end, "or")) { kind = CQ_NODE_OR; p += 2; }
+        else { *ok = FALSE; break; }
+        if (!list) {
+            list = cq_node_new(kind);
+            g_ptr_array_add(list->children, first);
+            first = NULL;
+        } else if (list->kind != kind) {
+            *ok = FALSE;
+            break;
+        }
+        cq_node *next = cq_parse_in_parens(&p, end, ok);
+        if (!next) { *ok = FALSE; break; }
+        g_ptr_array_add(list->children, next);
+    }
+    if (!*ok) {
+        cq_node_free(first);
+        cq_node_free(list);
+        return NULL;
+    }
+    return list ? list : first;
+}
+
+static gboolean
+cq_container_name_valid(const char *name, gsize len)
+{
+    if (len == 0) return FALSE;
+    static const char *reserved[] = { "none", "and", "or", "not", "inherit",
+                                      "initial", "unset", "revert",
+                                      "revert-layer", "default" };
+    for (gsize i = 0; i < G_N_ELEMENTS(reserved); i++)
+        if (strlen(reserved[i]) == len &&
+            g_ascii_strncasecmp(name, reserved[i], len) == 0)
+            return FALSE;
+    if (g_ascii_isdigit((guchar)name[0])) return FALSE;
+    if (name[0] == '-' && len > 1 && g_ascii_isdigit((guchar)name[1])) return FALSE;
+    for (gsize i = 0; i < len; i++) {
+        char c = name[i];
+        if (c == '\\') { i++; continue; }
+        if (!(g_ascii_isalnum((guchar)c) || c == '-' || c == '_' ||
+              (guchar)c >= 0x80))
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+cq_parse_condition(const char *cond, char **out_name, cq_node **out_query)
+{
+    *out_name = NULL;
+    *out_query = NULL;
+    const char *p = cond;
+    const char *end = cond + strlen(cond);
+    p = cq_skip_ws(p, end);
+    if (p < end && *p != '(' && !cq_word_at(p, end, "not")) {
+        const char *s = p;
+        while (p < end && !is_ws(*p) && *p != '(') {
+            if (*p == '\\' && p + 1 < end) p++;
+            p++;
+        }
+        if (!cq_container_name_valid(s, (gsize)(p - s))) return FALSE;
+        *out_name = g_strndup(s, (gsize)(p - s));
+        p = cq_skip_ws(p, end);
+        if (p >= end) return TRUE;
+    }
+    if (p >= end) return FALSE;
+    gboolean ok = TRUE;
+    cq_node *n = cq_parse_query(p, end, &ok);
+    if (!n || !ok) {
+        cq_node_free(n);
+        g_free(*out_name);
+        *out_name = NULL;
+        return FALSE;
+    }
+    *out_query = n;
+    return TRUE;
+}
+
+static GPtrArray *
+cq_split_commas(const char *text)
+{
+    GPtrArray *parts = g_ptr_array_new_with_free_func(g_free);
+    const char *end = text + strlen(text);
+    const char *seg = text;
+    for (const char *q = text; ; q++) {
+        if (q < end && *q == '(') {
+            const char *close = cq_match_paren(q, end);
+            if (close) { q = close; continue; }
+        }
+        if (q >= end || *q == ',') {
+            char *piece = g_strndup(seg, (gsize)(q - seg));
+            g_strstrip(piece);
+            g_ptr_array_add(parts, piece);
+            if (q >= end) break;
+            seg = q + 1;
+        }
+    }
+    return parts;
+}
+
+static void
+cq_serialize(const cq_node *n, GString *out)
+{
+    switch (n->kind) {
+    case CQ_NODE_FEATURE:
+        g_string_append_c(out, '(');
+        if (n->op1 == CQ_OP_NONE && n->op2 == CQ_OP_NONE) {
+            if (n->is_min) g_string_append(out, "min-");
+            if (n->is_max) g_string_append(out, "max-");
+            g_string_append(out, n->name);
+            if (n->val1) g_string_append_printf(out, ": %s", n->val1);
+        } else {
+            if (n->op1 != CQ_OP_NONE)
+                g_string_append_printf(out, "%s %s ", n->val1, cq_op_text(n->op1));
+            g_string_append(out, n->name);
+            if (n->op2 != CQ_OP_NONE)
+                g_string_append_printf(out, " %s %s", cq_op_text(n->op2), n->val2);
+        }
+        g_string_append_c(out, ')');
+        break;
+    case CQ_NODE_GENERAL:
+        g_string_append(out, n->text);
+        break;
+    case CQ_NODE_NOT:
+        g_string_append(out, "not ");
+        cq_serialize(n->children->pdata[0], out);
+        break;
+    case CQ_NODE_GROUP:
+        g_string_append_c(out, '(');
+        cq_serialize(n->children->pdata[0], out);
+        g_string_append_c(out, ')');
+        break;
+    case CQ_NODE_AND:
+    case CQ_NODE_OR:
+        for (guint i = 0; i < n->children->len; i++) {
+            if (i) g_string_append(out, n->kind == CQ_NODE_AND ? " and " : " or ");
+            cq_serialize(n->children->pdata[i], out);
+        }
+        break;
+    }
+}
+
+char *
+ns_css_container_name_canonical(const char *text)
+{
+    char *tok[16] = {0};
+    int n = split_ws_limit(text, tok, 16);
+    char *res = NULL;
+    if (n == 1 && g_ascii_strcasecmp(tok[0], "none") == 0) {
+        res = g_strdup("none");
+    } else if (n >= 1) {
+        gboolean ok = TRUE;
+        for (int i = 0; i < n && ok; i++)
+            ok = cq_container_name_valid(tok[i], strlen(tok[i]));
+        if (ok) res = g_strjoinv(" ", tok);
+    }
+    for (int i = 0; i < n; i++) g_free(tok[i]);
+    return res;
+}
+
+char *
+ns_css_container_shorthand_canonical(const char *text)
+{
+    const char *slash = strchr(text, '/');
+    char *name_part = slash ? g_strndup(text, (gsize)(slash - text)) : g_strdup(text);
+    g_strstrip(name_part);
+    char *name = ns_css_container_name_canonical(name_part);
+    g_free(name_part);
+    if (!name) return NULL;
+    char *type = NULL;
+    if (slash) {
+        char *type_part = g_strstrip(g_strdup(slash + 1));
+        if (g_ascii_strcasecmp(type_part, "normal") == 0 ||
+            g_ascii_strcasecmp(type_part, "size") == 0 ||
+            g_ascii_strcasecmp(type_part, "inline-size") == 0)
+            type = g_ascii_strdown(type_part, -1);
+        g_free(type_part);
+        if (!type) { g_free(name); return NULL; }
+    }
+    char *res = type && strcmp(type, "normal") != 0
+        ? g_strdup_printf("%s / %s", name, type) : g_strdup(name);
+    g_free(name);
+    g_free(type);
+    return res;
+}
+
+char *
+ns_css_container_condition_canonical(const char *cond)
+{
+    if (!cond) return NULL;
+    GPtrArray *parts = cq_split_commas(cond);
+    GString *out = g_string_new(NULL);
+    gboolean ok = parts->len > 0;
+    for (guint i = 0; i < parts->len && ok; i++) {
+        char *name = NULL;
+        cq_node *n = NULL;
+        if (!cq_parse_condition(parts->pdata[i], &name, &n)) { ok = FALSE; break; }
+        if (i) g_string_append(out, ", ");
+        if (name) g_string_append(out, name);
+        if (name && n) g_string_append_c(out, ' ');
+        if (n) cq_serialize(n, out);
+        cq_node_free(n);
+        g_free(name);
+    }
+    g_ptr_array_free(parts, TRUE);
+    if (!ok) { g_string_free(out, TRUE); return NULL; }
+    return g_string_free(out, FALSE);
+}
+
+static double
+cq_length_resolve(const char *v, double pct_basis)
+{
+    double px = 0, pct = 0;
+    if (!resolve_to_px_pct(v, strlen(v), &px, &pct)) return 0;
+    return px + pct / 100.0 * pct_basis;
+}
+
+static cq_tri
+cq_compare(double actual, cq_op op, double v)
+{
+    switch (op) {
+    case CQ_OP_LT: return actual < v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    case CQ_OP_LE: return actual <= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    case CQ_OP_EQ: return fabs(actual - v) < 0.001 ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    case CQ_OP_GT: return actual > v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    case CQ_OP_GE: return actual >= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    default: return CQ_TRI_UNKNOWN;
+    }
+}
+
+static cq_tri
+cq_eval_feature(const cq_node *n, const ns_cq_container *c)
+{
+    const char *name = n->name;
+    gboolean horiz = strcmp(name, "width") == 0 ||
+                     strcmp(name, c->vertical ? "block-size" : "inline-size") == 0;
+    gboolean vert = strcmp(name, "height") == 0 ||
+                    strcmp(name, c->vertical ? "inline-size" : "block-size") == 0;
+    gboolean block_axis = strcmp(name, c->vertical ? "width" : "height") == 0 ||
+                          strcmp(name, "block-size") == 0;
+    gboolean needs_block = block_axis || strcmp(name, "aspect-ratio") == 0 ||
+                           strcmp(name, "orientation") == 0;
+    if (needs_block && c->type != NS_CQ_TYPE_SIZE) return CQ_TRI_FALSE;
+    double actual;
+    if (horiz) actual = c->width;
+    else if (vert) actual = c->height;
+    else if (strcmp(name, "aspect-ratio") == 0)
+        actual = c->height > 0 ? c->width / c->height : 0;
+    else {
+        gboolean portrait = c->height >= c->width;
+        if (n->op1 == CQ_OP_NONE && n->op2 == CQ_OP_NONE && !n->val1)
+            return CQ_TRI_TRUE;
+        if (!n->val1) return CQ_TRI_UNKNOWN;
+        gboolean want_portrait = g_ascii_strcasecmp(n->val1, "portrait") == 0;
+        return portrait == want_portrait ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    }
+    gboolean ratio = strcmp(name, "aspect-ratio") == 0;
+    if (n->op1 == CQ_OP_NONE && n->op2 == CQ_OP_NONE) {
+        if (!n->val1) return actual > 0 ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+        double v = 0;
+        if (ratio) cq_value_is_ratio(n->val1, &v);
+        else v = cq_length_resolve(n->val1, horiz ? c->width : c->height);
+        if (n->is_min) return actual >= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+        if (n->is_max) return actual <= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+        return fabs(actual - v) < 0.001 ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    }
+    double basis = horiz ? c->width : c->height;
+    if (n->op1 != CQ_OP_NONE) {
+        double v = 0;
+        if (ratio) cq_value_is_ratio(n->val1, &v);
+        else v = cq_length_resolve(n->val1, basis);
+        cq_op flipped = n->op1 == CQ_OP_LT ? CQ_OP_GT : n->op1 == CQ_OP_LE ? CQ_OP_GE :
+                        n->op1 == CQ_OP_GT ? CQ_OP_LT : n->op1 == CQ_OP_GE ? CQ_OP_LE : CQ_OP_EQ;
+        if (cq_compare(actual, flipped, v) != CQ_TRI_TRUE) return CQ_TRI_FALSE;
+    }
+    if (n->op2 != CQ_OP_NONE) {
+        double v = 0;
+        if (ratio) cq_value_is_ratio(n->val2, &v);
+        else v = cq_length_resolve(n->val2, basis);
+        if (cq_compare(actual, n->op2, v) != CQ_TRI_TRUE) return CQ_TRI_FALSE;
+    }
+    return CQ_TRI_TRUE;
+}
+
+static cq_tri
+cq_eval(const cq_node *n, const ns_cq_container *c)
+{
+    switch (n->kind) {
+    case CQ_NODE_FEATURE: return cq_eval_feature(n, c);
+    case CQ_NODE_GENERAL: return CQ_TRI_UNKNOWN;
+    case CQ_NODE_GROUP: return cq_eval(n->children->pdata[0], c);
+    case CQ_NODE_NOT: {
+        cq_tri r = cq_eval(n->children->pdata[0], c);
+        if (r == CQ_TRI_UNKNOWN) return r;
+        return r == CQ_TRI_TRUE ? CQ_TRI_FALSE : CQ_TRI_TRUE;
+    }
+    case CQ_NODE_AND:
+    case CQ_NODE_OR: {
+        gboolean any_true = FALSE, any_false = FALSE;
+        for (guint i = 0; i < n->children->len; i++) {
+            cq_tri r = cq_eval(n->children->pdata[i], c);
+            if (r == CQ_TRI_UNKNOWN) return CQ_TRI_UNKNOWN;
+            if (r == CQ_TRI_TRUE) any_true = TRUE;
+            else any_false = TRUE;
+        }
+        if (n->kind == CQ_NODE_AND) return any_false ? CQ_TRI_FALSE : CQ_TRI_TRUE;
+        return any_true ? CQ_TRI_TRUE : CQ_TRI_FALSE;
+    }
+    }
+    return CQ_TRI_UNKNOWN;
+}
+
+static gboolean
+container_cond_matches_one(const char *cond)
+{
+    GPtrArray *parts = cq_split_commas(cond);
+    gboolean result = FALSE;
+    for (guint i = 0; i < parts->len && !result; i++) {
+        char *name = NULL;
+        cq_node *n = NULL;
+        if (!cq_parse_condition(parts->pdata[i], &name, &n)) continue;
+        const ns_cq_container *c =
+            cq_select_container(name, name ? strlen(name) : 0);
+        result = c && (!n || cq_eval(n, c) == CQ_TRI_TRUE);
+        cq_node_free(n);
+        g_free(name);
+    }
+    g_ptr_array_free(parts, TRUE);
+    return result;
+}
+
 static gboolean
 container_cond_matches(const char *cond)
 {
-    const char *q = cond;
-    while (*q && is_ws(*q)) q++;
-    const char *name = NULL;
-    gsize nlen = 0;
-    if (*q && *q != '(') {
-        const char *tok = q;
-        while (*q && !is_ws(*q) && *q != '(') q++;
-        gsize tlen = (gsize)(q - tok);
-        if (tlen == 3 && g_ascii_strncasecmp(tok, "not", 3) == 0) {
-            q = tok;
-        } else {
-            name = tok;
-            nlen = tlen;
-        }
-        if (nlen == 0) name = NULL;
+    const char *p = cond;
+    while (*p) {
+        const char *sep = strchr(p, '\x1f');
+        char *part = sep ? g_strndup(p, (gsize)(sep - p)) : g_strdup(p);
+        gboolean ok = container_cond_matches_one(part);
+        g_free(part);
+        if (!ok) return FALSE;
+        if (!sep) break;
+        p = sep + 1;
     }
-    const ns_cq_container *c = cq_select_container(name, nlen);
-    if (!c) return FALSE;
-    while (*q && is_ws(*q)) q++;
-    return !*q || cq_eval_expr(q, c, 0);
+    return TRUE;
 }
 
 static char *
@@ -15139,7 +15673,10 @@ parse_rules_until(const char **pp, const char *end,
                 gsize cond_len = (gsize)(cond_end - cond_start);
                 char *cond = g_strndup(cond_start, cond_len);
                 g_strstrip(cond);
-                if (p < end && *p == '{') {
+                char *canon = ns_css_container_condition_canonical(cond);
+                if (p < end && *p == '{' && !canon) {
+                    p = css_skip_to_block_end(p, end);
+                } else if (p < end && *p == '{') {
                     p++;
                     guint before = sh->rules->len;
                     parse_rules_until(&p, end, sh, source_order, '}',
@@ -15148,15 +15685,16 @@ parse_rules_until(const char **pp, const char *end,
                     for (guint ri = before; ri < sh->rules->len; ri++) {
                         ns_css_rule *r = g_ptr_array_index(sh->rules, ri);
                         if (r->container_condition) {
-                            char *joined = g_strdup_printf("%s and %s",
-                                cond, r->container_condition);
+                            char *joined = g_strdup_printf("%s\x1f%s",
+                                canon, r->container_condition);
                             g_free(r->container_condition);
                             r->container_condition = joined;
                         } else {
-                            r->container_condition = g_strdup(cond);
+                            r->container_condition = g_strdup(canon);
                         }
                     }
                 } else if (p < end && *p == ';') p++;
+                g_free(canon);
                 g_free(cond);
                 g_free(at_name);
                 continue;
@@ -17704,6 +18242,12 @@ css_inline_value_canonical(const char *prop, char *value)
             value = g_string_free(out, FALSE);
         } else {
             g_string_free(out, TRUE);
+        }
+    } else if (strcmp(prop, "container") == 0) {
+        char *canon = ns_css_container_shorthand_canonical(value);
+        if (canon) {
+            g_free(value);
+            value = canon;
         }
     } else if (strcmp(prop, "background-image") == 0 ||
                strcmp(prop, "mask-image") == 0 ||
