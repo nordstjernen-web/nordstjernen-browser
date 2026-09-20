@@ -3809,19 +3809,6 @@
                 });
             } catch (e) {}
         }
-        if (!navigator.credentials) {
-            try {
-                Object.defineProperty(navigator, 'credentials', {
-                    configurable: true, enumerable: true,
-                    value: {
-                        get: function () { return Promise.resolve(null); },
-                        create: function () { return Promise.resolve(null); },
-                        store: function (credential) { return Promise.resolve(credential || null); },
-                        preventSilentAccess: function () { return Promise.resolve(); }
-                    }
-                });
-            } catch (e) {}
-        }
     }
 
     var storageAccessTarget = typeof document !== 'undefined'
@@ -3935,70 +3922,6 @@
                 Object.defineProperty(cookieStoreProto, Symbol.toStringTag,
                                       { configurable: true, value: 'CookieStore' });
             }
-        } catch (e) {}
-    }
-
-    if (typeof global.Credential !== 'function') {
-        try {
-            defineCtor('Credential', function (init) {
-                init = init || {};
-                this.id = String(init.id || '');
-                this.type = String(init.type || '');
-            });
-        } catch (e) {}
-    }
-
-    if (typeof global.PasswordCredential !== 'function') {
-        try {
-            defineCtor('PasswordCredential', function (init) {
-                init = init || {};
-                this.id = String(init.id || init.name || '');
-                this.name = String(init.name || init.id || '');
-                this.type = 'password';
-                this.password = String(init.password || '');
-            });
-        } catch (e) {}
-    }
-
-    if (typeof global.FederatedCredential !== 'function') {
-        try {
-            defineCtor('FederatedCredential', function (init) {
-                init = init || {};
-                this.id = String(init.id || '');
-                this.name = String(init.name || '');
-                this.type = 'federated';
-                this.provider = String(init.provider || '');
-                this.protocol = String(init.protocol || '');
-            });
-        } catch (e) {}
-    }
-
-    if (typeof global.PublicKeyCredential !== 'function') {
-        try {
-            defineCtor('PublicKeyCredential', function () {
-                this.id = '';
-                this.rawId = new ArrayBuffer(0);
-                this.type = 'public-key';
-                this.response = {};
-            });
-            global.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable =
-                function () { return Promise.resolve(false); };
-            global.PublicKeyCredential.isConditionalMediationAvailable =
-                function () { return Promise.resolve(false); };
-            global.PublicKeyCredential.parseCreationOptionsFromJSON =
-                function (options) { return options || {}; };
-            global.PublicKeyCredential.parseRequestOptionsFromJSON =
-                function (options) { return options || {}; };
-        } catch (e) {}
-    }
-
-    if (typeof global.IdentityCredential !== 'function') {
-        try {
-            defineCtor('IdentityCredential', function (init) {
-                init = init || {};
-                this.token = String(init.token || '');
-                this.isAutoSelected = !!init.isAutoSelected;
-            });
         } catch (e) {}
     }
 
