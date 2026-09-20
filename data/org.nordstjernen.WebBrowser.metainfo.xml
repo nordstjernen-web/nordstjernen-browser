@@ -60,6 +60,20 @@
   </branding>
 
   <releases>
+    <release version="1.0.25" date="2026-09-20">
+      <description>
+        <p>Animations, CSS validation and interface release.</p>
+        <ul>
+          <li>Transitions and animations run for every property; the Web Animations surface (document.getAnimations(), Animation objects, keyframe effects) and animation and transition events by phase follow the specifications, and several CSS animations run on one element.</li>
+          <li>Container queries evaluate the full condition grammar, and image-set(), transform, the background and border shorthands, aspect-ratio, box-shadow, attr() and percentage border radii are validated and serialized per their CSS grammars.</li>
+          <li>Tables measure min-content and max-content widths column by column, position: fixed boxes stay anchored to the viewport, and rtl static positions and single-choice select defaults follow the specifications.</li>
+          <li>The toolbar takes the classic look of the Northstar web browser, with labelled colour buttons for Back, Forward, Reload, Stop, Home, Print and Downloads.</li>
+          <li>Fullscreen is announced with a notice naming the site, needs a user gesture, and ends on navigation, tab switch and tab close.</li>
+          <li>about:start wears the Northstar splash, an xkcd-style comic of Noah's ark, retitled for Nordstjernen.</li>
+          <li>quickjs-ng updated to v0.16.2; the .deb no longer bundles the dynamic loader.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.24" date="2026-09-16">
       <description>
         <p>Layout, CSS and forms compliance release.</p>
