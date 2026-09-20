@@ -51,7 +51,9 @@ Changelog:
   every v8::External and aligned internal-field pointer, and the build
   now passes the pointer-compression defines the just-js monolith is
   built with; docs/V8.md notes that the CREL relocations in those
-  releases need lld 19 or newer.
+  releases need lld 19 or newer. NDK r30's bionic refuses
+  malloc_usable_size under _FORTIFY_SOURCE=3, so the QuickJS allocator
+  reports the usable size as unknown on Android instead of calling it.
 * about:start wears the Northstar web browser's splash, carried over
   from that project's scripts/gen-splash.py and retitled "Nordstjernen
   web browser" with this release's version read from meson.build: a
