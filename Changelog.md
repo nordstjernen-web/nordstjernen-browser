@@ -50,6 +50,25 @@ Changelog:
   alive through the linker. Dropping them removes 11 MB of generated
   source, about 1 MB from each binary that links lexbor, and the
   per-encoding branches from the URL parser's query serializer.
+* The C DOMMatrix in js_canvas.c is gone. The startup polyfill defines
+  the 4x4 DOMMatrix, DOMMatrixReadOnly, DOMPoint and WebKitCSSMatrix
+  and assigned them over the native constructors on every page, so the
+  C class was dead at runtime while canvas getTransform() and the SVG
+  getCTM()/getScreenCTM() helpers still minted the C flavour, which
+  failed instanceof DOMMatrix. They now construct through the page's
+  DOMMatrix constructor, and about 250 lines of duplicate matrix code
+  and their declarations are removed.
+* The startup polyfill no longer stubs the Credential Management API:
+  navigator.credentials resolved every call to null and Credential,
+  PasswordCredential, FederatedCredential, PublicKeyCredential and
+  IdentityCredential were empty data holders, so sites that feature
+  detect WebAuthn or password autofill took a code path that could only
+  fail. With the properties absent they fall back to plain forms.
+* Repository weight: the 1.0.22, 1.0.23 and 1.0.24 splash frames
+  (1.4 MB of PNGs nothing referenced) are deleted, and the QuickJS
+  tree drops the harness sources the build never compiled (api-test.c,
+  lre-test.c, fuzz.c, ctest.c, cxxtest.cc and the WASI reactor) with
+  their CMake and Makefile targets.
 * CI moves to current toolchains: CodeQL Action v4 (v3 is retired in
   December 2026), setup-java v6, actions/cache restore and save v6 on
   Windows, FreeBSD 15.1 and NetBSD 11.0 VMs (14.2 and 10.0 are past
