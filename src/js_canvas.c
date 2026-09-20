@@ -1,4 +1,4 @@
-/* Nordstjernen — HTML canvas 2D, Path2D, ImageBitmap, DOMMatrix (QuickJS).
+/* Nordstjernen — HTML canvas 2D, Path2D, ImageBitmap (QuickJS).
  * Copyright 2026 Andreas Røsdal
  * SPDX-License-Identifier: LicenseRef-NSL-1.0
  */
@@ -396,254 +396,29 @@ ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     return ns_image_bitmap_make(ctx, copy, w, h);
 }
 
-void
-ns_dommatrix_read(JSContext *ctx, JSValueConst v, double *a, double *b,
-                  double *c, double *d, double *e, double *f)
-{
-    *a = 1; *b = 0; *c = 0; *d = 1; *e = 0; *f = 0;
-    if (!JS_IsObject(v)) return;
-    JSValue t;
-    t = JS_GetPropertyStr(ctx, v, "a"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, a, t); JS_FreeValue(ctx, t);
-    t = JS_GetPropertyStr(ctx, v, "b"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, b, t); JS_FreeValue(ctx, t);
-    t = JS_GetPropertyStr(ctx, v, "c"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, c, t); JS_FreeValue(ctx, t);
-    t = JS_GetPropertyStr(ctx, v, "d"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, d, t); JS_FreeValue(ctx, t);
-    t = JS_GetPropertyStr(ctx, v, "e"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, e, t); JS_FreeValue(ctx, t);
-    t = JS_GetPropertyStr(ctx, v, "f"); if (!JS_IsUndefined(t) && !JS_IsNull(t)) JS_ToFloat64(ctx, f, t); JS_FreeValue(ctx, t);
-}
-
-void
-ns_dommatrix_write(JSContext *ctx, JSValueConst obj, double a, double b,
-                   double c, double d, double e, double f)
-{
-    JS_SetPropertyStr(ctx, obj, "a",   JS_NewFloat64(ctx, a));
-    JS_SetPropertyStr(ctx, obj, "b",   JS_NewFloat64(ctx, b));
-    JS_SetPropertyStr(ctx, obj, "c",   JS_NewFloat64(ctx, c));
-    JS_SetPropertyStr(ctx, obj, "d",   JS_NewFloat64(ctx, d));
-    JS_SetPropertyStr(ctx, obj, "e",   JS_NewFloat64(ctx, e));
-    JS_SetPropertyStr(ctx, obj, "f",   JS_NewFloat64(ctx, f));
-    JS_SetPropertyStr(ctx, obj, "m11", JS_NewFloat64(ctx, a));
-    JS_SetPropertyStr(ctx, obj, "m12", JS_NewFloat64(ctx, b));
-    JS_SetPropertyStr(ctx, obj, "m21", JS_NewFloat64(ctx, c));
-    JS_SetPropertyStr(ctx, obj, "m22", JS_NewFloat64(ctx, d));
-    JS_SetPropertyStr(ctx, obj, "m41", JS_NewFloat64(ctx, e));
-    JS_SetPropertyStr(ctx, obj, "m42", JS_NewFloat64(ctx, f));
-    JS_SetPropertyStr(ctx, obj, "is2D", JS_TRUE);
-    JS_SetPropertyStr(ctx, obj, "isIdentity",
-        (a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0)
-        ? JS_TRUE : JS_FALSE);
-}
-
-JSValue
-ns_dommatrix_multiply(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv)
-{
-    double a1, b1, c1, d1, e1, f1, a2, b2, c2, d2, e2, f2;
-    ns_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
-    if (argc < 1) {
-        return ns_dommatrix_make(ctx, a1, b1, c1, d1, e1, f1, FALSE);
-    }
-    ns_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
-    double a = a1 * a2 + c1 * b2;
-    double b = b1 * a2 + d1 * b2;
-    double c = a1 * c2 + c1 * d2;
-    double d = b1 * c2 + d1 * d2;
-    double e = a1 * e2 + c1 * f2 + e1;
-    double f = b1 * e2 + d1 * f2 + f1;
-    return ns_dommatrix_make(ctx, a, b, c, d, e, f, FALSE);
-}
-
-JSValue
-ns_dommatrix_multiplySelf(JSContext *ctx, JSValueConst this_val,
-                          int argc, JSValueConst *argv)
-{
-    double a1, b1, c1, d1, e1, f1, a2, b2, c2, d2, e2, f2;
-    ns_dommatrix_read(ctx, this_val, &a1, &b1, &c1, &d1, &e1, &f1);
-    if (argc < 1) return JS_DupValue(ctx, this_val);
-    ns_dommatrix_read(ctx, argv[0], &a2, &b2, &c2, &d2, &e2, &f2);
-    ns_dommatrix_write(ctx, this_val,
-        a1 * a2 + c1 * b2, b1 * a2 + d1 * b2,
-        a1 * c2 + c1 * d2, b1 * c2 + d1 * d2,
-        a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1);
-    return JS_DupValue(ctx, this_val);
-}
-
-JSValue
-ns_dommatrix_translate(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv)
-{
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double tx = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 0;
-    double ty = argc >= 2 ? ns_arg_d(ctx, argv[1]) : 0;
-    return ns_dommatrix_make(ctx, a, b, c, d, e + a * tx + c * ty,
-                             f + b * tx + d * ty, FALSE);
-}
-
-JSValue
-ns_dommatrix_scale(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv)
-{
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double sx = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 1;
-    double sy = argc >= 2 ? ns_arg_d(ctx, argv[1]) : sx;
-    return ns_dommatrix_make(ctx, a * sx, b * sx, c * sy, d * sy, e, f, FALSE);
-}
-
-JSValue
-ns_dommatrix_rotate(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv)
-{
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double deg = argc >= 1 ? ns_arg_d(ctx, argv[0]) : 0;
-    double r = deg * G_PI / 180.0;
-    double cs = cos(r), sn = sin(r);
-    double na = a * cs + c * sn;
-    double nb = b * cs + d * sn;
-    double nc = -a * sn + c * cs;
-    double nd = -b * sn + d * cs;
-    return ns_dommatrix_make(ctx, na, nb, nc, nd, e, f, FALSE);
-}
-
-JSValue
-ns_dommatrix_inverse(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double det = a * d - b * c;
-    if (det == 0) {
-        JSValue nan = JS_NewFloat64(ctx, NAN);
-        JSValue m = ns_dommatrix_make(ctx, NAN, NAN, NAN, NAN, NAN, NAN, FALSE);
-        JS_FreeValue(ctx, nan);
-        return m;
-    }
-    double inv = 1.0 / det;
-    return ns_dommatrix_make(ctx,
-        d * inv, -b * inv, -c * inv, a * inv,
-        (c * f - d * e) * inv, (b * e - a * f) * inv, FALSE);
-}
-
-JSValue
-ns_dommatrix_invertSelf(JSContext *ctx, JSValueConst this_val,
-                        int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double det = a * d - b * c;
-    if (det == 0) {
-        ns_dommatrix_write(ctx, this_val, NAN, NAN, NAN, NAN, NAN, NAN);
-    } else {
-        double inv = 1.0 / det;
-        ns_dommatrix_write(ctx, this_val,
-            d * inv, -b * inv, -c * inv, a * inv,
-            (c * f - d * e) * inv, (b * e - a * f) * inv);
-    }
-    return JS_DupValue(ctx, this_val);
-}
-
-void
-ns_obj_double(JSContext *ctx, JSValueConst obj, const char *key, double *out)
-{
-    JSValue v = JS_GetPropertyStr(ctx, obj, key);
-    if (!JS_IsUndefined(v) && !JS_IsNull(v)) JS_ToFloat64(ctx, out, v);
-    JS_FreeValue(ctx, v);
-}
-
-JSValue
-ns_dommatrix_transformPoint(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv)
-{
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    double px = 0, py = 0, pz = 0, pw = 1;
-    if (argc >= 1 && JS_IsObject(argv[0])) {
-        ns_obj_double(ctx, argv[0], "x", &px);
-        ns_obj_double(ctx, argv[0], "y", &py);
-        ns_obj_double(ctx, argv[0], "z", &pz);
-        ns_obj_double(ctx, argv[0], "w", &pw);
-    }
-    JSValue out = JS_NewObject(ctx);
-    JS_SetPropertyStr(ctx, out, "x", JS_NewFloat64(ctx, a * px + c * py + e * pw));
-    JS_SetPropertyStr(ctx, out, "y", JS_NewFloat64(ctx, b * px + d * py + f * pw));
-    JS_SetPropertyStr(ctx, out, "z", JS_NewFloat64(ctx, pz));
-    JS_SetPropertyStr(ctx, out, "w", JS_NewFloat64(ctx, pw));
-    return out;
-}
-
-JSValue
-ns_dommatrix_toString(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    double a, b, c, d, e, f;
-    ns_dommatrix_read(ctx, this_val, &a, &b, &c, &d, &e, &f);
-    char buf[256];
-    g_snprintf(buf, sizeof buf, "matrix(%g, %g, %g, %g, %g, %g)",
-               a, b, c, d, e, f);
-    return JS_NewString(ctx, buf);
-}
-
 JSValue
 ns_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
-                  double e, double f, gboolean readonly)
+                  double e, double f)
 {
-    JSValue obj = JS_NewObject(ctx);
-    ns_dommatrix_write(ctx, obj, a, b, c, d, e, f);
-    ns_bind_fn(ctx, obj, "translatePoint",   ns_dommatrix_transformPoint, 1);
-    ns_bind_fn(ctx, obj, "transformPoint",   ns_dommatrix_transformPoint, 1);
-    ns_bind_fn(ctx, obj, "multiply",         ns_dommatrix_multiply,       1);
-    ns_bind_fn(ctx, obj, "translate",        ns_dommatrix_translate,      3);
-    ns_bind_fn(ctx, obj, "scale",            ns_dommatrix_scale,          6);
-    ns_bind_fn(ctx, obj, "rotate",           ns_dommatrix_rotate,         3);
-    ns_bind_fn(ctx, obj, "inverse",          ns_dommatrix_inverse,        0);
-    ns_bind_fn(ctx, obj, "toString",         ns_dommatrix_toString,       0);
-    if (!readonly) {
-        ns_bind_fn(ctx, obj, "multiplySelf",  ns_dommatrix_multiplySelf,  1);
-        ns_bind_fn(ctx, obj, "invertSelf",    ns_dommatrix_invertSelf,    0);
-    }
-    return obj;
-}
-
-JSValue
-ns_dommatrix_ctor_impl(JSContext *ctx, int argc, JSValueConst *argv,
-                       gboolean readonly)
-{
-    double a = 1, b = 0, c = 0, d = 1, e = 0, f = 0;
-    if (argc >= 1 && JS_IsArray(argv[0])) {
-        uint32_t n = ns_js_array_length(ctx, argv[0]);
-        if (n == 6) {
-            double v[6];
-            for (uint32_t i = 0; i < 6; i++) {
-                JSValue e2 = JS_GetPropertyUint32(ctx, argv[0], i);
-                JS_ToFloat64(ctx, &v[i], e2);
-                JS_FreeValue(ctx, e2);
-            }
-            a = v[0]; b = v[1]; c = v[2]; d = v[3]; e = v[4]; f = v[5];
-        }
-    } else if (argc >= 1 && JS_IsObject(argv[0])) {
-        ns_dommatrix_read(ctx, argv[0], &a, &b, &c, &d, &e, &f);
-    }
-    return ns_dommatrix_make(ctx, a, b, c, d, e, f, readonly);
-}
-
-JSValue
-ns_window_dommatrix_ctor(JSContext *ctx, JSValueConst this_val,
-                         int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_dommatrix_ctor_impl(ctx, argc, argv, FALSE);
-}
-
-JSValue
-ns_window_dommatrix_readonly_ctor(JSContext *ctx, JSValueConst this_val,
-                                  int argc, JSValueConst *argv)
-{
-    (void)this_val;
-    return ns_dommatrix_ctor_impl(ctx, argc, argv, TRUE);
+    const double v[6] = { a, b, c, d, e, f };
+    JSValue init = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < 6; i++)
+        JS_SetPropertyUint32(ctx, init, i, JS_NewFloat64(ctx, v[i]));
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMMatrix");
+    JS_FreeValue(ctx, global);
+    JSValue m = JS_IsFunction(ctx, ctor)
+        ? JS_CallConstructor(ctx, ctor, 1, &init) : JS_UNDEFINED;
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, init);
+    if (JS_IsException(m)) JS_FreeValue(ctx, JS_GetException(ctx));
+    if (JS_IsObject(m)) return m;
+    JS_FreeValue(ctx, m);
+    static const char *const keys[6] = { "a", "b", "c", "d", "e", "f" };
+    JSValue plain = JS_NewObject(ctx);
+    for (int i = 0; i < 6; i++)
+        JS_SetPropertyStr(ctx, plain, keys[i], JS_NewFloat64(ctx, v[i]));
+    return plain;
 }
 
 JSValue
@@ -2704,7 +2479,7 @@ ns_ctx_getTransform(JSContext *ctx, JSValueConst this_val,
     ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     cairo_matrix_t m = { 1, 0, 0, 1, 0, 0 };
     if (st) cairo_get_matrix(st->cr, &m);
-    return ns_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0, FALSE);
+    return ns_dommatrix_make(ctx, m.xx, m.yx, m.xy, m.yy, m.x0, m.y0);
 }
 
 JSValue

@@ -32335,25 +32335,6 @@ ns_element_getPointAtLength(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
-ns_make_dom_matrix(JSContext *ctx, double a, double b, double c,
-                   double d, double e, double f)
-{
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ctor = JS_GetPropertyStr(ctx, global, "DOMMatrix");
-    JS_FreeValue(ctx, global);
-    JSValue m = JS_UNDEFINED;
-    if (JS_IsFunction(ctx, ctor))
-        m = JS_CallConstructor(ctx, ctor, 0, NULL);
-    JS_FreeValue(ctx, ctor);
-    if (!JS_IsObject(m)) { JS_FreeValue(ctx, m); m = JS_NewObject(ctx); }
-    const char *keys[6] = { "a","b","c","d","e","f" };
-    double vals[6] = { a,b,c,d,e,f };
-    for (int i = 0; i < 6; i++)
-        JS_SetPropertyStr(ctx, m, keys[i], JS_NewFloat64(ctx, vals[i]));
-    return m;
-}
-
-static JSValue
 ns_svg_point_matrix_transform(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
@@ -32409,7 +32390,7 @@ ns_element_createSVGMatrix(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
     (void)this_val; (void)argc; (void)argv;
-    return ns_make_dom_matrix(ctx, 1, 0, 0, 1, 0, 0);
+    return ns_dommatrix_make(ctx, 1, 0, 0, 1, 0, 0);
 }
 
 static JSValue
@@ -32420,7 +32401,7 @@ ns_element_createSVGTransform(JSContext *ctx, JSValueConst this_val,
     JSValue t = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, t, "type", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, t, "angle", JS_NewFloat64(ctx, 0));
-    JS_SetPropertyStr(ctx, t, "matrix", ns_make_dom_matrix(ctx,1,0,0,1,0,0));
+    JS_SetPropertyStr(ctx, t, "matrix", ns_dommatrix_make(ctx,1,0,0,1,0,0));
     ns_bind_fn(ctx, t, "setMatrix",    ns_event_noop, 1);
     ns_bind_fn(ctx, t, "setTranslate", ns_event_noop, 2);
     ns_bind_fn(ctx, t, "setScale",     ns_event_noop, 2);
@@ -32466,7 +32447,7 @@ ns_element_getScreenCTM(JSContext *ctx, JSValueConst this_val,
             if (sh > 0) scaleY = sh / v[3];
         }
     }
-    return ns_make_dom_matrix(ctx, scaleX, 0, 0, scaleY,
+    return ns_dommatrix_make(ctx, scaleX, 0, 0, scaleY,
                               sx - minx*scaleX, sy - miny*scaleY);
 }
 
@@ -32490,7 +32471,7 @@ ns_element_getCTM(JSContext *ctx, JSValueConst this_val,
             if (v[3] > 0) scaleY = vh / v[3];
         }
     }
-    return ns_make_dom_matrix(ctx, scaleX, 0, 0, scaleY,
+    return ns_dommatrix_make(ctx, scaleX, 0, 0, scaleY,
                               -minx*scaleX, -miny*scaleY);
 }
 
@@ -46832,12 +46813,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
         };
         ns_bind_ctor_int_constants(ctx, global, "MediaError",
                                    constants, G_N_ELEMENTS(constants));
-    }
-    ns_bind_ctor(ctx, global, "DOMMatrix",          ns_window_dommatrix_ctor,          1);
-    ns_bind_ctor(ctx, global, "DOMMatrixReadOnly",  ns_window_dommatrix_readonly_ctor, 1);
-    {
-        JSValue dm = JS_GetPropertyStr(ctx, global, "DOMMatrix");
-        JS_SetPropertyStr(ctx, global, "WebKitCSSMatrix", dm);
     }
     ns_bind_ctor(ctx, global, "StaticRange",  ns_static_range_ctor,   1);
     ns_bind_ctor(ctx, global, "VTTCue",       ns_vtt_cue_ctor,        3);
