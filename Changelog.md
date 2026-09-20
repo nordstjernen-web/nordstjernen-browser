@@ -42,6 +42,16 @@ Changelog:
   gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
+* CI moves to current toolchains: CodeQL Action v4 (v3 is retired in
+  December 2026), setup-java v6, actions/cache restore and save v6 on
+  Windows, FreeBSD 15.1 and NetBSD 11.0 VMs (14.2 and 10.0 are past
+  end-of-life), NDK r30 (30.0.16248370) for the Android and CodeQL
+  builds, and the V8 15.2 monolith for the js_engine=v8 job. The V8
+  backend follows the V8 15 embedder API, which requires a type tag on
+  every v8::External and aligned internal-field pointer, and the build
+  now passes the pointer-compression defines the just-js monolith is
+  built with; docs/V8.md notes that the CREL relocations in those
+  releases need lld 19 or newer.
 * about:start wears the Northstar web browser's splash, carried over
   from that project's scripts/gen-splash.py and retitled "Nordstjernen
   web browser" with this release's version read from meson.build: a

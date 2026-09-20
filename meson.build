@@ -463,7 +463,9 @@ if js_engine == 'v8'
     endif
     v8_lib = v8_cpp.find_library('v8_monolith', static: true,
       dirs: [v8_root / 'lib', v8_root / 'obj', v8_root])
-    v8_dep = declare_dependency(compile_args: v8_inc_args,
+    v8_monolith_args = ['-DV8_COMPRESS_POINTERS',
+                        '-DV8_COMPRESS_POINTERS_IN_SHARED_CAGE']
+    v8_dep = declare_dependency(compile_args: v8_inc_args + v8_monolith_args,
                                 dependencies: [v8_lib])
     v8_static_monolith = true
   endif

@@ -39,6 +39,11 @@ namespace {
 
 std::unique_ptr<v8::Platform> g_v8_platform;
 
+v8::Local<v8::External> ns_v8_external(v8::Isolate *iso, void *value)
+{
+    return v8::External::New(iso, value, v8::kExternalPointerTypeTagDefault);
+}
+
 void ns_v8_global_init(void)
 {
     static gsize once = 0;
@@ -417,7 +422,7 @@ v8::Local<v8::Value> ns_v8_wrap_node(ns_js *js, ns_node *n)
     w->node = n;
     w->owned = FALSE;
     w->handle.Reset(iso, obj);
-    obj->SetAlignedPointerInInternalField(0, w);
+    obj->SetAlignedPointerInInternalField(0, w, v8::kEmbedderDataTypeTagDefault);
     n->js_wrapper = w;
     n->js_invalidate = ns_v8_node_invalidated;
     js->wraps.push_back(w);
@@ -429,7 +434,7 @@ ns_v8_wrap *ns_v8_wrap_of(v8::Local<v8::Value> v)
     if (v.IsEmpty() || !v->IsObject()) return nullptr;
     v8::Local<v8::Object> o = v.As<v8::Object>();
     if (o->InternalFieldCount() < 1) return nullptr;
-    return static_cast<ns_v8_wrap *>(o->GetAlignedPointerFromInternalField(0));
+    return static_cast<ns_v8_wrap *>(o->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
 }
 
 ns_node *ns_v8_node_of(v8::Local<v8::Value> v)
@@ -1142,7 +1147,7 @@ void ns_v8_el_rel_get(const v8::FunctionCallbackInfo<v8::Value> &info)
         info.GetReturnValue().SetNull();
         return;
     }
-    int code = (int)(intptr_t)info.Data().As<v8::External>()->Value();
+    int code = (int)(intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
     ns_node *r = NULL;
     switch (code) {
     case 0: r = n->parent; break;
@@ -1180,7 +1185,7 @@ void ns_v8_el_children_get(const v8::FunctionCallbackInfo<v8::Value> &info)
     ns_js *js = ns_v8_js_here(info);
     ns_node *n = ns_v8_self(info);
     gboolean elements_only =
-        (intptr_t)info.Data().As<v8::External>()->Value() != 0;
+        (intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault) != 0;
     std::vector<ns_node *> nodes;
     if (n)
         for (ns_node *c = n->first_child; c; c = c->next_sibling)
@@ -1505,7 +1510,7 @@ void ns_v8_el_metric_get(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     ns_js *js = ns_v8_js_here(info);
     ns_node *n = ns_v8_self(info);
-    int code = (int)(intptr_t)info.Data().As<v8::External>()->Value();
+    int code = (int)(intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
     double out = 0;
     const ns_box *b = js ? ns_v8_box_of(js, n) : NULL;
     if (b) {
@@ -1767,7 +1772,7 @@ ns_v8_canvas *ns_v8_canvas_of(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     if (info.Data().IsEmpty() || !info.Data()->IsExternal()) return nullptr;
     return static_cast<ns_v8_canvas *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
 }
 
 double ns_v8_arg_num(const v8::FunctionCallbackInfo<v8::Value> &info, int i)
@@ -2139,7 +2144,7 @@ void ns_v8_canvas_bind(ns_js *js, v8::Local<v8::Object> obj,
     v8::Isolate *iso = js->isolate;
     v8::Local<v8::Context> ctx = iso->GetCurrentContext();
     v8::Local<v8::Function> fn =
-        v8::Function::New(ctx, cb, v8::External::New(iso, c))
+        v8::Function::New(ctx, cb, ns_v8_external(iso, c))
             .ToLocalChecked();
     obj->Set(ctx, ns_v8_str(iso, name), fn).Check();
 }
@@ -2325,10 +2330,10 @@ void ns_v8_el_get_context(const v8::FunctionCallbackInfo<v8::Value> &info)
     for (auto &p : props) {
         v8::Local<v8::Function> getter =
             v8::Function::New(ctx, ns_v8_canvas_style_get,
-                              v8::External::New(iso, c))
+                              ns_v8_external(iso, c))
                 .ToLocalChecked();
         v8::Local<v8::Function> setter =
-            v8::Function::New(ctx, p.setter, v8::External::New(iso, c))
+            v8::Function::New(ctx, p.setter, ns_v8_external(iso, c))
                 .ToLocalChecked();
         obj->SetAccessorProperty(ns_v8_str(iso, p.name), getter, setter);
     }
@@ -2342,7 +2347,7 @@ void ns_v8_el_dim_get(const v8::FunctionCallbackInfo<v8::Value> &info)
     ns_js *js = ns_v8_js_here(info);
     ns_node *n = ns_v8_self(info);
     gboolean is_width =
-        (intptr_t)info.Data().As<v8::External>()->Value() != 0;
+        (intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault) != 0;
     int fallback = is_width ? 300 : 150;
     if (!n) {
         info.GetReturnValue().Set(0);
@@ -2370,7 +2375,7 @@ void ns_v8_el_dim_set(const v8::FunctionCallbackInfo<v8::Value> &info)
     ns_node *n = ns_v8_self(info);
     if (!js || !n || info.Length() < 1) return;
     gboolean is_width =
-        (intptr_t)info.Data().As<v8::External>()->Value() != 0;
+        (intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault) != 0;
     int v = (int)ns_v8_arg_num(info, 0);
     char buf[32];
     g_snprintf(buf, sizeof buf, "%d", v);
@@ -2547,7 +2552,7 @@ void ns_v8_worker_post_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     v8::Isolate *iso = info.GetIsolate();
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     if (info.Length() < 1) return;
     v8::Local<v8::Context> ctx = iso->GetCurrentContext();
     v8::Local<v8::String> json;
@@ -2560,7 +2565,7 @@ void ns_v8_worker_log_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     v8::Isolate *iso = info.GetIsolate();
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     GString *line = g_string_new("[worker] ");
     for (int i = 0; i < info.Length(); i++) {
         if (i) g_string_append_c(line, ' ');
@@ -2574,7 +2579,7 @@ void ns_v8_worker_log_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
 void ns_v8_worker_close_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     g_atomic_int_set(&w->terminate, 1);
 }
 
@@ -2582,7 +2587,7 @@ void ns_v8_worker_import_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     v8::Isolate *iso = info.GetIsolate();
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     v8::Local<v8::Context> ctx = iso->GetCurrentContext();
     for (int i = 0; i < info.Length(); i++) {
         std::string spec = ns_v8_utf8(iso, info[i]);
@@ -2613,7 +2618,7 @@ void ns_v8_worker_set_timeout_cb(
 {
     v8::Isolate *iso = info.GetIsolate();
     ns_v8_worker_rt *rt = static_cast<ns_v8_worker_rt *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     if (info.Length() < 1 || !info[0]->IsFunction()) return;
     double ms = info.Length() > 1 && info[1]->IsNumber()
                     ? info[1].As<v8::Number>()->Value()
@@ -2631,7 +2636,7 @@ void ns_v8_worker_clear_timeout_cb(
     const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     ns_v8_worker_rt *rt = static_cast<ns_v8_worker_rt *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     if (info.Length() < 1 || !info[0]->IsNumber()) return;
     int id = (int)info[0].As<v8::Number>()->Value();
     for (auto it = rt->timers.begin(); it != rt->timers.end(); ++it)
@@ -2695,8 +2700,8 @@ gpointer ns_v8_worker_thread(gpointer data)
         v8::Local<v8::Context> ctx = v8::Context::New(iso);
         v8::Context::Scope ctx_scope(ctx);
         v8::Local<v8::Object> global = ctx->Global();
-        v8::Local<v8::External> wext = v8::External::New(iso, w);
-        v8::Local<v8::External> rtext = v8::External::New(iso, &rt);
+        v8::Local<v8::External> wext = ns_v8_external(iso, w);
+        v8::Local<v8::External> rtext = ns_v8_external(iso, &rt);
         struct {
             const char *name;
             v8::FunctionCallback cb;
@@ -2856,7 +2861,7 @@ void ns_v8_worker_obj_post(const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     v8::Isolate *iso = info.GetIsolate();
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     if (info.Length() < 1) return;
     v8::Local<v8::Context> ctx = iso->GetCurrentContext();
     v8::Local<v8::String> json;
@@ -2869,7 +2874,7 @@ void ns_v8_worker_obj_terminate(
     const v8::FunctionCallbackInfo<v8::Value> &info)
 {
     ns_v8_worker *w = static_cast<ns_v8_worker *>(
-        info.Data().As<v8::External>()->Value());
+        info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault));
     g_atomic_int_set(&w->terminate, 1);
     g_async_queue_push(w->inbox, g_strdup("\x04"));
 }
@@ -2911,7 +2916,7 @@ void ns_v8_worker_ctor_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
     w->source = g_strndup((const char *)resp->body->data, resp->body->len);
     ns_response_free(resp);
     v8::Local<v8::Object> obj = info.This();
-    v8::Local<v8::External> wext = v8::External::New(iso, w);
+    v8::Local<v8::External> wext = ns_v8_external(iso, w);
     obj->Set(ctx, ns_v8_str(iso, "postMessage"),
              v8::Function::New(ctx, ns_v8_worker_obj_post, wext)
                  .ToLocalChecked()).Check();
@@ -3175,7 +3180,7 @@ ns_crypto_key *ns_v8_key_of(ns_js *, v8::Local<v8::Value> v)
     if (v.IsEmpty() || !v->IsObject()) return NULL;
     v8::Local<v8::Object> o = v.As<v8::Object>();
     if (o->InternalFieldCount() < 1) return NULL;
-    return static_cast<ns_crypto_key *>(o->GetAlignedPointerFromInternalField(0));
+    return static_cast<ns_crypto_key *>(o->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
 }
 
 gboolean ns_v8_parse_alg(ns_js *js, v8::Local<v8::Value> v,
@@ -3293,7 +3298,7 @@ v8::Local<v8::Value> ns_v8_make_cryptokey(ns_js *js, ns_crypto_key *k)
         return v8::Null(iso);
     v8::Local<v8::Object> obj;
     if (!ctor->NewInstance(ctx).ToLocal(&obj)) return v8::Null(iso);
-    obj->SetAlignedPointerInInternalField(0, k);
+    obj->SetAlignedPointerInInternalField(0, k, v8::kEmbedderDataTypeTagDefault);
     const char *type = k->type == NS_CK_PRIVATE ? "private"
                        : k->type == NS_CK_PUBLIC ? "public"
                                                  : "secret";
@@ -3742,7 +3747,7 @@ void ns_v8_element_ctor_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
     if (!info.IsConstructCall() || !info.This()->IsObject()) return;
     v8::Local<v8::Object> self = info.This();
     if (self->InternalFieldCount() < 1) return;
-    self->SetAlignedPointerInInternalField(0, nullptr);
+    self->SetAlignedPointerInInternalField(0, nullptr, v8::kEmbedderDataTypeTagDefault);
     ns_js *js = ns_v8_js_of(iso);
     if (!js) return;
     v8::Local<v8::Value> nt = info.NewTarget();
@@ -3762,7 +3767,7 @@ void ns_v8_element_ctor_cb(const v8::FunctionCallbackInfo<v8::Value> &info)
     w->node = el;
     w->owned = TRUE;
     w->handle.Reset(iso, self);
-    self->SetAlignedPointerInInternalField(0, w);
+    self->SetAlignedPointerInInternalField(0, w, v8::kEmbedderDataTypeTagDefault);
     el->js_wrapper = w;
     el->js_invalidate = ns_v8_node_invalidated;
     js->wraps.push_back(w);
@@ -3828,7 +3833,7 @@ void ns_v8_make_node_template(ns_js *js)
         proto->SetAccessorProperty(
             ns_v8_str(iso, r.name),
             v8::FunctionTemplate::New(iso, ns_v8_el_rel_get,
-                v8::External::New(iso, (void *)(intptr_t)r.code)));
+                ns_v8_external(iso, (void *)(intptr_t)r.code)));
 
     proto->SetAccessorProperty(ns_v8_str(iso, "nodeType"),
         v8::FunctionTemplate::New(iso, ns_v8_el_node_type));
@@ -3838,10 +3843,10 @@ void ns_v8_make_node_template(ns_js *js)
         v8::FunctionTemplate::New(iso, ns_v8_el_node_name));
     proto->SetAccessorProperty(ns_v8_str(iso, "children"),
         v8::FunctionTemplate::New(iso, ns_v8_el_children_get,
-            v8::External::New(iso, (void *)(intptr_t)1)));
+            ns_v8_external(iso, (void *)(intptr_t)1)));
     proto->SetAccessorProperty(ns_v8_str(iso, "childNodes"),
         v8::FunctionTemplate::New(iso, ns_v8_el_children_get,
-            v8::External::New(iso, (void *)(intptr_t)0)));
+            ns_v8_external(iso, (void *)(intptr_t)0)));
     proto->SetAccessorProperty(ns_v8_str(iso, "childElementCount"),
         v8::FunctionTemplate::New(iso, ns_v8_el_child_count));
     proto->SetAccessorProperty(ns_v8_str(iso, "textContent"),
@@ -3871,14 +3876,14 @@ void ns_v8_make_node_template(ns_js *js)
 
     proto->SetAccessorProperty(ns_v8_str(iso, "width"),
         v8::FunctionTemplate::New(iso, ns_v8_el_dim_get,
-            v8::External::New(iso, (void *)(intptr_t)1)),
+            ns_v8_external(iso, (void *)(intptr_t)1)),
         v8::FunctionTemplate::New(iso, ns_v8_el_dim_set,
-            v8::External::New(iso, (void *)(intptr_t)1)));
+            ns_v8_external(iso, (void *)(intptr_t)1)));
     proto->SetAccessorProperty(ns_v8_str(iso, "height"),
         v8::FunctionTemplate::New(iso, ns_v8_el_dim_get,
-            v8::External::New(iso, (void *)(intptr_t)0)),
+            ns_v8_external(iso, (void *)(intptr_t)0)),
         v8::FunctionTemplate::New(iso, ns_v8_el_dim_set,
-            v8::External::New(iso, (void *)(intptr_t)0)));
+            ns_v8_external(iso, (void *)(intptr_t)0)));
 
     struct {
         const char *name;
@@ -3892,7 +3897,7 @@ void ns_v8_make_node_template(ns_js *js)
         proto->SetAccessorProperty(
             ns_v8_str(iso, m.name),
             v8::FunctionTemplate::New(iso, ns_v8_el_metric_get,
-                v8::External::New(iso, (void *)(intptr_t)m.code)));
+                ns_v8_external(iso, (void *)(intptr_t)m.code)));
 
     js->node_tmpl.Reset(iso, ft);
 }
@@ -4033,7 +4038,7 @@ void ns_v8_doc_root_get(const v8::FunctionCallbackInfo<v8::Value> &info)
     info.GetReturnValue().SetNull();
     if (!js || !js->current_doc) return;
     const char *tag =
-        (const char *)info.Data().As<v8::External>()->Value();
+        (const char *)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
     ns_node *el = ns_node_find_first_element(js->current_doc, tag);
     if (el) info.GetReturnValue().Set(ns_v8_wrap_node(js, el));
 }
@@ -5178,7 +5183,7 @@ void ns_v8_location_get(const v8::FunctionCallbackInfo<v8::Value> &info)
     v8::Isolate *iso = info.GetIsolate();
     ns_js *js = ns_v8_js_of(iso);
     if (!js) return;
-    char part = (char)(intptr_t)info.Data().As<v8::External>()->Value();
+    char part = (char)(intptr_t)info.Data().As<v8::External>()->Value(v8::kExternalPointerTypeTagDefault);
     const char *url = js->current_url ? js->current_url : "about:blank";
     std::string out;
     if (part == 'H') {
@@ -5430,7 +5435,7 @@ void ns_v8_install_base(ns_js *js)
     for (auto &p : parts) {
         v8::Local<v8::Function> getter =
             v8::Function::New(ctx, ns_v8_location_get,
-                              v8::External::New(iso, (void *)(intptr_t)p.part))
+                              ns_v8_external(iso, (void *)(intptr_t)p.part))
                 .ToLocalChecked();
         v8::Local<v8::Function> setter;
         if (p.part == 'H')
@@ -5443,7 +5448,7 @@ void ns_v8_install_base(ns_js *js)
     ns_v8_bind_fn(js, location, "reload", ns_v8_location_reload);
     v8::Local<v8::Function> href_getter =
         v8::Function::New(ctx, ns_v8_location_get,
-                          v8::External::New(iso, (void *)(intptr_t)'H'))
+                          ns_v8_external(iso, (void *)(intptr_t)'H'))
             .ToLocalChecked();
     location->SetAccessorProperty(ns_v8_str(iso, "toString"), href_getter,
                                   v8::Local<v8::Function>());
@@ -5536,7 +5541,7 @@ void ns_v8_install_document(ns_js *js, const char *base_url)
         document->SetAccessorProperty(
             ns_v8_str(iso, r.name),
             v8::Function::New(ctx, ns_v8_doc_root_get,
-                v8::External::New(iso, (void *)r.tag)).ToLocalChecked());
+                ns_v8_external(iso, (void *)r.tag)).ToLocalChecked());
     document->SetAccessorProperty(
         ns_v8_str(iso, "activeElement"),
         v8::Function::New(ctx, ns_v8_doc_active_element).ToLocalChecked());

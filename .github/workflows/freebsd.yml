@@ -42,7 +42,7 @@ jobs:
       - name: Build, smoke and pack in a FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
-          release: '14.2'
+          release: '15.1'
           usesh: true
           copyback: true
           prepare: |

@@ -28,7 +28,7 @@ the free binary only. Treat Play as reach and reputation.
   libcurl/sqlite3/uchardet/libpsl — all plain C, no Rust.
 - Targets: `compileSdk`/`targetSdk` **36**, `minSdk` **34** (Android 14); ABIs
   **arm64-v8a** + **x86_64**.
-  AGP 8.11.1, Gradle 8.14.5, NDK r27, JDK 17.
+  AGP 8.11.1, Gradle 8.14.5, NDK r30, JDK 17.
 
 ## Play Store release checklist
 
