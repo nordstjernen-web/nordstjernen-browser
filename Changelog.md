@@ -3,6 +3,21 @@ Changelog:
 
 1.0.25:
 ======
+* Restyling a large document is roughly 40% faster. The style-sharing
+  cache builds a lookup key for every element on every cascade pass by
+  serialising that element's matched declarations; on Speedometer 3.1's
+  6,650-node complex-DOM pages that key cost more than the cascade it
+  was meant to avoid — 76ms of a 190ms pass. The key is now written
+  once into a correctly sized buffer instead of through ~2 million
+  incremental byte-array appends, the container-query part of the key
+  no longer scans every matched custom property when no container is on
+  the stack, and the key hash reads eight bytes at a time. Selector
+  gathering also jumps straight to the pseudo-element bucket a matched
+  selector belongs to rather than testing all ten. The same pass now
+  takes 120ms. Across the 22 loadable Speedometer 3.1 TodoMVC workloads
+  the aggregate score improves 31.7% (1.328 to 1.749); Vue-Complex-DOM
+  drops from 4810ms to 881ms and jQuery-Complex-DOM from 4948ms to
+  3140ms. Layout output is byte-identical.
 * The toolbar takes the classic look of the Northstar web browser: a
   raised, softly shaded bar with labelled colour buttons for Back,
   Forward, Reload, Stop, Home, Print and Downloads, bevelled hover and
