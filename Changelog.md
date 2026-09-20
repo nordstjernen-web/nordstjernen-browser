@@ -29,6 +29,20 @@ Changelog:
   tap or key press it rejects with a TypeError, fires fullscreenerror
   and logs to the console instead of taking over the screen.
   (Reported by Muhammad Wishal.)
+* The nightly .deb installs again on a Debian that is a patch release
+  behind the build container. dpkg-shlibdeps copied Debian's FFmpeg
+  shlibs floor, which is the exact upstream version of the build host's
+  FFmpeg, so the package demanded e.g. libavcodec61 (>= 7:7.1.5) and
+  dpkg refused it on a system with 7:7.1.1 although the SONAME, and so
+  the ABI, is the same. scripts/pack-deb.sh now relaxes the libav* and
+  libsw* floors to the FFmpeg major.minor release (>= 7:7.1) while the
+  SONAME-numbered package names keep guarding the ABI, logs the final
+  Depends line, and no longer Recommends an external media player the
+  shell doesn't launch. The container build then installs the .deb, .rpm
+  or .apk it produced and runs the installed browser headlessly, so a
+  package whose metadata, maintainer scripts, dependencies or installed
+  paths are broken fails the nightly stage instead of reaching the
+  download links. (Reported by guest271314.)
 * The nightly download links no longer 404 when one platform's build
   fails: scripts/nightly.sh publishes a stage's directory only once it
   holds artifacts and otherwise keeps the previous night's files, a
