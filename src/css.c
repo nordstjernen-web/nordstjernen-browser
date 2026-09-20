@@ -24135,6 +24135,12 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         g_rule_match_epoch = 1;
     }
 
+    int dest_of_pe[NS_CSS_PE_FILE_SELECTOR_BUTTON + 1];
+    for (gsize i = 0; i < G_N_ELEMENTS(dest_of_pe); i++) dest_of_pe[i] = -1;
+    for (guint dd = 0; dd < n_dests; dd++)
+        if ((gsize)dests[dd].pe < G_N_ELEMENTS(dest_of_pe))
+            dest_of_pe[dests[dd].pe] = (int)dd;
+
     guint matched_n = 0;
     for (guint ci = 0; ci < cand_n; ci++) {
         css_candidate cand = cands[ci];
@@ -24145,12 +24151,22 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
         if (r->container_condition &&
             !container_cond_matches(r->container_condition))
             continue;
-        for (guint dd = 0; dd < n_dests; dd++) {
+        ns_css_selector *cand_sel =
+            g_ptr_array_index(r->selectors, cand.selector_idx);
+        guint dd_first = 0, dd_last = n_dests - 1;
+        if (cand_sel) {
+            if ((gsize)cand_sel->pseudo_element >= G_N_ELEMENTS(dest_of_pe))
+                continue;
+            int dd_only = dest_of_pe[cand_sel->pseudo_element];
+            if (dd_only < 0) continue;
+            dd_first = dd_last = (guint)dd_only;
+        }
+        for (guint dd = dd_first; dd <= dd_last; dd++) {
             gather_dest *dst = &dests[dd];
             ns_css_pseudo_element pe = dst->pe;
             if (pe != NS_CSS_PE_NONE && !(r->pe_mask & (1u << pe)))
                 continue;
-            ns_css_selector *sel = g_ptr_array_index(r->selectors, cand.selector_idx);
+            ns_css_selector *sel = cand_sel;
             if (sel && sel->pseudo_element != pe) continue;
             int scope_order = 0;
             gboolean matched = FALSE;
@@ -27044,10 +27060,16 @@ share_key_free(gpointer p)
 static guint32
 share_key_djb2(const guint8 *d, guint32 n)
 {
-    guint32 h = 5381;
-    for (guint32 i = 0; i < n; i++)
-        h = ((h << 5) + h) ^ d[i];
-    return h;
+    guint64 h = 1469598103934665603ULL;
+    guint32 i = 0;
+    for (; i + 8 <= n; i += 8) {
+        guint64 w;
+        memcpy(&w, d + i, 8);
+        h = (h ^ w) * 1099511628211ULL;
+    }
+    for (; i < n; i++)
+        h = (h ^ d[i]) * 1099511628211ULL;
+    return (guint32)(h ^ (h >> 32));
 }
 
 typedef struct {
@@ -27088,53 +27110,74 @@ ns_style_clone_shared(const ns_style *s)
     return c;
 }
 
-static void
-share_key_put_matches(GByteArray *b, const GArray *arr)
+#define SHARE_KEY_MATCH_BYTES \
+    (sizeof(int) * 9 + sizeof(((match_entry *)0)->important) + \
+     sizeof(((match_entry *)0)->inline_style) + \
+     sizeof(((match_entry *)0)->rule) + sizeof(((match_entry *)0)->value) + \
+     sizeof(((match_entry *)0)->prop))
+#define SHARE_KEY_VAR_BYTES \
+    (sizeof(int) * 9 + sizeof(((var_match *)0)->important) + \
+     sizeof(((var_match *)0)->inline_style) + \
+     sizeof(((var_match *)0)->rule) + sizeof(((var_match *)0)->name) + \
+     sizeof(((var_match *)0)->text))
+#define SHARE_KEY_PENDING_BYTES \
+    (sizeof(int) * 9 + sizeof(((pending_match *)0)->inline_style) + \
+     sizeof(((pending_match *)0)->rule) + sizeof(((pending_match *)0)->pd))
+
+static inline guint8 *
+share_key_put_raw(guint8 *p, const void *src, gsize n)
+{
+    memcpy(p, src, n);
+    return p + n;
+}
+
+static guint8 *
+share_key_put_matches(guint8 *p, const GArray *arr)
 {
     guint n = arr ? arr->len : 0;
-    g_byte_array_append(b, (const guint8 *)&n, sizeof n);
+    p = share_key_put_raw(p, &n, sizeof n);
     for (guint i = 0; i < n; i++) {
         const match_entry *e = &g_array_index((GArray *)arr, match_entry, i);
-        g_byte_array_append(b, (const guint8 *)&e->origin, sizeof(int) * 9);
-        g_byte_array_append(b, (const guint8 *)&e->important, sizeof e->important);
-        g_byte_array_append(b, (const guint8 *)&e->inline_style,
-                            sizeof e->inline_style);
-        g_byte_array_append(b, (const guint8 *)&e->rule, sizeof e->rule);
-        g_byte_array_append(b, (const guint8 *)&e->value, sizeof e->value);
-        g_byte_array_append(b, (const guint8 *)&e->prop, sizeof e->prop);
+        p = share_key_put_raw(p, &e->origin, sizeof(int) * 9);
+        p = share_key_put_raw(p, &e->important, sizeof e->important);
+        p = share_key_put_raw(p, &e->inline_style, sizeof e->inline_style);
+        p = share_key_put_raw(p, &e->rule, sizeof e->rule);
+        p = share_key_put_raw(p, &e->value, sizeof e->value);
+        p = share_key_put_raw(p, &e->prop, sizeof e->prop);
     }
+    return p;
 }
 
-static void
-share_key_put_vars(GByteArray *b, const GArray *arr)
+static guint8 *
+share_key_put_vars(guint8 *p, const GArray *arr)
 {
     guint n = arr ? arr->len : 0;
-    g_byte_array_append(b, (const guint8 *)&n, sizeof n);
+    p = share_key_put_raw(p, &n, sizeof n);
     for (guint i = 0; i < n; i++) {
         const var_match *e = &g_array_index((GArray *)arr, var_match, i);
-        g_byte_array_append(b, (const guint8 *)&e->origin, sizeof(int) * 9);
-        g_byte_array_append(b, (const guint8 *)&e->important, sizeof e->important);
-        g_byte_array_append(b, (const guint8 *)&e->inline_style,
-                            sizeof e->inline_style);
-        g_byte_array_append(b, (const guint8 *)&e->rule, sizeof e->rule);
-        g_byte_array_append(b, (const guint8 *)&e->name, sizeof e->name);
-        g_byte_array_append(b, (const guint8 *)&e->text, sizeof e->text);
+        p = share_key_put_raw(p, &e->origin, sizeof(int) * 9);
+        p = share_key_put_raw(p, &e->important, sizeof e->important);
+        p = share_key_put_raw(p, &e->inline_style, sizeof e->inline_style);
+        p = share_key_put_raw(p, &e->rule, sizeof e->rule);
+        p = share_key_put_raw(p, &e->name, sizeof e->name);
+        p = share_key_put_raw(p, &e->text, sizeof e->text);
     }
+    return p;
 }
 
-static void
-share_key_put_pending(GByteArray *b, const GArray *arr)
+static guint8 *
+share_key_put_pending(guint8 *p, const GArray *arr)
 {
     guint n = arr ? arr->len : 0;
-    g_byte_array_append(b, (const guint8 *)&n, sizeof n);
+    p = share_key_put_raw(p, &n, sizeof n);
     for (guint i = 0; i < n; i++) {
         const pending_match *e = &g_array_index((GArray *)arr, pending_match, i);
-        g_byte_array_append(b, (const guint8 *)&e->origin, sizeof(int) * 9);
-        g_byte_array_append(b, (const guint8 *)&e->inline_style,
-                            sizeof e->inline_style);
-        g_byte_array_append(b, (const guint8 *)&e->rule, sizeof e->rule);
-        g_byte_array_append(b, (const guint8 *)&e->pd, sizeof e->pd);
+        p = share_key_put_raw(p, &e->origin, sizeof(int) * 9);
+        p = share_key_put_raw(p, &e->inline_style, sizeof e->inline_style);
+        p = share_key_put_raw(p, &e->rule, sizeof e->rule);
+        p = share_key_put_raw(p, &e->pd, sizeof e->pd);
     }
+    return p;
 }
 
 static gboolean
@@ -27201,6 +27244,17 @@ share_key_needs_container(const GArray *matches,
     return FALSE;
 }
 
+static gsize
+share_key_arrays_bytes(const GArray *matches, const GArray *var_matches,
+                       const GArray *pending_matches)
+{
+    return sizeof(guint) * 3 +
+           (matches ? matches->len : 0) * SHARE_KEY_MATCH_BYTES +
+           (var_matches ? var_matches->len : 0) * SHARE_KEY_VAR_BYTES +
+           (pending_matches ? pending_matches->len : 0) *
+               SHARE_KEY_PENDING_BYTES;
+}
+
 static void
 style_share_key(GByteArray *b,
                 const ns_style *parent_style, double root_px,
@@ -27208,28 +27262,38 @@ style_share_key(GByteArray *b,
                 const GArray *pending_matches,
                 const ns_pe_gather *pe_g, int n_pe)
 {
-    g_byte_array_set_size(b, 0);
-    guint parent_id = parent_style ? parent_style->share_id : 0;
-    g_byte_array_append(b, (const guint8 *)&parent_id, sizeof parent_id);
-    g_byte_array_append(b, (const guint8 *)&root_px, sizeof root_px);
-    guint cq_len = g_cq_stack &&
+    guint cq_len = g_cq_stack && g_cq_stack->len > 0 &&
         share_key_needs_container(matches, var_matches, pending_matches,
                                   pe_g, n_pe)
         ? g_cq_stack->len : 0;
-    g_byte_array_append(b, (const guint8 *)&cq_len, sizeof cq_len);
+
+    gsize need = sizeof(guint) + sizeof(double) + sizeof(guint) +
+                 cq_len * sizeof(ns_cq_container) +
+                 share_key_arrays_bytes(matches, var_matches, pending_matches);
+    for (int i = 0; i < n_pe; i++)
+        need += sizeof(guint) +
+                share_key_arrays_bytes(pe_g[i].m, pe_g[i].v, pe_g[i].p);
+    if (b->len < need) g_byte_array_set_size(b, (guint)need);
+
+    guint8 *p = b->data;
+    guint parent_id = parent_style ? parent_style->share_id : 0;
+    p = share_key_put_raw(p, &parent_id, sizeof parent_id);
+    p = share_key_put_raw(p, &root_px, sizeof root_px);
+    p = share_key_put_raw(p, &cq_len, sizeof cq_len);
     if (cq_len)
-        g_byte_array_append(b, (const guint8 *)g_cq_stack->data,
-                            cq_len * (guint)sizeof(ns_cq_container));
-    share_key_put_matches(b, matches);
-    share_key_put_vars(b, var_matches);
-    share_key_put_pending(b, pending_matches);
+        p = share_key_put_raw(p, g_cq_stack->data,
+                              cq_len * sizeof(ns_cq_container));
+    p = share_key_put_matches(p, matches);
+    p = share_key_put_vars(p, var_matches);
+    p = share_key_put_pending(p, pending_matches);
     for (int i = 0; i < n_pe; i++) {
         guint pe = (guint)pe_g[i].pe;
-        g_byte_array_append(b, (const guint8 *)&pe, sizeof pe);
-        share_key_put_matches(b, pe_g[i].m);
-        share_key_put_vars(b, pe_g[i].v);
-        share_key_put_pending(b, pe_g[i].p);
+        p = share_key_put_raw(p, &pe, sizeof pe);
+        p = share_key_put_matches(p, pe_g[i].m);
+        p = share_key_put_vars(p, pe_g[i].v);
+        p = share_key_put_pending(p, pe_g[i].p);
     }
+    b->len = (guint)(p - b->data);
 }
 
 static void
