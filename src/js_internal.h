@@ -368,53 +368,9 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
-void
-ns_dommatrix_read(JSContext *ctx, JSValueConst v, double *a, double *b,
-                  double *c, double *d, double *e, double *f);
-void
-ns_dommatrix_write(JSContext *ctx, JSValueConst obj, double a, double b,
-                   double c, double d, double e, double f);
-JSValue
-ns_dommatrix_multiply(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_multiplySelf(JSContext *ctx, JSValueConst this_val,
-                          int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_translate(JSContext *ctx, JSValueConst this_val,
-                       int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_scale(JSContext *ctx, JSValueConst this_val,
-                   int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_rotate(JSContext *ctx, JSValueConst this_val,
-                    int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_inverse(JSContext *ctx, JSValueConst this_val,
-                     int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_invertSelf(JSContext *ctx, JSValueConst this_val,
-                        int argc, JSValueConst *argv);
-void
-ns_obj_double(JSContext *ctx, JSValueConst obj, const char *key, double *out);
-JSValue
-ns_dommatrix_transformPoint(JSContext *ctx, JSValueConst this_val,
-                            int argc, JSValueConst *argv);
-JSValue
-ns_dommatrix_toString(JSContext *ctx, JSValueConst this_val,
-                      int argc, JSValueConst *argv);
 JSValue
 ns_dommatrix_make(JSContext *ctx, double a, double b, double c, double d,
-                  double e, double f, gboolean readonly);
-JSValue
-ns_dommatrix_ctor_impl(JSContext *ctx, int argc, JSValueConst *argv,
-                       gboolean readonly);
-JSValue
-ns_window_dommatrix_ctor(JSContext *ctx, JSValueConst this_val,
-                         int argc, JSValueConst *argv);
-JSValue
-ns_window_dommatrix_readonly_ctor(JSContext *ctx, JSValueConst this_val,
-                                  int argc, JSValueConst *argv);
+                  double e, double f);
 JSValue
 ns_window_offscreen_canvas_ctor(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv);
