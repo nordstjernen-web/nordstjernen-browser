@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.26:
+======
+
 1.0.25:
 ======
 * Restyling a large document is roughly 40% faster. The style-sharing
