@@ -54,10 +54,6 @@ amalgam: $(QJS)
 	cd $(TEMP) && $(RM) quickjs-amalgam.zip quickjs-amalgam.c quickjs.h quickjs-libc.h
 	$(RM) -d $(TEMP)
 
-fuzz:
-	clang -g -O1 -fsanitize=address,undefined,fuzzer -o fuzz fuzz.c
-	./fuzz
-
 $(BUILD_DIR):
 	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) -DCMAKE_INSTALL_PREFIX=$(INSTALL_PREFIX)
 
@@ -95,9 +91,6 @@ stats: $(QJS)
 
 jscheck: CFLAGS=-I. -D_GNU_SOURCE -DJS_CHECK_JSVALUE -Wall -Werror -fsyntax-only -c -o /dev/null
 jscheck:
-	$(CC) $(CFLAGS) api-test.c
-	$(CC) $(CFLAGS) ctest.c
-	$(CC) $(CFLAGS) fuzz.c
 	$(CC) $(CFLAGS) gen/function_source.c
 	$(CC) $(CFLAGS) gen/hello.c
 	$(CC) $(CFLAGS) gen/hello_module.c
@@ -109,18 +102,6 @@ jscheck:
 	$(CC) $(CFLAGS) quickjs-libc.c
 	$(CC) $(CFLAGS) quickjs.c
 	$(CC) $(CFLAGS) run-test262.c
-
-# effectively .PHONY because it doesn't generate output
-ctest: CFLAGS=-std=c11 -fsyntax-only -Wall -Wextra -Werror -pedantic
-ctest: ctest.c quickjs.h
-	$(CC) $(CFLAGS) -DJS_NAN_BOXING=0 $<
-	$(CC) $(CFLAGS) -DJS_NAN_BOXING=1 $<
-
-# effectively .PHONY because it doesn't generate output
-cxxtest: CXXFLAGS=-std=c++11 -fsyntax-only -Wall -Wextra -Werror -pedantic
-cxxtest: cxxtest.cc quickjs.h
-	$(CXX) $(CXXFLAGS) -DJS_NAN_BOXING=0 $<
-	$(CXX) $(CXXFLAGS) -DJS_NAN_BOXING=1 $<
 
 test: $(QJS)
 	$(RUN262) -c tests.conf
@@ -146,4 +127,4 @@ unicode_gen: $(BUILD_DIR)
 libunicode-table.h: unicode_gen
 	$(BUILD_DIR)/unicode_gen unicode $@
 
-.PHONY: all amalgam ctest cxxtest debug fuzz jscheck install clean codegen distclean stats test test262 test262-update test262-check microbench unicode_gen $(QJS) $(QJSC)
+.PHONY: all amalgam debug jscheck install clean codegen distclean stats test test262 test262-update test262-check microbench unicode_gen $(QJS) $(QJSC)
