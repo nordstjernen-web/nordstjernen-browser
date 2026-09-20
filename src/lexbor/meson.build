@@ -59,10 +59,7 @@ lexbor_srcs = files(
   'source/lexbor/encoding/decode.c',
   'source/lexbor/encoding/encode.c',
   'source/lexbor/encoding/encoding.c',
-  'source/lexbor/encoding/multi_res.c',
-  'source/lexbor/encoding/range_res.c',
   'source/lexbor/encoding/res.c',
-  'source/lexbor/encoding/single_res.c',
 
   'source/lexbor/html/attribute_steps.c',
   'source/lexbor/html/common.c',
