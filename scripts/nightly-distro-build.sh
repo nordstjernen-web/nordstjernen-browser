@@ -112,6 +112,43 @@ case "$DISTRO" in
     alpine)        ./scripts/pack-apk.sh ;;
 esac
 
+# Install the native package into this same container and run the installed
+# browser headlessly. That proves the control metadata parses, the maintainer
+# scripts run, every declared dependency resolves against a real package
+# database, and the installed binaries start from their packaged paths — so a
+# package that would fail at `dpkg -i` on a user's machine fails here, where
+# nightly.sh then publishes only the portable zip. (Dependency floors are
+# checked against this container's own packages, so a floor that is merely too
+# strict for older releases is pack-deb.sh's job to relax, not this check's.)
+verify_package() {
+    local pkg="$1"
+    echo "nightly-distro-build($DISTRO): installing $(basename "$pkg") to verify it"
+    case "$DISTRO" in
+        debian|ubuntu)
+            dpkg -i "$pkg"
+            dpkg-deb -f "$pkg" Depends | sed 's/^/  Depends: /'
+            ;;
+        opensuse)
+            rpm -Uvh --replacepkgs "$pkg"
+            rpm -qp --requires "$pkg" | sed 's/^/  Requires: /'
+            ;;
+        alpine)
+            apk add --allow-untrusted "$pkg"
+            ;;
+    esac
+    # The container runs as root, which the browser refuses without opt-in.
+    NS_ALLOW_ROOT=1 /usr/bin/nordstjernen --headless --dump=text about:start \
+        > /tmp/ns-smoke.txt
+    [ -s /tmp/ns-smoke.txt ] || {
+        echo "nightly-distro-build($DISTRO): installed browser produced no output for about:start" >&2
+        return 1
+    }
+    echo "nightly-distro-build($DISTRO): installed package smoke test passed:"
+    head -n 5 /tmp/ns-smoke.txt | sed 's/^/  | /'
+}
+pkg=$(ls -1 dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null | head -n 1)
+[ -n "$pkg" ] && verify_package "$pkg"
+
 echo
 echo "nightly-distro-build($DISTRO): artifacts in dist/:"
 ls -1 dist/*.zip dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null || true

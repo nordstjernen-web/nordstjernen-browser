@@ -6,6 +6,10 @@
 # a hand-maintained list. The image-codec libraries whose SONAMEs differ
 # per distro release (libavif and its AV1 codecs) are bundled in
 # the package instead, so one .deb installs across Ubuntu/Debian releases.
+# The FFmpeg libav* dependencies keep their SONAME-derived package names
+# but have their version floor relaxed to the FFmpeg major.minor release
+# (see relax_ffmpeg_floor), so a .deb built on a patched build host still
+# installs on a system running an earlier patch release of the same ABI.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -82,6 +86,18 @@ CORE_DENY='^(ld-linux|ld-musl|libc|libm|libmvec|libdl|libpthread|librt|libgcc_s|
 # Matched against the dep name directly (not via dpkg -S, whose path lookup
 # is unreliable under usrmerge), so it tracks whatever ldd linked.
 STRIP_RE='^lib(avif|aom|dav1d|gav1|yuv|sharpyuv|rav1e|svtav1)'
+# FFmpeg runtime packages. Debian/Ubuntu generate their shlibs floor with
+# `dh_makeshlibs -V`, i.e. the exact upstream version of the build host's
+# FFmpeg, so dpkg-shlibdeps emits e.g. `libavcodec61 (>= 7:7.1.5)` — which
+# refuses to install on a machine still on 7:7.1.1 even though the SONAME
+# (and hence the ABI the binary was linked against) is identical. FFmpeg
+# patch releases are bugfix-only and never change the ABI, so the floor is
+# relaxed to the major.minor release (`>= 7:7.1`); the SONAME-numbered
+# package name keeps guarding the actual ABI.
+FFMPEG_RE='^lib(avcodec|avformat|avutil|avfilter|avdevice|swscale|swresample|postproc)[0-9]+'
+relax_ffmpeg_floor() {
+    printf '%s' "$1" | sed -E 's/\(>= ([0-9]+:)?([0-9]+\.[0-9]+)[^)]*\)/(>= \1\2)/g'
+}
 bundled_any=0
 if command -v patchelf >/dev/null 2>&1; then
     install -dm755 "$BUNDLE_DIR"
@@ -171,18 +187,23 @@ fi
 
 set -e
 
-if [ "$bundled_any" = 1 ] && [ -n "$RUNTIME_DEPS" ]; then
-    kept=""
-    OLDIFS=$IFS; IFS=','
-    for dep in $RUNTIME_DEPS; do
-        d=$(printf '%s' "$dep" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
-        name=${d%% *}
-        if printf '%s' "$name" | grep -Eiq "$STRIP_RE"; then continue; fi
-        kept="${kept:+$kept, }$d"
-    done
-    IFS=$OLDIFS
-    RUNTIME_DEPS="$kept"
-fi
+kept=""
+OLDIFS=$IFS; IFS=','
+for dep in $RUNTIME_DEPS; do
+    d=$(printf '%s' "$dep" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    [ -n "$d" ] || continue
+    name=${d%% *}
+    if [ "$bundled_any" = 1 ] && printf '%s' "$name" | grep -Eiq "$STRIP_RE"; then
+        continue
+    fi
+    if printf '%s' "$name" | grep -Eq "$FFMPEG_RE"; then
+        d=$(relax_ffmpeg_floor "$d")
+    fi
+    kept="${kept:+$kept, }$d"
+done
+IFS=$OLDIFS
+RUNTIME_DEPS="$kept"
+echo "pack-deb: Depends: $RUNTIME_DEPS"
 
 cat > "$PKGROOT/DEBIAN/control" <<EOF
 Package: nordstjernen
@@ -191,7 +212,6 @@ Architecture: ${DEBARCH}
 Maintainer: Andreas Røsdal <andreas.rosdal@gmail.com>
 Installed-Size: ${INSTALLED_KB}
 Depends: ${RUNTIME_DEPS}
-Recommends: mpv | vlc | celluloid | totem | mplayer
 Section: web
 Priority: optional
 Homepage: https://nordstjernen.org
