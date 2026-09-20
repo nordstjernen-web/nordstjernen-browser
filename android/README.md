@@ -129,7 +129,7 @@ powershell -ExecutionPolicy Bypass -File android\scripts\fetch-prebuilt-deps.ps1
 ```
 
 ```sh
-ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
+ANDROID_NDK_HOME=~/Android/Sdk/ndk/30.0.16248370 \
 NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
 android/scripts/build-deps.sh x86_64 34
 ```

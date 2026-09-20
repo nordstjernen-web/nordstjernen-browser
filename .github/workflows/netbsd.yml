@@ -42,12 +42,12 @@ jobs:
       - name: Build, smoke and pack in a NetBSD VM
         uses: vmactions/netbsd-vm@v1
         with:
-          release: '10.0'
+          release: '11.0'
           usesh: true
           copyback: true
           prepare: |
             if [ ! -f /usr/X11R7/lib/pkgconfig/x11.pc ]; then
-              base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.0/amd64/binary/sets
+              base=https://cdn.netbsd.org/pub/NetBSD/NetBSD-11.0/amd64/binary/sets
               for s in xbase xcomp; do
                 ftp -o "/tmp/$s.tar.xz" "$base/$s.tar.xz"
                 tar -C / -xJpf "/tmp/$s.tar.xz"

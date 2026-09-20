@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  V8_RELEASE: '14.3'
+  V8_RELEASE: '15.2'
   DEBIAN_FRONTEND: noninteractive
 
 jobs:

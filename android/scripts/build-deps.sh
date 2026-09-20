@@ -38,7 +38,7 @@
 # load. Build the dependency sysroot at the same API level for the same reason.
 #
 # Usage:
-#   ANDROID_NDK_HOME=~/Android/Sdk/ndk/27.3.13750724 \
+#   ANDROID_NDK_HOME=~/Android/Sdk/ndk/30.0.16248370 \
 #   NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
 #   android/scripts/build-deps.sh x86_64 34
 
