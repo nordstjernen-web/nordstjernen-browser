@@ -54,51 +54,12 @@ enum {
     LXB_ENCODING_DECODE_CONTINUE      = 0x2FFFFF
 };
 
-enum {
-    LXB_ENCODING_DECODE_2022_JP_ASCII = 0x00,
-    LXB_ENCODING_DECODE_2022_JP_ROMAN,
-    LXB_ENCODING_DECODE_2022_JP_KATAKANA,
-    LXB_ENCODING_DECODE_2022_JP_LEAD,
-    LXB_ENCODING_DECODE_2022_JP_TRAIL,
-    LXB_ENCODING_DECODE_2022_JP_ESCAPE_START,
-    LXB_ENCODING_DECODE_2022_JP_ESCAPE,
-    LXB_ENCODING_DECODE_2022_JP_UNSET
-};
-
-enum {
-    LXB_ENCODING_ENCODE_2022_JP_ASCII = 0x00,
-    LXB_ENCODING_ENCODE_2022_JP_ROMAN,
-    LXB_ENCODING_ENCODE_2022_JP_JIS0208
-};
-
 typedef struct {
     unsigned   need;
     lxb_char_t lower;
     lxb_char_t upper;
 }
 lxb_encoding_ctx_utf_8_t;
-
-typedef struct {
-    lxb_char_t first;
-    lxb_char_t second;
-    lxb_char_t third;
-}
-lxb_encoding_ctx_gb18030_t;
-
-typedef struct {
-    lxb_char_t lead;
-    bool       is_jis0212;
-}
-lxb_encoding_ctx_euc_jp_t;
-
-typedef struct {
-    lxb_char_t lead;
-    lxb_char_t prepand;
-    unsigned   state;
-    unsigned   out_state;
-    bool       out_flag;
-}
-lxb_encoding_ctx_2022_jp_t;
 
 typedef struct lxb_encoding_data lxb_encoding_data_t;
 
@@ -126,11 +87,7 @@ typedef struct {
     lxb_status_t              status;
 
     union {
-        lxb_encoding_ctx_utf_8_t   utf_8;
-        lxb_encoding_ctx_gb18030_t gb18030;
-        unsigned                   lead;
-        lxb_encoding_ctx_euc_jp_t  euc_jp;
-        lxb_encoding_ctx_2022_jp_t iso_2022_jp;
+        lxb_encoding_ctx_utf_8_t utf_8;
     } u;
 }
 lxb_encoding_decode_t;
@@ -164,11 +121,11 @@ lxb_encoding_encode_t;
 *     lxb_encoding_ctx_t ctx = {0};
 *     const lxb_encoding_data_t *enc;
 *
-*     lxb_char_t *data = (lxb_char_t *) "\x81\x30\x84\x36";
+*     lxb_char_t *data = (lxb_char_t *) "\xE2\x82\xAC";
 *
-*     enc = lxb_encoding_data(LXB_ENCODING_GB18030);
+*     enc = lxb_encoding_data(LXB_ENCODING_UTF_8);
 *
-*     enc->decode(&ctx, (const lxb_char_t **) &data, data + 4);
+*     enc->decode(&ctx, (const lxb_char_t **) &data, data + 3);
 */
 typedef lxb_status_t
 (*lxb_encoding_encode_f)(lxb_encoding_encode_t *ctx, const lxb_codepoint_t **cp,
@@ -194,21 +151,6 @@ struct lxb_encoding_data {
     lxb_encoding_decode_single_f decode_single;
     lxb_char_t                   *name;
 };
-
-typedef struct {
-    lxb_char_t      name[4];
-    unsigned        size;
-    lxb_codepoint_t codepoint;
-}
-lxb_encoding_single_index_t;
-
-typedef lxb_encoding_single_index_t lxb_encoding_multi_index_t;
-
-typedef struct {
-    unsigned        index;
-    lxb_codepoint_t codepoint;
-}
-lxb_encoding_range_index_t;
 
 
 #ifdef __cplusplus

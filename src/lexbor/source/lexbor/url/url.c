@@ -1211,13 +1211,6 @@ lxb_url_includes_credentials(const lxb_url_t *url)
     return url->username.length != 0 || url->password.length != 0;
 }
 
-lxb_inline void
-lxb_url_encoding_init(const lxb_encoding_data_t *encoding,
-                      lxb_encoding_encode_t *encode)
-{
-    (void) lxb_encoding_encode_init_single(encode, encoding);
-}
-
 static bool
 lxb_url_start_windows_drive_letter(const lxb_char_t *data,
                                    const lxb_char_t *end)
@@ -1362,12 +1355,7 @@ lxb_url_parse_basic_h(lxb_url_parser_t *parser, lxb_url_t *url,
         state = override_state;
     }
 
-    if (encoding <= LXB_ENCODING_UNDEFINED
-        || encoding == LXB_ENCODING_UTF_16BE
-        || encoding == LXB_ENCODING_UTF_16LE)
-    {
-        encoding = LXB_ENCODING_UTF_8;
-    }
+    encoding = LXB_ENCODING_UTF_8;
 
     enc = lxb_encoding_data(encoding);
     if (enc == NULL) {
@@ -2379,19 +2367,6 @@ again:
         break;
 
     case LXB_URL_STATE_QUERY_STATE:
-        if (encoding != LXB_ENCODING_UTF_8
-            && (!lxb_url_is_special(url)
-                || schm->type == LXB_URL_SCHEMEL_TYPE_WS
-                || schm->type == LXB_URL_SCHEMEL_TYPE_WSS))
-        {
-            encoding = LXB_ENCODING_UTF_8;
-
-            enc = lxb_encoding_data(encoding);
-            if (enc == NULL) {
-                lxb_url_parse_return(orig_data, buf, LXB_STATUS_ERROR_WRONG_ARGS);
-            }
-        }
-
         begin = p;
 
         while (true) {
@@ -3185,115 +3160,9 @@ lxb_url_percent_encode_after_encoding(const lxb_char_t *data,
                                       lxb_url_map_type_t enmap,
                                       bool space_as_plus)
 {
-    int8_t len;
-    size_t length, size;
-    lxb_status_t status;
-    lxb_codepoint_t cp;
-    const lxb_char_t *p, *pb;
-    lxb_encoding_encode_t encode;
-    lxb_char_t c, buffer[128], percent[3];
-    lxb_char_t *buf = buffer;
-    const lxb_char_t *buf_end = buf + sizeof(buffer);
-    static const lexbor_str_t esc_str = lexbor_str("%26%23");
-
-    if (encoding->encoding == LXB_ENCODING_UTF_8) {
-        return lxb_url_percent_encode_after_utf_8(data, end, str, mraw,
-                                                  enmap, space_as_plus);
-    }
-
-    lxb_url_encoding_init(encoding, &encode);
-
-    p = data;
-    length = end - p;
-
-    /* Only valid for UTF-8. */
-
-    while (p < end) {
-        if (lxb_url_map[*p++] & enmap) {
-            length += 2;
-        }
-    }
-
-    status = lxb_url_str_init(str, mraw, length + 1);
-    if (status != LXB_STATUS_OK) {
-        return status;
-    }
-
-    p = data;
-    percent[0] = '%';
-
-    while (p < end) {
-        cp = lxb_encoding_decode_valid_utf_8_single(&p, end);
-        if (cp > LXB_ENCODING_DECODE_MAX_CODEPOINT) {
-            continue;
-        }
-
-        len = encoding->encode_single(&encode, &buf, buf_end, cp);
-
-        if (len < LXB_ENCODING_ENCODE_OK) {
-            size = lexbor_conv_int64_to_data((int64_t) cp, buf, buf_end - buf);
-
-            if (lexbor_str_append(str, mraw, esc_str.data, esc_str.length) == NULL) {
-                return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-            }
-
-            if (lexbor_str_append(str, mraw, buf, size) == NULL) {
-                return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-            }
-
-            percent[1] = '3';
-            percent[2] = 'B';
-
-            if (lexbor_str_append(str, mraw, percent, 3) == NULL) {
-                return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-            }
-
-            continue;
-        }
-
-    iso_2022_jp:
-
-        pb = buffer;
-
-        while (pb < buf) {
-            c = *pb;
-
-            if (space_as_plus && c == ' ') {
-                pb += 1;
-
-                if (lexbor_str_append_one(str, mraw, '+') == NULL) {
-                    return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-                }
-            }
-            else if (lxb_url_map[c] & enmap) {
-                percent[1] = lexbor_str_res_char_to_two_hex_value[c][0];
-                percent[2] = lexbor_str_res_char_to_two_hex_value[c][1];
-
-                if (lexbor_str_append(str, mraw, percent, 3) == NULL) {
-                    return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-                }
-            }
-            else {
-                if (lexbor_str_append_one(str, mraw, c) == NULL) {
-                    return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-                }
-            }
-
-            pb++;
-        }
-
-        buf = buffer;
-    }
-
-    if (encoding->encoding == LXB_ENCODING_ISO_2022_JP) {
-        len = lxb_encoding_encode_iso_2022_jp_eof_single(&encode,
-                                                         &buf, buf_end);
-        if (len != 0) {
-            goto iso_2022_jp;
-        }
-    }
-
-    return LXB_STATUS_OK;
+    (void) encoding;
+    return lxb_url_percent_encode_after_utf_8(data, end, str, mraw,
+                                              enmap, space_as_plus);
 }
 
 static lxb_status_t

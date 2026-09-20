@@ -17,43 +17,10 @@ extern "C" {
 #include "lexbor/encoding/encode.h"
 #include "lexbor/encoding/decode.h"
 
-#include "lexbor/core/shs.h"
-
-
-/*
- * Before searching will be removed any leading and trailing
- * ASCII whitespace in name.
- */
-LXB_API const lxb_encoding_data_t *
-lxb_encoding_data_by_pre_name(const lxb_char_t *name, size_t length);
-
-LXB_API lxb_encoding_t
-lxb_encoding_prescan_validate(const lxb_char_t *name, size_t length);
-
-LXB_API const lxb_encoding_data_t *
-lxb_encoding_data_prescan_validate(const lxb_char_t *name, size_t length);
-
-/*
- * To skip BOM.
- */
-LXB_API lxb_encoding_t
-lxb_encoding_bom_sniff(const lxb_char_t *begin, size_t length);
-
-LXB_API void
-lxb_encoding_utf_8_skip_bom(const lxb_char_t **begin, size_t *length);
-
-LXB_API void
-lxb_encoding_utf_16be_skip_bom(const lxb_char_t **begin, size_t *length);
-
-LXB_API void
-lxb_encoding_utf_16le_skip_bom(const lxb_char_t **begin, size_t *length);
 
 /*
  * Encoding data.
  */
-LXB_API const lxb_encoding_data_t *
-lxb_encoding_data_by_name(const lxb_char_t *name, size_t length);
-
 LXB_API const lxb_encoding_data_t *
 lxb_encoding_data(lxb_encoding_t encoding);
 
@@ -91,10 +58,7 @@ lxb_encoding_encode_init(lxb_encoding_encode_t *encode,
 lxb_inline lxb_status_t
 lxb_encoding_encode_finish(lxb_encoding_encode_t *encode)
 {
-    if (encode->encoding_data->encoding == LXB_ENCODING_ISO_2022_JP) {
-        return lxb_encoding_encode_iso_2022_jp_eof(encode);
-    }
-
+    (void) encode;
     return LXB_STATUS_OK;
 }
 
@@ -198,13 +162,6 @@ lxb_encoding_decode_finish(lxb_encoding_decode_t *decode)
     lxb_status_t status;
 
     if (decode->status != LXB_STATUS_OK) {
-
-        if (decode->encoding_data->encoding == LXB_ENCODING_ISO_2022_JP
-            && decode->u.iso_2022_jp.state == LXB_ENCODING_DECODE_2022_JP_ASCII)
-        {
-            return LXB_STATUS_OK;
-        }
-
         if (decode->replace_to == NULL) {
             return LXB_STATUS_ERROR;
         }
@@ -283,10 +240,9 @@ lxb_inline int8_t
 lxb_encoding_encode_finish_single(lxb_encoding_encode_t *encode,
                                   lxb_char_t **data, const lxb_char_t *end)
 {
-    if (encode->encoding_data->encoding == LXB_ENCODING_ISO_2022_JP) {
-        return lxb_encoding_encode_iso_2022_jp_eof_single(encode, data, end);
-    }
-
+    (void) encode;
+    (void) data;
+    (void) end;
     return 0;
 }
 
@@ -312,13 +268,6 @@ lxb_inline lxb_status_t
 lxb_encoding_decode_finish_single(lxb_encoding_decode_t *decode)
 {
     if (decode->status != LXB_STATUS_OK) {
-
-        if (decode->encoding_data->encoding == LXB_ENCODING_ISO_2022_JP
-            && decode->u.iso_2022_jp.state == LXB_ENCODING_DECODE_2022_JP_ASCII)
-        {
-            return LXB_STATUS_OK;
-        }
-
         return LXB_STATUS_ERROR;
     }
 
@@ -425,9 +374,6 @@ lxb_encoding_decode_init_single_noi(lxb_encoding_decode_t *decode,
 
 LXB_API lxb_status_t
 lxb_encoding_decode_finish_single_noi(lxb_encoding_decode_t *decode);
-
-LXB_API const lxb_encoding_data_t *
-lxb_encoding_data_by_name_noi(const lxb_char_t *name, size_t length);
 
 LXB_API const lxb_encoding_data_t *
 lxb_encoding_data_noi(lxb_encoding_t encoding);

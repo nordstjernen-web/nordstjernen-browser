@@ -42,6 +42,14 @@ Changelog:
   gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
+* The lexbor encoding module is trimmed to UTF-8. Its 43 legacy codecs
+  (Big5, GB18030, EUC-JP, Shift_JIS, the ISO-8859 and Windows code
+  pages, UTF-16 and the rest) had no caller: page bodies are decoded
+  through uchardet and g_convert, and lexbor's own URL parser only ever
+  needs UTF-8, yet its codec lookup table kept every conversion table
+  alive through the linker. Dropping them removes 11 MB of generated
+  source, about 1 MB from each binary that links lexbor, and the
+  per-encoding branches from the URL parser's query serializer.
 * CI moves to current toolchains: CodeQL Action v4 (v3 is retired in
   December 2026), setup-java v6, actions/cache restore and save v6 on
   Windows, FreeBSD 15.1 and NetBSD 11.0 VMs (14.2 and 10.0 are past
