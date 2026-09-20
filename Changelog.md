@@ -42,24 +42,22 @@ Changelog:
   gone from it.
 * The .deb no longer bundles the dynamic loader: pack-deb.sh's core
   runtime deny list matched ld-linux only when a dot followed the name.
-* about:start wears a new splash: an xkcd-style comic of Noah's ark,
-  drawn in black ink on white by scripts/build-splash-art.py with title
-  "Nordstjernen web browser", subtitle "Yet another web browser", and
-  release version in a hand-designed single-stroke printing alphabet,
-  dialogue that floats beside its speaker with a thin pointer line, a
-  wobbly panel border, a coastal lighthouse with a rotating beacon beam,
-  a keeper on the gallery and a seal lounging on the rocky islet,
-  and perspective depth from two lanes of animal pairs walking up to the
-  gangplank behind a rope-and-stanchion queue line, Noah waving from
-  the deck, a stick figure with a clipboard checking the animals in
-  ("The unicorns said they'd catch the next one"), giraffes through the
-  roof, a flying pig, doves, a rain cloud and a sun. scripts/build-splash-gif.py
-  animates 36 frames (walking gaits, a rocking ark, Noah's wave, the
-  sweeping lighthouse beam, a fluttering flag, drifting wavy water,
-  falling rain, pulsing sun rays and a gentle line boil) at 1.5x
-  resolution into the embedded 256-colour GIF, which is smaller than the
-  painted one it replaces. The version restamp script is gone since the
-  generator draws the version itself.
+* about:start wears the Northstar web browser's splash, carried over
+  from that project's scripts/gen-splash.py and retitled "Nordstjernen
+  web browser" with this release's version read from meson.build: a
+  flat, sunny xkcd-style comic of Noah's ark in Comic Neue lettering,
+  with the animal pairs walking two by two to the gangplank behind Noah
+  and his clipboard ("Two of each. Yes, even browsers."), a wooden ark
+  with a flag, portholes, a chimney and a penguin on deck, blue wavy
+  water with a spouting whale, a red-and-white lighthouse with its
+  keeper waving from the gallery, gulls, a dove, drifting clouds and a
+  yellow sun. Every frame is drawn at three times supersampling and the
+  32 frames (walking gaits, a bobbing ark, a fluttering flag, chimney
+  smoke, spinning sun rays, flapping gulls) are quantized to one shared
+  256-colour palette and squeezed by gifsicle into the embedded GIF.
+  scripts/gen-splash.sh regenerates it and writes the first frame to
+  data/about-splash-<version>.png; the earlier build-splash-art.py and
+  build-splash-gif.py generators are gone.
 * Container queries evaluate the full condition grammar: not/and/or
   with nesting, size features in plain, boolean and range form
   (double-sided ranges and math functions included), aspect-ratio and
