@@ -4997,6 +4997,16 @@ format_ordered_label(const char *kind, int n, char *out, gsize out_sz)
     g_snprintf(out, out_sz, "%d", n);
 }
 
+static gboolean
+li_generates_marker(const ns_node *li, const ns_style *li_style)
+{
+    if (!li || !li->name || strcmp(li->name, "li") != 0) return FALSE;
+    if (!li->parent || !li->parent->name) return FALSE;
+    const ns_css_value *d = li_style ? li_style->values[NS_CSS_DISPLAY] : NULL;
+    if (!d || d->kind != NS_CSS_V_KEYWORD || !d->u.keyword) return TRUE;
+    return strstr(d->u.keyword, "list-item") != NULL;
+}
+
 gboolean
 ns_paint_li_is_inside(const ns_style *li_style)
 {
@@ -5010,10 +5020,9 @@ gboolean
 ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
                         char *out, gsize out_sz)
 {
-    if (!li || !li->name || strcmp(li->name, "li") != 0) return FALSE;
+    if (!li_generates_marker(li, li_style)) return FALSE;
     if (out_sz < 8) return FALSE;
     const ns_node *parent = li->parent;
-    if (!parent || !parent->name) return FALSE;
     const ns_css_value *lst = li_style
         ? li_style->values[NS_CSS_LIST_STYLE_TYPE] : NULL;
     const char *style_kw = NULL;
@@ -5050,10 +5059,9 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
 static void
 paint_marker(cairo_t *cr, const ns_box *b)
 {
-    if (!b->dom || !b->dom->name || strcmp(b->dom->name, "li") != 0) return;
-    const ns_node *parent = b->dom->parent;
-    if (!parent || !parent->name) return;
     const ns_style *s = b->style;
+    if (!li_generates_marker(b->dom, s)) return;
+    const ns_node *parent = b->dom->parent;
     if (ns_paint_li_is_inside(s)) return;
     const ns_css_value *lst = s ? s->values[NS_CSS_LIST_STYLE_TYPE] : NULL;
     const char *style_kw = NULL;
