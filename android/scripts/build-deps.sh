@@ -74,6 +74,7 @@ CC="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang${TOOL_EXT}"
 CXX="${TOOLCHAIN}/bin/${TRIPLE}${API}-clang++${TOOL_EXT}"
 AR="${TOOLCHAIN}/bin/llvm-ar${EXE_EXT}"
 STRIP="${TOOLCHAIN}/bin/llvm-strip${EXE_EXT}"
+READELF="${TOOLCHAIN}/bin/llvm-readelf${EXE_EXT}"
 
 if [ ! -f "${CC}" ]; then
     echo "compiler not found: ${CC}" >&2
@@ -209,9 +210,31 @@ for match in list(re.finditer(rb"[^\0]+", data)):
 open(path, "wb").write(data)
 PY
 
-for so in "${SYSROOT_PREFIX}"/lib/*.so; do
+needed_libs() {
+    "${READELF}" -dW "$1" 2>/dev/null |
+        sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' || true
+}
+
+STAGED="libnordstjernen.so"
+FRONTIER="libnordstjernen.so"
+while [ -n "${FRONTIER}" ]; do
+    NEXT=""
+    for lib in ${FRONTIER}; do
+        for dep in $(needed_libs "${JNILIBS}/${lib}"); do
+            case " ${STAGED} " in *" ${dep} "*) continue ;; esac
+            [ -e "${SYSROOT_PREFIX}/lib/${dep}" ] || continue
+            cp -v "${SYSROOT_PREFIX}/lib/${dep}" "${JNILIBS}/"
+            STAGED="${STAGED} ${dep}"
+            NEXT="${NEXT} ${dep}"
+        done
+    done
+    FRONTIER="${NEXT}"
+done
+
+for so in "${JNILIBS}"/*.so; do
     [ -e "${so}" ] || continue
-    cp -v "${so}" "${JNILIBS}/"
+    case " ${STAGED} " in *" $(basename "${so}") "*) continue ;; esac
+    rm -v "${so}"
 done
 
 CMAKE_CACHE_ROOT="${REPO_ROOT}/android/app/.cxx"

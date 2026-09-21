@@ -28,7 +28,7 @@ the free binary only. Treat Play as reach and reputation.
   libcurl/sqlite3/uchardet/libpsl — all plain C, no Rust.
 - Targets: `compileSdk`/`targetSdk` **36**, `minSdk` **34** (Android 14); ABIs
   **arm64-v8a** + **x86_64**.
-  AGP 8.11.1, Gradle 8.14.5, NDK r30, JDK 17.
+  AGP 8.11.1, Gradle 8.14.5, NDK `30.0.16248370`, JDK 17+.
 
 ## Play Store release checklist
 
@@ -83,14 +83,35 @@ each subsequent release:
 
 ```sh
 cd android
-gradle wrapper                 # once, to generate ./gradlew (or use a system gradle)
 ./gradlew assembleDebug        # APK -> app/build/outputs/apk/debug/
 ./gradlew bundleRelease        # AAB -> app/build/outputs/bundle/release/  (Play upload)
+./gradlew assembleRelease      # APK -> app/build/outputs/apk/release/     (sideload test)
+```
+
+The Gradle wrapper is committed; no system `gradle` is needed. `local.properties`
+is git-ignored and absent from a fresh checkout, so export `ANDROID_HOME` first
+or Gradle fails with "SDK location not found":
+
+```powershell
+$env:ANDROID_HOME='C:\Users\<you>\AppData\Local\Android\Sdk'
 ```
 
 `bundleRelease` is signed only when `android/keystore.properties` exists (see
-[Signing](#signing)); otherwise it is unsigned. Play requires the App Bundle
-(`.aab`) for new apps.
+[Signing](#signing)); otherwise it is silently **unsigned** — that file is
+git-ignored, so a fresh clone has no copy. Play requires the App Bundle
+(`.aab`); an `.aab` cannot be installed on a device, so build the release APK
+for on-device testing.
+
+Before uploading, confirm the bundle is what you think it is:
+
+```sh
+aapt dump badging app-release.apk | head -1        # versionCode/Name, ABIs
+apksigner verify --print-certs app-release.apk     # upload-key fingerprint
+jarsigner -verify app-release.aab                  # "jar verified."
+```
+
+`jarsigner` also warns that the certificate chain is invalid — expected for a
+self-signed upload key with no CA, not a signing failure.
 
 ### Native engine (.so)
 
@@ -100,6 +121,20 @@ cross-compiles the engine against a dependency sysroot
 that file is absent, `CMakeLists.txt` links a **stub** bridge so the APK still
 builds and runs (engine reported unavailable); once present, the real bridge is
 linked and pages render.
+
+Run it for **both** shipped ABIs before `bundleRelease` — `jniLibs/` is
+git-ignored, so a fresh clone stages nothing and the bundle would ship the stub
+bridge. It needs `ANDROID_NDK_HOME` and `NORDSTJERNEN_ANDROID_SYSROOT`:
+
+```sh
+ANDROID_NDK_HOME=~/Android/Sdk/ndk/30.0.16248370 \
+NORDSTJERNEN_ANDROID_SYSROOT=~/.cache/nordstjernen-android-sysroot \
+android/scripts/build-deps.sh arm64-v8a 34   # then again for x86_64
+```
+
+The script stages only the engine's `DT_NEEDED` closure and deletes anything
+else from `jniLibs/<abi>/`, so libraries the sysroot happens to carry but this
+build does not link stay out of the bundle.
 
 `<api>` is the NDK platform level and defaults to **34** (Android 14) to match
 `minSdk`. It must be `<=` `minSdk`: a `.so` built at a higher level can bind
@@ -154,12 +189,18 @@ yearly.
   Pure-JVM apps pass automatically; ours ships native `.so`s, so every ELF
   segment must be 16 KB-aligned. Wired in three places: AGP ≥ 8.5.1 zip-aligns
   packaging (covered by 8.11.1), the CMake bridge build passes
-  `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (needed on NDK r27; r28+ aligns
-  by default), and `build-deps.sh` puts `-Wl,-z,max-page-size=16384` in the
-  meson cross-file for the engine and expects the dependency sysroot to be
-  built the same way. Verify with APK Analyzer or
-  `llvm-readelf -lW libnordstjernen.so` (LOAD segments' `Align` ≥ 0x4000)
-  before uploading.
+  `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (belt-and-braces now that
+  `ndkVersion` is r30 — it was required back on r27, and `build-deps.sh` may
+  still be pointed at an older NDK), and `build-deps.sh` puts
+  `-Wl,-z,max-page-size=16384` in the meson cross-file for the engine and
+  expects the dependency sysroot to be built the same way. Verify **every**
+  staged library, not just the engine — the sysroot deps are the ones likely to
+  regress:
+
+  ```sh
+  llvm-readelf -lW android/app/src/main/jniLibs/arm64-v8a/*.so |
+      awk '/LOAD/{print $NF}' | sort -u     # must be 0x4000 or 0x10000
+  ```
 - **Edge-to-edge.** Targeting API 36 enforces edge-to-edge drawing and
   disables the Android 15 opt-out attribute on Android 16+ devices
   ([behavior changes](https://developer.android.com/about/versions/16/behavior-changes-16)).
@@ -201,9 +242,12 @@ requires it, then production staged rollout. Personal accounts created after
 13 November 2023 need **at least 12 testers opted in for 14 consecutive days**
 before applying for production access ([Play Console Help](https://support.google.com/googleplay/android-developer/answer/14151465)).
 
-Versioning: `versionCode` is a monotonic int; `versionName` tracks the desktop
-version ("1.0.x"). For a critical security fix, halt rollout, then re-submit
-on a fast rollout.
+Versioning: `versionCode` is a monotonic int and Play rejects a repeat;
+`versionName` tracks the desktop version ("1.0.x"). Both live in
+`android/app/build.gradle` and are **not** derived from `meson.build`, so they
+are bumped by hand. The ladder so far: 1.0.22 = 7, 1.0.23 = 8, 1.0.24 = 9,
+1.0.25 = 10. For a critical security fix, halt rollout, then re-submit on a
+fast rollout.
 
 ## CI
 

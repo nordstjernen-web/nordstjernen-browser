@@ -4,14 +4,15 @@
 # the Android configuration — WITHOUT needing the NDK or a cross sysroot.
 #
 # It reuses the desktop build's compile_commands.json, then re-checks each
-# engine translation unit with clang -fsyntax-only after switching it to the
-# Android preprocessor configuration: define __ANDROID__ and drop the
-# desktop-only NS_HAVE_GDK_PIXBUF / NS_HAVE_LIBRSVG capability macros (Android
-# does not link GTK; GdkTexture is replaced by ns_texture).
+# engine translation unit with clang -fsyntax-only after defining __ANDROID__
+# (Android does not link GTK; GdkTexture is replaced by ns_texture).
 #
 # This catches Android-source regressions on an ordinary Linux build. It does
 # NOT exercise the NDK toolchain or the cross-compiled dependency sysroot —
 # that is android/scripts/build-deps.sh and runs in CI / on an NDK box.
+#
+# Run it on Linux: on an MSYS2 host, __ANDROID__ sends the host curl.h down its
+# POSIX branch and the translation units including it fail on <sys/select.h>.
 #
 # Usage: android/scripts/check-android-sources.sh [builddir]
 
@@ -34,9 +35,12 @@ entries = json.load(open(ccjson))
 
 # The embed library (libnordstjernen.so) compiles exactly the engine source
 # set that the Android build uses, so check those translation units.
+ENGINE_DIRS = ('libnordstjernen.so.p', 'libnordstjernen.dll.p',
+               'libnordstjernen.dylib.p')
+
 def is_engine(e):
     blob = e.get('output', '') + e.get('command', '')
-    return 'libnordstjernen.so.p' in blob and e['file'].endswith('.c')
+    return any(d in blob for d in ENGINE_DIRS) and e['file'].endswith('.c')
 
 DROP_WITH_ARG = {'-o', '-MF', '-MQ', '-MT'}
 DROP = {'-c', '-MD', '-MMD', '-MP'}
@@ -55,8 +59,6 @@ for e in entries:
             skip = True; continue
         if a in DROP or a.endswith('.o') or a.endswith('.o.d'):
             continue
-        if a.startswith('-DNS_HAVE_GDK_PIXBUF') or a.startswith('-DNS_HAVE_LIBRSVG'):
-            continue
         out.append(a)
     out += ['-D__ANDROID__', '-fsyntax-only']
     r = subprocess.run(out, cwd=builddir, capture_output=True, text=True)
@@ -71,5 +73,8 @@ for e in entries:
 
 print(f"\nchecked {checked} engine sources under __ANDROID__; "
       f"{len(fails)} failed")
+if not checked:
+    print(f"no engine translation units in {ccjson}", file=sys.stderr)
+    sys.exit(2)
 sys.exit(1 if fails else 0)
 PY
