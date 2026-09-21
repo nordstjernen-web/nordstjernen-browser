@@ -361,6 +361,16 @@ reorder_children_by_order(ns_box *box)
 }
 
 static gboolean
+style_is_multicol(const ns_style *s)
+{
+    if (!s) return FALSE;
+    const ns_css_value *cc = s->values[NS_CSS_COLUMN_COUNT];
+    if (cc && cc->kind == NS_CSS_V_LENGTH && cc->u.length.v >= 2) return TRUE;
+    const ns_css_value *cw = s->values[NS_CSS_COLUMN_WIDTH];
+    return cw && cw->kind == NS_CSS_V_LENGTH && cw->u.length.v > 0;
+}
+
+static gboolean
 style_is_absolute_or_fixed(const ns_style *s)
 {
     const ns_css_value *v = s ? s->values[NS_CSS_POSITION] : NULL;
@@ -6540,6 +6550,34 @@ float_side_of(const ns_style *s)
 }
 
 static int
+multicol_distributable_children(const ns_box *box)
+{
+    int n = 0;
+    for (const ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_BLOCK && c->kind != NS_BOX_TABLE) continue;
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        if (float_side_of(c->style) >= 0) continue;
+        if (++n >= 2) break;
+    }
+    return n;
+}
+
+static ns_box *
+multicol_column_host(ns_box *box)
+{
+    ns_box *only = NULL;
+    for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_BOX_BLOCK) continue;
+        if (style_is_absolute_or_fixed(c->style)) continue;
+        if (float_side_of(c->style) >= 0) continue;
+        if (only) return NULL;
+        only = c;
+    }
+    if (!only || multicol_distributable_children(only) < 2) return NULL;
+    return only;
+}
+
+static int
 clear_kind_of(const ns_style *s)
 {
     if (!s) return 0;
@@ -6587,6 +6625,7 @@ box_establishes_bfc(const ns_box *box)
         return TRUE;
     if (float_side_of(box->style) >= 0 ||
         style_is_absolute_or_fixed(box->style) ||
+        style_is_multicol(box->style) ||
         style_is_flex_container(box->style) ||
         style_is_grid_container(box->style))
         return TRUE;
@@ -6638,6 +6677,26 @@ floats_offsets_at(const GArray *floats, double y,
             if (y < f->top || y >= f->bottom) continue;
             if (f->side == 0) l += f->outer_w;
             else              r += f->outer_w;
+        }
+    }
+    *left_out = l;
+    *right_out = r;
+}
+
+static void
+floats_offsets_over(const GArray *floats, double top, double bottom,
+                    double *left_out, double *right_out)
+{
+    double l = 0, r = 0;
+    floats_offsets_at(floats, top, &l, &r);
+    if (floats && bottom > top) {
+        for (guint i = 0; i < floats->len; i++) {
+            const float_ref *f = &g_array_index(floats, float_ref, i);
+            if (f->top <= top || f->top >= bottom) continue;
+            double bl = 0, br = 0;
+            floats_offsets_at(floats, f->top, &bl, &br);
+            if (bl > l) l = bl;
+            if (br > r) r = br;
         }
     }
     *left_out = l;
@@ -11484,18 +11543,17 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     double col_gap = 16;
     int n_cols = box->style ? ns_css_used_column_count(box->style, cw, &col_gap)
                             : 1;
+    ns_box *column_host = NULL;
     if (n_cols > 1) {
-        int distributable = 0;
-        for (ns_box *c = box->first_child; c; c = c->next_sibling)
-            if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE)
-                if (++distributable >= 2) break;
+        int distributable = multicol_distributable_children(box);
         gboolean single_fragmentable_inline =
             box->first_child && !box->first_child->next_sibling &&
             inline_box_can_fragment_multicol(box->first_child,
                                              child_inherited, cw);
-        if (distributable < 2 &&
-            !single_fragmentable_inline)
-            n_cols = 1;
+        if (distributable < 2 && !single_fragmentable_inline) {
+            column_host = multicol_column_host(box);
+            if (!column_host) n_cols = 1;
+        }
     }
     if (n_cols > 1) {
         double col_w = (cw - col_gap * (n_cols - 1)) / n_cols;
@@ -11638,6 +11696,26 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             c->x = inner_x + left_off;
             c->y = cursor_y - mt;
             layout_box(c, cw_avail, child_inherited);
+            if (box_establishes_bfc(c) && cw_avail > 0) {
+                double span_l = 0, span_r = 0;
+                double c_h = c->content_height +
+                             c->padding.top + c->padding.bottom +
+                             c->border.top + c->border.bottom;
+                floats_offsets_over(floats, cursor_y, cursor_y + c_h,
+                                    &span_l, &span_r);
+                if (span_l > left_off || span_r > right_off) {
+                    double retry = cw - MAX(span_l, left_off)
+                                      - MAX(span_r, right_off);
+                    if (retry > 0 && retry < cw_avail) {
+                        left_off = MAX(span_l, left_off);
+                        right_off = MAX(span_r, right_off);
+                        cw_avail = retry;
+                        c->x = inner_x + left_off;
+                        c->y = cursor_y - mt;
+                        layout_box(c, cw_avail, child_inherited);
+                    }
+                }
+            }
             if (keyword_is(box->style ? box->style->values[NS_CSS_DIRECTION]
                                       : NULL, "rtl") &&
                 !style_is_absolute_or_fixed(c->style)) {
@@ -11719,12 +11797,28 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     if (n_cols > 1 &&
         !layout_multicol_single_inline(box, inner_x, inner_y, cw, col_gap,
                                        n_cols, child_inherited, &cursor_y)) {
+        ns_box *host = column_host ? column_host : box;
+        double flow_x = column_host && host->first_child
+            ? host->first_child->x : inner_x;
+        double flow_y = column_host && host->first_child
+            ? host->first_child->y : inner_y;
         double total_h = cursor_y - inner_y;
+        if (column_host) {
+            total_h = 0;
+            for (ns_box *c = host->first_child; c; c = c->next_sibling) {
+                if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE)
+                    total_h += c->content_height +
+                               c->padding.top + c->padding.bottom +
+                               c->border.top + c->border.bottom;
+                else
+                    total_h += c->content_height;
+            }
+        }
         double target_h = total_h / n_cols;
         double cur_y = 0;
         double max_col_h = 0;
         int cur_col = 0;
-        for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+        for (ns_box *c = host->first_child; c; c = c->next_sibling) {
             double c_full_h;
             if (c->kind == NS_BOX_BLOCK || c->kind == NS_BOX_TABLE) {
                 c_full_h = c->content_height +
@@ -11738,8 +11832,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 cur_col++;
                 cur_y = 0;
             }
-            double target_x = inner_x + cur_col * (cw + col_gap);
-            double target_y = inner_y + cur_y;
+            double target_x = flow_x + cur_col * (cw + col_gap);
+            double target_y = flow_y + cur_y;
             double dx = target_x - c->x;
             double dy = target_y - c->y;
             if (dx != 0 || dy != 0) shift_box_tree(c, dx, dy);
@@ -11747,7 +11841,16 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             if (cur_y > max_col_h) max_col_h = cur_y;
         }
         box->content_width = cw * n_cols + col_gap * (n_cols - 1);
-        cursor_y = inner_y + max_col_h;
+        if (column_host) {
+            column_host->content_width = box->content_width;
+            column_host->content_height = max_col_h;
+            cursor_y = flow_y + max_col_h +
+                       column_host->padding.bottom +
+                       column_host->border.bottom +
+                       column_host->margin.bottom;
+        } else {
+            cursor_y = inner_y + max_col_h;
+        }
     }
 
 flex_done: ;
