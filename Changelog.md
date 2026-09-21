@@ -3,6 +3,40 @@ Changelog:
 
 1.0.26:
 ======
+* A table column is never narrower than its cells' contents need. The
+  auto layout measured a cell's minimum through measure_min_width, which
+  returns a specified width when it has one, so a cell's own width
+  doubled as its minimum: `width: 1%` on a heading cell -- the idiom
+  Wikipedia's navboxes use to shrink a column to its label -- left the
+  column one per cent of the table wide and its text ran across the cell
+  beside it. The floor is the cell's min-content width now, and when the
+  minimums together exceed the width the table asked for, the table grows
+  to their sum instead of scaling every column down below what it can
+  hold, as CSS 2.1 requires.
+* `min-width` and `max-width` on a table cell take part in the column
+  measures, clamped max-then-min the way the rest of the box model is.
+* A table cell inherits `text-align` from the table or the row. The
+  default stylesheet pinned `td, th` to `text-align: left`, which no
+  browser's does, so `text-align: center` on a `<table>` or a `<tr>`
+  reached the caption and nothing else. `vertical-align` likewise moves
+  from a pinned `middle` on the cell to the spec's arrangement -- the row
+  groups carry it and the cells inherit -- so a row can set it, and
+  `align`/`valign` now map on the row, row-group and column elements too.
+* An inline-block whose width is a percentage no longer drags the
+  intrinsic width of whatever contains it up to the width of the page:
+  a percentage is indefinite while intrinsic sizes are measured, so the
+  atomic is measured against its own content.
+* `content: '[' / ''` renders just the bracket. The alternative text a
+  `content` value carries after a slash, for a screen reader to read in
+  place of the glyphs, was drawn as part of the text, so MediaWiki's
+  section-edit links came out as `[/ edit ]/`.
+* A list item styled `display: inline-block` or `display: block` draws no
+  bullet; only a `list-item` display generates a marker.
+* `<th>` paints no background of its own and `<caption>` is not bold,
+  `<figcaption>` is not italic, and `<figure>` and `<dl>` carry the
+  margins the HTML rendering rules specify. None of these are in a
+  browser's default sheet, and each showed through wherever a page paints
+  its own tables or figures.
 
 1.0.25:
 ======

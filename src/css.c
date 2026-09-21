@@ -25101,7 +25101,7 @@ static const char *kUa =
     "hr { margin: 12px 0; height: 1px; background-color: #888888; }\n"
     "ul, ol { padding-left: 40px; margin: 1em 0; }\n"
     "li { margin: 2px 0; }\n"
-    "dl { margin: 0.6em 0; } dt { font-weight: bold; } dd { margin-left: 24px; }\n"
+    "dl { margin: 1em 0; } dt { font-weight: bold; } dd { margin-left: 40px; }\n"
     "dl > dt { margin-top: 0.3em; }\n"
     "a:link, a:visited { color: #0645ad; text-decoration: underline; }\n"
     "b, strong { font-weight: bold; }\n"
@@ -25126,17 +25126,17 @@ static const char *kUa =
     "small { font-size: 0.85em; }\n"
     "sub, sup { font-size: 0.75em; }\n"
     "table { display: table; border-collapse: separate; border-spacing: 2px; }\n"
-    "caption { display: table-caption; font-weight: bold; padding-bottom: 4px; "
-    "text-align: center; }\n"
+    "caption { display: table-caption; text-align: center; }\n"
     "thead { display: table-header-group; }\n"
     "tbody { display: table-row-group; }\n"
     "tfoot { display: table-footer-group; }\n"
     "colgroup { display: table-column-group; }\n"
     "col { display: table-column; }\n"
     "tr { display: table-row; }\n"
-    "td, th { display: table-cell; padding: 1px; text-align: left; "
-    "vertical-align: middle; }\n"
-    "th { font-weight: bold; text-align: center; background-color: #f0f0f0; }\n"
+    "td, th { display: table-cell; padding: 1px; }\n"
+    "thead, tbody, tfoot, table > tr { vertical-align: middle; }\n"
+    "tr, td, th { vertical-align: inherit; }\n"
+    "th { font-weight: bold; text-align: center; }\n"
     "table[border] td, table[border] th { "
     "border-top-width: 1px; border-right-width: 1px; "
     "border-bottom-width: 1px; border-left-width: 1px; "
@@ -25148,8 +25148,7 @@ static const char *kUa =
     "border-top-width: 0; border-right-width: 0; "
     "border-bottom-width: 0; border-left-width: 0; }\n"
     "img { display: inline; }\n"
-    "figure { margin: 0.6em 24px; }\n"
-    "figcaption { font-style: italic; font-size: 0.9em; text-align: center; }\n"
+    "figure { margin: 1em 40px; }\n"
     "input[type=\"radio\"], input[type=\"checkbox\"], input[type=\"reset\"], "
     "input[type=\"button\"], input[type=\"submit\"], input[type=\"color\"], "
     "input[type=\"search\"], select, button { box-sizing: border-box; }\n"
@@ -25799,6 +25798,10 @@ presentational_hints_css(const ns_node *el)
     gboolean is_table = strcmp(tag, "table") == 0;
     gboolean is_cell  = strcmp(tag, "td") == 0 || strcmp(tag, "th") == 0;
     gboolean is_row   = strcmp(tag, "tr") == 0;
+    gboolean is_table_part = is_cell || is_row ||
+        strcmp(tag, "thead") == 0 || strcmp(tag, "tbody") == 0 ||
+        strcmp(tag, "tfoot") == 0 || strcmp(tag, "col") == 0 ||
+        strcmp(tag, "colgroup") == 0;
     gboolean is_img   = strcmp(tag, "img") == 0;
     gboolean is_hr    = strcmp(tag, "hr") == 0;
     gboolean is_body  = strcmp(tag, "body") == 0;
@@ -26012,6 +26015,8 @@ presentational_hints_css(const ns_node *el)
         }
         if (ns_element_get_attr(el, "nowrap"))
             g_string_append(out, "white-space: nowrap;");
+    }
+    if (is_table_part) {
         const char *align = ns_element_get_attr(el, "align");
         if (align && *align) {
             char *lo = g_ascii_strdown(align, -1);
