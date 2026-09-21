@@ -3,6 +3,18 @@ Changelog:
 
 1.0.26:
 ======
+* A multi-column block splits a list, not just a run of siblings. The
+  column code distributed a container's own children and gave up below
+  two of them, so `column-width` on a wrapper whose sole child is an
+  `<ol>` -- which is how a Wikipedia reference list is built -- laid the
+  whole list out in one column. A lone in-flow block child is looked
+  through now and its children distributed instead.
+* A multi-column block establishes a block formatting context, as the
+  spec says, so it sits beside a float rather than under it.
+* A block that establishes a formatting context is placed clear of every
+  float it spans, not just those beside its top edge. It was narrowed
+  against the float band at its first line and kept that width all the
+  way down, so a wider float lower down overlapped it.
 * A table column is never narrower than its cells' contents need. The
   auto layout measured a cell's minimum through measure_min_width, which
   returns a specified width when it has one, so a cell's own width
