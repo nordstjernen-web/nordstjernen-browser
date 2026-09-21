@@ -49,6 +49,11 @@ Changelog:
   margins the HTML rendering rules specify. None of these are in a
   browser's default sheet, and each showed through wherever a page paints
   its own tables or figures.
+* The Android app is about 8 MB smaller. The build staged every shared
+  library in the dependency sysroot into the APK, including ones this
+  build does not link at all -- llama/ggml, gobject-introspection and the
+  unused harfbuzz and pcre2 variants -- so 19 of the 51 libraries per ABI
+  were dead weight. Only the engine's `DT_NEEDED` closure is packaged now.
 
 1.0.25:
 ======

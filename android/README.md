@@ -55,12 +55,13 @@ refetching it, so scripts, form state and the reading position survive.
                            uchardet · libpsl       (cross-compiled deps)
 ```
 
-The engine drops **GTK 4** on Android: `GdkTexture`
-is replaced by the `ns_texture` abstraction (`src/texture.c`), and the SVG /
-fallback image decoders are gated out. So the Android dependency set is just
-the GLib/cairo/pango graphics stack plus networking/storage — all plain C, no
-Rust toolchain required. PNG/JPEG/GIF/BMP still decode via the in-tree Wuffs;
-SVG and uncommon formats render as a broken-image box for now.
+The engine drops **GTK 4** on Android: `GdkTexture` is replaced by the
+`ns_texture` abstraction (`src/texture.c`). So the Android dependency set is
+just the GLib/cairo/pango graphics stack plus networking/storage — all plain C,
+no Rust toolchain required. Image decoding is the same in-tree chain as the
+desktop: ICO, then Wuffs (PNG/APNG, GIF, BMP, JPEG), then WebP via libwebp,
+then SVG in-engine (`src/svg.c`). AVIF needs libavif and is absent from the
+Android sysroot, so `.avif` renders a broken-image box.
 
 `ns_browser_render_rgba()` (added to the embedding API for Android) paints a
 viewport region straight into an Android `ARGB_8888` Bitmap via
@@ -88,6 +89,7 @@ android/
     src/main/res/raw/cacert.pem         CA bundle for libcurl
   scripts/fetch-prebuilt-deps.ps1       fetch release-built Android dependency sysroots
   scripts/build-deps.sh                 cross-compile engine → jniLibs/<abi>/
+  scripts/check-android-sources.sh      syntax-check engine sources under __ANDROID__
   settings.gradle · build.gradle · gradle.properties
 ```
 
@@ -95,11 +97,18 @@ android/
 
 ```sh
 cd android
-gradle wrapper          # once, to generate ./gradlew (or use a system gradle)
 ./gradlew assembleDebug  # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Requires JDK 17, the Android SDK (compileSdk 36), and CMake 3.22+ from the SDK.
+The Gradle wrapper is committed, so no `gradle` on `PATH` is needed. Gradle
+locates the SDK through `android/local.properties` or `ANDROID_HOME`; neither
+is in the tree, so export `ANDROID_HOME` (Windows:
+`$env:ANDROID_HOME='C:\Users\<you>\AppData\Local\Android\Sdk'`) or Gradle fails
+with "SDK location not found".
+
+Requires JDK 17 or newer, the Android SDK (compileSdk 36), NDK
+`30.0.16248370` (`ndkVersion` in `app/build.gradle`; Gradle downloads it), and
+CMake 3.22+ from the SDK.
 `minSdk` is 34 (Android 14), `targetSdk` 36. Native code is built 16 KB page-size aligned
 (Play requirement): the JNI bridge via `ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES`,
 the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
@@ -144,6 +153,13 @@ into `jniLibs/<abi>/`. `NORDSTJERNEN_ANDROID_SYSROOT` can point either at a
 base directory containing `<abi>/lib/pkgconfig`, or directly at one ABI prefix.
 Each run writes diagnostic files under `android/.build/logs/`.
 
+Only the engine's `DT_NEEDED` closure is staged, and any `.so` outside it is
+removed from `jniLibs/<abi>/`, so a sysroot carrying libraries this build does
+not link (llama/ggml, gobject-introspection, the unused harfbuzz and pcre2
+variants) does not ship them in the APK. Nothing is loaded by name at runtime —
+Kotlin loads `libnordstjernen_jni.so` and the linker resolves the rest from
+`DT_NEEDED` — so the closure is the complete set.
+
 ## Status
 
 * **Done & verified on desktop:** engine `__ANDROID__` guards, the
@@ -157,14 +173,12 @@ Each run writes diagnostic files under `android/.build/logs/`.
   `sysroot-latest`, cross-compiles the engine, and assembles an APK on every
   push via `.github/workflows/android.yml`.
 * **Done & verified on desktop (dependency shrink):** the engine no longer
-  needs GTK 4 — `GdkTexture` is abstracted behind
-  `ns_texture` (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on
-  Android) and the SVG/fallback decoders are gated behind `NS_HAVE_LIBRSVG` /
-  `NS_HAVE_GDK_PIXBUF`. The desktop build is byte-for-byte behaviourally
-  identical (renders images to PNG as before).
+  needs GTK 4 — `GdkTexture` is abstracted behind `ns_texture`
+  (`src/texture.c`; a GDK wrapper on desktop, a BGRA buffer on Android). The
+  desktop build is byte-for-byte behaviourally identical.
 * **Android sources verified-compiling:** `android/scripts/check-android-sources.sh`
   re-checks every engine translation unit under the Android configuration
   (`__ANDROID__`) with `clang -fsyntax-only`, reusing
   the desktop `compile_commands.json` — no NDK required. It runs in the Linux
-  CI job, so Android-source regressions are caught on every build. All 36
+  CI job, so Android-source regressions are caught on every build. All 61
   engine sources pass.
