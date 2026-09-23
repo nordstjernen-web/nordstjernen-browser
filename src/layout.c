@@ -15093,7 +15093,7 @@ image_map_area_contains(const ns_node *area, double x, double y,
 {
     const char *shape = ns_element_get_attr(area, "shape");
     GArray *coords = image_map_coords(ns_element_get_attr(area, "coords"));
-    const double *c = (const double *)coords->data;
+    const double *c = &g_array_index(coords, double, 0);
     guint n = coords->len;
     gboolean hit = FALSE;
     if (shape && (g_ascii_strcasecmp(shape, "circle") == 0 ||
