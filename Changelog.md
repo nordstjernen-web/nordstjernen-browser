@@ -3,6 +3,26 @@ Changelog:
 
 1.0.26:
 ======
+* A cross-origin iframe can no longer script the page that embeds it.
+  A frame's `parent` and `top` were the embedding page's real window, and
+  the frame's global object inherited from it, so a framed site could read
+  and rewrite the embedder's DOM, `document.cookie` and `localStorage`
+  (only its own storage threw SecurityError). A cross-origin frame now
+  gets a restricted window proxy for `parent` and `top`, exposing only
+  `postMessage`, the `location` setter, `closed`, `length`,
+  `window`/`self`/`frames`/`parent`/`top` and `close`/`focus`/`blur`, and
+  throwing SecurityError for anything else. Its global inherits
+  `Window.prototype` rather than the parent's global. Messages it
+  exchanges with the parent carry the right `source` in both directions.
+  A frame sandboxed without `allow-same-origin` is treated the same way,
+  whatever its URL.
+* A framed document's `document.cookie` reads and writes the cookies of
+  the frame's own URL. It used to return the embedding page's cookie
+  string, and assigning to it replaced that string. Documents that have no
+  browsing context -- from `DOMParser`, `cloneNode` or
+  `createHTMLDocument` -- are cookie-averse and return the empty string,
+  as HTML specifies. The `Document.prototype` accessor also no longer
+  hands the top-level page's cookies to another document it is called on.
 * An iframe whose load handler navigates it again no longer hangs the
   page. Loading a queued frame fires its load event synchronously, so a
   handler that set `src` once more re-queued the same frame and the loader
