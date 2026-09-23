@@ -10575,7 +10575,11 @@ ns_wc_do_cipher(const ns_crypto_key *k, const ns_wc_alg *a, const guint8 *data,
     p.aad = a->aad; p.aad_len = a->aad_len;
     p.tag_bits = a->tag_bits;
     p.label = a->label; p.label_len = a->label_len;
-    if (!g_strcmp0(a->name, "AES-CTR")) { p.iv = a->counter; p.iv_len = a->counter_len; }
+    if (!g_strcmp0(a->name, "AES-CTR")) {
+        p.iv = a->counter;
+        p.iv_len = a->counter_len;
+        p.counter_bits = a->length;
+    }
     return enc ? ns_crypto_encrypt(k, &p, data, dl, out_len, err)
                : ns_crypto_decrypt(k, &p, data, dl, out_len, err);
 }

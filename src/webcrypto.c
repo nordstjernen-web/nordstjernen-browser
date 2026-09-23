@@ -909,6 +909,70 @@ ns_crypto_aes_cipher(const char *algo, int bits)
     return NULL;
 }
 
+static gboolean
+aes_ctr_pass(const EVP_CIPHER *cipher, const guint8 *key, const guint8 *counter,
+             const guint8 *in, gsize len, guint8 *out)
+{
+    EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
+    int outl = 0, finl = 0;
+    gboolean ok = ctx && len <= (gsize)G_MAXINT &&
+        EVP_EncryptInit_ex(ctx, cipher, NULL, key, counter) &&
+        EVP_EncryptUpdate(ctx, out, &outl, in, (int)len) &&
+        EVP_EncryptFinal_ex(ctx, out + outl, &finl);
+    EVP_CIPHER_CTX_free(ctx);
+    return ok;
+}
+
+static gboolean
+ctr_blocks_before_wrap(const guint8 *counter, int counter_bits, guint64 *blocks)
+{
+    guint64 low = 0;
+    for (int i = 8; i < 16; i++) low = (low << 8) | counter[i];
+    if (counter_bits >= 64) {
+        for (int bit = 64; bit < counter_bits; bit++)
+            if (!((counter[15 - bit / 8] >> (bit % 8)) & 1)) return FALSE;
+        *blocks = low == 0 ? G_MAXUINT64 : ~low + 1;
+        return TRUE;
+    }
+    guint64 mask = (G_GUINT64_CONSTANT(1) << counter_bits) - 1;
+    *blocks = mask - (low & mask) + 1;
+    return TRUE;
+}
+
+static guint8 *
+ns_crypto_aes_ctr(const ns_crypto_key *k, const EVP_CIPHER *cipher,
+                  const ns_crypto_params *p, const guint8 *data, gsize len,
+                  gsize *out_len, char **err)
+{
+    int bits = p->counter_bits;
+    if (bits < 1 || bits > 128)
+        return ns_crypto_err(err, "OperationError: invalid AES-CTR length");
+    guint64 blocks = (len + 15) / 16;
+    guint64 before_wrap = G_MAXUINT64;
+    gboolean wraps = bits < 128 &&
+        ctr_blocks_before_wrap(p->iv, bits, &before_wrap) &&
+        blocks > before_wrap;
+    if (wraps && bits < 64 && blocks > (G_GUINT64_CONSTANT(1) << bits))
+        return ns_crypto_err(err, "OperationError: AES-CTR counter would repeat");
+    guint8 *out = g_malloc(len + 16);
+    gsize head = wraps ? (gsize)before_wrap * 16 : len;
+    gboolean ok = aes_ctr_pass(cipher, k->raw, p->iv, data, head, out);
+    if (ok && wraps) {
+        guint8 restart[16];
+        memcpy(restart, p->iv, 16);
+        for (int bit = 0; bit < bits; bit++)
+            restart[15 - bit / 8] &= (guint8)~(1u << (bit % 8));
+        ok = aes_ctr_pass(cipher, k->raw, restart, data + head, len - head,
+                          out + head);
+    }
+    if (!ok) {
+        g_free(out);
+        return ns_crypto_err(err, "OperationError: AES-CTR");
+    }
+    *out_len = len;
+    return out;
+}
+
 static guint8 *
 ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *data,
               gsize len, gboolean enc, gsize *out_len, char **err)
@@ -932,6 +996,8 @@ ns_crypto_aes(const ns_crypto_key *k, const ns_crypto_params *p, const guint8 *d
             if (err) *err = g_strdup("OperationError: invalid AES IV length");
             return NULL;
         }
+        if (!g_strcmp0(k->algo, "AES-CTR"))
+            return ns_crypto_aes_ctr(k, cipher, p, data, len, out_len, err);
     }
     int tag_bits = gcm ? (p->tag_bits > 0 ? p->tag_bits : 128) : 0;
     int tag_len = tag_bits / 8;
