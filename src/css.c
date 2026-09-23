@@ -21354,6 +21354,17 @@ ns_css_html_ci_attr(const char *name)
     return FALSE;
 }
 
+static inline gboolean
+css_name_equals_lower(const char *name, const char *lower)
+{
+    for (;; name++, lower++) {
+        unsigned char c = (unsigned char)*name;
+        if (c >= 'A' && c <= 'Z') c = (unsigned char)(c + ('a' - 'A'));
+        if (c != (unsigned char)*lower) return FALSE;
+        if (!c) return TRUE;
+    }
+}
+
 static gboolean
 match_simple(const ns_css_simple *sel, const ns_node *el)
 {
@@ -21365,14 +21376,12 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                            !ns_element_get_attr(el, "data-nd-ns-uri");
         if (!null_ns) return FALSE;
     }
-    if (sel->type && strcmp(sel->type, "*") != 0) {
+    if (sel->type && !(sel->type[0] == '*' && sel->type[1] == '\0')) {
         if (!el->name) return FALSE;
         if (el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) {
             if (strcmp(sel->type, el->name) != 0) return FALSE;
         }
-        else if (g_ascii_tolower((unsigned char)el->name[0]) !=
-                     g_ascii_tolower((unsigned char)sel->type[0]) ||
-                 g_ascii_strcasecmp(sel->type, el->name) != 0) {
+        else if (!css_name_equals_lower(el->name, sel->type)) {
             return FALSE;
         }
     }
