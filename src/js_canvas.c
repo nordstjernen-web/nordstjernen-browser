@@ -90,6 +90,12 @@ ns_canvas_state_reset(ns_canvas_state *st, int w, int h)
     st->shadow_blur = st->shadow_ox = st->shadow_oy = 0;
 }
 
+gboolean
+ns_image_bitmap_is(JSValueConst v)
+{
+    return JS_GetOpaque(v, ns_image_bitmap_class_id) != NULL;
+}
+
 JSValue
 ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
