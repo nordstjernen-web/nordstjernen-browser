@@ -33469,14 +33469,16 @@ ns_node_will_validate(const ns_node *n)
     gboolean is_input    = strcmp(n->name, "input") == 0;
     gboolean is_textarea = strcmp(n->name, "textarea") == 0;
     gboolean is_select   = strcmp(n->name, "select") == 0;
-    if (!is_input && !is_textarea && !is_select) return FALSE;
+    gboolean is_button   = strcmp(n->name, "button") == 0;
+    if (!is_input && !is_textarea && !is_select && !is_button) return FALSE;
+    if (is_button && !ns_node_is_submit_trigger(n)) return FALSE;
     if (ns_element_effectively_disabled(n)) return FALSE;
     if (ns_form_control_readonly_bars_validation(n)) return FALSE;
+    if (is_input && ns_element_get_attr(n, "readonly")) return FALSE;
     for (const ns_node *p = n->parent; p; p = p->parent)
         if (ns_node_is_element_named(p, "datalist")) return FALSE;
     const char *type = is_input ? ns_element_get_attr(n, "type") : NULL;
-    if (type && (g_ascii_strcasecmp(type, "submit") == 0 ||
-                 g_ascii_strcasecmp(type, "button") == 0 ||
+    if (type && (g_ascii_strcasecmp(type, "button") == 0 ||
                  g_ascii_strcasecmp(type, "reset")  == 0 ||
                  g_ascii_strcasecmp(type, "image")  == 0 ||
                  g_ascii_strcasecmp(type, "hidden") == 0))
