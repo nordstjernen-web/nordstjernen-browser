@@ -550,6 +550,10 @@ prop_inherits(ns_css_prop p)
     case NS_CSS_TEXT_ANCHOR:
     case NS_CSS_PAINT_ORDER:
     case NS_CSS_SHAPE_RENDERING:
+    case NS_CSS_TEXT_SHADOW:
+    case NS_CSS_ORPHANS:
+    case NS_CSS_WIDOWS:
+    case NS_CSS_DOMINANT_BASELINE:
         return TRUE;
     default:
         return FALSE;
