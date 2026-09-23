@@ -26,7 +26,7 @@ trusted.
 - Windows process-mitigation bypass — the policies set via
   `SetProcessMitigationPolicy` at startup (ASLR, strict handle
   checks, extension-point disable, image-load restrictions,
-  dynamic-code prohibition, child-process block).
+  child-process block).
 - Same-origin, cookie, and HTTP-cache partitioning bypass.
 - HSTS, mixed-content, and CSP enforcement bypass.
 - URL-bar spoofing (IDN homograph, scheme confusion, etc.).
@@ -190,25 +190,20 @@ Windows has no direct Landlock or seccomp-bpf equivalent that a
 user-space GTK process can apply to itself. Instead the browser
 hardens itself at startup via `SetProcessMitigationPolicy`, called
 from `ns_security_win32_mitigations_init` in `src/security.c`
-**before** any DLL we don't statically link is touched. Six
-policies, all best-effort (an unsupported policy on an older
-Windows just returns `FALSE` and is skipped); the untrusted
-renderer gets all six, the GUI shell gets the first five (it must
-spawn renderer subprocesses):
+**before** any DLL we don't statically link is touched. Five
+policies, named by their `winnt.h` constants, all best-effort (an
+unsupported policy on an older Windows just returns `FALSE` and is
+skipped); the untrusted renderer gets all five, the GUI shell the
+first four (it must spawn renderer subprocesses):
 
-- **ASLR** (`ProcessASLRPolicy`, flags `0x0F`) — force relocate
-  images, force bottom-up randomization, high-entropy 64-bit
-  layout, disallow stripped images. Belt-and-braces on top of the
-  PE header's `IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE`.
+- **ASLR** (`ProcessASLRPolicy`, `EnableForceRelocateImages`) —
+  relocate images even if they were not linked with
+  `/DYNAMICBASE`. Bottom-up and high-entropy randomization come from
+  the PE header; `DisallowStrippedImages` is left off because it
+  would refuse a system or third-party DLL that has no relocations.
 - **StrictHandleCheck** (`ProcessStrictHandleCheckPolicy`, flags
   `0x03`) — raise an exception on invalid handle use and lock the
   setting permanently. Catches double-close, UAF-of-handle bugs.
-- **DisableDynamicCode** (`ProcessDynamicCodePolicy`, flags
-  `0x01`) — refuse `VirtualAlloc`/`VirtualProtect` with
-  `PAGE_EXECUTE_*`. Pairs with the no-JIT QuickJS guarantee: the
-  process has no legitimate need for writable-executable memory,
-  so any RCE that depends on allocating one is denied at the
-  kernel boundary.
 - **DisableExtensionPoints**
   (`ProcessExtensionPointDisablePolicy`, flags `0x01`) — block
   `AppInit_DLLs`, WinSock Layered Service Providers, Image File
@@ -233,6 +228,14 @@ spawn renderer subprocesses):
   (`http`/`https`/`ftp`/`rtsp`/`rtmp`; `file://` and local paths are
   refused on Windows so a media link can never launch a local
   executable).
+
+`ProcessDynamicCodePolicy` (no writable-executable memory) is not
+applied. The renderer legitimately needs executable memory: the GPU
+driver behind WebGL compiles shaders, and a `js_engine=v8` build JITs.
+Earlier releases listed it here, but the call passed policy 7, which is
+`ProcessControlFlowGuardPolicy` and cannot be enabled after start, and
+the "ASLR" call passed policy 0, `ProcessDEPPolicy`, which is always on
+for a 64-bit process -- neither did anything.
 
 There is no per-path filesystem sandbox; Windows AppContainer
 would provide one but requires a manifest and code-signing

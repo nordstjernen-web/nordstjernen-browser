@@ -964,10 +964,18 @@ ns_security_seccomp_init(void)
 
 #ifdef G_OS_WIN32
 
-typedef BOOL (WINAPI *ns_smp_fn)(int policy, PVOID buffer, SIZE_T length);
+typedef BOOL (WINAPI *ns_smp_fn)(PROCESS_MITIGATION_POLICY policy,
+                                 PVOID buffer, SIZE_T length);
+
+#define NS_ASLR_FORCE_RELOCATE_IMAGES        0x02u
+#define NS_STRICT_HANDLE_RAISE_AND_LOCK      0x03u
+#define NS_EXTENSION_POINTS_DISABLE          0x01u
+#define NS_IMAGE_LOAD_NO_REMOTE_OR_LOW_IL    0x07u
+#define NS_CHILD_PROCESS_NO_CREATION         0x01u
 
 static void
-ns_win32_apply_mitigation(ns_smp_fn fn, int policy, DWORD flags)
+ns_win32_apply_mitigation(ns_smp_fn fn, PROCESS_MITIGATION_POLICY policy,
+                          DWORD flags)
 {
     if (!fn) return;
     DWORD m = flags;
@@ -984,13 +992,17 @@ ns_security_win32_mitigations_init(gboolean allow_child_processes)
     ns_smp_fn fn = (ns_smp_fn)(void *)GetProcAddress(k, "SetProcessMitigationPolicy");
     if (!fn) return;
 
-    ns_win32_apply_mitigation(fn, 0,  0x0Fu);
-    ns_win32_apply_mitigation(fn, 3,  0x03u);
-    ns_win32_apply_mitigation(fn, 6,  0x01u);
-    ns_win32_apply_mitigation(fn, 7,  0x01u);
-    ns_win32_apply_mitigation(fn, 10, 0x07u);
+    ns_win32_apply_mitigation(fn, ProcessASLRPolicy,
+                              NS_ASLR_FORCE_RELOCATE_IMAGES);
+    ns_win32_apply_mitigation(fn, ProcessStrictHandleCheckPolicy,
+                              NS_STRICT_HANDLE_RAISE_AND_LOCK);
+    ns_win32_apply_mitigation(fn, ProcessExtensionPointDisablePolicy,
+                              NS_EXTENSION_POINTS_DISABLE);
+    ns_win32_apply_mitigation(fn, ProcessImageLoadPolicy,
+                              NS_IMAGE_LOAD_NO_REMOTE_OR_LOW_IL);
     if (!allow_child_processes)
-        ns_win32_apply_mitigation(fn, 13, 0x01u);
+        ns_win32_apply_mitigation(fn, ProcessChildProcessPolicy,
+                                  NS_CHILD_PROCESS_NO_CREATION);
 }
 
 #else

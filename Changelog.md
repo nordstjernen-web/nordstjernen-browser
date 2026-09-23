@@ -3,6 +3,13 @@ Changelog:
 
 1.0.26:
 ======
+* The Windows process mitigations are the ones intended. The policies were
+  passed as bare numbers and two were wrong: 0 is DEP, not ASLR, and 7 is
+  Control Flow Guard, not the dynamic-code policy -- DEP is always on for a
+  64-bit process and CFG cannot be turned on after start, so both calls did
+  nothing. ASLR now forces image relocation; dynamic-code prohibition stays
+  off, since the renderer's GPU driver and a V8 build need executable
+  memory; SECURITY.md is corrected to match.
 * A frame whose URL redirects to another site takes the origin of the page
   it actually loads. The frame kept the URL it was requested with, so a
   same-origin address that redirected elsewhere gave the other site's
