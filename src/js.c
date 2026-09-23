@@ -37981,12 +37981,12 @@ ns_js_set_focus(ns_js *js, const ns_node *el)
     }
     js->focused_node = el;
     ns_js_update_focus_visible(js);
+    js->mutated = TRUE;
     if (el) js->focus_nav_start = NULL;
     if (el) {
         ns_js_dispatch_event(js, el, "focus", NULL);
         ns_js_dispatch_event(js, el, "focusin", NULL);
     }
-    js->mutated = TRUE;
 }
 
 void
@@ -39449,6 +39449,8 @@ static void
 ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
                         const char *old_value, const char *new_value)
 {
+    if (el == js->focused_node && g_ascii_strcasecmp(attr, "type") == 0)
+        ns_js_update_focus_visible(js);
     if (g_ascii_strcasecmp(attr, "open") == 0 &&
         ns_node_is_element_named(el, "dialog")) {
         if (!new_value && old_value)

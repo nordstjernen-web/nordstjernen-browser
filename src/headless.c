@@ -725,6 +725,13 @@ typedef struct headless_flush_ctx {
     gboolean           relaying;
 } headless_flush_ctx;
 
+static const ns_node *
+headless_focus(const headless_flush_ctx *c)
+{
+    const ns_node *focused = c->js ? ns_js_focused_node(c->js) : NULL;
+    return focused ? focused : c->focused;
+}
+
 static void
 headless_relayout(headless_flush_ctx *c)
 {
@@ -742,8 +749,8 @@ headless_relayout(headless_flush_ctx *c)
 
     *c->styles = ns_engine_relayout(c->doc, c->base, c->vw, c->vh,
                                     c->image_cache, c->anim, c->js,
-                                    c->css_cache, c->focused, NULL, c->caret,
-                                    c->anchor, c->layout);
+                                    c->css_cache, headless_focus(c), NULL,
+                                    c->caret, c->anchor, c->layout);
     c->relaying = FALSE;
 }
 
