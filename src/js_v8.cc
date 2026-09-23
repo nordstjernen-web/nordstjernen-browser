@@ -6449,6 +6449,14 @@ ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb,
 }
 
 void
+ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data)
+{
+    (void)js;
+    (void)cb;
+    (void)user_data;
+}
+
+void
 ns_js_video_event(ns_js *js, const void *node, const char *kind, double value)
 {
     (void)js;
