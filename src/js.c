@@ -15438,6 +15438,25 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(col);
         return out;
     }
+    if (strcmp(name, "grid-template") == 0 || strcmp(name, "grid") == 0) {
+        static const char *const parts[6] = {
+            "grid-template-rows", "grid-template-columns",
+            "grid-template-areas", "grid-auto-flow", "grid-auto-rows",
+            "grid-auto-columns",
+        };
+        ns_js *grid_js = js_from_ctx(ctx);
+        if (grid_js) ns_js_flush_style(grid_js);
+        if (!grid_js || !grid_js->style_table ||
+            !g_hash_table_lookup(grid_js->style_table, n))
+            return g_strdup("");
+        gboolean full = name[4] == '\0';
+        char *values[6] = { NULL };
+        for (int i = 0; i < (full ? 6 : 3); i++)
+            values[i] = ns_computed_lookup(ctx, n, parts[i]);
+        char *out = ns_css_grid_shorthand_compose(values, full);
+        for (int i = 0; i < 6; i++) g_free(values[i]);
+        return out;
+    }
 
     ns_js *js = js_from_ctx(ctx);
     if (js) ns_js_flush_layout(js);
