@@ -1159,6 +1159,7 @@ void ns_css_mark_attr_dirty(ns_node *target, const char *name,
                             const char *old_value);
 gboolean ns_css_attr_may_affect_style(const ns_node *target, const char *name);
 void ns_css_set_render_zoom(double zoom);
+void ns_css_style_scale_font_size(ns_style *s, double factor);
 
 void ns_css_set_container_map(GHashTable *map);
 void ns_css_set_container_dims(double inline_px, double block_px);
