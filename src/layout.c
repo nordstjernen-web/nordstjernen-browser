@@ -326,6 +326,21 @@ keyword_or(const ns_style *s, ns_css_prop p, const char *fallback)
     return ns_css_alignment_base(v->u.keyword);
 }
 
+static const char *
+flex_direction_of(const ns_style *s)
+{
+    const char *dir = keyword_or(s, NS_CSS_FLEX_DIRECTION, "row");
+    int writing_mode = ns_css_writing_mode(s);
+    if (!writing_mode) return dir;
+    gboolean reverse = strstr(dir, "-reverse") != NULL;
+    if (strncmp(dir, "row", 3) == 0) {
+        gboolean rtl = keyword_is(s->values[NS_CSS_DIRECTION], "rtl");
+        return reverse != rtl ? "column-reverse" : "column";
+    }
+    gboolean right_to_left = writing_mode == 1;
+    return reverse != right_to_left ? "row-reverse" : "row";
+}
+
 static double
 number_or(const ns_css_value *v, double fallback)
 {
@@ -5783,6 +5798,12 @@ flex_align_is_baseline(const char *align)
 static double
 flex_item_baseline(const ns_box *c, double fallback)
 {
+    if (c->parent && ns_css_writing_mode(c->parent->style) &&
+        ns_css_writing_mode(c->style)) {
+        double border_h = c->content_height + c->padding.top +
+                          c->padding.bottom + c->border.top + c->border.bottom;
+        return c->margin.top + border_h / 2.0;
+    }
     double baseline;
     return box_first_baseline(c, &baseline) ? baseline : fallback;
 }
@@ -6803,7 +6824,7 @@ layout_image(ns_box *box, double parent_content_width)
     gboolean declared_size = box->media && box->media->declared_image_size;
     gboolean placeholder_size = box->media && box->media->placeholder_image_size;
     const char *parent_flex_dir = box->parent
-        ? keyword_or(box->parent->style, NS_CSS_FLEX_DIRECTION, "row") : "row";
+        ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
         style_is_flex_container(box->parent->style) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
@@ -7258,8 +7279,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (gw > 0) return gw;
     }
     gboolean flex_row = style_is_flex_container(box->style) &&
-        !keyword_is(box->style ? box->style->values[NS_CSS_FLEX_DIRECTION] : NULL, "column") &&
-        !keyword_is(box->style ? box->style->values[NS_CSS_FLEX_DIRECTION] : NULL, "column-reverse");
+        strncmp(flex_direction_of(box->style), "row", 3) == 0;
     double max_child = 0;
     double float_row = 0;
     double row_sum = 0;
@@ -8324,9 +8344,9 @@ estimate_natural_width(const ns_box *b, double cap)
         int flow_children = 0;
         gboolean column_flex = b->style &&
             style_is_flex_container(b->style) &&
-            (strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+            (strcmp(flex_direction_of(b->style),
                     "column") == 0 ||
-             strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+             strcmp(flex_direction_of(b->style),
                     "column-reverse") == 0);
         for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
             if (c->style && c->style != b->style &&
@@ -8347,9 +8367,9 @@ estimate_natural_width(const ns_box *b, double cap)
             flow_children++;
         }
         if (flow_children > 1 && style_is_flex_container(b->style) &&
-            strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+            strcmp(flex_direction_of(b->style),
                    "column") != 0 &&
-            strcmp(keyword_or(b->style, NS_CSS_FLEX_DIRECTION, "row"),
+            strcmp(flex_direction_of(b->style),
                    "column-reverse") != 0) {
             const ns_css_value *cg = b->style->values[NS_CSS_COLUMN_GAP];
             const ns_css_value *gg = b->style->values[NS_CSS_GAP];
@@ -11471,7 +11491,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     gboolean intrinsic_width = FALSE;
     gboolean flex_grow_filled = FALSE;
     const char *parent_flex_dir = box->parent
-        ? keyword_or(box->parent->style, NS_CSS_FLEX_DIRECTION, "row") : "row";
+        ? flex_direction_of(box->parent->style) : "row";
     gboolean flex_row_item = box->parent &&
         style_is_flex_container(box->parent->style) &&
         (strcmp(parent_flex_dir, "row") == 0 ||
@@ -11627,7 +11647,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         reorder_children_by_order(box);
 
     if (style_is_flex_container(box->style)) {
-        const char *dir = keyword_or(box->style, NS_CSS_FLEX_DIRECTION, "row");
+        const char *dir = flex_direction_of(box->style);
         gboolean is_row = strcmp(dir, "row") == 0 || strcmp(dir, "row-reverse") == 0;
         gboolean is_col = strcmp(dir, "column") == 0 || strcmp(dir, "column-reverse") == 0;
         if (is_row) {
@@ -12682,7 +12702,7 @@ flex_static_position(ns_box *abox, const ns_box *fc, double *out_x,
                      abox->border.bottom + abox->margin.top +
                      abox->margin.bottom;
 
-    const char *dir = keyword_or(fc->style, NS_CSS_FLEX_DIRECTION, "row");
+    const char *dir = flex_direction_of(fc->style);
     gboolean row = strncmp(dir, "row", 3) == 0;
     gboolean main_reverse = strstr(dir, "-reverse") != NULL;
     gboolean wrap_reverse = ns_css_keyword_is(
