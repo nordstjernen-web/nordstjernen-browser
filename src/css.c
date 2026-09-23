@@ -18311,6 +18311,8 @@ typedef struct {
     double height;
     int    type;    /* NS_CQ_TYPE_* */
     gboolean vertical;
+    int    sibling_index;
+    int    sibling_count;
 } ns_cq_container;
 
 static __thread GHashTable *g_cq_map;     /* ns_node* -> ns_cq_container* */
@@ -18366,6 +18368,19 @@ ns_css_container_map_add(GHashTable *map, const void *node,
     c->height = h;
     c->type = type;
     c->vertical = vertical;
+    const ns_node *el = node;
+    c->sibling_index = 1;
+    c->sibling_count = 1;
+    if (el->parent) {
+        int count = 0;
+        for (const ns_node *sib = el->parent->first_child; sib;
+             sib = sib->next_sibling) {
+            if (sib->kind != NS_NODE_ELEMENT) continue;
+            count++;
+            if (sib == el) c->sibling_index = count;
+        }
+        c->sibling_count = count;
+    }
     g_hash_table_insert(map, (gpointer)node, c);
 }
 
@@ -18580,11 +18595,41 @@ cq_value_is_ratio(const char *v, double *out)
     return ok;
 }
 
+static char *
+substitute_tree_counting(const char *text, int index, int count)
+{
+    GString *out = g_string_new(NULL);
+    for (const char *p = text; *p; ) {
+        const char *fn = NULL;
+        int value = 0;
+        if (g_ascii_strncasecmp(p, "sibling-index(", 14) == 0) {
+            fn = p + 14;
+            value = index;
+        } else if (g_ascii_strncasecmp(p, "sibling-count(", 14) == 0) {
+            fn = p + 14;
+            value = count;
+        }
+        if (fn) {
+            while (is_ws(*fn)) fn++;
+            if (*fn == ')') {
+                g_string_append_printf(out, "%d", value);
+                p = fn + 1;
+                continue;
+            }
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
 static gboolean
 cq_value_is_length(const char *v)
 {
     if (token_is_math_fn(v)) {
-        ns_css_value *cv = parse_calc(v);
+        char *counted = strstr(v, "sibling-")
+            ? substitute_tree_counting(v, 1, 1) : NULL;
+        ns_css_value *cv = parse_calc(counted ? counted : v);
+        g_free(counted);
         if (!cv) return FALSE;
         ns_css_value_free(cv);
         return TRUE;
@@ -18995,10 +19040,16 @@ ns_css_container_condition_canonical(const char *cond)
 }
 
 static double
-cq_length_resolve(const char *v, double pct_basis)
+cq_length_resolve(const char *v, double pct_basis, const ns_cq_container *c)
 {
     double px = 0, pct = 0;
-    if (!resolve_to_px_pct(v, strlen(v), &px, &pct)) return 0;
+    char *resolved = strstr(v, "sibling-")
+        ? substitute_tree_counting(v, c->sibling_index, c->sibling_count)
+        : NULL;
+    const char *text = resolved ? resolved : v;
+    gboolean ok = resolve_to_px_pct(text, strlen(text), &px, &pct);
+    g_free(resolved);
+    if (!ok) return 0;
     return px + pct / 100.0 * pct_basis;
 }
 
@@ -19046,7 +19097,7 @@ cq_eval_feature(const cq_node *n, const ns_cq_container *c)
         if (!n->val1) return actual > 0 ? CQ_TRI_TRUE : CQ_TRI_FALSE;
         double v = 0;
         if (ratio) cq_value_is_ratio(n->val1, &v);
-        else v = cq_length_resolve(n->val1, horiz ? c->width : c->height);
+        else v = cq_length_resolve(n->val1, horiz ? c->width : c->height, c);
         if (n->is_min) return actual >= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
         if (n->is_max) return actual <= v ? CQ_TRI_TRUE : CQ_TRI_FALSE;
         return fabs(actual - v) < 0.001 ? CQ_TRI_TRUE : CQ_TRI_FALSE;
@@ -19055,7 +19106,7 @@ cq_eval_feature(const cq_node *n, const ns_cq_container *c)
     if (n->op1 != CQ_OP_NONE) {
         double v = 0;
         if (ratio) cq_value_is_ratio(n->val1, &v);
-        else v = cq_length_resolve(n->val1, basis);
+        else v = cq_length_resolve(n->val1, basis, c);
         cq_op flipped = n->op1 == CQ_OP_LT ? CQ_OP_GT : n->op1 == CQ_OP_LE ? CQ_OP_GE :
                         n->op1 == CQ_OP_GT ? CQ_OP_LT : n->op1 == CQ_OP_GE ? CQ_OP_LE : CQ_OP_EQ;
         if (cq_compare(actual, flipped, v) != CQ_TRI_TRUE) return CQ_TRI_FALSE;
@@ -19063,7 +19114,7 @@ cq_eval_feature(const cq_node *n, const ns_cq_container *c)
     if (n->op2 != CQ_OP_NONE) {
         double v = 0;
         if (ratio) cq_value_is_ratio(n->val2, &v);
-        else v = cq_length_resolve(n->val2, basis);
+        else v = cq_length_resolve(n->val2, basis, c);
         if (cq_compare(actual, n->op2, v) != CQ_TRI_TRUE) return CQ_TRI_FALSE;
     }
     return CQ_TRI_TRUE;
