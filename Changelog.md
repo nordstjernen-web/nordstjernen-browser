@@ -3,6 +3,29 @@ Changelog:
 
 1.0.26:
 ======
+* A page can no longer read the pixels of another site's images. Drawing
+  a cross-origin image into a canvas -- directly, through a pattern,
+  another canvas, an ImageBitmap, an OffscreenCanvas or a video poster --
+  left its pixels readable through `getImageData`, `toDataURL`, `toBlob`
+  and `convertToBlob`, and WebGL's `texImage2D` plus `readPixels` read them
+  back too. The canvas is now marked tainted and those calls throw
+  `SecurityError`; WebGL and WebGPU refuse cross-origin sources outright;
+  a redirect to another origin counts as cross-origin. Same-origin, `data:`
+  and `blob:` images are unaffected, and so are images loaded with
+  `crossorigin` from servers that allow it through CORS, so WebGL texture
+  and map-tile pages keep working.
+* `OfflineAudioContext` and `createBuffer` reject impossible sizes with
+  `NotSupportedError`. A page could ask for an 8 GB render buffer, or raise
+  `length` after construction, and crash the browser, and bad channel
+  counts, lengths or sample rates were quietly replaced with 1. Very deep
+  audio graphs no longer abort when scratch memory runs out.
+* AES-CTR honours the counter `length`: the whole 128-bit block was used as
+  the counter, so once the counter wrapped the ciphertext no longer
+  decrypted in other browsers. Invalid lengths and messages that would
+  reuse a counter block are rejected.
+* `crypto.getRandomValues` throws the errors the specification names:
+  `TypeMismatchError` for a DataView and `QuotaExceededError` for more than
+  65536 bytes.
 * Changing an element's `class` or `id` to a name no style sheet mentions
   no longer restyles everything inside it: toggling an unused theme class
   on `<body>` re-ran the whole cascade, about 200 ms on a page of 12,000
