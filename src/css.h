@@ -364,6 +364,7 @@ char *ns_css_ident_serialize(const char *name);
 char *ns_css_list_style_serialize(const char *type, const char *position,
                                   const char *image);
 char *ns_css_grid_shorthand_compose(char *const values[6], gboolean full);
+char *ns_css_grid_placement_compose(char *const values[4], gboolean area);
 char *ns_css_animation_range_serialize(const char *start_list, const char *end_list);
 char *ns_css_timing_serialize(const ns_css_timing *t);
 const char *ns_css_initial_value_text(const char *name);
