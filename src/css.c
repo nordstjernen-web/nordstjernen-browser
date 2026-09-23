@@ -1076,11 +1076,21 @@ font_family_substitute(const char *token)
 }
 
 static gboolean (*g_font_available_cb)(const char *family);
+static guint64 (*g_font_generation_cb)(void);
+static guint g_font_oracle_serial;
 
 void
 ns_css_set_font_available_cb(gboolean (*cb)(const char *family))
 {
     g_font_available_cb = cb;
+    g_font_oracle_serial++;
+}
+
+void
+ns_css_set_font_generation_cb(guint64 (*cb)(void))
+{
+    g_font_generation_cb = cb;
+    g_font_oracle_serial++;
 }
 
 static void (*g_font_metrics_cb)(const char *family, double size_px,
@@ -1128,10 +1138,9 @@ legacy_em_normalize(double *val, ns_css_unit *unit)
     }
 }
 
-char *
-ns_css_font_family_for_pango(const char *css_family)
+static char *
+font_family_resolve(const char *css_family)
 {
-    if (!css_family || !*css_family) return g_strdup("sans-serif");
     char *fallback = NULL;
     const char *p = css_family;
     while (*p) {
@@ -1198,6 +1207,29 @@ font_weight_relative(int parent, gboolean bolder)
         return parent < 350 ? 400 : parent < 550 ? 700 : 900;
     if (parent < 100) return parent;
     return parent < 550 ? 100 : parent < 750 ? 400 : 700;
+}
+
+char *
+ns_css_font_family_for_pango(const char *css_family)
+{
+    static __thread GHashTable *memo;
+    static __thread guint64 memo_generation;
+    static __thread guint memo_oracle;
+    if (!css_family || !*css_family) return g_strdup("sans-serif");
+    guint64 generation = g_font_generation_cb ? g_font_generation_cb() : 0;
+    if (!memo)
+        memo = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    if (generation != memo_generation || memo_oracle != g_font_oracle_serial ||
+        g_hash_table_size(memo) >= 1024) {
+        g_hash_table_remove_all(memo);
+        memo_generation = generation;
+        memo_oracle = g_font_oracle_serial;
+    }
+    const char *hit = g_hash_table_lookup(memo, css_family);
+    if (hit) return g_strdup(hit);
+    char *resolved = font_family_resolve(css_family);
+    g_hash_table_insert(memo, g_strdup(css_family), g_strdup(resolved));
+    return resolved;
 }
 
 int

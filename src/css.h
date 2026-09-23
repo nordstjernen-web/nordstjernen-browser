@@ -624,6 +624,7 @@ double   ns_css_calc_math_fn_px(const ns_css_value *v, double basis);
 gboolean ns_css_keyword_is(const ns_css_value *v, const char *kw);
 char    *ns_css_font_family_for_pango(const char *css_family);
 void     ns_css_set_font_available_cb(gboolean (*cb)(const char *family));
+void     ns_css_set_font_generation_cb(guint64 (*cb)(void));
 int      ns_css_font_weight_number(const ns_css_value *v, int fallback);
 
 typedef struct ns_css_font_metrics {
