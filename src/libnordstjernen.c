@@ -72,6 +72,9 @@ struct ns_browser {
     int             scroll_anchor_y;
     GPtrArray      *img_sessions;
     guint           image_arrivals_since_layout;
+    guint           media_events_source;
+    gboolean        images_arrived_since_layout;
+    gint64          load_delay_deadline_us;
     GHashTable     *img_requested;
     gboolean        dirty;
     gboolean        cascade_dirty;
@@ -234,6 +237,9 @@ browser_restore_scroll(ns_box *b, GHashTable *map)
         browser_restore_scroll(c, map);
 }
 
+static void browser_ensure_images(ns_browser *browser);
+static void browser_schedule_media_events(ns_browser *b);
+
 static void
 browser_relayout(ns_browser *b)
 {
@@ -286,9 +292,12 @@ browser_relayout(ns_browser *b)
     g_hash_table_destroy(scroll_save);
     b->images_fetched = FALSE;
     b->has_deferred_lazy = FALSE;
+    b->images_arrived_since_layout = FALSE;
     if (b->js) {
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_layout_root(b->js, b->layout);
+        browser_ensure_images(b);
+        browser_schedule_media_events(b);
     }
 
     gint64 now = g_get_monotonic_time();
@@ -368,11 +377,38 @@ root_axis_overflow_hidden(const ns_box *b, ns_css_prop axis)
 
 static int browser_images_outstanding(ns_browser *browser);
 
+static gboolean
+browser_fire_media_events(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    b->media_events_source = 0;
+    if (b->js && b->layout) ns_js_fire_media_load_events(b->js, b->layout);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+browser_schedule_media_events(ns_browser *b)
+{
+    if (!b->media_events_source)
+        b->media_events_source =
+            g_timeout_add(0, browser_fire_media_events, b);
+}
+
+static gboolean
+browser_load_waits_for_images(gpointer user_data)
+{
+    ns_browser *b = user_data;
+    if (g_get_monotonic_time() >= b->load_delay_deadline_us) return FALSE;
+    return b->media_events_source != 0 || b->images_arrived_since_layout ||
+           browser_images_outstanding(b) > 0;
+}
+
 static void
 browser_image_arrived(gpointer user_data)
 {
     ns_browser *b = user_data;
     if (!b) return;
+    b->images_arrived_since_layout = TRUE;
     b->image_arrivals_since_layout++;
     if (b->image_arrivals_since_layout >= NS_IMAGE_RELAYOUT_BATCH ||
         browser_images_outstanding(b) == 0) {
@@ -1210,6 +1246,9 @@ browser_build_from_doc(ns_node *doc, char *base, int viewport_width,
                       browser_js_navigate, b,
                       navigation_timing);
     if (b->js) {
+        b->load_delay_deadline_us =
+            g_get_monotonic_time() + (gint64)10 * G_USEC_PER_SEC;
+        ns_js_set_load_delay_cb(b->js, browser_load_waits_for_images, b);
         ns_js_set_style_table(b->js, b->styles);
         ns_js_set_image_cache(b->js, b->images);
         ns_js_set_anim(b->js, b->anim);
@@ -3795,6 +3834,8 @@ void
 ns_browser_close(ns_browser *browser)
 {
     if (!browser) return;
+    if (browser->media_events_source)
+        g_source_remove(browser->media_events_source);
     if (browser->img_sessions) {
         for (guint i = 0; i < browser->img_sessions->len; i++)
             ns_engine_img_session_close(

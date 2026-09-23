@@ -54696,7 +54696,8 @@ ns_js_lifecycle_has_blockers(ns_js *js)
     return js->eval_depth > 0 || js->iframe_load_depth > 0 || js->in_pump ||
         (js->pending_iframe_loads && js->pending_iframe_loads->len > 0) ||
         (js->deferred_script_roots && js->deferred_script_roots->len > 0) ||
-        (js->async_script_roots && js->async_script_roots->len > 0);
+        (js->async_script_roots && js->async_script_roots->len > 0) ||
+        (js->load_delay_cb && js->load_delay_cb(js->load_delay_user_data));
 }
 
 static gboolean
@@ -55282,6 +55283,14 @@ ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb, gpointer user_dat
     if (!js) return;
     js->layout_flush_cb = cb;
     js->layout_flush_user_data = user_data;
+}
+
+void
+ns_js_set_load_delay_cb(ns_js *js, gboolean (*cb)(gpointer), gpointer user_data)
+{
+    if (!js) return;
+    js->load_delay_cb = cb;
+    js->load_delay_user_data = user_data;
 }
 
 static void

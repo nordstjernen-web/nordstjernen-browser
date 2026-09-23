@@ -102,6 +102,8 @@ struct ns_js {
     gpointer      layout_flush_user_data;
     ns_js_viewport_scroll_cb viewport_scroll_cb;
     gpointer      viewport_scroll_user_data;
+    gboolean    (*load_delay_cb)(gpointer user_data);
+    gpointer      load_delay_user_data;
     gboolean      in_layout_flush;
     guint64       task_epoch;
     ns_js_clipboard_write_cb clipboard_write_cb;
