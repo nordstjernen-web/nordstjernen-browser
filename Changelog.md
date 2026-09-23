@@ -3,6 +3,87 @@ Changelog:
 
 1.0.26:
 ======
+* Grids with more than 24 rows lay out fully. Auto-placement stopped at
+  row 24 and piled every later item onto it.
+* Grids that use `grid-template-areas` are laid out by the full grid
+  algorithm. They went through a reduced code path that gave `fr` rows no
+  share of a fixed container height (a header / `1fr` / footer page left
+  the footer under the header), sized the columns the areas added as `1fr`
+  instead of by `grid-auto-columns`, and ignored `align-content`,
+  `align-items` and `grid-auto-rows`. Area names also work as line names,
+  so `grid-row: main` places an item on a named area.
+* `fr` rows grow to fill a container's `min-height`, so the `min-height:
+  100vh; grid-template-rows: auto 1fr auto` page layout keeps its footer
+  at the bottom.
+* A grid row with a fixed size keeps it: content taller than a `20px` row
+  overflows instead of pushing later rows down. Items given both a row and
+  a column claim their cell before auto-placed items flow in, instead of
+  landing on top of one.
+* Grid track sizing follows the specification more closely: an item
+  spanning several `auto` or content-sized columns widens them instead of
+  overflowing; `fit-content()` tracks shrink to their content;
+  `minmax(<length>, 1fr)` columns no longer push the grid wider than its
+  container; `repeat(auto-fill / auto-fit)` counts repetitions in the
+  space the other tracks leave and now works for rows too, empty
+  `auto-fit` rows collapse, and line names inside the repetition repeat
+  with it; columns created past the explicit grid are sized from
+  `grid-auto-columns`.
+* `grid`, `grid-template`, `grid-row`, `grid-column`, `grid-area` and
+  their longhands follow their grammar: invalid values such as
+  `grid-template: 10px` or `grid-row-start: 0` are dropped instead of
+  partly applied, omitted parts are reset, rows written without a size in
+  the template form are `auto`, line and area names keep their case, and
+  `element.style` and `getComputedStyle()` read the shorthands back in
+  shortest form. Computed track lists keep `repeat()`, `minmax()`,
+  `fit-content()` and subgrid line names.
+* `self-start` and `self-end` on a grid item use the item's own writing
+  mode.
+* `sibling-index()` and `sibling-count()` in a container size query
+  resolve against the container element.
+* Popovers follow the HTML standard. `showPopover()` left the element
+  hidden until something else restyled the page, opening one auto popover
+  never closed another, nothing threw for elements without a `popover`
+  attribute or for disconnected ones, `toggle` fired synchronously as a
+  plain event, and a `popovertarget` submit button inside a form toggled
+  the popover instead of submitting. Popovers now use the standard auto
+  and hint stacks, fire a cancelable `beforetoggle` and a queued
+  `ToggleEvent` carrying `source`, close when the user clicks outside or
+  presses Escape, hide when removed or retyped, and get the standard
+  centred fixed box. The `popover`, `popoverTargetAction`,
+  `popoverTargetElement`, `command` and `commandForElement` properties
+  reflect their attributes, and `commandfor`/`command` buttons work: show,
+  hide and toggle-popover, show-modal, close, request-close, and custom
+  `--` commands through `CommandEvent`.
+* `<dialog>` follows the HTML show and close steps: `show()`,
+  `showModal()` and closing fire `beforetoggle` and a queued `toggle`, and
+  the `close` event is queued; `close()` on a closed dialog no longer
+  changes `returnValue`; `show()` on an open modal dialog throws, as does
+  `showModal()` on a dialog outside the active document; modal dialogs
+  stack in the order they were opened, so the last one opened is drawn on
+  top and stays interactive, and `:modal` matches every open modal dialog;
+  focus returns to the element focused before the dialog opened;
+  `requestClose()`, Escape and `closedby="any"` light dismiss go through a
+  close watcher that honours `closedby`, and cancel can no longer re-enter
+  itself.
+* Light dismiss of popovers and dialogs runs before the pointer event
+  reaches the page, so `beforetoggle` arrives before the page's
+  `pointerup` listeners, as the standard orders it.
+* A click on a popover opened inside a modal dialog lands on the popover,
+  not the dialog behind it.
+* Hiding a popover no longer moves focus back onto an element the page has
+  since moved into that popover.
+* `:focus-visible` is no longer the same as `:focus`: a button or link
+  focused by a mouse click no longer shows the focus styling pages reserve
+  for keyboard users, and `:focus:not(:focus-visible)` now matches.
+  Keyboard focus, text fields and script focus remain visible, and a
+  focused control that turns into a text field starts matching.
+* Pages' `autofocus` attribute works: the first visible, focusable element
+  with `autofocus` gets focus before the page finishes loading, unless the
+  page already focused something or the URL fragment points at an element.
+* The `--wpt` runner sends test_driver clicks, action sequences and keys
+  as trusted input, so light dismiss, Escape, Tab, keyboard activation and
+  click-to-focus are exercised the way real input exercises them, and
+  WebDriver key codes are no longer typed into fields.
 * The audio helper only opens what a page may play. It opened any
   `file://` path the renderer named, and treated any other string that was
   not an http, https or data URL as a local path, so the page's JavaScript
