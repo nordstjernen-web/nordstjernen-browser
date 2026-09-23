@@ -288,6 +288,7 @@ ns_video_free(gpointer p)
     g_free(v->token);
     if (v->cues) g_ptr_array_free(v->cues, TRUE);
     ns_texture_unref(v->poster_texture);
+    g_free(v->poster_url);
     ns_texture_unref(v->frame_texture);
     ns_video_player_free(v->player);
     g_free(v);
@@ -1715,6 +1716,8 @@ on_poster_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
                                                 resp->body->len, &w, &h);
         if (tex) {
             pending->video->poster_texture = tex;
+            g_free(pending->video->poster_url);
+            pending->video->poster_url = g_strdup(resp->final_url);
             if (pending->video->natural_width  <= 0) pending->video->natural_width  = w;
             if (pending->video->natural_height <= 0) pending->video->natural_height = h;
         }

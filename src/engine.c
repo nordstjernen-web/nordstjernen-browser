@@ -859,8 +859,13 @@ on_image_fetch_done(GObject *src, GAsyncResult *result, gpointer user_data)
     GError *err = NULL;
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (resp && !resp->error && resp->body && resp->body->len > 0) {
-        ns_image_cache_insert_encoded(it->st->cache, it->abs,
-                                      resp->body->data, resp->body->len);
+        ns_image *img = ns_image_cache_insert_encoded(it->st->cache, it->abs,
+                                                      resp->body->data,
+                                                      resp->body->len);
+        if (img && !img->final_url) {
+            img->final_url = g_strdup(resp->final_url);
+            img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
+        }
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);
@@ -977,8 +982,13 @@ on_image_fetch_async_done(GObject *src, GAsyncResult *result,
     ns_response *resp = ns_net_fetch_finish(result, &err);
     if (!s->dead && resp && !resp->error && resp->body &&
         resp->body->len > 0) {
-        ns_image_cache_insert_encoded(s->cache, it->abs,
-                                      resp->body->data, resp->body->len);
+        ns_image *img = ns_image_cache_insert_encoded(s->cache, it->abs,
+                                                      resp->body->data,
+                                                      resp->body->len);
+        if (img && !img->final_url) {
+            img->final_url = g_strdup(resp->final_url);
+            img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
+        }
     }
     if (resp) ns_response_free(resp);
     g_clear_error(&err);

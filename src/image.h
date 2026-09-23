@@ -32,6 +32,8 @@ typedef struct ns_image_pixel_frame {
 
 struct ns_image {
     char        *url;
+    char        *final_url;
+    char        *cors_allow_origin;
     ns_texture  *texture;
     void        *render_surface;
     int          natural_width;

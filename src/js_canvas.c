@@ -88,6 +88,7 @@ ns_canvas_state_reset(ns_canvas_state *st, int w, int h)
     st->font = g_strdup("10px sans-serif");
     st->shadow_r = st->shadow_g = st->shadow_b = st->shadow_a = 0;
     st->shadow_blur = st->shadow_ox = st->shadow_oy = 0;
+    st->origin_clean = TRUE;
 }
 
 gboolean
@@ -111,7 +112,8 @@ ns_image_bitmap_close(JSContext *ctx, JSValueConst this_val,
 }
 
 JSValue
-ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h)
+ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h,
+                     gboolean origin_clean)
 {
     if (!surf || w <= 0 || h <= 0) {
         if (surf) cairo_surface_destroy(surf);
@@ -121,6 +123,7 @@ ns_image_bitmap_make(JSContext *ctx, cairo_surface_t *surf, int w, int h)
     b->surf = surf;
     b->w = w;
     b->h = h;
+    b->origin_clean = origin_clean;
     JSValue obj = JS_NewObjectClass(ctx, ns_image_bitmap_class_id);
     JS_SetOpaque(obj, b);
     JS_SetPropertyStr(ctx, obj, "width",  JS_NewInt32(ctx, w));
@@ -324,6 +327,7 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
         return promise;
     }
     int sw = 0, sh = 0;
+    gboolean origin_clean = TRUE;
     cairo_surface_t *surf = NULL;
     JSValue dv = JS_GetPropertyStr(ctx, argv[0], "data");
     gboolean is_imagedata = JS_IsObject(dv);
@@ -339,7 +343,7 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
     else if (is_blob)
         surf = ns_image_bitmap_from_blob(ctx, argv[0], &sw, &sh);
     else
-        surf = ns_ctx_drawimage_source(ctx, argv[0], &sw, &sh);
+        surf = ns_ctx_drawimage_source(ctx, argv[0], &sw, &sh, &origin_clean);
     if (!surf) {
         ns_reject_image_decode(ctx, resolvers);
         return promise;
@@ -368,7 +372,7 @@ ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
         surf = out;
         sw = rw; sh = rh;
     }
-    JSValue bm = ns_image_bitmap_make(ctx, surf, sw, sh);
+    JSValue bm = ns_image_bitmap_make(ctx, surf, sw, sh, origin_clean);
     JS_Call(ctx, resolvers[0], JS_UNDEFINED, 1, &bm);
     JS_FreeValue(ctx, bm);
     JS_FreeValue(ctx, resolvers[0]);
@@ -399,7 +403,9 @@ ns_offscreen_transferToImageBitmap(JSContext *ctx, JSValueConst this_val,
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
     cairo_paint(cr);
     cairo_destroy(cr);
-    return ns_image_bitmap_make(ctx, copy, w, h);
+    ns_canvas_state *st = js->canvas_states
+        ? g_hash_table_lookup(js->canvas_states, el) : NULL;
+    return ns_image_bitmap_make(ctx, copy, w, h, !st || st->origin_clean);
 }
 
 JSValue
@@ -618,8 +624,9 @@ ns_ctx_build_conic_pattern(JSContext *ctx, JSValueConst obj)
 }
 
 cairo_pattern_t *
-ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
+ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj, gboolean *origin_clean)
 {
+    *origin_clean = TRUE;
     if (!JS_IsObject(obj)) return NULL;
     JSValue t = JS_GetPropertyStr(ctx, obj, "_type");
     if (!JS_IsString(t)) { JS_FreeValue(ctx, t); return NULL; }
@@ -640,7 +647,7 @@ ns_ctx_build_pattern(JSContext *ctx, JSValueConst obj)
         JSValue node_v = JS_GetPropertyStr(ctx, obj, "_node");
         int iw = 0, ih = 0;
         cairo_surface_t *img =
-            ns_ctx_drawimage_source(ctx, node_v, &iw, &ih);
+            ns_ctx_drawimage_source(ctx, node_v, &iw, &ih, origin_clean);
         JS_FreeValue(ctx, node_v);
         if (!img) return NULL;
         pat = cairo_pattern_create_for_surface(img);
@@ -802,7 +809,9 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
             JS_FreeCString(ctx, s);
         }
     } else if (JS_IsObject(v)) {
-        st->fill_pattern = ns_ctx_build_pattern(ctx, v);
+        gboolean clean = TRUE;
+        st->fill_pattern = ns_ctx_build_pattern(ctx, v, &clean);
+        if (!clean) st->origin_clean = FALSE;
     }
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "strokeStyle");
@@ -816,7 +825,9 @@ ns_ctx_sync_styles(JSContext *ctx, JSValueConst this_val, ns_canvas_state *st)
             JS_FreeCString(ctx, s);
         }
     } else if (JS_IsObject(v)) {
-        st->stroke_pattern = ns_ctx_build_pattern(ctx, v);
+        gboolean clean = TRUE;
+        st->stroke_pattern = ns_ctx_build_pattern(ctx, v, &clean);
+        if (!clean) st->origin_clean = FALSE;
     }
     JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "lineWidth");
@@ -1887,13 +1898,16 @@ ns_ctx_gradient_addColorStop(JSContext *ctx, JSValueConst this_val,
 }
 
 cairo_surface_t *
-ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h)
+ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h,
+                        gboolean *origin_clean)
 {
+    *origin_clean = TRUE;
     if (!JS_IsObject(src)) return NULL;
     ns_image_bitmap *bm = JS_GetOpaque(src, ns_image_bitmap_class_id);
     if (bm && bm->surf) {
         *out_w = bm->w;
         *out_h = bm->h;
+        *origin_clean = bm->origin_clean;
         return cairo_surface_reference(bm->surf);
     }
     const ns_node *n = ns_unwrap_element(src);
@@ -1911,21 +1925,30 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
             if (st && st->surf) {
                 *out_w = st->w;
                 *out_h = st->h;
+                *origin_clean = st->origin_clean;
                 return cairo_surface_reference(st->surf);
             }
         }
         return NULL;
     }
     ns_texture *tex = NULL;
+    const char *source_url = NULL;
+    const char *cors_allow_origin = NULL;
+    gboolean cors_requested = ns_element_get_attr(n, "crossorigin") != NULL;
     if (js->layout_root) {
         const ns_box *b = ns_box_find_by_dom(js->layout_root, n);
         if (b && b->media) {
             if (strcmp(n->name, "img") == 0 && b->media->image) {
                 const ns_image *im = (const ns_image *)b->media->image;
-                if (im->texture) tex = im->texture;
+                if (im->texture) {
+                    tex = im->texture;
+                    source_url = im->final_url ? im->final_url : im->url;
+                    cors_allow_origin = im->cors_allow_origin;
+                }
             } else if (strcmp(n->name, "video") == 0 && b->media->video) {
                 const ns_video *v = (const ns_video *)b->media->video;
                 tex = v->poster_texture;
+                source_url = v->poster_url;
             }
         }
     }
@@ -1934,10 +1957,14 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
         const ns_image *im = ns_js_image_for_node(js, n);
         if (im && im->texture) {
             tex = im->texture;
+            source_url = im->final_url ? im->final_url : im->url;
+            cors_allow_origin = im->cors_allow_origin;
             if (!im->anim_frames) im_cache = (ns_image *)im;
         }
     }
     if (!tex) return NULL;
+    *origin_clean = ns_js_resource_origin_clean(js, ctx, source_url,
+        cors_requested ? cors_allow_origin : NULL);
     if (im_cache && im_cache->render_surface) {
         cairo_surface_t *cached = im_cache->render_surface;
         *out_w = cairo_image_surface_get_width(cached);
@@ -1966,11 +1993,22 @@ ns_ctx_drawimage_source(JSContext *ctx, JSValueConst src, int *out_w, int *out_h
 
 cairo_surface_t *
 ns_js_drawimage_source_surface(JSContext *ctx, JSValueConst src,
-                               int *out_w, int *out_h)
+                               int *out_w, int *out_h, gboolean *threw)
 {
     *out_w = 0;
     *out_h = 0;
-    return ns_ctx_drawimage_source(ctx, src, out_w, out_h);
+    *threw = FALSE;
+    gboolean origin_clean = TRUE;
+    cairo_surface_t *surf = ns_ctx_drawimage_source(ctx, src, out_w, out_h,
+                                                    &origin_clean);
+    if (!surf || origin_clean) return surf;
+    cairo_surface_destroy(surf);
+    *out_w = 0;
+    *out_h = 0;
+    *threw = TRUE;
+    ns_canvas_throw_dom(ctx, "SecurityError",
+                        "The image source is not origin-clean.");
+    return NULL;
 }
 
 JSValue
@@ -1983,8 +2021,10 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
             "argument 1 is not a valid image source.");
     if (argc < 3) return JS_UNDEFINED;
     int sw_total = 0, sh_total = 0;
+    gboolean origin_clean = TRUE;
     cairo_surface_t *src = ns_ctx_drawimage_source(ctx, argv[0],
-                                                   &sw_total, &sh_total);
+                                                   &sw_total, &sh_total,
+                                                   &origin_clean);
     if (!src || sw_total <= 0 || sh_total <= 0) {
         if (src) cairo_surface_destroy(src);
         return JS_UNDEFINED;
@@ -2037,6 +2077,7 @@ ns_ctx_drawImage(JSContext *ctx, JSValueConst this_val,
     else                  cairo_paint(st->cr);
     cairo_restore(st->cr);
     cairo_surface_destroy(src);
+    if (!origin_clean) st->origin_clean = FALSE;
     { ns_js *_j = js_from_ctx(ctx); if (_j) _j->mutated = TRUE; }
     return JS_UNDEFINED;
 }
@@ -2048,7 +2089,9 @@ ns_ctx_createPattern(JSContext *ctx, JSValueConst this_val,
     (void)this_val;
     if (argc < 1 || !JS_IsObject(argv[0])) return JS_NULL;
     int iw = 0, ih = 0;
-    cairo_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih);
+    gboolean origin_clean = TRUE;
+    cairo_surface_t *probe = ns_ctx_drawimage_source(ctx, argv[0], &iw, &ih,
+                                                     &origin_clean);
     if (!probe) return JS_NULL;
     cairo_surface_destroy(probe);
     JSValue obj = JS_NewObject(ctx);
@@ -2193,6 +2236,10 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     JS_ToInt32(ctx, &sy, argv[1]);
     JS_ToInt32(ctx, &sw, argv[2]);
     JS_ToInt32(ctx, &sh, argv[3]);
+    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
+    if (st && !st->origin_clean)
+        return ns_canvas_throw_dom(ctx, "SecurityError",
+            "The canvas has been tainted by cross-origin data.");
     int64_t ox = sx, oy = sy, rw = sw, rh = sh;
     if (rw < 0) { ox += rw; rw = -rw; }
     if (rh < 0) { oy += rh; rh = -rh; }
@@ -2219,7 +2266,6 @@ ns_ctx_getImageData(JSContext *ctx, JSValueConst this_val,
     if (!out) return JS_ThrowRangeError(ctx, "getImageData allocation failed");
     /* A canvas with no backing surface (never drawn to) reads as
        transparent black, not null. */
-    ns_canvas_state *st = ns_ctx_state(ctx, this_val);
     cairo_surface_t *surf = (st && st->surf) ? st->surf : NULL;
     const uint8_t *cd = NULL;
     int cw = 0, ch = 0, cs = 0;
@@ -3183,6 +3229,16 @@ ns_offscreen_convertToBlob(JSContext *ctx, JSValueConst this_val,
     JSValue blob = JS_NULL;
     if (el && js_from_ctx(ctx)) {
         ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
+        if (st && !st->origin_clean) {
+            ns_canvas_throw_dom(ctx, "SecurityError",
+                                "Tainted canvases may not be exported.");
+            JSValue exc = JS_GetException(ctx);
+            JS_Call(ctx, resolvers[1], JS_UNDEFINED, 1, &exc);
+            JS_FreeValue(ctx, exc);
+            JS_FreeValue(ctx, resolvers[0]);
+            JS_FreeValue(ctx, resolvers[1]);
+            return promise;
+        }
         if (st && st->surf) {
             GByteArray *buf = g_byte_array_new();
             cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,

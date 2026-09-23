@@ -20,6 +20,7 @@ typedef struct ns_video {
     int          natural_width;
     int          natural_height;
     ns_texture  *poster_texture;
+    char        *poster_url;
     ns_texture  *frame_texture;
     gboolean     loaded;
     gboolean     failed;

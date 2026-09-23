@@ -2157,10 +2157,11 @@ wgl_imagedata_bytes(JSContext *ctx, JSValueConst src, int *w, int *h,
 
 static uint8_t *
 wgl_source_rgba(JSContext *ctx, JSValueConst src, int format,
-                gboolean flip_y, gboolean premultiply, int *out_w, int *out_h)
+                gboolean flip_y, gboolean premultiply, int *out_w, int *out_h,
+                gboolean *threw)
 {
     int w = 0, h = 0;
-    cairo_surface_t *s = ns_js_drawimage_source_surface(ctx, src, &w, &h);
+    cairo_surface_t *s = ns_js_drawimage_source_surface(ctx, src, &w, &h, threw);
     if (!s) return NULL;
     const unsigned char *data = cairo_image_surface_get_data(s);
     int stride = cairo_image_surface_get_stride(s);
@@ -2272,8 +2273,11 @@ wgl_texImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *ar
         } else if (px) {
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (type == GL_UNSIGNED_BYTE) {
+            gboolean threw = FALSE;
             uint8_t *rgba = wgl_source_rgba(ctx, argv[5], format,
-                                            g->unpack_flip_y, g->premultiply, &w, &h);
+                                            g->unpack_flip_y, g->premultiply,
+                                            &w, &h, &threw);
+            if (threw) return JS_EXCEPTION;
             if (rgba) {
                 glTexImage2D(target, level, internalformat, w, h, 0, format, type, rgba);
                 g_free(rgba);
@@ -2341,8 +2345,11 @@ wgl_texSubImage2D(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         } else if (px) {
             if (!JS_IsUndefined(hold)) JS_FreeValue(ctx, hold);
         } else if (type == GL_UNSIGNED_BYTE) {
+            gboolean threw = FALSE;
             uint8_t *rgba = wgl_source_rgba(ctx, argv[6], format,
-                                            g->unpack_flip_y, g->premultiply, &w, &h);
+                                            g->unpack_flip_y, g->premultiply,
+                                            &w, &h, &threw);
+            if (threw) return JS_EXCEPTION;
             if (rgba) {
                 glTexSubImage2D(target, level, xoff, yoff, w, h, format, type, rgba);
                 g_free(rgba);
