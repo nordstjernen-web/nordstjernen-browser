@@ -54973,6 +54973,25 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         if (abs_url) {
             GError *err = NULL;
             resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+            if (resp && resp->final_url && *resp->final_url &&
+                strcmp(resp->final_url, abs_url) != 0) {
+                g_free(abs_url);
+                abs_url = g_strdup(resp->final_url);
+                if (js->csp &&
+                    !ns_csp_allows(js->csp, frame_kind, abs_url, origin)) {
+                    if (js->log_cb) {
+                        char *line = g_strdup_printf(
+                            "Blocked %s redirected to %s by "
+                            "Content-Security-Policy %s",
+                            is_object ? "object" : "iframe", abs_url,
+                            is_object ? "object-src" : "frame-src");
+                        js->log_cb(line, js->log_user_data);
+                        g_free(line);
+                    }
+                    ns_response_free(resp);
+                    resp = NULL;
+                }
+            }
             if (resp && ns_iframe_framing_blocked(origin, abs_url, resp)) {
                 if (js->log_cb) {
                     char *line = g_strdup_printf(

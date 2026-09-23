@@ -3,6 +3,13 @@ Changelog:
 
 1.0.26:
 ======
+* A frame whose URL redirects to another site takes the origin of the page
+  it actually loads. The frame kept the URL it was requested with, so a
+  same-origin address that redirected elsewhere gave the other site's
+  document the embedding page's origin: it could read the parent's DOM and
+  cookies, and the parent could read it. The frame now uses the response's
+  final URL, and a redirect into a source the page's CSP `frame-src` or
+  `object-src` does not allow is blocked.
 * A page can no longer read the pixels of another site's images. Drawing
   a cross-origin image into a canvas -- directly, through a pattern,
   another canvas, an ImageBitmap, an OffscreenCanvas or a video poster --
