@@ -345,6 +345,18 @@ flex_direction_of(const ns_style *s)
     return reverse != right_to_left ? "row-reverse" : "row";
 }
 
+static gboolean
+self_start_is_far_side(const ns_style *s, gboolean horizontal_axis)
+{
+    int writing_mode = ns_css_writing_mode(s);
+    gboolean rtl = s && keyword_is(s->values[NS_CSS_DIRECTION], "rtl");
+    if (horizontal_axis)
+        return writing_mode == 1 ? TRUE : writing_mode == 2 ? FALSE : rtl;
+    if (!writing_mode) return FALSE;
+    gboolean upward = keyword_is(s->values[NS_CSS_WRITING_MODE], "sideways-lr");
+    return upward != rtl;
+}
+
 static double
 number_or(const ns_css_value *v, double fallback)
 {
@@ -11446,8 +11458,7 @@ layout_grid(ns_box *box, double cw,
                 jraw->u.keyword && g_str_has_prefix(jraw->u.keyword, "safe ");
             const char *j_kw = j_stretch || (j_safe && free_w < 0)
                 ? "start" : j_eff;
-            gboolean item_rtl = c->style &&
-                ns_css_keyword_is(c->style->values[NS_CSS_DIRECTION], "rtl");
+            gboolean item_far = self_start_is_far_side(c->style, TRUE);
             gboolean at_right = FALSE;
             if (strcmp(j_kw, "center") == 0) {
                 if (free_w > 0) dx = free_w / 2.0;
@@ -11456,9 +11467,9 @@ layout_grid(ns_box *box, double cw,
             } else if (strcmp(j_kw, "start") == 0 || strcmp(j_kw, "flex-start") == 0) {
                 at_right = grid_rtl;
             } else if (strcmp(j_kw, "self-end") == 0) {
-                at_right = !item_rtl;
+                at_right = !item_far;
             } else if (strcmp(j_kw, "self-start") == 0) {
-                at_right = item_rtl;
+                at_right = item_far;
             } else if (strcmp(j_kw, "right") == 0) {
                 at_right = TRUE;
             }
@@ -11728,9 +11739,12 @@ layout_grid(ns_box *box, double cw,
             dy_align = free_h / 2.0;
         } else if (free_h > 0.5 && (strcmp(a_eff, "end") == 0 ||
                                     strcmp(a_eff, "flex-end") == 0 ||
-                                    strcmp(a_eff, "self-end") == 0 ||
                                     strcmp(a_eff, "last baseline") == 0)) {
             dy_align = free_h;
+        } else if (free_h > 0.5 && (strcmp(a_eff, "self-end") == 0 ||
+                                    strcmp(a_eff, "self-start") == 0)) {
+            gboolean far = self_start_is_far_side(c->style, FALSE);
+            if (far == (strcmp(a_eff, "self-start") == 0)) dy_align = free_h;
         }
         grid_row *gr = &g_array_index(grid_rows, grid_row, r);
         double row_top = gr->top + row_extra_before[r] +
