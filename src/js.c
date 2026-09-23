@@ -25649,6 +25649,7 @@ ns_window_request_idle_callback(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean ns_js_run_animation_frame_internal(ns_js *js);
+static void ns_js_flush_autofocus(ns_js *js);
 
 static gboolean
 ns_raf_tick_timer(gpointer data)
@@ -27879,6 +27880,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
     if (!js || js->halted || js->in_pump) return FALSE;
     ns_js_flush_scrollend(js);
     ns_js_flush_ready_images(js);
+    ns_js_flush_autofocus(js);
     ns_drain_microtasks(js);
     ns_js_promote_deferred_iframes(js);
     ns_js_process_pending_iframes(js);
@@ -38987,7 +38989,38 @@ ns_popover_focusing_steps(ns_js *js, ns_node *el)
     }
     const ns_node *control = ns_element_get_attr(el, "autofocus")
         ? el : ns_autofocus_delegate(el, 0);
+    if (!control) return;
     ns_js_run_focusing_steps(js, control);
+    js->autofocus_processed = TRUE;
+}
+
+static gboolean
+ns_js_url_targets_element(ns_js *js)
+{
+    const char *hash = js->current_url ? strchr(js->current_url, '#') : NULL;
+    if (!hash || !hash[1] || !js->current_doc) return FALSE;
+    char *id = g_uri_unescape_string(hash + 1, NULL);
+    gboolean hit = id && ns_node_find_by_id(js->current_doc, id) != NULL;
+    g_free(id);
+    return hit;
+}
+
+static void
+ns_js_flush_autofocus(ns_js *js)
+{
+    if (!js || js->autofocus_processed || !js->current_doc || js->halted)
+        return;
+    if (js->focused_node || ns_js_url_targets_element(js)) {
+        js->autofocus_processed = TRUE;
+        return;
+    }
+    const ns_node *target = ns_autofocus_delegate(js->current_doc, 0);
+    if (target) {
+        js->autofocus_processed = TRUE;
+        ns_js_run_focusing_steps(js, target);
+        return;
+    }
+    if (js->ready_state >= 2) js->autofocus_processed = TRUE;
 }
 
 static ns_node *
@@ -39552,6 +39585,7 @@ ns_first_sequentially_focusable(const ns_node *root, int depth)
 static void
 ns_dialog_focusing_steps(ns_js *js, ns_node *dialog)
 {
+    js->autofocus_processed = TRUE;
     const ns_node *control = NULL;
     if (ns_element_get_attr(dialog, "autofocus"))
         control = dialog;
@@ -53253,6 +53287,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     js->current_doc = doc;
     js->ce_main_doc = doc;
     js->focused_node = NULL;
+    js->autofocus_processed = FALSE;
     js->active_modal = NULL;
     ns_dom_set_active_modal(NULL);
     g_free(js->current_url);
@@ -57138,6 +57173,7 @@ ns_js_lifecycle_tick(gpointer data)
         &js->navigation_timing.dom_complete_ms, "domComplete");
     js->ready_state = 2;
     if (js->rt) JS_RunGC(js->rt);
+    ns_js_flush_autofocus(js);
     ns_js_dispatch_event(js, doc, "readystatechange", NULL);
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.load_event_start_ms, "loadEventStart");
