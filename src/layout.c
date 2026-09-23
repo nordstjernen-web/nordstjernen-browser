@@ -9254,6 +9254,11 @@ layout_flex_row_wrap(ns_box *box, double cw,
                                + g_array_index(extras_arr, double, idx),
                             g_array_index(main_arr, double, idx),
                             pre_h, child_inherited);
+                    } else if (strcmp(eff_align, "center") == 0) {
+                        shift_box_tree(c, 0, per_line / 2.0);
+                    } else if (strcmp(eff_align, "flex-end") == 0 ||
+                               strcmp(eff_align, "end") == 0) {
+                        shift_box_tree(c, 0, per_line);
                     }
                 }
             }
@@ -11553,7 +11558,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
     }
     box->content_width = cw;
 
-    if (explicit_width) {
+    if (explicit_width && !style_is_absolute_or_fixed(box->style)) {
         gboolean ml_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_LEFT]  : NULL);
         gboolean mr_auto = length_is_auto(box->style ? box->style->values[NS_CSS_MARGIN_RIGHT] : NULL);
         double available = parent_content_width - cw - horiz_extras;
@@ -12595,9 +12600,9 @@ flex_static_cross_offset(const char *align, double free_space,
     gboolean flipped = wrap_reverse != (rtl && !row);
     gboolean phys_start_is_end = !row && rtl;
     gboolean self_start_is_end = !row && self_rtl;
-    if (strcmp(align, "start") == 0)
+    if (strcmp(align, "start") == 0 || flex_align_is_baseline(align))
         return phys_start_is_end ? free_space : 0;
-    if (strcmp(align, "end") == 0)
+    if (strcmp(align, "end") == 0 || strcmp(align, "last baseline") == 0)
         return phys_start_is_end ? 0 : free_space;
     if (strcmp(align, "self-start") == 0)
         return self_start_is_end ? free_space : 0;
@@ -12608,7 +12613,7 @@ flex_static_cross_offset(const char *align, double free_space,
     if (strcmp(align, "right") == 0)
         return row ? (phys_start_is_end ? free_space : 0) : free_space;
     double cross = 0;
-    if (strcmp(align, "flex-end") == 0 || strcmp(align, "last baseline") == 0)
+    if (strcmp(align, "flex-end") == 0)
         cross = free_space;
     else if (strcmp(align, "center") == 0 || strcmp(align, "self-center") == 0)
         cross = free_space / 2;
