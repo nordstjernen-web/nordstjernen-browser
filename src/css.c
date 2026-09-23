@@ -25535,7 +25535,8 @@ static const char *kUa =
     "input[type=hidden i] { display: none !important; }\n"
     ":is(table, thead, tbody, tfoot, tr) > form "
     "{ display: none !important; }\n"
-    "video { display: inline; }\n"
+    "video { display: inline; object-fit: contain; }\n"
+    "iframe { border: 2px inset; }\n"
     "canvas { display: inline; }\n"
     "iframe, frame, frameset, embed { display: none; }\n"
     "iframe[data-nd-frame-loaded], object[data-nd-frame-loaded] "
@@ -26454,7 +26455,8 @@ is_presentational_attr_name(const char *n)
                      g_ascii_strcasecmp(n, "cellspacing") == 0 ||
                      g_ascii_strcasecmp(n, "cellpadding") == 0;
     case 'f': return g_ascii_strcasecmp(n, "face") == 0 ||
-                     g_ascii_strcasecmp(n, "frame") == 0;
+                     g_ascii_strcasecmp(n, "frame") == 0 ||
+                     g_ascii_strcasecmp(n, "frameborder") == 0;
     case 'h': return g_ascii_strcasecmp(n, "height") == 0 ||
                      g_ascii_strcasecmp(n, "hspace") == 0;
     case 'l': return g_ascii_strcasecmp(n, "leftmargin") == 0;
@@ -26644,6 +26646,12 @@ presentational_hints_css(const ns_node *el)
         append_html_dimension(out, height, FALSE, "height", NULL);
     else if (height && is_cell)
         append_html_dimension(out, height, TRUE, "height", NULL);
+    if (is_iframe) {
+        const char *frameborder = ns_element_get_attr(el, "frameborder");
+        if (frameborder && ns_parse_int(frameborder, 0, G_MININT / 2,
+                                        G_MAXINT / 2) == 0)
+            g_string_append(out, "border-width: 0;");
+    }
     if (width && height && (is_img || is_video || is_image_input)) {
         double aw, ah;
         gboolean apct, hpct;
