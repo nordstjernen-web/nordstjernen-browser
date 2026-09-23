@@ -3,6 +3,49 @@ Changelog:
 
 1.0.26:
 ======
+* A flex item with a height of its own keeps it. Stretching ignored
+  whether an item's height was `auto` and ignored `min-height`/`max-height`,
+  so a 20px item in a 100px row came out 100px tall; only auto-height items
+  stretch now, within their min and max, and the relayout that stretching
+  triggers keeps the flexed width.
+* A `position: fixed` box inside a transformed element is positioned and
+  painted relative to that element and scrolls with it, as css-transforms
+  requires, instead of being pinned to the window.
+* Border-box sizing is honoured in more places: floats are placed by their
+  border box, so a Bootstrap-3-style row of padded `width: 50%` columns no
+  longer wraps; shrink-to-fit widths stop counting padding twice; a
+  percentage height inside a border-box parent resolves against its content
+  box; and tables honour `box-sizing` and are border-box by default, so a
+  bordered `width: 100%` table no longer overhangs its container.
+* A float is never narrower than its longest word, and a `width: 0` child no
+  longer widens a shrink-to-fit parent.
+* Absolutely positioned boxes shrink-wrap including their margins, padding
+  and border, honour `min-height`/`max-height`, find their static position
+  inside their parent rather than after it, and treat `margin: auto` as 0
+  unless both `left` and `right` are set.
+* A last child's bottom margin stays inside `overflow: hidden` blocks,
+  floats, inline-blocks and parents with a fixed or minimum height instead
+  of escaping through them, and the document contains the body's bottom
+  margin.
+* Flexbox: images and other replaced items stretch across column
+  containers, items move with their line when `align-content` grows it, and
+  row and column follow a vertical `writing-mode`.
+* `min-content`, `max-content`, `fit-content` and `stretch` work in
+  `min-width`, `max-width`, `min-height` and `max-height`, and as flex item
+  sizes.
+* Text around an HTML comment or a hidden element keeps its spaces ("Text
+  after", not "Textafter").
+* `<center>` and `align="center|right"` move block-level children too,
+  including a table nested in an aligned cell.
+* `document.fonts.load()` and `FontFace.load()` wait until the web font has
+  loaded, and `document.fonts.ready` resolves with the FontFaceSet, so
+  scripts that measure text after them see the web font's metrics.
+* A text input's line height is never smaller than `normal`, so a reset
+  such as `input { line-height: 1px }` no longer clips the field.
+* Viewport units in an iframe resolve against the frame, even when a
+  stylesheet sizes the frame, and `calc()` expressions with vw/vh follow the
+  current viewport rather than the one in effect when the stylesheet was
+  parsed.
 * An embedding page can no longer read a cross-origin frame's document.
   `iframe.contentDocument` returned the framed page's DOM and
   `contentWindow` its real window whatever their origin, so any page
