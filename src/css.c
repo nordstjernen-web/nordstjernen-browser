@@ -11268,9 +11268,88 @@ grid_track_tokens_canonical(const grid_tok *toks, int n)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+grid_name_group_append(GString *out, const char *tok)
+{
+    GString *names = g_string_new(NULL);
+    gboolean ok = grid_names_append(names, tok);
+    if (ok) g_string_append_printf(out, " [%s]", names->str);
+    g_string_free(names, TRUE);
+    return ok;
+}
+
+static gboolean
+grid_name_repeat_append(GString *out, const char *tok, gboolean *auto_fill)
+{
+    gsize len = strlen(tok);
+    if (len < 9 || g_ascii_strncasecmp(tok, "repeat(", 7) != 0 ||
+        tok[len - 1] != ')')
+        return FALSE;
+    const char *body = tok + 7;
+    const char *end = tok + len - 1;
+    const char *comma = memchr(body, ',', (gsize)(end - body));
+    if (!comma) return FALSE;
+    char *count = css_trim_dup_range(body, comma);
+    char *names = g_strndup(comma + 1, (gsize)(end - comma - 1));
+    gboolean ok = TRUE;
+    GString *group = g_string_new("repeat(");
+    if (g_ascii_strcasecmp(count, "auto-fill") == 0) {
+        ok = !*auto_fill;
+        *auto_fill = TRUE;
+        g_string_append(group, "auto-fill,");
+    } else {
+        char *digits_end = NULL;
+        long n = strtol(count, &digits_end, 10);
+        ok = *count && g_ascii_isdigit(*count) && digits_end && !*digits_end &&
+             n >= 1;
+        g_string_append_printf(group, "%ld,", n);
+    }
+    GArray *toks = ok ? grid_tokens(names) : NULL;
+    ok = toks && toks->len > 0;
+    for (guint i = 0; ok && i < toks->len; i++) {
+        const grid_tok *t = &g_array_index(toks, grid_tok, i);
+        ok = t->kind == GRID_TOK_NAMES && grid_name_group_append(group, t->text);
+    }
+    if (toks) g_array_free(toks, TRUE);
+    if (ok) g_string_append_printf(out, " %s)", group->str);
+    g_string_free(group, TRUE);
+    g_free(count);
+    g_free(names);
+    return ok;
+}
+
+static char *
+grid_subgrid_canonical(const char *text)
+{
+    GArray *toks = grid_tokens(text);
+    if (!toks) return NULL;
+    const grid_tok *t = (const grid_tok *)toks->data;
+    gboolean ok = toks->len > 0 && t[0].kind == GRID_TOK_OTHER &&
+                  g_ascii_strcasecmp(t[0].text, "subgrid") == 0;
+    gboolean auto_fill = FALSE;
+    GString *out = g_string_new("subgrid");
+    for (guint i = 1; ok && i < toks->len; i++) {
+        if (t[i].kind == GRID_TOK_NAMES)
+            ok = grid_name_group_append(out, t[i].text);
+        else
+            ok = t[i].kind == GRID_TOK_OTHER &&
+                 grid_name_repeat_append(out, t[i].text, &auto_fill);
+    }
+    g_array_free(toks, TRUE);
+    if (!ok) {
+        g_string_free(out, TRUE);
+        return NULL;
+    }
+    return g_string_free(out, FALSE);
+}
+
 static char *
 grid_track_text_canonical(const char *text)
 {
+    while (is_ws(*text)) text++;
+    if (g_ascii_strncasecmp(text, "subgrid", 7) == 0 &&
+        (!text[7] || is_ws(text[7]) || text[7] == '['))
+        return grid_subgrid_canonical(text);
     GArray *toks = grid_tokens(text);
     if (!toks) return NULL;
     char *out = grid_track_tokens_canonical((const grid_tok *)toks->data,
@@ -12860,7 +12939,18 @@ parse_value_for(ns_css_prop prop, const char *text)
     case NS_CSS_GRID_AUTO_ROWS:
     case NS_CSS_GRID_AUTO_COLUMNS: {
         v = parse_tracks(t);
-        if (v) v->specified = grid_track_text_canonical(t);
+        if (v && v->u.tracks.subgrid &&
+            (prop == NS_CSS_GRID_AUTO_ROWS || prop == NS_CSS_GRID_AUTO_COLUMNS)) {
+            ns_css_value_free(v);
+            v = NULL;
+        }
+        if (v) {
+            v->specified = grid_track_text_canonical(t);
+            if (v->u.tracks.subgrid && !v->specified) {
+                ns_css_value_free(v);
+                v = NULL;
+            }
+        }
         if (!v) v = parse_keyword_choice(t, "none");
         break;
     }
@@ -24897,9 +24987,9 @@ value_serialize_one(const ns_css_value *v)
         return g_string_free(s, FALSE);
     }
     case NS_CSS_V_TRACKS: {
-        GString *s = g_string_new(NULL);
         if (v->u.tracks.subgrid)
-            return g_strdup("subgrid");
+            return g_strdup(v->specified ? v->specified : "subgrid");
+        GString *s = g_string_new(NULL);
         for (int i = 0; i <= v->u.tracks.n; i++) {
             gboolean open = FALSE;
             for (int k = 0; k < v->u.tracks.n_line_names; k++) {
