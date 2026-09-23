@@ -26359,6 +26359,17 @@ html_dimension_value(const char *s, gboolean ignore_zero, double *value,
     return TRUE;
 }
 
+static gboolean
+cell_nowrap_quirk(const ns_node *cell)
+{
+    const ns_node *doc = ns_node_root(cell);
+    if (!doc || !(doc->flags & NS_NODE_QUIRKS)) return FALSE;
+    double v;
+    gboolean pct;
+    return html_dimension_value(ns_element_get_attr(cell, "width"), TRUE,
+                                &v, &pct) && !pct;
+}
+
 static void
 append_html_dimension(GString *out, const char *attr, gboolean ignore_zero,
                       const char *prop_a, const char *prop_b)
@@ -26764,7 +26775,7 @@ presentational_hints_css(const ns_node *el)
                                  "border-inline-style: none;");
         else if (part_rules)
             g_string_append(out, "border-width: 1px; border-style: none;");
-        if (ns_element_get_attr(el, "nowrap"))
+        if (ns_element_get_attr(el, "nowrap") && !cell_nowrap_quirk(el))
             g_string_append(out, "white-space: nowrap;");
     } else if ((part_rules == TABLE_RULES_GROUPS &&
                 strcmp(tag, "tr") != 0 && strcmp(tag, "colgroup") != 0) ||
