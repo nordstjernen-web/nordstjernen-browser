@@ -3,6 +3,34 @@ Changelog:
 
 1.0.26:
 ======
+* Styling a large page is much faster. Every rule used to be tried on each
+  element whose tag, class or id matched its last compound, and each try
+  walked all the way up the ancestors. The cascade now keeps a small
+  filter of the tags, ids and classes above the element being styled and
+  drops a rule at once when an ancestor it needs cannot be there: a page of
+  16,000 elements and 3,000 rules loads in under a second instead of three.
+* A selector whose left end cannot match no longer makes matching
+  exponential in the depth of the page. `.nomatch div div div span` on a
+  deep tree took seconds, in a style sheet or in `querySelectorAll`;
+  matching now stops as soon as the rest of the selector cannot match.
+* `:nth-child`, `:nth-last-child`, `:nth-of-type` and `:nth-last-of-type`
+  number each list once per style pass instead of counting siblings for
+  every element, so a long list is no longer quadratic to style: 40,000
+  rows with `li:nth-child(even)` load in about two seconds instead of 25.
+* A child no longer inherits from the wrong parent through style sharing.
+  Sharing identified parents by a counter restarted on every style pass,
+  so after a partial restyle, or under parents styled with `attr()`, two
+  different parents could look the same.
+* Relayouts no longer re-resolve, re-scan and re-key every style sheet,
+  and `@import`ed sheets are parsed once rather than on every relayout,
+  which also lets a page with an import restyle incrementally. Identical
+  inline CSS on two pages in different directories resolves its `url()`
+  values against each page's own address.
+* `@container` conditions are parsed once per rule instead of for every
+  element they are tested against.
+* Changing the desktop colour scheme or the reduced-motion preference takes
+  effect on reload; cached style sheets parsed for the old preference were
+  being reused.
 * `<img style="width:100%">` no longer crashes the renderer. Measuring a
   percentage-width image asked for its own natural width, which asked for
   the percentage basis again, until the stack ran out; replaced elements
