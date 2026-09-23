@@ -3336,6 +3336,30 @@ ns_node_arm_js_invalidate(ns_node *n)
     if (n && !n->js_invalidate) n->js_invalidate = ns_invalidate_wrapper;
 }
 
+static gboolean ns_ce_name_valid(const char *s);
+
+static int
+ns_cmp_tag_name(const void *a, const void *b)
+{
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static gboolean
+ns_html_tag_has_plain_interface(const char *lower_name)
+{
+    static const char *const plain[] = {
+        "abbr", "acronym", "address", "article", "aside", "b", "basefont",
+        "bdi", "bdo", "big", "center", "cite", "code", "dd", "dfn", "dt",
+        "em", "figcaption", "figure", "footer", "header", "hgroup", "i",
+        "kbd", "main", "mark", "nav", "nobr", "noembed", "noframes",
+        "noscript", "plaintext", "rb", "rp", "rt", "rtc", "ruby", "s",
+        "samp", "search", "section", "small", "strike", "strong", "sub",
+        "summary", "sup", "tt", "u", "var", "wbr",
+    };
+    return bsearch(&lower_name, plain, G_N_ELEMENTS(plain), sizeof plain[0],
+                   ns_cmp_tag_name) != NULL;
+}
+
 static JSValue
 ns_node_kind_proto(ns_js *js, const ns_node *node)
 {
@@ -3359,8 +3383,11 @@ ns_node_kind_proto(ns_js *js, const ns_node *node)
                     lower[i] = g_ascii_tolower(node->name[i]);
                 JSValue *slot = g_hash_table_lookup(js->per_tag_protos, lower);
                 if (slot) return *slot;
+                if (ns_html_tag_has_plain_interface(lower))
+                    return js->proto_htmlelement;
             }
-            if (!strchr(node->name, '-') && JS_IsObject(js->proto_htmlunknownelement))
+            if (!ns_ce_name_valid(node->name) &&
+                JS_IsObject(js->proto_htmlunknownelement))
                 return js->proto_htmlunknownelement;
         }
         return js->proto_htmlelement;
@@ -3680,7 +3707,7 @@ static const ns_instof_def ns_instof_table[] = {
     { "HTMLOutputElement",        "output",             NS_INSTOF_TAG },
     { "HTMLParagraphElement",     "p",                  NS_INSTOF_TAG },
     { "HTMLPictureElement",       "picture",            NS_INSTOF_TAG },
-    { "HTMLPreElement",           "pre",                NS_INSTOF_TAG },
+    { "HTMLPreElement",           "pre listing xmp",    NS_INSTOF_TAG },
     { "HTMLProgressElement",      "progress",           NS_INSTOF_TAG },
     { "HTMLQuoteElement",         "q blockquote",       NS_INSTOF_TAG },
     { "HTMLScriptElement",        "script",             NS_INSTOF_TAG },
@@ -46011,7 +46038,8 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
     if (tag_atom == JS_ATOM_NULL) return;
 
     static const char *const base_ifaces[] = {
-        "HTMLElement", "Element", "Node", "CharacterData", "Text",
+        "HTMLElement", "HTMLUnknownElement", "Element", "Node",
+        "CharacterData", "Text",
         "Comment", "CDATASection", "ProcessingInstruction", "Document",
         "HTMLDocument", "XMLDocument", "DocumentFragment", "ShadowRoot",
         "DocumentType", "Attr", "SVGElement", "SVGAElement", "SVGSVGElement",
