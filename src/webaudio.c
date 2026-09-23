@@ -160,7 +160,8 @@ ns_wa_sum_inputs(JSContext *ctx, JSValueConst node, uint32_t frames,
     if (!JS_IsObject(ins)) { JS_FreeValue(ctx, ins); return; }
     uint32_t n = ns_js_array_length(ctx, ins);
     if (!n) { JS_FreeValue(ctx, ins); return; }
-    float *tmp = g_new0(float, frames);
+    float *tmp = g_try_new0(float, frames);
+    if (!tmp) { JS_FreeValue(ctx, ins); return; }
     walk->depth++;
     for (uint32_t i = 0; i < n && walk->renders_left > 0; i++) {
         JSValue src = JS_GetPropertyUint32(ctx, ins, i);

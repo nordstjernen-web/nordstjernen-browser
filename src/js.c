@@ -11661,6 +11661,18 @@ ns_audio_buffer_getChannelData(JSContext *ctx, JSValueConst this_val,
     return arr;
 }
 
+#define NS_WEBAUDIO_MAX_CHANNELS 32
+#define NS_WEBAUDIO_MAX_SAMPLES  (UINT64_C(1) << 26)
+
+static gboolean
+ns_audio_buffer_shape_ok(int32_t channels, int32_t length, double sample_rate)
+{
+    return channels >= 1 && channels <= NS_WEBAUDIO_MAX_CHANNELS &&
+           length >= 1 &&
+           (uint64_t)channels * (uint64_t)length <= NS_WEBAUDIO_MAX_SAMPLES &&
+           sample_rate >= 3000.0 && sample_rate <= 768000.0;
+}
+
 static JSValue
 ns_audio_createBuffer(JSContext *ctx, JSValueConst this_val,
                       int argc, JSValueConst *argv)
@@ -11672,9 +11684,11 @@ ns_audio_createBuffer(JSContext *ctx, JSValueConst this_val,
     if (argc >= 1) JS_ToInt32(ctx, &channels, argv[0]);
     if (argc >= 2) JS_ToInt32(ctx, &length, argv[1]);
     if (argc >= 3) JS_ToFloat64(ctx, &sample_rate, argv[2]);
-    JSValue b = ns_audio_make_buffer(ctx, channels > 0 ? (uint32_t)channels : 1,
-                                     length > 0 ? (uint32_t)length : 1,
-                                     sample_rate);
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "AudioBuffer channel count, length or sample rate out of range");
+    JSValue b = ns_audio_make_buffer(ctx, (uint32_t)channels,
+                                     (uint32_t)length, sample_rate);
     ns_bind_fn(ctx, b, "getChannelData", ns_audio_buffer_getChannelData, 1);
     return b;
 }
@@ -11771,14 +11785,18 @@ ns_offline_audio_startRendering(JSContext *ctx, JSValueConst this_val,
     JS_ToInt32(ctx, &length, v); JS_FreeValue(ctx, v);
     v = JS_GetPropertyStr(ctx, this_val, "sampleRate");
     JS_ToFloat64(ctx, &sample_rate, v); JS_FreeValue(ctx, v);
-    if (channels <= 0) channels = 1;
-    if (length <= 0) length = 1;
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_promise_reject_dom(ctx, "NotSupportedError",
+            "OfflineAudioContext channel count, length or sample rate out of range");
+    float *mix = g_try_new0(float, (gsize)length);
+    if (!mix)
+        return ns_promise_reject_dom(ctx, "NotSupportedError",
+            "OfflineAudioContext rendering buffer could not be allocated");
     JSValue buf = ns_audio_make_buffer(ctx, (uint32_t)channels,
                                        (uint32_t)length, sample_rate);
     ns_bind_fn(ctx, buf, "getChannelData", ns_audio_buffer_getChannelData, 1);
     {
         JSValue dest = JS_GetPropertyStr(ctx, this_val, "destination");
-        float *mix = g_new0(float, (uint32_t)length);
         if (ns_webaudio_render_offline(ctx, dest, (uint32_t)length,
                                        sample_rate, mix)) {
             JSValue chans = JS_GetPropertyStr(ctx, buf, "_chans");
@@ -11839,9 +11857,9 @@ ns_offline_audio_context_ctor(JSContext *ctx, JSValueConst this_val,
         if (argc >= 2) JS_ToInt32(ctx, &length, argv[1]);
         if (argc >= 3) JS_ToFloat64(ctx, &sample_rate, argv[2]);
     }
-    if (channels <= 0) channels = 1;
-    if (length <= 0) length = 1;
-    if (!(sample_rate > 0)) sample_rate = 44100.0;
+    if (!ns_audio_buffer_shape_ok(channels, length, sample_rate))
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "OfflineAudioContext channel count, length or sample rate out of range");
     JSValue a = ns_audio_context_build(ctx, sample_rate);
     JS_SetPropertyStr(ctx, a, "state", JS_NewString(ctx, "suspended"));
     JS_SetPropertyStr(ctx, a, "length", JS_NewInt32(ctx, length));
