@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include "css.h"
+#include "css_syntax.h"
 #include "debuglog.h"
 #include "image.h"
 #include "paint.h"
@@ -547,6 +548,29 @@ frame_viewports_disagree_with_layout(void)
     return FALSE;
 }
 
+static gboolean
+sheet_type_is_css(const char *type)
+{
+    if (!type || !*type) return TRUE;
+    gsize n = strcspn(type, ";");
+    while (n > 0 && g_ascii_isspace(type[n - 1])) n--;
+    return n == 8 && g_ascii_strncasecmp(type, "text/css", 8) == 0;
+}
+
+static gboolean
+style_sheet_enabled(const ns_node *style)
+{
+    return !(style->flags & NS_NODE_SHEET_DISABLED) &&
+           sheet_type_is_css(ns_element_get_attr(style, "type"));
+}
+
+static gboolean
+link_sheet_enabled(const ns_node *link)
+{
+    return !ns_element_get_attr(link, "disabled") &&
+           sheet_type_is_css(ns_element_get_attr(link, "type"));
+}
+
 static void
 collect_stylesheets_walk(ns_node *n, const char *base_url,
                          sheet_collect_ctx *cc, int depth)
@@ -579,13 +603,14 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
     }
     GPtrArray *out = cc->out;
     GHashTable *cache = cc->cache;
-    if (ns_node_is_element_named(n, "style")) {
+    if (ns_node_is_element_named(n, "style") && style_sheet_enabled(n)) {
         char *css = ns_css_style_element_text(n);
         if (css) {
             if (css_has_viewport_media(css)) cc->media_seen = TRUE;
             if (cc->run_base && cc->run_base != base_url)
                 sheet_run_flush(cc);
-            if (strstr(css, "@import")) {
+            if (strstr(css, "@import") ||
+                !ns_css_syntax_is_self_contained(css, strlen(css))) {
                 sheet_run_flush(cc);
                 ns_css_stylesheet *sh =
                     ns_css_stylesheet_from_style_element_cached(n);
@@ -610,6 +635,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
         const char *href = ns_element_get_attr(n, "href");
         const char *media = ns_element_get_attr(n, "media");
         if (href && *href && rel_is_stylesheet(rel) &&
+            link_sheet_enabled(n) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
             GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,

@@ -6814,8 +6814,8 @@
                 },
                 disabled: {
                     enumerable: true, configurable: true,
-                    get: function () { return false; },
-                    set: function () {}
+                    get: function () { return !!node.disabled; },
+                    set: function (v) { node.disabled = !!v; }
                 },
                 cssRules: {
                     enumerable: true, configurable: true,

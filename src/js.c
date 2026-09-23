@@ -35039,6 +35039,8 @@ ns_element_get_disabled(JSContext *ctx, JSValueConst this_val)
     (void)ctx;
     const ns_node *el = ns_unwrap_element(this_val);
     if (!el) return JS_FALSE;
+    if (ns_node_is_element_named(el, "style"))
+        return (el->flags & NS_NODE_SHEET_DISABLED) ? JS_TRUE : JS_FALSE;
     return ns_element_get_attr(el, "disabled") ? JS_TRUE : JS_FALSE;
 }
 
@@ -35048,8 +35050,16 @@ ns_element_set_disabled(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
     ns_js *_j = js_from_ctx(ctx);
-    if (JS_ToBool(ctx, val)) ns_js_set_attr_recorded(_j, el, "disabled", "");
-    else                     ns_js_remove_attr_recorded(_j, el, "disabled");
+    gboolean disabled = JS_ToBool(ctx, val);
+    if (ns_node_is_element_named(el, "style")) {
+        guint32 flags = disabled ? el->flags | NS_NODE_SHEET_DISABLED
+                                 : el->flags & ~NS_NODE_SHEET_DISABLED;
+        if (flags != el->flags && _j) _j->mutated = TRUE;
+        el->flags = flags;
+        return JS_UNDEFINED;
+    }
+    if (disabled) ns_js_set_attr_recorded(_j, el, "disabled", "");
+    else          ns_js_remove_attr_recorded(_j, el, "disabled");
     return JS_UNDEFINED;
 }
 
