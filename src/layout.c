@@ -10998,11 +10998,12 @@ layout_grid(ns_box *box, double cw,
     int explicit_cols = n_cols;
     ns_css_tracks rows_buf = { 0 };
     const ns_css_tracks *rows_template = NULL;
+    int row_fit_start = 0, row_fit_count = 0;
     if (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
         !rows_v->u.tracks.subgrid) {
         rows_buf = expand_auto_repeat_ex(&rows_v->u.tracks,
                                          grid_auto_repeat_height(box, row_basis, cw),
-                                         row_gap, NULL, NULL);
+                                         row_gap, &row_fit_start, &row_fit_count);
         rows_template = &rows_buf;
     }
     int row_line_tracks = rows_subgrid ? sgr->n :
@@ -11219,6 +11220,23 @@ layout_grid(ns_box *box, double cw,
     if (n_rows > NS_GRID_ROWS_MAX) n_rows = NS_GRID_ROWS_MAX;
     if (rows_subgrid && n_rows > sgr->n) n_rows = sgr->n;
 
+    if (row_fit_count > 0 && rows_template == &rows_buf) {
+        gboolean used[NS_CSS_TRACKS_MAX] = {0};
+        for (guint k = 0; k < placed_rows->len; k++) {
+            int r0 = g_array_index(placed_rows, int, k);
+            int rs = k < row_spans->len ? g_array_index(row_spans, int, k) : 1;
+            for (int j = 0; j < rs && r0 + j < rows_buf.n; j++)
+                if (r0 + j >= 0) used[r0 + j] = TRUE;
+        }
+        for (int t = row_fit_start;
+             t < row_fit_start + row_fit_count && t < rows_buf.n; t++) {
+            if (used[t]) continue;
+            rows_buf.tracks[t].kind = NS_CSS_TRACK_PX;
+            rows_buf.tracks[t].v = 0;
+            rows_buf.tracks[t].pct = 0;
+            rows_buf.tracks[t].has_min = FALSE;
+        }
+    }
     gboolean col_collapsed[NS_CSS_TRACKS_MAX] = {0};
     double col_gap_after[NS_CSS_TRACKS_MAX + 1] = {0};
     if (fit_count > 0 && !cols_subgrid) {
