@@ -2508,13 +2508,13 @@ ns_storage_fits(GHashTable *store, const char *key, const char *value)
 }
 
 static JSValue
-ns_throw_quota_exceeded(JSContext *ctx)
+ns_throw_quota_exceeded_msg(JSContext *ctx, const char *message)
 {
     JSValue g = JS_GetGlobalObject(ctx);
     JSValue ctor = JS_GetPropertyStr(ctx, g, "QuotaExceededError");
     JS_FreeValue(ctx, g);
     if (JS_IsFunction(ctx, ctor)) {
-        JSValue msg = JS_NewString(ctx, "Storage quota exceeded");
+        JSValue msg = JS_NewString(ctx, message);
         JSValueConst args[1] = { msg };
         JSValue err = JS_CallConstructor(ctx, ctor, 1, args);
         JS_FreeValue(ctx, msg);
@@ -2529,7 +2529,7 @@ ns_throw_quota_exceeded(JSContext *ctx)
         JS_NewString(ctx, "QuotaExceededError"),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "message",
-        JS_NewString(ctx, "Storage quota exceeded"),
+        JS_NewString(ctx, message),
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_DefinePropertyValueStr(ctx, err, "code",
         JS_NewInt32(ctx, 22),
@@ -2539,6 +2539,12 @@ ns_throw_quota_exceeded(JSContext *ctx)
     JS_DefinePropertyValueStr(ctx, err, "quota", JS_NULL,
         JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     return JS_Throw(ctx, err);
+}
+
+static JSValue
+ns_throw_quota_exceeded(JSContext *ctx)
+{
+    return ns_throw_quota_exceeded_msg(ctx, "Storage quota exceeded");
 }
 
 static JSValue
@@ -16452,10 +16458,15 @@ ns_window_getRandomValues(JSContext *ctx, JSValueConst this_val,
     if (argc < 1) return JS_ThrowTypeError(ctx, "getRandomValues: argument required");
     JSValue arr = argv[0];
     size_t byte_offset = 0, byte_length = 0, bytes_per_element = 0;
+    if (JS_GetTypedArrayType(arr) < 0) {
+        if (JS_IsDataView(arr))
+            return ns_throw_dom_exception(ctx, "TypeMismatchError", 17,
+                "getRandomValues: integer typed array required");
+        return JS_ThrowTypeError(ctx, "getRandomValues: integer typed array required");
+    }
     JSValue buf = JS_GetTypedArrayBuffer(ctx, arr, &byte_offset,
                                          &byte_length, &bytes_per_element);
-    if (JS_IsException(buf))
-        return JS_ThrowTypeError(ctx, "getRandomValues: integer typed array required");
+    if (JS_IsException(buf)) return buf;
     int ta_type = JS_GetTypedArrayType(arr);
     if (ta_type == JS_TYPED_ARRAY_FLOAT16 ||
         ta_type == JS_TYPED_ARRAY_FLOAT32 ||
@@ -16469,9 +16480,8 @@ ns_window_getRandomValues(JSContext *ctx, JSValueConst this_val,
         aligned -= aligned % bytes_per_element;
     if (aligned > 65536) {
         JS_FreeValue(ctx, buf);
-        return JS_ThrowRangeError(ctx,
-            "getRandomValues: requested array length (%zu) exceeds 65536",
-            aligned);
+        return ns_throw_quota_exceeded_msg(ctx,
+            "getRandomValues: the array is longer than 65536 bytes");
     }
     if (aligned == 0) {
         JS_FreeValue(ctx, buf);
