@@ -11614,8 +11614,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             const ns_css_value *wv2 = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
             const ns_css_value *mxw2 = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
             const ns_css_value *mnw2 = c->style ? c->style->values[NS_CSS_MIN_WIDTH] : NULL;
+            double float_sizing_extras = flex_box_is_border_box(c)
+                ? c->padding.left + c->padding.right
+                  + c->border.left + c->border.right
+                : 0;
             if (wv2 && (wv2->kind == NS_CSS_V_LENGTH || wv2->kind == NS_CSS_V_CALC)) {
-                cw_for_float = length_resolve(wv2, cw, 0);
+                cw_for_float = length_resolve(wv2, cw, 0) - float_sizing_extras;
+                if (cw_for_float < 0) cw_for_float = 0;
             } else {
                 double cap = float_max_w
                     - c->padding.left - c->padding.right
@@ -11629,11 +11634,13 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             }
             if (mxw2 && (mxw2->kind == NS_CSS_V_LENGTH || mxw2->kind == NS_CSS_V_CALC)) {
                 double mx = length_resolve(mxw2, cw, 0);
-                if (mx > 0 && cw_for_float > mx) cw_for_float = mx;
+                if (mx > 0 && cw_for_float > mx - float_sizing_extras)
+                    cw_for_float = MAX(mx - float_sizing_extras, 0);
             }
             if (mnw2 && (mnw2->kind == NS_CSS_V_LENGTH || mnw2->kind == NS_CSS_V_CALC)) {
                 double mn = length_resolve(mnw2, cw, 0);
-                if (mn > 0 && cw_for_float < mn) cw_for_float = mn;
+                if (mn > 0 && cw_for_float < mn - float_sizing_extras)
+                    cw_for_float = mn - float_sizing_extras;
             }
             double avail = cw_for_float
                 + c->padding.left + c->padding.right
