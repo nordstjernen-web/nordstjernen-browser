@@ -28552,13 +28552,12 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
         JS_SetPropertyStr(ctx, event, "width",  JS_NewInt32(ctx, 1));
         JS_SetPropertyStr(ctx, event, "height", JS_NewInt32(ctx, 1));
     }
-    gboolean fired = ns_js_dispatch_built_event(js, target, type, event,
-                                                default_prevented);
     if (strcmp(type, "pointerdown") == 0 || strcmp(type, "pointerup") == 0) {
         ns_js_popover_light_dismiss(js, target, type[7] == 'u');
         ns_js_dialog_light_dismiss(js, target, type[7] == 'u');
     }
-    return fired;
+    return ns_js_dispatch_built_event(js, target, type, event,
+                                      default_prevented);
 }
 
 ns_js_drag_session *
