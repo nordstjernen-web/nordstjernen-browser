@@ -17242,15 +17242,21 @@ static ns_css_reduced_motion g_reduced_motion = NS_CSS_REDUCED_MOTION_NO_PREFERE
 void
 ns_css_set_color_scheme(ns_css_color_scheme scheme)
 {
-    g_color_scheme = scheme == NS_CSS_COLOR_SCHEME_DARK
+    ns_css_color_scheme next = scheme == NS_CSS_COLOR_SCHEME_DARK
         ? NS_CSS_COLOR_SCHEME_DARK : NS_CSS_COLOR_SCHEME_LIGHT;
+    if (g_color_scheme == next) return;
+    g_color_scheme = next;
+    ns_css_stylesheet_cache_drop();
 }
 
 void
 ns_css_set_reduced_motion(ns_css_reduced_motion motion)
 {
-    g_reduced_motion = motion == NS_CSS_REDUCED_MOTION_REDUCE
+    ns_css_reduced_motion next = motion == NS_CSS_REDUCED_MOTION_REDUCE
         ? NS_CSS_REDUCED_MOTION_REDUCE : NS_CSS_REDUCED_MOTION_NO_PREFERENCE;
+    if (g_reduced_motion == next) return;
+    g_reduced_motion = next;
+    ns_css_stylesheet_cache_drop();
 }
 
 ns_css_reduced_motion
