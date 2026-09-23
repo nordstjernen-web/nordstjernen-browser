@@ -6738,13 +6738,24 @@ ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value)
 void
 ns_js_set_focus(ns_js *js, const ns_node *el)
 {
-    if (js) js->focused = el;
+    if (!js) return;
+    js->focused = el;
+    ns_css_set_focus_visible_node(el);
 }
 
 void
 ns_js_set_focused_node(ns_js *js, const ns_node *el)
 {
-    if (js) js->focused = el;
+    if (!js) return;
+    js->focused = el;
+    ns_css_set_focus_visible_node(el);
+}
+
+void
+ns_js_note_pointer_input(ns_js *js, gboolean pointer)
+{
+    (void)js;
+    (void)pointer;
 }
 
 const ns_node *

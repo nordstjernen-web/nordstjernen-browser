@@ -163,6 +163,7 @@ gboolean ns_js_activate_summary(ns_js *js, const ns_node *el);
 void ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value);
 
 void           ns_js_set_focus(ns_js *js, const ns_node *el);
+void           ns_js_note_pointer_input(ns_js *js, gboolean pointer);
 void           ns_js_set_focused_node(ns_js *js, const ns_node *el);
 const ns_node *ns_js_focused_node(const ns_js *js);
 void           ns_js_focus_from_pointer(ns_js *js, const ns_node *target);

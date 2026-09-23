@@ -1000,6 +1000,7 @@ headless_click(headless_flush_ctx *fc, headless_nav_capture *nav,
 {
     ns_box *layout = *fc->layout;
     if (!layout) return;
+    ns_js_note_pointer_input(fc->js, TRUE);
     const ns_link_range *link = ns_box_hit_link_range(layout, x, y);
     const ns_node *form_target = ns_box_hit_form_dom(layout, x, y);
     const ns_node *inline_target = ns_box_hit_inline_dom(layout, x, y);
@@ -1329,6 +1330,7 @@ static void
 headless_key(headless_flush_ctx *fc, headless_nav_capture *nav,
              const char *name)
 {
+    ns_js_note_pointer_input(fc->js, FALSE);
     if (!fc->focused || !name || !*name) return;
     ns_node *t = (ns_node *)fc->focused;
     const char *cur = ns_node_editable_value(t);

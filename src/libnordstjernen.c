@@ -2829,6 +2829,7 @@ char *
 ns_browser_press(ns_browser *browser, int x, int y, int mods)
 {
     if (!browser || !browser->layout) return NULL;
+    ns_js_note_pointer_input(browser->js, TRUE);
     browser_damp_reset(browser);
     g_clear_pointer(&browser->pending_nav, g_free);
     gboolean extending = (mods & 1) != 0 &&
@@ -3334,6 +3335,7 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
 {
     if (out_prevented) *out_prevented = 0;
     if (!browser || !browser->js) return NULL;
+    ns_js_note_pointer_input(browser->js, FALSE);
     browser_damp_reset(browser);
     g_clear_pointer(&browser->pending_nav, g_free);
 

@@ -220,6 +220,14 @@ ns_css_set_focus_node(const ns_node *node)
     return prev;
 }
 
+static const ns_node *g_css_focus_visible_node = NULL;
+
+void
+ns_css_set_focus_visible_node(const ns_node *node)
+{
+    g_css_focus_visible_node = node;
+}
+
 static const ns_node *g_css_hover_node = NULL;
 
 const ns_node *
@@ -2504,7 +2512,7 @@ parse_pseudo_keyword(const char *name, gsize n,
         { "hover",         NS_CSS_PC_HOVER },
         { "active",        NS_CSS_PC_ACTIVE },
         { "focus",         NS_CSS_PC_FOCUS },
-        { "focus-visible", NS_CSS_PC_FOCUS },
+        { "focus-visible", NS_CSS_PC_FOCUS_VISIBLE },
         { "focus-within",  NS_CSS_PC_FOCUS_WITHIN },
         { "target",        NS_CSS_PC_TARGET },
         { "target-within", NS_CSS_PC_TARGET_WITHIN },
@@ -22499,6 +22507,11 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
             case NS_CSS_PC_FOCUS:
                 if (!g_css_focus_node || el != g_css_focus_node) return FALSE;
                 break;
+            case NS_CSS_PC_FOCUS_VISIBLE:
+                if (!g_css_focus_node || el != g_css_focus_node ||
+                    el != g_css_focus_visible_node)
+                    return FALSE;
+                break;
             case NS_CSS_PC_FOCUS_WITHIN: {
                 if (!g_css_focus_node) return FALSE;
                 const ns_node *f = g_css_focus_node;
@@ -28487,6 +28500,7 @@ incr_state_pseudo_attr(ns_css_pseudo k)
     case NS_CSS_PC_HOVER:
     case NS_CSS_PC_ACTIVE:
     case NS_CSS_PC_FOCUS:
+    case NS_CSS_PC_FOCUS_VISIBLE:
     case NS_CSS_PC_FOCUS_WITHIN:
     case NS_CSS_PC_TARGET:
     case NS_CSS_PC_TARGET_WITHIN:
