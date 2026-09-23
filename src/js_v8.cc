@@ -6431,6 +6431,15 @@ ns_js_window_action_applied(ns_js *js)
 }
 
 void
+ns_js_set_viewport_scroll_cb(ns_js *js, ns_js_viewport_scroll_cb cb,
+                             gpointer user_data)
+{
+    (void)js;
+    (void)cb;
+    (void)user_data;
+}
+
+void
 ns_js_set_layout_flush_cb(ns_js *js, ns_js_layout_flush_cb cb,
                           gpointer user_data)
 {
