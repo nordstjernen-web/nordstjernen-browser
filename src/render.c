@@ -10,6 +10,7 @@
 
 #include "font.h"
 #include "net.h"
+#include "paint.h"
 
 static gboolean g_render_page_uses_hover = FALSE;
 
@@ -557,10 +558,12 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
     render_style_pass(c, styles);
     gint64 t2 = profile ? g_get_monotonic_time() : 0;
 
+    ns_paint_list_ordinals_begin();
     ns_box *layout = ns_layout_build(c->doc, styles, viewport_width,
                                      c->focused_input, c->caret_byte,
                                      c->sel_anchor_byte,
                                      c->images, c->base_url);
+    ns_paint_list_ordinals_end();
     gint64 t3 = profile ? g_get_monotonic_time() : 0;
     if (profile) {
         profile->css1_us = t1 - t0;
@@ -608,10 +611,12 @@ ns_render_relayout_profile(const ns_render_ctx *c, ns_box **out_layout,
         }
         render_style_pass(c, styles2);
         gint64 t6 = profile ? g_get_monotonic_time() : 0;
+        ns_paint_list_ordinals_begin();
         ns_box *layout2 = ns_layout_build(c->doc, styles2, viewport_width,
                                           c->focused_input, c->caret_byte,
                                           c->sel_anchor_byte,
                                           c->images, c->base_url);
+        ns_paint_list_ordinals_end();
         gint64 t7 = profile ? g_get_monotonic_time() : 0;
         if (profile) {
             profile->css2_us += t5 - t4;
