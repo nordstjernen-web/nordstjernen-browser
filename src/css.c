@@ -19613,6 +19613,17 @@ css_body_has_nested_rule(const char *s, const char *e)
 }
 
 static void
+css_flatten_flush_decls(GString *out, const char *sel, GString *decls)
+{
+    if (decls->len == 0) return;
+    g_string_append(out, sel);
+    g_string_append_c(out, '{');
+    g_string_append_len(out, decls->str, (gssize)decls->len);
+    g_string_append_c(out, '}');
+    g_string_truncate(decls, 0);
+}
+
+static void
 css_flatten_style_rule(GString *out, const char *sel,
                        const char *body_s, const char *body_e, int depth)
 {
@@ -19625,7 +19636,6 @@ css_flatten_style_rule(GString *out, const char *sel,
         return;
     }
     GString *decls = g_string_new(NULL);
-    GString *deferred = g_string_new(NULL);
     const char *p = body_s;
     while (p < body_e) {
         while (p < body_e && is_ws(*p)) p++;
@@ -19641,6 +19651,7 @@ css_flatten_style_rule(GString *out, const char *sel,
         char term = 0;
         const char *seg_end = css_scan_segment(p, body_e, &term);
         if (term == '{') {
+            css_flatten_flush_decls(out, sel, decls);
             char *nsel = g_strndup(p, (gsize)(seg_end - p));
             css_trim_selector(nsel);
             const char *nbody_s = seg_end + 1;
@@ -19654,15 +19665,15 @@ css_flatten_style_rule(GString *out, const char *sel,
                     g_ascii_strncasecmp(nsel, "@layer", 6) == 0 ||
                     g_ascii_strncasecmp(nsel, "@scope", 6) == 0;
                 if (group) {
-                    g_string_append(deferred, nsel);
-                    g_string_append_c(deferred, '{');
-                    css_flatten_style_rule(deferred, sel, nbody_s, nbody_e,
+                    g_string_append(out, nsel);
+                    g_string_append_c(out, '{');
+                    css_flatten_style_rule(out, sel, nbody_s, nbody_e,
                                            depth + 1);
-                    g_string_append_c(deferred, '}');
+                    g_string_append_c(out, '}');
                 }
             } else {
                 char *combined = css_combine_selectors(sel, nsel);
-                css_flatten_style_rule(deferred, combined, nbody_s, nbody_e,
+                css_flatten_style_rule(out, combined, nbody_s, nbody_e,
                                        depth + 1);
                 g_free(combined);
             }
@@ -19674,15 +19685,8 @@ css_flatten_style_rule(GString *out, const char *sel,
             p = (seg_end < body_e) ? seg_end + 1 : body_e;
         }
     }
-    if (decls->len > 0) {
-        g_string_append(out, sel);
-        g_string_append_c(out, '{');
-        g_string_append_len(out, decls->str, (gssize)decls->len);
-        g_string_append_c(out, '}');
-    }
-    g_string_append_len(out, deferred->str, (gssize)deferred->len);
+    css_flatten_flush_decls(out, sel, decls);
     g_string_free(decls, TRUE);
-    g_string_free(deferred, TRUE);
 }
 
 static char *
