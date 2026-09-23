@@ -25584,6 +25584,36 @@ static const char *kUa =
     "caption[align=\"right\" i] { text-align: right; }\n"
     "caption[align=\"bottom\" i] { caption-side: bottom; }\n";
 
+static const char *kUaQuirks =
+    "form { margin-block-end: 1em; }\n"
+    "li { list-style-position: inside; }\n"
+    "li :is(dir, menu, ol, ul) { list-style-position: outside; }\n"
+    ":is(dir, menu, ol, ul) :is(dir, menu, ol, ul, li) "
+    "{ list-style-position: unset; }\n"
+    "table { font-weight: initial; font-style: initial; "
+    "font-variant: initial; font-size: initial; line-height: initial; "
+    "white-space: initial; text-align: initial; }\n"
+    "input:not([type=image i]), textarea { box-sizing: border-box; }\n"
+    "img[align=left i] { margin-right: 3px; }\n"
+    "img[align=right i] { margin-left: 3px; }\n";
+
+static const ns_css_stylesheet *
+ua_sheet_for(const ns_node *doc)
+{
+    static ns_css_stylesheet *standard = NULL;
+    static ns_css_stylesheet *quirks = NULL;
+    if (doc && (doc->flags & NS_NODE_QUIRKS)) {
+        if (!quirks) {
+            char *css = g_strconcat(kUa, kUaQuirks, NULL);
+            quirks = ns_css_stylesheet_parse(css, -1);
+            g_free(css);
+        }
+        return quirks;
+    }
+    if (!standard) standard = ns_css_stylesheet_parse(kUa, -1);
+    return standard;
+}
+
 static double
 resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
 {
@@ -29061,8 +29091,7 @@ ns_css_compute(ns_node *doc,
 
     g_pragma_valid = FALSE;
 
-    static ns_css_stylesheet *cached_ua = NULL;
-    if (!cached_ua) cached_ua = ns_css_stylesheet_parse(kUa, -1);
+    const ns_css_stylesheet *cached_ua = ua_sheet_for(doc);
 
     gboolean profile = g_getenv("NS_PROFILE") != NULL;
     gint64 t0 = profile ? g_get_monotonic_time() : 0;
