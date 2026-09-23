@@ -3,6 +3,16 @@ Changelog:
 
 1.0.26:
 ======
+* `postMessage`'s `targetOrigin` is checked against the origin of the
+  window the message goes to. The check read that window's `location`,
+  which answers with the URL of whichever frame's script is running, so
+  when a frame posted to its parent, the parent seemed to have the
+  frame's own origin: a message addressed to the parent's real origin was
+  dropped, and one addressed to any other origin -- the case
+  `targetOrigin` exists to stop -- was delivered. The top-level window's
+  origin now comes from its document, `"/"` means the sender's own origin
+  instead of matching everything, and an origin is compared as an origin,
+  not as a string prefix.
 * A cross-origin iframe can no longer script the page that embeds it.
   A frame's `parent` and `top` were the embedding page's real window, and
   the frame's global object inherited from it, so a framed site could read
