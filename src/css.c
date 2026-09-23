@@ -19784,14 +19784,15 @@ css_url_should_resolve(const char *url)
 static void
 css_value_resolve_url(ns_css_value *v, const char *base_url)
 {
-    if (!v || !base_url || v->kind != NS_CSS_V_URL)
-        return;
-    if (!css_url_should_resolve(v->u.url))
-        return;
-    char *abs_url = ns_url_resolve(base_url, v->u.url);
-    if (!abs_url) return;
-    g_free(v->u.url);
-    v->u.url = abs_url;
+    if (!base_url) return;
+    for (; v; v = v->next_layer) {
+        if (v->kind != NS_CSS_V_URL || !css_url_should_resolve(v->u.url))
+            continue;
+        char *abs_url = ns_url_resolve(base_url, v->u.url);
+        if (!abs_url) continue;
+        g_free(v->u.url);
+        v->u.url = abs_url;
+    }
 }
 
 static char *
