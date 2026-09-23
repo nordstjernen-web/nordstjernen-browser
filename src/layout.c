@@ -10839,6 +10839,26 @@ grid_expand_flexible_rows(double *row_height, int n_rows,
     g_free(fr_factor);
 }
 
+static double
+grid_auto_repeat_height(const ns_box *box, double row_basis, double cw)
+{
+    if (row_basis > 0) return row_basis;
+    if (!box->style) return 0;
+    const ns_css_value *mx = box->style->values[NS_CSS_MAX_HEIGHT];
+    if (mx && (mx->kind == NS_CSS_V_LENGTH || mx->kind == NS_CSS_V_CALC)) {
+        double h = specified_height_to_content(box,
+                                               resolve_used_height(box, mx, cw, -1));
+        if (h > 0) return h;
+    }
+    const ns_css_value *mn = box->style->values[NS_CSS_MIN_HEIGHT];
+    if (mn && (mn->kind == NS_CSS_V_LENGTH || mn->kind == NS_CSS_V_CALC)) {
+        double h = specified_height_to_content(box,
+                                               resolve_used_height(box, mn, cw, -1));
+        if (h > 0) return h;
+    }
+    return 0;
+}
+
 static void
 grid_extend_with_auto_tracks(ns_css_tracks *tracks, int from, int to,
                              const ns_css_value *auto_v)
@@ -10906,8 +10926,17 @@ layout_grid(ns_box *box, double cw,
     const ns_css_tracks *cols = &cols_buf;
     int n_cols = cols->n > 0 ? cols->n : 1;
     int explicit_cols = n_cols;
+    ns_css_tracks rows_buf = { 0 };
+    const ns_css_tracks *rows_template = NULL;
+    if (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
+        !rows_v->u.tracks.subgrid) {
+        rows_buf = expand_auto_repeat_ex(&rows_v->u.tracks,
+                                         grid_auto_repeat_height(box, row_basis, cw),
+                                         row_gap, NULL, NULL);
+        rows_template = &rows_buf;
+    }
     int row_line_tracks = rows_subgrid ? sgr->n :
-        ((rows_v && rows_v->kind == NS_CSS_V_TRACKS) ? rows_v->u.tracks.n : 1);
+        (rows_template ? rows_template->n : 1);
     if (areas && !rows_subgrid && areas->n_rows > row_line_tracks)
         row_line_tracks = areas->n_rows;
     if (row_line_tracks < 1) row_line_tracks = 1;
@@ -10931,8 +10960,7 @@ layout_grid(ns_box *box, double cw,
         int rs_start = -1, rs = 1;
         if (c->style) {
             grid_lines col_lines = { &cols_buf, areas, FALSE };
-            grid_lines row_lines = { rows_v && rows_v->kind == NS_CSS_V_TRACKS
-                                     ? &rows_v->u.tracks : NULL, areas, TRUE };
+            grid_lines row_lines = { rows_template, areas, TRUE };
             g_grid_lines = &col_lines;
             int got = grid_resolve_pos(c->style, NS_CSS_GRID_COLUMN,
                                        NS_CSS_GRID_COLUMN_START,
@@ -10980,9 +11008,7 @@ layout_grid(ns_box *box, double cw,
     gboolean col_flow = auto_flow && strstr(auto_flow, "column") != NULL &&
                         !cols_subgrid && !rows_subgrid;
     if (col_flow) {
-        int flow_rows = (rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-                         !rows_v->u.tracks.subgrid)
-                        ? rows_v->u.tracks.n : 0;
+        int flow_rows = rows_template ? rows_template->n : 0;
         if (flow_rows <= 0) flow_rows = 1;
         if (flow_rows > NS_CSS_TRACKS_MAX) flow_rows = NS_CSS_TRACKS_MAX;
         int tmpl_cols = (cols_v && cols_v->kind == NS_CSS_V_TRACKS &&
@@ -11057,10 +11083,7 @@ layout_grid(ns_box *box, double cw,
 
     const ns_css_value *auto_rows_v = box->style
         ? box->style->values[NS_CSS_GRID_AUTO_ROWS] : NULL;
-    const ns_css_tracks *rows_tracks =
-        (!rows_subgrid && rows_v && rows_v->kind == NS_CSS_V_TRACKS &&
-         !rows_v->u.tracks.subgrid)
-        ? &rows_v->u.tracks : NULL;
+    const ns_css_tracks *rows_tracks = rows_template;
     const ns_css_tracks *auto_rows_tracks =
         (!rows_subgrid && auto_rows_v && auto_rows_v->kind == NS_CSS_V_TRACKS &&
          !auto_rows_v->u.tracks.subgrid && auto_rows_v->u.tracks.n > 0)
