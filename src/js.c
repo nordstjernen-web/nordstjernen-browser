@@ -2140,13 +2140,14 @@ ns_tlist_item(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
 static JSValue
 ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
-    static const char *const rel_tokens[] = {
-        "alternate", "author", "bookmark", "canonical", "dns-prefetch",
-        "expect", "external", "help", "icon", "license", "manifest",
-        "me", "modulepreload", "next", "nofollow", "noopener",
-        "noreferrer", "opener", "pingback", "preconnect", "prefetch",
-        "preload", "prev", "privacy-policy", "search", "stylesheet",
-        "tag", "terms-of-service",
+    static const char *const link_rel_tokens[] = {
+        "alternate", "apple-touch-icon", "apple-touch-icon-precomposed",
+        "canonical", "dns-prefetch", "expect", "icon", "manifest",
+        "modulepreload", "next", "preconnect", "prefetch", "preload",
+        "prerender", "stylesheet",
+    };
+    static const char *const hyperlink_rel_tokens[] = {
+        "noopener", "noreferrer", "opener",
     };
     static const char *const sandbox_tokens[] = {
         "allow-downloads", "allow-forms", "allow-modals",
@@ -2157,15 +2158,19 @@ ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         "allow-top-navigation-to-custom-protocols",
     };
     const char *attr;
-    ns_tlist_node(this_val, &attr);
+    const ns_node *owner = ns_tlist_node(this_val, &attr);
     if (argc < 1)
         return JS_ThrowTypeError(ctx,
             "1 argument required, but only 0 present");
     const char *const *tokens = NULL;
     gsize count = 0;
-    if (strcmp(attr, "rel") == 0) {
-        tokens = rel_tokens;
-        count = G_N_ELEMENTS(rel_tokens);
+    if (strcmp(attr, "rel") == 0 && ns_node_is_element_named(owner, "link")) {
+        tokens = link_rel_tokens;
+        count = G_N_ELEMENTS(link_rel_tokens);
+    }
+    else if (strcmp(attr, "rel") == 0) {
+        tokens = hyperlink_rel_tokens;
+        count = G_N_ELEMENTS(hyperlink_rel_tokens);
     }
     else if (strcmp(attr, "sandbox") == 0) {
         tokens = sandbox_tokens;
@@ -6302,6 +6307,7 @@ ns_element_get_relList(JSContext *ctx, JSValueConst this_val)
     gboolean html_ns = !(n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
     gboolean ok = (html_ns && (ns_node_is_element_named(n, "a")
                                || ns_node_is_element_named(n, "area")
+                               || ns_node_is_element_named(n, "form")
                                || ns_node_is_element_named(n, "link")))
                || ((n->flags & NS_NODE_SVG_NS)
                    && n->name && strcmp(n->name, "a") == 0);
