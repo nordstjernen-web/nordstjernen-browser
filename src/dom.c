@@ -1467,6 +1467,22 @@ ns_node_is_element_named(const ns_node *n, const char *tag)
            strcmp(n->name, tag) == 0;
 }
 
+gboolean
+ns_input_is_one_line_text(const ns_node *n)
+{
+    if (!ns_node_is_element_named(n, "input")) return FALSE;
+    const char *type = ns_element_get_attr(n, "type");
+    if (!type) return TRUE;
+    static const char *const other_states[] = {
+        "button", "checkbox", "color", "date", "datetime-local", "file",
+        "hidden", "image", "month", "number", "radio", "range", "reset",
+        "submit", "time", "week",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(other_states); i++)
+        if (g_ascii_strcasecmp(type, other_states[i]) == 0) return FALSE;
+    return TRUE;
+}
+
 const ns_node *
 ns_node_root(const ns_node *n)
 {
