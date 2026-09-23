@@ -7674,21 +7674,25 @@ layout_table(ns_box *box, double parent_content_width, const ns_style *inherited
     const ns_css_value *wv = box->style ? box->style->values[NS_CSS_WIDTH] : NULL;
     gboolean explicit_width = wv &&
         (wv->kind == NS_CSS_V_LENGTH || wv->kind == NS_CSS_V_CALC);
+    double sizing_extras = flex_box_is_border_box(box)
+        ? box->padding.left + box->padding.right +
+          box->border.left + box->border.right
+        : 0;
     double cw;
     if (explicit_width) {
-        cw = length_resolve(wv, parent_content_width, 0);
+        cw = length_resolve(wv, parent_content_width, 0) - sizing_extras;
     } else {
         cw = parent_content_width - horiz_total;
     }
     const ns_css_value *mxw = box->style ? box->style->values[NS_CSS_MAX_WIDTH] : NULL;
     if (mxw && (mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC)) {
         double m = length_resolve(mxw, parent_content_width, -1);
-        if (m >= 0 && cw > m) cw = m;
+        if (m >= 0 && cw > m - sizing_extras) cw = m - sizing_extras;
     }
     const ns_css_value *mnw = box->style ? box->style->values[NS_CSS_MIN_WIDTH] : NULL;
     if (mnw && (mnw->kind == NS_CSS_V_LENGTH || mnw->kind == NS_CSS_V_CALC)) {
         double m = length_resolve(mnw, parent_content_width, -1);
-        if (m >= 0 && cw < m) cw = m;
+        if (m >= 0 && cw < m - sizing_extras) cw = m - sizing_extras;
     }
     if (cw < 0) cw = 0;
     box->content_width = cw;
