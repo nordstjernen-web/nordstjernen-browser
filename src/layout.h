@@ -238,6 +238,10 @@ const ns_box *ns_box_find_by_id(const ns_box *root, const char *id);
 const ns_box *ns_box_find_by_id_or_name(const ns_box *root, const char *frag);
 
 const ns_box *ns_box_hit_test(const ns_box *root, double x, double y);
+const ns_box *ns_box_hit_test_local(const ns_box *root, double x, double y,
+                                    double *local_x, double *local_y);
+const ns_node *ns_box_image_map_area(const ns_box *b, double local_x,
+                                     double local_y);
 void ns_box_set_hit_viewport(double scroll_x, double scroll_y);
 gboolean ns_box_is_fixed(const ns_box *b);
 void ns_box_sticky_offset_in(const ns_box *b, double sp_x0, double sp_y0,
@@ -273,6 +277,8 @@ gboolean ns_box_clips_out_point(const ns_box *b, double x, double y);
 const ns_node *ns_box_hit_form_dom(const ns_box *root, double x, double y);
 
 const ns_node *ns_box_hit_inline_dom(const ns_box *root, double x, double y);
+
+const ns_node *ns_box_hit_node(const ns_box *root, double x, double y);
 
 gboolean ns_box_inline_rect_for_dom(const ns_box *root, const ns_node *target,
                                     double *x, double *y,

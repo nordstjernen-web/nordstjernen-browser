@@ -14599,6 +14599,7 @@ typedef struct {
 static __thread GArray       *g_hit_deferred;
 static __thread int           g_hit_defer_depth;
 static __thread const ns_box *g_hit_flush_box;
+static __thread double        g_hit_local_x, g_hit_local_y;
 static double g_hit_vp_x, g_hit_vp_y;
 
 void
@@ -14916,8 +14917,11 @@ self_test: ;
                                root->border.top + root->border.bottom +
                                root->margin.top + root->margin.bottom : 0);
     if (!box_blocks_hit_testing(root) && !box_svg_yields_hit(root) &&
-        x >= x0 && x <= x1 && y >= y0 && y <= y1 && root->dom)
+        x >= x0 && x <= x1 && y >= y0 && y <= y1 && root->dom) {
+        g_hit_local_x = x;
+        g_hit_local_y = y;
         return root;
+    }
     return NULL;
 }
 
@@ -14961,6 +14965,200 @@ ns_box_hit_test(const ns_box *root, double x, double y)
         }
     }
     return box_hit_test_root(root, x, y);
+}
+
+static const ns_node *
+image_map_find(const ns_node *n, const char *name, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    if (ns_node_is_element_named(n, "map")) {
+        const char *id = ns_element_get_attr(n, "id");
+        const char *nm = ns_element_get_attr(n, "name");
+        if ((id && strcmp(id, name) == 0) || (nm && strcmp(nm, name) == 0))
+            return n;
+    }
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT || ns_element_get_attr(c, NS_SHADOW_ATTR))
+            continue;
+        const ns_node *m = image_map_find(c, name, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+static const ns_node *
+image_map_for(const ns_node *img)
+{
+    const char *usemap = ns_element_get_attr(img, "usemap");
+    const char *hash = usemap ? strchr(usemap, '#') : NULL;
+    if (!hash || !hash[1]) return NULL;
+    const ns_node *scope = img;
+    while (scope->parent && !ns_element_get_attr(scope, NS_SHADOW_ATTR))
+        scope = scope->parent;
+    return image_map_find(scope, hash + 1, 0);
+}
+
+static gboolean
+image_map_is_delimiter(char c)
+{
+    return c == ',' || c == ';' || c == ' ' || c == '\t' || c == '\n' ||
+           c == '\f' || c == '\r';
+}
+
+static double
+image_map_number(const char *s, const char *end)
+{
+    const char *p = s;
+    double sign = 1.0;
+    if (p < end && (*p == '-' || *p == '+')) {
+        if (*p == '-') sign = -1.0;
+        p++;
+    }
+    const char *digits = p;
+    while (p < end && g_ascii_isdigit(*p)) p++;
+    if (p < end && *p == '.' && p + 1 < end && g_ascii_isdigit(p[1])) {
+        p++;
+        while (p < end && g_ascii_isdigit(*p)) p++;
+    }
+    if (p == digits) return 0;
+    if (p < end && (*p == 'e' || *p == 'E')) {
+        const char *e = p + 1;
+        if (e < end && (*e == '-' || *e == '+')) e++;
+        if (e < end && g_ascii_isdigit(*e)) {
+            p = e;
+            while (p < end && g_ascii_isdigit(*p)) p++;
+        }
+    }
+    char *copy = g_strndup(digits, (gsize)(p - digits));
+    double v = g_ascii_strtod(copy, NULL);
+    g_free(copy);
+    return isfinite(v) ? sign * v : 0;
+}
+
+static GArray *
+image_map_coords(const char *coords)
+{
+    GArray *out = g_array_new(FALSE, FALSE, sizeof(double));
+    const char *p = coords ? coords : "";
+    while (*p && image_map_is_delimiter(*p)) p++;
+    while (*p) {
+        while (*p && !image_map_is_delimiter(*p) && !g_ascii_isdigit(*p) &&
+               *p != '.' && *p != '-')
+            p++;
+        const char *start = p;
+        while (*p && !image_map_is_delimiter(*p)) p++;
+        double v = image_map_number(start, p);
+        g_array_append_val(out, v);
+        while (*p && image_map_is_delimiter(*p)) p++;
+    }
+    return out;
+}
+
+static gboolean
+image_map_polygon_contains(const double *c, guint n, double x, double y)
+{
+    gboolean inside = FALSE;
+    guint pts = n / 2;
+    for (guint i = 0, j = pts - 1; i < pts; j = i++) {
+        double xi = c[2 * i], yi = c[2 * i + 1];
+        double xj = c[2 * j], yj = c[2 * j + 1];
+        double cross = (xj - xi) * (y - yi) - (yj - yi) * (x - xi);
+        if (fabs(cross) < 1e-6 && x >= MIN(xi, xj) && x <= MAX(xi, xj) &&
+            y >= MIN(yi, yj) && y <= MAX(yi, yj))
+            return TRUE;
+        if ((yi > y) != (yj > y) &&
+            x < (xj - xi) * (y - yi) / (yj - yi) + xi)
+            inside = !inside;
+    }
+    return inside;
+}
+
+static gboolean
+image_map_area_contains(const ns_node *area, double x, double y,
+                        double width, double height)
+{
+    const char *shape = ns_element_get_attr(area, "shape");
+    GArray *coords = image_map_coords(ns_element_get_attr(area, "coords"));
+    const double *c = (const double *)coords->data;
+    guint n = coords->len;
+    gboolean hit = FALSE;
+    if (shape && (g_ascii_strcasecmp(shape, "circle") == 0 ||
+                  g_ascii_strcasecmp(shape, "circ") == 0)) {
+        if (n >= 3 && c[2] > 0)
+            hit = (x - c[0]) * (x - c[0]) + (y - c[1]) * (y - c[1]) <=
+                  c[2] * c[2];
+    } else if (shape && g_ascii_strcasecmp(shape, "default") == 0) {
+        hit = x >= 0 && y >= 0 && x < width && y < height;
+    } else if (shape && (g_ascii_strcasecmp(shape, "poly") == 0 ||
+                         g_ascii_strcasecmp(shape, "polygon") == 0)) {
+        if (n >= 6) hit = image_map_polygon_contains(c, n & ~1u, x, y);
+    } else if (n >= 4) {
+        double x1 = MIN(c[0], c[2]), x2 = MAX(c[0], c[2]);
+        double y1 = MIN(c[1], c[3]), y2 = MAX(c[1], c[3]);
+        hit = x >= x1 && x < x2 && y >= y1 && y < y2;
+    }
+    g_array_free(coords, TRUE);
+    return hit;
+}
+
+static const ns_node *
+image_map_area_in(const ns_node *n, double x, double y, double width,
+                  double height, int depth)
+{
+    if (!n || depth >= 512) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        if (ns_node_is_element_named(c, "area") &&
+            image_map_area_contains(c, x, y, width, height))
+            return c;
+        const ns_node *m = image_map_area_in(c, x, y, width, height, depth + 1);
+        if (m) return m;
+    }
+    return NULL;
+}
+
+const ns_box *
+ns_box_hit_test_local(const ns_box *root, double x, double y,
+                      double *local_x, double *local_y)
+{
+    const ns_box *hit = ns_box_hit_test(root, x, y);
+    *local_x = g_hit_local_x;
+    *local_y = g_hit_local_y;
+    return hit;
+}
+
+const ns_node *
+ns_box_image_map_area(const ns_box *b, double local_x, double local_y)
+{
+    if (!b || b->kind != NS_BOX_IMAGE ||
+        !ns_node_is_element_named(b->dom, "img") ||
+        !ns_element_get_attr(b->dom, "usemap"))
+        return NULL;
+    const ns_node *map = image_map_for(b->dom);
+    if (!map) return NULL;
+    double x = local_x - (b->x + b->margin.left + b->border.left +
+                          b->padding.left);
+    double y = local_y - (b->y + b->margin.top + b->border.top +
+                          b->padding.top);
+    return image_map_area_in(map, x, y, b->content_width, b->content_height,
+                             0);
+}
+
+const ns_node *
+ns_box_hit_node(const ns_box *root, double x, double y)
+{
+    double local_x = 0, local_y = 0;
+    const ns_box *hit = ns_box_hit_test_local(root, x, y, &local_x, &local_y);
+    const ns_node *target = hit ? hit->dom : NULL;
+    const ns_node *inline_target = ns_box_hit_inline_dom(root, x, y);
+    if (inline_target) target = inline_target;
+    const ns_node *form_target = ns_box_hit_form_dom(root, x, y);
+    if (form_target) target = form_target;
+    if (hit && target == hit->dom) {
+        const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
+        if (area) target = area;
+    }
+    return target;
 }
 
 const ns_box *
