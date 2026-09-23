@@ -39066,8 +39066,11 @@ ns_popover_hide_steps(ns_js *js, ns_node *el, gboolean focus_prev,
             if (focus_prev && js->focused_node &&
                 ns_node_is_shadow_including_inclusive_ancestor(
                     el, js->focused_node)) {
-                if (prev) ns_js_run_focusing_steps(js, prev);
-                else      ns_js_set_focus(js, NULL);
+                if (!prev)
+                    ns_js_set_focus(js, NULL);
+                else if (!ns_node_is_shadow_including_inclusive_ancestor(
+                             el, prev))
+                    ns_js_run_focusing_steps(js, prev);
             }
         }
         pi = ns_popover_info_get(js, el);
