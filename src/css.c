@@ -25050,6 +25050,68 @@ pending_uses_attr(const GArray *pending_matches)
     return FALSE;
 }
 
+static gboolean
+append_pending_decls(const pending_match *pm, const char *value_text,
+                     GArray *matches, GPtrArray *owned_values)
+{
+    char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, value_text);
+    GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
+    const char *sp = synth;
+    parse_declaration_block(&sp, synth + strlen(synth), temp, NULL);
+    g_free(synth);
+    gboolean any = FALSE;
+    for (guint i = 0; i < temp->len; i++) {
+        ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
+        if (!d->value) continue;
+        g_ptr_array_add(owned_values, d->value);
+        match_entry me = {
+            .origin = pm->origin,
+            .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
+            .sheet_index = pm->sheet_index,
+            .layer_order = pm->layer_order,
+            .scope_order = pm->scope_order,
+            .source_order = pm->source_order,
+            .decl_order = pm->decl_order_base,
+            .important = pm->pd->important || d->important,
+            .inline_style = pm->inline_style,
+            .rule = pm->rule,
+            .value = d->value,
+            .prop  = d->prop,
+        };
+        g_array_append_val(matches, me);
+        any = TRUE;
+    }
+    g_array_free(temp, TRUE);
+    return any;
+}
+
+static char *
+pending_substituted_value(const pending_match *pm, const ns_var_map *vars,
+                          const ns_node *node)
+{
+    gboolean custom = pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-';
+    char *substituted = substitute_vars_with(pm->pd->raw_vtext, vars, 0);
+    if (substituted && strstr(substituted, "attr(")) {
+        gboolean tainted = FALSE;
+        char *with_attrs = substitute_attrs(substituted, node, 0, &tainted);
+        g_free(substituted);
+        substituted = with_attrs;
+        if (substituted && tainted && !custom) {
+            g_free(substituted);
+            substituted = NULL;
+        }
+    }
+    if (substituted) {
+        gboolean important = FALSE;
+        css_strip_important(substituted, &important);
+        if (important) {
+            g_free(substituted);
+            substituted = NULL;
+        }
+    }
+    return substituted;
+}
+
 static void
 resolve_pending_into_matches(GArray *pending_matches,
                              const ns_var_map *vars,
@@ -25062,49 +25124,12 @@ resolve_pending_into_matches(GArray *pending_matches,
     for (guint pmi = 0; pmi < pending_matches->len; pmi++) {
         pending_match *pm = &g_array_index(pending_matches, pending_match, pmi);
         if (!pm->pd || !pm->pd->pname || !pm->pd->raw_vtext) continue;
-        char *substituted = substitute_vars_with(pm->pd->raw_vtext, vars, 0);
-        if (!substituted) continue;
-        if (strstr(substituted, "attr(")) {
-            gboolean tainted = FALSE;
-            char *with_attrs = substitute_attrs(substituted, node, 0, &tainted);
-            g_free(substituted);
-            if (!with_attrs) continue;
-            if (tainted && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-')) {
-                g_free(with_attrs);
-                continue;
-            }
-            substituted = with_attrs;
-        }
-        gboolean ignored_important = FALSE;
-        css_strip_important(substituted, &ignored_important);
-        char *synth = g_strdup_printf("%s: %s;}", pm->pd->pname, substituted);
+        char *substituted = pending_substituted_value(pm, vars, node);
+        gboolean applied = substituted &&
+            append_pending_decls(pm, substituted, matches, owned_values);
         g_free(substituted);
-        GArray *temp = g_array_new(FALSE, FALSE, sizeof(ns_css_decl));
-        const char *sp = synth;
-        const char *se = synth + strlen(synth);
-        parse_declaration_block(&sp, se, temp, NULL);
-        g_free(synth);
-        for (guint i = 0; i < temp->len; i++) {
-            ns_css_decl *d = &g_array_index(temp, ns_css_decl, i);
-            if (!d->value) continue;
-            g_ptr_array_add(owned_values, d->value);
-            match_entry me = {
-                .origin = pm->origin,
-                .spec_a = pm->spec_a, .spec_b = pm->spec_b, .spec_c = pm->spec_c,
-                .sheet_index = pm->sheet_index,
-                .layer_order = pm->layer_order,
-                .scope_order = pm->scope_order,
-                .source_order = pm->source_order,
-                .decl_order = pm->decl_order_base,
-                .important = pm->pd->important || d->important,
-                .inline_style = pm->inline_style,
-                .rule = pm->rule,
-                .value = d->value,
-                .prop  = d->prop,
-            };
-            g_array_append_val(matches, me);
-        }
-        g_array_free(temp, TRUE);
+        if (!applied && !(pm->pd->pname[0] == '-' && pm->pd->pname[1] == '-'))
+            append_pending_decls(pm, "unset", matches, owned_values);
     }
 }
 
