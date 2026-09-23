@@ -3511,6 +3511,7 @@ void ns_v8_fill_cipher_params(ns_v8_wc_alg *a, ns_crypto_params *p)
     if (!g_strcmp0(a->name, "AES-CTR")) {
         p->iv = a->counter;
         p->iv_len = a->counter_len;
+        p->counter_bits = a->length;
     }
 }
 
