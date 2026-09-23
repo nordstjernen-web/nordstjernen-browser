@@ -12388,6 +12388,7 @@ static_abs_y_walk(const ns_box *b, const ns_node *target, double *out)
     if (!b || !target || !out) return;
     if (b->dom && b->dom != target && !node_is_ancestor_of(b->dom, target)) {
         if (node_precedes(target, b->dom)) return;
+        if (style_is_absolute_or_fixed(b->style)) return;
         if (node_precedes(b->dom, target) &&
             !style_is_absolute_or_fixed(b->style)) {
             double bottom = box_outer_bottom(b);
@@ -12474,8 +12475,22 @@ static_abs_y_batch_walk(const ns_box *b, GArray *calcs, guint *next,
             }
         }
     }
+    if (b->dom && !style_is_absolute_or_fixed(b->style)) {
+        double content_top = b->y + b->margin.top + b->border.top +
+                             b->padding.top;
+        if (content_top > *cur_max) *cur_max = content_top;
+    }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling)
         static_abs_y_batch_walk(c, calcs, next, cur_max);
+    while (b->dom && *next < calcs->len) {
+        ns_abs_static_calc *c = &g_array_index(calcs, ns_abs_static_calc, *next);
+        const ns_abs_entry *e =
+            &g_array_index(g_abs_pending, ns_abs_entry, c->entry_index);
+        if (!node_is_ancestor_of(b->dom, e->dom)) break;
+        c->y = *cur_max;
+        c->resolved = TRUE;
+        (*next)++;
+    }
     if (b->dom && !style_is_absolute_or_fixed(b->style)) {
         double bottom = box_outer_bottom(b);
         if (bottom > *cur_max) *cur_max = bottom;
