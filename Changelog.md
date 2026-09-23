@@ -3,6 +3,16 @@ Changelog:
 
 1.0.26:
 ======
+* An embedding page can no longer read a cross-origin frame's document.
+  `iframe.contentDocument` returned the framed page's DOM and
+  `contentWindow` its real window whatever their origin, so any page
+  could frame another site and read or script it. For a cross-origin
+  frame, or one sandboxed without `allow-same-origin`, `contentDocument`
+  is now `null` and `contentWindow` (and `window.frames[n]`) a restricted
+  window that allows only `postMessage`, the `location` setter, `closed`,
+  `length`, `window`/`self`/`frames`/`parent`/`top`/`opener` and
+  `close`/`focus`/`blur`. Same-origin, `about:blank` and `srcdoc` frames
+  are unaffected.
 * `window.scrollTo()`, `scroll()` and `scrollBy()`, and setting
   `scrollTop`/`scrollLeft` on the root element, move the page. They only
   changed the position script read back; the view stayed where it was. They
