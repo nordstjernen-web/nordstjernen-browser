@@ -3714,19 +3714,6 @@ build_inline_run_impl(const ns_node *first, const ns_node *last_excl,
         }
     }
     if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT &&
-        first->parent->name &&
-        strcmp(first->parent->name, "summary") == 0 &&
-        first->parent->parent &&
-        first->parent->parent->kind == NS_NODE_ELEMENT &&
-        first->parent->parent->name &&
-        strcmp(first->parent->parent->name, "details") == 0 &&
-        first == first->parent->first_child) {
-        gboolean open = ns_element_get_attr(first->parent->parent, "open") != NULL;
-        g_string_append(buf, open ? "\xe2\x96\xbe " : "\xe2\x96\xb8 ");
-    }
-    if (first && first->parent && first->parent->kind == NS_NODE_ELEMENT &&
-        first->parent->name &&
-        strcmp(first->parent->name, "li") == 0 &&
         first == first->parent->first_child) {
         const ns_style *li_style = g_hash_table_lookup(styles, first->parent);
         if (ns_paint_li_is_inside(li_style)) {

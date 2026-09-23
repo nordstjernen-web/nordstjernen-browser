@@ -5018,11 +5018,20 @@ format_ordered_label(const char *kind, int n, char *out, gsize out_sz)
 static gboolean
 li_generates_marker(const ns_node *li, const ns_style *li_style)
 {
-    if (!li || !li->name || strcmp(li->name, "li") != 0) return FALSE;
+    if (!li || li->kind != NS_NODE_ELEMENT || !li->name) return FALSE;
     if (!li->parent || !li->parent->name) return FALSE;
     const ns_css_value *d = li_style ? li_style->values[NS_CSS_DISPLAY] : NULL;
-    if (!d || d->kind != NS_CSS_V_KEYWORD || !d->u.keyword) return TRUE;
+    if (!d || d->kind != NS_CSS_V_KEYWORD || !d->u.keyword)
+        return strcmp(li->name, "li") == 0;
     return strstr(d->u.keyword, "list-item") != NULL;
+}
+
+static const char *
+disclosure_glyph(const char *style_kw, gboolean rtl)
+{
+    if (!style_kw || strncmp(style_kw, "disclosure-", 11) != 0) return NULL;
+    if (strcmp(style_kw + 11, "open") == 0) return "\xe2\x96\xbe";
+    return rtl ? "\xe2\x97\x82" : "\xe2\x96\xb8";
 }
 
 gboolean
@@ -5064,9 +5073,14 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
         g_snprintf(out, out_sz, "%s. ", buf);
         return TRUE;
     }
-    const char *glyph = "\xe2\x80\xa2";
-    if (style_kw && strcmp(style_kw, "square") == 0) glyph = "\xe2\x96\xaa";
-    else if (style_kw && strcmp(style_kw, "circle") == 0) glyph = "\xe2\x97\x8b";
+    const char *glyph = disclosure_glyph(style_kw,
+        li_style && keyword_is(li_style->values[NS_CSS_DIRECTION], "rtl"));
+    if (!glyph && style_kw && strcmp(style_kw, "square") == 0)
+        glyph = "\xe2\x96\xaa";
+    else if (!glyph && style_kw && strcmp(style_kw, "circle") == 0)
+        glyph = "\xe2\x97\x8b";
+    else if (!glyph)
+        glyph = "\xe2\x80\xa2";
     g_snprintf(out, out_sz, "%s ", glyph);
     return TRUE;
 }
@@ -5150,6 +5164,23 @@ paint_marker(cairo_t *cr, const ns_box *b)
         char with_dot[40];
         g_snprintf(with_dot, sizeof with_dot, "%s.", buf);
         paint_marker_label(cr, with_dot, edge_x, rtl, cy, font_size);
+    } else if (disclosure_glyph(style_kw, rtl)) {
+        gboolean open = strcmp(style_kw, "disclosure-open") == 0;
+        double sz = font_size * 0.3;
+        double ty = cy - font_size * 0.32;
+        double dir = rtl ? -1 : 1;
+        cairo_new_path(cr);
+        if (open) {
+            cairo_move_to(cr, cx - sz, ty - sz * 0.5);
+            cairo_line_to(cr, cx + sz, ty - sz * 0.5);
+            cairo_line_to(cr, cx, ty + sz * 0.7);
+        } else {
+            cairo_move_to(cr, cx - dir * sz * 0.5, ty - sz);
+            cairo_line_to(cr, cx - dir * sz * 0.5, ty + sz);
+            cairo_line_to(cr, cx + dir * sz * 0.7, ty);
+        }
+        cairo_close_path(cr);
+        cairo_fill(cr);
     } else if (style_kw && strcmp(style_kw, "square") == 0) {
         double sz = font_size * 0.32;
         cairo_new_path(cr);
