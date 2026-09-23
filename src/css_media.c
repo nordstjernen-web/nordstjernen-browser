@@ -1070,10 +1070,37 @@ mq_split_next(const char *p, const char *end, const char **seg_end)
     return end;
 }
 
-gboolean
-ns_css_media_query_matches(const char *query)
+static char *
+mq_strip_comments(const char *query)
 {
-    if (!query) return TRUE;
+    GString *out = g_string_sized_new(strlen(query));
+    char quote = 0;
+    for (const char *p = query; *p; p++) {
+        if (quote) {
+            if (*p == '\\' && p[1]) {
+                g_string_append_c(out, *p++);
+            } else if (*p == quote) {
+                quote = 0;
+            }
+            g_string_append_c(out, *p);
+            continue;
+        }
+        if (p[0] == '/' && p[1] == '*') {
+            const char *close = strstr(p + 2, "*/");
+            g_string_append_c(out, ' ');
+            if (!close) break;
+            p = close + 1;
+            continue;
+        }
+        if (*p == '"' || *p == '\'') quote = *p;
+        g_string_append_c(out, *p);
+    }
+    return g_string_free(out, FALSE);
+}
+
+static gboolean
+mq_query_list_matches(const char *query)
+{
     const char *end = query + strlen(query);
     const char *p = mq_skip_ws(query, end);
     if (p == end) return TRUE;
@@ -1088,6 +1115,17 @@ ns_css_media_query_matches(const char *query)
         p = next;
     }
     return any;
+}
+
+gboolean
+ns_css_media_query_matches(const char *query)
+{
+    if (!query) return TRUE;
+    if (!strstr(query, "/*")) return mq_query_list_matches(query);
+    char *clean = mq_strip_comments(query);
+    gboolean matches = mq_query_list_matches(clean);
+    g_free(clean);
+    return matches;
 }
 
 static void
