@@ -19,6 +19,7 @@ gboolean ns_font_available(void);
 
 
 gboolean ns_font_family_loaded(const char *family);
+guint    ns_font_generation(void);
 
 void     ns_font_request(const char *family, const char *src_url,
                          const char *base_url);
