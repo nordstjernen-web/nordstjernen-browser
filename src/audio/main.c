@@ -1217,7 +1217,7 @@ local_path_for(const char *url, char **tmp_out)
         *tmp_out = t;
         return t;
     }
-    return url;
+    return NULL;
 }
 
 #ifdef NS_HAVE_LIBAV

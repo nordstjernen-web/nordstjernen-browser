@@ -3,6 +3,14 @@ Changelog:
 
 1.0.26:
 ======
+* The audio helper only opens what a page may play. It opened any
+  `file://` path the renderer named, and treated any other string that was
+  not an http, https or data URL as a local path, so the page's JavaScript
+  check was the only thing keeping a web page from playing (and so
+  probing) local files. The shell now forwards `open` and `reload`
+  commands only for http, https and data URLs, the browser's own MSE audio
+  stream files, and local files when the tab itself shows a `file:` page;
+  the helper no longer reads bare paths at all.
 * The Windows process mitigations are the ones intended. The policies were
   passed as bare numbers and two were wrong: 0 is DEP, not ASLR, and 7 is
   Control Flow Guard, not the dynamic-code policy -- DEP is always on for a
