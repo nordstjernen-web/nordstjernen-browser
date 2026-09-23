@@ -392,6 +392,69 @@ ns_css_syntax_scan(const char *input, const char *end,
 }
 
 gboolean
+ns_css_syntax_is_self_contained(const char *input, gsize len)
+{
+    const char *p = input;
+    const char *end = input + len;
+    char quote = 0;
+    char stack[128];
+    guint depth = 0;
+    enum { STMT_NONE, STMT_AT, STMT_QUALIFIED } stmt = STMT_NONE;
+    while (p < end) {
+        char c = *p;
+        if (quote) {
+            if (c == '\\' && p + 1 < end) {
+                p += 2;
+                continue;
+            }
+            if (c == quote || c == '\n' || c == '\r' || c == '\f') quote = 0;
+            p++;
+            continue;
+        }
+        if (c == '/' && p + 1 < end && p[1] == '*') {
+            p += 2;
+            while (p + 1 < end && !(p[0] == '*' && p[1] == '/')) p++;
+            if (p + 1 >= end) return FALSE;
+            p += 2;
+            continue;
+        }
+        if (g_ascii_isspace(c)) {
+            p++;
+            continue;
+        }
+        if (depth == 0 && stmt == STMT_NONE) {
+            if (end - p >= 4 && memcmp(p, "<!--", 4) == 0) {
+                p += 4;
+                continue;
+            }
+            if (end - p >= 3 && memcmp(p, "-->", 3) == 0) {
+                p += 3;
+                continue;
+            }
+            stmt = c == '@' ? STMT_AT : STMT_QUALIFIED;
+        }
+        if (c == '\\') {
+            if (p + 1 >= end) return FALSE;
+            p += 2;
+            continue;
+        }
+        if (c == '"' || c == '\'') {
+            quote = c;
+        } else if (c == '(' || c == '[' || c == '{') {
+            if (depth == G_N_ELEMENTS(stack)) return FALSE;
+            stack[depth++] = c == '(' ? ')' : c == '[' ? ']' : '}';
+        } else if (depth > 0 && c == stack[depth - 1]) {
+            depth--;
+            if (depth == 0 && c == '}') stmt = STMT_NONE;
+        } else if (c == ';' && depth == 0 && stmt == STMT_AT) {
+            stmt = STMT_NONE;
+        }
+        p++;
+    }
+    return !quote && depth == 0 && stmt == STMT_NONE;
+}
+
+gboolean
 ns_css_component_value_valid(const char *input)
 {
     gboolean valid = FALSE;
