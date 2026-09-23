@@ -5501,12 +5501,14 @@ parse_tracks(const char *text)
                 }
                 v->u.tracks.auto_repeat = ar;
                 v->u.tracks.auto_repeat_start = v->u.tracks.n;
+                v->u.tracks.auto_repeat_names_start = v->u.tracks.n_line_names;
                 int cnt = 0;
                 if (!tracks_append_repeat_body(&v->u.tracks, body, body_len,
                                                1, &cnt)) {
                     g_free(v);
                     return NULL;
                 }
+                v->u.tracks.auto_repeat_names_end = v->u.tracks.n_line_names;
                 for (int k = v->u.tracks.auto_repeat_start; k < v->u.tracks.n; k++)
                     if (!track_is_fixed_size(&v->u.tracks.tracks[k])) {
                         g_free(v);

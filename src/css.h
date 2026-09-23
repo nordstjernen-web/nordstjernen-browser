@@ -441,6 +441,8 @@ typedef struct ns_css_tracks {
     ns_css_auto_repeat auto_repeat;
     int auto_repeat_start;
     int auto_repeat_count;
+    int auto_repeat_names_start;
+    int auto_repeat_names_end;
     gboolean subgrid;
     int n_line_names;
     ns_css_line_name line_names[NS_CSS_LINE_NAMES_MAX];
