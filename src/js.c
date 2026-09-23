@@ -54064,11 +54064,15 @@ ns_js_process_pending_iframes(ns_js *js)
 {
     if (!js || !js->pending_iframe_loads || js->halted) return;
     if (js->iframe_load_depth > 0 || js->eval_depth > 0) return;
-    while (js->pending_iframe_loads->len > 0) {
+    GHashTable *loaded = g_hash_table_new(g_direct_hash, g_direct_equal);
+    while (!js->halted && js->pending_iframe_loads &&
+           js->pending_iframe_loads->len > 0) {
         ns_node *iframe = g_ptr_array_index(js->pending_iframe_loads, 0);
+        if (!g_hash_table_add(loaded, iframe)) break;
         g_ptr_array_remove_index(js->pending_iframe_loads, 0);
         ns_js_load_iframe_now(js, iframe);
     }
+    g_hash_table_destroy(loaded);
 }
 
 static void

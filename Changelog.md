@@ -3,6 +3,12 @@ Changelog:
 
 1.0.26:
 ======
+* An iframe whose load handler navigates it again no longer hangs the
+  page. Loading a queued frame fires its load event synchronously, so a
+  handler that set `src` once more re-queued the same frame and the loader
+  never returned: timers, painting and the rest of the page starved while
+  the renderer spun at full CPU. Each pass now loads a frame at most once;
+  a frame queued again waits for the next tick.
 * A multi-column block splits a list, not just a run of siblings. The
   column code distributed a container's own children and gave up below
   two of them, so `column-width` on a wrapper whose sole child is an
