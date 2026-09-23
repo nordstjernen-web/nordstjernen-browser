@@ -779,6 +779,51 @@ pv_audio_feedback_line(GObject *src, GAsyncResult *res, gpointer user_data)
                                         pv_audio_feedback_line, v);
 }
 
+static char *
+pv_audio_url_path(const char *url)
+{
+    char *path = g_filename_from_uri(url, NULL, NULL);
+    if (path) return path;
+    const char *p = url + strlen("file://");
+    if (g_str_has_prefix(p, "localhost")) p += strlen("localhost");
+    return g_strdup(p);
+}
+
+static gboolean
+pv_audio_url_allowed(NsProcView *v, const char *url)
+{
+    if (g_str_has_prefix(url, "http://") || g_str_has_prefix(url, "https://") ||
+        g_str_has_prefix(url, "data:"))
+        return TRUE;
+    if (!g_str_has_prefix(url, "file://")) return FALSE;
+    if (v->current_url && g_str_has_prefix(v->current_url, "file:"))
+        return TRUE;
+    char *path = pv_audio_url_path(url);
+    char *canon = g_canonicalize_filename(path, NULL);
+    char *streams = g_build_filename(g_get_user_cache_dir(), "nordstjernen",
+                                     "msaudio", "", NULL);
+    g_strdelimit(canon, "\\", '/');
+    g_strdelimit(streams, "\\", '/');
+    gboolean inside = g_str_has_prefix(canon, streams);
+    g_free(streams);
+    g_free(canon);
+    g_free(path);
+    return inside;
+}
+
+static gboolean
+pv_audio_command_allowed(NsProcView *v, const char *cmd)
+{
+    const char *rest = NULL;
+    if (g_str_has_prefix(cmd, "open ")) rest = cmd + strlen("open ");
+    else if (g_str_has_prefix(cmd, "reload ")) rest = cmd + strlen("reload ");
+    else return TRUE;
+    const char *url = strchr(rest, ' ');
+    if (!url) return FALSE;
+    while (*url == ' ') url++;
+    return pv_audio_url_allowed(v, url);
+}
+
 static void
 pv_audio_pump(NsProcView *v, const char *commands)
 {
@@ -814,6 +859,11 @@ pv_audio_pump(NsProcView *v, const char *commands)
     char **lines = g_strsplit(commands, "\x1f", -1);
     for (int i = 0; lines[i]; i++) {
         if (!*lines[i]) continue;
+        if (!pv_audio_command_allowed(v, lines[i])) {
+            if (g_getenv("NS_DBG_AUDIO"))
+                g_printerr("[audio-pump] refused: %s\n", lines[i]);
+            continue;
+        }
         char *line = g_strconcat(lines[i], "\n", NULL);
         if (g_getenv("NS_DBG_AUDIO"))
             g_printerr("[audio-pump] cmd: %s", line);
