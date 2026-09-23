@@ -10629,6 +10629,56 @@ grid_track_is_fixed(const ns_css_track *t, double basis)
 }
 
 static void
+grid_expand_flexible_rows(double *row_height, int n_rows,
+                          const ns_css_tracks *rows_tracks,
+                          const ns_css_tracks *auto_rows_tracks,
+                          int explicit_rows, double space)
+{
+    double *fr_factor = g_new0(double, n_rows + 1);
+    gboolean any_fr = FALSE;
+    for (int r = 0; r < n_rows; r++) {
+        const ns_css_track *tk = NULL;
+        if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
+        else if (auto_rows_tracks && auto_rows_tracks->n > 0)
+            tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
+        if (tk && tk->kind == NS_CSS_TRACK_FR && tk->v > 0) {
+            fr_factor[r] = tk->v;
+            any_fr = TRUE;
+        }
+    }
+    if (any_fr) {
+        for (int r = 0; r < n_rows; r++)
+            if (fr_factor[r] <= 0) space -= row_height[r];
+        gboolean *inflexible = g_new0(gboolean, n_rows + 1);
+        for (int pass = 0; pass <= n_rows; pass++) {
+            double sum_fr = 0, leftover = space;
+            for (int r = 0; r < n_rows; r++) {
+                if (fr_factor[r] <= 0) continue;
+                if (inflexible[r]) leftover -= row_height[r];
+                else sum_fr += fr_factor[r];
+            }
+            if (sum_fr <= 0) break;
+            double unit = leftover > 0 ? leftover / MAX(sum_fr, 1.0) : 0;
+            gboolean changed = FALSE;
+            for (int r = 0; r < n_rows; r++) {
+                if (fr_factor[r] <= 0 || inflexible[r]) continue;
+                if (row_height[r] > unit * fr_factor[r] + 0.01) {
+                    inflexible[r] = TRUE;
+                    changed = TRUE;
+                }
+            }
+            if (changed) continue;
+            for (int r = 0; r < n_rows; r++)
+                if (fr_factor[r] > 0 && !inflexible[r])
+                    row_height[r] = unit * fr_factor[r];
+            break;
+        }
+        g_free(inflexible);
+    }
+    g_free(fr_factor);
+}
+
+static void
 grid_extend_with_auto_tracks(ns_css_tracks *tracks, int from, int to,
                              const ns_css_value *auto_v)
 {
@@ -11247,49 +11297,24 @@ layout_grid(ns_box *box, double cw,
                     row_height[r] -= take * shrinkable[r] / shrink_total;
         }
         g_free(shrinkable);
-        double *fr_factor = g_new0(double, n_rows + 1);
-        gboolean any_fr = FALSE;
-        for (int r = 0; r < n_rows; r++) {
-            const ns_css_track *tk = NULL;
-            if (rows_tracks && r < rows_tracks->n) tk = &rows_tracks->tracks[r];
-            else if (auto_rows_tracks && auto_rows_tracks->n > 0)
-                tk = &auto_rows_tracks->tracks[(r - explicit_rows) % auto_rows_tracks->n];
-            if (tk && tk->kind == NS_CSS_TRACK_FR && tk->v > 0) {
-                fr_factor[r] = tk->v;
-                any_fr = TRUE;
-            }
-        }
-        if (any_fr) {
-            double space = row_basis - (n_rows > 1 ? row_gap * (n_rows - 1) : 0);
-            for (int r = 0; r < n_rows; r++)
-                if (fr_factor[r] <= 0) space -= row_height[r];
-            gboolean *inflexible = g_new0(gboolean, n_rows + 1);
-            for (int pass = 0; pass <= n_rows; pass++) {
-                double sum_fr = 0, leftover = space;
-                for (int r = 0; r < n_rows; r++) {
-                    if (fr_factor[r] <= 0) continue;
-                    if (inflexible[r]) leftover -= row_height[r];
-                    else sum_fr += fr_factor[r];
-                }
-                if (sum_fr <= 0) break;
-                double unit = leftover > 0 ? leftover / MAX(sum_fr, 1.0) : 0;
-                gboolean changed = FALSE;
-                for (int r = 0; r < n_rows; r++) {
-                    if (fr_factor[r] <= 0 || inflexible[r]) continue;
-                    if (row_height[r] > unit * fr_factor[r] + 0.01) {
-                        inflexible[r] = TRUE;
-                        changed = TRUE;
-                    }
-                }
-                if (changed) continue;
-                for (int r = 0; r < n_rows; r++)
-                    if (fr_factor[r] > 0 && !inflexible[r])
-                        row_height[r] = unit * fr_factor[r];
-                break;
-            }
-            g_free(inflexible);
-        }
-        g_free(fr_factor);
+        grid_expand_flexible_rows(row_height, n_rows, rows_tracks,
+                                  auto_rows_tracks, explicit_rows,
+                                  row_basis - (n_rows > 1 ? row_gap * (n_rows - 1) : 0));
+    } else if (!rows_subgrid && n_rows > 0) {
+        const ns_css_value *mnv = box->style
+            ? box->style->values[NS_CSS_MIN_HEIGHT] : NULL;
+        double min_h = mnv && (mnv->kind == NS_CSS_V_LENGTH ||
+                               mnv->kind == NS_CSS_V_CALC)
+            ? specified_height_to_content(box,
+                                          resolve_used_height(box, mnv, cw, -1))
+            : -1;
+        double gaps = n_rows > 1 ? row_gap * (n_rows - 1) : 0;
+        double used = gaps;
+        for (int r = 0; r < n_rows; r++) used += row_height[r];
+        if (min_h > used)
+            grid_expand_flexible_rows(row_height, n_rows, rows_tracks,
+                                      auto_rows_tracks, explicit_rows,
+                                      min_h - gaps);
     }
 
     double cursor_y = rows_subgrid ? sgr->y[0] : inner_y;
