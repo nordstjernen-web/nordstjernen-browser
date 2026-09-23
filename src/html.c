@@ -5,10 +5,56 @@
 
 #include "html.h"
 
+#include <math.h>
 #include <string.h>
 #include <uchardet.h>
 
 #include <lexbor/core/base.h>
+
+static void
+ns_html_append_digits(GString *num, const char **p)
+{
+    while (g_ascii_isdigit(**p)) g_string_append_c(num, *(*p)++);
+}
+
+gboolean
+ns_html_parse_float(const char *s, double *out)
+{
+    if (!s) return FALSE;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\f' || *s == '\r')
+        s++;
+    const char *p = s;
+    GString *num = g_string_new(NULL);
+    if (*p == '-') g_string_append_c(num, *p++);
+    else if (*p == '+') p++;
+    if (!g_ascii_isdigit(*p) && !(*p == '.' && g_ascii_isdigit(p[1]))) {
+        g_string_free(num, TRUE);
+        return FALSE;
+    }
+    ns_html_append_digits(num, &p);
+    if (*p == '.') {
+        if (g_ascii_isdigit(p[1])) {
+            g_string_append_c(num, *p++);
+            ns_html_append_digits(num, &p);
+        } else if (p[1] == 'e' || p[1] == 'E') {
+            p++;
+        }
+    }
+    if (*p == 'e' || *p == 'E') {
+        const char *q = p + 1;
+        gboolean negative = *q == '-';
+        if (*q == '-' || *q == '+') q++;
+        if (g_ascii_isdigit(*q)) {
+            g_string_append(num, negative ? "e-" : "e");
+            ns_html_append_digits(num, &q);
+        }
+    }
+    double v = g_ascii_strtod(num->str, NULL);
+    g_string_free(num, TRUE);
+    if (!isfinite(v)) return FALSE;
+    *out = v == 0 ? 0.0 : v;
+    return TRUE;
+}
 
 gboolean
 ns_html_is_void(const char *tag)
