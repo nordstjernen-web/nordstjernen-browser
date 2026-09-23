@@ -20500,8 +20500,15 @@ ns_css_rule_index_ensure(const ns_css_stylesheet *sheet)
 
 static gboolean match_selector(const ns_css_selector *sel, const ns_node *el);
 static const ns_node *g_css_match_scope;
-static __thread GHashTable *g_css_nth_child_indices;
-static __thread GHashTable *g_css_nth_child_counts;
+typedef struct css_sibling_position {
+    int child;
+    int last_child;
+    int of_type;
+    int last_of_type;
+} css_sibling_position;
+
+static __thread GHashTable *g_sibling_positions;
+static __thread GPtrArray  *g_sibling_position_blocks;
 static __thread guint g_css_selector_batch_depth;
 
 const ns_node *
@@ -20516,8 +20523,8 @@ void
 ns_css_selector_batch_begin(void)
 {
     if (g_css_selector_batch_depth++ > 0) return;
-    g_css_nth_child_indices = g_hash_table_new(g_direct_hash, g_direct_equal);
-    g_css_nth_child_counts = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_sibling_positions = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_sibling_position_blocks = g_ptr_array_new_with_free_func(g_free);
 }
 
 void
@@ -20525,8 +20532,8 @@ ns_css_selector_batch_end(void)
 {
     if (g_css_selector_batch_depth == 0 || --g_css_selector_batch_depth > 0)
         return;
-    g_clear_pointer(&g_css_nth_child_indices, g_hash_table_destroy);
-    g_clear_pointer(&g_css_nth_child_counts, g_hash_table_destroy);
+    g_clear_pointer(&g_sibling_positions, g_hash_table_destroy);
+    g_clear_pointer(&g_sibling_position_blocks, g_ptr_array_unref);
 }
 
 static gboolean match_simple(const ns_css_simple *sel, const ns_node *el);
@@ -20805,35 +20812,69 @@ selector_group_matches_element(const GPtrArray *group, const ns_node *el)
     return FALSE;
 }
 
+static void
+css_sibling_positions_fill(const ns_node *parent)
+{
+    guint n = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling)
+        if (c->kind == NS_NODE_ELEMENT) n++;
+    if (n == 0) return;
+    css_sibling_position *block = g_new0(css_sibling_position, n);
+    g_ptr_array_add(g_sibling_position_blocks, block);
+    GHashTable *type_counts = g_hash_table_new(g_str_hash, g_str_equal);
+    guint i = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        css_sibling_position *pos = &block[i++];
+        pos->child = (int)i;
+        pos->last_child = (int)(n - i + 1);
+        pos->of_type = 1;
+        if (c->name) {
+            guint seen = GPOINTER_TO_UINT(
+                g_hash_table_lookup(type_counts, c->name)) + 1;
+            g_hash_table_insert(type_counts, c->name, GUINT_TO_POINTER(seen));
+            pos->of_type = (int)seen;
+        }
+        g_hash_table_insert(g_sibling_positions, (gpointer)c, pos);
+    }
+    i = 0;
+    for (const ns_node *c = parent->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        css_sibling_position *pos = &block[i++];
+        pos->last_of_type = c->name
+            ? (int)GPOINTER_TO_UINT(g_hash_table_lookup(type_counts, c->name))
+                  - pos->of_type + 1
+            : 1;
+    }
+    g_hash_table_destroy(type_counts);
+}
+
+static const css_sibling_position *
+css_sibling_position_of(const ns_node *el)
+{
+    if (!g_sibling_positions || !el->parent) return NULL;
+    const css_sibling_position *pos =
+        g_hash_table_lookup(g_sibling_positions, el);
+    if (pos) return pos;
+    css_sibling_positions_fill(el->parent);
+    return g_hash_table_lookup(g_sibling_positions, el);
+}
+
 static gboolean
 ns_css_sibling_counts_for_nth(const ns_node *el, const ns_css_pseudo_pred *pc,
                               int *idx_out)
 {
-    gboolean plain_child = !pc->of_group &&
-        (pc->kind == NS_CSS_PC_NTH_CHILD ||
-         pc->kind == NS_CSS_PC_NTH_LAST_CHILD);
-    if (plain_child && el->parent && g_css_nth_child_indices) {
-        const ns_node *parent = el->parent;
-        if (!g_hash_table_contains(g_css_nth_child_counts, parent)) {
-            int count = 0;
-            for (const ns_node *s = parent->first_child; s; s = s->next_sibling) {
-                if (s->kind != NS_NODE_ELEMENT) continue;
-                g_hash_table_insert(g_css_nth_child_indices,
-                                    (gpointer)s, GINT_TO_POINTER(++count));
+    if (!pc->of_group) {
+        const css_sibling_position *pos = css_sibling_position_of(el);
+        if (pos) {
+            switch (pc->kind) {
+            case NS_CSS_PC_NTH_CHILD:        *idx_out = pos->child; break;
+            case NS_CSS_PC_NTH_LAST_CHILD:   *idx_out = pos->last_child; break;
+            case NS_CSS_PC_NTH_OF_TYPE:      *idx_out = pos->of_type; break;
+            default:                         *idx_out = pos->last_of_type; break;
             }
-            g_hash_table_insert(g_css_nth_child_counts,
-                                (gpointer)parent, GINT_TO_POINTER(count));
+            return TRUE;
         }
-        gpointer cached = g_hash_table_lookup(g_css_nth_child_indices, el);
-        if (!cached) return FALSE;
-        int idx = GPOINTER_TO_INT(cached);
-        if (pc->kind == NS_CSS_PC_NTH_LAST_CHILD) {
-            int count = GPOINTER_TO_INT(
-                g_hash_table_lookup(g_css_nth_child_counts, parent));
-            idx = count - idx + 1;
-        }
-        *idx_out = idx;
-        return TRUE;
     }
     int idx = 1;
     gboolean reverse = pc->kind == NS_CSS_PC_NTH_LAST_CHILD ||
@@ -29301,6 +29342,7 @@ ns_css_compute(ns_node *doc,
         (GDestroyNotify)ns_var_map_unref, (GDestroyNotify)ns_var_map_unref);
     g_has_memo = g_hash_table_new_full(has_memo_hash, has_memo_equal,
                                        g_free, NULL);
+    ns_css_selector_batch_begin();
 
     guint64 sig = incr_sheet_sig(cached_ua, author_sheets, n_sheets);
     if (sig != g_incr_has_sig) {
@@ -29374,6 +29416,7 @@ ns_css_compute(ns_node *doc,
 
     g_hash_table_destroy(g_has_memo);
     g_has_memo = NULL;
+    ns_css_selector_batch_end();
     g_hash_table_destroy(g_style_share);
     g_style_share = NULL;
     g_hash_table_destroy(g_var_adjust_cache);
