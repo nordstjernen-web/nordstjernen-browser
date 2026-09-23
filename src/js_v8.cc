@@ -6752,6 +6752,15 @@ ns_js_focused_node(const ns_js *js)
     return js ? js->focused : NULL;
 }
 
+void
+ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
+{
+    const ns_node *focus = NULL;
+    for (const ns_node *a = target; a && !focus; a = a->parent)
+        if (ns_node_is_focusable(a)) focus = a;
+    ns_js_set_focus(js, focus);
+}
+
 static void
 ns_v8_collect_focusable(const ns_node *n, std::vector<const ns_node *> &out)
 {
