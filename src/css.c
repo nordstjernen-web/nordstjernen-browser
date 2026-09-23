@@ -23130,43 +23130,68 @@ static __thread int      g_sel_match_depth;
 
 #define NS_SEL_MATCH_BUDGET 8000000ull
 
-static gboolean
+typedef enum css_chain_result {
+    CSS_CHAIN_MATCHES,
+    CSS_CHAIN_FAILS_LOCALLY,
+    CSS_CHAIN_FAILS_ALL_SIBLINGS,
+    CSS_CHAIN_FAILS_COMPLETELY,
+} css_chain_result;
+
+static css_chain_result match_complex_chain(const ns_css_selector *sel,
+                                            int idx, const ns_node *cur);
+
+static css_chain_result
+match_compound_then_chain(const ns_css_selector *sel, int idx,
+                          const ns_node *el)
+{
+    if (!match_simple(g_ptr_array_index(sel->compounds, idx), el))
+        return CSS_CHAIN_FAILS_LOCALLY;
+    return match_complex_chain(sel, idx, el);
+}
+
+static css_chain_result
 match_complex_chain(const ns_css_selector *sel, int idx, const ns_node *cur)
 {
-    if (idx <= 0) return TRUE;
+    if (idx <= 0) return CSS_CHAIN_MATCHES;
     ns_css_comb comb = g_array_index(sel->combinators, ns_css_comb, idx);
-    const ns_css_simple *prev = g_ptr_array_index(sel->compounds, idx - 1);
     if (comb == NS_CSS_COMB_CHILD) {
         const ns_node *p = cur->parent;
-        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET) return FALSE;
-        return p && match_simple(prev, p) &&
-               match_complex_chain(sel, idx - 1, p);
+        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET)
+            return CSS_CHAIN_FAILS_COMPLETELY;
+        if (!p) return CSS_CHAIN_FAILS_COMPLETELY;
+        return match_compound_then_chain(sel, idx - 1, p);
     }
     if (comb == NS_CSS_COMB_ADJACENT) {
         const ns_node *s = cur->prev_sibling;
         while (s && s->kind != NS_NODE_ELEMENT) s = s->prev_sibling;
-        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET) return FALSE;
-        return s && match_simple(prev, s) &&
-               match_complex_chain(sel, idx - 1, s);
+        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET)
+            return CSS_CHAIN_FAILS_COMPLETELY;
+        if (!s) return CSS_CHAIN_FAILS_ALL_SIBLINGS;
+        return match_compound_then_chain(sel, idx - 1, s);
     }
     if (comb == NS_CSS_COMB_SIBLING) {
         int depth = 0;
-        for (const ns_node *s = cur->prev_sibling; s && depth++ < NS_DOM_MAX_DEPTH; s = s->prev_sibling) {
-            if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET) return FALSE;
-            if (s->kind == NS_NODE_ELEMENT && match_simple(prev, s) &&
-                match_complex_chain(sel, idx - 1, s))
-                return TRUE;
+        const ns_node *s = cur->prev_sibling;
+        for (; s && depth++ < NS_DOM_MAX_DEPTH; s = s->prev_sibling) {
+            if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET)
+                return CSS_CHAIN_FAILS_COMPLETELY;
+            if (s->kind != NS_NODE_ELEMENT) continue;
+            css_chain_result r = match_compound_then_chain(sel, idx - 1, s);
+            if (r != CSS_CHAIN_FAILS_LOCALLY) return r;
         }
-        return FALSE;
+        return s ? CSS_CHAIN_FAILS_LOCALLY : CSS_CHAIN_FAILS_ALL_SIBLINGS;
     }
     int depth = 0;
-    for (const ns_node *p = cur->parent; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
-        if (p->kind == NS_NODE_DOCUMENT) break;
-        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET) return FALSE;
-        if (match_simple(prev, p) && match_complex_chain(sel, idx - 1, p))
-            return TRUE;
+    const ns_node *p = cur->parent;
+    for (; p && depth++ < NS_DOM_MAX_DEPTH; p = p->parent) {
+        if (p->kind == NS_NODE_DOCUMENT) return CSS_CHAIN_FAILS_COMPLETELY;
+        if (++g_sel_match_ops > NS_SEL_MATCH_BUDGET)
+            return CSS_CHAIN_FAILS_COMPLETELY;
+        css_chain_result r = match_compound_then_chain(sel, idx - 1, p);
+        if (r == CSS_CHAIN_MATCHES || r == CSS_CHAIN_FAILS_COMPLETELY)
+            return r;
     }
-    return FALSE;
+    return p ? CSS_CHAIN_FAILS_LOCALLY : CSS_CHAIN_FAILS_COMPLETELY;
 }
 
 #define CSS_ANCESTOR_FILTER_SIZE 4096
@@ -23228,8 +23253,7 @@ match_selector_structural(const ns_css_selector *sel, const ns_node *el)
     if (g_sel_match_depth == 0) g_sel_match_ops = 0;
     g_sel_match_depth++;
     int idx = (int)sel->compounds->len - 1;
-    gboolean r = match_simple(g_ptr_array_index(sel->compounds, idx), el) &&
-                 match_complex_chain(sel, idx, el);
+    gboolean r = match_compound_then_chain(sel, idx, el) == CSS_CHAIN_MATCHES;
     g_sel_match_depth--;
     return r;
 }
