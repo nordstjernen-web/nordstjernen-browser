@@ -865,6 +865,21 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     return !style_is_block(s);
 }
 
+static gboolean
+node_leaves_inline_run_open(const ns_node *n, GHashTable *styles)
+{
+    if (n->kind == NS_NODE_COMMENT) return TRUE;
+    if (n->kind != NS_NODE_ELEMENT) return FALSE;
+    const ns_style *s = g_hash_table_lookup(styles, n);
+    return s && style_is_none(s);
+}
+
+static gboolean
+continues_inline_run(const ns_node *n, GHashTable *styles)
+{
+    return is_inline_dom(n, styles) || node_leaves_inline_run_open(n, styles);
+}
+
 static ns_display_internal
 node_table_internal(const ns_node *n, GHashTable *styles)
 {
@@ -1302,7 +1317,7 @@ build_cell(const ns_node *n, GHashTable *styles)
     while (c) {
         if (is_inline_dom(c, styles)) {
             const ns_node *start = c;
-            while (c && is_inline_dom(c, styles)) c = c->next_sibling;
+            while (c && continues_inline_run(c, styles)) c = c->next_sibling;
             ns_box *run = build_inline_run(start, c, styles);
             if (run->text && run->text[0] != '\0')
                 box_append_child(cell, run);
@@ -1415,7 +1430,7 @@ build_anonymous_table_cell(const ns_node *n, GHashTable *styles)
                     const ns_style *cs = g_hash_table_lookup(styles, c);
                     if (style_is_contents(cs)) break;
                 }
-                if (!is_inline_dom(c, styles)) break;
+                if (!continues_inline_run(c, styles)) break;
                 c = c->next_sibling;
             }
             ns_box *run = build_inline_run(start, c, styles);
@@ -4626,7 +4641,7 @@ append_display_contents_children(ns_box *block, const ns_node *n,
                     const ns_style *cs = g_hash_table_lookup(styles, c);
                     if (style_is_contents(cs)) break;
                 }
-                if (!is_inline_dom(c, styles)) break;
+                if (!continues_inline_run(c, styles)) break;
                 c = c->next_sibling;
             }
             ns_box *run = build_inline_run(start, c, styles);
@@ -5082,7 +5097,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                     const ns_style *cs = g_hash_table_lookup(styles, c);
                     if (style_is_contents(cs)) break;
                 }
-                if (!is_inline_dom(c, styles)) break;
+                if (!continues_inline_run(c, styles)) break;
                 c = c->next_sibling;
             }
             ns_box *run = build_inline_run(start, c, styles);
