@@ -3,6 +3,62 @@ Changelog:
 
 1.0.26:
 ======
+* URL setters follow the URL Standard where the parser library does not:
+  `url.host = "example.com:99999"` changes the host and keeps the port,
+  clearing the host of a non-special URL with credentials is refused, and
+  `new URL("??a=b").searchParams` keeps the second `?`. Links whose `href`
+  does not parse report `":"` as their protocol, and an `href` containing
+  a NUL is no longer cut short there.
+* `innerText` follows the rendered-text rules: a shadow host's text no
+  longer includes its shadow tree, an inline `<svg>`'s `<text>` counts, a
+  `visibility: hidden` paragraph or `<br>` adds no line breaks, and setting
+  `innerText` or `outerText` to a string with a NUL keeps what follows it.
+* Reflected attributes that ignored writes or read the wrong type are
+  fixed: `meta.content`, `textarea.rows` and `frameset.rows` can be set
+  from script; ARIA properties read `null` when absent and the missing
+  ones exist; `font.size` is a string; `progress.max` ignores non-positive
+  values; progress and meter use the HTML number rules; and `label` and
+  `defaultValue` writes reach mutation observers.
+* `innerHTML`, `outerHTML`, `insertAdjacentHTML` and
+  `Range.createContextualFragment` parse markup in the context element's
+  namespace, so gradients, filters and shapes that D3, icon libraries and
+  chart code insert into an `<svg>` that way are drawn.
+* A `<script>` inserted empty runs once it gets text or a `src`, and
+  `src=""` fires `error` instead of running the inline text.
+* Page images start downloading when the document is laid out rather than
+  at first paint; each `<img>` fires `load` when its image arrives,
+  `complete` and `naturalWidth` report it, and the window `load` event
+  waits for the page's non-lazy images.
+* Setting `document.title` on a page without a `<title>` creates one that
+  later reads find and mutation observers see.
+* `reportError(value)` reports the value like an uncaught exception, as a
+  cancelable `ErrorEvent` at the window, and uncaught-exception events are
+  `ErrorEvent`s.
+* Elements whose interface is plain `HTMLElement` (`article`, `section`,
+  `b`, `nav`, `summary`, ...) are no longer `HTMLUnknownElement`, and
+  `listing`/`xmp` are `HTMLPreElement`s.
+* Enter activates a focused link, button or `<summary>`, and Space on
+  release a focused button, checkbox, radio button or summary, with a
+  trusted `click` as a mouse press would; and Tab continues from where you
+  last clicked instead of from the top of the page.
+* Form validation: every radio button in a required group reports
+  `valueMissing` while none is checked; submit buttons are validation
+  candidates, so a custom validity message on one blocks submission; and a
+  `readonly` input of any type is left out of validation.
+* `relList.supports()` answers per element and `<form>` has a `relList`;
+  `String(link)` gives an `<a>`'s or `<area>`'s URL; and natively
+  implemented interfaces have their `Symbol.toStringTag`.
+* Client-side image maps work: clicking, hovering or `elementFromPoint()`
+  over an `<img usemap>` lands on the `<area>` under the pointer, and
+  clicking an area follows its link.
+* `Blob` and `File` follow the File API: any iterable of parts, `endings:
+  "native"`, printable-only `type`, prototype getters, clamping `slice()`
+  and `blob.bytes()`.
+* `structuredClone()` and `postMessage()` follow HTML's serialization
+  rules more closely: transferring an `ArrayBuffer` detaches it, a detached
+  or duplicate transfer throws `DataCloneError`, resizable buffers and
+  shared views survive, and a page that replaces `window.structuredClone`
+  no longer changes what `postMessage()` sends.
 * Styling a large page is much faster. Every rule used to be tried on each
   element whose tag, class or id matched its last compound, and each try
   walked all the way up the ancestors. The cascade now keeps a small
