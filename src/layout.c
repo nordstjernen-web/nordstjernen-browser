@@ -831,6 +831,8 @@ abs_joins_inline_run(const ns_node *n, const ns_style *s, GHashTable *styles)
     return FALSE;
 }
 
+static int clear_kind_of(const ns_style *s);
+
 static gboolean
 is_inline_dom(const ns_node *n, GHashTable *styles)
 {
@@ -860,6 +862,8 @@ is_inline_dom(const ns_node *n, GHashTable *styles)
     if (ns_display_is_flex_container(d) || ns_display_is_grid_container(d)) {
         if (d.outer == NS_DISPLAY_OUTER_INLINE) return TRUE;
     }
+    if (n->name && strcmp(n->name, "br") == 0 && clear_kind_of(s))
+        return FALSE;
     if (!style_is_block(s) && contains_block_media(n, styles)) return FALSE;
     if (display_is_atomic_inline_container(d)) return TRUE;
     return !style_is_block(s);
@@ -4939,6 +4943,14 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             return NULL;
         }
         g_abs_force_build = FALSE;
+    }
+
+    if (n->name && strcmp(n->name, "br") == 0) {
+        if (!clear_kind_of(s)) return NULL;
+        ns_box *clearance = box_new(NS_BOX_BLOCK);
+        clearance->dom = n;
+        clearance->style = s;
+        return clearance;
     }
 
     if (n->name && (strcmp(n->name, "img") == 0 ||
