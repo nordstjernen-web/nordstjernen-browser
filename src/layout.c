@@ -12466,6 +12466,7 @@ static_abs_y_batch_walk(const ns_box *b, GArray *calcs, guint *next,
 static const ns_node *find_abs_containing_block_dom(const ns_node *n,
                                                     GHashTable *styles);
 static gboolean style_creates_abs_cb(const ns_style *s);
+static gboolean style_creates_fixed_cb(const ns_style *s);
 
 static const ns_node *
 abs_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
@@ -12475,6 +12476,25 @@ abs_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
         if (style_creates_abs_cb(hs)) return e->dom;
     }
     return find_abs_containing_block_dom(e->dom, styles);
+}
+
+static const ns_node *
+fixed_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
+{
+    if (e->pseudo &&
+        style_creates_fixed_cb(g_hash_table_lookup(styles, e->dom)))
+        return e->dom;
+    for (const ns_node *p = e->dom ? e->dom->parent : NULL; p; p = p->parent) {
+        if (p->kind != NS_NODE_ELEMENT) continue;
+        if (style_creates_fixed_cb(g_hash_table_lookup(styles, p))) return p;
+    }
+    return NULL;
+}
+
+static const ns_node *
+positioned_entry_cb_dom(const ns_abs_entry *e, GHashTable *styles)
+{
+    return e->fixed ? fixed_entry_cb_dom(e, styles) : abs_entry_cb_dom(e, styles);
 }
 
 static double
@@ -12604,9 +12624,7 @@ static_abs_y_precompute(ns_box *root, GHashTable *box_map, GHashTable *styles,
         guint rank = GPOINTER_TO_UINT(
             g_hash_table_lookup(g_node_order, (gpointer)e.dom));
         if (!rank) continue;
-        const ns_node *cb_dom = e.fixed
-            ? NULL
-            : abs_entry_cb_dom(&e, styles);
+        const ns_node *cb_dom = positioned_entry_cb_dom(&e, styles);
         ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
         if (cb_dom && !cb) continue;
         if (!cb) cb = root;
@@ -12652,6 +12670,13 @@ style_creates_abs_cb(const ns_style *s)
             strcmp(kw, "fixed") == 0    || strcmp(kw, "sticky") == 0)
             return TRUE;
     }
+    return style_creates_fixed_cb(s);
+}
+
+static gboolean
+style_creates_fixed_cb(const ns_style *s)
+{
+    if (!s) return FALSE;
     static const ns_css_prop tprops[4] = {
         NS_CSS_TRANSFORM, NS_CSS_TRANSLATE, NS_CSS_ROTATE, NS_CSS_SCALE,
     };
@@ -13115,14 +13140,15 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
     static_abs_y_precompute(root, box_map, styles, batch_y, batch_resolved);
     for (guint i = 0; i < g_abs_pending->len; i++) {
         ns_abs_entry e = g_array_index(g_abs_pending, ns_abs_entry, i);
-        const ns_node *cb_dom = e.fixed
-            ? NULL
-            : abs_entry_cb_dom(&e, styles);
+        const ns_node *cb_dom = positioned_entry_cb_dom(&e, styles);
         ns_box *cb = cb_dom ? g_hash_table_lookup(box_map, cb_dom) : root;
-        if (!cb) cb = root;
+        if (!cb) {
+            cb = root;
+            if (e.fixed) cb_dom = NULL;
+        }
 
         ns_box *paint_parent = cb;
-        if (e.fixed) {
+        if (e.fixed && !cb_dom) {
             const ns_node *anc_dom = abs_entry_cb_dom(&e, styles);
             ns_box *anc = anc_dom ? g_hash_table_lookup(box_map, anc_dom) : NULL;
             if (anc && box_can_host_fixed(anc))
@@ -13883,8 +13909,12 @@ ns_box_set_hit_viewport(double scroll_x, double scroll_y)
 gboolean
 ns_box_is_fixed(const ns_box *b)
 {
-    return b && b->style &&
-           keyword_is(b->style->values[NS_CSS_POSITION], "fixed");
+    if (!b || !b->style ||
+        !keyword_is(b->style->values[NS_CSS_POSITION], "fixed"))
+        return FALSE;
+    for (const ns_box *p = b->parent; p; p = p->parent)
+        if (style_creates_fixed_cb(p->style)) return FALSE;
+    return TRUE;
 }
 
 static void
@@ -14009,8 +14039,10 @@ ns_box_hit_offset(const ns_box *b, double *dx, double *dy)
     const ns_css_value *pv = b->style->values[NS_CSS_POSITION];
     if (!pv || pv->kind != NS_CSS_V_KEYWORD || !pv->u.keyword) return;
     if (strcmp(pv->u.keyword, "fixed") == 0) {
-        *dx = g_hit_vp_x;
-        *dy = g_hit_vp_y;
+        if (ns_box_is_fixed(b)) {
+            *dx = g_hit_vp_x;
+            *dy = g_hit_vp_y;
+        }
     } else if (strcmp(pv->u.keyword, "sticky") == 0) {
         ns_box_sticky_offset(b, g_hit_vp_x, g_hit_vp_y,
                              g_hit_vp_x + ns_css_viewport_w(),
