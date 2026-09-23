@@ -3,6 +3,45 @@ Changelog:
 
 1.0.26:
 ======
+* Each `<style>` element is its own style sheet. Adjacent inline sheets
+  were joined before parsing, so one that ended inside an unclosed block
+  or comment swallowed every sheet after it. `<style type="text/foo">`, a
+  `<link>` whose `type` is not CSS and `<link disabled>` no longer apply,
+  and `styleEl.disabled` / `sheet.disabled` switch a sheet off.
+* A declaration whose `var()` cannot be substituted computes as `unset`
+  instead of letting an earlier declaration win, as CSS Variables
+  requires; a substituted value carrying `!important` counts as failed.
+* Declarations written after a nested rule keep their place in the
+  cascade instead of losing to the nested rule.
+* A stray `;` or `}` between rules invalidates the rule after it, and a
+  selector list with a trailing comma, an empty item or junk is dropped
+  whole, as CSS Syntax says and other browsers do. A type selector after
+  an id, class or attribute is rejected too.
+* Comments inside a media query are whitespace, so
+  `@media (min-width: 100px) /* desktop */` applies again.
+* An inline `!important` beats a layered `!important` rule.
+* `initial` gives inherited properties their real initial value instead
+  of behaving like `inherit`; `color: currentColor` takes the parent's
+  colour; and `bolder`/`lighter` resolve against the parent's weight with
+  the CSS Fonts 4 table.
+* `text-shadow`, `orphans`, `widows` and `dominant-baseline` are
+  inherited, so a shadow on a container reaches its paragraphs.
+* A percentage `line-height` is inherited as a length rather than
+  re-applied to each child's font, and `rem` in the root's `font-size`
+  refers to the initial size rather than to itself.
+* Every layer of a multi-image background resolves its `url()` against
+  the stylesheet, not the document.
+* A `min()`, `max()` or `clamp()` inside `calc()` resolves against the real
+  percentage basis instead of the window width, and NaN or infinite
+  `calc()` results are clamped instead of reaching layout.
+* `display: contents` computes to `none` on replaced elements, form
+  controls and an outermost `<svg>`, so their fallback no longer leaks.
+* `translate()` and the `translate` property keep percentages and font
+  units, so the `translateX(calc(-50% + 10px))` centring idiom works, and
+  `getComputedStyle().transform` no longer folds in `translate`, `rotate`
+  and `scale`.
+* `selectorText` and a style rule's `cssText` drop comments and write the
+  attribute case flag as ` i]`.
 * A flex item with a height of its own keeps it. Stretching ignored
   whether an item's height was `auto` and ignored `min-height`/`max-height`,
   so a 20px item in a 100px row came out 100px tall; only auto-height items
