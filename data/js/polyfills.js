@@ -9804,4 +9804,24 @@
         } catch (e) {}
     })();
 
+    (function () {
+        var hrefDesc = global.Element &&
+            Object.getOwnPropertyDescriptor(global.Element.prototype, 'href');
+        if (!hrefDesc || typeof hrefDesc.get !== 'function') return;
+        ['HTMLAnchorElement', 'HTMLAreaElement'].forEach(function (name) {
+            var ctor = global[name];
+            if (typeof ctor !== 'function' || !ctor.prototype) return;
+            try {
+                Object.defineProperty(ctor.prototype, 'toString', {
+                    configurable: true, enumerable: true, writable: true,
+                    value: function toString() {
+                        if (!(this instanceof ctor))
+                            throw new TypeError('Illegal invocation');
+                        return hrefDesc.get.call(this);
+                    }
+                });
+            } catch (e) {}
+        });
+    })();
+
 })(typeof globalThis !== 'undefined' ? globalThis : this);
