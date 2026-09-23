@@ -9108,7 +9108,7 @@ ns_css_initial_value_text(const char *name)
         { "font-variant",               "normal" },
         { "border-radius",              "0px" },
         { "gap",                        "normal" },
-        { "color",                      "rgb(26, 26, 26)" },
+        { "color",                      "rgb(0, 0, 0)" },
         { "font-family",                "serif" },
         { "font-size",                  "16px" },
         { "text-wrap-style",            "auto" },
@@ -25681,6 +25681,19 @@ overflow_pair_normalize(ns_style *out)
     }
 }
 
+static ns_css_value *
+initial_value_of(int prop)
+{
+    static __thread ns_css_value *parsed[NS_CSS_PROP_COUNT];
+    static __thread gboolean tried[NS_CSS_PROP_COUNT];
+    if (!tried[prop]) {
+        tried[prop] = TRUE;
+        const char *text = ns_css_initial_value_text(ns_css_prop_name(prop));
+        if (text) parsed[prop] = parse_value_for((ns_css_prop)prop, text);
+    }
+    return ns_css_value_dup(parsed[prop]);
+}
+
 static void
 cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
             const ns_style *layout_parent, gboolean is_root, double root_px)
@@ -25709,7 +25722,8 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                              : NULL;
         } else if (value_is_initial(out->values[i])) {
             ns_css_value_free(out->values[i]);
-            out->values[i] = NULL;
+            out->values[i] = prop_inherits((ns_css_prop)i) ? initial_value_of(i)
+                                                           : NULL;
             explicit_initial[i] = TRUE;
         } else if (value_is_unset(out->values[i])) {
             ns_css_value_free(out->values[i]);
