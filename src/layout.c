@@ -10278,6 +10278,35 @@ grid_track_repeat_px(const ns_css_track *t, double available_main)
     return min_px;
 }
 
+static void
+grid_line_name_copy(ns_css_tracks *out, const ns_css_line_name *ln, int line)
+{
+    if (out->n_line_names >= NS_CSS_LINE_NAMES_MAX) return;
+    ns_css_line_name *dst = &out->line_names[out->n_line_names++];
+    *dst = *ln;
+    dst->line = line;
+}
+
+static void
+grid_expand_repeat_names(const ns_css_tracks *tr, int repeats,
+                         ns_css_tracks *out)
+{
+    int first = tr->auto_repeat_names_start;
+    int last = tr->auto_repeat_names_end;
+    int shift = (repeats - 1) * tr->auto_repeat_count;
+    out->n_line_names = 0;
+    for (int i = 0; i < first; i++)
+        grid_line_name_copy(out, &tr->line_names[i], tr->line_names[i].line);
+    for (int r = 0; r < repeats; r++)
+        for (int i = first; i < last; i++)
+            grid_line_name_copy(out, &tr->line_names[i],
+                                tr->line_names[i].line +
+                                r * tr->auto_repeat_count);
+    for (int i = last; i < tr->n_line_names; i++)
+        grid_line_name_copy(out, &tr->line_names[i],
+                            tr->line_names[i].line + shift);
+}
+
 static ns_css_tracks
 expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap,
                       int *fit_start, int *fit_count)
@@ -10337,6 +10366,7 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
     }
     for (int i = 0; i < suffix_count && out.n < NS_CSS_TRACKS_MAX; i++)
         out.tracks[out.n++] = tr->tracks[suffix_start + i];
+    grid_expand_repeat_names(tr, repeats, &out);
     out.auto_repeat = NS_CSS_AUTO_REPEAT_NONE;
     if (tr->auto_repeat == NS_CSS_AUTO_REPEAT_FIT) {
         if (fit_start) *fit_start = prefix;
@@ -13617,9 +13647,23 @@ ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns)
             return NULL;
         tv = NULL;
     }
+    ns_css_tracks expanded;
     if (tv && tv->kind == NS_CSS_V_TRACKS &&
-        tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE)
+        tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE) {
         tk = &tv->u.tracks;
+    } else if (tv && tv->kind == NS_CSS_V_TRACKS &&
+               tv->u.tracks.auto_repeat_count > 0) {
+        int count = tv->u.tracks.auto_repeat_count;
+        int others = tv->u.tracks.n - count;
+        int explicit_n = columns ? box->grid_explicit_cols
+                                 : box->grid_explicit_rows;
+        if (explicit_n > others && (explicit_n - others) % count == 0) {
+            expanded = tv->u.tracks;
+            grid_expand_repeat_names(&tv->u.tracks,
+                                     (explicit_n - others) / count, &expanded);
+            tk = &expanded;
+        }
+    }
     if (tr->len == 0) return g_strdup("none");
     if (!tk && !(tv && tv->kind == NS_CSS_V_TRACKS)) {
         gboolean has_items = FALSE;
