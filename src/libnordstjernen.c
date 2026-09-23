@@ -2887,7 +2887,7 @@ ns_browser_press(ns_browser *browser, int x, int y, int mods)
         const ns_node *focus = NULL;
         for (const ns_node *a = node; a; a = a->parent)
             if (ns_node_is_focusable(a)) { focus = a; break; }
-        ns_js_set_focus(browser->js, focus);
+        ns_js_focus_from_pointer(browser->js, node);
         const char *val = focus ? ns_node_editable_value(focus) : NULL;
         browser->caret_byte = val ? strlen(val) : 0;
         browser->sel_anchor_byte = browser->caret_byte;
