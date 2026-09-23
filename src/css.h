@@ -591,6 +591,8 @@ typedef struct ns_css_value {
         struct { guint8 r, g, b, a; } color;
         struct {
             double pct; double px; double em; double rem;
+            double vw, vh, vmin, vmax;
+            double parsed_vw, parsed_vh;
             guint8 fn;
             guint8 n_args;
             guint8 arg_none;
