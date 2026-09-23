@@ -143,6 +143,7 @@ typedef struct ns_box {
     double cb_height_override;
     double flex_main_size;
     gboolean has_flex_main;
+    gboolean is_rendered_legend;
     double paint_top, paint_bottom;
     ns_edges margin, padding, border;
 
@@ -201,6 +202,10 @@ double ns_control_css_extra_h(const ns_node *dom, const ns_style *s);
 void ns_box_free(ns_box *box);
 
 double ns_box_max_bottom(const ns_box *root, double seed);
+
+gboolean ns_box_fieldset_legend_gap(const ns_box *fieldset, double *border_inset,
+                                    double *gap_x0, double *gap_x1,
+                                    double *gap_y0, double *gap_y1);
 
 void ns_paint_drop_box_cache(ns_box *box);
 

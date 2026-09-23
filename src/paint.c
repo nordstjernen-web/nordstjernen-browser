@@ -1279,6 +1279,15 @@ paint_block(cairo_t *cr, const ns_box *b)
                       b->border.left + b->border.right;
     double border_h = b->content_height + b->padding.top + b->padding.bottom +
                       b->border.top + b->border.bottom;
+    double legend_inset = 0;
+    double gap_x0 = 0, gap_x1 = 0, gap_y0 = 0, gap_y1 = 0;
+    gboolean legend_gap = ns_box_fieldset_legend_gap(b, &legend_inset,
+                                                     &gap_x0, &gap_x1,
+                                                     &gap_y0, &gap_y1);
+    if (legend_gap) {
+        border_y += legend_inset;
+        border_h -= legend_inset;
+    }
 
     if (border_w <= 0 || border_h <= 0) return;
 
@@ -1433,6 +1442,16 @@ paint_block(cairo_t *cr, const ns_box *b)
         }
     }
 
+    if (legend_gap) {
+        double cx0, cy0, cx1, cy1;
+        cairo_save(cr);
+        cairo_clip_extents(cr, &cx0, &cy0, &cx1, &cy1);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        cairo_rectangle(cr, cx0, cy0, cx1 - cx0, cy1 - cy0);
+        cairo_rectangle(cr, gap_x0, gap_y0, gap_x1 - gap_x0, gap_y1 - gap_y0);
+        cairo_clip(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+    }
     if (s) {
         double uniform_bw = 0;
         rgba uniform_color = {0};
@@ -1509,6 +1528,10 @@ paint_block(cairo_t *cr, const ns_box *b)
             cairo_stroke(cr);
             cairo_restore(cr);
         }
+        if (legend_gap) {
+            cairo_restore(cr);
+            legend_gap = FALSE;
+        }
         double ow = length_or(s->values[NS_CSS_OUTLINE_WIDTH], 0);
         const ns_css_value *ostyle = s->values[NS_CSS_OUTLINE_STYLE];
         gboolean ostyle_drawable = ostyle && ostyle->kind == NS_CSS_V_KEYWORD &&
@@ -1536,6 +1559,7 @@ paint_block(cairo_t *cr, const ns_box *b)
             cairo_restore(cr);
         }
     }
+    if (legend_gap) cairo_restore(cr);
 }
 
 static const ns_style *

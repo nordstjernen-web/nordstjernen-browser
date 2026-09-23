@@ -26850,6 +26850,16 @@ presentational_hints_css(const ns_node *el)
         if (v > 0)
             g_string_append_printf(out, "border: %dpx solid;", v);
     }
+    if (strcmp(tag, "legend") == 0) {
+        const char *align = ns_element_get_attr(el, "align");
+        if (align && (g_ascii_strcasecmp(align, "left") == 0 ||
+                      g_ascii_strcasecmp(align, "center") == 0 ||
+                      g_ascii_strcasecmp(align, "right") == 0)) {
+            char *lo = g_ascii_strdown(align, -1);
+            g_string_append_printf(out, "justify-self: %s;", lo);
+            g_free(lo);
+        }
+    }
     if (is_hr) {
         const char *align = ns_element_get_attr(el, "align");
         if (align && *align) {
