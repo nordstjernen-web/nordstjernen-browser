@@ -3436,8 +3436,20 @@ ns_browser_key_full(ns_browser *browser, int kind, const char *key,
                 browser_select_key(browser, (ns_node *)f, key, mods)) {
                 browser->dirty = TRUE;
                 if (out_prevented) *out_prevented = 1;
+            } else if (f && !(mods & (2 | 4 | 8)) &&
+                       ns_js_keyboard_activates(f, key)) {
+                if (out_prevented) *out_prevented = 1;
+            } else if (f && !(mods & (2 | 4 | 8)) &&
+                       ns_js_keyboard_activate(browser->js, f, key, FALSE)) {
+                browser->dirty = TRUE;
+                if (out_prevented) *out_prevented = 1;
             } else if (f && ns_node_editable_value(f) &&
                 browser_edit_key(browser, (ns_node *)f, key, mods))
+                browser->dirty = TRUE;
+        } else if (!prevented && kind == 1) {
+            const ns_node *f = ns_js_focused_node(browser->js);
+            if (f && !(mods & (2 | 4 | 8)) &&
+                ns_js_keyboard_activate(browser->js, f, key, TRUE))
                 browser->dirty = TRUE;
         }
     }

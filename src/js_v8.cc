@@ -6635,6 +6635,25 @@ ns_js_activate_element(ns_js *js, const ns_node *el)
 }
 
 gboolean
+ns_js_keyboard_activate(ns_js *js, const ns_node *el, const char *key,
+                        gboolean keyup)
+{
+    (void)js;
+    (void)el;
+    (void)key;
+    (void)keyup;
+    return FALSE;
+}
+
+gboolean
+ns_js_keyboard_activates(const ns_node *el, const char *key)
+{
+    (void)el;
+    (void)key;
+    return FALSE;
+}
+
+gboolean
 ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                             const ns_node *submitter,
                             gboolean *default_prevented)

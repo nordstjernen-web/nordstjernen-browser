@@ -151,6 +151,9 @@ gboolean ns_js_select_step(ns_js *js, ns_node *select, int dir);
 gboolean ns_js_select_edge(ns_js *js, ns_node *select, gboolean last);
 gboolean ns_js_select_typeahead(ns_js *js, ns_node *select, const char *key);
 void     ns_js_activate_element(ns_js *js, const ns_node *el);
+gboolean ns_js_keyboard_activate(ns_js *js, const ns_node *el,
+                                 const char *key, gboolean keyup);
+gboolean ns_js_keyboard_activates(const ns_node *el, const char *key);
 gboolean ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                      const ns_node *submitter,
                                      gboolean *default_prevented);
