@@ -308,6 +308,7 @@ static JSValue ns_nodelist_new(JSContext *ctx);
 static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
+static gboolean ns_node_is_shadow_root(const ns_node *n);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -5467,14 +5468,62 @@ static gboolean
 ns_inner_text_rendered_child(const ns_node *parent, const ns_node *child)
 {
     if (!parent || !parent->name || !child) return TRUE;
+    if (ns_node_is_shadow_root(child)) return FALSE;
     gboolean child_is = child->kind == NS_NODE_ELEMENT && child->name;
     if (g_ascii_strcasecmp(parent->name, "select") == 0)
         return child_is &&
                (g_ascii_strcasecmp(child->name, "option") == 0 ||
                 g_ascii_strcasecmp(child->name, "optgroup") == 0);
-    if (g_ascii_strcasecmp(parent->name, "optgroup") == 0)
+    if (g_ascii_strcasecmp(parent->name, "optgroup") == 0 &&
+        parent->parent && ns_node_is_element_named(parent->parent, "select"))
         return child_is && g_ascii_strcasecmp(child->name, "option") == 0;
     return TRUE;
+}
+
+static void
+ns_inner_text_emit_atomic(ns_inner_text_ctx *c, const char *inner)
+{
+    if (!inner || !*inner) {
+        ns_inner_text_emit_replaced(c);
+        return;
+    }
+    ns_inner_text_materialize_breaks(c);
+    if (c->pending_space && c->have_content)
+        g_string_append_c(c->out, ' ');
+    c->pending_space = FALSE;
+    g_string_append(c->out, inner);
+    c->have_content = TRUE;
+    c->have_text = TRUE;
+}
+
+static gboolean
+ns_inner_text_svg_unrendered(const char *nm)
+{
+    static const char *const set[] = {
+        "defs", "symbol", "clipPath", "mask", "pattern", "marker",
+        "linearGradient", "radialGradient", "filter", "title", "desc",
+        "metadata", "style", "script", "foreignObject", NULL };
+    if (!nm) return TRUE;
+    for (int i = 0; set[i]; i++)
+        if (g_ascii_strcasecmp(nm, set[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static void
+ns_inner_text_collect_svg(const ns_node *n, ns_inner_text_ctx *c,
+                          gboolean in_text, const char *tt, int depth)
+{
+    if (depth >= 512) return;
+    for (const ns_node *ch = n->first_child; ch; ch = ch->next_sibling) {
+        if (ch->kind == NS_NODE_TEXT) {
+            if (in_text) ns_inner_text_emit_text(c, ch->text, NS_IT_WS_NORMAL, tt);
+        } else if (ch->kind == NS_NODE_ELEMENT &&
+                   !ns_inner_text_svg_unrendered(ch->name)) {
+            gboolean text = in_text ||
+                g_ascii_strcasecmp(ch->name, "text") == 0;
+            ns_inner_text_collect_svg(ch, c, text, tt, depth + 1);
+        }
+    }
 }
 
 static void
@@ -5508,6 +5557,7 @@ ns_inner_text_collect_children(ns_js *js, const ns_node *n, ns_inner_text_ctx *c
             const ns_style *cs = js && js->style_table
                 ? g_hash_table_lookup(js->style_table, ch) : NULL;
             if (ns_inner_text_is_cell(cs, ch->name) &&
+                ns_inner_text_visible(cs, child_visible) &&
                 ns_inner_text_has_following_cell(js, ch))
                 ns_inner_text_emit_tab(c);
         }
@@ -5532,6 +5582,18 @@ ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
         return;
     }
     if (n->kind != NS_NODE_ELEMENT) return;
+    if (!is_root && visible && ns_node_is_element_named(n, "svg")) {
+        const ns_style *ss = js && js->style_table
+                           ? g_hash_table_lookup(js->style_table, n) : NULL;
+        if (ns_display_is_none(ns_css_display_of(ss)) ||
+            !ns_inner_text_visible(ss, visible))
+            return;
+        ns_inner_text_ctx sub = { g_string_new(NULL), FALSE, 0, FALSE, FALSE };
+        ns_inner_text_collect_svg(n, &sub, FALSE, tt, depth);
+        ns_inner_text_emit_atomic(c, sub.out->str);
+        g_string_free(sub.out, TRUE);
+        return;
+    }
     if (ns_inner_text_skip_tag(n->name)) return;
     if (n->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS)) return;
     const ns_style *s = js && js->style_table
@@ -5559,7 +5621,7 @@ ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
     }
     if (!is_root) {
         if (n->name && g_ascii_strcasecmp(n->name, "br") == 0) {
-            ns_inner_text_forced_break(c);
+            if (child_visible) ns_inner_text_forced_break(c);
             return;
         }
         gboolean intrinsic_break = n->name &&
@@ -5569,24 +5631,13 @@ ns_inner_text_collect(ns_js *js, const ns_node *n, ns_inner_text_ctx *c,
             ns_inner_text_ctx sub = { g_string_new(NULL), FALSE, 0, FALSE, FALSE };
             ns_inner_text_collect_children(js, n, &sub, child_ws, child_visible,
                                            child_tt, child_block, depth);
-            char *inner = g_string_free(sub.out, FALSE);
-            if (inner && *inner) {
-                ns_inner_text_materialize_breaks(c);
-                if (c->pending_space && c->have_content)
-                    g_string_append_c(c->out, ' ');
-                c->pending_space = FALSE;
-                g_string_append(c->out, inner);
-                c->have_content = TRUE;
-                c->have_text = TRUE;
-            } else {
-                ns_inner_text_emit_replaced(c);
-            }
-            g_free(inner);
+            ns_inner_text_emit_atomic(c, sub.out->str);
+            g_string_free(sub.out, TRUE);
             return;
         }
         gboolean is_p = n->name && g_ascii_strcasecmp(n->name, "p") == 0;
         gboolean block = force_block || ns_inner_text_is_block(s, n->name);
-        breaks = is_p ? 2 : (block ? 1 : 0);
+        breaks = !child_visible ? 0 : is_p ? 2 : (block ? 1 : 0);
         if (breaks) ns_inner_text_require_break(c, breaks);
     }
     ns_inner_text_collect_children(js, n, c, child_ws, child_visible, child_tt,
@@ -6849,6 +6900,15 @@ ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst v
     return JS_UNDEFINED;
 }
 
+static ns_node *
+ns_text_node_from_span(const char *s, gsize len)
+{
+    char *dup = g_malloc(len + 1);
+    memcpy(dup, s, len);
+    dup[len] = '\0';
+    return ns_node_new_text_len(dup, (guint32)len);
+}
+
 static JSValue
 ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
@@ -6867,7 +6927,7 @@ ns_element_set_innerText(JSContext *ctx, JSValueConst this_val, JSValueConst val
         const char *text = p;
         while (p < end && *p != '\n' && *p != '\r') p++;
         if (p > text)
-            ns_node_append_child(n, ns_node_new_text(g_strndup(text, (gsize)(p - text))));
+            ns_node_append_child(n, ns_text_node_from_span(text, (gsize)(p - text)));
         while (p < end && (*p == '\n' || *p == '\r')) {
             if (*p == '\r' && p + 1 < end && p[1] == '\n') p++;
             p++;
@@ -6892,7 +6952,7 @@ ns_rendered_text_fragment_new(const char *s, size_t len)
         while (p < end && *p != '\n' && *p != '\r') p++;
         if (p > text)
             ns_node_append_child(fragment,
-                ns_node_new_text(g_strndup(text, (gsize)(p - text))));
+                ns_text_node_from_span(text, (gsize)(p - text)));
         while (p < end && (*p == '\n' || *p == '\r')) {
             if (*p == '\r' && p + 1 < end && p[1] == '\n') p++;
             p++;
@@ -6905,16 +6965,14 @@ ns_rendered_text_fragment_new(const char *s, size_t len)
 static gboolean
 ns_text_node_concat(ns_node *dst, const ns_node *src)
 {
-    const char *a = dst->text ? dst->text : "";
-    const char *b = src->text ? src->text : "";
-    gsize la = strlen(a);
-    gsize lb = strlen(b);
-    if (la > G_MAXSIZE - lb - 1) return FALSE;
+    gsize la = dst->text ? dst->text_len : 0;
+    gsize lb = src->text ? src->text_len : 0;
+    if (la + lb >= G_MAXUINT32) return FALSE;
     char *merged = g_malloc(la + lb + 1);
-    if (la) memcpy(merged, a, la);
-    if (lb) memcpy(merged + la, b, lb);
+    if (la) memcpy(merged, dst->text, la);
+    if (lb) memcpy(merged + la, src->text, lb);
     merged[la + lb] = '\0';
-    ns_node_replace_text_owned(dst, merged);
+    ns_node_replace_text_len_owned(dst, merged, (guint32)(la + lb));
     return TRUE;
 }
 
@@ -15920,7 +15978,6 @@ ns_linked_css_text(JSContext *ctx, JSValueConst this_val,
 }
 
 static ns_node *ns_element_find_shadow_child(const ns_node *host);
-static gboolean ns_node_is_shadow_root(const ns_node *n);
 static ns_node *ns_node_assigned_slot_node(const ns_node *n);
 
 static gboolean
