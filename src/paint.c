@@ -4325,15 +4325,27 @@ apply_box_content_clip(cairo_t *cr, const ns_box *b)
     return clipped;
 }
 
-static cairo_surface_t *
-texture_surface_cached(ns_texture *tex, const char *filter_kw)
+typedef struct {
+    cairo_surface_t *plain;
+    char            *filter;
+    cairo_surface_t *filtered;
+} texture_surfaces;
+
+static void
+texture_surfaces_free(gpointer data)
 {
-    int iw = ns_texture_get_width(tex);
-    int ih = ns_texture_get_height(tex);
-    if (iw <= 0 || ih <= 0) return NULL;
-    cairo_surface_t *surf = ns_texture_get_user_data(tex);
-    if (surf && !filter_kw) return surf;
-    surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, iw, ih);
+    texture_surfaces *ts = data;
+    if (ts->plain) cairo_surface_destroy(ts->plain);
+    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    g_free(ts->filter);
+    g_free(ts);
+}
+
+static cairo_surface_t *
+texture_surface_create(ns_texture *tex, int iw, int ih, const char *filter_kw)
+{
+    cairo_surface_t *surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                       iw, ih);
     if (cairo_surface_status(surf) != CAIRO_STATUS_SUCCESS) {
         cairo_surface_destroy(surf);
         return NULL;
@@ -4341,13 +4353,35 @@ texture_surface_cached(ns_texture *tex, const char *filter_kw)
     guchar *dst = cairo_image_surface_get_data(surf);
     int dst_stride = cairo_image_surface_get_stride(surf);
     ns_texture_download(tex, dst, (gsize)dst_stride);
-    if (filter_kw) {
+    if (filter_kw)
         apply_image_filter(dst, dst_stride, iw, ih, filter_kw);
-    }
     cairo_surface_mark_dirty(surf);
-    if (!filter_kw)
-        ns_texture_set_user_data(tex, surf,
-                                 (GDestroyNotify)cairo_surface_destroy);
+    return surf;
+}
+
+static cairo_surface_t *
+texture_surface_cached(ns_texture *tex, const char *filter_kw)
+{
+    int iw = ns_texture_get_width(tex);
+    int ih = ns_texture_get_height(tex);
+    if (iw <= 0 || ih <= 0) return NULL;
+    texture_surfaces *ts = ns_texture_get_user_data(tex);
+    if (!ts) {
+        ts = g_new0(texture_surfaces, 1);
+        ns_texture_set_user_data(tex, ts, texture_surfaces_free);
+    }
+    if (!filter_kw) {
+        if (!ts->plain) ts->plain = texture_surface_create(tex, iw, ih, NULL);
+        return ts->plain;
+    }
+    if (ts->filtered && g_strcmp0(ts->filter, filter_kw) == 0)
+        return ts->filtered;
+    cairo_surface_t *surf = texture_surface_create(tex, iw, ih, filter_kw);
+    if (!surf) return NULL;
+    if (ts->filtered) cairo_surface_destroy(ts->filtered);
+    g_free(ts->filter);
+    ts->filtered = surf;
+    ts->filter = g_strdup(filter_kw);
     return surf;
 }
 
@@ -4423,7 +4457,6 @@ paint_texture(cairo_t *cr, const ns_box *b, ns_texture *tex)
          strcmp(ir->u.keyword, "crisp-edges") == 0))
         cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
     cairo_paint(cr);
-    if (surface_filter) cairo_surface_destroy(surf);
     return TRUE;
 }
 
