@@ -5580,6 +5580,7 @@ inline_box_measure_cacheable(const ns_box *box)
 }
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
+static gboolean flex_box_is_border_box(const ns_box *c);
 
 static double
 inline_atomic_outer_height(const ns_box *b)
@@ -7226,8 +7227,16 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (wv && wv->kind == NS_CSS_V_LENGTH &&
             (wv->u.length.unit == NS_CSS_UNIT_PX ||
              wv->u.length.unit == NS_CSS_UNIT_NUMBER) &&
-            wv->u.length.v > 0)
-            return wv->u.length.v;
+            wv->u.length.v > 0) {
+            double w = wv->u.length.v;
+            if (flex_box_is_border_box(box)) {
+                ns_edges m = {0}, pd = {0}, bd = {0};
+                edges_from_style(box->style, 0, &m, &pd, &bd);
+                w -= pd.left + pd.right + bd.left + bd.right;
+                if (w < 0) w = 0;
+            }
+            return w;
+        }
     }
     if (style_contains_inline_size(box->style)) return 0;
     const ns_style *child_style = box->style ? box->style : parent_style;
@@ -7247,8 +7256,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
     for (ns_box *c = box->first_child; c; c = c->next_sibling) {
         double w = measure_natural_width(c, child_style);
         int fside = float_side_of(c->style);
-        double cw_used = w;
-        double outer = cw_used;
+        double outer = w;
         if (c->style) {
             ns_edges m = {0}, pd = {0}, bd = {0};
             edges_from_style(c->style, 0, &m, &pd, &bd);
@@ -8309,8 +8317,6 @@ estimate_natural_width(const ns_box *b, double cap)
             if (c->style && c->style != b->style &&
                 style_is_absolute_or_fixed(c->style)) continue;
             double cw_child = estimate_natural_width(c, cap);
-            int fside = float_side_of(c->style);
-            if (fside >= 0 && cw_child < 60) cw_child = 60;
             if (c->style &&
                 (c->style->values[NS_CSS_MARGIN_LEFT] ||
                  c->style->values[NS_CSS_MARGIN_RIGHT])) {
