@@ -3,6 +3,13 @@ Changelog:
 
 1.0.26:
 ======
+* `window.scrollTo()`, `scroll()` and `scrollBy()`, and setting
+  `scrollTop`/`scrollLeft` on the root element, move the page. They only
+  changed the position script read back; the view stayed where it was. They
+  now lay out if needed, clamp to the scrollable range and scroll the
+  viewport in both axes. `scrollBy()` called bare, as it almost always is,
+  read its position from `undefined` and scrolled to NaN, and `scrollY`
+  briefly snapped back to the old position before the view caught up.
 * `postMessage`'s `targetOrigin` is checked against the origin of the
   window the message goes to. The check read that window's `location`,
   which answers with the URL of whichever frame's script is running, so
