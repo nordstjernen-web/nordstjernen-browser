@@ -3,6 +3,51 @@ Changelog:
 
 1.0.26:
 ======
+* `<img style="width:100%">` no longer crashes the renderer. Measuring a
+  percentage-width image asked for its own natural width, which asked for
+  the percentage basis again, until the stack ran out; replaced elements
+  resolve the percentage against their container again.
+* `srcset` is parsed as the HTML standard describes: a `data:` URL or any
+  URL containing a comma is no longer cut short, malformed descriptors are
+  rejected, and a `1x` candidate beats `src`. An image picked from a `2x`
+  or `w` candidate is laid out at its density-corrected size and reports it
+  through `naturalWidth`/`naturalHeight`, and a `<picture>` only considers
+  the `<source>` elements before its `<img>`.
+* Legacy presentational attributes follow the rendering section. Dimension
+  attributes use HTML's parsing rules (`width="20.25e2"` is 20.25px, not
+  2025px); `<font size="+1">` is relative to size 3 and nested sizes no
+  longer compound; hspace/vspace take percentages and apply to embed,
+  object and image buttons. Newly mapped: body topmargin/leftmargin/
+  marginwidth/marginheight (including the containing frame's),
+  `background`, `nobr`, `br clear`, `caption align` and legend `align`;
+  `<marquee>` shows its text. Table `border`, `frame`, `rules` and
+  `bordercolor` give the spec's outset/inset borders, and a width/height
+  pair on img, video and image buttons sets `aspect-ratio`, taken from the
+  selected `<source>` inside a `<picture>`.
+* The `dir` attribute sets CSS `direction`, so right-to-left pages lay out
+  flex rows and list markers from the right, not only their text.
+* The default stylesheet follows the HTML rendering section instead of
+  house style: lists get disc/circle/square by nesting depth with no gaps
+  around nested lists; text and links use the system colours;
+  `code`/`kbd`/`samp` are plain monospace; `pre` has 1em margins;
+  `<dialog open>` is centred instead of pushing the page down; form
+  controls no longer inherit uppercase, indent or letter-spacing. Also the
+  hidden-element and form-in-table rules, `appearance: auto` on controls,
+  the default iframe border with `frameborder`, and fieldset's groove
+  border.
+* A `<legend>` sits in its fieldset's top border, with the border broken
+  around it, positioned by its margins and `justify-self`.
+* The `<details>` disclosure triangle is a list marker, so `list-style:
+  none` or `display: block` on the summary removes it, and content inside
+  `<details>` is no longer indented 16px per level.
+* Frames and objects are no longer forced with user-agent `!important`, so
+  a page can hide a loaded helper iframe, and an `<object>` without a
+  document shows its fallback content.
+* No-doctype pages get HTML's quirks-mode rules: tables stop inheriting
+  body fonts and alignment, forms keep a bottom margin, and a nowrap cell
+  with a pixel width wraps.
+* An image loaded into an iframe shows as an image rather than its bytes
+  parsed as HTML.
 * Each `<style>` element is its own style sheet. Adjacent inline sheets
   were joined before parsing, so one that ended inside an unclosed block
   or comment swallowed every sheet after it. `<style type="text/foo">`, a
