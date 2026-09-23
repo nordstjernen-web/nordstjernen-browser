@@ -926,6 +926,9 @@ ns_css_stylesheet *ns_css_merged_styles_cached(const char *css, gssize len,
 ns_css_stylesheet *ns_css_stylesheet_parse_url_cached(const char *url,
                                                       const char *css,
                                                       gssize len);
+ns_css_stylesheet *ns_css_stylesheet_parse_import_cached(const char *url,
+                                                         const char *layer_name,
+                                                         GBytes *bytes);
 void               ns_css_style_element_cache_begin(void);
 void               ns_css_stylesheet_cache_drop(void);
 void               ns_css_style_element_cache_end(void);

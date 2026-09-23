@@ -29163,9 +29163,15 @@ typedef struct {
     guint       hash;
 } ns_merged_style_key;
 
+typedef struct {
+    GBytes *bytes;
+    ns_css_stylesheet *sheet;
+} ns_import_sheet_cached;
+
 static GHashTable *g_style_el_cache;
 static GHashTable *g_merged_style_cache;
 static GHashTable *g_link_sheet_cache;
+static GHashTable *g_import_sheet_cache;
 static guint64 g_merged_style_cache_clock;
 
 static void
@@ -29270,6 +29276,7 @@ ns_css_stylesheet_cache_drop(void)
     if (g_style_el_cache) g_hash_table_remove_all(g_style_el_cache);
     if (g_merged_style_cache) g_hash_table_remove_all(g_merged_style_cache);
     if (g_link_sheet_cache) g_hash_table_remove_all(g_link_sheet_cache);
+    if (g_import_sheet_cache) g_hash_table_remove_all(g_import_sheet_cache);
 }
 
 void
@@ -29281,6 +29288,8 @@ ns_css_style_element_cache_begin(void)
     ns_merged_style_cache_trim();
     if (g_link_sheet_cache && g_hash_table_size(g_link_sheet_cache) > 256)
         g_hash_table_remove_all(g_link_sheet_cache);
+    if (g_import_sheet_cache && g_hash_table_size(g_import_sheet_cache) > 256)
+        g_hash_table_remove_all(g_import_sheet_cache);
 }
 
 static void
@@ -29302,6 +29311,16 @@ ns_cached_stylesheet_free(gpointer data)
     if (!sheet) return;
     sheet->cached = FALSE;
     ns_css_stylesheet_free(sheet);
+}
+
+static void
+ns_import_sheet_cached_free(gpointer data)
+{
+    ns_import_sheet_cached *e = data;
+    if (!e) return;
+    g_bytes_unref(e->bytes);
+    ns_cached_stylesheet_free(e->sheet);
+    g_free(e);
 }
 
 void
@@ -29371,6 +29390,51 @@ ns_css_stylesheet_parse_url_cached(const char *url, const char *css, gssize len)
     }
     sh->cached = TRUE;
     g_hash_table_replace(g_link_sheet_cache, key, sh);
+    return sh;
+}
+
+static ns_css_stylesheet *
+ns_css_stylesheet_parse_in_layer(GBytes *bytes, const char *layer_name)
+{
+    gsize len = 0;
+    const char *data = g_bytes_get_data(bytes, &len);
+    ns_css_stylesheet *sh = ns_css_stylesheet_parse(data, (gssize)len);
+    if (sh && layer_name)
+        ns_css_stylesheet_force_layer(sh, layer_name);
+    return sh;
+}
+
+ns_css_stylesheet *
+ns_css_stylesheet_parse_import_cached(const char *url, const char *layer_name,
+                                      GBytes *bytes)
+{
+    if (!bytes) return NULL;
+    if (!url || !*url) return ns_css_stylesheet_parse_in_layer(bytes, layer_name);
+    if (!g_import_sheet_cache)
+        g_import_sheet_cache =
+            g_hash_table_new_full(g_str_hash, g_str_equal,
+                                  g_free, ns_import_sheet_cached_free);
+    char *key = g_strdup_printf("%.0fx%.0f|%c%zu:%s|%s",
+                                ns_css_media_viewport_current_w(),
+                                ns_css_media_viewport_current_h(),
+                                layer_name ? 'L' : '-',
+                                layer_name ? strlen(layer_name) : (gsize)0,
+                                layer_name ? layer_name : "", url);
+    ns_import_sheet_cached *hit = g_hash_table_lookup(g_import_sheet_cache, key);
+    if (hit && (hit->bytes == bytes || g_bytes_equal(hit->bytes, bytes))) {
+        g_free(key);
+        return hit->sheet;
+    }
+    ns_css_stylesheet *sh = ns_css_stylesheet_parse_in_layer(bytes, layer_name);
+    if (!sh) {
+        g_free(key);
+        return NULL;
+    }
+    sh->cached = TRUE;
+    ns_import_sheet_cached *entry = g_new0(ns_import_sheet_cached, 1);
+    entry->bytes = g_bytes_ref(bytes);
+    entry->sheet = sh;
+    g_hash_table_replace(g_import_sheet_cache, key, entry);
     return sh;
 }
 
