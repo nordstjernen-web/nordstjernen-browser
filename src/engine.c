@@ -379,16 +379,12 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
             if (seen) g_hash_table_add(seen, g_strdup(abs));
             GBytes *bytes = fetch_css_bytes(abs, top_url, cache, TRUE);
             if (bytes) {
-                gsize len = 0;
-                const char *data = g_bytes_get_data(bytes, &len);
                 ns_css_stylesheet *child =
-                    ns_css_stylesheet_parse(data, (gssize)len);
-                if (child) {
-                    if (im->layer_name)
-                        ns_css_stylesheet_force_layer(child, im->layer_name);
+                    ns_css_stylesheet_parse_import_cached(abs, im->layer_name,
+                                                          bytes);
+                if (child)
                     append_stylesheet_expanded(out, child, abs, top_url, seen,
                                                cache, depth + 1);
-                }
                 g_bytes_unref(bytes);
             }
             g_free(abs);
