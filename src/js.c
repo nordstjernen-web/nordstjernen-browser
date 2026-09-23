@@ -298,6 +298,15 @@ static JSValue ns_make_token_list(JSContext *ctx, JSValueConst element,
                                   const char *attr);
 static gboolean ns_node_is_disabled_form_control(const ns_node *el);
 static int ns_checkable_input_kind(const ns_node *el);
+static gboolean ns_node_is_submit_trigger(const ns_node *el);
+static void ns_popover_forget_node(ns_js *js, ns_node *n);
+static void ns_popover_state_clear(ns_js *js);
+static void ns_popover_removing_steps(ns_js *js, ns_node *el);
+static void ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
+                                    const char *old_value,
+                                    const char *new_value);
+static void ns_js_popover_light_dismiss(ns_js *js, const ns_node *target,
+                                        gboolean up);
 typedef struct {
     gboolean checked;
     gboolean indeterminate;
@@ -3332,6 +3341,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->js_image_loads)
         g_hash_table_remove(js->js_image_loads, n);
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
+    ns_popover_forget_node(js, n);
     n->js_invalidate = NULL;
 
     if (js && js->listeners) {
@@ -3999,6 +4009,7 @@ static const char *const kwr_as[]       = {
     "worker", "xslt",
 };
 static const char *const kwr_preload[]  = { "none", "metadata", "auto" };
+static const char *const kwr_popovertargetaction[] = { "toggle", "show", "hide" };
 
 static const ns_enum_reflect g_enum_reflect[] = {
     { "enctype",     kwr_enctype,   3, kwr_enctype[0], kwr_enctype[0] },
@@ -4009,6 +4020,7 @@ static const ns_enum_reflect g_enum_reflect[] = {
     { "kind",        kwr_kind,      5, "subtitles",    "metadata" },
     { "as",          kwr_as,        G_N_ELEMENTS(kwr_as), "", "" },
     { "preload",     kwr_preload,   3, "auto",         "auto" },
+    { "popovertargetaction", kwr_popovertargetaction, 3, "toggle", "toggle" },
 };
 
 static gboolean
@@ -4979,8 +4991,9 @@ ns_element_get_type(JSContext *ctx, JSValueConst this_val)
         return ns_reflect_enum(ctx, n, &d);
     }
     if (strcmp(n->name, "button") == 0) {
+        if (ns_node_is_submit_trigger(n)) return JS_NewString(ctx, "submit");
         ns_enum_attr_def d = { "type", kw_button_types,
-                               G_N_ELEMENTS(kw_button_types), "submit", "submit",
+                               G_N_ELEMENTS(kw_button_types), "button", "button",
                                FALSE };
         return ns_reflect_enum(ctx, n, &d);
     }
@@ -18999,8 +19012,6 @@ ns_form_data_append_select(JSContext *ctx, JSValueConst fd,
     }
 }
 
-static gboolean ns_node_is_submit_trigger(const ns_node *el);
-
 static void
 ns_form_data_populate_from_form(JSContext *ctx, JSValueConst fd,
                                 const ns_node *form, const ns_node *submitter)
@@ -25861,6 +25872,48 @@ ns_event_define_accessor(JSContext *ctx, JSValueConst ev, const char *prop,
     JS_FreeAtom(ctx, atom);
 }
 
+static const ns_node *
+ns_event_retarget_node(const ns_node *target, const ns_node *current)
+{
+    const ns_node *visible = target;
+    int depth = 0;
+    while (visible && depth++ < NS_DOM_MAX_DEPTH) {
+        const ns_node *root = visible;
+        while (root && !ns_node_is_shadow_root(root)) root = root->parent;
+        if (!root || (current && ns_node_ancestor_or_self(current, root)))
+            return visible;
+        visible = root->parent;
+    }
+    return target;
+}
+
+static JSValue
+ns_event_get_source(JSContext *ctx, JSValueConst this_val, int argc,
+                    JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    JSValue src = JS_GetPropertyStr(ctx, this_val, "__nd_source");
+    const ns_node *n = ns_unwrap_element(src);
+    if (!n) {
+        JS_FreeValue(ctx, src);
+        return JS_NULL;
+    }
+    JSValue ct = JS_GetPropertyStr(ctx, this_val, "currentTarget");
+    const ns_node *visible = ns_event_retarget_node(n, ns_unwrap_element(ct));
+    JS_FreeValue(ctx, ct);
+    if (!visible || visible == n) return src;
+    JS_FreeValue(ctx, src);
+    return ns_make_element(ctx, visible);
+}
+
+static void
+ns_event_define_source(JSContext *ctx, JSValueConst ev, JSValue source)
+{
+    JS_DefinePropertyValueStr(ctx, ev, "__nd_source", source,
+                              JS_PROP_CONFIGURABLE);
+    ns_event_define_accessor(ctx, ev, "source", ns_event_get_source, NULL);
+}
+
 static void
 ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
 {
@@ -26172,6 +26225,73 @@ ns_submit_event_ctor(JSContext *ctx, JSValueConst this_val,
         }
     }
     JS_SetPropertyStr(ctx, ev, "submitter", submitter);
+    return ev;
+}
+
+static int
+ns_event_init_string(JSContext *ctx, JSValueConst ev, int argc,
+                     JSValueConst *argv, const char *member)
+{
+    JSValue v = argc >= 2 && JS_IsObject(argv[1])
+        ? JS_GetPropertyStr(ctx, argv[1], member) : JS_UNDEFINED;
+    if (JS_IsException(v)) return -1;
+    JSValue s = JS_IsUndefined(v) ? JS_NewString(ctx, "") : JS_ToString(ctx, v);
+    JS_FreeValue(ctx, v);
+    if (JS_IsException(s)) return -1;
+    JS_DefinePropertyValueStr(ctx, ev, member, s,
+                              JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
+    return 0;
+}
+
+static int
+ns_event_init_source(JSContext *ctx, JSValueConst ev, int argc,
+                     JSValueConst *argv, const char *member)
+{
+    JSValue v = argc >= 2 && JS_IsObject(argv[1])
+        ? JS_GetPropertyStr(ctx, argv[1], member) : JS_UNDEFINED;
+    if (JS_IsException(v)) return -1;
+    if (JS_IsUndefined(v) || JS_IsNull(v)) {
+        JS_FreeValue(ctx, v);
+        v = JS_NULL;
+    } else {
+        const ns_node *n = ns_unwrap_element(v);
+        if (!n || n->kind != NS_NODE_ELEMENT) {
+            JS_FreeValue(ctx, v);
+            JS_ThrowTypeError(ctx, "Failed to read the '%s' property: "
+                              "value is not of type 'Element'", member);
+            return -1;
+        }
+    }
+    ns_event_define_source(ctx, ev, v);
+    return 0;
+}
+
+static JSValue
+ns_toggle_event_ctor(JSContext *ctx, JSValueConst this_val,
+                     int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    if (ns_event_init_string(ctx, ev, argc, argv, "newState") < 0 ||
+        ns_event_init_string(ctx, ev, argc, argv, "oldState") < 0 ||
+        ns_event_init_source(ctx, ev, argc, argv, "source") < 0) {
+        JS_FreeValue(ctx, ev);
+        return JS_EXCEPTION;
+    }
+    return ev;
+}
+
+static JSValue
+ns_command_event_ctor(JSContext *ctx, JSValueConst this_val,
+                      int argc, JSValueConst *argv)
+{
+    JSValue ev = ns_event_ctor(ctx, this_val, argc, argv);
+    if (JS_IsException(ev)) return ev;
+    if (ns_event_init_string(ctx, ev, argc, argv, "command") < 0 ||
+        ns_event_init_source(ctx, ev, argc, argv, "source") < 0) {
+        JS_FreeValue(ctx, ev);
+        return JS_EXCEPTION;
+    }
     return ev;
 }
 
@@ -28197,24 +28317,60 @@ ns_js_dispatch_submit_event(ns_js *js, const ns_node *form,
                                       default_prevented);
 }
 
+static void
+ns_event_define_readonly(JSContext *ctx, JSValueConst ev, const char *name,
+                         JSValue value)
+{
+    JS_DefinePropertyValueStr(ctx, ev, name, value,
+                              JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
+}
+
+static void
+ns_event_adopt_interface(JSContext *ctx, JSValueConst ev, const char *iface)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, iface);
+    if (JS_IsObject(ctor)) {
+        JSValue proto = JS_GetPropertyStr(ctx, ctor, "prototype");
+        if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
+        JS_FreeValue(ctx, proto);
+    }
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+}
+
+static gboolean
+ns_js_fire_toggle_event(ns_js *js, const ns_node *target, const char *type,
+                        const char *old_state, const char *new_state,
+                        gboolean cancelable, const ns_node *source,
+                        gboolean *default_prevented)
+{
+    if (default_prevented) *default_prevented = FALSE;
+    if (!js || !target || !type) return FALSE;
+    if (js->halted || js->in_pump) return FALSE;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, type, target);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "cancelable",
+                      cancelable ? JS_TRUE : JS_FALSE);
+    ns_event_define_readonly(ctx, event, "oldState",
+                             JS_NewString(ctx, old_state ? old_state : ""));
+    ns_event_define_readonly(ctx, event, "newState",
+                             JS_NewString(ctx, new_state ? new_state : ""));
+    ns_event_define_source(ctx, event,
+                           source ? ns_make_element(ctx, source) : JS_NULL);
+    ns_event_adopt_interface(ctx, event, "ToggleEvent");
+    return ns_js_dispatch_built_event(js, target, type, event,
+                                      default_prevented);
+}
+
 static gboolean
 ns_js_dispatch_toggle_event(ns_js *js, const ns_node *target, const char *type,
                             const char *old_state, const char *new_state,
                             gboolean cancelable, gboolean *default_prevented)
 {
-    if (default_prevented) *default_prevented = FALSE;
-    if (!js || !target || !type) return FALSE;
-    if (js->halted || js->in_pump) return FALSE;
-    JSValue event = ns_make_event(js->ctx, type, target);
-    JS_SetPropertyStr(js->ctx, event, "bubbles", JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "cancelable",
-                      cancelable ? JS_TRUE : JS_FALSE);
-    JS_SetPropertyStr(js->ctx, event, "oldState",
-                      JS_NewString(js->ctx, old_state ? old_state : ""));
-    JS_SetPropertyStr(js->ctx, event, "newState",
-                      JS_NewString(js->ctx, new_state ? new_state : ""));
-    return ns_js_dispatch_built_event(js, target, type, event,
-                                      default_prevented);
+    return ns_js_fire_toggle_event(js, target, type, old_state, new_state,
+                                   cancelable, NULL, default_prevented);
 }
 
 static gboolean
@@ -28394,7 +28550,11 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
         JS_SetPropertyStr(ctx, event, "width",  JS_NewInt32(ctx, 1));
         JS_SetPropertyStr(ctx, event, "height", JS_NewInt32(ctx, 1));
     }
-    return ns_js_dispatch_built_event(js, target, type, event, default_prevented);
+    gboolean fired = ns_js_dispatch_built_event(js, target, type, event,
+                                                default_prevented);
+    if (strcmp(type, "pointerdown") == 0 || strcmp(type, "pointerup") == 0)
+        ns_js_popover_light_dismiss(js, target, type[7] == 'u');
+    return fired;
 }
 
 ns_js_drag_session *
@@ -30759,122 +30919,6 @@ ns_element_removeAttribute(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     JS_FreeCString(ctx, raw_name);
     g_free(lowered);
     return JS_UNDEFINED;
-}
-
-static void
-ns_node_set_popover_open(JSContext *ctx, ns_node *n, gboolean open)
-{
-    if (!n || n->kind != NS_NODE_ELEMENT) return;
-    gboolean was = ns_element_get_attr(n, "data-nd-popover-open") != NULL;
-    if (open == was) return;
-    ns_js *_j = js_from_ctx(ctx);
-    const char *old_state = was  ? "open" : "closed";
-    const char *new_state = open ? "open" : "closed";
-    if (_j) {
-        gboolean prevented = FALSE;
-        ns_js_dispatch_toggle_event(_j, n, "beforetoggle",
-                                    old_state, new_state,
-                                    /* cancelable on open: */ open,
-                                    &prevented);
-        if (open && prevented) return;
-    }
-    if (open) ns_element_set_attr(n, "data-nd-popover-open", "");
-    else      ns_element_remove_attr(n, "data-nd-popover-open");
-    if (_j) {
-        _j->mutated = TRUE;
-        ns_js_dispatch_toggle_event(_j, n, "toggle",
-                                    old_state, new_state, FALSE, NULL);
-        if (_j->repaint_cb) _j->repaint_cb(_j->repaint_user_data);
-    }
-}
-
-static void
-ns_element_set_popover_open(JSContext *ctx, JSValueConst this_val, gboolean open)
-{
-    ns_node_set_popover_open(ctx, ns_unwrap_element_mut(this_val), open);
-}
-
-static JSValue
-ns_element_showPopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    ns_element_set_popover_open(ctx, this_val, TRUE);
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_element_hidePopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    (void)argc; (void)argv;
-    ns_element_set_popover_open(ctx, this_val, FALSE);
-    return JS_UNDEFINED;
-}
-
-static JSValue
-ns_element_togglePopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
-{
-    ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || n->kind != NS_NODE_ELEMENT) return JS_FALSE;
-    gboolean was = ns_element_get_attr(n, "data-nd-popover-open") != NULL;
-    gboolean target = !was;
-    if (argc >= 1 && JS_IsBool(argv[0])) target = JS_ToBool(ctx, argv[0]);
-    ns_element_set_popover_open(ctx, this_val, target);
-    return JS_NewBool(ctx, target);
-}
-
-static ns_node *
-ns_element_popover_target_node(JSContext *ctx, const ns_node *el)
-{
-    if (!el) return NULL;
-    const char *id = ns_element_get_attr(el, "popovertarget");
-    if (!id || !*id || !js_from_ctx(ctx) || !js_from_ctx(ctx)->current_doc)
-        return NULL;
-    ns_node *target = ns_node_find_by_id(js_from_ctx(ctx)->current_doc, id);
-    if (!target || target->kind != NS_NODE_ELEMENT) return NULL;
-    return target;
-}
-
-static JSValue
-ns_element_get_popoverTargetElement(JSContext *ctx, JSValueConst this_val)
-{
-    ns_node *target = ns_element_popover_target_node(ctx,
-        ns_unwrap_element(this_val));
-    return target ? ns_make_element(ctx, target) : JS_NULL;
-}
-
-static JSValue
-ns_element_set_popoverTargetElement(JSContext *ctx, JSValueConst this_val,
-                                    JSValueConst val)
-{
-    ns_node *el = ns_unwrap_element_mut(this_val);
-    if (!el) return JS_UNDEFINED;
-    if (JS_IsNull(val) || JS_IsUndefined(val)) {
-        ns_js_remove_attr_recorded(js_from_ctx(ctx), el, "popovertarget");
-        return JS_UNDEFINED;
-    }
-    const ns_node *target = ns_unwrap_element(val);
-    const char *id = target ? ns_element_get_attr(target, "id") : NULL;
-    if (id && *id)
-        ns_js_set_attr_recorded(js_from_ctx(ctx), el, "popovertarget", id);
-    return JS_UNDEFINED;
-}
-
-static gboolean
-ns_element_activate_popover_target(JSContext *ctx, const ns_node *el)
-{
-    const char *id = ns_element_get_attr(el, "popovertarget");
-    if (!id) return FALSE;
-    ns_node *target = ns_element_popover_target_node(ctx, el);
-    if (!target || !ns_element_get_attr(target, "popover")) return TRUE;
-    const char *action = ns_element_get_attr(el, "popovertargetaction");
-    gboolean open = ns_element_get_attr(target, "data-nd-popover-open") != NULL;
-    if (action && g_ascii_strcasecmp(action, "show") == 0)
-        ns_node_set_popover_open(ctx, target, TRUE);
-    else if (action && g_ascii_strcasecmp(action, "hide") == 0)
-        ns_node_set_popover_open(ctx, target, FALSE);
-    else
-        ns_node_set_popover_open(ctx, target, !open);
-    return TRUE;
 }
 
 static const ns_node *
@@ -38598,6 +38642,1155 @@ ns_js_dialog_close(ns_js *js, ns_node *dialog, const char *return_value)
     js->mutated = TRUE;
 }
 
+typedef enum {
+    NS_POPOVER_NONE,
+    NS_POPOVER_AUTO,
+    NS_POPOVER_MANUAL,
+    NS_POPOVER_HINT,
+} ns_popover_type;
+
+enum {
+    NS_POPOVER_VALID,
+    NS_POPOVER_WRONG_STATE,
+    NS_POPOVER_NOT_SUPPORTED,
+    NS_POPOVER_INVALID_STATE,
+};
+
+typedef struct {
+    int       timer;
+    gboolean  old_open;
+    gboolean  new_open;
+    ns_node  *source;
+} ns_toggle_tracker;
+
+typedef struct {
+    ns_js            *js;
+    ns_node          *el;
+    gboolean          hiding;
+    int               type_changing;
+    ns_node          *trigger;
+    ns_node          *prev_focus;
+    ns_toggle_tracker popover_toggle;
+    ns_toggle_tracker dialog_toggle;
+} ns_popover_info;
+
+typedef struct {
+    ns_node    *owner;
+    const char *attr;
+    ns_node    *target;
+} ns_attr_element_ref;
+
+static ns_popover_type
+ns_popover_type_of_value(const char *v)
+{
+    if (!v) return NS_POPOVER_NONE;
+    if (!*v || g_ascii_strcasecmp(v, "auto") == 0) return NS_POPOVER_AUTO;
+    if (g_ascii_strcasecmp(v, "hint") == 0) return NS_POPOVER_HINT;
+    return NS_POPOVER_MANUAL;
+}
+
+static gboolean
+ns_node_is_html_element(const ns_node *el)
+{
+    return el && el->kind == NS_NODE_ELEMENT && el->name &&
+           !(el->flags & (NS_NODE_SVG_NS | NS_NODE_FOREIGN_NS));
+}
+
+static ns_popover_type
+ns_popover_type_of(const ns_node *el)
+{
+    if (!ns_node_is_html_element(el)) return NS_POPOVER_NONE;
+    return ns_popover_type_of_value(ns_element_get_attr(el, "popover"));
+}
+
+static gboolean
+ns_popover_is_showing(const ns_node *el)
+{
+    return el && ns_element_get_attr(el, "data-nd-popover-open") != NULL;
+}
+
+static void
+ns_popover_set_showing(ns_js *js, ns_node *el, gboolean showing)
+{
+    if (ns_popover_is_showing(el) == showing) return;
+    if (showing) ns_element_set_attr(el, "data-nd-popover-open", "");
+    else         ns_element_remove_attr(el, "data-nd-popover-open");
+    ns_css_mark_attr_dirty(el, "data-nd-popover-open", showing ? NULL : "");
+    js->mutated = TRUE;
+    if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
+}
+
+static gboolean
+ns_node_is_connected(const ns_node *n)
+{
+    const ns_node *root = n ? ns_node_root(n) : NULL;
+    return root && root->kind == NS_NODE_DOCUMENT &&
+           !(root->flags & NS_NODE_FRAGMENT);
+}
+
+static gboolean
+ns_node_is_shadow_including_inclusive_ancestor(const ns_node *ancestor,
+                                               const ns_node *node)
+{
+    for (const ns_node *p = node; p; p = p->parent)
+        if (p == ancestor) return TRUE;
+    return FALSE;
+}
+
+static ns_node *
+ns_node_flat_parent(const ns_node *n)
+{
+    if (!n) return NULL;
+    ns_node *slot = ns_node_assigned_slot_node(n);
+    if (slot) return slot;
+    ns_node *p = n->parent;
+    if (p && ns_node_is_shadow_root(p)) p = p->parent;
+    return p;
+}
+
+static gboolean
+ns_node_is_flat_inclusive_descendant_of(const ns_node *node,
+                                        const ns_node *ancestor)
+{
+    int depth = 0;
+    for (const ns_node *p = node; p && depth < 4096;
+         p = ns_node_flat_parent(p), depth++)
+        if (p == ancestor) return TRUE;
+    return FALSE;
+}
+
+static const ns_node *
+ns_node_tree_root(const ns_node *n)
+{
+    while (n && n->parent && !ns_node_is_shadow_root(n)) n = n->parent;
+    return n;
+}
+
+static void
+ns_popover_info_free(gpointer data)
+{
+    ns_popover_info *pi = data;
+    if (!pi) return;
+    ns_js *js = pi->js;
+    int timers[2] = { pi->popover_toggle.timer, pi->dialog_toggle.timer };
+    for (int i = 0; i < 2; i++)
+        if (timers[i] && js && js->timers)
+            g_hash_table_remove(js->timers, GINT_TO_POINTER(timers[i]));
+    g_free(pi);
+}
+
+static ns_popover_info *
+ns_popover_info_lookup(ns_js *js, const ns_node *el)
+{
+    if (!js || !js->popover_info || !el) return NULL;
+    return g_hash_table_lookup(js->popover_info, el);
+}
+
+static ns_popover_info *
+ns_popover_info_get(ns_js *js, ns_node *el)
+{
+    ns_popover_info *pi = ns_popover_info_lookup(js, el);
+    if (pi) return pi;
+    if (!js->popover_info)
+        js->popover_info = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                 NULL, ns_popover_info_free);
+    pi = g_new0(ns_popover_info, 1);
+    pi->js = js;
+    pi->el = el;
+    ns_node_arm_js_invalidate(el);
+    g_hash_table_insert(js->popover_info, el, pi);
+    return pi;
+}
+
+static ns_node *
+ns_popover_note(ns_node *n)
+{
+    ns_node_arm_js_invalidate(n);
+    return n;
+}
+
+static void
+ns_popover_forget_node(ns_js *js, ns_node *n)
+{
+    if (!js || !n) return;
+    if (js->popover_auto) g_ptr_array_remove(js->popover_auto, n);
+    if (js->popover_hint) g_ptr_array_remove(js->popover_hint, n);
+    if (js->popover_hint_parent == n) js->popover_hint_parent = NULL;
+    if (js->popover_pointerdown == n) js->popover_pointerdown = NULL;
+    if (js->popover_info) {
+        g_hash_table_remove(js->popover_info, n);
+        GHashTableIter it;
+        gpointer value;
+        g_hash_table_iter_init(&it, js->popover_info);
+        while (g_hash_table_iter_next(&it, NULL, &value)) {
+            ns_popover_info *pi = value;
+            if (pi->trigger == n) pi->trigger = NULL;
+            if (pi->prev_focus == n) pi->prev_focus = NULL;
+            if (pi->popover_toggle.source == n) pi->popover_toggle.source = NULL;
+            if (pi->dialog_toggle.source == n) pi->dialog_toggle.source = NULL;
+        }
+    }
+    if (js->attr_element_refs) {
+        for (guint i = js->attr_element_refs->len; i > 0; i--) {
+            ns_attr_element_ref *r = &g_array_index(js->attr_element_refs,
+                                                    ns_attr_element_ref, i - 1);
+            if (r->owner == n || r->target == n)
+                g_array_remove_index(js->attr_element_refs, i - 1);
+        }
+    }
+}
+
+static void
+ns_popover_state_clear(ns_js *js)
+{
+    if (!js) return;
+    g_clear_pointer(&js->popover_info, g_hash_table_destroy);
+    g_clear_pointer(&js->popover_auto, g_ptr_array_unref);
+    g_clear_pointer(&js->popover_hint, g_ptr_array_unref);
+    g_clear_pointer(&js->attr_element_refs, g_array_unref);
+    js->popover_hint_parent = NULL;
+    js->popover_pointerdown = NULL;
+    js->popover_showing = FALSE;
+    js->popover_hiding_count = 0;
+}
+
+static ns_attr_element_ref *
+ns_attr_element_ref_find(ns_js *js, const ns_node *owner, const char *attr,
+                         guint *index)
+{
+    if (!js || !js->attr_element_refs) return NULL;
+    for (guint i = 0; i < js->attr_element_refs->len; i++) {
+        ns_attr_element_ref *r = &g_array_index(js->attr_element_refs,
+                                                ns_attr_element_ref, i);
+        if (r->owner == owner && strcmp(r->attr, attr) == 0) {
+            if (index) *index = i;
+            return r;
+        }
+    }
+    return NULL;
+}
+
+static void
+ns_attr_element_set_explicit(ns_js *js, ns_node *owner, const char *attr,
+                             ns_node *target)
+{
+    if (!js) return;
+    guint index = 0;
+    ns_attr_element_ref *r = ns_attr_element_ref_find(js, owner, attr, &index);
+    if (!target) {
+        if (r) g_array_remove_index(js->attr_element_refs, index);
+        return;
+    }
+    if (r) {
+        r->target = ns_popover_note(target);
+        return;
+    }
+    if (!js->attr_element_refs)
+        js->attr_element_refs = g_array_new(FALSE, FALSE,
+                                            sizeof(ns_attr_element_ref));
+    ns_attr_element_ref nr = { ns_popover_note(owner), attr,
+                               ns_popover_note(target) };
+    g_array_append_val(js->attr_element_refs, nr);
+}
+
+static ns_node *
+ns_attr_associated_element(ns_js *js, const ns_node *el, const char *attr)
+{
+    if (!el) return NULL;
+    ns_attr_element_ref *r = ns_attr_element_ref_find(js, el, attr, NULL);
+    if (r) {
+        ns_node *t = r->target;
+        if (!t || !t->parent) return NULL;
+        const ns_node *root = ns_node_tree_root(t);
+        for (const ns_node *p = el->parent; p; p = p->parent)
+            if (p == root) return t;
+        return NULL;
+    }
+    const char *id = ns_element_get_attr(el, attr);
+    if (!id || !*id) return NULL;
+    ns_node *hit = ns_node_find_by_id(ns_node_tree_root(el), id);
+    return hit && hit->kind == NS_NODE_ELEMENT ? hit : NULL;
+}
+
+static JSValue
+ns_attr_element_get(JSContext *ctx, JSValueConst this_val, const char *attr)
+{
+    ns_node *t = ns_attr_associated_element(js_from_ctx(ctx),
+                                            ns_unwrap_element(this_val), attr);
+    return t ? ns_make_element(ctx, t) : JS_NULL;
+}
+
+static JSValue
+ns_attr_element_set(JSContext *ctx, JSValueConst this_val, JSValueConst val,
+                    const char *attr)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el) return JS_UNDEFINED;
+    if (JS_IsNull(val) || JS_IsUndefined(val)) {
+        ns_js_remove_attr_recorded(js, el, attr);
+        ns_attr_element_set_explicit(js, el, attr, NULL);
+        return JS_UNDEFINED;
+    }
+    ns_node *target = ns_unwrap_element_mut(val);
+    if (!target || target->kind != NS_NODE_ELEMENT)
+        return JS_ThrowTypeError(ctx, "Failed to set the attribute element: "
+                                 "value is not of type 'Element'");
+    ns_js_set_attr_recorded(js, el, attr, "");
+    ns_attr_element_set_explicit(js, el, attr, target);
+    return JS_UNDEFINED;
+}
+
+static int
+ns_popover_validity(ns_js *js, const ns_node *el, gboolean expect_showing,
+                    const ns_node *expected_doc)
+{
+    if (ns_popover_type_of(el) == NS_POPOVER_NONE) {
+        ns_popover_info *pi = ns_popover_info_lookup(js, el);
+        if (!pi || !pi->type_changing) return NS_POPOVER_NOT_SUPPORTED;
+    }
+    if (ns_popover_is_showing(el) != expect_showing)
+        return NS_POPOVER_WRONG_STATE;
+    if (!ns_node_is_connected(el) ||
+        (expected_doc && ns_node_root(el) != expected_doc) ||
+        (ns_node_is_element_named(el, "dialog") &&
+         ns_element_get_attr(el, "open") &&
+         ns_dialog_is_modal(js->ctx, (ns_node *)el)))
+        return NS_POPOVER_INVALID_STATE;
+    return NS_POPOVER_VALID;
+}
+
+static JSValue
+ns_popover_throw(JSContext *ctx, int result)
+{
+    if (result == NS_POPOVER_NOT_SUPPORTED)
+        return ns_throw_dom_exception(ctx, "NotSupportedError", 9,
+            "Not supported on elements that do not have a valid value for "
+            "the 'popover' attribute.");
+    if (result == NS_POPOVER_INVALID_STATE)
+        return ns_throw_dom_exception(ctx, "InvalidStateError", 11,
+            "Invalid on popover elements which aren't connected, are "
+            "changing state, or are open modal dialogs.");
+    return JS_UNDEFINED;
+}
+
+static GPtrArray *
+ns_popover_list(ns_js *js, gboolean hint)
+{
+    GPtrArray **slot = hint ? &js->popover_hint : &js->popover_auto;
+    if (!*slot) *slot = g_ptr_array_new();
+    return *slot;
+}
+
+static gboolean
+ns_popover_list_has(const GPtrArray *list, const ns_node *el, guint *index)
+{
+    return list && g_ptr_array_find((GPtrArray *)list, el, index);
+}
+
+static ns_popover_type
+ns_popover_opened_mode(ns_js *js, const ns_node *el)
+{
+    if (ns_popover_list_has(js->popover_auto, el, NULL)) return NS_POPOVER_AUTO;
+    if (ns_popover_list_has(js->popover_hint, el, NULL)) return NS_POPOVER_HINT;
+    return NS_POPOVER_NONE;
+}
+
+static ns_node *
+ns_popover_topmost_auto_or_hint(ns_js *js)
+{
+    if (js->popover_hint && js->popover_hint->len)
+        return g_ptr_array_index(js->popover_hint, js->popover_hint->len - 1);
+    if (js->popover_auto && js->popover_auto->len)
+        return g_ptr_array_index(js->popover_auto, js->popover_auto->len - 1);
+    return NULL;
+}
+
+static JSValue
+ns_toggle_task_fn(JSContext *ctx, JSValueConst this_val, int argc,
+                  JSValueConst *argv, int magic, JSValueConst *data)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *el = ns_unwrap_element_mut(data[0]);
+    ns_popover_info *pi = ns_popover_info_lookup(js, el);
+    if (!pi) return JS_UNDEFINED;
+    ns_toggle_tracker *tt = magic ? &pi->dialog_toggle : &pi->popover_toggle;
+    if (!tt->timer) return JS_UNDEFINED;
+    ns_toggle_tracker fired = *tt;
+    memset(tt, 0, sizeof(*tt));
+    ns_js_fire_toggle_event(js, el, "toggle",
+                            fired.old_open ? "open" : "closed",
+                            fired.new_open ? "open" : "closed",
+                            FALSE, fired.source, NULL);
+    return JS_UNDEFINED;
+}
+
+static void
+ns_queue_toggle_task(ns_js *js, ns_node *el, gboolean dialog,
+                     gboolean old_open, gboolean new_open, ns_node *source)
+{
+    JSContext *ctx = js->ctx;
+    ns_popover_info *pi = ns_popover_info_get(js, el);
+    ns_toggle_tracker *tt = dialog ? &pi->dialog_toggle : &pi->popover_toggle;
+    if (tt->timer) {
+        old_open = tt->old_open;
+        if (js->timers)
+            g_hash_table_remove(js->timers, GINT_TO_POINTER(tt->timer));
+        tt->timer = 0;
+    }
+    JSValue wrapper = ns_make_element(ctx, el);
+    JSValue fn = JS_NewCFunctionData(ctx, ns_toggle_task_fn, 0,
+                                     dialog ? 1 : 0, 1, &wrapper);
+    JS_FreeValue(ctx, wrapper);
+    JSValueConst args[2] = { fn, JS_NewInt32(ctx, 0) };
+    JSValue id = ns_js_setTimeout(ctx, JS_UNDEFINED, 2, args, 0);
+    JS_FreeValue(ctx, fn);
+    int32_t timer = 0;
+    JS_ToInt32(ctx, &timer, id);
+    JS_FreeValue(ctx, id);
+    tt->timer = timer;
+    tt->old_open = old_open;
+    tt->new_open = new_open;
+    tt->source = source ? ns_popover_note(source) : NULL;
+}
+
+static void
+ns_js_run_focusing_steps(ns_js *js, const ns_node *el)
+{
+    if (!el || ns_element_effectively_inert(el) ||
+        ns_element_effectively_disabled(el) || !ns_node_is_focusable(el))
+        return;
+    ns_js_set_focus(js, el);
+}
+
+static const ns_node *
+ns_autofocus_delegate(const ns_node *root, int depth)
+{
+    if (!root || depth >= 512) return NULL;
+    for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        if (ns_element_get_attr(c, "autofocus") && ns_node_is_focusable(c) &&
+            !ns_element_effectively_inert(c))
+            return c;
+        const ns_node *d = ns_autofocus_delegate(c, depth + 1);
+        if (d) return d;
+    }
+    return NULL;
+}
+
+static void
+ns_popover_focusing_steps(ns_js *js, ns_node *el)
+{
+    const ns_node *control;
+    if (ns_node_is_element_named(el, "dialog")) {
+        control = ns_element_get_attr(el, "autofocus")
+            ? el : ns_js_first_focusable_in(el);
+        if (!control) control = el;
+        if (control == el) ns_js_set_focus(js, el);
+        else ns_js_run_focusing_steps(js, control);
+        return;
+    }
+    control = ns_element_get_attr(el, "autofocus")
+        ? el : ns_autofocus_delegate(el, 0);
+    ns_js_run_focusing_steps(js, control);
+}
+
+static ns_node *
+ns_popover_topmost_ancestor(ns_js *js, const ns_node *node,
+                            const ns_node *source)
+{
+    guint na = js->popover_auto ? js->popover_auto->len : 0;
+    guint nh = js->popover_hint ? js->popover_hint->len : 0;
+    ns_node *best = NULL;
+    for (guint i = 0; i < na + nh; i++) {
+        ns_node *p = i < na ? g_ptr_array_index(js->popover_auto, i)
+                            : g_ptr_array_index(js->popover_hint, i - na);
+        if (ns_node_is_flat_inclusive_descendant_of(node, p) ||
+            (source && ns_node_is_flat_inclusive_descendant_of(source, p)))
+            best = p;
+    }
+    return best;
+}
+
+static int ns_popover_hide(ns_js *js, ns_node *el, gboolean focus_prev,
+                           gboolean fire, ns_node *source);
+
+static void
+ns_popover_hide_stack_until(ns_js *js, const ns_node *endpoint, gboolean hint,
+                            gboolean focus_prev, gboolean fire)
+{
+    GPtrArray *list = hint ? js->popover_hint : js->popover_auto;
+    if (!list || list->len == 0) return;
+    guint index = 0;
+    guint keep = endpoint && ns_popover_list_has(list, endpoint, &index)
+        ? index + 1 : 0;
+    GPtrArray *to_hide = g_ptr_array_new();
+    GPtrArray *remain = g_ptr_array_new();
+    for (guint i = list->len; i > keep; i--)
+        g_ptr_array_add(to_hide, g_ptr_array_index(list, i - 1));
+    for (guint i = 0; i < keep; i++)
+        g_ptr_array_add(remain, g_ptr_array_index(list, i));
+    for (guint i = 0; i < to_hide->len; i++) {
+        ns_node *p = g_ptr_array_index(to_hide, i);
+        if (ns_popover_info_lookup(js, p))
+            ns_popover_hide(js, p, focus_prev, fire, NULL);
+    }
+    list = hint ? js->popover_hint : js->popover_auto;
+    GPtrArray *to_check = g_ptr_array_new();
+    for (guint i = list ? list->len : 0; i > 0; i--)
+        g_ptr_array_add(to_check, g_ptr_array_index(list, i - 1));
+    for (guint i = 0; i < to_check->len; i++) {
+        ns_node *p = g_ptr_array_index(to_check, i);
+        if (ns_popover_list_has(remain, p, NULL)) continue;
+        if (ns_popover_info_lookup(js, p))
+            ns_popover_hide(js, p, focus_prev, FALSE, NULL);
+    }
+    g_ptr_array_free(to_check, TRUE);
+    g_ptr_array_free(to_hide, TRUE);
+    g_ptr_array_free(remain, TRUE);
+}
+
+static void
+ns_popover_hide_until(ns_js *js, const ns_node *endpoint, gboolean focus_prev,
+                      gboolean fire)
+{
+    gboolean endpoint_is_hint =
+        endpoint && ns_popover_list_has(js->popover_hint, endpoint, NULL);
+    ns_popover_hide_stack_until(js, endpoint, TRUE, focus_prev, fire);
+    const ns_node *auto_endpoint = endpoint_is_hint
+        ? js->popover_hint_parent : endpoint;
+    ns_popover_hide_stack_until(js, auto_endpoint, FALSE, focus_prev, fire);
+}
+
+static int
+ns_popover_hide_steps(ns_js *js, ns_node *el, gboolean focus_prev,
+                      gboolean fire, ns_node *source)
+{
+    int v = ns_popover_validity(js, el, TRUE, NULL);
+    if (v != NS_POPOVER_VALID) return v;
+    ns_popover_info *pi = ns_popover_info_get(js, el);
+    gboolean nested = pi->hiding;
+    pi->hiding = TRUE;
+    if (nested) fire = FALSE;
+    js->popover_hiding_count++;
+    int result = NS_POPOVER_VALID;
+    gboolean in_auto = ns_popover_list_has(js->popover_auto, el, NULL);
+    gboolean in_hint = ns_popover_list_has(js->popover_hint, el, NULL);
+    if (in_auto || in_hint) {
+        if (in_hint) ns_popover_hide_stack_until(js, el, TRUE, focus_prev, fire);
+        if (el == js->popover_hint_parent)
+            ns_popover_hide_stack_until(js, NULL, TRUE, focus_prev, fire);
+        if (in_auto) ns_popover_hide_stack_until(js, el, FALSE, focus_prev, fire);
+        result = ns_popover_validity(js, el, TRUE, NULL);
+    }
+    if (result == NS_POPOVER_VALID && fire) {
+        ns_js_fire_toggle_event(js, el, "beforetoggle", "open", "closed",
+                                FALSE, source, NULL);
+        result = ns_popover_validity(js, el, TRUE, NULL);
+    }
+    pi = ns_popover_info_get(js, el);
+    if (result == NS_POPOVER_VALID) {
+        pi->trigger = NULL;
+        if (js->popover_auto) g_ptr_array_remove(js->popover_auto, el);
+        if (js->popover_hint) g_ptr_array_remove(js->popover_hint, el);
+        ns_popover_set_showing(js, el, FALSE);
+        if (el == js->popover_hint_parent || !js->popover_hint ||
+            js->popover_hint->len == 0)
+            js->popover_hint_parent = NULL;
+        if (fire) ns_queue_toggle_task(js, el, FALSE, TRUE, FALSE, source);
+        ns_node *prev = pi->prev_focus;
+        if (prev) {
+            pi->prev_focus = NULL;
+            if (focus_prev && js->focused_node &&
+                ns_node_is_shadow_including_inclusive_ancestor(
+                    el, js->focused_node))
+                ns_js_run_focusing_steps(js, prev);
+        }
+        pi = ns_popover_info_get(js, el);
+    }
+    if (!nested) pi->hiding = FALSE;
+    js->popover_hiding_count--;
+    return result;
+}
+
+static int
+ns_popover_hide(ns_js *js, ns_node *el, gboolean focus_prev, gboolean fire,
+                ns_node *source)
+{
+    JSValue hold = ns_make_element(js->ctx, el);
+    int result = ns_popover_hide_steps(js, el, focus_prev, fire, source);
+    JS_FreeValue(js->ctx, hold);
+    return result;
+}
+
+static int
+ns_popover_show_steps(ns_js *js, ns_node *el, ns_node *source)
+{
+    if (js->popover_showing || js->popover_hiding_count > 0)
+        return NS_POPOVER_INVALID_STATE;
+    int v = ns_popover_validity(js, el, FALSE, NULL);
+    if (v != NS_POPOVER_VALID) return v;
+    const ns_node *doc = ns_node_root(el);
+    js->popover_showing = TRUE;
+    gboolean prevented = FALSE;
+    ns_js_fire_toggle_event(js, el, "beforetoggle", "closed", "open", TRUE,
+                            source, &prevented);
+    if (prevented) {
+        js->popover_showing = FALSE;
+        return NS_POPOVER_VALID;
+    }
+    v = ns_popover_validity(js, el, FALSE, doc);
+    if (v != NS_POPOVER_VALID) {
+        js->popover_showing = FALSE;
+        return v;
+    }
+    gboolean restore_focus = FALSE;
+    ns_popover_type original = ns_popover_type_of(el);
+    ns_popover_type effective = original;
+    ns_node *ancestor = NULL;
+    if (original == NS_POPOVER_AUTO || original == NS_POPOVER_HINT) {
+        ancestor = ns_popover_topmost_ancestor(js, el, source);
+        if (ancestor && effective == NS_POPOVER_AUTO &&
+            ns_popover_opened_mode(js, ancestor) == NS_POPOVER_HINT)
+            effective = NS_POPOVER_HINT;
+        JSValue hold_ancestor = ancestor
+            ? ns_make_element(js->ctx, ancestor) : JS_UNDEFINED;
+        ns_popover_hide_stack_until(js, ancestor, TRUE, restore_focus, TRUE);
+        if (effective == NS_POPOVER_AUTO)
+            ns_popover_hide_stack_until(js, ancestor, FALSE, restore_focus,
+                                        TRUE);
+        JS_FreeValue(js->ctx, hold_ancestor);
+        if (original != ns_popover_type_of(el)) {
+            js->popover_showing = FALSE;
+            return NS_POPOVER_INVALID_STATE;
+        }
+        v = ns_popover_validity(js, el, FALSE, doc);
+        if (v != NS_POPOVER_VALID) {
+            js->popover_showing = FALSE;
+            return v;
+        }
+        if (!ns_popover_topmost_auto_or_hint(js)) restore_focus = TRUE;
+        g_ptr_array_add(ns_popover_list(js, effective == NS_POPOVER_HINT), el);
+    }
+    ns_popover_info *pi = ns_popover_info_get(js, el);
+    pi->prev_focus = NULL;
+    const ns_node *original_focus = js->focused_node;
+    if (effective == NS_POPOVER_HINT && ancestor &&
+        ns_popover_opened_mode(js, ancestor) == NS_POPOVER_AUTO)
+        js->popover_hint_parent = ns_popover_note(ancestor);
+    ns_popover_set_showing(js, el, TRUE);
+    pi->trigger = source ? ns_popover_note(source) : NULL;
+    ns_popover_focusing_steps(js, el);
+    pi = ns_popover_info_get(js, el);
+    if (restore_focus && original_focus &&
+        ns_popover_type_of(el) != NS_POPOVER_NONE)
+        pi->prev_focus = ns_popover_note((ns_node *)original_focus);
+    js->popover_showing = FALSE;
+    ns_queue_toggle_task(js, el, FALSE, FALSE, TRUE, source);
+    return NS_POPOVER_VALID;
+}
+
+static int
+ns_popover_show(ns_js *js, ns_node *el, ns_node *source)
+{
+    JSValue hold = ns_make_element(js->ctx, el);
+    int result = ns_popover_show_steps(js, el, source);
+    JS_FreeValue(js->ctx, hold);
+    return result;
+}
+
+static int
+ns_popover_source_option(JSContext *ctx, JSValueConst options, ns_node **out)
+{
+    *out = NULL;
+    if (!JS_IsObject(options)) return 0;
+    JSValue v = JS_GetPropertyStr(ctx, options, "source");
+    if (JS_IsException(v)) return -1;
+    if (JS_IsUndefined(v)) return 0;
+    ns_node *n = ns_unwrap_element_mut(v);
+    JS_FreeValue(ctx, v);
+    if (!ns_node_is_html_element(n)) {
+        JS_ThrowTypeError(ctx, "Failed to read the 'source' property: "
+                          "value is not of type 'HTMLElement'");
+        return -1;
+    }
+    *out = n;
+    return 0;
+}
+
+static JSValue
+ns_element_showPopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js) return JS_UNDEFINED;
+    ns_node *source = NULL;
+    if (argc >= 1 && ns_popover_source_option(ctx, argv[0], &source) < 0)
+        return JS_EXCEPTION;
+    return ns_popover_throw(ctx, ns_popover_show(js, el, source));
+}
+
+static JSValue
+ns_element_hidePopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js) return JS_UNDEFINED;
+    return ns_popover_throw(ctx, ns_popover_hide(js, el, TRUE, TRUE, NULL));
+}
+
+static JSValue
+ns_element_togglePopover(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    ns_js *js = js_from_ctx(ctx);
+    if (!el || !js) return JS_FALSE;
+    int force = -1;
+    ns_node *source = NULL;
+    if (argc >= 1 && JS_IsObject(argv[0])) {
+        JSValue fv = JS_GetPropertyStr(ctx, argv[0], "force");
+        if (JS_IsException(fv)) return JS_EXCEPTION;
+        if (!JS_IsUndefined(fv)) force = JS_ToBool(ctx, fv) ? 1 : 0;
+        JS_FreeValue(ctx, fv);
+        if (ns_popover_source_option(ctx, argv[0], &source) < 0)
+            return JS_EXCEPTION;
+    } else if (argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
+        force = JS_ToBool(ctx, argv[0]) ? 1 : 0;
+    }
+    int result;
+    if (ns_popover_is_showing(el) && force != 1)
+        result = ns_popover_hide(js, el, TRUE, TRUE, NULL);
+    else if (force != 0)
+        result = ns_popover_show(js, el, source);
+    else
+        result = ns_popover_validity(js, el, ns_popover_is_showing(el), NULL);
+    if (result == NS_POPOVER_NOT_SUPPORTED || result == NS_POPOVER_INVALID_STATE)
+        return ns_popover_throw(ctx, result);
+    return JS_NewBool(ctx, ns_popover_is_showing(el));
+}
+
+static JSValue
+ns_element_get_popover(JSContext *ctx, JSValueConst this_val)
+{
+    switch (ns_popover_type_of(ns_unwrap_element(this_val))) {
+    case NS_POPOVER_AUTO:   return JS_NewString(ctx, "auto");
+    case NS_POPOVER_MANUAL: return JS_NewString(ctx, "manual");
+    case NS_POPOVER_HINT:   return JS_NewString(ctx, "hint");
+    default:                return JS_NULL;
+    }
+}
+
+static JSValue
+ns_element_set_popover(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (!el) return JS_UNDEFINED;
+    if (JS_IsNull(val) || JS_IsUndefined(val)) {
+        ns_js_remove_attr_recorded(js_from_ctx(ctx), el, "popover");
+        return JS_UNDEFINED;
+    }
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, val);
+    if (!s) return JS_EXCEPTION;
+    ns_js_set_attr_recorded_len(js_from_ctx(ctx), el, "popover", s,
+                                (gssize)len);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_get_popoverTargetElement(JSContext *ctx, JSValueConst this_val)
+{
+    return ns_attr_element_get(ctx, this_val, "popovertarget");
+}
+
+static JSValue
+ns_element_set_popoverTargetElement(JSContext *ctx, JSValueConst this_val,
+                                    JSValueConst val)
+{
+    return ns_attr_element_set(ctx, this_val, val, "popovertarget");
+}
+
+static gboolean
+ns_node_is_button(const ns_node *el)
+{
+    if (ns_node_is_element_named(el, "button")) return TRUE;
+    if (!ns_node_is_element_named(el, "input")) return FALSE;
+    const char *t = ns_element_get_attr(el, "type");
+    return t && (g_ascii_strcasecmp(t, "submit") == 0 ||
+                 g_ascii_strcasecmp(t, "reset") == 0 ||
+                 g_ascii_strcasecmp(t, "image") == 0 ||
+                 g_ascii_strcasecmp(t, "button") == 0);
+}
+
+static const ns_node *ns_js_form_owner_for(const ns_node *el, ns_js *js);
+
+static ns_node *
+ns_popover_target_element(ns_js *js, const ns_node *node)
+{
+    if (!ns_node_is_button(node) || ns_element_effectively_disabled(node))
+        return NULL;
+    if (ns_node_is_submit_trigger(node) && ns_js_form_owner_for(node, js))
+        return NULL;
+    ns_node *target = ns_attr_associated_element(js, node, "popovertarget");
+    return ns_popover_type_of(target) == NS_POPOVER_NONE ? NULL : target;
+}
+
+static void
+ns_popover_target_activation(ns_js *js, ns_node *node, const ns_node *event_target)
+{
+    ns_node *popover = ns_popover_target_element(js, node);
+    if (!popover) return;
+    if (ns_node_is_shadow_including_inclusive_ancestor(popover, event_target) &&
+        ns_node_is_shadow_including_inclusive_ancestor(node, popover) &&
+        popover != node)
+        return;
+    const char *action = ns_element_get_attr(node, "popovertargetaction");
+    gboolean showing = ns_popover_is_showing(popover);
+    if (action && g_ascii_strcasecmp(action, "show") == 0 && showing) return;
+    if (action && g_ascii_strcasecmp(action, "hide") == 0 && !showing) return;
+    if (showing)
+        ns_popover_hide(js, popover, TRUE, TRUE, node);
+    else if (ns_popover_validity(js, popover, FALSE, NULL) == NS_POPOVER_VALID)
+        ns_popover_show(js, popover, node);
+}
+
+static ns_node *
+ns_popover_nearest_open(ns_js *js, const ns_node *node)
+{
+    int depth = 0;
+    for (const ns_node *c = node; c && depth < 4096;
+         c = ns_node_flat_parent(c), depth++)
+        if (c->kind == NS_NODE_ELEMENT && ns_popover_is_showing(c) &&
+            ns_popover_opened_mode(js, c) != NS_POPOVER_NONE)
+            return (ns_node *)c;
+    return NULL;
+}
+
+static ns_node *ns_button_target_popover(ns_js *js, const ns_node *node);
+
+static ns_node *
+ns_popover_nearest_target(ns_js *js, const ns_node *node)
+{
+    int depth = 0;
+    for (const ns_node *c = node; c && depth < 4096;
+         c = ns_node_flat_parent(c), depth++) {
+        if (c->kind != NS_NODE_ELEMENT) continue;
+        ns_node *t = ns_node_is_element_named(c, "button")
+            ? ns_button_target_popover(js, c) : ns_popover_target_element(js, c);
+        ns_popover_type type = ns_popover_type_of(t);
+        if (t && (type == NS_POPOVER_AUTO || type == NS_POPOVER_HINT) &&
+            ns_popover_is_showing(t))
+            return t;
+    }
+    return NULL;
+}
+
+static guint
+ns_popover_stack_position(ns_js *js, const ns_node *el)
+{
+    guint index = 0;
+    guint na = js->popover_auto ? js->popover_auto->len : 0;
+    if (el && ns_popover_list_has(js->popover_hint, el, &index))
+        return index + na + 1;
+    if (el && ns_popover_list_has(js->popover_auto, el, &index))
+        return index + 1;
+    return 0;
+}
+
+static ns_node *
+ns_popover_topmost_clicked(ns_js *js, const ns_node *node)
+{
+    ns_node *clicked = ns_popover_nearest_open(js, node);
+    ns_node *target = ns_popover_nearest_target(js, node);
+    return ns_popover_stack_position(js, clicked) >
+           ns_popover_stack_position(js, target) ? clicked : target;
+}
+
+static void
+ns_js_popover_light_dismiss(ns_js *js, const ns_node *target, gboolean up)
+{
+    if (!js || !js->ctx || !target || !ns_popover_topmost_auto_or_hint(js))
+        return;
+    if (!up) {
+        ns_node *clicked = ns_popover_topmost_clicked(js, target);
+        js->popover_pointerdown = clicked ? ns_popover_note(clicked) : NULL;
+        return;
+    }
+    ns_node *ancestor = ns_popover_topmost_clicked(js, target);
+    gboolean same = ancestor == js->popover_pointerdown;
+    js->popover_pointerdown = NULL;
+    if (same) ns_popover_hide_until(js, ancestor, FALSE, TRUE);
+}
+
+gboolean
+ns_js_process_close_request(ns_js *js)
+{
+    if (!js || !js->ctx || js->halted) return FALSE;
+    ns_node *top = ns_popover_topmost_auto_or_hint(js);
+    if (top) {
+        ns_popover_hide(js, top, TRUE, TRUE, NULL);
+        return TRUE;
+    }
+    ns_node *modal = (ns_node *)js->active_modal;
+    if (!modal || !ns_element_get_attr(modal, "open")) return FALSE;
+    JSValue wrapper = ns_make_element(js->ctx, modal);
+    JSValue r = ns_element_requestClose(js->ctx, wrapper, 0, NULL);
+    if (JS_IsException(r)) JS_FreeValue(js->ctx, JS_GetException(js->ctx));
+    JS_FreeValue(js->ctx, r);
+    JS_FreeValue(js->ctx, wrapper);
+    return TRUE;
+}
+
+static void
+ns_popover_removing_steps(ns_js *js, ns_node *el)
+{
+    if (!ns_popover_is_showing(el) || !ns_popover_info_lookup(js, el)) return;
+    ns_popover_hide(js, el, FALSE, FALSE, NULL);
+}
+
+static void
+ns_popover_attr_changed(ns_js *js, ns_node *el, const char *attr,
+                        const char *old_value, const char *new_value)
+{
+    if (g_ascii_strcasecmp(attr, "popovertarget") == 0 ||
+        g_ascii_strcasecmp(attr, "commandfor") == 0) {
+        ns_attr_element_set_explicit(js, el,
+            g_ascii_strcasecmp(attr, "commandfor") == 0
+                ? "commandfor" : "popovertarget", NULL);
+        return;
+    }
+    if (g_ascii_strcasecmp(attr, "popover") != 0 ||
+        !ns_node_is_html_element(el) || !ns_popover_is_showing(el))
+        return;
+    if (ns_popover_type_of_value(old_value) ==
+        ns_popover_type_of_value(new_value))
+        return;
+    ns_popover_info *pi = ns_popover_info_get(js, el);
+    pi->type_changing++;
+    ns_popover_hide(js, el, TRUE, TRUE, NULL);
+    pi = ns_popover_info_lookup(js, el);
+    if (pi) pi->type_changing--;
+}
+
+typedef enum {
+    NS_COMMAND_UNKNOWN,
+    NS_COMMAND_CUSTOM,
+    NS_COMMAND_TOGGLE_POPOVER,
+    NS_COMMAND_SHOW_POPOVER,
+    NS_COMMAND_HIDE_POPOVER,
+    NS_COMMAND_CLOSE,
+    NS_COMMAND_REQUEST_CLOSE,
+    NS_COMMAND_SHOW_MODAL,
+} ns_command_kind;
+
+static const char *const kw_commands[] = {
+    [NS_COMMAND_TOGGLE_POPOVER] = "toggle-popover",
+    [NS_COMMAND_SHOW_POPOVER]   = "show-popover",
+    [NS_COMMAND_HIDE_POPOVER]   = "hide-popover",
+    [NS_COMMAND_CLOSE]          = "close",
+    [NS_COMMAND_REQUEST_CLOSE]  = "request-close",
+    [NS_COMMAND_SHOW_MODAL]     = "show-modal",
+};
+
+static ns_command_kind
+ns_command_kind_of(const char *v)
+{
+    if (!v) return NS_COMMAND_UNKNOWN;
+    if (v[0] == '-' && v[1] == '-') return NS_COMMAND_CUSTOM;
+    for (int k = NS_COMMAND_TOGGLE_POPOVER; k <= NS_COMMAND_SHOW_MODAL; k++)
+        if (g_ascii_strcasecmp(v, kw_commands[k]) == 0)
+            return (ns_command_kind)k;
+    return NS_COMMAND_UNKNOWN;
+}
+
+static gboolean
+ns_command_is_popover(ns_command_kind cmd)
+{
+    return cmd == NS_COMMAND_TOGGLE_POPOVER || cmd == NS_COMMAND_SHOW_POPOVER ||
+           cmd == NS_COMMAND_HIDE_POPOVER;
+}
+
+static gboolean
+ns_command_is_valid(ns_command_kind cmd, const ns_node *target)
+{
+    if (cmd == NS_COMMAND_UNKNOWN) return FALSE;
+    if (cmd == NS_COMMAND_CUSTOM) return TRUE;
+    if (!ns_node_is_html_element(target)) return FALSE;
+    if (ns_command_is_popover(cmd)) return TRUE;
+    return ns_node_is_element_named(target, "dialog");
+}
+
+static JSValue
+ns_button_get_command(JSContext *ctx, JSValueConst this_val)
+{
+    const ns_node *el = ns_unwrap_element(this_val);
+    const char *v = el ? ns_element_get_attr(el, "command") : NULL;
+    ns_command_kind cmd = ns_command_kind_of(v);
+    if (cmd == NS_COMMAND_UNKNOWN) return JS_NewString(ctx, "");
+    if (cmd == NS_COMMAND_CUSTOM) return JS_NewString(ctx, v);
+    return JS_NewString(ctx, kw_commands[cmd]);
+}
+
+static JSValue
+ns_button_set_command(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    ns_node *el = ns_unwrap_element_mut(this_val);
+    if (!el) return JS_UNDEFINED;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, val);
+    if (!s) return JS_EXCEPTION;
+    ns_js_set_attr_recorded_len(js_from_ctx(ctx), el, "command", s,
+                                (gssize)len);
+    JS_FreeCString(ctx, s);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_button_get_commandForElement(JSContext *ctx, JSValueConst this_val)
+{
+    return ns_attr_element_get(ctx, this_val, "commandfor");
+}
+
+static JSValue
+ns_button_set_commandForElement(JSContext *ctx, JSValueConst this_val,
+                                JSValueConst val)
+{
+    return ns_attr_element_set(ctx, this_val, val, "commandfor");
+}
+
+static gboolean
+ns_button_type_is(const ns_node *el, const char *keyword)
+{
+    const char *t = ns_element_get_attr(el, "type");
+    return t && g_ascii_strcasecmp(t, keyword) == 0;
+}
+
+static gboolean
+ns_button_type_is_auto(const ns_node *el)
+{
+    return !ns_button_type_is(el, "submit") && !ns_button_type_is(el, "reset") &&
+           !ns_button_type_is(el, "button");
+}
+
+static ns_node *
+ns_button_target_popover(ns_js *js, const ns_node *node)
+{
+    if (ns_element_effectively_disabled(node)) return NULL;
+    ns_node *target = ns_attr_associated_element(js, node, "commandfor");
+    if (!target) return ns_popover_target_element(js, node);
+    if (ns_js_form_owner_for(node, js) &&
+        (ns_node_is_submit_trigger(node) || ns_button_type_is(node, "reset") ||
+         ns_button_type_is_auto(node)))
+        return NULL;
+    if (!ns_command_is_popover(
+            ns_command_kind_of(ns_element_get_attr(node, "command"))))
+        return NULL;
+    return ns_popover_type_of(target) == NS_POPOVER_NONE ? NULL : target;
+}
+
+static gboolean
+ns_js_fire_command_event(ns_js *js, ns_node *target, const char *command,
+                         const ns_node *source)
+{
+    if (js->halted || js->in_pump) return TRUE;
+    JSContext *ctx = js->ctx;
+    JSValue event = ns_make_event(ctx, "command", target);
+    JS_SetPropertyStr(ctx, event, "bubbles", JS_FALSE);
+    JS_SetPropertyStr(ctx, event, "cancelable", JS_TRUE);
+    JS_SetPropertyStr(ctx, event, "composed", JS_TRUE);
+    ns_event_define_readonly(ctx, event, "command",
+                             JS_NewString(ctx, command ? command : ""));
+    ns_event_define_source(ctx, event, ns_make_element(ctx, source));
+    ns_event_adopt_interface(ctx, event, "CommandEvent");
+    gboolean prevented = FALSE;
+    ns_js_dispatch_built_event(js, target, "command", event, &prevented);
+    return !prevented;
+}
+
+static void
+ns_dialog_command_steps(ns_js *js, ns_node *dialog, const ns_node *source,
+                        ns_command_kind cmd)
+{
+    if (ns_popover_is_showing(dialog)) return;
+    JSContext *ctx = js->ctx;
+    gboolean open = ns_element_get_attr(dialog, "open") != NULL;
+    const char *value = ns_element_get_attr(source, "value");
+    JSValue wrapper = ns_make_element(ctx, dialog);
+    JSValue arg = value ? JS_NewString(ctx, value) : JS_UNDEFINED;
+    JSValue r = JS_UNDEFINED;
+    if (cmd == NS_COMMAND_CLOSE && open)
+        r = ns_element_close(ctx, wrapper, 1, &arg);
+    else if (cmd == NS_COMMAND_REQUEST_CLOSE && open)
+        r = ns_element_requestClose(ctx, wrapper, 1, &arg);
+    else if (cmd == NS_COMMAND_SHOW_MODAL && !open)
+        r = ns_element_showModal(ctx, wrapper, 0, NULL);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+    JS_FreeValue(ctx, arg);
+    JS_FreeValue(ctx, wrapper);
+}
+
+static void
+ns_button_run_command(ns_js *js, ns_node *button, ns_node *target)
+{
+    const char *attr = ns_element_get_attr(button, "command");
+    ns_command_kind cmd = ns_command_kind_of(attr);
+    if (!ns_command_is_valid(cmd, target)) return;
+    char *command = g_strdup(attr);
+    JSValue hold = ns_make_element(js->ctx, target);
+    gboolean proceed = ns_js_fire_command_event(js, target, command, button);
+    g_free(command);
+    if (proceed && ns_node_is_connected(target) && cmd != NS_COMMAND_CUSTOM) {
+        if (cmd == NS_COMMAND_HIDE_POPOVER) {
+            if (ns_popover_validity(js, target, TRUE, NULL) == NS_POPOVER_VALID)
+                ns_popover_hide(js, target, TRUE, TRUE, button);
+        } else if (cmd == NS_COMMAND_TOGGLE_POPOVER) {
+            if (ns_popover_validity(js, target, FALSE, NULL) == NS_POPOVER_VALID)
+                ns_popover_show(js, target, button);
+            else if (ns_popover_validity(js, target, TRUE, NULL) ==
+                     NS_POPOVER_VALID)
+                ns_popover_hide(js, target, TRUE, TRUE, button);
+        } else if (cmd == NS_COMMAND_SHOW_POPOVER) {
+            if (ns_popover_validity(js, target, FALSE, NULL) == NS_POPOVER_VALID)
+                ns_popover_show(js, target, button);
+        } else if (ns_node_is_element_named(target, "dialog")) {
+            ns_dialog_command_steps(js, target, button, cmd);
+        }
+    }
+    JS_FreeValue(js->ctx, hold);
+}
+
+static JSValue ns_js_request_submit_form(JSContext *ctx, const ns_node *form,
+                                         const ns_node *submitter);
+static JSValue ns_js_reset_form(JSContext *ctx, ns_node *form);
+
+static void
+ns_button_activation(ns_js *js, ns_node *button, const ns_node *event_target)
+{
+    const ns_node *form = ns_js_form_owner_for(button, js);
+    if (form) {
+        if (ns_node_is_submit_trigger(button)) {
+            JSValue r = ns_js_request_submit_form(js->ctx, form, button);
+            JS_FreeValue(js->ctx, r);
+            return;
+        }
+        if (ns_button_type_is(button, "reset")) {
+            JSValue r = ns_js_reset_form(js->ctx, (ns_node *)form);
+            JS_FreeValue(js->ctx, r);
+            return;
+        }
+        if (ns_button_type_is_auto(button)) return;
+    }
+    ns_node *target = ns_attr_associated_element(js, button, "commandfor");
+    if (target)
+        ns_button_run_command(js, button, target);
+    else
+        ns_popover_target_activation(js, button, event_target);
+}
+
 static gboolean
 ns_node_is_disabled_form_control(const ns_node *el)
 {
@@ -38636,8 +39829,13 @@ ns_node_is_submit_trigger(const ns_node *el)
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
     if (g_ascii_strcasecmp(el->name, "button") == 0) {
         const char *t = ns_element_get_attr(el, "type");
-        return !t || (g_ascii_strcasecmp(t, "reset") != 0 &&
-                      g_ascii_strcasecmp(t, "button") != 0);
+        if (t && g_ascii_strcasecmp(t, "submit") == 0) return TRUE;
+        if (t && (g_ascii_strcasecmp(t, "reset") == 0 ||
+                  g_ascii_strcasecmp(t, "button") == 0))
+            return FALSE;
+        return !ns_element_get_attr(el, "command") &&
+               !ns_element_get_attr(el, "commandfor") &&
+               !ns_node_is_element_named(el->parent, "select");
     }
     if (g_ascii_strcasecmp(el->name, "input") == 0) {
         const char *t = ns_element_get_attr(el, "type");
@@ -38995,11 +40193,8 @@ static JSValue
 ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
                                const ns_node *target)
 {
-    (void)target;
     ns_js *js = js_from_ctx(ctx);
     if (!js) return JS_UNDEFINED;
-    if (ns_element_activate_popover_target(ctx, act))
-        return JS_UNDEFINED;
     if (ns_node_is_element_named(act, "summary")) {
         ns_js_activate_summary(js, act);
         return JS_UNDEFINED;
@@ -39040,13 +40235,26 @@ ns_element_activation_behavior(JSContext *ctx, const ns_node *act,
     }
     if (ns_node_is_disabled_form_control(act))
         return JS_UNDEFINED;
+    if (ns_node_is_element_named(act, "button")) {
+        ns_button_activation(js, (ns_node *)act, target);
+        return JS_UNDEFINED;
+    }
     if (ns_node_is_submit_trigger(act)) {
         const ns_node *form = ns_js_form_owner_for(act, js);
-        if (form) return ns_js_request_submit_form(ctx, form, act);
+        if (form) {
+            JSValue r = ns_js_request_submit_form(ctx, form, act);
+            if (JS_IsException(r)) return r;
+            JS_FreeValue(ctx, r);
+        }
     } else if (ns_node_is_reset_trigger(act)) {
         ns_node *form = (ns_node *)ns_js_form_owner_for(act, js);
-        if (form) return ns_js_reset_form(ctx, form);
+        if (form) {
+            JSValue r = ns_js_reset_form(ctx, form);
+            if (JS_IsException(r)) return r;
+            JS_FreeValue(ctx, r);
+        }
     }
+    ns_popover_target_activation(js, (ns_node *)act, target);
     return JS_UNDEFINED;
 }
 
@@ -39099,18 +40307,6 @@ ns_js_activate_element(ns_js *js, const ns_node *el)
 {
     if (!js || !js->ctx || !el) return;
     ns_js_click_with_activation(js, el);
-}
-
-static gboolean
-ns_node_is_button(const ns_node *el)
-{
-    if (ns_node_is_element_named(el, "button")) return TRUE;
-    if (!ns_node_is_element_named(el, "input")) return FALSE;
-    const char *t = ns_element_get_attr(el, "type");
-    return t && (g_ascii_strcasecmp(t, "submit") == 0 ||
-                 g_ascii_strcasecmp(t, "reset") == 0 ||
-                 g_ascii_strcasecmp(t, "image") == 0 ||
-                 g_ascii_strcasecmp(t, "button") == 0);
 }
 
 gboolean
@@ -45375,6 +46571,8 @@ static void
 ns_ce_disconnect_subtree_rec(ns_js *js, ns_node *root, int depth)
 {
     if (!js || !root || !js->ctx || depth >= 512) return;
+    if (js->popover_info && root->kind == NS_NODE_ELEMENT)
+        ns_popover_removing_steps(js, root);
     if (root->kind == NS_NODE_ELEMENT && root->js_wrapper) {
         JSContext *ctx = js->ctx;
         JSValue elem = JS_MKPTR(JS_TAG_OBJECT, root->js_wrapper);
@@ -45497,6 +46695,8 @@ static void
 ns_ce_attr_changed(ns_js *js, ns_node *node, const char *attr,
                    const char *old_value, const char *new_value)
 {
+    if (js && node && attr && js->ctx && !js->halted)
+        ns_popover_attr_changed(js, node, attr, old_value, new_value);
     if (js && attr && !old_value && new_value &&
         g_ascii_strcasecmp(attr, "src") == 0 &&
         ns_node_is_element_named(node, "script") &&
@@ -46899,6 +48099,8 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
     ns_set_ctor_proto(ctx, global, "HTMLElement", htmlelem_proto);
     ns_proto_define_getset(ctx, htmlelem_proto, "dataset",
                            ns_element_get_dataset, NULL);
+    ns_proto_define_getset(ctx, htmlelem_proto, "popover",
+                           ns_element_get_popover, ns_element_set_popover);
     ns_chain_proto(ctx, global, "SVGElement", elem_proto);
     ns_chain_proto(ctx, global, "SVGSVGElement", elem_proto);
     JSValue svg_proto = ns_proto_of(ctx, global, "SVGElement");
@@ -46989,6 +48191,18 @@ ns_install_dom_hierarchy(ns_js *js, JSContext *ctx, JSValueConst global)
             JS_SetPropertyFunctionList(ctx, track_proto, track_accessors,
                                        G_N_ELEMENTS(track_accessors));
         JS_FreeValue(ctx, track_proto);
+    }
+    {
+        JSValue button_proto = ns_proto_of(ctx, global, "HTMLButtonElement");
+        if (JS_IsObject(button_proto)) {
+            ns_proto_define_getset(ctx, button_proto, "command",
+                                   ns_button_get_command,
+                                   ns_button_set_command);
+            ns_proto_define_getset(ctx, button_proto, "commandForElement",
+                                   ns_button_get_commandForElement,
+                                   ns_button_set_commandForElement);
+        }
+        JS_FreeValue(ctx, button_proto);
     }
 
     js->per_tag_protos = g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -47975,6 +49189,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor_proto_fn(ctx, global, "ExtendableMessageEvent", "initMessageEvent",
                           ns_message_event_init, 1);
     ns_bind_ctor(ctx, global, "StorageEvent", ns_storage_event_ctor, 1);
+    ns_bind_ctor(ctx, global, "ToggleEvent",  ns_toggle_event_ctor,  2);
+    ns_bind_ctor(ctx, global, "CommandEvent", ns_command_event_ctor, 2);
     ns_install_drag_event_support(ctx);
     for (gsize i = 0; i < G_N_ELEMENTS(event_subclasses); i++)
         ns_event_link_proto(ctx, global, event_subclasses[i], "Event");
@@ -47991,6 +49207,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_event_link_proto(ctx, global, "MessageEvent",     "Event");
     ns_event_link_proto(ctx, global, "StorageEvent",     "Event");
     ns_event_link_proto(ctx, global, "SubmitEvent",      "Event");
+    ns_event_link_proto(ctx, global, "CommandEvent",     "Event");
     ns_event_link_proto(ctx, global, "UIEvent",          "Event");
     ns_event_link_proto(ctx, global, "MouseEvent",       "UIEvent");
     ns_event_link_proto(ctx, global, "PointerEvent",     "MouseEvent");
@@ -51358,6 +52575,7 @@ static void
 ns_js_reset_runtime_state(ns_js *js)
 {
     if (!js) return;
+    ns_popover_state_clear(js);
     js->focused_node = NULL;
     ns_storage_free_deferred_events(js);
 
@@ -52048,6 +53266,7 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    ns_popover_state_clear(js);
     ns_font_remove_idle_cb(ns_js_fonts_idle, js);
     if (js->font_ready_resolvers) {
         for (guint i = 0; i < js->font_ready_resolvers->len; i++)
