@@ -16529,7 +16529,7 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
             "   method('toJSON',   function(){ return this.__nd.href; });"
             "   Object.defineProperty(URLp, '__ndSync', { configurable: true,"
             "     writable: true, value: function(){"
-            "       try { var sp = new URLSearchParams(this.__nd.search.replace(/^\\?/, ''));"
+            "       try { var sp = new URLSearchParams(this.__nd.search);"
             "             if (this.__ndSP) { this.__ndSP._p = sp._p; }"
             "             else { sp._owner = this;"
             "               Object.defineProperty(this, '__ndSP', { value: sp,"
@@ -36464,17 +36464,23 @@ ns_js_doc_base_url(ns_js *js)
 }
 
 static char *
-ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
+ns_element_anchor_url(const ns_node *n, ns_js *js)
 {
     if (!n) return NULL;
-    const char *raw = ns_element_get_attr(n, "href");
+    gsize len = 0;
+    const char *raw = ns_element_get_attr_len(n, "href", &len);
     if (!raw) return NULL;
     g_autofree char *base = ns_js_doc_base_url(js);
-    if (base && *base) {
-        char *r = ns_url_resolve(base, raw);
-        if (r) return r;
-    }
-    return g_strdup(raw);
+    return ns_url_resolve_len(base && *base ? base : NULL, raw, len);
+}
+
+static char *
+ns_element_anchor_resolved_href(const ns_node *n, ns_js *js)
+{
+    char *r = ns_element_anchor_url(n, js);
+    if (r) return r;
+    const char *raw = n ? ns_element_get_attr(n, "href") : NULL;
+    return raw ? g_strdup(raw) : NULL;
 }
 
 static JSValue
@@ -36491,15 +36497,15 @@ ns_element_anchor_part_get(JSContext *ctx, JSValueConst this_val, int magic)
         }
         return JS_UNDEFINED;
     }
-    g_autofree char *href = ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
-    if (!href) return JS_NewString(ctx, "");
-    if (magic == NS_ANCHOR_HREF) return JS_NewString(ctx, href);
-    g_autoptr(ns_url_parts) p = ns_url_parts_new(href);
+    g_autofree char *href = ns_element_anchor_url(n, js_from_ctx(ctx));
+    g_autoptr(ns_url_parts) p = href ? ns_url_parts_new(href) : NULL;
     if (!p) {
+        if (magic == NS_ANCHOR_HREF)
+            return ns_element_reflect_str_get(ctx, this_val, "href", FALSE);
         if (magic == NS_ANCHOR_PROTOCOL) return JS_NewString(ctx, ":");
-        if (magic == NS_ANCHOR_ORIGIN)   return JS_NewString(ctx, "null");
         return JS_NewString(ctx, "");
     }
+    if (magic == NS_ANCHOR_HREF) return JS_NewString(ctx, href);
     const char *out = NULL;
     switch (magic) {
         case NS_ANCHOR_PROTOCOL: out = p->protocol; break;
@@ -36550,12 +36556,11 @@ ns_element_url_part_set(JSContext *ctx, JSValueConst this_val,
                                   JS_DupValue(ctx, val), JS_PROP_C_W_E);
         return JS_UNDEFINED;
     }
-    g_autofree char *href = ns_element_anchor_resolved_href(n, js_from_ctx(ctx));
-    if (!href) return JS_UNDEFINED;
     size_t vlen = 0;
     const char *v = JS_ToCStringLen(ctx, &vlen, val);
-    if (!v) return JS_UNDEFINED;
-    char *next = ns_url_set_component_len(href, name, v, vlen);
+    if (!v) return JS_EXCEPTION;
+    g_autofree char *href = ns_element_anchor_url(n, js_from_ctx(ctx));
+    char *next = href ? ns_url_set_component_len(href, name, v, vlen) : NULL;
     if (next) {
         ns_js_set_attr_recorded(js_from_ctx(ctx), n, "href", next);
         g_free(next);

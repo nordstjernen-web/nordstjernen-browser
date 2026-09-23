@@ -712,6 +712,108 @@ ns_url_resolve(const char *base, const char *href)
     return ns_url_resolve_len(base, href, href ? strlen(href) : 0);
 }
 
+static gboolean
+ns_url_host_is_empty(const lxb_url_t *u)
+{
+    switch (u->host.type) {
+    case LXB_URL_HOST_TYPE__UNDEF:
+    case LXB_URL_HOST_TYPE_EMPTY:
+        return TRUE;
+    case LXB_URL_HOST_TYPE_OPAQUE:
+        return u->host.u.opaque.length == 0;
+    case LXB_URL_HOST_TYPE_DOMAIN:
+        return u->host.u.domain.length == 0;
+    default:
+        return FALSE;
+    }
+}
+
+static gboolean
+ns_url_is_special(const lxb_url_t *u)
+{
+    return u->scheme.type >= LXB_URL_SCHEMEL_TYPE_HTTP &&
+           u->scheme.type <= LXB_URL_SCHEMEL_TYPE_FILE;
+}
+
+static gboolean
+ns_url_has_credentials_or_port(const lxb_url_t *u)
+{
+    return u->username.length > 0 || u->password.length > 0 || u->has_port;
+}
+
+static void
+ns_url_host_setter(lxb_url_t *u, lxb_url_parser_t *parser,
+                   const char *v, size_t len, gboolean hostname_only)
+{
+    gboolean special = ns_url_is_special(u);
+    gboolean brackets = FALSE;
+    size_t colon = len, end = 0;
+    for (; end < len; end++) {
+        char c = v[end];
+        if (c == '/' || c == '?' || c == '#' || (special && c == '\\'))
+            break;
+        if (c == '[') brackets = TRUE;
+        else if (c == ']') brackets = FALSE;
+        else if (c == ':' && !brackets && colon == len) colon = end;
+    }
+    if (colon == len && end == 0 && !special &&
+        ns_url_has_credentials_or_port(u))
+        return;
+    if (colon == len || hostname_only ||
+        u->scheme.type == LXB_URL_SCHEMEL_TYPE_FILE) {
+        if (hostname_only)
+            (void) lxb_url_api_hostname_set(u, parser,
+                                            (const lxb_char_t *)v, len);
+        else
+            (void) lxb_url_api_host_set(u, parser,
+                                        (const lxb_char_t *)v, len);
+        return;
+    }
+    if (colon == 0) return;
+    if (lxb_url_api_hostname_set(u, parser, (const lxb_char_t *)v, colon)
+        != LXB_STATUS_OK)
+        return;
+    size_t digits = colon + 1;
+    while (digits < end && g_ascii_isdigit(v[digits])) digits++;
+    if (digits == colon + 1) return;
+    guint64 port = 0;
+    for (size_t i = colon + 1; i < digits && port <= 65535; i++)
+        port = port * 10 + (guint64)(v[i] - '0');
+    if (port > 65535) return;
+    (void) lxb_url_api_port_set(u, parser, (const lxb_char_t *)v + colon + 1,
+                                digits - colon - 1);
+}
+
+static void
+ns_url_apply_setter(lxb_url_t *u, lxb_url_parser_t *parser,
+                    const char *component, const char *value, size_t vlen)
+{
+    const lxb_char_t *v = (const lxb_char_t *)value;
+    gboolean userinfo_or_port = strcmp(component, "username") == 0 ||
+                                strcmp(component, "password") == 0 ||
+                                strcmp(component, "port") == 0;
+    if (userinfo_or_port && ns_url_host_is_empty(u))
+        return;
+    if (strcmp(component, "protocol") == 0)
+        (void) lxb_url_api_protocol_set(u, parser, v, vlen);
+    else if (strcmp(component, "username") == 0)
+        (void) lxb_url_api_username_set(u, v, vlen);
+    else if (strcmp(component, "password") == 0)
+        (void) lxb_url_api_password_set(u, v, vlen);
+    else if (strcmp(component, "host") == 0)
+        ns_url_host_setter(u, parser, value, vlen, FALSE);
+    else if (strcmp(component, "hostname") == 0)
+        ns_url_host_setter(u, parser, value, vlen, TRUE);
+    else if (strcmp(component, "port") == 0)
+        (void) lxb_url_api_port_set(u, parser, v, vlen);
+    else if (strcmp(component, "pathname") == 0)
+        (void) lxb_url_api_pathname_set(u, parser, v, vlen);
+    else if (strcmp(component, "search") == 0)
+        (void) lxb_url_api_search_set(u, parser, v, vlen);
+    else if (strcmp(component, "hash") == 0)
+        (void) lxb_url_api_hash_set(u, parser, v, vlen);
+}
+
 char *
 ns_url_set_component_len(const char *href, const char *component,
                          const char *value, size_t value_len)
@@ -728,27 +830,7 @@ ns_url_set_component_len(const char *href, const char *component,
         return NULL;
     }
 
-    const lxb_char_t *v = (const lxb_char_t *)value;
-    size_t vlen = value_len;
-
-    if (strcmp(component, "protocol") == 0)
-        (void) lxb_url_api_protocol_set(u, parser, v, vlen);
-    else if (strcmp(component, "username") == 0)
-        (void) lxb_url_api_username_set(u, v, vlen);
-    else if (strcmp(component, "password") == 0)
-        (void) lxb_url_api_password_set(u, v, vlen);
-    else if (strcmp(component, "host") == 0)
-        (void) lxb_url_api_host_set(u, parser, v, vlen);
-    else if (strcmp(component, "hostname") == 0)
-        (void) lxb_url_api_hostname_set(u, parser, v, vlen);
-    else if (strcmp(component, "port") == 0)
-        (void) lxb_url_api_port_set(u, parser, v, vlen);
-    else if (strcmp(component, "pathname") == 0)
-        (void) lxb_url_api_pathname_set(u, parser, v, vlen);
-    else if (strcmp(component, "search") == 0)
-        (void) lxb_url_api_search_set(u, parser, v, vlen);
-    else if (strcmp(component, "hash") == 0)
-        (void) lxb_url_api_hash_set(u, parser, v, vlen);
+    ns_url_apply_setter(u, parser, component, value, value_len);
 
     char *out = NULL;
     GString *s = g_string_new(NULL);
