@@ -22553,7 +22553,7 @@ match_simple(const ns_css_simple *sel, const ns_node *el)
                     return FALSE;
                 break;
             case NS_CSS_PC_MODAL:
-                if (ns_dom_active_modal() != el) return FALSE;
+                if (!ns_element_get_attr(el, "data-nd-modal")) return FALSE;
                 break;
             case NS_CSS_PC_FULLSCREEN:
                 if (g_css_fullscreen_node != el) return FALSE;
@@ -28572,6 +28572,8 @@ incr_collect_attr_keys_simple(const ns_css_simple *c, int depth)
                 g_hash_table_add(g_attr_keys, g_strdup("open"));
             } else if (p->kind == NS_CSS_PC_POPOVER_OPEN) {
                 g_hash_table_add(g_attr_keys, g_strdup("data-nd-popover-open"));
+            } else if (p->kind == NS_CSS_PC_MODAL) {
+                g_hash_table_add(g_attr_keys, g_strdup("data-nd-modal"));
             }
             if (p->of_group)
                 for (guint gi = 0; gi < p->of_group->len; gi++)
