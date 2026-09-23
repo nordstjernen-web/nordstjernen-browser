@@ -7163,7 +7163,10 @@ inline_atomic_measure_basis(const ns_box *box)
 {
     const ns_css_value *wv = box && box->style
         ? box->style->values[NS_CSS_WIDTH] : NULL;
-    if (value_is_percent(wv)) {
+    gboolean replaced = box && (box->kind == NS_BOX_IMAGE ||
+                                box->kind == NS_BOX_VIDEO ||
+                                box->kind == NS_BOX_SVG);
+    if (value_is_percent(wv) && !replaced) {
         double content = measure_natural_width((ns_box *)box, box->style);
         if (content >= 0) return content;
     }
