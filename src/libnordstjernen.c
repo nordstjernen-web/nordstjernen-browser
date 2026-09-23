@@ -2110,6 +2110,13 @@ ns_browser_render_argb32(ns_browser *browser, int scroll_x, int scroll_y,
 
 static const ns_node *browser_hit_node(ns_browser *browser, int x, int y);
 
+static gboolean
+browser_node_is_hyperlink(const ns_node *n)
+{
+    return ns_node_is_element_named(n, "a") ||
+           ns_node_is_element_named(n, "area");
+}
+
 char *
 ns_browser_link_at(ns_browser *browser, int x, int y)
 {
@@ -2128,7 +2135,7 @@ ns_browser_link_at(ns_browser *browser, int x, int y)
         if (!href || !*href) {
             const ns_node *node = browser_hit_node(browser, px, py);
             for (const ns_node *a = node; a && (!href || !*href); a = a->parent)
-                if (ns_node_is_element_named(a, "a"))
+                if (browser_node_is_hyperlink(a))
                     href = ns_element_get_attr(a, "href");
         }
         if (href && *href) return browser_resolve_navigation(browser, href);
@@ -2150,14 +2157,9 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     };
     if (!browser || !browser->layout || !browser->styles) return NULL;
 
-    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
-    const ns_node *node = hit ? hit->dom : NULL;
-    const ns_node *inline_node =
-        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
-    if (inline_node) node = inline_node;
+    const ns_node *node = browser_hit_node(browser, x, y);
     const ns_node *form_node =
         ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
-    if (form_node) node = form_node;
 
     const ns_style *style = NULL;
     for (const ns_node *n = node; n && !style; n = n->parent)
@@ -2181,6 +2183,9 @@ ns_browser_cursor_at(ns_browser *browser, int x, int y)
     if (match) return match;
 
     if (ns_box_hit_link(browser->layout, (double)x, (double)y)) return NULL;
+    for (const ns_node *n = node; n; n = n->parent)
+        if (browser_node_is_hyperlink(n) &&
+            ns_element_get_attr(n, "href")) return NULL;
     if (form_node)
         return ns_node_is_text_input(form_node) ? g_strdup("text") : NULL;
     for (const ns_node *n = node; n; n = n->parent)
@@ -2258,14 +2263,7 @@ ns_browser_hover(ns_browser *browser, int x, int y)
 {
     if (!browser || !browser->layout) return -1;
 
-    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
-    const ns_node *node = hit ? hit->dom : NULL;
-    const ns_node *inline_node =
-        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
-    if (inline_node) node = inline_node;
-    const ns_node *form_node =
-        ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
-    if (form_node) node = form_node;
+    const ns_node *node = browser_hit_node(browser, x, y);
 
     browser_prune_cached_nodes(browser);
     const ns_node *prev = browser->hover_node;
@@ -2824,17 +2822,7 @@ browser_submit_form(ns_browser *b, const ns_node *clicked)
 static const ns_node *
 browser_hit_node(ns_browser *browser, int x, int y)
 {
-    const ns_box *hit = ns_box_hit_test(browser->layout, (double)x, (double)y);
-    const ns_node *node = hit ? hit->dom : NULL;
-    const ns_node *inline_node =
-        ns_box_hit_inline_dom(browser->layout, (double)x, (double)y);
-    if (inline_node)
-        node = inline_node;
-    const ns_node *form_node =
-        ns_box_hit_form_dom(browser->layout, (double)x, (double)y);
-    if (form_node)
-        node = form_node;
-    return node;
+    return ns_box_hit_node(browser->layout, (double)x, (double)y);
 }
 
 char *
@@ -3067,7 +3055,7 @@ ns_browser_release_click(ns_browser *browser, int *out_changed)
     } else if (!prevented && !browser->pending_nav) {
         const char *href = NULL;
         for (const ns_node *a = node; a && !href; a = a->parent) {
-            if (ns_node_is_element_named(a, "a")) {
+            if (browser_node_is_hyperlink(a)) {
                 const char *h = ns_element_get_attr(a, "href");
                 if (h && *h) href = h;
             }

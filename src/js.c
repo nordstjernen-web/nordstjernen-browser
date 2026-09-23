@@ -43123,8 +43123,12 @@ ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
     if (!ns_point_in_hit_bounds(js, x, y)) return JS_NULL;
     x += ns_window_scroll_prop(ctx, "scrollX");
     y += ns_window_scroll_prop(ctx, "scrollY");
-    const ns_box *hit = ns_box_hit_test(js->layout_root, x, y);
-    return hit && hit->dom ? ns_make_element(ctx, hit->dom) : JS_NULL;
+    double local_x = 0, local_y = 0;
+    const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
+                                              &local_x, &local_y);
+    if (!hit || !hit->dom) return JS_NULL;
+    const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
+    return ns_make_element(ctx, area ? area : hit->dom);
 }
 
 static JSValue
