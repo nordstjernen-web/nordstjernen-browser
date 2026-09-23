@@ -5686,7 +5686,14 @@
                     } else if (c === quote) quote = '';
                     continue;
                 }
-                if (c === '"' || c === "'") {
+                if (c === '/' && sel.charAt(i + 1) === '*') {
+                    var close = sel.indexOf('*/', i + 2);
+                    i = close < 0 ? sel.length : close + 1;
+                } else if (c === '\\' && i + 1 < sel.length) {
+                    if (pending && out) out += ' ';
+                    pending = false;
+                    out += c + sel.charAt(++i);
+                } else if (c === '"' || c === "'") {
                     if (pending && out) out += ' ';
                     pending = false;
                     quote = c;
@@ -5718,6 +5725,9 @@
                              ? lead : m;
                      })
                      .replace(/\[\|(?=[-*a-zA-Z_])/g, '[')
+                     .replace(/(["'])\s*([is])\s*\]/gi, function (m, q, flag) {
+                         return q + ' ' + flag.toLowerCase() + ']';
+                     })
                      .replace(/(^|[\s>+~,])\*(?=[.#[:])/g, '$1')
                      .replace(/(^|[^:]):(before|after|first-line|first-letter)\b/gi,
                               '$1::$2')
@@ -5863,9 +5873,7 @@
         }
         method(CSSStyleRule.prototype, '__cssText', function () {
             var d = declText(this);
-            var sel = nestedInStyleRule(this)
-                ? nestedSelectorText(canonSelector(this.__selector || '', this.__namespaces))
-                : this.__selector;
+            var sel = this.selectorText;
             if (this.__rules && this.__rules.length) {
                 var lines = [];
                 if (d) lines.push('  ' + d);
