@@ -12180,6 +12180,15 @@ ns_window_message_channel(JSContext *ctx, JSValueConst this_val,
 static char *
 ns_window_origin_of(JSContext *ctx, JSValueConst win)
 {
+    ns_js *js = js_from_ctx(ctx);
+    if (js && js->document_origin && JS_IsObject(win)) {
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+        JSValue main_global = JS_GetGlobalObject(main_ctx);
+        gboolean is_main =
+            JS_VALUE_GET_PTR(main_global) == JS_VALUE_GET_PTR(win);
+        JS_FreeValue(main_ctx, main_global);
+        if (is_main) return g_strdup(js->document_origin);
+    }
     JSValue loc = JS_GetPropertyStr(ctx, win, "location");
     char *out = NULL;
     if (JS_IsObject(loc)) {
@@ -12333,12 +12342,19 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
 
-    if (want_origin && strcmp(want_origin, "*") != 0 &&
-        strcmp(want_origin, "/") != 0) {
+    if (want_origin && strcmp(want_origin, "*") != 0) {
         g_autofree char *actual = ns_window_origin_of(ctx, target);
-        gboolean match = actual && g_str_has_prefix(want_origin, actual) &&
-            (want_origin[strlen(actual)] == '\0' ||
-             want_origin[strlen(actual)] == '/');
+        g_autofree char *wanted = NULL;
+        if (strcmp(want_origin, "/") == 0) {
+            JSValue src_win = JS_IsObject(source_override)
+                ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
+            wanted = ns_window_origin_of(ctx, src_win);
+            JS_FreeValue(ctx, src_win);
+        } else {
+            wanted = ns_url_origin_from(want_origin);
+        }
+        gboolean match = actual && wanted &&
+                         g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
             JS_FreeValue(ctx, transfer);
             JS_FreeValue(ctx, target);
@@ -50634,6 +50650,9 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_dom_set_active_modal(NULL);
     g_free(js->current_url);
     js->current_url = g_strdup(base_url ? base_url : "");
+    g_free(js->document_origin);
+    js->document_origin = base_url && *base_url
+        ? ns_url_origin_from(base_url) : NULL;
 
     if (doc) {
         ns_doc_id_index_build(doc);
@@ -51082,6 +51101,7 @@ ns_js_free(ns_js *js)
     g_free(js->cookie_value);
     g_free(js->referrer);
     g_free(js->current_url);
+    g_free(js->document_origin);
     g_free(js->selection_text);
     if (js->document_write_buffer) {
         g_string_free(js->document_write_buffer, TRUE);
