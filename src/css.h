@@ -805,6 +805,8 @@ typedef struct ns_css_pending_decl {
     int       decl_rank;
 } ns_css_pending_decl;
 
+typedef struct ns_css_container_query ns_css_container_query;
+
 typedef struct ns_css_rule {
     GPtrArray  *selectors;
     GArray     *decls;
@@ -813,6 +815,7 @@ typedef struct ns_css_rule {
     GArray     *pending;
     char       *layer_name;
     char       *container_condition;
+    ns_css_container_query *container_query;
     GPtrArray  *scopes;
     int         source_order;
     guint       pe_mask;
