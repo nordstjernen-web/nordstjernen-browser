@@ -13356,11 +13356,16 @@ ns_layout_grid_resolved_tracks(const ns_box *box, gboolean columns)
                                      : NS_CSS_GRID_TEMPLATE_ROWS]
         : NULL;
     const ns_css_tracks *tk = NULL;
-    if (tv && tv->kind == NS_CSS_V_TRACKS) {
-        if (tv->u.tracks.subgrid) return NULL;
-        if (tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE)
-            tk = &tv->u.tracks;
+    if (tv && tv->kind == NS_CSS_V_TRACKS && tv->u.tracks.subgrid) {
+        const ns_box *p = box->parent;
+        while (p && !p->style) p = p->parent;
+        if (p && ns_display_is_grid_container(ns_css_display_of(p->style)))
+            return NULL;
+        tv = NULL;
     }
+    if (tv && tv->kind == NS_CSS_V_TRACKS &&
+        tv->u.tracks.auto_repeat == NS_CSS_AUTO_REPEAT_NONE)
+        tk = &tv->u.tracks;
     if (tr->len == 0) return g_strdup("none");
     if (!tk && !(tv && tv->kind == NS_CSS_V_TRACKS)) {
         gboolean has_items = FALSE;
