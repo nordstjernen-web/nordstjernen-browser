@@ -12005,20 +12005,18 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static JSValue ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
+                                          int argc, JSValueConst *argv);
+
 static JSValue
-ns_structured_clone_value(JSContext *ctx, JSValueConst v)
+ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer)
 {
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue clone = JS_GetPropertyStr(ctx, global, "structuredClone");
-    JS_FreeValue(ctx, global);
-    JSValue out;
-    if (JS_IsFunction(ctx, clone)) {
-        JSValueConst cargs[1] = { v };
-        out = JS_Call(ctx, clone, JS_UNDEFINED, 1, cargs);
-    } else {
-        out = JS_DupValue(ctx, v);
-    }
-    JS_FreeValue(ctx, clone);
+    JSValue options = JS_NewObject(ctx);
+    if (JS_IsArray(transfer))
+        JS_SetPropertyStr(ctx, options, "transfer", JS_DupValue(ctx, transfer));
+    JSValueConst args[2] = { v, options };
+    JSValue out = ns_window_structured_clone(ctx, JS_UNDEFINED, 2, args);
+    JS_FreeValue(ctx, options);
     return out;
 }
 
@@ -12115,14 +12113,16 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
     if (bridge_id)
         return ns_port_bridge_send(ctx, this_val, bridge_id, data);
 
-    JSValue cloned = ns_structured_clone_value(ctx, data);
-    if (JS_IsException(cloned)) return JS_EXCEPTION;
-
     JSValue transfer = JS_UNDEFINED;
     if (argc >= 2 && JS_IsArray(argv[1])) {
         transfer = JS_DupValue(ctx, argv[1]);
     } else if (argc >= 2 && JS_IsObject(argv[1])) {
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
+    }
+    JSValue cloned = ns_structured_clone_value(ctx, data, transfer);
+    if (JS_IsException(cloned)) {
+        JS_FreeValue(ctx, transfer);
+        return JS_EXCEPTION;
     }
     JSValue ports = JS_NewArray(ctx);
     if (JS_IsArray(transfer)) {
@@ -12536,7 +12536,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         }
     }
 
-    JSValue data = ns_structured_clone_value(ctx, argv[0]);
+    JSValue data = ns_structured_clone_value(ctx, argv[0], transfer);
     if (JS_IsException(data)) {
         JS_FreeValue(ctx, transfer);
         JS_FreeValue(ctx, target);
@@ -12854,10 +12854,12 @@ typedef struct { void *orig; JSValue clone; } ns_sc_pair;
 typedef struct {
     JSContext *ctx;
     GArray    *memo;
+    GPtrArray *transferred_in_place;
     int        depth;
     JSValue    date_ctor, regexp_ctor, map_ctor, set_ctor;
-    JSValue    blob_ctor, file_ctor, dataview_ctor, error_ctor;
-    JSValue    number_ctor, string_ctor, boolean_ctor;
+    JSValue    blob_ctor, file_ctor, dataview_ctor;
+    JSValue    number_ctor, string_ctor, boolean_ctor, bigint_ctor;
+    JSValue    array_buffer_ctor, dom_exception_ctor;
 } ns_sc;
 
 static JSValue ns_sc_clone(ns_sc *s, JSValueConst v);
@@ -12874,6 +12876,50 @@ ns_sc_fail(JSContext *ctx)
 {
     return ns_throw_dom_exception(ctx, "DataCloneError", 25,
                                   "value could not be cloned.");
+}
+
+static gboolean ns_worker_transfer_is_port(JSContext *ctx, JSValueConst v);
+
+static JSValue
+ns_sc_fail_on_exception(JSContext *ctx, JSValue v)
+{
+    if (!JS_IsException(v)) return v;
+    JS_FreeValue(ctx, JS_GetException(ctx));
+    return ns_sc_fail(ctx);
+}
+
+static gboolean
+ns_sc_buffer_detached(JSContext *ctx, JSValueConst buffer)
+{
+    JSValue d = JS_GetPropertyStr(ctx, buffer, "detached");
+    gboolean detached = JS_ToBool(ctx, d) > 0;
+    JS_FreeValue(ctx, d);
+    return detached;
+}
+
+static JSValue
+ns_sc_copy_array_buffer(ns_sc *s, JSValueConst src)
+{
+    JSContext *ctx = s->ctx;
+    if (ns_sc_buffer_detached(ctx, src)) return ns_sc_fail(ctx);
+    size_t size = 0;
+    uint8_t *bytes = JS_GetArrayBuffer(ctx, &size, src);
+    JSValue resizable = JS_GetPropertyStr(ctx, src, "resizable");
+    gboolean is_resizable = JS_ToBool(ctx, resizable) > 0;
+    JS_FreeValue(ctx, resizable);
+    if (!is_resizable) return JS_NewArrayBufferCopy(ctx, bytes, size);
+    JSValue opts = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, opts, "maxByteLength",
+                      JS_GetPropertyStr(ctx, src, "maxByteLength"));
+    JSValue len = JS_NewInt64(ctx, (int64_t)size);
+    JSValueConst args[2] = { len, opts };
+    JSValue clone = JS_CallConstructor(ctx, s->array_buffer_ctor, 2, args);
+    JS_FreeValue(ctx, opts);
+    if (JS_IsException(clone)) return clone;
+    size_t clone_size = 0;
+    uint8_t *dst = JS_GetArrayBuffer(ctx, &clone_size, clone);
+    if (dst && bytes && clone_size >= size) memcpy(dst, bytes, size);
+    return clone;
 }
 
 static JSValue
@@ -12952,11 +12998,14 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
     JSValue memo = ns_sc_memo_get(s, ptr);
     if (!JS_IsUndefined(memo)) return memo;
 
+    if (s->transferred_in_place &&
+        g_ptr_array_find(s->transferred_in_place, ptr, NULL)) {
+        ns_sc_memo_put(s, ptr, v);
+        return JS_DupValue(ctx, v);
+    }
+
     if (JS_IsArrayBuffer(v)) {
-        size_t sz = 0;
-        uint8_t *p = JS_GetArrayBuffer(ctx, &sz, v);
-        if (!p) return JS_EXCEPTION;
-        JSValue clone = JS_NewArrayBufferCopy(ctx, p, sz);
+        JSValue clone = ns_sc_copy_array_buffer(s, v);
         if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
         return clone;
     }
@@ -12964,11 +13013,17 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
     int tt = JS_GetTypedArrayType(v);
     if (tt >= 0) {
         size_t off = 0, len = 0, bpe = 0;
-        JSValue buf = JS_GetTypedArrayBuffer(ctx, v, &off, &len, &bpe);
+        JSValue buf = ns_sc_fail_on_exception(ctx,
+            JS_GetTypedArrayBuffer(ctx, v, &off, &len, &bpe));
         if (JS_IsException(buf)) return buf;
-        size_t total = 0;
-        uint8_t *bp = JS_GetArrayBuffer(ctx, &total, buf);
-        JSValue newbuf = bp ? JS_NewArrayBufferCopy(ctx, bp, total) : JS_EXCEPTION;
+        JSValue newbuf;
+        if (JS_IsArrayBuffer(buf)) {
+            newbuf = ns_sc_clone(s, buf);
+        } else {
+            size_t total = 0;
+            uint8_t *bp = JS_GetArrayBuffer(ctx, &total, buf);
+            newbuf = bp ? JS_NewArrayBufferCopy(ctx, bp, total) : JS_EXCEPTION;
+        }
         JS_FreeValue(ctx, buf);
         if (JS_IsException(newbuf)) return newbuf;
         JSValueConst args[3] = { newbuf, JS_NewInt64(ctx, (int64_t)off),
@@ -13052,40 +13107,78 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
     }
 
     if (ns_sc_isa(ctx, v, s->dataview_ctor)) {
+        JSValue offset = ns_sc_fail_on_exception(ctx,
+            JS_GetPropertyStr(ctx, v, "byteOffset"));
+        if (JS_IsException(offset)) return offset;
+        JSValue length = ns_sc_fail_on_exception(ctx,
+            JS_GetPropertyStr(ctx, v, "byteLength"));
+        if (JS_IsException(length)) return length;
         JSValue buf = JS_GetPropertyStr(ctx, v, "buffer");
         JSValue cbuf = ns_sc_clone(s, buf);
         JS_FreeValue(ctx, buf);
-        if (JS_IsException(cbuf)) return cbuf;
-        JSValueConst args[3] = { cbuf, JS_GetPropertyStr(ctx, v, "byteOffset"),
-                                 JS_GetPropertyStr(ctx, v, "byteLength") };
+        if (JS_IsException(cbuf)) {
+            JS_FreeValue(ctx, offset);
+            JS_FreeValue(ctx, length);
+            return cbuf;
+        }
+        JSValueConst args[3] = { cbuf, offset, length };
         JSValue clone = JS_CallConstructor(ctx, s->dataview_ctor, 3, args);
         JS_FreeValue(ctx, cbuf);
-        JS_FreeValue(ctx, args[1]);
-        JS_FreeValue(ctx, args[2]);
+        JS_FreeValue(ctx, offset);
+        JS_FreeValue(ctx, length);
         if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->error_ctor)) {
+    if (ns_sc_isa(ctx, v, s->dom_exception_ctor)) {
+        JSValue message = JS_GetPropertyStr(ctx, v, "message");
+        JSValue name = JS_GetPropertyStr(ctx, v, "name");
+        JSValueConst args[2] = { message, name };
+        JSValue clone = JS_CallConstructor(ctx, s->dom_exception_ctor, 2, args);
+        JS_FreeValue(ctx, message);
+        JS_FreeValue(ctx, name);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
+    if (JS_IsError(v)) {
         static const char *const known[] = {
             "Error", "EvalError", "RangeError", "ReferenceError",
-            "SyntaxError", "TypeError", "URIError", "AggregateError",
+            "SyntaxError", "TypeError", "URIError",
         };
         JSValue nameV = JS_GetPropertyStr(ctx, v, "name");
-        JSValue msgV  = JS_GetPropertyStr(ctx, v, "message");
-        const char *nm = JS_ToCString(ctx, nameV);
-        gboolean is_known = FALSE;
+        const char *nm = JS_IsString(nameV) ? JS_ToCString(ctx, nameV) : NULL;
+        const char *ctor_name = "Error";
         for (gsize i = 0; nm && i < G_N_ELEMENTS(known); i++)
-            if (strcmp(nm, known[i]) == 0) { is_known = TRUE; break; }
-        JSValue g2 = JS_GetGlobalObject(ctx);
-        JSValue ctor = is_known ? JS_GetPropertyStr(ctx, g2, nm) : JS_UNDEFINED;
-        JS_FreeValue(ctx, g2);
-        if (!JS_IsObject(ctor)) {
-            JS_FreeValue(ctx, ctor);
-            ctor = JS_DupValue(ctx, s->error_ctor);
+            if (strcmp(nm, known[i]) == 0) { ctor_name = known[i]; break; }
+        JSValue msgV = JS_UNDEFINED;
+        JSPropertyDescriptor desc;
+        JSAtom message_atom = JS_NewAtom(ctx, "message");
+        int has_msg = JS_GetOwnProperty(ctx, &desc, v, message_atom);
+        JS_FreeAtom(ctx, message_atom);
+        if (has_msg > 0) {
+            if (!(desc.flags & JS_PROP_GETSET))
+                msgV = JS_ToString(ctx, desc.value);
+            JS_FreeValue(ctx, desc.value);
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
         }
+        if (has_msg < 0 || JS_IsException(msgV)) {
+            if (nm) JS_FreeCString(ctx, nm);
+            JS_FreeValue(ctx, nameV);
+            return JS_EXCEPTION;
+        }
+        JSValue g2 = JS_GetGlobalObject(ctx);
+        JSValue ctor = JS_GetPropertyStr(ctx, g2, ctor_name);
+        JS_FreeValue(ctx, g2);
         JSValue clone;
-        if (JS_IsUndefined(msgV)) {
+        if (!JS_IsConstructor(ctx, ctor)) {
+            clone = JS_NewError(ctx);
+            if (!JS_IsUndefined(msgV))
+                JS_DefinePropertyValueStr(ctx, clone, "message",
+                                          JS_DupValue(ctx, msgV),
+                                          JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        } else if (JS_IsUndefined(msgV)) {
             clone = JS_CallConstructor(ctx, ctor, 0, NULL);
         } else {
             JSValueConst a = msgV;
@@ -13093,8 +13186,6 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         }
         JS_FreeValue(ctx, ctor);
         if (!JS_IsException(clone)) {
-            if (!is_known && nm)
-                JS_SetPropertyStr(ctx, clone, "name", JS_NewString(ctx, nm));
             JSValue stackV = JS_GetPropertyStr(ctx, v, "stack");
             if (JS_IsString(stackV)) JS_SetPropertyStr(ctx, clone, "stack", stackV);
             else                     JS_FreeValue(ctx, stackV);
@@ -13107,7 +13198,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
             JS_FreeValue(ctx, causeV);
             ns_sc_memo_put(s, ptr, clone);
         }
-        JS_FreeCString(ctx, nm);
+        if (nm) JS_FreeCString(ctx, nm);
         JS_FreeValue(ctx, nameV);
         JS_FreeValue(ctx, msgV);
         return clone;
@@ -13132,6 +13223,17 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
+    if (ns_sc_isa(ctx, v, s->bigint_ctor)) {
+        JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
+        JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
+        JS_FreeValue(ctx, vo);
+        if (JS_IsException(prim)) return prim;
+        JSValue clone = JS_ToObject(ctx, prim);
+        JS_FreeValue(ctx, prim);
+        if (!JS_IsException(clone)) ns_sc_memo_put(s, ptr, clone);
+        return clone;
+    }
+
     if (ns_sc_isa(ctx, v, s->boolean_ctor)) {
         JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
         JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
@@ -13146,6 +13248,12 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
 
     JSValue clone = JS_IsArray(v) ? JS_NewArray(ctx) : JS_NewObject(ctx);
     if (JS_IsException(clone)) return clone;
+    if (JS_IsArray(v) &&
+        JS_SetPropertyStr(ctx, clone, "length",
+                          JS_GetPropertyStr(ctx, v, "length")) < 0) {
+        JS_FreeValue(ctx, clone);
+        return JS_EXCEPTION;
+    }
     ns_sc_memo_put(s, ptr, clone);
     JSPropertyEnum *tab = NULL;
     uint32_t n = 0;
@@ -13179,15 +13287,12 @@ ns_sc_clone(ns_sc *s, JSValueConst v)
 }
 
 static JSValue
-ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
+ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transferred_in_place)
 {
-    (void)this_val;
-    if (argc < 1)
-        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
     ns_sc s;
     s.ctx = ctx;
     s.memo = g_array_new(FALSE, FALSE, sizeof(ns_sc_pair));
+    s.transferred_in_place = transferred_in_place;
     s.depth = 0;
     JSValue g = JS_GetGlobalObject(ctx);
     s.date_ctor     = JS_GetPropertyStr(ctx, g, "Date");
@@ -13197,13 +13302,15 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     s.blob_ctor     = JS_GetPropertyStr(ctx, g, "Blob");
     s.file_ctor     = JS_GetPropertyStr(ctx, g, "File");
     s.dataview_ctor = JS_GetPropertyStr(ctx, g, "DataView");
-    s.error_ctor    = JS_GetPropertyStr(ctx, g, "Error");
     s.number_ctor   = JS_GetPropertyStr(ctx, g, "Number");
     s.string_ctor   = JS_GetPropertyStr(ctx, g, "String");
     s.boolean_ctor  = JS_GetPropertyStr(ctx, g, "Boolean");
+    s.bigint_ctor   = JS_GetPropertyStr(ctx, g, "BigInt");
+    s.array_buffer_ctor = JS_GetPropertyStr(ctx, g, "ArrayBuffer");
+    s.dom_exception_ctor = JS_GetPropertyStr(ctx, g, "DOMException");
     JS_FreeValue(ctx, g);
 
-    JSValue out = ns_sc_clone(&s, argv[0]);
+    JSValue out = ns_sc_clone(&s, value);
 
     for (guint i = 0; i < s.memo->len; i++)
         JS_FreeValue(ctx, g_array_index(s.memo, ns_sc_pair, i).clone);
@@ -13215,11 +13322,83 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     JS_FreeValue(ctx, s.blob_ctor);
     JS_FreeValue(ctx, s.file_ctor);
     JS_FreeValue(ctx, s.dataview_ctor);
-    JS_FreeValue(ctx, s.error_ctor);
     JS_FreeValue(ctx, s.number_ctor);
     JS_FreeValue(ctx, s.string_ctor);
     JS_FreeValue(ctx, s.boolean_ctor);
+    JS_FreeValue(ctx, s.bigint_ctor);
+    JS_FreeValue(ctx, s.array_buffer_ctor);
+    JS_FreeValue(ctx, s.dom_exception_ctor);
     return out;
+}
+
+static gboolean
+ns_sc_transferred_in_place(JSContext *ctx, JSValueConst v)
+{
+    return ns_worker_transfer_is_port(ctx, v) || ns_image_bitmap_is(v);
+}
+
+static JSValue
+ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
+    JSValue transfer = JS_UNDEFINED;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+        if (!JS_IsObject(argv[1]))
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: options is not an object");
+        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
+        if (JS_IsException(transfer)) return transfer;
+        if (!JS_IsUndefined(transfer) && !JS_IsArray(transfer)) {
+            JS_FreeValue(ctx, transfer);
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: transfer is not a sequence");
+        }
+    }
+    uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
+    GPtrArray *in_place = g_ptr_array_new();
+    GPtrArray *seen = g_ptr_array_new();
+    GArray *buffers = g_array_new(FALSE, FALSE, sizeof(JSValue));
+    JSValue res = JS_UNDEFINED;
+    for (uint32_t i = 0; i < len && JS_IsUndefined(res); i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        if (!JS_IsObject(item)) {
+            JS_FreeValue(ctx, item);
+            res = JS_ThrowTypeError(ctx,
+                "structuredClone: transfer list entry is not an object");
+            break;
+        }
+        void *ptr = JS_VALUE_GET_PTR(item);
+        gboolean ok = !g_ptr_array_find(seen, ptr, NULL);
+        g_ptr_array_add(seen, ptr);
+        if (ok && JS_IsArrayBuffer(item) &&
+            !ns_sc_buffer_detached(ctx, item)) {
+            g_array_append_val(buffers, item);
+            continue;
+        }
+        if (ok && !JS_IsArrayBuffer(item) &&
+            ns_sc_transferred_in_place(ctx, item))
+            g_ptr_array_add(in_place, ptr);
+        else
+            ok = FALSE;
+        JS_FreeValue(ctx, item);
+        if (!ok) res = ns_sc_fail(ctx);
+    }
+    JS_FreeValue(ctx, transfer);
+    if (JS_IsUndefined(res)) {
+        res = ns_sc_run(ctx, argv[0], in_place);
+        if (!JS_IsException(res))
+            for (guint i = 0; i < buffers->len; i++)
+                JS_DetachArrayBuffer(ctx, g_array_index(buffers, JSValue, i));
+    }
+    for (guint i = 0; i < buffers->len; i++)
+        JS_FreeValue(ctx, g_array_index(buffers, JSValue, i));
+    g_array_free(buffers, TRUE);
+    g_ptr_array_free(seen, TRUE);
+    g_ptr_array_free(in_place, TRUE);
+    return res;
 }
 
 static gboolean

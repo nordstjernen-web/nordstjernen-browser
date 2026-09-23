@@ -368,6 +368,8 @@ ns_image_bitmap_from_imagedata(JSContext *ctx, JSValueConst src,
 cairo_surface_t *
 ns_image_bitmap_crop(cairo_surface_t *src, int sw, int sh,
                      int sx, int sy, int rw, int rh);
+gboolean
+ns_image_bitmap_is(JSValueConst v);
 JSValue
 ns_window_create_image_bitmap(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv);
