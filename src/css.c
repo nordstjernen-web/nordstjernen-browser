@@ -3221,6 +3221,10 @@ typedef struct ns_calc_term {
     double vw, vh, vmin, vmax;
     double num;
     gboolean is_number;
+    guint8 fn;
+    guint8 n_args;
+    guint8 arg_none;
+    struct { double px, pct; } args[4];
 } ns_calc_term;
 
 static void
@@ -3232,8 +3236,63 @@ calc_skip_ws(const char **pp, const char *end)
 }
 
 static void
+calc_term_fn_scale(ns_calc_term *v, double m)
+{
+    if (!v->fn) return;
+    if (!isfinite(m)) {
+        v->fn = 0;
+        return;
+    }
+    for (int i = 0; i < v->n_args; i++) {
+        v->args[i].px *= m;
+        v->args[i].pct *= m;
+    }
+    if (m >= 0) return;
+    if (v->fn == 1 || v->fn == 2) {
+        v->fn = v->fn == 1 ? 2 : 1;
+        return;
+    }
+    double lo_px = v->args[0].px, lo_pct = v->args[0].pct;
+    v->args[0] = v->args[2];
+    v->args[2].px = lo_px;
+    v->args[2].pct = lo_pct;
+    guint8 none = v->arg_none;
+    v->arg_none = (guint8)((none & 2u) | ((none & 1u) << 2) | ((none & 4u) >> 2));
+}
+
+static void
+calc_term_fn_add(ns_calc_term *out, const ns_calc_term *rhs, double sign)
+{
+    if (!out->fn && !rhs->fn) return;
+    if ((out->fn && rhs->fn) || out->em != 0 || out->rem != 0 ||
+        rhs->em != 0 || rhs->rem != 0) {
+        out->fn = 0;
+        return;
+    }
+    if (out->fn) {
+        for (int i = 0; i < out->n_args; i++) {
+            out->args[i].px += sign * rhs->px;
+            out->args[i].pct += sign * rhs->pct;
+        }
+        return;
+    }
+    ns_calc_term r = *rhs;
+    calc_term_fn_scale(&r, sign);
+    if (!r.fn) return;
+    for (int i = 0; i < r.n_args; i++) {
+        r.args[i].px += out->px;
+        r.args[i].pct += out->pct;
+    }
+    out->fn = r.fn;
+    out->n_args = r.n_args;
+    out->arg_none = r.arg_none;
+    memcpy(out->args, r.args, sizeof out->args);
+}
+
+static void
 calc_term_scale(ns_calc_term *v, double m)
 {
+    calc_term_fn_scale(v, m);
     if (v->is_number) {
         v->num *= m;
     } else if (isfinite(m)) {
@@ -3390,6 +3449,16 @@ calc_primary_parse(const char **pp, const char *end, ns_calc_term *out,
             out->vh = v->u.calc.vh;
             out->vmin = v->u.calc.vmin;
             out->vmax = v->u.calc.vmax;
+            if (v->u.calc.fn >= 1 && v->u.calc.fn <= 3 &&
+                v->u.calc.n_args > 0 && v->u.calc.n_args <= 4) {
+                out->fn = v->u.calc.fn;
+                out->n_args = v->u.calc.n_args;
+                out->arg_none = v->u.calc.arg_none;
+                for (int k = 0; k < out->n_args; k++) {
+                    out->args[k].px = v->u.calc.args[k].px;
+                    out->args[k].pct = v->u.calc.args[k].pct;
+                }
+            }
         } else if (v->kind == NS_CSS_V_LENGTH) {
             double num = v->u.length.v;
             switch (v->u.length.unit) {
@@ -3519,6 +3588,7 @@ calc_expr_parse(const char **pp, const char *end, ns_calc_term *out,
             *pp = p;
             continue;
         }
+        calc_term_fn_add(out, &rhs, op == '+' ? 1.0 : -1.0);
         if (op == '+') {
             out->px += rhs.px;
             out->pct += rhs.pct;
@@ -4431,6 +4501,17 @@ parse_calc_inner(const char *text)
     if (!parsed) return NULL;
     ns_css_value *v = g_new0(ns_css_value, 1);
     v->kind = NS_CSS_V_CALC;
+    if (term.fn) {
+        v->u.calc.px = px + (em + rem) * 16.0 + pct * 0.01 * g_viewport_w;
+        v->u.calc.fn = term.fn;
+        v->u.calc.n_args = term.n_args;
+        v->u.calc.arg_none = term.arg_none;
+        for (int k = 0; k < term.n_args; k++) {
+            v->u.calc.args[k].px = term.args[k].px;
+            v->u.calc.args[k].pct = term.args[k].pct;
+        }
+        return v;
+    }
     v->u.calc.pct = pct;
     v->u.calc.px  = px;
     v->u.calc.em  = em;
