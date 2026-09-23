@@ -15104,6 +15104,9 @@ ns_box_hit_test(const ns_box *root, double x, double y)
     if (modal) {
         const ns_box *top = box_for_dom_node(root, modal);
         if (top && top != root) {
+            const ns_box *any = box_hit_test_root(root, x, y);
+            for (const ns_node *n = any ? any->dom : NULL; n; n = n->parent)
+                if (n == modal) return any;
             const ns_box *m = box_hit_test_root(top, x, y);
             if (m) return m;
         }
