@@ -15438,6 +15438,23 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         g_free(col);
         return out;
     }
+    if (strcmp(name, "grid-area") == 0 || strcmp(name, "grid-row") == 0 ||
+        strcmp(name, "grid-column") == 0) {
+        static const char *const area_parts[4] = {
+            "grid-row-start", "grid-column-start", "grid-row-end",
+            "grid-column-end",
+        };
+        gboolean area = name[5] == 'a';
+        gboolean column = name[5] == 'c';
+        char *values[4] = { NULL };
+        for (int i = 0; i < (area ? 4 : 2); i++) {
+            int part = area ? i : i * 2 + (column ? 1 : 0);
+            values[i] = ns_computed_lookup(ctx, n, area_parts[part]);
+        }
+        char *out = ns_css_grid_placement_compose(values, area);
+        for (int i = 0; i < 4; i++) g_free(values[i]);
+        return out;
+    }
     if (strcmp(name, "grid-template") == 0 || strcmp(name, "grid") == 0) {
         static const char *const parts[6] = {
             "grid-template-rows", "grid-template-columns",
@@ -15450,9 +15467,19 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             !g_hash_table_lookup(grid_js->style_table, n))
             return g_strdup("");
         gboolean full = name[4] == '\0';
+        const ns_style *grid_style =
+            g_hash_table_lookup(grid_js->style_table, n);
         char *values[6] = { NULL };
-        for (int i = 0; i < (full ? 6 : 3); i++)
-            values[i] = ns_computed_lookup(ctx, n, parts[i]);
+        for (int i = 0; i < (full ? 6 : 3); i++) {
+            const ns_css_value *tracks = i < 2
+                ? grid_style->values[i == 0 ? NS_CSS_GRID_TEMPLATE_ROWS
+                                            : NS_CSS_GRID_TEMPLATE_COLUMNS]
+                : NULL;
+            if (tracks && tracks->kind == NS_CSS_V_TRACKS)
+                values[i] = ns_css_value_serialize(tracks);
+            else
+                values[i] = ns_computed_lookup(ctx, n, parts[i]);
+        }
         char *out = ns_css_grid_shorthand_compose(values, full);
         for (int i = 0; i < 6; i++) g_free(values[i]);
         return out;

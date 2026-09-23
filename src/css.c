@@ -23235,6 +23235,24 @@ inline_grid_compose(char *const v[6])
 }
 
 char *
+ns_css_grid_placement_compose(char *const values[4], gboolean area)
+{
+    int n = area ? 4 : 2;
+    GString *text = g_string_new(NULL);
+    for (int i = 0; i < n; i++) {
+        if (!values[i] || !*values[i]) {
+            g_string_free(text, TRUE);
+            return g_strdup("");
+        }
+        if (i) g_string_append(text, " / ");
+        g_string_append(text, values[i]);
+    }
+    char *out = grid_placement_canonical(text->str, area);
+    g_string_free(text, TRUE);
+    return out ? out : g_strdup("");
+}
+
+char *
 ns_css_grid_shorthand_compose(char *const values[6], gboolean full)
 {
     int n = full ? 6 : 3;
