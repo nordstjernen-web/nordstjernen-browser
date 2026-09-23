@@ -85,6 +85,8 @@ void ns_paint_apply_css_line_spacing(NsPangoLayout *layout,
                                      const ns_style *style);
 
 gboolean ns_paint_li_is_inside(const ns_style *li_style);
+void     ns_paint_list_ordinals_begin(void);
+void     ns_paint_list_ordinals_end(void);
 gboolean ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
                                  char *out, gsize out_sz);
 
