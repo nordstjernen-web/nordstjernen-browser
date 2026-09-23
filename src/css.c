@@ -26279,6 +26279,42 @@ attr_is_color(const char *v, guint8 *r_out, guint8 *g_out, guint8 *b_out, guint8
 }
 
 static gboolean
+html_dimension_value(const char *s, gboolean ignore_zero, double *value,
+                     gboolean *percent)
+{
+    if (!s) return FALSE;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\f' || *s == '\r')
+        s++;
+    if (!g_ascii_isdigit(*s)) return FALSE;
+    double v = 0;
+    while (g_ascii_isdigit(*s)) v = v * 10 + (*s++ - '0');
+    if (*s == '.') {
+        s++;
+        double divisor = 1;
+        while (g_ascii_isdigit(*s)) {
+            divisor *= 10;
+            v += (*s++ - '0') / divisor;
+        }
+    }
+    if (ignore_zero && v == 0) return FALSE;
+    *value = v;
+    *percent = *s == '%';
+    return TRUE;
+}
+
+static void
+append_html_dimension(GString *out, const char *attr, gboolean ignore_zero,
+                      const char *prop_a, const char *prop_b)
+{
+    double v;
+    gboolean pct;
+    if (!html_dimension_value(attr, ignore_zero, &v, &pct)) return;
+    const char *unit = pct ? "%" : "px";
+    g_string_append_printf(out, "%s: %.10g%s;", prop_a, v, unit);
+    if (prop_b) g_string_append_printf(out, "%s: %.10g%s;", prop_b, v, unit);
+}
+
+static gboolean
 is_presentational_attr_name(const char *n)
 {
     if (!n || !*n) return FALSE;
@@ -26328,7 +26364,15 @@ presentational_hints_css(const ns_node *el)
     gboolean is_hr    = strcmp(tag, "hr") == 0;
     gboolean is_body  = strcmp(tag, "body") == 0;
     gboolean is_font  = strcmp(tag, "font") == 0;
-    gboolean is_marq  = strcmp(tag, "marquee") == 0;
+    gboolean is_iframe = strcmp(tag, "iframe") == 0;
+    gboolean is_video = strcmp(tag, "video") == 0;
+    const char *input_type = strcmp(tag, "input") == 0
+        ? ns_element_get_attr(el, "type") : NULL;
+    gboolean is_image_input = input_type &&
+                              g_ascii_strcasecmp(input_type, "image") == 0;
+    gboolean is_embedded = is_img || is_image_input || is_iframe ||
+        is_video || strcmp(tag, "object") == 0 ||
+        strcmp(tag, "embed") == 0 || strcmp(tag, "marquee") == 0;
 
     if (strcmp(tag, "ol") == 0 || strcmp(tag, "li") == 0) {
         const char *t = ns_element_get_attr(el, "type");
@@ -26417,38 +26461,21 @@ presentational_hints_css(const ns_node *el)
     }
 
     const char *width = ns_element_get_attr(el, "width");
-    if (width && *width && (is_table || is_cell || is_img || is_hr ||
-                            strcmp(tag, "col") == 0 ||
-                            strcmp(tag, "colgroup") == 0 ||
-                            strcmp(tag, "iframe") == 0 ||
-                            strcmp(tag, "video") == 0 ||
-                            strcmp(tag, "object") == 0 ||
-                            strcmp(tag, "embed") == 0 ||
-                            strcmp(tag, "col") == 0 ||
-                            strcmp(tag, "pre") == 0)) {
-        char *end = NULL;
-        double v = g_ascii_strtod(width, &end);
-        if (end && end != width) {
-            if (*end == '%')
-                g_string_append_printf(out, "width: %g%%;", v);
-            else
-                g_string_append_printf(out, "width: %gpx;", v);
-        }
-    }
+    if (width && (is_embedded || is_hr || strcmp(tag, "col") == 0 ||
+                  strcmp(tag, "colgroup") == 0 || strcmp(tag, "pre") == 0))
+        append_html_dimension(out, width, FALSE, "width", NULL);
+    else if (width && (is_table || is_cell))
+        append_html_dimension(out, width, TRUE, "width", NULL);
     const char *height = ns_element_get_attr(el, "height");
-    if (height && *height && (is_table || is_cell || is_img || is_row ||
-                              strcmp(tag, "iframe") == 0 ||
-                              strcmp(tag, "video") == 0 ||
-                              strcmp(tag, "object") == 0 ||
-                              strcmp(tag, "embed") == 0)) {
-        char *end = NULL;
-        double v = g_ascii_strtod(height, &end);
-        if (end && end != height) {
-            if (*end == '%')
-                g_string_append_printf(out, "height: %g%%;", v);
-            else
-                g_string_append_printf(out, "height: %gpx;", v);
-        }
+    if (height && (is_embedded || is_table || is_row))
+        append_html_dimension(out, height, FALSE, "height", NULL);
+    else if (height && is_cell)
+        append_html_dimension(out, height, TRUE, "height", NULL);
+    if (is_embedded && !is_iframe && !is_video) {
+        append_html_dimension(out, ns_element_get_attr(el, "hspace"), FALSE,
+                              "margin-left", "margin-right");
+        append_html_dimension(out, ns_element_get_attr(el, "vspace"), FALSE,
+                              "margin-top", "margin-bottom");
     }
     if (strcmp(tag, "canvas") == 0 && width && height) {
         int cw = ns_parse_int(width, 0, 0, G_MAXINT);
@@ -26592,22 +26619,12 @@ presentational_hints_css(const ns_node *el)
                 g_string_append(out, "vertical-align: middle;");
             g_free(lo);
         }
-        const char *hspace = ns_element_get_attr(el, "hspace");
-        if (hspace && *hspace) {
-            int v = ns_parse_int(hspace, 0, 0, 1000);
-            g_string_append_printf(out, "margin-left: %dpx; margin-right: %dpx;", v, v);
-        }
-        const char *vspace = ns_element_get_attr(el, "vspace");
-        if (vspace && *vspace) {
-            int v = ns_parse_int(vspace, 0, 0, 1000);
-            g_string_append_printf(out, "margin-top: %dpx; margin-bottom: %dpx;", v, v);
-        }
+    }
+    if (is_img || is_image_input || strcmp(tag, "object") == 0) {
         const char *iborder = ns_element_get_attr(el, "border");
-        if (iborder && *iborder) {
-            int v = ns_parse_int(iborder, 0, 0, 100);
-            if (v > 0)
-                g_string_append_printf(out, "border: %dpx solid;", v);
-        }
+        int v = ns_parse_int(iborder, 0, 0, G_MAXINT / 2);
+        if (v > 0)
+            g_string_append_printf(out, "border: %dpx solid;", v);
     }
     if (is_hr) {
         const char *align = ns_element_get_attr(el, "align");
@@ -26643,7 +26660,6 @@ presentational_hints_css(const ns_node *el)
         if (wrap && g_ascii_strcasecmp(wrap, "off") == 0)
             g_string_append(out, "white-space: pre;");
     }
-    (void)is_marq;
 
     if (out->len == 0) {
         g_string_free(out, TRUE);
