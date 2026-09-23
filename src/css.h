@@ -692,6 +692,7 @@ typedef enum ns_css_pseudo {
     NS_CSS_PC_HOVER,
     NS_CSS_PC_ACTIVE,
     NS_CSS_PC_FOCUS,
+    NS_CSS_PC_FOCUS_VISIBLE,
     NS_CSS_PC_FOCUS_WITHIN,
     NS_CSS_PC_TARGET,
     NS_CSS_PC_TARGET_WITHIN,
@@ -1178,6 +1179,7 @@ void ns_css_container_map_add(GHashTable *map, const void *node,
 void ns_css_set_target_fragment(const char *fragment);
 
 const ns_node *ns_css_set_focus_node(const ns_node *node);
+void ns_css_set_focus_visible_node(const ns_node *node);
 const ns_node *ns_css_set_hover_node(const ns_node *node);
 const ns_node *ns_css_set_active_node(const ns_node *node);
 const ns_node *ns_css_set_fullscreen_node(const ns_node *node);
