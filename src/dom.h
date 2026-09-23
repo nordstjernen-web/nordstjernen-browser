@@ -178,6 +178,7 @@ void        ns_doc_class_index_register(ns_node *doc, const char *class_attr, ns
 void        ns_doc_class_index_unregister(ns_node *doc, const char *class_attr, ns_node *node);
 void        ns_doc_class_index_subtree_added(ns_node *doc, ns_node *root);
 void        ns_doc_class_index_subtree_removed(ns_node *doc, ns_node *root);
+GPtrArray  *ns_doc_class_index_lookup(const ns_node *doc, const char *cls);
 
 void        ns_doc_tag_index_build(ns_node *doc);
 void        ns_doc_tag_index_subtree_added(ns_node *doc, ns_node *root);

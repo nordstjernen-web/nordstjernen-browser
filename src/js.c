@@ -31419,7 +31419,7 @@ ns_query_selector_simple(JSContext *ctx, const ns_node *root, const char *sel,
         ns_js *js = js_from_ctx(ctx);
         const ns_node *doc = js ? js->current_doc : NULL;
         if (doc && doc->class_index && ns_root_uses_doc_index(root, doc)) {
-            GPtrArray *list = g_hash_table_lookup(doc->class_index, sel + 1);
+            GPtrArray *list = ns_doc_class_index_lookup(doc, sel + 1);
             if (!want_all) {
                 const ns_node *hit = NULL;
                 if (list) {
@@ -31548,8 +31548,8 @@ ns_query_key_index(JSContext *ctx, const ns_node *root, GPtrArray *sels,
     } else if (key->classes && key->classes->len > 0 &&
                doc->class_index &&
                ((const char *)g_ptr_array_index(key->classes, 0))[0]) {
-        cands = g_hash_table_lookup(doc->class_index,
-                                    g_ptr_array_index(key->classes, 0));
+        cands = ns_doc_class_index_lookup(doc,
+                                          g_ptr_array_index(key->classes, 0));
         if (!cands) {
             *out = want_all ? ns_nodelist_from_array(ctx, JS_NewArray(ctx)) : JS_NULL;
             return TRUE;
