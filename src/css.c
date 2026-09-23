@@ -4820,6 +4820,7 @@ parse_one_track_depth(const char *start, gsize len, ns_css_track *out, int depth
         out->min_kind = NS_CSS_TRACK_AUTO;
         out->min_v    = 0;
         out->has_min  = TRUE;
+        out->fit_content = TRUE;
         return TRUE;
     }
     if (start[len - 1] == ')' &&
