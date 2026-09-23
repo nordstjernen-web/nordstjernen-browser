@@ -9352,6 +9352,38 @@ flex_column_item_shrinks_to_fit(const ns_box *c, const char *align)
 }
 
 static void
+flex_stretch_replaced_width(ns_box *c, double line_w)
+{
+    if (c->kind != NS_BOX_IMAGE && c->kind != NS_BOX_VIDEO &&
+        c->kind != NS_BOX_SVG)
+        return;
+    const ns_style *s = c->style;
+    if (!s || length_is_auto(s->values[NS_CSS_MARGIN_LEFT]) ||
+        length_is_auto(s->values[NS_CSS_MARGIN_RIGHT]))
+        return;
+    double hextra = c->padding.left + c->padding.right +
+                    c->border.left + c->border.right;
+    double w = line_w - c->margin.left - c->margin.right - hextra;
+    gboolean border_box =
+        keyword_is(s->values[NS_CSS_BOX_SIZING], "border-box");
+    double max_w = length_resolve(s->values[NS_CSS_MAX_WIDTH], line_w, -1);
+    double min_w = length_resolve(s->values[NS_CSS_MIN_WIDTH], line_w, -1);
+    if (border_box) {
+        if (max_w >= 0) max_w = MAX(max_w - hextra, 0);
+        if (min_w >= 0) min_w = MAX(min_w - hextra, 0);
+    }
+    if (max_w >= 0 && w > max_w) w = max_w;
+    if (min_w >= 0 && w < min_w) w = min_w;
+    if (w < 0) w = 0;
+    const ns_css_value *hv = s->values[NS_CSS_HEIGHT];
+    gboolean height_auto =
+        !(hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC));
+    if (height_auto && c->content_width > 0 && c->content_height > 0)
+        c->content_height = w * c->content_height / c->content_width;
+    c->content_width = w;
+}
+
+static void
 flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
                         const ns_style *child_inherited)
 {
@@ -9374,6 +9406,8 @@ flex_column_layout_item(ns_box *c, double cw, double line_w, gboolean fit,
     c->definite_height = 0;
     c->measured_content_height = -1;
     layout_box(c, parent_w, child_inherited);
+    if (!fit && !width_explicit)
+        flex_stretch_replaced_width(c, line_w);
 }
 
 static double
@@ -9658,7 +9692,8 @@ layout_flex_column(ns_box *box, double cw,
                 if (c->first_child && c->definite_height != target_h) {
                     c->definite_height = target_h;
                     double sx = c->x, sy = c->y;
-                    layout_box(c, item_outer_w, child_inherited);
+                    layout_box(c, stretches ? ln->cross : item_outer_w,
+                               child_inherited);
                     if (c->x != sx || c->y != sy)
                         shift_box_tree(c, sx - c->x, sy - c->y);
                     c->content_height = target_h;
