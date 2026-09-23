@@ -280,12 +280,8 @@ render_apply_zoom(const ns_render_ctx *c, GHashTable *styles)
     GHashTableIter it;
     gpointer key, val;
     g_hash_table_iter_init(&it, styles);
-    while (g_hash_table_iter_next(&it, &key, &val)) {
-        ns_style *st = val;
-        if (!st || !st->values[NS_CSS_FONT_SIZE]) continue;
-        if (st->values[NS_CSS_FONT_SIZE]->kind != NS_CSS_V_LENGTH) continue;
-        st->values[NS_CSS_FONT_SIZE]->u.length.v *= zoom;
-    }
+    while (g_hash_table_iter_next(&it, &key, &val))
+        ns_css_style_scale_font_size(val, zoom);
 }
 
 static guint64

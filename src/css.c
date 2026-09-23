@@ -29783,3 +29783,12 @@ ns_css_compute(ns_node *doc,
                    (t_cascade - t_idx) / 1000.0);
     return out;
 }
+
+void
+ns_css_style_scale_font_size(ns_style *s, double factor)
+{
+    if (!s || !s->values[NS_CSS_FONT_SIZE] ||
+        s->values[NS_CSS_FONT_SIZE]->kind != NS_CSS_V_LENGTH)
+        return;
+    ns_css_value_cow(s, NS_CSS_FONT_SIZE)->u.length.v *= factor;
+}
