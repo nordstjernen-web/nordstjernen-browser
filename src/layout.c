@@ -1241,6 +1241,7 @@ static const ns_node *g_form_control_inline;
 static GHashTable  *g_abs_ph_set;
 static GHashTable  *g_abs_static;
 static GHashTable  *g_abs_seen;
+static const ns_node *g_inline_skip_node;
 
 static void *
 collect_peek_image(const char *src)
@@ -2871,6 +2872,7 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
     }
     if (n->kind != NS_NODE_ELEMENT) return;
     if (node_is_non_rendering(n)) return;
+    if (n == g_inline_skip_node) return;
     const ns_style *s = g_hash_table_lookup(ctx->styles, n);
     if (s && style_is_none(s)) return;
     if (s && style_is_absolute_or_fixed(s)) {
@@ -4880,6 +4882,44 @@ build_blockified_inline_item(const ns_node *n, GHashTable *styles,
     return item;
 }
 
+static const ns_node *g_blockified_legend;
+static int float_side_of(const ns_style *s);
+
+static gboolean
+style_can_be_rendered_legend(const ns_style *s)
+{
+    return s && !style_is_none(s) && float_side_of(s) < 0 &&
+           !style_is_absolute_or_fixed(s);
+}
+
+static const ns_node *
+fieldset_rendered_legend_node(const ns_node *n, GHashTable *styles)
+{
+    if (!ns_node_is_element_named(n, "fieldset")) return NULL;
+    for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
+        if (!ns_node_is_element_named(c, "legend")) continue;
+        if (style_can_be_rendered_legend(g_hash_table_lookup(styles, c)))
+            return c;
+    }
+    return NULL;
+}
+
+static ns_box *
+build_rendered_legend(const ns_node *n, GHashTable *styles)
+{
+    const ns_node *saved = g_blockified_legend;
+    g_blockified_legend = n;
+    ns_box *legend = build_block(n, styles);
+    g_blockified_legend = saved;
+    if (!legend) {
+        legend = box_new(NS_BOX_BLOCK);
+        legend->dom = n;
+        legend->style = g_hash_table_lookup(styles, n);
+    }
+    legend->is_rendered_legend = TRUE;
+    return legend;
+}
+
 static ns_box *
 build_block_impl(const ns_node *n, GHashTable *styles)
 {
@@ -5103,11 +5143,12 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     }
 
     if (!style_is_block(s) && !contains_block_media(n, styles) &&
-        !style_is_absolute_or_fixed(s)) return NULL;
+        !style_is_absolute_or_fixed(s) && n != g_blockified_legend) return NULL;
 
     ns_box *block = box_new(NS_BOX_BLOCK);
     block->dom = n;
     block->style = s;
+    const ns_node *rendered_legend = fieldset_rendered_legend_node(n, styles);
 
     collect_box_bg_image(block, s);
 
@@ -5132,6 +5173,13 @@ build_block_impl(const ns_node *n, GHashTable *styles)
     gboolean blockify_children = style_is_flex_container(s) ||
                                  style_is_grid_container(s);
 
+    const ns_node *saved_skip = g_inline_skip_node;
+    if (rendered_legend) {
+        ns_box *legend = build_rendered_legend(rendered_legend, styles);
+        if (legend) box_append_child(block, legend);
+        g_inline_skip_node = rendered_legend;
+    }
+
     const ns_node *shadow_host_root = layout_shadow_root(n);
     const ns_node *c = shadow_host_root ? shadow_host_root->first_child
                                         : n->first_child;
@@ -5147,6 +5195,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                 c = c->next_sibling;
                 continue;
             }
+        }
+        if (c == rendered_legend) {
+            c = c->next_sibling;
+            continue;
         }
         if (blockify_children) {
             if (c->kind == NS_NODE_TEXT) {
@@ -5234,6 +5286,10 @@ build_block_impl(const ns_node *n, GHashTable *styles)
                     c = c->next_sibling;
                     continue;
                 }
+                if (c == rendered_legend) {
+                    c = c->next_sibling;
+                    continue;
+                }
                 if (details_collapsed &&
                     (c->kind != NS_NODE_ELEMENT || !c->name ||
                      strcmp(c->name, "summary") != 0)) break;
@@ -5264,6 +5320,7 @@ build_block_impl(const ns_node *n, GHashTable *styles)
             if (c) c = c->next_sibling;
         }
     }
+    g_inline_skip_node = saved_skip;
 
     if (pending_before) {
         box_append_child(block, pending_before);
@@ -5936,7 +5993,8 @@ box_first_baseline(const ns_box *b, double *out)
         return TRUE;
     }
     for (const ns_box *c = b->first_child; c; c = c->next_sibling) {
-        if (style_is_absolute_or_fixed(c->style)) continue;
+        if (style_is_absolute_or_fixed(c->style) || c->is_rendered_legend)
+            continue;
         double child_baseline;
         if (box_first_baseline(c, &child_baseline)) {
             *out = (c->y - b->y) + child_baseline;
@@ -6832,6 +6890,9 @@ box_establishes_bfc(const ns_box *box)
         style_is_multicol(box->style) ||
         style_is_flex_container(box->style) ||
         style_is_grid_container(box->style))
+        return TRUE;
+    if (box->is_rendered_legend ||
+        ns_node_is_element_named(box->dom, "fieldset"))
         return TRUE;
     const ns_css_value *d = box->style
         ? box->style->values[NS_CSS_DISPLAY] : NULL;
@@ -11793,6 +11854,147 @@ block_height_is_auto(const ns_box *box, double width_basis)
     return TRUE;
 }
 
+static ns_box *
+fieldset_rendered_legend(const ns_box *box)
+{
+    for (ns_box *c = box->first_child; c; c = c->next_sibling)
+        if (c->is_rendered_legend) return c;
+    return NULL;
+}
+
+static void
+box_detach_child(ns_box *parent, ns_box *child)
+{
+    ns_box *prev = NULL;
+    for (ns_box *c = parent->first_child; c && c != child; c = c->next_sibling)
+        prev = c;
+    if (prev) prev->next_sibling = child->next_sibling;
+    else parent->first_child = child->next_sibling;
+    if (parent->last_child == child) parent->last_child = prev;
+    child->next_sibling = NULL;
+}
+
+static void
+box_prepend_child(ns_box *parent, ns_box *child)
+{
+    child->next_sibling = parent->first_child;
+    parent->first_child = child;
+    if (!parent->last_child) parent->last_child = child;
+}
+
+static double
+legend_inline_offset(const ns_box *fieldset, const ns_box *legend,
+                     double free_w)
+{
+    const ns_style *ls = legend->style;
+    gboolean ml_auto = ls && length_is_auto(ls->values[NS_CSS_MARGIN_LEFT]);
+    gboolean mr_auto = ls && length_is_auto(ls->values[NS_CSS_MARGIN_RIGHT]);
+    if (ml_auto && mr_auto) return free_w / 2.0;
+    if (ml_auto) return free_w;
+    if (mr_auto) return 0;
+    const char *js = ls ? ns_style_keyword(ls, NS_CSS_JUSTIFY_SELF) : NULL;
+    if (js && g_str_has_prefix(js, "safe ")) js += 5;
+    else if (js && g_str_has_prefix(js, "unsafe ")) js += 7;
+    gboolean fieldset_rtl = fieldset->style &&
+        keyword_is(fieldset->style->values[NS_CSS_DIRECTION], "rtl");
+    gboolean legend_rtl = ls && keyword_is(ls->values[NS_CSS_DIRECTION], "rtl");
+    gboolean at_end = fieldset_rtl;
+    if (!js) return at_end ? free_w : 0;
+    if (strcmp(js, "center") == 0) return free_w / 2.0;
+    if (strcmp(js, "left") == 0) at_end = FALSE;
+    else if (strcmp(js, "right") == 0) at_end = TRUE;
+    else if (strcmp(js, "end") == 0 || strcmp(js, "flex-end") == 0)
+        at_end = !fieldset_rtl;
+    else if (strcmp(js, "self-start") == 0) at_end = legend_rtl;
+    else if (strcmp(js, "self-end") == 0) at_end = !legend_rtl;
+    return at_end ? free_w : 0;
+}
+
+static double
+layout_rendered_legend(ns_box *fieldset, ns_box *legend, double cw,
+                       double inner_x, const ns_style *inherited)
+{
+    edges_from_style(legend->style, cw,
+                     &legend->margin, &legend->padding, &legend->border);
+    double outer_extras = legend->padding.left + legend->padding.right +
+                          legend->border.left + legend->border.right +
+                          legend->margin.left + legend->margin.right;
+    const ns_css_value *wv = legend->style
+        ? legend->style->values[NS_CSS_WIDTH] : NULL;
+    double layout_w = cw;
+    if (!wv || length_is_auto(wv)) {
+        double avail = MAX(cw - outer_extras, 0);
+        double fit = measure_natural_width(legend, inherited);
+        if (fit > avail) fit = avail;
+        double floor_w = measure_min_width(legend, inherited);
+        if (fit < floor_w) fit = floor_w;
+        layout_w = fit + outer_extras;
+    }
+    double top_edge = fieldset->y + fieldset->margin.top;
+    legend->x = inner_x;
+    legend->y = top_edge;
+    layout_box(legend, layout_w, inherited);
+    double outer_w = legend->content_width +
+                     legend->padding.left + legend->padding.right +
+                     legend->border.left + legend->border.right +
+                     legend->margin.left + legend->margin.right;
+    double border_box_h = legend->content_height +
+                          legend->padding.top + legend->padding.bottom +
+                          legend->border.top + legend->border.bottom;
+    double border_top = fieldset->border.top;
+    double legend_top = legend->margin.top +
+                        MAX((border_top - border_box_h) / 2.0, 0);
+    double target_x = inner_x + legend_inline_offset(fieldset, legend,
+                                                     cw - outer_w);
+    double target_y = top_edge + legend_top - legend->margin.top;
+    shift_box_tree(legend, target_x - legend->x, target_y - legend->y);
+    double painted_border_top =
+        MAX(legend_top + border_box_h / 2.0 - border_top / 2.0, 0);
+    double legend_bottom = legend_top + border_box_h + legend->margin.bottom;
+    double extra = MAX(painted_border_top, legend_bottom - border_top);
+    return MAX(extra, 0);
+}
+
+static void
+fieldset_set_content_block_size(ns_box *box, double width_basis,
+                                double sizing_extras, double legend_extra)
+{
+    const ns_css_value *hv = box->style ? box->style->values[NS_CSS_HEIGHT] : NULL;
+    if (!hv || (hv->kind != NS_CSS_V_LENGTH && hv->kind != NS_CSS_V_CALC))
+        return;
+    double h = resolve_used_height(box, hv, width_basis, -1);
+    if (h < 0) return;
+    h = MAX(h - sizing_extras - legend_extra, 0);
+    for (ns_box *c = box->first_child; c; c = c->next_sibling)
+        c->cb_height_override = h;
+}
+
+gboolean
+ns_box_fieldset_legend_gap(const ns_box *fieldset, double *border_inset,
+                           double *gap_x0, double *gap_x1,
+                           double *gap_y0, double *gap_y1)
+{
+    const ns_box *legend = fieldset ? fieldset_rendered_legend(fieldset) : NULL;
+    if (!legend) return FALSE;
+    double top_edge = fieldset->y + fieldset->margin.top;
+    double legend_border_top = legend->y + legend->margin.top;
+    double border_box_w = legend->content_width +
+                          legend->padding.left + legend->padding.right +
+                          legend->border.left + legend->border.right;
+    double border_box_h = legend->content_height +
+                          legend->padding.top + legend->padding.bottom +
+                          legend->border.top + legend->border.bottom;
+    double inset = MAX(legend_border_top - top_edge + border_box_h / 2.0 -
+                       fieldset->border.top / 2.0, 0);
+    *border_inset = inset;
+    *gap_x0 = legend->x + legend->margin.left;
+    *gap_x1 = *gap_x0 + border_box_w;
+    *gap_y0 = MIN(legend->y, top_edge + inset);
+    *gap_y1 = MAX(legend_border_top + border_box_h + legend->margin.bottom,
+                  top_edge + inset + fieldset->border.top);
+    return TRUE;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -11953,6 +12155,18 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
 
     double inner_x = box->x + box->margin.left + box->border.left + box->padding.left;
     double inner_y = box->y + box->margin.top  + box->border.top  + box->padding.top;
+    const ns_style *child_inherited = box->style ? box->style : inherited_style;
+    ns_box *legend = fieldset_rendered_legend(box);
+    double legend_extra = 0;
+    if (legend) {
+        legend_extra = layout_rendered_legend(box, legend, cw, inner_x,
+                                              child_inherited);
+        inner_y += legend_extra;
+        box_detach_child(box, legend);
+        fieldset_set_content_block_size(box, parent_content_width,
+                                        border_box ? vert_extras : 0,
+                                        legend_extra);
+    }
     double cursor_y = inner_y;
     double prev_margin_bottom = 0;
     gboolean collapse_top_with_parent =
@@ -11962,7 +12176,6 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         box->padding.bottom == 0 && box->border.bottom == 0 &&
         box->parent && !box_is_doc_root(box) && !box_establishes_bfc(box) &&
         block_height_is_auto(box, parent_content_width);
-    const ns_style *child_inherited = box->style ? box->style : inherited_style;
 
     if (style_is_flex_container(box->style) || style_is_grid_container(box->style))
         reorder_children_by_order(box);
@@ -12333,7 +12546,8 @@ flex_done: ;
         ? overflow_axis_keyword(box->style, NS_CSS_OVERFLOW_Y) : NULL;
     gboolean overflow_scrolls  = overflow_kw_scrolls(ovy);
     gboolean overflow_scrolls_x = overflow_kw_scrolls(ovx);
-    double measured = cursor_y - inner_y;
+    if (legend) box_prepend_child(box, legend);
+    double measured = cursor_y - inner_y + legend_extra;
     box->measured_content_height = measured;
     double explicit_h = -1;
     if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
