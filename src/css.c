@@ -25739,6 +25739,12 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
                 out->values[i] = ns_css_value_dup(parent_style->values[i]);
         }
     }
+    if (ns_css_keyword_is(out->values[NS_CSS_COLOR], "currentcolor")) {
+        ns_css_value_free(out->values[NS_CSS_COLOR]);
+        out->values[NS_CSS_COLOR] = parent_style
+            ? ns_css_value_dup(parent_style->values[NS_CSS_COLOR])
+            : initial_value_of(NS_CSS_COLOR);
+    }
     {
         const ns_css_prop color_props[] = {
             NS_CSS_BACKGROUND_COLOR,
