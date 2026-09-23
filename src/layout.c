@@ -139,6 +139,9 @@ box_is_doc_root(const ns_box *b)
 static double containing_block_definite_height(const ns_box *box);
 static gboolean style_is_absolute_or_fixed(const ns_style *s);
 static gboolean height_keyword_stretches(const ns_css_value *v);
+static gboolean size_keyword_is_intrinsic(const ns_css_value *v);
+static double intrinsic_keyword_width(ns_box *box, const char *kw,
+                                      const ns_style *mi, double avail);
 
 static double
 resolve_used_height(const ns_box *box, const ns_css_value *hv,
@@ -5606,6 +5609,10 @@ inline_box_measure_cacheable(const ns_box *box)
 }
 
 static double measure_natural_width(ns_box *box, const ns_style *parent_style);
+static double measure_max_content_width(ns_box *box, const ns_style *parent_style);
+static double width_contribution_keyword_limits(ns_box *box, double w,
+                                                const ns_style *parent_style,
+                                                gboolean max_content);
 static gboolean flex_box_is_border_box(const ns_box *c);
 
 static double
@@ -7267,9 +7274,51 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
                 w -= pd.left + pd.right + bd.left + bd.right;
                 if (w < 0) w = 0;
             }
-            return w;
+            return width_contribution_keyword_limits(box, w, parent_style,
+                                                     TRUE);
         }
+        if (keyword_is(wv, "min-content"))
+            return width_contribution_keyword_limits(
+                box, measure_min_content_width(box, parent_style),
+                parent_style, TRUE);
     }
+    return width_contribution_keyword_limits(
+        box, measure_max_content_width(box, parent_style), parent_style, TRUE);
+}
+
+static double
+width_contribution_keyword_limits(ns_box *box, double w,
+                                  const ns_style *parent_style,
+                                  gboolean max_content)
+{
+    if (!box->style || (box->kind != NS_BOX_BLOCK && box->kind != NS_BOX_TABLE))
+        return w;
+    const ns_css_value *mxw = box->style->values[NS_CSS_MAX_WIDTH];
+    const ns_css_value *mnw = box->style->values[NS_CSS_MIN_WIDTH];
+    if (size_keyword_is_intrinsic(mxw)) {
+        gboolean use_max = keyword_is(mxw, "max-content") ||
+                           (max_content && keyword_is(mxw, "fit-content"));
+        double m = use_max ? measure_max_content_width(box, parent_style)
+                           : measure_min_content_width(box, parent_style);
+        if (m >= 0 && w > m) w = m;
+    }
+    if (size_keyword_is_intrinsic(mnw)) {
+        gboolean use_max = keyword_is(mnw, "max-content") ||
+                           (max_content && keyword_is(mnw, "fit-content"));
+        double m = use_max ? measure_max_content_width(box, parent_style)
+                           : measure_min_content_width(box, parent_style);
+        if (m >= 0 && w < m) w = m;
+    }
+    return w;
+}
+
+static double
+measure_max_content_width(ns_box *box, const ns_style *parent_style)
+{
+    if (box->kind == NS_BOX_INLINE || box->kind == NS_BOX_IMAGE ||
+        box->kind == NS_BOX_VIDEO || box->kind == NS_BOX_SVG ||
+        box->kind == NS_BOX_TEXT)
+        return measure_natural_width(box, parent_style);
     if (style_contains_inline_size(box->style)) return 0;
     const ns_style *child_style = box->style ? box->style : parent_style;
     if (box->kind == NS_BOX_TABLE)
@@ -7410,11 +7459,18 @@ measure_min_width(ns_box *box, const ns_style *parent_style)
                     double m = length_resolve(mnw, 0, -1);
                     if (m >= 0 && w < m) w = m;
                 }
-                return w;
+                return width_contribution_keyword_limits(box, w, parent_style,
+                                                         FALSE);
             }
         }
+        if (keyword_is(wv, "max-content"))
+            return width_contribution_keyword_limits(
+                box, measure_max_content_width(box, parent_style),
+                parent_style, FALSE);
     }
-    return measure_min_content_width(box, parent_style);
+    return width_contribution_keyword_limits(
+        box, measure_min_content_width(box, parent_style), parent_style,
+        FALSE);
 }
 
 static double
@@ -8242,8 +8298,21 @@ flex_border_box_to_content(const ns_box *c, double v)
     return v;
 }
 
+static double
+flex_item_keyword_width(ns_box *c, const ns_css_value *v, double cw,
+                        const ns_style *inherited)
+{
+    if (!v || v->kind != NS_CSS_V_KEYWORD || !v->u.keyword) return -1;
+    double inner = cw - c->margin.left - c->margin.right
+                 - c->padding.left - c->padding.right
+                 - c->border.left - c->border.right;
+    return intrinsic_keyword_width(c, v->u.keyword,
+                                   inherited ? inherited : c->style, inner);
+}
+
 static gboolean
-flex_main_basis_explicit(const ns_box *c, double cw, double *out)
+flex_main_basis_explicit(ns_box *c, double cw, const ns_style *inherited,
+                         double *out)
 {
     const ns_style *s = c->style;
     if (!s) return FALSE;
@@ -8252,16 +8321,19 @@ flex_main_basis_explicit(const ns_box *c, double cw, double *out)
         *out = flex_border_box_to_content(c, length_resolve(b, cw, 0));
         return TRUE;
     }
+    double keyword_basis = flex_item_keyword_width(c, b, cw, inherited);
+    if (keyword_basis >= 0) {
+        *out = keyword_basis;
+        return TRUE;
+    }
     const ns_css_value *w = s->values[NS_CSS_WIDTH];
     if (w && (w->kind == NS_CSS_V_LENGTH || w->kind == NS_CSS_V_CALC)) {
         *out = flex_border_box_to_content(c, length_resolve(w, cw, 0));
         return TRUE;
     }
-    if (height_keyword_stretches(w)) {
-        double inner = cw - c->margin.left - c->margin.right
-                     - c->padding.left - c->padding.right
-                     - c->border.left - c->border.right;
-        *out = inner > 0 ? inner : 0;
+    double keyword_width = flex_item_keyword_width(c, w, cw, inherited);
+    if (keyword_width >= 0) {
+        *out = keyword_width;
         return TRUE;
     }
     return FALSE;
@@ -8423,9 +8495,11 @@ flex_content_basis_from_natural(ns_box *b, const ns_style *inherited)
 }
 
 static double
-flex_item_max_main(const ns_box *c, double cw)
+flex_item_max_main(ns_box *c, double cw, const ns_style *inherited)
 {
     const ns_css_value *mxw = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
+    if (mxw && mxw->kind == NS_CSS_V_KEYWORD)
+        return flex_item_keyword_width(c, mxw, cw, inherited);
     if (!mxw || !(mxw->kind == NS_CSS_V_LENGTH || mxw->kind == NS_CSS_V_CALC))
         return -1;
     double mx = length_resolve(mxw, cw, -1);
@@ -8459,13 +8533,8 @@ flex_item_min_main(ns_box *c, double cw, const ns_style *inherited)
         return mn > 0 ? mn : 0;
     }
     if (mnw && mnw->kind == NS_CSS_V_KEYWORD && !keyword_is(mnw, "auto")) {
-        if (keyword_is(mnw, "max-content"))
-            return flex_content_basis_from_natural(c, inherited);
-        if (keyword_is(mnw, "min-content") || keyword_is(mnw, "fit-content")) {
-            double mc = measure_min_content_width(c, inherited ? inherited : c->style);
-            return mc > 0 ? mc : 0;
-        }
-        return 0;
+        double mn = flex_item_keyword_width(c, mnw, cw, inherited);
+        return mn > 0 ? mn : 0;
     }
     if (box_clips_children(c)) return 0;
     double mn = measure_min_content_width(c, inherited ? inherited : c->style);
@@ -8476,8 +8545,11 @@ flex_item_min_main(ns_box *c, double cw, const ns_style *inherited)
             ? flex_border_box_to_content(c, length_resolve(wv, 0, -1))
             : flex_border_box_to_content(c, length_resolve(wv, cw, -1));
         if (specified >= 0 && specified < mn) mn = specified;
+    } else {
+        double specified = flex_item_keyword_width(c, wv, cw, inherited);
+        if (specified >= 0 && specified < mn) mn = specified;
     }
-    double mx = flex_item_max_main(c, cw);
+    double mx = flex_item_max_main(c, cw, inherited);
     if (mx >= 0 && mn > mx) mn = mx;
     return mn;
 }
@@ -8726,7 +8798,7 @@ static gboolean
 flex_item_cross_size_auto(const ns_box *c)
 {
     const ns_css_value *h = c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
-    if (!h || h->kind == NS_CSS_V_KEYWORD) return TRUE;
+    if (!h || h->kind == NS_CSS_V_KEYWORD) return !size_keyword_is_intrinsic(h);
     return value_is_percent(h) && containing_block_definite_height(c) < 0;
 }
 
@@ -8852,11 +8924,11 @@ layout_flex_row(ns_box *box, double cw,
                         c->padding.left + c->padding.right +
                         c->border.left + c->border.right;
         double b = 0;
-        if (!flex_main_basis_explicit(c, cw, &b))
+        if (!flex_main_basis_explicit(c, cw, child_inherited, &b))
             b = flex_content_basis_from_natural(c, child_inherited);
         lens[i].basis = b;
         lens[i].min = flex_item_min_main(c, cw, child_inherited);
-        lens[i].max = flex_item_max_main(c, cw);
+        lens[i].max = flex_item_max_main(c, cw, child_inherited);
         lens[i].grow = flex_grow_of(c);
         lens[i].shrink = flex_shrink_of(c);
     }
@@ -9087,11 +9159,11 @@ layout_flex_row_wrap(ns_box *box, double cw,
             c->padding.left + c->padding.right +
             c->border.left + c->border.right;
         double b = 0;
-        if (!flex_main_basis_explicit(c, cw, &b))
+        if (!flex_main_basis_explicit(c, cw, child_inherited, &b))
             b = flex_content_basis_from_natural(c, child_inherited);
         lens[n].basis = b;
         lens[n].min = flex_item_min_main(c, cw, child_inherited);
-        lens[n].max = flex_item_max_main(c, cw);
+        lens[n].max = flex_item_max_main(c, cw, child_inherited);
         lens[n].grow = flex_grow_of(c);
         lens[n].shrink = flex_shrink_of(c);
     }
@@ -9316,6 +9388,14 @@ layout_flex_row_wrap(ns_box *box, double cw,
 }
 
 static double
+flex_item_stretch_main_height(const ns_box *c, double container_main_size)
+{
+    if (container_main_size < 0) return -1;
+    double h = container_main_size - c->margin.top - c->margin.bottom;
+    return h > 0 ? h : 0;
+}
+
+static double
 flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
 {
     double vextra = c->padding.top + c->padding.bottom +
@@ -9329,10 +9409,10 @@ flex_item_min_main_height(ns_box *c, double cw, double pct_basis)
     double content = (c->measured_content_height >= 0
                       ? c->measured_content_height : c->content_height) + vextra;
     if (mnh && mnh->kind == NS_CSS_V_KEYWORD && !keyword_is(mnh, "auto")) {
-        if (keyword_is(mnh, "min-content") || keyword_is(mnh, "max-content") ||
-            keyword_is(mnh, "fit-content"))
+        if (size_keyword_is_intrinsic(mnh))
             return content > 0 ? content : 0;
-        return 0;
+        double stretch = flex_item_stretch_main_height(c, pct_basis);
+        return stretch > 0 ? stretch : 0;
     }
     if (box_clips_children(c)) return 0;
     const ns_css_value *hv = c->style ? c->style->values[NS_CSS_HEIGHT] : NULL;
@@ -9350,6 +9430,14 @@ static double
 flex_item_max_main_height(ns_box *c, double cw, double pct_basis)
 {
     const ns_css_value *mxh = c->style ? c->style->values[NS_CSS_MAX_HEIGHT] : NULL;
+    if (size_keyword_is_intrinsic(mxh)) {
+        double content = c->measured_content_height >= 0
+            ? c->measured_content_height : c->content_height;
+        return content + c->padding.top + c->padding.bottom +
+               c->border.top + c->border.bottom;
+    }
+    if (height_keyword_stretches(mxh))
+        return flex_item_stretch_main_height(c, pct_basis);
     if (!mxh || !(mxh->kind == NS_CSS_V_LENGTH || mxh->kind == NS_CSS_V_CALC))
         return -1;
     if (value_is_percent(mxh) && pct_basis < 0) return -1;
@@ -11436,16 +11524,29 @@ intrinsic_keyword_width(ns_box *box, const char *kw, const ns_style *mi,
     if (!kw) return -1;
     if (avail < 0) avail = 0;
     if (strcmp(kw, "min-content") == 0)
-        return measure_min_width(box, mi);
+        return measure_min_content_width(box, mi);
     if (strcmp(kw, "max-content") == 0)
-        return measure_natural_width(box, mi);
+        return measure_max_content_width(box, mi);
     if (strcmp(kw, "fit-content") == 0) {
-        double mn = measure_min_width(box, mi);
-        double mx = measure_natural_width(box, mi);
+        double mn = measure_min_content_width(box, mi);
+        double mx = measure_max_content_width(box, mi);
         double w = mx < avail ? mx : avail;
         return w < mn ? mn : w;
     }
+    if (strcmp(kw, "stretch") == 0 ||
+        strcmp(kw, "-webkit-fill-available") == 0 ||
+        strcmp(kw, "-moz-available") == 0)
+        return avail;
     return -1;
+}
+
+static gboolean
+size_keyword_is_intrinsic(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           (strcmp(v->u.keyword, "min-content") == 0 ||
+            strcmp(v->u.keyword, "max-content") == 0 ||
+            strcmp(v->u.keyword, "fit-content") == 0);
 }
 
 static gboolean
@@ -12052,6 +12153,8 @@ flex_done: ;
     }
     if (max_h < 0 && stretch_h >= 0 && height_keyword_stretches(mxh))
         max_h = stretch_h;
+    if (max_h < 0 && size_keyword_is_intrinsic(mxh))
+        max_h = measured;
     if (max_h >= 0 && box->content_height > max_h)
         box->content_height = max_h;
     double min_h = resolve_used_height(box, mnh, parent_content_width, -1);
@@ -12061,6 +12164,8 @@ flex_done: ;
         min_h -= vert_extras;
         if (min_h < 0) min_h = 0;
     }
+    if (min_h < 0 && size_keyword_is_intrinsic(mnh))
+        min_h = measured;
     if (min_h >= 0 && box->content_height < min_h)
         box->content_height = min_h;
     if (box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
@@ -13249,8 +13354,21 @@ box_hit_untransform_point(const ns_box *b, double *x, double *y)
 }
 
 static double
+abs_height_limit(const ns_box *abox, const ns_css_value *v, double width_basis,
+                 double cb_h, double inset_h, double sizing_extras)
+{
+    double limit = resolve_height_with_basis(v, width_basis, cb_h, -1);
+    if (limit < 0 && size_keyword_is_intrinsic(v) &&
+        abox->measured_content_height >= 0)
+        limit = abox->measured_content_height + sizing_extras;
+    if (limit < 0 && height_keyword_stretches(v) && inset_h >= 0)
+        limit = inset_h + sizing_extras;
+    return limit;
+}
+
+static double
 abs_height_within_limits(const ns_box *abox, double h, double width_basis,
-                         double cb_h)
+                         double cb_h, double inset_h)
 {
     const ns_style *s = abox->style;
     if (!s) return h;
@@ -13258,12 +13376,12 @@ abs_height_within_limits(const ns_box *abox, double h, double width_basis,
         ? abox->padding.top + abox->padding.bottom +
           abox->border.top + abox->border.bottom
         : 0;
-    double mx = resolve_height_with_basis(s->values[NS_CSS_MAX_HEIGHT],
-                                          width_basis, cb_h, -1);
+    double mx = abs_height_limit(abox, s->values[NS_CSS_MAX_HEIGHT],
+                                 width_basis, cb_h, inset_h, sizing_extras);
     if (mx >= 0 && h > mx - sizing_extras)
         h = mx > sizing_extras ? mx - sizing_extras : 0;
-    double mn = resolve_height_with_basis(s->values[NS_CSS_MIN_HEIGHT],
-                                          width_basis, cb_h, -1);
+    double mn = abs_height_limit(abox, s->values[NS_CSS_MIN_HEIGHT],
+                                 width_basis, cb_h, inset_h, sizing_extras);
     if (mn >= 0 && h < mn - sizing_extras) h = mn - sizing_extras;
     return h;
 }
@@ -13427,6 +13545,20 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                 layout_box(abox, layout_w, cs);
             }
         }
+        gboolean t_set = atv && !length_is_auto(atv) &&
+            (atv->kind == NS_CSS_V_LENGTH || atv->kind == NS_CSS_V_CALC);
+        gboolean b_set = abv && !length_is_auto(abv) &&
+            (abv->kind == NS_CSS_V_LENGTH || abv->kind == NS_CSS_V_CALC);
+        double inset_h = -1;
+        if (cb_h > 0) {
+            inset_h = cb_h
+                - (t_set ? length_resolve(atv, cb_h, 0) : 0)
+                - (b_set ? length_resolve(abv, cb_h, 0) : 0)
+                - abox->margin.top - abox->margin.bottom
+                - abox->border.top - abox->border.bottom
+                - abox->padding.top - abox->padding.bottom;
+            if (inset_h < 0) inset_h = 0;
+        }
         if (has_explicit_height) {
             double explicit_h = resolve_height_with_basis(ahv, avail,
                                                           cb_h,
@@ -13437,14 +13569,10 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                                   abox->border.top + abox->border.bottom;
                     if (explicit_h < 0) explicit_h = 0;
                 }
-                abox->content_height =
-                    abs_height_within_limits(abox, explicit_h, avail, cb_h);
+                abox->content_height = abs_height_within_limits(
+                    abox, explicit_h, avail, cb_h, inset_h);
             }
         }
-        gboolean t_set = atv && !length_is_auto(atv) &&
-            (atv->kind == NS_CSS_V_LENGTH || atv->kind == NS_CSS_V_CALC);
-        gboolean b_set = abv && !length_is_auto(abv) &&
-            (abv->kind == NS_CSS_V_LENGTH || abv->kind == NS_CSS_V_CALC);
         gboolean intrinsic_height = ahv && ahv->kind == NS_CSS_V_KEYWORD &&
             ahv->u.keyword &&
             (strcmp(ahv->u.keyword, "fit-content") == 0 ||
@@ -13453,14 +13581,8 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         double stretched_h = -1;
         if (!has_explicit_height && !intrinsic_height &&
             t_set && b_set && cb_h > 0 && as_stretch) {
-            double t = length_resolve(atv, cb_h, 0);
-            double bb = length_resolve(abv, cb_h, 0);
-            double h = cb_h - t - bb
-                     - abox->margin.top - abox->margin.bottom
-                     - abox->border.top - abox->border.bottom
-                     - abox->padding.top - abox->padding.bottom;
-            if (h < 0) h = 0;
-            h = abs_height_within_limits(abox, h, avail, cb_h);
+            double h = abs_height_within_limits(abox, inset_h, avail, cb_h,
+                                                inset_h);
             abox->content_height = h;
             stretched_h = h;
         }
