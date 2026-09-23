@@ -4764,6 +4764,17 @@ ordered_marker_kind(const char *style_kw)
     return NULL;
 }
 
+static gboolean
+marker_is_ordered(const ns_node *li, const char *style_kw)
+{
+    if (!style_kw)
+        return li->parent && li->parent->name &&
+               strcmp(li->parent->name, "ol") == 0;
+    return strcmp(style_kw, "disc") != 0 && strcmp(style_kw, "circle") != 0 &&
+           strcmp(style_kw, "square") != 0 && strcmp(style_kw, "none") != 0 &&
+           strncmp(style_kw, "disclosure-", 11) != 0;
+}
+
 static const char *
 ordered_kind_from_type_attr(const char *type_attr)
 {
@@ -5028,7 +5039,6 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
 {
     if (!li_generates_marker(li, li_style)) return FALSE;
     if (out_sz < 8) return FALSE;
-    const ns_node *parent = li->parent;
     const ns_css_value *lst = li_style
         ? li_style->values[NS_CSS_LIST_STYLE_TYPE] : NULL;
     const char *style_kw = NULL;
@@ -5045,9 +5055,7 @@ ns_paint_li_marker_text(const ns_node *li, const ns_style *li_style,
         out[0] = '\0';
         return TRUE;
     }
-    gboolean ordered = strcmp(parent->name, "ol") == 0 ||
-                       ordered_marker_kind(style_kw) != NULL;
-    if (ordered) {
+    if (marker_is_ordered(li, style_kw)) {
         int n = list_item_ordinal(li);
         const char *kind = marker_default_kind(li, style_kw);
         char buf[32];
@@ -5067,7 +5075,6 @@ paint_marker(cairo_t *cr, const ns_box *b)
 {
     const ns_style *s = b->style;
     if (!li_generates_marker(b->dom, s)) return;
-    const ns_node *parent = b->dom->parent;
     if (ns_paint_li_is_inside(s)) return;
     const ns_css_value *lst = s ? s->values[NS_CSS_LIST_STYLE_TYPE] : NULL;
     const char *style_kw = NULL;
@@ -5128,13 +5135,10 @@ paint_marker(cairo_t *cr, const ns_box *b)
     rgba color = rgba_of(cval, 0.1, 0.1, 0.1, 1);
     set_source_rgba(cr, color);
 
-    gboolean ordered = strcmp(parent->name, "ol") == 0 ||
-                       ordered_marker_kind(style_kw) != NULL;
-
     if (custom) {
         paint_marker_label(cr, custom, content_x, cy, font_size);
         g_free(custom);
-    } else if (ordered) {
+    } else if (marker_is_ordered(b->dom, style_kw)) {
         int n = list_item_ordinal(b->dom);
         const char *kind = marker_default_kind(b->dom, style_kw);
         char buf[32];

@@ -25414,7 +25414,7 @@ static const char *kUa =
     "font-family: serif; font-size: 16px; line-height: normal; }\n"
     "body { display: block; margin: 8px; }\n"
     "div, p, section, article, header, footer, nav, main, aside, "
-    "ul, ol, dl, dt, dd, blockquote, pre, address, "
+    "dir, menu, ul, ol, dl, dt, dd, blockquote, pre, address, "
     "hr, form, fieldset, figure, figcaption, center, "
     "legend, search, hgroup { display: block; }\n"
     "li { display: list-item; }\n"
@@ -25439,7 +25439,6 @@ static const char *kUa =
     "rt { font-size: 0.7em; }\n"
     "abbr[title], acronym[title] { text-decoration: underline dotted; cursor: help; }\n"
     "rp, datalist { display: none; }\n"
-    "menu { display: block; padding-left: 32px; margin: 0.6em 0; }\n"
     "h1 { font-size: 2.0em;  margin: 0.67em 0; }\n"
     "h2 { font-size: 1.5em;  margin: 0.83em 0; }\n"
     "h3 { font-size: 1.17em; margin: 1.00em 0; }\n"
@@ -25450,10 +25449,15 @@ static const char *kUa =
     "address { color: #555; }\n"
     "blockquote { margin: 1em 40px; }\n"
     "hr { margin: 12px 0; height: 1px; background-color: #888888; }\n"
-    "ul, ol { padding-left: 40px; margin: 1em 0; }\n"
-    "li { margin: 2px 0; }\n"
-    "dl { margin: 1em 0; } dt { font-weight: bold; } dd { margin-left: 40px; }\n"
-    "dl > dt { margin-top: 0.3em; }\n"
+    "dir, dl, menu, ol, ul { margin-block: 1em; }\n"
+    ":is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) { margin-block: 0; }\n"
+    "dd { margin-inline-start: 40px; }\n"
+    "dir, menu, ol, ul { padding-inline-start: 40px; }\n"
+    "ol { list-style-type: decimal; }\n"
+    "dir, menu, ul { list-style-type: disc; }\n"
+    ":is(dir, menu, ol, ul) :is(dir, menu, ul) { list-style-type: circle; }\n"
+    ":is(dir, menu, ol, ul) :is(dir, menu, ol, ul) :is(dir, menu, ul) "
+    "{ list-style-type: square; }\n"
     "a:link, a:visited { color: #0645ad; text-decoration: underline; }\n"
     "b, strong { font-weight: bold; }\n"
     "i, em, cite, dfn { font-style: italic; }\n"
@@ -26515,6 +26519,7 @@ presentational_hints_css(const ns_node *el)
             if (g_ascii_strcasecmp(t, "disc") == 0) lst = "disc";
             else if (g_ascii_strcasecmp(t, "circle") == 0) lst = "circle";
             else if (g_ascii_strcasecmp(t, "square") == 0) lst = "square";
+            else if (g_ascii_strcasecmp(t, "none") == 0) lst = "none";
         }
         if (lst) g_string_append_printf(out, "list-style-type: %s;", lst);
     }
