@@ -10149,6 +10149,8 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
             fixed = t->kind == NS_CSS_TRACK_PX
                 ? t->v + t->pct * available_main / 100.0
                 : t->v * available_main / 100.0;
+            if (t->fit_content)
+                fixed = MIN(fixed, content_max ? content_max[i] : 0);
             if (t->has_min && track_is_intrinsic(t->min_kind) &&
                 content_min && content_min[i] > fixed)
                 fixed = content_min[i];
@@ -11540,7 +11542,8 @@ layout_grid(ns_box *box, double cw,
         if (tk) {
             gboolean flex = tk->kind == NS_CSS_TRACK_FR;
             fixed = flex ? track_min_px(tk, row_basis > 0 ? row_basis : 0)
-                         : grid_track_px(tk, row_basis);
+                  : tk->fit_content ? 0
+                  : grid_track_px(tk, row_basis);
             row_fixed[r] = grid_track_is_fixed(tk, row_basis) ||
                            (definite_rows && flex && tk->has_min &&
                             !track_is_intrinsic(tk->min_kind));

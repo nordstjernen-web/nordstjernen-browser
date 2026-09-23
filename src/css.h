@@ -419,6 +419,7 @@ typedef struct ns_css_track {
     double min_v;
     double min_em, min_rem, min_pct;
     gboolean has_min;
+    gboolean fit_content;
 } ns_css_track;
 
 typedef enum ns_css_auto_repeat {
