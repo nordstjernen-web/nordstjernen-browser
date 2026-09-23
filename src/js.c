@@ -1551,6 +1551,8 @@ static void ns_collect_by_tag_ns(const ns_node *n, const char *ns,
 static ns_node *ns_unwrap_element_mut(JSValueConst val);
 static void ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
                                   JSValueConst node_val);
+static void ns_tag_caller_document(JSContext *ctx, JSValueConst node_val);
+static char *ns_ce_key_name(const char *key);
 
 typedef struct {
     JSValue element;
@@ -17088,11 +17090,7 @@ ns_window_text_ctor(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_node_new_text_len(dup, (guint32)len);
     g_hash_table_add(js->orphan_nodes, n);
     JSValue wrapper = ns_make_element(ctx, n);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue realm_doc = JS_GetPropertyStr(ctx, global, "document");
-    ns_tag_owner_document(ctx, realm_doc, wrapper);
-    JS_FreeValue(ctx, realm_doc);
-    JS_FreeValue(ctx, global);
+    ns_tag_caller_document(ctx, wrapper);
     return wrapper;
 }
 
@@ -17117,11 +17115,7 @@ ns_window_comment_ctor(JSContext *ctx, JSValueConst this_val,
     ns_node *n = ns_node_new_comment_len(dup, (guint32)len);
     g_hash_table_add(js->orphan_nodes, n);
     JSValue wrapper = ns_make_element(ctx, n);
-    JSValue global = JS_GetGlobalObject(ctx);
-    JSValue realm_doc = JS_GetPropertyStr(ctx, global, "document");
-    ns_tag_owner_document(ctx, realm_doc, wrapper);
-    JS_FreeValue(ctx, realm_doc);
-    JS_FreeValue(ctx, global);
+    ns_tag_caller_document(ctx, wrapper);
     return wrapper;
 }
 
@@ -20675,11 +20669,12 @@ ns_window_event_ctor(JSContext *ctx, JSValueConst this_val,
             }
         }
         if (tag) {
-            ns_node *node = ns_node_new_element(g_strdup(tag));
+            ns_node *node = ns_node_new_element(ns_ce_key_name(tag));
             if (node) {
                 ns_node_arm_js_invalidate(node);
                 if (js->orphan_nodes) g_hash_table_add(js->orphan_nodes, node);
                 JSValue elem = ns_make_element(ctx, node);
+                ns_tag_caller_document(ctx, elem);
                 JSValue proto = JS_GetPropertyStr(ctx, this_val, "prototype");
                 if (JS_IsObject(proto)) JS_SetPrototype(ctx, elem, proto);
                 JS_FreeValue(ctx, proto);
@@ -41712,7 +41707,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames){"
     "  var url = initialURL || 'about:blank';"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
@@ -41835,20 +41830,55 @@ static const char ns_iframe_global_bootstrap[] =
     "    def('sessionStorage', { get: function(){ throw denyStore(); } });"
     "    def('indexedDB',      { get: function(){ throw denyStore(); } });"
     "  }"
+    "  var crossOrigin = (sandbox & 8192) !== 0;"
+    "  var parentOnly = { cookieStore:1, caches:1, getSelection:1, opener:1, frameElement:1, origin:1, name:1, navigation:1, external:1 };"
+    "  def('origin', { get: function(){ if ((sandbox & 1) && !(sandbox & 8)) return 'null'; var u=mk(url); return u ? u.origin : 'null'; } });"
+    "  if (crossOrigin) {"
+    "    def('opener', { value: null, writable: true });"
+    "    def('frameElement', { value: null, writable: true });"
+    "    def('name', { value: '', writable: true });"
+    "    def('getSelection', { writable: true, value: function(){ return iframeDoc.getSelection ? iframeDoc.getSelection() : null; } });"
+    "  }"
     "  try {"
     "    var pnames = Object.getOwnPropertyNames(realWin);"
     "    for (var pi = 0; pi < pnames.length; pi++) {"
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
+    "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
+    "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
     "        if (pd) Object.defineProperty(G, pk, pd);"
     "      } catch (e) {}"
     "    }"
     "  } catch (e) {}"
+    "  if (typeof realWin.Range === 'function') {"
+    "    var OrigRange = realWin.Range;"
+    "    var FrameRange = function Range(){"
+    "      var r = Reflect.construct(OrigRange, arguments, new.target || FrameRange);"
+    "      try { r.setStart(iframeDoc, 0); r.setEnd(iframeDoc, 0); } catch (e) {}"
+    "      return r;"
+    "    };"
+    "    FrameRange.prototype = OrigRange.prototype;"
+    "    try { Object.setPrototypeOf(FrameRange, OrigRange); } catch (e) {}"
+    "    def('Range', { value: FrameRange, writable: true });"
+    "  }"
     "  try { Object.setPrototypeOf(G, Object.getPrototypeOf(realWin)); } catch (e) {}"
     "  return { location: loc, history: hist };"
     "})";
+
+static JSValue
+ns_iframe_platform_names(JSContext *fctx, ns_js *js)
+{
+    if (!js->platform_globals) return JS_UNDEFINED;
+    JSValue names = JS_NewObjectProto(fctx, JS_NULL);
+    GHashTableIter it;
+    gpointer k;
+    g_hash_table_iter_init(&it, js->platform_globals);
+    while (g_hash_table_iter_next(&it, &k, NULL))
+        JS_SetPropertyStr(fctx, names, (const char *)k, JS_TRUE);
+    return names;
+}
 
 static JSContext *
 ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
@@ -41889,8 +41919,10 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     if (!JS_IsException(maker) && JS_IsFunction(fctx, maker)) {
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
-        JSValueConst args[5] = { fg, parent_global, iframe_doc, urlv, sbv };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 5, args);
+        JSValue platform = ns_iframe_platform_names(fctx, js);
+        JSValueConst args[6] = { fg, parent_global, iframe_doc, urlv, sbv, platform };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 6, args);
+        JS_FreeValue(fctx, platform);
         if (!JS_IsException(res) && JS_IsObject(res)) {
             *out_location = JS_GetPropertyStr(fctx, res, "location");
             *out_history  = JS_GetPropertyStr(fctx, res, "history");
@@ -44894,12 +44926,56 @@ ns_ce_pending_array_free(gpointer p)
     g_ptr_array_free(a, TRUE);
 }
 
+static const ns_node *
+ns_ce_realm_document(JSContext *ctx)
+{
+    JSContext *rctx = JS_GetCallerRealm(ctx);
+    JSValue global = JS_GetGlobalObject(rctx);
+    JSValue doc = JS_GetPropertyStr(rctx, global, "document");
+    const ns_node *node = JS_IsObject(doc) ? ns_unwrap_element(doc) : NULL;
+    JS_FreeValue(rctx, doc);
+    JS_FreeValue(rctx, global);
+    return node;
+}
+
+static const ns_node *
+ns_ce_node_document(ns_js *js, const ns_node *node)
+{
+    for (const ns_node *p = node; p; p = p->parent)
+        if (p->kind == NS_NODE_DOCUMENT && !(p->flags & NS_NODE_FRAGMENT))
+            return p;
+    if (node && node->js_wrapper && js && js->ctx) {
+        JSValue w = JS_MKPTR(JS_TAG_OBJECT, node->js_wrapper);
+        JSValue owner = JS_GetPropertyStr(js->ctx, w, "__ndOwnerDoc");
+        const ns_node *doc = JS_IsObject(owner) ? ns_unwrap_element(owner) : NULL;
+        JS_FreeValue(js->ctx, owner);
+        if (doc) return doc;
+    }
+    return js ? js->current_doc : NULL;
+}
+
+static char *
+ns_ce_key(const ns_js *js, const char *lower_name, const ns_node *doc)
+{
+    if (!doc || !js || doc == js->ce_main_doc) return g_strdup(lower_name);
+    return g_strdup_printf("%s\x1f%p", lower_name, (const void *)doc);
+}
+
+static char *
+ns_ce_key_name(const char *key)
+{
+    const char *sep = key ? strchr(key, '\x1f') : NULL;
+    return sep ? g_strndup(key, (gsize)(sep - key)) : g_strdup(key);
+}
+
 static JSValue
-ns_ce_lookup_klass(ns_js *js, const char *name)
+ns_ce_lookup_klass(JSContext *ctx, ns_js *js, const char *name)
 {
     if (!js || !js->ce_registry || !name) return JS_UNDEFINED;
     char *lower = g_ascii_strdown(name, -1);
-    JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
+    char *key = ns_ce_key(js, lower, ns_ce_realm_document(ctx));
+    JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
+    g_free(key);
     g_free(lower);
     return slot ? JS_DupValue(js->ctx, *slot) : JS_UNDEFINED;
 }
@@ -44917,8 +44993,12 @@ ns_ce_getName(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
     g_hash_table_iter_init(&it, js->ce_registry);
     while (g_hash_table_iter_next(&it, &k, &v)) {
         const JSValue *slot = v;
-        if (slot && JS_VALUE_GET_PTR(*slot) == want)
-            return JS_NewString(ctx, (const char *)k);
+        if (slot && JS_VALUE_GET_PTR(*slot) == want) {
+            char *name = ns_ce_key_name(k);
+            JSValue r = JS_NewString(ctx, name);
+            g_free(name);
+            return r;
+        }
     }
     return JS_NULL;
 }
@@ -45178,9 +45258,12 @@ ns_ce_class_for_node(ns_js *js, const ns_node *node)
         node->kind != NS_NODE_ELEMENT || !node->name)
         return JS_UNDEFINED;
     JSContext *ctx = js->ctx;
+    const ns_node *doc = ns_ce_node_document(js, node);
     if (strchr(node->name, '-')) {
         char *lower = g_ascii_strdown(node->name, -1);
-        JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
+        char *key = ns_ce_key(js, lower, doc);
+        JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
+        g_free(key);
         g_free(lower);
         if (!slot) return JS_UNDEFINED;
         JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
@@ -45191,7 +45274,9 @@ ns_ce_class_for_node(ns_js *js, const ns_node *node)
     const char *is = ns_element_get_attr(node, "is");
     if (!is || !*is) return JS_UNDEFINED;
     char *lower = g_ascii_strdown(is, -1);
-    JSValue *slot = g_hash_table_lookup(js->ce_registry, lower);
+    char *key = ns_ce_key(js, lower, doc);
+    JSValue *slot = g_hash_table_lookup(js->ce_registry, key);
+    g_free(key);
     g_free(lower);
     if (!slot) return JS_UNDEFINED;
     JSValue ext = JS_GetPropertyStr(ctx, *slot, "__nd_ce_extends");
@@ -45359,18 +45444,21 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
                                                 g_free, ns_ce_value_free);
     JSValue *slot = g_new0(JSValue, 1);
     *slot = JS_DupValue(ctx, argv[1]);
-    g_hash_table_replace(js->ce_registry, g_strdup(name), slot);
+    const ns_node *def_doc = ns_ce_realm_document(ctx);
+    char *key = ns_ce_key(js, name, def_doc);
+    g_hash_table_replace(js->ce_registry, g_strdup(key), slot);
     ns_css_register_defined_element(name);
 
-    if (js->current_doc) {
+    ns_node *upgrade_root = def_doc ? (ns_node *)def_doc : js->current_doc;
+    if (upgrade_root) {
         int saved = js->ce_defer_upgrades;
         js->ce_defer_upgrades = 0;
-        ns_ce_upgrade_subtree_named(js, js->current_doc, name);
+        ns_ce_upgrade_subtree_named(js, upgrade_root, key);
         js->ce_defer_upgrades = saved;
     }
 
     if (js->ce_pending) {
-        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, name);
+        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, key);
         if (waiters) {
             for (guint i = 0; i < waiters->len; i++) {
                 JSValue *fn = g_ptr_array_index(waiters, i);
@@ -45386,10 +45474,11 @@ ns_ce_define(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
                 }
             }
             g_ptr_array_set_size(waiters, 0);
-            g_hash_table_remove(js->ce_pending, name);
+            g_hash_table_remove(js->ce_pending, key);
         }
     }
 
+    g_free(key);
     g_free(name);
     return JS_UNDEFINED;
 }
@@ -45402,7 +45491,7 @@ ns_ce_get(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     const char *raw = JS_ToCString(ctx, argv[0]);
     if (!raw) return JS_EXCEPTION;
     ns_js *js = js_from_ctx(ctx);
-    JSValue r = ns_ce_lookup_klass(js, raw);
+    JSValue r = ns_ce_lookup_klass(ctx, js, raw);
     JS_FreeCString(ctx, raw);
     return r;
 }
@@ -45442,7 +45531,8 @@ ns_ce_whenDefined(JSContext *ctx, JSValueConst this_val,
     ns_js *js = js_from_ctx(ctx);
     char *name = g_ascii_strdown(raw, -1);
     JS_FreeCString(ctx, raw);
-    JSValue existing = ns_ce_lookup_klass(js, name);
+    JSValue existing = ns_ce_lookup_klass(ctx, js, name);
+    char *pending_key = ns_ce_key(js, name, ns_ce_realm_document(ctx));
     if (JS_IsObject(existing)) {
         JS_Call(ctx, resolving[0], JS_UNDEFINED, 1, (JSValueConst[]){ existing });
         JS_FreeValue(ctx, existing);
@@ -45453,16 +45543,17 @@ ns_ce_whenDefined(JSContext *ctx, JSValueConst this_val,
         if (!js->ce_pending)
             js->ce_pending = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                    g_free, ns_ce_pending_array_free);
-        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, name);
+        GPtrArray *waiters = g_hash_table_lookup(js->ce_pending, pending_key);
         if (!waiters) {
             waiters = g_ptr_array_new();
-            g_hash_table_insert(js->ce_pending, g_strdup(name), waiters);
+            g_hash_table_insert(js->ce_pending, g_strdup(pending_key), waiters);
         }
         JSValue *slot = g_new0(JSValue, 1);
         *slot = resolving[0];
         g_ptr_array_add(waiters, slot);
         JS_FreeValue(ctx, resolving[1]);
     }
+    g_free(pending_key);
     g_free(name);
     return promise;
 }
@@ -48569,6 +48660,24 @@ ns_tag_owner_document(JSContext *ctx, JSValueConst doc_val,
                               JS_DupValue(ctx, doc_val), 0);
 }
 
+static void
+ns_tag_caller_document(JSContext *ctx, JSValueConst node_val)
+{
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !JS_IsObject(node_val)) return;
+    JSContext *rctx = JS_GetCallerRealm(ctx);
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSValue global = JS_GetGlobalObject(rctx);
+    JSValue doc = JS_GetPropertyStr(rctx, global, "document");
+    if (rctx != main_ctx && JS_IsObject(doc))
+        JS_DefinePropertyValueStr(ctx, node_val, "__ndOwnerDoc",
+                                  JS_DupValue(ctx, doc), 0);
+    else
+        ns_tag_owner_document(ctx, doc, node_val);
+    JS_FreeValue(rctx, doc);
+    JS_FreeValue(rctx, global);
+}
+
 static JSValue
 ns_document_createElement(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
@@ -51355,6 +51464,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     ns_js_reset_runtime_state(js);
 
     js->current_doc = doc;
+    js->ce_main_doc = doc;
     js->focused_node = NULL;
     js->active_modal = NULL;
     js->focus_before_modal = NULL;
@@ -52124,6 +52234,7 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->ce_registry);
         js->ce_registry = NULL;
     }
+    g_clear_pointer(&js->platform_globals, g_hash_table_destroy);
     if (js->ce_pending) {
         g_hash_table_destroy(js->ce_pending);
         js->ce_pending = NULL;
@@ -55262,6 +55373,8 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         &js->navigation_timing.dom_loading_ms, "domLoading");
     gint64 t0 = g_get_monotonic_time();
     ns_js_install_document(js, doc, base_url);
+    if (js->platform_globals) g_hash_table_destroy(js->platform_globals);
+    js->platform_globals = ns_js_snapshot_globals(js);
     {
         const char *early = g_getenv("NS_EARLY_JS_FILE");
         char *early_src = NULL;

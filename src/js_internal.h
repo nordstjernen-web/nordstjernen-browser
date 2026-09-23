@@ -251,7 +251,9 @@ struct ns_js {
     GHashTable   *console_timers;
     GHashTable   *blob_urls;
     GHashTable   *ce_registry;
+    const ns_node *ce_main_doc;
     GHashTable   *ce_pending;
+    GHashTable   *platform_globals;
     GHashTable   *ce_under_construction;
     ns_node      *ce_upgrading;
     void         *ce_upgrading_wrapper;

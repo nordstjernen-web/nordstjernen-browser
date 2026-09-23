@@ -3,6 +3,21 @@ Changelog:
 
 1.0.26:
 ======
+* A cross-origin frame no longer reaches the embedding page through what
+  the two share. A frame's global object received a copy of every global
+  on the parent's window, including the page's own variables, so
+  `window.someState` or any stored reference to `document` handed the
+  frame the parent's DOM and cookies; `new Text()`, `new Comment()` and
+  `new Range()` produced nodes belonging to the parent's document;
+  `customElements.define()` in the frame upgraded the parent's elements
+  with the frame's class; and the `cookieStore` shim returned the parent's
+  cookies. A cross-origin frame now gets only the browser's own globals,
+  captured before the page's scripts run, and none of the parent-bound ones
+  (`cookieStore`, `caches`, `getSelection`, `opener`, `frameElement`,
+  `name`, `origin`, `navigation`); nodes and ranges a frame creates belong
+  to the frame's document; each document has its own custom element
+  registry, as HTML specifies; and `self.origin` reports the frame's
+  origin.
 * URL setters follow the URL Standard where the parser library does not:
   `url.host = "example.com:99999"` changes the host and keeps the port,
   clearing the host of a non-special URL with credentials is refused, and
