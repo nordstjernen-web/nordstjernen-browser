@@ -26410,8 +26410,7 @@ is_presentational_attr_name(const char *n)
     case 'b': return g_ascii_strcasecmp(n, "bgcolor") == 0 ||
                      g_ascii_strcasecmp(n, "bordercolor") == 0 ||
                      g_ascii_strcasecmp(n, "background") == 0 ||
-                     g_ascii_strcasecmp(n, "border") == 0 ||
-                     g_ascii_strcasecmp(n, "bottommargin") == 0;
+                     g_ascii_strcasecmp(n, "border") == 0;
     case 'c': return g_ascii_strcasecmp(n, "color") == 0 ||
                      g_ascii_strcasecmp(n, "cellspacing") == 0 ||
                      g_ascii_strcasecmp(n, "cellpadding") == 0;
@@ -26424,8 +26423,7 @@ is_presentational_attr_name(const char *n)
                      g_ascii_strcasecmp(n, "marginwidth") == 0;
     case 'n': return g_ascii_strcasecmp(n, "nowrap") == 0 ||
                      g_ascii_strcasecmp(n, "noshade") == 0;
-    case 'r': return g_ascii_strcasecmp(n, "rules") == 0 ||
-                     g_ascii_strcasecmp(n, "rightmargin") == 0;
+    case 'r': return g_ascii_strcasecmp(n, "rules") == 0;
     case 's': return g_ascii_strcasecmp(n, "size") == 0;
     case 't': return g_ascii_strcasecmp(n, "text") == 0 ||
                      g_ascii_strcasecmp(n, "topmargin") == 0 ||
@@ -26443,6 +26441,7 @@ presentational_hints_css(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return NULL;
     gboolean any = strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0 ||
+                   strcmp(el->name, "body") == 0 ||
                    strcmp(el->name, "tr") == 0 ||
                    strcmp(el->name, "thead") == 0 ||
                    strcmp(el->name, "tbody") == 0 ||
@@ -26517,21 +26516,28 @@ presentational_hints_css(const ns_node *el)
                                    r, g, b, a / 255.0);
     }
     if (is_body) {
+        const ns_node *doc = el;
+        while (doc && doc->kind != NS_NODE_DOCUMENT) doc = doc->parent;
+        const ns_node *container = doc ? doc->parent : NULL;
+        if (!ns_node_is_element_named(container, "iframe") &&
+            !ns_node_is_element_named(container, "frame"))
+            container = NULL;
         static const struct {
-            const char *prop, *attr, *fallback;
+            const char *start, *end, *attr, *alt;
         } body_margins[] = {
-            { "margin-top", "topmargin", "marginheight" },
-            { "margin-bottom", "bottommargin", "marginheight" },
-            { "margin-left", "leftmargin", "marginwidth" },
-            { "margin-right", "rightmargin", "marginwidth" },
+            { "margin-top", "margin-bottom", "marginheight", "topmargin" },
+            { "margin-left", "margin-right", "marginwidth", "leftmargin" },
         };
         for (gsize i = 0; i < G_N_ELEMENTS(body_margins); i++) {
             const char *v = ns_element_get_attr(el, body_margins[i].attr);
-            if (!v) v = ns_element_get_attr(el, body_margins[i].fallback);
+            if (!v) v = ns_element_get_attr(el, body_margins[i].alt);
+            if (!v && container)
+                v = ns_element_get_attr(container, body_margins[i].attr);
             int px = v ? ns_parse_int(v, -1, -1, G_MAXINT / 2) : -1;
             if (px >= 0)
-                g_string_append_printf(out, "%s: %dpx;", body_margins[i].prop,
-                                       px);
+                g_string_append_printf(out, "%s: %dpx; %s: %dpx;",
+                                       body_margins[i].start, px,
+                                       body_margins[i].end, px);
         }
         const char *text = ns_element_get_attr(el, "text");
         if (text && *text) {
