@@ -11382,6 +11382,21 @@ height_keyword_stretches(const ns_css_value *v)
             strcmp(v->u.keyword, "-moz-available") == 0);
 }
 
+static gboolean
+block_height_is_auto(const ns_box *box, double width_basis)
+{
+    if (!box->style) return TRUE;
+    if (resolve_used_height(box, box->style->values[NS_CSS_MIN_HEIGHT],
+                            width_basis, -1) > 0)
+        return FALSE;
+    const ns_css_value *hv = box->style->values[NS_CSS_HEIGHT];
+    if (height_keyword_stretches(hv))
+        return containing_block_definite_height(box) < 0;
+    if (hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC))
+        return resolve_used_height(box, hv, width_basis, -1) < 0;
+    return TRUE;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -11548,7 +11563,9 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
         box->padding.top == 0 && box->border.top == 0 &&
         !box_establishes_bfc(box);
     gboolean collapse_bottom_with_parent =
-        box->padding.bottom == 0 && box->border.bottom == 0;
+        box->padding.bottom == 0 && box->border.bottom == 0 &&
+        box->parent && !box_is_doc_root(box) && !box_establishes_bfc(box) &&
+        block_height_is_auto(box, parent_content_width);
     const ns_style *child_inherited = box->style ? box->style : inherited_style;
 
     if (style_is_flex_container(box->style) || style_is_grid_container(box->style))
