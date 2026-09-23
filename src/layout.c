@@ -8912,6 +8912,20 @@ shift_box_tree(ns_box *b, double dx, double dy)
     if (!b) return;
     b->x += dx;
     b->y += dy;
+    if (b->grid_col_tracks)
+        for (guint i = 0; i < b->grid_col_tracks->len; i++) {
+            ns_grid_track_edges *e =
+                &g_array_index(b->grid_col_tracks, ns_grid_track_edges, i);
+            e->start += dx;
+            e->end += dx;
+        }
+    if (b->grid_row_tracks)
+        for (guint i = 0; i < b->grid_row_tracks->len; i++) {
+            ns_grid_track_edges *e =
+                &g_array_index(b->grid_row_tracks, ns_grid_track_edges, i);
+            e->start += dy;
+            e->end += dy;
+        }
     for (ns_box *c = b->first_child; c; c = c->next_sibling)
         shift_box_tree(c, dx, dy);
     if (b->inline_atomics)
