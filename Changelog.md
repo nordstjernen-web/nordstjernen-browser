@@ -3,6 +3,31 @@ Changelog:
 
 1.0.26:
 ======
+* Changing an element's `class` or `id` to a name no style sheet mentions
+  no longer restyles everything inside it: toggling an unused theme class
+  on `<body>` re-ran the whole cascade, about 200 ms on a page of 12,000
+  elements and 3,000 rules. Names used anywhere in a selector, including
+  inside `:is()`, `:not()`, `:has()`, `:nth-child(... of S)` and `@scope`,
+  and any `[class]`/`[id]` attribute selector, still restyle as before.
+* Class changes and element insertion no longer walk sibling lists to keep
+  the document's class and tag indexes in order; large index entries are
+  re-sorted only when read, so 3,000 class changes on a 12,000-element page
+  take 5 ms instead of 480.
+* Removing or inserting children no longer counts the node's position
+  among its siblings when no live `Range` exists: emptying a 20,000-item
+  list from the end took 19 seconds and now takes 58 ms.
+* A CSS `font-family` list is resolved to a font once rather than on every
+  text run of every layout and paint, until the system font set changes or
+  a web font loads.
+* An image with a CSS `filter` is filtered once and the result kept with
+  the decoded image, not on every paint.
+* Ordered lists are numbered once per layout or paint pass instead of once
+  per item.
+* Page zoom scales each element's font size once; computed values shared
+  between sibling styles were multiplied once per sharer.
+* An absolutely positioned grid child placed with `grid-column`/`grid-row`
+  stays on its tracks when the grid moves after layout, under a
+  relatively positioned ancestor or in a reversed wrapping flex container.
 * A cross-origin frame no longer reaches the embedding page through what
   the two share. A frame's global object received a copy of every global
   on the parent's window, including the page's own variables, so
