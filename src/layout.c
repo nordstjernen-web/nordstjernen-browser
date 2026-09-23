@@ -13141,6 +13141,26 @@ box_hit_untransform_point(const ns_box *b, double *x, double *y)
     return TRUE;
 }
 
+static double
+abs_height_within_limits(const ns_box *abox, double h, double width_basis,
+                         double cb_h)
+{
+    const ns_style *s = abox->style;
+    if (!s) return h;
+    double sizing_extras = flex_box_is_border_box(abox)
+        ? abox->padding.top + abox->padding.bottom +
+          abox->border.top + abox->border.bottom
+        : 0;
+    double mx = resolve_height_with_basis(s->values[NS_CSS_MAX_HEIGHT],
+                                          width_basis, cb_h, -1);
+    if (mx >= 0 && h > mx - sizing_extras)
+        h = mx > sizing_extras ? mx - sizing_extras : 0;
+    double mn = resolve_height_with_basis(s->values[NS_CSS_MIN_HEIGHT],
+                                          width_basis, cb_h, -1);
+    if (mn >= 0 && h < mn - sizing_extras) h = mn - sizing_extras;
+    return h;
+}
+
 static void
 process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
 {
@@ -13283,30 +13303,35 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
         }
         layout_box(abox, layout_w, cs);
         if (!stretch_w && !has_explicit_width && abox->kind == NS_BOX_BLOCK) {
+            ns_edges fm = {0}, fp = {0}, fb = {0};
+            edges_from_style(abox->style, avail, &fm, &fp, &fb);
+            double box_extras = fp.left + fp.right + fb.left + fb.right;
+            double outer_extras = box_extras + fm.left + fm.right;
             double fit = measure_natural_width(abox, cs);
-            if (!(fit > 0)) fit = estimate_natural_width(abox, inset_w);
+            if (!(fit > 0)) fit = estimate_natural_width(abox, inset_w) - box_extras;
             double floor_w = measure_min_width(abox, cs);
             if (fit < floor_w) fit = floor_w;
-            if (fit >= 0 && fit < inset_w) layout_box(abox, fit, cs);
-            else if (floor_w > inset_w) layout_box(abox, floor_w, cs);
-            else if (inset_w < avail) layout_box(abox, inset_w, cs);
+            fit += outer_extras;
+            floor_w += outer_extras;
+            double fit_w = fit < inset_w ? fit
+                         : floor_w > inset_w ? floor_w : inset_w;
+            if (fit_w != layout_w) {
+                layout_w = fit_w;
+                layout_box(abox, layout_w, cs);
+            }
         }
         if (has_explicit_height) {
             double explicit_h = resolve_height_with_basis(ahv, avail,
                                                           cb_h,
                                                           -1);
             if (explicit_h >= 0) {
-                gboolean border_box = abox->style &&
-                    abox->style->values[NS_CSS_BOX_SIZING] &&
-                    abox->style->values[NS_CSS_BOX_SIZING]->kind == NS_CSS_V_KEYWORD &&
-                    strcmp(abox->style->values[NS_CSS_BOX_SIZING]->u.keyword,
-                           "border-box") == 0;
-                if (border_box) {
+                if (flex_box_is_border_box(abox)) {
                     explicit_h -= abox->padding.top + abox->padding.bottom +
                                   abox->border.top + abox->border.bottom;
                     if (explicit_h < 0) explicit_h = 0;
                 }
-                abox->content_height = explicit_h;
+                abox->content_height =
+                    abs_height_within_limits(abox, explicit_h, avail, cb_h);
             }
         }
         gboolean t_set = atv && !length_is_auto(atv) &&
@@ -13328,6 +13353,7 @@ process_absolute_boxes(ns_box *root, GHashTable *styles, double viewport_width)
                      - abox->border.top - abox->border.bottom
                      - abox->padding.top - abox->padding.bottom;
             if (h < 0) h = 0;
+            h = abs_height_within_limits(abox, h, avail, cb_h);
             abox->content_height = h;
             stretched_h = h;
         }
