@@ -25428,11 +25428,11 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
 {
     double my_font_px = resolve_font_size_px(out, parent_style);
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
-    if (root_px <= 0) root_px = my_font_px;
+    double font_rem_px = root_px > 0 ? root_px : 16.0;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH &&
         out->values[NS_CSS_FONT_SIZE]->u.length.unit == NS_CSS_UNIT_REM) {
-        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * root_px;
+        my_font_px = out->values[NS_CSS_FONT_SIZE]->u.length.v * font_rem_px;
     } else if (out->values[NS_CSS_FONT_SIZE] &&
                out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_CALC &&
                out->values[NS_CSS_FONT_SIZE]->u.calc.rem != 0) {
@@ -25444,11 +25444,12 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
                 NS_CSS_UNIT_PX)
             parent_px = parent_style->values[NS_CSS_FONT_SIZE]->u.length.v;
         my_font_px = fsv->u.calc.px + fsv->u.calc.em * parent_px +
-                     fsv->u.calc.rem * root_px +
+                     fsv->u.calc.rem * font_rem_px +
                      fsv->u.calc.pct * parent_px / 100.0 +
                      calc_viewport_refresh_px(fsv);
     }
     if (isnan(my_font_px) || my_font_px < 0) my_font_px = 0;
+    if (root_px <= 0) root_px = my_font_px;
     if (out->values[NS_CSS_FONT_SIZE] &&
         out->values[NS_CSS_FONT_SIZE]->kind == NS_CSS_V_LENGTH) {
         ns_css_value *fs = ns_css_value_cow(out, NS_CSS_FONT_SIZE);
