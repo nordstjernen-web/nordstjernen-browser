@@ -10225,6 +10225,19 @@ resolve_track_sizes_full(const ns_css_tracks *tr, double available_main,
     }
 }
 
+static double
+grid_track_repeat_px(const ns_css_track *t, double available_main)
+{
+    double min_px = track_min_px(t, available_main);
+    if (t->kind == NS_CSS_TRACK_PX || t->kind == NS_CSS_TRACK_PERCENT) {
+        double max_px = t->kind == NS_CSS_TRACK_PX
+            ? t->v + t->pct * available_main / 100.0
+            : t->v * available_main / 100.0;
+        return max_px > min_px ? max_px : min_px;
+    }
+    return min_px;
+}
+
 static ns_css_tracks
 expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap,
                       int *fit_start, int *fit_count)
@@ -10238,8 +10251,7 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
     double base_min = 0;
     for (int i = 0; i < tr->auto_repeat_count; i++) {
         const ns_css_track *t = &tr->tracks[tr->auto_repeat_start + i];
-        double m = track_min_px(t, available_main);
-        if (m <= 0 && t->kind == NS_CSS_TRACK_PX) m = t->v;
+        double m = grid_track_repeat_px(t, available_main);
         if (m <= 0) {
             memset(&out, 0, sizeof(out));
             out.n = 1;
@@ -10249,10 +10261,20 @@ expand_auto_repeat_ex(const ns_css_tracks *tr, double available_main, double gap
         base_min += m;
     }
     if (base_min <= 0) return out;
+    double others = 0;
+    int n_others = tr->n - tr->auto_repeat_count;
+    for (int i = 0; i < tr->n; i++) {
+        if (i >= tr->auto_repeat_start &&
+            i < tr->auto_repeat_start + tr->auto_repeat_count)
+            continue;
+        double m = grid_track_repeat_px(&tr->tracks[i], available_main);
+        if (m > 0) others += m;
+    }
     double pattern_with_gap = base_min + gap * tr->auto_repeat_count;
+    double room = available_main - others - (n_others - 1) * gap;
     int repeats = 1;
     if (pattern_with_gap > 0)
-        repeats = (int)((available_main + gap) / pattern_with_gap);
+        repeats = (int)(room / pattern_with_gap);
     if (repeats < 1) repeats = 1;
     if (repeats > NS_CSS_TRACKS_MAX) repeats = NS_CSS_TRACKS_MAX;
 
@@ -10944,12 +10966,8 @@ layout_grid(ns_box *box, double cw,
         }
         if (max_end > NS_CSS_TRACKS_MAX) max_end = NS_CSS_TRACKS_MAX;
         if (max_end > n_cols) {
-            for (int i = n_cols; i < max_end; i++) {
-                cols_buf.tracks[i].kind = NS_CSS_TRACK_AUTO;
-                cols_buf.tracks[i].v = 0;
-                cols_buf.tracks[i].has_min = FALSE;
-            }
-            cols_buf.n = max_end;
+            grid_extend_with_auto_tracks(&cols_buf, n_cols, max_end,
+                box->style->values[NS_CSS_GRID_AUTO_COLUMNS]);
             n_cols = max_end;
             avail = cw - (n_cols > 1 ? col_gap * (n_cols - 1) : 0);
             if (avail < 0) avail = 0;
