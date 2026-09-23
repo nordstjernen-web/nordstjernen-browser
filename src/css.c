@@ -21024,6 +21024,10 @@ ns_css_node_dir(const ns_node *el)
             const char *d = ns_dir_first_strong(n, 0);
             return d ? d : "ltr";
         }
+        if (n == el && n->name && g_ascii_strcasecmp(n->name, "input") == 0) {
+            const char *type = ns_element_get_attr(n, "type");
+            if (type && g_ascii_strcasecmp(type, "tel") == 0) return "ltr";
+        }
     }
     return "ltr";
 }
@@ -25434,6 +25438,9 @@ static const char *kUa =
     "bdi, bdo, ruby, rb, rt, output, "
     "button, label { display: inline; }\n"
     "var { font-style: italic; }\n"
+    "[dir]:dir(ltr), bdi:dir(ltr), input[type=\"tel\" i]:dir(ltr) "
+    "{ direction: ltr; }\n"
+    "[dir]:dir(rtl), bdi:dir(rtl) { direction: rtl; }\n"
     "bdo { unicode-bidi: bidi-override; }\n"
     "bdi { unicode-bidi: isolate; }\n"
     "rt { font-size: 0.7em; }\n"
@@ -25453,6 +25460,8 @@ static const char *kUa =
     ":is(dir, dl, menu, ol, ul) :is(dir, dl, menu, ol, ul) { margin-block: 0; }\n"
     "dd { margin-inline-start: 40px; }\n"
     "dir, menu, ol, ul { padding-inline-start: 40px; }\n"
+    "dd:dir(rtl) { margin-left: 0; margin-right: 40px; }\n"
+    ":is(dir, menu, ol, ul):dir(rtl) { padding-left: 0; padding-right: 40px; }\n"
     "ol { list-style-type: decimal; }\n"
     "dir, menu, ul { list-style-type: disc; }\n"
     ":is(dir, menu, ol, ul) :is(dir, menu, ul) { list-style-type: circle; }\n"

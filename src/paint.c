@@ -4957,14 +4957,15 @@ marker_custom_text(const ns_node *li, const ns_style *li_style,
 }
 
 static void
-paint_marker_label(cairo_t *cr, const char *label,
-                   double content_x, double baseline_y, double font_size)
+paint_marker_label(cairo_t *cr, const char *label, double edge_x,
+                   gboolean rtl, double baseline_y, double font_size)
 {
     if (!label || !*label) return;
     cairo_set_font_size(cr, font_size);
     cairo_text_extents_t ext;
     cairo_text_extents(cr, label, &ext);
-    double x = content_x - font_size * 0.35 - ext.width - ext.x_bearing;
+    double x = rtl ? edge_x + font_size * 0.35 - ext.x_bearing
+                   : edge_x - font_size * 0.35 - ext.width - ext.x_bearing;
     cairo_move_to(cr, x, baseline_y);
     cairo_show_text(cr, label);
 }
@@ -5106,8 +5107,10 @@ paint_marker(cairo_t *cr, const ns_box *b)
     if (ms && ms->values[NS_CSS_FONT_SIZE])
         font_size = length_or(ms->values[NS_CSS_FONT_SIZE], font_size);
     double cy = b->y + b->margin.top + b->padding.top + font_size * 0.7;
+    gboolean rtl = strcmp(ns_css_node_dir(b->dom), "rtl") == 0;
     double content_x = b->x + b->margin.left + b->padding.left;
-    double cx = content_x - font_size * 0.8;
+    double edge_x = rtl ? content_x + b->content_width : content_x;
+    double cx = rtl ? edge_x + font_size * 0.8 : edge_x - font_size * 0.8;
 
     if (marker_img) {
         int iw = ns_texture_get_width(marker_img->texture);
@@ -5118,7 +5121,8 @@ paint_marker(cairo_t *cr, const ns_box *b)
         cairo_surface_t *surf = texture_surface_cached(marker_img->texture,
                                                        NULL);
         if (surf) {
-            double dx = content_x - font_size * 0.35 - dw;
+            double dx = rtl ? edge_x + font_size * 0.35
+                            : edge_x - font_size * 0.35 - dw;
             double dy = cy - dh + font_size * 0.15;
             cairo_save(cr);
             cairo_translate(cr, dx, dy);
@@ -5136,7 +5140,7 @@ paint_marker(cairo_t *cr, const ns_box *b)
     set_source_rgba(cr, color);
 
     if (custom) {
-        paint_marker_label(cr, custom, content_x, cy, font_size);
+        paint_marker_label(cr, custom, edge_x, rtl, cy, font_size);
         g_free(custom);
     } else if (marker_is_ordered(b->dom, style_kw)) {
         int n = list_item_ordinal(b->dom);
@@ -5145,7 +5149,7 @@ paint_marker(cairo_t *cr, const ns_box *b)
         format_ordered_label(kind, n, buf, sizeof buf);
         char with_dot[40];
         g_snprintf(with_dot, sizeof with_dot, "%s.", buf);
-        paint_marker_label(cr, with_dot, content_x, cy, font_size);
+        paint_marker_label(cr, with_dot, edge_x, rtl, cy, font_size);
     } else if (style_kw && strcmp(style_kw, "square") == 0) {
         double sz = font_size * 0.32;
         cairo_new_path(cr);
