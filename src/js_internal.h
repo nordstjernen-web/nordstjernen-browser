@@ -151,6 +151,14 @@ struct ns_js {
     const ns_node *focus_nav_start;
     const ns_node *active_modal;
     const ns_node *focus_before_modal;
+    GPtrArray     *popover_auto;
+    GPtrArray     *popover_hint;
+    GHashTable    *popover_info;
+    ns_node       *popover_hint_parent;
+    ns_node       *popover_pointerdown;
+    gboolean       popover_showing;
+    int            popover_hiding_count;
+    GArray        *attr_element_refs;
     const ns_node *pointer_lock_element;
     double         last_mouse_x[2];
     double         last_mouse_y[2];

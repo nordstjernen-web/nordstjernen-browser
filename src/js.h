@@ -169,6 +169,7 @@ void           ns_js_focus_from_pointer(ns_js *js, const ns_node *target);
 const ns_node *ns_js_sequential_focus_target(ns_js *js, gboolean backward);
 gboolean       ns_node_is_focusable(const ns_node *el);
 void           ns_js_refresh_top_layer(ns_js *js);
+gboolean       ns_js_process_close_request(ns_js *js);
 
 void ns_js_details_toggle_open(ns_js *js, ns_node *details, gboolean open);
 
