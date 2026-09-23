@@ -49591,21 +49591,27 @@ ns_document_get_title(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_set_title(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 {
-    const char *s = JS_ToCString(ctx, val);
-    if (!s) return JS_UNDEFINED;
+    size_t len = 0;
+    const char *s = JS_ToCStringLen(ctx, &len, val);
+    if (!s) return JS_EXCEPTION;
+    ns_js *_j = js_from_ctx(ctx);
     ns_node *doc = ns_document_root_for(ctx, this_val);
     ns_node *t = doc ? ns_node_find_first_element(doc, "title") : NULL;
     if (!t && doc) {
         ns_node *head = ns_node_find_first_element(doc, "head");
-        if (!head) head = doc;
-        t = ns_node_new_element(g_strdup("title"));
-        ns_node_append_child(head, t);
+        if (head) {
+            t = ns_node_new_element(g_strdup("title"));
+            ns_node_append_child(head, t);
+            if (_j)
+                ns_js_record_child_change(_j, head, t, NULL,
+                                          t->prev_sibling, NULL);
+        }
     }
     if (t) {
-        ns_js *_j = js_from_ctx(ctx);
-        ns_js_clear_children(_j, t);
-        ns_node *text = ns_node_new_text(g_strdup(s));
-        ns_node_append_child(t, text);
+        ns_node *added = len > 0
+            ? ns_node_new_text_len(g_memdup2(s, len + 1), (guint32)len)
+            : NULL;
+        ns_element_replace_all_recorded(_j, t, added);
         if (_j) _j->mutated = TRUE;
     }
     JS_FreeCString(ctx, s);
