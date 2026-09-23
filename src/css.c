@@ -18807,6 +18807,21 @@ css_parse_page_block(ns_css_stylesheet *sh, const char *body_start,
     }
 }
 
+static const char *
+css_skip_invalid_qualified_rule(const char *p, const char *end,
+                                gboolean nested)
+{
+    while (p < end) {
+        char term = 0;
+        const char *seg = css_scan_segment(p, end, &term);
+        if (term == '{') return css_skip_to_block_end(seg, end);
+        if (term == 0 || seg >= end) return end;
+        if (term == '}' && nested) return seg;
+        p = seg + 1;
+    }
+    return end;
+}
+
 static void
 parse_rules_until(const char **pp, const char *end,
                   ns_css_stylesheet *sh, int *source_order,
@@ -18840,8 +18855,11 @@ parse_rules_until(const char **pp, const char *end,
             continue;
         }
         if (*p == '}') {
-            p++;
-            if (close_at == '}') break;
+            if (close_at == '}') {
+                p++;
+                break;
+            }
+            p = css_skip_invalid_qualified_rule(p + 1, end, FALSE);
             continue;
         }
         if (*p == '@') {
@@ -19371,7 +19389,9 @@ parse_rules_until(const char **pp, const char *end,
         const char *sel_end = css_scan_segment(p, end, &term);
         if (term != '{') {
             ns_css_rule_free(rule);
-            p = term == ';' ? sel_end + 1 : sel_end;
+            p = term == ';'
+                ? css_skip_invalid_qualified_rule(sel_end + 1, end, nested)
+                : sel_end;
             continue;
         }
         char *scoped_sel = rule->scopes
@@ -19389,13 +19409,18 @@ parse_rules_until(const char **pp, const char *end,
             if (sel) {
                 g_ptr_array_add(rule->selectors, sel);
                 ok = TRUE;
+            } else {
+                g_sel_parse_error = TRUE;
             }
             while (parse_p < parse_end && is_ws(*parse_p)) parse_p++;
             if (parse_p < parse_end && *parse_p == ',') {
                 parse_p++;
+                while (parse_p < parse_end && is_ws(*parse_p)) parse_p++;
+                if (parse_p >= parse_end) g_sel_parse_error = TRUE;
                 continue;
             }
-            else break;
+            if (parse_p < parse_end) g_sel_parse_error = TRUE;
+            break;
         }
         if (g_sel_parse_error) ok = FALSE;
         if (ok && g_sel_has_hover)
@@ -19542,7 +19567,10 @@ css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
             p += 3;
             continue;
         }
-        if (*p == '}') { p++; continue; }
+        if (*p == '}') {
+            p = css_skip_invalid_qualified_rule(p + 1, end, FALSE);
+            continue;
+        }
         if (*p == '@') {
             const char *prelude = p;
             char term = 0;
@@ -19576,7 +19604,7 @@ css_flatten_rule_list(GString *out, const char *p, const char *end, int depth)
         char term = 0;
         const char *seg_end = css_scan_segment(p, end, &term);
         if (term != '{') {
-            p = (seg_end < end) ? seg_end + 1 : end;
+            p = css_skip_invalid_qualified_rule(p, end, FALSE);
             continue;
         }
         char *sel = g_strndup(p, (gsize)(seg_end - p));
