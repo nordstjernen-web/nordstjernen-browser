@@ -184,6 +184,16 @@ clamp_height_minmax_px(const ns_style *s, double h)
 }
 
 static double
+specified_height_to_content(const ns_box *b, double h)
+{
+    if (h < 0 || !b->style ||
+        !ns_css_keyword_is(b->style->values[NS_CSS_BOX_SIZING], "border-box"))
+        return h;
+    h -= b->padding.top + b->padding.bottom + b->border.top + b->border.bottom;
+    return h < 0 ? 0 : h;
+}
+
+static double
 containing_block_definite_height(const ns_box *box)
 {
     if (box && box->cb_height_override > 0) return box->cb_height_override;
@@ -221,10 +231,11 @@ containing_block_definite_height(const ns_box *box)
         double ch = h->kind == NS_CSS_V_CALC
             ? h->u.calc.pct / 100.0 * base + h->u.calc.px
             : h->u.length.v * base / 100.0;
-        return clamp_height_minmax_px(p->style, ch);
+        return specified_height_to_content(p, clamp_height_minmax_px(p->style, ch));
     }
     if (p->content_height > 0) return p->content_height;
-    return clamp_height_minmax_px(p->style, length_resolve(h, 0, -1));
+    return specified_height_to_content(
+        p, clamp_height_minmax_px(p->style, length_resolve(h, 0, -1)));
 }
 
 static double
