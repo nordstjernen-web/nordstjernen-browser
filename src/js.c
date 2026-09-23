@@ -257,6 +257,12 @@ static void ns_js_schedule_iframe_load_full(ns_js *js, ns_node *iframe,
 static void ns_js_schedule_static_iframes(ns_js *js, ns_node *n);
 static void ns_js_promote_deferred_iframes(ns_js *js);
 static void ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin);
+static gboolean ns_js_report_exception_at(ns_js *js, JSValueConst ex,
+                                          const char *filename, int lineno,
+                                          int colno);
+static gboolean ns_js_caller_position(JSContext *ctx, char **file, int *line,
+                                      int *col);
+static char *ns_js_exception_message(JSContext *ctx, JSValueConst ex);
 static void ns_input_resanitize_value(ns_node *el);
 static char *ns_input_sanitize_value(const ns_node *el, const char *value);
 static gboolean ns_text_selection_applies(const ns_node *el);
@@ -12785,7 +12791,24 @@ ns_window_report_error(JSContext *ctx, JSValueConst this_val,
                        int argc, JSValueConst *argv)
 {
     (void)this_val;
-    ns_js_emit(js_from_ctx(ctx), "[error]", ctx, argc, argv);
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "reportError: 1 argument required");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_UNDEFINED;
+    char *file = NULL;
+    int line = 0, col = 0;
+    ns_js_caller_position(ctx, &file, &line, &col);
+    gboolean prevented = ns_js_report_exception_at(
+        js, argv[0], file ? file : js->current_url, line, col);
+    if (!prevented && js->log_cb) {
+        char *message = ns_js_exception_message(ctx, argv[0]);
+        char *entry = g_strdup_printf("Uncaught %s (%s:%d:%d)", message,
+                                      file ? file : "", line, col);
+        js->log_cb(entry, js->log_user_data);
+        g_free(entry);
+        g_free(message);
+    }
+    g_free(file);
     return JS_UNDEFINED;
 }
 
@@ -51919,10 +51942,24 @@ ns_js_bytecode_cache_store(ns_js *js, JSValue fn_obj, const char *src, gsize len
     js_free(js->ctx, bc);
 }
 
-static void
-ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
+static char *
+ns_js_exception_message(JSContext *ctx, JSValueConst ex)
 {
-    if (!js || !js->ctx || js->in_error_report) return;
+    const char *es = JS_ToCString(ctx, ex);
+    if (!es) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return g_strdup("Script error.");
+    }
+    char *out = g_strdup(es);
+    JS_FreeCString(ctx, es);
+    return out;
+}
+
+static gboolean
+ns_js_report_exception_at(ns_js *js, JSValueConst ex, const char *filename,
+                          int lineno, int colno)
+{
+    if (!js || !js->ctx || js->in_error_report) return FALSE;
     JSContext *ctx = js->ctx;
     js->in_error_report = 1;
 
@@ -51932,20 +51969,65 @@ ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
     JS_DefinePropertyValueStr(ctx, ev, "__ndErrorEvent", JS_TRUE, 0);
     JSValue g = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, g));
+    JSValue error_event = JS_GetPropertyStr(ctx, g, "ErrorEvent");
+    JSValue error_proto = JS_IsObject(error_event)
+        ? JS_GetPropertyStr(ctx, error_event, "prototype") : JS_UNDEFINED;
+    if (JS_IsObject(error_proto)) JS_SetPrototype(ctx, ev, error_proto);
+    JS_FreeValue(ctx, error_proto);
+    JS_FreeValue(ctx, error_event);
     JS_FreeValue(ctx, g);
 
-    const char *es = JS_ToCString(ctx, ex);
-    JS_SetPropertyStr(ctx, ev, "message",
-                      JS_NewString(ctx, es ? es : "Script error."));
-    if (es) JS_FreeCString(ctx, es);
+    char *message = ns_js_exception_message(ctx, ex);
+    JS_SetPropertyStr(ctx, ev, "message", JS_NewString(ctx, message));
+    g_free(message);
     JS_SetPropertyStr(ctx, ev, "filename",
-                      JS_NewString(ctx, origin ? origin : ""));
-    JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, 0));
-    JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, 0));
+                      JS_NewString(ctx, filename ? filename : ""));
+    JS_SetPropertyStr(ctx, ev, "lineno", JS_NewInt32(ctx, lineno));
+    JS_SetPropertyStr(ctx, ev, "colno", JS_NewInt32(ctx, colno));
     JS_SetPropertyStr(ctx, ev, "error", JS_DupValue(ctx, ex));
 
-    ns_js_dispatch_window_only_event(js, js->current_doc, "error", ev, NULL);
+    gboolean prevented = FALSE;
+    ns_js_dispatch_window_only_event(js, js->current_doc, "error", ev,
+                                     &prevented);
     js->in_error_report = 0;
+    return prevented;
+}
+
+static void
+ns_js_report_uncaught(ns_js *js, JSValueConst ex, const char *origin)
+{
+    ns_js_report_exception_at(js, ex, origin, 0, 0);
+}
+
+static gboolean
+ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
+{
+    JSValue err = JS_NewError(ctx);
+    JSValue stack = JS_GetPropertyStr(ctx, err, "stack");
+    JS_FreeValue(ctx, err);
+    const char *text = JS_IsString(stack) ? JS_ToCString(ctx, stack) : NULL;
+    JS_FreeValue(ctx, stack);
+    gboolean found = FALSE;
+    for (const char *p = text; p && *p && !found; ) {
+        const char *eol = strchr(p, '\n');
+        gsize n = eol ? (gsize)(eol - p) : strlen(p);
+        const char *open = memchr(p, '(', n);
+        if (open && n > 0 && p[n - 1] == ')') {
+            g_autofree char *loc = g_strndup(open + 1, (gsize)(p + n - 1 - open - 1));
+            char *c2 = strrchr(loc, ':');
+            char *c1 = c2 ? g_strrstr_len(loc, c2 - loc, ":") : NULL;
+            if (c1 && c2 && g_ascii_isdigit(c1[1]) && g_ascii_isdigit(c2[1])) {
+                *line = atoi(c1 + 1);
+                *col = atoi(c2 + 1);
+                *c1 = '\0';
+                *file = g_strdup(loc);
+                found = TRUE;
+            }
+        }
+        p = eol ? eol + 1 : NULL;
+    }
+    if (text) JS_FreeCString(ctx, text);
+    return found;
 }
 
 static void
