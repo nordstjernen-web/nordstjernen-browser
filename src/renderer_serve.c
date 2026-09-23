@@ -472,9 +472,10 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
         }
         int ticked = s->frame_valid
             ? ns_browser_tick(s->cur, s->tick_budget_ms) : 0;
+        int requested_scroll_x = -1;
         int requested_scroll_y = -1;
-        if (ns_browser_take_pending_scroll_y(s->cur, &requested_scroll_y))
-            sy = requested_scroll_y;
+        ns_browser_take_pending_scroll(s->cur, &requested_scroll_x,
+                                       &requested_scroll_y);
         int page_w = 0, page_h = 0;
         ns_browser_page_size(s->cur, &page_w, &page_h);
         if (requested_scroll_y >= 0) {
@@ -484,7 +485,13 @@ ns_renderer_session_handle(ns_renderer_session *s, const http_head *head,
                 requested_scroll_y = max_scroll_y;
             sy = requested_scroll_y;
         }
-        int requested_scroll_x = -1;
+        if (requested_scroll_x >= 0) {
+            int max_scroll_x = page_w - (int)ceil((double)vw / scale);
+            if (max_scroll_x < 0) max_scroll_x = 0;
+            if (requested_scroll_x > max_scroll_x)
+                requested_scroll_x = max_scroll_x;
+            sx = requested_scroll_x;
+        }
         int snap_x = (int)sx, snap_y = (int)sy;
         if (ns_browser_snap_document(s->cur, (double)vw / scale,
                                      (double)vh / scale,

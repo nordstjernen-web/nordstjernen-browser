@@ -280,6 +280,8 @@ int ns_browser_security(ns_browser *browser, const char **out_ip);
  * it. Returning it clears the pending state. */
 char *ns_browser_take_pending_nav(ns_browser *browser);
 int ns_browser_take_pending_scroll_y(ns_browser *browser, int *out_scroll_y);
+int ns_browser_take_pending_scroll(ns_browser *browser, int *out_scroll_x,
+                                   int *out_scroll_y);
 
 /* WebGL activity: take_pending_webgl returns the first origin that used WebGL
  * in this session (newly allocated; free() it), or NULL. A host may call
