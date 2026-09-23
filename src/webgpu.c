@@ -2266,8 +2266,11 @@ wg_queue_copyExternalImageToTexture(JSContext *ctx, JSValueConst this_val,
     gboolean flip_y = JS_ToBool(ctx, jflip);
     JS_FreeValue(ctx, jflip);
     int w = 0, h = 0;
-    cairo_surface_t *s = ns_js_drawimage_source_surface(ctx, jsrc, &w, &h);
+    gboolean threw = FALSE;
+    cairo_surface_t *s = ns_js_drawimage_source_surface(ctx, jsrc, &w, &h,
+                                                        &threw);
     JS_FreeValue(ctx, jsrc);
+    if (threw) return JS_EXCEPTION;
     if (!s) return JS_UNDEFINED;
     const unsigned char *data = cairo_image_surface_get_data(s);
     int stride = cairo_image_surface_get_stride(s);

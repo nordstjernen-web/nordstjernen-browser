@@ -98,6 +98,8 @@ ns_image_free(gpointer p)
     ns_image *img = p;
     if (!img) return;
     g_free(img->url);
+    g_free(img->final_url);
+    g_free(img->cors_allow_origin);
     g_free(img->error);
     if (img->render_surface) cairo_surface_destroy(img->render_surface);
     if (img->anim_frames) g_array_free(img->anim_frames, TRUE);
@@ -573,6 +575,10 @@ on_image_fetched(GObject *src, GAsyncResult *result, gpointer user_data)
         return;
     }
     pending->img->http_status = resp->status;
+    g_free(pending->img->final_url);
+    pending->img->final_url = g_strdup(resp->final_url);
+    g_free(pending->img->cors_allow_origin);
+    pending->img->cors_allow_origin = g_strdup(resp->cors_allow_origin);
     if (resp->error) {
         pending->img->failed = TRUE;
         pending->img->failed_at_us = g_get_monotonic_time();

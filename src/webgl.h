@@ -29,7 +29,8 @@ void  ns_webgl_set_decision(const char *origin, int allow);
 
 cairo_surface_t *ns_js_drawimage_source_surface(JSContext *ctx,
                                                 JSValueConst src,
-                                                int *out_w, int *out_h);
+                                                int *out_w, int *out_h,
+                                                gboolean *threw);
 
 G_END_DECLS
 

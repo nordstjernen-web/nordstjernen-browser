@@ -39554,6 +39554,59 @@ ns_js_image_for_node(ns_js *js, const ns_node *el)
     return NULL;
 }
 
+static gboolean
+ns_js_urls_share_http_authority(const char *a, const char *b)
+{
+    if (!ns_url_is_http_or_https(a)) return FALSE;
+    const char *authority = strstr(a, "://") + 3;
+    size_t authority_len = strcspn(authority, "/?#\\");
+    if (authority_len == 0) return FALSE;
+    size_t n = (size_t)(authority - a) + authority_len;
+    return strncmp(a, b, n) == 0 &&
+           (b[n] == '\0' || b[n] == '/' || b[n] == '?' || b[n] == '#');
+}
+
+static gboolean
+ns_js_urls_same_origin(const char *a, const char *b)
+{
+    if (!a || !b) return FALSE;
+    if (ns_js_urls_share_http_authority(a, b)) return TRUE;
+    if (ns_url_is_http_or_https(a) || ns_url_is_http_or_https(b))
+        return ns_url_same_origin(a, b);
+    const char *ca = strchr(a, ':'), *cb = strchr(b, ':');
+    return ca && cb && ca - a == cb - b &&
+           g_ascii_strncasecmp(a, b, (gsize)(ca - a)) == 0;
+}
+
+static const char *
+ns_js_caller_document_url(ns_js *js, JSContext *ctx)
+{
+    JSContext *caller = JS_GetCallerRealm(ctx);
+    if (js->frame_contexts) {
+        GHashTableIter it;
+        gpointer frame, fctx;
+        g_hash_table_iter_init(&it, js->frame_contexts);
+        while (g_hash_table_iter_next(&it, &frame, &fctx)) {
+            if (fctx != caller) continue;
+            const char *fu = ns_element_get_attr(frame, "data-nd-frame-url");
+            if (fu && *fu) return fu;
+        }
+    }
+    return js->document_origin ? js->document_origin : js->current_url;
+}
+
+gboolean
+ns_js_resource_origin_clean(ns_js *js, JSContext *ctx, const char *url,
+                            const char *cors_allow_origin)
+{
+    if (!js || !url) return FALSE;
+    if (g_str_has_prefix(url, "data:") || g_str_has_prefix(url, "blob:"))
+        return TRUE;
+    const char *doc_url = ns_js_caller_document_url(js, ctx);
+    if (ns_js_urls_same_origin(url, doc_url)) return TRUE;
+    return cors_allow_origin && cors_allows(doc_url, url, cors_allow_origin);
+}
+
 
 
 
@@ -39668,6 +39721,9 @@ ns_element_toDataURL(JSContext *ctx, JSValueConst this_val,
     if (!el || !js_from_ctx(ctx)) return JS_NewString(ctx, "data:,");
     ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
     if (!st || !st->surf) return JS_NewString(ctx, "data:,");
+    if (!st->origin_clean)
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "Tainted canvases may not be exported.");
     GByteArray *buf = g_byte_array_new();
     cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
         ns_canvas_png_write, buf);
@@ -39690,31 +39746,33 @@ ns_element_toBlob(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsFunction(ctx, argv[0])) return JS_UNDEFINED;
     const ns_node *el = ns_unwrap_element(this_val);
+    ns_canvas_state *st = el && js_from_ctx(ctx)
+        ? ns_canvas_state_for(js_from_ctx(ctx), el) : NULL;
+    if (st && !st->origin_clean)
+        return ns_throw_dom_exception(ctx, "SecurityError", 18,
+            "Tainted canvases may not be exported.");
     JSValue cb = JS_DupValue(ctx, argv[0]);
     JSValue blob = JS_NULL;
-    if (el && js_from_ctx(ctx)) {
-        ns_canvas_state *st = ns_canvas_state_for(js_from_ctx(ctx), el);
-        if (st && st->surf) {
-            GByteArray *buf = g_byte_array_new();
-            cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
-                ns_canvas_png_write, buf);
-            if (s == CAIRO_STATUS_SUCCESS) {
-                JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
-                JSValue global = JS_GetGlobalObject(ctx);
-                JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
-                JS_FreeValue(ctx, global);
-                JSValueConst u8args[1] = { ab };
-                JSValue u8a = JS_CallConstructor(ctx, u8c, 1, u8args);
-                JS_FreeValue(ctx, u8c);
-                JS_FreeValue(ctx, ab);
-                blob = JS_NewObject(ctx);
-                JS_SetPropertyStr(ctx, blob, "_b", u8a);
-                JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
-                JS_SetPropertyStr(ctx, blob, "type",
-                                  JS_NewString(ctx, "image/png"));
-            }
-            g_byte_array_free(buf, TRUE);
+    if (st && st->surf) {
+        GByteArray *buf = g_byte_array_new();
+        cairo_status_t s = cairo_surface_write_to_png_stream(st->surf,
+            ns_canvas_png_write, buf);
+        if (s == CAIRO_STATUS_SUCCESS) {
+            JSValue ab = JS_NewArrayBufferCopy(ctx, buf->data, buf->len);
+            JSValue global = JS_GetGlobalObject(ctx);
+            JSValue u8c = JS_GetPropertyStr(ctx, global, "Uint8Array");
+            JS_FreeValue(ctx, global);
+            JSValueConst u8args[1] = { ab };
+            JSValue u8a = JS_CallConstructor(ctx, u8c, 1, u8args);
+            JS_FreeValue(ctx, u8c);
+            JS_FreeValue(ctx, ab);
+            blob = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, blob, "_b", u8a);
+            JS_SetPropertyStr(ctx, blob, "size", JS_NewInt64(ctx, buf->len));
+            JS_SetPropertyStr(ctx, blob, "type",
+                              JS_NewString(ctx, "image/png"));
         }
+        g_byte_array_free(buf, TRUE);
     }
     JSValueConst cb_args[1] = { blob };
     JSValue r = JS_Call(ctx, cb, JS_UNDEFINED, 1, cb_args);
