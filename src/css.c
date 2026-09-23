@@ -11326,7 +11326,7 @@ grid_subgrid_canonical(const char *text)
 {
     GArray *toks = grid_tokens(text);
     if (!toks) return NULL;
-    const grid_tok *t = (const grid_tok *)toks->data;
+    const grid_tok *t = &g_array_index(toks, grid_tok, 0);
     gboolean ok = toks->len > 0 && t[0].kind == GRID_TOK_OTHER &&
                   g_ascii_strcasecmp(t[0].text, "subgrid") == 0;
     gboolean auto_fill = FALSE;
@@ -11355,7 +11355,7 @@ grid_track_text_canonical(const char *text)
         return grid_subgrid_canonical(text);
     GArray *toks = grid_tokens(text);
     if (!toks) return NULL;
-    char *out = grid_track_tokens_canonical((const grid_tok *)toks->data,
+    char *out = grid_track_tokens_canonical(&g_array_index(toks, grid_tok, 0),
                                             (int)toks->len);
     g_array_free(toks, TRUE);
     return out;
@@ -11543,7 +11543,7 @@ grid_template_parse(const char *text, char *out[3], char **canon)
 {
     GArray *toks = grid_tokens(text);
     if (!toks) return FALSE;
-    gboolean ok = grid_template_tokens_parse((const grid_tok *)toks->data,
+    gboolean ok = grid_template_tokens_parse(&g_array_index(toks, grid_tok, 0),
                                              (int)toks->len, out, canon);
     g_array_free(toks, TRUE);
     return ok;
@@ -11581,7 +11581,7 @@ grid_shorthand_parse(const char *text, char *out[6], char **canon)
 {
     GArray *toks = grid_tokens(text);
     if (!toks) return FALSE;
-    const grid_tok *t = (const grid_tok *)toks->data;
+    const grid_tok *t = &g_array_index(toks, grid_tok, 0);
     int n = (int)toks->len;
     int slash = grid_slash_index(t, n);
     gboolean ok = FALSE;
@@ -23278,7 +23278,7 @@ inline_grid_template_compose(char *const v[3])
         }
         if (out && strcmp(cols, "none") != 0) {
             char *explicit_cols = grid_track_list_canonical(
-                (const grid_tok *)col_toks->data, (int)col_toks->len,
+                &g_array_index(col_toks, grid_tok, 0), (int)col_toks->len,
                 NS_CSS_GRID_TEMPLATE_COLUMNS, TRUE);
             if (explicit_cols) {
                 g_string_append_printf(out, " / %s", explicit_cols);
