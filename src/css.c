@@ -1406,7 +1406,7 @@ named_color(const char *name, guint8 *r, guint8 *g, guint8 *b)
         { "menutext",        0,   0,   0   },
         { "scrollbar",       255, 255, 255 },
         { "threeddarkshadow",140, 140, 140 },
-        { "threedface",      240, 240, 240 },
+        { "threedface",      140, 140, 140 },
         { "threedhighlight", 140, 140, 140 },
         { "threedlightshadow",140, 140, 140 },
         { "threedshadow",    140, 140, 140 },
@@ -25423,13 +25423,9 @@ static const char *kUa =
     "legend, search, hgroup { display: block; }\n"
     "li { display: list-item; }\n"
     "address { font-style: italic; }\n"
-    "fieldset { margin: 0.5em 8px; padding: 0.35em 8px 0.6em; "
-    "border-top-width: 1px; border-right-width: 1px; "
-    "border-bottom-width: 1px; border-left-width: 1px; "
-    "border-top-style: solid; border-right-style: solid; "
-    "border-bottom-style: solid; border-left-style: solid; "
-    "border-top-color: #a0a0a0; border-right-color: #a0a0a0; "
-    "border-bottom-color: #a0a0a0; border-left-color: #a0a0a0; }\n"
+    "fieldset { margin-inline: 2px; border: groove 2px ThreeDFace; "
+    "padding-block: 0.35em 0.625em; padding-inline: 0.75em; "
+    "min-inline-size: min-content; }\n"
     "legend { padding-inline: 2px; }\n"
     "center { text-align: center; }\n"
     "h1, h2, h3, h4, h5, h6 { display: block; font-weight: bold; }\n"
