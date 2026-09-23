@@ -7,6 +7,7 @@
 #include "css_syntax.h"
 
 #include "config.h"
+#include "image.h"
 #include "net.h"
 
 #include <limits.h>
@@ -26382,6 +26383,26 @@ table_of_part(const ns_node *el)
     return ns_node_is_element_named(p, "table") ? p : NULL;
 }
 
+static const ns_node *
+img_dimension_attribute_source(const ns_node *img)
+{
+    const ns_node *picture = img->parent;
+    if (!ns_node_is_element_named(picture, "picture")) return img;
+    for (const ns_node *c = picture->first_child; c && c != img;
+         c = c->next_sibling) {
+        if (!ns_node_is_element_named(c, "source")) continue;
+        const char *srcset = ns_element_get_attr(c, "srcset");
+        if (!srcset || !*srcset) continue;
+        const char *media = ns_element_get_attr(c, "media");
+        if (media && *media && !ns_css_media_query_matches(media)) continue;
+        const char *type = ns_element_get_attr(c, "type");
+        if (type && *type && !ns_image_supports_mime(type)) continue;
+        return ns_element_get_attr(c, "width") ||
+               ns_element_get_attr(c, "height") ? c : img;
+    }
+    return img;
+}
+
 static const char *
 legacy_font_size_keyword(const char *s)
 {
@@ -26442,6 +26463,8 @@ presentational_hints_css(const ns_node *el)
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return NULL;
     gboolean any = strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0 ||
                    strcmp(el->name, "body") == 0 ||
+                   (strcmp(el->name, "img") == 0 &&
+                    ns_node_is_element_named(el->parent, "picture")) ||
                    strcmp(el->name, "tr") == 0 ||
                    strcmp(el->name, "thead") == 0 ||
                    strcmp(el->name, "tbody") == 0 ||
@@ -26589,13 +26612,15 @@ presentational_hints_css(const ns_node *el)
         if (size) g_string_append_printf(out, "font-size: %s;", size);
     }
 
-    const char *width = ns_element_get_attr(el, "width");
+    const ns_node *dim_source = is_img ? img_dimension_attribute_source(el)
+                                       : el;
+    const char *width = ns_element_get_attr(dim_source, "width");
     if (width && (is_embedded || is_hr || strcmp(tag, "col") == 0 ||
                   strcmp(tag, "colgroup") == 0 || strcmp(tag, "pre") == 0))
         append_html_dimension(out, width, FALSE, "width", NULL);
     else if (width && (is_table || is_cell))
         append_html_dimension(out, width, TRUE, "width", NULL);
-    const char *height = ns_element_get_attr(el, "height");
+    const char *height = ns_element_get_attr(dim_source, "height");
     if (height && (is_embedded || is_table || is_row))
         append_html_dimension(out, height, FALSE, "height", NULL);
     else if (height && is_cell)
