@@ -33147,6 +33147,42 @@ ns_js_value_matches_pattern(const char *v, const char *pat)
     return ok;
 }
 
+static gboolean
+ns_node_is_radio(const ns_node *n)
+{
+    const char *type = ns_node_is_element_named(n, "input")
+        ? ns_element_get_attr(n, "type") : NULL;
+    return type && g_ascii_strcasecmp(type, "radio") == 0;
+}
+
+static gboolean
+ns_radio_group_has_required(const ns_node *scan, const ns_node *root,
+                            const ns_node *owner, const char *name, int depth)
+{
+    if (!scan || depth >= 512) return FALSE;
+    if (ns_node_is_radio(scan) && ns_element_get_attr(scan, "required")) {
+        const char *scan_name = ns_element_get_attr(scan, "name");
+        if (scan_name && strcmp(scan_name, name) == 0 &&
+            ns_form_owner(scan, root) == owner)
+            return TRUE;
+    }
+    for (const ns_node *c = scan->first_child; c; c = c->next_sibling)
+        if (ns_radio_group_has_required(c, root, owner, name, depth + 1))
+            return TRUE;
+    return FALSE;
+}
+
+static gboolean
+ns_radio_group_required(const ns_node *radio)
+{
+    const char *name = ns_element_get_attr(radio, "name");
+    if (!name || !*name) return FALSE;
+    if (ns_element_get_attr(radio, "required")) return TRUE;
+    const ns_node *root = ns_node_root(radio);
+    return ns_radio_group_has_required(root, root, ns_form_owner(radio, root),
+                                       name, 0);
+}
+
 static void
 ns_js_compute_validity(const ns_node *n,
                        gboolean *value_missing,
@@ -33187,10 +33223,17 @@ ns_js_compute_validity(const ns_node *n,
         value = ns_input_used_value(n);
         if (!value) value = "";
     }
-    gboolean required = ns_form_control_supports_required(n) &&
-                        ns_element_get_attr(n, "required") != NULL &&
-                        !ns_element_effectively_disabled(n) &&
-                        !ns_form_control_readonly_bars_validation(n);
+    gboolean needs_mutable = is_textarea ||
+        (is_input && !ns_node_is_radio(n) &&
+         !(type && (g_ascii_strcasecmp(type, "checkbox") == 0 ||
+                    g_ascii_strcasecmp(type, "file") == 0)));
+    gboolean required = ns_node_is_radio(n)
+        ? ns_radio_group_required(n)
+        : ns_form_control_supports_required(n) &&
+          ns_element_get_attr(n, "required") != NULL &&
+          (!needs_mutable ||
+           (!ns_element_effectively_disabled(n) &&
+            !ns_form_control_readonly_bars_validation(n)));
     if (required && ns_form_control_value_missing(n, value, ns_node_root(n))) {
         *value_missing = TRUE;
         g_free(owned_value);
@@ -51445,10 +51488,12 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
     }
     {
         JSValue validity_proto = ns_proto_of(ctx, global, "ValidityState");
-        if (JS_IsObject(validity_proto))
+        if (JS_IsObject(validity_proto)) {
             JS_SetPropertyFunctionList(ctx, validity_proto,
                                        ns_validity_proto_funcs,
                                        G_N_ELEMENTS(ns_validity_proto_funcs));
+            ns_set_tostring_tag(ctx, validity_proto, "ValidityState");
+        }
         JS_FreeValue(ctx, validity_proto);
     }
     {
