@@ -27805,6 +27805,96 @@ ns_wpt_touch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv
     return JS_UNDEFINED;
 }
 
+static JSValue
+ns_wpt_pointer(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->early_inject_src || argc < 4 || js->halted ||
+        js->in_pump)
+        return JS_UNDEFINED;
+    const ns_node *target = ns_unwrap_element(argv[0]);
+    if (!target) target = js->current_doc;
+    const char *type = JS_ToCString(ctx, argv[1]);
+    if (!target || !type) {
+        if (type) JS_FreeCString(ctx, type);
+        return JS_UNDEFINED;
+    }
+    double x = 0, y = 0;
+    int32_t button = 0, buttons = 0;
+    JS_ToFloat64(ctx, &x, argv[2]);
+    JS_ToFloat64(ctx, &y, argv[3]);
+    if (argc > 4) JS_ToInt32(ctx, &button, argv[4]);
+    if (argc > 5) JS_ToInt32(ctx, &buttons, argv[5]);
+    gboolean prevented = FALSE;
+    ns_js_note_pointer_input(js, TRUE);
+    ns_js_dispatch_mouse_event(js, target, type, x, y, x, y, button, buttons,
+                               FALSE, FALSE, FALSE, FALSE, NULL, &prevented);
+    if (!prevented && strcmp(type, "mousedown") == 0) {
+        const ns_node *focus = NULL;
+        for (const ns_node *a = target; a && !focus; a = a->parent)
+            if (ns_node_is_focusable(a)) focus = a;
+        ns_js_set_focus(js, focus);
+    }
+    JS_FreeCString(ctx, type);
+    return JS_NewBool(ctx, prevented);
+}
+
+static int
+ns_wpt_key_code(const char *key)
+{
+    static const struct { const char *key; int code; } named[] = {
+        { "Backspace", 8 }, { "Tab", 9 }, { "Enter", 13 }, { "Shift", 16 },
+        { "Control", 17 }, { "Alt", 18 }, { "Escape", 27 }, { " ", 32 },
+        { "PageUp", 33 }, { "PageDown", 34 }, { "End", 35 }, { "Home", 36 },
+        { "ArrowLeft", 37 }, { "ArrowUp", 38 }, { "ArrowRight", 39 },
+        { "ArrowDown", 40 }, { "Delete", 46 },
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(named); i++)
+        if (strcmp(key, named[i].key) == 0) return named[i].code;
+    if (key[0] && !key[1]) return g_ascii_toupper(key[0]);
+    return 0;
+}
+
+static JSValue
+ns_wpt_key(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    ns_js *js = js_from_ctx(ctx);
+    if (!js || !js->early_inject_src || argc < 3 || js->halted ||
+        js->in_pump)
+        return JS_UNDEFINED;
+    const ns_node *target = ns_unwrap_element(argv[0]);
+    if (!target) target = js->current_doc;
+    const char *type = JS_ToCString(ctx, argv[1]);
+    const char *key = JS_ToCString(ctx, argv[2]);
+    gboolean shift = argc > 3 && JS_ToBool(ctx, argv[3]);
+    gboolean prevented = FALSE;
+    gboolean dispatched = target && type && key;
+    if (dispatched) {
+        ns_js_note_pointer_input(js, FALSE);
+        ns_js_dispatch_key_event_full(js, target, type, key, "",
+                                      ns_wpt_key_code(key), 0, shift, FALSE,
+                                      FALSE, FALSE, &prevented);
+        const ns_node *focused = ns_js_focused_node(js);
+        if (!prevented && strcmp(type, "keydown") == 0) {
+            if (strcmp(key, "Escape") == 0) {
+                ns_js_process_close_request(js);
+            } else if (strcmp(key, "Tab") == 0) {
+                const ns_node *next = ns_js_sequential_focus_target(js, shift);
+                if (next) ns_js_set_focus(js, next);
+            } else if (focused) {
+                ns_js_keyboard_activate(js, focused, key, FALSE);
+            }
+        } else if (!prevented && focused && strcmp(type, "keyup") == 0) {
+            ns_js_keyboard_activate(js, focused, key, TRUE);
+        }
+    }
+    if (type) JS_FreeCString(ctx, type);
+    if (key) JS_FreeCString(ctx, key);
+    return dispatched ? JS_NewBool(ctx, prevented) : JS_UNDEFINED;
+}
+
 void
 ns_js_set_style_table(ns_js *js, GHashTable *styles)
 {
@@ -49441,6 +49531,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, global, "cancelAnimationFrame",  ns_window_cancelAnimationFrame,   1);
     ns_bind_fn(ctx, global, "__nsWptWheel",          ns_wpt_wheel,                     5);
     ns_bind_fn(ctx, global, "__nsWptTouch",          ns_wpt_touch,                     4);
+    ns_bind_fn(ctx, global, "__nsWptPointer",        ns_wpt_pointer,                   6);
+    ns_bind_fn(ctx, global, "__nsWptKey",            ns_wpt_key,                       4);
     ns_bind_fn(ctx, global, "__nsWptActivate",       ns_wpt_activate,                  0);
     ns_bind_fn(ctx, global, "__ndDocEnter",          ns_js_doc_enter,                  1);
     ns_bind_fn(ctx, global, "__ndDocExit",           ns_js_doc_exit,                   0);

@@ -87,8 +87,54 @@
         return { x: x, y: y };
     }
 
+    var WEBDRIVER_KEYS = {
+        '\uE003': 'Backspace', '\uE004': 'Tab', '\uE006': 'Enter',
+        '\uE007': 'Enter', '\uE008': 'Shift', '\uE009': 'Control',
+        '\uE00A': 'Alt', '\uE00C': 'Escape', '\uE00D': ' ',
+        '\uE00E': 'PageUp', '\uE00F': 'PageDown', '\uE010': 'End',
+        '\uE011': 'Home', '\uE012': 'ArrowLeft', '\uE013': 'ArrowUp',
+        '\uE014': 'ArrowRight', '\uE015': 'ArrowDown', '\uE017': 'Delete',
+        '\uE03D': 'Meta'
+    };
+
+    function keyName(ch) {
+        return WEBDRIVER_KEYS[ch] || ch;
+    }
+
+    function trustedPointer(target, type, x, y, button, buttons) {
+        if (typeof global.__nsWptPointer !== 'function') return false;
+        try {
+            return global.__nsWptPointer(target, type, x || 0, y || 0,
+                                         button || 0, buttons || 0) !== undefined;
+        } catch (e) { return true; }
+    }
+
+    function trustedKey(target, type, key, shift) {
+        if (typeof global.__nsWptKey !== 'function') return null;
+        try {
+            var r = global.__nsWptKey(target, type, key, !!shift);
+            return r === undefined ? null : !!r;
+        } catch (e) { return false; }
+    }
+
+    var NON_TEXT_INPUT_TYPES = ['button', 'submit', 'reset', 'image',
+                                'checkbox', 'radio', 'file', 'color',
+                                'range', 'hidden'];
+
+    function isTextControl(el) {
+        if (!el || !el.tagName) return false;
+        var tag = String(el.tagName).toUpperCase();
+        if (tag === 'TEXTAREA') return true;
+        if (tag !== 'INPUT') return false;
+        var t = String(el.type || 'text').toLowerCase();
+        return NON_TEXT_INPUT_TYPES.indexOf(t) < 0;
+    }
+
     function fireMouse(target, type, x, y, button) {
         if (!target) return;
+        if (trustedPointer(target, type, x, y, button,
+                           type === 'mousedown' ? 1 : 0))
+            return;
         var ev;
         try {
             ev = new global.MouseEvent(type, {
@@ -104,6 +150,10 @@
 
     function firePointer(target, type, x, y, pointerType) {
         if (!target) return;
+        if (pointerType !== 'touch' &&
+            trustedPointer(target, type, x, y, 0,
+                           type === 'pointerdown' ? 1 : 0))
+            return;
         var ev;
         try {
             ev = new global.PointerEvent(type, {
@@ -144,28 +194,39 @@
         if (!element) return;
         try { element.focus(); } catch (e) {}
         var doc = element.ownerDocument || global.document;
-        var active = (doc && doc.activeElement) || element;
         for (var i = 0; i < keys.length; i++) {
             var ch = keys[i];
-            var down, up;
-            try {
-                down = new global.KeyboardEvent('keydown',
-                    { bubbles: true, cancelable: true, key: ch });
-                up = new global.KeyboardEvent('keyup',
-                    { bubbles: true, cancelable: true, key: ch });
-            } catch (e) {
-                down = new global.Event('keydown', { bubbles: true, cancelable: true });
-                up = new global.Event('keyup', { bubbles: true, cancelable: true });
-            }
-            try { active.dispatchEvent(down); } catch (e) {}
-            if (active && 'value' in active && ch >= ' ') {
+            var key = keyName(ch);
+            var active = (doc && doc.activeElement) || element;
+            var prevented = trustedKey(active, 'keydown', key, false);
+            if (prevented === null) {
+                var down;
                 try {
-                    active.value += ch;
+                    down = new global.KeyboardEvent('keydown',
+                        { bubbles: true, cancelable: true, key: key });
+                } catch (e) {
+                    down = new global.Event('keydown', { bubbles: true, cancelable: true });
+                }
+                try { prevented = !active.dispatchEvent(down); } catch (e) {}
+            }
+            if (!prevented && key.length === 1 && isTextControl(active)) {
+                try {
+                    active.value += key;
                     active.dispatchEvent(new global.Event('input',
                         { bubbles: true }));
                 } catch (e) {}
             }
-            try { active.dispatchEvent(up); } catch (e) {}
+            active = (doc && doc.activeElement) || element;
+            if (trustedKey(active, 'keyup', key, false) === null) {
+                var up;
+                try {
+                    up = new global.KeyboardEvent('keyup',
+                        { bubbles: true, cancelable: true, key: key });
+                } catch (e) {
+                    up = new global.Event('keyup', { bubbles: true, cancelable: true });
+                }
+                try { active.dispatchEvent(up); } catch (e) {}
+            }
         }
     }
 
@@ -182,24 +243,40 @@
         return { target: target, x: x, y: y };
     }
 
+    var pointerStates = {};
+
+    function hitAt(state) {
+        var hit = null;
+        try { hit = global.document.elementFromPoint(state.x, state.y); }
+        catch (e) {}
+        return hit || state.target;
+    }
+
     function runPointerSource(src) {
         var pt = (src.parameters && src.parameters.pointerType) || 'mouse';
-        var state = { x: 0, y: 0, target: null, downTarget: null };
+        var id = (src.id || 'pointer') + ':' + pt;
+        var state = pointerStates[id] ||
+            (pointerStates[id] = { x: 0, y: 0, target: null, downTarget: null });
         var acts = src.actions || [];
         for (var i = 0; i < acts.length; i++) {
             var a = acts[i];
             if (a.type === 'pointerMove') {
+                var byElement = a.origin && typeof a.origin === 'object' &&
+                    a.origin.nodeType;
                 var r = resolveOrigin(a.origin, state);
-                state.x = (a.x || 0) + (a.origin && a.origin.nodeType ? r.x : 0);
-                state.y = (a.y || 0) + (a.origin && a.origin.nodeType ? r.y : 0);
+                var ox = byElement ? r.x : a.origin === 'pointer' ? state.x : 0;
+                var oy = byElement ? r.y : a.origin === 'pointer' ? state.y : 0;
+                state.x = (a.x || 0) + ox;
+                state.y = (a.y || 0) + oy;
                 state.target = r.target;
+                state.target = hitAt(state);
                 firePointer(state.target, 'pointermove', state.x, state.y, pt);
                 if (pt === 'mouse')
                     fireMouse(state.target, 'mousemove', state.x, state.y, 0);
                 else if (pt === 'touch' && state.downTarget)
                     fireTouch(state.downTarget, 'touchmove', state.x, state.y);
             } else if (a.type === 'pointerDown') {
-                if (!state.target) state.target = resolveOrigin(null, state).target;
+                state.target = hitAt(state);
                 state.downTarget = state.target;
                 firePointer(state.target, 'pointerdown', state.x, state.y, pt);
                 if (pt === 'mouse')
@@ -208,6 +285,7 @@
                 else if (pt === 'touch')
                     fireTouch(state.target, 'touchstart', state.x, state.y);
             } else if (a.type === 'pointerUp') {
+                state.target = hitAt(state);
                 firePointer(state.target, 'pointerup', state.x, state.y, pt);
                 if (pt === 'mouse')
                     fireMouse(state.target, 'mouseup', state.x, state.y,
@@ -226,15 +304,20 @@
     function runKeySource(src) {
         var acts = src.actions || [];
         var doc = global.document;
-        var target = (doc && doc.activeElement) || (doc && doc.body);
+        var shift = false;
         for (var i = 0; i < acts.length; i++) {
             var a = acts[i];
             if (a.type !== 'keyDown' && a.type !== 'keyUp') continue;
             var type = a.type === 'keyDown' ? 'keydown' : 'keyup';
+            var key = keyName(a.value);
+            if (key === 'Shift') shift = a.type === 'keyDown';
+            var target = (doc && doc.activeElement) || (doc && doc.body);
+            if (trustedKey(target || doc, type, key, shift) !== null) continue;
             var ev;
             try {
                 ev = new global.KeyboardEvent(type,
-                    { bubbles: true, cancelable: true, key: a.value });
+                    { bubbles: true, cancelable: true, key: key,
+                      shiftKey: shift });
             } catch (e) {
                 ev = new global.Event(type, { bubbles: true, cancelable: true });
             }
