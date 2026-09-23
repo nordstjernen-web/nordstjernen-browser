@@ -275,18 +275,18 @@
                 out.push(c);
             } else if (c < 0x800) {
                 out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
-            } else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
-                var c2 = str.charCodeAt(i + 1);
-                if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+            } else if (c >= 0xd800 && c <= 0xdfff) {
+                var c2 = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+                if (c <= 0xdbff && c2 >= 0xdc00 && c2 <= 0xdfff) {
                     var cp = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);
                     out.push(0xf0 | (cp >> 18),
                              0x80 | ((cp >> 12) & 0x3f),
                              0x80 | ((cp >> 6)  & 0x3f),
                              0x80 | (cp & 0x3f));
                     i++;
-                    continue;
+                } else {
+                    out.push(0xef, 0xbf, 0xbd);
                 }
-                out.push(0xef, 0xbf, 0xbd);
             } else {
                 out.push(0xe0 | (c >> 12),
                          0x80 | ((c >> 6) & 0x3f),
@@ -296,53 +296,167 @@
         return new Uint8Array(out);
     }
 
-    function blobPartBytes(part) {
-        if (part == null) return new Uint8Array(0);
-        if (part instanceof Uint8Array) return part;
-        if (part instanceof ArrayBuffer) return new Uint8Array(part);
-        if (ArrayBuffer.isView && ArrayBuffer.isView(part))
-            return new Uint8Array(part.buffer, part.byteOffset, part.byteLength);
-        if (part instanceof Blob) return part._b || new Uint8Array(0);
-        if (typeof TextEncoder === 'function')
-            return new TextEncoder().encode(String(part));
-        return utf8Encode(part);
+    function blobIdlString(v) {
+        if (typeof v === 'symbol')
+            throw new TypeError('Cannot convert a Symbol value to a string');
+        return String(v);
     }
 
-    function Blob(parts, options) {
-        if (!(this instanceof Blob)) return new Blob(parts, options);
+    function blobNativeEndings(s) {
+        var platform = typeof navigator !== 'undefined' && navigator ?
+            String(navigator.platform || '') : '';
+        var eol = platform.indexOf('Win') === 0 ? '\r\n' : '\n';
+        return s.replace(/\r\n|\r|\n/g, eol);
+    }
+
+    function blobBufferBytes(buffer, offset, length) {
+        if (buffer.detached) return new Uint8Array(0);
+        return new Uint8Array(buffer.slice(offset, offset + length));
+    }
+
+    function blobPartItem(part) {
+        if (part instanceof ArrayBuffer)
+            return blobBufferBytes(part, 0, part.byteLength);
+        if (ArrayBuffer.isView(part))
+            return blobBufferBytes(part.buffer, part.byteOffset, part.byteLength);
+        if (part instanceof Blob) return part._b || new Uint8Array(0);
+        return blobIdlString(part);
+    }
+
+    function blobItemBytes(item, endings) {
+        if (typeof item !== 'string') return item;
+        if (endings === 'native') item = blobNativeEndings(item);
+        if (typeof TextEncoder === 'function') return new TextEncoder().encode(item);
+        return utf8Encode(item);
+    }
+
+    function blobNormalizeType(t) {
+        for (var i = 0; i < t.length; i++) {
+            var c = t.charCodeAt(i);
+            if (c < 0x20 || c > 0x7e) return '';
+        }
+        return t.toLowerCase();
+    }
+
+    function blobPropertyBag(options, withLastModified) {
+        var bag = { endings: 'transparent', type: '', lastModified: undefined };
+        if (options === undefined || options === null) return bag;
+        if (typeof options !== 'object' && typeof options !== 'function')
+            throw new TypeError('The options argument is not an object');
+        var endings = options.endings;
+        if (endings !== undefined) {
+            endings = blobIdlString(endings);
+            if (endings !== 'transparent' && endings !== 'native')
+                throw new TypeError('The endings option must be "transparent" or "native"');
+            bag.endings = endings;
+        }
+        if (withLastModified) {
+            var lm = options.lastModified;
+            if (lm !== undefined) bag.lastModified = blobLongLong(lm, false);
+        }
+        var type = options.type;
+        if (type !== undefined) bag.type = blobIdlString(type);
+        return bag;
+    }
+
+    function blobLongLong(v, clamp) {
+        var n = +v;
+        if (!isFinite(n)) {
+            if (!clamp || isNaN(n)) return 0;
+            return n > 0 ? Number.MAX_SAFE_INTEGER : Number.MIN_SAFE_INTEGER;
+        }
+        if (clamp) {
+            n = Math.min(Math.max(n, Number.MIN_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+            var f = Math.floor(n);
+            var d = n - f;
+            if (d > 0.5 || (d === 0.5 && f % 2 !== 0)) f += 1;
+            return f === 0 ? 0 : f;
+        }
+        n = Math.trunc(n);
+        return n === 0 ? 0 : n;
+    }
+
+    function blobCollectParts(parts) {
+        var items = [];
+        if (parts === undefined) return items;
+        if (parts === null || (typeof parts !== 'object' && typeof parts !== 'function'))
+            throw new TypeError('The blobParts argument is not a sequence');
+        var method = parts[Symbol.iterator];
+        if (typeof method !== 'function')
+            throw new TypeError('The blobParts argument is not iterable');
+        var iterator = method.call(parts);
+        if (iterator === null || typeof iterator !== 'object')
+            throw new TypeError('The blobParts iterator is not an object');
+        var next = iterator.next;
+        for (;;) {
+            var step = next.call(iterator);
+            if (step === null || typeof step !== 'object')
+                throw new TypeError('The blobParts iterator result is not an object');
+            if (step.done) break;
+            items.push(blobPartItem(step.value));
+        }
+        return items;
+    }
+
+    function blobConcatParts(items, endings) {
         var chunks = [];
         var total = 0;
-        if (parts && typeof parts.length === 'number') {
-            for (var i = 0; i < parts.length; i++) {
-                var b = blobPartBytes(parts[i]);
-                chunks.push(b); total += b.length;
-            }
+        for (var i = 0; i < items.length; i++) {
+            var b = blobItemBytes(items[i], endings);
+            chunks.push(b);
+            total += b.length;
         }
         var buf = new Uint8Array(total);
         var off = 0;
         for (var k = 0; k < chunks.length; k++) {
-            buf.set(chunks[k], off); off += chunks[k].length;
+            buf.set(chunks[k], off);
+            off += chunks[k].length;
         }
-        this._b = buf;
-        Object.defineProperty(this, 'size', { value: total, configurable: true });
-        Object.defineProperty(this, 'type', {
-            value: options && options.type ? String(options.type).toLowerCase() : '',
-            configurable: true
+        return buf;
+    }
+
+    function blobInit(self, bytes, type) {
+        Object.defineProperty(self, '_b', { value: bytes, writable: true, configurable: true });
+        Object.defineProperty(self, '_type', { value: type, writable: true, configurable: true });
+    }
+
+    function Blob() {
+        if (!new.target) throw new TypeError("Failed to construct 'Blob': Please use the 'new' operator");
+        var items = blobCollectParts(arguments[0]);
+        var bag = blobPropertyBag(arguments[1], false);
+        blobInit(this, blobConcatParts(items, bag.endings),
+                 blobNormalizeType(bag.type));
+    }
+    Object.defineProperty(Blob, 'length', { value: 0 });
+    function blobDefine(proto, name, fn) {
+        Object.defineProperty(proto, name, {
+            value: fn, writable: true, configurable: true, enumerable: true
         });
     }
-    Blob.prototype.slice = function (start, end, type) {
-        var s = start == null ? 0 : start | 0;
-        var e = end == null ? this.size : end | 0;
-        if (s < 0) s = Math.max(0, this.size + s);
-        if (e < 0) e = Math.max(0, this.size + e);
-        s = Math.min(s, this.size); e = Math.min(e, this.size);
-        if (e < s) e = s;
-        var slice = this._b.slice(s, e);
-        var out = new Blob([], {type: type || this.type});
-        out._b = slice;
-        Object.defineProperty(out, 'size', { value: slice.length, configurable: true });
+    function blobGetter(proto, name, fn) {
+        Object.defineProperty(proto, name, {
+            get: fn, configurable: true, enumerable: true
+        });
+    }
+    function blobBytesOf(blob) {
+        return blob && blob._b ? blob._b : new Uint8Array(0);
+    }
+    blobGetter(Blob.prototype, 'size', function () { return blobBytesOf(this).length; });
+    blobGetter(Blob.prototype, 'type', function () {
+        return this && typeof this._type === 'string' ? this._type : '';
+    });
+    blobDefine(Blob.prototype, 'slice', function (start, end, contentType) {
+        var bytes = blobBytesOf(this);
+        var size = bytes.length;
+        var from = start === undefined ? 0 : blobLongLong(start, true);
+        var to = end === undefined ? size : blobLongLong(end, true);
+        from = from < 0 ? Math.max(size + from, 0) : Math.min(from, size);
+        to = to < 0 ? Math.max(size + to, 0) : Math.min(to, size);
+        var type = contentType === undefined ? '' : blobNormalizeType(blobIdlString(contentType));
+        var out = Object.create(Blob.prototype);
+        blobInit(out, bytes.slice(from, Math.max(to, from)), type);
         return out;
-    };
+    });
     function utf8Decode(bytes) {
         var s = '';
         for (var i = 0; i < bytes.length;) {
@@ -370,20 +484,23 @@
         }
         return s;
     }
-    Blob.prototype.text = function () {
-        var b = this._b;
+    blobDefine(Blob.prototype, 'text', function () {
+        var b = blobBytesOf(this);
         var text = (typeof TextDecoder === 'function')
             ? new TextDecoder().decode(b) : utf8Decode(b);
         return Promise.resolve(text);
-    };
-    Blob.prototype.arrayBuffer = function () {
-        var b = this._b;
+    });
+    blobDefine(Blob.prototype, 'arrayBuffer', function () {
+        var b = blobBytesOf(this);
         var buf = new ArrayBuffer(b.length);
         new Uint8Array(buf).set(b);
         return Promise.resolve(buf);
-    };
-    Blob.prototype.stream = function () {
-        var bytes = this._b;
+    });
+    blobDefine(Blob.prototype, 'bytes', function () {
+        return Promise.resolve(new Uint8Array(blobBytesOf(this)));
+    });
+    blobDefine(Blob.prototype, 'stream', function () {
+        var bytes = blobBytesOf(this);
         if (typeof ReadableStream === 'function') {
             return new ReadableStream({
                 start: function (controller) {
@@ -408,20 +525,45 @@
                 };
             }
         };
-    };
+    });
+    Object.defineProperty(Blob.prototype, Symbol.toStringTag, {
+        value: 'Blob', configurable: true
+    });
     defineCtor('Blob', Blob);
 
-    function File(parts, name, options) {
-        if (!(this instanceof File)) return new File(parts, name, options);
-        Blob.call(this, parts, options);
-        Object.defineProperty(this, 'name', { value: String(name), configurable: true });
-        Object.defineProperty(this, 'lastModified', {
-            value: options && options.lastModified ? +options.lastModified : Date.now(),
-            configurable: true
+    function File(fileBits, fileName) {
+        if (!new.target) throw new TypeError("Failed to construct 'File': Please use the 'new' operator");
+        if (arguments.length < 2)
+            throw new TypeError("Failed to construct 'File': 2 arguments required");
+        if (fileBits === undefined)
+            throw new TypeError("Failed to construct 'File': fileBits is not a sequence");
+        var items = blobCollectParts(fileBits);
+        var name = blobIdlString(fileName);
+        var bag = blobPropertyBag(arguments[2], true);
+        blobInit(this, blobConcatParts(items, bag.endings),
+                 blobNormalizeType(bag.type));
+        Object.defineProperty(this, '_name', { value: name, writable: true, configurable: true });
+        Object.defineProperty(this, '_lastModified', {
+            value: bag.lastModified === undefined ? Date.now() : bag.lastModified,
+            writable: true, configurable: true
         });
     }
+    Object.defineProperty(File, 'length', { value: 2 });
     File.prototype = Object.create(Blob.prototype);
-    File.prototype.constructor = File;
+    Object.defineProperty(File.prototype, 'constructor', {
+        value: File, writable: true, configurable: true
+    });
+    Object.setPrototypeOf(File, Blob);
+    blobGetter(File.prototype, 'name', function () {
+        return this && typeof this._name === 'string' ? this._name : '';
+    });
+    blobGetter(File.prototype, 'lastModified', function () {
+        return this && typeof this._lastModified === 'number' ? this._lastModified : 0;
+    });
+    blobGetter(File.prototype, 'webkitRelativePath', function () { return ''; });
+    Object.defineProperty(File.prototype, Symbol.toStringTag, {
+        value: 'File', configurable: true
+    });
     defineCtor('File', File);
 
     if (typeof global.queueMicrotask !== 'function') {
