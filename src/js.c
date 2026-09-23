@@ -14327,12 +14327,10 @@ ns_computed_box_edge_px(const ns_box *b, const char *name)
 static char *
 ns_computed_transform_matrix(const ns_style *s, const ns_box *b)
 {
-    ns_css_transform eff;
-    eff.n_ops = 0;
-    if (s && (s->values[NS_CSS_TRANSFORM] || s->values[NS_CSS_TRANSLATE] ||
-              s->values[NS_CSS_ROTATE] || s->values[NS_CSS_SCALE]))
-        ns_css_style_effective_transform(s, NULL, &eff);
-    if (eff.n_ops == 0) return g_strdup("none");
+    const ns_css_value *tv = s ? s->values[NS_CSS_TRANSFORM] : NULL;
+    if (!tv || tv->kind != NS_CSS_V_TRANSFORM || tv->u.transform.n_ops == 0)
+        return g_strdup("none");
+    const ns_css_transform eff = tv->u.transform;
     double bw = 0, bh = 0;
     if (b) {
         bw = b->content_width + b->padding.left + b->padding.right +
