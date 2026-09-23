@@ -20124,6 +20124,9 @@ void
 ns_css_stylesheet_resolve_urls(ns_css_stylesheet *s, const char *base_url)
 {
     if (!s || !base_url) return;
+    if (s->resolved_base && strcmp(s->resolved_base, base_url) == 0) return;
+    g_free(s->resolved_base);
+    s->resolved_base = g_strdup(base_url);
     if (s->rules) {
         for (guint ri = 0; ri < s->rules->len; ri++) {
             ns_css_rule *r = g_ptr_array_index(s->rules, ri);
@@ -20236,6 +20239,7 @@ ns_css_stylesheet_free(ns_css_stylesheet *s)
     if (s->keyframes) g_array_free(s->keyframes, TRUE);
     if (s->property_rules) g_array_free(s->property_rules, TRUE);
     g_clear_pointer(&s->page_rule, g_free);
+    g_clear_pointer(&s->resolved_base, g_free);
     if (s->index) ns_css_rule_index_free(s->index);
     s->rules = NULL;
     s->imports = NULL;
@@ -29150,6 +29154,15 @@ typedef struct {
     guint64 stamp;
 } ns_merged_style_cached;
 
+typedef struct {
+    double      vw;
+    double      vh;
+    const char *base;
+    const char *css;
+    gsize       len;
+    guint       hash;
+} ns_merged_style_key;
+
 static GHashTable *g_style_el_cache;
 static GHashTable *g_merged_style_cache;
 static GHashTable *g_link_sheet_cache;
@@ -29166,6 +29179,52 @@ ns_style_el_cached_free(gpointer data)
         ns_css_stylesheet_free(e->sheet);
     }
     g_free(e);
+}
+
+static ns_merged_style_key
+ns_merged_style_key_make(const char *css, gsize len, const char *base)
+{
+    ns_merged_style_key k = {
+        .vw = rint(ns_css_media_viewport_current_w()),
+        .vh = rint(ns_css_media_viewport_current_h()),
+        .base = base,
+        .css = css,
+        .len = len,
+    };
+    guint h = 2166136261u;
+    for (gsize i = 0; i < len; i++) {
+        h ^= (guchar)css[i];
+        h *= 16777619u;
+    }
+    h ^= base ? g_str_hash(base) * 31u : 0;
+    h ^= (guint)k.vw * 7919u ^ (guint)k.vh * 104729u;
+    k.hash = h;
+    return k;
+}
+
+static guint
+ns_merged_style_key_hash(gconstpointer p)
+{
+    return ((const ns_merged_style_key *)p)->hash;
+}
+
+static gboolean
+ns_merged_style_key_equal(gconstpointer pa, gconstpointer pb)
+{
+    const ns_merged_style_key *a = pa, *b = pb;
+    return a->hash == b->hash && a->len == b->len &&
+           a->vw == b->vw && a->vh == b->vh &&
+           g_strcmp0(a->base, b->base) == 0 &&
+           memcmp(a->css, b->css, a->len) == 0;
+}
+
+static void
+ns_merged_style_key_free(gpointer data)
+{
+    ns_merged_style_key *k = data;
+    g_free((char *)k->base);
+    g_free((char *)k->css);
+    g_free(k);
 }
 
 static void
@@ -29253,34 +29312,37 @@ ns_css_style_element_cache_end(void)
 }
 
 ns_css_stylesheet *
-ns_css_merged_styles_cached(const char *css, gssize len)
+ns_css_merged_styles_cached(const char *css, gssize len, const char *base_url)
 {
     if (!css || len == 0) return NULL;
     if (len < 0) len = (gssize)strlen(css);
     if (!g_merged_style_cache)
         g_merged_style_cache =
-            g_hash_table_new_full(g_str_hash, g_str_equal,
-                                  g_free, ns_merged_style_cached_free);
-    char *key = g_strdup_printf("%.0fx%.0f|%.*s",
-                                ns_css_media_viewport_current_w(),
-                                ns_css_media_viewport_current_h(),
-                                (int)len, css);
+            g_hash_table_new_full(ns_merged_style_key_hash,
+                                  ns_merged_style_key_equal,
+                                  ns_merged_style_key_free,
+                                  ns_merged_style_cached_free);
+    ns_merged_style_key probe =
+        ns_merged_style_key_make(css, (gsize)len, base_url);
     ns_merged_style_cached *hit =
-        g_hash_table_lookup(g_merged_style_cache, key);
+        g_hash_table_lookup(g_merged_style_cache, &probe);
     if (hit) {
         hit->stamp = ++g_merged_style_cache_clock;
-        g_free(key);
         return hit->sheet;
     }
     ns_css_stylesheet *sh = ns_css_stylesheet_parse(css, len);
-    if (!sh) {
-        g_free(key);
-        return NULL;
-    }
+    if (!sh) return NULL;
     sh->cached = TRUE;
     ns_merged_style_cached *entry = g_new0(ns_merged_style_cached, 1);
     entry->sheet = sh;
     entry->stamp = ++g_merged_style_cache_clock;
+    ns_merged_style_key *key = g_new(ns_merged_style_key, 1);
+    *key = probe;
+    key->base = g_strdup(base_url);
+    char *copy = g_malloc((gsize)len + 1);
+    memcpy(copy, css, (gsize)len);
+    copy[len] = '\0';
+    key->css = copy;
     g_hash_table_replace(g_merged_style_cache, key, entry);
     return sh;
 }

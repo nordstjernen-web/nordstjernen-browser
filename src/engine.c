@@ -413,7 +413,8 @@ sheet_run_flush(sheet_collect_ctx *cc)
 {
     if (!cc->run || cc->run->len == 0) return;
     ns_css_stylesheet *sh =
-        ns_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len);
+        ns_css_merged_styles_cached(cc->run->str, (gssize)cc->run->len,
+                                    cc->run_base);
     if (sh) {
         GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, NULL);
@@ -486,6 +487,28 @@ css_has_viewport_media(const char *css)
 }
 
 static GHashTable *g_collect_frame_vp;
+static GHashTable *g_viewport_media_memo;
+
+static gboolean
+css_bytes_have_viewport_media(GBytes *bytes)
+{
+    if (!g_viewport_media_memo)
+        g_viewport_media_memo =
+            g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                  (GDestroyNotify)g_bytes_unref, NULL);
+    gpointer memo = g_hash_table_lookup(g_viewport_media_memo, bytes);
+    if (memo) return GPOINTER_TO_INT(memo) == 2;
+    if (g_hash_table_size(g_viewport_media_memo) >= 256)
+        g_hash_table_remove_all(g_viewport_media_memo);
+    gsize len = 0;
+    const char *data = g_bytes_get_data(bytes, &len);
+    char *terminated = g_strndup(data, len);
+    gboolean seen = css_has_viewport_media(terminated);
+    g_free(terminated);
+    g_hash_table_insert(g_viewport_media_memo, g_bytes_ref(bytes),
+                        GINT_TO_POINTER(seen ? 2 : 1));
+    return seen;
+}
 
 static void
 frame_viewport_px(const ns_node *frame, double *w, double *h)
@@ -644,9 +667,7 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
                 engine_remember_linked_css(abs, bytes);
-                char *terminated = g_strndup(data, len);
-                if (css_has_viewport_media(terminated)) cc->media_seen = TRUE;
-                g_free(terminated);
+                if (css_bytes_have_viewport_media(bytes)) cc->media_seen = TRUE;
                 ns_css_stylesheet *sh =
                     ns_css_stylesheet_parse_url_cached(abs, data, (gssize)len);
                 if (sh) {
