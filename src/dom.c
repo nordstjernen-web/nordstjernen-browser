@@ -2352,6 +2352,13 @@ ns_node_collect_text(const ns_node *root)
     return g_string_free(out, FALSE);
 }
 
+static gboolean
+ns_node_is_shadow_root_marked(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_ELEMENT &&
+           ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
+}
+
 static void
 collect_all_text(const ns_node *n, GString *out, int depth)
 {
@@ -2361,7 +2368,8 @@ collect_all_text(const ns_node *n, GString *out, int depth)
         return;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        collect_all_text(c, out, depth + 1);
+        if (!ns_node_is_shadow_root_marked(c))
+            collect_all_text(c, out, depth + 1);
 }
 
 char *
