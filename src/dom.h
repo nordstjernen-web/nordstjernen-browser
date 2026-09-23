@@ -156,6 +156,7 @@ guint64     ns_attr_name_bloom_bit(const char *name);
 guint64     ns_node_attr_bloom(const ns_node *el);
 gboolean    ns_node_has_class(const ns_node *el, const char *name, gsize len);
 gboolean    ns_node_is_element_named(const ns_node *n, const char *tag);
+gboolean    ns_input_is_one_line_text(const ns_node *n);
 
 const ns_node *ns_node_root(const ns_node *n);
 ns_node    *ns_node_find_first_element(const ns_node *root, const char *tag);

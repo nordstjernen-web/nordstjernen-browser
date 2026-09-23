@@ -1617,26 +1617,32 @@ ns_style_is_nowrap(const ns_style *style)
 }
 
 double
+ns_paint_normal_line_height_px(const ns_style *s)
+{
+    double font_size = length_or(s ? s->values[NS_CSS_FONT_SIZE] : NULL, 16);
+    double factor = 1.2;
+    const ns_css_value *family = s ? s->values[NS_CSS_FONT_FAMILY] : NULL;
+    if (family && family->kind == NS_CSS_V_KEYWORD && family->u.keyword) {
+        char *resolved = ns_css_font_family_for_pango(family->u.keyword);
+        if (g_ascii_strcasecmp(resolved, "Arial") == 0 ||
+            g_ascii_strcasecmp(resolved, "Helvetica") == 0)
+            factor = 1.1;
+        else if (g_ascii_strcasecmp(resolved, "Times New Roman") == 0 ||
+                 g_ascii_strcasecmp(resolved, "serif") == 0)
+            factor = 1.125;
+        g_free(resolved);
+    }
+    return ceil(font_size * factor);
+}
+
+double
 ns_paint_css_line_height_px(const ns_style *s)
 {
     if (!s) return -1;
     const ns_css_value *lh = s->values[NS_CSS_LINE_HEIGHT];
     double font_size = length_or(s->values[NS_CSS_FONT_SIZE], 16);
-    if (!lh || keyword_is(lh, "normal")) {
-        double factor = 1.2;
-        const ns_css_value *family = s->values[NS_CSS_FONT_FAMILY];
-        if (family && family->kind == NS_CSS_V_KEYWORD && family->u.keyword) {
-            char *resolved = ns_css_font_family_for_pango(family->u.keyword);
-            if (g_ascii_strcasecmp(resolved, "Arial") == 0 ||
-                g_ascii_strcasecmp(resolved, "Helvetica") == 0)
-                factor = 1.1;
-            else if (g_ascii_strcasecmp(resolved, "Times New Roman") == 0 ||
-                     g_ascii_strcasecmp(resolved, "serif") == 0)
-                factor = 1.125;
-            g_free(resolved);
-        }
-        return ceil(font_size * factor);
-    }
+    if (!lh || keyword_is(lh, "normal"))
+        return ns_paint_normal_line_height_px(s);
     if (lh->kind != NS_CSS_V_LENGTH) return -1;
     switch (lh->u.length.unit) {
     case NS_CSS_UNIT_PX:      return lh->u.length.v;

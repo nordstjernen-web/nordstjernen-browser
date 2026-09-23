@@ -5941,6 +5941,9 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     }
     if (line_count < 1) line_count = 1;
     double lh_default = inline_line_height(parent_style);
+    if (box->parent && ns_input_is_one_line_text(box->parent->dom))
+        lh_default = MAX(lh_default,
+                         ns_paint_normal_line_height_px(parent_style));
     double lh_control = inline_control_line_height(box, lh_default);
     double *line_heights = g_new(double, line_count);
     for (int i = 0; i < line_count; i++) line_heights[i] = lh_control;

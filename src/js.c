@@ -58,6 +58,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include "js_realm.h"
 #include "layout.h"
 #include "net.h"
+#include "paint.h"
 #include "eventsource.h"
 #include "security.h"
 #include "video.h"
@@ -14602,6 +14603,11 @@ ns_computed_line_height_px(JSContext *ctx, const ns_node *n, const ns_style *s)
 {
     const ns_css_value *lv = s ? s->values[NS_CSS_LINE_HEIGHT] : NULL;
     if (!lv || lv->kind != NS_CSS_V_LENGTH) return NULL;
+    if (ns_input_is_one_line_text(n)) {
+        double normal = ns_paint_normal_line_height_px(s);
+        if (ns_paint_css_line_height_px(s) < normal)
+            return g_strdup_printf("%gpx", normal);
+    }
     ns_css_unit u = lv->u.length.unit;
     double fs = ns_computed_font_px(ctx, n);
     if (u == NS_CSS_UNIT_NUMBER)
