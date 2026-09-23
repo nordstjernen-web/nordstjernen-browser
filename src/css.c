@@ -26025,6 +26025,131 @@ style_font_px(const ns_style *s)
     return 16;
 }
 
+static gboolean
+track_length_absolute(ns_css_unit unit, double v, double font_px,
+                      double root_px, double *px)
+{
+    switch (unit) {
+    case NS_CSS_UNIT_PX:  *px = v; return TRUE;
+    case NS_CSS_UNIT_EM:  *px = v * font_px; return TRUE;
+    case NS_CSS_UNIT_REM: *px = v * root_px; return TRUE;
+    default:              return FALSE;
+    }
+}
+
+static gboolean
+track_length_computed_append(GString *out, const char *tok, gsize len,
+                             double font_px, double root_px)
+{
+    char *text = g_strndup(tok, len);
+    double px = 0, pct = 0;
+    gboolean has_pct = FALSE, ok = FALSE, math = is_math_fn_start(text);
+    ns_css_value *v = math ? parse_calc(text) : NULL;
+    if (v && v->kind == NS_CSS_V_LENGTH) {
+        has_pct = v->u.length.unit == NS_CSS_UNIT_PERCENT;
+        if (has_pct) pct = v->u.length.v;
+        ok = has_pct || track_length_absolute(v->u.length.unit, v->u.length.v,
+                                              font_px, root_px, &px);
+    } else if (v && v->kind == NS_CSS_V_CALC && !v->u.calc.fn &&
+               v->u.calc.vw == 0 && v->u.calc.vh == 0 &&
+               v->u.calc.vmin == 0 && v->u.calc.vmax == 0) {
+        px = v->u.calc.px + v->u.calc.em * font_px + v->u.calc.rem * root_px;
+        pct = v->u.calc.pct;
+        has_pct = strchr(text, '%') != NULL;
+        ok = TRUE;
+    } else if (!math) {
+        double num;
+        ns_css_unit unit;
+        if (parse_length(text, &num, &unit)) {
+            has_pct = unit == NS_CSS_UNIT_PERCENT;
+            if (has_pct) pct = num;
+            ok = has_pct || track_length_absolute(unit, num, font_px, root_px,
+                                                  &px);
+        }
+    }
+    ns_css_value_free(v);
+    g_free(text);
+    if (!ok) return FALSE;
+    char *pct_str = ns_css_number_str(pct);
+    char *px_str = ns_css_number_str(has_pct ? fabs(px) : MAX(px, 0));
+    if (!has_pct)
+        g_string_append_printf(out, "%spx", px_str);
+    else if (!math)
+        g_string_append_printf(out, "%s%%", pct_str);
+    else
+        g_string_append_printf(out, "calc(%s%% %c %spx)", pct_str,
+                               px < 0 ? '-' : '+', px_str);
+    g_free(pct_str);
+    g_free(px_str);
+    return TRUE;
+}
+
+static gboolean
+track_number_start(const char *p)
+{
+    if (*p == '+' || *p == '-') p++;
+    if (*p == '.') p++;
+    return g_ascii_isdigit(*p);
+}
+
+static char *
+tracks_computed_text(const char *text, double font_px, double root_px)
+{
+    GString *out = g_string_new(NULL);
+    const char *p = text;
+    const char *end = text + strlen(text);
+    while (p < end) {
+        gboolean boundary = p == text || !(is_ident(p[-1]) || p[-1] == '.');
+        if (*p == '[') {
+            const char *close = memchr(p, ']', (gsize)(end - p));
+            const char *stop = close ? close + 1 : end;
+            g_string_append_len(out, p, stop - p);
+            p = stop;
+            continue;
+        }
+        if (boundary && is_math_fn_start(p)) {
+            const char *close = match_close_paren(strchr(p, '(') + 1, end);
+            const char *stop = close ? close + 1 : end;
+            if (!track_length_computed_append(out, p, (gsize)(stop - p),
+                                              font_px, root_px))
+                g_string_append_len(out, p, stop - p);
+            p = stop;
+            continue;
+        }
+        if (boundary && track_number_start(p)) {
+            const char *q = p + 1;
+            while (q < end && (g_ascii_isdigit(*q) || *q == '.')) q++;
+            if (q < end && (*q == 'e' || *q == 'E') && track_number_start(q + 1)) {
+                q += 2;
+                while (q < end && g_ascii_isdigit(*q)) q++;
+            }
+            const char *unit = q;
+            while (q < end && (g_ascii_isalpha(*q) || *q == '%')) q++;
+            gboolean flex = q - unit == 2 && g_ascii_strncasecmp(unit, "fr", 2) == 0;
+            if (flex || !track_length_computed_append(out, p, (gsize)(q - p),
+                                                      font_px, root_px))
+                g_string_append_len(out, p, q - p);
+            p = q;
+            continue;
+        }
+        g_string_append_c(out, *p++);
+    }
+    return g_string_free(out, FALSE);
+}
+
+char *
+ns_css_tracks_computed_serialize(const ns_style *s, const ns_style *root,
+                                 int prop)
+{
+    const ns_css_value *v = s && prop >= 0 && prop < NS_CSS_PROP_COUNT
+        ? s->values[prop] : NULL;
+    if (!v || v->kind != NS_CSS_V_TRACKS || v->u.tracks.subgrid ||
+        !v->specified)
+        return NULL;
+    return tracks_computed_text(v->specified, style_font_px(s),
+                                style_font_px(root ? root : s));
+}
+
 static void
 syntax_ctx_for_style(ns_css_syntax_ctx *ctx, const ns_style *s, double root_px)
 {
