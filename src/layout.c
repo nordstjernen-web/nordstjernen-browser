@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "css.h"
+#include "html.h"
 #include "image.h"
 #include "svg.h"
 #include "mathml.h"
@@ -2589,17 +2590,7 @@ typedef struct ns_meter_state {
 static gboolean
 parse_float_attr(const ns_node *n, const char *attr, double *out)
 {
-    const char *s = ns_element_get_attr(n, attr);
-    if (!s) return FALSE;
-    while (*s && g_ascii_isspace(*s)) s++;
-    if (!*s) return FALSE;
-    char *end = NULL;
-    double v = g_ascii_strtod(s, &end);
-    if (end == s) return FALSE;
-    while (*end && g_ascii_isspace(*end)) end++;
-    if (*end || !isfinite(v)) return FALSE;
-    *out = v;
-    return TRUE;
+    return ns_html_parse_float(ns_element_get_attr(n, attr), out);
 }
 
 static ns_progress_state

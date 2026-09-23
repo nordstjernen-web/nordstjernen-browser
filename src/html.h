@@ -32,6 +32,8 @@ void ns_html_convert_declarative_shadow(ns_node *root);
 
 gboolean ns_html_is_void(const char *tag);
 
+gboolean ns_html_parse_float(const char *s, double *out);
+
 gboolean ns_html_is_raw_text(const char *tag);
 
 void ns_html_escape_append(GString *out, const char *s, gboolean escape_quotes);

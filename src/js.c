@@ -4238,6 +4238,30 @@ ns_js_set_attr_recorded_paint_only(ns_js *js, ns_node *n,
     g_free(old_copy);
 }
 
+static gboolean
+ns_reflect_null_is_empty(const ns_node *n, const char *attr)
+{
+    static const struct { const char *elem, *attrs; } table[] = {
+        { "body",   " text link vlink alink bgcolor " },
+        { "font",   " color " },
+        { "frame",  " marginheight marginwidth " },
+        { "iframe", " marginheight marginwidth " },
+        { "img",    " border " },
+        { "object", " border " },
+        { "table",  " bgcolor cellpadding cellspacing " },
+        { "tr",     " bgcolor " },
+        { "td",     " bgcolor " },
+        { "th",     " bgcolor " },
+    };
+    if (!n || !n->name || !attr) return FALSE;
+    char key[32];
+    g_snprintf(key, sizeof key, " %s ", attr);
+    for (gsize i = 0; i < G_N_ELEMENTS(table); i++)
+        if (ns_node_is_element_named(n, table[i].elem))
+            return strstr(table[i].attrs, key) != NULL;
+    return FALSE;
+}
+
 static JSValue
 ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, int magic)
 {
@@ -4256,9 +4280,7 @@ ns_element_attr_setter(JSContext *ctx, JSValueConst this_val, JSValueConst val, 
                                   JS_DupValue(ctx, val), JS_PROP_C_W_E);
         return JS_UNDEFINED;
     }
-    if (JS_IsNull(val) && ns_node_is_element_named(n, "body") &&
-        (magic == 97 || magic == 99 || magic == 100 ||
-         magic == 101 || magic == 131)) {
+    if (JS_IsNull(val) && ns_reflect_null_is_empty(n, names[magic])) {
         ns_js_set_attr_recorded_len(js_from_ctx(ctx), n, names[magic], "", 0);
         return JS_UNDEFINED;
     }
@@ -4405,7 +4427,8 @@ static gboolean
 ns_int_attr_is_string(const char *elem, const char *attr)
 {
     if (!elem) return FALSE;
-    if (strcmp(attr, "size") == 0) return strcmp(elem, "hr") == 0;
+    if (strcmp(attr, "size") == 0)
+        return strcmp(elem, "hr") == 0 || strcmp(elem, "font") == 0;
     if (strcmp(attr, "cols") == 0 || strcmp(attr, "rows") == 0)
         return strcmp(elem, "frameset") == 0;
     return FALSE;
@@ -4517,7 +4540,9 @@ ns_element_int_attr_setter(JSContext *ctx, JSValueConst this_val,
         if (type == NIT_LIMITED_ULONG && uv == 0 && is_size)
             return ns_throw_dom_exception(ctx, "IndexSizeError", 1,
                                           "value must be greater than zero");
-        store = (uv > (uint32_t)NS_HTML_MAXINT) ? dflt : (long)uv;
+        gboolean out_of_range = uv > (uint32_t)NS_HTML_MAXINT ||
+                                (type == NIT_LIMITED_ULONG && uv == 0);
+        store = out_of_range ? dflt : (long)uv;
     }
     char buf[32];
     g_snprintf(buf, sizeof buf, "%ld", store);
@@ -4788,25 +4813,25 @@ static const ns_enum_attr_def g_enum_attrs[] = {
     [NS_ENUM_REFERRERPOLICY] = { "referrerpolicy", kw_referrer,  8, "",      "",      FALSE },
     [NS_ENUM_ENTERKEYHINT]   = { "enterkeyhint",   kw_enterkeyhint, 7, "",   "",      FALSE },
     [NS_ENUM_ARIA_ATOMIC]          = { "aria-atomic",          kw_truefalse,    2, NULL,    "false", TRUE },
-    [NS_ENUM_ARIA_AUTOCOMPLETE]    = { "aria-autocomplete",    kw_autocomplete, 4, "none",  "none",  TRUE },
-    [NS_ENUM_ARIA_BUSY]            = { "aria-busy",            kw_truefalse,    2, "false", "false", TRUE },
+    [NS_ENUM_ARIA_AUTOCOMPLETE]    = { "aria-autocomplete",    kw_autocomplete, 4, NULL,    "none",  TRUE },
+    [NS_ENUM_ARIA_BUSY]            = { "aria-busy",            kw_truefalse,    2, NULL,    "false", TRUE },
     [NS_ENUM_ARIA_CHECKED]         = { "aria-checked",         kw_tristate,     3, NULL,    NULL,    TRUE },
-    [NS_ENUM_ARIA_CURRENT]         = { "aria-current",         kw_ariacurrent,  7, "false", "true",  TRUE },
-    [NS_ENUM_ARIA_DISABLED]        = { "aria-disabled",        kw_truefalse,    2, "false", "false", TRUE },
+    [NS_ENUM_ARIA_CURRENT]         = { "aria-current",         kw_ariacurrent,  7, NULL,    "true",  TRUE },
+    [NS_ENUM_ARIA_DISABLED]        = { "aria-disabled",        kw_truefalse,    2, NULL,    "false", TRUE },
     [NS_ENUM_ARIA_EXPANDED]        = { "aria-expanded",        kw_truefalse,    2, NULL,    NULL,    TRUE },
     [NS_ENUM_ARIA_HASPOPUP]        = { "aria-haspopup",        kw_haspopup,     7, NULL,    "false", TRUE },
-    [NS_ENUM_ARIA_HIDDEN]          = { "aria-hidden",          kw_truefalse,    2, "false", "false", TRUE },
-    [NS_ENUM_ARIA_INVALID]         = { "aria-invalid",         kw_ariainvalid,  4, "false", "true",  TRUE },
-    [NS_ENUM_ARIA_LIVE]            = { "aria-live",            kw_arialive,     3, "off",   "off",   TRUE },
-    [NS_ENUM_ARIA_MODAL]           = { "aria-modal",           kw_truefalse,    2, "false", "false", TRUE },
-    [NS_ENUM_ARIA_MULTILINE]       = { "aria-multiline",       kw_truefalse,    2, "false", "false", TRUE },
-    [NS_ENUM_ARIA_MULTISELECTABLE] = { "aria-multiselectable", kw_truefalse,    2, "false", "false", TRUE },
+    [NS_ENUM_ARIA_HIDDEN]          = { "aria-hidden",          kw_truefalse,    2, NULL,    "false", TRUE },
+    [NS_ENUM_ARIA_INVALID]         = { "aria-invalid",         kw_ariainvalid,  4, NULL,    "true",  TRUE },
+    [NS_ENUM_ARIA_LIVE]            = { "aria-live",            kw_arialive,     3, NULL,    "off",   TRUE },
+    [NS_ENUM_ARIA_MODAL]           = { "aria-modal",           kw_truefalse,    2, NULL,    "false", TRUE },
+    [NS_ENUM_ARIA_MULTILINE]       = { "aria-multiline",       kw_truefalse,    2, NULL,    "false", TRUE },
+    [NS_ENUM_ARIA_MULTISELECTABLE] = { "aria-multiselectable", kw_truefalse,    2, NULL,    "false", TRUE },
     [NS_ENUM_ARIA_ORIENTATION]     = { "aria-orientation",     kw_orientation,  2, NULL,    NULL,    TRUE },
     [NS_ENUM_ARIA_PRESSED]         = { "aria-pressed",         kw_tristate,     3, NULL,    NULL,    TRUE },
-    [NS_ENUM_ARIA_READONLY]        = { "aria-readonly",        kw_truefalse,    2, "false", "false", TRUE },
-    [NS_ENUM_ARIA_REQUIRED]        = { "aria-required",        kw_truefalse,    2, "false", "false", TRUE },
+    [NS_ENUM_ARIA_READONLY]        = { "aria-readonly",        kw_truefalse,    2, NULL,    "false", TRUE },
+    [NS_ENUM_ARIA_REQUIRED]        = { "aria-required",        kw_truefalse,    2, NULL,    "false", TRUE },
     [NS_ENUM_ARIA_SELECTED]        = { "aria-selected",        kw_truefalse,    2, NULL,    NULL,    TRUE },
-    [NS_ENUM_ARIA_SORT]            = { "aria-sort",            kw_ariasort,     4, "none",  "none",  TRUE },
+    [NS_ENUM_ARIA_SORT]            = { "aria-sort",            kw_ariasort,     4, NULL,    "none",  TRUE },
 };
 
 static JSValue
@@ -4819,6 +4844,45 @@ ns_reflect_enum(JSContext *ctx, const ns_node *n, const ns_enum_attr_def *d)
         if (ns_enum_kw_eq(v, vlen, d->kw[i]))
             return JS_NewString(ctx, d->kw[i]);
     return d->invalid ? JS_NewString(ctx, d->invalid) : JS_NULL;
+}
+
+static const char *const ns_aria_string_attrs[] = {
+    "role", "aria-label", "aria-braillelabel",
+    "aria-brailleroledescription", "aria-colcount", "aria-colindex",
+    "aria-colindextext", "aria-colspan", "aria-description",
+    "aria-keyshortcuts", "aria-level", "aria-placeholder", "aria-posinset",
+    "aria-relevant", "aria-roledescription", "aria-rowcount",
+    "aria-rowindex", "aria-rowindextext", "aria-rowspan", "aria-setsize",
+    "aria-valuemax", "aria-valuemin", "aria-valuenow", "aria-valuetext",
+};
+
+static JSValue
+ns_element_aria_string_getter(JSContext *ctx, JSValueConst this_val, int magic)
+{
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_aria_string_attrs))
+        return JS_NULL;
+    const ns_node *n = ns_unwrap_element(this_val);
+    gsize len = 0;
+    const char *v = n ? ns_element_get_attr_len(n, ns_aria_string_attrs[magic],
+                                                &len) : NULL;
+    return v ? JS_NewStringLen(ctx, v, len) : JS_NULL;
+}
+
+static JSValue
+ns_element_aria_string_setter(JSContext *ctx, JSValueConst this_val,
+                              JSValueConst val, int magic)
+{
+    if (magic < 0 || magic >= (int)G_N_ELEMENTS(ns_aria_string_attrs))
+        return JS_UNDEFINED;
+    ns_node *n = ns_unwrap_element_mut(this_val);
+    if (!n) return JS_UNDEFINED;
+    if (JS_IsNull(val) || JS_IsUndefined(val)) {
+        ns_js_remove_attr_recorded(js_from_ctx(ctx), n,
+                                   ns_aria_string_attrs[magic]);
+        return JS_UNDEFINED;
+    }
+    return ns_element_reflect_str_set(ctx, this_val, val,
+                                      ns_aria_string_attrs[magic]);
 }
 
 static JSValue
@@ -6057,9 +6121,8 @@ ns_element_get_data(JSContext *ctx, JSValueConst this_val)
     const ns_node *n = ns_unwrap_element(this_val);
     if (ns_node_is_object_element(n)) {
         const char *v = ns_element_get_attr(n, "data");
-        if (!v || !*v) return JS_NewString(ctx, "");
-        ns_js *js = js_from_ctx(ctx);
-        const char *base = js ? js->current_url : NULL;
+        if (!v) return JS_NewString(ctx, "");
+        g_autofree char *base = ns_js_doc_base_url(js_from_ctx(ctx));
         if (base && *base) {
             char *resolved = ns_url_resolve(base, v);
             if (resolved) {
@@ -33462,6 +33525,9 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
 {
     ns_node *el = ns_unwrap_element_mut(this_val);
     if (!el) return JS_UNDEFINED;
+    if (!ns_node_is_element_named(el, "output") &&
+        !ns_node_is_element_named(el, "textarea"))
+        return ns_element_reflect_str_set(ctx, this_val, val, "value");
     const char *s = JS_ToCString(ctx, val);
     if (ns_node_is_element_named(el, "output")) {
         ns_js *_j = js_from_ctx(ctx);
@@ -33482,10 +33548,7 @@ ns_element_set_default_value(JSContext *ctx, JSValueConst this_val, JSValueConst
             ns_node_append_child(el, ns_node_new_text(g_strdup(s)));
         if (s) JS_FreeCString(ctx, s);
         if (_j) _j->mutated = TRUE;
-        return JS_UNDEFINED;
     }
-    ns_element_set_attr(el, "value", s ? s : "");
-    if (s) JS_FreeCString(ctx, s);
     return JS_UNDEFINED;
 }
 
@@ -35206,17 +35269,7 @@ typedef struct ns_js_meter_state {
 static gboolean
 ns_attr_float(const ns_node *n, const char *attr, double *out)
 {
-    const char *s = ns_element_get_attr(n, attr);
-    if (!s) return FALSE;
-    while (*s && g_ascii_isspace(*s)) s++;
-    if (!*s) return FALSE;
-    char *end = NULL;
-    double v = g_ascii_strtod(s, &end);
-    if (end == s) return FALSE;
-    while (*end && g_ascii_isspace(*end)) end++;
-    if (*end || !isfinite(v)) return FALSE;
-    *out = v;
-    return TRUE;
+    return ns_html_parse_float(ns_element_get_attr(n, attr), out);
 }
 
 static ns_js_progress_state
@@ -35266,13 +35319,15 @@ ns_meter_state_for(const ns_node *n)
 }
 
 static JSValue
-ns_element_set_double_attr(JSContext *ctx, ns_node *el,
-                           const char *attr, JSValueConst val)
+ns_element_set_double_attr_limited(JSContext *ctx, ns_node *el,
+                                   const char *attr, JSValueConst val,
+                                   gboolean positive_only)
 {
     double d;
     if (JS_ToFloat64(ctx, &d, val) < 0) return JS_EXCEPTION;
     if (!isfinite(d))
         return JS_ThrowTypeError(ctx, "The value provided is non-finite.");
+    if (positive_only && !(d > 0)) return JS_UNDEFINED;
     JSValue num = JS_NewFloat64(ctx, d);
     const char *s = JS_ToCString(ctx, num);
     JS_FreeValue(ctx, num);
@@ -35281,6 +35336,13 @@ ns_element_set_double_attr(JSContext *ctx, ns_node *el,
         JS_FreeCString(ctx, s);
     }
     return JS_UNDEFINED;
+}
+
+static JSValue
+ns_element_set_double_attr(JSContext *ctx, ns_node *el,
+                           const char *attr, JSValueConst val)
+{
+    return ns_element_set_double_attr_limited(ctx, el, attr, val, FALSE);
 }
 
 typedef enum ns_range_number_prop {
@@ -35316,8 +35378,8 @@ ns_element_range_number_getter(JSContext *ctx, JSValueConst this_val, int magic)
         return JS_NewFloat64(ctx, st.max);
     }
     const char *attr = ns_range_attr_name(magic);
-    const char *v = *attr ? ns_element_get_attr(el, attr) : NULL;
-    return JS_NewString(ctx, v ? v : "");
+    if (!*attr) return JS_NewString(ctx, "");
+    return ns_element_reflect_str_get(ctx, this_val, attr, FALSE);
 }
 
 static JSValue
@@ -35328,15 +35390,11 @@ ns_element_range_number_setter(JSContext *ctx, JSValueConst this_val,
     if (!el || !el->name) return JS_UNDEFINED;
     const char *attr = ns_range_attr_name(magic);
     if (!*attr) return JS_UNDEFINED;
-    if (g_ascii_strcasecmp(el->name, "meter") == 0 ||
-        (g_ascii_strcasecmp(el->name, "progress") == 0 && magic == NS_RANGE_MAX))
+    if (g_ascii_strcasecmp(el->name, "meter") == 0)
         return ns_element_set_double_attr(ctx, el, attr, val);
-    const char *s = JS_ToCString(ctx, val);
-    if (s) {
-        ns_js_set_attr_recorded(js_from_ctx(ctx), el, attr, s);
-        JS_FreeCString(ctx, s);
-    }
-    return JS_UNDEFINED;
+    if (g_ascii_strcasecmp(el->name, "progress") == 0 && magic == NS_RANGE_MAX)
+        return ns_element_set_double_attr_limited(ctx, el, attr, val, TRUE);
+    return ns_element_reflect_str_set(ctx, this_val, val, attr);
 }
 
 static JSValue
@@ -35483,10 +35541,8 @@ ns_element_get_label_prop(JSContext *ctx, JSValueConst this_val)
         return v;
     }
     if (g_ascii_strcasecmp(el->name, "optgroup") == 0 ||
-        g_ascii_strcasecmp(el->name, "track") == 0) {
-        const char *lbl = ns_element_get_attr(el, "label");
-        return JS_NewString(ctx, lbl ? lbl : "");
-    }
+        g_ascii_strcasecmp(el->name, "track") == 0)
+        return ns_element_reflect_str_get(ctx, this_val, "label", FALSE);
     return JS_UNDEFINED;
 }
 
@@ -35499,11 +35555,7 @@ ns_element_set_label_prop(JSContext *ctx, JSValueConst this_val, JSValueConst va
         g_ascii_strcasecmp(el->name, "optgroup") != 0 &&
         g_ascii_strcasecmp(el->name, "track")    != 0)
         return JS_UNDEFINED;
-    const char *s = JS_ToCString(ctx, val);
-    if (!s) return JS_UNDEFINED;
-    ns_element_set_attr(el, "label", s);
-    JS_FreeCString(ctx, s);
-    return JS_UNDEFINED;
+    return ns_element_reflect_str_set(ctx, this_val, val, "label");
 }
 
 static char *
@@ -36671,28 +36723,48 @@ ns_element_template_content(JSContext *ctx, JSValueConst this_val)
                                   JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
         return wrapped;
     }
-    const char *v = ns_element_get_attr(t, "content");
-    return JS_NewString(ctx, v ? v : "");
+    return ns_element_reflect_str_get(ctx, this_val, "content", FALSE);
+}
+
+static JSValue
+ns_element_set_content(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    if (ns_node_is_element_named(ns_unwrap_element(this_val), "template"))
+        return JS_UNDEFINED;
+    return ns_element_reflect_str_set(ctx, this_val, val, "content");
+}
+
+static int
+ns_int_attr_index(const char *attr)
+{
+    for (int i = 0; i < (int)G_N_ELEMENTS(g_int_attrs); i++)
+        if (strcmp(g_int_attrs[i].attr, attr) == 0) return i;
+    return -1;
+}
+
+static gboolean
+ns_element_reflects_rows(const ns_node *n)
+{
+    return ns_node_is_element_named(n, "textarea") ||
+           ns_node_is_element_named(n, "frameset");
+}
+
+static JSValue
+ns_element_set_rows(JSContext *ctx, JSValueConst this_val, JSValueConst val)
+{
+    if (!ns_element_reflects_rows(ns_unwrap_element(this_val)))
+        return JS_UNDEFINED;
+    return ns_element_int_attr_setter(ctx, this_val, val,
+                                      ns_int_attr_index("rows"));
 }
 
 static JSValue
 ns_element_table_rows(JSContext *ctx, JSValueConst this_val)
 {
     const ns_node *tbl = ns_unwrap_element(this_val);
-    if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "textarea") == 0) {
-        const char *v = ns_element_get_attr(tbl, "rows");
-        int32_t n = 2;
-        if (v) {
-            char *end = NULL;
-            long parsed = strtol(v, &end, 10);
-            if (end && end != v) n = (int32_t)parsed;
-        }
-        return JS_NewInt32(ctx, n);
-    }
-    if (tbl && tbl->name && g_ascii_strcasecmp(tbl->name, "frameset") == 0) {
-        const char *v = ns_element_get_attr(tbl, "rows");
-        return JS_NewString(ctx, v ? v : "");
-    }
+    if (ns_element_reflects_rows(tbl))
+        return ns_element_int_attr_getter(ctx, this_val,
+                                          ns_int_attr_index("rows"));
     JSValue arr = JS_NewArray(ctx);
     if (!tbl) return arr;
     uint32_t idx = 0;
@@ -41985,7 +42057,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CFUNC_DEF("attachInternals",   0, ns_element_attachInternals),
     JS_CGETSET_DEF("_internals",      ns_element_get_internals, ns_element_noop_set),
     JS_CGETSET_DEF("index",           ns_element_get_option_index,   ns_element_noop_set),
-    JS_CGETSET_DEF("rows",            ns_element_table_rows,         ns_element_noop_set),
+    JS_CGETSET_DEF("rows",            ns_element_table_rows,         ns_element_set_rows),
     JS_CGETSET_DEF("caption",         ns_element_table_caption,      ns_element_noop_set),
     JS_CGETSET_DEF("tHead",           ns_element_table_thead,        ns_element_noop_set),
     JS_CGETSET_DEF("tFoot",           ns_element_table_tfoot,        ns_element_noop_set),
@@ -42107,7 +42179,7 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_DEF("naturalHeight", ns_element_img_natural_height, ns_element_noop_set),
     JS_CGETSET_DEF("complete",      ns_element_img_complete, ns_element_noop_set),
     JS_CGETSET_DEF("currentSrc",    ns_element_img_current_src, ns_element_noop_set),
-    JS_CGETSET_DEF("content",       ns_element_template_content, ns_element_noop_set),
+    JS_CGETSET_DEF("content",       ns_element_template_content, ns_element_set_content),
     JS_CGETSET_DEF("hidden",        ns_element_get_hidden,     ns_element_set_hidden),
     JS_CGETSET_MAGIC_DEF("title",       ns_element_attr_getter, ns_element_attr_setter, 0),
     JS_CGETSET_MAGIC_DEF("name",        ns_element_attr_getter, ns_element_attr_setter, 1),
@@ -42234,8 +42306,30 @@ static const JSCFunctionListEntry ns_element_proto_funcs[] = {
     JS_CGETSET_MAGIC_DEF("httpEquiv",      ns_element_attr_getter, ns_element_attr_setter, 49),
     JS_CGETSET_DEF("contentEditable", ns_element_get_contentEditable, ns_element_set_contentEditable),
     JS_CGETSET_MAGIC_DEF("slot",           ns_element_attr_getter, ns_element_attr_setter, 51),
-    JS_CGETSET_MAGIC_DEF("role",           ns_element_attr_getter, ns_element_attr_setter, 53),
-    JS_CGETSET_MAGIC_DEF("ariaLabel",      ns_element_attr_getter, ns_element_attr_setter, 54),
+    JS_CGETSET_MAGIC_DEF("role", ns_element_aria_string_getter, ns_element_aria_string_setter, 0),
+    JS_CGETSET_MAGIC_DEF("ariaLabel", ns_element_aria_string_getter, ns_element_aria_string_setter, 1),
+    JS_CGETSET_MAGIC_DEF("ariaBrailleLabel", ns_element_aria_string_getter, ns_element_aria_string_setter, 2),
+    JS_CGETSET_MAGIC_DEF("ariaBrailleRoleDescription", ns_element_aria_string_getter, ns_element_aria_string_setter, 3),
+    JS_CGETSET_MAGIC_DEF("ariaColCount", ns_element_aria_string_getter, ns_element_aria_string_setter, 4),
+    JS_CGETSET_MAGIC_DEF("ariaColIndex", ns_element_aria_string_getter, ns_element_aria_string_setter, 5),
+    JS_CGETSET_MAGIC_DEF("ariaColIndexText", ns_element_aria_string_getter, ns_element_aria_string_setter, 6),
+    JS_CGETSET_MAGIC_DEF("ariaColSpan", ns_element_aria_string_getter, ns_element_aria_string_setter, 7),
+    JS_CGETSET_MAGIC_DEF("ariaDescription", ns_element_aria_string_getter, ns_element_aria_string_setter, 8),
+    JS_CGETSET_MAGIC_DEF("ariaKeyShortcuts", ns_element_aria_string_getter, ns_element_aria_string_setter, 9),
+    JS_CGETSET_MAGIC_DEF("ariaLevel", ns_element_aria_string_getter, ns_element_aria_string_setter, 10),
+    JS_CGETSET_MAGIC_DEF("ariaPlaceholder", ns_element_aria_string_getter, ns_element_aria_string_setter, 11),
+    JS_CGETSET_MAGIC_DEF("ariaPosInSet", ns_element_aria_string_getter, ns_element_aria_string_setter, 12),
+    JS_CGETSET_MAGIC_DEF("ariaRelevant", ns_element_aria_string_getter, ns_element_aria_string_setter, 13),
+    JS_CGETSET_MAGIC_DEF("ariaRoleDescription", ns_element_aria_string_getter, ns_element_aria_string_setter, 14),
+    JS_CGETSET_MAGIC_DEF("ariaRowCount", ns_element_aria_string_getter, ns_element_aria_string_setter, 15),
+    JS_CGETSET_MAGIC_DEF("ariaRowIndex", ns_element_aria_string_getter, ns_element_aria_string_setter, 16),
+    JS_CGETSET_MAGIC_DEF("ariaRowIndexText", ns_element_aria_string_getter, ns_element_aria_string_setter, 17),
+    JS_CGETSET_MAGIC_DEF("ariaRowSpan", ns_element_aria_string_getter, ns_element_aria_string_setter, 18),
+    JS_CGETSET_MAGIC_DEF("ariaSetSize", ns_element_aria_string_getter, ns_element_aria_string_setter, 19),
+    JS_CGETSET_MAGIC_DEF("ariaValueMax", ns_element_aria_string_getter, ns_element_aria_string_setter, 20),
+    JS_CGETSET_MAGIC_DEF("ariaValueMin", ns_element_aria_string_getter, ns_element_aria_string_setter, 21),
+    JS_CGETSET_MAGIC_DEF("ariaValueNow", ns_element_aria_string_getter, ns_element_aria_string_setter, 22),
+    JS_CGETSET_MAGIC_DEF("ariaValueText", ns_element_aria_string_getter, ns_element_aria_string_setter, 23),
     JS_CGETSET_MAGIC_DEF("ariaHidden",     ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_ARIA_HIDDEN),
     JS_CGETSET_MAGIC_DEF("ariaDisabled",   ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_ARIA_DISABLED),
     JS_CGETSET_MAGIC_DEF("ariaPressed",    ns_element_enum_getter, ns_element_enum_setter, NS_ENUM_ARIA_PRESSED),
