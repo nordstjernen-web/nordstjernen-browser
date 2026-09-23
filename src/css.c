@@ -25534,7 +25534,7 @@ static const char *kUa =
     "margin: 0 !important; z-index: 2147483647 !important; "
     "background-color: #000 !important; }\n"
     "svg { display: inline; }\n"
-    "noframes, frame, frameset, applet, basefont, marquee, "
+    "noframes, frame, frameset, applet, basefont, "
     "noembed, isindex { display: none; }\n"
     "listing, xmp, plaintext { display: block; font-family: monospace; "
     "white-space: pre; margin: 0.9em 0; line-height: 1.4; }\n"
@@ -25555,7 +25555,16 @@ static const char *kUa =
     "[hidden]:not([hidden=\"until-found\" i]) { display: none; }\n"
     "[hidden=\"until-found\" i] { content-visibility: hidden; }\n"
     "[popover]:not([data-nd-popover-open]) { display: none; }\n"
-    "template { display: none; }\n";
+    "template { display: none; }\n"
+    "marquee { display: inline-block; text-align: initial; "
+    "overflow: hidden; }\n"
+    "nobr { white-space: nowrap; }\n"
+    "br[clear=\"left\" i] { clear: left; }\n"
+    "br[clear=\"right\" i] { clear: right; }\n"
+    "br[clear=\"all\" i], br[clear=\"both\" i] { clear: both; }\n"
+    "caption[align=\"left\" i] { text-align: left; }\n"
+    "caption[align=\"right\" i] { text-align: right; }\n"
+    "caption[align=\"bottom\" i] { caption-side: bottom; }\n";
 
 static double
 resolve_font_size_px(const ns_style *s, const ns_style *parent_style)
@@ -26314,6 +26323,25 @@ append_html_dimension(GString *out, const char *attr, gboolean ignore_zero,
     if (prop_b) g_string_append_printf(out, "%s: %.10g%s;", prop_b, v, unit);
 }
 
+static const char *
+legacy_font_size_keyword(const char *s)
+{
+    static const char *const keywords[] = {
+        "x-small", "small", "medium", "large", "x-large", "xx-large",
+        "xxx-large",
+    };
+    if (!s) return NULL;
+    while (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\f' || *s == '\r')
+        s++;
+    int sign = *s == '+' ? 1 : *s == '-' ? -1 : 0;
+    if (sign) s++;
+    if (!g_ascii_isdigit(*s)) return NULL;
+    int value = 0;
+    while (g_ascii_isdigit(*s) && value < 100) value = value * 10 + (*s++ - '0');
+    if (sign) value = 3 + sign * value;
+    return keywords[CLAMP(value, 1, 7) - 1];
+}
+
 static gboolean
 is_presentational_attr_name(const char *n)
 {
@@ -26321,7 +26349,9 @@ is_presentational_attr_name(const char *n)
     switch (g_ascii_tolower((guchar)n[0])) {
     case 'a': return g_ascii_strcasecmp(n, "align") == 0;
     case 'b': return g_ascii_strcasecmp(n, "bgcolor") == 0 ||
-                     g_ascii_strcasecmp(n, "border") == 0;
+                     g_ascii_strcasecmp(n, "background") == 0 ||
+                     g_ascii_strcasecmp(n, "border") == 0 ||
+                     g_ascii_strcasecmp(n, "bottommargin") == 0;
     case 'c': return g_ascii_strcasecmp(n, "color") == 0 ||
                      g_ascii_strcasecmp(n, "cellspacing") == 0 ||
                      g_ascii_strcasecmp(n, "cellpadding") == 0;
@@ -26329,11 +26359,16 @@ is_presentational_attr_name(const char *n)
                      g_ascii_strcasecmp(n, "frame") == 0;
     case 'h': return g_ascii_strcasecmp(n, "height") == 0 ||
                      g_ascii_strcasecmp(n, "hspace") == 0;
+    case 'l': return g_ascii_strcasecmp(n, "leftmargin") == 0;
+    case 'm': return g_ascii_strcasecmp(n, "marginheight") == 0 ||
+                     g_ascii_strcasecmp(n, "marginwidth") == 0;
     case 'n': return g_ascii_strcasecmp(n, "nowrap") == 0 ||
                      g_ascii_strcasecmp(n, "noshade") == 0;
-    case 'r': return g_ascii_strcasecmp(n, "rules") == 0;
+    case 'r': return g_ascii_strcasecmp(n, "rules") == 0 ||
+                     g_ascii_strcasecmp(n, "rightmargin") == 0;
     case 's': return g_ascii_strcasecmp(n, "size") == 0;
     case 't': return g_ascii_strcasecmp(n, "text") == 0 ||
+                     g_ascii_strcasecmp(n, "topmargin") == 0 ||
                      g_ascii_strcasecmp(n, "type") == 0;
     case 'v': return g_ascii_strcasecmp(n, "valign") == 0 ||
                      g_ascii_strcasecmp(n, "vspace") == 0;
@@ -26397,6 +26432,18 @@ presentational_hints_css(const ns_node *el)
         if (lst) g_string_append_printf(out, "list-style-type: %s;", lst);
     }
 
+    const char *background = ns_element_get_attr(el, "background");
+    if (background && *background && (is_body || is_table || is_table_part)) {
+        g_string_append(out, "background-image: url(\"");
+        for (const char *p = background; *p; p++) {
+            if (*p == '"' || *p == '\\')
+                g_string_append_c(out, '\\');
+            if (*p == '\n' || *p == '\r' || *p == '\f')
+                continue;
+            g_string_append_c(out, *p);
+        }
+        g_string_append(out, "\");");
+    }
     const char *bgcolor = ns_element_get_attr(el, "bgcolor");
     if (bgcolor && *bgcolor) {
         guint8 r, g, b, a;
@@ -26405,6 +26452,22 @@ presentational_hints_css(const ns_node *el)
                                    r, g, b, a / 255.0);
     }
     if (is_body) {
+        static const struct {
+            const char *prop, *attr, *fallback;
+        } body_margins[] = {
+            { "margin-top", "topmargin", "marginheight" },
+            { "margin-bottom", "bottommargin", "marginheight" },
+            { "margin-left", "leftmargin", "marginwidth" },
+            { "margin-right", "rightmargin", "marginwidth" },
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(body_margins); i++) {
+            const char *v = ns_element_get_attr(el, body_margins[i].attr);
+            if (!v) v = ns_element_get_attr(el, body_margins[i].fallback);
+            int px = v ? ns_parse_int(v, -1, -1, G_MAXINT / 2) : -1;
+            if (px >= 0)
+                g_string_append_printf(out, "%s: %dpx;", body_margins[i].prop,
+                                       px);
+        }
         const char *text = ns_element_get_attr(el, "text");
         if (text && *text) {
             guint8 r, g, b, a;
@@ -26450,14 +26513,9 @@ presentational_hints_css(const ns_node *el)
                 g_string_append(out, "\";");
             }
         }
-        const char *size = ns_element_get_attr(el, "size");
-        if (size && *size) {
-            int n = ns_parse_int(size, 0, 0, 100);
-            if (n >= 1 && n <= 7) {
-                static const double map[] = { 0.63, 0.82, 1.0, 1.13, 1.5, 2.0, 3.0 };
-                g_string_append_printf(out, "font-size: %.2fem;", map[n - 1]);
-            }
-        }
+        const char *size = legacy_font_size_keyword(
+            ns_element_get_attr(el, "size"));
+        if (size) g_string_append_printf(out, "font-size: %s;", size);
     }
 
     const char *width = ns_element_get_attr(el, "width");
