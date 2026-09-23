@@ -10596,6 +10596,20 @@ grid_track_px(const ns_css_track *t, double basis)
     return 0;
 }
 
+static gboolean
+grid_track_is_fixed(const ns_css_track *t, double basis)
+{
+    if (!t) return FALSE;
+    if (t->kind == NS_CSS_TRACK_PX) {
+        if (t->pct != 0 && basis < 0) return FALSE;
+    } else if (t->kind != NS_CSS_TRACK_PERCENT || basis < 0) {
+        return FALSE;
+    }
+    if (!t->has_min) return TRUE;
+    return t->min_kind == NS_CSS_TRACK_PX ||
+           (t->min_kind == NS_CSS_TRACK_PERCENT && basis >= 0);
+}
+
 static const ns_css_area_rect *
 find_area_rect(const ns_css_areas *areas, const char *name)
 {
@@ -11459,16 +11473,22 @@ layout_grid(ns_box *box, double cw,
     }
 
     double *row_height = g_new0(double, n_rows + 1);
+    gboolean *row_fixed = g_new0(gboolean, n_rows + 1);
     for (int r = 0; r < n_rows; r++) {
         double fixed = 0;
+        const ns_css_track *tk = NULL;
         if (rows_subgrid) {
             fixed = sgr->sizes[r];
         } else if (rows_tracks && r < rows_tracks->n) {
-            fixed = grid_track_px(&rows_tracks->tracks[r], row_basis);
+            tk = &rows_tracks->tracks[r];
         } else if (auto_rows_tracks) {
             int ar = (r - explicit_rows) % auto_rows_tracks->n;
             if (ar < 0) ar = 0;
-            fixed = grid_track_px(&auto_rows_tracks->tracks[ar], row_basis);
+            tk = &auto_rows_tracks->tracks[ar];
+        }
+        if (tk) {
+            fixed = grid_track_px(tk, row_basis);
+            row_fixed[r] = grid_track_is_fixed(tk, row_basis);
         }
         if (fixed > row_height[r]) row_height[r] = fixed;
     }
@@ -11479,20 +11499,19 @@ layout_grid(ns_box *box, double cw,
         if (rs < 1) rs = 1;
         if (row + rs > n_rows) rs = n_rows - row;
         double item_outer = g_array_index(item_heights, double, i);
-        if (rs == 1) {
-            if (item_outer > row_height[row])
-                row_height[row] = item_outer;
-        } else {
-            double used = row_gap * (rs - 1);
+        double used = row_gap * (rs - 1);
+        int growable = 0;
+        for (int k = 0; k < rs; k++) {
+            used += row_height[row + k];
+            if (!row_fixed[row + k]) growable++;
+        }
+        if (item_outer > used && growable > 0) {
+            double add = (item_outer - used) / growable;
             for (int k = 0; k < rs; k++)
-                used += row_height[row + k];
-            if (item_outer > used) {
-                double add = (item_outer - used) / rs;
-                for (int k = 0; k < rs; k++)
-                    row_height[row + k] += add;
-            }
+                if (!row_fixed[row + k]) row_height[row + k] += add;
         }
     }
+    g_free(row_fixed);
 
     if (!rows_subgrid && row_basis > 0 && n_rows > 0) {
         double over = (n_rows > 1 ? row_gap * (n_rows - 1) : 0) - row_basis;
