@@ -25488,16 +25488,16 @@ static const char *kUa =
     "thead, tbody, tfoot, table > tr { vertical-align: middle; }\n"
     "tr, td, th { vertical-align: inherit; }\n"
     "th { font-weight: bold; text-align: center; }\n"
-    "table[border] td, table[border] th { "
-    "border-top-width: 1px; border-right-width: 1px; "
-    "border-bottom-width: 1px; border-left-width: 1px; "
-    "border-top-style: solid; border-right-style: solid; "
-    "border-bottom-style: solid; border-left-style: solid; "
-    "border-top-color: #888888; border-right-color: #888888; "
-    "border-bottom-color: #888888; border-left-color: #888888; }\n"
-    "table[border=\"0\"], table[border=\"0\"] td, table[border=\"0\"] th { "
-    "border-top-width: 0; border-right-width: 0; "
-    "border-bottom-width: 0; border-left-width: 0; }\n"
+    "thead, tbody, tfoot, tr { border-color: inherit; }\n"
+    "table:is([rules=none i], [rules=groups i], [rules=rows i], "
+    "[rules=cols i], [rules=all i], [frame=void i], [frame=above i], "
+    "[frame=below i], [frame=hsides i], [frame=lhs i], [frame=rhs i], "
+    "[frame=vsides i], [frame=box i], [frame=border i]), "
+    "table:is([rules=none i], [rules=groups i], [rules=rows i], "
+    "[rules=cols i], [rules=all i]) > tr > :is(td, th), "
+    "table:is([rules=none i], [rules=groups i], [rules=rows i], "
+    "[rules=cols i], [rules=all i]) > :is(thead, tbody, tfoot) > tr > "
+    ":is(td, th) { border-color: black; }\n"
     "img { display: inline; }\n"
     "figure { margin: 1em 40px; }\n"
     "input[type=\"radio\"], input[type=\"checkbox\"], input[type=\"reset\"], "
@@ -26323,6 +26323,65 @@ append_html_dimension(GString *out, const char *attr, gboolean ignore_zero,
     if (prop_b) g_string_append_printf(out, "%s: %.10g%s;", prop_b, v, unit);
 }
 
+enum {
+    TABLE_RULES_NONE = 1,
+    TABLE_RULES_GROUPS,
+    TABLE_RULES_ROWS,
+    TABLE_RULES_COLS,
+    TABLE_RULES_ALL,
+};
+
+static int
+table_rules_kind(const char *rules)
+{
+    static const char *const names[] = {
+        "none", "groups", "rows", "cols", "all",
+    };
+    for (gsize i = 0; rules && i < G_N_ELEMENTS(names); i++)
+        if (g_ascii_strcasecmp(rules, names[i]) == 0)
+            return TABLE_RULES_NONE + (int)i;
+    return 0;
+}
+
+static const char *
+table_frame_border_style(const char *frame)
+{
+    static const struct { const char *name, *style; } frames[] = {
+        { "void", "hidden" },
+        { "above", "outset hidden hidden hidden" },
+        { "below", "hidden hidden outset hidden" },
+        { "hsides", "outset hidden outset hidden" },
+        { "lhs", "hidden hidden hidden outset" },
+        { "rhs", "hidden outset hidden hidden" },
+        { "vsides", "hidden outset" },
+        { "box", "outset" },
+        { "border", "outset" },
+    };
+    for (gsize i = 0; frame && i < G_N_ELEMENTS(frames); i++)
+        if (g_ascii_strcasecmp(frame, frames[i].name) == 0)
+            return frames[i].style;
+    return NULL;
+}
+
+static const ns_node *
+table_of_part(const ns_node *el)
+{
+    const ns_node *p = el->parent;
+    if (ns_node_is_element_named(el, "td") ||
+        ns_node_is_element_named(el, "th")) {
+        if (!ns_node_is_element_named(p, "tr")) return NULL;
+        p = p->parent;
+    }
+    if ((ns_node_is_element_named(el, "td") ||
+         ns_node_is_element_named(el, "th") ||
+         ns_node_is_element_named(el, "tr")) &&
+        (ns_node_is_element_named(p, "thead") ||
+         ns_node_is_element_named(p, "tbody") ||
+         ns_node_is_element_named(p, "tfoot")))
+        p = p->parent;
+    return ns_node_is_element_named(p, "table") ? p : NULL;
+}
+
 static const char *
 legacy_font_size_keyword(const char *s)
 {
@@ -26349,6 +26408,7 @@ is_presentational_attr_name(const char *n)
     switch (g_ascii_tolower((guchar)n[0])) {
     case 'a': return g_ascii_strcasecmp(n, "align") == 0;
     case 'b': return g_ascii_strcasecmp(n, "bgcolor") == 0 ||
+                     g_ascii_strcasecmp(n, "bordercolor") == 0 ||
                      g_ascii_strcasecmp(n, "background") == 0 ||
                      g_ascii_strcasecmp(n, "border") == 0 ||
                      g_ascii_strcasecmp(n, "bottommargin") == 0;
@@ -26382,7 +26442,12 @@ static char *
 presentational_hints_css(const ns_node *el)
 {
     if (!el || el->kind != NS_NODE_ELEMENT || !el->name) return NULL;
-    gboolean any = (strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0);
+    gboolean any = strcmp(el->name, "td") == 0 || strcmp(el->name, "th") == 0 ||
+                   strcmp(el->name, "tr") == 0 ||
+                   strcmp(el->name, "thead") == 0 ||
+                   strcmp(el->name, "tbody") == 0 ||
+                   strcmp(el->name, "tfoot") == 0 ||
+                   strcmp(el->name, "colgroup") == 0;
     for (const ns_attr *a = el->attrs; !any && a; a = a->next)
         if (is_presentational_attr_name(a->name)) any = TRUE;
     if (!any) return NULL;
@@ -26542,93 +26607,89 @@ presentational_hints_css(const ns_node *el)
             g_string_append_printf(out, "aspect-ratio: auto %d / %d;", cw, ch);
     }
     if (is_table) {
+        const char *rules = ns_element_get_attr(el, "rules");
+        if (table_rules_kind(rules))
+            g_string_append(out, "border-style: hidden;"
+                                 "border-collapse: collapse;");
         const char *border = ns_element_get_attr(el, "border");
-        if (border && *border) {
-            int w = ns_parse_int(border, 0, 0, 100);
-            if (w > 0) {
-                g_string_append_printf(out,
-                    "border: %dpx solid #888;", w);
-            }
+        if (border) {
+            int w = ns_parse_int(border, -1, -1, G_MAXINT / 2);
+            g_string_append_printf(out, "border-width: %dpx;", w < 0 ? 1 : w);
+            if (w != 0) g_string_append(out, "border-style: outset;");
+        }
+        const char *frame_style = table_frame_border_style(
+            ns_element_get_attr(el, "frame"));
+        if (frame_style)
+            g_string_append_printf(out, "border-style: %s;", frame_style);
+        const char *bordercolor = ns_element_get_attr(el, "bordercolor");
+        if (bordercolor && *bordercolor) {
+            guint8 r, g, b, a;
+            if (attr_is_color(bordercolor, &r, &g, &b, &a))
+                g_string_append_printf(out, "border-color: rgba(%u,%u,%u,%g);",
+                                       r, g, b, a / 255.0);
         }
         const char *cellspacing = ns_element_get_attr(el, "cellspacing");
-        if (cellspacing) {
-            int v = ns_parse_int(cellspacing, 0, 0, 1000);
-            g_string_append_printf(out, "border-spacing: %dpx;", v);
-        }
-        const char *frame = ns_element_get_attr(el, "frame");
-        if (frame && *frame) {
-            char *lo = g_ascii_strdown(frame, -1);
-            if (strcmp(lo, "void") == 0)
-                g_string_append(out, "border-style: hidden;");
-            else if (strcmp(lo, "above") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-top: 1px solid #888;");
-            else if (strcmp(lo, "below") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-bottom: 1px solid #888;");
-            else if (strcmp(lo, "hsides") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-top: 1px solid #888;"
-                                     "border-bottom: 1px solid #888;");
-            else if (strcmp(lo, "vsides") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-left: 1px solid #888;"
-                                     "border-right: 1px solid #888;");
-            else if (strcmp(lo, "lhs") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-left: 1px solid #888;");
-            else if (strcmp(lo, "rhs") == 0)
-                g_string_append(out, "border-style: hidden;"
-                                     "border-right: 1px solid #888;");
-            else if (strcmp(lo, "box") == 0 || strcmp(lo, "border") == 0)
-                g_string_append(out, "border: 1px solid #888;");
-            g_free(lo);
-        }
-        const char *rules = ns_element_get_attr(el, "rules");
-        if (rules && *rules)
-            g_string_append(out, "border-collapse: collapse;");
+        int spacing = ns_parse_int(cellspacing, -1, -1, G_MAXINT / 2);
+        if (spacing >= 0)
+            g_string_append_printf(out, "border-spacing: %dpx;", spacing);
     }
+    const ns_node *part_table = is_table_part || strcmp(tag, "colgroup") == 0
+        ? table_of_part(el) : NULL;
+    int part_rules = part_table
+        ? table_rules_kind(ns_element_get_attr(part_table, "rules")) : 0;
     if (is_cell) {
         const ns_node *tbl = el->parent;
         while (tbl && !(tbl->kind == NS_NODE_ELEMENT && tbl->name &&
                         g_ascii_strcasecmp(tbl->name, "table") == 0))
             tbl = tbl->parent;
-        if (tbl) {
-            const char *cellpadding = ns_element_get_attr(tbl, "cellpadding");
-            if (cellpadding && *cellpadding) {
-                int v = ns_parse_int(cellpadding, 0, 0, 1000);
-                g_string_append_printf(out, "padding: %dpx;", v);
-            }
-            const char *tborder = ns_element_get_attr(tbl, "border");
-            if (tborder && ns_parse_int(tborder, 0, 0, 100) > 0)
-                g_string_append(out, "border: 1px solid #a0a0a0;");
-            const char *rules = ns_element_get_attr(tbl, "rules");
-            if (rules && *rules) {
-                char *lo = g_ascii_strdown(rules, -1);
-                if (strcmp(lo, "all") == 0 || strcmp(lo, "groups") == 0)
-                    g_string_append(out, "border: 1px solid #a0a0a0;");
-                else if (strcmp(lo, "cols") == 0)
-                    g_string_append(out, "border-style: hidden;"
-                                         "border-left: 1px solid #a0a0a0;"
-                                         "border-right: 1px solid #a0a0a0;");
-                else if (strcmp(lo, "rows") == 0)
-                    g_string_append(out, "border-style: hidden;"
-                                         "border-top: 1px solid #a0a0a0;"
-                                         "border-bottom: 1px solid #a0a0a0;");
-                else if (strcmp(lo, "none") == 0)
-                    g_string_append(out, "border-style: hidden;");
-                g_free(lo);
-            }
-        }
+        const char *cellpadding = tbl
+            ? ns_element_get_attr(tbl, "cellpadding") : NULL;
+        int padding = ns_parse_int(cellpadding, -1, -1, G_MAXINT / 2);
+        if (padding >= 0)
+            g_string_append_printf(out, "padding: %dpx;", padding);
+        const char *tborder = part_table
+            ? ns_element_get_attr(part_table, "border") : NULL;
+        if (tborder && ns_parse_int(tborder, -1, -1, G_MAXINT / 2) != 0)
+            g_string_append(out, "border-width: 1px; border-style: inset;");
+        const char *tcolor = part_table
+            ? ns_element_get_attr(part_table, "bordercolor") : NULL;
+        guint8 r, g, b, a;
+        if (tcolor && *tcolor && (tborder || part_rules) &&
+            attr_is_color(tcolor, &r, &g, &b, &a))
+            g_string_append_printf(out, "border-color: rgba(%u,%u,%u,%g);",
+                                   r, g, b, a / 255.0);
+        if (part_rules == TABLE_RULES_COLS)
+            g_string_append(out, "border-width: 1px;"
+                                 "border-block-style: none;"
+                                 "border-inline-style: solid;");
+        else if (part_rules == TABLE_RULES_ALL)
+            g_string_append(out, "border-width: 1px; border-style: solid;");
+        else if (part_rules == TABLE_RULES_ROWS)
+            g_string_append(out, "border-width: 1px;"
+                                 "border-block-style: solid;"
+                                 "border-inline-style: none;");
+        else if (part_rules)
+            g_string_append(out, "border-width: 1px; border-style: none;");
         if (ns_element_get_attr(el, "nowrap"))
             g_string_append(out, "white-space: nowrap;");
+    } else if ((part_rules == TABLE_RULES_GROUPS &&
+                strcmp(tag, "tr") != 0 && strcmp(tag, "colgroup") != 0) ||
+               (part_rules == TABLE_RULES_ROWS && is_row)) {
+        g_string_append(out, "border-block-width: 1px;"
+                             "border-block-style: solid;");
+    } else if (part_rules == TABLE_RULES_GROUPS &&
+               strcmp(tag, "colgroup") == 0) {
+        g_string_append(out, "border-inline-width: 1px;"
+                             "border-inline-style: solid;");
     }
     if (is_table_part) {
         const char *align = ns_element_get_attr(el, "align");
         if (align && *align) {
             char *lo = g_ascii_strdown(align, -1);
-            if (strcmp(lo, "left") == 0 || strcmp(lo, "center") == 0 ||
-                strcmp(lo, "right") == 0 || strcmp(lo, "justify") == 0)
+            if (strcmp(lo, "middle") == 0 || strcmp(lo, "absmiddle") == 0)
+                g_string_append(out, "text-align: center;");
+            else if (strcmp(lo, "left") == 0 || strcmp(lo, "center") == 0 ||
+                     strcmp(lo, "right") == 0 || strcmp(lo, "justify") == 0)
                 g_string_append_printf(out, "text-align: %s;", lo);
             g_free(lo);
         }
