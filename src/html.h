@@ -27,6 +27,9 @@ ns_node *ns_html_parse_fragment_in(const char *context_tag,
 ns_node *ns_html_parse_fragment_with_scripting(const char *context_tag,
                                                const char *input, gssize len,
                                                gboolean scripting);
+ns_node *ns_html_parse_fragment_in_context(const ns_node *context,
+                                           const char *input, gssize len,
+                                           gboolean scripting);
 
 void ns_html_convert_declarative_shadow(ns_node *root);
 

@@ -8107,11 +8107,16 @@
             var node = this._sc;
             var el = node.nodeType === 1 ? node
                    : isCharData(node) ? node.parentNode : null;
+            var ns = el && el.nodeType === 1 ? el.namespaceURI : null;
+            var foreign = ns === 'http://www.w3.org/2000/svg' ||
+                          ns === 'http://www.w3.org/1998/Math/MathML';
             var tag = el && el.nodeType === 1 ? el.localName : 'body';
-            if (tag === 'html') tag = 'body';
+            if (tag === 'html' && !foreign) tag = 'body';
             var scratch;
-            try { scratch = doc.createElement(tag); }
-            catch (e) { scratch = doc.createElement('body'); }
+            try {
+                scratch = foreign ? doc.createElementNS(ns, tag)
+                                  : doc.createElement(tag);
+            } catch (e) { scratch = doc.createElement('body'); }
             scratch.innerHTML = String(html);
             var frag = ownerDoc(node).createDocumentFragment();
             while (scratch.firstChild) frag.appendChild(scratch.firstChild);

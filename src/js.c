@@ -7161,8 +7161,7 @@ ns_element_set_html_core(JSContext *ctx, JSValueConst this_val,
     const ns_node *root = ns_node_root(n);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_html_parse_fragment_with_scripting(
-        n->name, s, -1, scripting);
+    ns_node *fragment = ns_html_parse_fragment_in_context(n, s, -1, scripting);
     if (declarative && fragment)
         ns_html_convert_declarative_shadow(fragment);
     if (free_s) JS_FreeCString(ctx, s);
@@ -7254,13 +7253,11 @@ ns_element_set_outerHTML(JSContext *ctx, JSValueConst this_val, JSValueConst val
     gboolean free_s = !JS_IsNull(val);
     const char *s = free_s ? JS_ToCString(ctx, val) : "";
     if (!s) return JS_UNDEFINED;
-    const char *ctx_tag = (self->parent && self->parent->kind == NS_NODE_ELEMENT)
-                          ? self->parent->name : NULL;
     const ns_node *root = ns_node_root(self);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_html_parse_fragment_with_scripting(
-        ctx_tag, s, -1, scripting);
+    ns_node *fragment = ns_html_parse_fragment_in_context(self->parent, s, -1,
+                                                          scripting);
     if (free_s) JS_FreeCString(ctx, s);
     if (fragment) {
         ns_mark_scripts_already_started(fragment);
@@ -28815,15 +28812,13 @@ ns_element_insertAdjacentHTML(JSContext *ctx, JSValueConst this_val,
         return ns_throw_dom_exception(ctx, "NoModificationAllowedError", 7,
             "insertAdjacentHTML: the element has no parent element");
     }
-    const char *ctx_tag = adjacent_to_self
-        ? ((self->parent && self->parent->kind == NS_NODE_ELEMENT)
-           ? self->parent->name : NULL)
-        : self->name;
+    const ns_node *context = adjacent_to_self ? self->parent : self;
     const ns_node *root = ns_node_root(self);
     gboolean scripting = !root ||
         !(root->flags & NS_NODE_SCRIPTING_DISABLED);
-    ns_node *fragment = ns_html_parse_fragment_with_scripting(
-        ctx_tag, html, -1, scripting);
+    ns_node *fragment = ns_node_is_element_named(context, "html")
+        ? ns_html_parse_fragment_with_scripting("body", html, -1, scripting)
+        : ns_html_parse_fragment_in_context(context, html, -1, scripting);
     if (fragment) {
         ns_mark_scripts_already_started(fragment);
         ns_js *_j = js_from_ctx(ctx);
