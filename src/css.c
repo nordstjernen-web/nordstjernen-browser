@@ -1186,6 +1186,15 @@ ns_css_font_family_for_pango(const char *css_family)
     return fallback ? fallback : g_strdup("sans-serif");
 }
 
+static int
+font_weight_relative(int parent, gboolean bolder)
+{
+    if (bolder)
+        return parent < 350 ? 400 : parent < 550 ? 700 : 900;
+    if (parent < 100) return parent;
+    return parent < 550 ? 100 : parent < 750 ? 400 : 700;
+}
+
 int
 ns_css_font_weight_number(const ns_css_value *v, int fallback)
 {
@@ -1193,18 +1202,9 @@ ns_css_font_weight_number(const ns_css_value *v, int fallback)
     const char *kw = v->u.keyword;
     if (strcmp(kw, "normal") == 0) return 400;
     if (strcmp(kw, "bold") == 0) return 700;
-    if (strcmp(kw, "bolder") == 0) {
-        int base = fallback > 0 ? fallback : 400;
-        if (base < 400) return 400;
-        if (base < 600) return 700;
-        return 900;
-    }
-    if (strcmp(kw, "lighter") == 0) {
-        int base = fallback > 0 ? fallback : 400;
-        if (base < 600) return 100;
-        if (base < 800) return 400;
-        return 700;
-    }
+    if (strcmp(kw, "bolder") == 0 || strcmp(kw, "lighter") == 0)
+        return font_weight_relative(fallback > 0 ? fallback : 400,
+                                    kw[0] == 'b');
     if (g_ascii_isdigit(kw[0])) {
         return ns_parse_int(kw, fallback > 0 ? fallback : 400, 1, 1000);
     }
@@ -25744,6 +25744,18 @@ cascade_for(GArray *matches, ns_style *out, const ns_style *parent_style,
         out->values[NS_CSS_COLOR] = parent_style
             ? ns_css_value_dup(parent_style->values[NS_CSS_COLOR])
             : initial_value_of(NS_CSS_COLOR);
+    }
+    if (ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder") ||
+        ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "lighter")) {
+        int parent_weight = parent_style
+            ? ns_css_font_weight_number(
+                  parent_style->values[NS_CSS_FONT_WEIGHT], 400)
+            : 400;
+        gboolean bolder =
+            ns_css_keyword_is(out->values[NS_CSS_FONT_WEIGHT], "bolder");
+        ns_css_value_free(out->values[NS_CSS_FONT_WEIGHT]);
+        out->values[NS_CSS_FONT_WEIGHT] = keyword_value(
+            g_strdup_printf("%d", font_weight_relative(parent_weight, bolder)));
     }
     {
         const ns_css_prop color_props[] = {
