@@ -27642,6 +27642,36 @@ style_share_key(GByteArray *b,
     b->len = (guint)(p - b->data);
 }
 
+static gboolean
+element_cannot_be_unboxed(const ns_node *el)
+{
+    if (el->kind != NS_NODE_ELEMENT || !el->name) return FALSE;
+    if (el->flags & NS_NODE_SVG_NS)
+        return strcmp(el->name, "svg") == 0 && el->parent &&
+               !(el->parent->flags & NS_NODE_SVG_NS);
+    if (el->flags & NS_NODE_FOREIGN_NS) return FALSE;
+    static const char *const unusual[] = {
+        "audio", "br", "canvas", "embed", "frame", "frameset", "iframe",
+        "img", "input", "meter", "object", "progress", "select",
+        "textarea", "video", "wbr",
+    };
+    for (gsize i = 0; i < G_N_ELEMENTS(unusual); i++)
+        if (g_ascii_strcasecmp(el->name, unusual[i]) == 0) return TRUE;
+    return FALSE;
+}
+
+static gboolean
+display_contents_to_none(const ns_node *el, ns_style *s)
+{
+    if (s->display.box != NS_DISPLAY_BOX_CONTENTS ||
+        !element_cannot_be_unboxed(el))
+        return FALSE;
+    ns_css_value_free(s->values[NS_CSS_DISPLAY]);
+    s->values[NS_CSS_DISPLAY] = keyword_value_dup("none");
+    s->display = ns_css_display_from_keyword("none");
+    return TRUE;
+}
+
 static void
 strip_native_widget_decorations(const ns_node *el, ns_style *s)
 {
@@ -27996,6 +28026,7 @@ cascade_walk(ns_node *node,
         if (shared) {
             ns_style_free(s);
             s = ns_style_clone_shared(shared);
+            display_contents_to_none(node, s);
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
@@ -28010,6 +28041,7 @@ cascade_walk(ns_node *node,
                         node->parent->kind == NS_NODE_DOCUMENT, *root_px);
             compute_registered_vars(s, parent_style, *root_px);
             strip_native_widget_decorations(node, s);
+            if (display_contents_to_none(node, s)) have_key = FALSE;
             g_array_set_size(matches, 0);
             g_array_set_size(var_matches, 0);
             g_array_set_size(pending_matches, 0);
