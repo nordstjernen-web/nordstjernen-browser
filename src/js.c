@@ -15236,11 +15236,12 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
         }
         return g_strdup("none");
     }
+    const char *canonical = pid >= 0 ? ns_css_prop_name(pid) : name;
     if (pid >= 0 && js && js->style_table) {
         const ns_style *s = g_hash_table_lookup(js->style_table, n);
         if (s && s->values[pid])
             return ns_css_value_serialize(s->values[pid]);
-        const char *initial = ns_computed_initial_value(name);
+        const char *initial = ns_computed_initial_value(canonical);
         if (s && initial) return g_strdup(initial);
     }
 
@@ -15269,7 +15270,7 @@ ns_computed_lookup(JSContext *ctx, const ns_node *n, const char *name)
             if (result) return result;
         }
     }
-    const char *initial = ns_computed_initial_value(name);
+    const char *initial = ns_computed_initial_value(canonical);
     if (initial) return g_strdup(initial);
     return NULL;
 }
