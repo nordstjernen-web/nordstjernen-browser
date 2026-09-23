@@ -11151,7 +11151,13 @@ layout_grid(ns_box *box, double cw,
         }
         if (n_rows < 1) n_rows = 1;
     }
-    for (guint i = 0; !col_flow && i < items->len; i++) {
+    if (!col_flow) {
+        g_array_set_size(placed_rows, items->len);
+        g_array_set_size(placed_cols, items->len);
+    }
+    for (guint step = 0; !col_flow && step < 2 * items->len; step++) {
+        guint i = step % items->len;
+        gboolean definite_pass = step < items->len;
         int s = g_array_index(col_starts, int, i);
         int sp = g_array_index(col_spans, int, i);
         int rs_start = g_array_index(row_starts, int, i);
@@ -11162,6 +11168,7 @@ layout_grid(ns_box *box, double cw,
         if (rs > NS_GRID_ROWS_MAX) rs = NS_GRID_ROWS_MAX;
         gboolean fixed_col = s >= 0 && s + sp <= n_cols;
         gboolean fixed_row = rs_start >= 0 && rs_start < NS_GRID_ROWS_MAX;
+        if (definite_pass != (fixed_col && fixed_row)) continue;
         int start_row = fixed_row ? rs_start : (dense ? 0 : auto_row);
         int start_col = fixed_col ? s : (fixed_row || dense ? 0 : auto_col);
         int placed_row = start_row;
@@ -11177,9 +11184,10 @@ layout_grid(ns_box *box, double cw,
             if (placed_row < 0) placed_row = 0;
         }
         grid_slot_mark(occupied, placed_row, placed_col, sp, rs, n_cols);
-        g_array_append_val(placed_rows, placed_row);
-        g_array_append_val(placed_cols, placed_col);
+        g_array_index(placed_rows, int, i) = placed_row;
+        g_array_index(placed_cols, int, i) = placed_col;
         if (placed_row + rs > n_rows) n_rows = placed_row + rs;
+        if (definite_pass) continue;
         auto_row = placed_row;
         auto_col = placed_col + sp;
         grid_advance_cursor(occupied, &auto_row, &auto_col, n_cols);
