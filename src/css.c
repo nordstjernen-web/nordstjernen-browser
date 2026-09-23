@@ -25477,6 +25477,68 @@ ns_css_value_cow(ns_style *out, int prop)
     return copy;
 }
 
+#define NS_CSS_CALC_LIMIT 33554400.0
+
+static double
+calc_clamp_finite(double v)
+{
+    if (isnan(v)) return 0;
+    if (isinf(v)) return v < 0 ? -NS_CSS_CALC_LIMIT : NS_CSS_CALC_LIMIT;
+    return v;
+}
+
+static gboolean
+calc_value_is_finite(const ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH) return isfinite(v->u.length.v);
+    if (v->kind == NS_CSS_V_TRANSFORM) {
+        for (int k = 0; k < v->u.transform.n_ops; k++) {
+            const ns_css_transform_op *op = &v->u.transform.ops[k];
+            if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
+                continue;
+            if (!isfinite(op->a) || !isfinite(op->b) || !isfinite(op->c))
+                return FALSE;
+        }
+        return TRUE;
+    }
+    if (v->kind != NS_CSS_V_CALC) return TRUE;
+    if (!isfinite(v->u.calc.px) || !isfinite(v->u.calc.pct) ||
+        !isfinite(v->u.calc.em) || !isfinite(v->u.calc.rem))
+        return FALSE;
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++)
+        if (!isfinite(v->u.calc.args[i].px) || !isfinite(v->u.calc.args[i].pct))
+            return FALSE;
+    return TRUE;
+}
+
+static void
+calc_value_clamp_finite(ns_css_value *v)
+{
+    if (v->kind == NS_CSS_V_LENGTH) {
+        v->u.length.v = calc_clamp_finite(v->u.length.v);
+        return;
+    }
+    if (v->kind == NS_CSS_V_TRANSFORM) {
+        for (int k = 0; k < v->u.transform.n_ops; k++) {
+            ns_css_transform_op *op = &v->u.transform.ops[k];
+            if (op->kind != NS_CSS_TFN_TRANSLATE && op->kind != NS_CSS_TFN_SCALE)
+                continue;
+            op->a = calc_clamp_finite(op->a);
+            op->b = calc_clamp_finite(op->b);
+            op->c = calc_clamp_finite(op->c);
+        }
+        return;
+    }
+    v->u.calc.px = calc_clamp_finite(v->u.calc.px);
+    v->u.calc.pct = calc_clamp_finite(v->u.calc.pct);
+    v->u.calc.em = calc_clamp_finite(v->u.calc.em);
+    v->u.calc.rem = calc_clamp_finite(v->u.calc.rem);
+    for (int i = 0; i < v->u.calc.n_args && i < 4; i++) {
+        v->u.calc.args[i].px = calc_clamp_finite(v->u.calc.args[i].px);
+        v->u.calc.args[i].pct = calc_clamp_finite(v->u.calc.args[i].pct);
+    }
+}
+
 static gboolean
 calc_has_percent(const ns_css_value *v)
 {
@@ -25555,6 +25617,10 @@ resolve_em_units(ns_style *out, const ns_style *parent_style, double root_px)
         if (i == NS_CSS_FONT_SIZE) continue;
         ns_css_value *v = out->values[i];
         if (!v) continue;
+        if (!calc_value_is_finite(v)) {
+            v = ns_css_value_cow(out, i);
+            calc_value_clamp_finite(v);
+        }
         if (v->kind == NS_CSS_V_SHADOW) {
             gboolean needs = FALSE;
             for (int k = 0; k < v->u.shadow.n && !needs; k++)
