@@ -26600,6 +26600,14 @@ presentational_hints_css(const ns_node *el)
         append_html_dimension(out, height, FALSE, "height", NULL);
     else if (height && is_cell)
         append_html_dimension(out, height, TRUE, "height", NULL);
+    if (width && height && (is_img || is_video || is_image_input)) {
+        double aw, ah;
+        gboolean apct, hpct;
+        if (html_dimension_value(width, FALSE, &aw, &apct) && !apct &&
+            html_dimension_value(height, FALSE, &ah, &hpct) && !hpct)
+            g_string_append_printf(out, "aspect-ratio: auto %.10g / %.10g;",
+                                   aw, ah);
+    }
     if (is_embedded && !is_iframe && !is_video) {
         append_html_dimension(out, ns_element_get_attr(el, "hspace"), FALSE,
                               "margin-left", "margin-right");
