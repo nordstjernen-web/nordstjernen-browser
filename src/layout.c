@@ -7227,7 +7227,7 @@ measure_natural_width(ns_box *box, const ns_style *parent_style)
         if (wv && wv->kind == NS_CSS_V_LENGTH &&
             (wv->u.length.unit == NS_CSS_UNIT_PX ||
              wv->u.length.unit == NS_CSS_UNIT_NUMBER) &&
-            wv->u.length.v > 0) {
+            wv->u.length.v >= 0) {
             double w = wv->u.length.v;
             if (flex_box_is_border_box(box)) {
                 ns_edges m = {0}, pd = {0}, bd = {0};
@@ -11616,6 +11616,7 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
             edges_from_style(c->style, cw,
                              &c->margin, &c->padding, &c->border);
             double float_max_w = cw;
+            double float_floor_w = 0;
             double cw_for_float;
             const ns_css_value *wv2 = c->style ? c->style->values[NS_CSS_WIDTH] : NULL;
             const ns_css_value *mxw2 = c->style ? c->style->values[NS_CSS_MAX_WIDTH] : NULL;
@@ -11636,6 +11637,10 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 cw_for_float = height_keyword_stretches(wv2)
                     ? cap : measure_natural_width(c, child_inherited);
                 if (cw_for_float > cap) cw_for_float = cap;
+                if (!height_keyword_stretches(wv2)) {
+                    float_floor_w = measure_min_width(c, child_inherited);
+                    if (cw_for_float < float_floor_w) cw_for_float = float_floor_w;
+                }
                 if (cw_for_float < 0) cw_for_float = 0;
             }
             if (mxw2 && (mxw2->kind == NS_CSS_V_LENGTH || mxw2->kind == NS_CSS_V_CALC)) {
@@ -11680,7 +11685,8 @@ layout_block(ns_box *box, double parent_content_width, const ns_style *inherited
                 - c->margin.left - c->margin.right
                 - c->padding.left - c->padding.right
                 - c->border.left - c->border.right;
-            if (cw_for_float > cw_capped && cw_capped > 0) cw_for_float = cw_capped;
+            if (cw_for_float > cw_capped && cw_capped > 0)
+                cw_for_float = MAX(cw_capped, float_floor_w);
             double tentative_outer = cw_for_float
                 + c->padding.left + c->padding.right
                 + c->border.left + c->border.right
