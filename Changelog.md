@@ -492,6 +492,11 @@ Changelog:
   option that is off by default (`-Dpdf=enabled` turns it on for a private
   build), and without it a PDF opens a page with a link that downloads the
   file.
+* THIRD-PARTY-LICENSES.md carries the notices it was missing for libraries
+  the builds link or ship: HarfBuzz, FriBidi and libthai (text shaping),
+  SDL2 (audio output), brotli, nghttp2, ngtcp2 and nghttp3 (through
+  libcurl), and the optional GnuTLS (HTTP/3 backend) and V8 (experimental
+  JavaScript backend).
 
 1.0.25:
 ======

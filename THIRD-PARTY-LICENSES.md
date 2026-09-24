@@ -338,10 +338,135 @@ Mozilla Public License 1.1. See:
 Licensed under the GNU Lesser General Public License version 2.1 or
 later. See the LGPL section above for terms and obligations.
 
+### HarfBuzz — "Old MIT" license
+
+> OpenType text shaping. ns-pango, the system Pango and GTK shape every
+> run of text through it, so every build links it; the Windows and macOS
+> bundles and the Android app ship it.
+> <https://harfbuzz.github.io>
+>
+> Copyright © 2010-2022  Google, Inc.
+> Copyright © 2015-2020  Ebrahim Byagowi
+> Copyright © 2019,2020  Facebook, Inc.
+> Copyright © 2012,2015  Mozilla Foundation
+> Copyright © 2011  Codethink Limited
+> Copyright © 2008,2010  Nokia Corporation and/or its subsidiary(-ies)
+> Copyright © 2009  Keith Stribley
+> Copyright © 2011  Martin Hosken and SIL International
+> Copyright © 2007  Chris Wilson
+> Copyright © 2005,2006,2020,2021,2022,2023  Behdad Esfahbod
+> Copyright © 2004,2007,2008,2009,2010,2013,2021,2022,2023  Red Hat, Inc.
+> Copyright © 1998-2005  David Turner and Werner Lemberg
+> Copyright © 2016  Igalia S.L.
+> Copyright © 2022  Matthias Clasen
+> Copyright © 2018,2021  Khaled Hosny
+> Copyright © 2018,2019,2020  Adobe, Inc
+> Copyright © 2013-2015  Alexei Podtelezhnikov
+
+Permission is hereby granted, without written agreement and without
+license or royalty fees, to use, copy, modify, and distribute this
+software and its documentation for any purpose, provided that the
+above copyright notice and the following two paragraphs appear in
+all copies of this software.
+
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE TO ANY PARTY FOR
+DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN
+IF THE COPYRIGHT HOLDER HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGE.
+
+THE COPYRIGHT HOLDER SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING,
+BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ON AN "AS IS" BASIS, AND THE COPYRIGHT HOLDER HAS NO OBLIGATION TO
+PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+
+### FriBidi and libthai — GNU LGPL 2.1 or later
+
+> FriBidi implements the Unicode bidirectional algorithm; libthai finds
+> Thai word breaks. ns-pango and Pango call them: the desktop builds link
+> FriBidi directly, and libthai too when the build host has it (ns-pango
+> detects it). The Windows and macOS bundles ship whichever of the two
+> is linked, and the Android app ships FriBidi.
+> <https://github.com/fribidi/fribidi>,
+> <https://linux.thai.net/projects/libthai>
+>
+> FriBidi: Copyright 2001, 2002, 2004, 2005 Behdad Esfahbod; 2004 Sharif
+> FarsiWeb, Inc; 1999, 2000, 2017 Dov Grobgeld.
+> libthai: Copyright 2001-2021 Theppitak Karoonboonyanan, Pattara
+> Kiatisevi, Vuthichai Ampornaramveth, Poonlap Veerathanabutr and Chanop
+> Silpa-Anan.
+
+Both are licensed under the GNU Lesser General Public License version
+2.1 or (at your option) any later version, and are linked dynamically.
+See the GTK 4 / GLib / Pango section above for the license text and your
+right to replace them.
+
+### SDL2 — zlib License
+
+> Audio output for the `nordstjernen-audio` helper, which is built
+> whenever SDL2 is present (a required library on the desktop). The
+> Windows and macOS bundles ship it; on macOS, where Homebrew's SDL2 is
+> the sdl2-compat layer, the bundle also carries SDL3, under the same
+> license.
+> <https://www.libsdl.org>
+>
+> Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not
+   be misrepresented as being the original software.
+3. This notice may not be removed or altered from any source
+   distribution.
+
+### brotli — MIT License
+
+> Brotli decompression for HTTP content encoding. libcurl links it, so it
+> ships in the Android app and in the Windows and macOS bundles wherever
+> the bundled libcurl uses it; the `-Dhttp_backend=nghttp2` build links
+> its decoder directly.
+> <https://github.com/google/brotli>
+>
+> Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+Licensed under the MIT License. See the quickjs-ng section above for the
+license text (same license).
+
+### nghttp2, ngtcp2 and nghttp3 — MIT License
+
+> HTTP/2 (nghttp2), QUIC (ngtcp2) and HTTP/3 (nghttp3). libcurl links
+> nghttp2 for HTTP/2, so it ships in the Android app and in the Windows
+> and macOS bundles; the Windows bundle also carries ngtcp2 and nghttp3
+> when MSYS2's libcurl is built with HTTP/3. The optional
+> `-Dhttp_backend=nghttp2` build links nghttp2 directly, and ngtcp2 and
+> nghttp3 too when its HTTP/3 support is detected.
+> <https://nghttp2.org>, <https://github.com/ngtcp2/ngtcp2>,
+> <https://github.com/ngtcp2/nghttp3>
+>
+> Copyright (c) 2012, 2014, 2015, 2016 Tatsuhiro Tsujikawa
+> Copyright (c) 2012, 2014, 2015, 2016 nghttp2 contributors
+> Copyright (c) 2016 ngtcp2 contributors
+> Copyright (c) 2019 nghttp3 contributors
+
+Licensed under the MIT License. See the quickjs-ng section above for the
+license text (same license).
+
 ### Optional dynamic dependencies
 
 These are linked only when present on the build host (meson
-`required: false`). When a build bundles them, their notices apply:
+`required: false`) or when a build option selects them. When a build
+links or bundles them, their notices apply:
 
 - **libavif** — BSD 2-Clause, © the AOMedia / libavif authors. AVIF
   image decoding.
@@ -352,6 +477,19 @@ These are linked only when present on the build host (meson
   the meson `pdf` feature that links it defaults to `disabled`, and it is
   linked only into a private build configured with `-Dpdf=enabled` (or
   `-Dpdf=auto` on a host that has poppler-glib).
+- **GnuTLS** — GNU LGPL 2.1 or later, © the Free Software Foundation and
+  the GnuTLS contributors. The QUIC TLS stack of the HTTP/3 support in the
+  optional `-Dhttp_backend=nghttp2` build (not Windows); the default curl
+  build does not link it. GnuTLS's own licensing notes that linking it
+  also brings in Nettle, GMP and libunistring, which are dual-licensed
+  LGPL-3.0-or-later or GPL-2.0-or-later, so a program linking GnuTLS must
+  be available under terms compatible with one of those licenses.
+- **V8** — BSD 3-Clause, © the V8 project authors. The experimental
+  `-Djs_engine=v8` backend, linked statically as a V8 monolith; not part
+  of the official builds. V8's `LICENSE` names the externally maintained
+  code it carries under other licenses, and a monolith also includes the
+  third-party libraries of the V8 checkout it was built from, whose
+  `LICENSE` files are in that checkout's sub-directories.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.
