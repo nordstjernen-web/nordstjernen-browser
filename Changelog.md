@@ -496,7 +496,13 @@ Changelog:
   the builds link or ship: HarfBuzz, FriBidi and libthai (text shaping),
   SDL2 (audio output), brotli, nghttp2, ngtcp2 and nghttp3 (through
   libcurl), and the optional GnuTLS (HTTP/3 backend) and V8 (experimental
-  JavaScript backend).
+  JavaScript backend). A second pass, checked against the 1.0.23 Windows,
+  macOS and .deb releases and the Android dependency set, adds the AV1
+  libraries that ship with libavif (libaom, dav1d, rav1e, SVT-AV1,
+  libgav1 with Abseil, libyuv, libvmaf) with the AOMedia patent license,
+  libjpeg-turbo, PCRE2, libpng, pixman, Expat, libffi, proxy-libintl,
+  libidn2 and libunistring, the libraries GnuTLS brings in, the FreeType
+  credit line, and how the Android app's LGPL libraries can be replaced.
 * SECURITY.md matches the code: service workers and extensions are
   implemented and in scope, WebGL is on by default without a prompt, and
   a new section describes the Android and iOS apps, which run the engine

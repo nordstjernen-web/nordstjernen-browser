@@ -138,8 +138,12 @@ Nordstjernen against your modified copy: write to us through the contact
 details published at <https://nordstjernen.org> (the address `License.md`
 gives for licensing inquiries) and we will supply the Nordstjernen object
 files, together with any data and utility programs needed, so that you can
-produce a modified executable. Android and iOS builds do not include ns-pango; they link the
-system Pango dynamically as before.
+produce a modified executable.
+
+Android and iOS builds do not include ns-pango. The Android app ships the
+stock Pango as a shared library (see the GTK 4 / GLib / Pango section);
+the iOS build, which is not released, links its dependency libraries
+statically.
 
 ## Dynamically linked
 
@@ -175,7 +179,9 @@ above for the license text (same license).
 
 ### libwebp — BSD 3-Clause License
 
-> WebP image decoding.
+> WebP image decoding. libwebp's libsharpyuv, which libwebp and libavif
+> load, is part of the same project under the same license and ships
+> with it in the Android app and the Windows bundle.
 > <https://chromium.googlesource.com/webm/libwebp>
 >
 > Copyright (c) 2010, Google Inc. All rights reserved.
@@ -289,6 +295,16 @@ against the modified copies. On Windows / macOS bundles the libraries
 are shipped alongside the executable as ordinary DLLs / dylibs that you
 can replace; on Linux distributions they are loaded from the system
 package manager.
+
+The Android app ships GLib (with GObject, GIO and GModule), Pango (with
+PangoCairo and PangoFT2), Cairo, FriBidi and proxy-libintl in the same
+way: each is a separate shared library (`lib/<abi>/*.so` in the APK)
+that `libnordstjernen.so` loads when the app starts, not code compiled
+into it. Using a modified, ABI-compatible build of one of them means
+putting it in place of the original `.so` in the APK and signing the
+rebuilt APK with your own key, because Android installs only signed
+packages; a package signed with a different key cannot be installed over
+the Play Store app, which has to be uninstalled first.
 
 ### FFmpeg — libavformat / libavcodec / libavutil / libswscale / libswresample — GNU LGPL 2.1 or later (inline WebM)
 
@@ -448,8 +464,8 @@ license text (same license).
 
 > HTTP/2 (nghttp2), QUIC (ngtcp2) and HTTP/3 (nghttp3). libcurl links
 > nghttp2 for HTTP/2, so it ships in the Android app and in the Windows
-> and macOS bundles; the Windows bundle also carries ngtcp2 and nghttp3
-> when MSYS2's libcurl is built with HTTP/3. The optional
+> and macOS bundles; the Windows and macOS bundles also carry ngtcp2 and
+> nghttp3, which their libcurl uses for HTTP/3. The optional
 > `-Dhttp_backend=nghttp2` build links nghttp2 directly, and ngtcp2 and
 > nghttp3 too when its HTTP/3 support is detected.
 > <https://nghttp2.org>, <https://github.com/ngtcp2/ngtcp2>,
@@ -463,14 +479,483 @@ license text (same license).
 Licensed under the MIT License. See the quickjs-ng section above for the
 license text (same license).
 
+### libavif and the AV1 libraries it loads — BSD-style and Apache 2.0 licenses
+
+> AVIF image decoding. libavif is optional (`-Davif`, auto-detected on the
+> desktop, never on Android or iOS). Where a release carries it, it also
+> carries the AV1 codec libraries that libavif was built against: the
+> Windows bundle ships libavif, libaom, dav1d, rav1e, SVT-AV1 and libyuv;
+> the macOS bundle ships libavif, libaom (with the libvmaf it links) and
+> dav1d; the Debian and Ubuntu `.deb` packages bundle libavif with
+> libaom, dav1d, libgav1 (and the Abseil libraries libgav1 needs), libyuv
+> (and the libjpeg-turbo it links) and, in the Debian package, rav1e and
+> SVT-AV1, under `/usr/lib/nordstjernen` (`scripts/pack-deb.sh`).
+> <https://github.com/AOMediaCodec/libavif>,
+> <https://aomedia.googlesource.com/aom/>,
+> <https://code.videolan.org/videolan/dav1d>,
+> <https://github.com/xiph/rav1e>,
+> <https://gitlab.com/AOMediaCodec/SVT-AV1>,
+> <https://chromium.googlesource.com/codecs/libgav1>,
+> <https://chromium.googlesource.com/libyuv/libyuv>,
+> <https://github.com/abseil/abseil-cpp>,
+> <https://github.com/Netflix/vmaf>
+>
+> libavif: Copyright 2019-2022 Joe Drago.
+> libaom: Copyright 2001-2022, Alliance for Open Media.
+> dav1d: Copyright 2018-2024, VideoLAN and dav1d authors; 2018-2023, Two
+> Orioles, LLC; and the other authors named in its `COPYING`.
+> rav1e: Copyright 2001-2016, Alliance for Open Media; 2017-2021, The
+> rav1e contributors.
+> SVT-AV1: Copyright 2016-2021 Alliance for Open Media; 2018-2022 Intel
+> Corporation; 2020 Tencent Corporation; 2019 Netflix, Inc.
+> libgav1: Copyright 2019-2020 Google LLC; 2019-2022 The libgav1 Authors.
+> libyuv: Copyright 2011 The LibYuv Project Authors.
+> Abseil: Copyright 2000-2017 Google Inc.; 2017-2021 The Abseil Authors.
+> libvmaf: Copyright (c) 2020 Netflix, Inc.
+
+libavif, libaom, dav1d and rav1e are licensed under the BSD 2-Clause
+License:
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+SVT-AV1 is licensed under the BSD 3-Clause Clear License:
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted (subject to the limitations in the disclaimer
+below) provided that the following conditions are met:
+
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the distribution.
+
+ 3. Neither the name of the Alliance for Open Media nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY THIS LICENSE.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+libgav1 and Abseil are licensed under the Apache License, Version 2.0
+(see the lexbor section above for the license text). libyuv is licensed
+under the BSD 3-Clause License (see the libwebp section above for the
+license text) together with Google's additional grant of patent rights
+in its `PATENTS` file.
+
+libvmaf is licensed under the BSD-2-Clause Plus Patent License:
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1. Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+Subject to the terms and conditions of this license, each copyright
+holder and contributor hereby grants to those receiving rights under
+this license a perpetual, worldwide, non-exclusive, no-charge, royalty-
+free, irrevocable (except for failure to satisfy the conditions of this
+license) patent license to make, have made, use, offer to sell, sell,
+import, and otherwise transfer this software, where such license applies
+only to those patent claims, already acquired or hereafter acquired,
+licensable by such copyright holder or contributor that are necessarily
+infringed by:
+
+(a) their Contribution(s) (the licensed copyrights of copyright holders
+and non-copyrightable additions of contributors, in source or binary
+form) alone; or
+
+(b) combination of their Contribution(s) with the work of authorship to
+which such Contribution(s) was added by such copyright holder or
+contributor, if, at the time the Contribution is added, such addition
+causes such combination to be necessarily infringed. The patent license
+shall not apply to any other combinations which include the
+Contribution.
+
+Except as expressly stated above, no rights or licenses from any
+copyright holder or contributor is granted under this license, whether
+expressly, by implication, estoppel or otherwise.
+
+DISCLAIMER
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+libaom, rav1e and SVT-AV1 also carry the Alliance for Open Media Patent
+License 1.0, which asks that it be reproduced with any binary
+distribution of an implementation:
+
+>     Alliance for Open Media Patent License 1.0
+>
+>     1. License Terms.
+>
+>     1.1. Patent License. Subject to the terms and conditions of this License, each
+>          Licensor, on behalf of itself and successors in interest and assigns,
+>          grants Licensee a non-sublicensable, perpetual, worldwide, non-exclusive,
+>          no-charge, royalty-free, irrevocable (except as expressly stated in this
+>          License) patent license to its Necessary Claims to make, use, sell, offer
+>          for sale, import or distribute any Implementation.
+>
+>     1.2. Conditions.
+>
+>     1.2.1. Availability. As a condition to the grant of rights to Licensee to make,
+>            sell, offer for sale, import or distribute an Implementation under
+>            Section 1.1, Licensee must make its Necessary Claims available under
+>            this License, and must reproduce this License with any Implementation
+>            as follows:
+>
+>            a. For distribution in source code, by including this License in the
+>               root directory of the source code with its Implementation.
+>
+>            b. For distribution in any other form (including binary, object form,
+>               and/or hardware description code (e.g., HDL, RTL, Gate Level Netlist,
+>               GDSII, etc.)), by including this License in the documentation, legal
+>               notices, and/or other written materials provided with the
+>               Implementation.
+>
+>     1.2.2. Additional Conditions. This license is directly from Licensor to
+>            Licensee.  Licensee acknowledges as a condition of benefiting from it
+>            that no rights from Licensor are received from suppliers, distributors,
+>            or otherwise in connection with this License.
+>
+>     1.3. Defensive Termination. If any Licensee, its Affiliates, or its agents
+>          initiates patent litigation or files, maintains, or voluntarily
+>          participates in a lawsuit against another entity or any person asserting
+>          that any Implementation infringes Necessary Claims, any patent licenses
+>          granted under this License directly to the Licensee are immediately
+>          terminated as of the date of the initiation of action unless 1) that suit
+>          was in response to a corresponding suit regarding an Implementation first
+>          brought against an initiating entity, or 2) that suit was brought to
+>          enforce the terms of this License (including intervention in a third-party
+>          action by a Licensee).
+>
+>     1.4. Disclaimers. The Reference Implementation and Specification are provided
+>          "AS IS" and without warranty. The entire risk as to implementing or
+>          otherwise using the Reference Implementation or Specification is assumed
+>          by the implementer and user. Licensor expressly disclaims any warranties
+>          (express, implied, or otherwise), including implied warranties of
+>          merchantability, non-infringement, fitness for a particular purpose, or
+>          title, related to the material. IN NO EVENT WILL LICENSOR BE LIABLE TO
+>          ANY OTHER PARTY FOR LOST PROFITS OR ANY FORM OF INDIRECT, SPECIAL,
+>          INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY CHARACTER FROM ANY CAUSES OF
+>          ACTION OF ANY KIND WITH RESPECT TO THIS LICENSE, WHETHER BASED ON BREACH
+>          OF CONTRACT, TORT (INCLUDING NEGLIGENCE), OR OTHERWISE, AND WHETHER OR
+>          NOT THE OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+>
+>     2. Definitions.
+>
+>     2.1. Affiliate.  "Affiliate" means an entity that directly or indirectly
+>          Controls, is Controlled by, or is under common Control of that party.
+>
+>     2.2. Control. "Control" means direct or indirect control of more than 50% of
+>          the voting power to elect directors of that corporation, or for any other
+>          entity, the power to direct management of such entity.
+>
+>     2.3. Decoder.  "Decoder" means any decoder that conforms fully with all
+>          non-optional portions of the Specification.
+>
+>     2.4. Encoder.  "Encoder" means any encoder that produces a bitstream that can
+>          be decoded by a Decoder only to the extent it produces such a bitstream.
+>
+>     2.5. Final Deliverable.  "Final Deliverable" means the final version of a
+>          deliverable approved by the Alliance for Open Media as a Final
+>          Deliverable.
+>
+>     2.6. Implementation.  "Implementation" means any implementation, including the
+>          Reference Implementation, that is an Encoder and/or a Decoder. An
+>          Implementation also includes components of an Implementation only to the
+>          extent they are used as part of an Implementation.
+>
+>     2.7. License. "License" means this license.
+>
+>     2.8. Licensee. "Licensee" means any person or entity who exercises patent
+>          rights granted under this License.
+>
+>     2.9. Licensor.  "Licensor" means (i) any Licensee that makes, sells, offers
+>          for sale, imports or distributes any Implementation, or (ii) a person
+>          or entity that has a licensing obligation to the Implementation as a
+>          result of its membership and/or participation in the Alliance for Open
+>          Media working group that developed the Specification.
+>
+>     2.10. Necessary Claims.  "Necessary Claims" means all claims of patents or
+>           patent applications, (a) that currently or at any time in the future,
+>           are owned or controlled by the Licensor, and (b) (i) would be an
+>           Essential Claim as defined by the W3C Policy as of February 5, 2004
+>           (https://www.w3.org/Consortium/Patent-Policy-20040205/#def-essential)
+>           as if the Specification was a W3C Recommendation; or (ii) are infringed
+>           by the Reference Implementation.
+>
+>     2.11. Reference Implementation. "Reference Implementation" means an Encoder
+>           and/or Decoder released by the Alliance for Open Media as a Final
+>           Deliverable.
+>
+>     2.12. Specification. "Specification" means the specification designated by
+>           the Alliance for Open Media as a Final Deliverable for which this
+>           License was issued.
+
+### libjpeg-turbo — IJG License and BSD 3-Clause License
+
+> JPEG decoding used by libyuv among the `.deb` packages' bundled AV1
+> libraries, by libtiff and gdk-pixbuf in the Windows and macOS bundles,
+> and by libyuv in the Windows bundle. (Page images are decoded by Wuffs,
+> not by libjpeg-turbo.)
+> <https://libjpeg-turbo.org>
+>
+> Copyright (C) 2009-2026 D. R. Commander
+> Copyright (C) 2018-2023 Randy <randy408@protonmail.com>
+
+This software is based in part on the work of the Independent JPEG
+Group.
+
+libjpeg-turbo's libjpeg API library is covered by the IJG License, and
+its TurboJPEG API library and build system by the Modified (3-clause)
+BSD License:
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+- Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+- Neither the name of the libjpeg-turbo Project nor the names of its
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS", AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+### PCRE2 — BSD 3-Clause License with the PCRE2 exception
+
+> Regular expressions for GLib (`GRegex`). It ships with GLib in the
+> Android app and in the Windows and macOS bundles.
+> <https://github.com/PCRE2Project/pcre2>
+>
+> Copyright (c) 1997-2007 University of Cambridge
+> Copyright (c) 2007-2024 Philip Hazel
+> Copyright (c) 2009-2024 Zoltan Herczeg (just-in-time compiler)
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+* Redistributions of source code must retain the above copyright
+  notices, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright
+  notices, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+* Neither the name of the University of Cambridge nor the names of any
+  contributors may be used to endorse or promote products derived from
+  this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+### libpng — PNG Reference Library License version 2
+
+> PNG encoding and decoding for Cairo, FreeType and gdk-pixbuf. It ships
+> in the Android app and in the Windows and macOS bundles. (Page images
+> are decoded by Wuffs, not by libpng.)
+> <http://www.libpng.org/pub/png/libpng.html>
+>
+> Copyright (c) 1995-2026 The PNG Reference Library Authors.
+> Copyright (c) 2018-2026 Cosmin Truta.
+> Copyright (c) 2000-2002, 2004, 2006-2018 Glenn Randers-Pehrson.
+> Copyright (c) 1996-1997 Andreas Dilger.
+> Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc.
+
+The software is supplied "as is", without warranty of any kind,
+express or implied, including, without limitation, the warranties
+of merchantability, fitness for a particular purpose, title, and
+non-infringement.  In no event shall the Copyright owners, or
+anyone distributing the software, be liable for any damages or
+other liability, whether in contract, tort or otherwise, arising
+from, out of, or in connection with the software, or the use or
+other dealings in the software, even if advised of the possibility
+of such damage.
+
+Permission is hereby granted to use, copy, modify, and distribute
+this software, or portions hereof, for any purpose, without fee,
+subject to the following restrictions:
+
+ 1. The origin of this software must not be misrepresented; you
+    must not claim that you wrote the original software.  If you
+    use this software in a product, an acknowledgment in the product
+    documentation would be appreciated, but is not required.
+
+ 2. Altered source versions must be plainly marked as such, and must
+    not be misrepresented as being the original software.
+
+ 3. This Copyright notice may not be removed or altered from any
+    source or altered source distribution.
+
+### pixman — MIT License
+
+> Pixel manipulation for Cairo. It ships in the Android app and in the
+> Windows and macOS bundles.
+> <https://www.pixman.org>
+>
+> Copyright 1987, 1988, 1989, 1998  The Open Group
+> Copyright 1987, 1988, 1989 Digital Equipment Corporation
+> Copyright 1999, 2004, 2008 Keith Packard
+> Copyright 2000 SuSE, Inc.
+> Copyright 2000 Keith Packard, member of The XFree86 Project, Inc.
+> Copyright 2004, 2005, 2007, 2008, 2009, 2010 Red Hat, Inc.
+> Copyright 2004 Nicholas Miell
+> Copyright 2005 Lars Knoll & Zack Rusin, Trolltech
+> Copyright 2005 Trolltech AS
+> Copyright 2007 Luca Barbato
+> Copyright 2008 Aaron Plattner, NVIDIA Corporation
+> Copyright 2008 Rodrigo Kumpera
+> Copyright 2008 André Tupinambá
+> Copyright 2008 Mozilla Corporation
+> Copyright 2008 Frederic Plourde
+> Copyright 2009, Oracle and/or its affiliates. All rights reserved.
+> Copyright 2009, 2010 Nokia Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice (including the next
+paragraph) shall be included in all copies or substantial portions of the
+Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Expat and libffi — MIT License
+
+> Expat parses Fontconfig's XML configuration; libffi is GObject's
+> foreign-function call layer. Both ship in the Android app and in the
+> Windows bundle; macOS provides its own.
+> <https://libexpat.github.io>, <https://sourceware.org/libffi/>
+>
+> Expat: Copyright (C) 1998-2000 Thai Open Source Software Center Ltd
+> and Clark Cooper; Copyright (C) 2001-2017 Expat maintainers.
+> libffi: Copyright (c) 1996-2024 Red Hat, Inc.; Copyright (C) 1996-2024
+> Anthony Green; Copyright (C) 1996-2010 Free Software Foundation, Inc;
+> and the other contributors named in its `LICENSE`.
+
+Both are licensed under the MIT License. See the quickjs-ng section above
+for the license text (same license).
+
+### proxy-libintl — GNU Library GPL 2.0 or later (Android)
+
+> A stub that stands in for GNU gettext's libintl where the platform has
+> none; GLib uses it on Android, where it ships as `libintl.so` in the
+> app. It performs no translation of its own.
+> <https://github.com/frida/proxy-libintl>
+>
+> Copyright (C) 2008 Tor Lillqvist
+
+Licensed under the GNU Library General Public License version 2 or (at
+your option) any later version, and linked dynamically. The full license
+text is available at:
+
+  <https://www.gnu.org/licenses/old-licenses/lgpl-2.0.html>
+
+### libidn2 and libunistring — GNU LGPL 3.0 or later, or GNU GPL 2.0 or later
+
+> Internationalized domain names and the Unicode routines they use. The
+> Windows bundle ships both as dependencies of libcurl and libpsl; on
+> Linux, libcurl and libpsl load them from the system packages, and the
+> Android app does not use them.
+> <https://gitlab.com/libidn/libidn2>,
+> <https://www.gnu.org/software/libunistring/>
+>
+> libidn2: Copyright (C) 2011-2014 Simon Josefsson.
+> libunistring: Copyright (C) 1995-2022 Free Software Foundation, Inc.
+
+The libraries are dual-licensed: you may use them under the GNU Lesser
+General Public License version 3 or (at your option) any later version,
+or under the GNU General Public License version 2 or (at your option)
+any later version. They are linked dynamically, as separate DLLs. The
+full license texts are available at:
+
+- <https://www.gnu.org/licenses/lgpl-3.0.html> (which incorporates
+  <https://www.gnu.org/licenses/gpl-3.0.html>)
+- <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>
+
 ### Optional dynamic dependencies
 
 These are linked only when present on the build host (meson
 `required: false`) or when a build option selects them. When a build
 links or bundles them, their notices apply:
 
-- **libavif** — BSD 2-Clause, © the AOMedia / libavif authors. AVIF
-  image decoding.
+- **libavif** — BSD 2-Clause, © 2019-2022 Joe Drago. AVIF image
+  decoding; see its section above for the AV1 libraries that come with it.
 - **Poppler** (`poppler-glib`) — GNU GPL 2.0 or later, © the Poppler
   developers. PDF rendering. Note: Poppler is GPL; a build that links it
   is subject to the GPL for that combined binary. It is therefore **not**
@@ -484,7 +969,18 @@ links or bundles them, their notices apply:
   build does not link it. GnuTLS's own licensing notes that linking it
   also brings in Nettle, GMP and libunistring, which are dual-licensed
   LGPL-3.0-or-later or GPL-2.0-or-later, so a program linking GnuTLS must
-  be available under terms compatible with one of those licenses.
+  be available under terms compatible with one of those licenses. Such a
+  build loads GnuTLS and its dependencies from the Linux system packages;
+  no release bundles them:
+  - **Nettle and Hogweed** — GNU LGPL 3.0 or later, or GNU GPL 2.0 or
+    later, © 2001-2023 Niels Möller.
+  - **GMP** — GNU LGPL 3.0 or later, or GNU GPL 2.0 or later, © the Free
+    Software Foundation, Inc.
+  - **libtasn1** — GNU LGPL 2.1 or later, © 2000-2022 Free Software
+    Foundation, Inc.
+  - **p11-kit** — BSD 3-Clause, © 2012-2023 Red Hat Inc. and the other
+    contributors named in its `COPYING`.
+  - **libidn2 and libunistring** — see their section above.
 - **V8** — BSD 3-Clause, © the V8 project authors. The experimental
   `-Djs_engine=v8` backend, linked statically as a V8 monolith; not part
   of the official builds. V8's `LICENSE` names the externally maintained
@@ -492,8 +988,14 @@ links or bundles them, their notices apply:
   third-party libraries of the V8 checkout it was built from, whose
   `LICENSE` files are in that checkout's sub-directories.
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
+  Font discovery; ns-pango requires it on the desktop, and it ships in the
+  Android app and in the Windows and macOS bundles.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
-  GPL 2.0, at your option, © The FreeType Project.
+  GPL 2.0, at your option, © The FreeType Project. Font rasterization;
+  ns-pango requires it on the desktop, and it ships in the Android app and
+  in the Windows and macOS bundles. Under the FreeType License:
+  Portions of this software are copyright © 1996-2026 The FreeType
+  Project (www.freetype.org). All rights reserved.
 - **wgpu-native** — MIT or Apache 2.0, © the gfx-rs authors. The
   experimental WebGPU backend. Its two C headers are vendored under
   `third_party/wgpu-native/include/webgpu/`: `webgpu.h` is BSD 3-Clause,
