@@ -501,6 +501,15 @@ Changelog:
   implemented and in scope, WebGL is on by default without a prompt, and
   a new section describes the Android and iOS apps, which run the engine
   in the app process without the desktop's renderer sandbox.
+* CSS counters saturate instead of overflowing: two
+  `counter-increment: c 2147483647` in a row showed `-2`, and a
+  `counter-reset` beyond the 32-bit range showed a truncated number; both
+  now stop at the largest (or smallest) 32-bit value, as CSS Lists allows.
+  Lengths handed to the text shaper are clamped before they are converted
+  to Pango units: an extreme `letter-spacing`, `word-spacing` or
+  `text-indent` (such as `-1e20px`) stays within the font-size limit, and
+  widths, shape boxes and hit-test points stay within the integer range,
+  instead of overflowing inside the shaper.
 
 1.0.25:
 ======

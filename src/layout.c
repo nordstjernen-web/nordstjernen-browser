@@ -2299,17 +2299,18 @@ counter_apply_decl(GHashTable *counters, const char *decl, gboolean increment)
         char *name = g_strndup(name_s, nlen);
         if (strcmp(name, "none") == 0) { g_free(name); break; }
         while (*p && g_ascii_isspace(*p)) p++;
-        int val = increment ? 1 : 0;
+        gint64 val = increment ? 1 : 0;
         if (*p == '-' || g_ascii_isdigit(*p)) {
             char *end = NULL;
-            long v = strtol(p, &end, 10);
-            if (end != p) { val = (int)v; p = end; }
+            gint64 v = g_ascii_strtoll(p, &end, 10);
+            if (end != p) { val = CLAMP(v, G_MININT, G_MAXINT); p = end; }
         }
-        gint cur = increment
+        gint64 cur = increment
             ? GPOINTER_TO_INT(g_hash_table_lookup(counters, name))
             : 0;
         g_hash_table_insert(counters, g_strdup(name),
-                            GINT_TO_POINTER(cur + val));
+                            GINT_TO_POINTER((gint)CLAMP(cur + val, G_MININT,
+                                                        G_MAXINT)));
         g_free(name);
     }
 }
@@ -5408,13 +5409,13 @@ apply_inline_spacing(NsPangoAttrList *list, const ns_style *style, const char *t
         ws_px = wv->u.length.v;
     if (ls_px != 0) {
         NsPangoAttribute *ls = ns_pango_attr_letter_spacing_new(
-            (int)(ls_px * NS_PANGO_SCALE));
+            ns_paint_pango_spacing(ls_px));
         ls->start_index = 0;
         ls->end_index = G_MAXUINT;
         ns_pango_attr_list_insert(list, ls);
     }
     if (ws_px != 0) {
-        int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
+        int per_space = ns_paint_pango_spacing(ls_px + ws_px);
         for (const char *p = text; *p; p++) {
             if (*p == ' ') {
                 gsize idx = (gsize)(p - text);
@@ -5538,7 +5539,7 @@ apply_inline_layout_attrs(NsPangoAttrList *attrs, const ns_box *box)
             break;
         case NS_INLINE_SPACER: {
             NsPangoRectangle rect = {
-                0, 0, (int)(r->box_w * NS_PANGO_SCALE), 0
+                0, 0, ns_paint_pango_units(r->box_w), 0
             };
             a = ns_pango_attr_shape_new(&rect, &rect);
             break;
@@ -5642,8 +5643,8 @@ ns_inline_apply_atomic_shapes(NsPangoAttrList *list, const ns_box *box)
                 else if (strcmp(va, "super") == 0)       top -= fs * 0.3;
                 else if (strcmp(va, "sub") == 0)         top += fs * 0.2;
             }
-            NsPangoRectangle r = { 0, (int)(top * NS_PANGO_SCALE),
-                                 (int)(w * NS_PANGO_SCALE), (int)(h * NS_PANGO_SCALE) };
+            NsPangoRectangle r = { 0, ns_paint_pango_units(top),
+                                 ns_paint_pango_units(w), ns_paint_pango_units(h) };
             NsPangoAttribute *attr = ns_pango_attr_shape_new(&r, &r);
             attr->start_index = (guint)a->byte_off;
             attr->end_index   = (guint)(a->byte_off + 3);
@@ -5677,8 +5678,8 @@ ns_inline_layout_set_attrs(NsPangoLayout *layout, NsPangoAttrList *list,
                                        : NULL, 16);
         double w = css_w - prefix;
         if (w < fs * 0.4) continue;
-        NsPangoRectangle rect = { 0, (int)(-fs * 0.8 * NS_PANGO_SCALE),
-                                (int)(w * NS_PANGO_SCALE), (int)(fs * NS_PANGO_SCALE) };
+        NsPangoRectangle rect = { 0, ns_paint_pango_units(-fs * 0.8),
+                                ns_paint_pango_units(w), ns_paint_pango_units(fs) };
         NsPangoAttribute *attr = ns_pango_attr_shape_new(&rect, &rect);
         attr->start_index = (guint)(r->start + r->len - 2);
         attr->end_index   = (guint)(r->start + r->len);
@@ -6090,7 +6091,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     if (ws_nowrap && !ellip)
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
     if (box->inline_atomics && box->inline_atomics->len > 0)
         inline_apply_text_align(layout, parent_style);
@@ -6098,7 +6099,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
         ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, content_width);
-        if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+        if (ti > 0) ns_pango_layout_set_indent(layout, ns_paint_pango_spacing(ti));
     }
     if (ellip)
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -6270,13 +6271,13 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
         return NULL;
     if (!box->text || !*box->text) return NULL;
     NsPangoLayout *layout = make_pango_layout(parent_style);
-    ns_pango_layout_set_width(layout, (int)(box->content_width * NS_PANGO_SCALE));
+    ns_pango_layout_set_width(layout, ns_paint_pango_units(box->content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);
     {
         double ti = ns_text_indent_px(parent_style, box->content_width);
-        if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+        if (ti > 0) ns_pango_layout_set_indent(layout, ns_paint_pango_spacing(ti));
     }
     if (keyword_is(parent_style ? parent_style->values[NS_CSS_TEXT_OVERFLOW] : NULL,
                    "ellipsis"))
@@ -6309,8 +6310,8 @@ inline_box_form_hit(const ns_box *box, double local_x, double local_y,
     int index = 0, trailing = 0;
     gboolean inside = ns_pango_layout_xy_to_index(
         layout,
-        (int)(local_x * NS_PANGO_SCALE),
-        (int)(local_y * NS_PANGO_SCALE),
+        ns_paint_pango_units(local_x),
+        ns_paint_pango_units(local_y),
         &index, &trailing);
     const ns_node *button_hit = NULL;
     const ns_node *field_hit = NULL;
@@ -6496,7 +6497,7 @@ inline_box_layout_for_multicol(const ns_box *box, double content_width,
                                const ns_style *parent_style)
 {
     NsPangoLayout *layout = make_pango_layout(parent_style);
-    ns_pango_layout_set_width(layout, (int)(content_width * NS_PANGO_SCALE));
+    ns_pango_layout_set_width(layout, ns_paint_pango_units(content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(parent_style));
     if (!(box->inline_atomics && box->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, parent_style);

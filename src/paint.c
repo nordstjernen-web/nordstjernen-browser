@@ -23,6 +23,11 @@ static int g_dbg_paint_x = -2, g_dbg_paint_y = -2;
 #include "svg.h"
 #include "video.h"
 
+enum {
+    NS_PAINT_MAX_FONT_PX  = 65535,
+    NS_PAINT_MAX_PANGO_PX = 1 << 20,
+};
+
 typedef struct rgba {
     double r, g, b, a;
 } rgba;
@@ -141,8 +146,24 @@ int
 ns_paint_pango_font_size(double size_px)
 {
     if (!(size_px > 0)) return 0;
-    if (size_px > 65535) size_px = 65535;
+    if (size_px > NS_PAINT_MAX_FONT_PX) size_px = NS_PAINT_MAX_FONT_PX;
     return (int)(size_px * NS_PANGO_SCALE);
+}
+
+int
+ns_paint_pango_units(double px)
+{
+    if (isnan(px)) return 0;
+    px = CLAMP(px, -NS_PAINT_MAX_PANGO_PX, NS_PAINT_MAX_PANGO_PX);
+    return (int)(px * NS_PANGO_SCALE);
+}
+
+int
+ns_paint_pango_spacing(double px)
+{
+    if (isnan(px)) return 0;
+    return ns_paint_pango_units(
+        CLAMP(px, -NS_PAINT_MAX_FONT_PX, NS_PAINT_MAX_FONT_PX));
 }
 
 static NsPangoStretch
@@ -2258,7 +2279,7 @@ apply_nowrap_align_width(NsPangoLayout *layout, const ns_box *b)
     int pw, ph;
     ns_pango_layout_get_pixel_size(layout, &pw, &ph);
     if (pw <= b->content_width)
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
 }
 
 static void paint_walk(cairo_t *cr, const ns_box *b, const char *highlight);
@@ -2676,14 +2697,14 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
         if (ti > 0)
-            ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+            ns_pango_layout_set_indent(layout, ns_paint_pango_spacing(ti));
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -2711,13 +2732,13 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
         ws_px = s->values[NS_CSS_WORD_SPACING]->u.length.v;
     if (ls_px != 0) {
         NsPangoAttribute *ls = ns_pango_attr_letter_spacing_new(
-            (int)(ls_px * NS_PANGO_SCALE));
+            ns_paint_pango_spacing(ls_px));
         ls->start_index = 0;
         ls->end_index = G_MAXUINT;
         ns_pango_attr_list_insert(attrs, ls);
     }
     if (ws_px != 0) {
-        int per_space = (int)((ls_px + ws_px) * NS_PANGO_SCALE);
+        int per_space = ns_paint_pango_spacing(ls_px + ws_px);
         for (const char *p = b->text; *p; p++) {
             if (*p == ' ') {
                 gsize idx = (gsize)(p - b->text);
@@ -2875,7 +2896,7 @@ paint_inline_make_layout(const ns_box *b, const ns_style *s,
                 break;
             case NS_INLINE_SPACER: {
                 NsPangoRectangle rect = {
-                    0, 0, (int)(r->box_w * NS_PANGO_SCALE), 0
+                    0, 0, ns_paint_pango_units(r->box_w), 0
                 };
                 a = ns_pango_attr_shape_new(&rect, &rect);
                 break;
@@ -3506,13 +3527,13 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
         !keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_width(layout, -1);
     else
-        ns_pango_layout_set_width(layout, (int)(b->content_width * NS_PANGO_SCALE));
+        ns_pango_layout_set_width(layout, ns_paint_pango_units(b->content_width));
     ns_pango_layout_set_wrap(layout, ns_paint_wrap_mode_for(s));
     if (!(b->inline_atomics && b->inline_atomics->len > 0))
         ns_paint_apply_css_line_spacing(layout, s);
     {
         double ti = ns_text_indent_px(s, b->content_width);
-        if (ti > 0) ns_pango_layout_set_indent(layout, (int)(ti * NS_PANGO_SCALE));
+        if (ti > 0) ns_pango_layout_set_indent(layout, ns_paint_pango_spacing(ti));
     }
     if (keyword_is(s ? s->values[NS_CSS_TEXT_OVERFLOW] : NULL, "ellipsis"))
         ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
@@ -3566,7 +3587,7 @@ ns_paint_build_inline_layout(cairo_t *cr, const ns_box *b)
                 a = ns_pango_attr_variant_new(NS_PANGO_VARIANT_SMALL_CAPS); break;
             case NS_INLINE_SPACER: {
                 NsPangoRectangle rect = {
-                    0, 0, (int)(r->box_w * NS_PANGO_SCALE), 0
+                    0, 0, ns_paint_pango_units(r->box_w), 0
                 };
                 a = ns_pango_attr_shape_new(&rect, &rect);
                 break;
@@ -3631,8 +3652,8 @@ ns_paint_inline_xy_to_byte(const ns_box *b, double rel_x, double rel_y,
     double y_offset = ns_paint_inline_y_offset_for_layout(b, layout);
     double layout_y = rel_y - y_offset;
     if (layout_y < 0) layout_y = 0;
-    ns_pango_layout_xy_to_index(layout, (int)(rel_x * NS_PANGO_SCALE),
-                             (int)(layout_y * NS_PANGO_SCALE),
+    ns_pango_layout_xy_to_index(layout, ns_paint_pango_units(rel_x),
+                             ns_paint_pango_units(layout_y),
                              &index, &trailing);
     if (out_byte) {
         gsize tlen = strlen(b->text);
@@ -4561,7 +4582,7 @@ paint_image(cairo_t *cr, const ns_box *b)
             NsPangoLayout *layout = paint_create_layout();
             ns_pango_layout_set_text(layout, alt, -1);
             ns_pango_layout_set_width(layout,
-                (int)((b->content_width - 8) * NS_PANGO_SCALE));
+                ns_paint_pango_units(b->content_width - 8));
             ns_pango_layout_set_ellipsize(layout, NS_PANGO_ELLIPSIZE_END);
             int pw, ph;
             ns_pango_layout_get_pixel_size(layout, &pw, &ph);
