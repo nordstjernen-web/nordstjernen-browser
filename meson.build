@@ -315,10 +315,18 @@ if not webgpu_feature.disabled() and not is_mobile
   endif
 endif
 
-libpoppler = dependency('poppler-glib', required: false)
+# The inline PDF viewer (src/pdf.c) renders through poppler-glib, which is
+# GPL-2.0-or-later: a binary linking it is subject to the GPL, so the NSL
+# builds leave it out. The 'pdf' feature defaults to disabled and must be
+# turned on explicitly for a private build; without it a PDF navigation shows
+# a page that offers the file as a download.
+pdf_feature = get_option('pdf').disable_auto_if(is_mobile)
+libpoppler = dependency('poppler-glib', required: pdf_feature)
 have_poppler = libpoppler.found() and not is_mobile
 if have_poppler
   add_project_arguments('-DNS_HAVE_POPPLER=1', language: 'c')
+  message('PDF viewer: built over poppler-glib (GPL-2.0-or-later) -- this ' +
+          'binary is subject to the GPL; see THIRD-PARTY-LICENSES.md')
 endif
 
 libfontconfig = dependency('fontconfig', required: false)
@@ -590,6 +598,7 @@ install_data(
 
 summary({'WebAssembly (WAMR)': have_wasm}, section: 'Features')
 summary({'AVIF images (libavif)': have_avif}, section: 'Features')
+summary({'Inline PDF viewer (poppler, GPL)': have_poppler}, section: 'Features')
 summary({'GTK 4 shell': have_gtk}, section: 'Shells')
 
 subdir('src')

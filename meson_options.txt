@@ -22,3 +22,5 @@ option('wgpu_native_root', type: 'string', value: '',
        description: 'Root of an extracted wgpu-native release (expects include/webgpu/webgpu.h and lib/libwgpu_native.{so,a}). Used only when -Dwebgpu is enabled and pkg-config cannot find wgpu_native.')
 option('ns-pango', type: 'feature', value: 'auto',
        description: 'Shape text through the bundled ns-pango fork, which caches finished glyph strings across layouts. Auto: used on desktop, never on Android or iOS, where the fork has no CoreText backend and no fontconfig. Disabled links the system Pango instead, with src/ns_pango_names.h mapping the renamed API back -- the same path the mobile builds take.')
+option('pdf', type: 'feature', value: 'disabled',
+       description: 'Build the inline PDF viewer over poppler-glib. Off by default and in every official build: poppler is GPL-2.0-or-later, so a binary that links it is subject to the GPL (see THIRD-PARTY-LICENSES.md). Without it a PDF navigation shows a page offering the file as a download. -Dpdf=enabled requires poppler-glib, -Dpdf=auto uses it when present; never built on Android or iOS.')

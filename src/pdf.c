@@ -40,7 +40,7 @@ ns_pdf_notice_html(const char *url, const char *message)
     char *html = g_strdup_printf(
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<title>PDF</title>%s</head><body><div class=\"doc\">"
-        "<p class=\"note\">%s<br><a href=\"%s\">%s</a></p>"
+        "<p class=\"note\">%s<br><a href=\"%s\" download>%s</a></p>"
         "</div></body></html>",
         ns_pdf_style, esc_msg, esc_url, esc_url);
     g_free(esc_url);
@@ -170,6 +170,7 @@ ns_pdf_document_html(const guint8 *data, gsize len, const char *url)
 #else
     (void)data; (void)len;
     return ns_pdf_notice_html(
-        url, "Inline PDF viewing is not available in this build.");
+        url, "This build has no inline PDF viewer. Download the document "
+             "to open it in a PDF reader:");
 #endif
 }

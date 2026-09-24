@@ -347,7 +347,11 @@ These are linked only when present on the build host (meson
   image decoding.
 - **Poppler** (`poppler-glib`) — GNU GPL 2.0 or later, © the Poppler
   developers. PDF rendering. Note: Poppler is GPL; a build that links it
-  is subject to the GPL for that combined binary.
+  is subject to the GPL for that combined binary. It is therefore **not**
+  part of the official builds or packages, which have no inline PDF viewer:
+  the meson `pdf` feature that links it defaults to `disabled`, and it is
+  linked only into a private build configured with `-Dpdf=enabled` (or
+  `-Dpdf=auto` on a host that has poppler-glib).
 - **Fontconfig** — MIT-style license, © Keith Packard and contributors.
 - **FreeType** — FreeType License (BSD-style with credit clause) or GNU
   GPL 2.0, at your option, © The FreeType Project.

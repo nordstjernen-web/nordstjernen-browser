@@ -306,6 +306,12 @@ the build works without it and simply does no spell-checking. `libavif-dev` is o
 AVIF decoding; it drags in a full AV1 decoder for a format that is rare
 on the web, so `-Davif=disabled` drops it.
 
+The inline PDF viewer (`src/pdf.c`) renders through poppler-glib, which is
+GPL-2.0-or-later, so it is **not** auto-detected: the `pdf` feature defaults
+to `disabled` and only `-Dpdf=enabled` (a private build) links it. Don't make
+it `auto`, and don't add poppler to any packaging dependency list or bundle.
+Without it a PDF navigation shows a page whose link downloads the file.
+
 The FFmpeg libav\* dev packages in the command above (MSYS2
 `mingw-w64-x86_64-ffmpeg`, or the LGPL build from
 `scripts/build-ffmpeg-lgpl.sh`) enable inline WebM playback (VP9/VP8 video

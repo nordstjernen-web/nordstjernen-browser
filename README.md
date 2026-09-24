@@ -77,7 +77,8 @@ DirectComposition). Every other platform builds from source — see
   [docs/http-backends.md](docs/http-backends.md).
 - **Images and graphics** — Wuffs decodes PNG/APNG, GIF, BMP, JPEG and lossy
   WebP; libwebp handles animated WebP; ICO and SVG are rendered in-engine,
-  with optional AVIF and inline PDF support.
+  with optional AVIF support. The inline PDF viewer is left out of official
+  builds (see below).
 - **Media** — `<video>` plays **inline** for MPEG-1 (decoded in-tree by
   [pl_mpeg](https://github.com/phoboslab/pl_mpeg)) and, when FFmpeg's libav is
   present at build time, **WebM** (VP9/VP8 + Opus/Vorbis). MSE/`blob:`
@@ -164,14 +165,23 @@ fork; `-Dns-pango=disabled` links the system Pango and needs no network.
 
 **Optional**, auto-detected or build-time-selected:
 [FFmpeg](https://github.com/FFmpeg/FFmpeg) libav\* (inline WebM playback —
-required on Linux and Windows, auto-detected on macOS), poppler-glib (inline
-PDF), libavif (AVIF images), Enchant (spell checking), fontconfig / pangoft2
-(extra font backends), [libnghttp2](https://github.com/nghttp2/nghttp2) (the
+required on Linux and Windows, auto-detected on macOS), libavif (AVIF
+images), Enchant (spell checking), fontconfig / pangoft2 (extra font
+backends), [libnghttp2](https://github.com/nghttp2/nghttp2) (the
 in-tree HTTP/2 backend), [ngtcp2](https://github.com/ngtcp2/ngtcp2) +
 [nghttp3](https://github.com/ngtcp2/nghttp3) + GnuTLS (HTTP/3 over QUIC inside
 it), [wgpu-native](https://github.com/gfx-rs/wgpu-native) (experimental
 WebGPU) and a [V8](https://v8.dev/) monolith (experimental
 `-Djs_engine=v8`).
+
+**PDF viewing is off in official builds.** The inline PDF viewer
+(`src/pdf.c`) renders through [Poppler](https://poppler.freedesktop.org/)'s
+poppler-glib, which is licensed GPL-2.0-or-later, and a binary that links it
+is subject to the GPL (see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)).
+The released binaries and packages therefore leave it out: opening a PDF shows
+a page with a link that downloads the file for a PDF reader. For a private
+build with the viewer, install poppler-glib's development package and
+configure with `meson setup builddir -Dpdf=enabled`.
 
 ## License
 

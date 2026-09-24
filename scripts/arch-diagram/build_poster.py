@@ -227,7 +227,7 @@ L.append(node("spellcheck", "spellcheck.c",
               "optional spell checking of editable text",
               "Enchant (optional)"))
 L.append(node("pdf", "pdf.c", "PDF rendered to an inline HTML page",
-              "poppler-glib (optional)"))
+              "poppler-glib (opt-in, -Dpdf; GPL)"))
 L.append('}')
 
 L.append(subcl("js", "JavaScript engine + bindings"))
@@ -530,7 +530,7 @@ L.append('syslibs [shape=none, margin=0, label=<'
          'SQLite, uchardet, Enchant (optional)</td></tr>'
          '<tr><td align="left"><b>media</b></td><td align="left">'
          'libwebp, libavif, SDL2, FFmpeg libav* '
-         '(required Linux/Windows, auto macOS), poppler (optional)</td></tr>'
+         '(required Linux/Windows, auto macOS), poppler (opt-in -Dpdf, GPL)</td></tr>'
          '<tr><td align="left"><b>sandbox / GPU</b></td><td align="left">'
          'libseccomp + Landlock (Linux), wgpu-native (optional, headers '
          'vendored)</td></tr>'

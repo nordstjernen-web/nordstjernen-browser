@@ -21,7 +21,6 @@ install_apt() {
         libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev libuchardet-dev libpsl-dev \
         libsqlite3-dev libseccomp-dev libwebp-dev libavif-dev libsdl2-dev
     apt-get install -y --no-install-recommends \
-        libpoppler-glib-dev \
         libfontconfig-dev libpango1.0-dev libavif-dev || true
     # FFmpeg libav* backs the inline WebM path (VP9/VP8 video + Opus/Vorbis
     # audio). meson requires it on Linux, so this is not optional — its own
@@ -55,12 +54,11 @@ install_zypper() {
     # SDL2 backs the auto-detected audio helper; keep it out of the required
     # set so an unavailable/mid-sync package degrades to no audio, not a failed
     # nightly. Its own line (not the optional group) so it is independent of
-    # poppler availability.
+    # the fontconfig/pango group's availability.
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
         libSDL2-devel \
         || echo "nightly-distro-build(opensuse): SDL2 unavailable; audio helper skipped" >&2
     zypper --non-interactive --gpg-auto-import-keys install --no-recommends \
-        libpoppler-glib-devel \
         fontconfig-devel pango-devel libavif-devel || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). meson requires it on
     # Linux, so a failure here is fatal; if the default repos come up short,
@@ -76,7 +74,6 @@ install_apk() {
         linux-headers gtk4.0-dev libepoxy-dev curl-dev openssl-dev uchardet-dev libpsl-dev sqlite-dev \
         libseccomp-dev libwebp-dev sdl2-dev
     apk add --no-cache \
-        poppler-dev \
         fontconfig-dev pango-dev libavif-dev || true
     # FFmpeg libav* (inline WebM: VP9/VP8 + Opus/Vorbis). ffmpeg-dev provides
     # all of libavformat/libavcodec/libavutil/libswscale/libswresample, and

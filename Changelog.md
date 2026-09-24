@@ -484,6 +484,14 @@ Changelog:
   build does not link at all -- llama/ggml, gobject-introspection and the
   unused harfbuzz and pcre2 variants -- so 19 of the 51 libraries per ABI
   were dead weight. Only the engine's `DT_NEEDED` closure is packaged now.
+* Official builds no longer link Poppler, so they have no inline PDF
+  viewer. Poppler is GPL-2.0-or-later and was picked up automatically
+  whenever poppler-glib was installed on the build machine, which made
+  such a binary subject to the GPL; the .deb, .apk and Alpine packages also
+  pulled it in as a dependency. The viewer is now behind a `pdf` build
+  option that is off by default (`-Dpdf=enabled` turns it on for a private
+  build), and without it a PDF opens a page with a link that downloads the
+  file.
 
 1.0.25:
 ======
