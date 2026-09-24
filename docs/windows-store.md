@@ -33,7 +33,8 @@ What this means in practice:
    code, ever). The engine is the product.
 2. **Request an exception before submitting.** The policy's stated
    intent is security currency, which Nordstjernen meets on its own
-   terms (open source, in-tree engine, fast release cadence). Raise
+   terms (published, auditable source, in-tree engine, fast release
+   cadence). Raise
    the question through Partner Center → Help + support with a
    pre-submission inquiry referencing 10.2.1, and via
    `reportapp@microsoft.com`. Independent-engine browsers (Ladybird,
@@ -270,7 +271,9 @@ inside the package), and uninstall from Start removes it cleanly.
    output is the right source), the `nordstjernen.svg` logo renders
    for any requested promotional sizes.
 8. **Submission notes for the certification tester**: state that
-   the app is a web browser with its own open-source engine,
+   the app is a web browser with its own independent engine, whose
+   source is published under the source-available Nordstjernen Source
+   License (not an OSI open-source license),
    reference any pre-submission 10.2.1 correspondence, and note the
    first-run behavior (opens the search-only `about:start`, no
    account, no setup).
@@ -302,15 +305,17 @@ inside the package), and uninstall from Start removes it cleanly.
 >   with administrator rights, the browser drops them.
 > - **Modern web, no bloat.** HTML5, modern CSS and JavaScript,
 >   WebAssembly, WebCrypto and WebGL — without WebGPU, ad
->   tech, or AI surface area. Audio and video hand off to the
->   player you already have.
-> - **Yours.** Open source, with your history, cookies and settings
->   stored only on your device. Search defaults to DuckDuckGo Lite
->   and is one setting away from anything else.
+>   tech, or AI surface area. WebM and MPEG-1 video and MP3 audio
+>   play right in the page.
+> - **Yours.** The source is published for anyone to read and audit,
+>   and your history, cookies and settings are stored only on your
+>   device. Search defaults to DuckDuckGo Lite and is one setting
+>   away from anything else.
 >
-> The UI speaks your language: the interface translates to the
-> operating-system language automatically, with 40 languages
-> in the box.
+> The interface follows the operating-system language: menus,
+> toolbar and settings are translated into German, French, Spanish,
+> Portuguese, Italian, Dutch, Russian, Ukrainian, Polish, Turkish,
+> Japanese, Chinese and Korean, and are in English otherwise.
 
 **Product features** (Store bullets):
 
@@ -318,12 +323,12 @@ inside the package), and uninstall from Start removes it cleanly.
 - Per-tab renderer process isolation
 - Zero telemetry, zero phone-home connections
 - WebGL enabled by default with visible use indicator
-- In-box UI translation for 40 languages
+- Menus and settings translated into 13 languages
 - Small footprint, fast startup
 
 **Search terms** (max 7):
 `web browser`, `private browser`, `lightweight browser`,
-`no telemetry`, `independent engine`, `open source`, `secure browser`
+`no telemetry`, `independent engine`, `source available`, `secure browser`
 
 **Category:** Productivity. **Pricing:** Free.
 
