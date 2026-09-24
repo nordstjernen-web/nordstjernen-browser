@@ -35,15 +35,33 @@ trusted.
 
 - Bugs in third-party libraries (libcurl, GTK 4, GLib, lexbor, QuickJS,
   Wuffs, …). Report upstream; we update when fixes ship.
-- Features we deliberately don't implement: WebRTC, EME/DRM, service
-  workers, browser extensions, JIT, "AI" web APIs. (WebGL *is*
-  implemented, off by default and gated behind a per-site trust prompt —
-  see `docs/webgl.md`. WebGPU is an **experimental**, opt-in feature —
-  absent unless the build has wgpu-native and the browser is started with
-  `--enable-webgpu` — see `docs/webgpu.md`. MSE and inline WebM/MP4
-  playback *are* implemented; their decoders are in scope above.)
+- Features we deliberately don't implement: WebRTC, EME/DRM, service-worker
+  push and background sync, JIT (in the default QuickJS build), "AI" web
+  APIs. (WebGPU is an **experimental**, opt-in feature — absent unless the
+  build has wgpu-native and the browser is started with `--enable-webgpu`
+  — see `docs/webgpu.md`.)
 - CPU-level side channels (Spectre-class).
 - Attacks that already require local code execution as the same user.
+
+These features *are* implemented, run in the renderer, and are in scope
+like the rest of the engine:
+
+- **WebGL 1/2** (`src/webgl.c`). It is **on by default** with no
+  permission prompt: the first `getContext("webgl")` on a page creates the
+  context, and the status bar then shows that the site uses WebGL. The
+  *Enable WebGL* setting on `about:settings` (`webgl_enabled`) turns it off
+  for every site. See `docs/webgl.md`.
+- **Service workers** — registration, lifecycle, and `fetch` interception
+  through `FetchEvent.respondWith` (`src/js.c`); a worker runs as a thread
+  of the tab's renderer.
+- **Browser extensions** — a scoped WebExtensions subset (content scripts,
+  `declarativeNetRequest`, a slice of `browser.*`), loaded unpacked from
+  the user's data directory or from `NS_EXTENSIONS_DIR` (`src/ext.c`, see
+  `docs/extensions.md`).
+- **MSE and inline WebM/MP4 playback**; their decoders are covered by the
+  memory-safety item above.
+- **The inline PDF viewer** exists only in private builds configured with
+  `-Dpdf=enabled`; the official builds do not include it.
 
 ## Defenses
 
@@ -255,6 +273,38 @@ both.
 The whole mitigation suite can be disabled for debugging with
 `NS_NO_WIN32_MITIGATIONS=1`. Don't use that in normal operation.
 
+### Android and iOS
+
+The mobile apps run the same C engine as the desktop, but without the
+desktop's process model or sandbox. Everything in the sections above
+about renderer processes, Landlock, seccomp, Seatbelt and the Windows
+mitigations applies to the desktop builds only.
+
+- **Android** (the Google Play app, `android/`). A Kotlin shell loads
+  `libnordstjernen.so` into the app's own process through JNI
+  (`android/app/src/main/cpp/ns_jni.c`). Each tab's renderer is a thread
+  in that process (`android_inproc_attach`), not a separate process: there
+  is no `isolatedProcess` service, the JNI layer never calls
+  `ns_browser_sandbox`, and the mobile build links no libseccomp. The only
+  confinement is the sandbox Android gives every app — its own UID and
+  SELinux domain, holding only the `INTERNET` and `ACCESS_NETWORK_STATE`
+  permissions. A memory-safety bug in the engine therefore runs with all of
+  the app's privileges: it can reach every tab, and the cookies, cache,
+  history and site storage in the app's private data directory. There is
+  no per-tab or per-site isolation, and one crashing tab takes the whole
+  app down. The manifest sets `usesCleartextTraffic="true"`, so the
+  platform does not block `http://` fetches; the engine's own HSTS and
+  mixed-content rules still apply. `allowBackup` is off.
+- **iOS** (`ios/`, built in CI but not released). The engine is linked
+  statically into the UIKit app and runs in the app process the same way;
+  the macOS Seatbelt code is compiled out (`TARGET_OS_IPHONE`), so the
+  iOS app container is the only confinement. `Info.plist` sets
+  `NSAllowsArbitraryLoads`, so App Transport Security does not restrict
+  the engine's fetches either.
+- **On both**, WebGL, WebGPU, the audio/video helper processes, WebM
+  (FFmpeg) and the PDF viewer are not built, and JavaScript runs in the
+  QuickJS interpreter with no JIT.
+
 ### Network
 
 libcurl drives every fetch with TLS verification enabled
@@ -412,13 +462,19 @@ The `document.cookie` setter:
   work; until then, do not rely on a cross-origin frame being contained
   from the embedding origin.
 - **No per-path filesystem sandbox on Windows.** The mitigation
-  suite restricts the *process* (no remote DLL loads, no dynamic
-  code, no child processes, etc.) but does not allow-list the
+  suite restricts the *process* (no remote DLL loads, no legacy
+  injection points, no child processes, etc.) but does not allow-list the
   files the renderer can read or write the way Landlock does on
   Linux. AppContainer or Low-Integrity-Level drop would close
   this; both require additional integration work (manifest /
   capability declarations / re-routed config paths) and are
   tracked as future work.
+- **No renderer isolation on Android and iOS.** The engine runs in the
+  app's own process with no syscall filter or filesystem allow-list of
+  its own (see *Android and iOS* above), so an engine compromise there
+  has the whole app's data and privileges. Moving the renderer into an
+  Android `isolatedProcess` service would close this there; it is not
+  done yet.
 - **`document.cookie` writes to the jar without file locking.** A
   JS cookie write and a concurrent libcurl jar flush from an
   in-flight transfer are not serialised against each other, so a

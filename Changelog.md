@@ -497,6 +497,10 @@ Changelog:
   SDL2 (audio output), brotli, nghttp2, ngtcp2 and nghttp3 (through
   libcurl), and the optional GnuTLS (HTTP/3 backend) and V8 (experimental
   JavaScript backend).
+* SECURITY.md matches the code: service workers and extensions are
+  implemented and in scope, WebGL is on by default without a prompt, and
+  a new section describes the Android and iOS apps, which run the engine
+  in the app process without the desktop's renderer sandbox.
 
 1.0.25:
 ======
