@@ -134,10 +134,11 @@ license text is available at:
 Unlike the other LGPL libraries listed here, ns-pango is linked
 **statically** into the Nordstjernen executables on desktop platforms. Per
 LGPL section 6(a), you are entitled to modify ns-pango and relink
-Nordstjernen against your modified copy: write to the address in
-`README.md` and we will supply the Nordstjernen object files, together with
-any data and utility programs needed, so that you can produce a modified
-executable. Android and iOS builds do not include ns-pango; they link the
+Nordstjernen against your modified copy: write to us through the contact
+details published at <https://nordstjernen.org> (the address `License.md`
+gives for licensing inquiries) and we will supply the Nordstjernen object
+files, together with any data and utility programs needed, so that you can
+produce a modified executable. Android and iOS builds do not include ns-pango; they link the
 system Pango dynamically as before.
 
 ## Dynamically linked
