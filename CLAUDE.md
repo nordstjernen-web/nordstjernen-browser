@@ -103,6 +103,10 @@ Update Changelog.md
 - No "section banner" comments (`/* ---------- helpers ---------- */`).
   Group code by file or function instead.
 - No `TODO`/`FIXME`/`XXX` markers — file a real task instead.
+- Bundled external projects are exempt from this comments policy.
+  In particular, do not reformat or strip comments from `src/lexbor/`,
+  `src/quickjs/`, `src/wamr/` or `subprojects/` just to satisfy
+  Nordstjernen style.
 
 ## Autonomous mode — read this every session
 
@@ -136,11 +140,12 @@ This repo is driven by Claude in long uninterrupted sessions.
   — that's the per-change correctness gate, not CI. See
   `docs/Windows.md` for the MSYS2 setup; the rest of this guide
   uses Unix-style invocations that work in either shell.
-- **CI is enabled.** The Linux / macOS / Windows workflows run on
-  every push to `main` and every PR targeting `main`, plus manual
-  `workflow_dispatch`. Local Linux is still the primary
-  correctness gate before pushing; CI provides cross-platform
-  sanity coverage.
+- **CI is enabled.** The Linux / macOS / Windows / musl / Java /
+  Android / iOS / V8 workflows and CodeQL run on every push to `main`
+  and every PR targeting `main`, plus manual `workflow_dispatch`;
+  FreeBSD and NetBSD run on a schedule or by dispatch. Local Linux is
+  still the primary correctness gate before pushing; CI provides
+  cross-platform sanity coverage.
 
 ## Build / verify locally
 
@@ -235,7 +240,7 @@ cookie jar). Everything above one hop — redirects, HSTS, referer, cache,
 cookie partitioning — lives in `src/net.c` and is shared by both backends,
 so they fetch through identical browser policy.
 
-`libcurl` stays a hard dependency either way (WebSocket, SSE, AI and audio
+`libcurl` stays a hard dependency either way (WebSocket, SSE and audio
 use it directly), and the nghttp2 backend delegates proxied and FTP hops
 back to `ns_hop_transport_curl()`. It pools HTTP/2 connections per
 `scheme://host:port` and **multiplexes concurrent requests over a single
@@ -290,6 +295,16 @@ Ed25519/X25519, PBKDF2 and HKDF. The QuickJS `CryptoKey` class and `subtle.*` ar
 marshalling live in `src/js.c`. OpenSSL is already linked transitively
 through libcurl's TLS backend on Linux and Windows/MSYS2; `meson`
 depends on `libcrypto` explicitly so the headers resolve.
+
+### WebAssembly: WAMR
+
+The `WebAssembly` JS API (`compile`, `instantiate`, `Memory`,
+`Table`, `Global`, externref) is implemented in `src/wasm.c` over a
+vendored subset of the [WebAssembly Micro Runtime
+(WAMR)](https://github.com/bytecodealliance/wasm-micro-runtime)
+interpreter at `src/wamr/`. It runs wasm-bindgen bundles. The `wasm`
+meson feature builds it by default and is off on 32-bit x86, which WAMR
+does not support. See `docs/webassembly.md`.
 
 System packages required on Debian/Ubuntu:
 
