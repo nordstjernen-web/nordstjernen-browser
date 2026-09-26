@@ -2634,21 +2634,24 @@ paint_spell_underlines(NsPangoAttrList *attrs, const ns_box *b)
     if (!attrs || !b || !b->text) return;
     if (!ns_spell_available()) return;
     gsize tlen = strlen(b->text);
-    gboolean had_range = FALSE;
+    gboolean ranges_known = FALSE;
     if (b->attrs) {
         for (guint i = 0; i < b->attrs->len; i++) {
             const ns_inline_attr *a =
                 &g_array_index(b->attrs, ns_inline_attr, i);
+            if (a->kind == NS_INLINE_INPUT_FIELD ||
+                a->kind == NS_INLINE_INPUT_FIELD_FOCUSED)
+                ranges_known = TRUE;
             if (a->kind != NS_INLINE_SPELLCHECK) continue;
             gsize s = a->start, e = a->start + a->len;
             if (e > tlen) e = tlen;
             if (s < e) {
                 spell_underline_range(attrs, b->text, s, e);
-                had_range = TRUE;
+                ranges_known = TRUE;
             }
         }
     }
-    if (had_range) return;
+    if (ranges_known) return;
     const ns_node *owner = NULL;
     for (const ns_box *bx = b; bx && !owner; bx = bx->parent)
         owner = bx->dom;
