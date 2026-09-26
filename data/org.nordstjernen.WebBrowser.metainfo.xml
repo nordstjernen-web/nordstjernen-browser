@@ -60,6 +60,19 @@
   </branding>
 
   <releases>
+    <release version="1.0.26" date="2026-09-26">
+      <description>
+        <p>Grid, dialogs, security and styling performance release.</p>
+        <ul>
+          <li>CSS Grid runs the full track-sizing algorithm for every grid, including grid-template-areas layouts, grids beyond 24 rows and fr rows that fill a container's height; the grid shorthands parse and serialize per their grammars.</li>
+          <li>Popovers, dialog and light dismiss follow the HTML standard, :focus-visible is matched separately from :focus, and the autofocus attribute works.</li>
+          <li>Cross-origin frames and images are isolated: an embedding page can no longer read or script another site's frame, cookies or image pixels, and the audio helper only opens media a page may play.</li>
+          <li>Styling large pages is much faster: rules are indexed instead of tried on every element, style sharing is corrected and relayouts no longer re-scan every style sheet.</li>
+          <li>The default stylesheet follows the HTML rendering section, legacy presentational attributes and quirks mode are honoured, and tables, floats, flexbox and multi-column layout follow the specifications more closely.</li>
+          <li>The Android app is about 8 MB smaller.</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.0.25" date="2026-09-20">
       <description>
         <p>Animations, CSS validation and interface release.</p>
