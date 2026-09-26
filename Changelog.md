@@ -1,6 +1,9 @@
 Changelog:
 ==Significant changes in each release:
 
+1.0.27:
+======
+
 1.0.26:
 ======
 * Grids with more than 24 rows lay out fully. Auto-placement stopped at
