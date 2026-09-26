@@ -3357,14 +3357,15 @@ collect_walk(const ns_node *n, collector_ctx *ctx, int depth)
                             ns_element_get_attr(n, "cols");
         if (!any) {
             const char *ph = ns_element_get_attr(n, "placeholder");
-            if (ph && *ph && !focused) {
+            if (ph && *ph) {
                 for (const char *p = ph; *p; p++) {
                     if (*p == '\n') g_string_append(ctx->out, "\xe2\x80\xa8");
                     else if (*p != '\r') g_string_append_c(ctx->out, *p);
                 }
                 disp_end = ctx->out->len;
                 is_placeholder = TRUE;
-                caret_pos = 0;
+                if (focused) { caret_pos = val_start; anchor_pos = val_start; }
+                else         { caret_pos = 0; }
             } else if (ta_sized) {
                 const char *rows_attr = ns_element_get_attr(n, "rows");
                 int row_lines = rows_attr ? atoi(rows_attr) : 2;
@@ -5752,8 +5753,15 @@ inline_control_line_height(const ns_box *box, double line_height)
     return out;
 }
 
+static gboolean
+style_sets_block_height(const ns_style *s)
+{
+    const ns_css_value *hv = s->values[NS_CSS_HEIGHT];
+    return hv && (hv->kind == NS_CSS_V_LENGTH || hv->kind == NS_CSS_V_CALC);
+}
+
 static double
-inline_textarea_total_height(const ns_box *box)
+inline_textarea_total_height(const ns_box *box, const ns_style *parent_style)
 {
     if (!box || !box->attrs) return 0;
     double out = 0;
@@ -5762,7 +5770,9 @@ inline_textarea_total_height(const ns_box *box)
             &g_array_index(box->attrs, ns_inline_attr, i);
         if ((r->kind == NS_INLINE_INPUT_FIELD ||
              r->kind == NS_INLINE_INPUT_FIELD_FOCUSED) &&
-            inline_control_is_textarea(r) && r->box_h > 0) {
+            inline_control_is_textarea(r) && r->box_h > 0 &&
+            !(r->style && r->style == parent_style &&
+              style_sets_block_height(r->style))) {
             double h = r->box_h + (r->native_chrome ? 8.0 : 0.0);
             if (h > out) out = h;
         }
@@ -6173,7 +6183,7 @@ inline_layout(ns_box *box, double content_width, const ns_style *parent_style)
     for (int i = 0; i < line_count; i++) expected += line_heights[i];
     box->content_width  = content_width;
     box->content_height = expected;
-    double ta_h = inline_textarea_total_height(box);
+    double ta_h = inline_textarea_total_height(box, parent_style);
     if (ta_h > box->content_height) box->content_height = ta_h;
     box->first_baseline =
         (double)ns_pango_layout_get_baseline(layout) / NS_PANGO_SCALE;
@@ -12111,6 +12121,29 @@ ns_box_fieldset_legend_gap(const ns_box *fieldset, double *border_inset,
     return TRUE;
 }
 
+static double
+block_align_content_shift(const ns_box *box, double free_space)
+{
+    if (!box->style || free_space == 0) return 0;
+    if (style_is_flex_container(box->style) ||
+        style_is_grid_container(box->style))
+        return 0;
+    const char *acont = keyword_or(box->style, NS_CSS_ALIGN_CONTENT, "normal");
+    gboolean unsafe = g_str_has_prefix(acont, "unsafe ");
+    if (unsafe) acont += strlen("unsafe ");
+    else if (g_str_has_prefix(acont, "safe ")) acont += strlen("safe ");
+    if (free_space < 0 &&
+        (!unsafe ||
+         overflow_kw_scrolls(overflow_axis_keyword(box->style, NS_CSS_OVERFLOW_Y))))
+        return 0;
+    if (strcmp(acont, "center") == 0 || strcmp(acont, "space-around") == 0 ||
+        strcmp(acont, "space-evenly") == 0)
+        return free_space / 2.0;
+    if (strcmp(acont, "end") == 0 || strcmp(acont, "flex-end") == 0)
+        return free_space;
+    return 0;
+}
+
 static void
 layout_block(ns_box *box, double parent_content_width, const ns_style *inherited_style)
 {
@@ -12721,14 +12754,23 @@ flex_done: ;
         min_h = measured;
     if (min_h >= 0 && box->content_height < min_h)
         box->content_height = min_h;
-    if (box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
+    double align_shift = block_align_content_shift(box, box->content_height - measured);
+    if (align_shift != 0) {
+        for (ns_box *c = box->first_child; c; c = c->next_sibling) {
+            if (!style_is_absolute_or_fixed(c->style))
+                shift_box_tree(c, 0, align_shift);
+        }
+    }
+    if (align_shift == 0 &&
+        box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
         strcmp(box->dom->name, "input") == 0 &&
         box->content_height > measured + 0.5) {
         double shift = (box->content_height - measured) * 0.5;
         for (ns_box *c = box->first_child; c; c = c->next_sibling)
             c->y += shift;
     }
-    if (box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
+    if (align_shift == 0 &&
+        box->dom && box->dom->kind == NS_NODE_ELEMENT && box->dom->name &&
         strcmp(box->dom->name, "button") == 0 &&
         !keyword_is(box->style ? box->style->values[NS_CSS_APPEARANCE] : NULL,
                     "none") &&

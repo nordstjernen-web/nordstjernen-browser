@@ -3,6 +3,23 @@ Changelog:
 
 1.0.27:
 ======
+* `align-content` works on block containers, as CSS Box Alignment
+  specifies: `center`, `end` and their `safe`/`unsafe` forms move the
+  content of a block with a fixed height. It only worked in flex and grid
+  containers, so a vertically centered block kept its text at the top.
+* A block-level `<textarea>` with a CSS height is sized by that height.
+  Its text run was sized as the whole control, padding included, so a
+  single-row field overflowed its own content box: it drew a scrollbar
+  and reported a `scrollHeight` 20px too tall, which auto-growing chat
+  inputs copied into their height.
+* A focused, empty `<textarea>` keeps showing its placeholder, with the
+  caret in front of it, as `<input>` already did. Placeholder text is no
+  longer spell-checked.
+* Web fonts whose files carry a family name other than the `@font-face`
+  family are registered under the CSS family with each file's own
+  weight. A family split over Regular, Medium and Bold files used to be
+  aliased to whichever file loaded first, so normal text could render
+  bold.
 
 1.0.26:
 ======

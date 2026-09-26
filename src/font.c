@@ -367,29 +367,25 @@ ns_font_install_file(const char *path, const char *css_family)
 {
     if (!path) return;
     FcConfigAppFontAddFile(NULL, (const FcChar8 *)path);
-    if (css_family && *css_family) {
-        int count = 0;
-        FcPattern *pat = FcFreeTypeQuery((const FcChar8 *)path, 0, NULL, &count);
-        if (pat) {
+    FcFontSet *app_fonts = FcConfigGetFonts(NULL, FcSetApplication);
+    if (css_family && *css_family && app_fonts) {
+        int count = 1;
+        for (int face = 0; face < count; face++) {
+            FcPattern *pat = FcFreeTypeQuery((const FcChar8 *)path, face, NULL,
+                                             &count);
+            if (!pat) break;
             FcChar8 *internal = NULL;
             if (FcPatternGetString(pat, FC_FAMILY, 0, &internal) == FcResultMatch &&
                 internal &&
-                g_ascii_strcasecmp((const char *)internal, css_family) != 0) {
-                char *fam = g_markup_escape_text(css_family, -1);
-                char *intl = g_markup_escape_text((const char *)internal, -1);
-                char *xml = g_strdup_printf(
-                    "<?xml version=\"1.0\"?>\n"
-                    "<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n"
-                    "<fontconfig><alias binding=\"strong\"><family>%s</family>"
-                    "<prefer><family>%s</family></prefer></alias></fontconfig>",
-                    fam, intl);
-                FcConfigParseAndLoadFromMemory(FcConfigGetCurrent(),
-                                               (const FcChar8 *)xml, FcTrue);
-                g_free(xml);
-                g_free(fam);
-                g_free(intl);
+                g_ascii_strcasecmp((const char *)internal, css_family) == 0) {
+                FcPatternDestroy(pat);
+                continue;
             }
-            FcPatternDestroy(pat);
+            FcPatternDel(pat, FC_FAMILY);
+            FcPatternDel(pat, FC_FAMILYLANG);
+            FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)css_family);
+            if (!FcFontSetAdd(app_fonts, pat))
+                FcPatternDestroy(pat);
         }
     }
 #ifdef NS_HAVE_PANGOFC
