@@ -25581,11 +25581,11 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
     guint cand_n = 0;
     #define CAND_PUSH_ARR(_arr) do { \
         if ((_arr)) { \
-            guint _n = (_arr)->len; \
-            if (cand_n > G_MAXUINT - _n) break; \
-            if (cand_n + _n > cand_cap) { \
+            guint push_len = (_arr)->len; \
+            if (cand_n > G_MAXUINT - push_len) break; \
+            if (cand_n + push_len > cand_cap) { \
                 guint new_cap = cand_cap < 64 ? 64 : cand_cap; \
-                while (cand_n + _n > new_cap) { \
+                while (cand_n + push_len > new_cap) { \
                     if (new_cap > G_MAXUINT / 2) { new_cap = G_MAXUINT; break; } \
                     new_cap *= 2; \
                 } \
@@ -25595,8 +25595,8 @@ gather_matches_multi(const ns_css_stylesheet *sheet, int origin,
                 g_cand_pool = cands; \
                 g_cand_pool_cap = cand_cap; \
             } \
-            if (_n) memcpy(cands + cand_n, (_arr)->data, _n * sizeof(css_candidate)); \
-            cand_n += _n; \
+            if (push_len) memcpy(cands + cand_n, (_arr)->data, push_len * sizeof(css_candidate)); \
+            cand_n += push_len; \
         } \
     } while (0)
 

@@ -29,6 +29,9 @@ Changelog:
   weight. A family split over Regular, Medium and Bold files used to be
   aliased to whichever file loaded first, so normal text could render
   bold.
+* Nordstjernen builds against GLib 2.90. Its `g_new()`/`g_renew()`
+  macros now declare a local named `_n`, which the CSS selector matcher
+  shadowed, so the Windows (MSYS2) build failed under `--werror`.
 
 1.0.26:
 ======
