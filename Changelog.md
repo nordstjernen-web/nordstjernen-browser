@@ -3,6 +3,15 @@ Changelog:
 
 1.0.27:
 ======
+* The in-tree HTML parser, lexbor, is refreshed to upstream master
+  (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
+  an out-of-bounds write in `CharacterData.replaceData()`, and
+  uninitialized memory in IDNA host processing. URLs parse more exactly:
+  `.` and `..` path segments no longer swallow the `?` or `#` after them
+  or miscount the path (`/a/b/../../../c/é/../../x` is `/x`), `//./c`
+  keeps its empty segment, a username may contain `@`, and spaces at the
+  end of an opaque path such as `sc:a ?q` are encoded. A `<form>` inside
+  a template's `innerHTML` is parsed as in the rest of the template.
 * `align-content` works on block containers, as CSS Box Alignment
   specifies: `center`, `end` and their `safe`/`unsafe` forms move the
   content of a block with a fixed height. It only worked in flex and grid

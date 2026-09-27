@@ -141,6 +141,10 @@ lxb_encoding_encode_utf_8_single(lxb_encoding_encode_t *ctx, lxb_char_t **data,
                                  const lxb_char_t *end, lxb_codepoint_t cp)
 {
     if (cp < 0x80) {
+        if (*data >= end) {
+            return LXB_ENCODING_ENCODE_SMALL_BUFFER;
+        }
+
         /* 0xxxxxxx */
         *(*data)++ = (lxb_char_t) cp;
 

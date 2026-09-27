@@ -325,6 +325,10 @@ lxb_encoding_decode_utf_8_single(lxb_encoding_decode_t *ctx,
     lxb_char_t ch;
     const lxb_char_t *p;
 
+    if (*data >= end) {
+        return LXB_ENCODING_DECODE_CONTINUE;
+    }
+
     if (ctx->u.utf_8.need != 0) {
         needed = ctx->u.utf_8.need;
         ctx->u.utf_8.need = 0;
@@ -433,13 +437,12 @@ lxb_encoding_decode_valid_utf_8_single(const lxb_char_t **data,
     lxb_codepoint_t cp;
     const lxb_char_t *p = *data;
 
+    if (p >= end) {
+        return LXB_ENCODING_DECODE_ERROR;
+    }
+
     if (*p < 0x80){
         /* 0xxxxxxx */
-
-        if (end - p < 1) {
-            *data = end;
-            return LXB_ENCODING_DECODE_ERROR;
-        }
 
         cp = (lxb_codepoint_t) *p;
 

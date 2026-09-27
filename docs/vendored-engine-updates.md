@@ -29,6 +29,74 @@ is classified:
 Sources are listed explicitly in each `meson.build`, so new upstream files
 in unused areas are simply not compiled; the build is the final gate.
 
+## 2026-09-27 — Lexbor de1d07a → 327a8b6
+
+| | value |
+|---|---|
+| Fork base | `de1d07a` (master, "Test: added README.md") |
+| Updated to | `327a8b6` (master, "URL: Fix parsing of query and fragment after a dot-component in path (#411)") |
+| Version | `3.1.0` (unchanged upstream); URL module 0.5 → 0.6, encoding module 2.3 → 2.4 |
+
+Twenty-six upstream commits; twenty-one touch the modules we carry.
+
+- **Memory safety** — `lexbor_mraw_realloc()` put the freed tail of a shrunk
+  non-tail allocation at the wrong offset, so later allocations could overlap
+  live data (`f3f6fa7`); `lxb_dom_character_data_replace()` wrote past the end
+  of its buffer (`cf31487`); IDNA buffer growth copied from uninitialized
+  memory when it moved off the stack buffer (`b0f7412`); `lexbor_conv_*`
+  integer and hex conversion ignored the output capacity (`05b5d37`).
+- **URL** — the dot-segment rework (`327a8b6`): `.`/`..` followed by `?` or
+  `#` keeps the delimiter on both the fast and the slow path, `path.length` no
+  longer drifts (so `/a/b/../../../c/é/../../x` is `/x`), an invalid `%`
+  sequence no longer swallows the following delimiter, `\` after a dot segment
+  reports invalid-reverse-solidus, and the empty segment in `//./c` survives.
+  Also: usernames containing `@` (`a36e09a`), spaces at the end of an opaque
+  path are encoded before `?`/`#` (`1b215a8`), fragment serialization without
+  a query (`385afff`), a replacement `file:` drive path stays hierarchical
+  (`917742f`), and new public API — the IPv6 parser, the percent-encoder with
+  its map, and component reset helpers (`a7dbebb`, `2b24b56`, `e6c068f`).
+- **HTML** — a `<form>` inside template contents is inserted without touching
+  the form element pointer when the template is the fragment-parsing context,
+  in body and in table (new `lxb_html_tree_parsing_template_contents()`);
+  "after head" resets frameset-ok; meta `charset`/`content` attribute names are
+  matched exactly in the prescan (`61ef2bc`).
+- **Encoding** — the UTF-8 single-code-point decoder returns CONTINUE on empty
+  input, the valid-UTF-8 decoder rejects it, and the UTF-8 single encoder
+  reports SMALL_BUFFER instead of writing an ASCII byte past `end` (`47be1dc`,
+  `5d3a6f5`). The Shift_JIS, single-byte and UTF-16 fixes (`7314185`,
+  `826b121`, `97c2aab`) land in codecs this fork no longer carries.
+- **Utils** — HTTP header fields reject a bare CR and serialize CRLF
+  (`1170290`).
+
+**Local modifications preserved:** `unicode/idna*` (our IDNA layer, merged
+cleanly with upstream's buffer-growth fix), `core/mraw.h` (unaligned-load
+fix), the UTF-8-only encoding module, `url/url.c` (UTF-8-only query and
+percent-encoding, and a port under a state override keeping the hostname), and
+our in-tree `meson.build`. `lxb_url_percent_encode_after_encoding()` gained
+upstream's `url_map` argument and still always encodes as UTF-8; upstream's new
+`lxb_url_output_encoding()` helper is not carried, since only UTF-8 remains.
+
+**Local modification dropped:** our dot-segment terminator fix in `url/url.c`
+(`2b6f8b9`). Upstream's `327a8b6` fixes the same bug on both paths and the
+related `path.length` and percent-sequence cases ours did not cover.
+
+### Verification
+
+- `meson compile -C builddir` — builds and links cleanly with no warnings.
+- A headless page exercising the URL parser (dot segments on both paths,
+  `@` in userinfo, opaque-path spaces, IDNA, the host setter with an invalid
+  port, `file:` drive paths, IPv6, `URLSearchParams`), the HTML tree builder
+  (form in template fragments and documents, form in table, adoption agency,
+  processing instructions), `CharacterData.replaceData` and
+  `TextEncoder`/`TextDecoder` gives the expected results, and larger local
+  documents render the same text as the pre-refresh build.
+- WPT's `url/resources` data (`urltestdata.json`, the JavaScript-only set,
+  `setters_tests.json`, `toascii.json` and the host-only `IdnaTestV2.json`
+  cases), driven headless through `URL`: 3855 → 3868 passing against the
+  pre-refresh build, no case newly failing. The gains are spaces at the end of
+  an opaque path before `?`/`#`, including after the `search` and `hash`
+  setters clear them.
+
 ## 2026-08-08 — QuickJS e2c45218 → 954dc53, Lexbor cf07699 → de1d07a
 
 ### QuickJS
