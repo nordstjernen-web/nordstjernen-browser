@@ -43684,7 +43684,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, childFrameOf, framePostMessage){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage){"
     "  var url = initialURL || 'about:blank';"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
@@ -43830,8 +43830,6 @@ static const char ns_iframe_global_bootstrap[] =
     "  var crossOrigin = (sandbox & 8192) !== 0;"
     "  var parentOnly = { cookieStore:1, caches:1, getSelection:1, opener:1, frameElement:1, origin:1, name:1, navigation:1, external:1 };"
     "  def('origin', { get: function(){ if ((sandbox & 1) && !(sandbox & 8)) return 'null'; var u=mk(url); return u ? u.origin : 'null'; } });"
-    "  var frameName = '';"
-    "  try { frameName = (frameEl && frameEl.getAttribute('name')) || ''; } catch (e) {}"
     "  def('name', { value: frameName, writable: true });"
     "  def('frameElement', { value: crossOrigin ? null : (frameEl || null), writable: true });"
     "  if (crossOrigin) {"
@@ -43919,16 +43917,20 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
         JSValue platform = ns_iframe_platform_names(fctx, js);
-        JSValue frame_el = iframe ? ns_make_element(js->ctx, iframe) : JS_NULL;
+        JSValue frame_el = iframe && !(sandbox & NS_FRAME_CROSS_ORIGIN)
+            ? ns_make_element(js->ctx, iframe) : JS_NULL;
+        const char *frame_name = iframe ? ns_element_get_attr(iframe, "name") : NULL;
+        JSValue frame_name_v = JS_NewString(fctx, frame_name ? frame_name : "");
         JSValue child_frame_of = JS_NewCFunction(fctx, ns_iframe_child_frame_of,
                                                  "childFrameOf", 2);
         JSValueConst post_data[1] = { fg };
         JSValue post_message = JS_NewCFunctionData(fctx,
             ns_window_post_message_data, 2, 0, 1, post_data);
-        JSValueConst args[9] = { fg, parent_global, iframe_doc, urlv, sbv,
-                                 platform, frame_el, child_frame_of,
-                                 post_message };
-        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 9, args);
+        JSValueConst args[10] = { fg, parent_global, iframe_doc, urlv, sbv,
+                                  platform, frame_el, frame_name_v,
+                                  child_frame_of, post_message };
+        JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 10, args);
+        JS_FreeValue(fctx, frame_name_v);
         JS_FreeValue(fctx, post_message);
         JS_FreeValue(fctx, child_frame_of);
         JS_FreeValue(js->ctx, frame_el);
