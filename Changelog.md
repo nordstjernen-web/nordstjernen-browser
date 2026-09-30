@@ -29,6 +29,18 @@ Changelog:
   `event.source` sent the answer back into the frame instead of to its
   parent. A message from another origin hands the frame a cross-origin
   WindowProxy as `event.source` rather than the sender's own window.
+* A cross-origin or opaque-origin frame can no longer unwrap its
+  embedder's window through `parent`, `top` or `event.source`. These were
+  guarded by JavaScript running inside the frame's own realm, so the
+  frame could switch the guard off: deleting
+  `window.__ndParentWindowProxy`, replacing `__nsDeliverMessage`, or
+  patching `Array.prototype.concat` before calling `parent.postMessage`
+  handed it the embedder's window and document. The cross-origin
+  WindowProxy is now a native object whose property access is decided in
+  C, and the engine wraps `event.source` before any of the frame's code
+  runs. `event.source === parent` still holds for messages from the
+  parent, sibling frames compare equal to `parent.frames[i]`, and
+  `Promise.resolve(parent)` no longer throws.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
   an out-of-bounds write in `CharacterData.replaceData()`, and

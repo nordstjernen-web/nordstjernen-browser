@@ -62,6 +62,8 @@ struct ns_js {
     GPtrArray    *frame_ctxs;
     GHashTable   *frame_contexts;
     GHashTable   *frame_windows;
+    GHashTable   *cross_windows;
+    GHashTable   *cross_origin_realms;
     GArray       *font_ready_resolvers;
     ns_js_log_cb  log_cb;
     gpointer      log_user_data;

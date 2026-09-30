@@ -376,8 +376,6 @@ static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   gboolean *special_cancel);
 static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
-static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
-                                        int argc, JSValueConst *argv);
 static ns_node *ns_iframe_document_node(const ns_node *iframe);
 static void    ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                                              const char *type,
@@ -1521,6 +1519,7 @@ static JSClassID ns_storage_class_id;
 static JSClassID ns_live_class_id;
 static JSClassID ns_dataset_class_id;
 static JSClassID ns_window_named_class_id;
+static JSClassID ns_cross_window_class_id;
 
 typedef enum {
     NS_LIVE_CHILDREN,
@@ -12513,6 +12512,433 @@ ns_window_url_of(JSContext *ctx, JSValueConst win)
     return out;
 }
 
+static JSValue ns_post_message_to_target(JSContext *ctx, JSValue target,
+                                         JSValueConst source_override,
+                                         int argc, JSValueConst *argv);
+
+typedef struct {
+    JSValue target;
+} ns_cross_window;
+
+static void
+ns_cross_window_finalizer(JSRuntime *rt, JSValueConst val)
+{
+    ns_cross_window *cw = JS_GetOpaque(val, ns_cross_window_class_id);
+    if (!cw) return;
+    JS_FreeValueRT(rt, cw->target);
+    g_free(cw);
+}
+
+static void
+ns_cross_window_mark(JSRuntime *rt, JSValueConst val, JS_MarkFunc *mark_func)
+{
+    ns_cross_window *cw = JS_GetOpaque(val, ns_cross_window_class_id);
+    if (cw) JS_MarkValue(rt, cw->target, mark_func);
+}
+
+static void
+ns_cross_windows_clear(ns_js *js)
+{
+    if (!js->cross_windows) return;
+    GHashTableIter realms;
+    gpointer realm, cache;
+    g_hash_table_iter_init(&realms, js->cross_windows);
+    while (g_hash_table_iter_next(&realms, &realm, &cache)) {
+        GHashTableIter entries;
+        gpointer target, wrapper;
+        g_hash_table_iter_init(&entries, cache);
+        while (g_hash_table_iter_next(&entries, &target, &wrapper))
+            JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, wrapper));
+        g_hash_table_destroy(cache);
+    }
+    g_hash_table_remove_all(js->cross_windows);
+}
+
+static JSValue
+ns_cross_window_for(JSContext *realm, JSValueConst target)
+{
+    ns_js *js = js_from_ctx(realm);
+    GHashTable *cache = js && js->cross_windows
+        ? g_hash_table_lookup(js->cross_windows, realm) : NULL;
+    gpointer hit = cache
+        ? g_hash_table_lookup(cache, JS_VALUE_GET_PTR(target)) : NULL;
+    if (hit) return JS_DupValue(realm, JS_MKPTR(JS_TAG_OBJECT, hit));
+    JSValue obj = JS_NewObjectProtoClass(realm, JS_NULL,
+                                         ns_cross_window_class_id);
+    if (JS_IsException(obj)) return obj;
+    ns_cross_window *cw = g_new0(ns_cross_window, 1);
+    cw->target = JS_DupValue(realm, target);
+    JS_SetOpaque(obj, cw);
+    JS_PreventExtensions(realm, obj);
+    if (js && js->cross_windows) {
+        if (!cache) {
+            cache = g_hash_table_new(g_direct_hash, g_direct_equal);
+            g_hash_table_insert(js->cross_windows, realm, cache);
+        }
+        g_hash_table_insert(cache, JS_VALUE_GET_PTR(target),
+                            JS_VALUE_GET_PTR(JS_DupValue(realm, obj)));
+    }
+    return obj;
+}
+
+static JSValue
+ns_cross_window_denied(JSContext *ctx)
+{
+    return ns_throw_dom_exception(ctx, "SecurityError", 18,
+                                  "Blocked cross-origin frame access");
+}
+
+static JSValue
+ns_cross_window_wrap(JSContext *ctx, JSValue raw)
+{
+    if (JS_IsException(raw)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_NULL;
+    }
+    if (!JS_IsObject(raw)) return raw;
+    JSValue own = JS_GetGlobalObject(ctx);
+    gboolean is_own = JS_VALUE_GET_PTR(own) == JS_VALUE_GET_PTR(raw);
+    JS_FreeValue(ctx, own);
+    if (is_own || JS_GetOpaque(raw, ns_cross_window_class_id)) return raw;
+    JSValue wrapped = ns_cross_window_for(ctx, raw);
+    JS_FreeValue(ctx, raw);
+    return wrapped;
+}
+
+static JSValue
+ns_cross_window_child(JSContext *ctx, ns_cross_window *cw, JSAtom prop)
+{
+    JSValue docv = JS_GetPropertyStr(ctx, cw->target, "document");
+    if (JS_IsException(docv)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_UNDEFINED;
+    }
+    ns_node *doc = ns_unwrap_element_mut(docv);
+    JS_FreeValue(ctx, docv);
+    if (!doc || doc->kind != NS_NODE_DOCUMENT) return JS_UNDEFINED;
+    uint32_t index = 0;
+    JSValue win = JS_UNDEFINED;
+    if (JS_AtomIsArrayIndex(ctx, &index, prop)) {
+        win = ns_window_child_frame_window(ctx, doc, index, NULL, TRUE);
+    } else {
+        const char *name = JS_AtomToCString(ctx, prop);
+        if (name) {
+            win = ns_window_child_frame_window(ctx, doc, 0, name, TRUE);
+            JS_FreeCString(ctx, name);
+        }
+    }
+    return ns_cross_window_wrap(ctx, win);
+}
+
+static JSValue
+ns_cross_window_post_message(JSContext *ctx, JSValueConst this_val,
+                             int argc, JSValueConst *argv, int magic,
+                             JSValue *data)
+{
+    (void)this_val; (void)magic;
+    ns_cross_window *cw = JS_GetOpaque(data[0], ns_cross_window_class_id);
+    ns_js *js = js_from_ctx(ctx);
+    if (!cw || !js || !js->ctx) return JS_UNDEFINED;
+    JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue proxy = JS_GetPropertyStr(ctx, global, "__ndWindowProxy");
+    if (JS_IsException(proxy)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JSValueConst source = JS_IsObject(proxy) ? proxy : global;
+    JSValue r = ns_post_message_to_target(main_ctx,
+        JS_DupValue(ctx, cw->target), source, argc, argv);
+    JS_FreeValue(ctx, proxy);
+    JS_FreeValue(ctx, global);
+    return r;
+}
+
+static const char *const ns_cross_window_methods[] = { "close", "focus", "blur" };
+
+static JSValue
+ns_cross_window_method(JSContext *ctx, JSValueConst this_val, int argc,
+                       JSValueConst *argv, int magic, JSValue *data)
+{
+    (void)this_val; (void)argc; (void)argv;
+    ns_cross_window *cw = JS_GetOpaque(data[0], ns_cross_window_class_id);
+    if (!cw || magic < 0 || magic >= (int)G_N_ELEMENTS(ns_cross_window_methods))
+        return JS_UNDEFINED;
+    JSValue fn = JS_GetPropertyStr(ctx, cw->target,
+                                   ns_cross_window_methods[magic]);
+    JSValue r = JS_IsFunction(ctx, fn)
+        ? JS_Call(ctx, fn, cw->target, 0, NULL) : JS_UNDEFINED;
+    JS_FreeValue(ctx, fn);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    else JS_FreeValue(ctx, r);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_cross_window_navigate(JSContext *ctx, JSValueConst this_val, int argc,
+                         JSValueConst *argv, int magic, JSValue *data)
+{
+    (void)this_val; (void)magic;
+    ns_cross_window *cw = JS_GetOpaque(data[0], ns_cross_window_class_id);
+    if (!cw || argc < 1) return JS_UNDEFINED;
+    JSValue url = JS_ToString(ctx, argv[0]);
+    if (JS_IsException(url)) return url;
+    JSValue loc = JS_GetPropertyStr(ctx, cw->target, "location");
+    if (JS_IsObject(loc) &&
+        JS_SetPropertyStr(ctx, loc, "href", JS_DupValue(ctx, url)) < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    else if (JS_IsException(loc))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, loc);
+    JS_FreeValue(ctx, url);
+    return JS_UNDEFINED;
+}
+
+static JSValue
+ns_cross_window_href_denied(JSContext *ctx, JSValueConst this_val, int argc,
+                            JSValueConst *argv, int magic, JSValue *data)
+{
+    (void)this_val; (void)argc; (void)argv; (void)magic; (void)data;
+    return ns_cross_window_denied(ctx);
+}
+
+static JSValue
+ns_cross_window_location(JSContext *ctx, JSValueConst obj)
+{
+    JSValueConst data[1] = { obj };
+    JSValue loc = JS_NewObjectProto(ctx, JS_NULL);
+    JSAtom href = JS_NewAtom(ctx, "href");
+    JS_DefinePropertyGetSet(ctx, loc, href,
+        JS_NewCFunctionData(ctx, ns_cross_window_href_denied, 0, 0, 1, data),
+        JS_NewCFunctionData(ctx, ns_cross_window_navigate, 1, 0, 1, data),
+        JS_PROP_ENUMERABLE);
+    JS_FreeAtom(ctx, href);
+    JS_SetPropertyStr(ctx, loc, "replace",
+        JS_NewCFunctionData(ctx, ns_cross_window_navigate, 1, 0, 1, data));
+    return loc;
+}
+
+static JSValue
+ns_cross_window_member(JSContext *ctx, JSValueConst obj, ns_cross_window *cw,
+                       const char *name)
+{
+    JSValueConst data[1] = { obj };
+    if (!strcmp(name, "window") || !strcmp(name, "self") ||
+        !strcmp(name, "frames"))
+        return JS_DupValue(ctx, obj);
+    if (!strcmp(name, "parent") || !strcmp(name, "top"))
+        return ns_cross_window_wrap(ctx,
+                                    JS_GetPropertyStr(ctx, cw->target, name));
+    if (!strcmp(name, "opener")) return JS_NULL;
+    if (!strcmp(name, "then")) return JS_UNDEFINED;
+    if (!strcmp(name, "closed") || !strcmp(name, "length")) {
+        JSValue v = JS_GetPropertyStr(ctx, cw->target, name);
+        if (JS_IsException(v)) JS_FreeValue(ctx, JS_GetException(ctx));
+        JSValue r = !strcmp(name, "closed")
+            ? JS_NewBool(ctx, JS_VALUE_GET_TAG(v) == JS_TAG_BOOL && JS_ToBool(ctx, v))
+            : JS_NewUint32(ctx, JS_VALUE_GET_TAG(v) == JS_TAG_INT
+                                ? (uint32_t)JS_VALUE_GET_INT(v) : 0);
+        JS_FreeValue(ctx, v);
+        return r;
+    }
+    if (!strcmp(name, "location")) return ns_cross_window_location(ctx, obj);
+    if (!strcmp(name, "postMessage"))
+        return JS_NewCFunctionData(ctx, ns_cross_window_post_message, 2, 0,
+                                   1, data);
+    for (int i = 0; i < (int)G_N_ELEMENTS(ns_cross_window_methods); i++)
+        if (!strcmp(name, ns_cross_window_methods[i]))
+            return JS_NewCFunctionData(ctx, ns_cross_window_method, 0, i,
+                                       1, data);
+    return JS_UNINITIALIZED;
+}
+
+static JSValue
+ns_cross_window_lookup(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    ns_cross_window *cw = JS_GetOpaque(obj, ns_cross_window_class_id);
+    if (!cw) return JS_UNDEFINED;
+    JSValue key = JS_AtomToValue(ctx, prop);
+    gboolean is_symbol = JS_IsSymbol(key);
+    JS_FreeValue(ctx, key);
+    if (is_symbol) return JS_UNDEFINED;
+    const char *name = JS_AtomToCString(ctx, prop);
+    if (!name) return JS_EXCEPTION;
+    JSValue member = ns_cross_window_member(ctx, obj, cw, name);
+    JS_FreeCString(ctx, name);
+    if (!JS_IsUninitialized(member)) return member;
+    JSValue child = ns_cross_window_child(ctx, cw, prop);
+    if (JS_IsObject(child)) return child;
+    JS_FreeValue(ctx, child);
+    return ns_cross_window_denied(ctx);
+}
+
+static JSValue
+ns_cross_window_get(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                    JSValueConst receiver)
+{
+    (void)receiver;
+    return ns_cross_window_lookup(ctx, obj, prop);
+}
+
+static int
+ns_cross_window_get_own(JSContext *ctx, JSPropertyDescriptor *desc,
+                        JSValueConst obj, JSAtom prop)
+{
+    JSValue v = ns_cross_window_lookup(ctx, obj, prop);
+    if (JS_IsException(v)) return -1;
+    if (JS_IsUndefined(v)) return 0;
+    if (!desc) {
+        JS_FreeValue(ctx, v);
+        return 1;
+    }
+    desc->flags  = JS_PROP_CONFIGURABLE;
+    desc->value  = v;
+    desc->getter = JS_UNDEFINED;
+    desc->setter = JS_UNDEFINED;
+    return 1;
+}
+
+static int
+ns_cross_window_has(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    JSValue v = ns_cross_window_lookup(ctx, obj, prop);
+    if (JS_IsException(v)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return 0;
+    }
+    int found = !JS_IsUndefined(v);
+    JS_FreeValue(ctx, v);
+    return found;
+}
+
+static int
+ns_cross_window_set(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                    JSValueConst value, JSValueConst receiver, int flags)
+{
+    (void)receiver; (void)flags;
+    ns_cross_window *cw = JS_GetOpaque(obj, ns_cross_window_class_id);
+    const char *name = JS_AtomToCString(ctx, prop);
+    gboolean is_location = name && !strcmp(name, "location");
+    if (name) JS_FreeCString(ctx, name);
+    if (!cw || !is_location) {
+        ns_cross_window_denied(ctx);
+        return -1;
+    }
+    JSValue data[1] = { JS_DupValue(ctx, obj) };
+    JSValueConst args[1] = { value };
+    JSValue r = ns_cross_window_navigate(ctx, JS_UNDEFINED, 1, args, 0, data);
+    JS_FreeValue(ctx, data[0]);
+    if (JS_IsException(r)) return -1;
+    JS_FreeValue(ctx, r);
+    return 1;
+}
+
+static int
+ns_cross_window_define(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                       JSValueConst val, JSValueConst getter,
+                       JSValueConst setter, int flags)
+{
+    (void)obj; (void)prop; (void)val; (void)getter; (void)setter; (void)flags;
+    ns_cross_window_denied(ctx);
+    return -1;
+}
+
+static int
+ns_cross_window_delete(JSContext *ctx, JSValueConst obj, JSAtom prop)
+{
+    (void)obj; (void)prop;
+    ns_cross_window_denied(ctx);
+    return -1;
+}
+
+static const char *const ns_cross_window_names[] = {
+    "window", "self", "location", "close", "closed", "focus", "blur",
+    "frames", "length", "top", "opener", "parent", "postMessage",
+};
+
+static int
+ns_cross_window_own_names(JSContext *ctx, JSPropertyEnum **ptab,
+                          uint32_t *plen, JSValueConst obj)
+{
+    (void)obj;
+    uint32_t n = G_N_ELEMENTS(ns_cross_window_names);
+    JSPropertyEnum *tab = js_malloc(ctx, sizeof(*tab) * n);
+    if (!tab) return -1;
+    for (uint32_t i = 0; i < n; i++) {
+        tab[i].is_enumerable = FALSE;
+        tab[i].atom = JS_NewAtom(ctx, ns_cross_window_names[i]);
+    }
+    *ptab = tab;
+    *plen = n;
+    return 0;
+}
+
+static JSClassExoticMethods ns_cross_window_exotic = {
+    .get_own_property       = ns_cross_window_get_own,
+    .get_own_property_names = ns_cross_window_own_names,
+    .delete_property        = ns_cross_window_delete,
+    .define_own_property    = ns_cross_window_define,
+    .has_property           = ns_cross_window_has,
+    .get_property           = ns_cross_window_get,
+    .set_property           = ns_cross_window_set,
+};
+
+static JSClassDef ns_cross_window_class = {
+    .class_name = "Window",
+    .finalizer  = ns_cross_window_finalizer,
+    .gc_mark    = ns_cross_window_mark,
+    .exotic     = &ns_cross_window_exotic,
+};
+
+static JSContext *
+ns_frame_realm_of_global(ns_js *js, JSValueConst global)
+{
+    if (!js || !js->frame_ctxs || !JS_IsObject(global)) return NULL;
+    for (guint i = 0; i < js->frame_ctxs->len; i++) {
+        JSContext *fctx = g_ptr_array_index(js->frame_ctxs, i);
+        JSValue g = JS_GetGlobalObject(fctx);
+        gboolean hit = JS_VALUE_GET_PTR(g) == JS_VALUE_GET_PTR(global);
+        JS_FreeValue(fctx, g);
+        if (hit) return fctx;
+    }
+    return NULL;
+}
+
+static gboolean
+ns_realm_is_cross_origin(ns_js *js, JSContext *realm)
+{
+    return realm && js->cross_origin_realms &&
+           g_hash_table_contains(js->cross_origin_realms, realm);
+}
+
+static gboolean
+ns_window_is_cross_origin_frame(ns_js *js, JSValueConst window)
+{
+    if (ns_realm_is_cross_origin(js, ns_frame_realm_of_global(js, window)))
+        return TRUE;
+    if (!js->frame_contexts || !js->frame_windows) return FALSE;
+    GHashTableIter it;
+    gpointer iframe, realm;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &iframe, &realm))
+        if (ns_realm_is_cross_origin(js, realm) &&
+            g_hash_table_lookup(js->frame_windows, iframe) ==
+                JS_VALUE_GET_PTR(window))
+            return TRUE;
+    return FALSE;
+}
+
+static JSValue
+ns_message_source_for(ns_js *js, JSValueConst receiver, JSValueConst source)
+{
+    JSContext *realm = ns_frame_realm_of_global(js, receiver);
+    if (!realm || !JS_IsObject(source) ||
+        JS_VALUE_GET_PTR(source) == JS_VALUE_GET_PTR(receiver) ||
+        JS_GetOpaque(source, ns_cross_window_class_id))
+        return JS_UNDEFINED;
+    if (!ns_realm_is_cross_origin(js, realm) &&
+        !ns_window_is_cross_origin_frame(js, source))
+        return JS_UNDEFINED;
+    return ns_cross_window_for(realm, source);
+}
+
 static JSValue
 ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -12523,26 +12949,23 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValue forwarded = JS_GetPropertyStr(ctx, target, "__ndForwardWindow");
     JSValue actual_target = JS_IsObject(forwarded)
         ? JS_DupValue(ctx, forwarded) : JS_DupValue(ctx, target);
-    if (JS_IsObject(forwarded) && js && js->ctx) {
-        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
-        JSValue source = JS_GetPropertyStr(ctx, ev, "source");
-        JSValue parent_global = JS_GetGlobalObject(main_ctx);
-        if (JS_IsObject(source) &&
-            JS_VALUE_GET_PTR(source) == JS_VALUE_GET_PTR(target)) {
-            JS_SetPropertyStr(ctx, ev, "source",
-                              JS_DupValue(ctx, actual_target));
-        } else if (JS_IsObject(source) &&
-                   JS_VALUE_GET_PTR(source) == JS_VALUE_GET_PTR(parent_global)) {
-            JSValue parent_proxy = JS_GetPropertyStr(
-                ctx, actual_target, "__ndParentWindowProxy");
-            if (JS_IsObject(parent_proxy))
-                JS_SetPropertyStr(ctx, ev, "source", parent_proxy);
-            else
-                JS_FreeValue(ctx, parent_proxy);
+    JSValue source = JS_GetPropertyStr(ctx, ev, "source");
+    if (JS_IsObject(forwarded) && JS_IsObject(source) &&
+        JS_VALUE_GET_PTR(source) == JS_VALUE_GET_PTR(target)) {
+        JS_DefinePropertyValueStr(ctx, ev, "source",
+                                  JS_DupValue(ctx, actual_target),
+                                  JS_PROP_C_W_E);
+    } else {
+        JSValue guarded = ns_message_source_for(js, actual_target, source);
+        if (JS_IsException(guarded)) {
+            JS_FreeValue(ctx, JS_GetException(ctx));
+            guarded = JS_NULL;
         }
-        JS_FreeValue(main_ctx, parent_global);
-        JS_FreeValue(ctx, source);
+        if (!JS_IsUndefined(guarded))
+            JS_DefinePropertyValueStr(ctx, ev, "source", guarded,
+                                      JS_PROP_C_W_E);
     }
+    JS_FreeValue(ctx, source);
     JSValue deliver = JS_GetPropertyStr(ctx, actual_target, "__nsDeliverMessage");
     if (JS_IsFunction(ctx, deliver)) {
         ns_budget_guard bg = {0};
@@ -43684,7 +44107,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
 }
 
 static const char ns_iframe_global_bootstrap[] =
-    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, childFrameOf, framePostMessage){"
+    "(function(G, realWin, iframeDoc, initialURL, sandbox, platformNames, frameEl, frameName, parentProxy, framePostMessage){"
     "  var url = initialURL || 'about:blank';"
     "  var hashL = [], popL = [], onhash = null, onpop = null, state = null;"
     "  var msgL = [], onmsg = null;"
@@ -43734,43 +44157,9 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('window',     { value: win, writable: true });"
     "  def('self',       { value: win, writable: true });"
     "  def('event',      { value: undefined, writable: true });"
-    "  var crossWindows = new WeakMap();"
-    "  function crossWindow(target, up){"
-    "    if (crossWindows.has(target)) return crossWindows.get(target);"
-    "    var proxy, loc = {};"
-    "    function denied(){ throw new DOMException('Blocked cross-origin frame access', 'SecurityError'); }"
-    "    function childFrame(p){"
-    "      if (typeof p !== 'string' || typeof childFrameOf !== 'function') return undefined;"
-    "      var child;"
-    "      try { child = childFrameOf(target, p); } catch (e) { return undefined; }"
-    "      return child && typeof child === 'object' ? crossWindow(child, proxy) : undefined; }"
-    "    Object.defineProperty(loc, 'href', { enumerable:true, set:function(v){ target.location.href=v; }, get:denied });"
-    "    loc.replace = function(v){ target.location.replace(v); };"
-    "    proxy = new Proxy({}, {"
-    "      get:function(t,p){"
-    "        if(p==='window'||p==='self'||p==='frames') return proxy;"
-    "        if(p==='parent') return up || proxy;"
-    "        if(p==='top') return up ? up.top : proxy;"
-    "        if(p==='postMessage') return function(){ return realWin.__nsPostMessageFrom.apply(realWin, [target, G.__ndWindowProxy || G].concat(Array.prototype.slice.call(arguments))); };"
-    "        if(p==='location') return loc;"
-    "        if(p==='closed') return !!target.closed;"
-    "        if(p==='length') return target.length >>> 0;"
-    "        if(p==='close'||p==='focus'||p==='blur') return function(){ return target[p](); };"
-    "        if(p===Symbol.toStringTag) return 'Window';"
-    "        var child = childFrame(p); if(child) return child;"
-    "        return denied(); },"
-    "      set:function(t,p,v){ if(p==='location'){ target.location.href=v; return true; } return denied(); },"
-    "      has:function(t,p){ return p==='window'||p==='self'||p==='frames'||p==='parent'||p==='top'||"
-    "        p==='postMessage'||p==='location'||p==='closed'||p==='length'||p==='close'||p==='focus'||p==='blur'||"
-    "        !!childFrame(p); }"
-    "    });"
-    "    crossWindows.set(target, proxy);"
-    "    return proxy;"
-    "  }"
-    "  var parentWin = (sandbox & 8192) ? crossWindow(realWin) : realWin;"
+    "  var parentWin = (sandbox & 8192) ? parentProxy : realWin;"
     "  var topWin = (sandbox & 8192) ? parentWin :"
     "    (realWin.top && typeof realWin.top === 'object' ? realWin.top : realWin);"
-    "  def('__ndParentWindowProxy', { value: parentWin });"
     "  def('top',        { value: topWin, writable: true });"
     "  def('parent',     { value: parentWin, writable: true });"
     "  def('frames',     { value: win, writable: true });"
@@ -43785,15 +44174,7 @@ static const char ns_iframe_global_bootstrap[] =
     "  def('onhashchange', { get: function(){ return onhash; }, set: function(v){ onhash=v; } });"
     "  def('onpopstate',   { get: function(){ return onpop; }, set: function(v){ onpop=v; } });"
     "  def('onmessage',    { get: function(){ return onmsg; }, set: function(v){ onmsg=v; } });"
-    "  function guardSource(ev){"
-    "    var src; try { src = ev.source; } catch (e) { return; }"
-    "    if (!src || typeof src !== 'object' || src === G || src === win) return;"
-    "    var srcOrigin;"
-    "    try { src.document; srcOrigin = src.location.origin; } catch (e) { return; }"
-    "    if (srcOrigin === G.origin && G.origin !== 'null') return;"
-    "    try { Object.defineProperty(ev, 'source', { value: crossWindow(src), configurable: true }); } catch (e) {}"
-    "  }"
-    "  def('__nsDeliverMessage', { value: function(ev){ guardSource(ev); fire(msgL, onmsg, ev); } });"
+    "  def('__nsDeliverMessage', { value: function(ev){ fire(msgL, onmsg, ev); } });"
     "  def('postMessage',  { writable: true, value: framePostMessage });"
     "  def('addEventListener', { writable: true, value: function(type, fn, o){"
     "      if (type==='hashchange'){ hashL.push(fn); return; }"
@@ -43893,6 +44274,8 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     g_ptr_array_add(js->frame_ctxs, fctx);
     if (iframe)
         g_hash_table_replace(js->frame_contexts, iframe, fctx);
+    if ((sandbox & NS_FRAME_CROSS_ORIGIN) && js->cross_origin_realms)
+        g_hash_table_add(js->cross_origin_realms, fctx);
 
     JSClassID dom_ids[6] = {
         ns_element_class_id, ns_style_class_id, ns_token_list_class_id,
@@ -43921,18 +44304,18 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
             ? ns_make_element(js->ctx, iframe) : JS_NULL;
         const char *frame_name = iframe ? ns_element_get_attr(iframe, "name") : NULL;
         JSValue frame_name_v = JS_NewString(fctx, frame_name ? frame_name : "");
-        JSValue child_frame_of = JS_NewCFunction(fctx, ns_iframe_child_frame_of,
-                                                 "childFrameOf", 2);
+        JSValue parent_proxy = (sandbox & NS_FRAME_CROSS_ORIGIN)
+            ? ns_cross_window_for(fctx, parent_global) : JS_NULL;
         JSValueConst post_data[1] = { fg };
         JSValue post_message = JS_NewCFunctionData(fctx,
             ns_window_post_message_data, 2, 0, 1, post_data);
         JSValueConst args[10] = { fg, parent_global, iframe_doc, urlv, sbv,
                                   platform, frame_el, frame_name_v,
-                                  child_frame_of, post_message };
+                                  parent_proxy, post_message };
         JSValue res = JS_Call(fctx, maker, JS_UNDEFINED, 10, args);
         JS_FreeValue(fctx, frame_name_v);
         JS_FreeValue(fctx, post_message);
-        JS_FreeValue(fctx, child_frame_of);
+        JS_FreeValue(fctx, parent_proxy);
         JS_FreeValue(js->ctx, frame_el);
         JS_FreeValue(fctx, platform);
         if (!JS_IsException(res) && JS_IsObject(res)) {
@@ -44325,30 +44708,6 @@ ns_window_child_frame_window(JSContext *ctx, ns_node *doc, uint32_t index,
              ns_iframe_ensure_content_root((ns_node *)frame))
         win = ns_iframe_realm_window(ctx, el, (ns_node *)frame);
     JS_FreeValue(ctx, el);
-    return win;
-}
-
-static JSValue
-ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val, int argc,
-                         JSValueConst *argv)
-{
-    (void)this_val;
-    if (argc < 2) return JS_UNDEFINED;
-    ns_node *doc = ns_window_document_for(ctx, argv[0]);
-    JSAtom key = JS_ValueToAtom(ctx, argv[1]);
-    if (key == JS_ATOM_NULL) return JS_EXCEPTION;
-    uint32_t index = 0;
-    JSValue win = JS_UNDEFINED;
-    if (JS_AtomIsArrayIndex(ctx, &index, key)) {
-        win = ns_window_child_frame_window(ctx, doc, index, NULL, TRUE);
-    } else {
-        const char *name = JS_AtomToCString(ctx, key);
-        if (name) {
-            win = ns_window_child_frame_window(ctx, doc, 0, name, TRUE);
-            JS_FreeCString(ctx, name);
-        }
-    }
-    JS_FreeAtom(ctx, key);
     return win;
 }
 
@@ -49253,6 +49612,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->frame_ctxs = g_ptr_array_new();
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->frame_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
+    js->cross_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
+    js->cross_origin_realms = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
     js->pinned_wrappers_set = g_hash_table_new(g_direct_hash, g_direct_equal);
@@ -49411,6 +49772,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     JS_SetPropertyStr(ctx, global, "Storage", storage_ctor);
     ns_new_class_id(&ns_window_named_class_id);
     JS_NewClass(js->rt, ns_window_named_class_id, &ns_window_named_class);
+    ns_new_class_id(&ns_cross_window_class_id);
+    JS_NewClass(js->rt, ns_cross_window_class_id, &ns_cross_window_class);
     JSValue console = JS_NewObject(ctx);
     static const ns_fn_def console_log_methods[] = {
         { "log", 0 }, { "info", 0 }, { "debug", 0 }, { "trace", 0 },
@@ -53493,6 +53856,9 @@ ns_js_reset_runtime_state(ns_js *js)
             JS_FreeValue(js->ctx, JS_MKPTR(JS_TAG_OBJECT, val));
         g_hash_table_remove_all(js->frame_windows);
     }
+    ns_cross_windows_clear(js);
+    if (js->cross_origin_realms)
+        g_hash_table_remove_all(js->cross_origin_realms);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
     ns_js_drop_pending_rejections(js);
@@ -54441,6 +54807,9 @@ ns_js_free(ns_js *js)
         g_hash_table_destroy(js->frame_windows);
         js->frame_windows = NULL;
     }
+    ns_cross_windows_clear(js);
+    g_clear_pointer(&js->cross_windows, g_hash_table_destroy);
+    g_clear_pointer(&js->cross_origin_realms, g_hash_table_destroy);
     if (js->frame_contexts) {
         g_hash_table_destroy(js->frame_contexts);
         js->frame_contexts = NULL;
