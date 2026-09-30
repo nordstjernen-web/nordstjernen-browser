@@ -9350,6 +9350,12 @@ JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop)
     return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, false);
 }
 
+JSValue JS_GetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                               JSValueConst receiver)
+{
+    return JS_GetPropertyInternal(ctx, obj, prop, receiver, false);
+}
+
 static JSValue JS_ThrowTypeErrorPrivateNotFound(JSContext *ctx, JSAtom atom)
 {
     return JS_ThrowTypeErrorAtom(ctx, "private class field '%s' does not exist",

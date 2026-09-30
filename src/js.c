@@ -3595,46 +3595,26 @@ ns_unwrap_element(JSValueConst val)
     return JS_GetOpaque(val, ns_element_class_id);
 }
 
-static ns_node *
-ns_js_top_document(ns_js *js)
-{
-    ns_node *doc = js ? js->current_doc : NULL;
-    while (doc && doc->parent) {
-        doc = doc->parent;
-        while (doc && doc->kind != NS_NODE_DOCUMENT)
-            doc = doc->parent;
-    }
-    return doc;
-}
-
-static ns_node *
-ns_window_named_lookup(ns_js *js, const char *name)
-{
-    ns_node *doc = ns_js_top_document(js);
-    if (!doc || !name || !*name) return NULL;
-    return ns_node_find_by_id(doc, name);
-}
-
-static JSValue ns_window_child_frame_window(JSContext *ctx, ns_js *js,
+static ns_node *ns_window_document_for(JSContext *ctx, JSValueConst window);
+static JSValue ns_window_child_frame_window(JSContext *ctx, ns_node *doc,
                                             uint32_t index, const char *name);
 
 static JSValue
 ns_window_child_frame(JSContext *ctx, JSValueConst this_val, int argc,
                       JSValueConst *argv)
 {
-    (void)this_val;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || argc < 1) return JS_UNDEFINED;
+    if (argc < 1) return JS_UNDEFINED;
+    ns_node *doc = ns_window_document_for(ctx, this_val);
     JSAtom key = JS_ValueToAtom(ctx, argv[0]);
     if (key == JS_ATOM_NULL) return JS_EXCEPTION;
     uint32_t index = 0;
     JSValue win = JS_UNDEFINED;
     if (JS_AtomIsArrayIndex(ctx, &index, key)) {
-        win = ns_window_child_frame_window(ctx, js, index, NULL);
+        win = ns_window_child_frame_window(ctx, doc, index, NULL);
     } else {
         const char *name = JS_AtomToCString(ctx, key);
         if (name) {
-            win = ns_window_child_frame_window(ctx, js, 0, name);
+            win = ns_window_child_frame_window(ctx, doc, 0, name);
             JS_FreeCString(ctx, name);
         }
     }
@@ -3642,9 +3622,62 @@ ns_window_child_frame(JSContext *ctx, JSValueConst this_val, int argc,
     return win;
 }
 
-static int
-ns_window_named_fill(JSPropertyDescriptor *desc, JSContext *ctx, JSValue value)
+static gboolean
+ns_window_named_value(JSContext *ctx, ns_node *doc, JSAtom prop, JSValue *out)
 {
+    if (!doc) return FALSE;
+    uint32_t index = 0;
+    if (JS_AtomIsArrayIndex(ctx, &index, prop)) {
+        JSValue win = ns_window_child_frame_window(ctx, doc, index, NULL);
+        if (JS_IsObject(win)) {
+            *out = win;
+            return TRUE;
+        }
+        JS_FreeValue(ctx, win);
+        return FALSE;
+    }
+    JSValue keyv = JS_AtomToValue(ctx, prop);
+    int is_str = JS_IsString(keyv);
+    JS_FreeValue(ctx, keyv);
+    if (!is_str) return FALSE;
+    const char *name = JS_AtomToCString(ctx, prop);
+    if (!name) return FALSE;
+    JSValue win = ns_window_child_frame_window(ctx, doc, 0, name);
+    if (JS_IsObject(win)) {
+        JS_FreeCString(ctx, name);
+        *out = win;
+        return TRUE;
+    }
+    JS_FreeValue(ctx, win);
+    ns_node *el = *name ? ns_node_find_by_id(doc, name) : NULL;
+    JS_FreeCString(ctx, name);
+    if (!el) return FALSE;
+    *out = ns_make_element(ctx, el);
+    return TRUE;
+}
+
+static int ns_window_named_resolving;
+
+static ns_node *
+ns_window_named_document(JSContext *ctx, JSValueConst window)
+{
+    if (ns_window_named_resolving) return NULL;
+    ns_window_named_resolving++;
+    ns_node *doc = ns_window_document_for(ctx, window);
+    ns_window_named_resolving--;
+    return doc;
+}
+
+static int
+ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
+                    JSValueConst obj, JSAtom prop)
+{
+    (void)obj;
+    JSValue global = JS_GetGlobalObject(ctx);
+    ns_node *doc = ns_window_named_document(ctx, global);
+    JS_FreeValue(ctx, global);
+    JSValue value;
+    if (!ns_window_named_value(ctx, doc, prop, &value)) return 0;
     if (!desc) {
         JS_FreeValue(ctx, value);
         return 1;
@@ -3656,42 +3689,28 @@ ns_window_named_fill(JSPropertyDescriptor *desc, JSContext *ctx, JSValue value)
     return 1;
 }
 
-static int
-ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
-                    JSValueConst obj, JSAtom prop)
+static JSValue
+ns_window_named_get_property(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                             JSValueConst receiver)
 {
-    (void)obj;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return 0;
-    uint32_t index = 0;
-    if (JS_AtomIsArrayIndex(ctx, &index, prop)) {
-        JSValue win = ns_window_child_frame_window(ctx, js, index, NULL);
-        if (!JS_IsObject(win)) {
-            JS_FreeValue(ctx, win);
-            return 0;
-        }
-        return ns_window_named_fill(desc, ctx, win);
+    JSValue value;
+    if (ns_window_named_value(ctx, ns_window_named_document(ctx, receiver),
+                              prop, &value))
+        return value;
+    JSValue proto = JS_GetPrototype(ctx, obj);
+    if (JS_IsException(proto)) return proto;
+    if (!JS_IsObject(proto)) {
+        JS_FreeValue(ctx, proto);
+        return JS_UNDEFINED;
     }
-    JSValue keyv = JS_AtomToValue(ctx, prop);
-    int is_str = JS_IsString(keyv);
-    JS_FreeValue(ctx, keyv);
-    if (!is_str) return 0;
-    const char *name = JS_AtomToCString(ctx, prop);
-    if (!name) return 0;
-    JSValue win = ns_window_child_frame_window(ctx, js, 0, name);
-    if (JS_IsObject(win)) {
-        JS_FreeCString(ctx, name);
-        return ns_window_named_fill(desc, ctx, win);
-    }
-    JS_FreeValue(ctx, win);
-    ns_node *el = ns_window_named_lookup(js, name);
-    JS_FreeCString(ctx, name);
-    if (!el) return 0;
-    return ns_window_named_fill(desc, ctx, ns_make_element(ctx, el));
+    JSValue result = JS_GetPropertyReceiver(ctx, proto, prop, receiver);
+    JS_FreeValue(ctx, proto);
+    return result;
 }
 
 static JSClassExoticMethods ns_window_named_exotic = {
     .get_own_property = ns_window_named_get,
+    .get_property     = ns_window_named_get_property,
 };
 
 static JSClassDef ns_window_named_class = {
@@ -44243,10 +44262,9 @@ ns_window_find_child_frame(const ns_node *n, uint32_t *index,
 }
 
 static JSValue
-ns_window_child_frame_window(JSContext *ctx, ns_js *js, uint32_t index,
+ns_window_child_frame_window(JSContext *ctx, ns_node *doc, uint32_t index,
                              const char *name)
 {
-    ns_node *doc = ns_js_top_document(js);
     if (!doc || (name && !*name)) return JS_UNDEFINED;
     const ns_node *frame = ns_window_find_child_frame(doc, &index, name, 0);
     if (!frame) return JS_UNDEFINED;
@@ -44276,11 +44294,10 @@ static JSValue
 ns_window_get_length(JSContext *ctx, JSValueConst this_val, int argc,
                      JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
-    ns_js *js = js_from_ctx(ctx);
+    (void)argc; (void)argv;
     JSValue arr = JS_NewArray(ctx);
     uint32_t i = 0;
-    ns_node *doc = ns_js_top_document(js);
+    ns_node *doc = ns_window_document_for(ctx, this_val);
     if (doc)
         ns_collect_frames_walk(ctx, doc, arr, &i, 0);
     JSValue len = JS_GetPropertyStr(ctx, arr, "length");
