@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Numbers the engine formats keep a `.` decimal point under locales that
+  use a comma, such as Turkish or Norwegian. `--single-process` runs the
+  engine inside the GTK shell, whose startup applies the OS locale, so
+  `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
 * The Android app builds with the current toolchain: Android Gradle
   plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
   (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX
