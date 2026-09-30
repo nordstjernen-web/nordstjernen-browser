@@ -3,6 +3,14 @@ Changelog:
 
 1.0.27:
 ======
+* Events carry the interface their type implies: messages from windows,
+  `MessageChannel` ports and workers are `MessageEvent`s, and `error`,
+  `hashchange`, `popstate`, `storage`, `pageshow`/`pagehide` and promise
+  rejection events get their own interfaces. Port messages were plain
+  objects. `isTrusted` lives on each event, not on `Event.prototype`, so
+  objects deriving from `Event.prototype` can define their own, as in
+  other browsers. Assigning to a getter-only property now names it in
+  the `TypeError`.
 * Page scripts enumerating the global object (`Object.keys(window)`,
   `Object.getOwnPropertyNames`, `for...in`) no longer see the engine's
   own `__nd`/`__ns`/`__js` helper properties, which no other browser

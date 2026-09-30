@@ -378,6 +378,7 @@ static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
 static void ns_js_name_engine_members(JSContext *ctx);
 static void ns_js_link_interfaces(JSContext *ctx);
+static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static ns_node *ns_iframe_document_node(const ns_node *iframe);
@@ -12042,6 +12043,8 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "composed",         JS_FALSE);
+    JS_SetPropertyStr(ctx, ev, "_is_trusted",      JS_TRUE);
+    ns_event_define_cancel_bubble(ctx, ev);
 
     ns_js *js = js_from_ctx(ctx);
     ns_budget_guard bg = {0};
@@ -16732,7 +16735,6 @@ static JSValue ns_event_get_modifier_state(JSContext *ctx, JSValueConst this_val
                                            int argc, JSValueConst *argv);
 static JSValue ns_event_stop_propagation(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
-static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static JSValue ns_event_initEvent(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv);
 static void ns_event_link_proto(JSContext *ctx, JSValueConst global,
@@ -26036,6 +26038,44 @@ ns_event_define_source(JSContext *ctx, JSValueConst ev, JSValue source)
     ns_event_define_accessor(ctx, ev, "source", ns_event_get_source, NULL);
 }
 
+static const char *
+ns_event_interface_for(JSContext *ctx, JSValueConst ev)
+{
+    static const struct { const char *type; const char *iface; } map[] = {
+        { "message", "MessageEvent" }, { "messageerror", "MessageEvent" },
+        { "error", "ErrorEvent" }, { "hashchange", "HashChangeEvent" },
+        { "popstate", "PopStateEvent" }, { "storage", "StorageEvent" },
+        { "pageshow", "PageTransitionEvent" },
+        { "pagehide", "PageTransitionEvent" },
+        { "unhandledrejection", "PromiseRejectionEvent" },
+        { "rejectionhandled", "PromiseRejectionEvent" },
+    };
+    const char *iface = "Event";
+    JSValue type = JS_GetPropertyStr(ctx, ev, "type");
+    const char *t = JS_IsString(type) ? JS_ToCString(ctx, type) : NULL;
+    for (gsize i = 0; t && i < G_N_ELEMENTS(map); i++)
+        if (strcmp(t, map[i].type) == 0) {
+            iface = map[i].iface;
+            break;
+        }
+    if (t) JS_FreeCString(ctx, t);
+    JS_FreeValue(ctx, type);
+    return iface;
+}
+
+static void
+ns_event_define_legacy_accessors(JSContext *ctx, JSValueConst obj)
+{
+    ns_event_define_accessor(ctx, obj, "cancelBubble",
+                             ns_event_get_cancel_bubble,
+                             ns_event_set_cancel_bubble);
+    ns_event_define_accessor(ctx, obj, "returnValue",
+                             ns_event_get_return_value,
+                             ns_event_set_return_value);
+    ns_event_define_accessor(ctx, obj, "srcElement",
+                             ns_event_get_src_element, NULL);
+}
+
 static void
 ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
 {
@@ -26049,7 +26089,12 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     JS_FreeValue(ctx, object_ctor);
     JS_FreeValue(ctx, cur_proto);
     if (plain) {
-        JSValue ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
+        JSValue ev_ctor = JS_GetPropertyStr(ctx, global,
+                                            ns_event_interface_for(ctx, ev));
+        if (!JS_IsObject(ev_ctor)) {
+            JS_FreeValue(ctx, ev_ctor);
+            ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
+        }
         if (JS_IsObject(ev_ctor)) {
             JSValue proto = JS_GetPropertyStr(ctx, ev_ctor, "prototype");
             if (JS_IsObject(proto) &&
@@ -26062,14 +26107,7 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
     JS_FreeValue(ctx, global);
     ns_event_define_accessor(ctx, ev, "isTrusted",
                              ns_event_get_is_trusted, NULL);
-    ns_event_define_accessor(ctx, ev, "cancelBubble",
-                             ns_event_get_cancel_bubble,
-                             ns_event_set_cancel_bubble);
-    ns_event_define_accessor(ctx, ev, "returnValue",
-                             ns_event_get_return_value,
-                             ns_event_set_return_value);
-    ns_event_define_accessor(ctx, ev, "srcElement",
-                             ns_event_get_src_element, NULL);
+    ns_event_define_legacy_accessors(ctx, ev);
 }
 
 static gboolean
@@ -49847,7 +49885,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             ns_bind_fn(ctx, ev_proto, "stopPropagation",          ns_event_stop_propagation, 0);
             ns_bind_fn(ctx, ev_proto, "stopImmediatePropagation", ns_event_stop_immediate, 0);
             ns_bind_fn(ctx, ev_proto, "composedPath",             ns_event_composed_path, 0);
-            ns_event_define_cancel_bubble(ctx, ev_proto);
+            ns_event_define_legacy_accessors(ctx, ev_proto);
         }
         JS_FreeValue(ctx, ev_proto);
         JS_FreeValue(ctx, ev_ctor_obj);
