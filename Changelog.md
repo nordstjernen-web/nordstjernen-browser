@@ -3,6 +3,11 @@ Changelog:
 
 1.0.27:
 ======
+* Functions the engine implements in JavaScript print as native code,
+  `function animate() { [native code] }`, like every other built-in.
+  434 of them printed their JavaScript source and many carried internal
+  names (`elementAnimate`, `value`), which no browser does. Page scripts,
+  inline handlers and `new Function` keep their source.
 * Inside a frame, `window`, `location` and `history` report themselves
   as `[object Window]`, `[object Location]` and `[object History]`, and
   `history instanceof History` holds, as on the top-level page. The
