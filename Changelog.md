@@ -58,6 +58,10 @@ Changelog:
 * Nordstjernen builds against GLib 2.90. Its `g_new()`/`g_renew()`
   macros now declare a local named `_n`, which the CSS selector matcher
   shadowed, so the Windows (MSYS2) build failed under `--werror`.
+* The macOS CI smoke test of the bundled app accepts the redesigned
+  example.com page, which no longer carries the "Example Domain"
+  heading the test looked for, so every macOS run failed after a
+  successful build.
 
 1.0.26:
 ======
