@@ -670,6 +670,10 @@ typedef struct JSClassExoticMethods {
     /* return < 0 if exception or true/false */
     int (*set_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
                         JSValueConst value, JSValueConst receiver, int flags);
+    /* like get_own_property, but used by [[Get]] and given the receiver */
+    int (*get_own_property_receiver)(JSContext *ctx, JSPropertyDescriptor *desc,
+                                     JSValueConst obj, JSAtom prop,
+                                     JSValueConst receiver);
 } JSClassExoticMethods;
 
 typedef void JSClassFinalizer(JSRuntime *rt, JSValueConst val);
@@ -973,8 +977,6 @@ JS_EXTERN JSValue JS_NewDate(JSContext *ctx, double epoch_ms);
 JS_EXTERN bool JS_IsDate(JSValueConst v);
 
 JS_EXTERN JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop);
-JS_EXTERN JSValue JS_GetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
-                                         JSValueConst receiver);
 JS_EXTERN JSValue JS_GetPropertyUint32(JSContext *ctx, JSValueConst this_obj,
                                        uint32_t idx);
 JS_EXTERN JSValue JS_GetPropertyInt64(JSContext *ctx, JSValueConst this_obj,
