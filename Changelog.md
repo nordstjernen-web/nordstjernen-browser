@@ -21,6 +21,14 @@ Changelog:
   and a frame without scripts ran its handlers with the parent's document.
   An `<iframe onload="...">` attribute runs in the page that holds the
   iframe, not inside the frame.
+* A frame's `window.name` starts as its `<iframe name>`, and a same-origin
+  frame's `window.frameElement` is its `<iframe>`. Both were empty, so a
+  frame could not find itself in `parent.frames`.
+* `postMessage` into a same-origin frame reports the caller as
+  `event.source`. It reported the receiving frame itself, so replying to
+  `event.source` sent the answer back into the frame instead of to its
+  parent. A message from another origin hands the frame a cross-origin
+  WindowProxy as `event.source` rather than the sender's own window.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
   an out-of-bounds write in `CharacterData.replaceData()`, and
