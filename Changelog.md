@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Numbers the engine formats keep a `.` decimal point under locales that
+  use a comma, such as Turkish or Norwegian. `--single-process` runs the
+  engine inside the GTK shell, whose startup applies the OS locale, so
+  `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
 * `window[i]` and `frames[i]` return the WindowProxy of the i-th child
   frame, and `window[name]` returns the frame whose `name` attribute
   matches, as the HTML named-access rules specify. Indexed access always
