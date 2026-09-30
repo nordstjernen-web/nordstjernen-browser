@@ -3,6 +3,12 @@ Changelog:
 
 1.0.27:
 ======
+* A worker's `navigator` matches the page's: `appVersion` follows the
+  user agent instead of a fixed Linux string, and `platform`, `product`
+  and `deviceMemory` are present. `performance.getEntries*` return empty
+  lists in workers instead of throwing. A frame's document has `domain`,
+  `timeline`, `pictureInPictureEnabled`, `adoptedStyleSheets`,
+  `xmlEncoding` and `xmlStandalone` like the top-level document.
 * Dedicated workers have `Intl` and `crossOriginIsolated`. A worker that
   read its time zone or formatted a number threw `ReferenceError`, and
   since worker errors do not reach the page, the page waited forever.

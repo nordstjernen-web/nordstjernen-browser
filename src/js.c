@@ -22551,6 +22551,22 @@ ns_worker_import_scripts(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_worker_performance_entries(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val; (void)argc; (void)argv;
+    return JS_NewArray(ctx);
+}
+
+static JSValue
+ns_worker_performance_clear(JSContext *ctx, JSValueConst this_val,
+                            int argc, JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_worker_performance_now(JSContext *ctx, JSValueConst this_val,
                           int argc, JSValueConst *argv)
 {
@@ -23272,8 +23288,16 @@ ns_worker_js_new(ns_worker_host *host)
                       JS_NewString(ctx, wkr_ua));
     JS_SetPropertyStr(ctx, navigator, "appName", JS_NewString(ctx, "Netscape"));
     JS_SetPropertyStr(ctx, navigator, "appCodeName", JS_NewString(ctx, "Mozilla"));
+    const char *wkr_app_version = wkr_ua;
+    if (g_str_has_prefix(wkr_app_version, "Mozilla/"))
+        wkr_app_version += strlen("Mozilla/");
     JS_SetPropertyStr(ctx, navigator, "appVersion",
-                      JS_NewString(ctx, "5.0 (X11; Linux x86_64)"));
+                      JS_NewString(ctx, wkr_app_version));
+    JS_SetPropertyStr(ctx, navigator, "platform",
+                      JS_NewString(ctx, ns_net_navigator_platform()));
+    JS_SetPropertyStr(ctx, navigator, "product", JS_NewString(ctx, "Gecko"));
+    JS_SetPropertyStr(ctx, navigator, "deviceMemory",
+                      JS_NewInt32(ctx, ns_nav_device_memory()));
     ns_navigator_set_languages(ctx, navigator);
     JS_SetPropertyStr(ctx, navigator, "onLine", JS_TRUE);
     JS_SetPropertyStr(ctx, navigator, "hardwareConcurrency",
@@ -23286,6 +23310,13 @@ ns_worker_js_new(ns_worker_host *host)
 
     JSValue performance = JS_NewObject(ctx);
     ns_bind_fn(ctx, performance, "now", ns_worker_performance_now, 0);
+    ns_bind_fn(ctx, performance, "getEntries", ns_worker_performance_entries, 0);
+    ns_bind_fn(ctx, performance, "getEntriesByType",
+               ns_worker_performance_entries, 1);
+    ns_bind_fn(ctx, performance, "getEntriesByName",
+               ns_worker_performance_entries, 1);
+    ns_bind_fn(ctx, performance, "clearMarks", ns_worker_performance_clear, 0);
+    ns_bind_fn(ctx, performance, "clearMeasures", ns_worker_performance_clear, 0);
     JS_SetPropertyStr(ctx, performance, "timeOrigin",
                       JS_NewFloat64(ctx, js->time_origin_real_ms));
     JS_SetPropertyStr(ctx, global, "performance", performance);
@@ -43847,6 +43878,13 @@ static const char ns_iframe_global_bootstrap[] =
     "  var parentOnly = { cookieStore:1, caches:1, getSelection:1, opener:1, frameElement:1, origin:1, name:1, navigation:1, external:1 };"
     "  def('origin', { get: function(){ if ((sandbox & 1) && !(sandbox & 8)) return 'null'; var u=mk(url); return u ? u.origin : 'null'; } });"
     "  def('name', { value: frameName, writable: true });"
+    "  try {"
+    "    ['timeline', 'pictureInPictureEnabled'].forEach(function(k){"
+    "      if (iframeDoc && !(k in iframeDoc) && realWin.document && k in realWin.document)"
+    "        Object.defineProperty(iframeDoc, k, { configurable: true, enumerable: true,"
+    "          value: realWin.document[k] });"
+    "    });"
+    "  } catch (e) {}"
     "  def('frameElement', { value: crossOrigin ? null : (frameEl || null), writable: true });"
     "  if (crossOrigin) {"
     "    def('opener', { value: null, writable: true });"
@@ -51770,6 +51808,16 @@ ns_make_realm_document(JSContext *ctx, ns_node *doc_node, const char *url,
     JS_DefinePropertyValueStr(ctx, w, "nodeName",
         JS_NewString(ctx, "#document"), JS_PROP_C_W_E);
     JS_DefinePropertyValueStr(ctx, w, "ownerDocument", JS_NULL, JS_PROP_C_W_E);
+    {
+        char *host = ns_url_host_from(u);
+        JS_DefinePropertyValueStr(ctx, w, "domain",
+            JS_NewString(ctx, host ? host : ""), JS_PROP_C_W_E);
+        g_free(host);
+    }
+    JS_DefinePropertyValueStr(ctx, w, "xmlEncoding", JS_NULL, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "xmlStandalone", JS_FALSE, JS_PROP_C_W_E);
+    JS_DefinePropertyValueStr(ctx, w, "adoptedStyleSheets", JS_NewArray(ctx),
+                              JS_PROP_C_W_E);
     if (inert)
         JS_DefinePropertyValueStr(ctx, w, "location", JS_NULL, JS_PROP_C_W_E);
     ns_synthdoc_define_getter(ctx, w, "documentElement",
