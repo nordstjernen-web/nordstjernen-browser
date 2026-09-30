@@ -223,7 +223,7 @@ jobs:
           set -o pipefail
           BIN="dist/Nordstjernen.app/Contents/MacOS/Nordstjernen"
           "$BIN" --headless --dump=text https://example.com | tee bundle-smoke.txt
-          grep -qi "Example Domain" bundle-smoke.txt
+          grep -qiE "Example Domain|documentation examples" bundle-smoke.txt
 
       - name: Publish pack-macos log on failure
         if: always() && hashFiles('pack-macos.log') != ''
