@@ -9310,7 +9310,7 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                         JS_FreeValue(ctx, obj1);
                         return retval;
                     }
-                    if (em->get_own_property) {
+                    if (em->get_own_property || em->get_own_property_receiver) {
                         JSPropertyDescriptor desc;
                         int ret;
                         JSValue obj1;
@@ -9318,7 +9318,11 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
                         /* Note: if 'p' is a prototype, it can be
                            freed in the called function */
                         obj1 = js_dup(JS_MKPTR(JS_TAG_OBJECT, p));
-                        ret = em->get_own_property(ctx, &desc, obj1, prop);
+                        if (em->get_own_property_receiver)
+                            ret = em->get_own_property_receiver(ctx, &desc, obj1,
+                                                                prop, this_obj);
+                        else
+                            ret = em->get_own_property(ctx, &desc, obj1, prop);
                         JS_FreeValue(ctx, obj1);
                         if (ret < 0)
                             return JS_EXCEPTION;
@@ -9348,12 +9352,6 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
 JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop)
 {
     return JS_GetPropertyInternal(ctx, this_obj, prop, this_obj, false);
-}
-
-JSValue JS_GetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
-                               JSValueConst receiver)
-{
-    return JS_GetPropertyInternal(ctx, obj, prop, receiver, false);
 }
 
 static JSValue JS_ThrowTypeErrorPrivateNotFound(JSContext *ctx, JSAtom atom)

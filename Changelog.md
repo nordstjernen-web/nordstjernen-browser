@@ -8,13 +8,19 @@ Changelog:
   matches, as the HTML named-access rules specify. Indexed access always
   gave `undefined`, and from inside a frame `parent.frames` counted the
   frames of the calling document instead of the parent's, so sibling
-  frames could not reach each other to `postMessage`. A cross-origin
-  parent now exposes its child frames by index and name too, while every
-  other property of it still throws `SecurityError`.
+  frames could not reach each other to `postMessage`. Named and indexed
+  access resolves in the document of the window being read, so a frame's
+  `window.foo` no longer finds an element in its parent. A cross-origin
+  parent now exposes its child frames by index and name too, each behind
+  the same cross-origin WindowProxy, while every other property still
+  throws `SecurityError`.
 * Inline event-handler content attributes inside a frame, such as
   `<body onload="...">`, are compiled and run in that frame's realm. They
   ran in the top-level page's realm, so they could not see functions
-  declared by the frame's own scripts and failed with `ReferenceError`.
+  declared by the frame's own scripts and failed with `ReferenceError`,
+  and a frame without scripts ran its handlers with the parent's document.
+  An `<iframe onload="...">` attribute runs in the page that holds the
+  iframe, not inside the frame.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
   an out-of-bounds write in `CharacterData.replaceData()`, and
