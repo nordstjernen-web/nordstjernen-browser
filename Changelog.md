@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Inside a frame, `window`, `location` and `history` report themselves
+  as `[object Window]`, `[object Location]` and `[object History]`, and
+  `history instanceof History` holds, as on the top-level page. The
+  frame's global still carried QuickJS's `global` tag.
 * A worker's `navigator` matches the page's: `appVersion` follows the
   user agent instead of a fixed Linux string, and `platform`, `product`
   and `deviceMemory` are present. `performance.getEntries*` return empty
