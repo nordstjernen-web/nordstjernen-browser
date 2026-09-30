@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Rounded solid borders whose sides differ in color, or have some sides
+  transparent, follow the corner radius. Each side was stroked as a
+  straight line, so a `border-radius` ring with two transparent sides,
+  such as the reCAPTCHA checkbox spinner, drew as a right angle.
 * Events carry the interface their type implies: messages from windows,
   `MessageChannel` ports and workers are `MessageEvent`s, and `error`,
   `hashchange`, `popstate`, `storage`, `pageshow`/`pagehide` and promise
