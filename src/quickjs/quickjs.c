@@ -22709,6 +22709,7 @@ typedef struct JSParseState {
     JSFunctionDef *cur_func;
     bool is_module; /* parsing a module */
     bool allow_html_comments;
+    bool hide_source;
 } JSParseState;
 
 typedef struct JSOpCode {
@@ -26259,10 +26260,14 @@ static __exception int js_parse_class(JSParseState *s, bool is_class_expr,
 
     /* store the class source code in the constructor. */
     js_free(ctx, ctor_fd->source);
-    ctor_fd->source_len = s->buf_ptr - class_start_ptr;
-    ctor_fd->source = js_strndup(ctx, (const char *)class_start_ptr, ctor_fd->source_len);
-    if (!ctor_fd->source)
-        goto fail;
+    ctor_fd->source = NULL;
+    ctor_fd->source_len = 0;
+    if (!s->hide_source) {
+        ctor_fd->source_len = s->buf_ptr - class_start_ptr;
+        ctor_fd->source = js_strndup(ctx, (const char *)class_start_ptr, ctor_fd->source_len);
+        if (!ctor_fd->source)
+            goto fail;
+    }
 
     /* consume the '}' */
     if (next_token(s))
@@ -38207,10 +38212,12 @@ static __exception int js_parse_function_decl2(JSParseState *s,
             /* save the function source code */
             /* the end of the function source code is after the last
                 token of the function source stored into s->last_ptr */
-            fd->source_len = s->last_ptr - ptr;
-            fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
-            if (!fd->source)
-                goto fail;
+            if (!s->hide_source) {
+                fd->source_len = s->last_ptr - ptr;
+                fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
+                if (!fd->source)
+                    goto fail;
+            }
 
             goto done;
         }
@@ -38245,10 +38252,12 @@ static __exception int js_parse_function_decl2(JSParseState *s,
         }
 
         /* save the function source code */
-        fd->source_len = s->buf_ptr - ptr;
-        fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
-        if (!fd->source)
-            goto fail;
+        if (!s->hide_source) {
+            fd->source_len = s->buf_ptr - ptr;
+            fd->source = js_strndup(ctx, (const char *)ptr, fd->source_len);
+            if (!fd->source)
+                goto fail;
+        }
 
         if (next_token(s)) {
             /* consume the '}' */
@@ -38592,6 +38601,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
     bool is_strict_mode;
 
     js_parse_init(ctx, s, input, input_len, filename, line, col);
+    s->hide_source = (flags & JS_EVAL_FLAG_HIDE_SOURCE) != 0;
     skip_shebang(&s->buf_ptr, s->buf_end);
 
     eval_type = flags & JS_EVAL_TYPE_MASK;

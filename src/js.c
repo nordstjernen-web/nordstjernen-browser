@@ -376,6 +376,7 @@ static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
                                   gboolean *special_cancel);
 static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
+static void ns_js_name_engine_members(JSContext *ctx);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static ns_node *ns_iframe_document_node(const ns_node *iframe);
@@ -8549,7 +8550,7 @@ ns_fetch_defer_stream_body(JSContext *ctx, JSValueConst this_val,
         " return pump();"
         "})";
     JSValue drain = JS_Eval(ctx, drain_src, strlen(drain_src),
-                            "<fetch-drain>", JS_EVAL_TYPE_GLOBAL);
+                            "<fetch-drain>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     JSValue drain_p = JS_UNDEFINED;
     if (!JS_IsException(drain)) {
         JSValueConst dargs[1] = { stream };
@@ -11117,7 +11118,7 @@ ns_clipboard_install_write(JSContext *ctx, JSValueConst clipboard)
         "};"
         "})";
     JSValue fn = JS_Eval(ctx, src, strlen(src), "<clipboard-write>",
-                         JS_EVAL_TYPE_GLOBAL);
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, fn);
@@ -16571,7 +16572,7 @@ ns_window_getComputedStyle(JSContext *ctx, JSValueConst this_val,
             " });"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<getComputedStyle>", JS_EVAL_TYPE_GLOBAL);
+                            "<getComputedStyle>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->computed_style_proxy = h;
             jsx->computed_style_proxy_set = 1;
@@ -16947,7 +16948,7 @@ ns_url_install_interface(JSContext *ctx)
         " try { Object.defineProperty(globalThis, 'URL', { enumerable: false }); } catch(e) {}"
         " try { Object.defineProperty(URL, 'prototype', { writable: false }); } catch(e) {}"
         "})()";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<url-iface>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = JS_Eval(ctx, src, strlen(src), "<url-iface>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
 }
@@ -16961,7 +16962,7 @@ ns_usp_install_interface(JSContext *ctx)
         " try { Object.defineProperty(globalThis, 'URLSearchParams', { enumerable: false }); } catch(e) {}"
         " try { Object.defineProperty(URLSearchParams, 'prototype', { writable: false }); } catch(e) {}"
         "})()";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<usp-iface>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = JS_Eval(ctx, src, strlen(src), "<usp-iface>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
 }
@@ -17092,7 +17093,7 @@ ns_window_url_ctor(JSContext *ctx, JSValueConst this_val,
             " return inst;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<url-helper>", JS_EVAL_TYPE_GLOBAL);
+                            "<url-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->url_helper = h;
             jsx->url_helper_set = 1;
@@ -17210,7 +17211,7 @@ ns_url_get_searchParams_value(JSContext *ctx, JSValueConst init)
             " return o;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<usp-helper>", JS_EVAL_TYPE_GLOBAL);
+                            "<usp-helper>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->search_params_helper = h;
             jsx->search_params_helper_set = 1;
@@ -19239,7 +19240,7 @@ ns_window_form_data_ctor(JSContext *ctx, JSValueConst this_val,
             " return fd;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<formdata>", JS_EVAL_TYPE_GLOBAL);
+                            "<formdata>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->form_data_helper = h;
             jsx->form_data_helper_set = 1;
@@ -20335,7 +20336,7 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             " return attach;"
             "})()";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<body-consumer>", JS_EVAL_TYPE_GLOBAL);
+                            "<body-consumer>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->body_consumer_helper = h;
             jsx->body_consumer_helper_set = 1;
@@ -20818,7 +20819,7 @@ ns_fetch_install_static_response(JSContext *ctx)
         "  redirect:{value:redirect,writable:true,configurable:true}});"
         "})()";
     JSValue result = JS_Eval(ctx, source, strlen(source),
-                             "<response-static>", JS_EVAL_TYPE_GLOBAL);
+                             "<response-static>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
 }
@@ -23036,7 +23037,7 @@ ns_sw_install_scope(JSContext *ctx, JSValueConst global, ns_worker_host *host)
         "}).catch(function(err){__nd_sw_fetch_result(id,2,String(err&&err.message||err));});"
         "};";
     JSValue fd_ret = JS_Eval(ctx, fetch_dispatch_src, strlen(fetch_dispatch_src),
-                             "<sw-fetch-dispatch>", JS_EVAL_TYPE_GLOBAL);
+                             "<sw-fetch-dispatch>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     JS_FreeValue(ctx, fd_ret);
 }
 
@@ -23225,6 +23226,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_idb_install(ctx, global);
     ns_js_eval(js, ns_js_polyfills_src,
                sizeof(ns_js_polyfills_src) - 1, "<worker-polyfills>");
+    ns_js_name_engine_members(ctx);
     {
         JSValue crypto = JS_NewObject(ctx);
         ns_bind_fn(ctx, crypto, "getRandomValues", ns_window_getRandomValues, 1);
@@ -27031,7 +27033,7 @@ ns_install_drag_event_support(JSContext *ctx)
         "Object.defineProperty(DragEvent.prototype,'constructor',{value:DragEvent,writable:true,configurable:true});"
         "global.DragEvent=DragEvent;"
         "})(globalThis);";
-    JSValue r = JS_Eval(ctx, src, strlen(src), "<drag-event>", JS_EVAL_TYPE_GLOBAL);
+    JSValue r = JS_Eval(ctx, src, strlen(src), "<drag-event>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(r))
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, r);
@@ -31613,7 +31615,7 @@ ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len)
             " return nl;"
             "})";
         JSValue h = JS_Eval(ctx, helper_src, strlen(helper_src),
-                            "<nodelist>", JS_EVAL_TYPE_GLOBAL);
+                            "<nodelist>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(h)) {
             jsx->nodelist_decorator = h;
             jsx->nodelist_decorator_set = 1;
@@ -43713,7 +43715,7 @@ ns_iframe_make_scope(JSContext *ctx, JSValue iframe_doc, const char *initial_url
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue maker = JS_Eval(ctx, ns_iframe_scope_bootstrap,
                             strlen(ns_iframe_scope_bootstrap),
-                            "<iframe-scope>", JS_EVAL_TYPE_GLOBAL);
+                            "<iframe-scope>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     JSValue scope = JS_NULL;
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValue urlv = JS_NewString(ctx, initial_url ? initial_url : "about:blank");
@@ -43975,7 +43977,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
 
     JSValue maker = JS_Eval(fctx, ns_iframe_global_bootstrap,
                             strlen(ns_iframe_global_bootstrap),
-                            "<iframe-global>", JS_EVAL_TYPE_GLOBAL);
+                            "<iframe-global>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     gboolean ok = FALSE;
     if (!JS_IsException(maker) && JS_IsFunction(fctx, maker)) {
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
@@ -44231,7 +44233,7 @@ ns_iframe_cross_origin_window(JSContext *ctx, JSValue target)
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue maker = JS_Eval(ctx, ns_cross_window_bootstrap,
                             strlen(ns_cross_window_bootstrap),
-                            "<cross-window>", JS_EVAL_TYPE_GLOBAL);
+                            "<cross-window>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     JSValue proxy = JS_NULL;
     if (!JS_IsException(maker) && JS_IsFunction(ctx, maker)) {
         JSValueConst args[2] = { global, target };
@@ -48713,7 +48715,7 @@ ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
         "   Object.defineProperty(PS,Symbol.toStringTag,{value:'PermissionStatus',configurable:true});}catch(e){}"
         "})()";
     JSValue result = JS_Eval(ctx, source, strlen(source),
-                             "<web-api-shapes>", JS_EVAL_TYPE_GLOBAL);
+                             "<web-api-shapes>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
     (void)global;
@@ -48745,7 +48747,7 @@ ns_install_navigator_shape(JSContext *ctx)
         " try{Object.defineProperty(P,Symbol.toStringTag,{value:'Navigator',configurable:true});}catch(e){}"
         "})()";
     JSValue result = JS_Eval(ctx, source, strlen(source),
-                             "<navigator-shape>", JS_EVAL_TYPE_GLOBAL);
+                             "<navigator-shape>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, result);
 }
@@ -49373,7 +49375,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "   { value: 'DOMTokenList', configurable: true });"
             "})";
         JSValue f = JS_Eval(ctx, iter_src, strlen(iter_src),
-                            "<tlist-iter>", JS_EVAL_TYPE_GLOBAL);
+                            "<tlist-iter>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(f)) {
             JSValueConst args[1] = { tlist_proto };
             JSValue r = JS_Call(ctx, f, JS_UNDEFINED, 1, args);
@@ -49435,7 +49437,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             " def(rnl, Symbol.toStringTag, 'RadioNodeList');"
             "})";
         JSValue deco = JS_Eval(ctx, deco_src, strlen(deco_src),
-                               "<live-proto>", JS_EVAL_TYPE_GLOBAL);
+                               "<live-proto>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (!JS_IsException(deco)) {
             JSValueConst args[3] = { hc_proto, nl_proto, rnl_proto };
             JSValue r = JS_Call(ctx, deco, JS_UNDEFINED, 3, args);
@@ -50277,7 +50279,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             JS_NewCFunction(ctx, ns_event_report_listener_exception,
                            "__ns_event_report", 1), 0);
         JSValue et_ret = JS_Eval(ctx, et_src, strlen(et_src),
-                                 "<event-target>", JS_EVAL_TYPE_GLOBAL);
+                                 "<event-target>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (JS_IsException(et_ret)) {
             JSValue err = JS_GetException(ctx);
             const char *msg = JS_ToCString(ctx, err);
@@ -50330,7 +50332,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "    w.scheduler.yield = function(){ return new Promise(function(resolve){ later(resolve); }); };"
             "})();";
         JSValue pm_ret = JS_Eval(ctx, post_message_src, strlen(post_message_src),
-                                 "<post-message>", JS_EVAL_TYPE_GLOBAL);
+                                 "<post-message>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         JS_FreeValue(ctx, pm_ret);
     }
 
@@ -50354,7 +50356,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "{value:'Window',writable:false,enumerable:false,configurable:true});}"
             "catch(e){}";
         JSValue tag_ret = JS_Eval(ctx, window_tag_src, strlen(window_tag_src),
-                                  "<window-tag>", JS_EVAL_TYPE_GLOBAL);
+                                  "<window-tag>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         JS_FreeValue(ctx, tag_ret);
     }
     {
@@ -50579,7 +50581,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "   { value:'Navigator', configurable:true }); } catch(e) {}"
             "})();";
         JSValue nr = JS_Eval(ctx, nav_iface_src, strlen(nav_iface_src),
-                             "<navigator-iface>", JS_EVAL_TYPE_GLOBAL);
+                             "<navigator-iface>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         JS_FreeValue(ctx, nr);
     }
 
@@ -50594,7 +50596,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             "         { enumerable: false }); } catch(e) {} } } });"
             "})();";
         JSValue hr = JS_Eval(ctx, hide_src, strlen(hide_src),
-                             "<hide-internals>", JS_EVAL_TYPE_GLOBAL);
+                             "<hide-internals>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         JS_FreeValue(ctx, hr);
     }
 
@@ -53796,7 +53798,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
             " try { Object.defineProperty(document, 'location', d); } catch(e){}"
             "})();";
         JSValue r = JS_Eval(ctx, loc_fwd, strlen(loc_fwd),
-                            "<location-forward>", JS_EVAL_TYPE_GLOBAL);
+                            "<location-forward>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
     }
@@ -53893,7 +53895,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
             " Object.defineProperty(p,Symbol.iterator,{value:A.values,writable:true,configurable:true});"
             "})(NamedNodeMap.prototype)";
         JSValue result = JS_Eval(ctx, source, strlen(source),
-                                 "<namednodemap>", JS_EVAL_TYPE_GLOBAL);
+                                 "<namednodemap>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
         if (JS_IsException(result)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, result);
     }
@@ -54093,6 +54095,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                sizeof(ns_js_streaming_src) - 1, "<streaming>");
     ns_drain_microtasks(js);
     ns_install_navigator_shape(ctx);
+    ns_js_name_engine_members(ctx);
     {
         JSValue g = JS_GetGlobalObject(ctx);
         JSValue doc_val = JS_GetPropertyStr(ctx, g, "document");
@@ -54713,9 +54716,63 @@ ns_js_caller_position(JSContext *ctx, char **file, int *line, int *col)
     return found;
 }
 
+static const char ns_member_names_src[] =
+    "(function(G){"
+    "  var toStr = Function.prototype.toString, done = new Set(), seen = new Set();"
+    "  function engine(f){ try { return / \\{ \\[native code\\] \\}$/.test(toStr.call(f)); } catch (e) { return false; } }"
+    "  function name(f, n){"
+    "    if (typeof f !== 'function' || done.has(f) || f.name === n || !engine(f)) return;"
+    "    done.add(f);"
+    "    try { Object.defineProperty(f, 'name', { value: n, configurable: true }); } catch (e) {}"
+    "  }"
+    "  function fix(o){"
+    "    if (!o || (typeof o !== 'object' && typeof o !== 'function') || seen.has(o)) return;"
+    "    seen.add(o);"
+    "    var keys; try { keys = Object.getOwnPropertyNames(o); } catch (e) { return; }"
+    "    keys.forEach(function(k){"
+    "      if (/^[A-Z]/.test(k) || k === 'constructor' || k.slice(0, 2) === '__') return;"
+    "      var d; try { d = Object.getOwnPropertyDescriptor(o, k); } catch (e) { return; }"
+    "      if (!d) return;"
+    "      if (d.get) name(d.get, 'get ' + k);"
+    "      if (d.set) name(d.set, 'set ' + k);"
+    "      if ('value' in d) name(d.value, k);"
+    "    });"
+    "  }"
+    "  var gkeys = Object.getOwnPropertyNames(G);"
+    "  gkeys.forEach(function(k){"
+    "    var v; try { v = G[k]; } catch (e) { return; }"
+    "    if (/^[A-Z]/.test(k) && typeof v === 'function') { fix(v); fix(v.prototype); }"
+    "  });"
+    "  fix(G); fix(Object.getPrototypeOf(G));"
+    "  gkeys.forEach(function(k){"
+    "    if (/^[A-Z]/.test(k)) return;"
+    "    var v; try { v = G[k]; } catch (e) { return; }"
+    "    if (v && typeof v === 'object') fix(v);"
+    "  });"
+    "})(globalThis)";
+
+static void
+ns_js_name_engine_members(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_member_names_src, sizeof(ns_member_names_src) - 1,
+                        "<member-names>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
+static int
+ns_js_origin_is_engine_code(const char *origin)
+{
+    return origin && origin[0] == '<' &&
+           strcmp(origin, "<inline>") != 0 && strcmp(origin, "<timer>") != 0;
+}
+
 static void
 ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
 {
+    int source_flags = ns_js_origin_is_engine_code(origin)
+        ? JS_EVAL_FLAG_HIDE_SOURCE : 0;
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
     if (js->iframe_doc_set) {
@@ -54723,7 +54780,7 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         g_string_append_len(w, src ? src : "", (gssize)len);
         g_string_append(w, "\n})");
         JSValue fn = JS_Eval(js->ctx, w->str, w->len, origin ? origin : "inline",
-                             JS_EVAL_TYPE_GLOBAL);
+                             JS_EVAL_TYPE_GLOBAL | source_flags);
         g_string_free(w, TRUE);
         if (!JS_IsException(fn) && JS_IsFunction(js->ctx, fn)) {
             JSValue global = JS_GetGlobalObject(js->ctx);
@@ -54778,7 +54835,8 @@ ns_js_eval(ns_js *js, const char *src, gsize len, const char *origin)
         JSValue geval = JS_GetGlobalObject(js->ctx);
         JSEvalOptions opts = {
             .version = JS_EVAL_OPTIONS_VERSION,
-            .eval_flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY,
+            .eval_flags = JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY |
+                          source_flags,
             .filename = origin,
             .line_num = src_line,
             .col_num = src_col,
@@ -56457,7 +56515,7 @@ ns_js_iframe_proto_snapshot(JSContext *ctx)
         "if(Object.prototype.propertyIsEnumerable.call(o,k))m[k]=1;"
         "}catch(e){}});return m;});})()";
     JSValue v = JS_Eval(ctx, src, strlen(src), "<iframe-proto-snapshot>",
-                        JS_EVAL_TYPE_GLOBAL);
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(v)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return JS_NULL;
@@ -56487,7 +56545,7 @@ ns_js_iframe_proto_cleanup(JSContext *ctx, JSValueConst before)
         "d.enumerable=false;Object.defineProperty(o,k,d);"
         "}catch(e){}});}})";
     JSValue fn = JS_Eval(ctx, src, strlen(src), "<iframe-proto-cleanup>",
-                         JS_EVAL_TYPE_GLOBAL);
+                         JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(fn)) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         return;
@@ -56593,7 +56651,7 @@ ns_js_iframe_restore_event_targets(JSContext *ctx)
         "try{if(Object.getPrototypeOf(win)!==W)Object.setPrototypeOf(win,W);}catch(e){}}"
         "})()";
     JSValue v = JS_Eval(ctx, src, strlen(src), "<iframe-events>",
-                        JS_EVAL_TYPE_GLOBAL);
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(v)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, v);
     JS_FreeValue(ctx, g);
@@ -56685,7 +56743,7 @@ ns_js_run_iframe_modules(ns_js *js, GPtrArray *modules, const char *origin,
         "return d&&('value' in d)?d.value:void 0;},"
         "set:function(v){Object.defineProperty(window,'Zone',{configurable:true,writable:true,value:v});}})";
     JSValue bridge = JS_Eval(ctx, bridge_src, strlen(bridge_src),
-                             "<iframe-zone>", JS_EVAL_TYPE_GLOBAL);
+                             "<iframe-zone>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
     if (JS_IsException(bridge)) JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, bridge);
 
