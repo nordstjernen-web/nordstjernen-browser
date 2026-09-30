@@ -10484,7 +10484,8 @@ static int delete_property(JSContext *ctx, JSObject *p, JSAtom atom)
 }
 
 static int call_setter(JSContext *ctx, JSObject *setter,
-                       JSValueConst this_obj, JSValue val, int flags)
+                       JSValueConst this_obj, JSValue val, int flags,
+                       JSAtom prop)
 {
     JSValue ret, func;
     if (likely(setter)) {
@@ -10501,7 +10502,7 @@ static int call_setter(JSContext *ctx, JSObject *setter,
         JS_FreeValue(ctx, val);
         if ((flags & JS_PROP_THROW) ||
             ((flags & JS_PROP_THROW_STRICT) && is_strict_mode(ctx))) {
-            JS_ThrowTypeError(ctx, "no setter for property");
+            JS_ThrowTypeErrorAtom(ctx, "Cannot set property %s which has only a getter", prop);
             return -1;
         }
         return false;
@@ -10744,7 +10745,7 @@ retry:
             assert(prop == JS_ATOM_length);
             return set_array_length(ctx, p, val, flags);
         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-            return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
+            return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags, prop);
         } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_VARREF) {
             /* JS_PROP_WRITABLE is always true for variable
                references, but they are write protected in module name
@@ -10836,7 +10837,7 @@ retry:
                                     setter = NULL;
                                 else
                                     setter = JS_VALUE_GET_OBJ(desc.setter);
-                                ret = call_setter(ctx, setter, this_obj, val, flags);
+                                ret = call_setter(ctx, setter, this_obj, val, flags, prop);
                                 JS_FreeValue(ctx, desc.getter);
                                 JS_FreeValue(ctx, desc.setter);
                                 return ret;
@@ -10868,7 +10869,7 @@ retry:
         prs = find_own_property(&pr, p1, prop);
         if (prs) {
             if ((prs->flags & JS_PROP_TMASK) == JS_PROP_GETSET) {
-                return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags);
+                return call_setter(ctx, pr->u.getset.setter, this_obj, val, flags, prop);
             } else if ((prs->flags & JS_PROP_TMASK) == JS_PROP_AUTOINIT) {
                 /* Instantiate property and retry (potentially useless) */
                 if (JS_AutoInitProperty(ctx, p1, prop, pr, prs))
