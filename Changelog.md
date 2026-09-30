@@ -3,6 +3,18 @@ Changelog:
 
 1.0.27:
 ======
+* `window[i]` and `frames[i]` return the WindowProxy of the i-th child
+  frame, and `window[name]` returns the frame whose `name` attribute
+  matches, as the HTML named-access rules specify. Indexed access always
+  gave `undefined`, and from inside a frame `parent.frames` counted the
+  frames of the calling document instead of the parent's, so sibling
+  frames could not reach each other to `postMessage`. A cross-origin
+  parent now exposes its child frames by index and name too, while every
+  other property of it still throws `SecurityError`.
+* Inline event-handler content attributes inside a frame, such as
+  `<body onload="...">`, are compiled and run in that frame's realm. They
+  ran in the top-level page's realm, so they could not see functions
+  declared by the frame's own scripts and failed with `ReferenceError`.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
   an out-of-bounds write in `CharacterData.replaceData()`, and
