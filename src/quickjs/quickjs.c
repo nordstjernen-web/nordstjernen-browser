@@ -9598,6 +9598,78 @@ static void js_free_prop_enum(JSContext *ctx, JSPropertyEnum *tab, uint32_t len)
 
 /* return < 0 in case if exception, 0 if OK. ptab and its atoms must
    be freed by the user. */
+static bool js_atom_is_engine_internal(JSRuntime *rt, JSAtom atom)
+{
+    JSString *str;
+    const uint8_t *c;
+
+    if (__JS_AtomIsTaggedInt(atom))
+        return false;
+    str = rt->atom_array[atom];
+    if (!str || str->atom_type != JS_ATOM_TYPE_STRING || str->is_wide_char ||
+        str->len < 4)
+        return false;
+    c = str8(str);
+    return c[0] == '_' && c[1] == '_' &&
+           ((c[2] == 'n' && (c[3] == 'd' || c[3] == 's')) ||
+            (c[2] == 'j' && c[3] == 's') || (c[2] == 'N' && c[3] == 'D'));
+}
+
+static bool js_filename_is_engine_code(JSRuntime *rt, JSAtom filename)
+{
+    static const char *const page_origins[] = {
+        "<inline>", "<timer>", "<shadowrealm>", "<unnamed>", "<input>",
+    };
+    JSString *str;
+    const char *name;
+    size_t i;
+
+    if (filename == JS_ATOM_NULL || __JS_AtomIsTaggedInt(filename))
+        return false;
+    str = rt->atom_array[filename];
+    if (!str || str->is_wide_char || str->len < 2)
+        return false;
+    name = (const char *)str8(str);
+    if (name[0] != '<')
+        return false;
+    for (i = 0; i < countof(page_origins); i++)
+        if (str->len == strlen(page_origins[i]) &&
+            !memcmp(name, page_origins[i], str->len))
+            return false;
+    return true;
+}
+
+/* engine helpers live on the global object under __nd/__ns/__js names;
+   page code enumerating a global does not see them, engine code does */
+static bool js_hide_engine_global_keys(JSContext *ctx, JSObject *p)
+{
+    JSRuntime *rt = ctx->rt;
+    struct list_head *el;
+    JSStackFrame *sf;
+    bool is_global = false;
+
+    list_for_each(el, &rt->context_list) {
+        JSContext *c = list_entry(el, JSContext, link);
+        if (JS_VALUE_GET_TAG(c->global_obj) == JS_TAG_OBJECT &&
+            JS_VALUE_GET_OBJ(c->global_obj) == p) {
+            is_global = true;
+            break;
+        }
+    }
+    if (!is_global)
+        return false;
+    for (sf = rt->current_stack_frame; sf; sf = sf->prev_frame) {
+        JSObject *f;
+        if (JS_VALUE_GET_TAG(sf->cur_func) != JS_TAG_OBJECT)
+            continue;
+        f = JS_VALUE_GET_OBJ(sf->cur_func);
+        if (!js_class_has_bytecode(f->class_id))
+            continue;
+        return !js_filename_is_engine_code(rt, f->u.func.function_bytecode->filename);
+    }
+    return false;
+}
+
 static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
                                                       JSPropertyEnum **ptab,
                                                       uint32_t *plen,
@@ -9610,13 +9682,14 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
     JSAtom atom;
     uint32_t num_keys_count, str_keys_count, sym_keys_count, atom_count;
     uint32_t num_index, str_index, sym_index, exotic_count, exotic_keys_count;
-    bool is_enumerable, num_sorted;
+    bool is_enumerable, num_sorted, hide_internal;
     uint32_t num_key;
     JSAtomKindEnum kind;
 
     /* clear pointer for consistency in case of failure */
     *ptab = NULL;
     *plen = 0;
+    hide_internal = js_hide_engine_global_keys(ctx, p);
 
     /* compute the number of returned properties */
     num_keys_count = 0;
@@ -9628,7 +9701,8 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
     sh = p->shape;
     for(i = 0, prs = get_shape_prop(sh); i < sh->prop_count; i++, prs++) {
         atom = prs->atom;
-        if (atom != JS_ATOM_NULL) {
+        if (atom != JS_ATOM_NULL &&
+            !(hide_internal && js_atom_is_engine_internal(ctx->rt, atom))) {
             is_enumerable = ((prs->flags & JS_PROP_ENUMERABLE) != 0);
             kind = JS_AtomGetKind(ctx, atom);
             if ((!(flags & JS_GPN_ENUM_ONLY) || is_enumerable) &&
@@ -9715,7 +9789,8 @@ static int __exception JS_GetOwnPropertyNamesInternal(JSContext *ctx,
     sh = p->shape;
     for(i = 0, prs = get_shape_prop(sh); i < sh->prop_count; i++, prs++) {
         atom = prs->atom;
-        if (atom != JS_ATOM_NULL) {
+        if (atom != JS_ATOM_NULL &&
+            !(hide_internal && js_atom_is_engine_internal(ctx->rt, atom))) {
             is_enumerable = ((prs->flags & JS_PROP_ENUMERABLE) != 0);
             kind = JS_AtomGetKind(ctx, atom);
             if ((!(flags & JS_GPN_ENUM_ONLY) || is_enumerable) &&
