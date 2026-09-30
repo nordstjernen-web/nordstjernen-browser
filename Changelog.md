@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Page scripts enumerating the global object (`Object.keys(window)`,
+  `Object.getOwnPropertyNames`, `for...in`) no longer see the engine's
+  own `__nd`/`__ns`/`__js` helper properties, which no other browser
+  exposes. The engine's own code still reaches them by name.
 * Objects the engine hands to pages inherit from their WebIDL interface
   and report its name: `new FileReader() instanceof FileReader`,
   `Object.prototype.toString.call(localStorage)` is `[object Storage]`,
