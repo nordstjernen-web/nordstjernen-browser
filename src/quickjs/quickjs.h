@@ -973,6 +973,8 @@ JS_EXTERN JSValue JS_NewDate(JSContext *ctx, double epoch_ms);
 JS_EXTERN bool JS_IsDate(JSValueConst v);
 
 JS_EXTERN JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop);
+JS_EXTERN JSValue JS_GetPropertyReceiver(JSContext *ctx, JSValueConst obj, JSAtom prop,
+                                         JSValueConst receiver);
 JS_EXTERN JSValue JS_GetPropertyUint32(JSContext *ctx, JSValueConst this_obj,
                                        uint32_t idx);
 JS_EXTERN JSValue JS_GetPropertyInt64(JSContext *ctx, JSValueConst this_obj,
