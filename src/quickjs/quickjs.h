@@ -670,6 +670,10 @@ typedef struct JSClassExoticMethods {
     /* return < 0 if exception or true/false */
     int (*set_property)(JSContext *ctx, JSValueConst obj, JSAtom atom,
                         JSValueConst value, JSValueConst receiver, int flags);
+    /* like get_own_property, but used by [[Get]] and given the receiver */
+    int (*get_own_property_receiver)(JSContext *ctx, JSPropertyDescriptor *desc,
+                                     JSValueConst obj, JSAtom prop,
+                                     JSValueConst receiver);
 } JSClassExoticMethods;
 
 typedef void JSClassFinalizer(JSRuntime *rt, JSValueConst val);

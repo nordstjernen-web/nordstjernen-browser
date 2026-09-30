@@ -3,6 +3,32 @@ Changelog:
 
 1.0.27:
 ======
+* `window[i]` and `frames[i]` return the WindowProxy of the i-th child
+  frame, and `window[name]` returns the frame whose `name` attribute
+  matches, as the HTML named-access rules specify. Indexed access always
+  gave `undefined`, and from inside a frame `parent.frames` counted the
+  frames of the calling document instead of the parent's, so sibling
+  frames could not reach each other to `postMessage`. Named and indexed
+  access resolves in the document of the window being read, so a frame's
+  `window.foo` no longer finds an element in its parent. A cross-origin
+  parent now exposes its child frames by index and name too, each behind
+  the same cross-origin WindowProxy, while every other property still
+  throws `SecurityError`.
+* Inline event-handler content attributes inside a frame, such as
+  `<body onload="...">`, are compiled and run in that frame's realm. They
+  ran in the top-level page's realm, so they could not see functions
+  declared by the frame's own scripts and failed with `ReferenceError`,
+  and a frame without scripts ran its handlers with the parent's document.
+  An `<iframe onload="...">` attribute runs in the page that holds the
+  iframe, not inside the frame.
+* A frame's `window.name` starts as its `<iframe name>`, and a same-origin
+  frame's `window.frameElement` is its `<iframe>`. Both were empty, so a
+  frame could not find itself in `parent.frames`.
+* `postMessage` into a same-origin frame reports the caller as
+  `event.source`. It reported the receiving frame itself, so replying to
+  `event.source` sent the answer back into the frame instead of to its
+  parent. A message from another origin hands the frame a cross-origin
+  WindowProxy as `event.source` rather than the sender's own window.
 * The in-tree HTML parser, lexbor, is refreshed to upstream master
   (327a8b6). It fixes memory corruption when a pooled allocation shrinks,
   an out-of-bounds write in `CharacterData.replaceData()`, and
