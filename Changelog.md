@@ -3,6 +3,9 @@ Changelog:
 
 1.0.27:
 ======
+* Dedicated workers have `Intl` and `crossOriginIsolated`. A worker that
+  read its time zone or formatted a number threw `ReferenceError`, and
+  since worker errors do not reach the page, the page waited forever.
 * Numbers the engine formats keep a `.` decimal point under locales that
   use a comma, such as Turkish or Norwegian. `--single-process` runs the
   engine inside the GTK shell, whose startup applies the OS locale, so
