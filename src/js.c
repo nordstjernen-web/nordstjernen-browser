@@ -377,6 +377,7 @@ static JSValue ns_call_on_handler(ns_js *js, JSValue handler,
 static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
 static void ns_js_name_engine_members(JSContext *ctx);
+static void ns_js_link_interfaces(JSContext *ctx);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static ns_node *ns_iframe_document_node(const ns_node *iframe);
@@ -54095,6 +54096,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
                sizeof(ns_js_streaming_src) - 1, "<streaming>");
     ns_drain_microtasks(js);
     ns_install_navigator_shape(ctx);
+    ns_js_link_interfaces(ctx);
     ns_js_name_engine_members(ctx);
     {
         JSValue g = JS_GetGlobalObject(ctx);
@@ -54741,7 +54743,10 @@ static const char ns_member_names_src[] =
     "  var gkeys = Object.getOwnPropertyNames(G);"
     "  gkeys.forEach(function(k){"
     "    var v; try { v = G[k]; } catch (e) { return; }"
-    "    if (/^[A-Z]/.test(k) && typeof v === 'function') { fix(v); fix(v.prototype); }"
+    "    if (/^[A-Z]/.test(k) && typeof v === 'function') {"
+    "      if (v.name !== k && G[v.name] !== v) name(v, k);"
+    "      fix(v); fix(v.prototype);"
+    "    }"
     "  });"
     "  fix(G); fix(Object.getPrototypeOf(G));"
     "  gkeys.forEach(function(k){"
@@ -54750,6 +54755,123 @@ static const char ns_member_names_src[] =
     "    if (v && typeof v === 'object') fix(v);"
     "  });"
     "})(globalThis)";
+
+static const char ns_interface_links_src[] =
+    "(function(G){"
+    "  var OP = Object.prototype;"
+    "  function tag(proto, n){"
+    "    if (!proto || proto === OP || Object.prototype.hasOwnProperty.call(proto, Symbol.toStringTag)) return;"
+    "    try { Object.defineProperty(proto, Symbol.toStringTag, { value: n, configurable: true }); } catch (e) {}"
+    "  }"
+    "  function iface(n){"
+    "    var C = G[n];"
+    "    if (typeof C !== 'function') {"
+    "      C = ({ [n]: function(){ throw new TypeError('Illegal constructor'); } })[n];"
+    "      try { Object.defineProperty(G, n, { value: C, writable: true, configurable: true, enumerable: false }); } catch (e) { return null; }"
+    "    }"
+    "    if (C.prototype && typeof C.prototype === 'object') tag(C.prototype, n);"
+    "    return C;"
+    "  }"
+    "  Object.getOwnPropertyNames(G).forEach(function(n){"
+    "    if (!/^[A-Z][A-Za-z0-9]*$/.test(n)) return;"
+    "    var C; try { C = G[n]; } catch (e) { return; }"
+    "    if (typeof C === 'function' && C.prototype && typeof C.prototype === 'object' &&"
+    "        C.prototype.constructor === C && !/Error$/.test(n)) tag(C.prototype, n);"
+    "  });"
+    "  function link(get, n){"
+    "    var o; try { o = get(); } catch (e) { return; }"
+    "    if (!o || typeof o !== 'object') return;"
+    "    var C = iface(n); if (!C || !C.prototype) return;"
+    "    var p = Object.getPrototypeOf(o);"
+    "    if (p === OP || p === null) { try { Object.setPrototypeOf(o, C.prototype); } catch (e) {} }"
+    "    else tag(p, n);"
+    "  }"
+    "  var N = G.navigator || {};"
+    "  link(function(){ return G.location; }, 'Location');"
+    "  link(function(){ return G.screen; }, 'Screen');"
+    "  ['locationbar','menubar','personalbar','scrollbars','statusbar','toolbar'].forEach(function(k){ link(function(){ return G[k]; }, 'BarProp'); });"
+    "  link(function(){ return G.visualViewport; }, 'VisualViewport');"
+    "  link(function(){ return G.customElements; }, 'CustomElementRegistry');"
+    "  link(function(){ return G.external; }, 'External');"
+    "  link(function(){ return G.caches; }, 'CacheStorage');"
+    "  link(function(){ return G.scheduler; }, 'Scheduler');"
+    "  link(function(){ return G.localStorage; }, 'Storage');"
+    "  link(function(){ return G.sessionStorage; }, 'Storage');"
+    "  link(function(){ return G.indexedDB; }, 'IDBFactory');"
+    "  link(function(){ return G.navigation; }, 'Navigation');"
+    "  link(function(){ return G.document && G.document.fonts; }, 'FontFaceSet');"
+    "  link(function(){ return G.performance && G.performance.memory; }, 'MemoryInfo');"
+    "  link(function(){ return N.clipboard; }, 'Clipboard');"
+    "  link(function(){ return N.locks; }, 'LockManager');"
+    "  link(function(){ return N.serviceWorker; }, 'ServiceWorkerContainer');"
+    "  link(function(){ return N.geolocation; }, 'Geolocation');"
+    "  link(function(){ return N.permissions; }, 'Permissions');"
+    "  link(function(){ return N.connection; }, 'NetworkInformation');"
+    "  link(function(){ return N.storage; }, 'StorageManager');"
+    "  link(function(){ return N.userAgentData; }, 'NavigatorUAData');"
+    "  link(function(){ return N.mediaDevices; }, 'MediaDevices');"
+    "  function adopt(r, n){"
+    "    if (!r || typeof r !== 'object') return r;"
+    "    var p = Object.getPrototypeOf(r);"
+    "    if (p === OP || p === null) { var C = iface(n);"
+    "      if (C && C.prototype) { try { Object.setPrototypeOf(r, C.prototype); } catch (e) {} } }"
+    "    return r;"
+    "  }"
+    "  function owner(o, k){ while (o) { if (Object.prototype.hasOwnProperty.call(o, k)) return o; o = Object.getPrototypeOf(o); } return null; }"
+    "  function wrap(o, k, after){"
+    "    var d = o && Object.getOwnPropertyDescriptor(o, k);"
+    "    if (!d || typeof d.value !== 'function') return;"
+    "    var orig = d.value;"
+    "    var w = ({ [k]: function(){ return after(orig.apply(this, arguments), arguments); } })[k];"
+    "    try { Object.defineProperty(w, 'length', { value: orig.length, configurable: true }); } catch (e) {}"
+    "    try { Object.defineProperty(o, k, { value: w, writable: d.writable, enumerable: d.enumerable, configurable: d.configurable }); } catch (e) {}"
+    "  }"
+    "  function wrapGetter(o, k, n){"
+    "    var d = o && Object.getOwnPropertyDescriptor(o, k);"
+    "    if (!d || typeof d.get !== 'function') { if (o) adopt(o[k], n); return; }"
+    "    var orig = d.get;"
+    "    var g = ({ ['get ' + k]: function(){ return adopt(orig.call(this), n); } })['get ' + k];"
+    "    try { Object.defineProperty(o, k, { get: g, set: d.set, enumerable: d.enumerable, configurable: d.configurable }); } catch (e) {}"
+    "  }"
+    "  var seenCtx = new WeakSet();"
+    "  function instrument2d(c){"
+    "    if (!c || seenCtx.has(c)) return c; seenCtx.add(c);"
+    "    wrap(owner(c, 'measureText'), 'measureText', function(r){ return adopt(r, 'TextMetrics'); });"
+    "    wrap(owner(c, 'getImageData'), 'getImageData', function(r){ return adopt(r, 'ImageData'); });"
+    "    wrap(owner(c, 'createImageData'), 'createImageData', function(r){ return adopt(r, 'ImageData'); });"
+    "    return c;"
+    "  }"
+    "  var ctxIface = { '2d': 'CanvasRenderingContext2D', 'webgl': 'WebGLRenderingContext',"
+    "    'experimental-webgl': 'WebGLRenderingContext', 'webgl2': 'WebGL2RenderingContext',"
+    "    'bitmaprenderer': 'ImageBitmapRenderingContext' };"
+    "  try {"
+    "    var cv = G.document && G.document.createElement('canvas');"
+    "    var cvOwner = cv && owner(cv, 'getContext');"
+    "    if (cvOwner && cvOwner !== cv) wrap(cvOwner, 'getContext', function(r, a){"
+    "      var n = ctxIface[String(a[0]).toLowerCase()];"
+    "      if (n) adopt(r, n);"
+    "      return n === 'CanvasRenderingContext2D' ? instrument2d(r) : r;"
+    "    });"
+    "  } catch (e) {}"
+    "  if (G.OffscreenCanvas && G.OffscreenCanvas.prototype) wrap(owner(G.OffscreenCanvas.prototype, 'getContext'), 'getContext', function(r, a){"
+    "    if (String(a[0]).toLowerCase() === '2d') { adopt(r, 'OffscreenCanvasRenderingContext2D'); return instrument2d(r); }"
+    "    return r;"
+    "  });"
+    "  wrap(owner(G, 'matchMedia'), 'matchMedia', function(r){ return adopt(r, 'MediaQueryList'); });"
+    "  if (G.document) wrapGetter(owner(G.document, 'fonts'), 'fonts', 'FontFaceSet');"
+    "  if (G.performance) wrapGetter(owner(G.performance, 'memory'), 'memory', 'MemoryInfo');"
+    "  wrapGetter(owner(N, 'scheduling'), 'scheduling', 'Scheduling');"
+    "})(globalThis)";
+
+static void
+ns_js_link_interfaces(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_interface_links_src,
+                        sizeof(ns_interface_links_src) - 1, "<interface-links>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
 
 static void
 ns_js_name_engine_members(JSContext *ctx)

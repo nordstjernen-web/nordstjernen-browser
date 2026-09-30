@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* Objects the engine hands to pages inherit from their WebIDL interface
+  and report its name: `new FileReader() instanceof FileReader`,
+  `Object.prototype.toString.call(localStorage)` is `[object Storage]`,
+  and canvas contexts, `TextMetrics`, `ImageData`, `MediaQueryList`,
+  `FontFaceSet`, `location`, `screen` and the `navigator` sub-objects
+  follow suit. `Location`, `Screen`, `BarProp`, `CustomElementRegistry`
+  and the other interfaces these belong to now exist as globals.
 * Functions the engine implements in JavaScript print as native code,
   `function animate() { [native code] }`, like every other built-in.
   434 of them printed their JavaScript source and many carried internal

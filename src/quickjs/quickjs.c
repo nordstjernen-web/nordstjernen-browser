@@ -18004,6 +18004,32 @@ static void close_lexical_var(JSContext *ctx, JSFunctionBytecode *b,
 #define JS_CALL_FLAG_COPY_ARGV   (1 << 1)
 #define JS_CALL_FLAG_GENERATOR   (1 << 2)
 
+/* a C constructor that returns a plain object gets new.target.prototype,
+   so host interface instances inherit from their interface prototype */
+static void js_adopt_new_target_prototype(JSContext *ctx, JSValueConst obj,
+                                          JSValueConst new_target)
+{
+    JSObject *o, *object_proto;
+    JSValue proto;
+
+    if (JS_VALUE_GET_TAG(obj) != JS_TAG_OBJECT ||
+        JS_VALUE_GET_TAG(new_target) != JS_TAG_OBJECT)
+        return;
+    o = JS_VALUE_GET_OBJ(obj);
+    object_proto = JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_OBJECT]);
+    if (o->class_id != JS_CLASS_OBJECT || o->shape->proto != object_proto)
+        return;
+    proto = JS_GetProperty(ctx, new_target, JS_ATOM_prototype);
+    if (JS_IsException(proto)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return;
+    }
+    if (JS_VALUE_GET_TAG(proto) == JS_TAG_OBJECT &&
+        JS_VALUE_GET_OBJ(proto) != object_proto)
+        JS_SetPrototypeInternal(ctx, obj, proto, false);
+    JS_FreeValue(ctx, proto);
+}
+
 static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
                                   JSValueConst this_obj,
                                   int argc, JSValueConst *argv, int flags)
@@ -18132,6 +18158,11 @@ static JSValue js_call_c_function(JSContext *ctx, JSValueConst func_obj,
     default:
         abort();
     }
+
+    if ((cproto == JS_CFUNC_constructor_or_func ||
+         cproto == JS_CFUNC_constructor_or_func_magic) &&
+        (flags & JS_CALL_FLAG_CONSTRUCTOR))
+        js_adopt_new_target_prototype(ctx, ret_val, this_obj);
 
     rt->cfunc_caller_realm = prev_caller_realm;
     rt->current_stack_frame = sf->prev_frame;
