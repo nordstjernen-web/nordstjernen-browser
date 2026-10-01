@@ -31843,12 +31843,6 @@ ns_element_get_children(JSContext *ctx, JSValueConst this_val)
 }
 
 static gboolean
-ns_node_is_embedded_doc(const ns_node *n)
-{
-    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
-}
-
-static gboolean
 ns_dom_hidden_child(const ns_node *c)
 {
     return ns_node_is_embedded_doc(c) || ns_node_is_shadow_root(c);
@@ -32970,8 +32964,10 @@ ns_element_hasChildNodes(JSContext *ctx, JSValueConst this_val,
 {
     (void)ctx; (void)argc; (void)argv;
     const ns_node *el = ns_unwrap_element(this_val);
-    if (ns_node_is_element_named(el, "template")) return JS_FALSE;
-    return (el && el->first_child) ? JS_TRUE : JS_FALSE;
+    if (!el || ns_node_is_element_named(el, "template")) return JS_FALSE;
+    for (const ns_node *c = el->first_child; c; c = c->next_sibling)
+        if (!ns_dom_hidden_child(c)) return JS_TRUE;
+    return JS_FALSE;
 }
 
 static gboolean
@@ -46616,20 +46612,33 @@ ns_tw_set_current(JSContext *ctx, JSValueConst w, ns_node *n)
 }
 
 static ns_node *
+ns_tw_skip_hidden(ns_node *n, gboolean backward)
+{
+    while (n && ns_dom_hidden_child(n))
+        n = backward ? n->prev_sibling : n->next_sibling;
+    return n;
+}
+
+static ns_node *ns_tw_first(const ns_node *n) { return ns_tw_skip_hidden(n->first_child, FALSE); }
+static ns_node *ns_tw_last(const ns_node *n)  { return ns_tw_skip_hidden(n->last_child, TRUE); }
+static ns_node *ns_tw_next(const ns_node *n)  { return ns_tw_skip_hidden(n->next_sibling, FALSE); }
+static ns_node *ns_tw_prev(const ns_node *n)  { return ns_tw_skip_hidden(n->prev_sibling, TRUE); }
+
+static ns_node *
 ns_tw_traverse_children(JSContext *ctx, JSValueConst w, ns_node *current,
                         gboolean last, int *err)
 {
-    ns_node *node = last ? current->last_child : current->first_child;
+    ns_node *node = last ? ns_tw_last(current) : ns_tw_first(current);
     while (node) {
         int result = ns_traversal_filter(ctx, w, node);
         if (result < 0) { *err = 1; return NULL; }
         if (result == NS_FILTER_ACCEPT) return node;
         if (result == NS_FILTER_SKIP) {
-            ns_node *child = last ? node->last_child : node->first_child;
+            ns_node *child = last ? ns_tw_last(node) : ns_tw_first(node);
             if (child) { node = child; continue; }
         }
         for (;;) {
-            ns_node *sibling = last ? node->prev_sibling : node->next_sibling;
+            ns_node *sibling = last ? ns_tw_prev(node) : ns_tw_next(node);
             if (sibling) { node = sibling; break; }
             ns_node *parent = node->parent;
             if (!parent || parent == current) return NULL;
@@ -46646,15 +46655,15 @@ ns_tw_traverse_siblings(JSContext *ctx, JSValueConst w, ns_node *current,
     ns_node *node = current;
     if (node == root) return NULL;
     for (;;) {
-        ns_node *sibling = prev ? node->prev_sibling : node->next_sibling;
+        ns_node *sibling = prev ? ns_tw_prev(node) : ns_tw_next(node);
         while (sibling) {
             node = sibling;
             int result = ns_traversal_filter(ctx, w, node);
             if (result < 0) { *err = 1; return NULL; }
             if (result == NS_FILTER_ACCEPT) return node;
-            sibling = prev ? node->last_child : node->first_child;
+            sibling = prev ? ns_tw_last(node) : ns_tw_first(node);
             if (result == NS_FILTER_REJECT || !sibling)
-                sibling = prev ? node->prev_sibling : node->next_sibling;
+                sibling = prev ? ns_tw_prev(node) : ns_tw_next(node);
         }
         node = node->parent;
         if (!node || node == root) return NULL;
@@ -46730,8 +46739,8 @@ ns_tw_nextNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
     if (!node || !root) return JS_NULL;
     int result = NS_FILTER_ACCEPT;
     for (;;) {
-        while (result != NS_FILTER_REJECT && node->first_child) {
-            node = node->first_child;
+        while (result != NS_FILTER_REJECT && ns_tw_first(node)) {
+            node = ns_tw_first(node);
             result = ns_traversal_filter(ctx, w, node);
             if (result < 0) return JS_EXCEPTION;
             if (result == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
@@ -46739,7 +46748,7 @@ ns_tw_nextNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
         ns_node *following = NULL, *temp = node;
         while (temp) {
             if (temp == root) return JS_NULL;
-            if (temp->next_sibling) { following = temp->next_sibling; break; }
+            if (ns_tw_next(temp)) { following = ns_tw_next(temp); break; }
             temp = temp->parent;
         }
         if (!following) return JS_NULL;
@@ -46758,18 +46767,18 @@ ns_tw_previousNode(JSContext *ctx, JSValueConst w, int argc, JSValueConst *argv)
     ns_node *root = ns_tw_node_prop(ctx, w, "root");
     if (!node || !root) return JS_NULL;
     while (node != root) {
-        ns_node *sibling = node->prev_sibling;
+        ns_node *sibling = ns_tw_prev(node);
         while (sibling) {
             node = sibling;
             int result = ns_traversal_filter(ctx, w, node);
             if (result < 0) return JS_EXCEPTION;
-            while (result != NS_FILTER_REJECT && node->last_child) {
-                node = node->last_child;
+            while (result != NS_FILTER_REJECT && ns_tw_last(node)) {
+                node = ns_tw_last(node);
                 result = ns_traversal_filter(ctx, w, node);
                 if (result < 0) return JS_EXCEPTION;
             }
             if (result == NS_FILTER_ACCEPT) return ns_tw_set_current(ctx, w, node);
-            sibling = node->prev_sibling;
+            sibling = ns_tw_prev(node);
         }
         if (node == root || !node->parent) return JS_NULL;
         node = node->parent;
@@ -46918,23 +46927,17 @@ static JSClassDef ns_node_iter_class = {
     .finalizer = ns_node_iter_finalizer,
 };
 
-static gboolean
-ns_node_is_nested_doc(const ns_node *n)
-{
-    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
-}
-
 static ns_node *
 ns_ni_skip_doc_fwd(ns_node *n)
 {
-    while (n && ns_node_is_nested_doc(n)) n = n->next_sibling;
+    while (n && ns_node_is_embedded_doc(n)) n = n->next_sibling;
     return n;
 }
 
 static ns_node *
 ns_ni_skip_doc_back(ns_node *n)
 {
-    while (n && ns_node_is_nested_doc(n)) n = n->prev_sibling;
+    while (n && ns_node_is_embedded_doc(n)) n = n->prev_sibling;
     return n;
 }
 
@@ -46942,7 +46945,7 @@ static ns_node *
 ns_ni_following(ns_node *node, ns_node *root)
 {
     if (node->first_child) {
-        ns_node *c = ns_node_is_nested_doc(node->first_child)
+        ns_node *c = ns_node_is_embedded_doc(node->first_child)
             ? ns_ni_skip_doc_fwd(node->first_child->next_sibling)
             : node->first_child;
         if (c) return c;

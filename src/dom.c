@@ -1349,6 +1349,7 @@ ns_node_clone_depth(const ns_node *src, gboolean deep, int depth)
                                          NS_NODE_PI);
     if (deep && out) {
         for (const ns_node *c = src->first_child; c; c = c->next_sibling) {
+            if (ns_node_is_embedded_doc(c)) continue;
             ns_node *cc = ns_node_clone_depth(c, TRUE, depth + 1);
             if (cc) ns_node_append_child(out, cc);
         }
@@ -2488,6 +2489,12 @@ ns_node_is_shadow_root_marked(const ns_node *n)
            ns_element_get_attr(n, NS_SHADOW_ATTR) != NULL;
 }
 
+gboolean
+ns_node_is_embedded_doc(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && n->parent != NULL;
+}
+
 static void
 collect_all_text(const ns_node *n, GString *out, int depth)
 {
@@ -2497,7 +2504,7 @@ collect_all_text(const ns_node *n, GString *out, int depth)
         return;
     }
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        if (!ns_node_is_shadow_root_marked(c))
+        if (!ns_node_is_shadow_root_marked(c) && !ns_node_is_embedded_doc(c))
             collect_all_text(c, out, depth + 1);
 }
 
@@ -2648,7 +2655,7 @@ serialize_node_opts(const ns_node *n, GString *out, gboolean include_self,
     if (shadow && ns_shadow_root_included(shadow, opts))
         serialize_shadow_template(shadow, out, depth, opts);
     for (const ns_node *c = n->first_child; c; c = c->next_sibling) {
-        if (c == shadow)
+        if (c == shadow || ns_node_is_embedded_doc(c))
             continue;
         if (raw_text && c->kind == NS_NODE_TEXT)
             g_string_append(out, c->text ? c->text : "");
@@ -2680,7 +2687,7 @@ ns_node_inner_html(const ns_node *root)
     const ns_node *shadow = ns_serialize_shadow_child(root);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-            if (c == shadow) continue;
+            if (c == shadow || ns_node_is_embedded_doc(c)) continue;
             if (raw_text && c->kind == NS_NODE_TEXT)
                 g_string_append(out, c->text ? c->text : "");
             else
@@ -2703,7 +2710,7 @@ ns_node_get_html(const ns_node *root, const ns_html_ser_opts *opts)
         serialize_shadow_template(shadow, out, 0, opts);
     if (root)
         for (const ns_node *c = root->first_child; c; c = c->next_sibling) {
-            if (c == shadow) continue;
+            if (c == shadow || ns_node_is_embedded_doc(c)) continue;
             if (raw_text && c->kind == NS_NODE_TEXT)
                 g_string_append(out, c->text ? c->text : "");
             else
@@ -2817,7 +2824,8 @@ xml_serialize_node(const ns_node *n, GString *out, const char *parent_ns,
     }
     g_string_append_c(out, '>');
     for (const ns_node *c = n->first_child; c; c = c->next_sibling)
-        xml_serialize_node(c, out, ns, depth + 1);
+        if (!ns_node_is_embedded_doc(c))
+            xml_serialize_node(c, out, ns, depth + 1);
     g_string_append(out, "</");
     if (prefix && *prefix) {
         g_string_append(out, prefix);
