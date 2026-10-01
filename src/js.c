@@ -32897,6 +32897,8 @@ ns_element_getBoundingClientRect(JSContext *ctx, JSValueConst this_val,
             double frame_x, frame_y, frame_w, frame_h;
             ns_box_visual_border_box(iframe_box, &frame_x, &frame_y,
                                      &frame_w, &frame_h);
+            frame_x += iframe_box->border.left + iframe_box->padding.left;
+            frame_y += iframe_box->border.top + iframe_box->padding.top;
             frame_x -= ns_window_scroll_prop(ctx, "scrollX");
             frame_y -= ns_window_scroll_prop(ctx, "scrollY");
             x -= frame_x;
@@ -43963,6 +43965,15 @@ static const char ns_iframe_global_bootstrap[] =
     "    });"
     "  } catch (e) {}"
     "  def('frameElement', { value: crossOrigin ? null : (frameEl || null), writable: true });"
+    "  function frameSize(prop, fallback){"
+    "    return { configurable: true, enumerable: true,"
+    "      get: function(){"
+    "        try { var v = frameEl && frameEl[prop]; if (typeof v === 'number' && v >= 0) return v; } catch (e) {}"
+    "        return realWin[fallback]; },"
+    "      set: function(v){ Object.defineProperty(G, fallback, { value: v, writable: true, configurable: true, enumerable: true }); } };"
+    "  }"
+    "  try { Object.defineProperty(G, 'innerWidth', frameSize('clientWidth', 'innerWidth')); } catch (e) {}"
+    "  try { Object.defineProperty(G, 'innerHeight', frameSize('clientHeight', 'innerHeight')); } catch (e) {}"
     "  if (crossOrigin) {"
     "    def('opener', { value: null, writable: true });"
     "    def('getSelection', { writable: true, value: function(){ return iframeDoc.getSelection ? iframeDoc.getSelection() : null; } });"
@@ -44048,8 +44059,7 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         JSValue urlv = JS_NewString(fctx, initial_url ? initial_url : "about:blank");
         JSValue sbv = JS_NewInt32(fctx, (int32_t)sandbox);
         JSValue platform = ns_iframe_platform_names(fctx, js);
-        JSValue frame_el = iframe && !(sandbox & NS_FRAME_CROSS_ORIGIN)
-            ? ns_make_element(js->ctx, iframe) : JS_NULL;
+        JSValue frame_el = iframe ? ns_make_element(js->ctx, iframe) : JS_NULL;
         const char *frame_name = iframe ? ns_element_get_attr(iframe, "name") : NULL;
         JSValue frame_name_v = JS_NewString(fctx, frame_name ? frame_name : "");
         JSValue child_frame_of = JS_NewCFunction(fctx, ns_iframe_child_frame_of,
@@ -45564,13 +45574,35 @@ ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
     if (!js || !js->current_doc) return JS_NULL;
     ns_js_flush_layout(js);
     if (!js->layout_root) return JS_NULL;
-    if (!ns_point_in_hit_bounds(js, x, y)) return JS_NULL;
-    x += ns_window_scroll_prop(ctx, "scrollX");
-    y += ns_window_scroll_prop(ctx, "scrollY");
+    const ns_node *doc = ns_unwrap_element(this_val);
+    const ns_node *frame = doc && doc->kind == NS_NODE_DOCUMENT &&
+        ns_node_is_element_named(doc->parent, "iframe") ? doc->parent : NULL;
+    if (frame) {
+        const ns_box *fb = ns_box_find_by_dom(js->layout_root, frame);
+        if (!fb) return JS_NULL;
+        double fx, fy, fw, fh;
+        ns_box_visual_border_box(fb, &fx, &fy, &fw, &fh);
+        double cw = fw - fb->border.left - fb->border.right -
+                    fb->padding.left - fb->padding.right;
+        double ch = fh - fb->border.top - fb->border.bottom -
+                    fb->padding.top - fb->padding.bottom;
+        if (x >= cw || y >= ch) return JS_NULL;
+        x += fx + fb->border.left + fb->padding.left;
+        y += fy + fb->border.top + fb->padding.top;
+    } else {
+        if (!ns_point_in_hit_bounds(js, x, y)) return JS_NULL;
+        x += ns_window_scroll_prop(ctx, "scrollX");
+        y += ns_window_scroll_prop(ctx, "scrollY");
+    }
     double local_x = 0, local_y = 0;
     const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
                                               &local_x, &local_y);
     if (!hit || !hit->dom) return JS_NULL;
+    if (frame) {
+        const ns_node *p = hit->dom;
+        while (p && p != doc) p = p->parent;
+        if (!p) return JS_NULL;
+    }
     const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
     return ns_make_element(ctx, area ? area : hit->dom);
 }
@@ -52563,13 +52595,28 @@ ns_document_get_referrer(JSContext *ctx, JSValueConst this_val)
     return JS_NewString(ctx, js_from_ctx(ctx)->referrer ? js_from_ctx(ctx)->referrer : "");
 }
 
+static void
+ns_js_set_doc_ready_state(ns_js *js, const ns_node *doc, int state)
+{
+    if (!js || !doc) return;
+    if (!js->doc_ready_states)
+        js->doc_ready_states = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_insert(js->doc_ready_states, (gpointer)doc,
+                        GINT_TO_POINTER(state));
+}
+
 static JSValue
 ns_document_get_readyState(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    if (!js_from_ctx(ctx)) return JS_NewString(ctx, "loading");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NewString(ctx, "loading");
     static const char *names[] = { "loading", "interactive", "complete" };
-    int idx = js_from_ctx(ctx)->ready_state;
+    int idx = js->ready_state;
+    const ns_node *doc = ns_unwrap_element(this_val);
+    gpointer state = NULL;
+    if (doc && js->doc_ready_states &&
+        g_hash_table_lookup_extended(js->doc_ready_states, doc, NULL, &state))
+        idx = GPOINTER_TO_INT(state);
     if (idx < 0 || idx > 2) idx = 0;
     return JS_NewString(ctx, names[idx]);
 }
@@ -54175,6 +54222,10 @@ void
 ns_js_free(ns_js *js)
 {
     if (!js) return;
+    if (js->doc_ready_states) {
+        g_hash_table_destroy(js->doc_ready_states);
+        js->doc_ready_states = NULL;
+    }
     ns_popover_state_clear(js);
     ns_font_remove_idle_cb(ns_js_fonts_idle, js);
     if (js->font_ready_resolvers) {
@@ -57606,6 +57657,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         js->raf_frame_ctx = iframe;
         GHashTable *globals_before = ns_js_snapshot_globals(js);
         js->iframe_load_depth++;
+        ns_js_set_doc_ready_state(js, content_doc, 0);
         if (xhtml_suppress_scripts)
             ns_js_mark_scripts_already_started(content_root);
         if (!scripts_ok) {
@@ -57629,7 +57681,10 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             g_array_free(tasks, TRUE);
         }
         if (content_doc) {
+            ns_js_set_doc_ready_state(js, content_doc, 1);
+            ns_js_dispatch_event(js, content_doc, "readystatechange", NULL);
             ns_js_dispatch_event(js, content_doc, "DOMContentLoaded", NULL);
+            ns_js_set_doc_ready_state(js, content_doc, 2);
             ns_js_dispatch_event(js, content_doc, "readystatechange", NULL);
             ns_js_dispatch_event(js, content_doc, "load", NULL);
             ns_js_fire_page_transition(js, "pageshow", FALSE);
@@ -57859,6 +57914,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     if (js->halted || js->in_pump) return;
     ns_js_lifecycle_clear(js);
     js->ready_state = 0;
+    if (js->doc_ready_states) g_hash_table_remove_all(js->doc_ready_states);
     ns_js_set_navigation_milestone(js,
         &js->navigation_timing.dom_loading_ms, "domLoading");
     gint64 t0 = g_get_monotonic_time();

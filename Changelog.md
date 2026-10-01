@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* Frames have their own document lifecycle and geometry. Each frame's
+  `document.readyState` runs `loading` -> `interactive` -> `complete`
+  with `readystatechange` at each step, instead of reporting the top
+  page's state (usually already `complete`). `innerWidth`/`innerHeight`
+  in a frame are the frame's size, not the top window's, element rects
+  are measured from the frame's content box rather than its border box,
+  and `document.elementFromPoint` in a frame hit-tests that frame.
 * A message from a cross-origin frame has the frame's WindowProxy as
   `event.source`, the same object as `iframe.contentWindow` and
   `frames[i]`, so pages can tell which frame spoke. It was a different

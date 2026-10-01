@@ -199,6 +199,7 @@ struct ns_js {
     guint64       opaque_counter;
     char         *referrer;
     int           ready_state;
+    GHashTable   *doc_ready_states;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
     ns_node      *lifecycle_doc;
