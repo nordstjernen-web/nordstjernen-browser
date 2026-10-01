@@ -3,6 +3,31 @@ Changelog:
 
 1.0.27:
 ======
+* Message ports work across frames: a frame that receives a transferred
+  `MessagePort` gets its message events, `data` and `ports` in its own
+  realm, so arrays, dates and objects pass `instanceof` checks there,
+  `addEventListener` on a port accepts `{handleEvent}` objects, and the
+  handlers run against the frame's document. Exceptions thrown by port
+  handlers and by window `on<event>` handlers now reach `onerror` and
+  `error` listeners instead of being dropped.
+* Events inside a frame reach that frame's window: window listeners and
+  `window.onclick`-style handlers see clicks, pointer and key events,
+  `DOMContentLoaded` and bubbling custom events, and a frame's `load`
+  event fires once with the document as its target.
+* When the browser dispatches an event, such as a user click or a port
+  message, microtasks queued by one listener run before the next
+  listener, as in other browsers.
+* The window keeps being ticked while a `requestIdleCallback`, a posted
+  message or a script-started image load is waiting, so they no longer
+  stall until an unrelated timer fires.
+* `window.postMessage` throws `SyntaxError` for an unparseable target
+  origin and defaults to `"/"` when none is given; messages to and from a
+  frame sandboxed without `allow-same-origin` use the opaque origin
+  `"null"`; message events target the receiving window and carry a
+  frozen `ports` array from the receiving realm.
+* Aliased built-ins keep their spec names (`String.prototype.trimLeft`
+  is the function named `trimStart`), and `Function.prototype.name` is
+  empty again.
 * `postMessage` and `MessagePort` messages are delivered as tasks, after
   the sender's microtasks, as in other browsers. They ran as microtasks,
   so a message arrived before promise callbacks queued ahead of it, and a
