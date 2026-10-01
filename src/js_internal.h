@@ -10,7 +10,7 @@
 #include <glib.h>
 #include <cairo.h>
 #include "ns_pango.h"
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 #include "js.h"
 #include "dom.h"

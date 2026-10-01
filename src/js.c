@@ -34,7 +34,7 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #include <gio/gio.h>
 #include <glib/gstdio.h>
 #include "ns_pango.h"
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -3677,6 +3677,7 @@ ns_window_named_get(JSContext *ctx, JSPropertyDescriptor *desc,
     return 1;
 }
 
+#ifndef NS_QUICKJS_ORIGINAL
 static int
 ns_window_named_get_receiver(JSContext *ctx, JSPropertyDescriptor *desc,
                              JSValueConst obj, JSAtom prop,
@@ -3693,10 +3694,13 @@ ns_window_named_get_receiver(JSContext *ctx, JSPropertyDescriptor *desc,
     desc->setter = JS_UNDEFINED;
     return 1;
 }
+#endif
 
 static JSClassExoticMethods ns_window_named_exotic = {
     .get_own_property          = ns_window_named_get,
+#ifndef NS_QUICKJS_ORIGINAL
     .get_own_property_receiver = ns_window_named_get_receiver,
+#endif
 };
 
 static JSClassDef ns_window_named_class = {
@@ -22603,7 +22607,7 @@ ns_worker_console_assert(JSContext *ctx, JSValueConst this_val,
 
 static void
 ns_worker_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
-                                    JSValueConst reason, bool is_handled,
+                                    JSValueConst reason, ns_js_bool is_handled,
                                     void *opaque)
 {
     (void)promise; (void)opaque;
@@ -46887,7 +46891,7 @@ ns_js_dispatch_rejection_event(ns_js *js, JSContext *ctx, const char *type,
 
 static void
 ns_js_promise_rejection_tracker(JSContext *ctx, JSValueConst promise,
-                                JSValueConst reason, bool is_handled,
+                                JSValueConst reason, ns_js_bool is_handled,
                                 void *opaque)
 {
     (void)opaque;

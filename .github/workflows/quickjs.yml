@@ -1,0 +1,91 @@
+name: quickjs
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+concurrency:
+  group: quickjs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build:
+    name: quickjs=quickjs (original QuickJS) on ubuntu-26.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ccache gcc g++ git make cmake pkg-config meson ninja-build \
+            libgtk-4-dev libepoxy-dev libcurl4-openssl-dev libssl-dev \
+            libuchardet-dev libpsl-dev libsqlite3-dev \
+            libwebp-dev libavif-dev libsdl2-dev libseccomp-dev ca-certificates \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
+            libswresample-dev
+
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-quickjs-${{ github.sha }}
+          restore-keys: |
+            ccache-quickjs-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=200M
+          ccache --zero-stats
+
+      - name: Build
+        shell: bash
+        run: |
+          set -o pipefail
+          export CC="ccache gcc" CXX="ccache g++"
+          meson setup builddir-quickjs --werror -Dquickjs=quickjs
+          meson compile -C builddir-quickjs 2>&1 | tee build.log
+
+      - name: ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Headless smoke (original QuickJS executes and mutates the DOM)
+        run: |
+          set -o pipefail
+          version=$(cat subprojects/quickjs/VERSION)
+          ./builddir-quickjs/src/gtk/nordstjernen --headless --dump=text \
+            about:nordstjernen > about.txt
+          grep -q "QuickJS ${version}" about.txt
+          ./builddir-quickjs/src/gtk/nordstjernen --headless --dump=text \
+            --settle-ms=300 \
+            'data:text/html,<p id="a">before</p><script>const a=document.getElementById("a");a.textContent="qjs-dom-ok "+(6*7)+" "+(2n**65n)+" "+structuredClone([1,[2]])[1][0];Promise.resolve().then(function(){a.textContent+=" qjs-microtask-ok"});setTimeout(function(){a.textContent+=" qjs-timer-ok"},50);</script>' \
+            > page.txt
+          cat page.txt
+          grep -q 'qjs-dom-ok 42 36893488147419103232 2' page.txt
+          grep -q 'qjs-microtask-ok' page.txt
+          grep -q 'qjs-timer-ok' page.txt
+
+      - name: Headless baseline smoke
+        run: NS_BIN="$PWD/builddir-quickjs/src/gtk/nordstjernen" ./scripts/dev.sh smoke

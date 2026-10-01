@@ -49,9 +49,11 @@ build.ninja
 compile_commands.json
 
 # Meson auto-downloaded subprojects (wrap files only are committed).
-# QuickJS and lexbor live in src/, not subprojects/.
+# The default QuickJS and lexbor live in src/, not subprojects/; the
+# original QuickJS (-Dquickjs=quickjs) is fetched into subprojects/quickjs/.
 /subprojects/packagecache/
 /subprojects/ns-pango/
+/subprojects/quickjs/
 
 # CMake (in case)
 CMakeCache.txt
