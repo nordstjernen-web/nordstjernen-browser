@@ -3,6 +3,18 @@ Changelog:
 
 1.0.27:
 ======
+* Events the browser fires carry the flags other browsers give them:
+  `focus`, `blur`, `readystatechange`, element `scroll` and media events
+  no longer bubble, and `DOMContentLoaded`, `input`, `change`, `scroll`
+  and `focusin`/`focusout` can no longer be cancelled. `invalid` can be.
+* Window events look as they do in other browsers: `load` reaches only
+  window listeners, with the document as its target; `hashchange` and
+  `popstate` are fired at the window and do not bubble; `pageshow` and
+  `pagehide` have the document as their target; `window.onload`,
+  `window.onmessage` and the other window handlers see `eventPhase` and
+  `currentTarget`; and `<body onload>`-style handlers run with the window
+  as `this`. Scrolling the page fires one `scroll` event instead of two,
+  and `resize` is fired at the window only.
 * Transferring a `MessagePort` moves it: the receiver gets a new port
   object, references to the port inside the message point to that new
   port, and the sender's port stops sending and receiving. Messages
