@@ -820,6 +820,15 @@
     var ndMseNextId = 0;
     var ndSourceBufferQuota = 256 * 1024 * 1024;
 
+    function ndBufferSourceBytes(data) {
+        if (ArrayBuffer.isView(data))
+            return blobBufferBytes(data.buffer, data.byteOffset, data.byteLength);
+        if (data instanceof ArrayBuffer)
+            return blobBufferBytes(data, 0, data.byteLength);
+        throw new TypeError("Failed to execute 'appendBuffer' on 'SourceBuffer': " +
+                            "parameter 1 is not of type '(ArrayBuffer or ArrayBufferView)'");
+    }
+
     function MediaSource() {
         if (!(this instanceof MediaSource)) return new MediaSource();
         this._sourceBuffers = new SourceBufferList();
@@ -1162,16 +1171,14 @@
         }
     });
     SourceBuffer.prototype.appendBuffer = function (data) {
+        var copy = ndBufferSourceBytes(data);
         if (this._removed || !this._mediaSource ||
             this._mediaSource.readyState === 'closed' || this.updating)
             throw ndDomError('InvalidStateError');
         this._mediaSource._ndReopen();
-        var bytes = blobPartBytes(data);
-        if (this._ndBufferedBytes() + bytes.length > ndSourceBufferQuota)
+        if (this._ndBufferedBytes() + copy.length > ndSourceBufferQuota)
             throw ndDomError('QuotaExceededError',
                              'SourceBuffer is full; remove buffered media first');
-        var copy = new Uint8Array(bytes.length);
-        copy.set(bytes);
         this._updating = true;
         var self = this;
         var seq = ++this._taskSeq;

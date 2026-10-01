@@ -62,6 +62,17 @@ Changelog:
   example.com page, which no longer carries the "Example Domain"
   heading the test looked for, so every macOS run failed after a
   successful build.
+* YouTube and other MSE players play video again.
+  `SourceBuffer.appendBuffer()` still called a helper that the Blob
+  rewrite removed, so every append threw `ReferenceError` and no media
+  byte reached the decoder: YouTube showed "An error occurred". It now
+  copies the `ArrayBuffer` or view it is given and throws `TypeError`
+  for anything else, before the state checks, as WebIDL requires.
+* `animation` and `transition` set to a CSS-wide keyword (`inherit`,
+  `initial`, `unset`, `revert`, `revert-layer`) give that keyword to
+  every longhand. The shorthand expansion read the keyword as an
+  animation list, which crashed the renderer on pages such as YouTube
+  and made `animation: inherit` compute to `none`.
 
 1.0.26:
 ======
