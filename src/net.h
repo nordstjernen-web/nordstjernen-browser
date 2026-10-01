@@ -9,6 +9,7 @@
 #include <gio/gio.h>
 #include <glib.h>
 
+#include "config.h"
 #include "version.h"
 
 G_BEGIN_DECLS
@@ -184,6 +185,10 @@ char    *ns_net_hsts_upgrade(const char *url);
 gboolean ns_net_hsts_should_upgrade(const char *host);
 char    *ns_net_https_first_upgrade(const char *url);
 gboolean ns_net_header_is_nosniff(const char *value);
+/* The referrer a request for url made by the document at referrer_url
+ * carries under policy, or NULL for none. */
+char    *ns_net_referer_for(const char *url, const char *referrer_url,
+                            ns_referer_policy policy);
 
 void  ns_net_log_clear(void);
 char *ns_net_log_dump(void);

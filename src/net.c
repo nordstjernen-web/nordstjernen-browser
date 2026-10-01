@@ -906,7 +906,7 @@ ns_url_same_origin(const char *a, const char *b)
     return eq;
 }
 
-static char *
+char *
 ns_net_referer_for(const char *url, const char *top_url,
                    ns_referer_policy policy)
 {

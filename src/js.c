@@ -1203,9 +1203,52 @@ typedef struct {
     ns_node   *frame;
     char      *url;
     char      *entered_url;
+    char     **prev_slot;
     gboolean   active;
     gboolean   is_base;
 } ns_realm_scope;
+
+/* The top-level document's URL, even while a frame's code has replaced
+ * current_url with the frame's own URL. */
+static const char *
+ns_js_top_url(ns_js *js)
+{
+    const char *url = js->top_url_slot ? *js->top_url_slot : js->current_url;
+    return url ? url : "";
+}
+
+static void
+ns_js_set_top_url(ns_js *js, const char *url)
+{
+    char **slot = js->top_url_slot ? js->top_url_slot : &js->current_url;
+    char *copy = g_strdup(url ? url : "");
+    g_free(*slot);
+    *slot = copy;
+}
+
+/* Makes url the current URL for a frame's script or event.  The outermost
+ * entry keeps the top-level URL where ns_js_top_url can find it. */
+typedef struct {
+    char *saved;
+    gboolean owns_slot;
+} ns_frame_url;
+
+static void
+ns_frame_url_enter(ns_js *js, ns_frame_url *fu, const char *url)
+{
+    fu->saved = js->current_url;
+    fu->owns_slot = js->top_url_slot == NULL;
+    if (fu->owns_slot) js->top_url_slot = &fu->saved;
+    js->current_url = g_strdup(url ? url : "");
+}
+
+static void
+ns_frame_url_leave(ns_js *js, ns_frame_url *fu)
+{
+    if (fu->owns_slot) js->top_url_slot = NULL;
+    g_free(js->current_url);
+    js->current_url = fu->saved;
+}
 
 static ns_node *
 ns_js_top_document(ns_node *doc)
@@ -1226,6 +1269,7 @@ ns_js_realm_scope_save(ns_js *js, ns_realm_scope *scope)
     scope->frame = js->raf_frame_ctx;
     scope->url = js->current_url;
     scope->entered_url = NULL;
+    scope->prev_slot = js->top_url_slot;
     scope->is_base = FALSE;
     scope->active = TRUE;
 }
@@ -1239,6 +1283,7 @@ ns_js_frame_scope_enter(ns_js *js, JSContext *realm, ns_node *frame,
         js->realm_scope_base = scope;
         scope->is_base = TRUE;
     }
+    if (!js->top_url_slot) js->top_url_slot = &scope->url;
     js->ctx = realm;
     ns_node *frame_doc = ns_iframe_document_node(frame);
     if (frame_doc) js->current_doc = frame_doc;
@@ -1258,9 +1303,9 @@ ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
         js->ctx = realm;
         js->raf_frame_ctx = base ? base->frame : NULL;
         js->current_doc = base ? base->doc : ns_js_top_document(js->current_doc);
-        const char *url = base ? base->url : scope->url;
-        js->current_url = g_strdup(url ? url : "");
+        js->current_url = g_strdup(ns_js_top_url(js));
         scope->entered_url = g_strdup(js->current_url);
+        js->top_url_slot = NULL;
         return;
     }
     if (!js->frame_contexts || g_hash_table_size(js->frame_contexts) == 0)
@@ -1282,14 +1327,14 @@ static void
 ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
 {
     if (!scope->active) return;
-    ns_realm_scope *base = js->realm_scope_base;
-    if (scope->entered_url && base &&
+    if (scope->entered_url && scope->prev_slot &&
         g_strcmp0(js->current_url, scope->entered_url) != 0) {
-        g_free(base->url);
-        base->url = g_strdup(js->current_url ? js->current_url : "");
+        g_free(*scope->prev_slot);
+        *scope->prev_slot = g_strdup(js->current_url ? js->current_url : "");
     }
     g_free(scope->entered_url);
     if (scope->is_base) js->realm_scope_base = NULL;
+    js->top_url_slot = scope->prev_slot;
     g_free(js->current_url);
     js->current_url = scope->url;
     js->raf_frame_ctx = scope->frame;
@@ -3559,6 +3604,8 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->focused_doc == n) js->focused_doc = NULL;
+    if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
+    if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
     n->js_invalidate = NULL;
 
@@ -13128,18 +13175,15 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         ns_budget_guard bg = {0};
         ns_js_budget_push(js, &bg);
         g_autofree char *realm_url = ns_window_url_of(ctx, actual_target);
-        char *saved_url = js ? js->current_url : NULL;
-        if (js && realm_url && *realm_url)
-            js->current_url = g_strdup(realm_url);
+        ns_frame_url fu;
+        gboolean swap_url = js && realm_url && *realm_url;
+        if (swap_url) ns_frame_url_enter(js, &fu, realm_url);
         ns_message_event_adopt_data(ctx, JS_GetFunctionRealm(ctx, deliver), ev);
         JSValueConst args[1] = { ev };
         JSValue r = JS_Call(ctx, deliver, actual_target, 1, args);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
         JS_FreeValue(ctx, r);
-        if (js && realm_url && *realm_url) {
-            g_free(js->current_url);
-            js->current_url = saved_url;
-        }
+        if (swap_url) ns_frame_url_leave(js, &fu);
         ns_js_budget_pop(js, &bg);
     } else if (js && js->ctx) {
         JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
@@ -24671,7 +24715,13 @@ ns_mut_drain_job(JSContext *ctx, int argc, JSValueConst *argv)
         JSValue cb = JS_DupValue(ctx, o->cb);
         JSValue self = JS_DupValue(ctx, o->wrapper);
         JSValueConst call_args[2] = { arr, self };
+        /* Each observer's callback runs against its own frame's document
+         * and URL, whichever realm queued this drain. */
+        JSContext *cb_realm = ns_function_realm(ctx, cb);
+        ns_realm_scope scope;
+        ns_js_realm_scope_enter(js, cb_realm, &scope);
         JSValue ret = JS_Call(ctx, cb, self, 2, call_args);
+        ns_js_realm_scope_leave(js, &scope);
         if (JS_IsException(ret)) {
             JSValue ex = JS_GetException(ctx);
             if (js->log_cb) {
@@ -28488,7 +28538,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     JSContext *saved_ctx = js->ctx;
     ns_node *saved_doc = js->current_doc;
     ns_node *saved_frame = js->raf_frame_ctx;
-    char *saved_url = js->current_url;
+    ns_frame_url fu;
     JSContext *target_ctx = ns_js_node_realm_context(js, target);
     const ns_node *target_root = target;
     while (target_root && target_root->parent) target_root = target_root->parent;
@@ -28504,9 +28554,8 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     if (target_frame) {
         js->current_doc = (ns_node *)target_doc;
         js->raf_frame_ctx = target_frame;
-        const char *frame_url = ns_element_get_attr(target_frame,
-                                                     "data-nd-frame-url");
-        js->current_url = g_strdup(frame_url ? frame_url : "");
+        ns_frame_url_enter(js, &fu, ns_element_get_attr(target_frame,
+                                                         "data-nd-frame-url"));
     }
     gboolean fired = FALSE;
     ns_budget_guard bg = {0};
@@ -28613,10 +28662,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     JS_FreeValue(js->ctx, event);
     ns_dispatch_finish_mutations(js);
     ns_js_budget_pop(js, &bg);
-    if (target_frame) {
-        g_free(js->current_url);
-        js->current_url = saved_url;
-    }
+    if (target_frame) ns_frame_url_leave(js, &fu);
     js->raf_frame_ctx = saved_frame;
     js->current_doc = saved_doc;
     js->ctx = saved_ctx;
@@ -28958,15 +29004,14 @@ ns_js_run_animation_frame_internal(ns_js *js)
         JSContext *previous_ctx = js->ctx;
         ns_node *previous_doc = js->current_doc;
         ns_node *previous_frame = js->raf_frame_ctx;
-        char *previous_url = js->current_url;
+        ns_frame_url fu;
         js->ctx = callback_ctx;
         js->raf_frame_ctx = e->frame;
         if (e->frame) {
             ns_node *frame_doc = ns_iframe_document_node(e->frame);
             if (frame_doc) js->current_doc = frame_doc;
-            const char *frame_url = ns_element_get_attr(e->frame,
-                                                         "data-nd-frame-url");
-            js->current_url = g_strdup(frame_url ? frame_url : "");
+            ns_frame_url_enter(js, &fu, ns_element_get_attr(e->frame,
+                                                             "data-nd-frame-url"));
         }
         js->eval_deadline_us = g_get_monotonic_time() + ns_js_eval_budget_us();
         JSValue arg = JS_NewFloat64(callback_ctx, ts_ms);
@@ -29035,10 +29080,7 @@ ns_js_run_animation_frame_internal(ns_js *js)
         JS_FreeValue(callback_ctx, arg);
         JS_FreeValue(callback_ctx, e->cb);
         ns_drain_microtasks(js);
-        if (e->frame) {
-            g_free(js->current_url);
-            js->current_url = previous_url;
-        }
+        if (e->frame) ns_frame_url_leave(js, &fu);
         js->raf_frame_ctx = previous_frame;
         js->current_doc = previous_doc;
         js->ctx = previous_ctx;
@@ -45009,7 +45051,13 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
     }
 
     JSValue fg = JS_GetGlobalObject(fctx);
-    JSValue parent_global = JS_GetGlobalObject(js->ctx);
+    /* The parent is the window whose document holds the iframe, which for
+     * a nested frame is another frame's window, not the top-level one. */
+    JSContext *parent_ctx = iframe && iframe->parent
+        ? ns_js_node_realm_context(js, iframe->parent) : NULL;
+    if (!parent_ctx) parent_ctx = js->main_realm_ctx ? js->main_realm_ctx
+                                                     : js->ctx;
+    JSValue parent_global = JS_GetGlobalObject(parent_ctx);
 
     JSValue maker = JS_Eval(fctx, ns_iframe_global_bootstrap,
                             strlen(ns_iframe_global_bootstrap),
@@ -50414,6 +50462,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->frame_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                            NULL, g_free);
+    js->frame_referrers = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                                NULL, g_free);
     js->frame_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
@@ -53589,9 +53639,15 @@ ns_document_set_cookie(JSContext *ctx, JSValueConst this_val, JSValueConst val)
 static JSValue
 ns_document_get_referrer(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    if (!js_from_ctx(ctx)) return JS_NewString(ctx, "");
-    return JS_NewString(ctx, js_from_ctx(ctx)->referrer ? js_from_ctx(ctx)->referrer : "");
+    ns_js *js = js_from_ctx(ctx);
+    if (!js) return JS_NewString(ctx, "");
+    ns_node *doc = ns_document_root_for(ctx, this_val);
+    if (doc && doc->parent) {
+        const char *r = js->frame_referrers
+            ? g_hash_table_lookup(js->frame_referrers, doc->parent) : NULL;
+        return JS_NewString(ctx, r ? r : "");
+    }
+    return JS_NewString(ctx, js->referrer ? js->referrer : "");
 }
 
 static void
@@ -54234,14 +54290,16 @@ ns_location_get_href(JSContext *ctx, JSValueConst this_val)
 {
     (void)this_val;
     if (!js_from_ctx(ctx)) return JS_NewString(ctx, "");
-    return JS_NewString(ctx, js_from_ctx(ctx)->current_url ? js_from_ctx(ctx)->current_url : "");
+    return JS_NewString(ctx, ns_js_top_url(js_from_ctx(ctx)));
 }
 
+/* The window's own location: the top-level document's URL, also when a
+ * frame's code reads parent.location or top.location. */
 static const char *
 ns_loc_url(JSContext *ctx)
 {
     ns_js *js = js_from_ctx(ctx);
-    return js && js->current_url ? js->current_url : "";
+    return js ? ns_js_top_url(js) : "";
 }
 
 static JSValue
@@ -54375,7 +54433,7 @@ ns_location_set_href(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         return JS_UNDEFINED;
     }
     if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(js->current_url, s);
+        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
         if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
             js->nav_cb(s, FALSE, js->nav_user_data);
     }
@@ -54397,7 +54455,7 @@ ns_location_assign(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
         return JS_UNDEFINED;
     }
     if (!ns_location_nav_in_iframe(js)) {
-        g_autofree char *abs_url = ns_url_resolve(js->current_url, s);
+        g_autofree char *abs_url = ns_url_resolve(ns_js_top_url(js), s);
         if (!abs_url || !ns_js_anchor_fragment_navigate(js, abs_url))
             js->nav_cb(s, FALSE, js->nav_user_data);
     }
@@ -54411,7 +54469,7 @@ ns_location_reload(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst
     (void)ctx; (void)this_val; (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
     if (js && js->nav_cb && !ns_location_nav_in_iframe(js))
-        js->nav_cb(js->current_url, TRUE, js->nav_user_data);
+        js->nav_cb(ns_js_top_url(js), TRUE, js->nav_user_data);
     return JS_UNDEFINED;
 }
 
@@ -54424,7 +54482,7 @@ ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
     const char *s = JS_ToCString(ctx, val);
     if (!s) return JS_UNDEFINED;
     const char *frag = s[0] == '#' ? s + 1 : s;
-    char *old_url = g_strdup(js->current_url ? js->current_url : "");
+    char *old_url = g_strdup(ns_js_top_url(js));
     char *base = g_strdup(old_url);
     char *cut = strchr(base, '#');
     if (cut) *cut = '\0';
@@ -54436,12 +54494,11 @@ ns_location_set_hash(JSContext *ctx, JSValueConst this_val, JSValueConst val)
         g_free(new_url);
         return JS_UNDEFINED;
     }
-    g_free(js->current_url);
-    js->current_url = g_strdup(new_url);
+    ns_js_set_top_url(js, new_url);
     if (js->soft_nav_cb)
-        js->soft_nav_cb(js->current_url, FALSE, js->soft_nav_user_data);
+        js->soft_nav_cb(new_url, FALSE, js->soft_nav_user_data);
     if (js->fragment_nav_cb)
-        js->fragment_nav_cb(js->current_url, js->fragment_nav_user_data);
+        js->fragment_nav_cb(new_url, js->fragment_nav_user_data);
     ns_js_dispatch_hashchange(js, old_url, new_url);
     g_free(old_url);
     g_free(new_url);
@@ -54452,15 +54509,15 @@ static JSValue
 ns_location_set_component(JSContext *ctx, JSValueConst val, const char *comp)
 {
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_url || !*js->current_url) return JS_UNDEFINED;
+    if (!js || !*ns_js_top_url(js)) return JS_UNDEFINED;
     size_t vlen = 0;
     const char *v = JS_ToCStringLen(ctx, &vlen, val);
     if (!v) return JS_EXCEPTION;
-    char *next = ns_url_set_component_len(js->current_url, comp, v, vlen);
+    char *next = ns_url_set_component_len(ns_js_top_url(js), comp, v, vlen);
     JS_FreeCString(ctx, v);
     if (!next) return JS_UNDEFINED;
     if (js->nav_cb && !ns_location_nav_in_iframe(js) &&
-        strcmp(next, js->current_url) != 0)
+        strcmp(next, ns_js_top_url(js)) != 0)
         js->nav_cb(next, FALSE, js->nav_user_data);
     g_free(next);
     return JS_UNDEFINED;
@@ -54687,6 +54744,8 @@ ns_js_reset_runtime_state(ns_js *js)
         g_hash_table_remove_all(js->frame_contexts);
     if (js->frame_urls)
         g_hash_table_remove_all(js->frame_urls);
+    if (js->frame_referrers)
+        g_hash_table_remove_all(js->frame_referrers);
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
@@ -55657,6 +55716,10 @@ ns_js_free(ns_js *js)
     if (js->frame_urls) {
         g_hash_table_destroy(js->frame_urls);
         js->frame_urls = NULL;
+    }
+    if (js->frame_referrers) {
+        g_hash_table_destroy(js->frame_referrers);
+        js->frame_referrers = NULL;
     }
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
@@ -56765,10 +56828,10 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
     }
     ns_node *previous_doc = js->current_doc;
     ns_node *previous_script = js->current_script;
-    char *previous_url = js->current_url;
+    ns_frame_url fu;
     js->current_doc = document ? document : previous_doc;
     js->current_script = script;
-    js->current_url = g_strdup(origin ? origin : "");
+    ns_frame_url_enter(js, &fu, origin);
 
     if (is_module) {
         JSContext *previous_module_ctx = js->module_ctx;
@@ -56811,8 +56874,7 @@ ns_js_eval_script_source(ns_js *js, ns_node *script, const char *source,
         ns_js_budget_pop(js, &budget);
     }
 
-    g_free(js->current_url);
-    js->current_url = previous_url;
+    ns_frame_url_leave(js, &fu);
     js->current_script = previous_script;
     js->current_doc = previous_doc;
 }
@@ -57320,6 +57382,40 @@ ns_js_drain_load_event_scripts(ns_js *js)
     }
 }
 
+/* The document.referrer of the document loading into iframe: the URL of
+ * the document holding the iframe, cut down by the referrer policy. */
+static char *
+ns_js_frame_referrer(ns_js *js, ns_node *iframe, const char *frame_url)
+{
+    const ns_node *holder = iframe->parent;
+    while (holder && holder->kind != NS_NODE_DOCUMENT) holder = holder->parent;
+    const char *holder_url = holder && holder->parent && js->frame_urls
+        ? g_hash_table_lookup(js->frame_urls, holder->parent)
+        : ns_js_top_url(js);
+    const ns_config *cfg = ns_config_get();
+    ns_referer_policy policy = cfg ? cfg->referer_policy
+                                   : NS_REFERER_STRICT_ORIGIN_WHEN_CROSS;
+    const char *attr = ns_element_get_attr(iframe, "referrerpolicy");
+    if (attr && g_ascii_strcasecmp(attr, "no-referrer") == 0)
+        policy = NS_REFERER_NO_REFERRER;
+    else if (attr && g_ascii_strcasecmp(attr, "same-origin") == 0)
+        policy = NS_REFERER_SAME_ORIGIN;
+    else if (attr && g_ascii_strcasecmp(attr, "unsafe-url") == 0)
+        policy = NS_REFERER_UNSAFE_URL;
+    const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
+    if (srcdoc && *srcdoc && policy != NS_REFERER_UNSAFE_URL) {
+        /* about:srcdoc is never same-origin with its holder's URL. */
+        char *origin = policy == NS_REFERER_STRICT_ORIGIN_WHEN_CROSS &&
+                       ns_url_is_http_or_https(holder_url)
+            ? ns_url_origin_from(holder_url) : NULL;
+        char *out = origin ? g_strdup_printf("%s/", origin) : g_strdup("");
+        g_free(origin);
+        return out;
+    }
+    char *referrer = ns_net_referer_for(frame_url, holder_url, policy);
+    return referrer ? referrer : g_strdup("");
+}
+
 static void
 ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
                          const char *abs_url)
@@ -57330,6 +57426,9 @@ ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
     if (js && js->frame_urls)
         g_hash_table_replace(js->frame_urls, iframe,
                              g_strdup(frame_url ? frame_url : ""));
+    if (js && js->frame_referrers)
+        g_hash_table_replace(js->frame_referrers, iframe,
+            ns_js_frame_referrer(js, iframe, frame_url));
     if (srcdoc && *srcdoc) {
         ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
         ns_element_set_attr(iframe, "data-nd-frame-url", origin);
@@ -58675,8 +58774,8 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             JS_FreeValue(js->ctx, iw);
         }
 
-        char *prev_url = js->current_url;
-        js->current_url = g_strdup(iorigin);
+        ns_frame_url fu;
+        ns_frame_url_enter(js, &fu, iorigin);
         ns_node *prev_doc = js->current_doc;
         js->current_doc = content_doc;
         if (content_doc) ns_doc_id_index_build(content_doc);
@@ -58731,8 +58830,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         js->iframe_doc_set = prev_idoc_set;
         js->current_script = prev_script;
         js->current_doc = prev_doc;
-        g_free(js->current_url);
-        js->current_url = prev_url;
+        ns_frame_url_leave(js, &fu);
         JS_FreeValue(js->ctx, realm_scope);
         JS_FreeValue(js->ctx, realm_doc);
     }
@@ -59460,6 +59558,10 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     if (!js || !js->ctx) return;
     if (js->halted || js->in_pump || js->in_hashchange) return;
     js->in_hashchange = TRUE;
+    /* The top-level window's hash changed, possibly through a frame's
+     * parent.location, so the event goes to the top-level window. */
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, js->main_realm_ctx, &scope);
     JSContext *ctx = js->ctx;
     JSValue global = JS_GetGlobalObject(ctx);
     JSValue ev = ns_make_window_event(ctx, "hashchange");
@@ -59482,6 +59584,7 @@ ns_js_dispatch_hashchange(ns_js *js, const char *old_url, const char *new_url)
     }
     JS_FreeValue(ctx, ev);
     JS_FreeValue(ctx, global);
+    ns_js_realm_scope_leave(js, &scope);
     js->in_hashchange = FALSE;
 }
 
