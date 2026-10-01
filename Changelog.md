@@ -3,6 +3,15 @@ Changelog:
 
 1.0.27:
 ======
+* Focus follows the HTML focus update steps. `blur` and `focusout` run
+  while no element has focus, `relatedTarget` names the other element,
+  and the windows get `blur` and `focus` when focus moves between a page
+  and its frames, by script or by a click. `document.activeElement` is
+  the iframe, not the element inside it, when a frame has focus, so a
+  page can no longer see which element of a cross-origin frame is
+  focused. `document.hasFocus()` is true only for the focused document
+  and the documents containing it, and `focus()` does nothing on an
+  element that cannot take focus or is not in the document.
 * Events the browser fires carry the flags other browsers give them:
   `focus`, `blur`, `readystatechange`, element `scroll` and media events
   no longer bubble, and `DOMContentLoaded`, `input`, `change`, `scroll`
