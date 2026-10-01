@@ -978,6 +978,13 @@ JS_EXTERN JSValue JS_NewProxy(JSContext *ctx, JSValueConst target,
 
 JS_EXTERN JSValue JS_NewDate(JSContext *ctx, double epoch_ms);
 JS_EXTERN bool JS_IsDate(JSValueConst v);
+enum {
+    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
+    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
+};
+/* the primitive type an object wraps (new Number(1), Object(1n), ...),
+   whatever realm created it */
+JS_EXTERN int JS_GetBoxedPrimitiveKind(JSValueConst v);
 
 JS_EXTERN JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop);
 JS_EXTERN JSValue JS_GetPropertyUint32(JSContext *ctx, JSValueConst this_obj,

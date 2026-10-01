@@ -3,6 +3,12 @@ Changelog:
 
 1.0.27:
 ======
+* Structured data sent between windows, frames and `MessageChannel`
+  ports arrives as objects of the receiving realm: `e.data instanceof
+  Uint8Array`, `Map`, `Date`, `Array` and `Object` hold in the receiver,
+  as in other browsers. Messages crossing a frame boundary carried the
+  sender's objects, and on ports `Map`, `Set`, `Date`, `RegExp`,
+  `DataView` and boxed primitives degraded to plain objects.
 * Frames have their own document lifecycle and geometry. Each frame's
   `document.readyState` runs `loading` -> `interactive` -> `complete`
   with `readystatechange` at each step, instead of reporting the top
