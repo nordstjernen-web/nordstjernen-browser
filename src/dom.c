@@ -2105,10 +2105,13 @@ ns_node_find_by_id(const ns_node *root, const char *id)
             g_hash_table_remove(root->id_index, id);
         return found;
     }
+    /* The document's index covers its own tree; below a shadow root the
+     * lookup walks instead of reading or filling it. */
     const ns_node *doc = root;
-    while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT)
+    while (doc && doc->parent && doc->kind != NS_NODE_DOCUMENT &&
+           !ns_dom_tree_scope_boundary(doc))
         doc = doc->parent;
-    if (doc && doc != root && doc->id_index) {
+    if (doc && doc != root && doc->kind == NS_NODE_DOCUMENT && doc->id_index) {
         ns_node *hit = g_hash_table_lookup(doc->id_index, id);
         if (hit) {
             const char *hid = ns_element_get_attr(hit, "id");

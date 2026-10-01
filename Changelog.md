@@ -3,6 +3,14 @@ Changelog:
 
 1.0.27:
 ======
+* Shadow roots behave as document fragments: nodes directly inside one
+  have a `null` `parentElement`, the root's `nodeName` is
+  `#document-fragment`, it is not `instanceof Element`, and `closest()`,
+  `contains()` and `compareDocumentPosition()` stop at the shadow
+  boundary. Document-wide queries such as `getElementById` and
+  `querySelector` no longer return elements inside shadow trees, which
+  they did once a script had looked those elements up inside the shadow
+  root.
 * A frame starts with its own `onload`, `onclick` and other window event
   handlers set to `null`. It used to start with copies of its parent's,
   so the page's `window.onload` could run again for the frame.
