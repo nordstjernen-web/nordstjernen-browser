@@ -39,6 +39,9 @@ JSClassID ns_new_class_id(JSClassID *pclass_id)
 #ifdef G_OS_WIN32
 #include <windows.h>
 #endif
+#ifdef __APPLE__
+#include <pthread.h>
+#endif
 
 #include "anim.h"
 #include "bytecode_cache.h"
@@ -23575,6 +23578,21 @@ ns_install_abort_signal_interface(JSContext *ctx, JSValueConst global)
     JS_FreeValue(ctx, ctor);
 }
 
+static size_t
+ns_worker_stack_limit(void)
+{
+    size_t limit = (size_t)5 * 1024 * 1024;
+    size_t stack = 0;
+#if defined(__APPLE__)
+    stack = pthread_get_stacksize_np(pthread_self());
+#elif defined(G_OS_WIN32)
+    stack = (size_t)1024 * 1024;
+#endif
+    if (stack > 0 && stack - stack / 4 < limit)
+        limit = stack - stack / 4;
+    return limit;
+}
+
 static ns_js *
 ns_worker_js_new(ns_worker_host *host)
 {
@@ -23622,7 +23640,7 @@ ns_worker_js_new(ns_worker_host *host)
     JS_SetInterruptHandler(js->rt, ns_js_interrupt_cb, js);
     JS_SetMemoryLimit(js->rt, (size_t)mb * 1024 * 1024);
     JS_SetHostPromiseRejectionTracker(js->rt, ns_worker_promise_rejection_tracker, NULL);
-    JS_SetMaxStackSize(js->rt, (size_t)5 * 1024 * 1024);
+    JS_SetMaxStackSize(js->rt, ns_worker_stack_limit());
 
     js->ctx = JS_NewContext(js->rt);
     if (!js->ctx) {
