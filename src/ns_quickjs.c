@@ -122,7 +122,8 @@ ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                             JSReallocArrayBufferDataFunc *realloc_func,
                             void *opaque, bool is_shared)
 {
-    (void)max_len;
+    if (max_len != 0)
+        return JS_ThrowRangeError(ctx, "resizable external ArrayBuffer is not supported");
     if (!realloc_func)
         return (JS_NewArrayBuffer)(ctx, buf, len, NULL, opaque, is_shared);
     ns_quickjs_array_buffer_owner *owner = g_new(ns_quickjs_array_buffer_owner, 1);
@@ -134,6 +135,18 @@ ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
     if (JS_IsException(buffer))
         g_free(owner);
     return buffer;
+}
+
+JSValue
+ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
+                           JSTypedArrayEnum type)
+{
+    JSValueConst padded[3] = { JS_UNDEFINED, JS_UNDEFINED, JS_UNDEFINED };
+    if (argc >= 3)
+        return (JS_NewTypedArray)(ctx, argc, argv, type);
+    for (int i = 0; i < argc; i++)
+        padded[i] = argv[i];
+    return (JS_NewTypedArray)(ctx, 3, padded, type);
 }
 
 static bool
@@ -175,12 +188,13 @@ JSValue
 JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
              size_t input_len, JSEvalOptions *options)
 {
+    const char *filename = options->filename ? options->filename : "<unnamed>";
     size_t lines = options->line_num > 1 ? (size_t)options->line_num - 1 : 0;
     size_t columns = options->col_num > 1 ? (size_t)options->col_num - 1 : 0;
     gboolean hashbang = input_len >= 2 && input[0] == '#' && input[1] == '!';
     if ((lines == 0 && columns == 0) || hashbang ||
         input_len > G_MAXSIZE - lines - columns - 1)
-        return JS_EvalThis(ctx, this_obj, input, input_len, options->filename,
+        return JS_EvalThis(ctx, this_obj, input, input_len, filename,
                            options->eval_flags);
     size_t padded_len = lines + columns + input_len;
     char *padded = g_try_malloc(padded_len + 1);
@@ -191,7 +205,7 @@ JS_EvalThis2(JSContext *ctx, JSValueConst this_obj, const char *input,
     memcpy(padded + lines + columns, input, input_len);
     padded[padded_len] = '\0';
     JSValue result = JS_EvalThis(ctx, this_obj, padded, padded_len,
-                                 options->filename, options->eval_flags);
+                                 filename, options->eval_flags);
     g_free(padded);
     return result;
 }

@@ -36,6 +36,8 @@ JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
                                     size_t max_len,
                                     JSReallocArrayBufferDataFunc *realloc_func,
                                     void *opaque, bool is_shared);
+JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
+                                   JSTypedArrayEnum type);
 
 bool JS_IsArrayBuffer(JSValueConst val);
 bool JS_IsDataView(JSValueConst val);
@@ -93,6 +95,8 @@ JS_RepointArrayBuffer(JSContext *ctx, JSValueConst obj, uint8_t *data,
 #define JS_IsBigInt(val)  ns_quickjs_is_big_int(val)
 #define JS_NewArrayBuffer(ctx, buf, len, max_len, realloc_func, opaque, shared) \
     ns_quickjs_new_array_buffer(ctx, buf, len, max_len, realloc_func, opaque, shared)
+#define JS_NewTypedArray(ctx, argc, argv, type) \
+    ns_quickjs_new_typed_array(ctx, argc, argv, type)
 
 #else
 

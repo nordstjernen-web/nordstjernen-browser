@@ -80,10 +80,10 @@ jobs:
           grep -q "QuickJS ${version}" about.txt
           ./builddir-quickjs/src/gtk/nordstjernen --headless --dump=text \
             --settle-ms=300 \
-            'data:text/html,<p id="a">before</p><script>const a=document.getElementById("a");a.textContent="qjs-dom-ok "+(6*7)+" "+(2n**65n)+" "+structuredClone([1,[2]])[1][0];Promise.resolve().then(function(){a.textContent+=" qjs-microtask-ok"});setTimeout(function(){a.textContent+=" qjs-timer-ok"},50);</script>' \
+            'data:text/html,<p id="a">before</p><script>const a=document.getElementById("a");let n=0;[1,1].sort(function(){n++;return 0});a.textContent="qjs-dom-ok "+(6*7)+" "+(2n**65n)+" "+structuredClone([1,[2]])[1][0]+" sortcmp="+n+" enc="+new TextEncoder().encode("h\u00e9").length;Promise.resolve().then(function(){a.textContent+=" qjs-microtask-ok"});setTimeout(function(){a.textContent+=" qjs-timer-ok"},50);</script>' \
             > page.txt
           cat page.txt
-          grep -q 'qjs-dom-ok 42 36893488147419103232 2' page.txt
+          grep -q 'qjs-dom-ok 42 36893488147419103232 2 sortcmp=1 enc=3' page.txt
           grep -q 'qjs-microtask-ok' page.txt
           grep -q 'qjs-timer-ok' page.txt
 
