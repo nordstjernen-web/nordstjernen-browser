@@ -26466,6 +26466,18 @@ ns_event_interface_for(JSContext *ctx, JSValueConst ev)
         { "pagehide", "PageTransitionEvent" },
         { "unhandledrejection", "PromiseRejectionEvent" },
         { "rejectionhandled", "PromiseRejectionEvent" },
+        { "click", "PointerEvent" }, { "auxclick", "PointerEvent" },
+        { "contextmenu", "PointerEvent" },
+        { "pointerdown", "PointerEvent" }, { "pointerup", "PointerEvent" },
+        { "pointermove", "PointerEvent" }, { "pointerover", "PointerEvent" },
+        { "pointerout", "PointerEvent" }, { "pointerenter", "PointerEvent" },
+        { "pointerleave", "PointerEvent" }, { "pointercancel", "PointerEvent" },
+        { "mousedown", "MouseEvent" }, { "mouseup", "MouseEvent" },
+        { "mousemove", "MouseEvent" }, { "mouseover", "MouseEvent" },
+        { "mouseout", "MouseEvent" }, { "mouseenter", "MouseEvent" },
+        { "mouseleave", "MouseEvent" }, { "dblclick", "MouseEvent" },
+        { "focus", "FocusEvent" }, { "blur", "FocusEvent" },
+        { "focusin", "FocusEvent" }, { "focusout", "FocusEvent" },
     };
     const char *iface = "Event";
     JSValue type = JS_GetPropertyStr(ctx, ev, "type");
@@ -29206,7 +29218,43 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
         strcmp(type, "mouseup") == 0 || strcmp(type, "pointerup") == 0 ||
         strcmp(type, "click") == 0 || strcmp(type, "dblclick") == 0)
         ns_js_note_user_activation(js);
-    JSContext *ctx = js->ctx;
+    JSContext *ctx = ns_js_node_realm_context(js, target);
+    if (!ctx) ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+    double frame_x = 0, frame_y = 0;
+    const ns_node *owner_iframe = ns_node_owner_iframe(target);
+    const ns_box *owner_box = js->layout_root && owner_iframe
+        ? ns_box_find_by_dom(js->layout_root, owner_iframe) : NULL;
+    if (owner_box) {
+        double w, h;
+        ns_box_visual_border_box(owner_box, &frame_x, &frame_y, &w, &h);
+        frame_x += owner_box->border.left + owner_box->padding.left;
+        frame_y += owner_box->border.top + owner_box->padding.top;
+    }
+    double screen_x = client_x, screen_y = client_y;
+    if (owner_box) {
+        client_x = page_x - frame_x;
+        client_y = page_y - frame_y;
+        page_x = client_x;
+        page_y = client_y;
+    }
+    double offset_x = client_x, offset_y = client_y;
+    const ns_box *target_box = js->layout_root
+        ? ns_box_find_by_dom(js->layout_root, target) : NULL;
+    if (target_box) {
+        double bx, by, bw, bh;
+        ns_box_visual_border_box(target_box, &bx, &by, &bw, &bh);
+        offset_x = page_x + frame_x - bx - target_box->border.left;
+        offset_y = page_y + frame_y - by - target_box->border.top;
+    }
+    gboolean is_pointer = g_str_has_prefix(type, "pointer");
+    gboolean button_change = strcmp(type, "pointerdown") == 0 ||
+                             strcmp(type, "pointerup") == 0 ||
+                             strcmp(type, "mousedown") == 0 ||
+                             strcmp(type, "mouseup") == 0 ||
+                             strcmp(type, "click") == 0 ||
+                             strcmp(type, "dblclick") == 0 ||
+                             strcmp(type, "auxclick") == 0 ||
+                             strcmp(type, "contextmenu") == 0;
     JSValue event = ns_make_event(ctx, type, target);
     if (g_str_has_suffix(type, "enter") || g_str_has_suffix(type, "leave")) {
         JS_SetPropertyStr(ctx, event, "bubbles",    JS_FALSE);
@@ -29218,10 +29266,14 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "y",       JS_NewFloat64(ctx, client_y));
     JS_SetPropertyStr(ctx, event, "pageX",   JS_NewFloat64(ctx, page_x));
     JS_SetPropertyStr(ctx, event, "pageY",   JS_NewFloat64(ctx, page_y));
-    JS_SetPropertyStr(ctx, event, "screenX", JS_NewFloat64(ctx, client_x));
-    JS_SetPropertyStr(ctx, event, "screenY", JS_NewFloat64(ctx, client_y));
-    JS_SetPropertyStr(ctx, event, "offsetX", JS_NewFloat64(ctx, client_x));
-    JS_SetPropertyStr(ctx, event, "offsetY", JS_NewFloat64(ctx, client_y));
+    JS_SetPropertyStr(ctx, event, "screenX", JS_NewFloat64(ctx, screen_x));
+    JS_SetPropertyStr(ctx, event, "screenY", JS_NewFloat64(ctx, screen_y));
+    JS_SetPropertyStr(ctx, event, "offsetX", JS_NewFloat64(ctx, offset_x));
+    JS_SetPropertyStr(ctx, event, "offsetY", JS_NewFloat64(ctx, offset_y));
+    JS_SetPropertyStr(ctx, event, "layerX",  JS_NewFloat64(ctx, offset_x));
+    JS_SetPropertyStr(ctx, event, "layerY",  JS_NewFloat64(ctx, offset_y));
+    JS_SetPropertyStr(ctx, event, "timeStamp",
+                      JS_NewFloat64(ctx, ns_perf_now_ms(js)));
     int move_x = 0, move_y = 0;
     if (strcmp(type, "mousemove") == 0 || strcmp(type, "pointermove") == 0) {
         int slot = type[0] == 'p' ? 1 : 0;
@@ -29235,12 +29287,13 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     }
     JS_SetPropertyStr(ctx, event, "movementX", JS_NewInt32(ctx, move_x));
     JS_SetPropertyStr(ctx, event, "movementY", JS_NewInt32(ctx, move_y));
-    JS_SetPropertyStr(ctx, event, "button",  JS_NewInt32(ctx, button));
+    JS_SetPropertyStr(ctx, event, "button",
+                      JS_NewInt32(ctx, is_pointer && !button_change ? -1 : button));
     JS_SetPropertyStr(ctx, event, "buttons", JS_NewInt32(ctx, buttons));
     JS_SetPropertyStr(ctx, event, "which",   JS_NewInt32(ctx, button + 1));
     JS_SetPropertyStr(ctx, event, "detail",
         JS_NewInt32(ctx, strcmp(type, "dblclick") == 0 ? 2
-                       : strcmp(type, "click") == 0    ? 1 : 0));
+                       : !is_pointer && button_change  ? 1 : 0));
     JS_SetPropertyStr(ctx, event, "shiftKey", shift ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "ctrlKey",  ctrl  ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "altKey",   alt   ? JS_TRUE : JS_FALSE);
@@ -29248,14 +29301,24 @@ ns_js_dispatch_mouse_event(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "relatedTarget",
                       related ? ns_make_element(ctx, related) : JS_NULL);
     JS_SetPropertyStr(ctx, event, "view", JS_GetGlobalObject(ctx));
-    if (g_str_has_prefix(type, "pointer")) {
+    gboolean click_like = strcmp(type, "click") == 0 ||
+                          strcmp(type, "auxclick") == 0 ||
+                          strcmp(type, "contextmenu") == 0;
+    if (is_pointer || click_like) {
         JS_SetPropertyStr(ctx, event, "pointerId",   JS_NewInt32(ctx, 1));
         JS_SetPropertyStr(ctx, event, "pointerType", JS_NewString(ctx, "mouse"));
-        JS_SetPropertyStr(ctx, event, "isPrimary",   JS_TRUE);
+        JS_SetPropertyStr(ctx, event, "isPrimary",   is_pointer ? JS_TRUE : JS_FALSE);
         JS_SetPropertyStr(ctx, event, "pressure",
-                          JS_NewFloat64(ctx, buttons ? 0.5 : 0.0));
+                          JS_NewFloat64(ctx, is_pointer && buttons ? 0.5 : 0.0));
         JS_SetPropertyStr(ctx, event, "width",  JS_NewInt32(ctx, 1));
         JS_SetPropertyStr(ctx, event, "height", JS_NewInt32(ctx, 1));
+        JS_SetPropertyStr(ctx, event, "tangentialPressure", JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, event, "tiltX",  JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, event, "tiltY",  JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, event, "twist",  JS_NewInt32(ctx, 0));
+        JS_SetPropertyStr(ctx, event, "altitudeAngle",
+                          JS_NewFloat64(ctx, G_PI / 2));
+        JS_SetPropertyStr(ctx, event, "azimuthAngle", JS_NewInt32(ctx, 0));
     }
     if (strcmp(type, "pointerdown") == 0 || strcmp(type, "pointerup") == 0) {
         ns_js_popover_light_dismiss(js, target, type[7] == 'u');
