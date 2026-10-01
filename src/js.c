@@ -1242,6 +1242,17 @@ ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
     js->ctx = scope->ctx;
 }
 
+static JSContext *
+ns_function_realm(JSContext *ctx, JSValueConst fn)
+{
+    JSContext *realm = JS_IsFunction(ctx, fn) ? JS_GetFunctionRealm(ctx, fn) : ctx;
+    if (!realm) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        realm = ctx;
+    }
+    return realm;
+}
+
 static void
 ns_drain_microtasks(ns_js *js)
 {
@@ -12151,7 +12162,7 @@ ns_freeze_array(JSContext *ctx, JSValueConst array)
 }
 
 static JSValue
-ns_port_listener_fn(JSContext *ctx, JSValueConst cb)
+ns_event_listener_fn(JSContext *ctx, JSValueConst cb)
 {
     if (JS_IsFunction(ctx, cb)) return JS_DupValue(ctx, cb);
     if (JS_IsObject(cb)) return JS_GetPropertyStr(ctx, cb, "handleEvent");
@@ -12159,22 +12170,25 @@ ns_port_listener_fn(JSContext *ctx, JSValueConst cb)
 }
 
 static JSContext *
-ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
+ns_target_handler_realm(JSContext *ctx, JSValueConst obj, const char *type,
+                        const char *listener_key)
 {
-    JSValue handler = JS_GetPropertyStr(ctx, port, "onmessage");
-    if (!JS_IsFunction(ctx, handler)) {
-        JS_FreeValue(ctx, handler);
-        handler = JS_UNDEFINED;
-        JSValue ls = JS_GetPropertyStr(ctx, port, "_listeners");
+    char on_name[32];
+    g_snprintf(on_name, sizeof on_name, "on%s", type);
+    JSValue fn = JS_GetPropertyStr(ctx, obj, on_name);
+    if (!JS_IsFunction(ctx, fn)) {
+        JS_FreeValue(ctx, fn);
+        fn = JS_UNDEFINED;
+        JSValue ls = JS_GetPropertyStr(ctx, obj, "_listeners");
         uint32_t len = JS_IsArray(ls) ? ns_js_array_length(ctx, ls) : 0;
-        for (uint32_t i = 0; i < len && !JS_IsFunction(ctx, handler); i++) {
+        for (uint32_t i = 0; i < len && !JS_IsFunction(ctx, fn); i++) {
             JSValue entry = JS_GetPropertyUint32(ctx, ls, i);
             JSValue type_v = JS_GetPropertyStr(ctx, entry, "type");
             const char *ts = JS_ToCString(ctx, type_v);
-            if (ts && strcmp(ts, "message") == 0) {
-                JSValue cb = JS_GetPropertyStr(ctx, entry, "cb");
-                JS_FreeValue(ctx, handler);
-                handler = ns_port_listener_fn(ctx, cb);
+            if (ts && strcmp(ts, type) == 0) {
+                JSValue cb = JS_GetPropertyStr(ctx, entry, listener_key);
+                JS_FreeValue(ctx, fn);
+                fn = ns_event_listener_fn(ctx, cb);
                 JS_FreeValue(ctx, cb);
             }
             if (ts) JS_FreeCString(ctx, ts);
@@ -12183,14 +12197,19 @@ ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
         }
         JS_FreeValue(ctx, ls);
     }
-    JSContext *realm = JS_IsFunction(ctx, handler)
-        ? JS_GetFunctionRealm(ctx, handler) : ctx;
-    JS_FreeValue(ctx, handler);
+    JSContext *realm = JS_IsFunction(ctx, fn) ? JS_GetFunctionRealm(ctx, fn) : ctx;
+    JS_FreeValue(ctx, fn);
     if (!realm) {
         JS_FreeValue(ctx, JS_GetException(ctx));
         realm = ctx;
     }
     return realm;
+}
+
+static JSContext *
+ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
+{
+    return ns_target_handler_realm(ctx, port, "message", "cb");
 }
 
 static JSValue
@@ -12291,7 +12310,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
                     any_dead = TRUE;
                 }
                 JSValue cb = JS_GetPropertyStr(ctx, entry, "cb");
-                JSValue fn = skip ? JS_UNDEFINED : ns_port_listener_fn(ctx, cb);
+                JSValue fn = skip ? JS_UNDEFINED : ns_event_listener_fn(ctx, cb);
                 if (JS_IsFunction(ctx, fn)) {
                     JSValueConst args[1] = { ev };
                     JSValue r = JS_Call(realm, fn,
@@ -18074,6 +18093,9 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                               const char *type, JSValueConst ev)
 {
     ns_js *js_ce = js_from_ctx(ctx);
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js_ce, ns_target_handler_realm(ctx, obj, type, "fn"),
+                            &scope);
     char on_name[32];
     g_snprintf(on_name, sizeof on_name, "on%s", type);
     JSValue prop = JS_GetPropertyStr(ctx, obj, on_name);
@@ -18093,6 +18115,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
         }
         if (JS_IsException(r)) ns_target_report_exception(js_ce, ctx, type);
         JS_FreeValue(ctx, r);
+        if (js_ce && !JS_IsRunningScript(js_ce->rt)) ns_drain_microtasks(js_ce);
     }
     JS_FreeValue(ctx, prop);
     JSValue listeners = JS_GetPropertyStr(ctx, obj, "_listeners");
@@ -18150,6 +18173,8 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
                             if (JS_IsException(r))
                                 ns_target_report_exception(js_ce, ctx, type);
                             JS_FreeValue(ctx, r);
+                            if (js_ce && !JS_IsRunningScript(js_ce->rt))
+                                ns_drain_microtasks(js_ce);
                         }
                         JS_FreeValue(ctx, fn);
                     }
@@ -18164,6 +18189,7 @@ ns_target_dispatch_with_event(JSContext *ctx, JSValueConst obj,
         if (any_dead) ns_listeners_compact_dead(ctx, obj);
     }
     JS_FreeValue(ctx, listeners);
+    ns_js_realm_scope_leave(js_ce, &scope);
 }
 
 static JSValue
@@ -21379,6 +21405,12 @@ static void
 ns_js_ws_dispatch(JSContext *ctx, JSValueConst this_v,
                   const char *on_name, JSValue event)
 {
+    ns_js *js = js_from_ctx(ctx);
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, ns_target_handler_realm(ctx, this_v,
+                                on_name && g_str_has_prefix(on_name, "on")
+                                    ? on_name + 2 : on_name, "fn"),
+                            &scope);
     JSValue cb = JS_GetPropertyStr(ctx, this_v, on_name);
     if (JS_IsFunction(ctx, cb)) {
         JSValueConst args[1] = { event };
@@ -21422,6 +21454,7 @@ ns_js_ws_dispatch(JSContext *ctx, JSValueConst this_v,
         JS_FreeValue(ctx, listeners);
     }
     JS_FreeValue(ctx, event);
+    ns_js_realm_scope_leave(js, &scope);
 }
 
 static JSValue
@@ -25503,7 +25536,10 @@ ns_io_call_cb(JSContext *ctx, ns_io_observer *o, JSValue entries)
     JSValue cb = JS_DupValue(ctx, o->cb);
     JSValue self = JS_DupValue(ctx, o->wrapper);
     JSValueConst args[2] = { entries, self };
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(jsx, ns_function_realm(ctx, cb), &scope);
     JSValue ret = JS_Call(ctx, cb, self, 2, args);
+    ns_js_realm_scope_leave(jsx, &scope);
     JS_FreeValue(ctx, cb);
     JS_FreeValue(ctx, self);
     if (jsx) jsx->eval_deadline_us = io_saved;
@@ -25969,8 +26005,12 @@ ns_resize_observers_tick(ns_js *js)
         }
         if (n_entries > 0) {
             JSValueConst call_args[2] = { entries, observer };
+            ns_realm_scope scope;
+            ns_js_realm_scope_enter(js, ns_function_realm(ctx, cb), &scope);
             JSValue ret = JS_Call(ctx, cb, observer, 2, call_args);
-            if (JS_IsException(ret)) JS_FreeValue(ctx, JS_GetException(ctx));
+            if (JS_IsException(ret))
+                ns_target_report_exception(js, ctx, "ResizeObserver");
+            ns_js_realm_scope_leave(js, &scope);
             JS_FreeValue(ctx, ret);
         }
         if (!JS_IsUndefined(entries)) JS_FreeValue(ctx, entries);
@@ -28097,7 +28137,12 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     ns_node *saved_frame = js->raf_frame_ctx;
     char *saved_url = js->current_url;
     JSContext *target_ctx = ns_js_node_realm_context(js, target);
-    js->ctx = target_ctx ? target_ctx : js->main_realm_ctx;
+    const ns_node *target_root = target;
+    while (target_root && target_root->parent) target_root = target_root->parent;
+    gboolean detached = !target_root || target_root->kind != NS_NODE_DOCUMENT ||
+                        (target_root->flags & NS_NODE_FRAGMENT);
+    js->ctx = target_ctx ? target_ctx
+            : detached ? saved_ctx : js->main_realm_ctx;
     const ns_node *target_doc = target;
     while (target_doc && target_doc->kind != NS_NODE_DOCUMENT)
         target_doc = target_doc->parent;
@@ -41709,6 +41754,7 @@ ns_js_request_repaint(ns_js *js)
 
 typedef struct ns_js_image_load {
     ns_js     *js;
+    JSContext *realm;
     ns_node   *el;
     ns_image  *img;
     char      *requested_url;
@@ -41868,7 +41914,10 @@ ns_js_image_ready_idle(gpointer data)
             ns_perf_add_resource(js, r->requested_url, "img", start_ms,
                                  end_ms - start_ms, 0);
         }
+        ns_realm_scope scope;
+        ns_js_realm_scope_enter(js, r->realm, &scope);
         ns_js_fire_img_load_once(js, r->el, img->failed);
+        ns_js_realm_scope_leave(js, &scope);
         if (img->loaded) js->mutated = TRUE;
     }
     if (js->repaint_cb) js->repaint_cb(js->repaint_user_data);
@@ -41907,6 +41956,9 @@ ns_js_start_image_load(ns_js *js, ns_node *el, const char *src)
         return;
     }
     ns_js_image_load *r = g_new0(ns_js_image_load, 1);
+    r->realm = js->raf_frame_ctx && js->frame_contexts
+        ? g_hash_table_lookup(js->frame_contexts, js->raf_frame_ctx) : NULL;
+    if (!r->realm) r->realm = js->ctx;
     r->js = js;
     r->el = el;
     r->requested_url = abs_url;
