@@ -16,6 +16,24 @@ Changelog:
   as stock QuickJS does; `docs/quickjs.md` lists the differences. A new CI
   workflow builds that configuration with `--werror` and runs the
   headless smoke.
+* A module script that imports other modules runs again after the page
+  has created an event, posted a message, opened IndexedDB or fetched
+  something. Native code that built those objects assigned `isTrusted`
+  over the read-only accessor on `Event.prototype`, and a fetched
+  response's `body` over the read-only `Response.prototype.body`, ignoring
+  the failure; quickjs-ng kept the error pending and reported it from the
+  next module evaluation as `TypeError: no setter for property`, so the
+  whole module was lost. Each page load also left two such errors behind
+  from start-up: `Event.prototype` was being made its own prototype, and
+  `new URL()` built its `searchParams` before `URLSearchParams` existed.
+  Trusted events keep `isTrusted` true through the accessor.
+* `new Response(body)` and `new Request(url, { body })` keep a string body
+  again. The constructors assigned it over the read-only
+  `Response.prototype.body` accessor, so the text never reached the body,
+  and `text()`, `json()` and `clone()` returned an empty body,
+  `new Response(null).body` was a stream instead of `null`, and reading
+  the stream failed. The raw body is now defined on the object and
+  replaced by the buffered body once it is read, as the GPL edition does.
 * On the original QuickJS, `Array.prototype.sort` calls the comparator for
   identical values, as the fork and every other engine do, through one
   patch applied to the fetched source
