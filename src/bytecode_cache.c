@@ -12,7 +12,13 @@
 
 #define NS_BYTECODE_CACHE_MEM_CAP_BYTES   (16u * 1024u * 1024u)
 #define NS_BYTECODE_CACHE_VALUE_CAP_BYTES (4u  * 1024u * 1024u)
-#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026052201u
+#define NS_BYTECODE_CACHE_FORMAT_VERSION  2026093001u
+
+#ifdef NS_QUICKJS_ORIGINAL
+#define NS_BYTECODE_CACHE_DIR "jsbc" G_DIR_SEPARATOR_S "quickjs-" NS_QUICKJS_ORIGINAL_VERSION
+#else
+#define NS_BYTECODE_CACHE_DIR "jsbc"
+#endif
 
 typedef struct ns_bytecode_cache_entry {
     guint8 *bytes;
@@ -45,7 +51,8 @@ ns_bytecode_cache_init(void)
         const ns_config *c = ns_config_get();
         if (!c || c->cache_enabled) {
             const char *base = g_get_user_cache_dir();
-            g_dir = g_build_filename(base, NS_APP_DIR_NAME, "jsbc", NULL);
+            g_dir = g_build_filename(base, NS_APP_DIR_NAME,
+                                     NS_BYTECODE_CACHE_DIR, NULL);
             g_mkdir_with_parents(g_dir, 0700);
         }
     }

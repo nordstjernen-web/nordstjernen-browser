@@ -10,7 +10,7 @@
 #include <glib.h>
 #include <cairo.h>
 #include "ns_pango.h"
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 #include "js.h"
 #include "dom.h"
@@ -125,6 +125,7 @@ struct ns_js {
     char         *current_url;
     char         *document_origin;
     ns_node       *current_doc;
+    gpointer       realm_scope_base;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
@@ -199,6 +200,12 @@ struct ns_js {
     guint64       opaque_counter;
     char         *referrer;
     int           ready_state;
+    GHashTable   *doc_ready_states;
+    GHashTable   *initial_blank_realms;
+    GHashTable   *window_forwards;
+    GHashTable   *window_outwards;
+    GQueue       *message_tasks;
+    guint         message_task_source;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
     ns_node      *lifecycle_doc;

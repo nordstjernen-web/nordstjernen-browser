@@ -8,7 +8,7 @@
 
 #include <glib.h>
 #include <cairo.h>
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 #include "dom.h"
 

@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
 }
 
 // Release signing is read from android/keystore.properties when present, so an
@@ -23,7 +22,8 @@ def syncLicenseAssets = tasks.register('syncLicenseAssets', Sync) {
 
 android {
     namespace 'org.nordstjernen.WebBrowser'
-    compileSdk 36
+    compileSdk 37
+    buildToolsVersion '37.0.0'
     ndkVersion '30.0.16248370'
 
     defaultConfig {
@@ -51,7 +51,7 @@ android {
     externalNativeBuild {
         cmake {
             path 'src/main/cpp/CMakeLists.txt'
-            version '3.22.1'
+            version '4.1.2'
         }
     }
 
@@ -66,13 +66,15 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = '17'
     }
 
     buildTypes {
@@ -103,8 +105,8 @@ tasks.configureEach { task ->
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'androidx.core:core-ktx:1.13.1'
-    implementation 'androidx.activity:activity-ktx:1.9.3'
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.appcompat:appcompat:1.8.0'
+    implementation 'androidx.core:core-ktx:1.19.1'
+    implementation 'androidx.activity:activity-ktx:1.13.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.2.0'
 }

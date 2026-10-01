@@ -26,9 +26,10 @@ the free binary only. Treat Play as reach and reputation.
   On Android it drops GTK 4 (see `android/README.md`),
   so its only native deps are the GLib/cairo/pango stack plus
   libcurl/sqlite3/uchardet/libpsl — all plain C, no Rust.
-- Targets: `compileSdk`/`targetSdk` **36**, `minSdk` **34** (Android 14); ABIs
-  **arm64-v8a** + **x86_64**.
-  AGP 8.11.1, Gradle 8.14.5, NDK `30.0.16248370`, JDK 17+.
+- Targets: `compileSdk` **37** (Android 17), `targetSdk` **36**, `minSdk`
+  **34** (Android 14); ABIs **arm64-v8a** + **x86_64**.
+  AGP 9.4.0 with its built-in Kotlin, Gradle 9.8.0, build-tools 37.0.0,
+  NDK `30.0.16248370`, CMake 4.1.2, JDK 17+.
 
 ## Play Store release checklist
 
@@ -188,7 +189,7 @@ yearly.
   memory pages ([docs](https://developer.android.com/guide/practices/page-sizes)).
   Pure-JVM apps pass automatically; ours ships native `.so`s, so every ELF
   segment must be 16 KB-aligned. Wired in three places: AGP ≥ 8.5.1 zip-aligns
-  packaging (covered by 8.11.1), the CMake bridge build passes
+  packaging (covered by 9.4.0), the CMake bridge build passes
   `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` (belt-and-braces now that
   `ndkVersion` is r30 — it was required back on r27, and `build-deps.sh` may
   still be pointed at an older NDK), and `build-deps.sh` puts
