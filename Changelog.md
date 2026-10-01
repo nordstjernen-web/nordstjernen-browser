@@ -3,6 +3,16 @@ Changelog:
 
 1.0.27:
 ======
+* `window.postMessage(message, [port])` with an array as the second
+  argument follows the `(message, options)` overload, as WebIDL overload
+  resolution requires: the array is read as an options dictionary, so
+  nothing is transferred. It was taken as a transfer list, so a library
+  that posts `postMessage(token, [channel.port2])` from code shared with
+  workers handed its own port to every `message` listener on the page,
+  and a listener waiting for a port from another frame accepted that one
+  instead. Any second argument that is neither an object nor
+  `undefined`/`null` is the target origin, and `postMessage()` with no
+  arguments throws `TypeError`.
 * `window[i]` and `frames[i]` return the WindowProxy of the i-th child
   frame, and `window[name]` returns the frame whose `name` attribute
   matches, as the HTML named-access rules specify. Indexed access always

@@ -12601,21 +12601,26 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
 {
     if (argc < 1) {
         JS_FreeValue(ctx, target);
-        return JS_UNDEFINED;
+        return JS_ThrowTypeError(ctx,
+            "Failed to execute 'postMessage' on 'Window': 1 argument required, "
+            "but only 0 present.");
     }
     JSContext *caller = JS_GetCallerRealm(ctx);
 
     g_autofree char *want_origin = NULL;
     JSValue transfer = JS_UNDEFINED;
-    if (argc >= 2 && JS_IsString(argv[1])) {
+    gboolean options_form = argc < 3 &&
+        (argc < 2 || JS_IsObject(argv[1]) || JS_IsUndefined(argv[1]) ||
+         JS_IsNull(argv[1]));
+    if (!options_form) {
         const char *s = JS_ToCString(ctx, argv[1]);
-        if (s) {
-            want_origin = g_strdup(s);
-            JS_FreeCString(ctx, s);
+        if (!s) {
+            JS_FreeValue(ctx, target);
+            return JS_EXCEPTION;
         }
+        want_origin = g_strdup(s);
+        JS_FreeCString(ctx, s);
         if (argc >= 3) transfer = JS_DupValue(ctx, argv[2]);
-    } else if (argc >= 2 && JS_IsArray(argv[1])) {
-        transfer = JS_DupValue(ctx, argv[1]);
     } else if (argc >= 2 && JS_IsObject(argv[1])) {
         JSValue tov = JS_GetPropertyStr(ctx, argv[1], "targetOrigin");
         if (JS_IsString(tov)) {
