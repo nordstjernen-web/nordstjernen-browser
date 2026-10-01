@@ -3,6 +3,9 @@ Changelog:
 
 1.0.27:
 ======
+* A frame starts with its own `onload`, `onclick` and other window event
+  handlers set to `null`. It used to start with copies of its parent's,
+  so the page's `window.onload` could run again for the frame.
 * Nested frames know their place: a frame inside a frame has the middle
   frame as its `parent`, so `parent.frames`, `parent.document` and
   `parent.name` refer to it, while `top` stays the page. `parent.location`
