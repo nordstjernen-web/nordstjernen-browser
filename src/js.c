@@ -12819,18 +12819,25 @@ static void
 ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
 {
     if (!realm) return;
+    JSValue ports = JS_GetPropertyStr(ctx, ev, "ports");
     JSValue data = JS_GetPropertyStr(ctx, ev, "data");
     if (JS_IsObject(data)) {
-        JSValue ports = JS_GetPropertyStr(ctx, ev, "ports");
         JSValue adopted = ns_structured_clone_value(realm, data,
             JS_IsArray(ports) ? (JSValueConst)ports : JS_UNDEFINED);
         if (JS_IsException(adopted))
             JS_FreeValue(realm, JS_GetException(realm));
         else
             JS_SetPropertyStr(ctx, ev, "data", adopted);
-        JS_FreeValue(ctx, ports);
     }
     JS_FreeValue(ctx, data);
+    JSValue realm_ports = JS_NewArray(realm);
+    uint32_t n = JS_IsArray(ports) ? ns_js_array_length(ctx, ports) : 0;
+    for (uint32_t i = 0; i < n; i++)
+        JS_SetPropertyUint32(realm, realm_ports, i,
+                             JS_GetPropertyUint32(ctx, ports, i));
+    JS_SetPropertyStr(ctx, ev, "ports", ns_freeze_array(realm, realm_ports));
+    JS_FreeValue(realm, realm_ports);
+    JS_FreeValue(ctx, ports);
 }
 
 static ns_node *
@@ -12853,6 +12860,8 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValue forwarded = ns_window_forward_of(js, target);
     JSValue actual_target = JS_IsObject(forwarded)
         ? JS_DupValue(ctx, forwarded) : JS_DupValue(ctx, target);
+    JS_SetPropertyStr(ctx, ev, "target", JS_DupValue(ctx, actual_target));
+    JS_SetPropertyStr(ctx, ev, "currentTarget", JS_DupValue(ctx, actual_target));
     if (JS_IsObject(forwarded) && js && js->ctx) {
         JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
         JSValue source = JS_GetPropertyStr(ctx, ev, "source");
