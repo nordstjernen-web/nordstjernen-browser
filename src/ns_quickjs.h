@@ -39,7 +39,19 @@ JSValue ns_quickjs_new_array_buffer(JSContext *ctx, uint8_t *buf, size_t len,
 JSValue ns_quickjs_new_typed_array(JSContext *ctx, int argc, JSValueConst *argv,
                                    JSTypedArrayEnum type);
 
+#define JS_EVAL_FLAG_HIDE_SOURCE 0
+
+enum {
+    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
+    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
+};
+
 bool JS_IsArrayBuffer(JSValueConst val);
+bool JS_IsDate(JSValueConst val);
+bool JS_IsRegExp(JSValueConst val);
+bool JS_IsMap(JSValueConst val);
+bool JS_IsSet(JSValueConst val);
+int JS_GetBoxedPrimitiveKind(JSValueConst val);
 bool JS_IsDataView(JSValueConst val);
 int JS_GetTypedArrayType(JSValueConst val);
 bool JS_AtomIsArrayIndex(JSContext *ctx, uint32_t *pval, JSAtom atom);

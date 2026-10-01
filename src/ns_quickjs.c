@@ -15,6 +15,11 @@ typedef struct ns_quickjs_class_ids {
     JSClassID array_buffer;
     JSClassID data_view;
     JSClassID typed_array[JS_TYPED_ARRAY_FLOAT64 + 1];
+    JSClassID date;
+    JSClassID regexp;
+    JSClassID map;
+    JSClassID set;
+    JSClassID boxed[JS_BOXED_SYMBOL + 1];
 } ns_quickjs_class_ids;
 
 typedef struct ns_quickjs_array_buffer_owner {
@@ -32,6 +37,49 @@ ns_quickjs_class_of(JSContext *ctx, JSValue val)
         JS_FreeValue(ctx, JS_GetException(ctx));
     JS_FreeValue(ctx, val);
     return id;
+}
+
+static JSValue
+ns_quickjs_construct(JSContext *ctx, const char *name, int argc,
+                     JSValueConst *argv)
+{
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue ctor = JS_GetPropertyStr(ctx, global, name);
+    JSValue obj = JS_CallConstructor(ctx, ctor, argc, argv);
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, global);
+    return obj;
+}
+
+static JSClassID
+ns_quickjs_boxed_class_of(JSContext *ctx, JSValue primitive)
+{
+    JSClassID id = ns_quickjs_class_of(ctx, JS_ToObject(ctx, primitive));
+    JS_FreeValue(ctx, primitive);
+    return id;
+}
+
+static void
+ns_quickjs_learn_value_class_ids(JSContext *ctx)
+{
+    ns_quickjs_class_ids *ids = &ns_quickjs_classes;
+    ids->date = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Date", 0, NULL));
+    JSValue pattern = JS_NewString(ctx, "a");
+    ids->regexp = ns_quickjs_class_of(ctx,
+        ns_quickjs_construct(ctx, "RegExp", 1, &pattern));
+    JS_FreeValue(ctx, pattern);
+    ids->map = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Map", 0, NULL));
+    ids->set = ns_quickjs_class_of(ctx, ns_quickjs_construct(ctx, "Set", 0, NULL));
+    ids->boxed[JS_BOXED_NUMBER] = ns_quickjs_boxed_class_of(ctx, JS_NewInt32(ctx, 0));
+    ids->boxed[JS_BOXED_STRING] = ns_quickjs_boxed_class_of(ctx, JS_NewString(ctx, ""));
+    ids->boxed[JS_BOXED_BOOLEAN] = ns_quickjs_boxed_class_of(ctx, JS_FALSE);
+    ids->boxed[JS_BOXED_BIGINT] = ns_quickjs_boxed_class_of(ctx, JS_NewBigInt64(ctx, 0));
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue symbol_fn = JS_GetPropertyStr(ctx, global, "Symbol");
+    ids->boxed[JS_BOXED_SYMBOL] = ns_quickjs_boxed_class_of(ctx,
+        JS_Call(ctx, symbol_fn, JS_UNDEFINED, 0, NULL));
+    JS_FreeValue(ctx, symbol_fn);
+    JS_FreeValue(ctx, global);
 }
 
 static void
@@ -55,6 +103,7 @@ ns_quickjs_learn_class_ids(JSContext *ctx)
     for (int type = JS_TYPED_ARRAY_UINT8C; type <= JS_TYPED_ARRAY_FLOAT64; type++)
         ids->typed_array[type] = ns_quickjs_class_of(ctx,
             JS_NewTypedArray(ctx, 1, &zero, (JSTypedArrayEnum)type));
+    ns_quickjs_learn_value_class_ids(ctx);
 }
 
 JSContext *
@@ -97,6 +146,39 @@ bool
 JS_IsDataView(JSValueConst val)
 {
     return ns_quickjs_has_class(val, ns_quickjs_classes.data_view);
+}
+
+bool
+JS_IsDate(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.date);
+}
+
+bool
+JS_IsRegExp(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.regexp);
+}
+
+bool
+JS_IsMap(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.map);
+}
+
+bool
+JS_IsSet(JSValueConst val)
+{
+    return ns_quickjs_has_class(val, ns_quickjs_classes.set);
+}
+
+int
+JS_GetBoxedPrimitiveKind(JSValueConst val)
+{
+    for (int kind = JS_BOXED_NUMBER; kind <= JS_BOXED_SYMBOL; kind++)
+        if (ns_quickjs_has_class(val, ns_quickjs_classes.boxed[kind]))
+            return kind;
+    return JS_BOXED_NONE;
 }
 
 int
