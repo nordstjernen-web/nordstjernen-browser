@@ -1193,6 +1193,55 @@ ns_js_queue_message_task(JSContext *ctx, JSJobFunc *func, int argc,
             ns_js_attach_timeout(js, 0, ns_js_run_message_task, js);
 }
 
+typedef struct {
+    JSContext *ctx;
+    ns_node   *doc;
+    ns_node   *frame;
+    char      *url;
+    gboolean   active;
+} ns_realm_scope;
+
+static void
+ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
+{
+    scope->active = FALSE;
+    if (!js || !realm || realm == js->ctx || !js->frame_contexts ||
+        g_hash_table_size(js->frame_contexts) == 0)
+        return;
+    ns_node *frame = NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        if (value == realm) {
+            frame = key;
+            break;
+        }
+    if (!frame) return;
+    scope->ctx = js->ctx;
+    scope->doc = js->current_doc;
+    scope->frame = js->raf_frame_ctx;
+    scope->url = js->current_url;
+    scope->active = TRUE;
+    js->ctx = realm;
+    ns_node *frame_doc = ns_iframe_document_node(frame);
+    if (frame_doc) js->current_doc = frame_doc;
+    js->raf_frame_ctx = frame;
+    const char *frame_url = ns_element_get_attr(frame, "data-nd-frame-url");
+    js->current_url = g_strdup(frame_url ? frame_url : "");
+}
+
+static void
+ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
+{
+    if (!scope->active) return;
+    g_free(js->current_url);
+    js->current_url = scope->url;
+    js->raf_frame_ctx = scope->frame;
+    js->current_doc = scope->doc;
+    js->ctx = scope->ctx;
+}
+
 static void
 ns_drain_microtasks(ns_js *js)
 {
@@ -1206,7 +1255,11 @@ ns_drain_microtasks(ns_js *js)
         if (js->eval_deadline_us != 0 &&
             g_get_monotonic_time() > js->eval_deadline_us)
             break;
-        if ((r = JS_ExecutePendingJob(js->rt, &ctx_out)) <= 0)
+        ns_realm_scope scope;
+        ns_js_realm_scope_enter(js, JS_GetPendingJobRealm(js->rt), &scope);
+        r = JS_ExecutePendingJob(js->rt, &ctx_out);
+        ns_js_realm_scope_leave(js, &scope);
+        if (r <= 0)
             break;
     }
     js->callback_depth--;
@@ -12095,53 +12148,6 @@ ns_freeze_array(JSContext *ctx, JSValueConst array)
     JS_FreeValue(ctx, freeze);
     JS_FreeValue(ctx, object_ctor);
     return frozen;
-}
-
-typedef struct {
-    JSContext *ctx;
-    ns_node   *doc;
-    ns_node   *frame;
-    char      *url;
-    gboolean   active;
-} ns_realm_scope;
-
-static void
-ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
-{
-    scope->active = FALSE;
-    if (!js || !realm || !js->frame_contexts) return;
-    ns_node *frame = NULL;
-    GHashTableIter it;
-    gpointer key, value;
-    g_hash_table_iter_init(&it, js->frame_contexts);
-    while (g_hash_table_iter_next(&it, &key, &value))
-        if (value == realm) {
-            frame = key;
-            break;
-        }
-    if (!frame) return;
-    scope->ctx = js->ctx;
-    scope->doc = js->current_doc;
-    scope->frame = js->raf_frame_ctx;
-    scope->url = js->current_url;
-    scope->active = TRUE;
-    js->ctx = realm;
-    ns_node *frame_doc = ns_iframe_document_node(frame);
-    if (frame_doc) js->current_doc = frame_doc;
-    js->raf_frame_ctx = frame;
-    const char *frame_url = ns_element_get_attr(frame, "data-nd-frame-url");
-    js->current_url = g_strdup(frame_url ? frame_url : "");
-}
-
-static void
-ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
-{
-    if (!scope->active) return;
-    g_free(js->current_url);
-    js->current_url = scope->url;
-    js->raf_frame_ctx = scope->frame;
-    js->current_doc = scope->doc;
-    js->ctx = scope->ctx;
 }
 
 static JSValue
