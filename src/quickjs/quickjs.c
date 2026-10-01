@@ -7490,6 +7490,11 @@ void JS_RunGC(JSRuntime *rt)
 /* Return false if not an object or if the object has already been
    freed (zombie objects are visible in finalizers when freeing
    cycles). */
+bool JS_IsRunningScript(JSRuntime *rt)
+{
+    return rt->current_stack_frame != NULL;
+}
+
 bool JS_IsLiveObject(JSRuntime *rt, JSValueConst obj)
 {
     JSObject *p;

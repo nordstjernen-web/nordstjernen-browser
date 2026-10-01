@@ -12256,7 +12256,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         JSValue r = JS_Call(realm, onmessage, port, 1, args);
         if (JS_IsException(r)) ns_target_report_exception(js, realm, "message");
         JS_FreeValue(ctx, r);
-        if (js && js->callback_depth == 0) ns_drain_microtasks(js);
+        if (js && !JS_IsRunningScript(js->rt)) ns_drain_microtasks(js);
     }
     JS_FreeValue(ctx, onmessage);
 
@@ -12294,7 +12294,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
                     if (JS_IsException(r))
                         ns_target_report_exception(js, realm, "message");
                     JS_FreeValue(ctx, r);
-                    if (js && js->callback_depth == 0) ns_drain_microtasks(js);
+                    if (js && !JS_IsRunningScript(js->rt)) ns_drain_microtasks(js);
                 } else if (JS_IsException(fn)) {
                     ns_target_report_exception(js, realm, "message");
                 }
@@ -27770,6 +27770,7 @@ ns_run_listener_array_full(ns_js *js, GPtrArray *to_call,
         }
         JS_FreeValue(js->ctx, ret);
         *fired = TRUE;
+        if (!JS_IsRunningScript(js->rt)) ns_drain_microtasks(js);
         JSValue imm = js->listener_atoms_set
             ? JS_GetProperty(js->ctx, event, js->atom_immediate_stopped)
             : JS_GetPropertyStr(js->ctx, event, "_immediate_stopped");
@@ -27902,6 +27903,7 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
         }
         JS_FreeValue(ctx, ret);
         fired = TRUE;
+        if (!JS_IsRunningScript(js->rt)) ns_drain_microtasks(js);
     }
     JS_FreeValue(ctx, handler);
     JS_FreeValue(ctx, global);
