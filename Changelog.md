@@ -3,6 +3,85 @@ Changelog:
 
 1.0.27:
 ======
+* `postMessage` and `MessagePort` messages are delivered as tasks, after
+  the sender's microtasks, as in other browsers. They ran as microtasks,
+  so a message arrived before promise callbacks queued ahead of it, and a
+  handler that posted back to itself kept `setTimeout` callbacks from
+  ever running.
+* A frame's `WindowProxy` stays the same object across its first
+  navigation. A `contentWindow` read while an iframe still showed its
+  initial `about:blank` now reaches the document that loads into it:
+  same-origin frames reuse the initial window, as the HTML spec
+  requires, and messages posted through the early reference to a
+  cross-origin frame are delivered. The link between a frame's outer
+  window and its realm global moved out of JavaScript-visible properties,
+  which had let a cross-origin frame reach its embedder's window.
+* Structured data sent between windows, frames and `MessageChannel`
+  ports arrives as objects of the receiving realm: `e.data instanceof
+  Uint8Array`, `Map`, `Date`, `Array` and `Object` hold in the receiver,
+  as in other browsers. Messages crossing a frame boundary carried the
+  sender's objects, and on ports `Map`, `Set`, `Date`, `RegExp`,
+  `DataView` and boxed primitives degraded to plain objects.
+* Frames have their own document lifecycle and geometry. Each frame's
+  `document.readyState` runs `loading` -> `interactive` -> `complete`
+  with `readystatechange` at each step, instead of reporting the top
+  page's state (usually already `complete`). `innerWidth`/`innerHeight`
+  in a frame are the frame's size, not the top window's, element rects
+  are measured from the frame's content box rather than its border box,
+  and `document.elementFromPoint` in a frame hit-tests that frame.
+* A message from a cross-origin frame has the frame's WindowProxy as
+  `event.source`, the same object as `iframe.contentWindow` and
+  `frames[i]`, so pages can tell which frame spoke. It was a different
+  wrapper, so `e.source === iframe.contentWindow` was false.
+* A `Response` or `Request` built from a string keeps that string as its
+  body. `new Response('{"a":1}').json()` rejected with a `SyntaxError`
+  because `text()` saw an empty body, and `fetch(new Request(url,
+  {method: 'POST', body: 'x'}))` sent nothing.
+* Rounded solid borders whose sides differ in color, or have some sides
+  transparent, follow the corner radius. Each side was stroked as a
+  straight line, so a `border-radius` ring with two transparent sides,
+  such as the reCAPTCHA checkbox spinner, drew as a right angle.
+* Events carry the interface their type implies: messages from windows,
+  `MessageChannel` ports and workers are `MessageEvent`s, and `error`,
+  `hashchange`, `popstate`, `storage`, `pageshow`/`pagehide` and promise
+  rejection events get their own interfaces. Port messages were plain
+  objects. `isTrusted` lives on each event, not on `Event.prototype`, so
+  objects deriving from `Event.prototype` can define their own, as in
+  other browsers. Assigning to a getter-only property now names it in
+  the `TypeError`.
+* Page scripts enumerating the global object (`Object.keys(window)`,
+  `Object.getOwnPropertyNames`, `for...in`) no longer see the engine's
+  own `__nd`/`__ns`/`__js` helper properties, which no other browser
+  exposes. The engine's own code still reaches them by name.
+* Objects the engine hands to pages inherit from their WebIDL interface
+  and report its name: `new FileReader() instanceof FileReader`,
+  `Object.prototype.toString.call(localStorage)` is `[object Storage]`,
+  and canvas contexts, `TextMetrics`, `ImageData`, `MediaQueryList`,
+  `FontFaceSet`, `location`, `screen` and the `navigator` sub-objects
+  follow suit. `Location`, `Screen`, `BarProp`, `CustomElementRegistry`
+  and the other interfaces these belong to now exist as globals.
+* Functions the engine implements in JavaScript print as native code,
+  `function animate() { [native code] }`, like every other built-in.
+  434 of them printed their JavaScript source and many carried internal
+  names (`elementAnimate`, `value`), which no browser does. Page scripts,
+  inline handlers and `new Function` keep their source.
+* Inside a frame, `window`, `location` and `history` report themselves
+  as `[object Window]`, `[object Location]` and `[object History]`, and
+  `history instanceof History` holds, as on the top-level page. The
+  frame's global still carried QuickJS's `global` tag.
+* A worker's `navigator` matches the page's: `appVersion` follows the
+  user agent instead of a fixed Linux string, and `platform`, `product`
+  and `deviceMemory` are present. `performance.getEntries*` return empty
+  lists in workers instead of throwing. A frame's document has `domain`,
+  `timeline`, `pictureInPictureEnabled`, `adoptedStyleSheets`,
+  `xmlEncoding` and `xmlStandalone` like the top-level document.
+* Dedicated workers have `Intl` and `crossOriginIsolated`. A worker that
+  read its time zone or formatted a number threw `ReferenceError`, and
+  since worker errors do not reach the page, the page waited forever.
+* Numbers the engine formats keep a `.` decimal point under locales that
+  use a comma, such as Turkish or Norwegian. `--single-process` runs the
+  engine inside the GTK shell, whose startup applies the OS locale, so
+  `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
 * The Android app builds with the current toolchain: Android Gradle
   plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
   (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX

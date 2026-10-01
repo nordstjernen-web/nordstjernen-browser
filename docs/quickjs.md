@@ -104,6 +104,10 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
   `RegExp.$1`–`$9`, `Function.prototype.caller`, `Error.captureStackTrace`,
   `Array.fromAsync` and `using` declarations are missing, and `error.stack`
   has no leading `Name: message` line.
+- **Engine helper source.** Scripts the engine evaluates for itself are not
+  hidden (`JS_EVAL_FLAG_HIDE_SOURCE` is 0), so `Function.prototype.toString`
+  of an engine-implemented member defined in such a script shows its source
+  instead of `[native code]`.
 - **Speed.** `JS_AtomIsArrayIndex` goes through a string, so indexed access
   on host objects (collections, `frames[i]`) is slower.
 
