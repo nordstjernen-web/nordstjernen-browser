@@ -6200,6 +6200,12 @@ ns_js_has_pending_work(const ns_js *js)
     return js && (!js->timers.empty() || !js->pending_requests.empty());
 }
 
+gboolean
+ns_js_needs_tick(const ns_js *js)
+{
+    return ns_js_has_pending_work(js);
+}
+
 void
 ns_js_dump_stats(ns_js *js, GString *out)
 {
