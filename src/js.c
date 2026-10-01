@@ -8231,8 +8231,6 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
             body_data = (const char *)resp->body->data;
             body_data_len = resp->body->len;
         }
-        JS_SetPropertyStr(st->ctx, r, "body",
-            JS_NewStringLen(st->ctx, body_data, body_data_len));
         JS_SetPropertyStr(st->ctx, r, "_bodyBuffer",
             JS_NewArrayBufferCopy(st->ctx,
                 (const uint8_t *)body_data, body_data_len));
@@ -12038,7 +12036,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_SetPropertyStr(ctx, ev, "target",           JS_DupValue(ctx, port));
     JS_SetPropertyStr(ctx, ev, "currentTarget",    JS_DupValue(ctx, port));
     JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
-    JS_SetPropertyStr(ctx, ev, "isTrusted",        JS_TRUE);
+    JS_DefinePropertyValueStr(ctx, ev, "isTrusted", JS_TRUE, JS_PROP_C_W_E);
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "composed",         JS_FALSE);
@@ -12677,7 +12675,6 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                       JS_NewString(ctx, src_origin ? src_origin : ""));
     JS_SetPropertyStr(ctx, ev, "lastEventId", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, ev, "source", source);
-    JS_SetPropertyStr(ctx, ev, "isTrusted", JS_TRUE);
     JSValue ports = JS_NewArray(ctx);
     if (JS_IsArray(transfer)) {
         uint32_t len = ns_js_array_length(ctx, transfer);
@@ -17233,6 +17230,10 @@ ns_url_get_searchParams_object(JSContext *ctx, const char *search)
     JSValue arg = JS_NewString(ctx, search ? search : "");
     JSValue obj = ns_url_get_searchParams_value(ctx, arg);
     JS_FreeValue(ctx, arg);
+    if (JS_IsException(obj)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        return JS_NewObject(ctx);
+    }
     return obj;
 }
 
@@ -20246,23 +20247,28 @@ ns_attach_body_consumers(JSContext *ctx, JSValueConst obj)
             "      return a; })();"
             " }"
             " function isStream(v){ return v && typeof v.getReader === 'function'; }"
+            " function dropRaw(r){try{if(Object.prototype.hasOwnProperty.call(r,'body'))delete r.body;}catch(e){}}"
             " function normalize(r){"
             "  if (r._bodyBuffer instanceof ArrayBuffer || r._bodyStream) {"
             "   if (!('_bodyNull' in r))"
             "    try { Object.defineProperty(r,'_bodyNull',{value:false,configurable:true}); } catch(e){}"
+            "   dropRaw(r);"
             "   return;"
             "  }"
-            "  if (isStream(r.body)) {"
-            "   try { Object.defineProperty(r,'_bodyStream',{value:r.body,configurable:true}); } catch(e){ r._bodyStream = r.body; }"
+            "  var raw=r.body;"
+            "  if (isStream(raw)) {"
+            "   try { Object.defineProperty(r,'_bodyStream',{value:raw,configurable:true}); } catch(e){ r._bodyStream = raw; }"
             "   try { Object.defineProperty(r,'_bodyNull',{value:false,configurable:true}); } catch(e){}"
+            "   dropRaw(r);"
             "   return;"
             "  }"
-            "  var isNull = (r.body === null || r.body === undefined);"
-            "  var s = (typeof r.body === 'string') ? r.body : (r.body == null ? '' : String(r.body));"
+            "  var isNull = (raw === null || raw === undefined);"
+            "  var s = (typeof raw === 'string') ? raw : (raw == null ? '' : String(raw));"
             "  var u8 = encodeStr(s);"
             "  var ab = new ArrayBuffer(u8.length); new Uint8Array(ab).set(u8);"
             "  try { Object.defineProperty(r,'_bodyBuffer',{value:ab,configurable:true}); } catch(e){ r._bodyBuffer = ab; }"
             "  try { Object.defineProperty(r,'_bodyNull',{value:isNull,configurable:true}); } catch(e){}"
+            "  dropRaw(r);"
             " }"
             " function bytes(r){"
             "  return (r._bodyBuffer instanceof ArrayBuffer)"
@@ -20369,16 +20375,23 @@ ns_body_extract_buffer(JSContext *ctx, JSValueConst body)
 }
 
 static void
+ns_body_set_raw(JSContext *ctx, JSValueConst obj, JSValue value)
+{
+    JS_DefinePropertyValueStr(ctx, obj, "body", value,
+        JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
+}
+
+static void
 ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
                 gboolean null_when_empty)
 {
     if (JS_IsUndefined(body) || JS_IsNull(body)) {
-        JS_SetPropertyStr(ctx, obj, "body",
-                          null_when_empty ? JS_NULL : JS_NewString(ctx, ""));
+        ns_body_set_raw(ctx, obj,
+                        null_when_empty ? JS_NULL : JS_NewString(ctx, ""));
         return;
     }
     if (JS_IsString(body)) {
-        JS_SetPropertyStr(ctx, obj, "body", JS_DupValue(ctx, body));
+        ns_body_set_raw(ctx, obj, JS_DupValue(ctx, body));
         JS_SetPropertyStr(ctx, obj, "_bodyCT",
                           JS_NewString(ctx, "text/plain;charset=UTF-8"));
         return;
@@ -20395,7 +20408,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
             JS_SetPropertyStr(ctx, obj, "_bodyBuffer",
                 JS_NewArrayBufferCopy(ctx, (const uint8_t *)serialized, blen));
             if (ct) JS_SetPropertyStr(ctx, obj, "_bodyCT", JS_NewString(ctx, ct));
-            JS_SetPropertyStr(ctx, obj, "body", JS_NewString(ctx, ""));
+            ns_body_set_raw(ctx, obj, JS_NewString(ctx, ""));
             g_free(serialized);
             g_free(ct);
             return;
@@ -20405,7 +20418,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
         JSValue buf = ns_body_extract_buffer(ctx, body);
         if (!JS_IsUndefined(buf)) {
             JS_SetPropertyStr(ctx, obj, "_bodyBuffer", buf);
-            JS_SetPropertyStr(ctx, obj, "body",
+            ns_body_set_raw(ctx, obj,
                 null_when_empty ? JS_DupValue(ctx, body) : JS_NewString(ctx, ""));
             return;
         }
@@ -20426,7 +20439,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
                     JS_SetPropertyStr(ctx, obj, "_bodyCT", JS_NewString(ctx, ts));
                 if (ts) JS_FreeCString(ctx, ts);
                 JS_FreeValue(ctx, tv);
-                JS_SetPropertyStr(ctx, obj, "body", JS_NewString(ctx, ""));
+                ns_body_set_raw(ctx, obj, JS_NewString(ctx, ""));
                 return;
             }
         }
@@ -20435,7 +20448,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
         gboolean is_stream = JS_IsFunction(ctx, get_reader);
         JS_FreeValue(ctx, get_reader);
         if (is_stream) {
-            JS_SetPropertyStr(ctx, obj, "body", JS_DupValue(ctx, body));
+            ns_body_set_raw(ctx, obj, JS_DupValue(ctx, body));
             return;
         }
     }
@@ -20444,7 +20457,7 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
         JS_FreeValue(ctx, JS_GetException(ctx));
         s = JS_NewString(ctx, "");
     }
-    JS_SetPropertyStr(ctx, obj, "body", s);
+    ns_body_set_raw(ctx, obj, s);
 }
 
 static void
@@ -22000,7 +22013,6 @@ ns_worker_event(JSContext *ctx, const char *type, JSValueConst data,
     JS_SetPropertyStr(ctx, ev, "bubbles", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "composed", JS_FALSE);
-    JS_SetPropertyStr(ctx, ev, "isTrusted", JS_TRUE);
     ns_bind_fn(ctx, ev, "preventDefault",           ns_event_prevent_default, 0);
     ns_bind_fn(ctx, ev, "stopPropagation",          ns_event_stop_propagation, 0);
     ns_event_define_cancel_bubble(ctx, ev);
@@ -23020,7 +23032,6 @@ ns_sw_make_extendable_event(JSContext *ctx, const char *type)
     JS_SetPropertyStr(ctx, ev, "bubbles",          JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
-    JS_SetPropertyStr(ctx, ev, "isTrusted",        JS_TRUE);
     ns_bind_fn(ctx, ev, "waitUntil",                 ns_event_noop, 1);
     ns_bind_fn(ctx, ev, "preventDefault",            ns_event_prevent_default, 0);
     ns_bind_fn(ctx, ev, "stopPropagation",           ns_event_stop_propagation, 0);
@@ -26005,7 +26016,9 @@ ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev)
         JSValue ev_ctor = JS_GetPropertyStr(ctx, global, "Event");
         if (JS_IsObject(ev_ctor)) {
             JSValue proto = JS_GetPropertyStr(ctx, ev_ctor, "prototype");
-            if (JS_IsObject(proto)) JS_SetPrototype(ctx, ev, proto);
+            if (JS_IsObject(proto) &&
+                JS_VALUE_GET_PTR(proto) != JS_VALUE_GET_PTR(ev))
+                JS_SetPrototype(ctx, ev, proto);
             JS_FreeValue(ctx, proto);
         }
         JS_FreeValue(ctx, ev_ctor);
@@ -26089,7 +26102,6 @@ ns_event_ctor(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *arg
                       JS_NewFloat64(ctx, ns_perf_now_ms(js_from_ctx(ctx))));
     JS_SetPropertyStr(ctx, ev, "target", JS_NULL);
     JS_SetPropertyStr(ctx, ev, "currentTarget", JS_NULL);
-    JS_SetPropertyStr(ctx, ev, "isTrusted", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "defaultPrevented", JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "eventPhase", JS_NewInt32(ctx, 0));
     JS_SetPropertyStr(ctx, ev, "bubbles",    bubbles ? JS_TRUE : JS_FALSE);
@@ -27802,7 +27814,6 @@ ns_js_dispatch_wheel_type(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "composed",   JS_TRUE);
-    JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
     JS_SetPropertyStr(ctx, event, "clientX",    JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
     JS_SetPropertyStr(ctx, event, "screenX",    JS_NewFloat64(ctx, x));
@@ -27863,7 +27874,6 @@ ns_js_dispatch_touch_type(ns_js *js, const ns_node *target, const char *type,
     JS_SetPropertyStr(ctx, event, "bubbles",    JS_TRUE);
     JS_SetPropertyStr(ctx, event, "cancelable", cancelable ? JS_TRUE : JS_FALSE);
     JS_SetPropertyStr(ctx, event, "composed",   JS_TRUE);
-    JS_SetPropertyStr(ctx, event, "isTrusted",  JS_TRUE);
     JS_SetPropertyStr(ctx, event, "clientX",    JS_NewFloat64(ctx, x));
     JS_SetPropertyStr(ctx, event, "clientY",    JS_NewFloat64(ctx, y));
     JS_SetPropertyStr(ctx, event, "touches",        JS_NewArray(ctx));
