@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* The Android app builds with the current toolchain: Android Gradle
+  plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
+  (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX
+  libraries. targetSdk stays 36. Native libraries are still stored
+  compressed and extracted at install, now requested from the build script
+  (packaging.jniLibs.useLegacyPackaging) because AGP 9 rejects
+  android:extractNativeLibs in the manifest.
 * Nordstjernen can run on Fabrice Bellard's original QuickJS as well as the
   in-tree quickjs-ng fork, chosen in meson with `-Dquickjs=quickjs` or
   `-Dquickjs=quickjs-ng` (the default). The original engine is fetched at
