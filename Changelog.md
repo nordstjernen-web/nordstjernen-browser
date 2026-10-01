@@ -21,7 +21,9 @@ Changelog:
   page can no longer see which element of a cross-origin frame is
   focused. `document.hasFocus()` is true only for the focused document
   and the documents containing it, and `focus()` does nothing on an
-  element that cannot take focus or is not in the document.
+  element that cannot take focus or is not in the document. Clicking
+  plain content inside a frame focuses the frame's document, as in other
+  browsers, instead of the iframe element around it.
 * Events the browser fires carry the flags other browsers give them:
   `focus`, `blur`, `readystatechange`, element `scroll` and media events
   no longer bubble, and `DOMContentLoaded`, `input`, `change`, `scroll`
