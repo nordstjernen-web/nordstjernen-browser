@@ -59107,6 +59107,20 @@ bool JS_IsDate(JSValueConst v)
     return JS_VALUE_GET_OBJ(v)->class_id == JS_CLASS_DATE;
 }
 
+int JS_GetBoxedPrimitiveKind(JSValueConst v)
+{
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return JS_BOXED_NONE;
+    switch (JS_VALUE_GET_OBJ(v)->class_id) {
+    case JS_CLASS_NUMBER:  return JS_BOXED_NUMBER;
+    case JS_CLASS_STRING:  return JS_BOXED_STRING;
+    case JS_CLASS_BOOLEAN: return JS_BOXED_BOOLEAN;
+    case JS_CLASS_BIG_INT: return JS_BOXED_BIGINT;
+    case JS_CLASS_SYMBOL:  return JS_BOXED_SYMBOL;
+    default:               return JS_BOXED_NONE;
+    }
+}
+
 int JS_AddIntrinsicDate(JSContext *ctx)
 {
     JSValue obj;

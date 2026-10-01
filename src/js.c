@@ -378,6 +378,7 @@ static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
 static void ns_js_name_engine_members(JSContext *ctx);
 static void ns_js_link_interfaces(JSContext *ctx);
+static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
@@ -12014,12 +12015,49 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
     if (argc < 2) return JS_UNDEFINED;
     JSValueConst port = argv[0];
-    JSValueConst data = argv[1];
+    JSValueConst data_in = argv[1];
 
     JSValue closed = JS_GetPropertyStr(ctx, port, "_closed");
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
     if (is_closed) return JS_UNDEFINED;
+    JSContext *realm = ctx;
+    {
+        JSValue handler = JS_GetPropertyStr(ctx, port, "onmessage");
+        if (!JS_IsFunction(ctx, handler)) {
+            JS_FreeValue(ctx, handler);
+            handler = JS_UNDEFINED;
+            JSValue ls = JS_GetPropertyStr(ctx, port, "_listeners");
+            if (JS_IsArray(ls) && ns_js_array_length(ctx, ls) > 0) {
+                JSValue first = JS_GetPropertyUint32(ctx, ls, 0);
+                if (JS_IsFunction(ctx, first)) handler = JS_DupValue(ctx, first);
+                else if (JS_IsObject(first)) {
+                    handler = JS_GetPropertyStr(ctx, first, "fn");
+                    if (!JS_IsFunction(ctx, handler)) {
+                        JS_FreeValue(ctx, handler);
+                        handler = JS_GetPropertyStr(ctx, first, "listener");
+                    }
+                }
+                JS_FreeValue(ctx, first);
+            }
+            JS_FreeValue(ctx, ls);
+        }
+        if (JS_IsFunction(ctx, handler)) realm = JS_GetFunctionRealm(ctx, handler);
+        JS_FreeValue(ctx, handler);
+    }
+    JSValue data = JS_DupValue(ctx, data_in);
+    if (realm && realm != ctx && JS_IsObject(data)) {
+        JSValue ports_in = argc >= 3 ? JS_DupValue(ctx, argv[2]) : JS_UNDEFINED;
+        JSValue adopted = ns_structured_clone_value(realm, data,
+            JS_IsArray(ports_in) ? (JSValueConst)ports_in : JS_UNDEFINED);
+        JS_FreeValue(ctx, ports_in);
+        if (JS_IsException(adopted)) {
+            JS_FreeValue(realm, JS_GetException(realm));
+        } else {
+            JS_FreeValue(ctx, data);
+            data = adopted;
+        }
+    }
 
     JSValue port_origin = JS_GetPropertyStr(ctx, port, "_origin");
     const char *po = JS_IsString(port_origin) ? JS_ToCString(ctx, port_origin)
@@ -12123,6 +12161,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     ns_js_budget_pop(js, &bg);
 
     JS_FreeValue(ctx, ev);
+    JS_FreeValue(ctx, data);
     return JS_UNDEFINED;
 }
 
@@ -12521,6 +12560,24 @@ ns_window_url_of(JSContext *ctx, JSValueConst win)
     return out;
 }
 
+static void
+ns_message_event_adopt_data(JSContext *ctx, JSContext *realm, JSValueConst ev)
+{
+    if (!realm) return;
+    JSValue data = JS_GetPropertyStr(ctx, ev, "data");
+    if (JS_IsObject(data)) {
+        JSValue ports = JS_GetPropertyStr(ctx, ev, "ports");
+        JSValue adopted = ns_structured_clone_value(realm, data,
+            JS_IsArray(ports) ? (JSValueConst)ports : JS_UNDEFINED);
+        if (JS_IsException(adopted))
+            JS_FreeValue(realm, JS_GetException(realm));
+        else
+            JS_SetPropertyStr(ctx, ev, "data", adopted);
+        JS_FreeValue(ctx, ports);
+    }
+    JS_FreeValue(ctx, data);
+}
+
 static JSValue
 ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -12559,6 +12616,7 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
         char *saved_url = js ? js->current_url : NULL;
         if (js && realm_url && *realm_url)
             js->current_url = g_strdup(realm_url);
+        ns_message_event_adopt_data(ctx, JS_GetFunctionRealm(ctx, deliver), ev);
         JSValueConst args[1] = { ev };
         JSValue r = JS_Call(ctx, deliver, actual_target, 1, args);
         if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
@@ -12583,6 +12641,7 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
             }
             JSContext *saved_ctx = js->ctx;
             ns_node *saved_doc = js->current_doc;
+            ns_message_event_adopt_data(ctx, main_ctx, ev);
             js->ctx = main_ctx;
             js->current_doc = main_doc;
             ns_js_dispatch_window_only_event(js, main_doc, "message",
@@ -13168,7 +13227,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->date_ctor)) {
+    if (JS_IsDate(v)) {
         JSValue gt = JS_GetPropertyStr(ctx, v, "getTime");
         JSValue tv = JS_Call(ctx, gt, v, 0, NULL);
         JS_FreeValue(ctx, gt);
@@ -13179,7 +13238,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->regexp_ctor)) {
+    if (JS_IsRegExp(v)) {
         JSValue src = JS_GetPropertyStr(ctx, v, "source");
         JSValue flg = JS_GetPropertyStr(ctx, v, "flags");
         JSValueConst a[2] = { src, flg };
@@ -13190,7 +13249,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->map_ctor)) {
+    if (JS_IsMap(v)) {
         JSValue clone = JS_CallConstructor(ctx, s->map_ctor, 0, NULL);
         if (JS_IsException(clone)) return clone;
         ns_sc_memo_put(s, ptr, clone);
@@ -13201,7 +13260,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->set_ctor)) {
+    if (JS_IsSet(v)) {
         JSValue clone = JS_CallConstructor(ctx, s->set_ctor, 0, NULL);
         if (JS_IsException(clone)) return clone;
         ns_sc_memo_put(s, ptr, clone);
@@ -13240,7 +13299,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->dataview_ctor)) {
+    if (JS_IsDataView(v)) {
         JSValue offset = ns_sc_fail_on_exception(ctx,
             JS_GetPropertyStr(ctx, v, "byteOffset"));
         if (JS_IsException(offset)) return offset;
@@ -13338,7 +13397,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->number_ctor)) {
+    if (JS_GetBoxedPrimitiveKind(v) == JS_BOXED_NUMBER) {
         double d = 0;
         JS_ToFloat64(ctx, &d, v);
         JSValue a = JS_NewFloat64(ctx, d);
@@ -13348,7 +13407,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->string_ctor)) {
+    if (JS_GetBoxedPrimitiveKind(v) == JS_BOXED_STRING) {
         JSValue prim = JS_ToString(ctx, v);
         JSValueConst a = prim;
         JSValue clone = JS_CallConstructor(ctx, s->string_ctor, 1, &a);
@@ -13357,7 +13416,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->bigint_ctor)) {
+    if (JS_GetBoxedPrimitiveKind(v) == JS_BOXED_BIGINT) {
         JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
         JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
         JS_FreeValue(ctx, vo);
@@ -13368,7 +13427,7 @@ ns_sc_clone_value(ns_sc *s, JSValueConst v)
         return clone;
     }
 
-    if (ns_sc_isa(ctx, v, s->boolean_ctor)) {
+    if (JS_GetBoxedPrimitiveKind(v) == JS_BOXED_BOOLEAN) {
         JSValue vo = JS_GetPropertyStr(ctx, v, "valueOf");
         JSValue prim = JS_Call(ctx, vo, v, 0, NULL);
         JS_FreeValue(ctx, vo);
