@@ -106,9 +106,9 @@ is in the tree, so export `ANDROID_HOME` (Windows:
 `$env:ANDROID_HOME='C:\Users\<you>\AppData\Local\Android\Sdk'`) or Gradle fails
 with "SDK location not found".
 
-Requires JDK 17 or newer, the Android SDK (compileSdk 36), NDK
-`30.0.16248370` (`ndkVersion` in `app/build.gradle`; Gradle downloads it), and
-CMake 3.22+ from the SDK.
+Requires JDK 17 or newer, the Android SDK (compileSdk 37, build-tools
+37.0.0), NDK `30.0.16248370` (`ndkVersion` in `app/build.gradle`; Gradle
+downloads it), and CMake 4.1.2 from the SDK.
 `minSdk` is 34 (Android 14), `targetSdk` 36. Native code is built 16 KB page-size aligned
 (Play requirement): the JNI bridge via `ANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES`,
 the engine via `-Wl,-z,max-page-size=16384` in the `build-deps.sh` cross-file.
