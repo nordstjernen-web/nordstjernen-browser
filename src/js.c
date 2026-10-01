@@ -20395,6 +20395,17 @@ ns_body_install(JSContext *ctx, JSValueConst obj, JSValueConst body,
         return;
     }
     if (JS_IsString(body)) {
+        size_t text_len = 0;
+        const char *text = JS_ToCStringLen(ctx, &text_len, body);
+        if (text) {
+            JSValue bytes = JS_NewArrayBufferCopy(ctx, (const uint8_t *)text,
+                                                  text_len);
+            JS_FreeCString(ctx, text);
+            if (JS_IsException(bytes))
+                JS_FreeValue(ctx, JS_GetException(ctx));
+            else
+                JS_SetPropertyStr(ctx, obj, "_bodyBuffer", bytes);
+        }
         ns_body_set_raw(ctx, obj, JS_DupValue(ctx, body));
         JS_SetPropertyStr(ctx, obj, "_bodyCT",
                           JS_NewString(ctx, "text/plain;charset=UTF-8"));
