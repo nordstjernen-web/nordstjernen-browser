@@ -45013,6 +45013,10 @@ static const char ns_iframe_global_bootstrap[] =
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
     "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
     "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
+    /* Engine keys written as "\xff..." in C read back starting with
+     * U+FFFD; they hold a window's own state, such as its on<event>
+     * handlers, and a frame must not start with its parent's. */
+    "      if (pk.charCodeAt(0) === 0xfffd) continue;"
     "      try {"
     "        var pd = Object.getOwnPropertyDescriptor(realWin, pk);"
     "        if (pd) Object.defineProperty(G, pk, pd);"
