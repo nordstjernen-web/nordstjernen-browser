@@ -1297,7 +1297,7 @@ ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
 static void
 ns_js_microtask_checkpoint(ns_js *js)
 {
-    if (js && js->callback_depth == 0 && !JS_IsRunningScript(js->rt))
+    if (js && js->ctx && js->callback_depth == 0 && !JS_IsRunningScript(js->ctx))
         ns_drain_microtasks(js);
 }
 

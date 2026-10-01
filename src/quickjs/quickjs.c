@@ -7508,9 +7508,9 @@ void JS_RunGC(JSRuntime *rt)
     gc_free_cycles(rt);
 }
 
-bool JS_IsRunningScript(JSRuntime *rt)
+bool JS_IsRunningScript(JSContext *ctx)
 {
-    return rt->current_stack_frame != NULL;
+    return ctx->rt->current_stack_frame != NULL;
 }
 
 /* Return false if not an object or if the object has already been
