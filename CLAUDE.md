@@ -159,6 +159,26 @@ there). It is not a meson subproject — `src/quickjs/meson.build` is
 loaded via `subdir()` from the top-level and exposes `libquickjs` as
 a declared dependency directly in the parent scope.
 
+### Original QuickJS: `-Dquickjs=quickjs`
+
+The `quickjs` meson option picks the engine under the QuickJS binding:
+`quickjs-ng` (default) is the in-tree fork above; `quickjs` is Fabrice
+Bellard's original [QuickJS](https://github.com/bellard/quickjs), fetched at
+configure time by `subprojects/quickjs.wrap` (pinned to a release commit,
+built by the overlay in `subprojects/packagefiles/quickjs/`, never vendored).
+See `docs/quickjs.md`.
+
+- **Engine code includes `"ns_quickjs.h"`, never `<quickjs.h>`.** On the
+  original engine (`NS_QUICKJS_ORIGINAL`) that header and `src/ns_quickjs.c`
+  supply the quickjs-ng API the binding is written against.
+- **A new quickjs-ng-only call goes into the adapter**, not behind an
+  `#ifdef` at the call site: build `-Dquickjs=quickjs` after binding changes,
+  and add whatever fails to compile to `src/ns_quickjs.c`. Only the fork's own
+  hooks with no equivalent (the receiver-aware `get_own_property_receiver`)
+  are guarded in place.
+- `.github/workflows/quickjs.yml` builds it with `--werror` and runs the
+  headless smoke.
+
 ### Text layout: ns-pango
 
 Desktop builds shape text through

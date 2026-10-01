@@ -3,6 +3,19 @@ Changelog:
 
 1.0.27:
 ======
+* Nordstjernen can run on Fabrice Bellard's original QuickJS as well as the
+  in-tree quickjs-ng fork, chosen in meson with `-Dquickjs=quickjs` or
+  `-Dquickjs=quickjs-ng` (the default). The original engine is fetched at
+  configure time through `subprojects/quickjs.wrap`, pinned to its
+  2026-06-04 release, and is never vendored. The same binding runs on both:
+  `src/ns_quickjs.h` maps the quickjs-ng API onto the original's, and the
+  original keeps its own bytecode cache. On the original engine, named
+  access into another frame's window, a view taken on an imported
+  WebAssembly memory before instantiation, and the fork's language
+  compatibility changes (`RegExp.$1`, `Function.prototype.caller`, a sort
+  comparator called for identical values) behave as stock QuickJS does;
+  `docs/quickjs.md` lists the differences. A new CI workflow builds that
+  configuration with `--werror` and runs the headless smoke.
 * `window[i]` and `frames[i]` return the WindowProxy of the i-th child
   frame, and `window[name]` returns the frame whose `name` attribute
   matches, as the HTML named-access rules specify. Indexed access always
