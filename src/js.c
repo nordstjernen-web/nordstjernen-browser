@@ -28085,7 +28085,7 @@ ns_js_dispatch_built_event(ns_js *js, const ns_node *target, const char *type,
     gboolean resource_load = !bubbles &&
         target != (const ns_node *)js->current_doc &&
         (strcmp(type, "load") == 0 || strcmp(type, "error") == 0);
-    if (target_frame || resource_load)
+    if (resource_load)
         window_in_path = FALSE;
     gboolean window_is_target = !bubbles && window_in_path &&
         target == (const ns_node *)js->current_doc &&
@@ -58003,18 +58003,6 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
             ns_js_dispatch_event(js, content_doc, "load", NULL);
             ns_js_fire_page_transition(js, "pageshow", FALSE);
         }
-        JSValue load_window = ns_iframe_lookup_realm_window(js, iframe);
-        if (!JS_IsObject(load_window) && JS_IsObject(realm_scope)) {
-            JS_FreeValue(js->ctx, load_window);
-            load_window = JS_GetPropertyStr(js->ctx, realm_scope, "window");
-        }
-        if (JS_IsObject(load_window)) {
-            JSValue load_event = ns_target_make_event(js->ctx, load_window,
-                                                       "load");
-            ns_js_dispatch_window_only_event(js, content_doc, "load",
-                                             load_event, NULL);
-        }
-        JS_FreeValue(js->ctx, load_window);
         js->iframe_load_depth--;
         ns_js_record_iframe_globals(js, iframe, globals_before);
         g_hash_table_destroy(globals_before);
