@@ -12,10 +12,20 @@ Changelog:
   original keeps its own bytecode cache. On the original engine, named
   access into another frame's window, a view taken on an imported
   WebAssembly memory before instantiation, and the fork's language
-  compatibility changes (`RegExp.$1`, `Function.prototype.caller`, a sort
-  comparator called for identical values) behave as stock QuickJS does;
-  `docs/quickjs.md` lists the differences. A new CI workflow builds that
-  configuration with `--werror` and runs the headless smoke.
+  compatibility changes (`RegExp.$1`, `Function.prototype.caller`) behave
+  as stock QuickJS does; `docs/quickjs.md` lists the differences. A new CI
+  workflow builds that configuration with `--werror` and runs the
+  headless smoke.
+* On the original QuickJS, `Array.prototype.sort` calls the comparator for
+  identical values, as the fork and every other engine do, through one
+  patch applied to the fetched source
+  (`subprojects/packagefiles/quickjs-sort-calls-comparator.patch`).
+  Without it jQuery 4's `uniqueSort` kept duplicates, so `$(a).add(a)` and
+  `.closest()` returned the same element twice. The adapter also pads
+  short argument lists to `JS_NewTypedArray`, whose original constructor
+  reads three arguments whatever `argc` says, gives `JS_EvalThis2` the
+  quickjs-ng default file name when none is passed, and refuses a
+  resizable external `ArrayBuffer` instead of quietly making it fixed.
 * `window[i]` and `frames[i]` return the WindowProxy of the i-th child
   frame, and `window[name]` returns the frame whose `name` attribute
   matches, as the HTML named-access rules specify. Indexed access always

@@ -17,7 +17,7 @@ An existing build directory switches with
 |---|---|---|
 | Source | `src/quickjs/`, an in-tree fork of [quickjs-ng](https://github.com/quickjs-ng/quickjs) | [bellard/quickjs](https://github.com/bellard/quickjs), the original engine |
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
-| Version | quickjs-ng 0.16.2 plus the browser hooks | release 2026-06-04, pinned by commit |
+| Version | quickjs-ng 0.16.2 plus the browser hooks | release 2026-06-04, pinned by commit, plus one sort patch |
 | About page | `QuickJS 0.16.2` | `QuickJS 2026-06-04` |
 | CI | every workflow | `.github/workflows/quickjs.yml` |
 
@@ -37,9 +37,16 @@ hidden symbols. Nothing is installed. A build with
 `--wrap-mode=nodownload` needs the checkout already in
 `subprojects/quickjs/`.
 
+One source patch rides on top, named by `diff_files`:
+`quickjs-sort-calls-comparator.patch`. The original `Array.prototype.sort`
+skips the comparator when both values are the same, which the fork, V8,
+SpiderMonkey and JavaScriptCore never do. jQuery 4's `uniqueSort` counts on
+that call to spot duplicates, so on the unpatched engine `$(a).add(a)` and
+`.closest()` return the same element twice.
+
 To move to a newer release, point `revision` in the wrap at the new release
-commit, delete `subprojects/quickjs/`, reconfigure, and rerun the checks
-below.
+commit, delete `subprojects/quickjs/`, reconfigure, regenerate the patch if
+it no longer applies, and rerun the checks below.
 
 ## The adapter: `src/ns_quickjs.h`
 
@@ -50,8 +57,10 @@ is a plain include. With the original engine (`NS_QUICKJS_ORIGINAL`, set by
 - **Different signatures.** `JS_IsArray`, `JS_IsError` and `JS_IsBigInt`
   take no context in quickjs-ng; `JS_NewArrayBuffer` takes a realloc-style
   callback and a maximum length; `JS_NewContext` is wrapped so the adapter
-  can learn the engine's class IDs. These are macros over functions in
-  `src/ns_quickjs.c`. The promise-rejection tracker's `is_handled` argument
+  can learn the engine's class IDs, and `JS_NewTypedArray` pads a short
+  argument list with `undefined`, because the original typed-array
+  constructor reads three arguments whatever `argc` says. These are macros
+  over functions in `src/ns_quickjs.c`. The promise-rejection tracker's `is_handled` argument
   is `ns_js_bool`, which is `bool` on quickjs-ng and `JS_BOOL` on the
   original.
 - **quickjs-ng additions.** `JS_IsArrayBuffer`, `JS_IsDataView` and
@@ -94,9 +103,7 @@ engine lacks. On `-Dquickjs=quickjs` these differ from the default build:
 - **Language behaviour.** The fork's compatibility changes are absent:
   `RegExp.$1`–`$9`, `Function.prototype.caller`, `Error.captureStackTrace`,
   `Array.fromAsync` and `using` declarations are missing, and `error.stack`
-  has no leading `Name: message` line. `Array.prototype.sort` never calls
-  the comparator for two identical values, so `jQuery.uniqueSort` (and the
-  jQuery methods built on it) keeps duplicate elements.
+  has no leading `Name: message` line.
 - **Speed.** `JS_AtomIsArrayIndex` goes through a string, so indexed access
   on host objects (collections, `frames[i]`) is slower.
 
