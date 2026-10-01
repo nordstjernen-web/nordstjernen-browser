@@ -3,6 +3,31 @@ Changelog:
 
 1.0.27:
 ======
+* Message ports work across frames: a frame that receives a transferred
+  `MessagePort` gets its message events, `data` and `ports` in its own
+  realm, so arrays, dates and objects pass `instanceof` checks there,
+  `addEventListener` on a port accepts `{handleEvent}` objects, and the
+  handlers run against the frame's document. Exceptions thrown by port
+  handlers and by window `on<event>` handlers now reach `onerror` and
+  `error` listeners instead of being dropped.
+* Events inside a frame reach that frame's window: window listeners and
+  `window.onclick`-style handlers see clicks, pointer and key events,
+  `DOMContentLoaded` and bubbling custom events, and a frame's `load`
+  event fires once with the document as its target.
+* When the browser dispatches an event, such as a user click or a port
+  message, microtasks queued by one listener run before the next
+  listener, as in other browsers.
+* The window keeps being ticked while a `requestIdleCallback`, a posted
+  message or a script-started image load is waiting, so they no longer
+  stall until an unrelated timer fires.
+* `window.postMessage` throws `SyntaxError` for an unparseable target
+  origin and defaults to `"/"` when none is given; messages to and from a
+  frame sandboxed without `allow-same-origin` use the opaque origin
+  `"null"`; message events target the receiving window and carry a
+  frozen `ports` array from the receiving realm.
+* Aliased built-ins keep their spec names (`String.prototype.trimLeft`
+  is the function named `trimStart`), and `Function.prototype.name` is
+  empty again.
 * `postMessage` and `MessagePort` messages are delivered as tasks, after
   the sender's microtasks, as in other browsers. They ran as microtasks,
   so a message arrived before promise callbacks queued ahead of it, and a
@@ -82,6 +107,16 @@ Changelog:
   use a comma, such as Turkish or Norwegian. `--single-process` runs the
   engine inside the GTK shell, whose startup applies the OS locale, so
   `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
+* `window.postMessage(message, [port])` with an array as the second
+  argument follows the `(message, options)` overload, as WebIDL overload
+  resolution requires: the array is read as an options dictionary, so
+  nothing is transferred. It was taken as a transfer list, so a library
+  that posts `postMessage(token, [channel.port2])` from code shared with
+  workers handed its own port to every `message` listener on the page,
+  and a listener waiting for a port from another frame accepted that one
+  instead. Any second argument that is neither an object nor
+  `undefined`/`null` is the target origin, and `postMessage()` with no
+  arguments throws `TypeError`.
 * The Android app builds with the current toolchain: Android Gradle
   plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
   (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX

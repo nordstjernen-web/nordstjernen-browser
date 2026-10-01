@@ -1848,7 +1848,7 @@ ns_browser_animating(ns_browser *browser)
     if (browser_images_outstanding(browser) > 0) return 1;
     if (browser->js && ns_js_has_pending_animation_frame(browser->js))
         return 1;
-    if (browser->js && ns_js_has_pending_work(browser->js))
+    if (browser->js && ns_js_needs_tick(browser->js))
         return 1;
     if (browser->anim && ns_anim_has_active(browser->anim))
         return 1;

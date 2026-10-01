@@ -2527,6 +2527,27 @@ JSContext *JS_GetPendingJobContext(JSRuntime *rt)
     return NULL;
 }
 
+static JSValue promise_reaction_job(JSContext *ctx, int argc,
+                                    JSValueConst *argv);
+
+JSContext *JS_GetPendingJobRealm(JSRuntime *rt)
+{
+    JSJobEntry *e;
+    JSContext *realm;
+
+    if (list_empty(&rt->job_list))
+        return NULL;
+    e = list_entry(rt->job_list.next, JSJobEntry, link);
+    if (e->job_func == promise_reaction_job && e->argc >= 3 &&
+        JS_IsFunction(e->ctx, e->argv[2])) {
+        realm = JS_GetFunctionRealm(e->ctx, e->argv[2]);
+        if (realm)
+            return realm;
+        JS_FreeValue(e->ctx, JS_GetException(e->ctx));
+    }
+    return e->ctx;
+}
+
 /* return < 0 if exception, 0 if no job pending, 1 if a job was
    executed successfully. the context of the job is stored in '*pctx' */
 int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
@@ -7485,6 +7506,11 @@ void JS_RunGC(JSRuntime *rt)
 
     /* free the GC objects in a cycle */
     gc_free_cycles(rt);
+}
+
+bool JS_IsRunningScript(JSContext *ctx)
+{
+    return ctx->rt->current_stack_frame != NULL;
 }
 
 /* Return false if not an object or if the object has already been
@@ -21413,6 +21439,15 @@ JSContext *JS_GetFunctionRealm(JSContext *ctx, JSValueConst func_obj)
         {
             JSBoundFunction *bf = p->u.bound_function;
             realm = JS_GetFunctionRealm(ctx, bf->func_obj);
+        }
+        break;
+    case JS_CLASS_ASYNC_FUNCTION_RESOLVE:
+    case JS_CLASS_ASYNC_FUNCTION_REJECT:
+        {
+            JSAsyncFunctionData *s = p->u.async_function_data;
+            realm = s && s->is_active
+                ? JS_GetFunctionRealm(ctx, s->func_state.frame.cur_func)
+                : ctx;
         }
         break;
     default:

@@ -386,6 +386,58 @@ JS_ThrowDOMException(JSContext *ctx, const char *name, const char *fmt, ...)
     return JS_Throw(ctx, error);
 }
 
+bool
+JS_IsRunningScript(JSContext *ctx)
+{
+    for (int level = 0; level < 8; level++) {
+        JSAtom name = JS_GetScriptOrModuleName(ctx, level);
+        if (name != JS_ATOM_NULL) {
+            JS_FreeAtom(ctx, name);
+            return true;
+        }
+    }
+    return false;
+}
+
+int
+JS_FreezeObject(JSContext *ctx, JSValueConst obj)
+{
+    JSPropertyEnum *props = NULL;
+    uint32_t count = 0;
+    if (JS_GetOwnPropertyNames(ctx, &props, &count, obj,
+                               JS_GPN_STRING_MASK | JS_GPN_SYMBOL_MASK) < 0)
+        return -1;
+    int ret = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        JSPropertyDescriptor desc;
+        int has = JS_GetOwnProperty(ctx, &desc, obj, props[i].atom);
+        int flags = JS_PROP_HAS_CONFIGURABLE;
+        if (has > 0) {
+            if (!(desc.flags & JS_PROP_GETSET)) flags |= JS_PROP_HAS_WRITABLE;
+            JS_FreeValue(ctx, desc.value);
+            JS_FreeValue(ctx, desc.getter);
+            JS_FreeValue(ctx, desc.setter);
+        }
+        if (has < 0 ||
+            JS_DefineProperty(ctx, obj, props[i].atom, JS_UNDEFINED,
+                              JS_UNDEFINED, JS_UNDEFINED, flags) < 0)
+            ret = -1;
+    }
+    for (uint32_t i = 0; i < count; i++)
+        JS_FreeAtom(ctx, props[i].atom);
+    js_free(ctx, props);
+    if (ret == 0 && JS_PreventExtensions(ctx, obj) < 0)
+        ret = -1;
+    return ret;
+}
+
+JSContext *
+JS_GetPendingJobRealm(JSRuntime *rt)
+{
+    (void)rt;
+    return NULL;
+}
+
 const char *
 JS_GetVersion(void)
 {
