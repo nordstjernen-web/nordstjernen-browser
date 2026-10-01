@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* A frame's document no longer shows through its iframe element:
+  `textContent`, `innerHTML`, `outerHTML`, `getHTML()`, `XMLSerializer`,
+  `TreeWalker`, `hasChildNodes()` and `cloneNode(true)` treat the iframe as
+  having only its fallback content, as `childNodes` already did. They used
+  to include the frame's text and markup, even for a cross-origin frame.
+* Deep recursion in a worker throws `RangeError` instead of crashing the
+  browser: the worker's JavaScript stack limit now fits its thread's stack.
 * Message ports work across frames: a frame that receives a transferred
   `MessagePort` gets its message events, `data` and `ports` in its own
   realm, so arrays, dates and objects pass `instanceof` checks there,
