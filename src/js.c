@@ -12735,12 +12735,37 @@ ns_window_outward_of(ns_js *js, JSValueConst realm_window)
     return ns_window_link_lookup(js, js ? js->window_outwards : NULL, realm_window);
 }
 
+static ns_node *
+ns_window_frame_node(ns_js *js, JSValueConst win)
+{
+    if (!js || !js->frame_contexts || !JS_IsObject(win)) return NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value)) {
+        JSValue global = JS_GetGlobalObject(value);
+        gboolean hit = JS_VALUE_GET_PTR(global) == JS_VALUE_GET_PTR(win);
+        JS_FreeValue(value, global);
+        if (hit) return key;
+    }
+    return NULL;
+}
+
 static char *
 ns_window_origin_of(JSContext *ctx, JSValueConst win)
 {
     ns_js *js = js_from_ctx(ctx);
     JSValue forwarded = ns_window_forward_of(js, win);
     if (JS_IsObject(forwarded)) win = forwarded;
+    ns_node *frame = ns_window_frame_node(js, win);
+    if (frame) {
+        unsigned sandbox = ns_iframe_effective_sandbox(frame);
+        if ((sandbox & NS_SANDBOX_ACTIVE) &&
+            !(sandbox & NS_SANDBOX_ALLOW_SAME_ORIGIN)) {
+            JS_FreeValue(ctx, forwarded);
+            return g_strdup("null");
+        }
+    }
     if (js && js->document_origin && JS_IsObject(win)) {
         JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
         JSValue main_global = JS_GetGlobalObject(main_ctx);
@@ -12929,30 +12954,47 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         JS_FreeCString(ctx, s);
         if (argc >= 3) transfer = JS_DupValue(ctx, argv[2]);
     } else if (argc >= 2 && JS_IsObject(argv[1])) {
+        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
         JSValue tov = JS_GetPropertyStr(ctx, argv[1], "targetOrigin");
-        if (JS_IsString(tov)) {
+        if (JS_IsException(transfer) || JS_IsException(tov)) {
+            JS_FreeValue(ctx, tov);
+            JS_FreeValue(ctx, transfer);
+            JS_FreeValue(ctx, target);
+            return JS_EXCEPTION;
+        }
+        if (!JS_IsUndefined(tov)) {
             const char *s = JS_ToCString(ctx, tov);
-            if (s) {
-                want_origin = g_strdup(s);
-                JS_FreeCString(ctx, s);
+            if (!s) {
+                JS_FreeValue(ctx, tov);
+                JS_FreeValue(ctx, transfer);
+                JS_FreeValue(ctx, target);
+                return JS_EXCEPTION;
             }
+            want_origin = g_strdup(s);
+            JS_FreeCString(ctx, s);
         }
         JS_FreeValue(ctx, tov);
-        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
+    if (!want_origin) want_origin = g_strdup("/");
 
-    if (want_origin && strcmp(want_origin, "*") != 0) {
-        g_autofree char *actual = ns_window_origin_of(ctx, target);
-        g_autofree char *wanted = NULL;
-        if (strcmp(want_origin, "/") == 0) {
-            JSValue src_win = JS_IsObject(source_override)
-                ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
-            wanted = ns_window_origin_of(ctx, src_win);
-            JS_FreeValue(ctx, src_win);
-        } else {
-            wanted = ns_url_origin_from(want_origin);
+    g_autofree char *wanted = NULL;
+    if (strcmp(want_origin, "/") == 0) {
+        JSValue src_win = JS_IsObject(source_override)
+            ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
+        wanted = ns_window_origin_of(ctx, src_win);
+        JS_FreeValue(ctx, src_win);
+    } else if (strcmp(want_origin, "*") != 0) {
+        wanted = ns_url_origin_from(want_origin);
+        if (!wanted) {
+            JS_FreeValue(ctx, transfer);
+            JS_FreeValue(ctx, target);
+            return ns_throw_dom_exception(ctx, "SyntaxError", 12,
+                "Failed to execute 'postMessage' on 'Window': Invalid target origin.");
         }
-        gboolean match = actual && wanted &&
+    }
+    if (strcmp(want_origin, "*") != 0) {
+        g_autofree char *actual = ns_window_origin_of(ctx, target);
+        gboolean match = actual && wanted && strcmp(wanted, "null") != 0 &&
                          g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
             JS_FreeValue(ctx, transfer);
