@@ -12852,6 +12852,13 @@ ns_window_origin_of(JSContext *ctx, JSValueConst win)
             return g_strdup(js->document_origin);
         }
     }
+    const char *frame_url = frame && js->frame_urls
+        ? g_hash_table_lookup(js->frame_urls, frame) : NULL;
+    if (frame_url) {
+        char *origin = ns_url_origin_from(frame_url);
+        JS_FreeValue(ctx, forwarded);
+        return origin ? origin : g_strdup("null");
+    }
     JSValue loc = JS_GetPropertyStr(ctx, win, "location");
     if (JS_IsException(loc)) JS_FreeValue(ctx, JS_GetException(ctx));
     char *out = NULL;
@@ -49988,6 +49995,8 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     js->workers = g_ptr_array_new();
     js->frame_ctxs = g_ptr_array_new();
     js->frame_contexts = g_hash_table_new(g_direct_hash, g_direct_equal);
+    js->frame_urls = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                           NULL, g_free);
     js->frame_windows = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->orphan_nodes = g_hash_table_new(g_direct_hash, g_direct_equal);
     js->listeners    = g_ptr_array_new();
@@ -54258,6 +54267,8 @@ ns_js_reset_runtime_state(ns_js *js)
     ns_js_drop_message_tasks(js);
     if (js->frame_contexts)
         g_hash_table_remove_all(js->frame_contexts);
+    if (js->frame_urls)
+        g_hash_table_remove_all(js->frame_urls);
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
         for (guint i = 0; i < js->frame_ctxs->len; i++)
@@ -55223,6 +55234,10 @@ ns_js_free(ns_js *js)
     if (js->frame_contexts) {
         g_hash_table_destroy(js->frame_contexts);
         js->frame_contexts = NULL;
+    }
+    if (js->frame_urls) {
+        g_hash_table_destroy(js->frame_urls);
+        js->frame_urls = NULL;
     }
     ns_js_drop_pending_rejections(js);
     if (js->frame_ctxs) {
@@ -56887,9 +56902,15 @@ ns_js_drain_load_event_scripts(ns_js *js)
 }
 
 static void
-ns_js_mark_iframe_source(ns_node *iframe, const char *origin, const char *abs_url)
+ns_js_mark_iframe_source(ns_js *js, ns_node *iframe, const char *origin,
+                         const char *abs_url)
 {
     const char *srcdoc = ns_element_get_attr(iframe, "srcdoc");
+    const char *frame_url = srcdoc && *srcdoc ? origin
+                          : abs_url && *abs_url ? abs_url : origin;
+    if (js && js->frame_urls)
+        g_hash_table_replace(js->frame_urls, iframe,
+                             g_strdup(frame_url ? frame_url : ""));
     if (srcdoc && *srcdoc) {
         ns_element_set_attr(iframe, "data-nd-frame-srcdoc", srcdoc);
         ns_element_set_attr(iframe, "data-nd-frame-url", origin);
@@ -58191,7 +58212,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         ns_css_mark_attr_dirty(iframe, "data-nd-frame-loaded", NULL);
 
         const char *iorigin = abs_url && *abs_url ? abs_url : origin;
-        ns_js_mark_iframe_source(iframe, origin, abs_url);
+        ns_js_mark_iframe_source(js, iframe, origin, abs_url);
         if ((iorigin && js->current_url &&
              !ns_url_same_origin(iorigin, js->current_url)) ||
             ((sandbox & NS_SANDBOX_ACTIVE) &&
