@@ -2527,8 +2527,6 @@ JSContext *JS_GetPendingJobContext(JSRuntime *rt)
     return NULL;
 }
 
-/* return < 0 if exception, 0 if no job pending, 1 if a job was
-   executed successfully. the context of the job is stored in '*pctx' */
 static JSValue promise_reaction_job(JSContext *ctx, int argc,
                                     JSValueConst *argv);
 
@@ -2550,6 +2548,8 @@ JSContext *JS_GetPendingJobRealm(JSRuntime *rt)
     return e->ctx;
 }
 
+/* return < 0 if exception, 0 if no job pending, 1 if a job was
+   executed successfully. the context of the job is stored in '*pctx' */
 int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
 {
     JSContext *ctx;
@@ -7508,14 +7508,14 @@ void JS_RunGC(JSRuntime *rt)
     gc_free_cycles(rt);
 }
 
-/* Return false if not an object or if the object has already been
-   freed (zombie objects are visible in finalizers when freeing
-   cycles). */
 bool JS_IsRunningScript(JSRuntime *rt)
 {
     return rt->current_stack_frame != NULL;
 }
 
+/* Return false if not an object or if the object has already been
+   freed (zombie objects are visible in finalizers when freeing
+   cycles). */
 bool JS_IsLiveObject(JSRuntime *rt, JSValueConst obj)
 {
     JSObject *p;
