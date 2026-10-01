@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* A `Response` or `Request` built from a string keeps that string as its
+  body. `new Response('{"a":1}').json()` rejected with a `SyntaxError`
+  because `text()` saw an empty body, and `fetch(new Request(url,
+  {method: 'POST', body: 'x'}))` sent nothing.
 * Rounded solid borders whose sides differ in color, or have some sides
   transparent, follow the corner radius. Each side was stroked as a
   straight line, so a `border-radius` ring with two transparent sides,
