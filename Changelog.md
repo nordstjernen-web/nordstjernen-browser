@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* Nested frames know their place: a frame inside a frame has the middle
+  frame as its `parent`, so `parent.frames`, `parent.document` and
+  `parent.name` refer to it, while `top` stays the page. `parent.location`
+  and `top.location` read in a frame give that window's URL instead of
+  the frame's own, setting `parent.location.hash` fires `hashchange` at
+  the page, and a frame's `document.referrer` is the URL of the document
+  holding it, cut down by the referrer policy as in other browsers.
 * Focus follows the HTML focus update steps. `blur` and `focusout` run
   while no element has focus, `relatedTarget` names the other element,
   and the windows get `blur` and `focus` when focus moves between a page

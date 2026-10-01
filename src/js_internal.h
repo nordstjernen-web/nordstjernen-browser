@@ -126,7 +126,11 @@ struct ns_js {
     char         *document_origin;
     ns_node       *current_doc;
     GHashTable    *frame_urls;
+    GHashTable    *frame_referrers;
     gpointer       realm_scope_base;
+    /* While a frame's code runs, current_url is the frame's URL and the
+     * top-level document's URL is held in the slot this points at. */
+    char         **top_url_slot;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
