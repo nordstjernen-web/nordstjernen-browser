@@ -200,6 +200,9 @@ struct ns_js {
     char         *referrer;
     int           ready_state;
     GHashTable   *doc_ready_states;
+    GHashTable   *initial_blank_realms;
+    GHashTable   *window_forwards;
+    GHashTable   *window_outwards;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
     ns_node      *lifecycle_doc;
