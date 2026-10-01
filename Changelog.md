@@ -3,6 +3,14 @@ Changelog:
 
 1.0.27:
 ======
+* A frame's `WindowProxy` stays the same object across its first
+  navigation. A `contentWindow` read while an iframe still showed its
+  initial `about:blank` now reaches the document that loads into it:
+  same-origin frames reuse the initial window, as the HTML spec
+  requires, and messages posted through the early reference to a
+  cross-origin frame are delivered. The link between a frame's outer
+  window and its realm global moved out of JavaScript-visible properties,
+  which had let a cross-origin frame reach its embedder's window.
 * Structured data sent between windows, frames and `MessageChannel`
   ports arrives as objects of the receiving realm: `e.data instanceof
   Uint8Array`, `Map`, `Date`, `Array` and `Object` hold in the receiver,
