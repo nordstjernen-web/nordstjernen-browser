@@ -378,6 +378,7 @@ static JSContext *ns_js_node_realm_context(ns_js *js, const ns_node *node);
 static gboolean ns_iframe_is_cross_origin(ns_js *js, const ns_node *iframe);
 static void ns_js_name_engine_members(JSContext *ctx);
 static void ns_js_link_interfaces(JSContext *ctx);
+static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
@@ -12667,10 +12668,24 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
         ? JS_DupValue(ctx, source_override) : JS_GetGlobalObject(caller);
     g_autofree char *src_origin = ns_window_origin_of(ctx, source_global);
     JSValue source_proxy = JS_GetPropertyStr(ctx, source_global, "__ndWindowProxy");
-    JSValue source = JS_IsObject(source_override)
-        ? JS_DupValue(ctx, source_global)
-        : (JS_IsObject(source_proxy)
-            ? JS_DupValue(ctx, source_proxy) : JS_DupValue(ctx, source_global));
+    JSValue source;
+    JSValue forward = JS_IsObject(source_override)
+        ? JS_GetPropertyStr(ctx, source_override, "__ndForwardWindow") : JS_UNDEFINED;
+    gboolean outward_source = JS_IsObject(forward);
+    JS_FreeValue(ctx, forward);
+    if (outward_source)
+        source = ns_iframe_cross_origin_window(ctx, JS_DupValue(ctx, source_override));
+    else if (JS_IsObject(source_override))
+        source = JS_DupValue(ctx, source_global);
+    else if (JS_IsObject(source_proxy))
+        source = ns_iframe_cross_origin_window(ctx, JS_DupValue(ctx, source_proxy));
+    else
+        source = JS_DupValue(ctx, source_global);
+    if (!JS_IsObject(source)) {
+        JS_FreeValue(ctx, source);
+        source = JS_IsObject(source_proxy) ? JS_DupValue(ctx, source_proxy)
+                                           : JS_DupValue(ctx, source_global);
+    }
     JS_FreeValue(ctx, source_proxy);
     JS_FreeValue(ctx, source_global);
 

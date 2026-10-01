@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* A message from a cross-origin frame has the frame's WindowProxy as
+  `event.source`, the same object as `iframe.contentWindow` and
+  `frames[i]`, so pages can tell which frame spoke. It was a different
+  wrapper, so `e.source === iframe.contentWindow` was false.
 * A `Response` or `Request` built from a string keeps that string as its
   body. `new Response('{"a":1}').json()` rejected with a `SyntaxError`
   because `text()` saw an empty body, and `fetch(new Request(url,
