@@ -6,7 +6,7 @@
 #ifndef NS_JS_CLASSID_H
 #define NS_JS_CLASSID_H
 
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 JSClassID ns_new_class_id(JSClassID *pclass_id);
 

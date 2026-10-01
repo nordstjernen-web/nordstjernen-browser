@@ -480,10 +480,21 @@ if js_engine == 'v8'
   message('JS engine: v8 (experimental js_v8.cc backend; live core DOM ' +
           'bindings, no fetch/XHR/modules yet, ' +
           'WebGL/WebGPU/Wasm-JS/IndexedDB/extensions stubbed)')
+elif get_option('quickjs') == 'quickjs'
+  quickjs_sp = subproject('quickjs',
+    default_options: ['warning_level=0', 'werror=false'])
+  quickjs_version = quickjs_sp.get_variable('quickjs_version')
+  libquickjs = declare_dependency(
+    compile_args: ['-DNS_QUICKJS_ORIGINAL',
+                   '-DNS_QUICKJS_ORIGINAL_VERSION="' + quickjs_version + '"'],
+    dependencies: quickjs_sp.get_variable('quickjs_dep'))
+  message('JS engine: quickjs (Bellard\'s original QuickJS ' +
+          quickjs_version + ' through src/ns_quickjs.h, full DOM bindings)')
 else
   subdir('src/quickjs')
-  message('JS engine: quickjs (in-tree, full DOM bindings)')
+  message('JS engine: quickjs (in-tree quickjs-ng fork, full DOM bindings)')
 endif
+quickjs_original = js_engine == 'quickjs' and get_option('quickjs') == 'quickjs'
 
 wasm_unsupported_cpu = host_machine.cpu_family() == 'x86'
 if get_option('wasm').enabled() and wasm_unsupported_cpu

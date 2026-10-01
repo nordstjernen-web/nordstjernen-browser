@@ -3,7 +3,7 @@ python = import('python').find_installation()
 qjsc_prog = find_program('qjsc', required: false)
 qjs_prog  = find_program('qjs',  required: false)
 
-if not meson.is_cross_build() and qjsc_prog.found() and qjs_prog.found()
+if not meson.is_cross_build() and not quickjs_original and qjsc_prog.found() and qjs_prog.found()
   # files() so the script path is absolute — a raw '../scripts/...' string would
   # be resolved relative to the build dir and break out-of-tree builds.
   verify_polyfills_py = files('../scripts/verify-polyfills.py')
@@ -107,6 +107,9 @@ if js_engine == 'quickjs'
     'webaudio.c',
     'webgl.c',
   )
+  if quickjs_original
+    nordstjernen_engine_sources += files('ns_quickjs.c')
+  endif
 else
   nordstjernen_engine_sources += files('js_v8.cc')
 endif
