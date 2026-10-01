@@ -3,6 +3,12 @@ Changelog:
 
 1.0.27:
 ======
+* Scripts run against the part of the page parsed so far, as in other
+  browsers: a script in `<head>` sees `document.body` as `null`, a
+  script is the last `<script>` in the document while it runs, elements
+  further down cannot be found yet, and the rest of the page is inserted
+  after the script, with the MutationObserver records parser insertions
+  produce. The whole page used to be visible to every script.
 * Shadow roots behave as document fragments: nodes directly inside one
   have a `null` `parentElement`, the root's `nodeName` is
   `#document-fragment`, it is not `instanceof Element`, and `closest()`,

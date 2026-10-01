@@ -331,6 +331,7 @@ static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val,
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
 static gboolean ns_node_is_shadow_root(const ns_node *n);
 static void ns_focus_guard_forget(ns_js *js, const ns_node *n);
+static void ns_parser_hold_forget(ns_js *js, const ns_node *n);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -3606,6 +3607,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->focused_doc == n) js->focused_doc = NULL;
     if (js) ns_focus_guard_forget(js, n);
+    if (js) ns_parser_hold_forget(js, n);
     if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
     if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
@@ -57101,6 +57103,150 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
     }
 }
 
+/* Nordstjernen parses a whole document before running its scripts, but a
+ * parser-blocking script runs while the HTML parser has only reached its
+ * end tag: nothing after it exists yet, so document.body is null in <head>
+ * and the script is the last <script> in the document.  Before the first
+ * such script, every node after it is taken out of the tree, each one on
+ * its own, and before each later script the nodes up to and including it
+ * are put back one at a time in document order, the way the parser inserts
+ * them: at the end of their parent, after anything scripts inserted, and
+ * each with the childList record a parser insertion produces.  The rest is
+ * put back once the last parser-blocking script has run. */
+typedef struct ns_parser_held {
+    ns_node *parent;
+    ns_node *node;
+} ns_parser_held;
+
+typedef struct ns_parser_hold {
+    GArray *held;                   /* ns_parser_held, in document order */
+    guint next;                     /* first one not yet put back */
+    GHashTable *members;            /* every held node and parent */
+    struct ns_parser_hold *prev;
+} ns_parser_hold;
+
+static void
+ns_parser_hold_forget(ns_js *js, const ns_node *n)
+{
+    for (ns_parser_hold *h = js->parser_hold; h; h = h->prev) {
+        if (!g_hash_table_remove(h->members, n)) continue;
+        for (guint i = h->next; i < h->held->len; i++) {
+            ns_parser_held *e = &g_array_index(h->held, ns_parser_held, i);
+            if (e->parent == n) e->parent = NULL;
+            if (e->node == n) e->node = NULL;
+        }
+    }
+}
+
+static void
+ns_parser_hold_collect(ns_parser_hold *hold, ns_node *parent, ns_node *n,
+                       int depth)
+{
+    if (ns_dom_hidden_child(n)) return;
+    ns_parser_held e = { parent, n };
+    g_array_append_val(hold->held, e);
+    g_hash_table_add(hold->members, parent);
+    g_hash_table_add(hold->members, n);
+    if (depth >= 512 || ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_parser_hold_collect(hold, n, c, depth + 1);
+}
+
+static void
+ns_js_parser_hold_after(ns_js *js, ns_node *script, ns_parser_hold *hold)
+{
+    hold->held = g_array_new(FALSE, FALSE, sizeof(ns_parser_held));
+    hold->next = 0;
+    hold->members = g_hash_table_new(g_direct_hash, g_direct_equal);
+    hold->prev = js->parser_hold;
+    js->parser_hold = hold;
+    GPtrArray *tops = g_ptr_array_new();
+    for (ns_node *n = script; n && n->parent && n->kind != NS_NODE_DOCUMENT;
+         n = n->parent)
+        for (ns_node *sib = n->next_sibling; sib; sib = sib->next_sibling)
+            if (!ns_dom_hidden_child(sib)) {
+                g_ptr_array_add(tops, sib);
+                ns_parser_hold_collect(hold, n->parent, sib, 0);
+            }
+    for (guint i = 0; i < tops->len; i++) {
+        ns_node *top = g_ptr_array_index(tops, i);
+        ns_node *parent = top->parent;
+        ns_js_index_child_change(js, parent, NULL, top);
+        ns_node_remove(top);
+    }
+    g_ptr_array_free(tops, TRUE);
+    for (guint i = 0; i < hold->held->len; i++) {
+        ns_parser_held *e = &g_array_index(hold->held, ns_parser_held, i);
+        ns_node_arm_js_invalidate(e->parent);
+        ns_node_arm_js_invalidate(e->node);
+        if (e->node->parent) ns_node_remove(e->node);
+    }
+}
+
+static void
+ns_js_parser_put_back(ns_js *js, ns_parser_hold *hold, guint upto)
+{
+    for (; hold->next < upto && hold->next < hold->held->len; hold->next++) {
+        ns_parser_held *e = &g_array_index(hold->held, ns_parser_held,
+                                           hold->next);
+        /* A freed parent keeps its content out, like markup the parser
+         * goes on inserting into an element no longer in the tree. */
+        if (!e->parent || !e->node || e->node->parent) continue;
+        ns_node *prev = e->parent->last_child;
+        ns_node_append_child(e->parent, e->node);
+        ns_js_record_child_change(js, e->parent, e->node, NULL, prev, NULL);
+        js->mutated = TRUE;
+    }
+}
+
+/* Puts back the held nodes up to script and its text. */
+static void
+ns_js_parser_reach(ns_js *js, ns_parser_hold *hold, const ns_node *script)
+{
+    guint i = hold->next;
+    while (i < hold->held->len &&
+           g_array_index(hold->held, ns_parser_held, i).node != script)
+        i++;
+    if (i == hold->held->len) return;
+    i++;
+    while (i < hold->held->len &&
+           g_array_index(hold->held, ns_parser_held, i).parent == script)
+        i++;
+    ns_js_parser_put_back(js, hold, i);
+}
+
+static void
+ns_js_parser_release(ns_js *js, ns_parser_hold *hold)
+{
+    ns_js_parser_put_back(js, hold, hold->held->len);
+    js->parser_hold = hold->prev;
+    g_hash_table_destroy(hold->members);
+    g_array_free(hold->held, TRUE);
+}
+
+/* The parser-blocking scripts of a document's initial parse, in order,
+ * each seeing only the part of the document parsed before it. */
+static void
+ns_js_run_parser_blocking_scripts(ns_js *js, GArray *tasks, const char *origin)
+{
+    if (!js || !tasks) return;
+    ns_parser_hold hold;
+    gboolean holding = FALSE;
+    for (guint i = 0; i < tasks->len; i++) {
+        ns_script_task *task = &g_array_index(tasks, ns_script_task, i);
+        if (task->schedule != NS_SCRIPT_BLOCKING) continue;
+        if (!holding) {
+            ns_js_parser_hold_after(js, task->node, &hold);
+            holding = TRUE;
+        } else {
+            ns_js_parser_reach(js, &hold, task->node);
+        }
+        ns_js_run_script_element(js, task->node, origin);
+    }
+    if (holding) ns_js_parser_release(js, &hold);
+    ns_ce_upgrade_subtree_all(js, js->current_doc);
+}
+
 static void
 ns_js_run_script_schedule(ns_js *js, GArray *tasks, ns_script_schedule schedule,
                           const char *origin)
@@ -58879,7 +59025,7 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         } else {
             GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
             ns_js_collect_script_tasks(content_root, tasks);
-            ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, iorigin);
+            ns_js_run_parser_blocking_scripts(js, tasks, iorigin);
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_DEFERRED, iorigin);
             ns_js_run_script_schedule(js, tasks, NS_SCRIPT_ASYNC, iorigin);
             g_array_free(tasks, TRUE);
@@ -59141,7 +59287,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);
     ns_js_collect_script_tasks(doc, tasks);
-    ns_js_run_script_schedule(js, tasks, NS_SCRIPT_BLOCKING, origin);
+    ns_js_run_parser_blocking_scripts(js, tasks, origin);
     js->lifecycle_tasks = tasks;
     js->lifecycle_doc = doc;
     js->lifecycle_origin = g_strdup(origin);
