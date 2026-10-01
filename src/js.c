@@ -39307,8 +39307,13 @@ ns_js_focus_from_pointer(ns_js *js, const ns_node *target)
 {
     if (!js) return;
     const ns_node *focus = NULL;
-    for (const ns_node *a = target; a && !focus; a = a->parent)
+    /* Look for a focusable ancestor only within the clicked document: a
+     * click on plain content in a frame focuses the frame's document, not
+     * the iframe element around it. */
+    for (const ns_node *a = target; a && !focus; a = a->parent) {
+        if (a->kind == NS_NODE_DOCUMENT) break;
         if (ns_node_is_focusable(a)) focus = a;
+    }
     ns_js_set_focus_in(js, focus, ns_node_owner_doc(target));
     if (focus || !target) return;
     js->focus_nav_start = target;
