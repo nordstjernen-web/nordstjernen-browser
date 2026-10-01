@@ -3,6 +3,11 @@ Changelog:
 
 1.0.27:
 ======
+* `document.write` runs the scripts it writes; they used to be skipped.
+  A write whose markup closes everything it opens is inserted right away,
+  so the written elements exist when `write()` returns and a written
+  inline script runs inside the call, as in other browsers. A written
+  external script runs before the rest of the page is parsed.
 * Scripts run against the part of the page parsed so far, as in other
   browsers: a script in `<head>` sees `document.body` as `null`, a
   script is the last `<script>` in the document while it runs, elements

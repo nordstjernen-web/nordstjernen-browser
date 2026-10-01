@@ -53871,7 +53871,7 @@ ns_js_flush_document_write(ns_js *js)
         ctx_tag, html, -1, scripting);
     g_free(html);
     if (!fragment) return;
-    ns_mark_scripts_already_started(fragment);
+    /* Unlike innerHTML, markup from document.write runs its scripts. */
     GPtrArray *inserted = g_ptr_array_new();
     js->throw_on_dynamic_markup++;
     ns_node *c = fragment->first_child;
@@ -53971,6 +53971,94 @@ ns_document_close(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* True when markup written so far closes every element it opens and ends
+ * outside any tag, comment or raw-text element, so parsing it now gives
+ * the nodes the HTML parser would have inserted by the end of the write.
+ * Writes that leave an element open, such as write("<div>") followed by
+ * write("</div>"), are parsed once the script ends instead.  Markup with an
+ * external script is held too, so that script runs before parsing goes on. */
+static gboolean
+ns_written_markup_is_complete(const char *s)
+{
+    static const char *const void_tags[] = {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+        "meta", "param", "source", "track", "wbr",
+    };
+    static const char *const raw_tags[] = {
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed",
+        "noframes",
+    };
+    GPtrArray *open = g_ptr_array_new_with_free_func(g_free);
+    gboolean ok = TRUE;
+    const char *p = s;
+    while (ok && (p = strchr(p, '<'))) {
+        if (g_str_has_prefix(p, "<!--")) {
+            const char *end = strstr(p + 4, "-->");
+            if (!end) ok = FALSE; else p = end + 3;
+            continue;
+        }
+        gboolean closing = p[1] == '/';
+        const char *name = p + (closing ? 2 : 1);
+        if (!g_ascii_isalpha(*name)) {
+            if (*name == '!' || *name == '?') {
+                const char *end = strchr(name, '>');
+                if (!end) ok = FALSE; else p = end + 1;
+            } else {
+                p++;
+            }
+            continue;
+        }
+        const char *q = name;
+        while (*q && (g_ascii_isalnum(*q) || *q == '-' || *q == ':')) q++;
+        char *tag = g_ascii_strdown(name, q - name);
+        char quote = 0;
+        gboolean self_closing = FALSE, has_src = FALSE;
+        for (; *q && (quote || *q != '>'); q++) {
+            if (quote) { if (*q == quote) quote = 0; continue; }
+            if (*q == '"' || *q == '\'') quote = *q;
+            else if (*q == '/' && q[1] == '>') self_closing = TRUE;
+            else if (g_ascii_strncasecmp(q, "src", 3) == 0 &&
+                     (q[3] == '=' || g_ascii_isspace(q[3])) &&
+                     g_ascii_isspace(q[-1]))
+                has_src = TRUE;
+        }
+        if (!*q) { g_free(tag); ok = FALSE; break; }
+        p = q + 1;
+        if (closing) {
+            for (guint i = open->len; i > 0; i--)
+                if (strcmp(g_ptr_array_index(open, i - 1), tag) == 0) {
+                    g_ptr_array_set_size(open, i - 1);
+                    break;
+                }
+            g_free(tag);
+            continue;
+        }
+        gboolean is_void = self_closing, is_raw = FALSE;
+        for (gsize i = 0; i < G_N_ELEMENTS(void_tags); i++)
+            if (strcmp(tag, void_tags[i]) == 0) is_void = TRUE;
+        for (gsize i = 0; i < G_N_ELEMENTS(raw_tags); i++)
+            if (strcmp(tag, raw_tags[i]) == 0) is_raw = TRUE;
+        if (strcmp(tag, "script") == 0 && has_src) ok = FALSE;
+        if (ok && is_raw && !is_void) {
+            char *end_tag = g_strconcat("</", tag, NULL);
+            const char *e = p;
+            while ((e = strchr(e, '<')) &&
+                   g_ascii_strncasecmp(e, end_tag, strlen(end_tag)) != 0)
+                e++;
+            g_free(end_tag);
+            if (!e || !(e = strchr(e, '>'))) ok = FALSE;
+            else p = e + 1;
+            g_free(tag);
+            continue;
+        }
+        if (is_void) g_free(tag);
+        else g_ptr_array_add(open, tag);
+    }
+    ok = ok && open->len == 0;
+    g_ptr_array_free(open, TRUE);
+    return ok;
+}
+
 static JSValue
 ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
                          gboolean newline)
@@ -53999,7 +54087,8 @@ ns_document_write_common(JSContext *ctx, int argc, JSValueConst *argv,
         JS_FreeCString(ctx, s);
     }
     if (newline) g_string_append_c(js->document_write_buffer, '\n');
-    if (!js->current_script)
+    if (!js->current_script ||
+        ns_written_markup_is_complete(js->document_write_buffer->str))
         ns_js_flush_document_write(js);
     return JS_UNDEFINED;
 }
@@ -57519,8 +57608,12 @@ ns_js_run_inserted_scripts(ns_js *js, ns_node *root)
     gboolean have_external = FALSE;
     for (guint i = 0; i < tasks->len; i++) {
         ns_script_task *t = &g_array_index(tasks, ns_script_task, i);
+        /* While the initial parse is held at a script, a blocking script it
+         * writes runs before the parser goes on, even an external one. */
+        gboolean parser_paused = js->parser_hold && js->eval_depth == 0 &&
+                                 js->callback_depth == 0;
         if (t->schedule == NS_SCRIPT_BLOCKING &&
-            !ns_element_get_attr(t->node, "src") &&
+            (!ns_element_get_attr(t->node, "src") || parser_paused) &&
             !ns_script_type_is_module(t->node))
             ns_js_run_script_element(js, t->node, origin);
         else
