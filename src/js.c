@@ -50228,7 +50228,6 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_fn(ctx, url_ctor, "createObjectURL", ns_window_url_create_object, 1);
     ns_bind_fn(ctx, url_ctor, "revokeObjectURL", ns_window_url_revoke_object, 1);
     JS_SetPropertyStr(ctx, global, "URL", url_ctor);
-    ns_url_install_interface(ctx);
     JSValue custom_elements = JS_NewObject(ctx);
     ns_bind_fn(ctx, custom_elements, "define",      ns_ce_define,      3);
     ns_bind_fn(ctx, custom_elements, "get",         ns_ce_get,         1);
@@ -50290,6 +50289,7 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
     ns_bind_ctor(ctx, global, "Option",          ns_window_option_ctor,          4);
     ns_bind_ctor(ctx, global, "URLSearchParams", ns_window_usp_ctor, 0);
     ns_usp_install_interface(ctx);
+    ns_url_install_interface(ctx);
     ns_bind_ctor(ctx, global, "XMLHttpRequestUpload", ns_illegal_constructor,    0);
     ns_bind_ctor(ctx, global, "XMLHttpRequest",  ns_window_xhr_ctor,             0);
     ns_xhr_install_interface(ctx, global);
