@@ -3,6 +3,11 @@ Changelog:
 
 1.0.27:
 ======
+* `postMessage` and `MessagePort` messages are delivered as tasks, after
+  the sender's microtasks, as in other browsers. They ran as microtasks,
+  so a message arrived before promise callbacks queued ahead of it, and a
+  handler that posted back to itself kept `setTimeout` callbacks from
+  ever running.
 * A frame's `WindowProxy` stays the same object across its first
   navigation. A `contentWindow` read while an iframe still showed its
   initial `about:blank` now reaches the document that loads into it:
