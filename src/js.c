@@ -12265,6 +12265,36 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValueConst port = argv[0];
     JSValueConst data_in = argv[1];
 
+    JSValue shipped_to = JS_GetPropertyStr(ctx, port, "_shipped_to");
+    if (JS_IsObject(shipped_to)) {
+        /* The port moved to another realm while this message was queued;
+         * its messages move with it. */
+        JSValue started = JS_GetPropertyStr(ctx, shipped_to, "_started");
+        gboolean is_started = JS_ToBool(ctx, started);
+        JS_FreeValue(ctx, started);
+        if (is_started) {
+            JSValueConst job_args[3] = { shipped_to, data_in,
+                                         argc >= 3 ? argv[2] : JS_UNDEFINED };
+            JSValue r = ns_port_deliver_job(ctx, 3, job_args);
+            JS_FreeValue(ctx, shipped_to);
+            return r;
+        }
+        JSValue queue = JS_GetPropertyStr(ctx, shipped_to, "_queue");
+        if (JS_IsArray(queue)) {
+            JSValue message = JS_NewObject(ctx);
+            JS_SetPropertyStr(ctx, message, "_portMessage", JS_TRUE);
+            JS_SetPropertyStr(ctx, message, "data", JS_DupValue(ctx, data_in));
+            JS_SetPropertyStr(ctx, message, "ports",
+                              argc >= 3 ? JS_DupValue(ctx, argv[2]) : JS_NewArray(ctx));
+            JS_SetPropertyUint32(ctx, queue, ns_js_array_length(ctx, queue),
+                                 message);
+        }
+        JS_FreeValue(ctx, queue);
+        JS_FreeValue(ctx, shipped_to);
+        return JS_UNDEFINED;
+    }
+    JS_FreeValue(ctx, shipped_to);
+
     JSValue closed = JS_GetPropertyStr(ctx, port, "_closed");
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
@@ -12399,19 +12429,18 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+static JSValue ns_structured_clone_transfer(JSContext *ctx, JSValueConst value,
+                                            JSValue transfer, JSValueConst seed_from,
+                                            JSValueConst seed_to);
 static JSValue ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
 
 static JSValue
 ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer)
 {
-    JSValue options = JS_NewObject(ctx);
-    if (JS_IsArray(transfer))
-        JS_SetPropertyStr(ctx, options, "transfer", JS_DupValue(ctx, transfer));
-    JSValueConst args[2] = { v, options };
-    JSValue out = ns_window_structured_clone(ctx, JS_UNDEFINED, 2, args);
-    JS_FreeValue(ctx, options);
-    return out;
+    return ns_structured_clone_transfer(ctx, v,
+        JS_IsArray(transfer) ? JS_DupValue(ctx, transfer) : JS_UNDEFINED,
+        JS_UNDEFINED, JS_UNDEFINED);
 }
 
 static void
@@ -12492,6 +12521,13 @@ ns_port_bridge_id(JSContext *ctx, JSValueConst port)
     return id;
 }
 
+static JSContext *ns_port_realm(JSContext *ctx, JSValueConst port);
+static int ns_port_transfer_prepare(JSContext *ctx, JSValueConst transfer,
+                                   JSValueConst source_port, JSContext *realm,
+                                   JSValue *old_ports, JSValue *new_ports);
+static void ns_port_transfer_commit(JSContext *ctx, JSValueConst old_ports,
+                                    JSValueConst new_ports);
+
 static JSValue
 ns_port_post_message(JSContext *ctx, JSValueConst this_val,
                      int argc, JSValueConst *argv)
@@ -12513,27 +12549,29 @@ ns_port_post_message(JSContext *ctx, JSValueConst this_val,
     } else if (argc >= 2 && JS_IsObject(argv[1])) {
         transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
     }
-    JSValue cloned = ns_structured_clone_value(ctx, data, transfer);
-    if (JS_IsException(cloned)) {
+    if (JS_IsException(transfer)) return JS_EXCEPTION;
+    JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
+    JSContext *realm = JS_IsObject(pair) ? ns_port_realm(ctx, pair) : ctx;
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, this_val, realm,
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, pair);
         JS_FreeValue(ctx, transfer);
         return JS_EXCEPTION;
     }
-    JSValue ports = JS_NewArray(ctx);
-    if (JS_IsArray(transfer)) {
-        uint32_t len = ns_js_array_length(ctx, transfer);
-        uint32_t k = 0;
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
-            JSValue is_port = JS_GetPropertyStr(ctx, item, "_is_port");
-            if (JS_ToBool(ctx, is_port))
-                JS_SetPropertyUint32(ctx, ports, k++, JS_DupValue(ctx, item));
-            JS_FreeValue(ctx, is_port);
-            JS_FreeValue(ctx, item);
-        }
+    JSValue cloned = ns_structured_clone_transfer(ctx, data, transfer,
+                                                  old_ports, ports);
+    if (JS_IsException(cloned)) {
+        JS_FreeValue(ctx, old_ports);
+        JS_FreeValue(ctx, ports);
+        JS_FreeValue(ctx, pair);
+        return JS_EXCEPTION;
     }
-    JS_FreeValue(ctx, transfer);
+    ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+    JS_FreeValue(ctx, pair);
+    pair = JS_GetPropertyStr(ctx, this_val, "_pair");
 
-    JSValue pair = JS_GetPropertyStr(ctx, this_val, "_pair");
     if (JS_IsUndefined(pair) || JS_IsNull(pair)) {
         JS_FreeValue(ctx, pair);
         JS_FreeValue(ctx, ports);
@@ -12685,6 +12723,14 @@ ns_port_close(JSContext *ctx, JSValueConst this_val,
 }
 
 static JSValue
+ns_port_realm_marker(JSContext *ctx, JSValueConst this_val, int argc,
+                     JSValueConst *argv)
+{
+    (void)ctx; (void)this_val; (void)argc; (void)argv;
+    return JS_UNDEFINED;
+}
+
+static JSValue
 ns_port_new(JSContext *ctx)
 {
     JSValue p = JS_NewObject(ctx);
@@ -12709,11 +12755,117 @@ ns_port_new(JSContext *ctx)
         JS_PROP_CONFIGURABLE | JS_PROP_ENUMERABLE);
     JS_FreeAtom(ctx, onmessage_atom);
     JS_SetPropertyStr(ctx, p, "onmessageerror", JS_NULL);
+    JS_DefinePropertyValueStr(ctx, p, "_realm",
+        JS_NewCFunction(ctx, ns_port_realm_marker, "", 0), 0);
     JS_SetPropertyStr(ctx, p, "_is_port",       JS_TRUE);
     JS_SetPropertyStr(ctx, p, "_closed",        JS_FALSE);
     JS_SetPropertyStr(ctx, p, "_started",       JS_FALSE);
     JS_SetPropertyStr(ctx, p, "_queue",         JS_NewArray(ctx));
     return p;
+}
+
+static JSContext *
+ns_port_realm(JSContext *ctx, JSValueConst port)
+{
+    JSValue marker = JS_GetPropertyStr(ctx, port, "_realm");
+    if (JS_IsException(marker)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JSContext *realm = ns_function_realm(ctx, marker);
+    JS_FreeValue(ctx, marker);
+    return realm;
+}
+
+static gboolean
+ns_port_flag(JSContext *ctx, JSValueConst port, const char *name)
+{
+    JSValue v = JS_GetPropertyStr(ctx, port, name);
+    gboolean set = JS_ToBool(ctx, v) > 0;
+    JS_FreeValue(ctx, v);
+    return set;
+}
+
+static void
+ns_port_ship(JSContext *ctx, JSValueConst port, JSValueConst shipped)
+{
+    JSValue pair = JS_GetPropertyStr(ctx, port, "_pair");
+    if (JS_IsObject(pair)) {
+        JS_SetPropertyStr(ctx, pair, "_pair", JS_DupValue(ctx, shipped));
+        JS_SetPropertyStr(ctx, shipped, "_pair", JS_DupValue(ctx, pair));
+    }
+    JS_FreeValue(ctx, pair);
+    JSValue origin = JS_GetPropertyStr(ctx, port, "_origin");
+    if (JS_IsString(origin)) JS_SetPropertyStr(ctx, shipped, "_origin", origin);
+    else JS_FreeValue(ctx, origin);
+    JS_SetPropertyStr(ctx, shipped, "_closed",
+                      JS_GetPropertyStr(ctx, port, "_closed"));
+    JSValue queue = JS_GetPropertyStr(ctx, port, "_queue");
+    if (JS_IsArray(queue)) JS_SetPropertyStr(ctx, shipped, "_queue", queue);
+    else JS_FreeValue(ctx, queue);
+    JS_SetPropertyStr(ctx, port, "_queue", JS_NewArray(ctx));
+    JS_SetPropertyStr(ctx, port, "_pair", JS_NULL);
+    JS_SetPropertyStr(ctx, port, "_closed", JS_TRUE);
+    JS_SetPropertyStr(ctx, port, "_shipped", JS_TRUE);
+    JS_DefinePropertyValueStr(ctx, port, "_shipped_to",
+                              JS_DupValue(ctx, shipped), 0);
+}
+
+/* Checks the MessagePorts in a postMessage transfer list and makes the
+ * receiving realm's replacement for each one.  Nothing is detached yet, so a
+ * failed clone leaves the sender's ports usable; ns_port_transfer_commit then
+ * moves each port's entanglement and queued messages to its replacement. */
+static int
+ns_port_transfer_prepare(JSContext *ctx, JSValueConst transfer,
+                         JSValueConst source_port, JSContext *realm,
+                         JSValue *old_ports, JSValue *new_ports)
+{
+    *old_ports = JS_NewArray(ctx);
+    *new_ports = JS_NewArray(realm);
+    uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
+    GPtrArray *seen = g_ptr_array_new();
+    gboolean bad = FALSE;
+    uint32_t k = 0;
+    for (uint32_t i = 0; i < len && !bad; i++) {
+        JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
+        if (JS_IsObject(item) && ns_port_flag(ctx, item, "_is_port")) {
+            void *ptr = JS_VALUE_GET_PTR(item);
+            bad = g_ptr_array_find(seen, ptr, NULL) ||
+                  (JS_IsObject(source_port) &&
+                   ptr == JS_VALUE_GET_PTR(source_port)) ||
+                  ns_port_flag(ctx, item, "_shipped");
+            g_ptr_array_add(seen, ptr);
+            if (!bad) {
+                JSValue shipped = ns_port_bridge_id(ctx, item)
+                    ? JS_DupValue(ctx, item) : ns_port_new(realm);
+                JS_SetPropertyUint32(realm, *new_ports, k, shipped);
+                JS_SetPropertyUint32(ctx, *old_ports, k++,
+                                     JS_DupValue(ctx, item));
+            }
+        }
+        JS_FreeValue(ctx, item);
+    }
+    g_ptr_array_free(seen, TRUE);
+    if (!bad) return 0;
+    JS_FreeValue(ctx, *old_ports);
+    JS_FreeValue(realm, *new_ports);
+    *old_ports = *new_ports = JS_UNDEFINED;
+    ns_throw_dom_exception(ctx, "DataCloneError", 25,
+        "Failed to execute 'postMessage': a MessagePort in the transfer list "
+        "is the source port, a duplicate, or already transferred.");
+    return -1;
+}
+
+static void
+ns_port_transfer_commit(JSContext *ctx, JSValueConst old_ports,
+                        JSValueConst new_ports)
+{
+    uint32_t n = JS_IsArray(old_ports) ? ns_js_array_length(ctx, old_ports) : 0;
+    for (uint32_t i = 0; i < n; i++) {
+        JSValue from = JS_GetPropertyUint32(ctx, old_ports, i);
+        JSValue to = JS_GetPropertyUint32(ctx, new_ports, i);
+        if (JS_VALUE_GET_PTR(from) != JS_VALUE_GET_PTR(to))
+            ns_port_ship(ctx, from, to);
+        JS_FreeValue(ctx, from);
+        JS_FreeValue(ctx, to);
+    }
 }
 
 static JSValue
@@ -13022,6 +13174,32 @@ ns_window_post_message_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     return JS_UNDEFINED;
 }
 
+/* The realm that ns_window_post_message_deliver_job will deliver into. */
+static JSContext *
+ns_window_message_realm(JSContext *ctx, JSValueConst target)
+{
+    ns_js *js = js_from_ctx(ctx);
+    JSValue forwarded = ns_window_forward_of(js, target);
+    JSValueConst actual = JS_IsObject(forwarded) ? (JSValueConst)forwarded
+                                                 : target;
+    JSValue deliver = JS_GetPropertyStr(ctx, actual, "__nsDeliverMessage");
+    JSContext *realm = ctx;
+    if (JS_IsException(deliver)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    } else if (JS_IsFunction(ctx, deliver)) {
+        realm = ns_function_realm(ctx, deliver);
+    } else if (js && js->ctx) {
+        JSContext *main_ctx = js->main_realm_ctx ? js->main_realm_ctx : js->ctx;
+        JSValue main_global = JS_GetGlobalObject(main_ctx);
+        if (JS_VALUE_GET_PTR(main_global) == JS_VALUE_GET_PTR(actual))
+            realm = main_ctx;
+        JS_FreeValue(main_ctx, main_global);
+    }
+    JS_FreeValue(ctx, deliver);
+    JS_FreeValue(ctx, forwarded);
+    return realm;
+}
+
 static JSValue
 ns_post_message_to_target(JSContext *ctx, JSValue target,
                           JSValueConst source_override,
@@ -13088,22 +13266,38 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                 "Failed to execute 'postMessage' on 'Window': Invalid target origin.");
         }
     }
+
+    /* Serializing and transferring happen before the origin check, so a
+     * message to the wrong origin still detaches its transferred ports. */
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, JS_UNDEFINED,
+                                 ns_window_message_realm(ctx, target),
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, transfer);
+        JS_FreeValue(ctx, target);
+        return JS_EXCEPTION;
+    }
+    JSValue data = ns_structured_clone_transfer(ctx, argv[0], transfer,
+                                                old_ports, ports);
+    if (JS_IsException(data)) {
+        JS_FreeValue(ctx, old_ports);
+        JS_FreeValue(ctx, ports);
+        JS_FreeValue(ctx, target);
+        return JS_EXCEPTION;
+    }
+    ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+
     if (strcmp(want_origin, "*") != 0) {
         g_autofree char *actual = ns_window_origin_of(ctx, target);
         gboolean match = actual && wanted && strcmp(wanted, "null") != 0 &&
                          g_ascii_strcasecmp(wanted, actual) == 0;
         if (!match) {
-            JS_FreeValue(ctx, transfer);
+            JS_FreeValue(ctx, data);
+            JS_FreeValue(ctx, ports);
             JS_FreeValue(ctx, target);
             return JS_UNDEFINED;
         }
-    }
-
-    JSValue data = ns_structured_clone_value(ctx, argv[0], transfer);
-    if (JS_IsException(data)) {
-        JS_FreeValue(ctx, transfer);
-        JS_FreeValue(ctx, target);
-        return JS_EXCEPTION;
     }
 
     JSValue source_global = JS_IsObject(source_override)
@@ -13127,21 +13321,7 @@ ns_post_message_to_target(JSContext *ctx, JSValue target,
                       JS_NewString(ctx, src_origin ? src_origin : ""));
     JS_SetPropertyStr(ctx, ev, "lastEventId", JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, ev, "source", source);
-    JSValue ports = JS_NewArray(ctx);
-    if (JS_IsArray(transfer)) {
-        uint32_t len = ns_js_array_length(ctx, transfer);
-        uint32_t k = 0;
-        for (uint32_t i = 0; i < len; i++) {
-            JSValue item = JS_GetPropertyUint32(ctx, transfer, i);
-            JSValue is_port = JS_GetPropertyStr(ctx, item, "_is_port");
-            if (JS_ToBool(ctx, is_port))
-                JS_SetPropertyUint32(ctx, ports, k++, JS_DupValue(ctx, item));
-            JS_FreeValue(ctx, is_port);
-            JS_FreeValue(ctx, item);
-        }
-    }
     JS_SetPropertyStr(ctx, ev, "ports", ports);
-    JS_FreeValue(ctx, transfer);
 
     JSValueConst job_args[2] = { target, ev };
     ns_js_queue_message_task(ctx, ns_window_post_message_deliver_job, 2, job_args);
@@ -13853,13 +14033,24 @@ ns_sc_clone(ns_sc *s, JSValueConst v)
 }
 
 static JSValue
-ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transferred_in_place)
+ns_sc_run(JSContext *ctx, JSValueConst value, GPtrArray *transferred_in_place,
+          JSValueConst seed_from, JSValueConst seed_to)
 {
     ns_sc s;
     s.ctx = ctx;
     s.memo = g_array_new(FALSE, FALSE, sizeof(ns_sc_pair));
     s.transferred_in_place = transferred_in_place;
     s.depth = 0;
+    uint32_t seeds = JS_IsArray(seed_from) && JS_IsArray(seed_to)
+        ? ns_js_array_length(ctx, seed_from) : 0;
+    for (uint32_t i = 0; i < seeds; i++) {
+        JSValue from = JS_GetPropertyUint32(ctx, seed_from, i);
+        JSValue to = JS_GetPropertyUint32(ctx, seed_to, i);
+        if (JS_IsObject(from) && JS_IsObject(to))
+            ns_sc_memo_put(&s, JS_VALUE_GET_PTR(from), to);
+        JS_FreeValue(ctx, from);
+        JS_FreeValue(ctx, to);
+    }
     JSValue g = JS_GetGlobalObject(ctx);
     s.date_ctor     = JS_GetPropertyStr(ctx, g, "Date");
     s.regexp_ctor   = JS_GetPropertyStr(ctx, g, "RegExp");
@@ -13904,25 +14095,9 @@ ns_sc_transferred_in_place(JSContext *ctx, JSValueConst v)
 }
 
 static JSValue
-ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
-                           int argc, JSValueConst *argv)
+ns_structured_clone_transfer(JSContext *ctx, JSValueConst value, JSValue transfer,
+                             JSValueConst seed_from, JSValueConst seed_to)
 {
-    (void)this_val;
-    if (argc < 1)
-        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
-    JSValue transfer = JS_UNDEFINED;
-    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
-        if (!JS_IsObject(argv[1]))
-            return JS_ThrowTypeError(ctx,
-                "structuredClone: options is not an object");
-        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
-        if (JS_IsException(transfer)) return transfer;
-        if (!JS_IsUndefined(transfer) && !JS_IsArray(transfer)) {
-            JS_FreeValue(ctx, transfer);
-            return JS_ThrowTypeError(ctx,
-                "structuredClone: transfer is not a sequence");
-        }
-    }
     uint32_t len = JS_IsArray(transfer) ? ns_js_array_length(ctx, transfer) : 0;
     GPtrArray *in_place = g_ptr_array_new();
     GPtrArray *seen = g_ptr_array_new();
@@ -13954,7 +14129,7 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, transfer);
     if (JS_IsUndefined(res)) {
-        res = ns_sc_run(ctx, argv[0], in_place);
+        res = ns_sc_run(ctx, value, in_place, seed_from, seed_to);
         if (!JS_IsException(res))
             for (guint i = 0; i < buffers->len; i++)
                 JS_DetachArrayBuffer(ctx, g_array_index(buffers, JSValue, i));
@@ -13964,6 +14139,40 @@ ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
     g_array_free(buffers, TRUE);
     g_ptr_array_free(seen, TRUE);
     g_ptr_array_free(in_place, TRUE);
+    return res;
+}
+
+static JSValue
+ns_window_structured_clone(JSContext *ctx, JSValueConst this_val,
+                           int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "structuredClone requires at least 1 argument");
+    JSValue transfer = JS_UNDEFINED;
+    if (argc >= 2 && !JS_IsUndefined(argv[1]) && !JS_IsNull(argv[1])) {
+        if (!JS_IsObject(argv[1]))
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: options is not an object");
+        transfer = JS_GetPropertyStr(ctx, argv[1], "transfer");
+        if (JS_IsException(transfer)) return transfer;
+        if (!JS_IsUndefined(transfer) && !JS_IsArray(transfer)) {
+            JS_FreeValue(ctx, transfer);
+            return JS_ThrowTypeError(ctx,
+                "structuredClone: transfer is not a sequence");
+        }
+    }
+    JSValue old_ports, ports;
+    if (ns_port_transfer_prepare(ctx, transfer, JS_UNDEFINED, ctx,
+                                 &old_ports, &ports) < 0) {
+        JS_FreeValue(ctx, transfer);
+        return JS_EXCEPTION;
+    }
+    JSValue res = ns_structured_clone_transfer(ctx, argv[0], transfer,
+                                               old_ports, ports);
+    if (!JS_IsException(res)) ns_port_transfer_commit(ctx, old_ports, ports);
+    JS_FreeValue(ctx, old_ports);
+    JS_FreeValue(ctx, ports);
     return res;
 }
 
