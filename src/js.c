@@ -381,6 +381,7 @@ static void ns_js_link_interfaces(JSContext *ctx);
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
+static void ns_target_report_exception(ns_js *js, JSContext *ctx, const char *type);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
                                         int argc, JSValueConst *argv);
 static ns_node *ns_iframe_document_node(const ns_node *iframe);
@@ -12096,6 +12097,96 @@ ns_freeze_array(JSContext *ctx, JSValueConst array)
     return frozen;
 }
 
+typedef struct {
+    JSContext *ctx;
+    ns_node   *doc;
+    ns_node   *frame;
+    char      *url;
+    gboolean   active;
+} ns_realm_scope;
+
+static void
+ns_js_realm_scope_enter(ns_js *js, JSContext *realm, ns_realm_scope *scope)
+{
+    scope->active = FALSE;
+    if (!js || !realm || !js->frame_contexts) return;
+    ns_node *frame = NULL;
+    GHashTableIter it;
+    gpointer key, value;
+    g_hash_table_iter_init(&it, js->frame_contexts);
+    while (g_hash_table_iter_next(&it, &key, &value))
+        if (value == realm) {
+            frame = key;
+            break;
+        }
+    if (!frame) return;
+    scope->ctx = js->ctx;
+    scope->doc = js->current_doc;
+    scope->frame = js->raf_frame_ctx;
+    scope->url = js->current_url;
+    scope->active = TRUE;
+    js->ctx = realm;
+    ns_node *frame_doc = ns_iframe_document_node(frame);
+    if (frame_doc) js->current_doc = frame_doc;
+    js->raf_frame_ctx = frame;
+    const char *frame_url = ns_element_get_attr(frame, "data-nd-frame-url");
+    js->current_url = g_strdup(frame_url ? frame_url : "");
+}
+
+static void
+ns_js_realm_scope_leave(ns_js *js, ns_realm_scope *scope)
+{
+    if (!scope->active) return;
+    g_free(js->current_url);
+    js->current_url = scope->url;
+    js->raf_frame_ctx = scope->frame;
+    js->current_doc = scope->doc;
+    js->ctx = scope->ctx;
+}
+
+static JSValue
+ns_port_listener_fn(JSContext *ctx, JSValueConst cb)
+{
+    if (JS_IsFunction(ctx, cb)) return JS_DupValue(ctx, cb);
+    if (JS_IsObject(cb)) return JS_GetPropertyStr(ctx, cb, "handleEvent");
+    return JS_UNDEFINED;
+}
+
+static JSContext *
+ns_port_receiving_realm(JSContext *ctx, JSValueConst port)
+{
+    JSValue handler = JS_GetPropertyStr(ctx, port, "onmessage");
+    if (!JS_IsFunction(ctx, handler)) {
+        JS_FreeValue(ctx, handler);
+        handler = JS_UNDEFINED;
+        JSValue ls = JS_GetPropertyStr(ctx, port, "_listeners");
+        uint32_t len = JS_IsArray(ls) ? ns_js_array_length(ctx, ls) : 0;
+        for (uint32_t i = 0; i < len && !JS_IsFunction(ctx, handler); i++) {
+            JSValue entry = JS_GetPropertyUint32(ctx, ls, i);
+            JSValue type_v = JS_GetPropertyStr(ctx, entry, "type");
+            const char *ts = JS_ToCString(ctx, type_v);
+            if (ts && strcmp(ts, "message") == 0) {
+                JSValue cb = JS_GetPropertyStr(ctx, entry, "cb");
+                JS_FreeValue(ctx, handler);
+                handler = ns_port_listener_fn(ctx, cb);
+                JS_FreeValue(ctx, cb);
+            }
+            if (ts) JS_FreeCString(ctx, ts);
+            JS_FreeValue(ctx, type_v);
+            JS_FreeValue(ctx, entry);
+        }
+        JS_FreeValue(ctx, ls);
+    }
+    JSContext *realm = JS_IsFunction(ctx, handler)
+        ? JS_GetFunctionRealm(ctx, handler) : ctx;
+    JS_FreeValue(ctx, handler);
+    if (!realm) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+        realm = ctx;
+    }
+    return realm;
+}
+
 static JSValue
 ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
 {
@@ -12107,30 +12198,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     gboolean is_closed = JS_ToBool(ctx, closed);
     JS_FreeValue(ctx, closed);
     if (is_closed) return JS_UNDEFINED;
-    JSContext *realm = ctx;
-    {
-        JSValue handler = JS_GetPropertyStr(ctx, port, "onmessage");
-        if (!JS_IsFunction(ctx, handler)) {
-            JS_FreeValue(ctx, handler);
-            handler = JS_UNDEFINED;
-            JSValue ls = JS_GetPropertyStr(ctx, port, "_listeners");
-            if (JS_IsArray(ls) && ns_js_array_length(ctx, ls) > 0) {
-                JSValue first = JS_GetPropertyUint32(ctx, ls, 0);
-                if (JS_IsFunction(ctx, first)) handler = JS_DupValue(ctx, first);
-                else if (JS_IsObject(first)) {
-                    handler = JS_GetPropertyStr(ctx, first, "fn");
-                    if (!JS_IsFunction(ctx, handler)) {
-                        JS_FreeValue(ctx, handler);
-                        handler = JS_GetPropertyStr(ctx, first, "listener");
-                    }
-                }
-                JS_FreeValue(ctx, first);
-            }
-            JS_FreeValue(ctx, ls);
-        }
-        if (JS_IsFunction(ctx, handler)) realm = JS_GetFunctionRealm(ctx, handler);
-        JS_FreeValue(ctx, handler);
-    }
+    JSContext *realm = ns_port_receiving_realm(ctx, port);
     JSValue data = JS_DupValue(ctx, data_in);
     if (realm && realm != ctx && JS_IsObject(data)) {
         JSValue ports_in = argc >= 3 ? JS_DupValue(ctx, argv[2]) : JS_UNDEFINED;
@@ -12148,7 +12216,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JSValue port_origin = JS_GetPropertyStr(ctx, port, "_origin");
     const char *po = JS_IsString(port_origin) ? JS_ToCString(ctx, port_origin)
                                               : NULL;
-    JSValue ev = JS_NewObject(ctx);
+    JSValue ev = JS_NewObject(realm);
     JS_SetPropertyStr(ctx, ev, "type",             JS_NewString(ctx, "message"));
     JS_SetPropertyStr(ctx, ev, "data",             JS_DupValue(ctx, data));
     JS_SetPropertyStr(ctx, ev, "origin",           JS_NewString(ctx, po ? po : ""));
@@ -12156,9 +12224,14 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_FreeValue(ctx, port_origin);
     JS_SetPropertyStr(ctx, ev, "lastEventId",      JS_NewString(ctx, ""));
     JS_SetPropertyStr(ctx, ev, "source",           JS_NULL);
-    JSValue event_ports = argc >= 3 && JS_IsArray(argv[2])
-        ? JS_DupValue(ctx, argv[2]) : JS_NewArray(ctx);
-    JSValue frozen_ports = ns_freeze_array(ctx, event_ports);
+    JSValue event_ports = JS_NewArray(realm);
+    if (argc >= 3 && JS_IsArray(argv[2])) {
+        uint32_t n = ns_js_array_length(ctx, argv[2]);
+        for (uint32_t i = 0; i < n; i++)
+            JS_SetPropertyUint32(realm, event_ports, i,
+                                 JS_GetPropertyUint32(ctx, argv[2], i));
+    }
+    JSValue frozen_ports = ns_freeze_array(realm, event_ports);
     JS_FreeValue(ctx, event_ports);
     JS_SetPropertyStr(ctx, ev, "ports", frozen_ports);
     JS_SetPropertyStr(ctx, ev, "target",           JS_DupValue(ctx, port));
@@ -12169,34 +12242,21 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     JS_SetPropertyStr(ctx, ev, "cancelable",       JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "composed",         JS_FALSE);
     JS_SetPropertyStr(ctx, ev, "_is_trusted",      JS_TRUE);
-    ns_event_define_cancel_bubble(ctx, ev);
+    ns_event_define_cancel_bubble(realm, ev);
 
     ns_js *js = js_from_ctx(ctx);
     ns_budget_guard bg = {0};
     ns_js_budget_push(js, &bg);
+    ns_realm_scope scope;
+    ns_js_realm_scope_enter(js, realm, &scope);
 
     JSValue onmessage = JS_GetPropertyStr(ctx, port, "onmessage");
     if (JS_IsFunction(ctx, onmessage)) {
         JSValueConst args[1] = { ev };
-        JSValue r = JS_Call(ctx, onmessage, port, 1, args);
-        if (JS_IsException(r)) {
-            JSValue exc = JS_GetException(ctx);
-            const char *msg = JS_ToCString(ctx, exc);
-            JSValue stk = JS_GetPropertyStr(ctx, exc, "stack");
-            const char *stack = JS_ToCString(ctx, stk);
-            if (msg && js && js->log_cb) {
-                char *line = g_strdup_printf("JS error in MessagePort onmessage: %s%s%s",
-                                             msg, stack && *stack ? "\n" : "",
-                                             stack ? stack : "");
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-            }
-            if (stack) JS_FreeCString(ctx, stack);
-            JS_FreeValue(ctx, stk);
-            if (msg) JS_FreeCString(ctx, msg);
-            JS_FreeValue(ctx, exc);
-        }
+        JSValue r = JS_Call(realm, onmessage, port, 1, args);
+        if (JS_IsException(r)) ns_target_report_exception(js, realm, "message");
         JS_FreeValue(ctx, r);
+        if (js && js->callback_depth == 0) ns_drain_microtasks(js);
     }
     JS_FreeValue(ctx, onmessage);
 
@@ -12225,15 +12285,20 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
                     any_dead = TRUE;
                 }
                 JSValue cb = JS_GetPropertyStr(ctx, entry, "cb");
-                if (!skip && JS_IsFunction(ctx, cb)) {
+                JSValue fn = skip ? JS_UNDEFINED : ns_port_listener_fn(ctx, cb);
+                if (JS_IsFunction(ctx, fn)) {
                     JSValueConst args[1] = { ev };
-                    JSValue r = JS_Call(ctx, cb, port, 1, args);
-                    if (JS_IsException(r)) {
-                        JSValue exc = JS_GetException(ctx);
-                        JS_FreeValue(ctx, exc);
-                    }
+                    JSValue r = JS_Call(realm, fn,
+                                        JS_IsFunction(ctx, cb) ? port : cb,
+                                        1, args);
+                    if (JS_IsException(r))
+                        ns_target_report_exception(js, realm, "message");
                     JS_FreeValue(ctx, r);
+                    if (js && js->callback_depth == 0) ns_drain_microtasks(js);
+                } else if (JS_IsException(fn)) {
+                    ns_target_report_exception(js, realm, "message");
                 }
+                JS_FreeValue(ctx, fn);
                 JS_FreeValue(ctx, cb);
             }
             if (ts) JS_FreeCString(ctx, ts);
@@ -12244,6 +12309,7 @@ ns_port_deliver_job(JSContext *ctx, int argc, JSValueConst *argv)
     }
     JS_FreeValue(ctx, listeners);
 
+    ns_js_realm_scope_leave(js, &scope);
     ns_js_budget_pop(js, &bg);
 
     JS_FreeValue(ctx, ev);
@@ -12438,7 +12504,7 @@ static JSValue
 ns_port_add_event_listener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    if (argc < 2 || !JS_IsFunction(ctx, argv[1])) return JS_UNDEFINED;
+    if (argc < 2 || !JS_IsObject(argv[1])) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
     gboolean capture = FALSE, once = FALSE;
@@ -27830,15 +27896,7 @@ ns_fire_window_property_handlers(ns_js *js, const ns_node *target,
         JSValue ret = ns_call_on_handler(js, handler, global, type, event,
                                          TRUE, &special);
         if (JS_IsException(ret)) {
-            JSValue ex = JS_GetException(ctx);
-            const char *m = JS_ToCString(ctx, ex);
-            if (m && js->log_cb) {
-                char *line = g_strdup_printf("JS error in on%s: %s", type, m);
-                js->log_cb(line, js->log_user_data);
-                g_free(line);
-            }
-            if (m) JS_FreeCString(ctx, m);
-            JS_FreeValue(ctx, ex);
+            ns_target_report_exception(js, ctx, type);
         } else if (!special && JS_IsBool(ret) && !JS_ToBool(ctx, ret)) {
             ns_event_mark_default_prevented(ctx, event);
         }
