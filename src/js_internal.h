@@ -159,6 +159,9 @@ struct ns_js {
     /* The innermost focus change in progress (ns_focus_guard in js.c); the
      * node-free hook clears freed nodes from every one. */
     gpointer       focus_guard;
+    /* The innermost parser-blocking script run's held-back nodes
+     * (ns_parser_hold in js.c); the node-free hook clears freed ones. */
+    gpointer       parser_hold;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *focus_nav_start;
