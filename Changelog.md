@@ -82,6 +82,16 @@ Changelog:
   use a comma, such as Turkish or Norwegian. `--single-process` runs the
   engine inside the GTK shell, whose startup applies the OS locale, so
   `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
+* `window.postMessage(message, [port])` with an array as the second
+  argument follows the `(message, options)` overload, as WebIDL overload
+  resolution requires: the array is read as an options dictionary, so
+  nothing is transferred. It was taken as a transfer list, so a library
+  that posts `postMessage(token, [channel.port2])` from code shared with
+  workers handed its own port to every `message` listener on the page,
+  and a listener waiting for a port from another frame accepted that one
+  instead. Any second argument that is neither an object nor
+  `undefined`/`null` is the target origin, and `postMessage()` with no
+  arguments throws `TypeError`.
 * The Android app builds with the current toolchain: Android Gradle
   plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
   (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX
