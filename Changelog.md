@@ -3,6 +3,14 @@ Changelog:
 
 1.0.27:
 ======
+* Transferring a `MessagePort` moves it: the receiver gets a new port
+  object, references to the port inside the message point to that new
+  port, and the sender's port stops sending and receiving. Messages
+  already queued for the port go with it. Transferring a port twice,
+  transferring the port that sends the message, or listing a port twice
+  throws `DataCloneError`, and a message that fails to clone leaves its
+  ports in place. `window.postMessage` transfers its ports even when the
+  target origin does not match, as in other browsers.
 * A frame's document no longer shows through its iframe element:
   `textContent`, `innerHTML`, `outerHTML`, `getHTML()`, `XMLSerializer`,
   `TreeWalker`, `hasChildNodes()` and `cloneNode(true)` treat the iframe as
