@@ -156,6 +156,9 @@ struct ns_js {
     const ns_node *focused_node;
     /* The document that has focus; NULL means the top-level document. */
     const ns_node *focused_doc;
+    /* The innermost focus change in progress (ns_focus_guard in js.c); the
+     * node-free hook clears freed nodes from every one. */
+    gpointer       focus_guard;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *focus_nav_start;

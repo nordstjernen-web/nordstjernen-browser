@@ -330,6 +330,7 @@ static JSValue ns_nodelist_finalize(JSContext *ctx, JSValue nl, uint32_t len);
 static JSValue ns_element_set_textContent(JSContext *ctx, JSValueConst this_val, JSValueConst val);
 static const ns_node *ns_node_ancestor_or_self(const ns_node *desc, const ns_node *root);
 static gboolean ns_node_is_shadow_root(const ns_node *n);
+static void ns_focus_guard_forget(ns_js *js, const ns_node *n);
 static void ns_insert_sibling_before(ns_node *ref, ns_node *newc);
 static JSValue ns_element_getElementById(JSContext *ctx, JSValueConst this_val,
                                           int argc, JSValueConst *argv);
@@ -3604,6 +3605,7 @@ ns_invalidate_wrapper(ns_node *n)
     if (js && js->focus_nav_start == n) js->focus_nav_start = NULL;
     if (js && js->focused_node == n) js->focused_node = NULL;
     if (js && js->focused_doc == n) js->focused_doc = NULL;
+    if (js) ns_focus_guard_forget(js, n);
     if (js && js->frame_urls) g_hash_table_remove(js->frame_urls, n);
     if (js && js->frame_referrers) g_hash_table_remove(js->frame_referrers, n);
     ns_popover_forget_node(js, n);
@@ -29327,7 +29329,7 @@ ns_event_type_init_flags(const char *type, gboolean at_document,
 {
     static const char *const plain[] = {
         "abort", "error", "load", "unload", "readystatechange", "resize",
-        "focus", "blur", "toggle", "close", "cancel",
+        "focus", "blur", "toggle", "close",
         "loadstart", "progress", "suspend", "emptied", "stalled",
         "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
         "playing", "waiting", "seeking", "seeked", "ended",
@@ -29348,7 +29350,7 @@ ns_event_type_init_flags(const char *type, gboolean at_document,
         *cancelable = FALSE;
         return;
     }
-    if (strcmp(type, "invalid") == 0) {
+    if (strcmp(type, "invalid") == 0 || strcmp(type, "cancel") == 0) {
         *bubbles = FALSE;
         return;
     }
@@ -39163,6 +39165,19 @@ ns_js_note_pointer_input(ns_js *js, gboolean pointer)
     if (js) js->pointer_input = pointer;
 }
 
+typedef struct ns_focus_guard {
+    const ns_node *node[4];     /* old element, new element, old and new document */
+    struct ns_focus_guard *prev;
+} ns_focus_guard;
+
+static void
+ns_focus_guard_forget(ns_js *js, const ns_node *n)
+{
+    for (ns_focus_guard *g = js->focus_guard; g; g = g->prev)
+        for (gsize i = 0; i < G_N_ELEMENTS(g->node); i++)
+            if (g->node[i] == n) g->node[i] = NULL;
+}
+
 static ns_node *
 ns_node_owner_doc(const ns_node *n)
 {
@@ -39232,29 +39247,44 @@ ns_js_set_focus_in(ns_js *js, const ns_node *el, ns_node *doc)
     if (js->focused_node == el && new_doc == old_doc) return;
     const ns_node *old = js->focused_node;
     gboolean same_doc = new_doc == old_doc;
+
+    /* Handlers run between the steps below and may free any of these
+     * nodes; the free hook clears them and the update stops. */
+    ns_focus_guard g = { { old, el, old_doc, new_doc }, js->focus_guard };
+    for (gsize i = 0; i < G_N_ELEMENTS(g.node); i++)
+        if (g.node[i]) ns_node_arm_js_invalidate((ns_node *)g.node[i]);
+    js->focus_guard = &g;
+
     js->focused_node = NULL;
     ns_js_update_focus_visible(js);
     js->mutated = TRUE;
     if (old) {
         ns_js_dispatch_focus_event(js, old, "blur", same_doc ? el : NULL);
-        ns_js_dispatch_focus_event(js, old, "focusout", same_doc ? el : NULL);
-        if (js->focused_node) return;
+        if (g.node[0])
+            ns_js_dispatch_focus_event(js, old, "focusout",
+                                       same_doc ? el : NULL);
+        if (js->focused_node) goto out;
     }
     if (!same_doc) {
         /* The windows hear about the move after the focused document has
          * changed, so the old window's blur already sees it. */
+        if (!g.node[3]) goto out;
         js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
-        ns_js_fire_window_focus_event(js, old_doc, "blur");
+        if (g.node[2]) ns_js_fire_window_focus_event(js, old_doc, "blur");
+        if (js->focused_node || !g.node[3]) goto out;
         ns_js_fire_window_focus_event(js, new_doc, "focus");
-        if (js->focused_node) return;
+        if (js->focused_node) goto out;
     }
-    if (!el) return;
+    if (!el || !g.node[1]) goto out;
     js->focused_node = el;
     js->focused_doc = new_doc && new_doc->parent ? new_doc : NULL;
     ns_js_update_focus_visible(js);
     js->focus_nav_start = NULL;
     ns_js_dispatch_focus_event(js, el, "focus", same_doc ? old : NULL);
-    ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+    if (g.node[1])
+        ns_js_dispatch_focus_event(js, el, "focusin", same_doc ? old : NULL);
+out:
+    js->focus_guard = g.prev;
 }
 
 void
