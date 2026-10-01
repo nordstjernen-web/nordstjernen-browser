@@ -28633,6 +28633,19 @@ ns_js_has_pending_work(const ns_js *js)
     return FALSE;
 }
 
+gboolean
+ns_js_needs_tick(const ns_js *js)
+{
+    if (!js) return FALSE;
+    if (ns_js_has_pending_work(js)) return TRUE;
+    if (js->timers && g_hash_table_size(js->timers) > 0) return TRUE;
+    if (js->message_tasks && !g_queue_is_empty(js->message_tasks))
+        return TRUE;
+    if (js->js_image_loads && g_hash_table_size(js->js_image_loads) > 0)
+        return TRUE;
+    return FALSE;
+}
+
 const char *
 ns_js_engine_version(void)
 {
