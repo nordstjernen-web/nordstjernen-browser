@@ -19,7 +19,7 @@ An existing build directory switches with
 | How it gets into the build | always in the tree | fetched at configure time by `subprojects/quickjs.wrap`, never vendored |
 | Version | quickjs-ng 0.16.2 plus the browser hooks | release 2026-06-04, pinned by commit, plus one sort patch |
 | About page | `QuickJS 0.16.2` | `QuickJS 2026-06-04` |
-| CI | every workflow | `.github/workflows/quickjs.yml` |
+| CI | every workflow | none; build it locally (see below) |
 
 Both builds carry the same Web API surface. The whole binding — `src/js.c`
 and its satellites — is written against the quickjs-ng API; the original
