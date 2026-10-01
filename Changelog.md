@@ -13,9 +13,7 @@ Changelog:
   access into another frame's window, a view taken on an imported
   WebAssembly memory before instantiation, and the fork's language
   compatibility changes (`RegExp.$1`, `Function.prototype.caller`) behave
-  as stock QuickJS does; `docs/quickjs.md` lists the differences. A new CI
-  workflow builds that configuration with `--werror` and runs the
-  headless smoke.
+  as stock QuickJS does; `docs/quickjs.md` lists the differences.
 * A module script that imports other modules runs again after the page
   has created an event, posted a message, opened IndexedDB or fetched
   something. Native code that built those objects assigned `isTrusted`

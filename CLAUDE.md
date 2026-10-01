@@ -176,8 +176,8 @@ See `docs/quickjs.md`.
   and add whatever fails to compile to `src/ns_quickjs.c`. Only the fork's own
   hooks with no equivalent (the receiver-aware `get_own_property_receiver`)
   are guarded in place.
-- `.github/workflows/quickjs.yml` builds it with `--werror` and runs the
-  headless smoke.
+- CI does not build it: build both configurations locally after binding
+  changes (`docs/quickjs.md`, "Checking a change").
 
 ### Text layout: ns-pango
 
