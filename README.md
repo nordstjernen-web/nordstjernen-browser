@@ -66,7 +66,9 @@ DirectComposition). Every other platform builds from source — see
   routing. The engine binding is a build-time seam: an experimental **V8
   backend** (`-Djs_engine=v8`, external V8 monolith, never vendored) runs page
   scripts with live core DOM bindings while QuickJS stays the default — see
-  [docs/V8.md](docs/V8.md).
+  [docs/V8.md](docs/V8.md). The QuickJS itself is selectable too: the in-tree
+  quickjs-ng fork by default, or Fabrice Bellard's original QuickJS with
+  `-Dquickjs=quickjs` — see [docs/quickjs.md](docs/quickjs.md).
 - **Networking** over HTTP/2 with libcurl — HTTP/3 when the linked libcurl
   provides it — HSTS, CSP, subresource-integrity checks, partitioned cookies,
   speculative subresource loading, request coalescing and a `Vary`-aware HTTP
@@ -170,8 +172,10 @@ PDF), libavif (AVIF images), Enchant (spell checking), fontconfig / pangoft2
 in-tree HTTP/2 backend), [ngtcp2](https://github.com/ngtcp2/ngtcp2) +
 [nghttp3](https://github.com/ngtcp2/nghttp3) + GnuTLS (HTTP/3 over QUIC inside
 it), [wgpu-native](https://github.com/gfx-rs/wgpu-native) (experimental
-WebGPU) and a [V8](https://v8.dev/) monolith (experimental
-`-Djs_engine=v8`).
+WebGPU), a [V8](https://v8.dev/) monolith (experimental
+`-Djs_engine=v8`) and Fabrice Bellard's original
+[QuickJS](https://github.com/bellard/quickjs) (`-Dquickjs=quickjs`, fetched
+through a meson wrap).
 
 ## License
 

@@ -3,6 +3,110 @@ Changelog:
 
 1.0.27:
 ======
+* Message ports work across frames: a frame that receives a transferred
+  `MessagePort` gets its message events, `data` and `ports` in its own
+  realm, so arrays, dates and objects pass `instanceof` checks there,
+  `addEventListener` on a port accepts `{handleEvent}` objects, and the
+  handlers run against the frame's document. Exceptions thrown by port
+  handlers and by window `on<event>` handlers now reach `onerror` and
+  `error` listeners instead of being dropped.
+* Events inside a frame reach that frame's window: window listeners and
+  `window.onclick`-style handlers see clicks, pointer and key events,
+  `DOMContentLoaded` and bubbling custom events, and a frame's `load`
+  event fires once with the document as its target.
+* When the browser dispatches an event, such as a user click or a port
+  message, microtasks queued by one listener run before the next
+  listener, as in other browsers.
+* The window keeps being ticked while a `requestIdleCallback`, a posted
+  message or a script-started image load is waiting, so they no longer
+  stall until an unrelated timer fires.
+* `window.postMessage` throws `SyntaxError` for an unparseable target
+  origin and defaults to `"/"` when none is given; messages to and from a
+  frame sandboxed without `allow-same-origin` use the opaque origin
+  `"null"`; message events target the receiving window and carry a
+  frozen `ports` array from the receiving realm.
+* Aliased built-ins keep their spec names (`String.prototype.trimLeft`
+  is the function named `trimStart`), and `Function.prototype.name` is
+  empty again.
+* `postMessage` and `MessagePort` messages are delivered as tasks, after
+  the sender's microtasks, as in other browsers. They ran as microtasks,
+  so a message arrived before promise callbacks queued ahead of it, and a
+  handler that posted back to itself kept `setTimeout` callbacks from
+  ever running.
+* A frame's `WindowProxy` stays the same object across its first
+  navigation. A `contentWindow` read while an iframe still showed its
+  initial `about:blank` now reaches the document that loads into it:
+  same-origin frames reuse the initial window, as the HTML spec
+  requires, and messages posted through the early reference to a
+  cross-origin frame are delivered. The link between a frame's outer
+  window and its realm global moved out of JavaScript-visible properties,
+  which had let a cross-origin frame reach its embedder's window.
+* Structured data sent between windows, frames and `MessageChannel`
+  ports arrives as objects of the receiving realm: `e.data instanceof
+  Uint8Array`, `Map`, `Date`, `Array` and `Object` hold in the receiver,
+  as in other browsers. Messages crossing a frame boundary carried the
+  sender's objects, and on ports `Map`, `Set`, `Date`, `RegExp`,
+  `DataView` and boxed primitives degraded to plain objects.
+* Frames have their own document lifecycle and geometry. Each frame's
+  `document.readyState` runs `loading` -> `interactive` -> `complete`
+  with `readystatechange` at each step, instead of reporting the top
+  page's state (usually already `complete`). `innerWidth`/`innerHeight`
+  in a frame are the frame's size, not the top window's, element rects
+  are measured from the frame's content box rather than its border box,
+  and `document.elementFromPoint` in a frame hit-tests that frame.
+* A message from a cross-origin frame has the frame's WindowProxy as
+  `event.source`, the same object as `iframe.contentWindow` and
+  `frames[i]`, so pages can tell which frame spoke. It was a different
+  wrapper, so `e.source === iframe.contentWindow` was false.
+* A `Response` or `Request` built from a string keeps that string as its
+  body. `new Response('{"a":1}').json()` rejected with a `SyntaxError`
+  because `text()` saw an empty body, and `fetch(new Request(url,
+  {method: 'POST', body: 'x'}))` sent nothing.
+* Rounded solid borders whose sides differ in color, or have some sides
+  transparent, follow the corner radius. Each side was stroked as a
+  straight line, so a `border-radius` ring with two transparent sides,
+  such as the reCAPTCHA checkbox spinner, drew as a right angle.
+* Events carry the interface their type implies: messages from windows,
+  `MessageChannel` ports and workers are `MessageEvent`s, and `error`,
+  `hashchange`, `popstate`, `storage`, `pageshow`/`pagehide` and promise
+  rejection events get their own interfaces. Port messages were plain
+  objects. `isTrusted` lives on each event, not on `Event.prototype`, so
+  objects deriving from `Event.prototype` can define their own, as in
+  other browsers. Assigning to a getter-only property now names it in
+  the `TypeError`.
+* Page scripts enumerating the global object (`Object.keys(window)`,
+  `Object.getOwnPropertyNames`, `for...in`) no longer see the engine's
+  own `__nd`/`__ns`/`__js` helper properties, which no other browser
+  exposes. The engine's own code still reaches them by name.
+* Objects the engine hands to pages inherit from their WebIDL interface
+  and report its name: `new FileReader() instanceof FileReader`,
+  `Object.prototype.toString.call(localStorage)` is `[object Storage]`,
+  and canvas contexts, `TextMetrics`, `ImageData`, `MediaQueryList`,
+  `FontFaceSet`, `location`, `screen` and the `navigator` sub-objects
+  follow suit. `Location`, `Screen`, `BarProp`, `CustomElementRegistry`
+  and the other interfaces these belong to now exist as globals.
+* Functions the engine implements in JavaScript print as native code,
+  `function animate() { [native code] }`, like every other built-in.
+  434 of them printed their JavaScript source and many carried internal
+  names (`elementAnimate`, `value`), which no browser does. Page scripts,
+  inline handlers and `new Function` keep their source.
+* Inside a frame, `window`, `location` and `history` report themselves
+  as `[object Window]`, `[object Location]` and `[object History]`, and
+  `history instanceof History` holds, as on the top-level page. The
+  frame's global still carried QuickJS's `global` tag.
+* A worker's `navigator` matches the page's: `appVersion` follows the
+  user agent instead of a fixed Linux string, and `platform`, `product`
+  and `deviceMemory` are present. `performance.getEntries*` return empty
+  lists in workers instead of throwing. A frame's document has `domain`,
+  `timeline`, `pictureInPictureEnabled`, `adoptedStyleSheets`,
+  `xmlEncoding` and `xmlStandalone` like the top-level document.
+* Dedicated workers have `Intl` and `crossOriginIsolated`. A worker that
+  read its time zone or formatted a number threw `ReferenceError`, and
+  since worker errors do not reach the page, the page waited forever.
+* Numbers the engine formats keep a `.` decimal point under locales that
+  use a comma, such as Turkish or Norwegian. `--single-process` runs the
+  engine inside the GTK shell, whose startup applies the OS locale, so
+  `Accept-Language` went out as `tr-TR,tr;q=0,9`, an invalid header.
 * `window.postMessage(message, [port])` with an array as the second
   argument follows the `(message, options)` overload, as WebIDL overload
   resolution requires: the array is read as an options dictionary, so
@@ -13,6 +117,52 @@ Changelog:
   instead. Any second argument that is neither an object nor
   `undefined`/`null` is the target origin, and `postMessage()` with no
   arguments throws `TypeError`.
+* The Android app builds with the current toolchain: Android Gradle
+  plugin 9.4 with its built-in Kotlin, Gradle 9.8, compileSdk 37
+  (Android 17) with build-tools 37, CMake 4.1.2 and the current AndroidX
+  libraries. targetSdk stays 36. Native libraries are still stored
+  compressed and extracted at install, now requested from the build script
+  (packaging.jniLibs.useLegacyPackaging) because AGP 9 rejects
+  android:extractNativeLibs in the manifest.
+* Nordstjernen can run on Fabrice Bellard's original QuickJS as well as the
+  in-tree quickjs-ng fork, chosen in meson with `-Dquickjs=quickjs` or
+  `-Dquickjs=quickjs-ng` (the default). The original engine is fetched at
+  configure time through `subprojects/quickjs.wrap`, pinned to its
+  2026-06-04 release, and is never vendored. The same binding runs on both:
+  `src/ns_quickjs.h` maps the quickjs-ng API onto the original's, and the
+  original keeps its own bytecode cache. On the original engine, named
+  access into another frame's window, a view taken on an imported
+  WebAssembly memory before instantiation, and the fork's language
+  compatibility changes (`RegExp.$1`, `Function.prototype.caller`) behave
+  as stock QuickJS does; `docs/quickjs.md` lists the differences.
+* A module script that imports other modules runs again after the page
+  has created an event, posted a message, opened IndexedDB or fetched
+  something. Native code that built those objects assigned `isTrusted`
+  over the read-only accessor on `Event.prototype`, and a fetched
+  response's `body` over the read-only `Response.prototype.body`, ignoring
+  the failure; quickjs-ng kept the error pending and reported it from the
+  next module evaluation as `TypeError: no setter for property`, so the
+  whole module was lost. Each page load also left two such errors behind
+  from start-up: `Event.prototype` was being made its own prototype, and
+  `new URL()` built its `searchParams` before `URLSearchParams` existed.
+  Trusted events keep `isTrusted` true through the accessor.
+* `new Response(body)` and `new Request(url, { body })` keep a string body
+  again. The constructors assigned it over the read-only
+  `Response.prototype.body` accessor, so the text never reached the body,
+  and `text()`, `json()` and `clone()` returned an empty body,
+  `new Response(null).body` was a stream instead of `null`, and reading
+  the stream failed. The raw body is now defined on the object and
+  replaced by the buffered body once it is read, as the GPL edition does.
+* On the original QuickJS, `Array.prototype.sort` calls the comparator for
+  identical values, as the fork and every other engine do, through one
+  patch applied to the fetched source
+  (`subprojects/packagefiles/quickjs-sort-calls-comparator.patch`).
+  Without it jQuery 4's `uniqueSort` kept duplicates, so `$(a).add(a)` and
+  `.closest()` returned the same element twice. The adapter also pads
+  short argument lists to `JS_NewTypedArray`, whose original constructor
+  reads three arguments whatever `argc` says, gives `JS_EvalThis2` the
+  quickjs-ng default file name when none is passed, and refuses a
+  resizable external `ArrayBuffer` instead of quietly making it fixed.
 * `window[i]` and `frames[i]` return the WindowProxy of the i-th child
   frame, and `window[name]` returns the frame whose `name` attribute
   matches, as the HTML named-access rules specify. Indexed access always
@@ -72,6 +222,17 @@ Changelog:
   example.com page, which no longer carries the "Example Domain"
   heading the test looked for, so every macOS run failed after a
   successful build.
+* YouTube and other MSE players play video again.
+  `SourceBuffer.appendBuffer()` still called a helper that the Blob
+  rewrite removed, so every append threw `ReferenceError` and no media
+  byte reached the decoder: YouTube showed "An error occurred". It now
+  copies the `ArrayBuffer` or view it is given and throws `TypeError`
+  for anything else, before the state checks, as WebIDL requires.
+* `animation` and `transition` set to a CSS-wide keyword (`inherit`,
+  `initial`, `unset`, `revert`, `revert-layer`) give that keyword to
+  every longhand. The shorthand expansion read the keyword as an
+  animation list, which crashed the renderer on pages such as YouTube
+  and made `animation: inherit` compute to `none`.
 
 1.0.26:
 ======

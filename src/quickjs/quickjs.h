@@ -461,6 +461,9 @@ static inline bool JS_VALUE_IS_NAN(JSValue v)
 /* allow top-level await in normal script. JS_Eval() returns a
    promise. Only allowed with JS_EVAL_TYPE_GLOBAL */
 #define JS_EVAL_FLAG_ASYNC (1 << 7)
+/* functions compiled by this eval keep no source text, so
+   Function.prototype.toString reports them as native code */
+#define JS_EVAL_FLAG_HIDE_SOURCE (1 << 8)
 
 typedef JSValue JSCFunction(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
 typedef JSValue JSCFunctionMagic(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic);
@@ -531,6 +534,8 @@ JS_EXTERN void JS_MarkValue(JSRuntime *rt, JSValueConst val,
                             JS_MarkFunc *mark_func);
 JS_EXTERN void JS_RunGC(JSRuntime *rt);
 JS_EXTERN bool JS_IsLiveObject(JSRuntime *rt, JSValueConst obj);
+JS_EXTERN bool JS_IsRunningScript(JSContext *ctx);
+JS_EXTERN JSContext *JS_GetPendingJobRealm(JSRuntime *rt);
 
 JS_EXTERN JSContext *JS_NewContext(JSRuntime *rt);
 JS_EXTERN void JS_FreeContext(JSContext *s);
@@ -975,6 +980,13 @@ JS_EXTERN JSValue JS_NewProxy(JSContext *ctx, JSValueConst target,
 
 JS_EXTERN JSValue JS_NewDate(JSContext *ctx, double epoch_ms);
 JS_EXTERN bool JS_IsDate(JSValueConst v);
+enum {
+    JS_BOXED_NONE, JS_BOXED_NUMBER, JS_BOXED_STRING, JS_BOXED_BOOLEAN,
+    JS_BOXED_BIGINT, JS_BOXED_SYMBOL,
+};
+/* the primitive type an object wraps (new Number(1), Object(1n), ...),
+   whatever realm created it */
+JS_EXTERN int JS_GetBoxedPrimitiveKind(JSValueConst v);
 
 JS_EXTERN JSValue JS_GetProperty(JSContext *ctx, JSValueConst this_obj, JSAtom prop);
 JS_EXTERN JSValue JS_GetPropertyUint32(JSContext *ctx, JSValueConst this_obj,

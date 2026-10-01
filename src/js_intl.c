@@ -1383,9 +1383,8 @@ static const char *
 intl_local_tz_id(void)
 {
     static char *cached;
-    static gboolean tried;
-    if (!tried) {
-        tried = TRUE;
+    static gsize resolved;
+    if (g_once_init_enter(&resolved)) {
 #ifdef _WIN32
         DYNAMIC_TIME_ZONE_INFORMATION info = {0};
         if (GetDynamicTimeZoneInformation(&info) != TIME_ZONE_ID_INVALID) {
@@ -1463,6 +1462,7 @@ intl_local_tz_id(void)
             if (env && *env && strchr(env, '/')) cached = g_strdup(env);
         }
         if (!cached) cached = g_strdup("UTC");
+        g_once_init_leave(&resolved, 1);
     }
     return cached;
 }

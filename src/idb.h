@@ -6,7 +6,7 @@
 #ifndef NS_IDB_H
 #define NS_IDB_H
 
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 void ns_idb_install(JSContext *ctx, JSValueConst global);
 

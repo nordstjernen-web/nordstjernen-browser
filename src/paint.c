@@ -478,6 +478,107 @@ style_has_inline_box_paint(const ns_style *s)
     return FALSE;
 }
 
+static corner_radii
+corner_radii_fit(corner_radii c, double w, double h)
+{
+    double f = 1.0;
+    const double sums[4] = { c.tl + c.tr, c.trv + c.brv, c.br + c.bl, c.tlv + c.blv };
+    const double lens[4] = { w, h, w, h };
+    for (int i = 0; i < 4; i++)
+        if (sums[i] > 0 && lens[i] / sums[i] < f) f = lens[i] / sums[i];
+    if (f < 1.0) {
+        c.tl *= f; c.tr *= f; c.br *= f; c.bl *= f;
+        c.tlv *= f; c.trv *= f; c.brv *= f; c.blv *= f;
+    }
+    return c;
+}
+
+static corner_radii
+corner_radii_inset(corner_radii c, double top, double right, double bottom,
+                   double left)
+{
+    corner_radii in = {
+        MAX(0, c.tl - left), MAX(0, c.tr - right),
+        MAX(0, c.br - right), MAX(0, c.bl - left),
+        MAX(0, c.tlv - top), MAX(0, c.trv - top),
+        MAX(0, c.brv - bottom), MAX(0, c.blv - bottom),
+    };
+    return in;
+}
+
+static gboolean
+border_style_is_solid(const ns_css_value *v)
+{
+    return v && v->kind == NS_CSS_V_KEYWORD && v->u.keyword &&
+           strcmp(v->u.keyword, "solid") == 0;
+}
+
+static void
+border_wedge_apex(const double a0[2], const double a1[2],
+                  const double b0[2], const double b1[2],
+                  double cx, double cy, double *out_x, double *out_y)
+{
+    double dax = a1[0] - a0[0], day = a1[1] - a0[1];
+    double dbx = b1[0] - b0[0], dby = b1[1] - b0[1];
+    double den = dax * dby - day * dbx;
+    if (fabs(den) < 1e-9) {
+        *out_x = cx;
+        *out_y = cy;
+        return;
+    }
+    double t = ((b0[0] - a0[0]) * dby - (b0[1] - a0[1]) * dbx) / den;
+    *out_x = a0[0] + t * dax;
+    *out_y = a0[1] + t * day;
+}
+
+static gboolean
+paint_rounded_mixed_border(cairo_t *cr, const ns_box *b, const ns_style *s,
+                           double x, double y, double w, double h,
+                           corner_radii radii)
+{
+    const double bw[4] = { b->border.top, b->border.right,
+                           b->border.bottom, b->border.left };
+    const int style_props[4] = { NS_CSS_BORDER_TOP_STYLE, NS_CSS_BORDER_RIGHT_STYLE,
+                                 NS_CSS_BORDER_BOTTOM_STYLE, NS_CSS_BORDER_LEFT_STYLE };
+    const int color_props[4] = { NS_CSS_BORDER_TOP_COLOR, NS_CSS_BORDER_RIGHT_COLOR,
+                                 NS_CSS_BORDER_BOTTOM_COLOR, NS_CSS_BORDER_LEFT_COLOR };
+    for (int i = 0; i < 4; i++)
+        if (bw[i] > 0 && !border_style_is_solid(s->values[style_props[i]]))
+            return FALSE;
+    corner_radii outer = corner_radii_fit(radii, w, h);
+    double ix = x + bw[3], iy = y + bw[0];
+    double iw = w - bw[1] - bw[3], ih = h - bw[0] - bw[2];
+    corner_radii inner = corner_radii_inset(outer, bw[0], bw[1], bw[2], bw[3]);
+    const double oc[4][2] = { { x, y }, { x + w, y }, { x + w, y + h }, { x, y + h } };
+    const double ic[4][2] = { { ix, iy }, { ix + iw, iy }, { ix + iw, iy + ih }, { ix, iy + ih } };
+    for (int i = 0; i < 4; i++) {
+        if (bw[i] <= 0) continue;
+        rgba c = rgba_of(s->values[color_props[i]] ? s->values[color_props[i]]
+                                                   : s->values[NS_CSS_COLOR],
+                         0, 0, 0, 1);
+        if (c.a <= 0) continue;
+        cairo_save(cr);
+        cairo_new_path(cr);
+        int a = i, bidx = (i + 1) % 4;
+        double apex_x, apex_y;
+        border_wedge_apex(oc[a], ic[a], oc[bidx], ic[bidx],
+                          x + w / 2.0, y + h / 2.0, &apex_x, &apex_y);
+        cairo_move_to(cr, oc[a][0], oc[a][1]);
+        cairo_line_to(cr, oc[bidx][0], oc[bidx][1]);
+        cairo_line_to(cr, apex_x, apex_y);
+        cairo_close_path(cr);
+        cairo_clip(cr);
+        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+        rounded_rect_path(cr, x, y, w, h, outer);
+        if (iw > 0 && ih > 0)
+            rounded_rect_path(cr, ix, iy, iw, ih, inner);
+        set_source_rgba(cr, c);
+        cairo_fill(cr);
+        cairo_restore(cr);
+    }
+    return TRUE;
+}
+
 static gboolean
 style_uniform_solid_border(const ns_style *s, double *out_w, rgba *out_color)
 {
@@ -1470,6 +1571,9 @@ paint_block(cairo_t *cr, const ns_box *b)
             cairo_stroke(cr);
             drew_uniform = TRUE;
         }
+        if (!drew_uniform && !corner_radii_zero(radii))
+            drew_uniform = paint_rounded_mixed_border(cr, b, s, border_x, border_y,
+                                                      border_w, border_h, radii);
         const struct {
             double w;
             const ns_css_value *col;

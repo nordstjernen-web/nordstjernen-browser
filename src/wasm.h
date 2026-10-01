@@ -6,7 +6,7 @@
 #ifndef NS_WASM_H
 #define NS_WASM_H
 
-#include <quickjs.h>
+#include "ns_quickjs.h"
 
 void ns_wasm_install(JSContext *ctx, JSValueConst global);
 
