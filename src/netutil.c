@@ -172,7 +172,7 @@ ns_search_url_for(const char *query)
 {
     const ns_config *cfg = ns_config_get();
     const char *engine = (cfg && cfg->search_engine && *cfg->search_engine)
-        ? cfg->search_engine : "https://lite.duckduckgo.com/lite/?q=%s";
+        ? cfg->search_engine : NS_DEFAULT_SEARCH_ENGINE;
     char *enc = g_uri_escape_string(query ? query : "", NULL, TRUE);
     const char *pct = strstr(engine, "%s");
     char *out;

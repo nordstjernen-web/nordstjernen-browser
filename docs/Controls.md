@@ -77,8 +77,7 @@ opens the first tab this way. (Private tabs require the default
 multi-process mode; the entry is disabled under `--single-process`.)
 
 Settings includes a **Search engine** drop-down with the common engines
-(DuckDuckGo Lite — the default — DuckDuckGo, Baidu, Google, Bing, Yandex,
-Yahoo, Yahoo! Japan, Sogou, Naver, Startpage, Brave, Ecosia) plus a
+(DuckDuckGo — the default — Startpage, Google, Bing, Brave, Wikipedia) plus a
 **Custom…** entry for any `…?q=%s`-style query URL. The choice drives both
 the address-bar search and the `about:start` search box.
 

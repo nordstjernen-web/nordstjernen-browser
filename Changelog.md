@@ -4,6 +4,10 @@ Changelog:
 1.0.27:
 ======
 * The about:start splash shows version 1.0.27.
+* The default search engine is DuckDuckGo (`https://duckduckgo.com/`)
+  instead of DuckDuckGo Lite, for the address bar, the about:start search
+  box and the Android app. A saved configuration still holding the old
+  Lite default moves to the new one; other choices are kept.
 * A CSS value with thousands of nested parentheses or functions, in an
   `@property` `initial-value` or in `CSS.registerProperty()`, no longer
   crashes the renderer. Values nested deeper than 128 levels are
