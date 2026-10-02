@@ -3,6 +3,11 @@ Changelog:
 
 1.0.27:
 ======
+* A page nested tens of thousands of elements deep no longer crashes the
+  renderer. Font-usage collection, video discovery, container-unit
+  detection, animated-value propagation and iframe cleanup walked the
+  tree recursively and ran out of stack around 50,000 levels (a plain
+  run of `<div>` or `<li>` was enough); they now walk it in a loop.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)
