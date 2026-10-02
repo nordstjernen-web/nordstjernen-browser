@@ -219,6 +219,10 @@ struct ns_js {
     GHashTable   *window_forwards;
     GHashTable   *window_outwards;
     GQueue       *message_tasks;
+    GHashTable   *realm_cloners;
+    JSValue       navigator_brand;   /* WeakSet of the frame realms'
+                                        navigators the Navigator getters
+                                        accept */
     guint         message_task_source;
     guint         lifecycle_source;
     GArray       *lifecycle_tasks;
