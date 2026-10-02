@@ -18708,10 +18708,24 @@ ns_target_fire_event(JSContext *ctx, JSValueConst obj, const char *type)
     JS_FreeValue(ctx, ev);
 }
 
+/* EventTarget.prototype's methods reach nodes as well (the node interfaces
+ * no longer carry copies of them): a document keeps its listeners with the
+ * document's, any other node with the element listener list. */
+static gboolean
+ns_target_is_document_node(const ns_node *n)
+{
+    return n && n->kind == NS_NODE_DOCUMENT && !(n->flags & NS_NODE_FRAGMENT);
+}
+
 static JSValue
 ns_target_addEventListener(JSContext *ctx, JSValueConst this_val,
                         int argc, JSValueConst *argv)
 {
+    const ns_node *node = ns_unwrap_element(this_val);
+    if (node)
+        return ns_target_is_document_node(node)
+            ? ns_document_addEventListener(ctx, this_val, argc, argv)
+            : ns_element_addEventListener(ctx, this_val, argc, argv);
     if (argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
@@ -18804,8 +18818,11 @@ ns_target_dispatchEvent(JSContext *ctx, JSValueConst this_val,
 {
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "dispatchEvent: argument is not an Event");
-    if (ns_unwrap_element(this_val))
-        return ns_element_dispatchEvent(ctx, this_val, argc, argv);
+    const ns_node *target_node = ns_unwrap_element(this_val);
+    if (target_node)
+        return ns_target_is_document_node(target_node)
+            ? ns_document_dispatchEvent(ctx, this_val, argc, argv)
+            : ns_element_dispatchEvent(ctx, this_val, argc, argv);
     JSValue guard = ns_event_dispatch_guard(ctx, argv[0]);
     if (JS_IsException(guard)) return guard;
     JSValue tv = JS_GetPropertyStr(ctx, argv[0], "type");
@@ -18933,6 +18950,11 @@ static JSValue
 ns_target_removeEventListener(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
+    const ns_node *node = ns_unwrap_element(this_val);
+    if (node)
+        return ns_target_is_document_node(node)
+            ? ns_document_removeEventListener(ctx, this_val, argc, argv)
+            : ns_element_removeEventListener(ctx, this_val, argc, argv);
     if (argc < 2) return JS_UNDEFINED;
     const char *type = JS_ToCString(ctx, argv[0]);
     if (!type) return JS_UNDEFINED;
@@ -51387,6 +51409,155 @@ ns_install_tostringtag(JSContext *ctx, JSValueConst global)
     JS_FreeAtom(ctx, tag_atom);
 }
 
+/* The members each non-element node interface defines (WebIDL, as Chrome
+ * ships them). The element member table used to be installed on Node,
+ * Document, HTMLDocument and DocumentFragment as well, so a document, a
+ * text node or a fragment had click(), style, tagName and the rest;
+ * ns_install_node_shapes keeps only these names on those prototypes. A
+ * name a character-data node, a doctype or a shadow root should have but
+ * only found through Node.prototype (or DocumentFragment.prototype) is
+ * moved down first. The __shady_ shims stay. */
+static const char ns_node_shapes_src[] =
+    "(function(G){"
+    "  var W = {"
+        "  Node: 'ATTRIBUTE_NODE CDATA_SECTION_NODE COMMENT_NODE "
+        "DOCUMENT_FRAGMENT_NODE DOCUMENT_NODE "
+        "DOCUMENT_POSITION_CONTAINED_BY DOCUMENT_POSITION_CONTAINS "
+        "DOCUMENT_POSITION_DISCONNECTED DOCUMENT_POSITION_FOLLOWING "
+        "DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC "
+        "DOCUMENT_POSITION_PRECEDING DOCUMENT_TYPE_NODE ELEMENT_NODE "
+        "ENTITY_NODE ENTITY_REFERENCE_NODE NOTATION_NODE "
+        "PROCESSING_INSTRUCTION_NODE TEXT_NODE appendChild baseURI "
+        "childNodes cloneNode compareDocumentPosition contains firstChild "
+        "getRootNode hasChildNodes insertBefore isConnected "
+        "isDefaultNamespace isEqualNode isSameNode lastChild "
+        "lookupNamespaceURI lookupPrefix nextSibling nodeName nodeType "
+        "nodeValue normalize ownerDocument parentElement parentNode "
+        "previousSibling removeChild replaceChild textContent',"
+        "  CharacterData: 'after appendData before data deleteData insertData length "
+        "nextElementSibling previousElementSibling remove replaceData "
+        "replaceWith substringData',"
+        "  Text: 'assignedSlot splitText wholeText',"
+        "  Comment: '',"
+        "  ProcessingInstruction: 'getAttribute getAttributeNames hasAttribute hasAttributes "
+        "removeAttribute setAttribute sheet target toggleAttribute',"
+        "  CDATASection: '',"
+        "  DocumentType: 'after before name publicId remove replaceWith systemId',"
+        "  Document: 'URL activeElement activeViewTransition adoptNode "
+        "adoptedStyleSheets alinkColor all anchors append applets "
+        "ariaNotify bgColor body browsingTopics captureEvents "
+        "caretPositionFromPoint caretRangeFromPoint characterSet charset "
+        "childElementCount children clear close compatMode contentType "
+        "cookie createAttribute createAttributeNS createCDATASection "
+        "createComment createDocumentFragment createElement createElementNS "
+        "createEvent createExpression createNSResolver createNodeIterator "
+        "createProcessingInstruction createRange createTextNode "
+        "createTreeWalker currentScript customElementRegistry defaultView "
+        "designMode dir doctype documentElement documentURI domain "
+        "elementFromPoint elementsFromPoint embeds evaluate execCommand "
+        "exitFullscreen exitPictureInPicture exitPointerLock featurePolicy "
+        "fgColor firstElementChild fonts forms fragmentDirective fullscreen "
+        "fullscreenElement fullscreenEnabled getAnimations getElementById "
+        "getElementsByClassName getElementsByName getElementsByTagName "
+        "getElementsByTagNameNS getSelection hasFocus hasPrivateToken "
+        "hasRedemptionRecord hasStorageAccess hasUnpartitionedCookieAccess "
+        "head hidden images implementation importNode inputEncoding "
+        "lastElementChild lastModified linkColor links moveBefore onabort "
+        "onanimationcancel onanimationend onanimationiteration "
+        "onanimationstart onauxclick onbeforecopy onbeforecut onbeforeinput "
+        "onbeforematch onbeforepaste onbeforetoggle onbeforexrselect onblur "
+        "oncancel oncanplay oncanplaythrough onchange onclick onclose "
+        "oncommand oncontentvisibilityautostatechange oncontextlost "
+        "oncontextmenu oncontextrestored oncopy oncuechange oncut "
+        "ondblclick ondrag ondragend ondragenter ondragleave ondragover "
+        "ondragstart ondrop ondurationchange onemptied onended onerror "
+        "onfocus onformdata onfreeze onfullscreenchange onfullscreenerror "
+        "ongotpointercapture oninput oninvalid onkeydown onkeypress onkeyup "
+        "onload onloadeddata onloadedmetadata onloadstart "
+        "onlostpointercapture onmousedown onmouseenter onmouseleave "
+        "onmousemove onmouseout onmouseover onmouseup onmousewheel onpaste "
+        "onpause onplay onplaying onpointercancel onpointerdown "
+        "onpointerenter onpointerleave onpointerlockchange "
+        "onpointerlockerror onpointermove onpointerout onpointerover "
+        "onpointerrawupdate onpointerup onprerenderingchange onprogress "
+        "onratechange onreadystatechange onreset onresize onresume onscroll "
+        "onscrollend onscrollsnapchange onscrollsnapchanging onsearch "
+        "onsecuritypolicyviolation onseeked onseeking onselect "
+        "onselectionchange onselectstart onslotchange onstalled onsubmit "
+        "onsuspend ontimeupdate ontoggle ontransitioncancel ontransitionend "
+        "ontransitionrun ontransitionstart onvisibilitychange "
+        "onvolumechange onwaiting onwebkitanimationend "
+        "onwebkitanimationiteration onwebkitanimationstart "
+        "onwebkitfullscreenchange onwebkitfullscreenerror "
+        "onwebkittransitionend onwheel open pictureInPictureElement "
+        "pictureInPictureEnabled plugins pointerLockElement prepend "
+        "prerendering queryCommandEnabled queryCommandIndeterm "
+        "queryCommandState queryCommandSupported queryCommandValue "
+        "querySelector querySelectorAll readyState referrer releaseEvents "
+        "replaceChildren requestStorageAccess rootElement scripts "
+        "scrollingElement startViewTransition styleSheets timeline title "
+        "visibilityState vlinkColor wasDiscarded webkitCancelFullScreen "
+        "webkitCurrentFullScreenElement webkitExitFullscreen "
+        "webkitFullscreenElement webkitFullscreenEnabled webkitHidden "
+        "webkitIsFullScreen webkitVisibilityState write writeln xmlEncoding "
+        "xmlStandalone xmlVersion',"
+        "  HTMLDocument: '',"
+        "  XMLDocument: '',"
+        "  DocumentFragment: 'append childElementCount children firstElementChild getElementById "
+        "lastElementChild moveBefore prepend querySelector querySelectorAll "
+        "replaceChildren',"
+        "  ShadowRoot: 'activeElement adoptedStyleSheets clonable customElementRegistry "
+        "delegatesFocus elementFromPoint elementsFromPoint "
+        "fullscreenElement getAnimations getHTML getSelection host "
+        "innerHTML mode onslotchange pictureInPictureElement "
+        "pointerLockElement referenceTarget serializable setHTML "
+        "setHTMLUnsafe slotAssignment styleSheets',"
+    "  };"
+    "  var up = { HTMLDocument: 'Document', XMLDocument: 'Document' };"
+    "  Object.keys(up).forEach(function(n){"
+    "    var C = G[n], U = G[up[n]]; if (!C || !U || !C.prototype || !U.prototype) return;"
+    "    var P = C.prototype, Q = U.prototype, want = new Set(W[up[n]].split(' '));"
+    "    Object.getOwnPropertyNames(P).forEach(function(k){"
+    "      if (!want.has(k) || Object.prototype.hasOwnProperty.call(Q, k)) return;"
+    "      try { Object.defineProperty(Q, k, Object.getOwnPropertyDescriptor(P, k)); } catch (e) {}"
+    "    });"
+    "  });"
+    "  var from = { CharacterData: ['Node'], Text: ['Node'], Comment: ['Node'],"
+    "    ProcessingInstruction: ['Node'], CDATASection: ['Node'],"
+    "    DocumentType: ['Node'], ShadowRoot: ['DocumentFragment', 'Node'] };"
+    "  var own = Object.prototype.hasOwnProperty, plan = [];"
+    "  Object.keys(W).forEach(function(n){"
+    "    var C = G[n]; if (typeof C !== 'function' || !C.prototype) return;"
+    "    var P = C.prototype, want = new Set(W[n] ? W[n].split(' ') : []), add = [];"
+    "    want.forEach(function(k){"
+    "      if (own.call(P, k)) return;"
+    "      (from[n] || []).some(function(s){"
+    "        var S = G[s] && G[s].prototype, d = S && Object.getOwnPropertyDescriptor(S, k);"
+    "        if (d) add.push([k, d]);"
+    "        return !!d;"
+    "      });"
+    "    });"
+    "    var del = Object.getOwnPropertyNames(P).filter(function(k){"
+    "      return k !== 'constructor' && !want.has(k) && k.slice(0, 8) !== '__shady_';"
+    "    });"
+    "    plan.push([P, add, del]);"
+    "  });"
+    "  plan.forEach(function(p){ p[1].forEach(function(a){"
+    "    try { Object.defineProperty(p[0], a[0], a[1]); } catch (e) {} }); });"
+    "  plan.forEach(function(p){ p[2].forEach(function(k){"
+    "    try { delete p[0][k]; } catch (e) {} }); });"
+    "})(globalThis)";
+
+static void
+ns_install_node_shapes(JSContext *ctx)
+{
+    JSValue r = JS_Eval(ctx, ns_node_shapes_src, sizeof(ns_node_shapes_src) - 1,
+                        "<node-shapes>",
+                        JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_HIDE_SOURCE);
+    if (JS_IsException(r)) JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeValue(ctx, r);
+}
+
 static void
 ns_install_web_api_shapes(JSContext *ctx, JSValueConst global)
 {
@@ -52841,11 +53012,14 @@ ns_js_new(ns_js_log_cb log_cb, gpointer log_user_data,
             JSValue carrier = JS_GetPropertyStr(ctx, global, node_carriers[c]);
             if (!JS_IsObject(carrier)) { JS_FreeValue(ctx, carrier); continue; }
             JSValue proto = JS_GetPropertyStr(ctx, carrier, "prototype");
+            /* The constants belong to Node.prototype, which the document
+             * and fragment prototypes inherit from. */
+            gboolean doc_like_carrier = c >= 3;
             for (gsize i = 0; i < G_N_ELEMENTS(node_constants); i++) {
                 JS_DefinePropertyValueStr(ctx, carrier, node_constants[i].name,
                     JS_NewInt32(ctx, node_constants[i].value),
                     JS_PROP_ENUMERABLE);
-                if (JS_IsObject(proto))
+                if (JS_IsObject(proto) && !doc_like_carrier)
                     JS_DefinePropertyValueStr(ctx, proto, node_constants[i].name,
                         JS_NewInt32(ctx, node_constants[i].value),
                         JS_PROP_ENUMERABLE);
@@ -56949,6 +57123,7 @@ ns_js_install_document(ns_js *js, ns_node *doc, const char *base_url)
         JS_FreeValue(ctx, doc_val);
         JS_FreeValue(ctx, g);
     }
+    ns_install_node_shapes(ctx);
 }
 
 void
