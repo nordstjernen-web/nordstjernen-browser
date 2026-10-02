@@ -305,7 +305,7 @@ inside the package), and uninstall from Start removes it cleanly.
 >   tech, or AI surface area. Audio and video hand off to the
 >   player you already have.
 > - **Yours.** Open source, with your history, cookies and settings
->   stored only on your device. Search defaults to DuckDuckGo Lite
+>   stored only on your device. Search defaults to DuckDuckGo
 >   and is one setting away from anything else.
 >
 > The UI speaks your language: the interface translates to the

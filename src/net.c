@@ -4498,7 +4498,7 @@ static const char k_about_settings_html[] =
 "function $(i){return document.getElementById(i);}\n"
 "function enc(o){var p=[];for(var k in o)p.push(encodeURIComponent(k)+'='+"
 "encodeURIComponent(o[k]==null?'':o[k]));return p.join('&');}\n"
-"var engines=[{n:'DuckDuckGo',u:'https://lite.duckduckgo.com/lite/?q=%s'},"
+"var engines=[{n:'DuckDuckGo',u:'" NS_DEFAULT_SEARCH_ENGINE "'},"
 "{n:'Startpage',u:'https://www.startpage.com/sp/search?query=%s'},"
 "{n:'Google',u:'https://www.google.com/search?q=%s'},"
 "{n:'Bing',u:'https://www.bing.com/search?q=%s'},"
@@ -4707,7 +4707,7 @@ synthesize_about_response(const char *url, const char *top_url,
         g_autofree char *engine_dup =
             (scfg && scfg->search_engine && *scfg->search_engine)
             ? g_strdup(scfg->search_engine)
-            : g_strdup("https://lite.duckduckgo.com/lite/?q=%s");
+            : g_strdup(NS_DEFAULT_SEARCH_ENGINE);
         ns_config_unlock();
         const char *engine = engine_dup;
         GString *esc_engine = g_string_new(NULL);

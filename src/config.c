@@ -136,7 +136,7 @@ static const cfg_field cfg_fields[] = {
     FS(user_agent,            ""),
     FS(compat_mode,           "chrome"),
     FS(accept_language,       ""),
-    FS(search_engine,         "https://lite.duckduckgo.com/lite/?q=%s"),
+    FS(search_engine,         NS_DEFAULT_SEARCH_ENGINE),
     FS(ai_model_mirror,       ""),
     FS(http_proxy,            ""),
     FS(https_proxy,           ""),
@@ -287,6 +287,10 @@ ns_config_init(void)
                                   NS_APP_DIR_NAME, "nordstjernen.conf",
                                   NULL);
     load_file(&g_cfg, g_cfg_path);
+    if (g_strcmp0(g_cfg.search_engine, "https://lite.duckduckgo.com/lite/?q=%s") == 0) {
+        g_free(g_cfg.search_engine);
+        g_cfg.search_engine = g_strdup(NS_DEFAULT_SEARCH_ENGINE);
+    }
     apply_env(&g_cfg);
 }
 

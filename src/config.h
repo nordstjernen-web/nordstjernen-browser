@@ -88,6 +88,7 @@ void             ns_config_lock(void);
 void             ns_config_unlock(void);
 
 #define NS_APP_DIR_NAME "nordstjernen"
+#define NS_DEFAULT_SEARCH_ENGINE "https://duckduckgo.com/?q=%s"
 
 G_END_DECLS
 

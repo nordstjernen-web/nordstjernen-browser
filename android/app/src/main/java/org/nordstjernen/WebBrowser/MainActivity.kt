@@ -760,7 +760,7 @@ class MainActivity : AppCompatActivity() {
     private fun normalizeUrl(input: String): String {
         if (input.startsWith("about:") || input.contains("://")) return input
         if (!input.contains('.') || input.contains(' ')) {
-            return "https://duckduckgo.com/html/?q=" + Uri.encode(input)
+            return "https://duckduckgo.com/?q=" + Uri.encode(input)
         }
         return "https://$input"
     }
