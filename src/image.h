@@ -41,6 +41,13 @@ struct ns_image {
     long         http_status;
     char        *error;
     gint64       failed_at_us;
+    gint64       request_us;    /* monotonic time the fetch started */
+    gint64       response_us;   /* and the time its response arrived */
+    /* For resource timing: the connection's ALPN id, the response's
+     * Timing-Allow-Origin values and its body size. */
+    char        *next_hop_protocol;
+    char        *timing_allow_origin;
+    gint64       body_size;
     int          attempts;
     gboolean     loaded;
     gboolean     failed;

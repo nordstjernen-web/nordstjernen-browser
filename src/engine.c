@@ -161,9 +161,69 @@ ns_engine_linked_css_text(const char *url)
     return g_strndup(data, len);
 }
 
+#define NS_ENGINE_TIMING_CAP 256
+
+static GMutex     engine_timing_lock;
+static GPtrArray *engine_timings;
+
+static void
+engine_resource_timing_free(gpointer p)
+{
+    ns_engine_resource_timing *t = p;
+    if (!t) return;
+    g_free(t->top_url);
+    g_free(t->url);
+    ns_response_free(t->resp);
+    g_free(t);
+}
+
+static void
+engine_record_timing(const char *top_url, const char *url,
+                     const char *initiator, gint64 start_us,
+                     ns_response *resp, gboolean render_blocking,
+                     gboolean in_frame)
+{
+    if (!top_url || !url || !resp) return;
+    ns_engine_resource_timing *t = g_new0(ns_engine_resource_timing, 1);
+    t->top_url = g_strdup(top_url);
+    t->url = g_strdup(url);
+    t->initiator = initiator;
+    t->render_blocking = render_blocking;
+    t->in_frame = in_frame;
+    t->start_us = start_us;
+    t->end_us = g_get_monotonic_time();
+    t->resp = resp;
+    g_mutex_lock(&engine_timing_lock);
+    if (!engine_timings)
+        engine_timings = g_ptr_array_new_with_free_func(engine_resource_timing_free);
+    if (engine_timings->len >= NS_ENGINE_TIMING_CAP)
+        g_ptr_array_remove_index(engine_timings, 0);
+    g_ptr_array_add(engine_timings, t);
+    g_mutex_unlock(&engine_timing_lock);
+}
+
+GPtrArray *
+ns_engine_take_resource_timings(const char *top_url)
+{
+    GPtrArray *out = g_ptr_array_new_with_free_func(engine_resource_timing_free);
+    if (!top_url) return out;
+    g_mutex_lock(&engine_timing_lock);
+    for (guint i = 0; engine_timings && i < engine_timings->len; ) {
+        ns_engine_resource_timing *t = g_ptr_array_index(engine_timings, i);
+        if (g_strcmp0(t->top_url, top_url) == 0) {
+            g_ptr_array_add(out, g_ptr_array_steal_index(engine_timings, i));
+        } else {
+            i++;
+        }
+    }
+    g_mutex_unlock(&engine_timing_lock);
+    return out;
+}
+
 static GBytes *
 fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
-                gboolean strict_mime)
+                gboolean strict_mime, const char *initiator,
+                gboolean render_blocking, gboolean in_frame)
 {
     if (!url || !*url) return NULL;
     guint8 attempts = 0;
@@ -179,6 +239,7 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
             if (attempts >= 3) return NULL;
         }
     }
+    gint64 start_us = g_get_monotonic_time();
     ns_response *resp = engine_fetch_blocking_with_headers(
         url, top_url, ns_net_accept_headers_for(NS_FETCH_DEST_STYLE), NULL);
     GBytes *bytes = NULL;
@@ -196,7 +257,8 @@ fetch_css_bytes(const char *url, const char *top_url, GHashTable *cache,
         g_hash_table_insert(cache, g_strdup(url),
                             g_bytes_new(&marker, 1));
     }
-    if (resp) ns_response_free(resp);
+    if (resp) engine_record_timing(top_url, url, initiator, start_us, resp,
+                                   render_blocking, in_frame);
     return bytes;
 }
 
@@ -360,7 +422,8 @@ ns_engine_speculative_preload(ns_node *doc, const char *base_url,
 static void
 append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                            const char *base_url, const char *top_url,
-                           GHashTable *seen, GHashTable *cache, int depth)
+                           GHashTable *seen, GHashTable *cache, int depth,
+                           gboolean render_blocking, gboolean in_frame)
 {
     if (!out || !sh) return;
     if (depth < NS_CSS_IMPORT_MAX_DEPTH && sh->imports) {
@@ -377,14 +440,16 @@ append_stylesheet_expanded(GPtrArray *out, ns_css_stylesheet *sh,
                 continue;
             }
             if (seen) g_hash_table_add(seen, g_strdup(abs));
-            GBytes *bytes = fetch_css_bytes(abs, top_url, cache, TRUE);
+            GBytes *bytes = fetch_css_bytes(abs, top_url, cache, TRUE, "css",
+                                            render_blocking, in_frame);
             if (bytes) {
                 ns_css_stylesheet *child =
                     ns_css_stylesheet_parse_import_cached(abs, im->layer_name,
                                                           bytes);
                 if (child)
                     append_stylesheet_expanded(out, child, abs, top_url, seen,
-                                               cache, depth + 1);
+                                               cache, depth + 1,
+                                               render_blocking, in_frame);
                 g_bytes_unref(bytes);
             }
             g_free(abs);
@@ -402,7 +467,19 @@ typedef struct {
     const char *top_url;
     gboolean    strict_css_mime;
     gboolean    media_seen;
+    int         frame_depth;   /* inside a frame's document when > 0 */
 } sheet_collect_ctx;
+
+/* Whether a <style> or <link> sits in its document's <head>, which makes
+ * the sheet render-blocking for resource timing. */
+static gboolean
+engine_node_in_head(const ns_node *n)
+{
+    for (const ns_node *p = n ? n->parent : NULL;
+         p && p->kind == NS_NODE_ELEMENT; p = p->parent)
+        if (ns_node_is_element_named(p, "head")) return TRUE;
+    return FALSE;
+}
 
 static void
 sheet_run_flush(sheet_collect_ctx *cc)
@@ -415,7 +492,7 @@ sheet_run_flush(sheet_collect_ctx *cc)
         GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
                                                  g_free, NULL);
         append_stylesheet_expanded(cc->out, sh, cc->run_base, cc->top_url, seen,
-                                   cc->cache, 0);
+                                   cc->cache, 0, FALSE, cc->frame_depth > 0);
         g_hash_table_destroy(seen);
     }
     g_string_set_size(cc->run, 0);
@@ -610,9 +687,11 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             gboolean outer_media = cc->media_seen;
             cc->media_seen = FALSE;
             ns_css_media_viewport_push(fw, fh);
+            cc->frame_depth++;
             for (ns_node *c = n->first_child; c; c = c->next_sibling)
                 collect_stylesheets_walk(c, base_url, cc, depth + 1);
             sheet_run_flush(cc);
+            cc->frame_depth--;
             gboolean frame_media = cc->media_seen;
             ns_css_media_viewport_pop();
             cc->media_seen = outer_media || frame_media;
@@ -638,7 +717,9 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                         g_hash_table_new_full(g_str_hash, g_str_equal,
                                               g_free, NULL);
                     append_stylesheet_expanded(out, sh, base_url, cc->top_url,
-                                               seen, cache, 0);
+                                               seen, cache, 0,
+                                               engine_node_in_head(n),
+                                               cc->frame_depth > 0);
                     g_hash_table_destroy(seen);
                 }
             } else {
@@ -657,8 +738,10 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
             link_sheet_enabled(n) &&
             (!media || !*media || ns_css_media_query_matches(media))) {
             char *abs = ns_url_resolve(base_url, href);
+            gboolean blocking = engine_node_in_head(n);
             GBytes *bytes = fetch_css_bytes(abs, cc->top_url, cache,
-                                            cc->strict_css_mime);
+                                            cc->strict_css_mime, "link",
+                                            blocking, cc->frame_depth > 0);
             if (bytes) {
                 gsize len = 0;
                 const char *data = g_bytes_get_data(bytes, &len);
@@ -672,7 +755,8 @@ collect_stylesheets_walk(ns_node *n, const char *base_url,
                                               g_free, NULL);
                     if (abs) g_hash_table_add(seen, g_strdup(abs));
                     append_stylesheet_expanded(out, sh, abs, cc->top_url, seen,
-                                               cache, 0);
+                                               cache, 0, blocking,
+                                               cc->frame_depth > 0);
                     g_hash_table_destroy(seen);
                 }
                 g_bytes_unref(bytes);

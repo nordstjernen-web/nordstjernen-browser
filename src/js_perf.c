@@ -5,6 +5,7 @@
 
 #include "js_internal.h"
 #include "js_classid.h"
+#include "net.h"
 
 #include <math.h>
 #include <string.h>
@@ -18,6 +19,19 @@ typedef struct ns_perf_entry {
     double start_time;
     double duration;
     gint64 transfer_size;
+    gint64 encoded_size;
+    /* Resource timing taken from the network layer; when has_timing is
+     * FALSE the phases collapse onto start_time and the end. */
+    gboolean has_timing;
+    char  *next_hop_protocol;
+    int    response_status;
+    double fetch_start, domain_lookup_start, domain_lookup_end;
+    double connect_start, connect_end, secure_connection_start;
+    double request_start, response_start, response_end;
+    gboolean render_blocking;
+    /* The realm of the document whose performance timeline holds the
+     * entry; frames have timelines of their own. */
+    gconstpointer realm;
 } ns_perf_entry;
 
 void
@@ -28,6 +42,7 @@ ns_perf_entry_free(gpointer p)
     g_free(e->name);
     g_free(e->type);
     g_free(e->initiator_type);
+    g_free(e->next_hop_protocol);
     g_free(e);
 }
 
@@ -42,7 +57,59 @@ ns_perf_entry_clone(const ns_perf_entry *e)
     copy->start_time = e->start_time;
     copy->duration   = e->duration;
     copy->transfer_size = e->transfer_size;
+    copy->encoded_size = e->encoded_size;
+    copy->has_timing = e->has_timing;
+    copy->next_hop_protocol = g_strdup(e->next_hop_protocol);
+    copy->response_status = e->response_status;
+    copy->fetch_start = e->fetch_start;
+    copy->domain_lookup_start = e->domain_lookup_start;
+    copy->domain_lookup_end = e->domain_lookup_end;
+    copy->connect_start = e->connect_start;
+    copy->connect_end = e->connect_end;
+    copy->secure_connection_start = e->secure_connection_start;
+    copy->request_start = e->request_start;
+    copy->response_start = e->response_start;
+    copy->response_end = e->response_end;
+    copy->render_blocking = e->render_blocking;
+    copy->realm = e->realm;
     return copy;
+}
+
+/* The timeline an entry or a reader belongs to; NULL and the main realm
+ * both stand for the page's own. */
+static gconstpointer
+ns_perf_realm_key(const ns_js *js, gconstpointer timeline)
+{
+    if (!js) return timeline;
+    return timeline == js->main_realm_ctx ? NULL : timeline;
+}
+
+static JSClassID ns_performance_class_id;
+static JSClassDef ns_performance_class = { .class_name = "Performance" };
+
+/* A window's performance object.  It remembers its realm, because frames
+ * share the Performance interface (and so its methods) with the page while
+ * each document keeps a timeline of its own. */
+JSValue
+ns_perf_new_performance_object(JSContext *ctx)
+{
+    ns_new_class_id(&ns_performance_class_id);
+    JSRuntime *rt = JS_GetRuntime(ctx);
+    if (!JS_IsRegisteredClass(rt, ns_performance_class_id))
+        JS_NewClass(rt, ns_performance_class_id, &ns_performance_class);
+    JSValue o = JS_NewObjectClass(ctx, ns_performance_class_id);
+    ns_js *js = js_from_ctx(ctx);
+    if (!JS_IsException(o) && ns_perf_realm_key(js, ctx))
+        JS_SetOpaque(o, ctx);
+    return o;
+}
+
+/* The timeline a performance method called on this_val reads. */
+static gconstpointer
+ns_perf_this_realm(const ns_js *js, JSValueConst this_val)
+{
+    return ns_perf_realm_key(js, ns_performance_class_id
+        ? JS_GetOpaque(this_val, ns_performance_class_id) : NULL);
 }
 
 #define NS_TIMER_RESOLUTION_US 100
@@ -82,37 +149,55 @@ ns_perf_entry_to_js(JSContext *ctx, const ns_perf_entry *e)
     JS_SetPropertyStr(ctx, o, "duration",  JS_NewFloat64(ctx, e->duration));
     if (e->type && strcmp(e->type, "resource") == 0) {
         double end = e->start_time + e->duration;
+        gboolean t = e->has_timing;
         JS_SetPropertyStr(ctx, o, "initiatorType",
                           JS_NewString(ctx, e->initiator_type
                                             ? e->initiator_type : "other"));
-        JS_SetPropertyStr(ctx, o, "nextHopProtocol", JS_NewString(ctx, "h2"));
+        JS_SetPropertyStr(ctx, o, "nextHopProtocol",
+                          JS_NewString(ctx, e->next_hop_protocol
+                                            ? e->next_hop_protocol : ""));
         JS_SetPropertyStr(ctx, o, "workerStart", JS_NewFloat64(ctx, 0));
         JS_SetPropertyStr(ctx, o, "redirectStart", JS_NewFloat64(ctx, 0));
         JS_SetPropertyStr(ctx, o, "redirectEnd", JS_NewFloat64(ctx, 0));
-        JS_SetPropertyStr(ctx, o, "fetchStart",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "domainLookupStart",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "domainLookupEnd",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "connectStart",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "connectEnd",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "secureConnectionStart",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "requestStart",
-                          JS_NewFloat64(ctx, e->start_time));
-        JS_SetPropertyStr(ctx, o, "responseStart", JS_NewFloat64(ctx, end));
-        JS_SetPropertyStr(ctx, o, "responseEnd", JS_NewFloat64(ctx, end));
+        static const struct { const char *name; gsize off; } phases[] = {
+            { "fetchStart", G_STRUCT_OFFSET(ns_perf_entry, fetch_start) },
+            { "domainLookupStart",
+              G_STRUCT_OFFSET(ns_perf_entry, domain_lookup_start) },
+            { "domainLookupEnd",
+              G_STRUCT_OFFSET(ns_perf_entry, domain_lookup_end) },
+            { "connectStart", G_STRUCT_OFFSET(ns_perf_entry, connect_start) },
+            { "connectEnd", G_STRUCT_OFFSET(ns_perf_entry, connect_end) },
+            { "secureConnectionStart",
+              G_STRUCT_OFFSET(ns_perf_entry, secure_connection_start) },
+            { "requestStart", G_STRUCT_OFFSET(ns_perf_entry, request_start) },
+            { "responseStart", G_STRUCT_OFFSET(ns_perf_entry, response_start) },
+            { "responseEnd", G_STRUCT_OFFSET(ns_perf_entry, response_end) },
+        };
+        for (gsize i = 0; i < G_N_ELEMENTS(phases); i++) {
+            double v = t ? G_STRUCT_MEMBER(double, e, phases[i].off)
+                     : i >= 7 ? end : e->start_time;
+            JS_SetPropertyStr(ctx, o, phases[i].name, JS_NewFloat64(ctx, v));
+        }
         JS_SetPropertyStr(ctx, o, "transferSize",
                           JS_NewInt64(ctx, e->transfer_size));
         JS_SetPropertyStr(ctx, o, "encodedBodySize",
-                          JS_NewInt64(ctx, e->transfer_size));
+                          JS_NewInt64(ctx, e->encoded_size));
         JS_SetPropertyStr(ctx, o, "decodedBodySize",
-                          JS_NewInt64(ctx, e->transfer_size));
+                          JS_NewInt64(ctx, e->encoded_size));
         JS_SetPropertyStr(ctx, o, "serverTiming", JS_NewArray(ctx));
-        JS_SetPropertyStr(ctx, o, "responseStatus", JS_NewInt32(ctx, 200));
+        JS_SetPropertyStr(ctx, o, "responseStatus",
+                          JS_NewInt32(ctx, e->response_status));
+        JS_SetPropertyStr(ctx, o, "renderBlockingStatus",
+                          JS_NewString(ctx, e->render_blocking
+                                            ? "blocking" : "non-blocking"));
+        JSValue g = JS_GetGlobalObject(ctx);
+        JSValue ctor = JS_GetPropertyStr(ctx, g, "PerformanceResourceTiming");
+        JSValue proto = JS_IsObject(ctor)
+            ? JS_GetPropertyStr(ctx, ctor, "prototype") : JS_UNDEFINED;
+        if (JS_IsObject(proto)) JS_SetPrototype(ctx, o, proto);
+        JS_FreeValue(ctx, proto);
+        JS_FreeValue(ctx, ctor);
+        JS_FreeValue(ctx, g);
     }
     ns_bind_fn(ctx, o, "toJSON", ns_own_data_props_toJSON, 0);
     return o;
@@ -180,25 +265,184 @@ ns_perf_build_paint_entry(JSContext *ctx, const char *name, double start)
 
 static void ns_perf_observer_queue(ns_js *js, const ns_perf_entry *entry);
 
-void
-ns_perf_add_resource(ns_js *js, const char *url, const char *initiator,
-                     double start_ms, double duration_ms, gint64 size)
+/* The timing allow check: a document sees a resource's timing details,
+ * sizes and protocol when the resource is same-origin with it or answers
+ * with a Timing-Allow-Origin header naming the document's origin or "*". */
+static gboolean
+ns_perf_timing_allowed(const char *document_url, const char *url,
+                       const char *tao)
 {
-    if (!js || !js->perf_entries || !url) return;
-    if (g_str_has_prefix(url, "data:") || g_str_has_prefix(url, "blob:") ||
-        g_str_has_prefix(url, "about:"))
-        return;
+    if (ns_url_same_origin(document_url, url)) return TRUE;
+    if (!tao || !document_url) return FALSE;
+    char *origin = ns_url_origin_from(document_url);
+    gboolean allowed = FALSE;
+    gchar **parts = g_strsplit(tao, ",", -1);
+    for (int i = 0; parts[i] && !allowed; i++) {
+        const char *v = g_strstrip(parts[i]);
+        allowed = strcmp(v, "*") == 0 ||
+                  (origin && strcmp(origin, "null") != 0 && strcmp(v, origin) == 0);
+    }
+    g_strfreev(parts);
+    g_free(origin);
+    return allowed;
+}
+
+/* The responseStatus a document sees: the status for a same-origin
+ * response, a CORS response the document's origin may read, or a frame's
+ * navigation, and 0 for a no-CORS cross-origin response. */
+static int
+ns_perf_visible_status(const ns_perf_resource_info *info,
+                       const struct ns_response *resp, const char *url,
+                       const char *initiator)
+{
+    long status = resp ? resp->status : info->status;
+    if (ns_url_same_origin(info->document_url, url) ||
+        g_strcmp0(initiator, "iframe") == 0 ||
+        g_strcmp0(initiator, "frame") == 0)
+        return (int)status;
+    if (!info->cors_mode || !resp || !resp->cors_allow_origin)
+        return 0;
+    char *doc_origin = ns_url_origin_from(info->document_url);
+    const char *acao = resp->cors_allow_origin;
+    gboolean cors_ok = strcmp(acao, "*") == 0 ||
+        (doc_origin && g_ascii_strcasecmp(acao, doc_origin) == 0);
+    g_free(doc_origin);
+    return cors_ok ? (int)status : 0;
+}
+
+/* The phase attributes of an entry whose timing details the document may
+ * see.  curl reports each phase as time since the request started; a
+ * reused connection has no lookup or connect phase, and then all of them,
+ * secureConnectionStart included, sit at fetchStart. */
+static void
+ns_perf_set_phases(ns_perf_entry *e, const struct ns_response *resp,
+                   const char *url, gint64 origin, double end)
+{
+    gboolean network = resp && resp->request_start_us > 0 &&
+                       resp->next_hop_protocol;
+    double fetch = network
+        ? MAX(e->start_time, ns_perf_relative_ms(resp->request_start_us, origin))
+        : e->start_time;
+#define NS_PHASE(ms) MIN(end, fetch + (network && (ms) > 0 ? (ms) : 0))
+    e->fetch_start = fetch;
+    e->domain_lookup_start = fetch;
+    e->domain_lookup_end = NS_PHASE(resp ? resp->domain_lookup_ms : 0);
+    e->connect_start = e->domain_lookup_end;
+    e->connect_end = MAX(e->connect_start,
+                         NS_PHASE(resp ? MAX(resp->connect_ms, resp->tls_ms) : 0));
+    if (g_str_has_prefix(url, "https:"))
+        e->secure_connection_start = network && resp->tls_ms > 0
+            ? MAX(e->connect_start, NS_PHASE(resp->connect_ms)) : fetch;
+    e->request_start = MAX(e->connect_end,
+                           NS_PHASE(resp ? resp->pretransfer_ms : 0));
+    e->response_start = MAX(e->request_start,
+                            network && resp->response_start_ms > 0
+                                ? NS_PHASE(resp->response_start_ms) : end);
+#undef NS_PHASE
+}
+
+/* The protocol and sizes of an entry whose details the document may see.
+ * The Resource Timing standard counts 300 bytes of header for a response
+ * that came over the network and none for a cached one. */
+static void
+ns_perf_set_sizes(ns_perf_entry *e, const ns_perf_resource_info *info,
+                  const struct ns_response *resp)
+{
+    e->encoded_size = resp ? (resp->body ? (gint64)resp->body->len : 0)
+                           : info->body_size;
+    const char *protocol = resp ? resp->next_hop_protocol
+                                : info->next_hop_protocol;
+    e->next_hop_protocol = g_strdup(protocol ? protocol : "");
+    e->transfer_size = protocol && *protocol ? e->encoded_size + 300 : 0;
+}
+
+static gboolean
+ns_perf_url_untimed(const char *url)
+{
+    return g_str_has_prefix(url, "data:") || g_str_has_prefix(url, "blob:") ||
+           g_str_has_prefix(url, "about:");
+}
+
+static gboolean
+ns_perf_resource_timing_allowed(const ns_perf_resource_info *info,
+                                const struct ns_response *resp,
+                                const char *url)
+{
+    char *tao = resp ? ns_net_raw_header_values(resp->raw_headers,
+                                                "timing-allow-origin")
+                     : g_strdup(info->timing_allow_origin);
+    gboolean allowed = ns_perf_timing_allowed(info->document_url, url, tao);
+    g_free(tao);
+    return allowed;
+}
+
+/* A resource entry from monotonic start and end times and, when the
+ * resource came over the network, the response's own phase timings.  A
+ * cross-origin resource that fails the timing allow check keeps only its
+ * start and end, as other browsers do. */
+void
+ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
+                           const char *url, const char *initiator,
+                           gint64 start_us, gint64 end_us,
+                           const struct ns_response *resp)
+{
+    static const ns_perf_resource_info no_info = { 0 };
+    if (!info) info = &no_info;
+    if (!js || !js->perf_entries || !url || ns_perf_url_untimed(url)) return;
     if (js->perf_entries->len >= NS_PERF_ENTRY_CAP)
         g_ptr_array_remove_index(js->perf_entries, 0);
+    gint64 origin = js->time_origin_us;
     ns_perf_entry *e = g_new0(ns_perf_entry, 1);
+    e->realm = ns_perf_realm_key(js, info->timeline);
     e->name = g_strdup(url);
     e->type = g_strdup("resource");
     e->initiator_type = g_strdup(initiator ? initiator : "other");
-    e->start_time = start_ms;
-    e->duration = duration_ms >= 0 ? duration_ms : 0;
-    e->transfer_size = size > 0 ? size : 0;
+    e->render_blocking = info->render_blocking;
+    e->start_time = ns_perf_relative_ms(start_us, origin);
+    double end = ns_perf_relative_ms(MAX(end_us, start_us), origin);
+    e->duration = end - e->start_time;
+    e->response_status = ns_perf_visible_status(info, resp, url, initiator);
+    e->has_timing = TRUE;
+    e->fetch_start = e->start_time;
+    e->response_end = end;
+    if (ns_perf_resource_timing_allowed(info, resp, url)) {
+        ns_perf_set_sizes(e, info, resp);
+        ns_perf_set_phases(e, resp, url, origin, end);
+    } else {
+        e->next_hop_protocol = g_strdup("");
+    }
     g_ptr_array_add(js->perf_entries, e);
     ns_perf_observer_queue(js, e);
+}
+
+/* Whether a timeline already has a resource entry for url. */
+gboolean
+ns_perf_has_resource(ns_js *js, gconstpointer timeline, const char *url,
+                     const char *initiator)
+{
+    if (!js || !js->perf_entries || !url) return FALSE;
+    gconstpointer key = ns_perf_realm_key(js, timeline);
+    for (guint i = 0; i < js->perf_entries->len; i++) {
+        const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
+        if (e && e->realm == key && g_strcmp0(e->type, "resource") == 0 &&
+            g_strcmp0(e->name, url) == 0 &&
+            g_strcmp0(e->initiator_type, initiator) == 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/* Moves the entries recorded for a frame before it had a realm, under the
+ * frame element's key, to that realm's timeline. */
+void
+ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to)
+{
+    if (!js || !js->perf_entries || !from) return;
+    gconstpointer key = ns_perf_realm_key(js, to);
+    for (guint i = 0; i < js->perf_entries->len; i++) {
+        ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
+        if (e && e->realm == from) e->realm = key;
+    }
 }
 
 static JSClassID ns_perf_observer_class_id;
@@ -409,6 +653,16 @@ ns_perf_observer_add_type(ns_perf_observer *o, const char *type)
 static void
 ns_perf_schedule_drain(ns_js *js);
 
+/* Whether an observer is connected, watches entry's timeline and wants
+ * its type. */
+static gboolean
+ns_perf_observer_takes(ns_js *js, const ns_perf_observer *o,
+                       const ns_perf_entry *entry)
+{
+    return o && !o->disconnected && JS_IsFunction(js->ctx, o->cb) &&
+           o->realm == entry->realm && ns_perf_observer_wants(o, entry->type);
+}
+
 static void
 ns_perf_observer_queue(ns_js *js, const ns_perf_entry *entry)
 {
@@ -416,8 +670,7 @@ ns_perf_observer_queue(ns_js *js, const ns_perf_entry *entry)
     gboolean queued = FALSE;
     for (guint i = 0; i < js->perf_observers->len; i++) {
         ns_perf_observer *o = g_ptr_array_index(js->perf_observers, i);
-        if (!o || o->disconnected || !JS_IsFunction(js->ctx, o->cb)) continue;
-        if (!ns_perf_observer_wants(o, entry->type)) continue;
+        if (!ns_perf_observer_takes(js, o, entry)) continue;
         if (!o->records)
             o->records = g_ptr_array_new_with_free_func(ns_perf_entry_free);
         if (o->records->len >= NS_PERF_ENTRY_CAP)
@@ -532,7 +785,8 @@ ns_perf_observer_observe(JSContext *ctx, JSValueConst this_val,
     if (js && js->perf_entries && ns_js_get_bool_prop(ctx, argv[0], "buffered", NULL)) {
         for (guint i = 0; i < js->perf_entries->len; i++) {
             const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
-            if (!e || !ns_perf_observer_wants(o, e->type)) continue;
+            if (!e || e->realm != o->realm ||
+                !ns_perf_observer_wants(o, e->type)) continue;
             if (!o->records)
                 o->records = g_ptr_array_new_with_free_func(ns_perf_entry_free);
             if (o->records->len >= NS_PERF_ENTRY_CAP)
@@ -604,6 +858,13 @@ ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
     }
     JS_FreeValue(ctx, proto);
     ns_perf_observer *o = g_new0(ns_perf_observer, 1);
+    /* The observer watches the timeline of the document its callback comes
+     * from: frames share this constructor with the page. */
+    JSContext *cb_realm = argc >= 1 && JS_IsFunction(ctx, argv[0])
+        ? JS_GetFunctionRealm(ctx, argv[0]) : NULL;
+    if (!cb_realm && JS_HasException(ctx))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    o->realm = ns_perf_realm_key(js, cb_realm);
     o->entry_types = g_ptr_array_new_with_free_func(g_free);
     o->records = g_ptr_array_new_with_free_func(ns_perf_entry_free);
     o->cb = (argc >= 1 && JS_IsFunction(ctx, argv[0]))
@@ -627,7 +888,8 @@ ns_perf_observer_ctor(JSContext *ctx, JSValueConst this_val,
 JSValue
 ns_perf_supported_entry_types(JSContext *ctx)
 {
-    static const char *types[] = { "mark", "measure", "navigation", "resource", "paint" };
+    /* In alphabetical order, as the Performance Timeline standard asks. */
+    static const char *types[] = { "mark", "measure", "navigation", "paint", "resource" };
     JSValue arr = JS_NewArray(ctx);
     for (guint i = 0; i < G_N_ELEMENTS(types); i++)
         JS_SetPropertyUint32(ctx, arr, i, JS_NewString(ctx, types[i]));
@@ -635,13 +897,14 @@ ns_perf_supported_entry_types(JSContext *ctx)
 }
 
 static void
-ns_perf_push(ns_js *js, const char *type, const char *name,
-             double start_time, double duration)
+ns_perf_push(ns_js *js, gconstpointer realm, const char *type,
+             const char *name, double start_time, double duration)
 {
     if (!js || !js->perf_entries) return;
     if (js->perf_entries->len >= NS_PERF_ENTRY_CAP)
         g_ptr_array_remove_index(js->perf_entries, 0);
     ns_perf_entry *e = g_new0(ns_perf_entry, 1);
+    e->realm      = realm;
     e->name       = g_strdup(name ? name : "");
     e->type       = g_strdup(type);
     e->start_time = start_time;
@@ -654,11 +917,10 @@ JSValue
 ns_window_performance_mark(JSContext *ctx, JSValueConst this_val,
                            int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     const char *name = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
     double t = ns_perf_now_ms(js);
-    ns_perf_push(js, "mark", name, t, 0.0);
+    ns_perf_push(js, ns_perf_this_realm(js, this_val), "mark", name, t, 0.0);
     JSValue r = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, r, "name",
                       JS_NewString(ctx, name ? name : ""));
@@ -670,12 +932,13 @@ ns_window_performance_mark(JSContext *ctx, JSValueConst this_val,
 }
 
 static gboolean
-ns_perf_lookup_mark(const ns_js *js, const char *name, double *out_time)
+ns_perf_lookup_mark(const ns_js *js, gconstpointer realm, const char *name,
+                    double *out_time)
 {
     if (!js || !js->perf_entries || !name) return FALSE;
     for (guint i = js->perf_entries->len; i > 0; i--) {
         const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i - 1);
-        if (e && e->type && !strcmp(e->type, "mark") &&
+        if (e && e->realm == realm && e->type && !strcmp(e->type, "mark") &&
             e->name && !strcmp(e->name, name)) {
             if (out_time) *out_time = e->start_time;
             return TRUE;
@@ -686,7 +949,7 @@ ns_perf_lookup_mark(const ns_js *js, const char *name, double *out_time)
 
 static gboolean
 ns_perf_resolve_time(JSContext *ctx, JSValueConst v, const ns_js *js,
-                     double fallback, double *out)
+                     gconstpointer realm, double fallback, double *out)
 {
     if (JS_IsUndefined(v) || JS_IsNull(v)) {
         *out = fallback;
@@ -701,7 +964,7 @@ ns_perf_resolve_time(JSContext *ctx, JSValueConst v, const ns_js *js,
     if (JS_IsString(v)) {
         const char *s = JS_ToCString(ctx, v);
         if (!s) return FALSE;
-        gboolean ok = ns_perf_lookup_mark(js, s, out);
+        gboolean ok = ns_perf_lookup_mark(js, realm, s, out);
         JS_FreeCString(ctx, s);
         if (!ok) *out = fallback;
         return TRUE;
@@ -714,19 +977,19 @@ JSValue
 ns_window_performance_measure(JSContext *ctx, JSValueConst this_val,
                               int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
+    gconstpointer realm = ns_perf_this_realm(js, this_val);
     const char *name = argc > 0 ? JS_ToCString(ctx, argv[0]) : NULL;
     double end_time = ns_perf_now_ms(js);
     double start_time = 0.0;
     double resolved_end = end_time;
     JSValue start_v = argc > 1 ? argv[1] : JS_UNDEFINED;
     JSValue end_v   = argc > 2 ? argv[2] : JS_UNDEFINED;
-    ns_perf_resolve_time(ctx, start_v, js, 0.0, &start_time);
-    ns_perf_resolve_time(ctx, end_v,   js, end_time, &resolved_end);
+    ns_perf_resolve_time(ctx, start_v, js, realm, 0.0, &start_time);
+    ns_perf_resolve_time(ctx, end_v,   js, realm, end_time, &resolved_end);
     double duration = resolved_end - start_time;
     if (duration < 0) duration = 0;
-    ns_perf_push(js, "measure", name, start_time, duration);
+    ns_perf_push(js, realm, "measure", name, start_time, duration);
     JSValue r = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, r, "name",
                       JS_NewString(ctx, name ? name : ""));
@@ -738,12 +1001,13 @@ ns_window_performance_measure(JSContext *ctx, JSValueConst this_val,
 }
 
 static void
-ns_perf_clear(ns_js *js, const char *type, const char *name)
+ns_perf_clear(ns_js *js, gconstpointer realm, const char *type,
+              const char *name)
 {
     if (!js || !js->perf_entries) return;
     for (guint i = js->perf_entries->len; i > 0; i--) {
         const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i - 1);
-        if (!e) continue;
+        if (!e || e->realm != realm) continue;
         if (type && (!e->type || strcmp(e->type, type))) continue;
         if (name && (!e->name || strcmp(e->name, name))) continue;
         g_ptr_array_remove_index(js->perf_entries, i - 1);
@@ -754,11 +1018,10 @@ JSValue
 ns_window_performance_clearMarks(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     const char *name = argc > 0 && JS_IsString(argv[0])
                          ? JS_ToCString(ctx, argv[0]) : NULL;
-    ns_perf_clear(js, "mark", name);
+    ns_perf_clear(js, ns_perf_this_realm(js, this_val), "mark", name);
     if (name) JS_FreeCString(ctx, name);
     return JS_UNDEFINED;
 }
@@ -767,12 +1030,22 @@ JSValue
 ns_window_performance_clearMeasures(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     const char *name = argc > 0 && JS_IsString(argv[0])
                          ? JS_ToCString(ctx, argv[0]) : NULL;
-    ns_perf_clear(js, "measure", name);
+    ns_perf_clear(js, ns_perf_this_realm(js, this_val), "measure", name);
     if (name) JS_FreeCString(ctx, name);
+    return JS_UNDEFINED;
+}
+
+JSValue
+ns_window_performance_clearResourceTimings(JSContext *ctx,
+                                           JSValueConst this_val,
+                                           int argc, JSValueConst *argv)
+{
+    (void)argc; (void)argv;
+    ns_js *js = js_from_ctx(ctx);
+    ns_perf_clear(js, ns_perf_this_realm(js, this_val), "resource", NULL);
     return JS_UNDEFINED;
 }
 
@@ -780,10 +1053,11 @@ JSValue
 ns_window_performance_getEntries(JSContext *ctx, JSValueConst this_val,
                                  int argc, JSValueConst *argv)
 {
-    (void)this_val; (void)argc; (void)argv;
+    (void)argc; (void)argv;
     ns_js *js = js_from_ctx(ctx);
     JSValue arr = JS_NewArray(ctx);
     if (!js) return arr;
+    gconstpointer realm = ns_perf_this_realm(js, this_val);
     uint32_t out = 0;
     JS_SetPropertyUint32(ctx, arr, out++,
                          ns_perf_build_navigation_entry(ctx, js));
@@ -794,8 +1068,9 @@ ns_window_performance_getEntries(JSContext *ctx, JSValueConst this_val,
     if (js->perf_entries)
         for (guint i = 0; i < js->perf_entries->len; i++) {
             const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
-            if (e) JS_SetPropertyUint32(ctx, arr, out++,
-                                        ns_perf_entry_to_js(ctx, e));
+            if (e && e->realm == realm)
+                JS_SetPropertyUint32(ctx, arr, out++,
+                                     ns_perf_entry_to_js(ctx, e));
         }
     return arr;
 }
@@ -804,17 +1079,17 @@ JSValue
 ns_window_performance_getEntriesByName(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     JSValue arr = JS_NewArray(ctx);
     if (!js || !js->perf_entries || argc < 1) return arr;
+    gconstpointer realm = ns_perf_this_realm(js, this_val);
     const char *name = JS_ToCString(ctx, argv[0]);
     const char *type = argc > 1 && JS_IsString(argv[1])
                          ? JS_ToCString(ctx, argv[1]) : NULL;
     uint32_t out = 0;
     for (guint i = 0; i < js->perf_entries->len; i++) {
         const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
-        if (!e) continue;
+        if (!e || e->realm != realm) continue;
         if (name && (!e->name || strcmp(e->name, name))) continue;
         if (type && (!e->type || strcmp(e->type, type))) continue;
         JS_SetPropertyUint32(ctx, arr, out++, ns_perf_entry_to_js(ctx, e));
@@ -828,10 +1103,10 @@ JSValue
 ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this_val,
                                        int argc, JSValueConst *argv)
 {
-    (void)this_val;
     ns_js *js = js_from_ctx(ctx);
     JSValue arr = JS_NewArray(ctx);
     if (!js || argc < 1) return arr;
+    gconstpointer realm = ns_perf_this_realm(js, this_val);
     const char *type = JS_ToCString(ctx, argv[0]);
     uint32_t out = 0;
     if (type && strcmp(type, "navigation") == 0) {
@@ -846,7 +1121,7 @@ ns_window_performance_getEntriesByType(JSContext *ctx, JSValueConst this_val,
     if (js->perf_entries)
         for (guint i = 0; i < js->perf_entries->len; i++) {
             const ns_perf_entry *e = g_ptr_array_index(js->perf_entries, i);
-            if (!e) continue;
+            if (!e || e->realm != realm) continue;
             if (type && (!e->type || strcmp(e->type, type))) continue;
             JS_SetPropertyUint32(ctx, arr, out++, ns_perf_entry_to_js(ctx, e));
         }
