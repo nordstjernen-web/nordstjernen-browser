@@ -146,8 +146,12 @@ verify_package() {
     echo "nightly-distro-build($DISTRO): installed package smoke test passed:"
     head -n 5 /tmp/ns-smoke.txt | sed 's/^/  | /'
 }
-pkg=$(ls -1 dist/*.deb dist/*.rpm dist/*.apk 2>/dev/null | head -n 1)
-[ -n "$pkg" ] && verify_package "$pkg"
+shopt -s nullglob
+pkgs=(dist/*.deb dist/*.rpm dist/*.apk)
+shopt -u nullglob
+if [ ${#pkgs[@]} -gt 0 ]; then
+    verify_package "${pkgs[0]}"
+fi
 
 echo
 echo "nightly-distro-build($DISTRO): artifacts in dist/:"
