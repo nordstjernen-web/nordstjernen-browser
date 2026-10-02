@@ -46239,8 +46239,13 @@ static const char ns_iframe_global_bootstrap[] =
     "    for (var pi = 0; pi < pnames.length; pi++) {"
     "      var pk = pnames[pi];"
     "      if (Object.prototype.hasOwnProperty.call(G, pk)) continue;"
-    "      if (crossOrigin && (parentOnly[pk] || !platformNames ||"
-    "          !Object.prototype.hasOwnProperty.call(platformNames, pk))) continue;"
+    /* Only names the platform defines are carried over: the page's own
+     * globals (its var and function declarations, window.x = ...) belong
+     * to the page's window, and a same-origin frame must not see them as
+     * its own, as it did while every own property was copied. */
+    "      if (platformNames ? !Object.prototype.hasOwnProperty.call(platformNames, pk)"
+    "                        : crossOrigin) continue;"
+    "      if (crossOrigin && parentOnly[pk]) continue;"
     /* Engine keys written as "\xff..." in C read back starting with
      * U+FFFD; they hold a window's own state, such as its on<event>
      * handlers, and a frame must not start with its parent's. */
