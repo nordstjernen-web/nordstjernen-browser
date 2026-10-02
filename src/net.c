@@ -5125,6 +5125,13 @@ ns_hop_transport_curl(const ns_hop_req *req, ns_write_ctx *wctx,
     if (has_body) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req->body);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)req->body_len);
+    } else if (method_is_post) {
+        /* A POST without data: libcurl would otherwise read the body from
+         * stdin and send it chunked, which a server that does not take
+         * chunked requests reads as the start of the next request on the
+         * connection. */
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, 0L);
     }
     if (!method_is_post && !method_is_get && req->method &&
         !strpbrk(req->method, "\r\n"))
@@ -5668,25 +5675,27 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     gboolean method_is_get  = !method || !*method ||
                               g_ascii_strcasecmp(method, "GET") == 0;
     gboolean has_body = body && body_len > 0;
-
-    if (has_body && (method_is_post || (!method_is_get && method))) {
-        gboolean extra_has_ct = FALSE;
-        if (extra_headers) {
-            for (guint i = 0; i < extra_headers->len; i++) {
-                const char *h = g_ptr_array_index(extra_headers, i);
-                if (h && g_ascii_strncasecmp(h, "Content-Type:", 13) == 0) {
-                    extra_has_ct = TRUE;
-                    break;
-                }
+    gboolean extra_has_ct = FALSE;
+    if (extra_headers) {
+        for (guint i = 0; i < extra_headers->len; i++) {
+            const char *h = g_ptr_array_index(extra_headers, i);
+            if (h && g_ascii_strncasecmp(h, "Content-Type:", 13) == 0) {
+                extra_has_ct = TRUE;
+                break;
             }
         }
-        if (!extra_has_ct) {
-            char *ct_hdr = g_strdup_printf("Content-Type: %s",
-                content_type && *content_type ? content_type
-                                              : "application/x-www-form-urlencoded");
-            headers = curl_slist_append(headers, ct_hdr);
-            g_free(ct_hdr);
-        }
+    }
+    if (!extra_has_ct && (method_is_post || (has_body && !method_is_get && method))) {
+        /* A form navigation without a type posts as a form; a script's
+         * request sends the type its body has, if any. "Content-Type:"
+         * keeps libcurl from adding its own form type. */
+        char *ct_hdr = content_type && *content_type
+            ? g_strdup_printf("Content-Type: %s", content_type)
+            : g_strdup(is_navigation && has_body
+                       ? "Content-Type: application/x-www-form-urlencoded"
+                       : "Content-Type:");
+        headers = curl_slist_append(headers, ct_hdr);
+        g_free(ct_hdr);
     }
 
     if (extra_headers) {
@@ -5695,6 +5704,17 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
             if (!h || !*h) continue;
             if (g_ascii_strncasecmp(h, "X-ND-", 5) == 0) continue;
             if (strpbrk(h, "\r\n")) continue;
+            /* libcurl drops a header written "Name:" with nothing after the
+             * colon; "Name;" is how it sends one with an empty value. */
+            const char *colon = strchr(h, ':');
+            const char *v = colon ? colon + 1 : NULL;
+            while (v && (*v == ' ' || *v == '\t')) v++;
+            if (colon && colon > h && v && !*v) {
+                char *empty = g_strdup_printf("%.*s;", (int)(colon - h), h);
+                headers = curl_slist_append(headers, empty);
+                g_free(empty);
+                continue;
+            }
             headers = curl_slist_append(headers, h);
         }
     }

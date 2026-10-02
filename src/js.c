@@ -19426,6 +19426,164 @@ ns_xhr_setRequestHeader(JSContext *ctx, JSValueConst this_val,
     return JS_UNDEFINED;
 }
 
+/* The type of a Blob body, or NULL for an untyped Blob or a buffer. */
+static char *
+ns_xhr_blob_type(JSContext *ctx, JSValueConst body)
+{
+    if (!JS_IsObject(body)) return NULL;
+    JSValue tv = JS_GetPropertyStr(ctx, body, "type");
+    char *out = NULL;
+    if (JS_IsString(tv)) {
+        const char *t = JS_ToCString(ctx, tv);
+        if (t && *t && ns_header_value_is_safe(t)) out = g_strdup(t);
+        if (t) JS_FreeCString(ctx, t);
+    } else if (JS_IsException(tv)) {
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    }
+    JS_FreeValue(ctx, tv);
+    return out;
+}
+
+static gboolean
+ns_mime_is_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static gboolean
+ns_mime_is_token(const char *s, gsize n)
+{
+    if (n == 0) return FALSE;
+    for (gsize i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (!g_ascii_isalnum(c) && !strchr("!#$%&'*+-.^_`|~", c)) return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean
+ns_mime_is_quoted_token(const char *s)
+{
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c != '\t' && (c < 0x20 || c == 0x7f)) return FALSE;
+    }
+    return TRUE;
+}
+
+/* Collects an HTTP quoted string at *p (which is at a '"') and returns its
+ * value, leaving *p after it (Fetch, "collect an HTTP quoted string" with
+ * the extract-value flag). */
+static char *
+ns_mime_quoted(const char **p)
+{
+    GString *v = g_string_new(NULL);
+    const char *q = *p + 1;
+    for (;;) {
+        while (*q && *q != '"' && *q != '\\') g_string_append_c(v, *q++);
+        if (!*q) break;
+        if (*q++ == '\\') {
+            if (!*q) {
+                g_string_append_c(v, '\\');
+                break;
+            }
+            g_string_append_c(v, *q++);
+        } else {
+            break;
+        }
+    }
+    *p = q;
+    return g_string_free(v, FALSE);
+}
+
+/* An author Content-Type for a text body with a charset parameter that is
+ * not UTF-8: the type parsed as a MIME type, charset set to UTF-8 and the
+ * result serialized (XHR send() step 4.4). NULL when the value is not a
+ * MIME type, has no charset or already says UTF-8; then it stays as is. */
+static char *
+ns_xhr_content_type_utf8(const char *value)
+{
+    const char *p = value ? value : "";
+    while (ns_mime_is_ws(*p)) p++;
+    const char *slash = strchr(p, '/');
+    if (!slash || !ns_mime_is_token(p, (gsize)(slash - p))) return NULL;
+    const char *sub = slash + 1;
+    const char *sub_end = sub + strcspn(sub, ";");
+    const char *sub_trim = sub_end;
+    while (sub_trim > sub && ns_mime_is_ws(sub_trim[-1])) sub_trim--;
+    if (!ns_mime_is_token(sub, (gsize)(sub_trim - sub))) return NULL;
+    char *essence = g_ascii_strdown(p, (gssize)(sub_trim - p));
+    GPtrArray *names = g_ptr_array_new_with_free_func(g_free);
+    GPtrArray *values = g_ptr_array_new_with_free_func(g_free);
+    gboolean changed = FALSE;
+    for (p = sub_end; *p; ) {
+        p++; /* the ';' */
+        while (ns_mime_is_ws(*p)) p++;
+        const char *n0 = p;
+        while (*p && *p != ';' && *p != '=') p++;
+        char *name = g_ascii_strdown(n0, (gssize)(p - n0));
+        if (*p == ';' || !*p) {
+            g_free(name);
+            continue;
+        }
+        p++; /* the '=' */
+        char *val;
+        if (*p == '"') {
+            val = ns_mime_quoted(&p);
+            while (*p && *p != ';') p++;
+        } else {
+            const char *v0 = p;
+            while (*p && *p != ';') p++;
+            const char *v1 = p;
+            while (v1 > v0 && ns_mime_is_ws(v1[-1])) v1--;
+            if (v1 == v0) {
+                g_free(name);
+                continue;
+            }
+            val = g_strndup(v0, (gsize)(v1 - v0));
+        }
+        gboolean seen = FALSE;
+        for (guint i = 0; i < names->len; i++)
+            if (strcmp(names->pdata[i], name) == 0) seen = TRUE;
+        if (seen || !ns_mime_is_token(name, strlen(name)) ||
+            !ns_mime_is_quoted_token(val)) {
+            g_free(name);
+            g_free(val);
+            continue;
+        }
+        if (strcmp(name, "charset") == 0 && g_ascii_strcasecmp(val, "UTF-8") != 0) {
+            g_free(val);
+            val = g_strdup("UTF-8");
+            changed = TRUE;
+        }
+        g_ptr_array_add(names, name);
+        g_ptr_array_add(values, val);
+    }
+    char *out = NULL;
+    if (changed) {
+        GString *s = g_string_new(essence);
+        for (guint i = 0; i < names->len; i++) {
+            const char *v = values->pdata[i];
+            g_string_append_printf(s, ";%s=", (const char *)names->pdata[i]);
+            if (ns_mime_is_token(v, strlen(v))) {
+                g_string_append(s, v);
+                continue;
+            }
+            g_string_append_c(s, '"');
+            for (; *v; v++) {
+                if (*v == '"' || *v == '\\') g_string_append_c(s, '\\');
+                g_string_append_c(s, *v);
+            }
+            g_string_append_c(s, '"');
+        }
+        out = g_string_free(s, FALSE);
+    }
+    g_free(essence);
+    g_ptr_array_free(names, TRUE);
+    g_ptr_array_free(values, TRUE);
+    return out;
+}
+
 static JSValue
 ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
 {
@@ -19452,6 +19610,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     char *body = NULL;
     gsize body_len = 0;
     char *auto_content_type = NULL;
+    gboolean body_is_text = FALSE;
     if (send_body && argc >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
         if (ns_js_value_is_form_data(ctx, argv[0])) {
             body = ns_js_form_data_serialize(ctx, argv[0], &body_len,
@@ -19466,9 +19625,12 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
                 body = g_strndup(b, slen);
                 body_len = slen;
                 JS_FreeCString(ctx, b);
+                auto_content_type = g_strdup("text/plain;charset=UTF-8");
+                body_is_text = TRUE;
             }
         } else {
             body = ns_js_body_bytes(ctx, argv[0], &body_len);
+            auto_content_type = ns_xhr_blob_type(ctx, argv[0]);
         }
     }
     ns_js *_js = js_from_ctx(ctx);
@@ -19523,18 +19685,26 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     gboolean user_set_content_type = FALSE;
     for (guint i = 0; i < hdrs->len; i++) {
         const char *h = hdrs->pdata[i];
-        if (h && g_ascii_strncasecmp(h, "Content-Type:", 13) == 0)
+        if (h && g_ascii_strncasecmp(h, "Content-Type:", 13) == 0) {
             user_set_content_type = TRUE;
+            if (body_is_text) {
+                char *utf8 = ns_xhr_content_type_utf8(h + 13);
+                if (utf8) {
+                    g_free(hdrs->pdata[i]);
+                    hdrs->pdata[i] = g_strdup_printf("Content-Type: %s", utf8);
+                    g_free(utf8);
+                }
+            }
+        }
         g_ptr_array_add(hdr_terminated, hdrs->pdata[i]);
     }
     g_ptr_array_add(hdr_terminated, NULL);
 
+    /* The body's own type when the author set none; an ArrayBuffer or an
+     * untyped Blob has none, and then no Content-Type is sent. */
     const char *effective_ct = NULL;
-    if (send_body && body) {
-        if (user_set_content_type)         effective_ct = NULL;
-        else if (auto_content_type)        effective_ct = auto_content_type;
-        else                               effective_ct = "application/x-www-form-urlencoded";
-    }
+    if (send_body && body && !user_set_content_type)
+        effective_ct = auto_content_type;
     gboolean blocked_mixed = st->js && st->js->current_url &&
         g_ascii_strncasecmp(st->js->current_url, "https://", 8) == 0 &&
         g_ascii_strncasecmp(st->url, "http://", 7) == 0;

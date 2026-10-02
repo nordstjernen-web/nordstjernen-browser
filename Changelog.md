@@ -3,6 +3,20 @@ Changelog:
 
 1.0.28:
 ======
+* A `POST` without a body (`XMLHttpRequest.send()` or `send(null)`, an
+  empty `fetch()`) goes out with `Content-Length: 0`. libcurl read such a
+  body from the renderer's standard input and sent it chunked; a server
+  that does not take chunked requests then read the end of that body as
+  the start of the next request on the connection and answered it with
+  an error, so the next request on a kept-alive connection failed.
+* `XMLHttpRequest` sends the `Content-Type` its body calls for: a string
+  as `text/plain;charset=UTF-8`, a `Blob` as its own type and an
+  `ArrayBuffer` or untyped `Blob` without one, instead of
+  `application/x-www-form-urlencoded` for all of them. An author
+  `Content-Type` on a string body has its charset changed to UTF-8, and
+  a header set to an empty value is sent with an empty value instead of
+  being dropped. Requests from scripts no longer get libcurl's form type
+  when they have none.
 * `SharedArrayBuffer` is no longer on the global object of pages,
   frames and workers. The HTML standard exposes it only to documents and
   workers that are cross-origin isolated, which no document here is
