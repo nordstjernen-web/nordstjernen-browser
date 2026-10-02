@@ -38,6 +38,20 @@ void ns_engine_collect_stylesheets(ns_node *doc, const char *base_url,
 
 char *ns_engine_linked_css_text(const char *url);
 
+/* Resource timing of the stylesheets the engine fetched for a page, held
+ * until that page's JavaScript takes them for its performance timeline. */
+typedef struct ns_engine_resource_timing {
+    char               *top_url;
+    char               *url;
+    const char         *initiator;   /* "link" or "css" */
+    gint64              start_us, end_us;
+    struct ns_response *resp;
+    gboolean            render_blocking;  /* a <head> sheet, or imported by one */
+    gboolean            in_frame;         /* for a frame's document */
+} ns_engine_resource_timing;
+
+GPtrArray *ns_engine_take_resource_timings(const char *top_url);
+
 void ns_engine_speculative_preload(ns_node *doc, const char *base_url,
                                    gboolean include_images);
 

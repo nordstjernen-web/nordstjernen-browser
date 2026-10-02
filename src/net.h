@@ -97,6 +97,7 @@ typedef struct ns_response {
     char *error;
     char *tls_warning;
     char *remote_ip;
+    char *next_hop_protocol;   /* ALPN id of the connection, "" from cache */
     gint64 request_start_us;
     double request_start_real_ms;
     double domain_lookup_ms;
@@ -196,6 +197,9 @@ char *ns_net_log_dump(void);
 char *ns_url_host_from(const char *url);
 char *ns_url_origin_from(const char *url);
 gboolean ns_url_same_origin(const char *a, const char *b);
+/* The values of every "name:" line in a raw header block, comma-joined,
+ * or NULL when there is none. */
+char *ns_net_raw_header_values(const char *raw, const char *name);
 gboolean ns_url_is_http_or_https(const char *url);
 
 gboolean ns_net_parse_refresh(const char *input, double *time_out,

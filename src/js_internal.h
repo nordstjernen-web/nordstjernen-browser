@@ -48,6 +48,7 @@ typedef struct ns_image_bitmap {
 typedef struct ns_perf_observer {
     JSValue   cb;
     JSValue   wrapper;
+    gconstpointer realm;   /* the realm whose timeline the observer watches */
     gboolean  disconnected;
     gboolean  pinned;
     GPtrArray *entry_types;
@@ -686,9 +687,33 @@ gboolean ns_js_get_bool_prop(JSContext *ctx, JSValueConst obj, const char *key,
                              gboolean *was_set);
 
 double ns_perf_now_ms(const ns_js *js);
-void ns_perf_add_resource(ns_js *js, const char *url, const char *initiator,
-                          double start_ms, double duration_ms, gint64 size);
 double ns_perf_relative_ms(gint64 now_us, gint64 origin_us);
+/* What a resource timing entry needs beyond its times and response.
+ * timeline names the performance timeline that gets the entry: a frame
+ * realm's JSContext, an opaque key for a frame without a realm, or NULL
+ * for the page's own.  document_url is that document's URL, for the
+ * same-origin and Timing-Allow-Origin checks.  Without a response (an
+ * image the image cache fetched) the protocol, the Timing-Allow-Origin
+ * value, the status and the size come from here. */
+typedef struct ns_perf_resource_info {
+    gconstpointer timeline;
+    const char   *document_url;
+    gboolean      render_blocking;
+    gboolean      cors_mode;
+    const char   *next_hop_protocol;
+    const char   *timing_allow_origin;
+    long          status;
+    gint64        body_size;
+} ns_perf_resource_info;
+struct ns_response;
+void ns_perf_add_resource_timed(ns_js *js, const ns_perf_resource_info *info,
+                                const char *url, const char *initiator,
+                                gint64 start_us, gint64 end_us,
+                                const struct ns_response *resp);
+gboolean ns_perf_has_resource(ns_js *js, gconstpointer timeline,
+                              const char *url, const char *initiator);
+void ns_perf_move_timeline(ns_js *js, gconstpointer from, gconstpointer to);
+JSValue ns_perf_new_performance_object(JSContext *ctx);
 void ns_perf_entry_free(gpointer p);
 JSValue ns_perf_supported_entry_types(JSContext *ctx);
 void ns_perf_install_entry_list(JSContext *ctx, JSValueConst global);
@@ -710,6 +735,9 @@ JSValue ns_window_performance_clearMarks(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
 JSValue ns_window_performance_clearMeasures(JSContext *ctx, JSValueConst this_val,
                                             int argc, JSValueConst *argv);
+JSValue ns_window_performance_clearResourceTimings(JSContext *ctx,
+                                                   JSValueConst this_val,
+                                                   int argc, JSValueConst *argv);
 JSValue ns_window_performance_getEntries(JSContext *ctx, JSValueConst this_val,
                                          int argc, JSValueConst *argv);
 JSValue ns_window_performance_getEntriesByName(JSContext *ctx, JSValueConst this_val,
