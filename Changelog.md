@@ -3,6 +3,10 @@ Changelog:
 
 1.0.28:
 ======
+* `prepend()` with the parent's first child no longer hangs the page. The
+  child was inserted before itself and became its own next sibling, so
+  the next walk over the document never ended; example.com's new script
+  does this, and loading it hung the renderer.
 * Events the browser fires (messages from frames, workers, ports and
   broadcast channels, `XMLHttpRequest` progress, `load` and the others)
   carry a `timeStamp`, as in other browsers; it was `undefined`. Events
