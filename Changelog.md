@@ -3,6 +3,11 @@ Changelog:
 
 1.0.28:
 ======
+* An asynchronous `XMLHttpRequest` a frame sends to its own origin works
+  when that origin differs from the page's. The response was checked
+  against whichever document the event loop was in when it arrived,
+  usually the page, so it failed with status 0; synchronous requests and
+  `fetch()` were not affected.
 
 1.0.27:
 ======
