@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* The desktop browser now records visited pages in History. The shell
+  recorded each page title into a history database it never opened, so
+  in the default multi-process mode `about:history` stayed empty. A
+  `--private` launch still records nothing.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)
