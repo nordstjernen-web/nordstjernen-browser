@@ -285,12 +285,11 @@ cap, and `CURLOPT_NOSIGNAL`. HSTS state is loaded and persisted via
 - Subresource Integrity (`integrity="sha256-…"` / `sha384-` / `sha512-`)
   is verified against the response body before scripts or stylesheets
   are applied.
-- IDN labels are accepted for display only under a Unicode TR-39
-  "Highly Restricted"–style profile: each label must be either pure
-  ASCII, a single non-Latin script, or one of the three standard CJK
-  combinations (Japanese / Traditional Chinese / Korean). Anything
-  else is shown as punycode in the URL bar, defeating most
-  Latin-look-alike homograph attacks.
+- The URL bar shows every host in its ASCII Punycode form, as the WHATWG
+  URL parser serializes it, so an internationalized look-alike such as
+  `аррӏе.com` (Cyrillic) appears as `xn--80ak6aa92e.com`. There is no
+  Unicode display of IDN hosts yet, so there is no script-mixing profile
+  to get wrong.
 
 ### On-disk state
 

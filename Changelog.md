@@ -30,6 +30,11 @@ Changelog:
   or URL. Both checks now split a command on spaces and tabs the way the
   helpers do, so a tab after `open` no longer skips the audio check, and
   both helpers open media with FFmpeg's `file` protocol only.
+* Each published release gets a Debian/Ubuntu `.deb`, a portable Linux
+  x86_64 zip and a `SHA256SUMS` file attached by a new `release`
+  workflow. The packages are built and checked with the same script as
+  the nightly builds, which installs the `.deb` and runs it headless
+  before anything is uploaded.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)
