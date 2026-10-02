@@ -6648,6 +6648,107 @@ static JSValue js_call_c_function_data(JSContext *ctx, JSValueConst func_obj,
     return ret;
 }
 
+/* A native function in ctx's realm that forwards to target: a call passes
+   this and the arguments through, a construct call passes new.target, so
+   the instance takes new.target's prototype. It lets one realm present
+   another realm's JS-implemented functions as its own. */
+static JSValue js_forwarder_call(JSContext *ctx, JSValueConst this_val,
+                                 int argc, JSValueConst *argv, int magic,
+                                 JSValueConst *data)
+{
+    JSStackFrame *sf = ctx->rt->current_stack_frame;
+    (void)magic;
+    if (sf && sf->is_constructor)
+        return JS_CallConstructor2(ctx, data[0], this_val, argc, argv);
+    return JS_Call(ctx, data[0], this_val, argc, argv);
+}
+
+JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target, const char *name,
+                        int length, bool constructor)
+{
+    JSValue f = JS_NewCFunctionData2(ctx, js_forwarder_call, name, 0, 0, 1,
+                                     &target);
+    if (JS_IsException(f))
+        return f;
+    /* The visible length; the record keeps 0 so calls are not padded. */
+    JS_DefinePropertyValue(ctx, f, JS_ATOM_length, js_int32(length),
+                           JS_PROP_CONFIGURABLE);
+    JS_VALUE_GET_OBJ(f)->is_constructor = constructor;
+    return f;
+}
+
+bool JS_IsForwarder(JSValueConst v, JSValue *target)
+{
+    JSObject *p;
+    JSCFunctionDataRecord *s;
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return false;
+    p = JS_VALUE_GET_OBJ(v);
+    if (p->class_id != JS_CLASS_C_FUNCTION_DATA)
+        return false;
+    s = p->u.opaque;
+    if (!s || s->func != js_forwarder_call)
+        return false;
+    if (target)
+        *target = s->data[0];
+    return true;
+}
+
+JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func)
+{
+    JSObject *p, *q;
+    JSValue func_obj;
+
+    if (JS_VALUE_GET_TAG(func) != JS_TAG_OBJECT)
+        return JS_UNDEFINED;
+    p = JS_VALUE_GET_OBJ(func);
+    if (p->class_id == JS_CLASS_C_FUNCTION) {
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        q = JS_VALUE_GET_OBJ(func_obj);
+        q->u.cfunc.realm = JS_DupContext(ctx);
+        q->u.cfunc.c_function = p->u.cfunc.c_function;
+        q->u.cfunc.length = p->u.cfunc.length;
+        q->u.cfunc.cproto = p->u.cfunc.cproto;
+        q->u.cfunc.magic = p->u.cfunc.magic;
+        q->is_constructor = p->is_constructor;
+        return func_obj;
+    }
+    if (p->class_id == JS_CLASS_C_FUNCTION_DATA) {
+        JSCFunctionDataRecord *src = JS_GetOpaque(func, JS_CLASS_C_FUNCTION_DATA);
+        JSCFunctionDataRecord *dst;
+        int i;
+        if (!src)
+            return JS_UNDEFINED;
+        func_obj = JS_NewObjectProtoClass(ctx, ctx->function_proto,
+                                          JS_CLASS_C_FUNCTION_DATA);
+        if (JS_IsException(func_obj))
+            return func_obj;
+        dst = js_malloc(ctx, sizeof(*dst) + src->data_len * sizeof(JSValue));
+        if (!dst) {
+            JS_FreeValue(ctx, func_obj);
+            return JS_EXCEPTION;
+        }
+        dst->func = src->func;
+        dst->length = src->length;
+        dst->data_len = src->data_len;
+        dst->magic = src->magic;
+        for (i = 0; i < src->data_len; i++)
+            dst->data[i] = js_dup(src->data[i]);
+        JS_SetOpaqueInternal(func_obj, dst);
+        JS_VALUE_GET_OBJ(func_obj)->is_constructor = p->is_constructor;
+        return func_obj;
+    }
+    return JS_UNDEFINED;
+}
+
+int JS_GetClassCount(JSRuntime *rt)
+{
+    return rt->class_count;
+}
+
 JSValue JS_NewCFunctionData2(JSContext *ctx, JSCFunctionData *func,
                              const char *name,
                              int length, int magic, int data_len,

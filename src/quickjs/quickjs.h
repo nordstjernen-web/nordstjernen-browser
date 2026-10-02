@@ -717,6 +717,7 @@ typedef struct JSEvalOptions {
 
 #define JS_INVALID_CLASS_ID 0
 JS_EXTERN JSClassID JS_NewClassID(JSRuntime *rt, JSClassID *pclass_id);
+JS_EXTERN int JS_GetClassCount(JSRuntime *rt);
 /* Returns the class ID if `v` is an object, otherwise returns JS_INVALID_CLASS_ID. */
 JS_EXTERN JSClassID JS_GetClassID(JSValueConst v);
 JS_EXTERN int JS_NewClass(JSRuntime *rt, JSClassID class_id, const JSClassDef *class_def);
@@ -1348,6 +1349,11 @@ JS_EXTERN JSValue JS_NewCFunction3(JSContext *ctx, JSCFunction *func,
                                    const char *name,
                                    int length, JSCFunctionEnum cproto, int magic,
                                    JSValueConst proto_val, int n_fields);
+JS_EXTERN JSValue JS_CloneCFunction(JSContext *ctx, JSValueConst func);
+JS_EXTERN JSValue JS_NewForwarder(JSContext *ctx, JSValueConst target,
+                                  const char *name, int length,
+                                  bool constructor);
+JS_EXTERN bool JS_IsForwarder(JSValueConst v, JSValue *target);
 JS_EXTERN JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
                                       int length, int magic, int data_len,
                                       JSValueConst *data);
