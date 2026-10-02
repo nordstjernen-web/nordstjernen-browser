@@ -440,6 +440,7 @@ static gboolean ns_dom_hidden_child(const ns_node *c);
 #define NS_SANDBOX_ALLOW_POINTER_LOCK  (1u << 10)
 #define NS_SANDBOX_ALLOW_PRESENTATION  (1u << 11)
 #define NS_SANDBOX_ALLOW_ORIENTATION   (1u << 12)
+#define NS_SANDBOX_ALLOW_STORAGE_ACCESS (1u << 14)
 /* Internal flag, never produced by the sandbox-attribute parser: set when the
    frame is cross-origin to its embedder, to deny it the embedding origin's
    localStorage/sessionStorage/cookies (the runtime's storage is keyed to the
@@ -459,6 +460,7 @@ static const struct { const char *token; unsigned flag; } ns_sandbox_tokens[] = 
     { "allow-pointer-lock",                     NS_SANDBOX_ALLOW_POINTER_LOCK },
     { "allow-presentation",                     NS_SANDBOX_ALLOW_PRESENTATION },
     { "allow-orientation-lock",                 NS_SANDBOX_ALLOW_ORIENTATION },
+    { "allow-storage-access-by-user-activation", NS_SANDBOX_ALLOW_STORAGE_ACCESS },
 };
 
 static unsigned
@@ -2473,6 +2475,7 @@ ns_tlist_supports(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst 
         "allow-same-origin", "allow-scripts", "allow-top-navigation",
         "allow-top-navigation-by-user-activation",
         "allow-top-navigation-to-custom-protocols",
+        "allow-storage-access-by-user-activation",
     };
     const char *attr;
     const ns_node *owner = ns_tlist_node(this_val, &attr);
@@ -23949,8 +23952,12 @@ ns_worker_deliver_owner(gpointer data)
         ns_worker_message_free(msg);
         return G_SOURCE_REMOVE;
     }
-    JSValue ev = ns_worker_event(ctx, type, data_v, host->origin,
+    /* A dedicated worker's messages come through its implicit port, so
+     * their origin is empty, as for any MessagePort message. */
+    JSValue ev = ns_worker_event(ctx, type, data_v,
+                                 host->is_service_worker ? host->origin : "",
                                  msg->message, msg->filename);
+    JS_FreeValue(ctx, ns_freeze_array(ctx, ports));
     JS_SetPropertyStr(ctx, ev, "ports", ports);
     if (msg->is_error) ns_worker_shape_error_event(ctx, ev, msg);
     JSValue target = JS_DupValue(ctx, host->owner_obj);
@@ -24121,10 +24128,17 @@ ns_worker_fetch_script(ns_worker_host *host, const char *url,
     }
 
     GError *err = NULL;
-    static const char *const script_headers[] = {
-        "Accept: text/javascript, application/javascript, application/ecmascript, application/x-javascript, */*;q=0.8",
-        NULL
-    };
+    /* importScripts() fetches a script; the worker's own script is fetched
+     * with the worker's destination and mode "same-origin". */
+    static const char *const import_headers[] = {
+        "X-ND-Fetch-Dest: script", NULL };
+    static const char *const worker_headers[] = {
+        "X-ND-Fetch-Dest: worker", NULL };
+    static const char *const service_headers[] = {
+        "X-ND-Fetch-Dest: serviceworker", NULL };
+    const char *const *script_headers =
+        allow_cross_origin ? import_headers
+        : (host && host->is_service_worker ? service_headers : worker_headers);
     ns_response *resp = ns_net_request_blocking(url, host ? host->base_url : NULL,
                                                 "GET", NULL, 0, NULL,
                                                 script_headers, NULL, &err);
@@ -24368,7 +24382,10 @@ ns_worker_deliver_worker(gpointer data)
         return G_SOURCE_REMOVE;
     }
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue ev = ns_worker_event(ctx, type, data_v, host->origin, NULL, NULL);
+    JSValue ev = ns_worker_event(ctx, type, data_v,
+                                 host->is_service_worker ? host->origin : "",
+                                 NULL, NULL);
+    JS_FreeValue(ctx, ns_freeze_array(ctx, ports));
     JS_SetPropertyStr(ctx, ev, "ports", ports);
     ns_worker_dispatch(ctx, global, type, ev);
     JS_FreeValue(ctx, ev);
@@ -46473,6 +46490,15 @@ static const char ns_iframe_global_bootstrap[] =
     "    def('sessionStorage', { get: function(){ throw denyStore(); } });"
     "    def('indexedDB',      { get: function(){ throw denyStore(); } });"
     "  }"
+    /* A sandboxed document may ask for storage access only with
+     * allow-storage-access-by-user-activation. */
+    "  if ((sandbox & 1) && !(sandbox & 16384) && iframeDoc) {"
+    "    try { Object.defineProperty(iframeDoc, 'requestStorageAccess', {"
+    "      configurable: true, writable: true, enumerable: true,"
+    "      value: function requestStorageAccess(){ return Promise.reject("
+    "        new realWin.DOMException('Storage access is not allowed in this sandboxed document.', 'NotAllowedError')); } });"
+    "    } catch (e) {}"
+    "  }"
     "  var crossOrigin = (sandbox & 8192) !== 0;"
     "  var parentOnly = { cookieStore:1, caches:1, getSelection:1, opener:1, frameElement:1, origin:1, name:1, navigation:1, external:1 };"
     "  def('origin', { get: function(){ if ((sandbox & 1) && !(sandbox & 8)) return 'null'; var u=mk(url); return u ? u.origin : 'null'; } });"
@@ -46839,12 +46865,36 @@ ns_iframe_content_document(JSContext *ctx, JSValueConst this_val, ns_node *n)
     return ns_iframe_build_content_document(ctx, n);
 }
 
+/* A frame element has a content navigable only while it is connected to a
+ * document that has a browsing context: the page's document or, through
+ * frames, a document nested in it. A frame created by createElement() and
+ * not inserted yet, or one in a document from createHTMLDocument(), has
+ * none, so its contentWindow and contentDocument are null. */
+static gboolean
+ns_frame_owner_has_browsing_context(ns_js *js, const ns_node *frame)
+{
+    if (!js || !frame) return FALSE;
+    /* The page's document, whichever document is current while a frame's
+     * script runs; a frame's document hangs below its frame element. */
+    const ns_node *page = js->ce_main_doc ? js->ce_main_doc : js->current_doc;
+    const ns_node *root = frame;
+    while (root->parent) root = root->parent;
+    return root == page;
+}
+
 static JSValue
 ns_element_get_contentDocument(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
     if (!n || (!ns_node_is_element_named(n, "iframe") &&
-               !ns_node_is_element_named(n, "object"))) return JS_NULL;
+               !ns_node_is_element_named(n, "object") &&
+               !ns_node_is_element_named(n, "frame") &&
+               !ns_node_is_element_named(n, "embed")))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    if (!ns_node_is_element_named(n, "iframe") &&
+        !ns_node_is_element_named(n, "object")) return JS_NULL;
+    if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
+        return JS_NULL;
     if (ns_iframe_is_cross_origin(js_from_ctx(ctx), n)) return JS_NULL;
     return ns_iframe_content_document(ctx, this_val, n);
 }
@@ -46974,7 +47024,14 @@ static JSValue
 ns_element_get_contentWindow(JSContext *ctx, JSValueConst this_val)
 {
     ns_node *n = ns_unwrap_element_mut(this_val);
-    if (!n || !ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!n || (!ns_node_is_element_named(n, "iframe") &&
+               !ns_node_is_element_named(n, "object") &&
+               !ns_node_is_element_named(n, "frame") &&
+               !ns_node_is_element_named(n, "embed")))
+        return JS_ThrowTypeError(ctx, "Illegal invocation");
+    if (!ns_node_is_element_named(n, "iframe")) return JS_NULL;
+    if (!ns_frame_owner_has_browsing_context(js_from_ctx(ctx), n))
+        return JS_NULL;
     if (!ns_iframe_ensure_content_root(n)) return JS_NULL;
     JSValue win = ns_iframe_realm_window(ctx, this_val, n);
     if (!JS_IsObject(win) || !ns_iframe_is_cross_origin(js_from_ctx(ctx), n))
@@ -48189,72 +48246,94 @@ ns_point_in_hit_bounds(ns_js *js, double x, double y)
     return x <= w && y <= h;
 }
 
-static JSValue
-ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
-                               int argc, JSValueConst *argv)
+/* The node a point hits in the document this_val is, or NULL: the point is
+ * in that document's viewport coordinates, and for a frame's document it is
+ * translated into the frame's content box first. local_x and local_y get the
+ * point inside the hit box. */
+static const ns_node *
+ns_document_hit_node(JSContext *ctx, JSValueConst this_val, double x, double y,
+                     const ns_node **doc_out, const ns_box **box_out,
+                     double *local_x, double *local_y)
 {
-    (void)this_val;
-    if (argc < 2) return JS_NULL;
-    double x = 0, y = 0;
-    JS_ToFloat64(ctx, &x, argv[0]);
-    JS_ToFloat64(ctx, &y, argv[1]);
-    if (!isfinite(x) || !isfinite(y) || x < 0 || y < 0) return JS_NULL;
+    *doc_out = NULL;
+    *box_out = NULL;
+    if (!isfinite(x) || !isfinite(y) || x < 0 || y < 0) return NULL;
     ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return JS_NULL;
+    if (!js || !js->current_doc) return NULL;
     ns_js_flush_layout(js);
-    if (!js->layout_root) return JS_NULL;
+    if (!js->layout_root) return NULL;
     const ns_node *doc = ns_unwrap_element(this_val);
     const ns_node *frame = doc && doc->kind == NS_NODE_DOCUMENT &&
         ns_node_is_element_named(doc->parent, "iframe") ? doc->parent : NULL;
     if (frame) {
         const ns_box *fb = ns_box_find_by_dom(js->layout_root, frame);
-        if (!fb) return JS_NULL;
+        if (!fb) return NULL;
         double fx, fy, fw, fh;
         ns_box_visual_border_box(fb, &fx, &fy, &fw, &fh);
         double cw = fw - fb->border.left - fb->border.right -
                     fb->padding.left - fb->padding.right;
         double ch = fh - fb->border.top - fb->border.bottom -
                     fb->padding.top - fb->padding.bottom;
-        if (x >= cw || y >= ch) return JS_NULL;
+        if (x >= cw || y >= ch) return NULL;
         x += fx + fb->border.left + fb->padding.left;
         y += fy + fb->border.top + fb->padding.top;
     } else {
-        if (!ns_point_in_hit_bounds(js, x, y)) return JS_NULL;
+        if (!ns_point_in_hit_bounds(js, x, y)) return NULL;
         x += ns_window_scroll_prop(ctx, "scrollX");
         y += ns_window_scroll_prop(ctx, "scrollY");
+        doc = js->current_doc;
     }
-    double local_x = 0, local_y = 0;
     const ns_box *hit = ns_box_hit_test_local(js->layout_root, x, y,
-                                              &local_x, &local_y);
-    if (!hit || !hit->dom) return JS_NULL;
-    if (frame) {
-        const ns_node *p = hit->dom;
-        while (p && p != doc) p = p->parent;
-        if (!p) return JS_NULL;
-    }
-    const ns_node *area = ns_box_image_map_area(hit, local_x, local_y);
-    return ns_make_element(ctx, area ? area : hit->dom);
+                                              local_x, local_y);
+    if (!hit || !hit->dom) return NULL;
+    /* Content of a nested document is not part of this document's hit
+     * test: a point over a frame hits the frame element. */
+    const ns_node *node = hit->dom;
+    const ns_node *p = hit->dom;
+    for (; p && p != doc; p = p->parent)
+        if (p->kind == NS_NODE_DOCUMENT && p->parent)
+            node = p->parent;
+    if (!p) return NULL;
+    *doc_out = doc;
+    *box_out = node == hit->dom ? hit : NULL;
+    return node;
+}
+
+static JSValue
+ns_document_element_from_point(JSContext *ctx, JSValueConst this_val,
+                               int argc, JSValueConst *argv)
+{
+    if (argc < 2) return JS_NULL;
+    double x = 0, y = 0;
+    JS_ToFloat64(ctx, &x, argv[0]);
+    JS_ToFloat64(ctx, &y, argv[1]);
+    const ns_node *doc = NULL;
+    const ns_box *box = NULL;
+    double local_x = 0, local_y = 0;
+    const ns_node *node = ns_document_hit_node(ctx, this_val, x, y, &doc, &box,
+                                               &local_x, &local_y);
+    if (!node) return JS_NULL;
+    const ns_node *area = box ? ns_box_image_map_area(box, local_x, local_y)
+                              : NULL;
+    return ns_make_element(ctx, area ? area : node);
 }
 
 static JSValue
 ns_document_elements_from_point(JSContext *ctx, JSValueConst this_val,
                                 int argc, JSValueConst *argv)
 {
-    (void)this_val;
     JSValue arr = JS_NewArray(ctx);
     if (argc < 2) return arr;
     double x = 0, y = 0;
     JS_ToFloat64(ctx, &x, argv[0]);
     JS_ToFloat64(ctx, &y, argv[1]);
-    if (!isfinite(x) || !isfinite(y) || x < 0 || y < 0) return arr;
-    ns_js *js = js_from_ctx(ctx);
-    if (!js || !js->current_doc) return arr;
-    ns_js_flush_layout(js);
-    if (!js->layout_root) return arr;
-    if (!ns_point_in_hit_bounds(js, x, y)) return arr;
-    const ns_box *hit = ns_box_hit_test(js->layout_root, x, y);
+    const ns_node *doc = NULL;
+    const ns_box *box = NULL;
+    double local_x = 0, local_y = 0;
+    const ns_node *node = ns_document_hit_node(ctx, this_val, x, y, &doc, &box,
+                                               &local_x, &local_y);
     uint32_t i = 0;
-    for (const ns_node *n = hit && hit->dom ? hit->dom : NULL; n; n = n->parent)
+    for (const ns_node *n = node; n && n != doc; n = n->parent)
         if (n->kind == NS_NODE_ELEMENT)
             JS_SetPropertyUint32(ctx, arr, i++, ns_make_element(ctx, n));
     return arr;
@@ -55809,8 +55888,25 @@ ns_document_get_readyState(JSContext *ctx, JSValueConst this_val)
 static JSValue
 ns_document_get_defaultView(JSContext *ctx, JSValueConst this_val)
 {
-    (void)this_val;
-    return JS_GetGlobalObject(ctx);
+    /* The window of the document's browsing context: the page's window, or
+     * a frame's window for the frame's document, whichever realm asks. A
+     * document without a browsing context (createHTMLDocument(), DOMParser,
+     * an XHR response) has none. */
+    ns_js *js = js_from_ctx(ctx);
+    ns_node *doc = ns_unwrap_element_mut(this_val);
+    if (!js || !doc || doc->kind != NS_NODE_DOCUMENT || doc == js->current_doc)
+        return js && js->ctx ? JS_GetGlobalObject(js->ctx)
+                             : JS_GetGlobalObject(ctx);
+    ns_node *owner = doc->parent;
+    if (owner && owner->kind == NS_NODE_ELEMENT &&
+        (ns_node_is_element_named(owner, "iframe") ||
+         ns_node_is_element_named(owner, "frame"))) {
+        JSValue el = ns_make_element(ctx, owner);
+        JSValue win = ns_iframe_realm_window(ctx, el, owner);
+        JS_FreeValue(ctx, el);
+        return win;
+    }
+    return JS_NULL;
 }
 
 static JSValue
@@ -60972,7 +61068,17 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         if (abs_url) {
             GError *err = NULL;
             gint64 frame_fetch_us = g_get_monotonic_time();
-            resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+            static const char *const iframe_dest[] = {
+                "X-ND-Fetch-Dest: iframe", NULL };
+            static const char *const frame_dest[] = {
+                "X-ND-Fetch-Dest: frame", NULL };
+            static const char *const object_dest[] = {
+                "X-ND-Fetch-Dest: object", NULL };
+            const char *const *dest_headers =
+                is_object ? object_dest
+                : (iframe->name && g_ascii_strcasecmp(iframe->name, "frame") == 0
+                   ? frame_dest : iframe_dest);
+            resp = ns_js_fetch_resource(js, abs_url, origin, dest_headers, &err);
             /* A response the frame would hand to the download manager
              * gets no resource timing entry, as in other browsers. */
             if (!ns_frame_response_is_download(resp)) {
