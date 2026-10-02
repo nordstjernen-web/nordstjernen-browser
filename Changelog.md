@@ -3,6 +3,11 @@ Changelog:
 
 1.0.28:
 ======
+* `SharedArrayBuffer` is no longer on the global object of pages,
+  frames and workers. The HTML standard exposes it only to documents and
+  workers that are cross-origin isolated, which no document here is
+  (`crossOriginIsolated` is always false), and other browsers hide it the
+  same way.
 * `prepend()` with the parent's first child no longer hangs the page. The
   child was inserted before itself and became its own next sibling, so
   the next walk over the document never ended; example.com's new script

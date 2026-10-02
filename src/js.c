@@ -395,6 +395,7 @@ static void ns_js_link_interfaces(JSContext *ctx);
 static JSValue ns_structured_clone_value(JSContext *ctx, JSValueConst v, JSValueConst transfer);
 static JSValue ns_iframe_cross_origin_window(JSContext *ctx, JSValue target);
 static void ns_event_define_cancel_bubble(JSContext *ctx, JSValueConst ev);
+static void ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global);
 static void ns_target_report_exception(ns_js *js, JSContext *ctx, const char *type);
 static gboolean ns_js_image_loads_pending(const ns_js *js);
 static JSValue ns_iframe_child_frame_of(JSContext *ctx, JSValueConst this_val,
@@ -25020,6 +25021,7 @@ ns_worker_js_new(ns_worker_host *host)
     ns_wasm_install(ctx, global);
     ns_js_intl_install(ctx, global);
     JS_SetPropertyStr(ctx, global, "crossOriginIsolated", JS_FALSE);
+    ns_hide_shared_array_buffer(ctx, global);
     ns_bind_ctor(ctx, global, "XMLHttpRequestUpload", ns_illegal_constructor, 0);
     ns_bind_ctor(ctx, global, "XMLHttpRequest", ns_window_xhr_ctor, 0);
     ns_xhr_install_interface(ctx, global);
@@ -46380,6 +46382,9 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         fctx = JS_NewContext(js->rt);
         if (!fctx) return NULL;
         JS_SetContextOpaque(fctx, js);
+        JSValue fglobal = JS_GetGlobalObject(fctx);
+        ns_hide_shared_array_buffer(fctx, fglobal);
+        JS_FreeValue(fctx, fglobal);
         g_ptr_array_add(js->frame_ctxs, fctx);
         if (iframe) {
             g_hash_table_replace(js->frame_contexts, iframe, fctx);
@@ -50720,6 +50725,19 @@ ns_install_event_handler_accessors(JSContext *ctx, JSValueConst proto)
     }
 }
 
+/* No document or worker here is cross-origin isolated (crossOriginIsolated
+ * is always false), and the HTML standard removes SharedArrayBuffer from
+ * the global object of every realm that is not. Shared memory a
+ * WebAssembly.Memory creates still works. */
+static void
+ns_hide_shared_array_buffer(JSContext *ctx, JSValueConst global)
+{
+    JSAtom atom = JS_NewAtom(ctx, "SharedArrayBuffer");
+    if (JS_DeleteProperty(ctx, global, atom, 0) < 0)
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    JS_FreeAtom(ctx, atom);
+}
+
 static void
 ns_install_window_compat(JSContext *ctx, JSValueConst global)
 {
@@ -50787,6 +50805,7 @@ ns_install_window_compat(JSContext *ctx, JSValueConst global)
     }
 
     ns_set_if_missing(ctx, global, "crossOriginIsolated", JS_FALSE);
+    ns_hide_shared_array_buffer(ctx, global);
     ns_set_if_missing(ctx, global, "frameElement", JS_NULL);
     ns_js_intl_install(ctx, global);
     ns_js_temporal_install(ctx, global);
