@@ -13,7 +13,13 @@ Changelog:
   `DocumentType` and `ShadowRoot` get the ones (`appendData()`,
   `splitText()`, `remove()`, `innerHTML` and so on) they only reached
   through `Node.prototype`, and `EventTarget.prototype`'s listener
-  methods work on any node.
+  methods work on any node. Elements get the same treatment: what an
+  HTML element interface defines (`value`, `href`, `checked`, `rows`,
+  `play()`...) is on that interface's prototype and what every HTML
+  element has (`style`, `click()`, `focus()`, `title`...) on
+  `HTMLElement.prototype`, so a `<div>` no longer has `href` or
+  `checked` and an SVG element no longer has `click()`;
+  `Element.prototype` holds Element's own members.
 * A redirect turns a request into a `GET` only where the Fetch standard
   says so (a `POST` on 301 and 302, anything but `GET` and `HEAD` on 303),
   and the redirected `GET` drops the request's `Content-Type` and the
