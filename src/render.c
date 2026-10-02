@@ -105,34 +105,39 @@ render_font_usage_add_text(render_font_usage *usage, const char *text)
 }
 
 static void
-render_collect_font_usage(const ns_node *node, GHashTable *styles,
+render_collect_text_font_usage(const ns_node *node, GHashTable *styles,
+                               GHashTable *families)
+{
+    const ns_style *style = g_hash_table_lookup(styles, node->parent);
+    const ns_css_value *value = style
+        ? style->values[NS_CSS_FONT_FAMILY] : NULL;
+    const char *list = value && value->kind == NS_CSS_V_KEYWORD
+        ? value->u.keyword : NULL;
+    if (!list) return;
+    GHashTableIter iter;
+    gpointer key, val;
+    g_hash_table_iter_init(&iter, families);
+    while (g_hash_table_iter_next(&iter, &key, &val))
+        if (render_font_list_contains(list, key))
+            render_font_usage_add_text(val, node->text);
+}
+
+static void
+render_collect_font_usage(const ns_node *root, GHashTable *styles,
                           GHashTable *families)
 {
-    if (!node) return;
-    if (node->kind == NS_NODE_ELEMENT) {
-        const ns_style *style = g_hash_table_lookup(styles, node);
-        if (ns_display_is_none(ns_css_display_of(style)))
-            return;
-    }
-    if (node->kind == NS_NODE_TEXT && node->text && *node->text &&
-        node->parent) {
-        const ns_style *style = g_hash_table_lookup(styles, node->parent);
-        const ns_css_value *value = style
-            ? style->values[NS_CSS_FONT_FAMILY] : NULL;
-        const char *list = value && value->kind == NS_CSS_V_KEYWORD
-            ? value->u.keyword : NULL;
-        if (list) {
-            GHashTableIter iter;
-            gpointer key, val;
-            g_hash_table_iter_init(&iter, families);
-            while (g_hash_table_iter_next(&iter, &key, &val))
-                if (render_font_list_contains(list, key))
-                    render_font_usage_add_text(val, node->text);
+    const ns_node *node = root;
+    while (node) {
+        gboolean descend = TRUE;
+        if (node->kind == NS_NODE_ELEMENT) {
+            const ns_style *style = g_hash_table_lookup(styles, node);
+            descend = !ns_display_is_none(ns_css_display_of(style));
+        } else if (node->kind == NS_NODE_TEXT && node->text && *node->text &&
+                   node->parent) {
+            render_collect_text_font_usage(node, styles, families);
         }
+        node = ns_node_next_in_subtree(node, root, descend);
     }
-    for (const ns_node *child = node->first_child; child;
-         child = child->next_sibling)
-        render_collect_font_usage(child, styles, families);
 }
 
 static gboolean
@@ -328,16 +333,13 @@ render_collect_containers(const ns_box *b, GHashTable *map, guint64 *sig)
 }
 
 static gboolean
-render_dom_uses_container_units(const ns_node *node)
+render_dom_uses_container_units(const ns_node *root)
 {
-    if (!node) return FALSE;
-    if (node->kind == NS_NODE_ELEMENT) {
+    for (const ns_node *node = root; node;
+         node = ns_node_next_in_subtree(node, root, TRUE)) {
+        if (node->kind != NS_NODE_ELEMENT) continue;
         const char *style = ns_element_get_attr(node, "style");
         if (ns_css_text_has_container_units(style, -1)) return TRUE;
-    }
-    for (const ns_node *child = node->first_child; child;
-         child = child->next_sibling) {
-        if (render_dom_uses_container_units(child)) return TRUE;
     }
     return FALSE;
 }

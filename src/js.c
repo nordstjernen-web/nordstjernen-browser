@@ -30379,14 +30379,13 @@ ns_js_scrub_iframe_globals(ns_js *js, const ns_node *iframe)
 static void
 ns_js_purge_subtree_rafs(ns_js *js, ns_node *root)
 {
-    if (!js || !root) return;
-    if (ns_node_is_element_named(root, "iframe")) {
-        ns_js_purge_frame_rafs(js, root);
-        ns_js_purge_frame_timers(js, root);
-        ns_js_scrub_iframe_globals(js, root);
+    if (!js) return;
+    for (ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE)) {
+        if (!ns_node_is_element_named(n, "iframe")) continue;
+        ns_js_purge_frame_rafs(js, n);
+        ns_js_purge_frame_timers(js, n);
+        ns_js_scrub_iframe_globals(js, n);
     }
-    for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_js_purge_subtree_rafs(js, c);
 }
 
 /* The bubbles and cancelable flags the HTML, DOM and UI Events standards
@@ -59075,23 +59074,23 @@ ns_subtree_has_wrapper(ns_node *root)
 static void
 ns_js_purge_subtree_pending_iframes(ns_js *js, ns_node *root)
 {
-    if (!js || !root) return;
+    if (!js) return;
     GPtrArray *queues[] = {
         js->pending_iframe_loads,
         js->deferred_iframe_loads,
     };
-    for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
-        if (!queues[q]) continue;
-        guint i = 0;
-        while (i < queues[q]->len) {
-            if (g_ptr_array_index(queues[q], i) == root)
-                g_ptr_array_remove_index(queues[q], i);
-            else
-                i++;
+    for (ns_node *n = root; n; n = ns_node_next_in_subtree(n, root, TRUE)) {
+        for (guint q = 0; q < G_N_ELEMENTS(queues); q++) {
+            if (!queues[q]) continue;
+            guint i = 0;
+            while (i < queues[q]->len) {
+                if (g_ptr_array_index(queues[q], i) == n)
+                    g_ptr_array_remove_index(queues[q], i);
+                else
+                    i++;
+            }
         }
     }
-    for (ns_node *c = root->first_child; c; c = c->next_sibling)
-        ns_js_purge_subtree_pending_iframes(js, c);
 }
 
 static void
