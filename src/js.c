@@ -30559,7 +30559,8 @@ ns_js_walk_collect_media_events(const ns_box *b, GPtrArray *imgs,
         if (strcmp(b->dom->name, "img") == 0 && b->media->image) {
             const ns_image *im = (const ns_image *)b->media->image;
             if ((im->loaded || im->failed) &&
-                !(b->dom->flags & NS_NODE_IMG_LOAD_FIRED)) {
+                !(b->dom->flags & NS_NODE_IMG_LOAD_FIRED) &&
+                !g_ptr_array_find(imgs, b->dom, NULL)) {
                 gboolean failed = im->failed ? TRUE : FALSE;
                 g_ptr_array_add(imgs, (gpointer)b->dom);
                 g_array_append_val(img_failed, failed);
@@ -60229,6 +60230,7 @@ ns_js_lifecycle_has_blockers(ns_js *js)
 {
     if (!js) return FALSE;
     return js->eval_depth > 0 || js->iframe_load_depth > 0 || js->in_pump ||
+        ns_js_image_loads_pending(js) ||
         (js->pending_iframe_loads && js->pending_iframe_loads->len > 0) ||
         (js->deferred_script_roots && js->deferred_script_roots->len > 0) ||
         (js->async_script_roots && js->async_script_roots->len > 0) ||
@@ -60331,6 +60333,31 @@ ns_js_lifecycle_tick(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* Starts tracking the document's own <img> elements the way script-made
+ * images are tracked, so each gets its load or error event when the image
+ * cache finishes with it, and the window's load event waits for them.
+ * Images whose source depends on layout (srcset, <picture>) or that load
+ * lazily are left to layout. */
+static void
+ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
+{
+    if (!n || depth >= 512 || (depth > 0 && ns_dom_hidden_child(n))) return;
+    if (ns_node_is_element_named(n, "img")) {
+        const char *src = ns_element_get_attr(n, "src");
+        const char *loading = ns_element_get_attr(n, "loading");
+        if (src && *src && !ns_element_get_attr(n, "srcset") &&
+            !(loading && g_ascii_strcasecmp(loading, "lazy") == 0) &&
+            !ns_node_is_element_named(n->parent, "picture") &&
+            !(js->js_image_loads && g_hash_table_contains(js->js_image_loads, n)) &&
+            !(n->flags & NS_NODE_IMG_LOAD_FIRED))
+            ns_js_start_image_load(js, n, src);
+        return;
+    }
+    if (ns_node_is_element_named(n, "template")) return;
+    for (ns_node *c = n->first_child; c; c = c->next_sibling)
+        ns_js_track_document_images(js, c, depth + 1);
+}
+
 void
 ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
 {
@@ -60375,6 +60402,7 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
         if (cs) { char *r = ns_js_eval_source(js, cs, "content-script"); g_free(r); }
     }
     ns_js_schedule_static_iframes(js, doc);
+    ns_js_track_document_images(js, doc, 0);
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);

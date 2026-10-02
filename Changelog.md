@@ -3,6 +3,10 @@ Changelog:
 
 1.0.27:
 ======
+* Images in the page's own markup fire `load` and `error` events, and
+  the window's `load` event waits for them, as in other browsers. A
+  broken or missing image could finish without an `error` event and
+  still read as incomplete when the page's `load` event fired.
 * Dedicated workers follow the HTML standard more closely. Messages to
   and from workers use structured cloning, so `Error` objects (with
   `cause`), `DOMException`, `Blob` and `File`, non-index array
