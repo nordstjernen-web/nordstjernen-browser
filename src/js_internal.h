@@ -126,7 +126,11 @@ struct ns_js {
     char         *document_origin;
     ns_node       *current_doc;
     GHashTable    *frame_urls;
+    GHashTable    *frame_referrers;
     gpointer       realm_scope_base;
+    /* While a frame's code runs, current_url is the frame's URL and the
+     * top-level document's URL is held in the slot this points at. */
+    char         **top_url_slot;
     ns_node       *current_script;
     char         *early_inject_src;
     gboolean      mutated;
@@ -150,6 +154,14 @@ struct ns_js {
     const void   *box_lookup_pending_root;
     int           box_lookup_pending_count;
     const ns_node *focused_node;
+    /* The document that has focus; NULL means the top-level document. */
+    const ns_node *focused_doc;
+    /* The innermost focus change in progress (ns_focus_guard in js.c); the
+     * node-free hook clears freed nodes from every one. */
+    gpointer       focus_guard;
+    /* The innermost parser-blocking script run's held-back nodes
+     * (ns_parser_hold in js.c); the node-free hook clears freed ones. */
+    gpointer       parser_hold;
     gboolean      pointer_input;
     gboolean      autofocus_processed;
     const ns_node *focus_nav_start;
