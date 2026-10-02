@@ -5335,12 +5335,31 @@ ns_net_fetch_destination(GPtrArray *extra_headers)
             continue;
         h += sizeof prefix - 1;
         while (*h == ' ' || *h == '\t') h++;
-        if (g_ascii_strcasecmp(h, "script") == 0) return "script";
-        if (g_ascii_strcasecmp(h, "style") == 0) return "style";
-        if (g_ascii_strcasecmp(h, "image") == 0) return "image";
-        if (g_ascii_strcasecmp(h, "font") == 0) return "font";
+        static const char *const known[] = {
+            "script", "style", "image", "font", "iframe", "frame", "object",
+            "embed", "worker", "sharedworker", "serviceworker",
+        };
+        for (gsize k = 0; k < G_N_ELEMENTS(known); k++)
+            if (g_ascii_strcasecmp(h, known[k]) == 0) return known[k];
     }
     return "empty";
+}
+
+/* A request for a nested browsing context's document is a navigation too:
+ * Fetch gives it mode "navigate" and the document Accept header. */
+static gboolean
+ns_net_dest_is_nested_navigation(const char *dest)
+{
+    return strcmp(dest, "iframe") == 0 || strcmp(dest, "frame") == 0 ||
+           strcmp(dest, "object") == 0 || strcmp(dest, "embed") == 0;
+}
+
+/* Worker scripts are fetched with mode "same-origin". */
+static gboolean
+ns_net_dest_is_worker(const char *dest)
+{
+    return strcmp(dest, "worker") == 0 || strcmp(dest, "sharedworker") == 0 ||
+           strcmp(dest, "serviceworker") == 0;
 }
 
 static char *
@@ -5587,8 +5606,12 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         headers = curl_slist_append(headers, h);
         g_free(h);
     }
+    const char *fetch_dest = is_navigation
+        ? "document" : ns_net_fetch_destination(extra_headers);
+    gboolean navigates = is_navigation ||
+                         ns_net_dest_is_nested_navigation(fetch_dest);
     if (!caller_set_accept) {
-        headers = curl_slist_append(headers, is_navigation
+        headers = curl_slist_append(headers, navigates
             ? "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
             : "Accept: */*");
     }
@@ -5625,8 +5648,10 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         g_free(site_h);
 
         const char *fetch_mode;
-        if (is_navigation) {
+        if (navigates) {
             fetch_mode = "navigate";
+        } else if (ns_net_dest_is_worker(fetch_dest)) {
+            fetch_mode = "same-origin";
         } else if (method && *method &&
                    g_ascii_strcasecmp(method, "GET") != 0 &&
                    g_ascii_strcasecmp(method, "HEAD") != 0) {
@@ -5638,15 +5663,13 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
         headers = curl_slist_append(headers, mode_h);
         g_free(mode_h);
 
-        const char *fetch_dest = is_navigation
-            ? "document" : ns_net_fetch_destination(extra_headers);
         char *dest_h = g_strdup_printf("Sec-Fetch-Dest: %s", fetch_dest);
         headers = curl_slist_append(headers, dest_h);
         g_free(dest_h);
 
         if (is_navigation && user_activated)
             headers = curl_slist_append(headers, "Sec-Fetch-User: ?1");
-        if (is_navigation) {
+        if (navigates) {
             headers = curl_slist_append(headers,
                                         "Upgrade-Insecure-Requests: 1");
         }
