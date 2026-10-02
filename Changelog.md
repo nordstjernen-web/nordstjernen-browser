@@ -3,6 +3,13 @@ Changelog:
 
 1.0.27:
 ======
+* The shell checks every `open` and `reload` command a renderer sends to
+  the video helper, as it already did for the audio helper: only a
+  stream file under `~/.cache/nordstjernen/msvideo/` is passed on. A
+  renderer could make the unsandboxed video helper open any local file
+  or URL. Both checks now split a command on spaces and tabs the way the
+  helpers do, so a tab after `open` no longer skips the audio check, and
+  both helpers open media with FFmpeg's `file` protocol only.
 * A connection that fails to one port of a host no longer makes
   requests to the host's other ports fail for two minutes: recent
   connection failures are remembered per origin (scheme, host and port)

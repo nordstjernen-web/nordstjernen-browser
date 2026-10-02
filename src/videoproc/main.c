@@ -148,7 +148,11 @@ static int
 vdec_open(ns_vdec *d, const char *path, double *out_dur)
 {
     memset(d, 0, sizeof *d);
-    if (avformat_open_input(&d->fmt, path, NULL, NULL) < 0) return 0;
+    AVDictionary *opts = NULL;
+    av_dict_set(&opts, "protocol_whitelist", "file", 0);
+    int rc = avformat_open_input(&d->fmt, path, NULL, &opts);
+    av_dict_free(&opts);
+    if (rc < 0) return 0;
     if (avformat_find_stream_info(d->fmt, NULL) < 0) { vdec_close(d); return 0; }
     d->stream = av_find_best_stream(d->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
     if (d->stream < 0) { vdec_close(d); return 0; }
