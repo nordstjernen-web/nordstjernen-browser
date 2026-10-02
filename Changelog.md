@@ -3,6 +3,19 @@ Changelog:
 
 1.0.27:
 ======
+* Dedicated workers follow the HTML standard more closely. Messages to
+  and from workers use structured cloning, so `Error` objects (with
+  `cause`), `DOMException`, `Blob` and `File`, non-index array
+  properties, shared references and cycles arrive intact, functions and
+  symbols throw `DataCloneError`, and a transferred `MessagePort` can be
+  sent back to where its other end lives. `new Worker()` accepts `data:`
+  URLs (which run with an opaque origin), resolves URLs against the
+  document's base URL, throws `SyntaxError` only for a URL that does not
+  parse and otherwise reports failures through an `error` event.
+  Uncaught worker errors reach `self.onerror`, then the `Worker`'s
+  `onerror`, then the page's `window.onerror`, unless one of them
+  cancels it; a worker keeps running after one, and `terminate()` drops
+  messages the worker had already sent.
 * `document.write` runs the scripts it writes; they used to be skipped.
   A write whose markup closes everything it opens is inserted right away,
   so the written elements exist when `write()` returns and a written
