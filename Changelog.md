@@ -3,6 +3,17 @@ Changelog:
 
 1.0.28:
 ======
+* A document, a text node, a comment or a document fragment no longer
+  has the members of an element. The element member table was installed
+  on the `Node`, `Document`, `HTMLDocument` and `DocumentFragment`
+  prototypes as well, so `document.click`, `document.style`,
+  `document.tagName` and hundreds more existed and `Node.prototype` had
+  519 members (47 in other browsers). Each of these prototypes now holds
+  the members its interface defines; `CharacterData`, `Text`,
+  `DocumentType` and `ShadowRoot` get the ones (`appendData()`,
+  `splitText()`, `remove()`, `innerHTML` and so on) they only reached
+  through `Node.prototype`, and `EventTarget.prototype`'s listener
+  methods work on any node.
 * A redirect turns a request into a `GET` only where the Fetch standard
   says so (a `POST` on 301 and 302, anything but `GET` and `HEAD` on 303),
   and the redirected `GET` drops the request's `Content-Type` and the
