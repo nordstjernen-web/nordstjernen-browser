@@ -6043,14 +6043,33 @@ ns_fetch_sync(const char *url, const char *top_url, const char *method,
             g_free(from_origin);
             g_free(to_origin);
         }
-        if (resp->status == 303 ||
-            ((resp->status == 301 || resp->status == 302) &&
-             g_ascii_strcasecmp(cur_method, "GET") != 0)) {
+        /* Fetch's HTTP-redirect fetch: 301 and 302 turn a POST into a GET,
+         * 303 turns anything but GET and HEAD into one, and the request
+         * then loses its body and the headers that describe it. */
+        gboolean was_post = g_ascii_strcasecmp(cur_method, "POST") == 0;
+        gboolean get_or_head = g_ascii_strcasecmp(cur_method, "GET") == 0 ||
+                               g_ascii_strcasecmp(cur_method, "HEAD") == 0;
+        if (((resp->status == 301 || resp->status == 302) && was_post) ||
+            (resp->status == 303 && !get_or_head)) {
             g_free(cur_method);
             cur_method = g_strdup("GET");
             cur_body = NULL;
             cur_len = 0;
             cur_ct = NULL;
+            static const char *const body_headers[] = {
+                "Content-Encoding:", "Content-Language:", "Content-Location:",
+                "Content-Type:",
+            };
+            for (guint i = 0; hop_headers && i < hop_headers->len; ) {
+                const char *h = g_ptr_array_index(hop_headers, i);
+                gboolean drop = FALSE;
+                for (gsize k = 0; h && k < G_N_ELEMENTS(body_headers); k++)
+                    if (g_ascii_strncasecmp(h, body_headers[k],
+                                            strlen(body_headers[k])) == 0)
+                        drop = TRUE;
+                if (drop) g_ptr_array_remove_index(hop_headers, i);
+                else i++;
+            }
         }
         g_free(cur_top);
         cur_top = NULL;

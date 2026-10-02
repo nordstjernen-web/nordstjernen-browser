@@ -3,6 +3,12 @@ Changelog:
 
 1.0.28:
 ======
+* A redirect turns a request into a `GET` only where the Fetch standard
+  says so (a `POST` on 301 and 302, anything but `GET` and `HEAD` on 303),
+  and the redirected `GET` drops the request's `Content-Type` and the
+  other headers that described its body. A `HEAD` request stayed a
+  `HEAD` only on 307 and 308, and a `PUT` became a `GET` on 301 and 302;
+  a `POST` turned `GET` still sent its `Content-Type`.
 * A `POST` without a body (`XMLHttpRequest.send()` or `send(null)`, an
   empty `fetch()`) goes out with `Content-Length: 0`. libcurl read such a
   body from the renderer's standard input and sent it chunked; a server
