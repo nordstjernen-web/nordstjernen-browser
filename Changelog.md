@@ -3,6 +3,9 @@ Changelog:
 
 1.0.27:
 ======
+* An SVG with thousands of nested `<g>` elements, as an `<img>` or
+  inline, no longer crashes the renderer. Rendering stops descending
+  after 256 nested elements.
 * A page nested tens of thousands of elements deep no longer crashes the
   renderer. Font-usage collection, video discovery, container-unit
   detection, animated-value propagation and iframe cleanup walked the
