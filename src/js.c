@@ -254,6 +254,9 @@ static void ns_js_drain_deferred_scripts(ns_js *js);
 static void ns_js_drain_async_script_roots(ns_js *js);
 static void ns_js_schedule_pending_script_drain(ns_js *js);
 static void ns_js_run_inserted_scripts(ns_js *js, ns_node *root);
+static void ns_js_element_perf_info(ns_js *js, const ns_node *el,
+                                    ns_perf_resource_info *info);
+static gboolean ns_script_type_is_module(const ns_node *n);
 static void ns_js_nodes_inserted(ns_js *js, ns_node *parent, GPtrArray *nodes);
 static void ns_js_script_needs_prepare(ns_js *js, ns_node *script);
 static void ns_js_schedule_iframe_load(ns_js *js, ns_node *iframe);
@@ -619,6 +622,42 @@ ns_js_fetch_resource(ns_js *js, const char *url, const char *top_url,
         else g_error_free(pf.err);
     }
     return pf.resp;
+}
+
+/* ns_js_fetch_resource for one of a document's own subresources, recorded
+ * as a PerformanceResourceTiming entry with the given initiator type in the
+ * timeline info names. */
+static ns_response *
+ns_js_fetch_subresource(ns_js *js, const char *url, const char *top_url,
+                        const char *const *headers, GError **error,
+                        const char *initiator, const ns_perf_resource_info *info)
+{
+    gint64 start_us = g_get_monotonic_time();
+    ns_response *resp = ns_js_fetch_resource(js, url, top_url, headers, error);
+    if (js && !js->worker_host && initiator)
+        ns_perf_add_resource_timed(js, info, url, initiator, start_us,
+                                   g_get_monotonic_time(), resp);
+    return resp;
+}
+
+/* The URL of the document whose global is realm: a frame's own URL for a
+ * frame realm, the page's otherwise. */
+static const char *
+ns_js_realm_document_url(ns_js *js, JSContext *realm)
+{
+    if (!js) return NULL;
+    if (realm && realm != js->main_realm_ctx && js->frame_contexts &&
+        js->frame_urls) {
+        GHashTableIter it;
+        gpointer frame, fctx;
+        g_hash_table_iter_init(&it, js->frame_contexts);
+        while (g_hash_table_iter_next(&it, &frame, &fctx))
+            if (fctx == realm) {
+                const char *url = g_hash_table_lookup(js->frame_urls, frame);
+                if (url) return url;
+            }
+    }
+    return js->current_url;
 }
 
 typedef struct ns_budget_guard {
@@ -8183,6 +8222,7 @@ ns_header_name_is_forbidden(const char *name)
 
 typedef struct ns_js_fetch_state {
     JSContext     *ctx;
+    JSContext     *timeline;   /* realm of the calling script, for timing */
     ns_js         *js;
     JSValue        promise;
     JSValue        resolve;
@@ -8440,11 +8480,22 @@ ns_on_js_fetch_deliver(ns_js_fetch_state *st, ns_response *resp, GError *err)
         return;
     }
     if (st->js && st->requested_url) {
-        double end_ms = ns_perf_now_ms(st->js);
-        double start_ms = st->fetch_start_ms > 0 ? st->fetch_start_ms : end_ms;
-        ns_perf_add_resource(st->js, st->requested_url, "fetch", start_ms,
-                             end_ms - start_ms,
-                             resp && resp->body ? (gint64)resp->body->len : 0);
+        gint64 end_us = g_get_monotonic_time();
+        gint64 start_us = st->fetch_start_ms > 0
+            ? st->js->time_origin_us + (gint64)(st->fetch_start_ms * 1000.0)
+            : end_us;
+        ns_perf_resource_info info = {
+            .timeline = st->timeline,
+            .document_url = ns_js_realm_document_url(st->js, st->timeline),
+            .cors_mode = !st->no_cors,
+        };
+        /* The entry is named by the request's URL, resolved. */
+        char *abs = st->origin_url
+            ? ns_url_resolve(st->origin_url, st->requested_url) : NULL;
+        ns_perf_add_resource_timed(st->js, &info,
+                                   abs ? abs : st->requested_url, "fetch",
+                                   start_us, end_us, resp);
+        g_free(abs);
     }
     if (resp && !resp->error &&
         ns_final_url_connect_blocked(st->js, resp->final_url))
@@ -9025,6 +9076,9 @@ ns_js_fetch(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     ns_js_fetch_state *st = g_new0(ns_js_fetch_state, 1);
     st->ctx = ctx;
     st->js = js_from_ctx(ctx);
+    /* Frames share fetch() with the page, so the function's own realm is
+     * the page's; the realm running the calling script is js->ctx. */
+    st->timeline = st->js ? st->js->ctx : ctx;
     st->promise = JS_DupValue(ctx, promise);
     st->resolve = resolving[0];
     st->reject  = resolving[1];
@@ -18233,6 +18287,7 @@ ns_window_dom_parser_ctor(JSContext *ctx, JSValueConst this_val,
 
 typedef struct ns_xhr_state {
     JSContext *ctx;
+    JSContext *timeline;   /* realm of the calling script, for timing */
     ns_js     *js;
     JSValue    obj;
     char      *method;
@@ -18859,11 +18914,16 @@ ns_xhr_deliver(ns_xhr_state *st, ns_response *resp, GError *err)
     if (st->js && st->js->pending_xhrs)
         g_ptr_array_remove_fast(st->js->pending_xhrs, st);
     if (st->js && st->url) {
-        double end_ms = ns_perf_now_ms(st->js);
-        double start_ms = st->start_ms > 0 ? st->start_ms : end_ms;
-        ns_perf_add_resource(st->js, st->url, "xmlhttprequest", start_ms,
-                             end_ms - start_ms,
-                             resp && resp->body ? (gint64)resp->body->len : 0);
+        gint64 end_us = g_get_monotonic_time();
+        gint64 start_us = st->start_ms > 0
+            ? st->js->time_origin_us + (gint64)(st->start_ms * 1000.0) : end_us;
+        ns_perf_resource_info info = {
+            .timeline = st->timeline,
+            .document_url = ns_js_realm_document_url(st->js, st->timeline),
+            .cors_mode = TRUE,
+        };
+        ns_perf_add_resource_timed(st->js, &info, st->url, "xmlhttprequest",
+                                   start_us, end_us, resp);
     }
     JSContext *ctx = st->ctx;
     gboolean response_allowed = FALSE;
@@ -19351,6 +19411,7 @@ ns_xhr_send(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv)
     ns_js *_js = js_from_ctx(ctx);
     ns_xhr_state *st = g_new0(ns_xhr_state, 1);
     st->ctx = ctx;
+    st->timeline = _js ? _js->ctx : ctx;
     st->js  = _js;
     st->obj = JS_DupValue(ctx, this_val);
     char *resolved = (_js && _js->current_url)
@@ -30542,6 +30603,29 @@ ns_js_dispatch_resource_event(ns_js *js, const ns_node *target, const char *type
     return ns_js_dispatch_built_event(js, target, type, event, NULL);
 }
 
+/* The resource timing entry of an image, from the times the image cache
+ * started and finished fetching it.  An image served from memory without
+ * a fetch for this page takes its load time instead. */
+static void
+ns_js_record_image_timing(ns_js *js, const ns_node *node, const char *url,
+                          const ns_image *img)
+{
+    if (!js || !url || !img) return;
+    ns_perf_resource_info info = { 0 };
+    ns_js_element_perf_info(js, node, &info);
+    /* A second image with the same URL comes from the memory cache and,
+     * as in other browsers, gets no entry of its own. */
+    if (ns_perf_has_resource(js, info.timeline, url, "img")) return;
+    info.next_hop_protocol = img->next_hop_protocol;
+    info.timing_allow_origin = img->timing_allow_origin;
+    info.status = img->http_status;
+    info.body_size = img->body_size;
+    gint64 now = g_get_monotonic_time();
+    gint64 start = img->request_us >= js->time_origin_us ? img->request_us : now;
+    gint64 end = img->response_us >= start ? img->response_us : now;
+    ns_perf_add_resource_timed(js, &info, url, "img", start, end, NULL);
+}
+
 static void
 ns_js_fire_img_load_once(ns_js *js, ns_node *node, gboolean failed)
 {
@@ -30549,6 +30633,10 @@ ns_js_fire_img_load_once(ns_js *js, ns_node *node, gboolean failed)
     if (node->flags & NS_NODE_IMG_LOAD_FIRED) return;
     if (js->halted || js->in_pump) return;
     node->flags |= NS_NODE_IMG_LOAD_FIRED;
+    if (ns_node_is_element_named(node, "img")) {
+        const ns_image *im = ns_js_image_for_node(js, node);
+        if (im) ns_js_record_image_timing(js, node, im->url, im);
+    }
     ns_js_dispatch_resource_event(js, node, failed ? "error" : "load");
 }
 
@@ -43474,6 +43562,83 @@ ns_js_node_realm_context(ns_js *js, const ns_node *node)
         ? g_hash_table_lookup(js->frame_contexts, frame) : NULL;
 }
 
+/* The frame element whose content document holds node, or NULL for the
+ * page's own document (fallback content inside an <object> included). */
+static ns_node *
+ns_js_node_content_frame(const ns_node *node)
+{
+    const ns_node *p = node;
+    while (p && !(p->kind == NS_NODE_DOCUMENT && !(p->flags & NS_NODE_FRAGMENT)))
+        p = p->parent;
+    ns_node *frame = p ? p->parent : NULL;
+    return frame && (ns_node_is_element_named(frame, "iframe") ||
+                     ns_node_is_element_named(frame, "frame") ||
+                     ns_node_is_element_named(frame, "object"))
+        ? frame : NULL;
+}
+
+static gboolean
+ns_js_attr_has_token(const ns_node *el, const char *attr, const char *token)
+{
+    const char *v = ns_element_get_attr(el, attr);
+    if (!v) return FALSE;
+    gchar **parts = g_strsplit_set(v, " \t\n\f\r", -1);
+    gboolean found = FALSE;
+    for (int i = 0; parts[i] && !found; i++)
+        found = g_ascii_strcasecmp(parts[i], token) == 0;
+    g_strfreev(parts);
+    return found;
+}
+
+/* Whether a script or stylesheet link blocks rendering, as
+ * PerformanceResourceTiming.renderBlockingStatus reports it: the element
+ * is in its document's <head> and has blocking="render", or is a
+ * parser-inserted classic script without async or defer, or a stylesheet
+ * link the parser created for media that applies to the screen. */
+static gboolean
+ns_js_element_render_blocking(const ns_node *el)
+{
+    if (!el || el->kind != NS_NODE_ELEMENT) return FALSE;
+    gboolean in_head = FALSE;
+    for (const ns_node *p = el->parent; p && p->kind == NS_NODE_ELEMENT;
+         p = p->parent)
+        if (ns_node_is_element_named(p, "head")) { in_head = TRUE; break; }
+    if (!in_head) return FALSE;
+    if (ns_js_attr_has_token(el, "blocking", "render")) return TRUE;
+    if (el->flags & NS_NODE_NOT_PARSER_INSERTED) return FALSE;
+    if (ns_node_is_element_named(el, "script"))
+        return !ns_script_type_is_module(el) &&
+               !ns_element_get_attr(el, "async") &&
+               !ns_element_get_attr(el, "defer");
+    if (ns_node_is_element_named(el, "link")) {
+        const char *media = ns_element_get_attr(el, "media");
+        return ns_js_attr_has_token(el, "rel", "stylesheet") &&
+               !ns_js_attr_has_token(el, "rel", "alternate") &&
+               (!media || !*media || g_ascii_strcasecmp(media, "all") == 0 ||
+                g_ascii_strcasecmp(media, "screen") == 0);
+    }
+    return FALSE;
+}
+
+/* The resource timing details that come from the element a resource is
+ * loaded for: the timeline of its document (the frame's realm, the frame
+ * element for a frame without one yet, NULL for the page's own), that
+ * document's URL, its render-blocking status and its CORS mode. */
+static void
+ns_js_element_perf_info(ns_js *js, const ns_node *el,
+                        ns_perf_resource_info *info)
+{
+    ns_node *frame = ns_js_node_content_frame(el);
+    JSContext *fctx = frame && js && js->frame_contexts
+        ? g_hash_table_lookup(js->frame_contexts, frame) : NULL;
+    info->timeline = fctx ? (gconstpointer)fctx : (gconstpointer)frame;
+    const char *url = frame && js && js->frame_urls
+        ? g_hash_table_lookup(js->frame_urls, frame) : NULL;
+    info->document_url = url ? url : js ? js->current_url : NULL;
+    info->render_blocking = ns_js_element_render_blocking(el);
+    info->cors_mode = el && ns_element_get_attr(el, "crossorigin") != NULL;
+}
+
 static char *
 ns_js_node_document_base_url(ns_js *js, const ns_node *node)
 {
@@ -43590,12 +43755,6 @@ ns_js_image_ready_idle(gpointer data)
         g_free(line);
     }
     if (img && (img->loaded || img->failed)) {
-        if (!(r->el->flags & NS_NODE_IMG_LOAD_FIRED)) {
-            double end_ms = ns_perf_now_ms(js);
-            double start_ms = r->start_ms > 0 ? r->start_ms : end_ms;
-            ns_perf_add_resource(js, r->requested_url, "img", start_ms,
-                                 end_ms - start_ms, 0);
-        }
         ns_realm_scope scope;
         ns_js_realm_scope_enter(js, r->realm, &scope);
         ns_js_fire_img_load_once(js, r->el, img->failed);
@@ -46132,8 +46291,10 @@ ns_iframe_make_realm_context(ns_js *js, ns_node *iframe,
         if (!fctx) return NULL;
         JS_SetContextOpaque(fctx, js);
         g_ptr_array_add(js->frame_ctxs, fctx);
-        if (iframe)
+        if (iframe) {
             g_hash_table_replace(js->frame_contexts, iframe, fctx);
+            ns_perf_move_timeline(js, iframe, fctx);
+        }
 
         JSClassID dom_ids[6] = {
             ns_element_class_id, ns_style_class_id, ns_token_list_class_id,
@@ -50780,7 +50941,8 @@ ns_install_performance_prototype(JSContext *ctx, JSValueConst global)
                ns_window_performance_getEntriesByName, 2);
     ns_bind_fn(ctx, proto, "getEntriesByType",
                ns_window_performance_getEntriesByType, 1);
-    ns_bind_fn(ctx, proto, "clearResourceTimings", ns_event_noop, 0);
+    ns_bind_fn(ctx, proto, "clearResourceTimings",
+               ns_window_performance_clearResourceTimings, 0);
     ns_bind_fn(ctx, proto, "setResourceTimingBufferSize", ns_event_noop, 1);
     ns_bind_fn(ctx, proto, "toJSON", ns_window_performance_toJSON, 0);
     ns_set_tostring_tag(ctx, proto, "Performance");
@@ -50793,7 +50955,7 @@ ns_make_performance_object(JSContext *ctx, ns_js *js,
 {
     JSValue global = JS_GetGlobalObject(ctx);
     ns_install_performance_prototype(ctx, global);
-    JSValue performance = JS_NewObject(ctx);
+    JSValue performance = ns_perf_new_performance_object(ctx);
     ns_obj_adopt_global_proto(ctx, performance, "Performance");
     JS_SetPropertyStr(ctx, performance, "timeOrigin",
                       JS_NewFloat64(ctx, js ? js->time_origin_real_ms : 0));
@@ -57785,9 +57947,14 @@ ns_js_module_loader(JSContext *ctx, const char *module_name, void *opaque,
     GError *err = NULL;
     const char *top_url = !js ? NULL
         : (js->worker_host ? js->worker_host->base_url : js->current_url);
-    ns_response *resp = ns_js_fetch_resource(js, module_name, top_url,
+    ns_perf_resource_info info = {
+        .timeline = ctx,
+        .document_url = ns_js_realm_document_url(js, ctx),
+        .cors_mode = TRUE,
+    };
+    ns_response *resp = ns_js_fetch_subresource(js, module_name, top_url,
         json_module ? NULL : ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
-        &err);
+        &err, "script", &info);
     if (!resp || resp->error || !resp->body || resp->body->len == 0 ||
         resp->body->len > NS_MAX_SCRIPT_BYTES) {
         const char *why = err ? err->message :
@@ -58163,9 +58330,11 @@ ns_js_run_script_element(ns_js *js, ns_node *n, const char *origin)
         }
         GError *err = NULL;
         gboolean loaded = FALSE;
-        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin,
-                                                 ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT),
-                                                 &err);
+        ns_perf_resource_info info = { 0 };
+        ns_js_element_perf_info(js, n, &info);
+        ns_response *resp = ns_js_fetch_subresource(js, abs_url, origin,
+            ns_net_accept_headers_for(NS_FETCH_DEST_SCRIPT), &err, "script",
+            &info);
         if (resp && ns_net_header_is_nosniff(resp->x_content_type_options) &&
             !content_type_is_javascript(resp->content_type)) {
             if (js->log_cb) {
@@ -58491,7 +58660,10 @@ ns_js_load_stylesheet_element(ns_js *js, ns_node *n, const char *origin)
         }
     } else {
         GError *err = NULL;
-        ns_response *resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+        ns_perf_resource_info info = { 0 };
+        ns_js_element_perf_info(js, n, &info);
+        ns_response *resp = ns_js_fetch_subresource(js, abs_url, origin, NULL,
+                                                    &err, "link", &info);
         if (resp && resp->status == 200)
             loaded = TRUE;
         else if (js->log_cb) {
@@ -59564,7 +59736,11 @@ ns_js_run_iframe_scripts(ns_js *js, ns_node *content_root,
             char *abs_url = ns_url_resolve(origin, src);
             if (abs_url) {
                 GError *err = NULL;
-                ns_response *r = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+                ns_perf_resource_info info = { 0 };
+                ns_js_element_perf_info(js, n, &info);
+                ns_response *r = ns_js_fetch_subresource(js, abs_url, origin,
+                                                         NULL, &err, "script",
+                                                         &info);
                 gboolean nosniff_blocked = r &&
                     ns_net_header_is_nosniff(r->x_content_type_options) &&
                     !content_type_is_javascript(r->content_type);
@@ -59803,6 +59979,32 @@ ns_iframe_framing_blocked(const char *embedder_url, const char *framed_url,
     return FALSE;
 }
 
+/* Whether a frame's response is one a browser downloads instead of
+ * showing: one sent as an attachment, or of a type it does not display. */
+static gboolean
+ns_frame_response_is_download(const ns_response *resp)
+{
+    if (!resp || resp->error) return FALSE;
+    if (resp->content_disposition) {
+        const char *cd = resp->content_disposition;
+        while (g_ascii_isspace(*cd)) cd++;
+        if (g_ascii_strncasecmp(cd, "attachment", 10) == 0) return TRUE;
+    }
+    const char *type = resp->content_type;
+    if (!type || !*type) return FALSE;
+    char *mime = g_ascii_strdown(type, strcspn(type, ";"));
+    g_strstrip(mime);
+    gboolean shown = !*mime || g_str_has_prefix(mime, "text/") ||
+        g_str_has_prefix(mime, "image/") || g_str_has_prefix(mime, "video/") ||
+        g_str_has_prefix(mime, "audio/") || g_str_has_suffix(mime, "+xml") ||
+        strcmp(mime, "application/xml") == 0 ||
+        strcmp(mime, "application/xhtml+xml") == 0 ||
+        strcmp(mime, "application/json") == 0 ||
+        strcmp(mime, "application/pdf") == 0;
+    g_free(mime);
+    return !shown;
+}
+
 static void
 ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
 {
@@ -59885,7 +60087,18 @@ ns_js_load_iframe_now(ns_js *js, ns_node *iframe)
         }
         if (abs_url) {
             GError *err = NULL;
+            gint64 frame_fetch_us = g_get_monotonic_time();
             resp = ns_js_fetch_resource(js, abs_url, origin, NULL, &err);
+            /* A response the frame would hand to the download manager
+             * gets no resource timing entry, as in other browsers. */
+            if (!ns_frame_response_is_download(resp)) {
+                ns_perf_resource_info info = { 0 };
+                ns_js_element_perf_info(js, iframe, &info);
+                ns_perf_add_resource_timed(js, &info, abs_url,
+                                           is_object ? "object" : "iframe",
+                                           frame_fetch_us,
+                                           g_get_monotonic_time(), resp);
+            }
             if (resp && resp->final_url && *resp->final_url &&
                 strcmp(resp->final_url, abs_url) != 0) {
                 g_free(abs_url);
@@ -60373,10 +60586,10 @@ ns_js_lifecycle_tick(gpointer data)
 }
 
 /* Starts tracking the document's own <img> elements the way script-made
- * images are tracked, so each gets its load or error event when the image
- * cache finishes with it, and the window's load event waits for them.
- * Images whose source depends on layout (srcset, <picture>) or that load
- * lazily are left to layout. */
+ * images are tracked, so each gets its load or error event, and its
+ * resource timing entry, when the image cache finishes with it, and the
+ * window's load event waits for them.  Images whose source depends on
+ * layout (srcset, <picture>) or that load lazily are left to layout. */
 static void
 ns_js_track_document_images(ns_js *js, ns_node *n, int depth)
 {
@@ -60442,6 +60655,22 @@ ns_js_run_scripts_in_doc(ns_js *js, ns_node *doc, const char *base_url_borrowed)
     }
     ns_js_schedule_static_iframes(js, doc);
     ns_js_track_document_images(js, doc, 0);
+    {
+        /* Stylesheets the engine fetched before this document's realm
+         * existed go into its resource timing now. */
+        GPtrArray *sheets = ns_engine_take_resource_timings(base_url);
+        for (guint i = 0; i < sheets->len; i++) {
+            const ns_engine_resource_timing *t = g_ptr_array_index(sheets, i);
+            /* A frame's sheets belong to the frame's own timeline. */
+            if (t->in_frame) continue;
+            ns_perf_resource_info info = { 0 };
+            ns_js_element_perf_info(js, doc, &info);
+            info.render_blocking = t->render_blocking;
+            ns_perf_add_resource_timed(js, &info, t->url, t->initiator,
+                                       t->start_us, t->end_us, t->resp);
+        }
+        g_ptr_array_free(sheets, TRUE);
+    }
     const char *origin = base_url && *base_url ? base_url : "inline";
     GArray *tasks = g_array_new(FALSE, FALSE, sizeof(ns_script_task));
     ns_js_register_import_maps(js, doc);

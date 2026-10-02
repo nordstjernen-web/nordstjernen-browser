@@ -895,6 +895,27 @@ ns_url_origin_from(const char *url)
     return out;
 }
 
+char *
+ns_net_raw_header_values(const char *raw, const char *name)
+{
+    if (!raw || !name) return NULL;
+    gsize n = strlen(name);
+    GString *out = NULL;
+    for (const char *line = raw; line && *line; ) {
+        const char *eol = strchr(line, '\n');
+        gsize len = eol ? (gsize)(eol - line) : strlen(line);
+        if (len > n && line[n] == ':' &&
+            g_ascii_strncasecmp(line, name, n) == 0) {
+            char *v = g_strstrip(g_strndup(line + n + 1, len - n - 1));
+            if (!out) out = g_string_new(v);
+            else g_string_append_printf(out, ",%s", v);
+            g_free(v);
+        }
+        line = eol ? eol + 1 : NULL;
+    }
+    return out ? g_string_free(out, FALSE) : NULL;
+}
+
 gboolean
 ns_url_same_origin(const char *a, const char *b)
 {
@@ -2298,6 +2319,7 @@ ns_response_free(ns_response *resp)
     g_free(resp->error);
     g_free(resp->tls_warning);
     g_free(resp->remote_ip);
+    g_free(resp->next_hop_protocol);
     g_free(resp);
 }
 
@@ -2320,6 +2342,7 @@ ns_response_copy(const ns_response *src)
     r->error = g_strdup(src->error);
     r->tls_warning = g_strdup(src->tls_warning);
     r->remote_ip = g_strdup(src->remote_ip);
+    r->next_hop_protocol = g_strdup(src->next_hop_protocol);
     r->body = g_byte_array_new();
     if (src->body && src->body->len)
         g_byte_array_append(r->body, src->body->data, src->body->len);
@@ -5726,6 +5749,9 @@ ns_fetch_sync_hop(const char *url, const char *top_url, const char *method,
     resp->response_end_ms = out.t_total_ms;
     if (out.remote_ip)
         resp->remote_ip = g_strdup(out.remote_ip);
+    if (out.http_version)
+        resp->next_hop_protocol =
+            g_strdup(ns_net_http_version_name(out.http_version));
     if (out.tls_warning)
         resp->tls_warning = g_strdup(out.tls_warning);
     {
