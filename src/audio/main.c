@@ -920,7 +920,11 @@ static int
 ain_open(ns_audio_player *p, const char *path)
 {
     ain_close(p);
-    if (avformat_open_input(&p->in_fmt, path, NULL, NULL) < 0) return 0;
+    AVDictionary *opts = NULL;
+    av_dict_set(&opts, "protocol_whitelist", "file", 0);
+    int rc = avformat_open_input(&p->in_fmt, path, NULL, &opts);
+    av_dict_free(&opts);
+    if (rc < 0) return 0;
     if (avformat_find_stream_info(p->in_fmt, NULL) < 0) { ain_close(p); return 0; }
     const AVCodec *codec = NULL;
     p->in_sidx = av_find_best_stream(p->in_fmt, AVMEDIA_TYPE_AUDIO, -1, -1,
